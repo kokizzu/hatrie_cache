@@ -2,9 +2,9 @@
 .idea
 
 # cgo
-.a
-.o
-.so
+*.a
+*.o
+*.so
 
 
 # Binaries for programs and plugins
