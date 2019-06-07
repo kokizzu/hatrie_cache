@@ -4,8 +4,19 @@
 # cgo
 *.a
 *.o
-*.so
+*.cache
+*.in
+*.pc
 
+
+luikore__hat-trie/compile 
+luikore__hat-trie/configure 
+luikore__hat-trie/depcomp 
+luikore__hat-trie/install-sh 
+luikore__hat-trie/libtool 
+luikore__hat-trie/ltmain.sh 
+luikore__hat-trie/missing 
+luikore__hat-trie/test-driver
 
 # Binaries for programs and plugins
 *.exe

@@ -1,27 +1,20 @@
 package main
 import "C"
 import (
-	"fmt"
 	"unsafe"
 )
 
-// note: there should be no newline before import "C" 
+// note: there should be no newline before import "C"
 
-// current steps:
-// gcc -std=c++17 -c -g global_hat_trie.cc -static -static-libgcc -static-libstdc++ && mv global_hat_trie.o libglobal_hat_trie.a 
-// go build -x main.go
-
-
-// #cgo LDFLAGS: -lstdc++ -L${SRCDIR} -L. -lglobal_hat_trie
+// #cgo LDFLAGS: -L${SRCDIR} -L. -lhat-trie
 // #cgo CFLAGS: -g -Wall
-// #cgo CXXFLAGS: -std=c++17
-// #include <stdlib.h>
-// #include "global_hat_trie.h"
+// #include "hat-trie/hat-trie.h"
+// extern hattrie_t* hattrie_create (void);
+// extern value_t* hattrie_get (hattrie_t*, const char* key, size_t len); // get and set
+// extern void       hattrie_free   (hattrie_t*);
+// extern value_t* hattrie_tryget (hattrie_t*, const char* key, size_t len);
+// extern int hattrie_del(hattrie_t* T, const char* key, size_t len);
 import "C"
-import (
-	"fmt"
-	"unsafe"
-)
 
 func main() {
 	
@@ -29,12 +22,9 @@ func main() {
 	key := C.CString("Gopher")
 	defer C.free(unsafe.Pointer(key))
 	
-	fmt.Println(C.HatInsert(key,1))
+	h := C.hattrie_create()
+	v := C.hattrie_get(h, key, 8)
+	*v = 1
 	
-	fmt.Println(C.HatFind(key))
-	
-	fmt.Println(C.HatErase(key))
-	
-	fmt.Println(C.HatFind(key))
 	
 }
