@@ -4,9 +4,9 @@ Distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Ask
 ## TODO:
 
 1. bind https://github.com/Tessil/hat-trie to Go using CGO, example: stackoverflow.com/questions/1713214 or github.com/burke/howto-go-with-cpp
-2. hat_map<string,int> stores index to `[][]byte` (aka rawValues) or special type (deque/set/etc) if negative, counter if positive; rawValues serialized using flatbuffers or fastbinaryencoding
-3. create a service for monitoring, and APIs using http2/grpc so it can be accessed from another language; also a client library
-4. the distributed part using emitter.io, or offloaded to another MQ (master-slave), or learn from github.com/etcd-io/raft (multi-master)
+2. hat_map<string,int> stores index to `[][]byte` (aka rawValues) or special type (deque/set/etc) if negative, counter if positive; rawValues serialized using github.com/google/flatbuffers or github.com/chronoxor/FastBinaryEncoding
+3. create a service for monitoring, and APIs using http2/grpc so it can be accessed from another language; also a client CLI
+4. the distributed part using emitter.io, or offloaded to another MQ (master-slave), or learn from https://github.com/etcd-io/etcd/tree/master/raft (multi-master)
 5. data persisted to disk using lmdb, or leveldb
 6. when service start, data loaded from database to memory; when service stopped/timer/sync-write forced, data written to disk
 7. supported commands:
