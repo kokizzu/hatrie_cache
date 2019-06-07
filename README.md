@@ -29,4 +29,3 @@ counter type:
   INT key
     gets
 ```
-8. in case of network partition, 
