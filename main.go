@@ -1,6 +1,7 @@
 package main
 import "C"
 import (
+	"fmt"
 	"unsafe"
 )
 
@@ -18,13 +19,31 @@ import "C"
 
 func main() {
 	
-	// TODO: https://karthikkaranth.me/blog/calling-c-code-from-go/
 	key := C.CString("Gopher")
 	defer C.free(unsafe.Pointer(key))
 	
+	// create and destroy
 	h := C.hattrie_create()
+	defer C.hattrie_free(h)
+	
+	// insert or update
 	v := C.hattrie_get(h, key, 8)
-	*v = 1
+	*v = 123
 	
+	// get
+	r := C.hattrie_tryget(h, key, 8)
+	if r != nil {
+		fmt.Println(`the value is `, *r)
+	}
 	
+	// delete
+	C.hattrie_del(h,key,8)
+	
+	// check if deleted
+	r =  C.hattrie_tryget(h, key, 8)
+	if r != nil {
+		fmt.Println(*r)
+	} else {
+		fmt.Println(`deleted or not exists`)
+	}
 }
