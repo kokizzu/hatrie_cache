@@ -1,2 +1,2 @@
 # hatrie_cache
-Distributed memcache but using HAT-Trie
+Distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Askitis)
