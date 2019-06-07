@@ -31,11 +31,12 @@ const (
 	DATAVALUE_TYPE_COUNTER
 	DATAVALUE_TYPE_RAW_BYTES
 	DATAVALUE_TYPE_RAW_STRING
+	// TODO: add more types (deque, priority queue, etc)
 )
 
 type HatValue struct {
-	Index int32 // index to local data
-	Type uint8 
+	Index int32 // 32bit index to HatTrie.raws or integer counter
+	Type uint8 // 1bit TTL + 7bit TYPE
 }
 
 func (hval HatValue) Empty() bool {
@@ -213,11 +214,13 @@ func (ht *HatTrie) AppendString(key string, str string) {
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
 		ht.raws.Put(hval.Index,[]byte(string(old) + str))
-	} else if hval.Empty() {
-		hval.Index = ht.raws.Add([]byte(str))
 	} else {
 		hval.Type = DATAVALUE_TYPE_RAW_STRING
-		ht.raws.Put(hval.Index,[]byte(str))
+		if hval.Empty() {
+			hval.Index = ht.raws.Add([]byte(str))
+		} else {
+			ht.raws.Put(hval.Index,[]byte(str))
+		}
 		*rawPtr = hval.ToUlong()
 	}
 }
@@ -230,11 +233,13 @@ func (ht *HatTrie) PrependString(key string, str string) {
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
 		ht.raws.Put(hval.Index,[]byte(str+string(old)))
-	} else if hval.Empty() {
-		hval.Index = ht.raws.Add([]byte(str))
 	} else {
 		hval.Type = DATAVALUE_TYPE_RAW_STRING
-		ht.raws.Put(hval.Index,[]byte(str))
+		if hval.Empty() {
+			hval.Index = ht.raws.Add([]byte(str))
+		} else {
+			ht.raws.Put(hval.Index,[]byte(str))
+		}
 		*rawPtr = hval.ToUlong()
 	}
 }
@@ -275,37 +280,40 @@ func main() {
 	defer h.Destroy()
 	
 	// counter test
-	// insert or update (upsert)
-	fmt.Println(`-- counter test`)
-	const key1 = `test`
-	h.UpsertCounter(key1, 5)
-	// get
-	fmt.Println(h.Get(key1))	
-	// increment
-	h.IncrementCounter(key1,-2)
-	// get
-	fmt.Println(h.GetCounter(key1))	
-	// delete
-	h.Del(key1)	
-	// check if deleted
-	fmt.Println(h.Get(key1))
+	fmt.Println(`
+-- counter test`)
+	const key1= `test`
+	h.UpsertCounter(key1, 5) // upsert
+	fmt.Println(h.Get(key1)) // get raw hatValue
+	fmt.Println(h.GetString(key1) + ` get as string`)
+	h.IncrementCounter(key1, -2)    // increment
+	fmt.Println(h.GetCounter(key1)) // get
+	h.Del(key1)                     // delete	
+	fmt.Println(h.Get(key1))        // check if deleted
 	
 	// string test
-	fmt.Println(`-- string test`)
-	const key2 = `foo`
-	h.UpsertString(key2, `eat`)
+	fmt.Println(`
+-- string test`)
+	const key2= `foo`
+	h.UpsertString(key2, `eat`) // set
 	fmt.Println(h.GetString(key2))
-	h.AppendString(key2, ` nasi`)
+	h.AppendString(key2, ` nasi`) // append
 	fmt.Println(h.GetString(key2))
-	h.Del(key2)
+	h.PrependString(key2, `i `) // prepend
 	fmt.Println(h.GetString(key2))
-	h.PrependString(key2, `i `)
+	h.Del(key2)                            // delete
+	h.AppendString(key2, `mie ayam jamur`) // append again
 	fmt.Println(h.GetString(key2))
-
+	h.Del(key2)                        // delete
+	h.PrependString(key2, `pizza hut`) // prepend again
+	fmt.Println(h.GetString(key2))
+	
 	// serialized value test (without flatbuffer/fastbinaryencoding)
-	p1 := M.SX{`name`:`koki`, `age`:32}
-	const key3 = `test3`
-	h.UpsertBytes(key3,[]byte(X.ToJson(p1)))
-	p2 := S.JsonToMap(string(h.GetBytes(key3)))
+	fmt.Println(`
+-- bytes test`)
+	p1 := M.SX{`name`: `koki`, `age`: 32}
+	const key3= `test3`
+	h.UpsertBytes(key3, []byte(X.ToJson(p1)))   // upsert
+	p2 := S.JsonToMap(string(h.GetBytes(key3))) // get
 	fmt.Println(p2)
 }
