@@ -1,6 +1,11 @@
 # editor
 .idea
 
+# cgo
+.a
+.o
+.so
+
 
 # Binaries for programs and plugins
 *.exe
