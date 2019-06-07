@@ -25,7 +25,7 @@ any type:
    check if key exists -1 if expired or not existshe
 counter type:
   INC key value=1
-    maximum of 56-bit unsigned integer
+    maximum of 63-bit unsigned integer, 0 if overflow or negative
   INT key
     gets
 ```
