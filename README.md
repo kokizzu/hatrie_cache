@@ -7,8 +7,8 @@ Experimental distributed memcache using HAT-Trie (a data structure designed by D
 - [x] `hat_map<string,int+byte>` stores index or special types (deque/set/etc) to `[][]byte` (aka raws); raws can be serialized using [FlatBuffers](http://github.com/google/flatbuffers) or [FastBinaryEncoding](http://github.com/chronoxor/FastBinaryEncoding)
 - [ ] add TTL map, check for expiration when read, delete if expired 
 - [ ] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
-- [ ] create a service for monitoring 
-- [ ] create APIs using http2/grpc so it can be accessed from another language 
+- [ ] create a web UI for management and monitoring (frontend: [Svelte](https://svelte.dev/))
+- [ ] create backend service using http2/grpc for APIs so it can be accessed from another language 
 - [ ] create a client CLI with for [statistics/cluster/server](https://redis.io/commands/#server) management and running commands:
 ```		
 any type:
