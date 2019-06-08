@@ -30,9 +30,10 @@ type HatValue struct {
 
 const DATAVALUE_SIZE_BYTE = 5
 const DATAVALUE_TTL_BIT_SHIFT = 8
-const DATAVALUE_TTL_TYPE_BITS = 1 << DATAVALUE_TTL_BIT_SHIFT - 1
-const DATAVALUE_TTL_OFFSET = 32
-const DATAVALUE_VALUE_BITS = 1 << DATAVALUE_TTL_OFFSET - 1
+const DATAVALUE_DISK_BIT_SHIFT = 7
+const DATAVALUE_TTL_TYPE_BITS = 1 << DATAVALUE_TTL_DISK_BIT_SHIFT - 1
+const DATAVALUE_VALUE_OFFSET = 32
+const DATAVALUE_VALUE_BITS = 1 <<DATAVALUE_VALUE_OFFSET - 1
 const (
 	DATAVALUE_TYPE_NULL uint8 = iota
 	DATAVALUE_TYPE_COUNTER
@@ -76,7 +77,11 @@ func (hval HatValue) IsSlice() bool {
 }
 
 func (hval HatValue) HasTtl() bool {
-	return hval.Flags| DATAVALUE_TTL_BIT_SHIFT == 1
+	return (hval.Flags >> DATAVALUE_TTL_BIT_SHIFT) & 1 == 1
+}
+
+func (hval HatValue) OnDisk() bool {
+	return (hval.Flags >> DATAVALUE_DISK_BIT_SHIFT) & 1 == 1
 }
 
 func (hval HatValue) String() string {
@@ -99,11 +104,11 @@ func (hval HatValue) String() string {
 }
 
 func (hval HatValue) ToUlong() C.ulong {
-	return C.ulong(uint64(hval.Flags) << DATAVALUE_TTL_OFFSET | uint64(hval.Index))
+	return C.ulong(uint64(hval.Flags) <<DATAVALUE_VALUE_OFFSET | uint64(hval.Index))
 }
 
 func (hval *HatValue) FromUlong(ulong C.ulong) {
-	hval.Flags = uint8(ulong >> DATAVALUE_TTL_OFFSET)
+	hval.Flags = uint8(ulong >> DATAVALUE_VALUE_OFFSET)
 	hval.Index = int32(ulong & DATAVALUE_VALUE_BITS)
 }
 
