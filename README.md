@@ -10,7 +10,7 @@ Experimental distributed memcache using HAT-Trie (a data structure designed by D
 4. [ ] the distributed part using emitter.io, or offloaded to another MQ (master-slave), or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) (multi-master)
 5. [ ] data persisted to disk using lmdb, or leveldb with snappy compression
 6. [ ] when service start, data loaded from database to memory; when service stopped/timer/sync-write forced, data written to disk
-7. [ ] ttl check every second for deletion, ttl stored on []{time,idx} (O(n) lookup operation, look for a better way)
+7. [ ] add TTL map, check for expiration when read, delete if expired; on-load check for expired data; create vaccum daemon to clean expired data
 8. [ ] initial supported commands:
 ```
 any type:

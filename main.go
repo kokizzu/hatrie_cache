@@ -25,7 +25,7 @@ import (
 // HatValue: 5 bytes that saved on the hat_trie
 type HatValue struct {
 	Index int32 // 32bit index to HatTrie.raws or integer counter
-	Type uint8 // 1bit TTL + 7bit TYPE
+	Flags uint8 // 1bit TTL + 7bit TYPE
 }
 
 const DATAVALUE_SIZE_BYTE = 5
@@ -44,11 +44,15 @@ const (
 )
 
 func (hval HatValue) Empty() bool {
-	return hval.Type == 0 
+	return hval.Flags == 0 
+}
+
+func (hval HatValue) Type() uint8 {
+	return hval.Flags & DATAVALUE_TTL_TYPE_BITS
 }
 
 func (hval HatValue) Is(cmp uint8) bool {
-	return hval.Type & DATAVALUE_TTL_TYPE_BITS == cmp
+	return hval.Type() == cmp
 }
 
 func (hval HatValue) IsCounter() bool {
@@ -63,10 +67,6 @@ func (hval HatValue) IsStringAtRaws() bool {
 	return hval.Is(DATAVALUE_TYPE_RAW_STRING)
 }
 
-func (hval HatValue) IsRaw() bool {
-	return hval.IsStringAtRaws() || hval.IsBytesAtRaws()
-}
-
 func (hval HatValue) IsMap() bool {
 	return hval.Is(DATAVALUE_TYPE_MAP)
 }
@@ -76,12 +76,12 @@ func (hval HatValue) IsSlice() bool {
 }
 
 func (hval HatValue) HasTtl() bool {
-	return hval.Type | DATAVALUE_TTL_BIT_SHIFT == 1
+	return hval.Flags| DATAVALUE_TTL_BIT_SHIFT == 1
 }
 
 func (hval HatValue) String() string {
 	// hval.HasTtl()
-	switch hval.Type & DATAVALUE_TTL_TYPE_BITS {
+	switch hval.Flags & DATAVALUE_TTL_TYPE_BITS {
 	case DATAVALUE_TYPE_NULL:
 		return `null hat value`
 	case DATAVALUE_TYPE_COUNTER:
@@ -99,13 +99,14 @@ func (hval HatValue) String() string {
 }
 
 func (hval HatValue) ToUlong() C.ulong {
-	return C.ulong(uint64(hval.Type) << DATAVALUE_TTL_OFFSET | uint64(hval.Index))
+	return C.ulong(uint64(hval.Flags) << DATAVALUE_TTL_OFFSET | uint64(hval.Index))
 }
 
 func (hval *HatValue) FromUlong(ulong C.ulong) {
-	hval.Type = uint8(ulong >> DATAVALUE_TTL_OFFSET)
+	hval.Flags = uint8(ulong >> DATAVALUE_TTL_OFFSET)
 	hval.Index = int32(ulong & DATAVALUE_VALUE_BITS)
 }
+
 
 /////////////
 // BytesStorage, for string and bytes/serialized values
@@ -268,12 +269,13 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 	if hval.Empty() {
 		return
 	}
-	if hval.IsMap() {
+	switch hval.Type() {
+	case DATAVALUE_TYPE_MAP:
 		ht.maps.Del(hval.Index)
-	} else if hval.IsSlice() {
-		ht.slices.Del(hval.Index)		
-	} else if hval.IsRaw() {
-		ht.raws.Del(hval.Index)		
+	case DATAVALUE_TYPE_SLICE:
+		ht.slices.Del(hval.Index)
+	case DATAVALUE_TYPE_RAW_BYTES, DATAVALUE_TYPE_RAW_STRING:
+		ht.raws.Del(hval.Index)
 	}
 }
 
@@ -302,7 +304,7 @@ func (ht *HatTrie) Del(key string) {
 
 // set type as counter at key
 func (ht *HatTrie) UpsertCounter(key string, val int32) {
-	*ht.upsertLocation(key) = HatValue{Index: val, Type: DATAVALUE_TYPE_COUNTER}.ToUlong()
+	*ht.upsertLocation(key) = HatValue{Index: val, Flags: DATAVALUE_TYPE_COUNTER}.ToUlong()
 }
 
 // increment counter at key, if type not type of counter, will reset the value to "by"
@@ -313,7 +315,7 @@ func (ht *HatTrie) IncrementCounter(key string, by int32) {
 	if hval.IsCounter() {
 		hval.Index += by		
 	} else {
-		hval.Type = DATAVALUE_TYPE_COUNTER
+		hval.Flags = DATAVALUE_TYPE_COUNTER
 		hval.Index = by
 	}
 	*rawPtr = hval.ToUlong()
@@ -334,7 +336,7 @@ func (ht *HatTrie) GetCounter(s string) int32 {
 // set type as string/raw index at key
 func (ht *HatTrie) UpsertString(key string, val string) {
 	idx := ht.raws.Add([]byte(val))
-	*ht.upsertLocation(key) = HatValue{Index: idx, Type: DATAVALUE_TYPE_RAW_STRING}.ToUlong()
+	*ht.upsertLocation(key) = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.ToUlong()
 }
 
 // append string at key, if type not string, will reset the value to "str"
@@ -348,7 +350,7 @@ func (ht *HatTrie) AppendString(key string, str string) {
 	} else {
 		ht.returnStorage(hval)
 		hval.Index = ht.raws.Add([]byte(str))
-		hval.Type = DATAVALUE_TYPE_RAW_STRING
+		hval.Flags = DATAVALUE_TYPE_RAW_STRING
 		*rawPtr = hval.ToUlong()
 	}
 }
@@ -364,7 +366,7 @@ func (ht *HatTrie) PrependString(key string, str string) {
 	} else {
 		ht.returnStorage(hval)
 		hval.Index = ht.raws.Add([]byte(str))
-		hval.Type = DATAVALUE_TYPE_RAW_STRING
+		hval.Flags = DATAVALUE_TYPE_RAW_STRING
 		*rawPtr = hval.ToUlong()
 	}
 }
@@ -386,7 +388,7 @@ func (ht *HatTrie) GetString(key string) string {
 // serialized type (bytes)
 func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 	idx := ht.raws.Add(val)
-	*ht.upsertLocation(key) = HatValue{Index: idx, Type: DATAVALUE_TYPE_RAW_BYTES}.ToUlong()
+	*ht.upsertLocation(key) = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}.ToUlong()
 }
 
 // return nil if type not string/bytes
@@ -403,7 +405,7 @@ func (ht *HatTrie) GetBytes(key string) []byte {
 
 func (ht *HatTrie) UpsertMap(key string, val M.SX) {
 	idx := ht.maps.Add(val)
-	*ht.upsertLocation(key) = HatValue{Index: idx, Type: DATAVALUE_TYPE_MAP}.ToUlong()
+	*ht.upsertLocation(key) = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.ToUlong()
 }
 
 func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
@@ -416,7 +418,7 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 	} else {
 		ht.returnStorage(hval)
 		hval.Index = ht.maps.Add(M.SX{key:val})
-		hval.Type = DATAVALUE_TYPE_RAW_BYTES
+		hval.Flags = DATAVALUE_TYPE_RAW_BYTES
 		*rawPtr = hval.ToUlong()
 	}	
 }
@@ -452,7 +454,7 @@ func (ht *HatTrie) GetMap(key string) M.SX {
 
 func (ht *HatTrie) UpsertSlice(key string, val A.X) {
 	idx := ht.slices.Add(val)
-	*ht.upsertLocation(key) = HatValue{Index: idx, Type: DATAVALUE_TYPE_SLICE}.ToUlong()
+	*ht.upsertLocation(key) = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.ToUlong()
 }
 
 func (ht *HatTrie) PushSlice(key string, val interface{}, vals... interface{}) {
@@ -473,7 +475,7 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals... interface{}) {
 			arr = append(arr,vals...)
 		}		
 		hval.Index = ht.slices.Add(arr)
-		hval.Type = DATAVALUE_TYPE_RAW_STRING
+		hval.Flags = DATAVALUE_TYPE_RAW_STRING
 		*rawPtr = hval.ToUlong()
 	}	
 }
