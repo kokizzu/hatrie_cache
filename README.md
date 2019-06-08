@@ -4,7 +4,8 @@ Experimental distributed memcache using HAT-Trie (a data structure designed by D
 ## TODO:
 
 1. [x] bind [HAT-Trie](https://github.com/luikore/hat-trie) to Go using CGO
-2. [x] `hat_map<string,int+byte>` stores index or special types (deque/set/etc) to `[][]byte` (aka raws); raws can be serialized using [FlatBuffers](http://github.com/google/flatbuffers) or [FastBinaryEncoding](http://github.com/chronoxor/FastBinaryEncoding)
+2a. [x] `hat_map<string,int+byte>` stores index or special types (deque/set/etc) to `[][]byte` (aka raws); raws can be serialized using [FlatBuffers](http://github.com/google/flatbuffers) or [FastBinaryEncoding](http://github.com/chronoxor/FastBinaryEncoding)
+2b. [ ] need benchmark which how much faster and space efficient: [][]byte compared to map[int][]byte
 3. [ ] create a service for monitoring, and APIs using http2/grpc so it can be accessed from another language; also a client CLI, make sure all operation synchronized
 4. [ ] the distributed part using emitter.io, or offloaded to another MQ (master-slave), or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) (multi-master)
 5. [ ] data persisted to disk using lmdb, or leveldb with snappy compression
@@ -30,5 +31,11 @@ any type:
 counter type:
   INC key value=1
     maximum of 32-bit integer
+map type:
+  PUTMAP key subkey val [subkey val]...
+  TAKEMAP/PEEKMAP key subkey
+slice/arr type:
+  PUSHSLICE key val...
+  POPSLICE,SHIFTSLICE,HEADSLICE,TAILSLICE key
 ```
 9. when master/leader disconnected from all slave, new master/leader elected by reamining slave
