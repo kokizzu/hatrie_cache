@@ -1,6 +1,8 @@
 # hatrie_cache
 Experimental distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Askitis)
 
+_**warning**: this project obviously not ready for production_
+
 ## TODO:
 
 - [x] bind [HAT-Trie](https://github.com/luikore/hat-trie) to Go using CGO
@@ -38,19 +40,20 @@ slice/arr/stack/queue type:
 ```
 - [ ] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
 - [ ] check if serializer can support Go's map
-- [ ] data persisted to disk using lmdb, or leveldb with snappy compression
-- [ ] binary data that are >1MB always stored on disk
+- [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
+- [ ] binary data that are >64KB always stored on disk
 - [ ] write all pending transaction on journal (backup if program terminated unexpectedly)
+- [ ] update statistics (last hit, last write, hit rate, cumulative hit rate) to disk
 - [ ] on-load check for expired data
-- [ ] when service start, data loaded from database to memory
+- [ ] when service start, non-expired keys and (<1KB AND <1h last hit AND >1000 hit rate) values loaded from database to memory
 - [ ] when service stopped/timer/sync-write forced, data written to disk
 - [ ] create iterator command to get all keys and keys based on certain prefix
-- [ ] create vacuum goroutine to clean expired data
+- [ ] create timer/oom vacuum goroutine to clean expired data
 - [ ] when master/leader disconnected from all slave, new master/leader elected by remaining slave
-- [ ] the distributed part using emitter.io, or offloaded to another MQ (master-slave), or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) (multi-master)
+- [ ] the distributed part using emitter.io, or offloaded to another MQ, or learn from [rqlite](https://github.com/rqlite/rqlite) (master-slave), or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) (multi-master)
 
 ## Use cases:
 
 - storing session keys
 - counting url hits, likes
-- caching results
+- caching 
