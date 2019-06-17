@@ -50,7 +50,7 @@ slice/arr/stack/queue type:
 - [ ] create iterator command to get all keys and keys based on certain prefix
 - [ ] create timer/oom vacuum goroutine to clean expired data
 - [ ] when master/leader disconnected from all slave, new master/leader elected by remaining slave
-- [ ] the distributed part using emitter.io, or offloaded to another MQ, or learn from [rqlite](https://github.com/rqlite/rqlite) (master-slave), or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) (multi-master)
+- [ ] the distributed part using emitter.io, or offloaded to another MQ, or [dynomite](https://github.com/Netflix/dynomite) (eventually consistent), or [bcache](https://github.com/iwanbk/bcache) or [consul](https://medium.com/@didil/building-a-simple-distributed-system-with-go-consul-39b08ffc5d2c) or learn from [rqlite](https://github.com/rqlite/rqlite) (master-slave), or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) (multi-master)
 
 ## Use cases:
 
