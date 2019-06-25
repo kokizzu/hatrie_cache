@@ -57,6 +57,7 @@ slice/arr/stack/queue type:
       or [consul](https://medium.com/@didil/building-a-simple-distributed-system-with-go-consul-39b08ffc5d2c) 
       or learn from [rqlite](https://github.com/rqlite/rqlite) (master-slave), 
       or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) 
+      or learn from [projects using Badger](https://github.com/dgraph-io/badger#other-projects-using-badger)
       or use [dragonboat](https://github.com/lni/dragonboat) (multi-master)
 
 ## Use cases:
