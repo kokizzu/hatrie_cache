@@ -58,6 +58,7 @@ slice/arr/stack/queue type:
       or learn from [rqlite](https://github.com/rqlite/rqlite) (master-slave), 
       or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) 
       or learn from [projects using Badger](https://github.com/dgraph-io/badger#other-projects-using-badger)
+      or learn from [autocache](https://github.com/pomerium/autocache)
       or use [dragonboat](https://github.com/lni/dragonboat) (multi-master)
 
 ## Use cases:
