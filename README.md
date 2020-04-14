@@ -59,6 +59,7 @@ slice/arr/stack/queue type:
       or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) 
       or learn from [projects using Badger](https://github.com/dgraph-io/badger#other-projects-using-badger)
       or learn from [autocache](https://github.com/pomerium/autocache)
+      or use [finn](https://github.com/tidwall/finn) and learn from [summitdb](https://github.com/tidwall/summitdb)
       or use [dragonboat](https://github.com/lni/dragonboat) (multi-master)
 
 ## Use cases:
