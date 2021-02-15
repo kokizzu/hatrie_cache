@@ -1,5 +1,5 @@
 # hatrie_cache
-Experimental distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Askitis)
+Experimental **TO BE** distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Askitis)
 
 _**warning**: this project obviously not ready for production_
 
@@ -38,6 +38,7 @@ slice/arr/stack/queue type:
   PUSHSLICE key val...
   POPSLICE,SHIFTSLICE,HEADSLICE,TAILSLICE key
 ```
+- [ ] add option to shard/partition it or full replica
 - [ ] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
 - [ ] check if serializer can support Go's map
 - [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
