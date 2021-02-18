@@ -38,7 +38,7 @@ slice/arr/stack/queue type:
   PUSHSLICE key val...
   POPSLICE,SHIFTSLICE,HEADSLICE,TAILSLICE key
 ```
-- [ ] add option to shard/partition it or full replica
+- [ ] add option to shard/partition it or full replica, copy tarantool's vbucket/vshard logic
 - [ ] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
 - [ ] check if serializer can support Go's map
 - [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
