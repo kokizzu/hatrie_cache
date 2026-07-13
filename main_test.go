@@ -1265,6 +1265,29 @@ func TestPersistRemovesTTL(t *testing.T) {
 	}
 }
 
+func TestExpireAtPastDeletesImmediatelyAndReusesStorage(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(250, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertBytes("key", []byte("value"))
+	idx := ht.Get("key").Index
+	if !ht.ExpireAt("key", now) {
+		t.Fatal("ExpireAt(key, now) = false, want true")
+	}
+	if got := ht.Size(); got != 0 {
+		t.Fatalf("size after immediate ExpireAt = %d, want 0", got)
+	}
+	if !rawIndexReleased(ht, idx) {
+		t.Fatalf("expired raw index %d was not released immediately", idx)
+	}
+
+	ht.UpsertBytes("next", []byte("value"))
+	if got := ht.Get("next").Index; got != idx {
+		t.Fatalf("raw storage after immediate ExpireAt = %d, want reused %d", got, idx)
+	}
+}
+
 func TestPlainUpsertClearsTTL(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(300, 0)

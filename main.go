@@ -1781,6 +1781,13 @@ func (ht *HatTrie) expireAtLocked(key string, at time.Time) bool {
 	if ht.expireIfNeededLocked(key, hval) {
 		return false
 	}
+	if !ht.currentTime().Before(at) {
+		deleted := ht.deleteKnownLocked(key, hval)
+		if deleted {
+			ht.recordDeleteLocked(key)
+		}
+		return deleted
+	}
 
 	ht.setExpirationLocked(key, at, rawPtr, hval)
 	return true

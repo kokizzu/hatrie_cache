@@ -81,6 +81,15 @@ func TestExecuteCommandExtendedTTLCommands(t *testing.T) {
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "bad", Value: "value", TTLSeconds: &ttlSeconds, UnixSeconds: &absoluteExpiry}); got.OK {
 		t.Fatalf("SETSTR with two expirations response = %#v, want error", got)
 	}
+
+	ht.UpsertString("past", "value")
+	pastExpiry := now.Unix()
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXPIREAT", Key: "past", UnixSeconds: &pastExpiry}); !got.OK {
+		t.Fatalf("EXPIREAT past response = %#v, want ok", got)
+	}
+	if ht.Exists("past") {
+		t.Fatal("EXPIREAT in the past left key present")
+	}
 }
 
 func TestExecuteCommandIncrementCounter(t *testing.T) {
