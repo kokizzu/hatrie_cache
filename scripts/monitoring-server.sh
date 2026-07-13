@@ -20,6 +20,11 @@ db_hot_load_min_hits=${DB_HOT_LOAD_MIN_HITS:-1000}
 snapshot_path=${SNAPSHOT_PATH:-}
 snapshot_interval=${SNAPSHOT_INTERVAL:-0}
 journal_path=${JOURNAL_PATH:-}
+journal_pull_source=${JOURNAL_PULL_SOURCE:-}
+journal_pull_state_path=${JOURNAL_PULL_STATE_PATH:-}
+journal_pull_interval=${JOURNAL_PULL_INTERVAL:-0}
+journal_pull_limit=${JOURNAL_PULL_LIMIT:-0}
+journal_pull_max_batches=${JOURNAL_PULL_MAX_BATCHES:-0}
 
 exec go run ./cmd/hatrie-cache \
 	-monitoring-server \
@@ -41,4 +46,9 @@ exec go run ./cmd/hatrie-cache \
 	-db-hot-load-min-hits "$db_hot_load_min_hits" \
 	-snapshot-path "$snapshot_path" \
 	-snapshot-interval "$snapshot_interval" \
-	-journal-path "$journal_path"
+	-journal-path "$journal_path" \
+	-journal-pull-source "$journal_pull_source" \
+	-journal-pull-state-path "$journal_pull_state_path" \
+	-journal-pull-interval "$journal_pull_interval" \
+	-journal-pull-limit "$journal_pull_limit" \
+	-journal-pull-max-batches "$journal_pull_max_batches"

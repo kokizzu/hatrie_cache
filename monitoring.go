@@ -471,95 +471,27 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		return
 	}
 	source := strings.TrimSpace(request.Source)
-	limit, err := normalizeCommandJournalTailLimit(request.Limit)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
-		return
-	}
-	maxBatches, err := normalizeCommandJournalPullBatches(request.UntilCurrent, request.MaxBatches)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
-		return
-	}
 	if requestContextDone(w, r) {
 		return
 	}
 
-	result, status, err := handler.pullCommandJournalTail(r.Context(), source, request.AfterSequence, limit, request.UntilCurrent, maxBatches)
+	result, err := PullCommandJournal(r.Context(), handler.trie, handler.options.Journal, CommandJournalPullOptions{
+		Source:        source,
+		AfterSequence: request.AfterSequence,
+		Limit:         request.Limit,
+		UntilCurrent:  request.UntilCurrent,
+		MaxBatches:    request.MaxBatches,
+	})
 	if err != nil {
-		if status == http.StatusBadRequest {
-			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
-			return
-		}
-		if status == http.StatusConflict {
-			writeJSONStatus(w, http.StatusConflict, commandError(err.Error()))
+		var pullErr *CommandJournalPullError
+		if errors.As(err, &pullErr) && pullErr.Status > 0 {
+			writeJSONStatus(w, pullErr.Status, commandError(pullErr.Error()))
 			return
 		}
 		writeJSONStatus(w, http.StatusBadGateway, commandError(err.Error()))
 		return
 	}
 	writeJSON(w, result)
-}
-
-func (handler *MonitoringHandler) pullCommandJournalTail(ctx context.Context, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int) (CommandJournalPullResult, int, error) {
-	result := CommandJournalPullResult{
-		Source:         source,
-		AfterSequence:  afterSequence,
-		AppliedThrough: afterSequence,
-	}
-	for batch := 0; batch < maxBatches; batch++ {
-		endpoint, err := commandJournalEndpoint(source, result.AppliedThrough, limit)
-		if err != nil {
-			return result, http.StatusBadRequest, err
-		}
-		tail, status, err := fetchCommandJournalTail(ctx, http.DefaultClient, endpoint)
-		if err != nil {
-			return result, status, err
-		}
-		batchResult, err := handler.applyCommandJournalTail(source, result.AppliedThrough, tail)
-		if err != nil {
-			return result, http.StatusBadGateway, err
-		}
-		result.LastSequence = batchResult.LastSequence
-		result.CompactedThrough = batchResult.CompactedThrough
-		result.Applied += batchResult.Applied
-		result.AppliedThrough = batchResult.AppliedThrough
-		result.HasMore = batchResult.HasMore
-		result.Batches++
-		if !untilCurrent || !result.HasMore {
-			return result, http.StatusOK, nil
-		}
-		if batchResult.Applied == 0 {
-			return result, http.StatusBadGateway, errors.New("journal source reported more entries without returning progress")
-		}
-		if err := ctx.Err(); err != nil {
-			return result, 0, err
-		}
-	}
-	return result, http.StatusOK, nil
-}
-
-func (handler *MonitoringHandler) applyCommandJournalTail(source string, afterSequence uint64, tail CommandJournalTail) (CommandJournalPullResult, error) {
-	result := CommandJournalPullResult{
-		Source:           source,
-		AfterSequence:    afterSequence,
-		LastSequence:     tail.LastSequence,
-		CompactedThrough: tail.CompactedThrough,
-		AppliedThrough:   afterSequence,
-		HasMore:          tail.HasMore,
-	}
-	for _, entry := range tail.Entries {
-		if entry.Sequence <= result.AppliedThrough {
-			return result, fmt.Errorf("journal tail sequence %d is not after %d", entry.Sequence, result.AppliedThrough)
-		}
-		response := handler.options.Journal.ExecuteCommand(handler.trie, entry.Request)
-		if !response.OK {
-			return result, fmt.Errorf("journal entry %d failed: %s", entry.Sequence, response.Message)
-		}
-		result.Applied++
-		result.AppliedThrough = entry.Sequence
-	}
-	return result, nil
 }
 
 func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint string) (CommandJournalTail, int, error) {

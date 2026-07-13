@@ -8,11 +8,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +72,27 @@ func TestParseConfigSnapshotFlags(t *testing.T) {
 	}
 	if cfg.journalPath != "/tmp/cache.journal" {
 		t.Fatalf("journalPath = %q, want explicit path", cfg.journalPath)
+	}
+}
+
+func TestParseConfigJournalPullFlags(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-journal-path", "/tmp/cache.journal",
+		"-journal-pull-source", "http://leader:8080",
+		"-journal-pull-state-path", "/tmp/cache.pull.json",
+		"-journal-pull-interval", "5s",
+		"-journal-pull-limit", "250",
+		"-journal-pull-max-batches", "8",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.journalPullSource != "http://leader:8080" || cfg.journalPullStatePath != "/tmp/cache.pull.json" || cfg.journalPullInterval != 5*time.Second {
+		t.Fatalf("cfg journal pull basics = %#v, want explicit source/state/interval", cfg)
+	}
+	if cfg.journalPullLimit != 250 || cfg.journalPullMaxBatches != 8 {
+		t.Fatalf("cfg journal pull limits = %d/%d, want 250/8", cfg.journalPullLimit, cfg.journalPullMaxBatches)
 	}
 }
 
@@ -727,6 +750,72 @@ func TestSnapshotCallbackRequiresPath(t *testing.T) {
 	}
 }
 
+func TestJournalPullerAppliesAndPersistsState(t *testing.T) {
+	requests := make(chan string, 1)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.URL.String()
+		if r.URL.Query().Get("after_sequence") != "" {
+			t.Fatalf("after_sequence = %q, want empty first pull", r.URL.Query().Get("after_sequence"))
+		}
+		response := hatriecache.CommandJournalTail{
+			LastSequence: 1,
+			Entries: []hatriecache.CommandJournalRecord{
+				{Sequence: 1, Request: hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	journal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	statePath := filepath.Join(t.TempDir(), "pull-state.json")
+
+	stop := startJournalPuller(context.Background(), ht, journal, journalPullerConfig{
+		Source:     source.URL,
+		StatePath:  statePath,
+		Limit:      10,
+		MaxBatches: 5,
+	}, &bytes.Buffer{})
+	waitUntil(t, time.Second, func() bool {
+		return ht.GetString("name") == "ivi"
+	})
+	stop()
+
+	select {
+	case path := <-requests:
+		if path != "/api/journal?limit=10" {
+			t.Fatalf("source path = %q, want /api/journal?limit=10", path)
+		}
+	default:
+		t.Fatal("journal puller did not call source")
+	}
+	after, err := loadJournalPullState(statePath, source.URL)
+	if err != nil {
+		t.Fatalf("loadJournalPullState() error = %v", err)
+	}
+	if after != 1 {
+		t.Fatalf("pull state after = %d, want 1", after)
+	}
+}
+
+func TestJournalPullStateRejectsSourceMismatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pull-state.json")
+	if err := saveJournalPullState(path, "http://leader-a", 7); err != nil {
+		t.Fatalf("saveJournalPullState() error = %v", err)
+	}
+	if _, err := loadJournalPullState(path, "http://leader-b"); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("loadJournalPullState(mismatch) error = %v, want source mismatch", err)
+	}
+}
+
 func TestJournaledSnapshotHelpersCheckpointAndCompact(t *testing.T) {
 	dir := t.TempDir()
 	snapshotPath := filepath.Join(dir, "snapshot.json")
@@ -764,4 +853,16 @@ func TestJournaledSnapshotHelpersCheckpointAndCompact(t *testing.T) {
 	if got := loaded.GetCounter("views"); got != 3 {
 		t.Fatalf("loaded views = %d, want 3", got)
 	}
+}
+
+func waitUntil(t *testing.T, timeout time.Duration, ready func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ready() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition did not become true before timeout")
 }

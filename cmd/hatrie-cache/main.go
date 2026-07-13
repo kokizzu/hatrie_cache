@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,26 +26,31 @@ import (
 const serverShutdownTimeout = 5 * time.Second
 
 type config struct {
-	monitoringServer    bool
-	monitoringAddr      string
-	monitoringTLSCert   string
-	monitoringTLSKey    string
-	monitoringWebDir    string
-	nodeID              string
-	topologyPath        string
-	electionTimeout     time.Duration
-	replication         bool
-	enforceLeaderWrites bool
-	grpcAddr            string
-	dbPath              string
-	dbSyncInterval      time.Duration
-	dbHotLoad           bool
-	dbHotLoadMaxBytes   int64
-	dbHotLoadMaxAge     time.Duration
-	dbHotLoadMinHits    uint64
-	snapshotPath        string
-	snapshotInterval    time.Duration
-	journalPath         string
+	monitoringServer      bool
+	monitoringAddr        string
+	monitoringTLSCert     string
+	monitoringTLSKey      string
+	monitoringWebDir      string
+	nodeID                string
+	topologyPath          string
+	electionTimeout       time.Duration
+	replication           bool
+	enforceLeaderWrites   bool
+	grpcAddr              string
+	dbPath                string
+	dbSyncInterval        time.Duration
+	dbHotLoad             bool
+	dbHotLoadMaxBytes     int64
+	dbHotLoadMaxAge       time.Duration
+	dbHotLoadMinHits      uint64
+	snapshotPath          string
+	snapshotInterval      time.Duration
+	journalPath           string
+	journalPullSource     string
+	journalPullStatePath  string
+	journalPullInterval   time.Duration
+	journalPullLimit      uint64
+	journalPullMaxBatches uint64
 }
 
 func main() {
@@ -114,6 +122,20 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, stderr)
 	defer stopSnapshots()
+	if cfg.journalPullSource != "" && journal == nil {
+		return errors.New("journal pull requires -journal-path")
+	}
+	if cfg.journalPullSource != "" && cfg.journalPullStatePath == "" {
+		cfg.journalPullStatePath = cfg.journalPath + ".pull_state.json"
+	}
+	stopJournalPuller := startJournalPuller(ctx, trie, journal, journalPullerConfig{
+		Source:     cfg.journalPullSource,
+		StatePath:  cfg.journalPullStatePath,
+		Interval:   cfg.journalPullInterval,
+		Limit:      cfg.journalPullLimit,
+		MaxBatches: cfg.journalPullMaxBatches,
+	}, stderr)
+	defer stopJournalPuller()
 
 	topology, err := openTopologyIfConfigured(cfg.topologyPath, cfg.nodeID, cfg.monitoringAddr)
 	if err != nil {
@@ -225,6 +247,11 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional JSON snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
 	flags.StringVar(&cfg.journalPath, "journal-path", "", "optional command journal path to replay on startup and append mutating commands")
+	flags.StringVar(&cfg.journalPullSource, "journal-pull-source", "", "optional source monitoring URL to pull journal catch-up batches from")
+	flags.StringVar(&cfg.journalPullStatePath, "journal-pull-state-path", "", "optional JSON path for persisted journal pull source sequence")
+	flags.DurationVar(&cfg.journalPullInterval, "journal-pull-interval", 0, "optional interval for repeated journal pull catch-up")
+	flags.Uint64Var(&cfg.journalPullLimit, "journal-pull-limit", 0, "maximum entries per journal pull batch")
+	flags.Uint64Var(&cfg.journalPullMaxBatches, "journal-pull-max-batches", 0, "maximum batches per journal pull attempt")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -498,6 +525,159 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 		}
 	}()
 	return periodicStopper(done, stopped)
+}
+
+type journalPullerConfig struct {
+	Source     string
+	StatePath  string
+	Interval   time.Duration
+	Limit      uint64
+	MaxBatches uint64
+}
+
+type journalPullState struct {
+	Source         string    `json:"source"`
+	AppliedThrough uint64    `json:"applied_through"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+func startJournalPuller(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, cfg journalPullerConfig, stderr io.Writer) func() {
+	if cfg.Source == "" || journal == nil {
+		return func() {}
+	}
+
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	pull := func() {
+		result, err := pullJournalOnce(ctx, trie, journal, cfg)
+		if err != nil {
+			fmt.Fprintf(stderr, "pull journal: %v\n", err)
+			return
+		}
+		if result.HasMore {
+			fmt.Fprintf(stderr, "pull journal: source still has more entries after %d batches\n", result.Batches)
+		}
+	}
+	go func() {
+		defer close(stopped)
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		default:
+		}
+		pull()
+		if cfg.Interval <= 0 {
+			return
+		}
+		ticker := time.NewTicker(cfg.Interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				pull()
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
+	return periodicStopper(done, stopped)
+}
+
+func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, cfg journalPullerConfig) (hatriecache.CommandJournalPullResult, error) {
+	afterSequence, err := loadJournalPullState(cfg.StatePath, cfg.Source)
+	if err != nil {
+		return hatriecache.CommandJournalPullResult{}, err
+	}
+	result, err := hatriecache.PullCommandJournal(ctx, trie, journal, hatriecache.CommandJournalPullOptions{
+		Source:        cfg.Source,
+		AfterSequence: afterSequence,
+		Limit:         cfg.Limit,
+		UntilCurrent:  true,
+		MaxBatches:    cfg.MaxBatches,
+	})
+	if err != nil {
+		return result, err
+	}
+	if result.AppliedThrough >= afterSequence {
+		if err := saveJournalPullState(cfg.StatePath, cfg.Source, result.AppliedThrough); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func loadJournalPullState(path string, source string) (uint64, error) {
+	if path == "" {
+		return 0, nil
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var state journalPullState
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&state); err != nil {
+		return 0, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return 0, errors.New("invalid journal pull state JSON")
+	}
+	if state.Source != "" && state.Source != source {
+		return 0, fmt.Errorf("journal pull state source %q does not match %q", state.Source, source)
+	}
+	return state.AppliedThrough, nil
+}
+
+func saveJournalPullState(path string, source string, appliedThrough uint64) error {
+	if path == "" {
+		return nil
+	}
+	state := journalPullState{
+		Source:         source,
+		AppliedThrough: appliedThrough,
+		UpdatedAt:      time.Now().UTC(),
+	}
+	return writeJSONFileAtomic(path, state)
+}
+
+func writeJSONFileAtomic(path string, value interface{}) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func snapshotCallback(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string) func() error {

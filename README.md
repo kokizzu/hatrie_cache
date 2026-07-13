@@ -131,6 +131,14 @@ If `N` is older than the compacted snapshot checkpoint, the endpoint returns
 mutating commands locally through the configured journal. Set `until_current`
 and optional `max_batches` to continue pulling bounded batches until the source
 has no more entries or the batch cap is reached.
+Set `JOURNAL_PULL_SOURCE` with `JOURNAL_PATH` to automatically pull bounded
+catch-up batches from another node at startup; `JOURNAL_PULL_STATE_PATH`
+persists the source sequence so non-idempotent commands are not replayed after
+restart. Add `JOURNAL_PULL_INTERVAL` to repeat catch-up periodically:
+
+```
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_INTERVAL=5s
+```
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
 The topology endpoint validates nodes, shard ownership, and replicas, and can
