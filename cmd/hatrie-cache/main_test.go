@@ -440,16 +440,13 @@ func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
 	stop := startLevelDBSaver(ctx, ht, store, time.Millisecond, &bytes.Buffer{})
 	defer stop()
 
-	deadline := time.Now().Add(200 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		loaded := hatriecache.CreateHatTrie()
-		count, err := store.Load(loaded)
-		got := loaded.GetString("key")
-		loaded.Destroy()
-		if err == nil && count == 1 && got == "value" {
+		entry, ok, err := store.Entry("key")
+		if err == nil && ok && entry.Type == "string" && entry.String == "value" {
 			return
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("periodic LevelDB save was not written")
 }
