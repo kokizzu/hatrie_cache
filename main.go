@@ -55,6 +55,7 @@ const (
 	DATAVALUE_TYPE_SET
 	DATAVALUE_TYPE_PRIORITY_QUEUE
 	DATAVALUE_TYPE_BLOOM_FILTER
+	DATAVALUE_TYPE_COUNT_MIN_SKETCH
 )
 
 type Map = map[string]interface{}
@@ -587,6 +588,10 @@ func (hval HatValue) IsBloomFilter() bool {
 	return hval.Is(DATAVALUE_TYPE_BLOOM_FILTER)
 }
 
+func (hval HatValue) IsCountMinSketch() bool {
+	return hval.Is(DATAVALUE_TYPE_COUNT_MIN_SKETCH)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -617,6 +622,8 @@ func (hval HatValue) String() string {
 		return "priority queue at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_BLOOM_FILTER:
 		return "bloom filter at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
+		return "count-min sketch at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -1229,21 +1236,22 @@ func (rs *LevelDBReferenceStorage) Del(idx int32) {
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing
 // pools referenced by compact HatValue records.
 type HatTrie struct {
-	mu             sync.RWMutex
-	root           *C.hattrie_t
-	raws           *BytesStorage
-	disks          *DiskStorage
-	maps           *MapStorage
-	slices         *SliceStorage
-	sets           *SetStorage
-	priorityQueues *PriorityQueueStorage
-	bloomFilters   *BloomFilterStorage
-	dbrefs         *LevelDBReferenceStorage
-	expires        map[string]time.Time
-	expirations    expirationHeap
-	stats          CacheStats
-	keyStats       map[string]KeyStats
-	now            func() time.Time
+	mu               sync.RWMutex
+	root             *C.hattrie_t
+	raws             *BytesStorage
+	disks            *DiskStorage
+	maps             *MapStorage
+	slices           *SliceStorage
+	sets             *SetStorage
+	priorityQueues   *PriorityQueueStorage
+	bloomFilters     *BloomFilterStorage
+	countMinSketches *CountMinSketchStorage
+	dbrefs           *LevelDBReferenceStorage
+	expires          map[string]time.Time
+	expirations      expirationHeap
+	stats            CacheStats
+	keyStats         map[string]KeyStats
+	now              func() time.Time
 }
 
 func CreateHatTrie() *HatTrie {
@@ -1265,18 +1273,19 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		return nil, err
 	}
 	ht := &HatTrie{
-		root:           C.hattrie_create(),
-		raws:           CreateBytesStorage(),
-		disks:          disks,
-		maps:           CreateMapStorage(),
-		slices:         CreateSliceStorage(),
-		sets:           CreateSetStorage(),
-		priorityQueues: CreatePriorityQueueStorage(),
-		bloomFilters:   CreateBloomFilterStorage(),
-		dbrefs:         CreateLevelDBReferenceStorage(),
-		expires:        map[string]time.Time{},
-		keyStats:       map[string]KeyStats{},
-		now:            time.Now,
+		root:             C.hattrie_create(),
+		raws:             CreateBytesStorage(),
+		disks:            disks,
+		maps:             CreateMapStorage(),
+		slices:           CreateSliceStorage(),
+		sets:             CreateSetStorage(),
+		priorityQueues:   CreatePriorityQueueStorage(),
+		bloomFilters:     CreateBloomFilterStorage(),
+		countMinSketches: CreateCountMinSketchStorage(),
+		dbrefs:           CreateLevelDBReferenceStorage(),
+		expires:          map[string]time.Time{},
+		keyStats:         map[string]KeyStats{},
+		now:              time.Now,
 	}
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
 	return ht, nil
@@ -1305,6 +1314,7 @@ func (ht *HatTrie) Destroy() {
 	ht.sets = nil
 	ht.priorityQueues = nil
 	ht.bloomFilters = nil
+	ht.countMinSketches = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
@@ -1773,6 +1783,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.priorityQueues.Del(hval.Index)
 	case DATAVALUE_TYPE_BLOOM_FILTER:
 		ht.bloomFilters.Del(hval.Index)
+	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
+		ht.countMinSketches.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)

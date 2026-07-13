@@ -377,6 +377,15 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDBF", "BFADD":
 		_, ok := commandSliceValues(request)
 		return ok
+	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
+		_, _, err := commandCountMinSketchConfig(request)
+		return err == nil
+	case "INCRCMS", "ADDCMS", "CMSADD":
+		if _, ok := commandSliceValues(request); !ok {
+			return false
+		}
+		_, err := commandCountMinSketchIncrement(request)
+		return err == nil
 	default:
 		return false
 	}

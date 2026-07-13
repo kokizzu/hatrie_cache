@@ -189,6 +189,52 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOBF response = %#v, want JSON info", infoBloomResp)
 	}
 
+	createSketchResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATECMS",
+		Key:     "freq",
+		Value:   "128",
+		Subkey:  "4",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATECMS) error = %v", err)
+	}
+	if !createSketchResp.GetOk() {
+		t.Fatalf("CREATECMS response = %#v, want ok", createSketchResp)
+	}
+	incrSketchResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INCRCMS",
+		Key:     "freq",
+		Value:   "alpha",
+		Subkey:  "3",
+	})
+	if err != nil {
+		t.Fatalf("Command(INCRCMS) error = %v", err)
+	}
+	if !incrSketchResp.GetOk() || incrSketchResp.GetValue() != "3" {
+		t.Fatalf("INCRCMS response = %#v, want estimate 3", incrSketchResp)
+	}
+	estimateSketchResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ESTCMS",
+		Key:     "freq",
+		Value:   "alpha",
+	})
+	if err != nil {
+		t.Fatalf("Command(ESTCMS) error = %v", err)
+	}
+	if !estimateSketchResp.GetOk() || estimateSketchResp.GetValue() != "3" {
+		t.Fatalf("ESTCMS response = %#v, want estimate 3", estimateSketchResp)
+	}
+	infoSketchResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFOCMS",
+		Key:     "freq",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFOCMS) error = %v", err)
+	}
+	if !infoSketchResp.GetOk() || infoSketchResp.GetValue() == "" {
+		t.Fatalf("INFOCMS response = %#v, want JSON info", infoSketchResp)
+	}
+
 	stats, err := client.Stats(context.Background(), &hatriecachev1.StatsRequest{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)

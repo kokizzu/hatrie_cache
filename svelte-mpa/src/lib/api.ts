@@ -23,7 +23,16 @@ export type CacheStats = {
 
 export type CacheEntry = {
   key: string;
-  type: 'counter' | 'string' | 'bytes' | 'map' | 'slice' | 'set' | 'priority_queue' | 'bloom_filter';
+  type:
+    | 'counter'
+    | 'string'
+    | 'bytes'
+    | 'map'
+    | 'slice'
+    | 'set'
+    | 'priority_queue'
+    | 'bloom_filter'
+    | 'count_min_sketch';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -38,6 +47,7 @@ export type CommandRequest = {
   command: string;
   key: string;
   value?: string;
+  subkey?: string;
   priority?: number | null;
   ttl_seconds?: number | null;
 };
@@ -119,6 +129,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 11984,
     value_preview: '95851 bits, 7 hashes'
+  },
+  {
+    key: 'freq:paths',
+    type: 'count_min_sketch',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 32768,
+    value_preview: '2048x4 counters, 918240 total'
   },
   {
     key: 'tags:active',

@@ -299,6 +299,32 @@ func TestRunCommandPostsBloomFilterOptions(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsCountMinSketchOptions(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"created count-min sketch"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "CREATECMS",
+		"-key", "freq",
+		"-value", "2048",
+		"-subkey", "4",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command CREATECMS) error = %v", err)
+	}
+
+	if gotRequest.Command != "CREATECMS" || gotRequest.Key != "freq" || gotRequest.Value != "2048" || gotRequest.Subkey != "4" {
+		t.Fatalf("request = %#v, want CREATECMS freq value 2048 subkey 4", gotRequest)
+	}
+}
+
 func TestRunSnapshotPostsToSnapshotEndpoint(t *testing.T) {
 	var gotPath string
 	var gotMethod string

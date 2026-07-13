@@ -27,6 +27,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 		t.Fatalf("UpsertBloomFilter() error = %v", err)
 	}
 	ht.AddBloomFilter("session:seen", "email:1")
+	if err := ht.UpsertCountMinSketch("session:freq", 128, 4); err != nil {
+		t.Fatalf("UpsertCountMinSketch() error = %v", err)
+	}
+	ht.IncrementCountMinSketch("session:freq", "/api/users", 3)
 	ht.UpsertCounter("counter:views", 42)
 	if !ht.Expire("session:1", time.Minute) {
 		t.Fatal("Expire(session:1) = false, want true")
@@ -34,6 +38,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	bloomInfo, ok := ht.BloomFilterInfo("session:seen")
 	if !ok {
 		t.Fatal("BloomFilterInfo(session:seen) = false, want true")
+	}
+	sketchInfo, ok := ht.CountMinSketchInfo("session:freq")
+	if !ok {
+		t.Fatal("CountMinSketchInfo(session:freq) = false, want true")
 	}
 
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
@@ -76,8 +84,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 4 {
-		t.Fatalf("entries len = %d, want 4: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 5 {
+		t.Fatalf("entries len = %d, want 5: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -86,16 +94,21 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if entry.TTLMillis == nil || *entry.TTLMillis != int64(time.Minute/time.Millisecond) {
 		t.Fatalf("entry TTL = %v, want 60000", entry.TTLMillis)
 	}
-	queueEntry := entries.Entries[1]
+	sketchEntry := entries.Entries[1]
+	wantSketchPreview := strconv.FormatUint(sketchInfo.Width, 10) + "x" + strconv.Itoa(int(sketchInfo.Depth)) + " counters, " + strconv.FormatUint(sketchInfo.TotalCount, 10) + " total"
+	if sketchEntry.Key != "session:freq" || sketchEntry.Type != "count_min_sketch" || sketchEntry.SizeBytes != int64(sketchInfo.CounterBytes) || sketchEntry.ValuePreview != wantSketchPreview {
+		t.Fatalf("count-min sketch entry = %#v, want compact counter preview", sketchEntry)
+	}
+	queueEntry := entries.Entries[2]
 	if queueEntry.Key != "session:jobs" || queueEntry.Type != "priority_queue" || queueEntry.SizeBytes != 2 || queueEntry.ValuePreview != "2 priority items" {
 		t.Fatalf("priority queue entry = %#v, want priority queue item preview", queueEntry)
 	}
-	bloomEntry := entries.Entries[2]
+	bloomEntry := entries.Entries[3]
 	wantBloomPreview := strconv.FormatUint(bloomInfo.BitCount, 10) + " bits, " + strconv.Itoa(int(bloomInfo.HashCount)) + " hashes"
 	if bloomEntry.Key != "session:seen" || bloomEntry.Type != "bloom_filter" || bloomEntry.SizeBytes != int64(bloomInfo.BitBytes) || bloomEntry.ValuePreview != wantBloomPreview {
 		t.Fatalf("bloom filter entry = %#v, want compact bitset preview", bloomEntry)
 	}
-	setEntry := entries.Entries[3]
+	setEntry := entries.Entries[4]
 	if setEntry.Key != "session:tags" || setEntry.Type != "set" || setEntry.SizeBytes != 2 || setEntry.ValuePreview != "2 members" {
 		t.Fatalf("set entry = %#v, want set member preview", setEntry)
 	}

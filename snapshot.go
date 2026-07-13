@@ -24,18 +24,19 @@ type SnapshotMetadata struct {
 }
 
 type snapshotEntry struct {
-	Key           string               `json:"key"`
-	Type          string               `json:"type"`
-	Counter       int32                `json:"counter,omitempty"`
-	String        string               `json:"string,omitempty"`
-	Bytes         string               `json:"bytes,omitempty"`
-	Map           Map                  `json:"map"`
-	Slice         Slice                `json:"slice"`
-	Set           Set                  `json:"set"`
-	PriorityQueue []priorityQueueItem  `json:"priority_queue"`
-	BloomFilter   *bloomFilterSnapshot `json:"bloom_filter,omitempty"`
-	ExpiresAt     *time.Time           `json:"expires_at,omitempty"`
-	Stats         *KeyStats            `json:"stats,omitempty"`
+	Key            string                  `json:"key"`
+	Type           string                  `json:"type"`
+	Counter        int32                   `json:"counter,omitempty"`
+	String         string                  `json:"string,omitempty"`
+	Bytes          string                  `json:"bytes,omitempty"`
+	Map            Map                     `json:"map"`
+	Slice          Slice                   `json:"slice"`
+	Set            Set                     `json:"set"`
+	PriorityQueue  []priorityQueueItem     `json:"priority_queue"`
+	BloomFilter    *bloomFilterSnapshot    `json:"bloom_filter,omitempty"`
+	CountMinSketch *countMinSketchSnapshot `json:"count_min_sketch,omitempty"`
+	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
+	Stats          *KeyStats               `json:"stats,omitempty"`
 }
 
 type snapshotOperation struct {
@@ -155,6 +156,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_BLOOM_FILTER:
 		snapshot := ht.bloomFilters.array[entry.Value.Index].Snapshot()
 		out.BloomFilter = &snapshot
+	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
+		snapshot := ht.countMinSketches.array[entry.Value.Index].Snapshot()
+		out.CountMinSketch = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -185,6 +189,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: bloom filter snapshot is required")
 		}
 		if err := validateBloomFilterSnapshot(*entry.BloomFilter); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "count_min_sketch":
+		if entry.CountMinSketch == nil {
+			return snapshotOperation{}, errors.New("hatriecache: count-min sketch snapshot is required")
+		}
+		if err := validateCountMinSketchSnapshot(*entry.CountMinSketch); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -333,6 +345,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.bloomFilters.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_BLOOM_FILTER}
+	case "count_min_sketch":
+		data, err := newCountMinSketchDataFromSnapshot(*entry.CountMinSketch)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.countMinSketches.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

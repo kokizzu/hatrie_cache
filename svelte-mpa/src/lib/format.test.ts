@@ -4,7 +4,8 @@ import type { CacheEntry } from './api';
 
 const entries: CacheEntry[] = [
   { key: 'user:1', type: 'map', ttl_ms: null, on_disk: false, size_bytes: 20, value_preview: '{}' },
-  { key: 'asset:large', type: 'bytes', ttl_ms: 5000, on_disk: true, size_bytes: 70000, value_preview: 'bytes' }
+  { key: 'asset:large', type: 'bytes', ttl_ms: 5000, on_disk: true, size_bytes: 70000, value_preview: 'bytes' },
+  { key: 'freq:paths', type: 'count_min_sketch', ttl_ms: null, on_disk: false, size_bytes: 32768, value_preview: '2048x4 counters' }
 ];
 
 describe('format helpers', () => {
@@ -24,6 +25,7 @@ describe('format helpers', () => {
   it('filters entries by text and type', () => {
     expect(filterEntries(entries, 'USER', 'all')).toHaveLength(1);
     expect(filterEntries(entries, '', 'bytes')).toEqual([entries[1]]);
+    expect(filterEntries(entries, '', 'count_min_sketch')).toEqual([entries[2]]);
     expect(filterEntries(entries, 'missing', 'all')).toHaveLength(0);
   });
 });

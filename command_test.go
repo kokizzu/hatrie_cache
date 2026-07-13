@@ -292,6 +292,62 @@ func TestExecuteCommandBloomFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATECMS", Key: "freq", Value: "128", Subkey: "4"}); !got.OK {
+		t.Fatalf("CREATECMS response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "2"}); !got.OK || got.Value != "2" {
+		t.Fatalf("INCRCMS alpha response = %#v, want estimate 2", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INCRCMS", Key: "freq", Values: Slice{"alpha", "beta"}}); !got.OK || got.Value != "2" {
+		t.Fatalf("INCRCMS values response = %#v, want updated 2 values", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ESTCMS", Key: "freq", Value: "alpha"}); !got.OK || got.Value != "3" {
+		t.Fatalf("ESTCMS alpha response = %#v, want 3", got)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOCMS", Key: "freq"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOCMS response = %#v, want JSON info", infoResp)
+	}
+	var info CountMinSketchInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFOCMS JSON error = %v", err)
+	}
+	if info.Width != 128 || info.Depth != 4 || info.TotalCount != 4 || info.CounterBytes != 128*4*4 {
+		t.Fatalf("INFOCMS = %#v, want populated sketch info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "freq"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET count-min sketch response = %#v, want JSON info", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INCRCMS", Key: "auto", Value: "value"}); !got.OK || got.Value != "1" {
+		t.Fatalf("INCRCMS auto response = %#v, want estimate 1", got)
+	}
+	if !ht.Get("auto").IsCountMinSketch() {
+		t.Fatal("INCRCMS on missing key did not create a Count-Min Sketch")
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATECMS",
+		Key:     "paired",
+		Pairs:   Map{"width": json.Number("64"), "depth": json.Number("3")},
+	}); !got.OK {
+		t.Fatalf("CREATECMS pairs response = %#v, want ok", got)
+	}
+	pairedInfo, ok := ht.CountMinSketchInfo("paired")
+	if !ok || pairedInfo.Width != 64 || pairedInfo.Depth != 3 {
+		t.Fatalf("paired CountMinSketchInfo = %#v/%v, want configured sketch", pairedInfo, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATECMS", Key: "bad", Value: "0"}); got.OK {
+		t.Fatalf("CREATECMS invalid response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "0"}); got.OK {
+		t.Fatalf("INCRCMS zero increment response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
 	source := newTestTrie(t)
 	now := time.Unix(1400, 0)

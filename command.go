@@ -305,6 +305,48 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
+		width, depth, err := commandCountMinSketchConfig(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertCountMinSketch(key, width, depth); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created count-min sketch"}
+	case "INCRCMS", "ADDCMS", "CMSADD":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		count, err := commandCountMinSketchIncrement(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if len(values) == 1 {
+			estimate := ht.IncrementCountMinSketch(key, values[0], count)
+			return CacheCommandResponse{OK: true, Message: "incremented count-min sketch", Value: strconv.FormatUint(estimate, 10)}
+		}
+		for _, value := range values {
+			ht.IncrementCountMinSketch(key, value, count)
+		}
+		return CacheCommandResponse{OK: true, Message: "incremented count-min sketch values", Value: strconv.Itoa(len(values))}
+	case "ESTCMS", "QUERYCMS", "CMSQUERY", "CMSCOUNT":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value is required")
+		}
+		estimate, ok := ht.EstimateCountMinSketch(key, values[0])
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(estimate, 10)}
+	case "INFOCMS", "CMSINFO":
+		info, ok := ht.CountMinSketchInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	default:
 		return commandError("unsupported command")
 	}
@@ -513,6 +555,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
+		data, err := json.Marshal(ht.countMinSketches.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	default:
 		return "", nil
 	}
@@ -630,6 +678,71 @@ func commandBloomFilterConfig(request CacheCommandRequest) (uint64, float64, err
 		}
 	}
 	return expectedItems, falsePositiveRate, nil
+}
+
+func commandCountMinSketchConfig(request CacheCommandRequest) (uint64, uint8, error) {
+	width := DefaultCountMinSketchWidth
+	depth := DefaultCountMinSketchDepth
+	var err error
+
+	if strings.TrimSpace(request.Value) != "" {
+		width, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return 0, 0, errors.New("count-min sketch width must be an unsigned integer")
+		}
+	}
+	if strings.TrimSpace(request.Subkey) != "" {
+		parsed, err := strconv.ParseUint(strings.TrimSpace(request.Subkey), 10, 64)
+		if err != nil {
+			return 0, 0, errors.New("count-min sketch depth must be an unsigned integer")
+		}
+		depth, err = countMinSketchDepthValue(parsed)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	if value, ok := request.Pairs["width"]; ok {
+		width, err = commandUint64Value(value)
+		if err != nil {
+			return 0, 0, errors.New("count-min sketch width must be an unsigned integer")
+		}
+	}
+	if value, ok := request.Pairs["depth"]; ok {
+		parsed, err := commandUint64Value(value)
+		if err != nil {
+			return 0, 0, errors.New("count-min sketch depth must be an unsigned integer")
+		}
+		depth, err = countMinSketchDepthValue(parsed)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	if err := validateCountMinSketchShape(width, depth); err != nil {
+		return 0, 0, err
+	}
+	return width, depth, nil
+}
+
+func commandCountMinSketchIncrement(request CacheCommandRequest) (uint32, error) {
+	count := uint64(1)
+	if strings.TrimSpace(request.Subkey) != "" {
+		parsed, err := strconv.ParseUint(strings.TrimSpace(request.Subkey), 10, 64)
+		if err != nil {
+			return 0, errors.New("count-min sketch increment must be an unsigned integer")
+		}
+		count = parsed
+	}
+	if value, ok := request.Pairs["count"]; ok {
+		parsed, err := commandUint64Value(value)
+		if err != nil {
+			return 0, errors.New("count-min sketch increment must be an unsigned integer")
+		}
+		count = parsed
+	}
+	if count == 0 || count > uint64(maxCountMinSketchCounter) {
+		return 0, errors.New("count-min sketch increment must be between 1 and " + strconv.FormatUint(uint64(maxCountMinSketchCounter), 10))
+	}
+	return uint32(count), nil
 }
 
 func commandUint64Value(value interface{}) (uint64, error) {

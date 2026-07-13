@@ -27,6 +27,10 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertBloomFilter() error = %v", err)
 	}
 	ht.AddBloomFilter("bloom", "alpha", "beta")
+	if err := ht.UpsertCountMinSketch("freq", 128, 4); err != nil {
+		t.Fatalf("UpsertCountMinSketch() error = %v", err)
+	}
+	ht.IncrementCountMinSketch("freq", "alpha", 5)
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -68,6 +72,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.BloomFilterInfo("bloom"); !ok || info.Insertions != 2 {
 		t.Fatalf("loaded BloomFilterInfo = %#v/%v, want 2 insertions", info, ok)
+	}
+	if got, ok := loaded.EstimateCountMinSketch("freq", "alpha"); !ok || got != 5 {
+		t.Fatalf("loaded Count-Min Sketch estimate = %d/%v, want 5", got, ok)
+	}
+	if info, ok := loaded.CountMinSketchInfo("freq"); !ok || info.Width != 128 || info.Depth != 4 || info.TotalCount != 5 {
+		t.Fatalf("loaded CountMinSketchInfo = %#v/%v, want restored sketch", info, ok)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)

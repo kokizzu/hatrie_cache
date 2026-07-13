@@ -6,20 +6,24 @@
   let command = 'SETSTR';
   let key = '';
   let value = '';
+  let subkey = '';
   let ttl = 3600;
   let priority = 0;
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCMS'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
+  $: needsSubkey = ['CREATECMS', 'INCRCMS'].includes(command);
+  $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : 'Count';
 
   async function submit() {
     const result = await runCommand({
       command,
       key,
       value,
+      subkey: needsSubkey ? subkey : undefined,
       priority: needsPriority ? priority : null,
       ttl_seconds: needsTTL && !persist ? ttl : null
     });
@@ -61,6 +65,10 @@
           <option>ADDBF</option>
           <option>HASBF</option>
           <option>INFOBF</option>
+          <option>CREATECMS</option>
+          <option>INCRCMS</option>
+          <option>ESTCMS</option>
+          <option>INFOCMS</option>
         </select>
       </label>
 
@@ -80,6 +88,13 @@
         <label>
           <span>Priority</span>
           <input type="number" bind:value={priority} />
+        </label>
+      {/if}
+
+      {#if needsSubkey}
+        <label>
+          <span>{subkeyLabel}</span>
+          <input bind:value={subkey} placeholder={command === 'CREATECMS' ? '4' : '1'} />
         </label>
       {/if}
 

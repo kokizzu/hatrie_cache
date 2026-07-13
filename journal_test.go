@@ -161,6 +161,48 @@ func TestCommandJournalReplaysBloomFilterMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysCountMinSketchMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATECMS", Key: "freq", Value: "128", Subkey: "4"}); !got.OK {
+		t.Fatalf("journaled CREATECMS response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "2"}); !got.OK {
+		t.Fatalf("journaled INCRCMS response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ESTCMS", Key: "freq", Value: "alpha"}); !got.OK || got.Value != "2" {
+		t.Fatalf("journaled ESTCMS response = %#v, want local estimate", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want CREATECMS and INCRCMS only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got, ok := replayed.EstimateCountMinSketch("freq", "alpha"); !ok || got != 2 {
+		t.Fatalf("replayed Count-Min Sketch estimate = %d/%v, want 2", got, ok)
+	}
+	if info, ok := replayed.CountMinSketchInfo("freq"); !ok || info.TotalCount != 2 {
+		t.Fatalf("replayed CountMinSketchInfo = %#v/%v, want total 2", info, ok)
+	}
+}
+
 func TestCommandJournalReplaysRelativeTTLsAsAbsoluteExpirations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

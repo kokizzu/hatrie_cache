@@ -182,6 +182,26 @@ func TestSnapshotOperationValueSizeSupportsBloomFilter(t *testing.T) {
 	}
 }
 
+func TestSnapshotOperationValueSizeSupportsCountMinSketch(t *testing.T) {
+	sketch, err := newCountMinSketchData(128, 4)
+	if err != nil {
+		t.Fatalf("newCountMinSketchData() error = %v", err)
+	}
+	snapshot := sketch.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:           "count_min_sketch",
+			CountMinSketch: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(count_min_sketch) error = %v", err)
+	}
+	if size != sketch.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(count_min_sketch) = %d, want %d", size, sketch.EncodedSize())
+	}
+}
+
 func TestLevelDBShouldHotLoadRejectsNegativeLimits(t *testing.T) {
 	now := time.Unix(4600, 0)
 	operation := snapshotOperation{

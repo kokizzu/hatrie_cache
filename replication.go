@@ -302,7 +302,7 @@ func replicationPayloadKindFor(request CacheCommandRequest, response CacheComman
 		return replicationPayloadNone
 	}
 	switch command {
-	case "DUMP", "GET", "GETSTR", "EXISTS", "TTL", "PEEKMAP", "HEADSLICE", "TAILSLICE", "HASSET", "GETSET", "PEEKPQ", "PEEKPRIORITY", "GETPQ", "GETPRIORITY", "HASBF", "BFHAS", "BFEXISTS", "INFOBF", "BFINFO", "INTERNALSET", "INTERNALDEL":
+	case "DUMP", "GET", "GETSTR", "EXISTS", "TTL", "PEEKMAP", "HEADSLICE", "TAILSLICE", "HASSET", "GETSET", "PEEKPQ", "PEEKPRIORITY", "GETPQ", "GETPRIORITY", "HASBF", "BFHAS", "BFEXISTS", "INFOBF", "BFINFO", "ESTCMS", "QUERYCMS", "CMSQUERY", "CMSCOUNT", "INFOCMS", "CMSINFO", "INTERNALSET", "INTERNALDEL":
 		return replicationPayloadNone
 	case "DEL":
 		return replicationPayloadDelete

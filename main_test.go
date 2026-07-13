@@ -40,6 +40,10 @@ func bloomFilterIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.bloomFilters.array) || ht.bloomFilters.reusables.Has(idx)
 }
 
+func countMinSketchIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.countMinSketches.array) || ht.countMinSketches.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
@@ -99,6 +103,7 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "set", value: HatValue{Index: 6, Flags: DATAVALUE_TYPE_SET}, want: "set at index: 6"},
 		{name: "priority queue", value: HatValue{Index: 7, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}, want: "priority queue at index: 7"},
 		{name: "bloom filter", value: HatValue{Index: 8, Flags: DATAVALUE_TYPE_BLOOM_FILTER}, want: "bloom filter at index: 8"},
+		{name: "count-min sketch", value: HatValue{Index: 9, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}, want: "count-min sketch at index: 9"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -1287,6 +1292,116 @@ func TestBloomFilterStorageReleasedOnOverwrite(t *testing.T) {
 	}
 	if got := ht.Get("new").Index; got != idx {
 		t.Fatalf("Bloom filter storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestCountMinSketchOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertCountMinSketch("freq", 128, 4); err != nil {
+		t.Fatalf("UpsertCountMinSketch() error = %v", err)
+	}
+	if hval := ht.Get("freq"); !hval.IsCountMinSketch() {
+		t.Fatalf("UpsertCountMinSketch stored type %+v, want count-min sketch", hval)
+	}
+	if got := ht.IncrementCountMinSketch("freq", "alpha", 2); got < 2 {
+		t.Fatalf("IncrementCountMinSketch(alpha, 2) = %d, want at least 2", got)
+	}
+	if got := ht.IncrementCountMinSketch("freq", "alpha", 3); got < 5 {
+		t.Fatalf("IncrementCountMinSketch(alpha, 3) = %d, want at least 5", got)
+	}
+	if got := ht.IncrementCountMinSketch("freq", "beta", 1); got < 1 {
+		t.Fatalf("IncrementCountMinSketch(beta, 1) = %d, want at least 1", got)
+	}
+	if got, ok := ht.EstimateCountMinSketch("freq", "alpha"); !ok || got < 5 {
+		t.Fatalf("EstimateCountMinSketch(alpha) = %d/%v, want at least 5", got, ok)
+	}
+	info, ok := ht.CountMinSketchInfo("freq")
+	if !ok {
+		t.Fatal("CountMinSketchInfo(freq) = false, want true")
+	}
+	if info.Width != 128 || info.Depth != 4 || info.CounterBytes != 128*4*4 || info.TotalCount != 6 || info.MaxCounter < 5 {
+		t.Fatalf("CountMinSketchInfo(freq) = %#v, want populated compact sketch", info)
+	}
+
+	if err := ht.UpsertCountMinSketch("freq", 32, 3); err != nil {
+		t.Fatalf("UpsertCountMinSketch(replace) error = %v", err)
+	}
+	if got, ok := ht.EstimateCountMinSketch("freq", "alpha"); !ok || got != 0 {
+		t.Fatalf("EstimateCountMinSketch(alpha after replace) = %d/%v, want 0 hit", got, ok)
+	}
+	if got := ht.IncrementCountMinSketch("auto", "value", 1); got < 1 {
+		t.Fatalf("IncrementCountMinSketch(auto) = %d, want at least 1", got)
+	}
+	if hval := ht.Get("auto"); !hval.IsCountMinSketch() {
+		t.Fatalf("IncrementCountMinSketch(auto) stored type %+v, want count-min sketch", hval)
+	}
+	if got := ht.IncrementCountMinSketch("noop", "value", 0); got != 0 {
+		t.Fatalf("IncrementCountMinSketch(noop, 0) = %d, want 0", got)
+	}
+	if hval := ht.Get("noop"); !hval.Empty() {
+		t.Fatalf("zero-count Count-Min Sketch increment created value %+v", hval)
+	}
+}
+
+func TestCountMinSketchRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	tests := []struct {
+		name  string
+		width uint64
+		depth uint8
+	}{
+		{name: "zero width", width: 0, depth: 4},
+		{name: "zero depth", width: 128, depth: 0},
+		{name: "too many counters", width: maxCountMinSketchCounters, depth: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ht.UpsertCountMinSketch("bad", tt.width, tt.depth); err == nil {
+				t.Fatal("UpsertCountMinSketch() error = nil, want error")
+			}
+			if got := ht.Get("bad"); !got.Empty() {
+				t.Fatalf("invalid Count-Min Sketch config stored value %+v", got)
+			}
+		})
+	}
+}
+
+func TestCountMinSketchCountersSaturate(t *testing.T) {
+	sketch, err := newCountMinSketchData(16, 3)
+	if err != nil {
+		t.Fatalf("newCountMinSketchData() error = %v", err)
+	}
+	if got := sketch.Add("hot", maxCountMinSketchCounter); got != uint64(maxCountMinSketchCounter) {
+		t.Fatalf("Add(max counter) = %d, want saturation value", got)
+	}
+	if got := sketch.Add("hot", 1); got != uint64(maxCountMinSketchCounter) {
+		t.Fatalf("Add(after saturation) = %d, want saturated value", got)
+	}
+	info := sketch.Info()
+	if info.SaturatedCounters != uint64(sketch.depth) || info.MaxCounter != maxCountMinSketchCounter {
+		t.Fatalf("saturated Count-Min Sketch info = %#v, want one saturated counter per row", info)
+	}
+}
+
+func TestCountMinSketchStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertCountMinSketch("freq", 64, 4); err != nil {
+		t.Fatalf("UpsertCountMinSketch() error = %v", err)
+	}
+	idx := ht.Get("freq").Index
+	ht.UpsertString("freq", "value")
+	if !countMinSketchIndexReleased(ht, idx) {
+		t.Fatalf("overwritten Count-Min Sketch index %d was not released", idx)
+	}
+
+	if err := ht.UpsertCountMinSketch("new", 64, 4); err != nil {
+		t.Fatalf("UpsertCountMinSketch(new) error = %v", err)
+	}
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("Count-Min Sketch storage was not reused: got index %d, want %d", got, idx)
 	}
 }
 

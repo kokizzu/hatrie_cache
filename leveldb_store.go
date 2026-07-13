@@ -278,6 +278,11 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 			return 0, errors.New("hatriecache: bloom filter snapshot is required")
 		}
 		return int64(bloomFilterWordCount(entry.BloomFilter.BitCount) * 8), nil
+	case "count_min_sketch":
+		if entry.CountMinSketch == nil {
+			return 0, errors.New("hatriecache: count-min sketch snapshot is required")
+		}
+		return int64(entry.CountMinSketch.Width * uint64(entry.CountMinSketch.Depth) * 4), nil
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

@@ -439,6 +439,16 @@ textarea {
   color: #6a5720;
 }
 
+.type-pill.bloom_filter {
+  background: #e9f5dc;
+  color: #426915;
+}
+
+.type-pill.count_min_sketch {
+  background: #eef0ff;
+  color: #384aa0;
+}
+
 .preview {
   color: #62707d;
   max-width: 280px;
