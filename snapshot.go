@@ -260,7 +260,10 @@ func snapshotEntryHasKey(data []byte) (bool, error) {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return false, err
 	}
-	_, ok := fields["key"]
+	value, ok := fields["key"]
+	if ok && string(value) == "null" {
+		return false, errors.New("hatriecache: snapshot entry key must be a string")
+	}
 	return ok, nil
 }
 

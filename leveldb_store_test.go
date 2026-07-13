@@ -508,6 +508,9 @@ func TestDecodeLevelDBEntryRejectsInvalidJSON(t *testing.T) {
 	if _, err := decodeLevelDBEntry([]byte(`{"type":"string","string":"value"}`)); err == nil {
 		t.Fatal("decodeLevelDBEntry(missing key) error = nil, want error")
 	}
+	if _, err := decodeLevelDBEntry([]byte(`{"key":null,"type":"string","string":"value"}`)); err == nil {
+		t.Fatal("decodeLevelDBEntry(null key) error = nil, want error")
+	}
 	if _, err := decodeLevelDBEntryForKey("x", []byte(`{"key":"y","type":"string","string":"value"}`)); err == nil {
 		t.Fatal("decodeLevelDBEntryForKey(mismatch) error = nil, want error")
 	}

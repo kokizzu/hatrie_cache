@@ -319,6 +319,7 @@ func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 		"version":     `{"version":999,"entries":[]}`,
 		"type":        `{"version":1,"entries":[{"key":"bad","type":"unknown"}]}`,
 		"missing-key": `{"version":1,"entries":[{"type":"string","string":"value"}]}`,
+		"null-key":    `{"version":1,"entries":[{"key":null,"type":"string","string":"value"}]}`,
 		"trailing":    `{"version":1,"entries":[]} trailing`,
 	} {
 		path := filepath.Join(dir, name+".json")
