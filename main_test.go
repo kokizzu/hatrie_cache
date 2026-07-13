@@ -887,6 +887,38 @@ func TestReusableIndexesDeduplicateAndSkipStaleEntries(t *testing.T) {
 	}
 }
 
+func TestTrimReusableTailCompactsReusableIndexMetadata(t *testing.T) {
+	values := make([]int, 200)
+	var indexes reusableIndexes
+	indexes.Mark(10)
+	for idx := int32(64); idx < int32(len(values)); idx++ {
+		indexes.Mark(idx)
+	}
+
+	values = trimReusableTail(values, &indexes)
+	if got := len(values); got != 64 {
+		t.Fatalf("trimmed values len = %d, want 64", got)
+	}
+	if got := indexes.Len(); got != 1 {
+		t.Fatalf("reusable count after trim = %d, want 1", got)
+	}
+	if got := len(indexes.stack); got != 1 {
+		t.Fatalf("reusable stack len after trim = %d, want 1", got)
+	}
+	if got := len(indexes.bits); got != 1 {
+		t.Fatalf("reusable bitmap words after trim = %d, want 1", got)
+	}
+	if !indexes.Has(10) {
+		t.Fatal("remaining reusable index 10 was lost")
+	}
+	if indexes.Has(64) {
+		t.Fatal("trimmed reusable index 64 still marked")
+	}
+	if got, ok := indexes.Take(); !ok || got != 10 {
+		t.Fatalf("Take() after trim = %d/%v, want 10/true", got, ok)
+	}
+}
+
 func TestBytesStorageClonesCallerOwnedValues(t *testing.T) {
 	store := CreateBytesStorage()
 	value := []byte("value")

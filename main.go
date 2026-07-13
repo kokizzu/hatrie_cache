@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	mathbits "math/bits"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -295,6 +296,70 @@ func (indexes *reusableIndexes) Use(idx int32) bool {
 	return true
 }
 
+func (indexes *reusableIndexes) Compact(limit int) {
+	if indexes == nil {
+		return
+	}
+	if limit <= 0 {
+		for i := range indexes.stack {
+			indexes.stack[i] = 0
+		}
+		for i := range indexes.bits {
+			indexes.bits[i] = 0
+		}
+		indexes.stack = nil
+		indexes.bits = nil
+		indexes.count = 0
+		return
+	}
+
+	neededWords := (limit + 63) / 64
+	if neededWords < len(indexes.bits) {
+		for i := neededWords; i < len(indexes.bits); i++ {
+			indexes.bits[i] = 0
+		}
+		indexes.bits = indexes.bits[:neededWords]
+	}
+	if neededWords == len(indexes.bits) && neededWords > 0 && limit%64 != 0 {
+		indexes.bits[neededWords-1] &= (uint64(1) << uint(limit%64)) - 1
+	}
+
+	indexes.count = 0
+	for _, word := range indexes.bits {
+		indexes.count += mathbits.OnesCount64(word)
+	}
+
+	nextStack := indexes.stack[:0]
+	for _, idx := range indexes.stack {
+		if idx >= 0 && int(idx) < limit && indexes.Has(idx) {
+			nextStack = append(nextStack, idx)
+		}
+	}
+	for i := len(nextStack); i < len(indexes.stack); i++ {
+		indexes.stack[i] = 0
+	}
+	indexes.stack = nextStack
+	indexes.compactBackingSlices()
+}
+
+func (indexes *reusableIndexes) compactBackingSlices() {
+	if len(indexes.stack) == 0 {
+		indexes.stack = nil
+	} else if cap(indexes.stack) > 16 && len(indexes.stack)*4 < cap(indexes.stack) {
+		next := make([]int32, len(indexes.stack))
+		copy(next, indexes.stack)
+		indexes.stack = next
+	}
+
+	if len(indexes.bits) == 0 {
+		indexes.bits = nil
+	} else if cap(indexes.bits) > 16 && len(indexes.bits)*4 < cap(indexes.bits) {
+		next := make([]uint64, len(indexes.bits))
+		copy(next, indexes.bits)
+		indexes.bits = next
+	}
+}
+
 func reusableIndexBit(idx int32) (int, uint64) {
 	value := int(idx)
 	return value / 64, uint64(1) << uint(value%64)
@@ -302,14 +367,22 @@ func reusableIndexBit(idx int32) (int, uint64) {
 
 func trimReusableTail[T any](values []T, reusables *reusableIndexes) []T {
 	var zero T
+	trimmed := false
 	for len(values) > 0 {
 		idx := int32(len(values) - 1)
 		if !reusables.Has(idx) {
+			if trimmed {
+				reusables.Compact(len(values))
+			}
 			return values
 		}
 		values[len(values)-1] = zero
 		reusables.Use(idx)
 		values = values[:len(values)-1]
+		trimmed = true
+	}
+	if trimmed {
+		reusables.Compact(0)
 	}
 	return values
 }
