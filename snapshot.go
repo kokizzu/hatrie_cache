@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -183,9 +182,6 @@ func (ht *HatTrie) bytesValueLocked(hval HatValue) ([]byte, error) {
 }
 
 func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
-	if strings.TrimSpace(entry.Key) == "" {
-		return snapshotOperation{}, errors.New("hatriecache: snapshot entry key is required")
-	}
 	operation := snapshotOperation{entry: entry}
 	switch entry.Type {
 	case "counter", "string", "map", "slice", "set", "priority_queue":

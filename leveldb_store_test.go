@@ -68,6 +68,37 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreRoundTripPreservesBlankKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("", "empty")
+	source.UpsertString(" ", "space")
+	source.UpsertString("\t", "tab")
+
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	count, err := loaded.LoadLevelDB(path)
+	if err != nil {
+		t.Fatalf("LoadLevelDB() error = %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("loaded count = %d, want 3", count)
+	}
+
+	for key, want := range map[string]string{
+		"":   "empty",
+		" ":  "space",
+		"\t": "tab",
+	} {
+		if got := loaded.GetString(key); got != want {
+			t.Fatalf("GetString(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestLevelDBStoreRoundTripRestoresKeyStats(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

@@ -64,6 +64,33 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestSnapshotRoundTripPreservesBlankKeys(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("", "empty")
+	ht.UpsertString(" ", "space")
+	ht.UpsertString("\t", "tab")
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := ht.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	if err := loaded.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+
+	for key, want := range map[string]string{
+		"":   "empty",
+		" ":  "space",
+		"\t": "tab",
+	} {
+		if got := loaded.GetString(key); got != want {
+			t.Fatalf("GetString(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestPriorityQueueSnapshotPreservesTieOrderAndNextSequence(t *testing.T) {
 	ht := newTestTrie(t)
 	if added := ht.PushPriorityQueue("jobs", 1, "first", "second"); added != 2 {
@@ -288,11 +315,10 @@ func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 	dir := t.TempDir()
 
 	for name, payload := range map[string]string{
-		"broken":    `{broken`,
-		"version":   `{"version":999,"entries":[]}`,
-		"type":      `{"version":1,"entries":[{"key":"bad","type":"unknown"}]}`,
-		"empty-key": `{"version":1,"entries":[{"key":"","type":"string","string":"value"}]}`,
-		"trailing":  `{"version":1,"entries":[]} trailing`,
+		"broken":   `{broken`,
+		"version":  `{"version":999,"entries":[]}`,
+		"type":     `{"version":1,"entries":[{"key":"bad","type":"unknown"}]}`,
+		"trailing": `{"version":1,"entries":[]} trailing`,
 	} {
 		path := filepath.Join(dir, name+".json")
 		if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
