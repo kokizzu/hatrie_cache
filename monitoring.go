@@ -237,7 +237,7 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 			return 0, ""
 		}
 		value := ht.slices.array[hval.Index]
-		return int64(len(value)), strconv.Itoa(len(value)) + " items"
+		return int64(value.Len()), strconv.Itoa(value.Len()) + " items"
 	default:
 		return 0, ""
 	}

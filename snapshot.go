@@ -147,7 +147,7 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_MAP:
 		out.Map = cloneMap(ht.maps.array[entry.Value.Index])
 	case DATAVALUE_TYPE_SLICE:
-		out.Slice = cloneSlice(ht.slices.array[entry.Value.Index])
+		out.Slice = ht.slices.array[entry.Value.Index].Slice()
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

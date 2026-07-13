@@ -47,12 +47,159 @@ const (
 	DATAVALUE_TYPE_RAW_BYTES
 	DATAVALUE_TYPE_RAW_STRING
 	DATAVALUE_TYPE_MAP
+	// Slice values are backed by a ring deque for stack/queue operations.
 	DATAVALUE_TYPE_SLICE
-	// TODO: add more types (deque, priority queue, etc).
+	// TODO: add more types (set, priority queue, etc).
 )
 
 type Map = map[string]interface{}
 type Slice = []interface{}
+
+type deque struct {
+	values []interface{}
+	head   int
+	size   int
+}
+
+func newDeque(value Slice) deque {
+	cloned := cloneSlice(value)
+	if cloned == nil {
+		return deque{}
+	}
+	return deque{values: cloned, size: len(cloned)}
+}
+
+func (dq *deque) Len() int {
+	if dq == nil {
+		return 0
+	}
+	return dq.size
+}
+
+func (dq *deque) Slice() Slice {
+	if dq == nil || dq.values == nil {
+		return nil
+	}
+	if dq.size == 0 {
+		return make(Slice, 0)
+	}
+	out := make(Slice, dq.size)
+	dq.copyTo(out)
+	return out
+}
+
+func (dq *deque) Push(values ...interface{}) {
+	if len(values) == 0 {
+		return
+	}
+	needed := dq.size + len(values)
+	if len(dq.values) < needed {
+		dq.resize(grownDequeCapacity(len(dq.values), needed))
+	}
+	for _, value := range values {
+		idx := (dq.head + dq.size) % len(dq.values)
+		dq.values[idx] = value
+		dq.size++
+	}
+}
+
+func (dq *deque) Pop() (interface{}, bool) {
+	if dq == nil || dq.size == 0 {
+		return nil, false
+	}
+	idx := (dq.head + dq.size - 1) % len(dq.values)
+	value := dq.values[idx]
+	dq.values[idx] = nil
+	dq.size--
+	dq.compactIfSparse()
+	return value, true
+}
+
+func (dq *deque) Shift() (interface{}, bool) {
+	if dq == nil || dq.size == 0 {
+		return nil, false
+	}
+	value := dq.values[dq.head]
+	dq.values[dq.head] = nil
+	dq.size--
+	if dq.size == 0 {
+		dq.head = 0
+	} else {
+		dq.head = (dq.head + 1) % len(dq.values)
+	}
+	dq.compactIfSparse()
+	return value, true
+}
+
+func (dq *deque) Head() (interface{}, bool) {
+	if dq == nil || dq.size == 0 {
+		return nil, false
+	}
+	return dq.values[dq.head], true
+}
+
+func (dq *deque) Tail() (interface{}, bool) {
+	if dq == nil || dq.size == 0 {
+		return nil, false
+	}
+	idx := (dq.head + dq.size - 1) % len(dq.values)
+	return dq.values[idx], true
+}
+
+func (dq *deque) compactIfSparse() {
+	if dq.values == nil {
+		return
+	}
+	if dq.size == 0 {
+		dq.values = make([]interface{}, 0)
+		dq.head = 0
+		return
+	}
+	if len(dq.values) <= 16 || dq.size*4 > len(dq.values) {
+		return
+	}
+	dq.resize(maxInt(16, dq.size*2))
+}
+
+func (dq *deque) resize(capacity int) {
+	if capacity < dq.size {
+		capacity = dq.size
+	}
+	values := make([]interface{}, capacity)
+	dq.copyTo(values)
+	dq.values = values
+	dq.head = 0
+}
+
+func (dq *deque) copyTo(out []interface{}) {
+	if dq == nil || dq.size == 0 || len(dq.values) == 0 {
+		return
+	}
+	if dq.head+dq.size <= len(dq.values) {
+		copy(out, dq.values[dq.head:dq.head+dq.size])
+		return
+	}
+	n := copy(out, dq.values[dq.head:])
+	copy(out[n:], dq.values[:dq.size-n])
+}
+
+func grownDequeCapacity(current int, needed int) int {
+	capacity := current * 2
+	if capacity < 4 {
+		capacity = 4
+	}
+	for capacity < needed {
+		capacity *= 2
+	}
+	return capacity
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 const (
 	NoTTL              time.Duration = -1
@@ -361,13 +508,13 @@ func (ms *MapStorage) Del(idx int32) {
 
 // SliceStorage stores slice values outside the trie.
 type SliceStorage struct {
-	array     []Slice
+	array     []deque
 	reusables map[int32]bool
 }
 
 func CreateSliceStorage() *SliceStorage {
 	return &SliceStorage{
-		array:     []Slice{},
+		array:     []deque{},
 		reusables: map[int32]bool{},
 	}
 }
@@ -376,19 +523,19 @@ func (ss *SliceStorage) Put(idx int32, value Slice) {
 	if idx < 0 || int(idx) >= len(ss.array) {
 		return
 	}
-	ss.array[idx] = cloneSlice(value)
+	ss.array[idx] = newDeque(value)
 	delete(ss.reusables, idx)
 }
 
 func (ss *SliceStorage) Append(value Slice) int32 {
-	ss.array = append(ss.array, cloneSlice(value))
+	ss.array = append(ss.array, newDeque(value))
 	return int32(len(ss.array) - 1)
 }
 
 func (ss *SliceStorage) Add(value Slice) int32 {
 	if len(ss.reusables) > 0 {
 		for idx := range ss.reusables {
-			ss.array[idx] = cloneSlice(value)
+			ss.array[idx] = newDeque(value)
 			delete(ss.reusables, idx)
 			return idx
 		}
@@ -400,7 +547,7 @@ func (ss *SliceStorage) Del(idx int32) {
 	if idx < 0 || int(idx) >= len(ss.array) {
 		return
 	}
-	ss.array[idx] = nil
+	ss.array[idx] = deque{}
 	ss.reusables[idx] = true
 }
 
@@ -1381,12 +1528,10 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsSlice() {
-		old := ht.slices.array[hval.Index]
-		old = append(old, val)
-		if len(vals) > 0 {
-			old = append(old, vals...)
-		}
-		ht.slices.Put(hval.Index, old)
+		values := make(Slice, 0, 1+len(vals))
+		values = append(values, val)
+		values = append(values, vals...)
+		ht.slices.array[hval.Index].Push(values...)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked()
 		return
@@ -1394,10 +1539,9 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 
 	ht.returnStorage(hval)
 	delete(ht.expires, key)
-	arr := Slice{val}
-	if len(vals) > 0 {
-		arr = append(arr, vals...)
-	}
+	arr := make(Slice, 0, 1+len(vals))
+	arr = append(arr, val)
+	arr = append(arr, vals...)
 	idx := ht.slices.Add(arr)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 	ht.recordWriteLocked()
@@ -1413,15 +1557,12 @@ func (ht *HatTrie) PopSlice(key string) interface{} {
 		return nil
 	}
 
-	old := ht.slices.array[hval.Index]
-	last := len(old) - 1
-	if last < 0 {
+	val, ok := ht.slices.array[hval.Index].Pop()
+	if !ok {
 		ht.recordReadLocked(false)
 		return nil
 	}
-	val := old[last]
 	ht.recordReadLocked(true)
-	ht.slices.Put(hval.Index, old[:last])
 	ht.recordWriteLocked()
 	return val
 }
@@ -1436,14 +1577,12 @@ func (ht *HatTrie) ShiftSlice(key string) interface{} {
 		return nil
 	}
 
-	old := ht.slices.array[hval.Index]
-	if len(old) == 0 {
+	val, ok := ht.slices.array[hval.Index].Shift()
+	if !ok {
 		ht.recordReadLocked(false)
 		return nil
 	}
-	val := old[0]
 	ht.recordReadLocked(true)
-	ht.slices.Put(hval.Index, old[1:])
 	ht.recordWriteLocked()
 	return val
 }
@@ -1452,11 +1591,12 @@ func (ht *HatTrie) HeadSlice(key string) interface{} {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	sl, ok := ht.sliceRefLocked(key)
-	hit := ok && len(sl) > 0
+	dq, ok := ht.sliceRefLocked(key)
+	val, hit := dq.Head()
+	hit = ok && hit
 	ht.recordReadLocked(hit)
 	if hit {
-		return sl[0]
+		return val
 	}
 	return nil
 }
@@ -1465,11 +1605,12 @@ func (ht *HatTrie) TailSlice(key string) interface{} {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	sl, ok := ht.sliceRefLocked(key)
-	hit := ok && len(sl) > 0
+	dq, ok := ht.sliceRefLocked(key)
+	val, hit := dq.Tail()
+	hit = ok && hit
 	ht.recordReadLocked(hit)
 	if hit {
-		return sl[len(sl)-1]
+		return val
 	}
 	return nil
 }
@@ -1478,18 +1619,18 @@ func (ht *HatTrie) GetSlice(key string) Slice {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	sl, ok := ht.sliceRefLocked(key)
+	dq, ok := ht.sliceRefLocked(key)
 	ht.recordReadLocked(ok)
 	if !ok {
 		return nil
 	}
-	return cloneSlice(sl)
+	return dq.Slice()
 }
 
-func (ht *HatTrie) sliceRefLocked(key string) (Slice, bool) {
+func (ht *HatTrie) sliceRefLocked(key string) (*deque, bool) {
 	hval := ht.getLocked(key)
 	if hval.IsSlice() {
-		return ht.slices.array[hval.Index], true
+		return &ht.slices.array[hval.Index], true
 	}
 	return nil, false
 }

@@ -314,7 +314,7 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		}
 		return string(data), nil
 	case DATAVALUE_TYPE_SLICE:
-		data, err := json.Marshal(ht.slices.array[hval.Index])
+		data, err := json.Marshal(ht.slices.array[hval.Index].Slice())
 		if err != nil {
 			return "", err
 		}
