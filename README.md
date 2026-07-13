@@ -14,6 +14,9 @@ reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
 uses a min-heap schedule plus an authoritative key map, so vacuuming pops due
 keys instead of scanning every TTL entry and compacts stale schedule entries
 under churn.
+Map, slice, set, and priority queue APIs deep-copy nested JSON-style map/slice
+values at storage and read boundaries so callers cannot mutate cached state
+through shared nested references.
 
 ## Development
 

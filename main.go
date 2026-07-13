@@ -89,6 +89,9 @@ func (dq *deque) Slice() Slice {
 	}
 	out := make(Slice, dq.size)
 	dq.copyTo(out)
+	for idx, value := range out {
+		out[idx] = cloneValue(value)
+	}
 	return out
 }
 
@@ -102,7 +105,7 @@ func (dq *deque) Push(values ...interface{}) {
 	}
 	for _, value := range values {
 		idx := (dq.head + dq.size) % len(dq.values)
-		dq.values[idx] = value
+		dq.values[idx] = cloneValue(value)
 		dq.size++
 	}
 }
@@ -780,7 +783,7 @@ func (set *setData) Add(values ...interface{}) int {
 		if _, exists := set.items[key]; exists {
 			continue
 		}
-		set.items[key] = value
+		set.items[key] = cloneValue(value)
 		added++
 	}
 	return added
@@ -820,7 +823,7 @@ func (set *setData) Values() Set {
 	sort.Strings(keys)
 	out := make(Set, len(keys))
 	for idx, key := range keys {
-		out[idx] = set.items[key]
+		out[idx] = cloneValue(set.items[key])
 	}
 	return out
 }
@@ -2069,7 +2072,7 @@ func (ht *HatTrie) PeekMap(key, subkey string) interface{} {
 	}
 	val, exists := m[subkey]
 	ht.recordReadLocked(exists, key)
-	return val
+	return cloneValue(val)
 }
 
 func (ht *HatTrie) TakeMap(key, subkey string) interface{} {
@@ -2205,7 +2208,7 @@ func (ht *HatTrie) HeadSlice(key string) interface{} {
 	hit = ok && hit
 	ht.recordReadLocked(hit, key)
 	if hit {
-		return val
+		return cloneValue(val)
 	}
 	return nil
 }
@@ -2219,7 +2222,7 @@ func (ht *HatTrie) TailSlice(key string) interface{} {
 	hit = ok && hit
 	ht.recordReadLocked(hit, key)
 	if hit {
-		return val
+		return cloneValue(val)
 	}
 	return nil
 }
@@ -2352,7 +2355,7 @@ func cloneMap(value Map) Map {
 	}
 	out := make(Map, len(value))
 	for key, val := range value {
-		out[key] = val
+		out[key] = cloneValue(val)
 	}
 	return out
 }
@@ -2362,8 +2365,21 @@ func cloneSlice(value Slice) Slice {
 		return nil
 	}
 	out := make(Slice, len(value))
-	copy(out, value)
+	for idx, val := range value {
+		out[idx] = cloneValue(val)
+	}
 	return out
+}
+
+func cloneValue(value interface{}) interface{} {
+	switch v := value.(type) {
+	case Map:
+		return cloneMap(v)
+	case Slice:
+		return cloneSlice(v)
+	default:
+		return value
+	}
 }
 
 func setItemKey(value interface{}) (string, error) {

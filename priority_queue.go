@@ -32,7 +32,13 @@ func newPriorityQueueDataFromItems(values []priorityQueueItem) priorityQueueData
 	out := priorityQueueData{
 		items: make([]priorityQueueItem, len(values)),
 	}
-	copy(out.items, values)
+	for idx, value := range values {
+		out.items[idx] = priorityQueueItem{
+			Priority: value.Priority,
+			Sequence: value.Sequence,
+			Value:    cloneValue(value.Value),
+		}
+	}
 	for _, value := range values {
 		if value.Sequence >= out.nextSequence {
 			out.nextSequence = value.Sequence + 1
@@ -59,7 +65,7 @@ func (pq *priorityQueueData) Push(priority int64, values ...interface{}) int {
 		item := priorityQueueItem{
 			Priority: priority,
 			Sequence: pq.nextSequence,
-			Value:    value,
+			Value:    cloneValue(value),
 		}
 		pq.nextSequence++
 		pq.items = append(pq.items, item)
@@ -133,6 +139,7 @@ func (pq *priorityQueueData) SnapshotItems() []priorityQueueItem {
 	for len(copyData.items) > 0 {
 		item := copyData.items[0]
 		_, _ = copyData.Pop()
+		item.Value = cloneValue(item.Value)
 		out = append(out, item)
 	}
 	return out
@@ -194,7 +201,7 @@ func priorityQueueLess(a, b priorityQueueItem) bool {
 func (item priorityQueueItem) PriorityItem() PriorityItem {
 	return PriorityItem{
 		Priority: item.Priority,
-		Value:    item.Value,
+		Value:    cloneValue(item.Value),
 	}
 }
 

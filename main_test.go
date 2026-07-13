@@ -242,6 +242,34 @@ func TestMapOperations(t *testing.T) {
 	}
 }
 
+func TestMapOperationsDeepCopyNestedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	nested := Map{"name": "ivi"}
+	items := Slice{"one", Map{"two": true}}
+
+	ht.UpsertMap("map", Map{"nested": nested, "items": items})
+	nested["name"] = "changed"
+	items[0] = "changed"
+	items[1].(Map)["two"] = false
+
+	got := ht.GetMap("map")
+	if got["nested"].(Map)["name"] != "ivi" || got["items"].(Slice)[0] != "one" || got["items"].(Slice)[1].(Map)["two"] != true {
+		t.Fatalf("stored map changed through caller input: %#v", got)
+	}
+
+	got["nested"].(Map)["name"] = "from-get"
+	got["items"].(Slice)[1].(Map)["two"] = false
+	if again := ht.GetMap("map"); again["nested"].(Map)["name"] != "ivi" || again["items"].(Slice)[1].(Map)["two"] != true {
+		t.Fatalf("GetMap exposed nested values: %#v", again)
+	}
+
+	peek := ht.PeekMap("map", "nested").(Map)
+	peek["name"] = "from-peek"
+	if again := ht.PeekMap("map", "nested").(Map); again["name"] != "ivi" {
+		t.Fatalf("PeekMap exposed nested value: %#v", again)
+	}
+}
+
 func TestMapJSONSerializerRoundTrip(t *testing.T) {
 	input := Map{
 		"name": "ivi",
@@ -549,6 +577,28 @@ func TestSliceOperations(t *testing.T) {
 	}
 }
 
+func TestSliceOperationsDeepCopyNestedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	item := Map{"field": "value"}
+
+	ht.PushSlice("slice", item)
+	item["field"] = "caller"
+	head := ht.HeadSlice("slice").(Map)
+	if head["field"] != "value" {
+		t.Fatalf("HeadSlice() = %#v, want stored value", head)
+	}
+	head["field"] = "head"
+	if again := ht.HeadSlice("slice").(Map); again["field"] != "value" {
+		t.Fatalf("HeadSlice exposed nested value: %#v", again)
+	}
+
+	values := ht.GetSlice("slice")
+	values[0].(Map)["field"] = "get"
+	if again := ht.GetSlice("slice"); again[0].(Map)["field"] != "value" {
+		t.Fatalf("GetSlice exposed nested value: %#v", again)
+	}
+}
+
 func TestPopAndShiftMissingSliceDoNotCreateKeys(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -600,6 +650,28 @@ func TestSetOperations(t *testing.T) {
 	}
 }
 
+func TestSetOperationsDeepCopyNestedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	item := Map{"field": "value"}
+
+	if added := ht.AddSet("set", item); added != 1 {
+		t.Fatalf("AddSet() = %d, want 1", added)
+	}
+	item["field"] = "caller"
+	if !ht.HasSet("set", Map{"field": "value"}) {
+		t.Fatal("HasSet(original nested map) = false, want true")
+	}
+
+	values := ht.GetSet("set")
+	if values[0].(Map)["field"] != "value" {
+		t.Fatalf("GetSet() = %#v, want stored value", values)
+	}
+	values[0].(Map)["field"] = "get"
+	if again := ht.GetSet("set"); again[0].(Map)["field"] != "value" {
+		t.Fatalf("GetSet exposed nested value: %#v", again)
+	}
+}
+
 func TestPriorityQueueOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -634,6 +706,30 @@ func TestPriorityQueueOperations(t *testing.T) {
 	ht.UpsertPriorityQueue("queue", PriorityQueue{{Priority: -1, Value: "first"}, {Priority: 5, Value: "later"}})
 	if got, ok := ht.PopPriorityQueue("queue"); !ok || got.Value != "first" {
 		t.Fatalf("PopPriorityQueue after upsert = %#v/%v, want first", got, ok)
+	}
+}
+
+func TestPriorityQueueOperationsDeepCopyNestedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	item := Map{"job": "build"}
+
+	if added := ht.PushPriorityQueue("queue", 1, item); added != 1 {
+		t.Fatalf("PushPriorityQueue() = %d, want 1", added)
+	}
+	item["job"] = "caller"
+	peek, ok := ht.PeekPriorityQueue("queue")
+	if !ok || peek.Value.(Map)["job"] != "build" {
+		t.Fatalf("PeekPriorityQueue() = %#v/%v, want stored value", peek, ok)
+	}
+	peek.Value.(Map)["job"] = "peek"
+	if again, ok := ht.PeekPriorityQueue("queue"); !ok || again.Value.(Map)["job"] != "build" {
+		t.Fatalf("PeekPriorityQueue exposed nested value: %#v/%v", again, ok)
+	}
+
+	items := ht.GetPriorityQueue("queue")
+	items[0].Value.(Map)["job"] = "get"
+	if again, ok := ht.PeekPriorityQueue("queue"); !ok || again.Value.(Map)["job"] != "build" {
+		t.Fatalf("GetPriorityQueue exposed nested value: %#v/%v", again, ok)
 	}
 }
 
