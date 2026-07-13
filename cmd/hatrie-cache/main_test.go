@@ -99,6 +99,20 @@ func TestParseConfigGRPCFlag(t *testing.T) {
 	}
 }
 
+func TestParseConfigLevelDBFlags(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-db-path", "/tmp/cache.leveldb",
+		"-db-sync-interval", "10s",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.dbPath != "/tmp/cache.leveldb" || cfg.dbSyncInterval != 10*time.Second {
+		t.Fatalf("cfg db = %q/%s, want explicit path and interval", cfg.dbPath, cfg.dbSyncInterval)
+	}
+}
+
 func TestParseConfigRejectsPartialMonitoringTLSConfig(t *testing.T) {
 	if _, err := parseConfig([]string{"-monitoring-tls-cert", "/tmp/cert.pem"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("parseConfig(partial TLS) error = nil, want error")
@@ -235,6 +249,31 @@ func TestSnapshotLifecycleHelpersLoadAndSave(t *testing.T) {
 	}
 }
 
+func TestLevelDBLifecycleHelpersLoadAndSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := hatriecache.CreateHatTrie()
+	defer source.Destroy()
+	source.UpsertString("key", "value")
+
+	store, err := openLevelDBIfConfigured(path)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+	if err := store.Save(source); err != nil {
+		t.Fatalf("store.Save() error = %v", err)
+	}
+
+	loaded := hatriecache.CreateHatTrie()
+	defer loaded.Destroy()
+	if err := loadLevelDBIfConfigured(loaded, store); err != nil {
+		t.Fatalf("loadLevelDBIfConfigured() error = %v", err)
+	}
+	if got := loaded.GetString("key"); got != "value" {
+		t.Fatalf("loaded key = %q, want value", got)
+	}
+}
+
 func writeTestCertificate(t *testing.T) (string, string) {
 	t.Helper()
 
@@ -310,6 +349,36 @@ func TestStartSnapshotSaverWritesPeriodically(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("periodic snapshot was not written")
+}
+
+func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("key", "value")
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"))
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := startLevelDBSaver(ctx, ht, store, time.Millisecond, &bytes.Buffer{})
+	defer stop()
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		loaded := hatriecache.CreateHatTrie()
+		count, err := store.Load(loaded)
+		got := loaded.GetString("key")
+		loaded.Destroy()
+		if err == nil && count == 1 && got == "value" {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("periodic LevelDB save was not written")
 }
 
 func TestSnapshotCallbackRequiresPath(t *testing.T) {

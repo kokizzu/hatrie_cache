@@ -61,6 +61,14 @@ Set `GRPC_ADDR` to expose the native protobuf API from
 make monitoring-server GRPC_ADDR=127.0.0.1:9090
 ```
 
+Set `DB_PATH` to load and save cache data through LevelDB with Snappy
+compression. `DB_SYNC_INTERVAL` periodically rewrites the LevelDB snapshot while
+the server is running:
+
+```
+make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
+```
+
 Set `SNAPSHOT_PATH` to load a JSON snapshot at startup and save it on shutdown.
 Set `SNAPSHOT_INTERVAL` to periodically write the same snapshot while the server
 runs:
@@ -127,6 +135,10 @@ Use `SaveSnapshot` and `LoadSnapshot` for portable JSON data snapshots. Snapshot
 loads skip expired entries and re-apply the normal disk spill threshold for large
 byte values.
 
+Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
+disk persistence. The LevelDB writer uses Snappy compression and clears stale
+keys on each save.
+
 Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
 service in another Go process, or use the generated client in
 `internal/gen/hatriecache/v1`.
@@ -178,7 +190,7 @@ deleted index saved on another map
 - [x] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
 - [x] check if serializer can support Go's map
 - [x] add portable JSON snapshot persistence to disk
-- [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
+- [x] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
 - [x] binary data that are >64KB always stored on disk
 - [x] write all pending transaction on journal (backup if program terminated unexpectedly)
 - [x] update statistics (last hit, last write, hit rate, cumulative hit rate) to disk

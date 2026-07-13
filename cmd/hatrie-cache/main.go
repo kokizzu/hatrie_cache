@@ -27,6 +27,8 @@ type config struct {
 	monitoringTLSKey  string
 	monitoringWebDir  string
 	grpcAddr          string
+	dbPath            string
+	dbSyncInterval    time.Duration
 	snapshotPath      string
 	snapshotInterval  time.Duration
 	journalPath       string
@@ -54,6 +56,24 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
+
+	dbStore, err := openLevelDBIfConfigured(cfg.dbPath)
+	if err != nil {
+		return err
+	}
+	defer closeLevelDB(dbStore, stderr)
+	if err := loadLevelDBIfConfigured(trie, dbStore); err != nil {
+		return err
+	}
+	if dbStore != nil {
+		defer func() {
+			if err := dbStore.Save(trie); err != nil {
+				fmt.Fprintf(stderr, "save leveldb: %v\n", err)
+			}
+		}()
+	}
+	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, cfg.dbSyncInterval, stderr)
+	defer stopDBSync()
 
 	journal, err := openJournalIfConfigured(cfg.journalPath)
 	if err != nil {
@@ -143,6 +163,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
+	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
+	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional JSON snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
 	flags.StringVar(&cfg.journalPath, "journal-path", "", "optional command journal path to replay on startup and append mutating commands")
@@ -204,6 +226,30 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
+func openLevelDBIfConfigured(path string) (*hatriecache.LevelDBStore, error) {
+	if path == "" {
+		return nil, nil
+	}
+	return hatriecache.OpenLevelDBStore(path)
+}
+
+func loadLevelDBIfConfigured(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore) error {
+	if store == nil {
+		return nil
+	}
+	_, err := store.Load(trie)
+	return err
+}
+
+func closeLevelDB(store *hatriecache.LevelDBStore, stderr io.Writer) {
+	if store == nil {
+		return
+	}
+	if err := store.Close(); err != nil {
+		fmt.Fprintf(stderr, "close leveldb: %v\n", err)
+	}
+}
+
 func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error) (*grpc.Server, net.Listener, error) {
 	if cfg.grpcAddr == "" {
 		return nil, nil, nil
@@ -234,6 +280,36 @@ func stopGRPCServer(server *grpc.Server) {
 	case <-time.After(serverShutdownTimeout):
 		server.Stop()
 		<-done
+	}
+}
+
+func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, interval time.Duration, stderr io.Writer) func() {
+	if store == nil || interval <= 0 {
+		return func() {}
+	}
+
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := store.Save(trie); err != nil {
+					fmt.Fprintf(stderr, "save leveldb: %v\n", err)
+				}
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-stopped
 	}
 }
 
