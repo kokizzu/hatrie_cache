@@ -125,6 +125,9 @@ When journaling is enabled, `GET /api/journal?after_sequence=N` returns the
 ordered mutating commands after `N` plus the latest journal sequence. If `N` is
 older than the compacted snapshot checkpoint, the endpoint returns `409` so a
 replica can fall back to a snapshot or explicit replication sync.
+`POST /api/journal` accepts `source` and optional `after_sequence`, pulls that
+source node's journal tail, and applies the returned mutating commands locally
+through the configured journal.
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
 The topology endpoint validates nodes, shard ownership, and replicas, and can
@@ -166,7 +169,8 @@ heartbeat or mark a node offline. `GET /api/replication` returns the most recent
 replication result. `POST /api/replication` accepts optional `prefix` and
 pushes matching local entries to their remote topology owners.
 `GET /api/journal?after_sequence=...` returns the command journal tail when
-journaling is configured.
+journaling is configured. `POST /api/journal` pulls a remote journal tail from
+`source` and applies it locally.
 `POST /api/commands` accepts `command`, `key`, optional `value`, `values`,
 `subkey`, `pairs`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
@@ -218,6 +222,7 @@ make cli ARGS='replication'
 make cli ARGS='replication -sync'
 make cli ARGS='replication -sync -prefix session:'
 make cli ARGS='journal -after-sequence 42'
+make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42'
 make cli ARGS='snapshot'
 ```
 

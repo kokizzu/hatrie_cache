@@ -255,6 +255,42 @@ func TestRunJournalFetchesTail(t *testing.T) {
 	}
 }
 
+func TestRunJournalPullPostsSource(t *testing.T) {
+	var gotPath string
+	var gotBody struct {
+		Source        string `json:"source"`
+		AfterSequence uint64 `json:"after_sequence"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"source":"http://leader","after_sequence":7,"last_sequence":8,"applied":1,"applied_through":8}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "journal", "-pull-from", " http://leader ", "-after-sequence", "7"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(journal -pull-from) error = %v", err)
+	}
+	if gotPath != "/api/journal" {
+		t.Fatalf("path = %q, want /api/journal", gotPath)
+	}
+	if gotBody.Source != "http://leader" || gotBody.AfterSequence != 7 {
+		t.Fatalf("body = %#v, want source http://leader after 7", gotBody)
+	}
+	if got := stdout.String(); got != "{\"source\":\"http://leader\",\"after_sequence\":7,\"last_sequence\":8,\"applied\":1,\"applied_through\":8}\n" {
+		t.Fatalf("stdout = %q, want journal pull JSON", got)
+	}
+}
+
 func TestRunCommandPostsJSON(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

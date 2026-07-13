@@ -30,6 +30,15 @@ type CommandJournalTail struct {
 	Entries          []CommandJournalRecord `json:"entries"`
 }
 
+type CommandJournalPullResult struct {
+	Source           string `json:"source"`
+	AfterSequence    uint64 `json:"after_sequence"`
+	LastSequence     uint64 `json:"last_sequence"`
+	CompactedThrough uint64 `json:"compacted_through,omitempty"`
+	Applied          int    `json:"applied"`
+	AppliedThrough   uint64 `json:"applied_through"`
+}
+
 type commandJournalEntry struct {
 	Version    int                 `json:"version"`
 	Sequence   uint64              `json:"sequence"`

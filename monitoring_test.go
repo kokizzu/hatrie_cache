@@ -304,6 +304,92 @@ func TestMonitoringHandlerExposesJournalTail(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
+	var gotSourcePath string
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSourcePath = r.URL.String()
+		if r.Method != http.MethodGet {
+			t.Fatalf("source method = %s, want GET", r.Method)
+		}
+		writeJSON(w, CommandJournalTail{
+			LastSequence: 3,
+			Entries: []CommandJournalRecord{
+				{Sequence: 2, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+				{Sequence: 3, Request: CacheCommandRequest{Command: "INC", Key: "views", Value: "2"}},
+			},
+		})
+	}))
+	defer source.Close()
+
+	ht := newTestTrie(t)
+	journalPath := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{Journal: journal}).Handler()
+	body, err := json.Marshal(map[string]interface{}{
+		"source":         source.URL,
+		"after_sequence": 1,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/journal", bytes.NewReader(body)))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("journal pull status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	if gotSourcePath != "/api/journal?after_sequence=1" {
+		t.Fatalf("source path = %q, want /api/journal?after_sequence=1", gotSourcePath)
+	}
+	var result CommandJournalPullResult
+	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("journal pull JSON error = %v", err)
+	}
+	if result.Applied != 2 || result.AppliedThrough != 3 || result.LastSequence != 3 || result.AfterSequence != 1 || result.Source != source.URL {
+		t.Fatalf("journal pull result = %#v, want applied through sequence 3", result)
+	}
+	if got := ht.GetString("name"); got != "ivi" {
+		t.Fatalf("pulled name = %q, want ivi", got)
+	}
+	if got := ht.GetCounter("views"); got != 2 {
+		t.Fatalf("pulled views = %d, want 2", got)
+	}
+	entries, err := readCommandJournalEntries(journalPath)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("local journal entries = %d, want 2", len(entries))
+	}
+}
+
+func TestMonitoringHandlerPullJournalPropagatesCompactedSource(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusConflict, commandError("hatriecache: command journal entries are compacted"))
+	}))
+	defer source.Close()
+
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{Journal: journal}).Handler()
+	body, err := json.Marshal(map[string]interface{}{"source": source.URL})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/journal", bytes.NewReader(body)))
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("compacted source status = %d, want 409", resp.Code)
+	}
+}
+
 func TestMonitoringHandlerRejectsInvalidCommandRequests(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()

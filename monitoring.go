@@ -1,10 +1,13 @@
 package hatriecache
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
@@ -53,6 +56,11 @@ type MonitoringEntriesResponse struct {
 
 type replicationSyncRequest struct {
 	Prefix string `json:"prefix,omitempty"`
+}
+
+type journalPullRequest struct {
+	Source        string `json:"source"`
+	AfterSequence uint64 `json:"after_sequence,omitempty"`
 }
 
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
@@ -347,7 +355,7 @@ func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *ht
 }
 
 func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
 		return
 	}
@@ -356,6 +364,10 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 	}
 	if handler.options.Journal == nil {
 		writeJSONStatus(w, http.StatusConflict, commandError("journal is not configured"))
+		return
+	}
+	if r.Method == http.MethodPost {
+		handler.handleJournalPull(w, r)
 		return
 	}
 	afterSequence := uint64(0)
@@ -377,6 +389,133 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, tail)
+}
+
+func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *http.Request) {
+	var request journalPullRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid journal pull request", http.StatusBadRequest)
+		return
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid journal pull request", http.StatusBadRequest)
+		return
+	}
+	source := strings.TrimSpace(request.Source)
+	endpoint, err := commandJournalEndpoint(source, request.AfterSequence)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+
+	tail, status, err := fetchCommandJournalTail(r.Context(), http.DefaultClient, endpoint)
+	if err != nil {
+		if status == http.StatusConflict {
+			writeJSONStatus(w, http.StatusConflict, commandError(err.Error()))
+			return
+		}
+		writeJSONStatus(w, http.StatusBadGateway, commandError(err.Error()))
+		return
+	}
+	result, err := handler.applyCommandJournalTail(source, request.AfterSequence, tail)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadGateway, commandError(err.Error()))
+		return
+	}
+	writeJSON(w, result)
+}
+
+func (handler *MonitoringHandler) applyCommandJournalTail(source string, afterSequence uint64, tail CommandJournalTail) (CommandJournalPullResult, error) {
+	result := CommandJournalPullResult{
+		Source:           source,
+		AfterSequence:    afterSequence,
+		LastSequence:     tail.LastSequence,
+		CompactedThrough: tail.CompactedThrough,
+		AppliedThrough:   afterSequence,
+	}
+	for _, entry := range tail.Entries {
+		if entry.Sequence <= result.AppliedThrough {
+			return result, fmt.Errorf("journal tail sequence %d is not after %d", entry.Sequence, result.AppliedThrough)
+		}
+		response := handler.options.Journal.ExecuteCommand(handler.trie, entry.Request)
+		if !response.OK {
+			return result, fmt.Errorf("journal entry %d failed: %s", entry.Sequence, response.Message)
+		}
+		result.Applied++
+		result.AppliedThrough = entry.Sequence
+	}
+	return result, nil
+}
+
+func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint string) (CommandJournalTail, int, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return CommandJournalTail{}, 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return CommandJournalTail{}, 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if readErr != nil {
+			return CommandJournalTail{}, resp.StatusCode, readErr
+		}
+		return CommandJournalTail{}, resp.StatusCode, fmt.Errorf("journal source returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	var tail CommandJournalTail
+	if err := decoder.Decode(&tail); err != nil {
+		return CommandJournalTail{}, resp.StatusCode, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return CommandJournalTail{}, resp.StatusCode, errors.New("journal source returned invalid trailing JSON")
+	}
+	if tail.Entries == nil {
+		tail.Entries = []CommandJournalRecord{}
+	}
+	return tail, resp.StatusCode, nil
+}
+
+func commandJournalEndpoint(source string, afterSequence uint64) (string, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "", errors.New("journal source is required")
+	}
+	if !strings.Contains(source, "://") {
+		source = "http://" + source
+	}
+	parsed, err := url.Parse(source)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("journal source is invalid")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/journal"
+	query := parsed.Query()
+	if afterSequence > 0 {
+		query.Set("after_sequence", strconv.FormatUint(afterSequence, 10))
+	} else {
+		query.Del("after_sequence")
+	}
+	parsed.RawQuery = query.Encode()
+	parsed.Fragment = ""
+	return parsed.String(), nil
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {

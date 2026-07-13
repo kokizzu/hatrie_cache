@@ -186,8 +186,23 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 	flags := flag.NewFlagSet("journal", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	afterSequence := flags.Uint64("after-sequence", 0, "only return journal entries after this sequence")
+	pullFrom := flags.String("pull-from", "", "source monitoring server base URL to pull and apply journal entries from")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+
+	if strings.TrimSpace(*pullFrom) != "" {
+		body, err := json.Marshal(struct {
+			Source        string `json:"source"`
+			AfterSequence uint64 `json:"after_sequence,omitempty"`
+		}{
+			Source:        strings.TrimSpace(*pullFrom),
+			AfterSequence: *afterSequence,
+		})
+		if err != nil {
+			return err
+		}
+		return postJSON(ctx, client, addr, "/api/journal", body, stdout)
 	}
 
 	path := "/api/journal"
