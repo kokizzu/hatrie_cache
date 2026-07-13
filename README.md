@@ -104,7 +104,9 @@ make monitoring-server SNAPSHOT_PATH=data/snapshot.json JOURNAL_PATH=data/comman
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
 The topology endpoint validates nodes, shard ownership, and replicas, and can
-route a key to its shard:
+route a key to its shard. Topologies default to `mode: "sharded"`. Set
+`bucket_count` and compact `bucket_ranges` to use vbucket-style routing, or set
+`mode: "full_replica"` to route every key to every node without partitions:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json
@@ -140,6 +142,31 @@ make cli ARGS='topology'
 make cli ARGS='topology -key session:1'
 make cli ARGS='topology -file data/topology.json'
 make cli ARGS='snapshot'
+```
+
+Example sharded topology with 1024 virtual buckets:
+
+```
+{
+  "version": 1,
+  "mode": "sharded",
+  "bucket_count": 1024,
+  "self": "node-a",
+  "nodes": [{"id": "node-a"}, {"id": "node-b"}],
+  "shards": [{"id": 0, "primary": "node-a"}, {"id": 1, "primary": "node-b"}],
+  "bucket_ranges": [{"start": 0, "end": 511, "shard": 0}, {"start": 512, "end": 1023, "shard": 1}]
+}
+```
+
+Example full-replica topology:
+
+```
+{
+  "version": 1,
+  "mode": "full_replica",
+  "self": "node-a",
+  "nodes": [{"id": "node-a"}, {"id": "node-b"}]
+}
 ```
 
 The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
@@ -231,7 +258,7 @@ the idx is 32-bit integer, 1 bit is for ttl flag, 1 bit if on disk, remaining 6-
 master/leader write, journal, and broadcasting: internalDEL key idx
 deleted index saved on another map
 ```
-- [ ] add option to shard/partition it or full replica, copy tarantool's vbucket/vshard logic
+- [x] add option to shard/partition it or full replica, copy tarantool's vbucket/vshard logic
 - [x] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
 - [x] check if serializer can support Go's map
 - [x] add portable JSON snapshot persistence to disk
