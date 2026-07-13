@@ -402,6 +402,28 @@ func TestStartSnapshotSaverWritesPeriodically(t *testing.T) {
 	t.Fatal("periodic snapshot was not written")
 }
 
+func TestStartSnapshotSaverStopIsIdempotent(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	stop := startSnapshotSaver(ctx, ht, nil, path, time.Hour, &bytes.Buffer{})
+	cancel()
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("snapshot saver repeated stop did not return")
+	}
+}
+
 func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
 	ht := hatriecache.CreateHatTrie()
 	defer ht.Destroy()
@@ -430,6 +452,33 @@ func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("periodic LevelDB save was not written")
+}
+
+func TestStartLevelDBSaverStopIsIdempotent(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"))
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := startLevelDBSaver(ctx, ht, store, time.Hour, &bytes.Buffer{})
+	cancel()
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("LevelDB saver repeated stop did not return")
+	}
 }
 
 func TestSnapshotCallbackRequiresPath(t *testing.T) {

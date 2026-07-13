@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -374,10 +375,7 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 			}
 		}
 	}()
-	return func() {
-		close(done)
-		<-stopped
-	}
+	return periodicStopper(done, stopped)
 }
 
 func openJournalIfConfigured(path string) (*hatriecache.CommandJournal, error) {
@@ -432,10 +430,7 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 			}
 		}
 	}()
-	return func() {
-		close(done)
-		<-stopped
-	}
+	return periodicStopper(done, stopped)
 }
 
 func snapshotCallback(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string) func() error {
@@ -444,5 +439,15 @@ func snapshotCallback(trie *hatriecache.HatTrie, journal *hatriecache.CommandJou
 	}
 	return func() error {
 		return saveSnapshotIfConfigured(trie, journal, path)
+	}
+}
+
+func periodicStopper(done chan struct{}, stopped chan struct{}) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(done)
+			<-stopped
+		})
 	}
 }
