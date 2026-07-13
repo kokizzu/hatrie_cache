@@ -8,6 +8,9 @@ deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with
 stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
 O(1), and memory usage low without per-item node allocations.
+Typed backing pools reuse deleted indexes through a compact bitset-backed stack,
+avoiding per-index hash-map overhead while keeping reuse checks and allocation
+fast.
 
 ## Development
 
@@ -245,6 +248,7 @@ build files have not been generated.
 - [x] `hat_map<string,int+byte>` stores index or special types (deque/set/etc) to `[][]byte` (aka raws); raws can be serialized using [FlatBuffers](http://github.com/google/flatbuffers) or [FastBinaryEncoding](http://github.com/chronoxor/FastBinaryEncoding)
 - [x] add TTL map, check for expiration when read, delete if expired
 - [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
+- [x] replace reusable-index hash maps with a compact bitset-backed stack for typed backing pools
 - [x] create a web UI for management and monitoring (frontend: Svelte MPA)
 - [x] create backend service using HTTP/2 JSON APIs so it can be accessed from another language
 - [x] add native gRPC protobuf APIs for strongly typed client generation

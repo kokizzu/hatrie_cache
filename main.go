@@ -205,6 +205,83 @@ func maxInt(a, b int) int {
 	return b
 }
 
+type reusableIndexes struct {
+	stack []int32
+	bits  []uint64
+	count int
+}
+
+func (indexes *reusableIndexes) Len() int {
+	if indexes == nil {
+		return 0
+	}
+	return indexes.count
+}
+
+func (indexes *reusableIndexes) Has(idx int32) bool {
+	if indexes == nil || idx < 0 {
+		return false
+	}
+	word, mask := reusableIndexBit(idx)
+	if word >= len(indexes.bits) {
+		return false
+	}
+	return indexes.bits[word]&mask != 0
+}
+
+func (indexes *reusableIndexes) Mark(idx int32) bool {
+	if indexes == nil || idx < 0 {
+		return false
+	}
+	word, mask := reusableIndexBit(idx)
+	if word >= len(indexes.bits) {
+		next := make([]uint64, word+1)
+		copy(next, indexes.bits)
+		indexes.bits = next
+	}
+	if indexes.bits[word]&mask != 0 {
+		return false
+	}
+	indexes.bits[word] |= mask
+	indexes.stack = append(indexes.stack, idx)
+	indexes.count++
+	return true
+}
+
+func (indexes *reusableIndexes) Take() (int32, bool) {
+	if indexes == nil {
+		return 0, false
+	}
+	for len(indexes.stack) > 0 {
+		last := len(indexes.stack) - 1
+		idx := indexes.stack[last]
+		indexes.stack[last] = 0
+		indexes.stack = indexes.stack[:last]
+		if indexes.Use(idx) {
+			return idx, true
+		}
+	}
+	return 0, false
+}
+
+func (indexes *reusableIndexes) Use(idx int32) bool {
+	if indexes == nil || idx < 0 {
+		return false
+	}
+	word, mask := reusableIndexBit(idx)
+	if word >= len(indexes.bits) || indexes.bits[word]&mask == 0 {
+		return false
+	}
+	indexes.bits[word] &^= mask
+	indexes.count--
+	return true
+}
+
+func reusableIndexBit(idx int32) (int, uint64) {
+	value := int(idx)
+	return value / 64, uint64(1) << uint(value%64)
+}
+
 const (
 	NoTTL              time.Duration = -1
 	DiskBytesThreshold               = 64 * 1024
@@ -368,13 +445,12 @@ func (hval *HatValue) fromValue(value C.value_t) {
 // BytesStorage stores byte and string values outside the trie.
 type BytesStorage struct {
 	array     [][]byte
-	reusables map[int32]bool
+	reusables reusableIndexes
 }
 
 func CreateBytesStorage() *BytesStorage {
 	return &BytesStorage{
-		array:     [][]byte{},
-		reusables: map[int32]bool{},
+		array: [][]byte{},
 	}
 }
 
@@ -383,7 +459,7 @@ func (bs *BytesStorage) Put(idx int32, value []byte) {
 		return
 	}
 	bs.array[idx] = cloneBytes(value)
-	delete(bs.reusables, idx)
+	bs.reusables.Use(idx)
 }
 
 func (bs *BytesStorage) Append(value []byte) int32 {
@@ -392,12 +468,9 @@ func (bs *BytesStorage) Append(value []byte) int32 {
 }
 
 func (bs *BytesStorage) Add(value []byte) int32 {
-	if len(bs.reusables) > 0 {
-		for idx := range bs.reusables {
-			bs.array[idx] = cloneBytes(value)
-			delete(bs.reusables, idx)
-			return idx
-		}
+	if idx, ok := bs.reusables.Take(); ok {
+		bs.array[idx] = cloneBytes(value)
+		return idx
 	}
 	return bs.Append(value)
 }
@@ -407,7 +480,7 @@ func (bs *BytesStorage) Del(idx int32) {
 		return
 	}
 	bs.array[idx] = nil
-	bs.reusables[idx] = true
+	bs.reusables.Mark(idx)
 }
 
 // DiskStorage stores large byte values outside the Go heap.
@@ -415,7 +488,7 @@ type DiskStorage struct {
 	dir       string
 	ownedDir  bool
 	paths     []string
-	reusables map[int32]bool
+	reusables reusableIndexes
 }
 
 func CreateDiskStorage(dir string, ownedDir bool) (*DiskStorage, error) {
@@ -423,10 +496,9 @@ func CreateDiskStorage(dir string, ownedDir bool) (*DiskStorage, error) {
 		return nil, err
 	}
 	return &DiskStorage{
-		dir:       dir,
-		ownedDir:  ownedDir,
-		paths:     []string{},
-		reusables: map[int32]bool{},
+		dir:      dir,
+		ownedDir: ownedDir,
+		paths:    []string{},
 	}, nil
 }
 
@@ -437,7 +509,7 @@ func (ds *DiskStorage) Put(idx int32, value []byte) error {
 	if err := os.WriteFile(ds.paths[idx], value, 0o600); err != nil {
 		return err
 	}
-	delete(ds.reusables, idx)
+	ds.reusables.Use(idx)
 	return nil
 }
 
@@ -452,14 +524,12 @@ func (ds *DiskStorage) Append(value []byte) (int32, error) {
 }
 
 func (ds *DiskStorage) Add(value []byte) (int32, error) {
-	if len(ds.reusables) > 0 {
-		for idx := range ds.reusables {
-			if err := os.WriteFile(ds.paths[idx], value, 0o600); err != nil {
-				return 0, err
-			}
-			delete(ds.reusables, idx)
-			return idx, nil
+	if idx, ok := ds.reusables.Take(); ok {
+		if err := os.WriteFile(ds.paths[idx], value, 0o600); err != nil {
+			ds.reusables.Mark(idx)
+			return 0, err
 		}
+		return idx, nil
 	}
 	return ds.Append(value)
 }
@@ -476,7 +546,7 @@ func (ds *DiskStorage) Del(idx int32) {
 		return
 	}
 	_ = os.Remove(ds.paths[idx])
-	ds.reusables[idx] = true
+	ds.reusables.Mark(idx)
 }
 
 func (ds *DiskStorage) Destroy() {
@@ -499,13 +569,12 @@ func (ds *DiskStorage) pathFor(idx int32) string {
 // MapStorage stores map values outside the trie.
 type MapStorage struct {
 	array     []Map
-	reusables map[int32]bool
+	reusables reusableIndexes
 }
 
 func CreateMapStorage() *MapStorage {
 	return &MapStorage{
-		array:     []Map{},
-		reusables: map[int32]bool{},
+		array: []Map{},
 	}
 }
 
@@ -514,7 +583,7 @@ func (ms *MapStorage) Put(idx int32, value Map) {
 		return
 	}
 	ms.array[idx] = cloneMap(value)
-	delete(ms.reusables, idx)
+	ms.reusables.Use(idx)
 }
 
 func (ms *MapStorage) Append(value Map) int32 {
@@ -523,12 +592,9 @@ func (ms *MapStorage) Append(value Map) int32 {
 }
 
 func (ms *MapStorage) Add(value Map) int32 {
-	if len(ms.reusables) > 0 {
-		for idx := range ms.reusables {
-			ms.array[idx] = cloneMap(value)
-			delete(ms.reusables, idx)
-			return idx
-		}
+	if idx, ok := ms.reusables.Take(); ok {
+		ms.array[idx] = cloneMap(value)
+		return idx
 	}
 	return ms.Append(value)
 }
@@ -538,19 +604,18 @@ func (ms *MapStorage) Del(idx int32) {
 		return
 	}
 	ms.array[idx] = nil
-	ms.reusables[idx] = true
+	ms.reusables.Mark(idx)
 }
 
 // SliceStorage stores slice values outside the trie.
 type SliceStorage struct {
 	array     []deque
-	reusables map[int32]bool
+	reusables reusableIndexes
 }
 
 func CreateSliceStorage() *SliceStorage {
 	return &SliceStorage{
-		array:     []deque{},
-		reusables: map[int32]bool{},
+		array: []deque{},
 	}
 }
 
@@ -559,7 +624,7 @@ func (ss *SliceStorage) Put(idx int32, value Slice) {
 		return
 	}
 	ss.array[idx] = newDeque(value)
-	delete(ss.reusables, idx)
+	ss.reusables.Use(idx)
 }
 
 func (ss *SliceStorage) Append(value Slice) int32 {
@@ -568,12 +633,9 @@ func (ss *SliceStorage) Append(value Slice) int32 {
 }
 
 func (ss *SliceStorage) Add(value Slice) int32 {
-	if len(ss.reusables) > 0 {
-		for idx := range ss.reusables {
-			ss.array[idx] = newDeque(value)
-			delete(ss.reusables, idx)
-			return idx
-		}
+	if idx, ok := ss.reusables.Take(); ok {
+		ss.array[idx] = newDeque(value)
+		return idx
 	}
 	return ss.Append(value)
 }
@@ -583,7 +645,7 @@ func (ss *SliceStorage) Del(idx int32) {
 		return
 	}
 	ss.array[idx] = deque{}
-	ss.reusables[idx] = true
+	ss.reusables.Mark(idx)
 }
 
 type setData struct {
@@ -661,13 +723,12 @@ func (set *setData) Values() Set {
 // SetStorage stores set values outside the trie.
 type SetStorage struct {
 	array     []setData
-	reusables map[int32]bool
+	reusables reusableIndexes
 }
 
 func CreateSetStorage() *SetStorage {
 	return &SetStorage{
-		array:     []setData{},
-		reusables: map[int32]bool{},
+		array: []setData{},
 	}
 }
 
@@ -676,7 +737,7 @@ func (ss *SetStorage) Put(idx int32, value Set) {
 		return
 	}
 	ss.array[idx] = newSetData(value)
-	delete(ss.reusables, idx)
+	ss.reusables.Use(idx)
 }
 
 func (ss *SetStorage) Append(value Set) int32 {
@@ -685,12 +746,9 @@ func (ss *SetStorage) Append(value Set) int32 {
 }
 
 func (ss *SetStorage) Add(value Set) int32 {
-	if len(ss.reusables) > 0 {
-		for idx := range ss.reusables {
-			ss.array[idx] = newSetData(value)
-			delete(ss.reusables, idx)
-			return idx
-		}
+	if idx, ok := ss.reusables.Take(); ok {
+		ss.array[idx] = newSetData(value)
+		return idx
 	}
 	return ss.Append(value)
 }
@@ -700,7 +758,7 @@ func (ss *SetStorage) Del(idx int32) {
 		return
 	}
 	ss.array[idx] = setData{}
-	ss.reusables[idx] = true
+	ss.reusables.Mark(idx)
 }
 
 type LevelDBReference struct {
@@ -711,13 +769,12 @@ type LevelDBReference struct {
 
 type LevelDBReferenceStorage struct {
 	array     []LevelDBReference
-	reusables map[int32]bool
+	reusables reusableIndexes
 }
 
 func CreateLevelDBReferenceStorage() *LevelDBReferenceStorage {
 	return &LevelDBReferenceStorage{
-		array:     []LevelDBReference{},
-		reusables: map[int32]bool{},
+		array: []LevelDBReference{},
 	}
 }
 
@@ -727,12 +784,9 @@ func (rs *LevelDBReferenceStorage) Append(value LevelDBReference) int32 {
 }
 
 func (rs *LevelDBReferenceStorage) Add(value LevelDBReference) int32 {
-	if len(rs.reusables) > 0 {
-		for idx := range rs.reusables {
-			rs.array[idx] = value
-			delete(rs.reusables, idx)
-			return idx
-		}
+	if idx, ok := rs.reusables.Take(); ok {
+		rs.array[idx] = value
+		return idx
 	}
 	return rs.Append(value)
 }
@@ -741,7 +795,7 @@ func (rs *LevelDBReferenceStorage) Get(idx int32) (LevelDBReference, bool) {
 	if rs == nil || idx < 0 || int(idx) >= len(rs.array) {
 		return LevelDBReference{}, false
 	}
-	return rs.array[idx], !rs.reusables[idx]
+	return rs.array[idx], !rs.reusables.Has(idx)
 }
 
 func (rs *LevelDBReferenceStorage) Del(idx int32) {
@@ -749,7 +803,7 @@ func (rs *LevelDBReferenceStorage) Del(idx int32) {
 		return
 	}
 	rs.array[idx] = LevelDBReference{}
-	rs.reusables[idx] = true
+	rs.reusables.Mark(idx)
 }
 
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing

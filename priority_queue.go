@@ -201,13 +201,12 @@ func (item priorityQueueItem) PriorityItem() PriorityItem {
 // PriorityQueueStorage stores priority queue values outside the trie.
 type PriorityQueueStorage struct {
 	array     []priorityQueueData
-	reusables map[int32]bool
+	reusables reusableIndexes
 }
 
 func CreatePriorityQueueStorage() *PriorityQueueStorage {
 	return &PriorityQueueStorage{
-		array:     []priorityQueueData{},
-		reusables: map[int32]bool{},
+		array: []priorityQueueData{},
 	}
 }
 
@@ -216,7 +215,7 @@ func (store *PriorityQueueStorage) Put(idx int32, value PriorityQueue) {
 		return
 	}
 	store.array[idx] = newPriorityQueueData(value)
-	delete(store.reusables, idx)
+	store.reusables.Use(idx)
 }
 
 func (store *PriorityQueueStorage) PutItems(idx int32, value []priorityQueueItem) {
@@ -224,7 +223,7 @@ func (store *PriorityQueueStorage) PutItems(idx int32, value []priorityQueueItem
 		return
 	}
 	store.array[idx] = newPriorityQueueDataFromItems(value)
-	delete(store.reusables, idx)
+	store.reusables.Use(idx)
 }
 
 func (store *PriorityQueueStorage) Append(value PriorityQueue) int32 {
@@ -238,21 +237,17 @@ func (store *PriorityQueueStorage) AppendItems(value []priorityQueueItem) int32 
 }
 
 func (store *PriorityQueueStorage) Add(value PriorityQueue) int32 {
-	if len(store.reusables) > 0 {
-		for idx := range store.reusables {
-			store.Put(idx, value)
-			return idx
-		}
+	if idx, ok := store.reusables.Take(); ok {
+		store.array[idx] = newPriorityQueueData(value)
+		return idx
 	}
 	return store.Append(value)
 }
 
 func (store *PriorityQueueStorage) AddItems(value []priorityQueueItem) int32 {
-	if len(store.reusables) > 0 {
-		for idx := range store.reusables {
-			store.PutItems(idx, value)
-			return idx
-		}
+	if idx, ok := store.reusables.Take(); ok {
+		store.array[idx] = newPriorityQueueDataFromItems(value)
+		return idx
 	}
 	return store.AppendItems(value)
 }
@@ -262,7 +257,7 @@ func (store *PriorityQueueStorage) Del(idx int32) {
 		return
 	}
 	store.array[idx] = priorityQueueData{}
-	store.reusables[idx] = true
+	store.reusables.Mark(idx)
 }
 
 func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {

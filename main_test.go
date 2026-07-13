@@ -133,7 +133,7 @@ func TestLargeBytesStoredOnDiskAndCleaned(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("large bytes file still exists after delete: %v", err)
 	}
-	if !ht.disks.reusables[hval.Index] {
+	if !ht.disks.reusables.Has(hval.Index) {
 		t.Fatalf("deleted disk index %d was not reusable", hval.Index)
 	}
 }
@@ -154,7 +154,7 @@ func TestBytesDiskThresholdAndReplacement(t *testing.T) {
 	if !diskValue.OnDisk() {
 		t.Fatalf("large bytes were not stored on disk: %+v", diskValue)
 	}
-	if !ht.raws.reusables[rawIdx] {
+	if !ht.raws.reusables.Has(rawIdx) {
 		t.Fatalf("replaced raw index %d was not reusable", rawIdx)
 	}
 	diskPath := ht.disks.paths[diskValue.Index]
@@ -632,13 +632,46 @@ func TestDeleteReleasesBackingStorageForReuse(t *testing.T) {
 	if got := ht.Get("old"); !got.Empty() {
 		t.Fatalf("deleted key still exists: %+v", got)
 	}
-	if !ht.raws.reusables[idx] {
+	if !ht.raws.reusables.Has(idx) {
 		t.Fatalf("deleted raw index %d was not marked reusable", idx)
 	}
 
 	ht.UpsertString("new", "value")
 	if got := ht.Get("new").Index; got != idx {
 		t.Fatalf("raw storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestReusableIndexesDeduplicateAndSkipStaleEntries(t *testing.T) {
+	var indexes reusableIndexes
+	if indexes.Len() != 0 {
+		t.Fatalf("empty Len() = %d, want 0", indexes.Len())
+	}
+	if !indexes.Mark(3) {
+		t.Fatal("Mark(3) = false, want true")
+	}
+	if indexes.Mark(3) {
+		t.Fatal("duplicate Mark(3) = true, want false")
+	}
+	if !indexes.Has(3) || indexes.Len() != 1 {
+		t.Fatalf("after Mark(3): has=%v len=%d, want has true len 1", indexes.Has(3), indexes.Len())
+	}
+	if !indexes.Use(3) {
+		t.Fatal("Use(3) = false, want true")
+	}
+	if indexes.Has(3) || indexes.Len() != 0 {
+		t.Fatalf("after Use(3): has=%v len=%d, want has false len 0", indexes.Has(3), indexes.Len())
+	}
+
+	indexes.Mark(1)
+	indexes.Mark(2)
+	indexes.Use(2)
+	idx, ok := indexes.Take()
+	if !ok || idx != 1 {
+		t.Fatalf("Take() = %d/%v, want 1/true after stale index", idx, ok)
+	}
+	if _, ok := indexes.Take(); ok {
+		t.Fatal("second Take() ok = true, want false")
 	}
 }
 
@@ -652,7 +685,7 @@ func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
 	if hval := ht.Get("key"); !hval.IsSlice() {
 		t.Fatalf("replacement type = %+v, want slice", hval)
 	}
-	if !ht.maps.reusables[mapIdx] {
+	if !ht.maps.reusables.Has(mapIdx) {
 		t.Fatalf("replaced map index %d was not marked reusable", mapIdx)
 	}
 
@@ -661,7 +694,7 @@ func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
 	if hval := ht.Get("key"); !hval.IsPriorityQueue() {
 		t.Fatalf("replacement type = %+v, want priority queue", hval)
 	}
-	if !ht.slices.reusables[sliceIdx] {
+	if !ht.slices.reusables.Has(sliceIdx) {
 		t.Fatalf("replaced slice index %d was not marked reusable", sliceIdx)
 	}
 }
@@ -693,7 +726,7 @@ func TestTTLExpiresOnReadAndReusesStorage(t *testing.T) {
 	if got := ht.Size(); got != 0 {
 		t.Fatalf("size after read-time expiration = %d, want 0", got)
 	}
-	if !ht.raws.reusables[idx] {
+	if !ht.raws.reusables.Has(idx) {
 		t.Fatalf("expired raw index %d was not reusable", idx)
 	}
 
@@ -912,7 +945,7 @@ func TestIterationCleansExpiredKeys(t *testing.T) {
 	if got := ht.Get("expired"); !got.Empty() {
 		t.Fatalf("expired key still exists after iteration: %+v", got)
 	}
-	if !ht.raws.reusables[expiredIdx] {
+	if !ht.raws.reusables.Has(expiredIdx) {
 		t.Fatalf("expired raw index %d was not reusable", expiredIdx)
 	}
 }
@@ -952,10 +985,10 @@ func TestVacuumExpiredRemovesOnlyExpiredKeys(t *testing.T) {
 	if got := ht.Get("expired:map"); !got.Empty() {
 		t.Fatalf("expired map still exists: %+v", got)
 	}
-	if !ht.raws.reusables[expiredRawIdx] {
+	if !ht.raws.reusables.Has(expiredRawIdx) {
 		t.Fatalf("expired raw index %d was not reusable", expiredRawIdx)
 	}
-	if !ht.maps.reusables[expiredMapIdx] {
+	if !ht.maps.reusables.Has(expiredMapIdx) {
 		t.Fatalf("expired map index %d was not reusable", expiredMapIdx)
 	}
 	if got := ht.VacuumExpired(); got != 0 {
