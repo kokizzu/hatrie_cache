@@ -635,6 +635,76 @@ func TestMonitoringHandlerManagesElection(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerEnforcesLeaderWrites(t *testing.T) {
+	ht := newTestTrie(t)
+	topology := replicationTestTopology(t, "127.0.0.1:1")
+	election := NewElectionStore(topology, ElectionOptions{})
+	if err := election.MarkOffline("node-a"); err != nil {
+		t.Fatalf("MarkOffline(node-a) error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:            "node-a",
+		Topology:            topology,
+		Election:            election,
+		EnforceLeaderWrites: true,
+	}).Handler()
+
+	writeResp := httptest.NewRecorder()
+	handler.ServeHTTP(writeResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"session:1","value":"value"}`)))
+	if writeResp.Code != http.StatusConflict {
+		t.Fatalf("follower write status = %d, want 409", writeResp.Code)
+	}
+	var rejected CacheCommandResponse
+	if err := json.Unmarshal(writeResp.Body.Bytes(), &rejected); err != nil {
+		t.Fatalf("follower write JSON error = %v", err)
+	}
+	if rejected.OK || !strings.Contains(rejected.Message, "leader is node-b") {
+		t.Fatalf("follower write response = %#v, want leader rejection", rejected)
+	}
+	if got := ht.GetString("session:1"); got != "" {
+		t.Fatalf("follower write stored %q, want no local write", got)
+	}
+
+	readResp := httptest.NewRecorder()
+	handler.ServeHTTP(readResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"GET","key":"session:1"}`)))
+	if readResp.Code != http.StatusOK {
+		t.Fatalf("follower read status = %d, want 200", readResp.Code)
+	}
+
+	internalResp := httptest.NewRecorder()
+	handler.ServeHTTP(internalResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"INTERNALSET","key":"session:1","value":"{\"type\":\"string\",\"string\":\"replicated\"}"}`)))
+	if internalResp.Code != http.StatusOK {
+		t.Fatalf("internal replication status = %d, want 200", internalResp.Code)
+	}
+	if got := ht.GetString("session:1"); got != "replicated" {
+		t.Fatalf("internal replicated value = %q, want replicated", got)
+	}
+}
+
+func TestMonitoringHandlerAllowsElectedLeaderWrites(t *testing.T) {
+	ht := newTestTrie(t)
+	topology := replicationTestTopology(t, "127.0.0.1:1")
+	election := NewElectionStore(topology, ElectionOptions{})
+	if err := election.MarkOffline("node-a"); err != nil {
+		t.Fatalf("MarkOffline(node-a) error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:            "node-b",
+		Topology:            topology,
+		Election:            election,
+		EnforceLeaderWrites: true,
+	}).Handler()
+
+	writeResp := httptest.NewRecorder()
+	handler.ServeHTTP(writeResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"session:1","value":"value"}`)))
+	if writeResp.Code != http.StatusOK {
+		t.Fatalf("leader write status = %d, want 200", writeResp.Code)
+	}
+	if got := ht.GetString("session:1"); got != "value" {
+		t.Fatalf("leader write stored %q, want value", got)
+	}
+}
+
 func TestMonitoringHandlerReplicatesCommands(t *testing.T) {
 	ht := newTestTrie(t)
 	var gotRequest CacheCommandRequest

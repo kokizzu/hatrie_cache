@@ -23,25 +23,26 @@ import (
 const serverShutdownTimeout = 5 * time.Second
 
 type config struct {
-	monitoringServer  bool
-	monitoringAddr    string
-	monitoringTLSCert string
-	monitoringTLSKey  string
-	monitoringWebDir  string
-	nodeID            string
-	topologyPath      string
-	electionTimeout   time.Duration
-	replication       bool
-	grpcAddr          string
-	dbPath            string
-	dbSyncInterval    time.Duration
-	dbHotLoad         bool
-	dbHotLoadMaxBytes int64
-	dbHotLoadMaxAge   time.Duration
-	dbHotLoadMinHits  uint64
-	snapshotPath      string
-	snapshotInterval  time.Duration
-	journalPath       string
+	monitoringServer    bool
+	monitoringAddr      string
+	monitoringTLSCert   string
+	monitoringTLSKey    string
+	monitoringWebDir    string
+	nodeID              string
+	topologyPath        string
+	electionTimeout     time.Duration
+	replication         bool
+	enforceLeaderWrites bool
+	grpcAddr            string
+	dbPath              string
+	dbSyncInterval      time.Duration
+	dbHotLoad           bool
+	dbHotLoadMaxBytes   int64
+	dbHotLoadMaxAge     time.Duration
+	dbHotLoadMinHits    uint64
+	snapshotPath        string
+	snapshotInterval    time.Duration
+	journalPath         string
 }
 
 func main() {
@@ -134,13 +135,14 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
-		NodeName:   cfg.nodeID,
-		WebDir:     cfg.monitoringWebDir,
-		Snapshot:   snapshotCallback(trie, journal, cfg.snapshotPath),
-		Journal:    journal,
-		Topology:   topology,
-		Election:   election,
-		Replicator: replicator,
+		NodeName:            defaultNodeID(cfg.nodeID),
+		WebDir:              cfg.monitoringWebDir,
+		Snapshot:            snapshotCallback(trie, journal, cfg.snapshotPath),
+		Journal:             journal,
+		Topology:            topology,
+		Election:            election,
+		Replicator:          replicator,
+		EnforceLeaderWrites: cfg.enforceLeaderWrites,
 	}).Handler()
 	server := &http.Server{
 		Addr:      cfg.monitoringAddr,
@@ -212,6 +214,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
 	flags.DurationVar(&cfg.electionTimeout, "election-timeout", cfg.electionTimeout, "node heartbeat timeout for deterministic topology leader election")
 	flags.BoolVar(&cfg.replication, "replication", false, "replicate successful leader writes to topology owners over HTTP")
+	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")

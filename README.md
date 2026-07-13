@@ -159,6 +159,15 @@ current topology replicas:
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true
 ```
 
+Set `ENFORCE_LEADER_WRITES=true` on clustered nodes to reject mutating client
+commands unless the local node is the elected leader for the command key.
+Internal replication commands are still accepted so followers can apply leader
+updates:
+
+```
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true ENFORCE_LEADER_WRITES=true
+```
+
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
 `/api/journal`, and `/api/commands`.

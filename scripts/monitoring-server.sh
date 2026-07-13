@@ -9,6 +9,7 @@ node_id=${NODE_ID:-}
 topology_path=${TOPOLOGY_PATH:-}
 election_timeout=${ELECTION_TIMEOUT:-15s}
 replication=${REPLICATION:-false}
+enforce_leader_writes=${ENFORCE_LEADER_WRITES:-false}
 grpc_addr=${GRPC_ADDR:-}
 db_path=${DB_PATH:-}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
@@ -30,6 +31,7 @@ exec go run ./cmd/hatrie-cache \
 	-topology-path "$topology_path" \
 	-election-timeout "$election_timeout" \
 	-replication="$replication" \
+	-enforce-leader-writes="$enforce_leader_writes" \
 	-grpc-addr "$grpc_addr" \
 	-db-path "$db_path" \
 	-db-sync-interval "$db_sync_interval" \

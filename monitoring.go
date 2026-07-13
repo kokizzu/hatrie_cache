@@ -17,14 +17,15 @@ import (
 )
 
 type MonitoringOptions struct {
-	NodeName   string
-	WebDir     string
-	StartAt    time.Time
-	Snapshot   func() error
-	Journal    *CommandJournal
-	Topology   *TopologyStore
-	Election   *ElectionStore
-	Replicator *HTTPReplicator
+	NodeName            string
+	WebDir              string
+	StartAt             time.Time
+	Snapshot            func() error
+	Journal             *CommandJournal
+	Topology            *TopologyStore
+	Election            *ElectionStore
+	Replicator          *HTTPReplicator
+	EnforceLeaderWrites bool
 }
 
 type MonitoringHandler struct {
@@ -173,6 +174,10 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if requestContextDone(w, r) {
 		return
 	}
+	if response, rejected := handler.rejectNonLeaderWrite(request); rejected {
+		writeJSONStatus(w, http.StatusConflict, response)
+		return
+	}
 
 	var response CacheCommandResponse
 	if handler.options.Journal != nil {
@@ -184,6 +189,38 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		handler.options.Replicator.ReplicateCommand(r.Context(), handler.trie, request, response)
 	}
 	writeJSON(w, response)
+}
+
+func (handler *MonitoringHandler) rejectNonLeaderWrite(request CacheCommandRequest) (CacheCommandResponse, bool) {
+	if !handler.options.EnforceLeaderWrites || !commandRequiresLeader(request) {
+		return CacheCommandResponse{}, false
+	}
+	if handler.options.Election == nil {
+		return commandError("election store is not configured"), true
+	}
+	route, ok := handler.options.Election.LeaderForKey(strings.TrimSpace(request.Key))
+	if !ok {
+		return commandError("topology cannot route key"), true
+	}
+	if !route.Leader.Available || route.Leader.Leader == "" {
+		return commandError("no elected leader for key"), true
+	}
+	if route.Leader.Leader != strings.TrimSpace(handler.options.NodeName) {
+		return commandError("local node is not elected leader for key; leader is " + route.Leader.Leader), true
+	}
+	return CacheCommandResponse{}, false
+}
+
+func commandRequiresLeader(request CacheCommandRequest) bool {
+	if !commandShouldJournal(request) {
+		return false
+	}
+	switch normalizedCommand(request.Command) {
+	case "INTERNALSET", "INTERNALDEL":
+		return false
+	default:
+		return true
+	}
 }
 
 func (handler *MonitoringHandler) handleSnapshot(w http.ResponseWriter, r *http.Request) {
