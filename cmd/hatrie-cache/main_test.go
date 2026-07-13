@@ -19,7 +19,10 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	hatriecache "hatrie_cache"
+	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
 func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
@@ -270,6 +273,38 @@ func TestRunDoesNotStartMonitoringWhenGRPCBindFails(t *testing.T) {
 	}
 }
 
+func TestRunStartsHTTPAndGRPCAndStopsOnContextCancel(t *testing.T) {
+	monitoringAddr := freeTCPAddr(t)
+	grpcAddr := freeTCPAddr(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, []string{
+			"-monitoring-server",
+			"-monitoring-addr", monitoringAddr,
+			"-monitoring-web-dir", "",
+			"-grpc-addr", grpcAddr,
+		}, &bytes.Buffer{}, &bytes.Buffer{})
+	}()
+
+	waitForHTTPHealth(t, "http://"+monitoringAddr+"/api/health")
+	waitForGRPCHealth(t, grpcAddr)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run() after cancel error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run() did not return after context cancellation")
+	}
+	waitForAddrReusable(t, monitoringAddr)
+	waitForAddrReusable(t, grpcAddr)
+}
+
 func TestReportServerErrorDoesNotBlockWhenChannelIsFull(t *testing.T) {
 	errCh := make(chan error, 1)
 	errCh <- errors.New("first")
@@ -298,6 +333,65 @@ func freeTCPAddr(t *testing.T) string {
 		t.Fatalf("free TCP listener Close() error = %v", err)
 	}
 	return addr
+}
+
+func waitForHTTPHealth(t *testing.T, url string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("HTTP health endpoint %s did not become ready", url)
+}
+
+func waitForGRPCHealth(t *testing.T, addr string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		conn, err := grpc.DialContext(ctx, addr,
+			grpc.WithBlock(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		cancel()
+		if err == nil {
+			client := hatriecachev1.NewCacheServiceClient(conn)
+			callCtx, callCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			_, callErr := client.Health(callCtx, &hatriecachev1.HealthRequest{})
+			callCancel()
+			if closeErr := conn.Close(); closeErr != nil {
+				t.Fatalf("gRPC connection Close() error = %v", closeErr)
+			}
+			if callErr == nil {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("gRPC health endpoint %s did not become ready", addr)
+}
+
+func waitForAddrReusable(t *testing.T, addr string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
+			if err := listener.Close(); err != nil {
+				t.Fatalf("listener Close() error = %v", err)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("address %s was not released", addr)
 }
 
 func TestLoadSnapshotIfConfiguredIgnoresMissingSnapshot(t *testing.T) {
