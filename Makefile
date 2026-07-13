@@ -2,11 +2,12 @@ MONITORING_ADDR ?= 127.0.0.1:8080
 MONITORING_WEB_DIR ?= svelte-mpa/dist
 MONITORING_TLS_CERT ?=
 MONITORING_TLS_KEY ?=
+GRPC_ADDR ?=
 SNAPSHOT_PATH ?=
 SNAPSHOT_INTERVAL ?= 0
 JOURNAL_PATH ?=
 
-.PHONY: test verify verify-go verify-c verify-frontend bench run cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-c verify-frontend bench run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -27,11 +28,14 @@ bench:
 run:
 	@CMD='$(CMD)' ./scripts/run.sh
 
+generate-proto:
+	./scripts/generate-proto.sh
+
 cli:
 	./scripts/cli.sh $(ARGS)
 
 monitoring-server:
-	MONITORING_ADDR='$(MONITORING_ADDR)' MONITORING_WEB_DIR='$(MONITORING_WEB_DIR)' MONITORING_TLS_CERT='$(MONITORING_TLS_CERT)' MONITORING_TLS_KEY='$(MONITORING_TLS_KEY)' SNAPSHOT_PATH='$(SNAPSHOT_PATH)' SNAPSHOT_INTERVAL='$(SNAPSHOT_INTERVAL)' JOURNAL_PATH='$(JOURNAL_PATH)' ./scripts/monitoring-server.sh
+	MONITORING_ADDR='$(MONITORING_ADDR)' MONITORING_WEB_DIR='$(MONITORING_WEB_DIR)' MONITORING_TLS_CERT='$(MONITORING_TLS_CERT)' MONITORING_TLS_KEY='$(MONITORING_TLS_KEY)' GRPC_ADDR='$(GRPC_ADDR)' SNAPSHOT_PATH='$(SNAPSHOT_PATH)' SNAPSHOT_INTERVAL='$(SNAPSHOT_INTERVAL)' JOURNAL_PATH='$(JOURNAL_PATH)' ./scripts/monitoring-server.sh
 
 frontend-install:
 	./scripts/frontend.sh install

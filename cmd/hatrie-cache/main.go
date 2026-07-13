@@ -7,12 +7,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
 	hatriecache "hatrie_cache"
 )
 
@@ -24,6 +26,7 @@ type config struct {
 	monitoringTLSCert string
 	monitoringTLSKey  string
 	monitoringWebDir  string
+	grpcAddr          string
 	snapshotPath      string
 	snapshotInterval  time.Duration
 	journalPath       string
@@ -97,6 +100,17 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}()
 	fmt.Fprintf(stdout, "monitoring server listening on %s\n", monitoringURL(cfg))
 
+	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath))
+	if err != nil {
+		return err
+	}
+	if grpcServer != nil {
+		go func() {
+			errCh <- grpcServer.Serve(grpcListener)
+		}()
+		fmt.Fprintf(stdout, "grpc server listening on %s\n", cfg.grpcAddr)
+	}
+
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
@@ -104,9 +118,12 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
+		stopGRPCServer(grpcServer)
 		return nil
 	case err := <-errCh:
-		if errors.Is(err, http.ErrServerClosed) {
+		_ = server.Close()
+		stopGRPCServer(grpcServer)
+		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, grpc.ErrServerStopped) {
 			return nil
 		}
 		return err
@@ -125,6 +142,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
+	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional JSON snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
 	flags.StringVar(&cfg.journalPath, "journal-path", "", "optional command journal path to replay on startup and append mutating commands")
@@ -184,6 +202,39 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error) (*grpc.Server, net.Listener, error) {
+	if cfg.grpcAddr == "" {
+		return nil, nil, nil
+	}
+	listener, err := net.Listen("tcp", cfg.grpcAddr)
+	if err != nil {
+		return nil, nil, err
+	}
+	server := grpc.NewServer()
+	hatriecache.RegisterCacheGRPCServer(server, hatriecache.NewCacheGRPCServer(trie, hatriecache.CacheGRPCOptions{
+		Snapshot: snapshot,
+		Journal:  journal,
+	}))
+	return server, listener, nil
+}
+
+func stopGRPCServer(server *grpc.Server) {
+	if server == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		server.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(serverShutdownTimeout):
+		server.Stop()
+		<-done
+	}
 }
 
 func openJournalIfConfigured(path string) (*hatriecache.CommandJournal, error) {

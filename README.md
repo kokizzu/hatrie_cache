@@ -32,6 +32,13 @@ Run one-off commands through the Makefile/script wrapper:
 make run CMD='go env GOMOD'
 ```
 
+Regenerate native gRPC/protobuf stubs after editing
+`proto/hatriecache/v1/cache.proto`:
+
+```
+make generate-proto
+```
+
 The monitoring web/API server is opt-in. It does not run unless the
 `-monitoring-server` flag is set:
 
@@ -45,6 +52,13 @@ with HTTP/2 ALPN enabled:
 
 ```
 make monitoring-server MONITORING_ADDR=127.0.0.1:8443 MONITORING_TLS_CERT=cert.pem MONITORING_TLS_KEY=key.pem
+```
+
+Set `GRPC_ADDR` to expose the native protobuf API from
+`proto/hatriecache/v1/cache.proto`:
+
+```
+make monitoring-server GRPC_ADDR=127.0.0.1:9090
 ```
 
 Set `SNAPSHOT_PATH` to load a JSON snapshot at startup and save it on shutdown.
@@ -113,6 +127,10 @@ Use `SaveSnapshot` and `LoadSnapshot` for portable JSON data snapshots. Snapshot
 loads skip expired entries and re-apply the normal disk spill threshold for large
 byte values.
 
+Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
+service in another Go process, or use the generated client in
+`internal/gen/hatriecache/v1`.
+
 The bundled C HAT-trie tests can be compiled directly with GCC when autotools
 build files have not been generated.
 
@@ -124,7 +142,7 @@ build files have not been generated.
 - [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
 - [x] create a web UI for management and monitoring (frontend: Svelte MPA)
 - [x] create backend service using HTTP/2 JSON APIs so it can be accessed from another language
-- [ ] add native gRPC protobuf APIs for strongly typed client generation
+- [x] add native gRPC protobuf APIs for strongly typed client generation
 - [x] create a client CLI for monitoring stats, key listing, and running commands
 - [x] add client CLI support for cache command management:
 ```		

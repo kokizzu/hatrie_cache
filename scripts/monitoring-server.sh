@@ -5,6 +5,7 @@ addr=${MONITORING_ADDR:-127.0.0.1:8080}
 web_dir=${MONITORING_WEB_DIR:-svelte-mpa/dist}
 tls_cert=${MONITORING_TLS_CERT:-}
 tls_key=${MONITORING_TLS_KEY:-}
+grpc_addr=${GRPC_ADDR:-}
 snapshot_path=${SNAPSHOT_PATH:-}
 snapshot_interval=${SNAPSHOT_INTERVAL:-0}
 journal_path=${JOURNAL_PATH:-}
@@ -15,6 +16,7 @@ exec go run ./cmd/hatrie-cache \
 	-monitoring-web-dir "$web_dir" \
 	-monitoring-tls-cert "$tls_cert" \
 	-monitoring-tls-key "$tls_key" \
+	-grpc-addr "$grpc_addr" \
 	-snapshot-path "$snapshot_path" \
 	-snapshot-interval "$snapshot_interval" \
 	-journal-path "$journal_path"

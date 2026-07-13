@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package hatriecache.v1;
+
+option go_package = "hatrie_cache/internal/gen/hatriecache/v1;hatriecachev1";
+
+service CacheService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc Stats(StatsRequest) returns (StatsResponse);
+  rpc Entries(EntriesRequest) returns (EntriesResponse);
+  rpc Command(CommandRequest) returns (CommandResponse);
+  rpc Snapshot(SnapshotRequest) returns (CommandResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string node = 2;
+  int64 uptime_seconds = 3;
+  uint64 memory_bytes = 4;
+  uint64 disk_spill_bytes = 5;
+  int32 cleaners_running = 6;
+}
+
+message StatsRequest {}
+
+message StatsResponse {
+  uint64 reads = 1;
+  uint64 hits = 2;
+  uint64 misses = 3;
+  uint64 writes = 4;
+  uint64 deletes = 5;
+  uint64 expirations = 6;
+  int64 last_hit_unix_nano = 7;
+  int64 last_miss_unix_nano = 8;
+  int64 last_write_unix_nano = 9;
+  double hit_rate = 10;
+  double cumulative_hit_rate = 11;
+}
+
+message EntriesRequest {
+  string prefix = 1;
+}
+
+message Entry {
+  string key = 1;
+  string type = 2;
+  optional int64 ttl_millis = 3;
+  bool on_disk = 4;
+  int64 size_bytes = 5;
+  string value_preview = 6;
+}
+
+message EntriesResponse {
+  repeated Entry entries = 1;
+}
+
+message CommandRequest {
+  string command = 1;
+  string key = 2;
+  string value = 3;
+  repeated string values = 4;
+  string subkey = 5;
+  map<string, string> pairs = 6;
+  optional int64 ttl_seconds = 7;
+  optional int64 unix_seconds = 8;
+}
+
+message CommandResponse {
+  bool ok = 1;
+  string message = 2;
+  string value = 3;
+}
+
+message SnapshotRequest {}

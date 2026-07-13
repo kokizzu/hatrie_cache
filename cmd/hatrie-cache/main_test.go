@@ -86,6 +86,19 @@ func TestParseConfigMonitoringTLSFlags(t *testing.T) {
 	}
 }
 
+func TestParseConfigGRPCFlag(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-grpc-addr", "127.0.0.1:9091",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.grpcAddr != "127.0.0.1:9091" {
+		t.Fatalf("grpcAddr = %q, want explicit address", cfg.grpcAddr)
+	}
+}
+
 func TestParseConfigRejectsPartialMonitoringTLSConfig(t *testing.T) {
 	if _, err := parseConfig([]string{"-monitoring-tls-cert", "/tmp/cert.pem"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("parseConfig(partial TLS) error = nil, want error")
