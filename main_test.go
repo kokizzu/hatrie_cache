@@ -78,6 +78,12 @@ func TestKeysUseFullLengthAndSupportNULBytes(t *testing.T) {
 	if got := ht.GetString("nul\x00key"); got != "zero" {
 		t.Fatalf("NUL-containing key = %q, want zero", got)
 	}
+	if !ht.Delete("nul\x00key") {
+		t.Fatal("Delete(NUL-containing key) = false, want true")
+	}
+	if got := ht.GetString("nul\x00key"); got != "" {
+		t.Fatalf("GetString(NUL-containing key after delete) = %q, want empty", got)
+	}
 }
 
 func TestStringOperationsReuseStorage(t *testing.T) {

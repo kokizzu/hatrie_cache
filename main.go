@@ -1729,18 +1729,27 @@ func (stats *KeyStats) updateRates() {
 
 func (ht *HatTrie) upsertLocation(key string) *C.value_t {
 	ht.ensureOpen()
-	cstr := C.CString(key)
-	defer C.free(unsafe.Pointer(cstr))
 
-	return C.hattrie_get(ht.root, cstr, C.size_t(len(key)))
+	cstr, keyLen := cKey(key)
+	value := C.hattrie_get(ht.root, cstr, keyLen)
+	runtime.KeepAlive(key)
+	return value
 }
 
 func (ht *HatTrie) tryLocation(key string) *C.value_t {
 	ht.ensureOpen()
-	cstr := C.CString(key)
-	defer C.free(unsafe.Pointer(cstr))
 
-	return C.hattrie_tryget(ht.root, cstr, C.size_t(len(key)))
+	cstr, keyLen := cKey(key)
+	value := C.hattrie_tryget(ht.root, cstr, keyLen)
+	runtime.KeepAlive(key)
+	return value
+}
+
+func cKey(key string) (*C.char, C.size_t) {
+	if key == "" {
+		return nil, 0
+	}
+	return (*C.char)(unsafe.Pointer(unsafe.StringData(key))), C.size_t(len(key))
 }
 
 func (ht *HatTrie) returnStorage(hval HatValue) {
@@ -1880,10 +1889,11 @@ func (ht *HatTrie) deleteLocked(key string) bool {
 }
 
 func (ht *HatTrie) deleteKnownLocked(key string, hval HatValue) bool {
-	cstr := C.CString(key)
-	defer C.free(unsafe.Pointer(cstr))
+	cstr, keyLen := cKey(key)
 
-	if C.hattrie_del(ht.root, cstr, C.size_t(len(key))) != 0 {
+	deleted := C.hattrie_del(ht.root, cstr, keyLen)
+	runtime.KeepAlive(key)
+	if deleted != 0 {
 		return false
 	}
 	ht.clearExpirationLocked(key)
@@ -1935,9 +1945,9 @@ func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
 	if prefix == "" {
 		iter = C.hattrie_iter_begin(ht.root, C.bool(sorted))
 	} else {
-		cprefix := C.CString(prefix)
-		defer C.free(unsafe.Pointer(cprefix))
-		iter = C.hattrie_iter_with_prefix(ht.root, C.bool(sorted), cprefix, C.size_t(len(prefix)))
+		cprefix, prefixLen := cKey(prefix)
+		iter = C.hattrie_iter_with_prefix(ht.root, C.bool(sorted), cprefix, prefixLen)
+		runtime.KeepAlive(prefix)
 	}
 
 	type expiredEntry struct {
