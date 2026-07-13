@@ -8,11 +8,12 @@ deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with
 stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
 O(1), and memory usage low without per-item node allocations.
-Typed backing pools reuse deleted indexes through a compact bitset-backed stack,
-avoiding per-index hash-map overhead while keeping reuse checks and allocation
-fast. TTL expiration uses a min-heap schedule plus an authoritative key map, so
-vacuuming pops due keys instead of scanning every TTL entry and compacts stale
-schedule entries under churn.
+Typed backing pools reuse deleted indexes through a compact bitset-backed stack
+and trim freed tail slots, avoiding per-index hash-map overhead while keeping
+reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
+uses a min-heap schedule plus an authoritative key map, so vacuuming pops due
+keys instead of scanning every TTL entry and compacts stale schedule entries
+under churn.
 
 ## Development
 
@@ -252,6 +253,7 @@ build files have not been generated.
 - [x] use a min-heap expiration schedule so TTL vacuuming does not scan every TTL key
 - [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
 - [x] replace reusable-index hash maps with a compact bitset-backed stack for typed backing pools
+- [x] trim freed backing-pool tail slots so delete-heavy workloads release references
 - [x] create a web UI for management and monitoring (frontend: Svelte MPA)
 - [x] create backend service using HTTP/2 JSON APIs so it can be accessed from another language
 - [x] add native gRPC protobuf APIs for strongly typed client generation

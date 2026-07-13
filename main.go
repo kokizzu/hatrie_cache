@@ -282,6 +282,20 @@ func reusableIndexBit(idx int32) (int, uint64) {
 	return value / 64, uint64(1) << uint(value%64)
 }
 
+func trimReusableTail[T any](values []T, reusables *reusableIndexes) []T {
+	var zero T
+	for len(values) > 0 {
+		idx := int32(len(values) - 1)
+		if !reusables.Has(idx) {
+			return values
+		}
+		values[len(values)-1] = zero
+		reusables.Use(idx)
+		values = values[:len(values)-1]
+	}
+	return values
+}
+
 const (
 	NoTTL              time.Duration = -1
 	DiskBytesThreshold               = 64 * 1024
@@ -568,6 +582,7 @@ func (bs *BytesStorage) Del(idx int32) {
 	}
 	bs.array[idx] = nil
 	bs.reusables.Mark(idx)
+	bs.array = trimReusableTail(bs.array, &bs.reusables)
 }
 
 // DiskStorage stores large byte values outside the Go heap.
@@ -634,6 +649,7 @@ func (ds *DiskStorage) Del(idx int32) {
 	}
 	_ = os.Remove(ds.paths[idx])
 	ds.reusables.Mark(idx)
+	ds.paths = trimReusableTail(ds.paths, &ds.reusables)
 }
 
 func (ds *DiskStorage) Destroy() {
@@ -692,6 +708,7 @@ func (ms *MapStorage) Del(idx int32) {
 	}
 	ms.array[idx] = nil
 	ms.reusables.Mark(idx)
+	ms.array = trimReusableTail(ms.array, &ms.reusables)
 }
 
 // SliceStorage stores slice values outside the trie.
@@ -733,6 +750,7 @@ func (ss *SliceStorage) Del(idx int32) {
 	}
 	ss.array[idx] = deque{}
 	ss.reusables.Mark(idx)
+	ss.array = trimReusableTail(ss.array, &ss.reusables)
 }
 
 type setData struct {
@@ -846,6 +864,7 @@ func (ss *SetStorage) Del(idx int32) {
 	}
 	ss.array[idx] = setData{}
 	ss.reusables.Mark(idx)
+	ss.array = trimReusableTail(ss.array, &ss.reusables)
 }
 
 type LevelDBReference struct {
@@ -891,6 +910,7 @@ func (rs *LevelDBReferenceStorage) Del(idx int32) {
 	}
 	rs.array[idx] = LevelDBReference{}
 	rs.reusables.Mark(idx)
+	rs.array = trimReusableTail(rs.array, &rs.reusables)
 }
 
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing

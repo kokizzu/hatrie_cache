@@ -258,6 +258,7 @@ func (store *PriorityQueueStorage) Del(idx int32) {
 	}
 	store.array[idx] = priorityQueueData{}
 	store.reusables.Mark(idx)
+	store.array = trimReusableTail(store.array, &store.reusables)
 }
 
 func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {

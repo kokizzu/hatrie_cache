@@ -20,6 +20,22 @@ func newTestTrie(t *testing.T) *HatTrie {
 	return ht
 }
 
+func rawIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
+}
+
+func diskIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.disks.paths) || ht.disks.reusables.Has(idx)
+}
+
+func mapIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.maps.array) || ht.maps.reusables.Has(idx)
+}
+
+func sliceIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.slices.array) || ht.slices.reusables.Has(idx)
+}
+
 func TestHatValueRoundTripPreservesNegativeCountersAndFlags(t *testing.T) {
 	in := HatValue{Index: -42, Flags: DATAVALUE_TYPE_COUNTER | (1 << DATAVALUE_TTL_BIT_SHIFT)}
 	var out HatValue
@@ -133,8 +149,8 @@ func TestLargeBytesStoredOnDiskAndCleaned(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("large bytes file still exists after delete: %v", err)
 	}
-	if !ht.disks.reusables.Has(hval.Index) {
-		t.Fatalf("deleted disk index %d was not reusable", hval.Index)
+	if !diskIndexReleased(ht, hval.Index) {
+		t.Fatalf("deleted disk index %d was not released", hval.Index)
 	}
 }
 
@@ -154,8 +170,8 @@ func TestBytesDiskThresholdAndReplacement(t *testing.T) {
 	if !diskValue.OnDisk() {
 		t.Fatalf("large bytes were not stored on disk: %+v", diskValue)
 	}
-	if !ht.raws.reusables.Has(rawIdx) {
-		t.Fatalf("replaced raw index %d was not reusable", rawIdx)
+	if !rawIndexReleased(ht, rawIdx) {
+		t.Fatalf("replaced raw index %d was not released", rawIdx)
 	}
 	diskPath := ht.disks.paths[diskValue.Index]
 
@@ -632,8 +648,8 @@ func TestDeleteReleasesBackingStorageForReuse(t *testing.T) {
 	if got := ht.Get("old"); !got.Empty() {
 		t.Fatalf("deleted key still exists: %+v", got)
 	}
-	if !ht.raws.reusables.Has(idx) {
-		t.Fatalf("deleted raw index %d was not marked reusable", idx)
+	if !rawIndexReleased(ht, idx) {
+		t.Fatalf("deleted raw index %d was not released", idx)
 	}
 
 	ht.UpsertString("new", "value")
@@ -675,6 +691,102 @@ func TestReusableIndexesDeduplicateAndSkipStaleEntries(t *testing.T) {
 	}
 }
 
+func TestStoragePoolsTrimReusableTailSlots(t *testing.T) {
+	raws := CreateBytesStorage()
+	raws.Add([]byte("zero"))
+	rawMiddle := raws.Add([]byte("middle"))
+	rawTail := raws.Add([]byte("tail"))
+	raws.Del(rawMiddle)
+	if got := len(raws.array); got != 3 {
+		t.Fatalf("raw len after middle delete = %d, want 3", got)
+	}
+	if got := raws.Add([]byte("reuse-middle")); got != rawMiddle {
+		t.Fatalf("raw Add() after middle delete = %d, want reused index %d", got, rawMiddle)
+	}
+	raws.Del(rawMiddle)
+	raws.Del(rawTail)
+	if got := len(raws.array); got != 1 {
+		t.Fatalf("raw len after tail trim = %d, want 1", got)
+	}
+	if got := raws.Add([]byte("next")); got != 1 {
+		t.Fatalf("raw Add() after trim = %d, want appended index 1", got)
+	}
+
+	disks, err := CreateDiskStorage(t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("CreateDiskStorage() error = %v", err)
+	}
+	diskMiddle, err := disks.Add([]byte("middle"))
+	if err != nil {
+		t.Fatalf("disk Add(middle) error = %v", err)
+	}
+	diskTail, err := disks.Add([]byte("tail"))
+	if err != nil {
+		t.Fatalf("disk Add(tail) error = %v", err)
+	}
+	disks.Del(diskMiddle)
+	if got := len(disks.paths); got != 2 {
+		t.Fatalf("disk len after middle delete = %d, want 2", got)
+	}
+	disks.Del(diskTail)
+	if got := len(disks.paths); got != 0 {
+		t.Fatalf("disk len after tail trim = %d, want 0", got)
+	}
+	if got, err := disks.Add([]byte("next")); err != nil || got != 0 {
+		t.Fatalf("disk Add() after trim = %d/%v, want 0/nil", got, err)
+	}
+
+	maps := CreateMapStorage()
+	maps.Add(Map{"zero": true})
+	mapMiddle := maps.Add(Map{"middle": true})
+	mapTail := maps.Add(Map{"tail": true})
+	maps.Del(mapMiddle)
+	maps.Del(mapTail)
+	if got := len(maps.array); got != 1 {
+		t.Fatalf("map len after tail trim = %d, want 1", got)
+	}
+
+	slices := CreateSliceStorage()
+	slices.Add(Slice{"zero"})
+	sliceMiddle := slices.Add(Slice{"middle"})
+	sliceTail := slices.Add(Slice{"tail"})
+	slices.Del(sliceMiddle)
+	slices.Del(sliceTail)
+	if got := len(slices.array); got != 1 {
+		t.Fatalf("slice len after tail trim = %d, want 1", got)
+	}
+
+	sets := CreateSetStorage()
+	sets.Add(Set{"zero"})
+	setMiddle := sets.Add(Set{"middle"})
+	setTail := sets.Add(Set{"tail"})
+	sets.Del(setMiddle)
+	sets.Del(setTail)
+	if got := len(sets.array); got != 1 {
+		t.Fatalf("set len after tail trim = %d, want 1", got)
+	}
+
+	refs := CreateLevelDBReferenceStorage()
+	refs.Add(LevelDBReference{Key: "zero"})
+	refMiddle := refs.Add(LevelDBReference{Key: "middle"})
+	refTail := refs.Add(LevelDBReference{Key: "tail"})
+	refs.Del(refMiddle)
+	refs.Del(refTail)
+	if got := len(refs.array); got != 1 {
+		t.Fatalf("leveldb ref len after tail trim = %d, want 1", got)
+	}
+
+	queues := CreatePriorityQueueStorage()
+	queues.Add(PriorityQueue{{Priority: 1, Value: "zero"}})
+	queueMiddle := queues.Add(PriorityQueue{{Priority: 1, Value: "middle"}})
+	queueTail := queues.Add(PriorityQueue{{Priority: 1, Value: "tail"}})
+	queues.Del(queueMiddle)
+	queues.Del(queueTail)
+	if got := len(queues.array); got != 1 {
+		t.Fatalf("priority queue len after tail trim = %d, want 1", got)
+	}
+}
+
 func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -685,8 +797,8 @@ func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
 	if hval := ht.Get("key"); !hval.IsSlice() {
 		t.Fatalf("replacement type = %+v, want slice", hval)
 	}
-	if !ht.maps.reusables.Has(mapIdx) {
-		t.Fatalf("replaced map index %d was not marked reusable", mapIdx)
+	if !mapIndexReleased(ht, mapIdx) {
+		t.Fatalf("replaced map index %d was not released", mapIdx)
 	}
 
 	sliceIdx := ht.Get("key").Index
@@ -694,8 +806,8 @@ func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
 	if hval := ht.Get("key"); !hval.IsPriorityQueue() {
 		t.Fatalf("replacement type = %+v, want priority queue", hval)
 	}
-	if !ht.slices.reusables.Has(sliceIdx) {
-		t.Fatalf("replaced slice index %d was not marked reusable", sliceIdx)
+	if !sliceIndexReleased(ht, sliceIdx) {
+		t.Fatalf("replaced slice index %d was not released", sliceIdx)
 	}
 }
 
@@ -726,8 +838,8 @@ func TestTTLExpiresOnReadAndReusesStorage(t *testing.T) {
 	if got := ht.Size(); got != 0 {
 		t.Fatalf("size after read-time expiration = %d, want 0", got)
 	}
-	if !ht.raws.reusables.Has(idx) {
-		t.Fatalf("expired raw index %d was not reusable", idx)
+	if !rawIndexReleased(ht, idx) {
+		t.Fatalf("expired raw index %d was not released", idx)
 	}
 
 	ht.UpsertString("new", "value")
@@ -945,8 +1057,8 @@ func TestIterationCleansExpiredKeys(t *testing.T) {
 	if got := ht.Get("expired"); !got.Empty() {
 		t.Fatalf("expired key still exists after iteration: %+v", got)
 	}
-	if !ht.raws.reusables.Has(expiredIdx) {
-		t.Fatalf("expired raw index %d was not reusable", expiredIdx)
+	if !rawIndexReleased(ht, expiredIdx) {
+		t.Fatalf("expired raw index %d was not released", expiredIdx)
 	}
 }
 
@@ -985,11 +1097,11 @@ func TestVacuumExpiredRemovesOnlyExpiredKeys(t *testing.T) {
 	if got := ht.Get("expired:map"); !got.Empty() {
 		t.Fatalf("expired map still exists: %+v", got)
 	}
-	if !ht.raws.reusables.Has(expiredRawIdx) {
-		t.Fatalf("expired raw index %d was not reusable", expiredRawIdx)
+	if !rawIndexReleased(ht, expiredRawIdx) {
+		t.Fatalf("expired raw index %d was not released", expiredRawIdx)
 	}
-	if !ht.maps.reusables.Has(expiredMapIdx) {
-		t.Fatalf("expired map index %d was not reusable", expiredMapIdx)
+	if !mapIndexReleased(ht, expiredMapIdx) {
+		t.Fatalf("expired map index %d was not released", expiredMapIdx)
 	}
 	if got := ht.VacuumExpired(); got != 0 {
 		t.Fatalf("second VacuumExpired() = %d, want 0", got)
