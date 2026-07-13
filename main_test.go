@@ -83,6 +83,34 @@ func TestHatValueRoundTripPreservesNegativeCountersAndFlags(t *testing.T) {
 	}
 }
 
+func TestHatValueStringReportsKnownTypes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value HatValue
+		want  string
+	}{
+		{name: "null", value: HatValue{}, want: "null hat value"},
+		{name: "counter", value: HatValue{Index: -7, Flags: DATAVALUE_TYPE_COUNTER}, want: "int32 counter: -7"},
+		{name: "bytes", value: HatValue{Index: 1, Flags: DATAVALUE_TYPE_RAW_BYTES}, want: "raw bytes at index: 1"},
+		{name: "string", value: HatValue{Index: 2, Flags: DATAVALUE_TYPE_RAW_STRING}, want: "string at index: 2"},
+		{name: "map", value: HatValue{Index: 3, Flags: DATAVALUE_TYPE_MAP}, want: "map at index: 3"},
+		{name: "slice", value: HatValue{Index: 4, Flags: DATAVALUE_TYPE_SLICE}, want: "slice at index: 4"},
+		{name: "leveldb reference", value: HatValue{Index: 5, Flags: DATAVALUE_TYPE_LEVELDB_REF}, want: "leveldb reference at index: 5"},
+		{name: "set", value: HatValue{Index: 6, Flags: DATAVALUE_TYPE_SET}, want: "set at index: 6"},
+		{name: "priority queue", value: HatValue{Index: 7, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}, want: "priority queue at index: 7"},
+		{name: "bloom filter", value: HatValue{Index: 8, Flags: DATAVALUE_TYPE_BLOOM_FILTER}, want: "bloom filter at index: 8"},
+		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.value.String(); got != tt.want {
+				t.Fatalf("HatValue.String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCounterOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -625,6 +653,39 @@ func TestKeyStatsTrackExistingKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
 	}
 }
 
+func TestRestoreKeyStatsUpdatesRatesAndClearsStats(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+
+	restored := KeyStats{
+		Reads:  4,
+		Hits:   3,
+		Misses: 1,
+		Writes: 2,
+	}
+	ht.restoreKeyStats("key", &restored)
+	got, ok := ht.StatsForKey("key")
+	if !ok {
+		t.Fatal("StatsForKey(restored key) = false, want true")
+	}
+	if got.Reads != 4 || got.Hits != 3 || got.Misses != 1 || got.Writes != 2 {
+		t.Fatalf("restored key stats = %#v, want restored counters", got)
+	}
+	if got.HitRate != 0.75 || got.CumulativeHitRate != 0.75 {
+		t.Fatalf("restored hit rates = %f/%f, want 0.75/0.75", got.HitRate, got.CumulativeHitRate)
+	}
+
+	ht.restoreKeyStats("key", nil)
+	if stats, ok := ht.StatsForKey("key"); ok {
+		t.Fatalf("StatsForKey(after clear) = %#v, true; want false", stats)
+	}
+
+	ht.restoreKeyStats("missing", &restored)
+	if stats, ok := ht.StatsForKey("missing"); ok {
+		t.Fatalf("StatsForKey(missing restored key) = %#v, true; want false", stats)
+	}
+}
+
 func TestKeyStatsTrackEmptyKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(975, 0)
@@ -822,6 +883,26 @@ func TestSliceOperationsDeepCopyNestedValues(t *testing.T) {
 	values[0].(Map)["field"] = "get"
 	if again := ht.GetSlice("slice"); again[0].(Map)["field"] != "value" {
 		t.Fatalf("GetSlice exposed nested value: %#v", again)
+	}
+}
+
+func TestUpsertSliceReplacesExistingSliceAndClearsTTL(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertSlice("slice", Slice{"old", "values"})
+	idx := ht.Get("slice").Index
+	if !ht.Expire("slice", time.Minute) {
+		t.Fatal("Expire(slice) = false, want true")
+	}
+
+	ht.UpsertSlice("slice", Slice{"new"})
+	if got := ht.Get("slice"); !got.IsSlice() || got.Index != idx || got.HasTtl() {
+		t.Fatalf("slice value after UpsertSlice = %+v, want same slice index without TTL", got)
+	}
+	if got := ht.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"new"}) {
+		t.Fatalf("GetSlice(after UpsertSlice) = %#v, want new value", got)
+	}
+	if ttl := ht.TTL("slice"); ttl != NoTTL {
+		t.Fatalf("TTL(slice) = %s, want NoTTL", ttl)
 	}
 }
 
@@ -1227,6 +1308,20 @@ func TestDeleteReleasesBackingStorageForReuse(t *testing.T) {
 	ht.UpsertString("new", "value")
 	if got := ht.Get("new").Index; got != idx {
 		t.Fatalf("raw storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestDelAliasDeletesAndReleasesBackingStorage(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertBytes("key", []byte("value"))
+	idx := ht.Get("key").Index
+	ht.Del("key")
+	if got := ht.Get("key"); !got.Empty() {
+		t.Fatalf("Del(key) left value present: %+v", got)
+	}
+	if !rawIndexReleased(ht, idx) {
+		t.Fatalf("Del(key) did not release raw index %d", idx)
 	}
 }
 
