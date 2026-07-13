@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"net/http"
@@ -236,6 +237,23 @@ func TestRunDoesNotStartServerByDefault(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "monitoring server disabled") {
 		t.Fatalf("stdout = %q, want disabled message", stdout.String())
+	}
+}
+
+func TestReportServerErrorDoesNotBlockWhenChannelIsFull(t *testing.T) {
+	errCh := make(chan error, 1)
+	errCh <- errors.New("first")
+
+	done := make(chan struct{})
+	go func() {
+		reportServerError(errCh, errors.New("second"))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("reportServerError blocked on a full channel")
 	}
 }
 
