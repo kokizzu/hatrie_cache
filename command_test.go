@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -345,6 +346,62 @@ func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "0"}); got.OK {
 		t.Fatalf("INCRCMS zero increment response = %#v, want error", got)
+	}
+}
+
+func TestExecuteCommandHyperLogLogOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEHLL", Key: "card", Value: "10"}); !got.OK {
+		t.Fatalf("CREATEHLL response = %#v, want ok", got)
+	}
+	addResp := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDHLL", Key: "card", Values: Slice{"alpha", "beta", "alpha"}})
+	if !addResp.OK {
+		t.Fatalf("ADDHLL response = %#v, want ok", addResp)
+	}
+	addEstimate, err := strconv.ParseUint(addResp.Value, 10, 64)
+	if err != nil || addEstimate < 2 {
+		t.Fatalf("ADDHLL estimate = %q/%v, want at least 2", addResp.Value, err)
+	}
+	countResp := ht.ExecuteCommand(CacheCommandRequest{Command: "COUNTHLL", Key: "card"})
+	if !countResp.OK || countResp.Value != addResp.Value {
+		t.Fatalf("COUNTHLL response = %#v, want estimate %q", countResp, addResp.Value)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOHLL", Key: "card"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOHLL response = %#v, want JSON info", infoResp)
+	}
+	var info HyperLogLogInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFOHLL JSON error = %v", err)
+	}
+	if info.Precision != 10 || info.RegisterBytes != 1<<10 || info.Observations != 3 || info.Estimate != addEstimate {
+		t.Fatalf("INFOHLL = %#v, want populated HyperLogLog info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "card"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET hyperloglog response = %#v, want JSON info", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDHLL", Key: "auto", Value: "value"}); !got.OK || got.Value == "0" {
+		t.Fatalf("ADDHLL auto response = %#v, want non-zero estimate", got)
+	}
+	if !ht.Get("auto").IsHyperLogLog() {
+		t.Fatal("ADDHLL on missing key did not create a HyperLogLog")
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATEHLL",
+		Key:     "paired",
+		Pairs:   Map{"precision": json.Number("9")},
+	}); !got.OK {
+		t.Fatalf("CREATEHLL pairs response = %#v, want ok", got)
+	}
+	pairedInfo, ok := ht.HyperLogLogInfo("paired")
+	if !ok || pairedInfo.Precision != 9 {
+		t.Fatalf("paired HyperLogLogInfo = %#v/%v, want precision 9", pairedInfo, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEHLL", Key: "bad", Value: "3"}); got.OK {
+		t.Fatalf("CREATEHLL invalid response = %#v, want error", got)
 	}
 }
 

@@ -12,7 +12,7 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCMS'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCMS', 'COUNTHLL', 'INFOHLL'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
   $: needsSubkey = ['CREATECMS', 'INCRCMS'].includes(command);
@@ -69,6 +69,10 @@
           <option>INCRCMS</option>
           <option>ESTCMS</option>
           <option>INFOCMS</option>
+          <option>CREATEHLL</option>
+          <option>ADDHLL</option>
+          <option>COUNTHLL</option>
+          <option>INFOHLL</option>
         </select>
       </label>
 

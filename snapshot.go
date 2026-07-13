@@ -35,6 +35,7 @@ type snapshotEntry struct {
 	PriorityQueue  []priorityQueueItem     `json:"priority_queue"`
 	BloomFilter    *bloomFilterSnapshot    `json:"bloom_filter,omitempty"`
 	CountMinSketch *countMinSketchSnapshot `json:"count_min_sketch,omitempty"`
+	HyperLogLog    *hyperLogLogSnapshot    `json:"hyperloglog,omitempty"`
 	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
 	Stats          *KeyStats               `json:"stats,omitempty"`
 }
@@ -159,6 +160,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
 		snapshot := ht.countMinSketches.array[entry.Value.Index].Snapshot()
 		out.CountMinSketch = &snapshot
+	case DATAVALUE_TYPE_HYPERLOGLOG:
+		snapshot := ht.hyperLogLogs.array[entry.Value.Index].Snapshot()
+		out.HyperLogLog = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -197,6 +201,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: count-min sketch snapshot is required")
 		}
 		if err := validateCountMinSketchSnapshot(*entry.CountMinSketch); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "hyperloglog":
+		if entry.HyperLogLog == nil {
+			return snapshotOperation{}, errors.New("hatriecache: hyperloglog snapshot is required")
+		}
+		if err := validateHyperLogLogSnapshot(*entry.HyperLogLog); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -352,6 +364,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.countMinSketches.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}
+	case "hyperloglog":
+		data, err := newHyperLogLogDataFromSnapshot(*entry.HyperLogLog)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.hyperLogLogs.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_HYPERLOGLOG}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

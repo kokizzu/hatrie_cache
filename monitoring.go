@@ -439,6 +439,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		info := ht.countMinSketches.array[hval.Index].Info()
 		return int64(info.CounterBytes), strconv.FormatUint(info.Width, 10) + "x" + strconv.Itoa(int(info.Depth)) + " counters, " + strconv.FormatUint(info.TotalCount, 10) + " total"
+	case DATAVALUE_TYPE_HYPERLOGLOG:
+		if int(hval.Index) >= len(ht.hyperLogLogs.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.hyperLogLogs.array[hval.Index].Info()
+		return int64(info.RegisterBytes), strconv.Itoa(int(info.Precision)) + " precision, " + strconv.FormatUint(info.Estimate, 10) + " estimated"
 	default:
 		return 0, ""
 	}
@@ -466,6 +472,8 @@ func monitoringType(hval HatValue) string {
 		return "bloom_filter"
 	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
 		return "count_min_sketch"
+	case DATAVALUE_TYPE_HYPERLOGLOG:
+		return "hyperloglog"
 	default:
 		return "unknown"
 	}

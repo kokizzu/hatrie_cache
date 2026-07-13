@@ -386,6 +386,12 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 		}
 		_, err := commandCountMinSketchIncrement(request)
 		return err == nil
+	case "CREATEHLL", "RESERVEHLL", "HLLRESERVE":
+		_, err := commandHyperLogLogPrecision(request)
+		return err == nil
+	case "ADDHLL", "HLLADD":
+		_, ok := commandSliceValues(request)
+		return ok
 	default:
 		return false
 	}

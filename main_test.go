@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -42,6 +43,10 @@ func bloomFilterIndexReleased(ht *HatTrie, idx int32) bool {
 
 func countMinSketchIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.countMinSketches.array) || ht.countMinSketches.reusables.Has(idx)
+}
+
+func hyperLogLogIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.hyperLogLogs.array) || ht.hyperLogLogs.reusables.Has(idx)
 }
 
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
@@ -104,6 +109,7 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "priority queue", value: HatValue{Index: 7, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}, want: "priority queue at index: 7"},
 		{name: "bloom filter", value: HatValue{Index: 8, Flags: DATAVALUE_TYPE_BLOOM_FILTER}, want: "bloom filter at index: 8"},
 		{name: "count-min sketch", value: HatValue{Index: 9, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}, want: "count-min sketch at index: 9"},
+		{name: "hyperloglog", value: HatValue{Index: 10, Flags: DATAVALUE_TYPE_HYPERLOGLOG}, want: "hyperloglog at index: 10"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -1402,6 +1408,93 @@ func TestCountMinSketchStorageReleasedOnOverwrite(t *testing.T) {
 	}
 	if got := ht.Get("new").Index; got != idx {
 		t.Fatalf("Count-Min Sketch storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestHyperLogLogOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertHyperLogLog("card", 10); err != nil {
+		t.Fatalf("UpsertHyperLogLog() error = %v", err)
+	}
+	if hval := ht.Get("card"); !hval.IsHyperLogLog() {
+		t.Fatalf("UpsertHyperLogLog stored type %+v, want hyperloglog", hval)
+	}
+	if got := ht.AddHyperLogLog("card", "alpha", "beta", "alpha"); got < 2 {
+		t.Fatalf("AddHyperLogLog(alpha, beta, alpha) = %d, want at least 2", got)
+	}
+	if got, ok := ht.CountHyperLogLog("card"); !ok || got < 2 {
+		t.Fatalf("CountHyperLogLog(card) = %d/%v, want at least 2", got, ok)
+	}
+	info, ok := ht.HyperLogLogInfo("card")
+	if !ok {
+		t.Fatal("HyperLogLogInfo(card) = false, want true")
+	}
+	if info.Precision != 10 || info.RegisterCount != 1<<10 || info.RegisterBytes != 1<<10 || info.Observations != 3 || info.NonZeroRegisters < 2 || info.Estimate < 2 {
+		t.Fatalf("HyperLogLogInfo(card) = %#v, want populated compact registers", info)
+	}
+
+	if err := ht.UpsertHyperLogLog("card", 8); err != nil {
+		t.Fatalf("UpsertHyperLogLog(replace) error = %v", err)
+	}
+	if got, ok := ht.CountHyperLogLog("card"); !ok || got != 0 {
+		t.Fatalf("CountHyperLogLog(card after replace) = %d/%v, want 0 hit", got, ok)
+	}
+	if got := ht.AddHyperLogLog("auto", "value"); got < 1 {
+		t.Fatalf("AddHyperLogLog(auto) = %d, want at least 1", got)
+	}
+	if hval := ht.Get("auto"); !hval.IsHyperLogLog() {
+		t.Fatalf("AddHyperLogLog(auto) stored type %+v, want hyperloglog", hval)
+	}
+}
+
+func TestHyperLogLogRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	for _, precision := range []uint8{minHyperLogLogPrecision - 1, maxHyperLogLogPrecision + 1} {
+		if err := ht.UpsertHyperLogLog("bad", precision); err == nil {
+			t.Fatalf("UpsertHyperLogLog(%d) error = nil, want error", precision)
+		}
+		if got := ht.Get("bad"); !got.Empty() {
+			t.Fatalf("invalid HyperLogLog config stored value %+v", got)
+		}
+	}
+}
+
+func TestHyperLogLogSnapshotValidationRejectsInvalidRegisterRank(t *testing.T) {
+	hll, err := newHyperLogLogData(10)
+	if err != nil {
+		t.Fatalf("newHyperLogLogData() error = %v", err)
+	}
+	snapshot := hll.Snapshot()
+	raw, err := base64.StdEncoding.DecodeString(snapshot.Registers)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	raw[0] = hyperLogLogMaxRank(snapshot.Precision) + 1
+	snapshot.Registers = base64.StdEncoding.EncodeToString(raw)
+	if err := validateHyperLogLogSnapshot(snapshot); err == nil {
+		t.Fatal("validateHyperLogLogSnapshot(invalid rank) error = nil, want error")
+	}
+}
+
+func TestHyperLogLogStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertHyperLogLog("card", 10); err != nil {
+		t.Fatalf("UpsertHyperLogLog() error = %v", err)
+	}
+	idx := ht.Get("card").Index
+	ht.UpsertString("card", "value")
+	if !hyperLogLogIndexReleased(ht, idx) {
+		t.Fatalf("overwritten HyperLogLog index %d was not released", idx)
+	}
+
+	if err := ht.UpsertHyperLogLog("new", 10); err != nil {
+		t.Fatalf("UpsertHyperLogLog(new) error = %v", err)
+	}
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("HyperLogLog storage was not reused: got index %d, want %d", got, idx)
 	}
 }
 

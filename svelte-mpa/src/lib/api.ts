@@ -32,7 +32,8 @@ export type CacheEntry = {
     | 'set'
     | 'priority_queue'
     | 'bloom_filter'
-    | 'count_min_sketch';
+    | 'count_min_sketch'
+    | 'hyperloglog';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -137,6 +138,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 32768,
     value_preview: '2048x4 counters, 918240 total'
+  },
+  {
+    key: 'card:visitors',
+    type: 'hyperloglog',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 16384,
+    value_preview: '14 precision, 482120 estimated'
   },
   {
     key: 'tags:active',

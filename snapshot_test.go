@@ -31,6 +31,10 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertCountMinSketch() error = %v", err)
 	}
 	ht.IncrementCountMinSketch("freq", "alpha", 5)
+	if err := ht.UpsertHyperLogLog("card", 10); err != nil {
+		t.Fatalf("UpsertHyperLogLog() error = %v", err)
+	}
+	ht.AddHyperLogLog("card", "alpha", "beta")
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -78,6 +82,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.CountMinSketchInfo("freq"); !ok || info.Width != 128 || info.Depth != 4 || info.TotalCount != 5 {
 		t.Fatalf("loaded CountMinSketchInfo = %#v/%v, want restored sketch", info, ok)
+	}
+	if got, ok := loaded.CountHyperLogLog("card"); !ok || got < 2 {
+		t.Fatalf("loaded HyperLogLog estimate = %d/%v, want at least 2", got, ok)
+	}
+	if info, ok := loaded.HyperLogLogInfo("card"); !ok || info.Precision != 10 || info.Observations != 2 {
+		t.Fatalf("loaded HyperLogLogInfo = %#v/%v, want restored HyperLogLog", info, ok)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)

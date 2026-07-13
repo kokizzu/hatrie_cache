@@ -62,6 +62,7 @@
         <option value="priority_queue">Priority Queue</option>
         <option value="bloom_filter">Bloom Filter</option>
         <option value="count_min_sketch">Count-Min Sketch</option>
+        <option value="hyperloglog">HyperLogLog</option>
       </select>
     </label>
   </section>

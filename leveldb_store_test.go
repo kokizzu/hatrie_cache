@@ -202,6 +202,26 @@ func TestSnapshotOperationValueSizeSupportsCountMinSketch(t *testing.T) {
 	}
 }
 
+func TestSnapshotOperationValueSizeSupportsHyperLogLog(t *testing.T) {
+	hll, err := newHyperLogLogData(10)
+	if err != nil {
+		t.Fatalf("newHyperLogLogData() error = %v", err)
+	}
+	snapshot := hll.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:        "hyperloglog",
+			HyperLogLog: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(hyperloglog) error = %v", err)
+	}
+	if size != hll.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(hyperloglog) = %d, want %d", size, hll.EncodedSize())
+	}
+}
+
 func TestLevelDBShouldHotLoadRejectsNegativeLimits(t *testing.T) {
 	now := time.Unix(4600, 0)
 	operation := snapshotOperation{

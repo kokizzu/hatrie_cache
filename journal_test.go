@@ -203,6 +203,48 @@ func TestCommandJournalReplaysCountMinSketchMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysHyperLogLogMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATEHLL", Key: "card", Value: "10"}); !got.OK {
+		t.Fatalf("journaled CREATEHLL response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDHLL", Key: "card", Values: Slice{"alpha", "beta"}}); !got.OK {
+		t.Fatalf("journaled ADDHLL response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "COUNTHLL", Key: "card"}); !got.OK || got.Value == "0" {
+		t.Fatalf("journaled COUNTHLL response = %#v, want local estimate", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want CREATEHLL and ADDHLL only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got, ok := replayed.CountHyperLogLog("card"); !ok || got < 2 {
+		t.Fatalf("replayed HyperLogLog estimate = %d/%v, want at least 2", got, ok)
+	}
+	if info, ok := replayed.HyperLogLogInfo("card"); !ok || info.Observations != 2 {
+		t.Fatalf("replayed HyperLogLogInfo = %#v/%v, want 2 observations", info, ok)
+	}
+}
+
 func TestCommandJournalReplaysRelativeTTLsAsAbsoluteExpirations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

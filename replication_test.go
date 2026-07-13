@@ -216,6 +216,65 @@ func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesHyperLogLogMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATEHLL", Key: "card", Value: "10"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATEHLL response = %#v, want ok", response)
+	}
+	add := CacheCommandRequest{Command: "ADDHLL", Key: "card", Values: Slice{"alpha", "beta"}}
+	response := trie.ExecuteCommand(add)
+	if !response.OK {
+		t.Fatalf("ADDHLL response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, add, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("HyperLogLog replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "card" || request.Value == "" {
+			t.Fatalf("replicated HyperLogLog request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated HyperLogLog snapshot JSON error = %v", err)
+		}
+		if entry.Type != "hyperloglog" || entry.HyperLogLog == nil {
+			t.Fatalf("replicated HyperLogLog snapshot = %#v, want hyperloglog payload", entry)
+		}
+	default:
+		t.Fatal("HyperLogLog mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "COUNTHLL", Key: "card"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "COUNTHLL", Key: "card"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("HyperLogLog read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestReplicationEndpointNormalizesAddresses(t *testing.T) {
 	got, err := replicationEndpoint("127.0.0.1:8080/base/")
 	if err != nil {

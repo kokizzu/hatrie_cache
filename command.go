@@ -347,6 +347,34 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATEHLL", "RESERVEHLL", "HLLRESERVE":
+		precision, err := commandHyperLogLogPrecision(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertHyperLogLog(key, precision); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created hyperloglog"}
+	case "ADDHLL", "HLLADD":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		estimate := ht.AddHyperLogLog(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(estimate, 10)}
+	case "COUNTHLL", "ESTHLL", "HLLCOUNT", "HLLCARD":
+		count, ok := ht.CountHyperLogLog(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(count, 10)}
+	case "INFOHLL", "HLLINFO":
+		info, ok := ht.HyperLogLogInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	default:
 		return commandError("unsupported command")
 	}
@@ -561,6 +589,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_HYPERLOGLOG:
+		data, err := json.Marshal(ht.hyperLogLogs.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	default:
 		return "", nil
 	}
@@ -743,6 +777,40 @@ func commandCountMinSketchIncrement(request CacheCommandRequest) (uint32, error)
 		return 0, errors.New("count-min sketch increment must be between 1 and " + strconv.FormatUint(uint64(maxCountMinSketchCounter), 10))
 	}
 	return uint32(count), nil
+}
+
+func commandHyperLogLogPrecision(request CacheCommandRequest) (uint8, error) {
+	precision := DefaultHyperLogLogPrecision
+	if strings.TrimSpace(request.Value) != "" {
+		parsed, err := strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return 0, errors.New("hyperloglog precision must be an unsigned integer")
+		}
+		next, err := hyperLogLogPrecisionValue(parsed)
+		if err != nil {
+			return 0, err
+		}
+		precision = next
+	}
+	if value, ok := request.Pairs["precision"]; ok {
+		parsed, err := commandUint64Value(value)
+		if err != nil {
+			return 0, errors.New("hyperloglog precision must be an unsigned integer")
+		}
+		next, err := hyperLogLogPrecisionValue(parsed)
+		if err != nil {
+			return 0, err
+		}
+		precision = next
+	}
+	return precision, validateHyperLogLogPrecision(precision)
+}
+
+func hyperLogLogPrecisionValue(value uint64) (uint8, error) {
+	if value < uint64(minHyperLogLogPrecision) || value > uint64(maxHyperLogLogPrecision) || value > uint64(^uint8(0)) {
+		return 0, errors.New("hatriecache: hyperloglog precision must be between " + strconv.Itoa(int(minHyperLogLogPrecision)) + " and " + strconv.Itoa(int(maxHyperLogLogPrecision)))
+	}
+	return uint8(value), nil
 }
 
 func commandUint64Value(value interface{}) (uint64, error) {

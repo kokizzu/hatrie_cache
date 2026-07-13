@@ -283,6 +283,11 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 			return 0, errors.New("hatriecache: count-min sketch snapshot is required")
 		}
 		return int64(entry.CountMinSketch.Width * uint64(entry.CountMinSketch.Depth) * 4), nil
+	case "hyperloglog":
+		if entry.HyperLogLog == nil {
+			return 0, errors.New("hatriecache: hyperloglog snapshot is required")
+		}
+		return int64(hyperLogLogRegisterCount(entry.HyperLogLog.Precision)), nil
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

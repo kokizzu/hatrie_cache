@@ -235,6 +235,49 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOCMS response = %#v, want JSON info", infoSketchResp)
 	}
 
+	createHLLResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATEHLL",
+		Key:     "card",
+		Value:   "10",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATEHLL) error = %v", err)
+	}
+	if !createHLLResp.GetOk() {
+		t.Fatalf("CREATEHLL response = %#v, want ok", createHLLResp)
+	}
+	addHLLResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDHLL",
+		Key:     "card",
+		Values:  []string{"alpha", "beta"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDHLL) error = %v", err)
+	}
+	if !addHLLResp.GetOk() || addHLLResp.GetValue() == "0" {
+		t.Fatalf("ADDHLL response = %#v, want non-zero estimate", addHLLResp)
+	}
+	countHLLResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "COUNTHLL",
+		Key:     "card",
+	})
+	if err != nil {
+		t.Fatalf("Command(COUNTHLL) error = %v", err)
+	}
+	if !countHLLResp.GetOk() || countHLLResp.GetValue() != addHLLResp.GetValue() {
+		t.Fatalf("COUNTHLL response = %#v, want estimate %q", countHLLResp, addHLLResp.GetValue())
+	}
+	infoHLLResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFOHLL",
+		Key:     "card",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFOHLL) error = %v", err)
+	}
+	if !infoHLLResp.GetOk() || infoHLLResp.GetValue() == "" {
+		t.Fatalf("INFOHLL response = %#v, want JSON info", infoHLLResp)
+	}
+
 	stats, err := client.Stats(context.Background(), &hatriecachev1.StatsRequest{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)

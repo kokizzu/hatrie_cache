@@ -325,6 +325,31 @@ func TestRunCommandPostsCountMinSketchOptions(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsHyperLogLogOptions(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"created hyperloglog"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "CREATEHLL",
+		"-key", "card",
+		"-value", "14",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command CREATEHLL) error = %v", err)
+	}
+
+	if gotRequest.Command != "CREATEHLL" || gotRequest.Key != "card" || gotRequest.Value != "14" {
+		t.Fatalf("request = %#v, want CREATEHLL card value 14", gotRequest)
+	}
+}
+
 func TestRunSnapshotPostsToSnapshotEndpoint(t *testing.T) {
 	var gotPath string
 	var gotMethod string

@@ -449,6 +449,11 @@ textarea {
   color: #384aa0;
 }
 
+.type-pill.hyperloglog {
+  background: #ffeef6;
+  color: #9a2a62;
+}
+
 .preview {
   color: #62707d;
   max-width: 280px;

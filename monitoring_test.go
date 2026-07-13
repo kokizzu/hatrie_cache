@@ -31,6 +31,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 		t.Fatalf("UpsertCountMinSketch() error = %v", err)
 	}
 	ht.IncrementCountMinSketch("session:freq", "/api/users", 3)
+	if err := ht.UpsertHyperLogLog("session:card", 10); err != nil {
+		t.Fatalf("UpsertHyperLogLog() error = %v", err)
+	}
+	ht.AddHyperLogLog("session:card", "user:1", "user:2")
 	ht.UpsertCounter("counter:views", 42)
 	if !ht.Expire("session:1", time.Minute) {
 		t.Fatal("Expire(session:1) = false, want true")
@@ -42,6 +46,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	sketchInfo, ok := ht.CountMinSketchInfo("session:freq")
 	if !ok {
 		t.Fatal("CountMinSketchInfo(session:freq) = false, want true")
+	}
+	hllInfo, ok := ht.HyperLogLogInfo("session:card")
+	if !ok {
+		t.Fatal("HyperLogLogInfo(session:card) = false, want true")
 	}
 
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
@@ -84,8 +92,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 5 {
-		t.Fatalf("entries len = %d, want 5: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 6 {
+		t.Fatalf("entries len = %d, want 6: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -94,21 +102,26 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if entry.TTLMillis == nil || *entry.TTLMillis != int64(time.Minute/time.Millisecond) {
 		t.Fatalf("entry TTL = %v, want 60000", entry.TTLMillis)
 	}
-	sketchEntry := entries.Entries[1]
+	hllEntry := entries.Entries[1]
+	wantHLLPreview := strconv.Itoa(int(hllInfo.Precision)) + " precision, " + strconv.FormatUint(hllInfo.Estimate, 10) + " estimated"
+	if hllEntry.Key != "session:card" || hllEntry.Type != "hyperloglog" || hllEntry.SizeBytes != int64(hllInfo.RegisterBytes) || hllEntry.ValuePreview != wantHLLPreview {
+		t.Fatalf("hyperloglog entry = %#v, want compact register preview", hllEntry)
+	}
+	sketchEntry := entries.Entries[2]
 	wantSketchPreview := strconv.FormatUint(sketchInfo.Width, 10) + "x" + strconv.Itoa(int(sketchInfo.Depth)) + " counters, " + strconv.FormatUint(sketchInfo.TotalCount, 10) + " total"
 	if sketchEntry.Key != "session:freq" || sketchEntry.Type != "count_min_sketch" || sketchEntry.SizeBytes != int64(sketchInfo.CounterBytes) || sketchEntry.ValuePreview != wantSketchPreview {
 		t.Fatalf("count-min sketch entry = %#v, want compact counter preview", sketchEntry)
 	}
-	queueEntry := entries.Entries[2]
+	queueEntry := entries.Entries[3]
 	if queueEntry.Key != "session:jobs" || queueEntry.Type != "priority_queue" || queueEntry.SizeBytes != 2 || queueEntry.ValuePreview != "2 priority items" {
 		t.Fatalf("priority queue entry = %#v, want priority queue item preview", queueEntry)
 	}
-	bloomEntry := entries.Entries[3]
+	bloomEntry := entries.Entries[4]
 	wantBloomPreview := strconv.FormatUint(bloomInfo.BitCount, 10) + " bits, " + strconv.Itoa(int(bloomInfo.HashCount)) + " hashes"
 	if bloomEntry.Key != "session:seen" || bloomEntry.Type != "bloom_filter" || bloomEntry.SizeBytes != int64(bloomInfo.BitBytes) || bloomEntry.ValuePreview != wantBloomPreview {
 		t.Fatalf("bloom filter entry = %#v, want compact bitset preview", bloomEntry)
 	}
-	setEntry := entries.Entries[4]
+	setEntry := entries.Entries[5]
 	if setEntry.Key != "session:tags" || setEntry.Type != "set" || setEntry.SizeBytes != 2 || setEntry.ValuePreview != "2 members" {
 		t.Fatalf("set entry = %#v, want set member preview", setEntry)
 	}

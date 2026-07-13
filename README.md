@@ -12,6 +12,8 @@ Bloom filter values use packed bitsets plus double hashing for fast,
 low-memory membership checks without storing inserted items.
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
+HyperLogLog values use compact register arrays for approximate distinct counts
+without retaining the observed items.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack
 and trim freed tail slots, avoiding per-index hash-map overhead while keeping
 reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
@@ -160,7 +162,8 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
 `POPPQ`, `GETPQ`, `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF`, `CREATECMS`,
-`INCRCMS`, `ESTCMS`, `INFOCMS`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`. `DUMP`,
+`INCRCMS`, `ESTCMS`, `INFOCMS`, `CREATEHLL`, `ADDHLL`, `COUNTHLL`,
+`INFOHLL`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`. `DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence.
@@ -183,6 +186,9 @@ make cli ARGS='command -cmd HASBF -key seen:emails -value user@example.com'
 make cli ARGS='command -cmd CREATECMS -key freq:paths -value 2048 -subkey 4'
 make cli ARGS='command -cmd INCRCMS -key freq:paths -value /api/users -subkey 3'
 make cli ARGS='command -cmd ESTCMS -key freq:paths -value /api/users'
+make cli ARGS='command -cmd CREATEHLL -key card:visitors -value 14'
+make cli ARGS='command -cmd ADDHLL -key card:visitors -value user-123'
+make cli ARGS='command -cmd COUNTHLL -key card:visitors'
 make cli ARGS='command -cmd DUMP -key tags'
 make cli ARGS='topology'
 make cli ARGS='topology -key session:1'
@@ -312,6 +318,10 @@ count-min sketch type:
   CREATECMS key width [depth]
   INCRCMS key val [count]
   ESTCMS/INFOCMS key
+hyperloglog type:
+  CREATEHLL key [precision]
+  ADDHLL key val...
+  COUNTHLL/INFOHLL key
 ```
 - [x] add client CLI support for cluster/server topology management and replication internals:
 ```
