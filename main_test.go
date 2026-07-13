@@ -865,6 +865,82 @@ func TestStartExpirationCleanerRejectsInvalidInterval(t *testing.T) {
 	_ = ht.StartExpirationCleaner(0)
 }
 
+func TestVacuumExpiredOnMemoryPressure(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(850, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("expired", "value")
+	if !ht.Expire("expired", time.Second) {
+		t.Fatal("Expire(expired) = false, want true")
+	}
+	now = now.Add(2 * time.Second)
+
+	if got := ht.VacuumExpiredOnMemoryPressure(^uint64(0)); got != 0 {
+		t.Fatalf("below-threshold VacuumExpiredOnMemoryPressure() = %d, want 0", got)
+	}
+	if got := ht.Size(); got != 1 {
+		t.Fatalf("size after below-threshold vacuum = %d, want 1", got)
+	}
+	if got := ht.VacuumExpiredOnMemoryPressure(1); got != 1 {
+		t.Fatalf("pressure VacuumExpiredOnMemoryPressure() = %d, want 1", got)
+	}
+	if got := ht.Size(); got != 0 {
+		t.Fatalf("size after pressure vacuum = %d, want 0", got)
+	}
+}
+
+func TestStartMemoryPressureVacuumRemovesExpiredKeysAndStops(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(860, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("key", "value")
+	if !ht.Expire("key", time.Second) {
+		t.Fatal("Expire(key) = false, want true")
+	}
+	now = now.Add(2 * time.Second)
+
+	stop := ht.StartMemoryPressureVacuum(time.Millisecond, 1)
+	waitUntil(t, 200*time.Millisecond, func() bool {
+		return ht.Size() == 0
+	})
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("memory pressure vacuum stop did not return")
+	}
+}
+
+func TestMemoryPressureVacuumRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	for _, test := range []struct {
+		name string
+		fn   func()
+	}{
+		{name: "immediate threshold", fn: func() { ht.VacuumExpiredOnMemoryPressure(0) }},
+		{name: "cleaner interval", fn: func() { ht.StartMemoryPressureVacuum(0, 1) }},
+		{name: "cleaner threshold", fn: func() { ht.StartMemoryPressureVacuum(time.Millisecond, 0) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("panic = nil, want panic")
+				}
+			}()
+			test.fn()
+		})
+	}
+}
+
 func TestConcurrentIterationIsSynchronized(t *testing.T) {
 	ht := newTestTrie(t)
 

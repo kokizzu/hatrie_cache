@@ -660,6 +660,60 @@ func (ht *HatTrie) StartExpirationCleaner(interval time.Duration) func() {
 	}
 }
 
+// VacuumExpiredOnMemoryPressure removes expired keys when current heap
+// allocation is at or above maxAllocBytes. It returns the number of removed
+// entries, or zero when memory pressure is below the threshold.
+func (ht *HatTrie) VacuumExpiredOnMemoryPressure(maxAllocBytes uint64) int {
+	if maxAllocBytes == 0 {
+		panic("hatriecache: memory pressure threshold must be positive")
+	}
+
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	if mem.Alloc < maxAllocBytes {
+		return 0
+	}
+	return ht.VacuumExpired()
+}
+
+// StartMemoryPressureVacuum starts a background cleaner that vacuums expired
+// keys only while current heap allocation is at or above maxAllocBytes. The
+// returned stop function is idempotent and waits for the goroutine to exit.
+func (ht *HatTrie) StartMemoryPressureVacuum(interval time.Duration, maxAllocBytes uint64) func() {
+	if interval <= 0 {
+		panic("hatriecache: memory pressure vacuum interval must be positive")
+	}
+	if maxAllocBytes == 0 {
+		panic("hatriecache: memory pressure threshold must be positive")
+	}
+
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	var stopOnce sync.Once
+
+	go func() {
+		defer close(stopped)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				ht.VacuumExpiredOnMemoryPressure(maxAllocBytes)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	return func() {
+		stopOnce.Do(func() {
+			close(done)
+			<-stopped
+		})
+	}
+}
+
 // Keys returns all non-expired keys. When sorted is true, keys are returned in
 // bytewise lexicographic order.
 func (ht *HatTrie) Keys(sorted bool) []string {

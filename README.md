@@ -67,7 +67,9 @@ The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
 and `TTL`. Expired entries are removed lazily when the key is read or mutated.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
 `VacuumExpired` for immediate cleanup or `StartExpirationCleaner` for periodic
-background cleanup.
+background cleanup. Use `VacuumExpiredOnMemoryPressure` or
+`StartMemoryPressureVacuum` to remove expired keys only when heap allocation is
+above a configured threshold.
 
 Use `Keys`, `KeysWithPrefix`, `Entries`, and `EntriesWithPrefix` to iterate
 over non-expired keys and value metadata. Prefix iteration returns full keys and
@@ -143,7 +145,7 @@ slice/arr/stack/queue type:
 - [x] add explicit sync-write force API/CLI
 - [x] create iterator command to get all keys and keys based on certain prefix
 - [x] create timer vacuum goroutine to clean expired data
-- [ ] add OOM-triggered vacuum policy
+- [x] add OOM-triggered vacuum policy
 - [ ] when master/leader disconnected from all slave, new master/leader elected by remaining slave
 - [ ] the distributed part using emitter.io, 
       or offloaded to another MQ, 
