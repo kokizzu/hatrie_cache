@@ -922,6 +922,26 @@ func TestPriorityQueueBulkUpsertPreservesTieOrderBeforeLaterPush(t *testing.T) {
 	}
 }
 
+func TestPriorityQueueBulkPushMaintainsFIFOAcrossGrowth(t *testing.T) {
+	ht := newTestTrie(t)
+	const count = 65
+	values := make([]interface{}, 0, count-1)
+	for idx := 1; idx < count; idx++ {
+		values = append(values, "job-"+strconv.Itoa(idx))
+	}
+
+	if added := ht.PushPriorityQueue("queue", 1, "job-0", values...); added != count {
+		t.Fatalf("PushPriorityQueue(batch) = %d, want %d", added, count)
+	}
+	for idx := 0; idx < count; idx++ {
+		want := "job-" + strconv.Itoa(idx)
+		got, ok := ht.PopPriorityQueue("queue")
+		if !ok || got.Value != want {
+			t.Fatalf("PopPriorityQueue(%d) = %#v/%v, want %q", idx, got, ok, want)
+		}
+	}
+}
+
 func TestPriorityQueueOperationsDeepCopyNestedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	item := Map{"job": "build"}
