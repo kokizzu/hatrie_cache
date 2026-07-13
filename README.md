@@ -60,6 +60,7 @@ Use the HTTP client CLI against a running monitoring server:
 make cli ARGS='stats'
 make cli ARGS='entries -prefix session:'
 make cli ARGS='command -cmd SETSTR -key name -value ivi'
+make cli ARGS='snapshot'
 ```
 
 The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
@@ -139,7 +140,7 @@ slice/arr/stack/queue type:
 - [x] when service starts, non-expired snapshot keys are loaded into memory
 - [ ] when service start, non-expired keys and (<1KB AND <1h last hit AND >1000 hit rate) values loaded from database to memory
 - [x] when service stopped/timer, snapshot data written to disk
-- [ ] add explicit sync-write force API/CLI
+- [x] add explicit sync-write force API/CLI
 - [x] create iterator command to get all keys and keys based on certain prefix
 - [x] create timer vacuum goroutine to clean expired data
 - [ ] add OOM-triggered vacuum policy

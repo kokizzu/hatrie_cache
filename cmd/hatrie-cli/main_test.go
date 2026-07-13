@@ -97,6 +97,28 @@ func TestRunCommandPostsJSON(t *testing.T) {
 	}
 }
 
+func TestRunSnapshotPostsToSnapshotEndpoint(t *testing.T) {
+	var gotPath string
+	var gotMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		gotMethod = r.Method
+		w.Write([]byte(`{"ok":true,"message":"snapshot saved"}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "snapshot"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(snapshot) error = %v", err)
+	}
+	if gotPath != "/api/snapshot" || gotMethod != http.MethodPost {
+		t.Fatalf("request = %s %s, want POST /api/snapshot", gotMethod, gotPath)
+	}
+	if got := stdout.String(); got != "{\"ok\":true,\"message\":\"snapshot saved\"}\n" {
+		t.Fatalf("stdout = %q, want snapshot response", got)
+	}
+}
+
 func TestRunReportsServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad", http.StatusBadRequest)

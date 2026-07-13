@@ -45,6 +45,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runEntries(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "command":
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "snapshot":
+		return postJSON(ctx, client, cfg.addr, "/api/snapshot", []byte("{}"), stdout)
 	default:
 		return fmt.Errorf("unknown subcommand %q", remaining[0])
 	}

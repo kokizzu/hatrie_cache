@@ -61,7 +61,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	defer stopSnapshots()
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
-		WebDir: cfg.monitoringWebDir,
+		WebDir:   cfg.monitoringWebDir,
+		Snapshot: snapshotCallback(trie, cfg.snapshotPath),
 	}).Handler()
 	server := &http.Server{
 		Addr:    cfg.monitoringAddr,
@@ -145,5 +146,14 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, path str
 	return func() {
 		close(done)
 		<-stopped
+	}
+}
+
+func snapshotCallback(trie *hatriecache.HatTrie, path string) func() error {
+	if path == "" {
+		return nil
+	}
+	return func() error {
+		return trie.SaveSnapshot(path)
 	}
 }

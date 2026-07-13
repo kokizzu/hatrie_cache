@@ -142,3 +142,47 @@ func TestMonitoringHandlerRejectsInvalidCommandRequests(t *testing.T) {
 		t.Fatalf("invalid JSON status = %d, want 400", resp.Code)
 	}
 }
+
+func TestMonitoringHandlerForcesSnapshotWhenConfigured(t *testing.T) {
+	ht := newTestTrie(t)
+	called := false
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		Snapshot: func() error {
+			called = true
+			return nil
+		},
+	}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/snapshot", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d, want 200", resp.Code)
+	}
+	if !called {
+		t.Fatal("snapshot callback was not called")
+	}
+	var result CacheCommandResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("snapshot JSON error = %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("snapshot response = %#v, want ok", result)
+	}
+}
+
+func TestMonitoringHandlerRejectsForcedSnapshotWhenUnconfigured(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/snapshot", nil))
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("snapshot status = %d, want 409", resp.Code)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/snapshot", nil))
+	if resp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("snapshot GET status = %d, want 405", resp.Code)
+	}
+}

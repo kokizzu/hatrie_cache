@@ -123,3 +123,24 @@ func TestStartSnapshotSaverWritesPeriodically(t *testing.T) {
 	}
 	t.Fatal("periodic snapshot was not written")
 }
+
+func TestSnapshotCallbackRequiresPath(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+
+	if got := snapshotCallback(ht, ""); got != nil {
+		t.Fatal("snapshotCallback(empty) returned callback, want nil")
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	callback := snapshotCallback(ht, path)
+	if callback == nil {
+		t.Fatal("snapshotCallback(path) = nil, want callback")
+	}
+	if err := callback(); err != nil {
+		t.Fatalf("snapshot callback error = %v", err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
+		t.Fatalf("snapshot file info = %v/%v, want non-empty file", info, err)
+	}
+}

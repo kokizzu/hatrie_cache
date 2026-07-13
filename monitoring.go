@@ -16,6 +16,7 @@ type MonitoringOptions struct {
 	NodeName string
 	WebDir   string
 	StartAt  time.Time
+	Snapshot func() error
 }
 
 type MonitoringHandler struct {
@@ -65,6 +66,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/stats", handler.handleStats)
 	mux.HandleFunc("/api/entries", handler.handleEntries)
 	mux.HandleFunc("/api/commands", handler.handleCommands)
+	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
@@ -126,6 +128,22 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	}
 
 	writeJSON(w, handler.trie.ExecuteCommand(request))
+}
+
+func (handler *MonitoringHandler) handleSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if handler.options.Snapshot == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("snapshot path is not configured"))
+		return
+	}
+	if err := handler.options.Snapshot(); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	writeJSON(w, CacheCommandResponse{OK: true, Message: "snapshot saved"})
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {
@@ -245,7 +263,12 @@ func truncatePreview(value string) string {
 }
 
 func writeJSON(w http.ResponseWriter, value interface{}) {
+	writeJSONStatus(w, http.StatusOK, value)
+}
+
+func writeJSONStatus(w http.ResponseWriter, status int, value interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
