@@ -834,7 +834,8 @@ func (ss *SliceStorage) Del(idx int32) {
 }
 
 type setData struct {
-	items map[string]interface{}
+	items   map[string]interface{}
+	deleted int
 }
 
 func newSetData(values Set) setData {
@@ -857,6 +858,9 @@ func (set *setData) Len() int {
 }
 
 func (set *setData) Add(values ...interface{}) int {
+	if len(values) == 0 {
+		return 0
+	}
 	set.ensureCapacity(len(values))
 	added := 0
 	for _, value := range values {
@@ -899,6 +903,7 @@ func (set *setData) RemoveOne(value interface{}, values ...interface{}) int {
 func (set *setData) ensureCapacity(capacity int) {
 	if set.items == nil {
 		set.items = make(map[string]interface{}, capacity)
+		set.deleted = 0
 	}
 }
 
@@ -917,6 +922,8 @@ func (set *setData) removeValue(value interface{}) int {
 		return 0
 	}
 	delete(set.items, key)
+	set.deleted++
+	set.compactIfSparse()
 	return 1
 }
 
@@ -929,8 +936,11 @@ func (set *setData) Has(value interface{}) bool {
 }
 
 func (set *setData) Values() Set {
-	if set == nil || set.items == nil {
+	if set == nil {
 		return nil
+	}
+	if len(set.items) == 0 {
+		return make(Set, 0)
 	}
 	keys := make([]string, 0, len(set.items))
 	for key := range set.items {
@@ -942,6 +952,26 @@ func (set *setData) Values() Set {
 		out[idx] = cloneValue(set.items[key])
 	}
 	return out
+}
+
+func (set *setData) compactIfSparse() {
+	if set.items == nil {
+		return
+	}
+	if len(set.items) == 0 {
+		set.items = nil
+		set.deleted = 0
+		return
+	}
+	if set.deleted < 32 || set.deleted < len(set.items) {
+		return
+	}
+	next := make(map[string]interface{}, len(set.items))
+	for key, value := range set.items {
+		next[key] = value
+	}
+	set.items = next
+	set.deleted = 0
 }
 
 // SetStorage stores set values outside the trie.

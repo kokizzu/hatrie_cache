@@ -661,6 +661,50 @@ func TestSetOperations(t *testing.T) {
 	}
 }
 
+func TestSetRemoveLastValueKeepsEmptySetReadable(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertSet("set", Set{"only"})
+
+	if removed := ht.RemoveSet("set", "only"); removed != 1 {
+		t.Fatalf("RemoveSet(only) = %d, want 1", removed)
+	}
+	got := ht.GetSet("set")
+	if got == nil || len(got) != 0 {
+		t.Fatalf("GetSet(after removing last value) = %#v, want empty set", got)
+	}
+	if !ht.Get("set").IsSet() {
+		t.Fatal("removing last set value removed set key")
+	}
+}
+
+func TestSetDataCompactsSparseBackingMap(t *testing.T) {
+	var set setData
+	values := make(Set, 96)
+	for idx := range values {
+		values[idx] = idx
+	}
+	if added := set.Add(values...); added != len(values) {
+		t.Fatalf("set.Add(values) = %d, want %d", added, len(values))
+	}
+
+	for idx := 0; idx < 48; idx++ {
+		if removed := set.Remove(idx); removed != 1 {
+			t.Fatalf("set.Remove(%d) = %d, want 1", idx, removed)
+		}
+	}
+	if set.deleted != 0 {
+		t.Fatalf("set.deleted after sparse compaction = %d, want 0", set.deleted)
+	}
+	if got := set.Len(); got != 48 {
+		t.Fatalf("set.Len() after removals = %d, want 48", got)
+	}
+	for idx := 48; idx < 96; idx++ {
+		if !set.Has(idx) {
+			t.Fatalf("set.Has(%d) = false, want true", idx)
+		}
+	}
+}
+
 func TestSetOperationsDeepCopyNestedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	item := Map{"field": "value"}
