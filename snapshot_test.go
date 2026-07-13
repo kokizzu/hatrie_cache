@@ -64,6 +64,33 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestPriorityQueueSnapshotPreservesTieOrderAndNextSequence(t *testing.T) {
+	ht := newTestTrie(t)
+	if added := ht.PushPriorityQueue("jobs", 1, "first", "second"); added != 2 {
+		t.Fatalf("PushPriorityQueue(first, second) = %d, want 2", added)
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := ht.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	if err := loaded.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if added := loaded.PushPriorityQueue("jobs", 1, "third"); added != 1 {
+		t.Fatalf("PushPriorityQueue(third) = %d, want 1", added)
+	}
+
+	for _, want := range []string{"first", "second", "third"} {
+		got, ok := loaded.PopPriorityQueue("jobs")
+		if !ok || got.Priority != 1 || got.Value != want {
+			t.Fatalf("PopPriorityQueue() = %#v/%v, want %q priority 1", got, ok, want)
+		}
+	}
+}
+
 func TestWriteFileAtomicReplacesFileAndCleansTemporaryFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "data.json")

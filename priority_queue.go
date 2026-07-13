@@ -94,8 +94,16 @@ func (pq *priorityQueueData) Peek() (PriorityItem, bool) {
 }
 
 func (pq *priorityQueueData) Pop() (PriorityItem, bool) {
-	if pq == nil || len(pq.items) == 0 {
+	item, ok := pq.popItem()
+	if !ok {
 		return PriorityItem{}, false
+	}
+	return item.PriorityItem(), true
+}
+
+func (pq *priorityQueueData) popItem() (priorityQueueItem, bool) {
+	if pq == nil || len(pq.items) == 0 {
+		return priorityQueueItem{}, false
 	}
 
 	root := pq.items[0]
@@ -107,7 +115,7 @@ func (pq *priorityQueueData) Pop() (PriorityItem, bool) {
 		pq.siftDown(0)
 	}
 	pq.compactIfSparse()
-	return root.PriorityItem(), true
+	return root, true
 }
 
 func (pq *priorityQueueData) Items() PriorityQueue {
@@ -149,8 +157,7 @@ func (pq *priorityQueueData) SnapshotItems() []priorityQueueItem {
 	copy(copyData.items, pq.items)
 	out := make([]priorityQueueItem, 0, len(copyData.items))
 	for len(copyData.items) > 0 {
-		item := copyData.items[0]
-		_, _ = copyData.Pop()
+		item, _ := copyData.popItem()
 		item.Value = cloneValue(item.Value)
 		out = append(out, item)
 	}
