@@ -129,6 +129,29 @@ func TestExecuteCommandMapOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandPutMapClonesNestedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	nested := Map{"field": "stored"}
+	payload := []byte("bytes")
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs:   Map{"nested": nested, "payload": payload},
+	}); !got.OK {
+		t.Fatalf("PUTMAP nested response = %#v, want ok", got)
+	}
+
+	nested["field"] = "caller"
+	payload[0] = 'X'
+	got := ht.GetMap("profile")
+	if got["nested"].(Map)["field"] != "stored" {
+		t.Fatalf("PUTMAP nested value = %#v, want stored clone", got["nested"])
+	}
+	if string(got["payload"].([]byte)) != "bytes" {
+		t.Fatalf("PUTMAP payload = %q, want bytes", got["payload"])
+	}
+}
+
 func TestExecuteCommandSliceOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

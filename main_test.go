@@ -287,6 +287,28 @@ func TestMapStorageCompactsSparseBackingMap(t *testing.T) {
 	}
 }
 
+func TestMapStoragePutEntriesClonesValues(t *testing.T) {
+	store := CreateMapStorage()
+	idx := store.Add(Map{"existing": "value"})
+	nested := Map{"field": "stored"}
+	payload := []byte("bytes")
+
+	store.PutEntries(idx, Map{"nested": nested, "payload": payload})
+	nested["field"] = "caller"
+	payload[0] = 'X'
+
+	got := store.array[idx]
+	if got["existing"] != "value" {
+		t.Fatalf("existing map entry = %v, want value", got["existing"])
+	}
+	if got["nested"].(Map)["field"] != "stored" {
+		t.Fatalf("nested map entry = %#v, want stored clone", got["nested"])
+	}
+	if string(got["payload"].([]byte)) != "bytes" {
+		t.Fatalf("payload map entry = %q, want bytes", got["payload"])
+	}
+}
+
 func TestMapOperationsDeepCopyNestedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	nested := Map{"name": "ivi"}

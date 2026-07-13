@@ -815,6 +815,20 @@ func (ms *MapStorage) PutEntry(idx int32, subkey string, value interface{}) {
 	ms.reusables.Use(idx)
 }
 
+func (ms *MapStorage) PutEntries(idx int32, fields Map) {
+	if idx < 0 || int(idx) >= len(ms.array) || len(fields) == 0 {
+		return
+	}
+	if ms.array[idx] == nil {
+		ms.array[idx] = make(Map, len(fields))
+		ms.deleted[idx] = 0
+	}
+	for subkey, value := range fields {
+		ms.array[idx][subkey] = cloneValue(value)
+	}
+	ms.reusables.Use(idx)
+}
+
 func (ms *MapStorage) Append(value Map) int32 {
 	ms.array = append(ms.array, cloneMap(value))
 	ms.deleted = append(ms.deleted, 0)

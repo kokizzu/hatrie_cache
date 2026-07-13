@@ -305,14 +305,7 @@ func (ht *HatTrie) commandPutMap(key string, fields Map) {
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsMap() {
-		current := ht.maps.array[hval.Index]
-		if current == nil {
-			current = Map{}
-		}
-		for subkey, value := range fields {
-			current[subkey] = value
-		}
-		ht.maps.Put(hval.Index, current)
+		ht.maps.PutEntries(hval.Index, fields)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return
