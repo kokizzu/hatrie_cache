@@ -190,6 +190,48 @@ func TestRunReplicationFetchesStatus(t *testing.T) {
 	}
 }
 
+func TestRunReplicationSyncPostsPrefix(t *testing.T) {
+	var gotPath string
+	var gotBody struct {
+		Prefix string `json:"prefix"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"command":"SYNC","key":"session:","entries":1,"skipped":false}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "replication", "-sync", "-prefix", "session:"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(replication -sync) error = %v", err)
+	}
+	if gotPath != "/api/replication" {
+		t.Fatalf("path = %q, want /api/replication", gotPath)
+	}
+	if gotBody.Prefix != "session:" {
+		t.Fatalf("prefix = %q, want session:", gotBody.Prefix)
+	}
+	if got := stdout.String(); got != "{\"command\":\"SYNC\",\"key\":\"session:\",\"entries\":1,\"skipped\":false}\n" {
+		t.Fatalf("stdout = %q, want sync JSON", got)
+	}
+}
+
+func TestRunReplicationRejectsPrefixWithoutSync(t *testing.T) {
+	err := run(context.Background(), []string{"replication", "-prefix", "session:"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "requires -sync") {
+		t.Fatalf("run(replication -prefix) error = %v, want requires -sync", err)
+	}
+}
+
 func TestRunCommandPostsJSON(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

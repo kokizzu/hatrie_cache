@@ -556,6 +556,66 @@ func TestMonitoringHandlerReplicatesCommands(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerSyncsReplication(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("session:1", "value")
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/commands" {
+			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
+		}
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
+	}))
+	defer target.Close()
+
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:   "node-a",
+		Topology:   topology,
+		Election:   election,
+		Replicator: replicator,
+	}).Handler()
+
+	replicationResp := httptest.NewRecorder()
+	handler.ServeHTTP(replicationResp, httptest.NewRequest(http.MethodPost, "/api/replication", bytes.NewBufferString(`{"prefix":"session:"}`)))
+	if replicationResp.Code != http.StatusOK {
+		t.Fatalf("replication sync status = %d, want 200", replicationResp.Code)
+	}
+	var result ReplicationResult
+	if err := json.Unmarshal(replicationResp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("replication sync JSON error = %v", err)
+	}
+	if result.Skipped || result.Command != "SYNC" || result.Key != "session:" || result.Entries != 1 || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("replication sync result = %#v, want one ok target", result)
+	}
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
+			t.Fatalf("replication sync request = %#v, want INTERNALSET snapshot", request)
+		}
+	default:
+		t.Fatal("replication sync did not reach remote target")
+	}
+
+	invalidResp := httptest.NewRecorder()
+	handler.ServeHTTP(invalidResp, httptest.NewRequest(http.MethodPost, "/api/replication", bytes.NewBufferString(`{"unknown":true}`)))
+	if invalidResp.Code != http.StatusBadRequest {
+		t.Fatalf("invalid replication sync status = %d, want 400", invalidResp.Code)
+	}
+}
+
 func canceledMonitoringRequest(method string, target string, body string) *http.Request {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

@@ -157,6 +157,83 @@ func TestHTTPReplicatorAcceptsNilContext(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 2)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/commands" {
+			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
+		}
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "value-1")
+	trie.UpsertString("session:2", "value-2")
+	trie.UpsertString("other:1", "ignored")
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	result := replicator.SyncAll(context.Background(), trie, "session:")
+	if result.Skipped || result.Command != "SYNC" || result.Key != "session:" || result.Entries != 2 || len(result.Targets) != 2 {
+		t.Fatalf("sync result = %#v, want two synced entries", result)
+	}
+	targetKeys := map[string]bool{}
+	for _, target := range result.Targets {
+		if !target.OK || target.Key == "" {
+			t.Fatalf("sync target = %#v, want ok target with key", target)
+		}
+		targetKeys[target.Key] = true
+	}
+	if !targetKeys["session:1"] || !targetKeys["session:2"] {
+		t.Fatalf("sync target keys = %#v, want session keys", targetKeys)
+	}
+	for i := 0; i < 2; i++ {
+		request := <-requests
+		if request.Command != "INTERNALSET" || request.Value == "" || (request.Key != "session:1" && request.Key != "session:2") {
+			t.Fatalf("sync request = %#v, want INTERNALSET session snapshot", request)
+		}
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("unexpected sync request = %#v", request)
+	default:
+	}
+	if got := replicator.LastResult(); !reflect.DeepEqual(got, result) {
+		t.Fatalf("LastResult() = %#v, want sync result %#v", got, result)
+	}
+}
+
+func TestHTTPReplicatorSyncAllSkipsNoEntries(t *testing.T) {
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, "127.0.0.1:1")
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+	})
+
+	result := replicator.SyncAll(context.Background(), trie, "missing:")
+	if !result.Skipped || result.Reason != "no entries to sync" || result.Entries != 0 || len(result.Targets) != 0 {
+		t.Fatalf("empty sync result = %#v, want no entries skip", result)
+	}
+	if got := replicator.LastResult(); !reflect.DeepEqual(got, result) {
+		t.Fatalf("LastResult() = %#v, want empty sync result %#v", got, result)
+	}
+}
+
 func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

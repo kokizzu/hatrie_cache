@@ -51,6 +51,10 @@ type MonitoringEntriesResponse struct {
 	Entries []MonitoringEntry `json:"entries"`
 }
 
+type replicationSyncRequest struct {
+	Prefix string `json:"prefix,omitempty"`
+}
+
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
@@ -306,7 +310,7 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 }
 
 func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
 		return
 	}
@@ -317,7 +321,28 @@ func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *ht
 		writeJSONStatus(w, http.StatusConflict, commandError("replication is not configured"))
 		return
 	}
-	writeJSON(w, handler.options.Replicator.LastResult())
+	if r.Method == http.MethodGet {
+		writeJSON(w, handler.options.Replicator.LastResult())
+		return
+	}
+
+	var request replicationSyncRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid replication request", http.StatusBadRequest)
+		return
+	} else if err == nil {
+		var extra struct{}
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			http.Error(w, "invalid replication request", http.StatusBadRequest)
+			return
+		}
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	writeJSON(w, handler.options.Replicator.SyncAll(r.Context(), handler.trie, request.Prefix))
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {

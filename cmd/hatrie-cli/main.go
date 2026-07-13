@@ -49,7 +49,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 	case "election":
 		return runElection(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "replication":
-		return getJSON(ctx, client, cfg.addr, "/api/replication", stdout)
+		return runReplication(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "command":
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "snapshot":
@@ -153,6 +153,31 @@ func postElectionUpdate(ctx context.Context, client *http.Client, addr string, n
 		return err
 	}
 	return postJSON(ctx, client, addr, "/api/election", body, stdout)
+}
+
+func runReplication(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("replication", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	sync := flags.Bool("sync", false, "push local entries to topology replicas")
+	prefix := flags.String("prefix", "", "key prefix to sync")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *prefix != "" && !*sync {
+		return errors.New("replication -prefix requires -sync")
+	}
+	if !*sync {
+		return getJSON(ctx, client, addr, "/api/replication", stdout)
+	}
+	body, err := json.Marshal(struct {
+		Prefix string `json:"prefix,omitempty"`
+	}{
+		Prefix: *prefix,
+	})
+	if err != nil {
+		return err
+	}
+	return postJSON(ctx, client, addr, "/api/replication", body, stdout)
 }
 
 func runCommand(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {

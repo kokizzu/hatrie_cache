@@ -143,7 +143,9 @@ Set `REPLICATION=true` to let an elected leader broadcast successful local
 mutations to the current key's topology owners over HTTP. Replication uses the
 internal `DUMP`/`INTERNALSET` and `INTERNALDEL` commands, skips internal
 replication commands to avoid loops, and records the last replication attempt at
-`/api/replication`:
+`/api/replication`. `POST /api/replication` runs an explicit anti-entropy sync
+that pushes the local leader-owned keys, optionally filtered by prefix, to their
+current topology replicas:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true
@@ -156,8 +158,10 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `GET /api/election?key=...` returns the topology route plus the elected leader
 for that key. `POST /api/election` accepts `node` and `online` to record a
 heartbeat or mark a node offline. `GET /api/replication` returns the most recent
-replication result. `POST /api/commands` accepts `command`, `key`,
-optional `value`, `values`, `subkey`, `pairs`,
+replication result. `POST /api/replication` accepts optional `prefix` and
+pushes matching local entries to their remote topology owners.
+`POST /api/commands` accepts `command`, `key`, optional `value`, `values`,
+`subkey`, `pairs`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
@@ -204,6 +208,8 @@ make cli ARGS='election -key session:1'
 make cli ARGS='election -heartbeat node-a'
 make cli ARGS='election -offline node-a'
 make cli ARGS='replication'
+make cli ARGS='replication -sync'
+make cli ARGS='replication -sync -prefix session:'
 make cli ARGS='snapshot'
 ```
 

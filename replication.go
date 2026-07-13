@@ -36,6 +36,7 @@ type HTTPReplicator struct {
 type ReplicationResult struct {
 	Command string                    `json:"command,omitempty"`
 	Key     string                    `json:"key,omitempty"`
+	Entries int                       `json:"entries,omitempty"`
 	Skipped bool                      `json:"skipped"`
 	Reason  string                    `json:"reason,omitempty"`
 	Targets []ReplicationTargetResult `json:"targets,omitempty"`
@@ -43,6 +44,7 @@ type ReplicationResult struct {
 
 type ReplicationTargetResult struct {
 	Node    string `json:"node"`
+	Key     string `json:"key,omitempty"`
 	Address string `json:"address,omitempty"`
 	OK      bool   `json:"ok"`
 	Status  int    `json:"status,omitempty"`
@@ -86,6 +88,12 @@ func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 
 func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
 	result := replicator.replicateCommand(ctx, trie, request, response)
+	replicator.storeLastResult(result)
+	return result
+}
+
+func (replicator *HTTPReplicator) SyncAll(ctx context.Context, trie *HatTrie, prefix string) ReplicationResult {
+	result := replicator.syncAll(ctx, trie, prefix)
 	replicator.storeLastResult(result)
 	return result
 }
@@ -144,6 +152,70 @@ func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *Ha
 	}
 	for _, target := range targets {
 		result.Targets = append(result.Targets, replicator.postReplicationCommand(ctx, target, payload))
+	}
+	return result
+}
+
+func (replicator *HTTPReplicator) syncAll(ctx context.Context, trie *HatTrie, prefix string) ReplicationResult {
+	ctx = replicationContext(ctx)
+	result := ReplicationResult{Command: "SYNC", Key: prefix}
+	if replicator == nil {
+		result.Skipped = true
+		result.Reason = "replication is not configured"
+		return result
+	}
+	if trie == nil {
+		result.Skipped = true
+		result.Reason = "trie is not configured"
+		return result
+	}
+	if err := ctx.Err(); err != nil {
+		result.Skipped = true
+		result.Reason = err.Error()
+		return result
+	}
+
+	entries := trie.EntriesWithPrefix(prefix, true)
+	if len(entries) == 0 {
+		result.Skipped = true
+		result.Reason = "no entries to sync"
+		return result
+	}
+
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			if len(result.Targets) == 0 {
+				result.Skipped = true
+				result.Reason = err.Error()
+			}
+			return result
+		}
+		key := entry.Key
+		route, ok := replicator.routeForKey(key)
+		if !ok {
+			continue
+		}
+		if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
+			continue
+		}
+		targets := replicator.replicationTargets(route)
+		if len(targets) == 0 {
+			continue
+		}
+		payload, ok := replicationCommandPayload(trie, key, replicationPayloadSet)
+		if !ok {
+			continue
+		}
+		result.Entries++
+		for _, target := range targets {
+			targetResult := replicator.postReplicationCommand(ctx, target, payload)
+			targetResult.Key = key
+			result.Targets = append(result.Targets, targetResult)
+		}
+	}
+	if len(result.Targets) == 0 {
+		result.Skipped = true
+		result.Reason = "no sync targets"
 	}
 	return result
 }
