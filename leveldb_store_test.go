@@ -21,6 +21,7 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	source.UpsertMap("map", Map{"name": "ivi", "age": json.Number("32")})
 	source.UpsertSlice("slice", Slice{"a", json.Number("2")})
 	source.UpsertSet("set", Set{"a", json.Number("2"), "a"})
+	source.UpsertPriorityQueue("priority", PriorityQueue{{Priority: 5, Value: json.Number("2")}, {Priority: 1, Value: "urgent"}})
 	source.UpsertString("ttl", "alive")
 	if !source.Expire("ttl", time.Minute) {
 		t.Fatal("Expire(ttl) = false, want true")
@@ -36,8 +37,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
 	}
-	if count != 7 {
-		t.Fatalf("loaded count = %d, want 7", count)
+	if count != 8 {
+		t.Fatalf("loaded count = %d, want 8", count)
 	}
 
 	if got := loaded.GetCounter("counter"); got != -7 {
@@ -57,6 +58,9 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if got := loaded.GetSet("set"); !reflect.DeepEqual(got, Set{"a", json.Number("2")}) {
 		t.Fatalf("set = %#v, want preserved json.Number", got)
+	}
+	if got := loaded.GetPriorityQueue("priority"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 1, Value: "urgent"}, {Priority: 5, Value: json.Number("2")}}) {
+		t.Fatalf("priority queue = %#v, want restored priority order", got)
 	}
 	if got := loaded.TTL("ttl"); got <= 0 || got > time.Minute {
 		t.Fatalf("ttl = %s, want remaining positive TTL", got)
@@ -98,6 +102,24 @@ func TestLevelDBStoreRoundTripRestoresKeyStats(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("loaded key stats = %#v, want %#v", got, want)
+	}
+}
+
+func TestSnapshotOperationValueSizeSupportsPriorityQueue(t *testing.T) {
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type: "priority_queue",
+			PriorityQueue: []priorityQueueItem{
+				{Priority: 1, Sequence: 0, Value: "urgent"},
+				{Priority: 5, Sequence: 1, Value: json.Number("2")},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(priority_queue) error = %v", err)
+	}
+	if size == 0 {
+		t.Fatal("snapshotOperationValueSize(priority_queue) = 0, want encoded size")
 	}
 }
 

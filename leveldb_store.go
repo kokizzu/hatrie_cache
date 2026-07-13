@@ -225,6 +225,9 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 	case "set":
 		data, err := json.Marshal(entry.Set)
 		return int64(len(data)), err
+	case "priority_queue":
+		data, err := json.Marshal(entry.PriorityQueue)
+		return int64(len(data)), err
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

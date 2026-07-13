@@ -22,6 +22,7 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	ht.UpsertMap("map", Map{"name": "ivi", "age": json.Number("32")})
 	ht.UpsertSlice("slice", Slice{"a", json.Number("2")})
 	ht.UpsertSet("set", Set{"a", json.Number("2"), "a"})
+	ht.UpsertPriorityQueue("priority", PriorityQueue{{Priority: 5, Value: json.Number("2")}, {Priority: 1, Value: "urgent"}})
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -54,6 +55,9 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if got := loaded.GetSet("set"); !reflect.DeepEqual(got, Set{"a", json.Number("2")}) {
 		t.Fatalf("set = %#v, want restored set", got)
+	}
+	if got := loaded.GetPriorityQueue("priority"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 1, Value: "urgent"}, {Priority: 5, Value: json.Number("2")}}) {
+		t.Fatalf("priority queue = %#v, want restored priority order", got)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)

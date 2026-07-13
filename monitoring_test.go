@@ -18,6 +18,7 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 
 	ht.UpsertString("session:1", "active user")
 	ht.UpsertSet("session:tags", Set{"active", "paid"})
+	ht.UpsertPriorityQueue("session:jobs", PriorityQueue{{Priority: 1, Value: "rebuild"}, {Priority: 5, Value: "compact"}})
 	ht.UpsertCounter("counter:views", 42)
 	if !ht.Expire("session:1", time.Minute) {
 		t.Fatal("Expire(session:1) = false, want true")
@@ -63,8 +64,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 2 {
-		t.Fatalf("entries len = %d, want 2: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 3 {
+		t.Fatalf("entries len = %d, want 3: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -73,7 +74,11 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if entry.TTLMillis == nil || *entry.TTLMillis != int64(time.Minute/time.Millisecond) {
 		t.Fatalf("entry TTL = %v, want 60000", entry.TTLMillis)
 	}
-	setEntry := entries.Entries[1]
+	queueEntry := entries.Entries[1]
+	if queueEntry.Key != "session:jobs" || queueEntry.Type != "priority_queue" || queueEntry.SizeBytes != 2 || queueEntry.ValuePreview != "2 priority items" {
+		t.Fatalf("priority queue entry = %#v, want priority queue item preview", queueEntry)
+	}
+	setEntry := entries.Entries[2]
 	if setEntry.Key != "session:tags" || setEntry.Type != "set" || setEntry.SizeBytes != 2 || setEntry.ValuePreview != "2 members" {
 		t.Fatalf("set entry = %#v, want set member preview", setEntry)
 	}

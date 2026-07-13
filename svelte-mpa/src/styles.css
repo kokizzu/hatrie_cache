@@ -429,6 +429,16 @@ textarea {
   color: #9f1d31;
 }
 
+.type-pill.set {
+  background: #e8f7f7;
+  color: #11666a;
+}
+
+.type-pill.priority_queue {
+  background: #f4f1e8;
+  color: #6a5720;
+}
+
 .preview {
   color: #62707d;
   max-width: 280px;

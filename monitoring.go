@@ -300,6 +300,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		value := ht.sets.array[hval.Index]
 		return int64(value.Len()), strconv.Itoa(value.Len()) + " members"
+	case DATAVALUE_TYPE_PRIORITY_QUEUE:
+		if int(hval.Index) >= len(ht.priorityQueues.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		value := ht.priorityQueues.array[hval.Index]
+		return int64(value.Len()), strconv.Itoa(value.Len()) + " priority items"
 	default:
 		return 0, ""
 	}
@@ -321,6 +327,8 @@ func monitoringType(hval HatValue) string {
 		return "leveldb_ref"
 	case DATAVALUE_TYPE_SET:
 		return "set"
+	case DATAVALUE_TYPE_PRIORITY_QUEUE:
+		return "priority_queue"
 	default:
 		return "unknown"
 	}

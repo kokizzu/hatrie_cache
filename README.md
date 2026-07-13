@@ -5,7 +5,9 @@ _**warning**: this project obviously not ready for production_
 
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
-retain old object references.
+retain old object references. Priority queue values use a flat binary heap with
+stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
+O(1), and memory usage low without per-item node allocations.
 
 ## Development
 
@@ -111,14 +113,15 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/topology`, and `/api/commands`. `POST /api/commands` accepts
 `command`, `key`, optional `value`, `values`, `subkey`, `pairs`,
-`ttl_seconds`, and `unix_seconds`; it currently
+`priority`, `ttl_seconds`, and `unix_seconds`; it currently
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
-`TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `DUMP`, `INTERNALSET`,
-and `INTERNALDEL`. `DUMP`, `INTERNALSET`, and `INTERNALDEL` are low-level
-replication primitives that move one key as the same snapshot-entry JSON used by
-snapshot and LevelDB persistence.
+`TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
+`POPPQ`, `GETPQ`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`. `DUMP`,
+`INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
+one key as the same snapshot-entry JSON used by snapshot and LevelDB
+persistence.
 
 Use the HTTP client CLI against a running monitoring server:
 
@@ -130,6 +133,8 @@ make cli ARGS='command -cmd INC -key views'
 make cli ARGS="command -cmd PUTMAP -key user:1 -pairs '{\"name\":\"ivi\",\"age\":32}'"
 make cli ARGS="command -cmd PUSHSLICE -key jobs -values '[\"build\",\"verify\"]'"
 make cli ARGS="command -cmd ADDSET -key tags -values '[\"go\",\"cache\"]'"
+make cli ARGS='command -cmd PUSHPQ -key jobs -priority 1 -value rebuild'
+make cli ARGS='command -cmd POPPQ -key jobs'
 make cli ARGS='command -cmd DUMP -key tags'
 make cli ARGS='topology'
 make cli ARGS='topology -key session:1'
@@ -214,6 +219,9 @@ set type:
   ADDSET,REMSET key val...
   HASSET key val
   GETSET key
+priority queue type:
+  PUSHPQ key priority val...
+  PEEKPQ/POPPQ/GETPQ key
 ```
 - [x] add client CLI support for cluster/server topology management and replication internals:
 ```

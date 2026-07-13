@@ -170,6 +170,31 @@ func TestExecuteCommandSetOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandPriorityQueueOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	lowPriority := int64(10)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHPQ", Key: "jobs", Value: "slow", Priority: &lowPriority}); !got.OK || got.Value != "1" {
+		t.Fatalf("PUSHPQ value response = %#v, want added 1", got)
+	}
+	highPriority := int64(1)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHPQ", Key: "jobs", Values: Slice{"urgent", json.Number("2")}, Priority: &highPriority}); !got.OK || got.Value != "2" {
+		t.Fatalf("PUSHPQ values response = %#v, want added 2", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PEEKPQ", Key: "jobs"}); !got.OK || got.Value != `{"priority":1,"value":"urgent"}` {
+		t.Fatalf("PEEKPQ response = %#v, want urgent priority item", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPPQ", Key: "jobs"}); !got.OK || got.Value != `{"priority":1,"value":"urgent"}` {
+		t.Fatalf("POPPQ response = %#v, want urgent priority item", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETPQ", Key: "jobs"}); !got.OK || got.Value != `[{"priority":1,"value":2},{"priority":10,"value":"slow"}]` {
+		t.Fatalf("GETPQ response = %#v, want ordered JSON array", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "jobs"}); !got.OK || got.Value != `[{"priority":1,"value":2},{"priority":10,"value":"slow"}]` {
+		t.Fatalf("GET priority queue response = %#v, want ordered JSON array", got)
+	}
+}
+
 func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
 	source := newTestTrie(t)
 	now := time.Unix(1400, 0)
@@ -247,6 +272,8 @@ func TestExecuteCommandValidation(t *testing.T) {
 		{Command: "ADDSET", Key: "key"},
 		{Command: "REMSET", Key: "key"},
 		{Command: "HASSET", Key: "key"},
+		{Command: "PUSHPQ", Key: "key"},
+		{Command: "PUSHPQ", Key: "key", Value: "job"},
 		{Command: "INTERNALSET", Key: "key"},
 		{Command: "UNKNOWN", Key: "key"},
 	} {

@@ -170,6 +170,7 @@ func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 		"-value", "Singapore",
 		"-pairs", `{"age":32}`,
 		"-values", `["queued",7]`,
+		"-priority", "3",
 		"-unix-seconds", "1800",
 	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
 		t.Fatalf("run(command structured) error = %v", err)
@@ -180,6 +181,9 @@ func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 	}
 	if gotRequest.UnixSeconds == nil || *gotRequest.UnixSeconds != unixSeconds {
 		t.Fatalf("unix seconds = %v, want %d", gotRequest.UnixSeconds, unixSeconds)
+	}
+	if gotRequest.Priority == nil || *gotRequest.Priority != 3 {
+		t.Fatalf("priority = %v, want 3", gotRequest.Priority)
 	}
 	if got := gotRequest.Pairs["age"]; got != json.Number("32") {
 		t.Fatalf("pairs[age] = %#v, want json.Number(32)", got)

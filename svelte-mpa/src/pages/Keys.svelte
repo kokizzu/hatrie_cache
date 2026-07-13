@@ -58,6 +58,8 @@
         <option value="bytes">Bytes</option>
         <option value="map">Map</option>
         <option value="slice">Slice</option>
+        <option value="set">Set</option>
+        <option value="priority_queue">Priority Queue</option>
       </select>
     </label>
   </section>

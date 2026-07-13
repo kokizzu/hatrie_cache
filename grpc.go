@@ -130,6 +130,10 @@ func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) CacheCo
 		unixSeconds := request.GetUnixSeconds()
 		out.UnixSeconds = &unixSeconds
 	}
+	if request.Priority != nil {
+		priority := request.GetPriority()
+		out.Priority = &priority
+	}
 	if len(request.Values) > 0 {
 		out.Values = make(Slice, len(request.Values))
 		for i, value := range request.Values {

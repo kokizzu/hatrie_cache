@@ -7,15 +7,21 @@
   let key = '';
   let value = '';
   let ttl = 3600;
+  let priority = 0;
   let persist = false;
   let response = '';
+
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ'].includes(command);
+  $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
+  $: needsPriority = command === 'PUSHPQ';
 
   async function submit() {
     const result = await runCommand({
       command,
       key,
       value,
-      ttl_seconds: persist ? null : ttl
+      priority: needsPriority ? priority : null,
+      ttl_seconds: needsTTL && !persist ? ttl : null
     });
     response = result.value ? `${result.message} ${result.value}` : result.message;
   }
@@ -47,6 +53,10 @@
           <option>SETINT</option>
           <option>DEL</option>
           <option>EXPIRE</option>
+          <option>PUSHPQ</option>
+          <option>PEEKPQ</option>
+          <option>POPPQ</option>
+          <option>GETPQ</option>
         </select>
       </label>
 
@@ -55,14 +65,21 @@
         <input bind:value={key} placeholder="session:user:1024" required />
       </label>
 
-      {#if command !== 'GET' && command !== 'DEL' && command !== 'EXPIRE'}
+      {#if needsValue}
         <label>
           <span>Value</span>
           <textarea bind:value={value} rows="4" placeholder="value"></textarea>
         </label>
       {/if}
 
-      {#if command !== 'GET' && command !== 'DEL'}
+      {#if needsPriority}
+        <label>
+          <span>Priority</span>
+          <input type="number" bind:value={priority} />
+        </label>
+      {/if}
+
+      {#if needsTTL}
         <div class="ttl-row">
           <label>
             <span>TTL seconds</span>

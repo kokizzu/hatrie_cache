@@ -23,7 +23,7 @@ export type CacheStats = {
 
 export type CacheEntry = {
   key: string;
-  type: 'counter' | 'string' | 'bytes' | 'map' | 'slice';
+  type: 'counter' | 'string' | 'bytes' | 'map' | 'slice' | 'set' | 'priority_queue';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -38,6 +38,7 @@ export type CommandRequest = {
   command: string;
   key: string;
   value?: string;
+  priority?: number | null;
   ttl_seconds?: number | null;
 };
 
@@ -102,6 +103,22 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 1176,
     value_preview: '18 pending items'
+  },
+  {
+    key: 'priority:jobs',
+    type: 'priority_queue',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 6,
+    value_preview: '6 priority items'
+  },
+  {
+    key: 'tags:active',
+    type: 'set',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 4,
+    value_preview: '4 members'
   },
   {
     key: 'profile:name:1024',

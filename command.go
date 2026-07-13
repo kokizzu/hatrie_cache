@@ -17,6 +17,7 @@ type CacheCommandRequest struct {
 	Values      Slice  `json:"values,omitempty"`
 	Subkey      string `json:"subkey,omitempty"`
 	Pairs       Map    `json:"pairs,omitempty"`
+	Priority    *int64 `json:"priority,omitempty"`
 	TTLSeconds  *int64 `json:"ttl_seconds,omitempty"`
 	UnixSeconds *int64 `json:"unix_seconds,omitempty"`
 }
@@ -243,6 +244,35 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
+	case "PUSHPQ", "PUSHPRIORITY":
+		priority, ok := commandPriority(request)
+		if !ok {
+			return commandError("priority is required")
+		}
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		added := ht.PushPriorityQueue(key, priority, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "pushed priority queue values", Value: strconv.Itoa(added)}
+	case "PEEKPQ", "PEEKPRIORITY":
+		value, ok := ht.PeekPriorityQueue(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
+	case "POPPQ", "POPPRIORITY":
+		value, ok := ht.PopPriorityQueue(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("removed", value)
+	case "GETPQ", "GETPRIORITY":
+		value := ht.GetPriorityQueue(key)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
 	default:
 		return commandError("unsupported command")
 	}
@@ -426,6 +456,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_PRIORITY_QUEUE:
+		data, err := json.Marshal(ht.priorityQueues.array[hval.Index].Items())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	default:
 		return "", nil
 	}
@@ -491,6 +527,20 @@ func commandSliceValues(request CacheCommandRequest) (Slice, bool) {
 		return Slice{request.Value}, true
 	}
 	return nil, false
+}
+
+func commandPriority(request CacheCommandRequest) (int64, bool) {
+	if request.Priority != nil {
+		return *request.Priority, true
+	}
+	if strings.TrimSpace(request.Subkey) == "" {
+		return 0, false
+	}
+	parsed, err := strconv.ParseInt(strings.TrimSpace(request.Subkey), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func commandValueResponse(message string, value interface{}) CacheCommandResponse {

@@ -119,6 +119,30 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("TAILSLICE response = %#v, want verify", tailResp)
 	}
 
+	priority := int64(1)
+	pushPQResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command:  "PUSHPQ",
+		Key:      "priority:jobs",
+		Value:    "urgent",
+		Priority: &priority,
+	})
+	if err != nil {
+		t.Fatalf("Command(PUSHPQ) error = %v", err)
+	}
+	if !pushPQResp.GetOk() {
+		t.Fatalf("PUSHPQ response = %#v, want ok", pushPQResp)
+	}
+	popPQResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "POPPQ",
+		Key:     "priority:jobs",
+	})
+	if err != nil {
+		t.Fatalf("Command(POPPQ) error = %v", err)
+	}
+	if !popPQResp.GetOk() || popPQResp.GetValue() != `{"priority":1,"value":"urgent"}` {
+		t.Fatalf("POPPQ response = %#v, want urgent priority item", popPQResp)
+	}
+
 	stats, err := client.Stats(context.Background(), &hatriecachev1.StatsRequest{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)

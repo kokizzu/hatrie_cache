@@ -584,6 +584,43 @@ func TestSetOperations(t *testing.T) {
 	}
 }
 
+func TestPriorityQueueOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if added := ht.PushPriorityQueue("queue", 10, "slow"); added != 1 {
+		t.Fatalf("PushPriorityQueue(slow) = %d, want 1", added)
+	}
+	if added := ht.PushPriorityQueue("queue", 1, "urgent", "also-urgent"); added != 2 {
+		t.Fatalf("PushPriorityQueue(urgent) = %d, want 2", added)
+	}
+	if hval := ht.Get("queue"); !hval.IsPriorityQueue() {
+		t.Fatalf("PushPriorityQueue on missing key stored type %+v, want priority queue", hval)
+	}
+	if got, ok := ht.PeekPriorityQueue("queue"); !ok || got.Priority != 1 || got.Value != "urgent" {
+		t.Fatalf("PeekPriorityQueue() = %#v/%v, want urgent priority 1", got, ok)
+	}
+	if got, ok := ht.PopPriorityQueue("queue"); !ok || got.Priority != 1 || got.Value != "urgent" {
+		t.Fatalf("first PopPriorityQueue() = %#v/%v, want urgent priority 1", got, ok)
+	}
+	if got, ok := ht.PopPriorityQueue("queue"); !ok || got.Priority != 1 || got.Value != "also-urgent" {
+		t.Fatalf("second PopPriorityQueue() = %#v/%v, want FIFO tie", got, ok)
+	}
+	if got := ht.GetPriorityQueue("queue"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 10, Value: "slow"}}) {
+		t.Fatalf("GetPriorityQueue() = %#v, want slow remaining", got)
+	}
+
+	copied := ht.GetPriorityQueue("queue")
+	copied[0].Value = "changed"
+	if got := ht.GetPriorityQueue("queue"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 10, Value: "slow"}}) {
+		t.Fatalf("GetPriorityQueue exposed internal queue: got %#v", got)
+	}
+
+	ht.UpsertPriorityQueue("queue", PriorityQueue{{Priority: -1, Value: "first"}, {Priority: 5, Value: "later"}})
+	if got, ok := ht.PopPriorityQueue("queue"); !ok || got.Value != "first" {
+		t.Fatalf("PopPriorityQueue after upsert = %#v/%v, want first", got, ok)
+	}
+}
+
 func TestDeleteReleasesBackingStorageForReuse(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -617,6 +654,15 @@ func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
 	}
 	if !ht.maps.reusables[mapIdx] {
 		t.Fatalf("replaced map index %d was not marked reusable", mapIdx)
+	}
+
+	sliceIdx := ht.Get("key").Index
+	ht.UpsertPriorityQueue("key", PriorityQueue{{Priority: 1, Value: "job"}})
+	if hval := ht.Get("key"); !hval.IsPriorityQueue() {
+		t.Fatalf("replacement type = %+v, want priority queue", hval)
+	}
+	if !ht.slices.reusables[sliceIdx] {
+		t.Fatalf("replaced slice index %d was not marked reusable", sliceIdx)
 	}
 }
 
@@ -710,7 +756,8 @@ func TestExpiredReadsAcrossValueFamilies(t *testing.T) {
 	ht.UpsertBytes("bytes", []byte("value"))
 	ht.UpsertMap("map", Map{"field": "value"})
 	ht.UpsertSlice("slice", Slice{"value"})
-	for _, key := range []string{"counter", "bytes", "map", "slice"} {
+	ht.UpsertPriorityQueue("priority", PriorityQueue{{Priority: 1, Value: "value"}})
+	for _, key := range []string{"counter", "bytes", "map", "slice", "priority"} {
 		if !ht.Expire(key, time.Second) {
 			t.Fatalf("Expire(%q) = false, want true", key)
 		}
@@ -728,6 +775,9 @@ func TestExpiredReadsAcrossValueFamilies(t *testing.T) {
 	}
 	if got := ht.HeadSlice("slice"); got != nil {
 		t.Fatalf("expired slice head = %v, want nil", got)
+	}
+	if got, ok := ht.PeekPriorityQueue("priority"); ok || got.Value != nil {
+		t.Fatalf("expired priority queue peek = %#v/%v, want missing", got, ok)
 	}
 	if got := ht.Size(); got != 0 {
 		t.Fatalf("size after family expiration reads = %d, want 0", got)
@@ -764,8 +814,9 @@ func TestKeysAndEntries(t *testing.T) {
 	ht.UpsertBytes("apricot", []byte("orange"))
 	ht.UpsertMap("map", Map{"field": "value"})
 	ht.UpsertSlice("slice", Slice{"item"})
+	ht.UpsertPriorityQueue("priority", PriorityQueue{{Priority: 1, Value: "item"}})
 
-	wantKeys := []string{"apple", "apricot", "banana", "map", "slice"}
+	wantKeys := []string{"apple", "apricot", "banana", "map", "priority", "slice"}
 	if got := ht.Keys(true); !reflect.DeepEqual(got, wantKeys) {
 		t.Fatalf("Keys(sorted) = %#v, want %#v", got, wantKeys)
 	}
@@ -790,6 +841,9 @@ func TestKeysAndEntries(t *testing.T) {
 	}
 	if got := values["slice"]; !got.IsSlice() {
 		t.Fatalf("slice entry = %+v, want slice", got)
+	}
+	if got := values["priority"]; !got.IsPriorityQueue() {
+		t.Fatalf("priority entry = %+v, want priority queue", got)
 	}
 }
 

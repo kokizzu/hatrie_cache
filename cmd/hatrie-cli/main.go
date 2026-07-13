@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	hatriecache "hatrie_cache"
@@ -114,6 +115,7 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 	valuesJSON := flags.String("values", "", "JSON array for commands that accept multiple values")
 	subkey := flags.String("subkey", "", "map subkey")
 	pairsJSON := flags.String("pairs", "", "JSON object for map fields")
+	priority := flags.String("priority", "", "priority for priority queue push")
 	ttlSeconds := flags.Int64("ttl-seconds", -1, "optional ttl in seconds")
 	unixSeconds := flags.Int64("unix-seconds", -1, "optional absolute expiration as Unix seconds")
 	if err := flags.Parse(args); err != nil {
@@ -131,6 +133,13 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 	}
 	if *unixSeconds >= 0 {
 		request.UnixSeconds = unixSeconds
+	}
+	if *priority != "" {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(*priority), 10, 64)
+		if err != nil {
+			return fmt.Errorf("priority: %w", err)
+		}
+		request.Priority = &parsed
 	}
 	if *valuesJSON != "" {
 		values, err := decodeJSONFlag[hatriecache.Slice](*valuesJSON)

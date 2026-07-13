@@ -24,16 +24,17 @@ type SnapshotMetadata struct {
 }
 
 type snapshotEntry struct {
-	Key       string     `json:"key"`
-	Type      string     `json:"type"`
-	Counter   int32      `json:"counter,omitempty"`
-	String    string     `json:"string,omitempty"`
-	Bytes     string     `json:"bytes,omitempty"`
-	Map       Map        `json:"map"`
-	Slice     Slice      `json:"slice"`
-	Set       Set        `json:"set"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Stats     *KeyStats  `json:"stats,omitempty"`
+	Key           string              `json:"key"`
+	Type          string              `json:"type"`
+	Counter       int32               `json:"counter,omitempty"`
+	String        string              `json:"string,omitempty"`
+	Bytes         string              `json:"bytes,omitempty"`
+	Map           Map                 `json:"map"`
+	Slice         Slice               `json:"slice"`
+	Set           Set                 `json:"set"`
+	PriorityQueue []priorityQueueItem `json:"priority_queue"`
+	ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
+	Stats         *KeyStats           `json:"stats,omitempty"`
 }
 
 type snapshotOperation struct {
@@ -158,6 +159,8 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 		return ht.levelDBReferenceSnapshotEntryLocked(entry.Key, entry.Value)
 	case DATAVALUE_TYPE_SET:
 		out.Set = ht.sets.array[entry.Value.Index].Values()
+	case DATAVALUE_TYPE_PRIORITY_QUEUE:
+		out.PriorityQueue = ht.priorityQueues.array[entry.Value.Index].SnapshotItems()
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -181,7 +184,7 @@ func (ht *HatTrie) bytesValueLocked(hval HatValue) ([]byte, error) {
 func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 	operation := snapshotOperation{entry: entry}
 	switch entry.Type {
-	case "counter", "string", "map", "slice", "set":
+	case "counter", "string", "map", "slice", "set", "priority_queue":
 		return operation, nil
 	case "bytes":
 		value, err := base64.StdEncoding.DecodeString(entry.Bytes)
@@ -250,6 +253,9 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 	case "set":
 		idx := ht.sets.Add(entry.Set)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}
+	case "priority_queue":
+		idx := ht.priorityQueues.AddItems(entry.PriorityQueue)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
