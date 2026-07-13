@@ -85,7 +85,9 @@ Set `DB_HOT_LOAD=true` to load all non-expired LevelDB keys as compact
 references while only materializing hot values in memory. By default a hot value
 must be 1024 bytes or smaller, have a last hit within 1 hour, and have more than
 1000 recorded hits. Cold values are hydrated from LevelDB on first value access
-and are still preserved by later LevelDB saves:
+and are still preserved by later LevelDB saves. Keep the `LevelDBStore` open
+while cold references may be accessed, or call `HydrateLevelDBReferences` before
+closing it to materialize all references into the trie:
 
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
@@ -236,7 +238,8 @@ re-apply the normal disk spill threshold for large byte values.
 
 Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
 disk persistence. The LevelDB writer uses Snappy compression and clears stale
-keys on each save while preserving per-key access metadata.
+keys on each save while preserving per-key access metadata. `LevelDBStore.Close`
+is idempotent; operations after close return `ErrLevelDBStoreClosed`.
 
 Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
 service in another Go process, or use the generated client in

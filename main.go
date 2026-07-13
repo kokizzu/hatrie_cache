@@ -1710,6 +1710,31 @@ func (ht *HatTrie) getLocked(key string) HatValue {
 	return hval
 }
 
+// HydrateLevelDBReferences materializes all lazy LevelDB-backed values into the
+// trie. Use it before closing a LevelDBStore when a hot-loaded trie must keep
+// serving cold values without the store handle.
+func (ht *HatTrie) HydrateLevelDBReferences() (int, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	ht.ensureOpen()
+	entries := ht.entriesWithPrefixLocked("", true)
+	hydrated := 0
+	for _, entry := range entries {
+		if !entry.Value.IsLevelDBReference() {
+			continue
+		}
+		hval, err := ht.hydrateLevelDBReferenceLocked(entry.Key, entry.Value)
+		if err != nil {
+			return hydrated, err
+		}
+		if !hval.Empty() {
+			hydrated++
+		}
+	}
+	return hydrated, nil
+}
+
 func (ht *HatTrie) hydrateLevelDBReferenceLocked(key string, hval HatValue) (HatValue, error) {
 	ref, ok := ht.dbrefs.Get(hval.Index)
 	if !ok || ref.Store == nil {

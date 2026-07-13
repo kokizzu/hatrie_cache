@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -13,6 +14,8 @@ import (
 )
 
 var levelDBEntryPrefix = []byte("entry:")
+
+var ErrLevelDBStoreClosed = errors.New("hatriecache: leveldb store is closed")
 
 // LevelDBLoadPolicy controls how LevelDB entries are restored into memory.
 type LevelDBLoadPolicy struct {
@@ -40,6 +43,7 @@ func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
 }
 
 type LevelDBStore struct {
+	mu sync.RWMutex
 	db *leveldb.DB
 }
 
@@ -60,10 +64,17 @@ func OpenLevelDBStore(path string) (*LevelDBStore, error) {
 }
 
 func (store *LevelDBStore) Close() error {
-	if store == nil || store.db == nil {
+	if store == nil {
 		return nil
 	}
-	return store.db.Close()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.db == nil {
+		return nil
+	}
+	db := store.db
+	store.db = nil
+	return db.Close()
 }
 
 func (store *LevelDBStore) Save(trie *HatTrie) error {
@@ -72,8 +83,14 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 		return err
 	}
 
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	batch := new(leveldb.Batch)
-	iterator := store.db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
+	iterator := db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
 	for iterator.Next() {
 		key := cloneBytes(iterator.Key())
 		batch.Delete(key)
@@ -91,7 +108,7 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 		}
 		batch.Put(levelDBKey(entry.Key), data)
 	}
-	return store.db.Write(batch, &opt.WriteOptions{Sync: true})
+	return db.Write(batch, &opt.WriteOptions{Sync: true})
 }
 
 func (store *LevelDBStore) Load(trie *HatTrie) (int, error) {
@@ -103,7 +120,13 @@ func (store *LevelDBStore) Load(trie *HatTrie) (int, error) {
 // cold values are represented by lightweight references; keep store open while
 // those references may be accessed or saved.
 func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolicy) (LevelDBLoadResult, error) {
-	iterator := store.db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return LevelDBLoadResult{}, err
+	}
+	defer unlock()
+
+	iterator := db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
 	defer iterator.Release()
 
 	now := trie.currentTime()
@@ -152,7 +175,13 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 }
 
 func (store *LevelDBStore) Entry(key string) (snapshotEntry, bool, error) {
-	data, err := store.db.Get(levelDBKey(key), nil)
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return snapshotEntry{}, false, err
+	}
+	defer unlock()
+
+	data, err := db.Get(levelDBKey(key), nil)
 	if errors.Is(err, leveldb.ErrNotFound) {
 		return snapshotEntry{}, false, nil
 	}
@@ -164,6 +193,18 @@ func (store *LevelDBStore) Entry(key string) (snapshotEntry, bool, error) {
 		return snapshotEntry{}, false, err
 	}
 	return entry, true, nil
+}
+
+func (store *LevelDBStore) lockDB() (*leveldb.DB, func(), error) {
+	if store == nil {
+		return nil, func() {}, ErrLevelDBStoreClosed
+	}
+	store.mu.RLock()
+	if store.db == nil {
+		store.mu.RUnlock()
+		return nil, func() {}, ErrLevelDBStoreClosed
+	}
+	return store.db, store.mu.RUnlock, nil
 }
 
 func (trie *HatTrie) SaveLevelDB(path string) error {

@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -197,6 +198,108 @@ func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T)
 	}
 	if got := roundTrip.GetString("large-hot"); got == "" {
 		t.Fatal("large-hot was not preserved after saving hot-loaded trie")
+	}
+}
+
+func TestLevelDBStoreCloseIsIdempotentAndRejectsOperations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("key", "value")
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	if err := store.Save(loaded); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("Save(closed) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := store.Load(loaded); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("Load(closed) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("LoadWithPolicy(closed) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := store.Entry("key"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("Entry(closed) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+}
+
+func TestHydrateLevelDBReferencesAllowsClosingStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("cold", "cold-value")
+	source.UpsertMap("map", Map{"field": "value"})
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 2 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 2 keys and 0 values", result)
+	}
+	if got, err := loaded.HydrateLevelDBReferences(); err != nil || got != 2 {
+		t.Fatalf("HydrateLevelDBReferences() = %d/%v, want 2/nil", got, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if got := loaded.GetString("cold"); got != "cold-value" {
+		t.Fatalf("GetString(cold) after close = %q, want cold-value", got)
+	}
+	if got := loaded.GetMap("map"); !reflect.DeepEqual(got, Map{"field": "value"}) {
+		t.Fatalf("GetMap(map) after close = %#v, want hydrated map", got)
+	}
+	path = filepath.Join(t.TempDir(), "snapshot.json")
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot(after close) error = %v", err)
+	}
+}
+
+func TestHydrateLevelDBReferencesReportsClosedStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("cold", "value")
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	loaded := newTestTrie(t)
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if got, err := loaded.HydrateLevelDBReferences(); got != 0 || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HydrateLevelDBReferences() = %d/%v, want 0/ErrLevelDBStoreClosed", got, err)
+	}
+	if err := loaded.SaveSnapshot(filepath.Join(t.TempDir(), "snapshot.json")); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("SaveSnapshot(with closed cold ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 }
 
