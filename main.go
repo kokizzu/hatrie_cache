@@ -581,8 +581,21 @@ func (bs *BytesStorage) Put(idx int32, value []byte) {
 	bs.reusables.Use(idx)
 }
 
+func (bs *BytesStorage) putOwned(idx int32, value []byte) {
+	if idx < 0 || int(idx) >= len(bs.array) {
+		return
+	}
+	bs.array[idx] = value
+	bs.reusables.Use(idx)
+}
+
 func (bs *BytesStorage) Append(value []byte) int32 {
 	bs.array = append(bs.array, cloneBytes(value))
+	return int32(len(bs.array) - 1)
+}
+
+func (bs *BytesStorage) appendOwned(value []byte) int32 {
+	bs.array = append(bs.array, value)
 	return int32(len(bs.array) - 1)
 }
 
@@ -592,6 +605,14 @@ func (bs *BytesStorage) Add(value []byte) int32 {
 		return idx
 	}
 	return bs.Append(value)
+}
+
+func (bs *BytesStorage) addOwned(value []byte) int32 {
+	if idx, ok := bs.reusables.Take(); ok {
+		bs.array[idx] = value
+		return idx
+	}
+	return bs.appendOwned(value)
 }
 
 func (bs *BytesStorage) Del(idx int32) {
@@ -1947,7 +1968,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsStringAtRaws() {
-		ht.raws.Put(hval.Index, []byte(val))
+		ht.raws.putOwned(hval.Index, []byte(val))
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
@@ -1957,7 +1978,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.Add([]byte(val))
+	idx := ht.raws.addOwned([]byte(val))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 }
@@ -1973,7 +1994,7 @@ func (ht *HatTrie) AppendString(key string, str string) {
 		next := make([]byte, 0, len(old)+len(str))
 		next = append(next, old...)
 		next = append(next, str...)
-		ht.raws.Put(hval.Index, next)
+		ht.raws.putOwned(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return
@@ -1981,7 +2002,7 @@ func (ht *HatTrie) AppendString(key string, str string) {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.Add([]byte(str))
+	idx := ht.raws.addOwned([]byte(str))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 }
@@ -1997,7 +2018,7 @@ func (ht *HatTrie) PrependString(key string, str string) {
 		next := make([]byte, 0, len(str)+len(old))
 		next = append(next, str...)
 		next = append(next, old...)
-		ht.raws.Put(hval.Index, next)
+		ht.raws.putOwned(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return
@@ -2005,7 +2026,7 @@ func (ht *HatTrie) PrependString(key string, str string) {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.Add([]byte(str))
+	idx := ht.raws.addOwned([]byte(str))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 }

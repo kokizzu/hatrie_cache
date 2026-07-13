@@ -798,6 +798,23 @@ func TestReusableIndexesDeduplicateAndSkipStaleEntries(t *testing.T) {
 	}
 }
 
+func TestBytesStorageClonesCallerOwnedValues(t *testing.T) {
+	store := CreateBytesStorage()
+	value := []byte("value")
+	idx := store.Add(value)
+	value[0] = 'X'
+	if got := string(store.array[idx]); got != "value" {
+		t.Fatalf("Add() stored caller-owned bytes: %q", got)
+	}
+
+	replacement := []byte("next")
+	store.Put(idx, replacement)
+	replacement[0] = 'X'
+	if got := string(store.array[idx]); got != "next" {
+		t.Fatalf("Put() stored caller-owned bytes: %q", got)
+	}
+}
+
 func TestStoragePoolsTrimReusableTailSlots(t *testing.T) {
 	raws := CreateBytesStorage()
 	raws.Add([]byte("zero"))
