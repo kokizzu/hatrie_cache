@@ -8,6 +8,10 @@ package hatriecache
 import "C"
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -58,6 +62,33 @@ const (
 type Entry struct {
 	Key   string
 	Value HatValue
+}
+
+func MarshalMapJSON(value Map) ([]byte, error) {
+	return json.Marshal(value)
+}
+
+func UnmarshalMapJSON(data []byte) (Map, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+
+	var value interface{}
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("hatriecache: invalid JSON map")
+		}
+		return nil, err
+	}
+
+	m, ok := value.(map[string]interface{})
+	if !ok {
+		return nil, errors.New("hatriecache: JSON value is not an object")
+	}
+	return Map(m), nil
 }
 
 func (hval HatValue) Empty() bool {
@@ -1031,6 +1062,27 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 	delete(ht.expires, key)
 	idx := ht.maps.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
+}
+
+func (ht *HatTrie) UpsertMapJSON(key string, data []byte) error {
+	value, err := UnmarshalMapJSON(data)
+	if err != nil {
+		return err
+	}
+	ht.UpsertMap(key, value)
+	return nil
+}
+
+func (ht *HatTrie) GetMapJSON(key string) ([]byte, bool, error) {
+	value := ht.GetMap(key)
+	if value == nil {
+		return nil, false, nil
+	}
+	data, err := MarshalMapJSON(value)
+	if err != nil {
+		return nil, true, err
+	}
+	return data, true, nil
 }
 
 func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {

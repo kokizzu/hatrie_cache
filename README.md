@@ -27,6 +27,10 @@ Use `Keys`, `KeysWithPrefix`, `Entries`, and `EntriesWithPrefix` to iterate
 over non-expired keys and value metadata. Prefix iteration returns full keys and
 supports keys containing NUL bytes.
 
+Use `MarshalMapJSON`, `UnmarshalMapJSON`, `UpsertMapJSON`, and `GetMapJSON`
+for JSON serialization of Go map values. The JSON decoder preserves numbers as
+`json.Number`.
+
 Byte values larger than `DiskBytesThreshold` (64KB) are stored on disk and set
 the `HatValue.OnDisk()` flag. `CreateHatTrie` uses an owned temporary spill
 directory that is removed by `Destroy`; use `CreateHatTrieWithDiskDir` to supply
@@ -72,7 +76,7 @@ slice/arr/stack/queue type:
 ```
 - [ ] add option to shard/partition it or full replica, copy tarantool's vbucket/vshard logic
 - [x] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
-- [ ] check if serializer can support Go's map
+- [x] check if serializer can support Go's map
 - [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
 - [x] binary data that are >64KB always stored on disk
 - [ ] write all pending transaction on journal (backup if program terminated unexpectedly)

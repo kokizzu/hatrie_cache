@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"reflect"
 	"sort"
@@ -222,6 +223,114 @@ func TestMapOperations(t *testing.T) {
 	if got := ht.PeekMap("map", "age"); got != 32 {
 		t.Fatalf("GetMap exposed internal map: got age %v, want 32", got)
 	}
+}
+
+func TestMapJSONSerializerRoundTrip(t *testing.T) {
+	input := Map{
+		"name": "ivi",
+		"age":  json.Number("32"),
+		"nested": map[string]interface{}{
+			"enabled": true,
+			"ratio":   json.Number("1.25"),
+		},
+		"items": []interface{}{json.Number("1"), "two", false},
+	}
+
+	data, err := MarshalMapJSON(input)
+	if err != nil {
+		t.Fatalf("MarshalMapJSON() error = %v", err)
+	}
+	output, err := UnmarshalMapJSON(data)
+	if err != nil {
+		t.Fatalf("UnmarshalMapJSON() error = %v", err)
+	}
+	if !reflect.DeepEqual(output, input) {
+		t.Fatalf("round trip = %#v, want %#v", output, input)
+	}
+}
+
+func TestMapJSONCacheMethods(t *testing.T) {
+	ht := newTestTrie(t)
+
+	input := []byte(`{"age":32,"name":"ivi","nested":{"enabled":true},"items":[1,"two"]}`)
+	if err := ht.UpsertMapJSON("json", input); err != nil {
+		t.Fatalf("UpsertMapJSON() error = %v", err)
+	}
+
+	got := ht.GetMap("json")
+	if got["age"] != json.Number("32") {
+		t.Fatalf("decoded age = %#v, want json.Number(32)", got["age"])
+	}
+	nested, ok := got["nested"].(map[string]interface{})
+	if !ok || nested["enabled"] != true {
+		t.Fatalf("decoded nested map = %#v", got["nested"])
+	}
+
+	data, ok, err := ht.GetMapJSON("json")
+	if err != nil {
+		t.Fatalf("GetMapJSON() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("GetMapJSON() ok = false, want true")
+	}
+	roundTrip, err := UnmarshalMapJSON(data)
+	if err != nil {
+		t.Fatalf("GetMapJSON payload did not decode: %v", err)
+	}
+	if !reflect.DeepEqual(roundTrip, got) {
+		t.Fatalf("GetMapJSON round trip = %#v, want %#v", roundTrip, got)
+	}
+
+	if data, ok, err := ht.GetMapJSON("missing"); err != nil || ok || data != nil {
+		t.Fatalf("GetMapJSON(missing) = (%q, %v, %v), want nil false nil", data, ok, err)
+	}
+}
+
+func TestMapJSONRejectsInvalidInputs(t *testing.T) {
+	for _, input := range [][]byte{
+		[]byte(`[]`),
+		[]byte(`"not an object"`),
+		[]byte(`{"ok":true} trailing`),
+		[]byte(`{"broken"`),
+	} {
+		if got, err := UnmarshalMapJSON(input); err == nil {
+			t.Fatalf("UnmarshalMapJSON(%q) = %#v, nil error", input, got)
+		}
+	}
+
+	if _, err := MarshalMapJSON(Map{"bad": make(chan int)}); err == nil {
+		t.Fatal("MarshalMapJSON(unsupported value) error = nil, want error")
+	}
+}
+
+func TestConcurrentMapJSONOperationsAreSynchronized(t *testing.T) {
+	ht := newTestTrie(t)
+
+	const (
+		workers    = 4
+		iterations = 50
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		worker := worker
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				data := []byte(`{"worker":` + strconv.Itoa(worker) + `,"iteration":` + strconv.Itoa(i) + `}`)
+				if err := ht.UpsertMapJSON("json", data); err != nil {
+					t.Errorf("UpsertMapJSON() error = %v", err)
+					return
+				}
+				if _, ok, err := ht.GetMapJSON("json"); err != nil || !ok {
+					t.Errorf("GetMapJSON() = ok %v err %v", ok, err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestSliceOperations(t *testing.T) {
