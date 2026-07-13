@@ -91,11 +91,12 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-monitoring-server",
 		"-node-id", "node-a",
 		"-topology-path", "/tmp/topology.json",
+		"-election-timeout", "30s",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
 	}
-	if cfg.nodeID != "node-a" || cfg.topologyPath != "/tmp/topology.json" {
+	if cfg.nodeID != "node-a" || cfg.topologyPath != "/tmp/topology.json" || cfg.electionTimeout != 30*time.Second {
 		t.Fatalf("cfg topology = %#v, want explicit node and path", cfg)
 	}
 }

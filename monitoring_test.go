@@ -291,3 +291,69 @@ func TestMonitoringHandlerManagesTopology(t *testing.T) {
 		t.Fatalf("bad topology status = %d, want 400", badResp.Code)
 	}
 }
+
+func TestMonitoringHandlerManagesElection(t *testing.T) {
+	ht := newTestTrie(t)
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Nodes: []TopologyNode{
+			{ID: "node-a"},
+			{ID: "node-b"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	election := NewElectionStore(topology, ElectionOptions{})
+	handler := NewMonitoringHandler(ht, MonitoringOptions{Topology: topology, Election: election}).Handler()
+
+	statusResp := httptest.NewRecorder()
+	handler.ServeHTTP(statusResp, httptest.NewRequest(http.MethodGet, "/api/election", nil))
+	if statusResp.Code != http.StatusOK {
+		t.Fatalf("election GET status = %d, want 200", statusResp.Code)
+	}
+	var status ElectionStatus
+	if err := json.Unmarshal(statusResp.Body.Bytes(), &status); err != nil {
+		t.Fatalf("election status JSON error = %v", err)
+	}
+	if len(status.Leaders) != 1 || status.Leaders[0].Leader != "node-a" {
+		t.Fatalf("election status = %#v, want node-a leader", status)
+	}
+
+	offlineResp := httptest.NewRecorder()
+	handler.ServeHTTP(offlineResp, httptest.NewRequest(http.MethodPost, "/api/election", bytes.NewBufferString(`{"node":"node-a","online":false}`)))
+	if offlineResp.Code != http.StatusOK {
+		t.Fatalf("election offline status = %d body %q, want 200", offlineResp.Code, offlineResp.Body.String())
+	}
+	if got := election.Status().Leaders[0]; got.Leader != "node-b" {
+		t.Fatalf("leader after offline = %#v, want node-b", got)
+	}
+
+	routeResp := httptest.NewRecorder()
+	handler.ServeHTTP(routeResp, httptest.NewRequest(http.MethodGet, "/api/election?key=session:1", nil))
+	if routeResp.Code != http.StatusOK {
+		t.Fatalf("election route status = %d, want 200", routeResp.Code)
+	}
+	var route ElectionKeyRoute
+	if err := json.Unmarshal(routeResp.Body.Bytes(), &route); err != nil {
+		t.Fatalf("election route JSON error = %v", err)
+	}
+	if route.Key != "session:1" || route.Leader.Leader != "node-b" {
+		t.Fatalf("election route = %#v, want node-b leader", route)
+	}
+
+	badResp := httptest.NewRecorder()
+	handler.ServeHTTP(badResp, httptest.NewRequest(http.MethodPost, "/api/election", bytes.NewBufferString(`{"node":"missing"}`)))
+	if badResp.Code != http.StatusBadRequest {
+		t.Fatalf("bad election status = %d, want 400", badResp.Code)
+	}
+
+	methodResp := httptest.NewRecorder()
+	handler.ServeHTTP(methodResp, httptest.NewRequest(http.MethodDelete, "/api/election", nil))
+	if methodResp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("election DELETE status = %d, want 405", methodResp.Code)
+	}
+}

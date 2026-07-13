@@ -29,6 +29,7 @@ type config struct {
 	monitoringWebDir  string
 	nodeID            string
 	topologyPath      string
+	electionTimeout   time.Duration
 	grpcAddr          string
 	dbPath            string
 	dbSyncInterval    time.Duration
@@ -114,6 +115,12 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	if err != nil {
 		return err
 	}
+	election := hatriecache.NewElectionStore(topology, hatriecache.ElectionOptions{Timeout: cfg.electionTimeout})
+	if err := election.Heartbeat(defaultNodeID(cfg.nodeID)); err != nil {
+		if cfg.nodeID != "" {
+			return err
+		}
+	}
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
 		NodeName: cfg.nodeID,
@@ -121,6 +128,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Snapshot: snapshotCallback(trie, journal, cfg.snapshotPath),
 		Journal:  journal,
 		Topology: topology,
+		Election: election,
 	}).Handler()
 	server := &http.Server{
 		Addr:      cfg.monitoringAddr,
@@ -168,6 +176,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	cfg := config{
 		monitoringAddr:   "127.0.0.1:8080",
 		monitoringWebDir: "svelte-mpa/dist",
+		electionTimeout:  hatriecache.DefaultElectionTimeout,
 	}
 	flags := flag.NewFlagSet("hatrie-cache", flag.ContinueOnError)
 	flags.SetOutput(output)
@@ -178,6 +187,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.StringVar(&cfg.nodeID, "node-id", "", "local cluster node id")
 	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
+	flags.DurationVar(&cfg.electionTimeout, "election-timeout", cfg.electionTimeout, "node heartbeat timeout for deterministic topology leader election")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")

@@ -112,9 +112,21 @@ route a key to its shard. Topologies default to `mode: "sharded"`. Set
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json
 ```
 
+Set `ELECTION_TIMEOUT` to control deterministic topology-based leader failover.
+The current shard primary stays leader while healthy; when it is marked offline
+or its heartbeat times out, the first healthy replica becomes leader:
+
+```
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_TIMEOUT=15s
+```
+
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
-`/api/entries`, `/api/topology`, and `/api/commands`. `POST /api/commands` accepts
-`command`, `key`, optional `value`, `values`, `subkey`, `pairs`,
+`/api/entries`, `/api/topology`, `/api/election`, and `/api/commands`.
+`GET /api/election` returns node liveness and elected shard leaders.
+`GET /api/election?key=...` returns the topology route plus the elected leader
+for that key. `POST /api/election` accepts `node` and `online` to record a
+heartbeat or mark a node offline. `POST /api/commands` accepts `command`, `key`,
+optional `value`, `values`, `subkey`, `pairs`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
@@ -141,6 +153,10 @@ make cli ARGS='command -cmd DUMP -key tags'
 make cli ARGS='topology'
 make cli ARGS='topology -key session:1'
 make cli ARGS='topology -file data/topology.json'
+make cli ARGS='election'
+make cli ARGS='election -key session:1'
+make cli ARGS='election -heartbeat node-a'
+make cli ARGS='election -offline node-a'
 make cli ARGS='snapshot'
 ```
 
@@ -274,7 +290,7 @@ deleted index saved on another map
 - [x] create iterator command to get all keys and keys based on certain prefix
 - [x] create timer vacuum goroutine to clean expired data
 - [x] add OOM-triggered vacuum policy
-- [ ] when master/leader disconnected from all slave, new master/leader elected by remaining slave
+- [x] when master/leader disconnected from all slave, new master/leader elected by remaining slave
 - [ ] the distributed part using emitter.io, 
       or offloaded to another MQ, 
       or [dynomite](https://github.com/Netflix/dynomite) (eventually consistent), 

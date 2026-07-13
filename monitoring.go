@@ -19,6 +19,7 @@ type MonitoringOptions struct {
 	Snapshot func() error
 	Journal  *CommandJournal
 	Topology *TopologyStore
+	Election *ElectionStore
 }
 
 type MonitoringHandler struct {
@@ -65,6 +66,10 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 			options.Topology = topology
 		}
 	}
+	if options.Election == nil && options.Topology != nil {
+		options.Election = NewElectionStore(options.Topology, ElectionOptions{})
+		_ = options.Election.Heartbeat(options.NodeName)
+	}
 	return &MonitoringHandler{trie: trie, options: options}
 }
 
@@ -76,6 +81,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/commands", handler.handleCommands)
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	mux.HandleFunc("/api/topology", handler.handleTopology)
+	mux.HandleFunc("/api/election", handler.handleElection)
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
@@ -197,6 +203,59 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 			return
 		}
 		writeJSON(w, handler.options.Topology.Get())
+	default:
+		writeMethodNotAllowed(w)
+	}
+}
+
+type electionUpdateRequest struct {
+	Node   string `json:"node"`
+	Online *bool  `json:"online,omitempty"`
+}
+
+func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.Request) {
+	if handler.options.Election == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("election store is not configured"))
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		key := r.URL.Query().Get("key")
+		if key != "" {
+			route, ok := handler.options.Election.LeaderForKey(key)
+			if !ok {
+				writeJSONStatus(w, http.StatusConflict, commandError("topology cannot route key"))
+				return
+			}
+			writeJSON(w, route)
+			return
+		}
+		writeJSON(w, handler.options.Election.Status())
+	case http.MethodPost:
+		var request electionUpdateRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			http.Error(w, "invalid election request", http.StatusBadRequest)
+			return
+		}
+		var extra struct{}
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			http.Error(w, "invalid election request", http.StatusBadRequest)
+			return
+		}
+		var err error
+		if request.Online == nil || *request.Online {
+			err = handler.options.Election.Heartbeat(request.Node)
+		} else {
+			err = handler.options.Election.MarkOffline(request.Node)
+		}
+		if err != nil {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+			return
+		}
+		writeJSON(w, handler.options.Election.Status())
 	default:
 		writeMethodNotAllowed(w)
 	}

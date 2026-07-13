@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -107,6 +108,62 @@ func TestRunTopologyUploadsFile(t *testing.T) {
 	}
 	if gotMethod != http.MethodPut || gotTopology.Self != "node-a" {
 		t.Fatalf("request = %s %#v, want PUT node-a topology", gotMethod, gotTopology)
+	}
+}
+
+func TestRunElectionGetsRoutesAndUpdatesNodes(t *testing.T) {
+	var gotRequests []string
+	var updates []struct {
+		Node   string `json:"node"`
+		Online bool   `json:"online"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRequests = append(gotRequests, r.Method+" "+r.URL.String())
+		if r.Method == http.MethodPost {
+			var update struct {
+				Node   string `json:"node"`
+				Online bool   `json:"online"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			updates = append(updates, update)
+		}
+		w.Write([]byte(`{"leaders":[]}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{"-addr", server.URL, "election"}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(election) error = %v", err)
+	}
+	if err := run(context.Background(), []string{"-addr", server.URL, "election", "-key", "session:1"}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(election -key) error = %v", err)
+	}
+	if err := run(context.Background(), []string{"-addr", server.URL, "election", "-heartbeat", "node-a"}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(election -heartbeat) error = %v", err)
+	}
+	if err := run(context.Background(), []string{"-addr", server.URL, "election", "-offline", "node-b"}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(election -offline) error = %v", err)
+	}
+
+	wantRequests := []string{
+		"GET /api/election",
+		"GET /api/election?key=session%3A1",
+		"POST /api/election",
+		"POST /api/election",
+	}
+	if !reflect.DeepEqual(gotRequests, wantRequests) {
+		t.Fatalf("requests = %#v, want %#v", gotRequests, wantRequests)
+	}
+	if len(updates) != 2 || updates[0].Node != "node-a" || !updates[0].Online || updates[1].Node != "node-b" || updates[1].Online {
+		t.Fatalf("updates = %#v, want node-a online then node-b offline", updates)
+	}
+}
+
+func TestRunElectionRejectsConflictingFlags(t *testing.T) {
+	err := run(context.Background(), []string{"election", "-key", "k", "-offline", "node-a"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("run(election conflicting flags) error = %v, want mutually exclusive", err)
 	}
 }
 

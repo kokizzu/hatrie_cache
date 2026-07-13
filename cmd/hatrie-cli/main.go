@@ -34,7 +34,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return err
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, command, snapshot")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, command, snapshot")
 	}
 
 	switch remaining[0] {
@@ -46,6 +46,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runEntries(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "topology":
 		return runTopology(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "election":
+		return runElection(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "command":
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "snapshot":
@@ -104,6 +106,51 @@ func runTopology(ctx context.Context, client *http.Client, addr string, args []s
 		path += "?key=" + url.QueryEscape(*key)
 	}
 	return getJSON(ctx, client, addr, path, stdout)
+}
+
+func runElection(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("election", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	key := flags.String("key", "", "cache key to route through election")
+	heartbeat := flags.String("heartbeat", "", "node id to mark online")
+	offline := flags.String("offline", "", "node id to mark offline")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	mutating := 0
+	for _, value := range []string{*heartbeat, *offline} {
+		if value != "" {
+			mutating++
+		}
+	}
+	if mutating > 1 || (mutating > 0 && *key != "") {
+		return errors.New("election -key, -heartbeat, and -offline are mutually exclusive")
+	}
+	if *heartbeat != "" {
+		return postElectionUpdate(ctx, client, addr, *heartbeat, true, stdout)
+	}
+	if *offline != "" {
+		return postElectionUpdate(ctx, client, addr, *offline, false, stdout)
+	}
+	path := "/api/election"
+	if *key != "" {
+		path += "?key=" + url.QueryEscape(*key)
+	}
+	return getJSON(ctx, client, addr, path, stdout)
+}
+
+func postElectionUpdate(ctx context.Context, client *http.Client, addr string, node string, online bool, stdout io.Writer) error {
+	body, err := json.Marshal(struct {
+		Node   string `json:"node"`
+		Online bool   `json:"online"`
+	}{
+		Node:   node,
+		Online: online,
+	})
+	if err != nil {
+		return err
+	}
+	return postJSON(ctx, client, addr, "/api/election", body, stdout)
 }
 
 func runCommand(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
