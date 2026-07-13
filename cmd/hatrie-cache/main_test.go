@@ -240,6 +240,36 @@ func TestRunDoesNotStartServerByDefault(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotStartMonitoringWhenGRPCBindFails(t *testing.T) {
+	monitoringAddr := freeTCPAddr(t)
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("blocking listen error = %v", err)
+	}
+	defer blocker.Close()
+
+	stdout := &bytes.Buffer{}
+	err = run(context.Background(), []string{
+		"-monitoring-server",
+		"-monitoring-addr", monitoringAddr,
+		"-grpc-addr", blocker.Addr().String(),
+	}, stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("run() error = nil, want gRPC bind error")
+	}
+	if strings.Contains(stdout.String(), "monitoring server listening") {
+		t.Fatalf("stdout = %q, want no monitoring startup message", stdout.String())
+	}
+
+	listener, err := net.Listen("tcp", monitoringAddr)
+	if err != nil {
+		t.Fatalf("monitoring address %s remained in use after failed startup: %v", monitoringAddr, err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatalf("monitoring listener Close() error = %v", err)
+	}
+}
+
 func TestReportServerErrorDoesNotBlockWhenChannelIsFull(t *testing.T) {
 	errCh := make(chan error, 1)
 	errCh <- errors.New("first")
@@ -255,6 +285,19 @@ func TestReportServerErrorDoesNotBlockWhenChannelIsFull(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("reportServerError blocked on a full channel")
 	}
+}
+
+func freeTCPAddr(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("free TCP listen error = %v", err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("free TCP listener Close() error = %v", err)
+	}
+	return addr
 }
 
 func TestLoadSnapshotIfConfiguredIgnoresMissingSnapshot(t *testing.T) {

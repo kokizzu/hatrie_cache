@@ -148,16 +148,27 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		TLSConfig: monitoringTLSConfig(nil),
 	}
 
-	errCh := make(chan error, 2)
-	go func() {
-		reportServerError(errCh, serveMonitoring(server, cfg))
-	}()
-	fmt.Fprintf(stdout, "monitoring server listening on %s\n", monitoringURL(cfg))
-
 	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath))
 	if err != nil {
 		return err
 	}
+	monitoringListener, err := newMonitoringListener(cfg)
+	if err != nil {
+		if grpcListener != nil {
+			_ = grpcListener.Close()
+		}
+		if grpcServer != nil {
+			grpcServer.Stop()
+		}
+		return err
+	}
+
+	errCh := make(chan error, 2)
+	go func() {
+		reportServerError(errCh, serveMonitoring(server, cfg, monitoringListener))
+	}()
+	fmt.Fprintf(stdout, "monitoring server listening on %s\n", monitoringURL(cfg))
+
 	if grpcServer != nil {
 		go func() {
 			reportServerError(errCh, grpcServer.Serve(grpcListener))
@@ -220,11 +231,15 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	return cfg, nil
 }
 
-func serveMonitoring(server *http.Server, cfg config) error {
+func newMonitoringListener(cfg config) (net.Listener, error) {
+	return net.Listen("tcp", cfg.monitoringAddr)
+}
+
+func serveMonitoring(server *http.Server, cfg config, listener net.Listener) error {
 	if cfg.monitoringTLSCert == "" {
-		return server.ListenAndServe()
+		return server.Serve(listener)
 	}
-	return server.ListenAndServeTLS(cfg.monitoringTLSCert, cfg.monitoringTLSKey)
+	return server.ServeTLS(listener, cfg.monitoringTLSCert, cfg.monitoringTLSKey)
 }
 
 func reportServerError(errCh chan<- error, err error) {
