@@ -76,6 +76,10 @@ a specific directory.
 Use `Stats` to read cache counters and hit-rate metadata. `SaveStats` writes the
 statistics snapshot as JSON, and `LoadStats` restores a saved snapshot.
 
+Use `SaveSnapshot` and `LoadSnapshot` for portable JSON data snapshots. Snapshot
+loads skip expired entries and re-apply the normal disk spill threshold for large
+byte values.
+
 The bundled C HAT-trie tests can be compiled directly with GCC when autotools
 build files have not been generated.
 
@@ -118,11 +122,12 @@ slice/arr/stack/queue type:
 - [ ] add option to shard/partition it or full replica, copy tarantool's vbucket/vshard logic
 - [x] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
 - [x] check if serializer can support Go's map
+- [x] add portable JSON snapshot persistence to disk
 - [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
 - [x] binary data that are >64KB always stored on disk
 - [ ] write all pending transaction on journal (backup if program terminated unexpectedly)
 - [x] update statistics (last hit, last write, hit rate, cumulative hit rate) to disk
-- [ ] on-load check for expired data
+- [x] on-load check for expired snapshot data
 - [ ] when service start, non-expired keys and (<1KB AND <1h last hit AND >1000 hit rate) values loaded from database to memory
 - [ ] when service stopped/timer/sync-write forced, data written to disk
 - [x] create iterator command to get all keys and keys based on certain prefix
