@@ -97,6 +97,47 @@ func TestRunCommandPostsJSON(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decoder := json.NewDecoder(r.Body)
+		decoder.UseNumber()
+		if err := decoder.Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"stored"}`))
+	}))
+	defer server.Close()
+
+	unixSeconds := int64(1800)
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "PUTMAP",
+		"-key", "profile",
+		"-subkey", "city",
+		"-value", "Singapore",
+		"-pairs", `{"age":32}`,
+		"-values", `["queued",7]`,
+		"-unix-seconds", "1800",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command structured) error = %v", err)
+	}
+
+	if gotRequest.Command != "PUTMAP" || gotRequest.Key != "profile" || gotRequest.Subkey != "city" || gotRequest.Value != "Singapore" {
+		t.Fatalf("request basics = %#v, want PUTMAP profile city Singapore", gotRequest)
+	}
+	if gotRequest.UnixSeconds == nil || *gotRequest.UnixSeconds != unixSeconds {
+		t.Fatalf("unix seconds = %v, want %d", gotRequest.UnixSeconds, unixSeconds)
+	}
+	if got := gotRequest.Pairs["age"]; got != json.Number("32") {
+		t.Fatalf("pairs[age] = %#v, want json.Number(32)", got)
+	}
+	if len(gotRequest.Values) != 2 || gotRequest.Values[0] != "queued" || gotRequest.Values[1] != json.Number("7") {
+		t.Fatalf("values = %#v, want queued and json.Number(7)", gotRequest.Values)
+	}
+}
+
 func TestRunSnapshotPostsToSnapshotEndpoint(t *testing.T) {
 	var gotPath string
 	var gotMethod string

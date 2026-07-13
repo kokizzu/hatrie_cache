@@ -84,7 +84,11 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 	command := flags.String("cmd", "", "cache command")
 	key := flags.String("key", "", "cache key")
 	value := flags.String("value", "", "cache value")
+	valuesJSON := flags.String("values", "", "JSON array for commands that accept multiple values")
+	subkey := flags.String("subkey", "", "map subkey")
+	pairsJSON := flags.String("pairs", "", "JSON object for map fields")
 	ttlSeconds := flags.Int64("ttl-seconds", -1, "optional ttl in seconds")
+	unixSeconds := flags.Int64("unix-seconds", -1, "optional absolute expiration as Unix seconds")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -93,15 +97,47 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 		Command: *command,
 		Key:     *key,
 		Value:   *value,
+		Subkey:  *subkey,
 	}
 	if *ttlSeconds >= 0 {
 		request.TTLSeconds = ttlSeconds
+	}
+	if *unixSeconds >= 0 {
+		request.UnixSeconds = unixSeconds
+	}
+	if *valuesJSON != "" {
+		values, err := decodeJSONFlag[hatriecache.Slice](*valuesJSON)
+		if err != nil {
+			return fmt.Errorf("values: %w", err)
+		}
+		request.Values = values
+	}
+	if *pairsJSON != "" {
+		pairs, err := decodeJSONFlag[hatriecache.Map](*pairsJSON)
+		if err != nil {
+			return fmt.Errorf("pairs: %w", err)
+		}
+		request.Pairs = pairs
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return err
 	}
 	return postJSON(ctx, client, addr, "/api/commands", body, stdout)
+}
+
+func decodeJSONFlag[T any](value string) (T, error) {
+	var out T
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.UseNumber()
+	if err := decoder.Decode(&out); err != nil {
+		return out, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return out, errors.New("invalid trailing JSON")
+	}
+	return out, nil
 }
 
 func getJSON(ctx context.Context, client *http.Client, addr string, path string, stdout io.Writer) error {

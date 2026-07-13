@@ -10,10 +10,14 @@ import (
 const maxCommandTTLSeconds = int64(1<<63-1) / int64(time.Second)
 
 type CacheCommandRequest struct {
-	Command    string `json:"command"`
-	Key        string `json:"key"`
-	Value      string `json:"value,omitempty"`
-	TTLSeconds *int64 `json:"ttl_seconds,omitempty"`
+	Command     string `json:"command"`
+	Key         string `json:"key"`
+	Value       string `json:"value,omitempty"`
+	Values      Slice  `json:"values,omitempty"`
+	Subkey      string `json:"subkey,omitempty"`
+	Pairs       Map    `json:"pairs,omitempty"`
+	TTLSeconds  *int64 `json:"ttl_seconds,omitempty"`
+	UnixSeconds *int64 `json:"unix_seconds,omitempty"`
 }
 
 type CacheCommandResponse struct {
@@ -93,6 +97,16 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return commandError("failed to set ttl")
 		}
 		return CacheCommandResponse{OK: true, Message: "stored counter with ttl"}
+	case "INC":
+		by, ok := parseCommandIncrement(request.Value)
+		if !ok {
+			return commandError("value must be a 32-bit integer")
+		}
+		value, ok := ht.commandIncrementCounter(key, by)
+		if !ok {
+			return commandError("counter overflow")
+		}
+		return CacheCommandResponse{OK: true, Message: "incremented", Value: strconv.FormatInt(int64(value), 10)}
 	case "DEL":
 		if ht.Delete(key) {
 			return CacheCommandResponse{OK: true, Message: "deleted"}
@@ -113,9 +127,123 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "key not found"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ttl updated"}
+	case "EXPIREAT":
+		expiresAt, ok := commandExpireAt(request)
+		if !ok {
+			return commandError("unix_seconds or integer value is required")
+		}
+		if !ht.ExpireAt(key, expiresAt) {
+			return CacheCommandResponse{OK: true, Message: "key not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ttl updated"}
+	case "PUTMAP":
+		fields, ok := commandMapFields(request)
+		if !ok {
+			return commandError("subkey/value or pairs is required")
+		}
+		ht.commandPutMap(key, fields)
+		return CacheCommandResponse{OK: true, Message: "stored map fields"}
+	case "PEEKMAP":
+		subkey := strings.TrimSpace(request.Subkey)
+		if subkey == "" {
+			return commandError("subkey is required")
+		}
+		value := ht.PeekMap(key, subkey)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
+	case "TAKEMAP":
+		subkey := strings.TrimSpace(request.Subkey)
+		if subkey == "" {
+			return commandError("subkey is required")
+		}
+		value := ht.TakeMap(key, subkey)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("removed", value)
+	case "PUSHSLICE":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		ht.PushSlice(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "pushed slice values"}
+	case "POPSLICE":
+		value := ht.PopSlice(key)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("removed", value)
+	case "SHIFTSLICE":
+		value := ht.ShiftSlice(key)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("removed", value)
+	case "HEADSLICE":
+		value := ht.HeadSlice(key)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
+	case "TAILSLICE":
+		value := ht.TailSlice(key)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
 	default:
 		return commandError("unsupported command")
 	}
+}
+
+func (ht *HatTrie) commandIncrementCounter(key string, by int32) (int32, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsCounter() {
+		next := int64(hval.Index) + int64(by)
+		if next < minCommandInt32 || next > maxCommandInt32 {
+			return 0, false
+		}
+		hval.Index = int32(next)
+	} else {
+		ht.returnStorage(hval)
+		delete(ht.expires, key)
+		hval = HatValue{Index: by, Flags: DATAVALUE_TYPE_COUNTER}
+	}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked()
+	return hval.Index, true
+}
+
+func (ht *HatTrie) commandPutMap(key string, fields Map) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsMap() {
+		current := ht.maps.array[hval.Index]
+		if current == nil {
+			current = Map{}
+		}
+		for subkey, value := range fields {
+			current[subkey] = value
+		}
+		ht.maps.Put(hval.Index, current)
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked()
+		return
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
+	idx := ht.maps.Add(fields)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
+	ht.recordWriteLocked()
 }
 
 func (ht *HatTrie) applyCommandTTL(key string, ttlSeconds *int64) (CacheCommandResponse, bool) {
@@ -202,6 +330,83 @@ func parseCommandInt32(value string) (int32, bool) {
 		return 0, false
 	}
 	return int32(parsed), true
+}
+
+const (
+	minCommandInt32 = -1 << 31
+	maxCommandInt32 = 1<<31 - 1
+)
+
+func parseCommandIncrement(value string) (int32, bool) {
+	if strings.TrimSpace(value) == "" {
+		return 1, true
+	}
+	return parseCommandInt32(value)
+}
+
+func commandExpireAt(request CacheCommandRequest) (time.Time, bool) {
+	var unixSeconds int64
+	if request.UnixSeconds != nil {
+		unixSeconds = *request.UnixSeconds
+	} else {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return time.Time{}, false
+		}
+		unixSeconds = parsed
+	}
+	return time.Unix(unixSeconds, 0), true
+}
+
+func commandMapFields(request CacheCommandRequest) (Map, bool) {
+	fields := Map{}
+	for subkey, value := range request.Pairs {
+		if strings.TrimSpace(subkey) == "" {
+			return nil, false
+		}
+		fields[subkey] = value
+	}
+	subkey := strings.TrimSpace(request.Subkey)
+	if subkey != "" {
+		fields[subkey] = request.Value
+	}
+	if len(fields) == 0 {
+		return nil, false
+	}
+	return fields, true
+}
+
+func commandSliceValues(request CacheCommandRequest) (Slice, bool) {
+	if len(request.Values) > 0 {
+		return request.Values, true
+	}
+	if request.Value != "" {
+		return Slice{request.Value}, true
+	}
+	return nil, false
+}
+
+func commandValueResponse(message string, value interface{}) CacheCommandResponse {
+	payload, err := commandScalarString(value)
+	if err != nil {
+		return commandError(err.Error())
+	}
+	return CacheCommandResponse{OK: true, Message: message, Value: payload}
+}
+
+func commandScalarString(value interface{}) (string, error) {
+	switch v := value.(type) {
+	case string:
+		return v, nil
+	case json.Number:
+		return v.String(), nil
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
 }
 
 func requirePositiveTTL(ttlSeconds *int64) (time.Duration, bool) {

@@ -56,6 +56,90 @@ func TestExecuteCommandExtendedTTLCommands(t *testing.T) {
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXPIRE", Key: "counter", TTLSeconds: &ttlSeconds}); !got.OK {
 		t.Fatalf("EXPIRE response = %#v, want ok", got)
 	}
+
+	expiresAt := now.Add(10 * time.Second).Unix()
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXPIREAT", Key: "counter", UnixSeconds: &expiresAt}); !got.OK {
+		t.Fatalf("EXPIREAT response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "TTL", Key: "counter"}); !got.OK || got.Value != "10" {
+		t.Fatalf("TTL after EXPIREAT response = %#v, want 10", got)
+	}
+	now = now.Add(11 * time.Second)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "counter"}); !got.OK || got.Value != "" {
+		t.Fatalf("GET expired EXPIREAT key = %#v, want not found", got)
+	}
+}
+
+func TestExecuteCommandIncrementCounter(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INC", Key: "views"}); !got.OK || got.Value != "1" {
+		t.Fatalf("INC default response = %#v, want 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INC", Key: "views", Value: "41"}); !got.OK || got.Value != "42" {
+		t.Fatalf("INC 41 response = %#v, want 42", got)
+	}
+
+	ht.UpsertCounter("max", maxCommandInt32)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INC", Key: "max"}); got.OK {
+		t.Fatalf("INC overflow response = %#v, want not ok", got)
+	}
+	if got := ht.GetCounter("max"); got != maxCommandInt32 {
+		t.Fatalf("counter after overflow = %d, want unchanged max", got)
+	}
+}
+
+func TestExecuteCommandMapOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs:   Map{"name": "ivi", "age": 32},
+	}); !got.OK {
+		t.Fatalf("PUTMAP pairs response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTMAP", Key: "profile", Subkey: "city", Value: "Singapore"}); !got.OK {
+		t.Fatalf("PUTMAP subkey response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PEEKMAP", Key: "profile", Subkey: "name"}); !got.OK || got.Value != "ivi" {
+		t.Fatalf("PEEKMAP name response = %#v, want ivi", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PEEKMAP", Key: "profile", Subkey: "age"}); !got.OK || got.Value != "32" {
+		t.Fatalf("PEEKMAP age response = %#v, want 32", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "TAKEMAP", Key: "profile", Subkey: "city"}); !got.OK || got.Value != "Singapore" {
+		t.Fatalf("TAKEMAP city response = %#v, want Singapore", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PEEKMAP", Key: "profile", Subkey: "city"}); !got.OK || got.Value != "" {
+		t.Fatalf("PEEKMAP removed city response = %#v, want value not found", got)
+	}
+}
+
+func TestExecuteCommandSliceOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHSLICE", Key: "queue", Value: "first"}); !got.OK {
+		t.Fatalf("PUSHSLICE value response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHSLICE", Key: "queue", Values: Slice{"second", 3}}); !got.OK {
+		t.Fatalf("PUSHSLICE values response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HEADSLICE", Key: "queue"}); !got.OK || got.Value != "first" {
+		t.Fatalf("HEADSLICE response = %#v, want first", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "TAILSLICE", Key: "queue"}); !got.OK || got.Value != "3" {
+		t.Fatalf("TAILSLICE response = %#v, want 3", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPSLICE", Key: "queue"}); !got.OK || got.Value != "3" {
+		t.Fatalf("POPSLICE response = %#v, want 3", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SHIFTSLICE", Key: "queue"}); !got.OK || got.Value != "first" {
+		t.Fatalf("SHIFTSLICE response = %#v, want first", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HEADSLICE", Key: "queue"}); !got.OK || got.Value != "second" {
+		t.Fatalf("HEADSLICE remaining response = %#v, want second", got)
+	}
 }
 
 func TestExecuteCommandValidation(t *testing.T) {
@@ -67,6 +151,13 @@ func TestExecuteCommandValidation(t *testing.T) {
 		{Command: "SETINT", Key: "counter", Value: "not-int"},
 		{Command: "SETSTRX", Key: "key", Value: "value"},
 		{Command: "EXPIRE", Key: "key"},
+		{Command: "EXPIREAT", Key: "key"},
+		{Command: "INC", Key: "key", Value: "not-int"},
+		{Command: "PUTMAP", Key: "key"},
+		{Command: "PUTMAP", Key: "key", Pairs: Map{"": "bad"}},
+		{Command: "PEEKMAP", Key: "key"},
+		{Command: "TAKEMAP", Key: "key"},
+		{Command: "PUSHSLICE", Key: "key"},
 		{Command: "UNKNOWN", Key: "key"},
 	} {
 		if got := ht.ExecuteCommand(request); got.OK {

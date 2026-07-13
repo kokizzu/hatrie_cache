@@ -57,9 +57,12 @@ make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_INTERVAL=30s
 
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, and `/api/commands`. `POST /api/commands` accepts
-`command`, `key`, optional `value`, and optional `ttl_seconds`; it currently
+`command`, `key`, optional `value`, `values`, `subkey`, `pairs`,
+`ttl_seconds`, and `unix_seconds`; it currently
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
-`SETINT`, `SETINTX`, `DEL`, `TTL`, and `EXPIRE`.
+`SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
+`PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
+and `TAILSLICE`.
 
 Use the HTTP client CLI against a running monitoring server:
 
@@ -67,6 +70,9 @@ Use the HTTP client CLI against a running monitoring server:
 make cli ARGS='stats'
 make cli ARGS='entries -prefix session:'
 make cli ARGS='command -cmd SETSTR -key name -value ivi'
+make cli ARGS='command -cmd INC -key views'
+make cli ARGS="command -cmd PUTMAP -key user:1 -pairs '{\"name\":\"ivi\",\"age\":32}'"
+make cli ARGS="command -cmd PUSHSLICE -key jobs -values '[\"build\",\"verify\"]'"
 make cli ARGS='snapshot'
 ```
 
@@ -111,23 +117,18 @@ build files have not been generated.
 - [x] create backend service using HTTP/2 JSON APIs so it can be accessed from another language
 - [ ] add native gRPC protobuf APIs for strongly typed client generation
 - [x] create a client CLI for monitoring stats, key listing, and running commands
-- [ ] add client CLI support for [cluster/server](https://redis.io/commands/#server) management:
+- [x] add client CLI support for cache command management:
 ```		
 any type:
   SET/SETSTR/SETINT key value
   SETX/SETSTRX/SETINTX key ttl value
-   master/leader write, journal, and broadcasting: internalSET key idx value ttl
-   currenttime+ttl set to an array, and checked every second, execute DEL if expired
-   the idx is 32-bit integer, 1 bit is for ttl flag, 1 bit if on disk, remaining 6-bit is for special type
   EXISTS/GET/GETSTR key
    check the value on the hat_map
   DEL key
-   master/leader write, journal, and broadcasting: internalDEL key idx
-   deleted index saved on another map
   TTL
    check if key exists -1 if expired or not exists, >0 if has ttl
   EXPIRE/EXPIREAT key
-   make expired 
+   make expired
 counter type:
   INC key value=1
     maximum of 32-bit integer
@@ -137,6 +138,14 @@ map type:
 slice/arr/stack/queue type:
   PUSHSLICE key val...
   POPSLICE,SHIFTSLICE,HEADSLICE,TAILSLICE key
+```
+- [ ] add client CLI support for cluster/server topology management and replication internals:
+```
+master/leader write, journal, and broadcasting: internalSET key idx value ttl
+currenttime+ttl set to an array, and checked every second, execute DEL if expired
+the idx is 32-bit integer, 1 bit is for ttl flag, 1 bit if on disk, remaining 6-bit is for special type
+master/leader write, journal, and broadcasting: internalDEL key idx
+deleted index saved on another map
 ```
 - [ ] add option to shard/partition it or full replica, copy tarantool's vbucket/vshard logic
 - [x] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)

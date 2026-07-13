@@ -122,6 +122,22 @@ func TestMonitoringHandlerExecutesCommands(t *testing.T) {
 	if !getResult.OK || getResult.Value != "ivi" {
 		t.Fatalf("GET response = %#v, want ivi", getResult)
 	}
+
+	putMapResp := httptest.NewRecorder()
+	handler.ServeHTTP(putMapResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"PUTMAP","key":"profile","pairs":{"age":32}}`)))
+	if putMapResp.Code != http.StatusOK {
+		t.Fatalf("PUTMAP status = %d, want 200", putMapResp.Code)
+	}
+	var putMapResult CacheCommandResponse
+	if err := json.Unmarshal(putMapResp.Body.Bytes(), &putMapResult); err != nil {
+		t.Fatalf("PUTMAP JSON error = %v", err)
+	}
+	if !putMapResult.OK {
+		t.Fatalf("PUTMAP response = %#v, want ok", putMapResult)
+	}
+	if got := ht.PeekMap("profile", "age"); got != json.Number("32") {
+		t.Fatalf("profile age = %#v, want json.Number(32)", got)
+	}
 }
 
 func TestMonitoringHandlerRejectsInvalidCommandRequests(t *testing.T) {
