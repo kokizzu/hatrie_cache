@@ -8,6 +8,8 @@ package hatriecache
 import "C"
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -48,7 +50,10 @@ const (
 type Map = map[string]interface{}
 type Slice = []interface{}
 
-const NoTTL time.Duration = -1
+const (
+	NoTTL              time.Duration = -1
+	DiskBytesThreshold               = 64 * 1024
+)
 
 type Entry struct {
 	Key   string
@@ -178,6 +183,92 @@ func (bs *BytesStorage) Del(idx int32) {
 	bs.reusables[idx] = true
 }
 
+// DiskStorage stores large byte values outside the Go heap.
+type DiskStorage struct {
+	dir       string
+	ownedDir  bool
+	paths     []string
+	reusables map[int32]bool
+}
+
+func CreateDiskStorage(dir string, ownedDir bool) (*DiskStorage, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	return &DiskStorage{
+		dir:       dir,
+		ownedDir:  ownedDir,
+		paths:     []string{},
+		reusables: map[int32]bool{},
+	}, nil
+}
+
+func (ds *DiskStorage) Put(idx int32, value []byte) error {
+	if idx < 0 || int(idx) >= len(ds.paths) {
+		return nil
+	}
+	if err := os.WriteFile(ds.paths[idx], value, 0o600); err != nil {
+		return err
+	}
+	delete(ds.reusables, idx)
+	return nil
+}
+
+func (ds *DiskStorage) Append(value []byte) (int32, error) {
+	idx := int32(len(ds.paths))
+	path := ds.pathFor(idx)
+	if err := os.WriteFile(path, value, 0o600); err != nil {
+		return 0, err
+	}
+	ds.paths = append(ds.paths, path)
+	return idx, nil
+}
+
+func (ds *DiskStorage) Add(value []byte) (int32, error) {
+	if len(ds.reusables) > 0 {
+		for idx := range ds.reusables {
+			if err := os.WriteFile(ds.paths[idx], value, 0o600); err != nil {
+				return 0, err
+			}
+			delete(ds.reusables, idx)
+			return idx, nil
+		}
+	}
+	return ds.Append(value)
+}
+
+func (ds *DiskStorage) Get(idx int32) ([]byte, error) {
+	if idx < 0 || int(idx) >= len(ds.paths) {
+		return nil, nil
+	}
+	return os.ReadFile(ds.paths[idx])
+}
+
+func (ds *DiskStorage) Del(idx int32) {
+	if idx < 0 || int(idx) >= len(ds.paths) {
+		return
+	}
+	_ = os.Remove(ds.paths[idx])
+	ds.reusables[idx] = true
+}
+
+func (ds *DiskStorage) Destroy() {
+	if ds == nil {
+		return
+	}
+	if ds.ownedDir {
+		_ = os.RemoveAll(ds.dir)
+		return
+	}
+	for _, path := range ds.paths {
+		_ = os.Remove(path)
+	}
+}
+
+func (ds *DiskStorage) pathFor(idx int32) string {
+	return filepath.Join(ds.dir, "bytes-"+strconv.FormatInt(int64(idx), 10)+".bin")
+}
+
 // MapStorage stores map values outside the trie.
 type MapStorage struct {
 	array     []Map
@@ -274,6 +365,7 @@ type HatTrie struct {
 	mu      sync.RWMutex
 	root    *C.hattrie_t
 	raws    *BytesStorage
+	disks   *DiskStorage
 	maps    *MapStorage
 	slices  *SliceStorage
 	expires map[string]time.Time
@@ -281,16 +373,34 @@ type HatTrie struct {
 }
 
 func CreateHatTrie() *HatTrie {
+	diskDir, err := os.MkdirTemp("", "hatrie-cache-*")
+	if err != nil {
+		panic(err)
+	}
+	ht, err := CreateHatTrieWithDiskDir(diskDir, true)
+	if err != nil {
+		_ = os.RemoveAll(diskDir)
+		panic(err)
+	}
+	return ht
+}
+
+func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*HatTrie, error) {
+	disks, err := CreateDiskStorage(diskDir, removeDiskDirOnDestroy)
+	if err != nil {
+		return nil, err
+	}
 	ht := &HatTrie{
 		root:    C.hattrie_create(),
 		raws:    CreateBytesStorage(),
+		disks:   disks,
 		maps:    CreateMapStorage(),
 		slices:  CreateSliceStorage(),
 		expires: map[string]time.Time{},
 		now:     time.Now,
 	}
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
-	return ht
+	return ht, nil
 }
 
 func (ht *HatTrie) Destroy() {
@@ -305,8 +415,12 @@ func (ht *HatTrie) Destroy() {
 	}
 	runtime.SetFinalizer(ht, nil)
 	C.hattrie_free(ht.root)
+	if ht.disks != nil {
+		ht.disks.Destroy()
+	}
 	ht.root = nil
 	ht.raws = nil
+	ht.disks = nil
 	ht.maps = nil
 	ht.slices = nil
 	ht.expires = nil
@@ -516,7 +630,13 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.maps.Del(hval.Index)
 	case DATAVALUE_TYPE_SLICE:
 		ht.slices.Del(hval.Index)
-	case DATAVALUE_TYPE_RAW_BYTES, DATAVALUE_TYPE_RAW_STRING:
+	case DATAVALUE_TYPE_RAW_BYTES:
+		if hval.OnDisk() {
+			ht.disks.Del(hval.Index)
+		} else {
+			ht.raws.Del(hval.Index)
+		}
+	case DATAVALUE_TYPE_RAW_STRING:
 		ht.raws.Del(hval.Index)
 	}
 }
@@ -827,17 +947,15 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsBytesAtRaws() {
-		ht.raws.Put(hval.Index, val)
 		delete(ht.expires, key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
-		*rawPtr = hval.toValue()
+		ht.storeBytesLocked(rawPtr, hval, val)
 		return
 	}
 
 	ht.returnStorage(hval)
 	delete(ht.expires, key)
-	idx := ht.raws.Add(val)
-	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}.toValue()
+	ht.storeBytesLocked(rawPtr, HatValue{}, val)
 }
 
 // GetBytes returns nil if key is missing or not a string/bytes value.
@@ -846,10 +964,54 @@ func (ht *HatTrie) GetBytes(key string) []byte {
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
-	if hval.IsStringAtRaws() || hval.IsBytesAtRaws() {
+	if hval.IsStringAtRaws() {
+		return cloneBytes(ht.raws.array[hval.Index])
+	}
+	if hval.IsBytesAtRaws() {
+		if hval.OnDisk() {
+			value, err := ht.disks.Get(hval.Index)
+			if err != nil {
+				panic(err)
+			}
+			return value
+		}
 		return cloneBytes(ht.raws.array[hval.Index])
 	}
 	return nil
+}
+
+func (ht *HatTrie) storeBytesLocked(rawPtr *C.value_t, old HatValue, val []byte) {
+	if len(val) > DiskBytesThreshold {
+		if old.IsBytesAtRaws() && old.OnDisk() {
+			if err := ht.disks.Put(old.Index, val); err != nil {
+				panic(err)
+			}
+			*rawPtr = old.toValue()
+			return
+		}
+		if old.IsBytesAtRaws() && !old.OnDisk() {
+			ht.raws.Del(old.Index)
+		}
+		idx, err := ht.disks.Add(val)
+		if err != nil {
+			panic(err)
+		}
+		*rawPtr = HatValue{
+			Index: idx,
+			Flags: DATAVALUE_TYPE_RAW_BYTES | (1 << DATAVALUE_DISK_BIT_SHIFT),
+		}.toValue()
+		return
+	}
+
+	if old.IsBytesAtRaws() && old.OnDisk() {
+		ht.disks.Del(old.Index)
+	} else if old.IsBytesAtRaws() {
+		ht.raws.Put(old.Index, val)
+		*rawPtr = old.toValue()
+		return
+	}
+	idx := ht.raws.Add(val)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}.toValue()
 }
 
 func (ht *HatTrie) UpsertMap(key string, val Map) {

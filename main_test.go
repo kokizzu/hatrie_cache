@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -95,6 +96,105 @@ func TestBytesOperationsCopyInputsAndOutputs(t *testing.T) {
 	got[1] = 'y'
 	if again := ht.GetBytes("bytes"); !bytes.Equal(again, []byte("abc")) {
 		t.Fatalf("stored bytes changed through returned slice: got %q", again)
+	}
+}
+
+func TestLargeBytesStoredOnDiskAndCleaned(t *testing.T) {
+	ht := newTestTrie(t)
+
+	input := testPayload(DiskBytesThreshold + 1)
+	want := cloneBytes(input)
+	ht.UpsertBytes("large", input)
+	input[0] ^= 0xff
+
+	hval := ht.Get("large")
+	if !hval.IsBytesAtRaws() || !hval.OnDisk() {
+		t.Fatalf("large bytes metadata = %+v, want on-disk bytes", hval)
+	}
+	path := ht.disks.paths[hval.Index]
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("large bytes file was not created: %v", err)
+	}
+	if got := ht.GetBytes("large"); !bytes.Equal(got, want) {
+		t.Fatalf("GetBytes(large) changed with caller input")
+	}
+
+	got := ht.GetBytes("large")
+	got[0] ^= 0xff
+	if again := ht.GetBytes("large"); !bytes.Equal(again, want) {
+		t.Fatalf("GetBytes(large) exposed mutable disk value")
+	}
+
+	if !ht.Delete("large") {
+		t.Fatal("Delete(large) = false, want true")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("large bytes file still exists after delete: %v", err)
+	}
+	if !ht.disks.reusables[hval.Index] {
+		t.Fatalf("deleted disk index %d was not reusable", hval.Index)
+	}
+}
+
+func TestBytesDiskThresholdAndReplacement(t *testing.T) {
+	ht := newTestTrie(t)
+
+	thresholdValue := testPayload(DiskBytesThreshold)
+	ht.UpsertBytes("bytes", thresholdValue)
+	rawIdx := ht.Get("bytes").Index
+	if hval := ht.Get("bytes"); hval.OnDisk() {
+		t.Fatalf("threshold-sized bytes stored on disk: %+v", hval)
+	}
+
+	largeValue := testPayload(DiskBytesThreshold + 1)
+	ht.UpsertBytes("bytes", largeValue)
+	diskValue := ht.Get("bytes")
+	if !diskValue.OnDisk() {
+		t.Fatalf("large bytes were not stored on disk: %+v", diskValue)
+	}
+	if !ht.raws.reusables[rawIdx] {
+		t.Fatalf("replaced raw index %d was not reusable", rawIdx)
+	}
+	diskPath := ht.disks.paths[diskValue.Index]
+
+	smallValue := []byte("small")
+	ht.UpsertBytes("bytes", smallValue)
+	if hval := ht.Get("bytes"); hval.OnDisk() {
+		t.Fatalf("small replacement stayed on disk: %+v", hval)
+	}
+	if _, err := os.Stat(diskPath); !os.IsNotExist(err) {
+		t.Fatalf("disk file still exists after small replacement: %v", err)
+	}
+	if got := ht.GetBytes("bytes"); !bytes.Equal(got, smallValue) {
+		t.Fatalf("small replacement bytes = %q, want %q", got, smallValue)
+	}
+}
+
+func TestOnDiskBytesExpireAndDestroyCleanFiles(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(50, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertBytes("large", testPayload(DiskBytesThreshold+1))
+	hval := ht.Get("large")
+	path := ht.disks.paths[hval.Index]
+	if !ht.Expire("large", time.Second) {
+		t.Fatal("Expire(large) = false, want true")
+	}
+	now = now.Add(2 * time.Second)
+	if got := ht.VacuumExpired(); got != 1 {
+		t.Fatalf("VacuumExpired() = %d, want 1", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("disk file still exists after expiration vacuum: %v", err)
+	}
+
+	owned := CreateHatTrie()
+	ownedDir := owned.disks.dir
+	owned.UpsertBytes("large", testPayload(DiskBytesThreshold+1))
+	owned.Destroy()
+	if _, err := os.Stat(ownedDir); !os.IsNotExist(err) {
+		t.Fatalf("owned disk directory still exists after destroy: %v", err)
 	}
 }
 
@@ -681,4 +781,12 @@ func waitUntil(t *testing.T, timeout time.Duration, ready func() bool) {
 		return
 	}
 	t.Fatal("condition was not met before timeout")
+}
+
+func testPayload(size int) []byte {
+	payload := make([]byte, size)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	return payload
 }

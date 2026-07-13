@@ -27,6 +27,11 @@ Use `Keys`, `KeysWithPrefix`, `Entries`, and `EntriesWithPrefix` to iterate
 over non-expired keys and value metadata. Prefix iteration returns full keys and
 supports keys containing NUL bytes.
 
+Byte values larger than `DiskBytesThreshold` (64KB) are stored on disk and set
+the `HatValue.OnDisk()` flag. `CreateHatTrie` uses an owned temporary spill
+directory that is removed by `Destroy`; use `CreateHatTrieWithDiskDir` to supply
+a specific directory.
+
 The bundled C HAT-trie tests can be compiled directly with GCC when autotools
 build files have not been generated.
 
@@ -69,7 +74,7 @@ slice/arr/stack/queue type:
 - [x] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
 - [ ] check if serializer can support Go's map
 - [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
-- [ ] binary data that are >64KB always stored on disk
+- [x] binary data that are >64KB always stored on disk
 - [ ] write all pending transaction on journal (backup if program terminated unexpectedly)
 - [ ] update statistics (last hit, last write, hit rate, cumulative hit rate) to disk
 - [ ] on-load check for expired data
