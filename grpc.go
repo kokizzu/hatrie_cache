@@ -41,7 +41,10 @@ func RegisterCacheGRPCServer(registrar grpc.ServiceRegistrar, server *CacheGRPCS
 	hatriecachev1.RegisterCacheServiceServer(registrar, server)
 }
 
-func (server *CacheGRPCServer) Health(context.Context, *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
+func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	return &hatriecachev1.HealthResponse{
@@ -54,7 +57,10 @@ func (server *CacheGRPCServer) Health(context.Context, *hatriecachev1.HealthRequ
 	}, nil
 }
 
-func (server *CacheGRPCServer) Stats(context.Context, *hatriecachev1.StatsRequest) (*hatriecachev1.StatsResponse, error) {
+func (server *CacheGRPCServer) Stats(ctx context.Context, _ *hatriecachev1.StatsRequest) (*hatriecachev1.StatsResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	stats := server.trie.Stats()
 	return &hatriecachev1.StatsResponse{
 		Reads:             stats.Reads,
@@ -71,7 +77,10 @@ func (server *CacheGRPCServer) Stats(context.Context, *hatriecachev1.StatsReques
 	}, nil
 }
 
-func (server *CacheGRPCServer) Entries(_ context.Context, request *hatriecachev1.EntriesRequest) (*hatriecachev1.EntriesResponse, error) {
+func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecachev1.EntriesRequest) (*hatriecachev1.EntriesResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries := server.trie.monitoringEntries(request.GetPrefix())
 	out := make([]*hatriecachev1.Entry, 0, len(entries))
 	for _, entry := range entries {
@@ -80,7 +89,10 @@ func (server *CacheGRPCServer) Entries(_ context.Context, request *hatriecachev1
 	return &hatriecachev1.EntriesResponse{Entries: out}, nil
 }
 
-func (server *CacheGRPCServer) Command(_ context.Context, request *hatriecachev1.CommandRequest) (*hatriecachev1.CommandResponse, error) {
+func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecachev1.CommandRequest) (*hatriecachev1.CommandResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	command := cacheCommandRequestFromProto(request)
 	var response CacheCommandResponse
 	if server.options.Journal != nil {
@@ -91,7 +103,10 @@ func (server *CacheGRPCServer) Command(_ context.Context, request *hatriecachev1
 	return grpcCommandResponse(response), nil
 }
 
-func (server *CacheGRPCServer) Snapshot(context.Context, *hatriecachev1.SnapshotRequest) (*hatriecachev1.CommandResponse, error) {
+func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.SnapshotRequest) (*hatriecachev1.CommandResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if server.options.Snapshot == nil {
 		return grpcCommandResponse(commandError("snapshot path is not configured")), nil
 	}

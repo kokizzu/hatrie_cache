@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"context"
+	"errors"
 	"net"
 	"path/filepath"
 	"testing"
@@ -221,6 +222,37 @@ func TestCacheGRPCServerSnapshotRequiresCallback(t *testing.T) {
 	}
 	if resp.GetOk() {
 		t.Fatalf("Snapshot response = %#v, want not ok", resp)
+	}
+}
+
+func TestCacheGRPCServerHonorsCanceledContexts(t *testing.T) {
+	ht := newTestTrie(t)
+	server := NewCacheGRPCServer(ht, CacheGRPCOptions{
+		Snapshot: func() error {
+			t.Fatal("snapshot callback should not run for canceled context")
+			return nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.Health(ctx, &hatriecachev1.HealthRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Health(canceled) error = %v, want context.Canceled", err)
+	}
+	if _, err := server.Stats(ctx, &hatriecachev1.StatsRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Stats(canceled) error = %v, want context.Canceled", err)
+	}
+	if _, err := server.Entries(ctx, &hatriecachev1.EntriesRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Entries(canceled) error = %v, want context.Canceled", err)
+	}
+	if _, err := server.Command(ctx, &hatriecachev1.CommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Command(canceled) error = %v, want context.Canceled", err)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("Command(canceled) mutated trie: name=%q", got)
+	}
+	if _, err := server.Snapshot(ctx, &hatriecachev1.SnapshotRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Snapshot(canceled) error = %v, want context.Canceled", err)
 	}
 }
 
