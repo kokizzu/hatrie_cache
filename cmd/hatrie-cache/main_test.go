@@ -144,6 +144,30 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 	}
 }
 
+func TestParseConfigRejectsNegativeHotLoadLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "max bytes",
+			args: []string{"-db-hot-load-max-bytes", "-1"},
+		},
+		{
+			name: "max age",
+			args: []string{"-db-hot-load-max-age", "-1s"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := parseConfig(tt.args, &bytes.Buffer{}); err == nil {
+				t.Fatal("parseConfig() error = nil, want error")
+			}
+		})
+	}
+}
+
 func TestParseConfigRejectsPartialMonitoringTLSConfig(t *testing.T) {
 	if _, err := parseConfig([]string{"-monitoring-tls-cert", "/tmp/cert.pem"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("parseConfig(partial TLS) error = nil, want error")

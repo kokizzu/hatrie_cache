@@ -230,6 +230,9 @@ func levelDBShouldHotLoad(operation snapshotOperation, now time.Time, policy Lev
 	if !policy.HotValuesOnly {
 		return true
 	}
+	if policy.MaxLastHitAge < 0 || policy.MaxValueBytes < 0 {
+		return false
+	}
 	stats := operation.entry.Stats
 	if stats == nil || stats.LastHit.IsZero() {
 		return false

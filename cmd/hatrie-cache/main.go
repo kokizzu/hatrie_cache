@@ -228,6 +228,12 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if (cfg.monitoringTLSCert == "") != (cfg.monitoringTLSKey == "") {
 		return config{}, errors.New("monitoring TLS requires both -monitoring-tls-cert and -monitoring-tls-key")
 	}
+	if cfg.dbHotLoadMaxBytes < 0 {
+		return config{}, errors.New("db hot-load max bytes must be non-negative")
+	}
+	if cfg.dbHotLoadMaxAge < 0 {
+		return config{}, errors.New("db hot-load max age must be non-negative")
+	}
 	return cfg, nil
 }
 

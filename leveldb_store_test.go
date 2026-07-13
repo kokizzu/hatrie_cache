@@ -155,6 +155,41 @@ func TestSnapshotOperationValueSizeSupportsPriorityQueue(t *testing.T) {
 	}
 }
 
+func TestLevelDBShouldHotLoadRejectsNegativeLimits(t *testing.T) {
+	now := time.Unix(4600, 0)
+	operation := snapshotOperation{
+		entry: snapshotEntry{
+			Type:   "string",
+			String: "hot",
+			Stats: &KeyStats{
+				Hits:    1,
+				LastHit: now,
+			},
+		},
+	}
+	policy := LevelDBLoadPolicy{
+		HotValuesOnly: true,
+		MaxValueBytes: 1024,
+		MaxLastHitAge: time.Hour,
+		MinHits:       1,
+	}
+
+	if !levelDBShouldHotLoad(operation, now, policy) {
+		t.Fatal("levelDBShouldHotLoad(valid policy) = false, want true")
+	}
+
+	policy.MaxValueBytes = -1
+	if levelDBShouldHotLoad(operation, now, policy) {
+		t.Fatal("levelDBShouldHotLoad(negative max bytes) = true, want false")
+	}
+
+	policy.MaxValueBytes = 1024
+	policy.MaxLastHitAge = -time.Second
+	if levelDBShouldHotLoad(operation, now, policy) {
+		t.Fatal("levelDBShouldHotLoad(negative max age) = true, want false")
+	}
+}
+
 func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
