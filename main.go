@@ -2628,10 +2628,14 @@ func cloneSlice(value Slice) Slice {
 
 func cloneValue(value interface{}) interface{} {
 	switch v := value.(type) {
+	case []byte:
+		return cloneBytes(v)
 	case Map:
 		return cloneMap(v)
 	case Slice:
 		return cloneSlice(v)
+	case PriorityQueue:
+		return clonePriorityQueue(v)
 	default:
 		return value
 	}

@@ -20,6 +20,20 @@ type priorityQueueData struct {
 	nextSequence uint64
 }
 
+func clonePriorityQueue(value PriorityQueue) PriorityQueue {
+	if value == nil {
+		return nil
+	}
+	out := make(PriorityQueue, len(value))
+	for idx, item := range value {
+		out[idx] = PriorityItem{
+			Priority: item.Priority,
+			Value:    cloneValue(item.Value),
+		}
+	}
+	return out
+}
+
 func newPriorityQueueData(values PriorityQueue) priorityQueueData {
 	out := priorityQueueData{}
 	for _, value := range values {

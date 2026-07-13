@@ -772,6 +772,78 @@ func TestSetOperationsDeepCopyNestedValues(t *testing.T) {
 	}
 }
 
+func TestCompositeValuesDeepCopyBytesAndPriorityQueues(t *testing.T) {
+	ht := newTestTrie(t)
+	payload := []byte("value")
+	queue := PriorityQueue{{Priority: 1, Value: Map{"job": "build"}}}
+
+	ht.UpsertMap("map", Map{"bytes": payload, "queue": queue})
+	ht.PushSlice("slice", payload, queue)
+	ht.AddSet("set", payload, queue)
+
+	payload[0] = 'X'
+	queue[0].Value.(Map)["job"] = "caller"
+	assertCompositeValuesDeepCopied(t, ht)
+
+	gotMap := ht.GetMap("map")
+	gotMap["bytes"].([]byte)[0] = 'M'
+	gotMap["queue"].(PriorityQueue)[0].Value.(Map)["job"] = "map-read"
+
+	gotSlice := ht.GetSlice("slice")
+	gotSlice[0].([]byte)[0] = 'S'
+	gotSlice[1].(PriorityQueue)[0].Value.(Map)["job"] = "slice-read"
+
+	gotSet := ht.GetSet("set")
+	for _, value := range gotSet {
+		switch typed := value.(type) {
+		case []byte:
+			typed[0] = 'T'
+		case PriorityQueue:
+			typed[0].Value.(Map)["job"] = "set-read"
+		}
+	}
+	assertCompositeValuesDeepCopied(t, ht)
+}
+
+func assertCompositeValuesDeepCopied(t *testing.T, ht *HatTrie) {
+	t.Helper()
+
+	gotMap := ht.GetMap("map")
+	if got := string(gotMap["bytes"].([]byte)); got != "value" {
+		t.Fatalf("map nested bytes = %q, want value", got)
+	}
+	if got := gotMap["queue"].(PriorityQueue)[0].Value.(Map)["job"]; got != "build" {
+		t.Fatalf("map nested priority queue job = %v, want build", got)
+	}
+
+	gotSlice := ht.GetSlice("slice")
+	if got := string(gotSlice[0].([]byte)); got != "value" {
+		t.Fatalf("slice nested bytes = %q, want value", got)
+	}
+	if got := gotSlice[1].(PriorityQueue)[0].Value.(Map)["job"]; got != "build" {
+		t.Fatalf("slice nested priority queue job = %v, want build", got)
+	}
+
+	var sawBytes, sawQueue bool
+	for _, value := range ht.GetSet("set") {
+		switch typed := value.(type) {
+		case []byte:
+			sawBytes = true
+			if got := string(typed); got != "value" {
+				t.Fatalf("set nested bytes = %q, want value", got)
+			}
+		case PriorityQueue:
+			sawQueue = true
+			if got := typed[0].Value.(Map)["job"]; got != "build" {
+				t.Fatalf("set nested priority queue job = %v, want build", got)
+			}
+		}
+	}
+	if !sawBytes || !sawQueue {
+		t.Fatalf("set values saw bytes=%v queue=%v, want both", sawBytes, sawQueue)
+	}
+}
+
 func TestPriorityQueueOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
