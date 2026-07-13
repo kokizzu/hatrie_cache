@@ -242,6 +242,48 @@ func TestLevelDBStoreHotLoadCanDeleteColdReference(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreHotLoadSchedulesColdReferenceExpiration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	now := time.Unix(4700, 0)
+	source.now = func() time.Time { return now }
+	source.UpsertString("cold", "value")
+	if !source.Expire("cold", time.Minute) {
+		t.Fatal("Expire(cold) = false, want true")
+	}
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now }
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 1 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 1 key and 0 values", result)
+	}
+	entries := loaded.Entries(true)
+	if len(entries) != 1 || entries[0].Key != "cold" || !entries[0].Value.IsLevelDBReference() {
+		t.Fatalf("entries after hot-load = %#v, want cold leveldb reference", entries)
+	}
+
+	now = now.Add(2 * time.Minute)
+	if got := loaded.VacuumExpired(); got != 1 {
+		t.Fatalf("VacuumExpired() after hot-load = %d, want 1", got)
+	}
+	if got := loaded.GetString("cold"); got != "" {
+		t.Fatalf("cold after vacuum = %q, want empty", got)
+	}
+}
+
 func TestLevelDBStoreSkipsExpiredValuesOnLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

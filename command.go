@@ -291,7 +291,7 @@ func (ht *HatTrie) commandIncrementCounter(key string, by int32) (int32, bool) {
 		hval.Index = int32(next)
 	} else {
 		ht.returnStorage(hval)
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		hval = HatValue{Index: by, Flags: DATAVALUE_TYPE_COUNTER}
 	}
 	*rawPtr = hval.toValue()
@@ -319,7 +319,7 @@ func (ht *HatTrie) commandPutMap(key string, fields Map) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.maps.Add(fields)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)

@@ -232,7 +232,7 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 	if !old.Empty() {
 		ht.returnStorage(old)
 	}
-	delete(ht.expires, entry.Key)
+	ht.clearExpirationLocked(entry.Key)
 
 	hval := HatValue{}
 	switch entry.Type {
@@ -263,9 +263,7 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		*rawPtr = hval.toValue()
 	}
 	if entry.ExpiresAt != nil {
-		ht.expires[entry.Key] = *entry.ExpiresAt
-		hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
-		*rawPtr = hval.toValue()
+		hval = ht.setExpirationLocked(entry.Key, *entry.ExpiresAt, rawPtr, hval)
 	}
 	ht.restoreKeyStatsLocked(entry.Key, entry.Stats)
 	return hval, nil

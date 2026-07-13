@@ -292,6 +292,93 @@ type Entry struct {
 	Value HatValue
 }
 
+type expirationEntry struct {
+	key string
+	at  time.Time
+}
+
+type expirationHeap []expirationEntry
+
+func (heap expirationHeap) Len() int {
+	return len(heap)
+}
+
+func (heap expirationHeap) Peek() (expirationEntry, bool) {
+	if len(heap) == 0 {
+		return expirationEntry{}, false
+	}
+	return heap[0], true
+}
+
+func (heap *expirationHeap) Push(entry expirationEntry) {
+	*heap = append(*heap, entry)
+	heap.siftUp(len(*heap) - 1)
+}
+
+func (heap *expirationHeap) Pop() (expirationEntry, bool) {
+	if heap == nil || len(*heap) == 0 {
+		return expirationEntry{}, false
+	}
+	values := *heap
+	root := values[0]
+	last := len(values) - 1
+	values[0] = values[last]
+	values[last] = expirationEntry{}
+	values = values[:last]
+	*heap = values
+	if len(values) > 0 {
+		heap.siftDown(0)
+	}
+	return root, true
+}
+
+func (heap *expirationHeap) Clear() {
+	if heap == nil {
+		return
+	}
+	for idx := range *heap {
+		(*heap)[idx] = expirationEntry{}
+	}
+	*heap = (*heap)[:0]
+}
+
+func (heap expirationHeap) siftUp(idx int) {
+	for idx > 0 {
+		parent := (idx - 1) / 2
+		if !heap[idx].before(heap[parent]) {
+			return
+		}
+		heap[idx], heap[parent] = heap[parent], heap[idx]
+		idx = parent
+	}
+}
+
+func (heap expirationHeap) siftDown(idx int) {
+	for {
+		left := 2*idx + 1
+		if left >= len(heap) {
+			return
+		}
+		smallest := left
+		right := left + 1
+		if right < len(heap) && heap[right].before(heap[left]) {
+			smallest = right
+		}
+		if !heap[smallest].before(heap[idx]) {
+			return
+		}
+		heap[idx], heap[smallest] = heap[smallest], heap[idx]
+		idx = smallest
+	}
+}
+
+func (entry expirationEntry) before(other expirationEntry) bool {
+	if !entry.at.Equal(other.at) {
+		return entry.at.Before(other.at)
+	}
+	return entry.key < other.key
+}
+
 type CacheStats struct {
 	Reads             uint64    `json:"reads"`
 	Hits              uint64    `json:"hits"`
@@ -819,6 +906,7 @@ type HatTrie struct {
 	priorityQueues *PriorityQueueStorage
 	dbrefs         *LevelDBReferenceStorage
 	expires        map[string]time.Time
+	expirations    expirationHeap
 	stats          CacheStats
 	keyStats       map[string]KeyStats
 	now            func() time.Time
@@ -883,6 +971,8 @@ func (ht *HatTrie) Destroy() {
 	ht.priorityQueues = nil
 	ht.dbrefs = nil
 	ht.expires = nil
+	ht.expirations.Clear()
+	ht.expirations = nil
 	ht.keyStats = nil
 	ht.now = nil
 }
@@ -1011,7 +1101,7 @@ func (ht *HatTrie) Persist(key string) bool {
 
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		return false
 	}
 
@@ -1024,7 +1114,7 @@ func (ht *HatTrie) Persist(key string) bool {
 		return false
 	}
 
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 	*rawPtr = hval.toValue()
 	ht.recordWriteLocked(key)
@@ -1039,7 +1129,7 @@ func (ht *HatTrie) TTL(key string) time.Duration {
 
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		ht.recordReadLocked(false, key)
 		return NoTTL
 	}
@@ -1358,7 +1448,7 @@ func (ht *HatTrie) upsertFreshLocation(key string) (*C.value_t, HatValue) {
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
 	if hval.Empty() {
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		return rawPtr, hval
 	}
 	if ht.expireIfNeededLocked(key, hval) {
@@ -1371,7 +1461,7 @@ func (ht *HatTrie) upsertFreshLocation(key string) (*C.value_t, HatValue) {
 func (ht *HatTrie) expireAtLocked(key string, at time.Time) bool {
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		return false
 	}
 
@@ -1381,10 +1471,52 @@ func (ht *HatTrie) expireAtLocked(key string, at time.Time) bool {
 		return false
 	}
 
-	ht.expires[key] = at
-	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
-	*rawPtr = hval.toValue()
+	ht.setExpirationLocked(key, at, rawPtr, hval)
 	return true
+}
+
+func (ht *HatTrie) setExpirationLocked(key string, at time.Time, rawPtr *C.value_t, hval HatValue) HatValue {
+	ht.expires[key] = at
+	ht.expirations.Push(expirationEntry{key: key, at: at})
+	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
+	if rawPtr != nil {
+		*rawPtr = hval.toValue()
+	}
+	ht.compactExpirationHeapLocked()
+	return hval
+}
+
+func (ht *HatTrie) clearExpirationLocked(key string) {
+	if _, ok := ht.expires[key]; !ok {
+		return
+	}
+	delete(ht.expires, key)
+	ht.compactExpirationHeapLocked()
+}
+
+func (ht *HatTrie) compactExpirationHeapLocked() {
+	const minHeapEntries = 64
+	total := ht.expirations.Len()
+	live := len(ht.expires)
+	if total == 0 {
+		return
+	}
+	if live == 0 {
+		ht.expirations.Clear()
+		return
+	}
+	if total < minHeapEntries || total <= live*4 {
+		return
+	}
+	ht.rebuildExpirationHeapLocked()
+}
+
+func (ht *HatTrie) rebuildExpirationHeapLocked() {
+	next := make(expirationHeap, 0, len(ht.expires))
+	for key, at := range ht.expires {
+		next.Push(expirationEntry{key: key, at: at})
+	}
+	ht.expirations = next
 }
 
 func (ht *HatTrie) expireIfNeededLocked(key string, hval HatValue) bool {
@@ -1405,7 +1537,7 @@ func (ht *HatTrie) expireIfNeededLocked(key string, hval HatValue) bool {
 func (ht *HatTrie) deleteLocked(key string) bool {
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		return false
 	}
 
@@ -1421,7 +1553,7 @@ func (ht *HatTrie) deleteKnownLocked(key string, hval HatValue) bool {
 	if C.hattrie_del(ht.root, cstr, C.size_t(len(key))) != 0 {
 		return false
 	}
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	delete(ht.keyStats, key)
 	ht.returnStorage(hval)
 	return true
@@ -1432,24 +1564,34 @@ func (ht *HatTrie) vacuumExpiredLocked() int {
 
 	now := ht.currentTime()
 	removed := 0
-	for key, expiresAt := range ht.expires {
+	for {
+		entry, ok := ht.expirations.Peek()
+		if !ok || now.Before(entry.at) {
+			break
+		}
+		_, _ = ht.expirations.Pop()
+		expiresAt, ok := ht.expires[entry.key]
+		if !ok || !expiresAt.Equal(entry.at) {
+			continue
+		}
 		if now.Before(expiresAt) {
 			continue
 		}
 
-		rawPtr := ht.tryLocation(key)
+		rawPtr := ht.tryLocation(entry.key)
 		if rawPtr == nil {
-			delete(ht.expires, key)
+			delete(ht.expires, entry.key)
 			continue
 		}
 
 		hval := HatValue{}
 		hval.fromValue(*rawPtr)
-		if ht.deleteKnownLocked(key, hval) {
-			ht.recordExpirationLocked(key)
+		if ht.deleteKnownLocked(entry.key, hval) {
+			ht.recordExpirationLocked(entry.key)
 			removed++
 		}
 	}
+	ht.compactExpirationHeapLocked()
 	return removed
 }
 
@@ -1516,7 +1658,7 @@ func (ht *HatTrie) Get(key string) HatValue {
 func (ht *HatTrie) peekLocked(key string) HatValue {
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		return HatValue{}
 	}
 	hval := HatValue{}
@@ -1543,7 +1685,7 @@ func (ht *HatTrie) getLocked(key string) HatValue {
 			return hydrated
 		}
 	} else {
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 	}
 	return hval
 }
@@ -1605,7 +1747,7 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 	if !hval.IsCounter() {
 		ht.returnStorage(hval)
 	}
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	*rawPtr = HatValue{Index: val, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
 	ht.recordWriteLocked(key)
 }
@@ -1621,7 +1763,7 @@ func (ht *HatTrie) IncrementCounter(key string, by int32) {
 		hval.Index += by
 	} else {
 		ht.returnStorage(hval)
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		hval.Flags = DATAVALUE_TYPE_COUNTER
 		hval.Index = by
 	}
@@ -1650,7 +1792,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsStringAtRaws() {
 		ht.raws.Put(hval.Index, []byte(val))
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
@@ -1658,7 +1800,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.raws.Add([]byte(val))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
@@ -1682,7 +1824,7 @@ func (ht *HatTrie) AppendString(key string, str string) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.raws.Add([]byte(str))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
@@ -1706,7 +1848,7 @@ func (ht *HatTrie) PrependString(key string, str string) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.raws.Add([]byte(str))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
@@ -1735,7 +1877,7 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsBytesAtRaws() {
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		ht.storeBytesLocked(rawPtr, hval, val)
 		ht.recordWriteLocked(key)
@@ -1743,7 +1885,7 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	ht.storeBytesLocked(rawPtr, HatValue{}, val)
 	ht.recordWriteLocked(key)
 }
@@ -1812,7 +1954,7 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsMap() {
 		ht.maps.Put(hval.Index, val)
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
@@ -1820,7 +1962,7 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.maps.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)
@@ -1865,7 +2007,7 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.maps.Add(Map{subkey: val})
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)
@@ -1930,7 +2072,7 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsSlice() {
 		ht.slices.Put(hval.Index, val)
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
@@ -1938,7 +2080,7 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.slices.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 	ht.recordWriteLocked(key)
@@ -1960,7 +2102,7 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	arr := make(Slice, 0, 1+len(vals))
 	arr = append(arr, val)
 	arr = append(arr, vals...)
@@ -2064,7 +2206,7 @@ func (ht *HatTrie) UpsertSet(key string, val Set) {
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsSet() {
 		ht.sets.Put(hval.Index, val)
-		delete(ht.expires, key)
+		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
@@ -2072,7 +2214,7 @@ func (ht *HatTrie) UpsertSet(key string, val Set) {
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.sets.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
 	ht.recordWriteLocked(key)
@@ -2095,7 +2237,7 @@ func (ht *HatTrie) AddSet(key string, val interface{}, vals ...interface{}) int 
 	}
 
 	ht.returnStorage(hval)
-	delete(ht.expires, key)
+	ht.clearExpirationLocked(key)
 	idx := ht.sets.Add(values)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
 	ht.recordWriteLocked(key)

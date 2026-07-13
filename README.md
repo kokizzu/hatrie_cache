@@ -10,7 +10,9 @@ stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
 O(1), and memory usage low without per-item node allocations.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack,
 avoiding per-index hash-map overhead while keeping reuse checks and allocation
-fast.
+fast. TTL expiration uses a min-heap schedule plus an authoritative key map, so
+vacuuming pops due keys instead of scanning every TTL entry and compacts stale
+schedule entries under churn.
 
 ## Development
 
@@ -247,6 +249,7 @@ build files have not been generated.
 - [x] bind [HAT-Trie](https://github.com/luikore/hat-trie) to Go using CGO
 - [x] `hat_map<string,int+byte>` stores index or special types (deque/set/etc) to `[][]byte` (aka raws); raws can be serialized using [FlatBuffers](http://github.com/google/flatbuffers) or [FastBinaryEncoding](http://github.com/chronoxor/FastBinaryEncoding)
 - [x] add TTL map, check for expiration when read, delete if expired
+- [x] use a min-heap expiration schedule so TTL vacuuming does not scan every TTL key
 - [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
 - [x] replace reusable-index hash maps with a compact bitset-backed stack for typed backing pools
 - [x] create a web UI for management and monitoring (frontend: Svelte MPA)

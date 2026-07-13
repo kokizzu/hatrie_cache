@@ -187,6 +187,39 @@ func TestLoadSnapshotSkipsExpiredEntries(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotSchedulesExpirationForVacuum(t *testing.T) {
+	now := time.Unix(3050, 0)
+	expiresAt := now.Add(time.Minute)
+	data := snapshotFile{
+		Version: snapshotVersion,
+		Entries: []snapshotEntry{
+			{Key: "ttl", Type: "string", String: "value", ExpiresAt: &expiresAt},
+		},
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	ht.now = func() time.Time { return now }
+	if err := ht.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	now = now.Add(2 * time.Minute)
+	if got := ht.VacuumExpired(); got != 1 {
+		t.Fatalf("VacuumExpired() after snapshot load = %d, want 1", got)
+	}
+	if got := ht.GetString("ttl"); got != "" {
+		t.Fatalf("ttl after vacuum = %q, want empty", got)
+	}
+}
+
 func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 	ht := newTestTrie(t)
 	dir := t.TempDir()

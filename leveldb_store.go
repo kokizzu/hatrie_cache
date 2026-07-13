@@ -243,7 +243,7 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snap
 	if !old.Empty() {
 		trie.returnStorage(old)
 	}
-	delete(trie.expires, entry.Key)
+	trie.clearExpirationLocked(entry.Key)
 
 	idx := trie.dbrefs.Add(LevelDBReference{
 		Key:   entry.Key,
@@ -252,8 +252,7 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snap
 	})
 	hval := HatValue{Index: idx, Flags: DATAVALUE_TYPE_LEVELDB_REF}
 	if entry.ExpiresAt != nil {
-		trie.expires[entry.Key] = *entry.ExpiresAt
-		hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
+		hval = trie.setExpirationLocked(entry.Key, *entry.ExpiresAt, rawPtr, hval)
 	}
 	*rawPtr = hval.toValue()
 	trie.restoreKeyStatsLocked(entry.Key, entry.Stats)

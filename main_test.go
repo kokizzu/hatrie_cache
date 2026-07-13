@@ -996,6 +996,58 @@ func TestVacuumExpiredRemovesOnlyExpiredKeys(t *testing.T) {
 	}
 }
 
+func TestVacuumExpiredSkipsStaleExpirationEntries(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(750, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("extended", "value")
+	if !ht.Expire("extended", 10*time.Second) {
+		t.Fatal("first Expire(extended) = false, want true")
+	}
+	if !ht.Expire("extended", time.Hour) {
+		t.Fatal("second Expire(extended) = false, want true")
+	}
+
+	now = now.Add(11 * time.Second)
+	if got := ht.VacuumExpired(); got != 0 {
+		t.Fatalf("VacuumExpired() before latest deadline = %d, want 0", got)
+	}
+	if got := ht.GetString("extended"); got != "value" {
+		t.Fatalf("extended value after stale deadline = %q, want value", got)
+	}
+
+	now = now.Add(time.Hour)
+	if got := ht.VacuumExpired(); got != 1 {
+		t.Fatalf("VacuumExpired() after latest deadline = %d, want 1", got)
+	}
+	if got := ht.GetString("extended"); got != "" {
+		t.Fatalf("extended value after latest deadline = %q, want empty", got)
+	}
+}
+
+func TestExpirationHeapCompactsStaleEntries(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(760, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("hot", "value")
+	for i := 0; i < 128; i++ {
+		if !ht.ExpireAt("hot", now.Add(time.Duration(i+1)*time.Hour)) {
+			t.Fatalf("ExpireAt(hot, %d) = false, want true", i)
+		}
+	}
+	if got := ht.expirations.Len(); got > 64 {
+		t.Fatalf("expiration heap len after repeated updates = %d, want compacted <= 64", got)
+	}
+	if !ht.Persist("hot") {
+		t.Fatal("Persist(hot) = false, want true")
+	}
+	if got := ht.expirations.Len(); got != 0 {
+		t.Fatalf("expiration heap len after Persist() = %d, want 0", got)
+	}
+}
+
 func TestStartExpirationCleanerRemovesExpiredKeysAndStops(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(800, 0)
