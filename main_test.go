@@ -86,6 +86,42 @@ func TestKeysUseFullLengthAndSupportNULBytes(t *testing.T) {
 	}
 }
 
+func TestEmptyKeyIsCountedIterableAndDeletable(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if ht.Exists("") {
+		t.Fatal("Exists(empty key) before insert = true, want false")
+	}
+
+	ht.UpsertString("", "empty")
+	hval := ht.Get("")
+	if !hval.IsStringAtRaws() {
+		t.Fatalf("Get(empty key) = %+v, want string value", hval)
+	}
+	if got := ht.GetString(""); got != "empty" {
+		t.Fatalf("GetString(empty key) = %q, want empty", got)
+	}
+	if got := ht.Size(); got != 1 {
+		t.Fatalf("Size() after empty key insert = %d, want 1", got)
+	}
+	if got := ht.Keys(true); !reflect.DeepEqual(got, []string{""}) {
+		t.Fatalf("Keys() after empty key insert = %#v, want empty key", got)
+	}
+
+	if !ht.Delete("") {
+		t.Fatal("Delete(empty key) = false, want true")
+	}
+	if !rawIndexReleased(ht, hval.Index) {
+		t.Fatalf("empty key raw index %d was not released", hval.Index)
+	}
+	if got := ht.Size(); got != 0 {
+		t.Fatalf("Size() after empty key delete = %d, want 0", got)
+	}
+	if ht.Exists("") {
+		t.Fatal("Exists(empty key) after delete = true, want false")
+	}
+}
+
 func TestStringOperationsReuseStorage(t *testing.T) {
 	ht := newTestTrie(t)
 

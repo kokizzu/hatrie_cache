@@ -118,7 +118,12 @@ static node_ptr hattrie_find(hattrie_t* T, const char **key, size_t *len, int* f
     node_ptr parent = T->root;
     assert(*parent.flag & NODE_TYPE_TRIE);
 
-    if (*len == 0) return parent;
+    if (*len == 0) {
+        if (!(parent.t->flag & NODE_HAS_VAL)) {
+            *found = 0;
+        }
+        return parent;
+    }
 
     node_ptr node = hattrie_consume(&parent, key, len, 1);
 
@@ -345,7 +350,7 @@ value_t* hattrie_get(hattrie_t* T, const char* key, size_t len)
     node_ptr parent = T->root;
     assert(*parent.flag & NODE_TYPE_TRIE);
 
-    if (len == 0) return &parent.t->val;
+    if (len == 0) return hattrie_useval(T, parent);
 
     /* consume all trie nodes, now parent must be trie and child anything */
     node_ptr node = hattrie_consume(&parent, &key, &len, 0);
