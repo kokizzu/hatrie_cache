@@ -17,8 +17,10 @@ import (
 const commandJournalVersion = 1
 
 const (
-	DefaultCommandJournalTailLimit = 1000
-	MaxCommandJournalTailLimit     = 10000
+	DefaultCommandJournalTailLimit   = 1000
+	MaxCommandJournalTailLimit       = 10000
+	DefaultCommandJournalPullBatches = 100
+	MaxCommandJournalPullBatches     = 1000
 )
 
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
@@ -44,6 +46,7 @@ type CommandJournalPullResult struct {
 	CompactedThrough uint64 `json:"compacted_through,omitempty"`
 	Applied          int    `json:"applied"`
 	AppliedThrough   uint64 `json:"applied_through"`
+	Batches          int    `json:"batches,omitempty"`
 	HasMore          bool   `json:"has_more,omitempty"`
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -374,6 +375,105 @@ func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
 	}
 	if len(entries) != 2 {
 		t.Fatalf("local journal entries = %d, want 2", len(entries))
+	}
+
+	badMaxBatchesBody, err := json.Marshal(map[string]interface{}{
+		"source":      source.URL,
+		"max_batches": 2,
+	})
+	if err != nil {
+		t.Fatalf("Marshal(bad max batches) error = %v", err)
+	}
+	badMaxBatchesResp := httptest.NewRecorder()
+	handler.ServeHTTP(badMaxBatchesResp, httptest.NewRequest(http.MethodPost, "/api/journal", bytes.NewReader(badMaxBatchesBody)))
+	if badMaxBatchesResp.Code != http.StatusBadRequest {
+		t.Fatalf("bad max_batches status = %d, want 400", badMaxBatchesResp.Code)
+	}
+}
+
+func TestMonitoringHandlerPullsJournalTailUntilCurrent(t *testing.T) {
+	var gotSourcePaths []string
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSourcePaths = append(gotSourcePaths, r.URL.String())
+		after := r.URL.Query().Get("after_sequence")
+		switch after {
+		case "1":
+			writeJSON(w, CommandJournalTail{
+				LastSequence: 4,
+				Limit:        1,
+				HasMore:      true,
+				Entries: []CommandJournalRecord{
+					{Sequence: 2, Request: CacheCommandRequest{Command: "SETSTR", Key: "one", Value: "1"}},
+				},
+			})
+		case "2":
+			writeJSON(w, CommandJournalTail{
+				LastSequence: 4,
+				Limit:        1,
+				HasMore:      true,
+				Entries: []CommandJournalRecord{
+					{Sequence: 3, Request: CacheCommandRequest{Command: "SETSTR", Key: "two", Value: "2"}},
+				},
+			})
+		case "3":
+			writeJSON(w, CommandJournalTail{
+				LastSequence: 4,
+				Limit:        1,
+				Entries: []CommandJournalRecord{
+					{Sequence: 4, Request: CacheCommandRequest{Command: "SETSTR", Key: "three", Value: "3"}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected source after_sequence = %q", after)
+		}
+	}))
+	defer source.Close()
+
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{Journal: journal}).Handler()
+	body, err := json.Marshal(map[string]interface{}{
+		"source":         source.URL,
+		"after_sequence": 1,
+		"limit":          1,
+		"until_current":  true,
+		"max_batches":    5,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/journal", bytes.NewReader(body)))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("journal pull until current status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	wantPaths := []string{
+		"/api/journal?after_sequence=1&limit=1",
+		"/api/journal?after_sequence=2&limit=1",
+		"/api/journal?after_sequence=3&limit=1",
+	}
+	if !reflect.DeepEqual(gotSourcePaths, wantPaths) {
+		t.Fatalf("source paths = %#v, want %#v", gotSourcePaths, wantPaths)
+	}
+	var result CommandJournalPullResult
+	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("journal pull until current JSON error = %v", err)
+	}
+	if result.Applied != 3 || result.AppliedThrough != 4 || result.LastSequence != 4 || result.Batches != 3 || result.HasMore {
+		t.Fatalf("journal pull until current result = %#v, want fully caught up through sequence 4", result)
+	}
+	if got := ht.GetString("one"); got != "1" {
+		t.Fatalf("pulled one = %q, want 1", got)
+	}
+	if got := ht.GetString("two"); got != "2" {
+		t.Fatalf("pulled two = %q, want 2", got)
+	}
+	if got := ht.GetString("three"); got != "3" {
+		t.Fatalf("pulled three = %q, want 3", got)
 	}
 }
 

@@ -188,8 +188,16 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 	afterSequence := flags.Uint64("after-sequence", 0, "only return journal entries after this sequence")
 	limit := flags.Uint64("limit", 0, "maximum journal entries to fetch or pull")
 	pullFrom := flags.String("pull-from", "", "source monitoring server base URL to pull and apply journal entries from")
+	untilCurrent := flags.Bool("until-current", false, "keep pulling batches until the source has no more entries")
+	maxBatches := flags.Uint64("max-batches", 0, "maximum journal batches to pull with -until-current")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *maxBatches > 0 && !*untilCurrent {
+		return errors.New("journal -max-batches requires -until-current")
+	}
+	if *untilCurrent && strings.TrimSpace(*pullFrom) == "" {
+		return errors.New("journal -until-current requires -pull-from")
 	}
 
 	if strings.TrimSpace(*pullFrom) != "" {
@@ -197,10 +205,14 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 			Source        string `json:"source"`
 			AfterSequence uint64 `json:"after_sequence,omitempty"`
 			Limit         uint64 `json:"limit,omitempty"`
+			UntilCurrent  bool   `json:"until_current,omitempty"`
+			MaxBatches    uint64 `json:"max_batches,omitempty"`
 		}{
 			Source:        strings.TrimSpace(*pullFrom),
 			AfterSequence: *afterSequence,
 			Limit:         *limit,
+			UntilCurrent:  *untilCurrent,
+			MaxBatches:    *maxBatches,
 		})
 		if err != nil {
 			return err

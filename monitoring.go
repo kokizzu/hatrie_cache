@@ -71,6 +71,8 @@ type journalPullRequest struct {
 	Source        string `json:"source"`
 	AfterSequence uint64 `json:"after_sequence,omitempty"`
 	Limit         uint64 `json:"limit,omitempty"`
+	UntilCurrent  bool   `json:"until_current,omitempty"`
+	MaxBatches    uint64 `json:"max_batches,omitempty"`
 }
 
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
@@ -474,7 +476,7 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 		return
 	}
-	endpoint, err := commandJournalEndpoint(source, request.AfterSequence, limit)
+	maxBatches, err := normalizeCommandJournalPullBatches(request.UntilCurrent, request.MaxBatches)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 		return
@@ -483,8 +485,12 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		return
 	}
 
-	tail, status, err := fetchCommandJournalTail(r.Context(), http.DefaultClient, endpoint)
+	result, status, err := handler.pullCommandJournalTail(r.Context(), source, request.AfterSequence, limit, request.UntilCurrent, maxBatches)
 	if err != nil {
+		if status == http.StatusBadRequest {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+			return
+		}
 		if status == http.StatusConflict {
 			writeJSONStatus(w, http.StatusConflict, commandError(err.Error()))
 			return
@@ -492,12 +498,45 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		writeJSONStatus(w, http.StatusBadGateway, commandError(err.Error()))
 		return
 	}
-	result, err := handler.applyCommandJournalTail(source, request.AfterSequence, tail)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadGateway, commandError(err.Error()))
-		return
-	}
 	writeJSON(w, result)
+}
+
+func (handler *MonitoringHandler) pullCommandJournalTail(ctx context.Context, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int) (CommandJournalPullResult, int, error) {
+	result := CommandJournalPullResult{
+		Source:         source,
+		AfterSequence:  afterSequence,
+		AppliedThrough: afterSequence,
+	}
+	for batch := 0; batch < maxBatches; batch++ {
+		endpoint, err := commandJournalEndpoint(source, result.AppliedThrough, limit)
+		if err != nil {
+			return result, http.StatusBadRequest, err
+		}
+		tail, status, err := fetchCommandJournalTail(ctx, http.DefaultClient, endpoint)
+		if err != nil {
+			return result, status, err
+		}
+		batchResult, err := handler.applyCommandJournalTail(source, result.AppliedThrough, tail)
+		if err != nil {
+			return result, http.StatusBadGateway, err
+		}
+		result.LastSequence = batchResult.LastSequence
+		result.CompactedThrough = batchResult.CompactedThrough
+		result.Applied += batchResult.Applied
+		result.AppliedThrough = batchResult.AppliedThrough
+		result.HasMore = batchResult.HasMore
+		result.Batches++
+		if !untilCurrent || !result.HasMore {
+			return result, http.StatusOK, nil
+		}
+		if batchResult.Applied == 0 {
+			return result, http.StatusBadGateway, errors.New("journal source reported more entries without returning progress")
+		}
+		if err := ctx.Err(); err != nil {
+			return result, 0, err
+		}
+	}
+	return result, http.StatusOK, nil
 }
 
 func (handler *MonitoringHandler) applyCommandJournalTail(source string, afterSequence uint64, tail CommandJournalTail) (CommandJournalPullResult, error) {
@@ -611,6 +650,22 @@ func normalizeCommandJournalTailLimit(value uint64) (int, error) {
 	}
 	if value > uint64(MaxCommandJournalTailLimit) {
 		return 0, fmt.Errorf("limit must be <= %d", MaxCommandJournalTailLimit)
+	}
+	return int(value), nil
+}
+
+func normalizeCommandJournalPullBatches(untilCurrent bool, value uint64) (int, error) {
+	if !untilCurrent {
+		if value > 0 {
+			return 0, errors.New("max_batches requires until_current")
+		}
+		return 1, nil
+	}
+	if value == 0 {
+		return DefaultCommandJournalPullBatches, nil
+	}
+	if value > uint64(MaxCommandJournalPullBatches) {
+		return 0, fmt.Errorf("max_batches must be <= %d", MaxCommandJournalPullBatches)
 	}
 	return int(value), nil
 }

@@ -128,7 +128,9 @@ If `N` is older than the compacted snapshot checkpoint, the endpoint returns
 `409` so a replica can fall back to a snapshot or explicit replication sync.
 `POST /api/journal` accepts `source`, optional `after_sequence`, and optional
 `limit`, pulls that source node's journal tail, and applies the returned
-mutating commands locally through the configured journal.
+mutating commands locally through the configured journal. Set `until_current`
+and optional `max_batches` to continue pulling bounded batches until the source
+has no more entries or the batch cap is reached.
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
 The topology endpoint validates nodes, shard ownership, and replicas, and can
@@ -233,6 +235,7 @@ make cli ARGS='replication -sync'
 make cli ARGS='replication -sync -prefix session:'
 make cli ARGS='journal -after-sequence 42 -limit 1000'
 make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000'
+make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000 -until-current -max-batches 100'
 make cli ARGS='snapshot'
 ```
 

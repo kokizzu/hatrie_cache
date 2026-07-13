@@ -261,6 +261,8 @@ func TestRunJournalPullPostsSource(t *testing.T) {
 		Source        string `json:"source"`
 		AfterSequence uint64 `json:"after_sequence"`
 		Limit         uint64 `json:"limit"`
+		UntilCurrent  bool   `json:"until_current"`
+		MaxBatches    uint64 `json:"max_batches"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.String()
@@ -278,17 +280,36 @@ func TestRunJournalPullPostsSource(t *testing.T) {
 	defer server.Close()
 
 	stdout := &bytes.Buffer{}
-	if err := run(context.Background(), []string{"-addr", server.URL, "journal", "-pull-from", " http://leader ", "-after-sequence", "7", "-limit", "25"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"journal",
+		"-pull-from", " http://leader ",
+		"-after-sequence", "7",
+		"-limit", "25",
+		"-until-current",
+		"-max-batches", "3",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
 		t.Fatalf("run(journal -pull-from) error = %v", err)
 	}
 	if gotPath != "/api/journal" {
 		t.Fatalf("path = %q, want /api/journal", gotPath)
 	}
-	if gotBody.Source != "http://leader" || gotBody.AfterSequence != 7 || gotBody.Limit != 25 {
-		t.Fatalf("body = %#v, want source http://leader after 7 limit 25", gotBody)
+	if gotBody.Source != "http://leader" || gotBody.AfterSequence != 7 || gotBody.Limit != 25 || !gotBody.UntilCurrent || gotBody.MaxBatches != 3 {
+		t.Fatalf("body = %#v, want source http://leader after 7 limit 25 until current max batches 3", gotBody)
 	}
 	if got := stdout.String(); got != "{\"source\":\"http://leader\",\"after_sequence\":7,\"last_sequence\":8,\"applied\":1,\"applied_through\":8}\n" {
 		t.Fatalf("stdout = %q, want journal pull JSON", got)
+	}
+}
+
+func TestRunJournalRejectsInvalidFollowFlags(t *testing.T) {
+	err := run(context.Background(), []string{"journal", "-until-current"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "requires -pull-from") {
+		t.Fatalf("run(journal -until-current) error = %v, want requires -pull-from", err)
+	}
+	err = run(context.Background(), []string{"journal", "-max-batches", "3"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "requires -until-current") {
+		t.Fatalf("run(journal -max-batches) error = %v, want requires -until-current", err)
 	}
 }
 
