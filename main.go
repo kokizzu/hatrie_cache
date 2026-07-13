@@ -647,7 +647,7 @@ func (ds *DiskStorage) Put(idx int32, value []byte) error {
 	if idx < 0 || int(idx) >= len(ds.paths) {
 		return nil
 	}
-	if err := os.WriteFile(ds.paths[idx], value, 0o600); err != nil {
+	if err := writeFileAtomic(ds.paths[idx], value); err != nil {
 		return err
 	}
 	ds.reusables.Use(idx)
@@ -657,7 +657,7 @@ func (ds *DiskStorage) Put(idx int32, value []byte) error {
 func (ds *DiskStorage) Append(value []byte) (int32, error) {
 	idx := int32(len(ds.paths))
 	path := ds.pathFor(idx)
-	if err := os.WriteFile(path, value, 0o600); err != nil {
+	if err := writeFileAtomic(path, value); err != nil {
 		return 0, err
 	}
 	ds.paths = append(ds.paths, path)
@@ -666,7 +666,7 @@ func (ds *DiskStorage) Append(value []byte) (int32, error) {
 
 func (ds *DiskStorage) Add(value []byte) (int32, error) {
 	if idx, ok := ds.reusables.Take(); ok {
-		if err := os.WriteFile(ds.paths[idx], value, 0o600); err != nil {
+		if err := writeFileAtomic(ds.paths[idx], value); err != nil {
 			ds.reusables.Mark(idx)
 			return 0, err
 		}

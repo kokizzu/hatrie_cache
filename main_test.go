@@ -911,6 +911,59 @@ func TestStoragePoolsTrimReusableTailSlots(t *testing.T) {
 	}
 }
 
+func TestDiskStorageWritesReplaceAndReuseAtomically(t *testing.T) {
+	disks, err := CreateDiskStorage(t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("CreateDiskStorage() error = %v", err)
+	}
+
+	idx, err := disks.Add([]byte("first"))
+	if err != nil {
+		t.Fatalf("Add(first) error = %v", err)
+	}
+	if err := disks.Put(idx, []byte("second")); err != nil {
+		t.Fatalf("Put(second) error = %v", err)
+	}
+	if got, err := disks.Get(idx); err != nil || string(got) != "second" {
+		t.Fatalf("Get(after Put) = %q/%v, want second/nil", got, err)
+	}
+
+	disks.Del(idx)
+	reused, err := disks.Add([]byte("third"))
+	if err != nil {
+		t.Fatalf("Add(third) error = %v", err)
+	}
+	if reused != idx {
+		t.Fatalf("Add(third) index = %d, want reused %d", reused, idx)
+	}
+	if got, err := disks.Get(reused); err != nil || string(got) != "third" {
+		t.Fatalf("Get(reused) = %q/%v, want third/nil", got, err)
+	}
+	assertNoAtomicTempFiles(t, disks.dir, filepath.Base(disks.paths[reused]))
+}
+
+func TestDiskStorageWriteFailureCleansTemporaryFilesAndKeepsReusableIndex(t *testing.T) {
+	dir := t.TempDir()
+	disks, err := CreateDiskStorage(dir, false)
+	if err != nil {
+		t.Fatalf("CreateDiskStorage() error = %v", err)
+	}
+	badPath := filepath.Join(dir, "bytes-0.bin")
+	if err := os.Mkdir(badPath, 0o700); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	disks.paths = append(disks.paths, badPath)
+	disks.reusables.Mark(0)
+
+	if _, err := disks.Add([]byte("payload")); err == nil {
+		t.Fatal("Add(payload) error = nil, want write error")
+	}
+	if !disks.reusables.Has(0) {
+		t.Fatal("failed Add did not restore reusable disk index")
+	}
+	assertNoAtomicTempFiles(t, dir, "bytes-0.bin")
+}
+
 func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
 	ht := newTestTrie(t)
 
