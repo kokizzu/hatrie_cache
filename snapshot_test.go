@@ -43,6 +43,8 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertCuckooFilter() error = %v", err)
 	}
 	ht.AddCuckooFilter("cuckoo", "alpha", "beta")
+	ht.UpsertRoaringBitmap("bitmap")
+	ht.AddRoaringBitmap("bitmap", 1, 1<<16+7)
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -108,6 +110,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.CuckooFilterInfo("cuckoo"); !ok || info.Count != 2 || info.Capacity < 128 {
 		t.Fatalf("loaded CuckooFilterInfo = %#v/%v, want restored Cuckoo filter", info, ok)
+	}
+	if got := loaded.GetRoaringBitmap("bitmap"); !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7}) {
+		t.Fatalf("loaded Roaring bitmap = %#v, want restored integer set", got)
+	}
+	if info, ok := loaded.RoaringBitmapInfo("bitmap"); !ok || info.Cardinality != 2 || info.Containers != 2 {
+		t.Fatalf("loaded RoaringBitmapInfo = %#v/%v, want restored Roaring bitmap", info, ok)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)

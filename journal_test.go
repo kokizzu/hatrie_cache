@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -260,6 +261,51 @@ func TestCommandJournalReplaysCuckooFilterMutations(t *testing.T) {
 	}
 	if !replayed.HasCuckooFilter("seen", "beta") {
 		t.Fatal("replayed Cuckoo filter does not contain journaled value beta")
+	}
+}
+
+func TestCommandJournalReplaysRoaringBitmapMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATERB", Key: "ids"}); !got.OK {
+		t.Fatalf("journaled CREATERB response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDRB", Key: "ids", Values: Slice{json.Number("1"), json.Number("65543")}}); !got.OK {
+		t.Fatalf("journaled ADDRB response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "REMRB", Key: "ids", Value: "1"}); !got.OK {
+		t.Fatalf("journaled REMRB response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "HASRB", Key: "ids", Value: "65543"}); !got.OK || got.Value != "1" {
+		t.Fatalf("journaled HASRB response = %#v, want local read hit", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("journal entries = %d, want CREATERB, ADDRB, and REMRB only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if replayed.HasRoaringBitmap("ids", 1) {
+		t.Fatal("replayed Roaring bitmap contains removed value 1")
+	}
+	if !replayed.HasRoaringBitmap("ids", 65543) {
+		t.Fatal("replayed Roaring bitmap does not contain journaled value 65543")
 	}
 }
 

@@ -59,6 +59,10 @@ func cuckooFilterIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.cuckooFilters.array) || ht.cuckooFilters.reusables.Has(idx)
 }
 
+func roaringBitmapIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.roaringBitmaps.array) || ht.roaringBitmaps.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
@@ -133,6 +137,7 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "count-min sketch", value: HatValue{Index: 9, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}, want: "count-min sketch at index: 9"},
 		{name: "hyperloglog", value: HatValue{Index: 10, Flags: DATAVALUE_TYPE_HYPERLOGLOG}, want: "hyperloglog at index: 10"},
 		{name: "top-k", value: HatValue{Index: 11, Flags: DATAVALUE_TYPE_TOP_K}, want: "top-k at index: 11"},
+		{name: "roaring bitmap", value: HatValue{Index: 12, Flags: DATAVALUE_TYPE_ROARING_BITMAP}, want: "roaring bitmap at index: 12"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -1436,6 +1441,128 @@ func TestCuckooFilterStorageReleasedOnOverwrite(t *testing.T) {
 	}
 	if got := ht.Get("new").Index; got != idx {
 		t.Fatalf("Cuckoo filter storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestRoaringBitmapOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertRoaringBitmap("ids")
+	if hval := ht.Get("ids"); !hval.IsRoaringBitmap() {
+		t.Fatalf("UpsertRoaringBitmap stored type %+v, want roaring bitmap", hval)
+	}
+	if added := ht.AddRoaringBitmap("ids", 1, 2, 1, 1<<16+7, ^uint32(0)); added != 4 {
+		t.Fatalf("AddRoaringBitmap() = %d, want 4 unique values", added)
+	}
+	if !ht.HasRoaringBitmap("ids", 1) || !ht.HasRoaringBitmap("ids", 1<<16+7) || !ht.HasRoaringBitmap("ids", ^uint32(0)) {
+		t.Fatal("HasRoaringBitmap(inserted values) = false, want true")
+	}
+	if ht.HasRoaringBitmap("ids", 3) {
+		t.Fatal("HasRoaringBitmap(missing) = true, want false")
+	}
+	if removed := ht.RemoveRoaringBitmap("ids", 2, 3); removed != 1 {
+		t.Fatalf("RemoveRoaringBitmap(2, 3) = %d, want 1", removed)
+	}
+	if count, ok := ht.CountRoaringBitmap("ids"); !ok || count != 3 {
+		t.Fatalf("CountRoaringBitmap(ids) = %d/%v, want 3", count, ok)
+	}
+	if got := ht.GetRoaringBitmap("ids"); !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7, ^uint32(0)}) {
+		t.Fatalf("GetRoaringBitmap(ids) = %#v, want sorted values", got)
+	}
+	info, ok := ht.RoaringBitmapInfo("ids")
+	if !ok {
+		t.Fatal("RoaringBitmapInfo(ids) = false, want true")
+	}
+	if info.Cardinality != 3 || info.Containers != 3 || info.ArrayContainers != 3 || info.EncodedBytes != 6 {
+		t.Fatalf("RoaringBitmapInfo(ids) = %#v, want sparse compact arrays", info)
+	}
+
+	if added := ht.AddRoaringBitmap("auto", 42); added != 1 {
+		t.Fatalf("AddRoaringBitmap(auto) = %d, want 1", added)
+	}
+	if hval := ht.Get("auto"); !hval.IsRoaringBitmap() {
+		t.Fatalf("AddRoaringBitmap(auto) stored type %+v, want roaring bitmap", hval)
+	}
+}
+
+func TestRoaringBitmapConvertsDenseContainers(t *testing.T) {
+	ht := newTestTrie(t)
+	for idx := 0; idx <= roaringBitmapArrayMaxSize; idx++ {
+		ht.AddRoaringBitmap("dense", uint32(idx))
+	}
+	info, ok := ht.RoaringBitmapInfo("dense")
+	if !ok {
+		t.Fatal("RoaringBitmapInfo(dense) = false, want true")
+	}
+	if info.BitmapContainers != 1 || info.ArrayContainers != 0 || info.EncodedBytes != roaringBitmapBitmapWords*8 {
+		t.Fatalf("dense RoaringBitmapInfo = %#v, want one bitmap container", info)
+	}
+	for idx := roaringBitmapArrayShrinkSize; idx <= roaringBitmapArrayMaxSize; idx++ {
+		ht.RemoveRoaringBitmap("dense", uint32(idx))
+	}
+	info, ok = ht.RoaringBitmapInfo("dense")
+	if !ok {
+		t.Fatal("RoaringBitmapInfo(dense after shrink) = false, want true")
+	}
+	if info.ArrayContainers != 1 || info.BitmapContainers != 0 || info.EncodedBytes != uint64(roaringBitmapArrayShrinkSize*2) {
+		t.Fatalf("shrunk RoaringBitmapInfo = %#v, want one compact array container", info)
+	}
+}
+
+func TestRoaringBitmapRejectsInvalidCommandValues(t *testing.T) {
+	if _, err := roaringBitmapValuesFromCommand(CacheCommandRequest{Values: Slice{"1", json.Number("4294967295")}}); err != nil {
+		t.Fatalf("roaringBitmapValuesFromCommand(valid) error = %v", err)
+	}
+	tests := []CacheCommandRequest{
+		{},
+		{Value: "-1"},
+		{Value: "4294967296"},
+		{Values: Slice{1.5}},
+	}
+	for _, request := range tests {
+		if _, err := roaringBitmapValuesFromCommand(request); err == nil {
+			t.Fatalf("roaringBitmapValuesFromCommand(%#v) error = nil, want error", request)
+		}
+	}
+}
+
+func TestRoaringBitmapSnapshotValidationRejectsCorruptPayload(t *testing.T) {
+	data := newRoaringBitmapData()
+	for idx := 0; idx <= roaringBitmapArrayMaxSize; idx++ {
+		data.Add(uint32(idx))
+	}
+	snapshot := data.Snapshot()
+	snapshot.Cardinality++
+	if err := validateRoaringBitmapSnapshot(snapshot); err == nil {
+		t.Fatal("validateRoaringBitmapSnapshot(mismatched cardinality) error = nil, want error")
+	}
+
+	snapshot = data.Snapshot()
+	snapshot.Containers[0].Cardinality++
+	if err := validateRoaringBitmapSnapshot(snapshot); err == nil {
+		t.Fatal("validateRoaringBitmapSnapshot(mismatched container cardinality) error = nil, want error")
+	}
+
+	snapshot = data.Snapshot()
+	snapshot.Containers[0].Kind = "unknown"
+	if err := validateRoaringBitmapSnapshot(snapshot); err == nil {
+		t.Fatal("validateRoaringBitmapSnapshot(unknown kind) error = nil, want error")
+	}
+}
+
+func TestRoaringBitmapStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertRoaringBitmap("ids")
+	idx := ht.Get("ids").Index
+	ht.UpsertString("ids", "value")
+	if !roaringBitmapIndexReleased(ht, idx) {
+		t.Fatalf("overwritten Roaring bitmap index %d was not released", idx)
+	}
+
+	ht.UpsertRoaringBitmap("new")
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("Roaring bitmap storage was not reused: got index %d, want %d", got, idx)
 	}
 }
 

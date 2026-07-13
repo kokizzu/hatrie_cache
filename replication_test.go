@@ -352,6 +352,65 @@ func TestHTTPReplicatorReplicatesCuckooFilterMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesRoaringBitmapMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATERB", Key: "ids"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATERB response = %#v, want ok", response)
+	}
+	add := CacheCommandRequest{Command: "ADDRB", Key: "ids", Values: Slice{json.Number("1"), json.Number("65543")}}
+	response := trie.ExecuteCommand(add)
+	if !response.OK {
+		t.Fatalf("ADDRB response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, add, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("Roaring bitmap replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "ids" || request.Value == "" {
+			t.Fatalf("replicated Roaring bitmap request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated Roaring bitmap snapshot JSON error = %v", err)
+		}
+		if entry.Type != "roaring_bitmap" || entry.RoaringBitmap == nil {
+			t.Fatalf("replicated Roaring bitmap snapshot = %#v, want roaring_bitmap payload", entry)
+		}
+	default:
+		t.Fatal("Roaring bitmap mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "HASRB", Key: "ids", Value: "1"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "HASRB", Key: "ids", Value: "1"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("Roaring bitmap read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestHTTPReplicatorReplicatesHyperLogLogMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

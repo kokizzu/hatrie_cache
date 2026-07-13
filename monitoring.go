@@ -739,6 +739,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		info := ht.cuckooFilters.array[hval.Index].Info()
 		return int64(info.FingerprintBytes), strconv.FormatUint(info.Count, 10) + "/" + strconv.FormatUint(info.Capacity, 10) + " slots, " + strconv.Itoa(int(info.FingerprintBits)) + "-bit fingerprints"
+	case DATAVALUE_TYPE_ROARING_BITMAP:
+		if int(hval.Index) >= len(ht.roaringBitmaps.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.roaringBitmaps.array[hval.Index].Info()
+		return int64(info.EncodedBytes), strconv.FormatUint(info.Cardinality, 10) + " integers, " + strconv.FormatUint(info.Containers, 10) + " containers"
 	default:
 		return 0, ""
 	}
@@ -772,6 +778,8 @@ func monitoringType(hval HatValue) string {
 		return "top_k"
 	case DATAVALUE_TYPE_CUCKOO_FILTER:
 		return "cuckoo_filter"
+	case DATAVALUE_TYPE_ROARING_BITMAP:
+		return "roaring_bitmap"
 	default:
 		return "unknown"
 	}

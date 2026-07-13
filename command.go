@@ -343,6 +343,50 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATERB", "CREATEROARING", "RBRESERVE":
+		ht.UpsertRoaringBitmap(key)
+		return CacheCommandResponse{OK: true, Message: "created roaring bitmap"}
+	case "ADDRB", "RBADD":
+		values, err := roaringBitmapValuesFromCommand(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		added := ht.AddRoaringBitmap(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "added roaring bitmap values", Value: strconv.Itoa(added)}
+	case "REMRB", "DELRB", "RBREM", "RBDEL":
+		values, err := roaringBitmapValuesFromCommand(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		removed := ht.RemoveRoaringBitmap(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "removed roaring bitmap values", Value: strconv.Itoa(removed)}
+	case "HASRB", "RBHAS", "RBEXISTS":
+		values, err := roaringBitmapValuesFromCommand(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if ht.HasRoaringBitmap(key, values[0]) {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	case "COUNTRB", "RBCOUNT":
+		count, ok := ht.CountRoaringBitmap(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(count, 10)}
+	case "GETRB", "RBGET":
+		values := ht.GetRoaringBitmap(key)
+		if values == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", values)
+	case "INFORB", "RBINFO":
+		info, ok := ht.RoaringBitmapInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
 		width, depth, err := commandCountMinSketchConfig(request)
 		if err != nil {
@@ -667,6 +711,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		return string(data), nil
 	case DATAVALUE_TYPE_CUCKOO_FILTER:
 		data, err := json.Marshal(ht.cuckooFilters.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	case DATAVALUE_TYPE_ROARING_BITMAP:
+		data, err := json.Marshal(ht.roaringBitmaps.array[hval.Index].Info())
 		if err != nil {
 			return "", err
 		}

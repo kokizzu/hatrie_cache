@@ -492,6 +492,11 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDCF", "CFADD", "DELCF", "REMCF", "CFDEL":
 		_, ok := commandSliceValues(request)
 		return ok
+	case "CREATERB", "CREATEROARING", "RBRESERVE":
+		return true
+	case "ADDRB", "RBADD", "REMRB", "DELRB", "RBREM", "RBDEL":
+		_, err := roaringBitmapValuesFromCommand(request)
+		return err == nil
 	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
 		_, _, err := commandCountMinSketchConfig(request)
 		return err == nil

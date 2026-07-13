@@ -12,6 +12,8 @@ Bloom filter values use packed bitsets plus double hashing for fast,
 low-memory membership checks without storing inserted items.
 Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
 low-memory membership checks with approximate delete support.
+Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
+exact uint32 sets with fast membership, remove, count, and sorted iteration.
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts
@@ -201,10 +203,11 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
 `POPPQ`, `GETPQ`, `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF`, `CREATECF`,
-`ADDCF`, `HASCF`, `DELCF`, `INFOCF`, `CREATECMS`, `INCRCMS`, `ESTCMS`,
-`INFOCMS`, `CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`,
-`ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`, `DUMP`, `INTERNALSET`, and
-`INTERNALDEL`. `DUMP`,
+`ADDCF`, `HASCF`, `DELCF`, `INFOCF`, `CREATERB`, `ADDRB`, `REMRB`, `HASRB`,
+`COUNTRB`, `GETRB`, `INFORB`, `CREATECMS`, `INCRCMS`, `ESTCMS`, `INFOCMS`,
+`CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`, `ADDTOPK`,
+`ESTTOPK`, `GETTOPK`, `INFOTOPK`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`.
+`DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence.
@@ -227,6 +230,9 @@ make cli ARGS='command -cmd HASBF -key seen:emails -value user@example.com'
 make cli ARGS='command -cmd CREATECF -key active:users -value 10000 -subkey 0.01'
 make cli ARGS='command -cmd ADDCF -key active:users -value user-123'
 make cli ARGS='command -cmd DELCF -key active:users -value user-123'
+make cli ARGS='command -cmd CREATERB -key cohort:ids'
+make cli ARGS='command -cmd ADDRB -key cohort:ids -value 65543'
+make cli ARGS='command -cmd COUNTRB -key cohort:ids'
 make cli ARGS='command -cmd CREATECMS -key freq:paths -value 2048 -subkey 4'
 make cli ARGS='command -cmd INCRCMS -key freq:paths -value /api/users -subkey 3'
 make cli ARGS='command -cmd ESTCMS -key freq:paths -value /api/users'

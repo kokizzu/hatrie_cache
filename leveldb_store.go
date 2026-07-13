@@ -299,6 +299,22 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 			return 0, errors.New("hatriecache: cuckoo filter snapshot is required")
 		}
 		return int64(entry.CuckooFilter.BucketCount * uint64(entry.CuckooFilter.BucketSize) * 2), nil
+	case "roaring_bitmap":
+		if entry.RoaringBitmap == nil {
+			return 0, errors.New("hatriecache: roaring bitmap snapshot is required")
+		}
+		var total int64
+		for _, container := range entry.RoaringBitmap.Containers {
+			switch container.Kind {
+			case roaringBitmapContainerKindArray:
+				total += int64(container.Cardinality) * 2
+			case roaringBitmapContainerKindBits:
+				total += roaringBitmapBitmapWords * 8
+			default:
+				return 0, errors.New("hatriecache: unsupported roaring bitmap container kind")
+			}
+		}
+		return total, nil
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

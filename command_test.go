@@ -356,6 +356,59 @@ func TestExecuteCommandCuckooFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandRoaringBitmapOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATERB", Key: "ids"}); !got.OK {
+		t.Fatalf("CREATERB response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRB", Key: "ids", Value: "1"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDRB value response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRB", Key: "ids", Values: Slice{json.Number("65543"), "1"}}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDRB values response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASRB", Key: "ids", Value: "65543"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASRB present response = %#v, want 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASRB", Key: "ids", Value: "2"}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASRB missing response = %#v, want 0", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "REMRB", Key: "ids", Value: "1"}); !got.OK || got.Value != "1" {
+		t.Fatalf("REMRB response = %#v, want removed 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "COUNTRB", Key: "ids"}); !got.OK || got.Value != "1" {
+		t.Fatalf("COUNTRB response = %#v, want 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRB", Key: "ids"}); !got.OK || got.Value != "[65543]" {
+		t.Fatalf("GETRB response = %#v, want remaining sorted value", got)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFORB", Key: "ids"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFORB response = %#v, want JSON info", infoResp)
+	}
+	var info RoaringBitmapInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFORB JSON error = %v", err)
+	}
+	if info.Cardinality != 1 || info.Containers != 1 || info.EncodedBytes != 2 {
+		t.Fatalf("INFORB = %#v, want one compact array value", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "ids"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET roaring bitmap response = %#v, want JSON info", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRB", Key: "auto", Value: "42"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDRB auto response = %#v, want added 1", got)
+	}
+	if !ht.Get("auto").IsRoaringBitmap() {
+		t.Fatal("ADDRB on missing key did not create a Roaring bitmap")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRB", Key: "bad", Value: "-1"}); got.OK {
+		t.Fatalf("ADDRB invalid response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

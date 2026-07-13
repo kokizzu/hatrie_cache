@@ -31,6 +31,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertCuckooFilter() error = %v", err)
 	}
 	source.AddCuckooFilter("cuckoo", "alpha", "beta")
+	source.UpsertRoaringBitmap("bitmap")
+	source.AddRoaringBitmap("bitmap", 1, 1<<16+7)
 	source.UpsertString("ttl", "alive")
 	if !source.Expire("ttl", time.Minute) {
 		t.Fatal("Expire(ttl) = false, want true")
@@ -46,8 +48,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
 	}
-	if count != 10 {
-		t.Fatalf("loaded count = %d, want 10", count)
+	if count != 11 {
+		t.Fatalf("loaded count = %d, want 11", count)
 	}
 
 	if got := loaded.GetCounter("counter"); got != -7 {
@@ -76,6 +78,9 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if !loaded.HasCuckooFilter("cuckoo", "alpha") || !loaded.HasCuckooFilter("cuckoo", "beta") {
 		t.Fatal("loaded Cuckoo filter does not contain inserted values")
+	}
+	if got := loaded.GetRoaringBitmap("bitmap"); !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7}) {
+		t.Fatalf("loaded Roaring bitmap = %#v, want restored integer set", got)
 	}
 	if got := loaded.TTL("ttl"); got <= 0 || got > time.Minute {
 		t.Fatalf("ttl = %s, want remaining positive TTL", got)
@@ -206,6 +211,26 @@ func TestSnapshotOperationValueSizeSupportsCuckooFilter(t *testing.T) {
 	}
 	if size != filter.EncodedSize() {
 		t.Fatalf("snapshotOperationValueSize(cuckoo_filter) = %d, want %d", size, filter.EncodedSize())
+	}
+}
+
+func TestSnapshotOperationValueSizeSupportsRoaringBitmap(t *testing.T) {
+	bitmap := newRoaringBitmapData()
+	for idx := 0; idx <= roaringBitmapArrayMaxSize; idx++ {
+		bitmap.Add(uint32(idx))
+	}
+	snapshot := bitmap.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:          "roaring_bitmap",
+			RoaringBitmap: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(roaring_bitmap) error = %v", err)
+	}
+	if size != bitmap.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(roaring_bitmap) = %d, want %d", size, bitmap.EncodedSize())
 	}
 }
 

@@ -59,6 +59,7 @@ const (
 	DATAVALUE_TYPE_HYPERLOGLOG
 	DATAVALUE_TYPE_TOP_K
 	DATAVALUE_TYPE_CUCKOO_FILTER
+	DATAVALUE_TYPE_ROARING_BITMAP
 )
 
 type Map = map[string]interface{}
@@ -607,6 +608,10 @@ func (hval HatValue) IsCuckooFilter() bool {
 	return hval.Is(DATAVALUE_TYPE_CUCKOO_FILTER)
 }
 
+func (hval HatValue) IsRoaringBitmap() bool {
+	return hval.Is(DATAVALUE_TYPE_ROARING_BITMAP)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -645,6 +650,8 @@ func (hval HatValue) String() string {
 		return "top-k at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_CUCKOO_FILTER:
 		return "cuckoo filter at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_ROARING_BITMAP:
+		return "roaring bitmap at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -1270,6 +1277,7 @@ type HatTrie struct {
 	hyperLogLogs     *HyperLogLogStorage
 	topKs            *TopKStorage
 	cuckooFilters    *CuckooFilterStorage
+	roaringBitmaps   *RoaringBitmapStorage
 	dbrefs           *LevelDBReferenceStorage
 	expires          map[string]time.Time
 	expirations      expirationHeap
@@ -1309,6 +1317,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		hyperLogLogs:     CreateHyperLogLogStorage(),
 		topKs:            CreateTopKStorage(),
 		cuckooFilters:    CreateCuckooFilterStorage(),
+		roaringBitmaps:   CreateRoaringBitmapStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
 		keyStats:         map[string]KeyStats{},
@@ -1345,6 +1354,7 @@ func (ht *HatTrie) Destroy() {
 	ht.hyperLogLogs = nil
 	ht.topKs = nil
 	ht.cuckooFilters = nil
+	ht.roaringBitmaps = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
@@ -1821,6 +1831,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.topKs.Del(hval.Index)
 	case DATAVALUE_TYPE_CUCKOO_FILTER:
 		ht.cuckooFilters.Del(hval.Index)
+	case DATAVALUE_TYPE_ROARING_BITMAP:
+		ht.roaringBitmaps.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)

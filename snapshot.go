@@ -38,6 +38,7 @@ type snapshotEntry struct {
 	HyperLogLog    *hyperLogLogSnapshot    `json:"hyperloglog,omitempty"`
 	TopK           *topKSnapshot           `json:"top_k,omitempty"`
 	CuckooFilter   *cuckooFilterSnapshot   `json:"cuckoo_filter,omitempty"`
+	RoaringBitmap  *roaringBitmapSnapshot  `json:"roaring_bitmap,omitempty"`
 	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
 	Stats          *KeyStats               `json:"stats,omitempty"`
 }
@@ -171,6 +172,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_CUCKOO_FILTER:
 		snapshot := ht.cuckooFilters.array[entry.Value.Index].Snapshot()
 		out.CuckooFilter = &snapshot
+	case DATAVALUE_TYPE_ROARING_BITMAP:
+		snapshot := ht.roaringBitmaps.array[entry.Value.Index].Snapshot()
+		out.RoaringBitmap = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -233,6 +237,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: cuckoo filter snapshot is required")
 		}
 		if err := validateCuckooFilterSnapshot(*entry.CuckooFilter); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "roaring_bitmap":
+		if entry.RoaringBitmap == nil {
+			return snapshotOperation{}, errors.New("hatriecache: roaring bitmap snapshot is required")
+		}
+		if err := validateRoaringBitmapSnapshot(*entry.RoaringBitmap); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -409,6 +421,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.cuckooFilters.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_CUCKOO_FILTER}
+	case "roaring_bitmap":
+		data, err := newRoaringBitmapDataFromSnapshot(*entry.RoaringBitmap)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.roaringBitmaps.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_ROARING_BITMAP}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

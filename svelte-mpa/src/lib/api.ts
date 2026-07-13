@@ -33,6 +33,7 @@ export type CacheEntry = {
     | 'priority_queue'
     | 'bloom_filter'
     | 'cuckoo_filter'
+    | 'roaring_bitmap'
     | 'count_min_sketch'
     | 'hyperloglog'
     | 'top_k';
