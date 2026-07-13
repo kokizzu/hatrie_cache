@@ -1,4 +1,4 @@
-.PHONY: test verify verify-go verify-c verify-frontend bench frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-c verify-frontend bench run frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -15,6 +15,9 @@ verify-frontend:
 
 bench:
 	go test -run '^$$' -bench=RawBytes -benchmem
+
+run:
+	@CMD='$(CMD)' ./scripts/run.sh
 
 frontend-install:
 	./scripts/frontend.sh install

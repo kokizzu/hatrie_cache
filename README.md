@@ -26,6 +26,12 @@ make frontend-dev
 
 Run the full local verification suite with `make verify`.
 
+Run one-off commands through the Makefile/script wrapper:
+
+```
+make run CMD='go env GOMOD'
+```
+
 The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
 and `TTL`. Expired entries are removed lazily when the key is read or mutated.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
