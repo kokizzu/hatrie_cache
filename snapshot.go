@@ -270,17 +270,25 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 }
 
 func writeFileAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
+	cleanup := func() {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -291,5 +299,17 @@ func writeFileAtomic(path string, data []byte) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	return nil
+	return syncDirectory(dir)
+}
+
+func syncDirectory(dir string) error {
+	file, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }

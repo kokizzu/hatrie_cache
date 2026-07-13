@@ -64,6 +64,42 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomicReplacesFileAndCleansTemporaryFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.json")
+
+	if err := writeFileAtomic(path, []byte("first")); err != nil {
+		t.Fatalf("writeFileAtomic(first) error = %v", err)
+	}
+	if err := writeFileAtomic(path, []byte("second")); err != nil {
+		t.Fatalf("writeFileAtomic(second) error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "second" {
+		t.Fatalf("file payload = %q, want second", data)
+	}
+	assertNoAtomicTempFiles(t, dir, "data.json")
+}
+
+func TestWriteFileAtomicCleansTemporaryFileOnRenameError(t *testing.T) {
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "target.json")
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+
+	if err := writeFileAtomic(targetDir, []byte("payload")); err == nil {
+		t.Fatal("writeFileAtomic(directory target) error = nil, want error")
+	}
+	assertNoAtomicTempFiles(t, dir, "target.json")
+	if info, err := os.Stat(targetDir); err != nil || !info.IsDir() {
+		t.Fatalf("target directory = %v/%v, want existing directory", info, err)
+	}
+}
+
 func TestSnapshotRoundTripRestoresKeyStats(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(2050, 0)
@@ -246,5 +282,16 @@ func TestSaveSnapshotRejectsUnsupportedJSONValues(t *testing.T) {
 
 	if err := ht.SaveSnapshot(filepath.Join(t.TempDir(), "snapshot.json")); err == nil {
 		t.Fatal("SaveSnapshot() error = nil, want unsupported JSON value error")
+	}
+}
+
+func assertNoAtomicTempFiles(t *testing.T, dir string, base string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, base+".tmp-*"))
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary files remain: %v", matches)
 	}
 }
