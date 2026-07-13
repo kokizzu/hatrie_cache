@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -300,6 +301,128 @@ func TestMapJSONRejectsInvalidInputs(t *testing.T) {
 
 	if _, err := MarshalMapJSON(Map{"bad": make(chan int)}); err == nil {
 		t.Fatal("MarshalMapJSON(unsupported value) error = nil, want error")
+	}
+}
+
+func TestStatsTrackReadsWritesDeletesAndRates(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(900, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("key", "value")
+	now = now.Add(time.Second)
+	if got := ht.GetString("key"); got != "value" {
+		t.Fatalf("GetString(key) = %q, want value", got)
+	}
+	now = now.Add(time.Second)
+	if got := ht.GetString("missing"); got != "" {
+		t.Fatalf("GetString(missing) = %q, want empty", got)
+	}
+	now = now.Add(time.Second)
+	if !ht.Delete("key") {
+		t.Fatal("Delete(key) = false, want true")
+	}
+
+	stats := ht.Stats()
+	if stats.Reads != 2 || stats.Hits != 1 || stats.Misses != 1 {
+		t.Fatalf("read stats = reads %d hits %d misses %d, want 2/1/1", stats.Reads, stats.Hits, stats.Misses)
+	}
+	if stats.Writes != 2 {
+		t.Fatalf("writes = %d, want 2", stats.Writes)
+	}
+	if stats.Deletes != 1 {
+		t.Fatalf("deletes = %d, want 1", stats.Deletes)
+	}
+	if stats.HitRate != 0.5 || stats.CumulativeHitRate != 0.5 {
+		t.Fatalf("hit rates = %f/%f, want 0.5/0.5", stats.HitRate, stats.CumulativeHitRate)
+	}
+	if !stats.LastHit.Equal(time.Unix(901, 0)) {
+		t.Fatalf("LastHit = %s, want %s", stats.LastHit, time.Unix(901, 0))
+	}
+	if !stats.LastMiss.Equal(time.Unix(902, 0)) {
+		t.Fatalf("LastMiss = %s, want %s", stats.LastMiss, time.Unix(902, 0))
+	}
+	if !stats.LastWrite.Equal(time.Unix(903, 0)) {
+		t.Fatalf("LastWrite = %s, want %s", stats.LastWrite, time.Unix(903, 0))
+	}
+}
+
+func TestStatsTrackExpirationsAndPersistToDisk(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(1000, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("key", "value")
+	if !ht.Expire("key", time.Second) {
+		t.Fatal("Expire(key) = false, want true")
+	}
+	now = now.Add(2 * time.Second)
+	if got := ht.GetString("key"); got != "" {
+		t.Fatalf("expired GetString(key) = %q, want empty", got)
+	}
+
+	stats := ht.Stats()
+	if stats.Expirations != 1 {
+		t.Fatalf("expirations = %d, want 1", stats.Expirations)
+	}
+	if stats.Misses != 1 {
+		t.Fatalf("misses = %d, want 1", stats.Misses)
+	}
+
+	path := filepath.Join(t.TempDir(), "stats.json")
+	if err := ht.SaveStats(path); err != nil {
+		t.Fatalf("SaveStats() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	if err := loaded.LoadStats(path); err != nil {
+		t.Fatalf("LoadStats() error = %v", err)
+	}
+	if got := loaded.Stats(); !cacheStatsEqual(got, stats) {
+		t.Fatalf("loaded stats = %#v, want %#v", got, stats)
+	}
+}
+
+func TestLoadStatsRejectsInvalidJSON(t *testing.T) {
+	ht := newTestTrie(t)
+	path := filepath.Join(t.TempDir(), "stats.json")
+	if err := os.WriteFile(path, []byte(`{broken`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := ht.LoadStats(path); err == nil {
+		t.Fatal("LoadStats(invalid JSON) error = nil, want error")
+	}
+}
+
+func TestConcurrentStatsUpdatesAreSynchronized(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+
+	const (
+		workers    = 4
+		iterations = 50
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				_ = ht.GetString("key")
+				_ = ht.GetString("missing")
+				ht.UpsertCounter("counter", int32(i))
+			}
+		}()
+	}
+	wg.Wait()
+
+	stats := ht.Stats()
+	if stats.Reads != workers*iterations*2 {
+		t.Fatalf("reads = %d, want %d", stats.Reads, workers*iterations*2)
+	}
+	if stats.Hits != workers*iterations || stats.Misses != workers*iterations {
+		t.Fatalf("hits/misses = %d/%d, want %d/%d", stats.Hits, stats.Misses, workers*iterations, workers*iterations)
 	}
 }
 
@@ -890,6 +1013,20 @@ func waitUntil(t *testing.T, timeout time.Duration, ready func() bool) {
 		return
 	}
 	t.Fatal("condition was not met before timeout")
+}
+
+func cacheStatsEqual(a, b CacheStats) bool {
+	return a.Reads == b.Reads &&
+		a.Hits == b.Hits &&
+		a.Misses == b.Misses &&
+		a.Writes == b.Writes &&
+		a.Deletes == b.Deletes &&
+		a.Expirations == b.Expirations &&
+		a.LastHit.Equal(b.LastHit) &&
+		a.LastMiss.Equal(b.LastMiss) &&
+		a.LastWrite.Equal(b.LastWrite) &&
+		a.HitRate == b.HitRate &&
+		a.CumulativeHitRate == b.CumulativeHitRate
 }
 
 func testPayload(size int) []byte {
