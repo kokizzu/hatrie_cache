@@ -21,6 +21,8 @@ type config struct {
 	monitoringServer bool
 	monitoringAddr   string
 	monitoringWebDir string
+	snapshotPath     string
+	snapshotInterval time.Duration
 }
 
 func main() {
@@ -45,6 +47,18 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
+	if err := loadSnapshotIfConfigured(trie, cfg.snapshotPath); err != nil {
+		return err
+	}
+	if cfg.snapshotPath != "" {
+		defer func() {
+			if err := trie.SaveSnapshot(cfg.snapshotPath); err != nil {
+				fmt.Fprintf(stderr, "save snapshot: %v\n", err)
+			}
+		}()
+	}
+	stopSnapshots := startSnapshotSaver(ctx, trie, cfg.snapshotPath, cfg.snapshotInterval, stderr)
+	defer stopSnapshots()
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
 		WebDir: cfg.monitoringWebDir,
@@ -86,8 +100,50 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.BoolVar(&cfg.monitoringServer, "monitoring-server", false, "run the grpc/http2/web monitoring server")
 	flags.StringVar(&cfg.monitoringAddr, "monitoring-addr", cfg.monitoringAddr, "monitoring server listen address")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
+	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional JSON snapshot path to load on startup and save on shutdown")
+	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
 	return cfg, nil
+}
+
+func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) error {
+	if path == "" {
+		return nil
+	}
+	if err := trie.LoadSnapshot(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, path string, interval time.Duration, stderr io.Writer) func() {
+	if path == "" || interval <= 0 {
+		return func() {}
+	}
+
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := trie.SaveSnapshot(path); err != nil {
+					fmt.Fprintf(stderr, "save snapshot: %v\n", err)
+				}
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-stopped
+	}
 }

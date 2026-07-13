@@ -1,5 +1,7 @@
 MONITORING_ADDR ?= 127.0.0.1:8080
 MONITORING_WEB_DIR ?= svelte-mpa/dist
+SNAPSHOT_PATH ?=
+SNAPSHOT_INTERVAL ?= 0
 
 .PHONY: test verify verify-go verify-c verify-frontend bench run cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
@@ -26,7 +28,7 @@ cli:
 	./scripts/cli.sh $(ARGS)
 
 monitoring-server:
-	MONITORING_ADDR='$(MONITORING_ADDR)' MONITORING_WEB_DIR='$(MONITORING_WEB_DIR)' ./scripts/monitoring-server.sh
+	MONITORING_ADDR='$(MONITORING_ADDR)' MONITORING_WEB_DIR='$(MONITORING_WEB_DIR)' SNAPSHOT_PATH='$(SNAPSHOT_PATH)' SNAPSHOT_INTERVAL='$(SNAPSHOT_INTERVAL)' ./scripts/monitoring-server.sh
 
 frontend-install:
 	./scripts/frontend.sh install

@@ -40,6 +40,14 @@ make monitoring-server MONITORING_ADDR=127.0.0.1:8080
 make run CMD='go run ./cmd/hatrie-cache'
 ```
 
+Set `SNAPSHOT_PATH` to load a JSON snapshot at startup and save it on shutdown.
+Set `SNAPSHOT_INTERVAL` to periodically write the same snapshot while the server
+runs:
+
+```
+make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_INTERVAL=30s
+```
+
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, and `/api/commands`. `POST /api/commands` accepts
 `command`, `key`, optional `value`, and optional `ttl_seconds`; it currently
@@ -128,8 +136,10 @@ slice/arr/stack/queue type:
 - [ ] write all pending transaction on journal (backup if program terminated unexpectedly)
 - [x] update statistics (last hit, last write, hit rate, cumulative hit rate) to disk
 - [x] on-load check for expired snapshot data
+- [x] when service starts, non-expired snapshot keys are loaded into memory
 - [ ] when service start, non-expired keys and (<1KB AND <1h last hit AND >1000 hit rate) values loaded from database to memory
-- [ ] when service stopped/timer/sync-write forced, data written to disk
+- [x] when service stopped/timer, snapshot data written to disk
+- [ ] add explicit sync-write force API/CLI
 - [x] create iterator command to get all keys and keys based on certain prefix
 - [x] create timer vacuum goroutine to clean expired data
 - [ ] add OOM-triggered vacuum policy
