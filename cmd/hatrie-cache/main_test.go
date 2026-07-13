@@ -3,6 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +65,112 @@ func TestParseConfigSnapshotFlags(t *testing.T) {
 	}
 }
 
+func TestParseConfigMonitoringTLSFlags(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-monitoring-tls-cert", "/tmp/cert.pem",
+		"-monitoring-tls-key", "/tmp/key.pem",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.monitoringTLSCert != "/tmp/cert.pem" || cfg.monitoringTLSKey != "/tmp/key.pem" {
+		t.Fatalf("cfg TLS = %q/%q, want explicit paths", cfg.monitoringTLSCert, cfg.monitoringTLSKey)
+	}
+	if got := monitoringURL(cfg); got != "https://127.0.0.1:8080" {
+		t.Fatalf("monitoringURL() = %q, want https URL", got)
+	}
+}
+
+func TestParseConfigRejectsPartialMonitoringTLSConfig(t *testing.T) {
+	if _, err := parseConfig([]string{"-monitoring-tls-cert", "/tmp/cert.pem"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseConfig(partial TLS) error = nil, want error")
+	}
+	if _, err := parseConfig([]string{"-monitoring-tls-key", "/tmp/key.pem"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseConfig(partial TLS key) error = nil, want error")
+	}
+}
+
+func TestMonitoringTLSConfigEnablesHTTP2(t *testing.T) {
+	base := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{
+			"acme-tls/1",
+		},
+	}
+	cfg := monitoringTLSConfig(base)
+	if cfg == base {
+		t.Fatal("monitoringTLSConfig returned base config, want clone")
+	}
+	if !containsString(cfg.NextProtos, "h2") {
+		t.Fatalf("NextProtos = %#v, want h2", cfg.NextProtos)
+	}
+	if !containsString(cfg.NextProtos, "http/1.1") {
+		t.Fatalf("NextProtos = %#v, want http/1.1", cfg.NextProtos)
+	}
+	if !containsString(cfg.NextProtos, "acme-tls/1") {
+		t.Fatalf("NextProtos = %#v, want preserved custom protocol", cfg.NextProtos)
+	}
+	if base.NextProtos[0] != "acme-tls/1" || len(base.NextProtos) != 1 {
+		t.Fatalf("base NextProtos mutated: %#v", base.NextProtos)
+	}
+}
+
+func TestMonitoringServerServesHTTP2OverTLS(t *testing.T) {
+	certPath, keyPath := writeTestCertificate(t)
+
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("key", "value")
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen error = %v", err)
+	}
+
+	handler := hatriecache.NewMonitoringHandler(ht, hatriecache.MonitoringOptions{}).Handler()
+	server := &http.Server{
+		Handler:   handler,
+		TLSConfig: monitoringTLSConfig(nil),
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeTLS(listener, certPath, keyPath)
+	}()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			t.Fatalf("server shutdown error = %v", err)
+		}
+		if err := <-errCh; err != nil && err != http.ErrServerClosed {
+			t.Fatalf("server error = %v", err)
+		}
+	})
+
+	transport := &http.Transport{
+		ForceAttemptHTTP2: true,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport}
+
+	resp, err := client.Get("https://" + listener.Addr().String() + "/api/health")
+	if err != nil {
+		t.Fatalf("GET /api/health error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if resp.ProtoMajor != 2 {
+		t.Fatalf("protocol = %s, want HTTP/2", resp.Proto)
+	}
+}
+
 func TestRunDoesNotStartServerByDefault(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	if err := run(context.Background(), nil, stdout, &bytes.Buffer{}); err != nil {
@@ -101,6 +216,62 @@ func TestSnapshotLifecycleHelpersLoadAndSave(t *testing.T) {
 	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
 		t.Fatalf("snapshot file info = %v/%v, want non-empty file", info, err)
 	}
+}
+
+func writeTestCertificate(t *testing.T) (string, string) {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey error = %v", err)
+	}
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "localhost",
+		},
+		NotBefore: time.Now().Add(-time.Hour),
+		NotAfter:  time.Now().Add(time.Hour),
+		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+		},
+		DNSNames:    []string{"localhost"},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("CreateCertificate error = %v", err)
+	}
+
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+	certFile, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatalf("open cert file error = %v", err)
+	}
+	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		certFile.Close()
+		t.Fatalf("write cert error = %v", err)
+	}
+	if err := certFile.Close(); err != nil {
+		t.Fatalf("close cert file error = %v", err)
+	}
+
+	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatalf("open key file error = %v", err)
+	}
+	if err := pem.Encode(keyFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}); err != nil {
+		keyFile.Close()
+		t.Fatalf("write key error = %v", err)
+	}
+	if err := keyFile.Close(); err != nil {
+		t.Fatalf("close key file error = %v", err)
+	}
+
+	return certPath, keyPath
 }
 
 func TestStartSnapshotSaverWritesPeriodically(t *testing.T) {

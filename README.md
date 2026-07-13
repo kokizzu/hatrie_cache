@@ -40,6 +40,13 @@ make monitoring-server MONITORING_ADDR=127.0.0.1:8080
 make run CMD='go run ./cmd/hatrie-cache'
 ```
 
+Provide a TLS certificate and key to serve the same monitoring API over HTTPS
+with HTTP/2 ALPN enabled:
+
+```
+make monitoring-server MONITORING_ADDR=127.0.0.1:8443 MONITORING_TLS_CERT=cert.pem MONITORING_TLS_KEY=key.pem
+```
+
 Set `SNAPSHOT_PATH` to load a JSON snapshot at startup and save it on shutdown.
 Set `SNAPSHOT_INTERVAL` to periodically write the same snapshot while the server
 runs:
@@ -101,7 +108,8 @@ build files have not been generated.
 - [x] add TTL map, check for expiration when read, delete if expired
 - [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
 - [x] create a web UI for management and monitoring (frontend: Svelte MPA)
-- [ ] create backend service using http2/grpc for APIs so it can be accessed from another language 
+- [x] create backend service using HTTP/2 JSON APIs so it can be accessed from another language
+- [ ] add native gRPC protobuf APIs for strongly typed client generation
 - [x] create a client CLI for monitoring stats, key listing, and running commands
 - [ ] add client CLI support for [cluster/server](https://redis.io/commands/#server) management:
 ```		

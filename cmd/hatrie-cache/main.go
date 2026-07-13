@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,11 +19,13 @@ import (
 const serverShutdownTimeout = 5 * time.Second
 
 type config struct {
-	monitoringServer bool
-	monitoringAddr   string
-	monitoringWebDir string
-	snapshotPath     string
-	snapshotInterval time.Duration
+	monitoringServer  bool
+	monitoringAddr    string
+	monitoringTLSCert string
+	monitoringTLSKey  string
+	monitoringWebDir  string
+	snapshotPath      string
+	snapshotInterval  time.Duration
 }
 
 func main() {
@@ -65,15 +68,16 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Snapshot: snapshotCallback(trie, cfg.snapshotPath),
 	}).Handler()
 	server := &http.Server{
-		Addr:    cfg.monitoringAddr,
-		Handler: handler,
+		Addr:      cfg.monitoringAddr,
+		Handler:   handler,
+		TLSConfig: monitoringTLSConfig(nil),
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- server.ListenAndServe()
+		errCh <- serveMonitoring(server, cfg)
 	}()
-	fmt.Fprintf(stdout, "monitoring server listening on %s\n", cfg.monitoringAddr)
+	fmt.Fprintf(stdout, "monitoring server listening on %s\n", monitoringURL(cfg))
 
 	select {
 	case <-ctx.Done():
@@ -100,13 +104,67 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.SetOutput(output)
 	flags.BoolVar(&cfg.monitoringServer, "monitoring-server", false, "run the grpc/http2/web monitoring server")
 	flags.StringVar(&cfg.monitoringAddr, "monitoring-addr", cfg.monitoringAddr, "monitoring server listen address")
+	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
+	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional JSON snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
+	if (cfg.monitoringTLSCert == "") != (cfg.monitoringTLSKey == "") {
+		return config{}, errors.New("monitoring TLS requires both -monitoring-tls-cert and -monitoring-tls-key")
+	}
 	return cfg, nil
+}
+
+func serveMonitoring(server *http.Server, cfg config) error {
+	if cfg.monitoringTLSCert == "" {
+		return server.ListenAndServe()
+	}
+	return server.ListenAndServeTLS(cfg.monitoringTLSCert, cfg.monitoringTLSKey)
+}
+
+func monitoringURL(cfg config) string {
+	scheme := "http"
+	if cfg.monitoringTLSCert != "" {
+		scheme = "https"
+	}
+	return scheme + "://" + cfg.monitoringAddr
+}
+
+func monitoringTLSConfig(base *tls.Config) *tls.Config {
+	var cfg tls.Config
+	if base != nil {
+		cfg = *base.Clone()
+	}
+	cfg.NextProtos = withHTTP2Proto(cfg.NextProtos)
+	return &cfg
+}
+
+func withHTTP2Proto(nextProtos []string) []string {
+	out := make([]string, 0, len(nextProtos)+2)
+	if !containsString(nextProtos, "h2") {
+		out = append(out, "h2")
+	}
+	if !containsString(nextProtos, "http/1.1") {
+		out = append(out, "http/1.1")
+	}
+	for _, proto := range nextProtos {
+		if proto != "h2" && proto != "http/1.1" {
+			out = append(out, proto)
+		}
+	}
+	return out
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) error {
