@@ -237,7 +237,7 @@ func levelDBShouldHotLoad(operation snapshotOperation, now time.Time, policy Lev
 	if policy.MaxLastHitAge > 0 && now.Sub(stats.LastHit) > policy.MaxLastHitAge {
 		return false
 	}
-	if stats.Hits <= policy.MinHits {
+	if stats.Hits < policy.MinHits {
 		return false
 	}
 	if policy.MaxValueBytes > 0 {

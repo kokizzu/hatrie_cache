@@ -164,7 +164,8 @@ func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T)
 	source.UpsertString("cold", "cold-value")
 	source.UpsertString("hot", "hot-value")
 	source.UpsertString("large-hot", string(bytes.Repeat([]byte("x"), 2048)))
-	for i := 0; i < 1001; i++ {
+	policy := DefaultLevelDBHotLoadPolicy()
+	for i := uint64(0); i < policy.MinHits; i++ {
 		if got := source.GetString("hot"); got != "hot-value" {
 			t.Fatalf("GetString(hot) = %q, want hot-value", got)
 		}
@@ -184,7 +185,7 @@ func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T)
 
 	loaded := newTestTrie(t)
 	loaded.now = func() time.Time { return now.Add(30 * time.Minute) }
-	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	result, err := store.LoadWithPolicy(loaded, policy)
 	if err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
 	}
