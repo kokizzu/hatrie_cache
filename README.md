@@ -46,6 +46,14 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `DEL`, `TTL`, and `EXPIRE`.
 
+Use the HTTP client CLI against a running monitoring server:
+
+```
+make cli ARGS='stats'
+make cli ARGS='entries -prefix session:'
+make cli ARGS='command -cmd SETSTR -key name -value ivi'
+```
+
 The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
 and `TTL`. Expired entries are removed lazily when the key is read or mutated.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
@@ -79,7 +87,8 @@ build files have not been generated.
 - [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
 - [x] create a web UI for management and monitoring (frontend: Svelte MPA)
 - [ ] create backend service using http2/grpc for APIs so it can be accessed from another language 
-- [ ] create a client CLI with for [statistics/cluster/server](https://redis.io/commands/#server) management and running commands:
+- [x] create a client CLI for monitoring stats, key listing, and running commands
+- [ ] add client CLI support for [cluster/server](https://redis.io/commands/#server) management:
 ```		
 any type:
   SET/SETSTR/SETINT key value

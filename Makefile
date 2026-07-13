@@ -1,7 +1,7 @@
 MONITORING_ADDR ?= 127.0.0.1:8080
 MONITORING_WEB_DIR ?= svelte-mpa/dist
 
-.PHONY: test verify verify-go verify-c verify-frontend bench run monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-c verify-frontend bench run cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -21,6 +21,9 @@ bench:
 
 run:
 	@CMD='$(CMD)' ./scripts/run.sh
+
+cli:
+	./scripts/cli.sh $(ARGS)
 
 monitoring-server:
 	MONITORING_ADDR='$(MONITORING_ADDR)' MONITORING_WEB_DIR='$(MONITORING_WEB_DIR)' ./scripts/monitoring-server.sh
