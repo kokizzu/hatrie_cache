@@ -32,6 +32,14 @@ Run one-off commands through the Makefile/script wrapper:
 make run CMD='go env GOMOD'
 ```
 
+The monitoring web/API server is opt-in. It does not run unless the
+`-monitoring-server` flag is set:
+
+```
+make monitoring-server MONITORING_ADDR=127.0.0.1:8080
+make run CMD='go run ./cmd/hatrie-cache'
+```
+
 The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
 and `TTL`. Expired entries are removed lazily when the key is read or mutated.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
