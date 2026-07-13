@@ -230,6 +230,13 @@ func (ht *HatTrie) applySnapshotOperation(operation snapshotOperation) error {
 
 func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (HatValue, error) {
 	entry := operation.entry
+	if entry.ExpiresAt != nil && !ht.currentTime().Before(*entry.ExpiresAt) {
+		if ht.deleteLocked(entry.Key) {
+			ht.recordExpirationLocked(entry.Key)
+		}
+		return HatValue{}, nil
+	}
+
 	rawPtr := ht.upsertLocation(entry.Key)
 	old := HatValue{}
 	old.fromValue(*rawPtr)

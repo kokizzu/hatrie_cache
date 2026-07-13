@@ -274,11 +274,36 @@ func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
 	}); !got.OK {
 		t.Fatalf("INTERNALSET without payload key response = %#v, want ok", got)
 	}
+	target.UpsertString("expired-copy", "old")
+	expiredIdx := target.Get("expired-copy").Index
+	expiredAt := now.Add(-time.Second)
+	expiredPayload, err := json.Marshal(snapshotEntry{
+		Key:       "expired-copy",
+		Type:      "string",
+		String:    "new",
+		ExpiresAt: &expiredAt,
+	})
+	if err != nil {
+		t.Fatalf("Marshal(expired snapshot entry) error = %v", err)
+	}
+	if got := target.ExecuteCommand(CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "expired-copy",
+		Value:   string(expiredPayload),
+	}); !got.OK {
+		t.Fatalf("INTERNALSET expired payload response = %#v, want ok", got)
+	}
 	if got := target.GetSet("tags"); !reflect.DeepEqual(got, Set{"cache", "go"}) {
 		t.Fatalf("replicated set = %#v, want cache/go", got)
 	}
 	if got := target.GetString("implicit-key"); got != "value" {
 		t.Fatalf("implicit-key = %q, want value", got)
+	}
+	if target.Exists("expired-copy") {
+		t.Fatal("expired INTERNALSET payload left key present")
+	}
+	if !rawIndexReleased(target, expiredIdx) {
+		t.Fatalf("expired INTERNALSET did not release raw index %d", expiredIdx)
 	}
 	if got := target.TTL("tags"); got != time.Minute {
 		t.Fatalf("replicated TTL = %s, want 1m", got)
