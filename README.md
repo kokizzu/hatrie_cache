@@ -120,12 +120,24 @@ or its heartbeat times out, the first healthy replica becomes leader:
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_TIMEOUT=15s
 ```
 
+Set `REPLICATION=true` to let an elected leader broadcast successful local
+mutations to the current key's topology owners over HTTP. Replication uses the
+internal `DUMP`/`INTERNALSET` and `INTERNALDEL` commands, skips internal
+replication commands to avoid loops, and records the last replication attempt at
+`/api/replication`:
+
+```
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true
+```
+
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
-`/api/entries`, `/api/topology`, `/api/election`, and `/api/commands`.
+`/api/entries`, `/api/topology`, `/api/election`, `/api/replication`, and
+`/api/commands`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader
 for that key. `POST /api/election` accepts `node` and `online` to record a
-heartbeat or mark a node offline. `POST /api/commands` accepts `command`, `key`,
+heartbeat or mark a node offline. `GET /api/replication` returns the most recent
+replication result. `POST /api/commands` accepts `command`, `key`,
 optional `value`, `values`, `subkey`, `pairs`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
@@ -157,6 +169,7 @@ make cli ARGS='election'
 make cli ARGS='election -key session:1'
 make cli ARGS='election -heartbeat node-a'
 make cli ARGS='election -offline node-a'
+make cli ARGS='replication'
 make cli ARGS='snapshot'
 ```
 

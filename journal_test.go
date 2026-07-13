@@ -80,6 +80,43 @@ func TestCommandJournalReplaysSetAndInternalReplicationCommands(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysPriorityQueueMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	priority := int64(1)
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "PUSHPQ", Key: "jobs", Value: "urgent", Priority: &priority}); !got.OK {
+		t.Fatalf("journaled PUSHPQ response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "POPPQ", Key: "jobs"}); !got.OK {
+		t.Fatalf("journaled POPPQ response = %#v, want ok", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want 2", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got := replayed.GetPriorityQueue("jobs"); len(got) != 0 {
+		t.Fatalf("replayed queue = %#v, want empty queue after push/pop", got)
+	}
+}
+
 func TestCommandJournalSkipsInvalidAndReadOnlyCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

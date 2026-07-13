@@ -309,6 +309,14 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDSET", "REMSET":
 		_, ok := commandSliceValues(request)
 		return ok
+	case "PUSHPQ", "PUSHPRIORITY":
+		if _, ok := commandPriority(request); !ok {
+			return false
+		}
+		_, ok := commandSliceValues(request)
+		return ok
+	case "POPPQ", "POPPRIORITY":
+		return true
 	default:
 		return false
 	}

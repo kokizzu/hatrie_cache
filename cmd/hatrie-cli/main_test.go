@@ -167,6 +167,29 @@ func TestRunElectionRejectsConflictingFlags(t *testing.T) {
 	}
 }
 
+func TestRunReplicationFetchesStatus(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		w.Write([]byte(`{"skipped":true,"reason":"none"}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "replication"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(replication) error = %v", err)
+	}
+	if gotPath != "/api/replication" {
+		t.Fatalf("path = %q, want /api/replication", gotPath)
+	}
+	if got := stdout.String(); got != "{\"skipped\":true,\"reason\":\"none\"}\n" {
+		t.Fatalf("stdout = %q, want replication JSON", got)
+	}
+}
+
 func TestRunCommandPostsJSON(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

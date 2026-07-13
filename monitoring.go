@@ -13,13 +13,14 @@ import (
 )
 
 type MonitoringOptions struct {
-	NodeName string
-	WebDir   string
-	StartAt  time.Time
-	Snapshot func() error
-	Journal  *CommandJournal
-	Topology *TopologyStore
-	Election *ElectionStore
+	NodeName   string
+	WebDir     string
+	StartAt    time.Time
+	Snapshot   func() error
+	Journal    *CommandJournal
+	Topology   *TopologyStore
+	Election   *ElectionStore
+	Replicator *HTTPReplicator
 }
 
 type MonitoringHandler struct {
@@ -82,6 +83,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	mux.HandleFunc("/api/topology", handler.handleTopology)
 	mux.HandleFunc("/api/election", handler.handleElection)
+	mux.HandleFunc("/api/replication", handler.handleReplication)
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
@@ -143,11 +145,16 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		return
 	}
 
+	var response CacheCommandResponse
 	if handler.options.Journal != nil {
-		writeJSON(w, handler.options.Journal.ExecuteCommand(handler.trie, request))
-		return
+		response = handler.options.Journal.ExecuteCommand(handler.trie, request)
+	} else {
+		response = handler.trie.ExecuteCommand(request)
 	}
-	writeJSON(w, handler.trie.ExecuteCommand(request))
+	if handler.options.Replicator != nil {
+		handler.options.Replicator.ReplicateCommand(r.Context(), handler.trie, request, response)
+	}
+	writeJSON(w, response)
 }
 
 func (handler *MonitoringHandler) handleSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -259,6 +266,18 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 	default:
 		writeMethodNotAllowed(w)
 	}
+}
+
+func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if handler.options.Replicator == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("replication is not configured"))
+		return
+	}
+	writeJSON(w, handler.options.Replicator.LastResult())
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {

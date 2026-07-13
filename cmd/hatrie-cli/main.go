@@ -34,7 +34,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return err
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, command, snapshot")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, command, snapshot")
 	}
 
 	switch remaining[0] {
@@ -48,6 +48,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runTopology(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "election":
 		return runElection(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "replication":
+		return getJSON(ctx, client, cfg.addr, "/api/replication", stdout)
 	case "command":
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "snapshot":

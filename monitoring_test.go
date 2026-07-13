@@ -357,3 +357,55 @@ func TestMonitoringHandlerManagesElection(t *testing.T) {
 		t.Fatalf("election DELETE status = %d, want 405", methodResp.Code)
 	}
 }
+
+func TestMonitoringHandlerReplicatesCommands(t *testing.T) {
+	ht := newTestTrie(t)
+	var gotRequest CacheCommandRequest
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/commands" {
+			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
+	}))
+	defer target.Close()
+
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:   "node-a",
+		Topology:   topology,
+		Election:   election,
+		Replicator: replicator,
+	}).Handler()
+
+	commandResp := httptest.NewRecorder()
+	handler.ServeHTTP(commandResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"session:1","value":"value"}`)))
+	if commandResp.Code != http.StatusOK {
+		t.Fatalf("command status = %d, want 200", commandResp.Code)
+	}
+	if gotRequest.Command != "INTERNALSET" || gotRequest.Key != "session:1" || gotRequest.Value == "" {
+		t.Fatalf("replicated request = %#v, want INTERNALSET snapshot", gotRequest)
+	}
+
+	replicationResp := httptest.NewRecorder()
+	handler.ServeHTTP(replicationResp, httptest.NewRequest(http.MethodGet, "/api/replication", nil))
+	if replicationResp.Code != http.StatusOK {
+		t.Fatalf("replication status = %d, want 200", replicationResp.Code)
+	}
+	var result ReplicationResult
+	if err := json.Unmarshal(replicationResp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("replication JSON error = %v", err)
+	}
+	if len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("replication result = %#v, want one ok target", result)
+	}
+}

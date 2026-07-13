@@ -30,6 +30,7 @@ type config struct {
 	nodeID            string
 	topologyPath      string
 	electionTimeout   time.Duration
+	replication       bool
 	grpcAddr          string
 	dbPath            string
 	dbSyncInterval    time.Duration
@@ -121,14 +122,23 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			return err
 		}
 	}
+	var replicator *hatriecache.HTTPReplicator
+	if cfg.replication {
+		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
+			Self:     defaultNodeID(cfg.nodeID),
+			Topology: topology,
+			Election: election,
+		})
+	}
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
-		NodeName: cfg.nodeID,
-		WebDir:   cfg.monitoringWebDir,
-		Snapshot: snapshotCallback(trie, journal, cfg.snapshotPath),
-		Journal:  journal,
-		Topology: topology,
-		Election: election,
+		NodeName:   cfg.nodeID,
+		WebDir:     cfg.monitoringWebDir,
+		Snapshot:   snapshotCallback(trie, journal, cfg.snapshotPath),
+		Journal:    journal,
+		Topology:   topology,
+		Election:   election,
+		Replicator: replicator,
 	}).Handler()
 	server := &http.Server{
 		Addr:      cfg.monitoringAddr,
@@ -188,6 +198,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.nodeID, "node-id", "", "local cluster node id")
 	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
 	flags.DurationVar(&cfg.electionTimeout, "election-timeout", cfg.electionTimeout, "node heartbeat timeout for deterministic topology leader election")
+	flags.BoolVar(&cfg.replication, "replication", false, "replicate successful leader writes to topology owners over HTTP")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
