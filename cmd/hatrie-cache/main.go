@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,8 @@ type config struct {
 	monitoringTLSCert string
 	monitoringTLSKey  string
 	monitoringWebDir  string
+	nodeID            string
+	topologyPath      string
 	grpcAddr          string
 	dbPath            string
 	dbSyncInterval    time.Duration
@@ -107,10 +110,17 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, stderr)
 	defer stopSnapshots()
 
+	topology, err := openTopologyIfConfigured(cfg.topologyPath, cfg.nodeID, cfg.monitoringAddr)
+	if err != nil {
+		return err
+	}
+
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
+		NodeName: cfg.nodeID,
 		WebDir:   cfg.monitoringWebDir,
 		Snapshot: snapshotCallback(trie, journal, cfg.snapshotPath),
 		Journal:  journal,
+		Topology: topology,
 	}).Handler()
 	server := &http.Server{
 		Addr:      cfg.monitoringAddr,
@@ -166,6 +176,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
+	flags.StringVar(&cfg.nodeID, "node-id", "", "local cluster node id")
+	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
@@ -232,6 +244,20 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func openTopologyIfConfigured(path string, nodeID string, address string) (*hatriecache.TopologyStore, error) {
+	return hatriecache.OpenTopologyStore(path, hatriecache.SingleNodeTopology(defaultNodeID(nodeID), address))
+}
+
+func defaultNodeID(nodeID string) string {
+	if nodeID = strings.TrimSpace(nodeID); nodeID != "" {
+		return nodeID
+	}
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		return hostname
+	}
+	return "local"
 }
 
 func openLevelDBIfConfigured(path string) (*hatriecache.LevelDBStore, error) {

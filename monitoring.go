@@ -18,6 +18,7 @@ type MonitoringOptions struct {
 	StartAt  time.Time
 	Snapshot func() error
 	Journal  *CommandJournal
+	Topology *TopologyStore
 }
 
 type MonitoringHandler struct {
@@ -58,6 +59,12 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 			options.NodeName = "local"
 		}
 	}
+	if options.Topology == nil {
+		topology, err := NewTopologyStore(SingleNodeTopology(options.NodeName, ""))
+		if err == nil {
+			options.Topology = topology
+		}
+	}
 	return &MonitoringHandler{trie: trie, options: options}
 }
 
@@ -68,6 +75,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/entries", handler.handleEntries)
 	mux.HandleFunc("/api/commands", handler.handleCommands)
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
+	mux.HandleFunc("/api/topology", handler.handleTopology)
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
@@ -150,6 +158,48 @@ func (handler *MonitoringHandler) handleSnapshot(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, CacheCommandResponse{OK: true, Message: "snapshot saved"})
+}
+
+func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.Request) {
+	if handler.options.Topology == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("topology store is not configured"))
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		key := r.URL.Query().Get("key")
+		if key != "" {
+			route, ok := handler.options.Topology.Route(key)
+			if !ok {
+				writeJSONStatus(w, http.StatusConflict, commandError("topology has no shards"))
+				return
+			}
+			writeJSON(w, route)
+			return
+		}
+		writeJSON(w, handler.options.Topology.Get())
+	case http.MethodPut:
+		var topology ClusterTopology
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&topology); err != nil {
+			http.Error(w, "invalid topology request", http.StatusBadRequest)
+			return
+		}
+		var extra struct{}
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			http.Error(w, "invalid topology request", http.StatusBadRequest)
+			return
+		}
+		if err := handler.options.Topology.Set(topology); err != nil {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+			return
+		}
+		writeJSON(w, handler.options.Topology.Get())
+	default:
+		writeMethodNotAllowed(w)
+	}
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {

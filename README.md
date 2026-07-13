@@ -100,8 +100,16 @@ successful snapshot:
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json JOURNAL_PATH=data/commands.journal
 ```
 
+Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
+The topology endpoint validates nodes, shard ownership, and replicas, and can
+route a key to its shard:
+
+```
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json
+```
+
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
-`/api/entries`, and `/api/commands`. `POST /api/commands` accepts
+`/api/entries`, `/api/topology`, and `/api/commands`. `POST /api/commands` accepts
 `command`, `key`, optional `value`, `values`, `subkey`, `pairs`,
 `ttl_seconds`, and `unix_seconds`; it currently
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
@@ -123,6 +131,9 @@ make cli ARGS="command -cmd PUTMAP -key user:1 -pairs '{\"name\":\"ivi\",\"age\"
 make cli ARGS="command -cmd PUSHSLICE -key jobs -values '[\"build\",\"verify\"]'"
 make cli ARGS="command -cmd ADDSET -key tags -values '[\"go\",\"cache\"]'"
 make cli ARGS='command -cmd DUMP -key tags'
+make cli ARGS='topology'
+make cli ARGS='topology -key session:1'
+make cli ARGS='topology -file data/topology.json'
 make cli ARGS='snapshot'
 ```
 
@@ -204,7 +215,7 @@ set type:
   HASSET key val
   GETSET key
 ```
-- [ ] add client CLI support for cluster/server topology management and replication internals:
+- [x] add client CLI support for cluster/server topology management and replication internals:
 ```
 master/leader write, journal, and broadcasting: internalSET key idx value ttl
 currenttime+ttl set to an array, and checked every second, execute DEL if expired

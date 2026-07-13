@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,6 +58,55 @@ func TestRunEntriesPassesPrefix(t *testing.T) {
 	}
 	if gotPath != "/api/entries?prefix=session%3A" {
 		t.Fatalf("path = %q, want prefix query", gotPath)
+	}
+}
+
+func TestRunTopologyGetsAndRoutes(t *testing.T) {
+	var gotPaths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.String())
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		w.Write([]byte(`{"version":1,"self":"node-a","nodes":[{"id":"node-a"}],"shards":[{"id":0,"primary":"node-a"}]}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{"-addr", server.URL, "topology"}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(topology) error = %v", err)
+	}
+	if err := run(context.Background(), []string{"-addr", server.URL, "topology", "-key", "session:1"}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(topology -key) error = %v", err)
+	}
+	if len(gotPaths) != 2 || gotPaths[0] != "/api/topology" || gotPaths[1] != "/api/topology?key=session%3A1" {
+		t.Fatalf("paths = %#v, want topology and route paths", gotPaths)
+	}
+}
+
+func TestRunTopologyUploadsFile(t *testing.T) {
+	var gotMethod string
+	var gotTopology hatriecache.ClusterTopology
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotTopology); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"version":1}`))
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "topology.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"self":"node-a","nodes":[{"id":"node-a"}],"shards":[{"id":0,"primary":"node-a"}]}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := run(context.Background(), []string{"-addr", server.URL, "topology", "-file", path}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(topology -file) error = %v", err)
+	}
+	if gotMethod != http.MethodPut || gotTopology.Self != "node-a" {
+		t.Fatalf("request = %s %#v, want PUT node-a topology", gotMethod, gotTopology)
 	}
 }
 

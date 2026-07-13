@@ -86,6 +86,20 @@ func TestParseConfigMonitoringTLSFlags(t *testing.T) {
 	}
 }
 
+func TestParseConfigTopologyFlags(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-node-id", "node-a",
+		"-topology-path", "/tmp/topology.json",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.nodeID != "node-a" || cfg.topologyPath != "/tmp/topology.json" {
+		t.Fatalf("cfg topology = %#v, want explicit node and path", cfg)
+	}
+}
+
 func TestParseConfigGRPCFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"-monitoring-server",
@@ -282,6 +296,30 @@ func TestLevelDBLifecycleHelpersLoadAndSave(t *testing.T) {
 	}
 	if got := loaded.GetString("key"); got != "value" {
 		t.Fatalf("loaded key = %q, want value", got)
+	}
+}
+
+func TestTopologyLifecycleHelperLoadsAndSaves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "topology.json")
+	store, err := openTopologyIfConfigured(path, "node-a", "127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("openTopologyIfConfigured() error = %v", err)
+	}
+	if got := store.Get(); got.Self != "node-a" {
+		t.Fatalf("fallback topology = %#v, want node-a", got)
+	}
+
+	updated := hatriecache.SingleNodeTopology("node-b", "127.0.0.1:8081")
+	if err := store.Set(updated); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	reloaded, err := openTopologyIfConfigured(path, "node-a", "127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("openTopologyIfConfigured(reload) error = %v", err)
+	}
+	if got := reloaded.Get(); got.Self != "node-b" {
+		t.Fatalf("reloaded topology = %#v, want node-b", got)
 	}
 }
 

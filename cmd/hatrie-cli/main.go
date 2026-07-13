@@ -33,7 +33,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return err
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, command")
+		return errors.New("subcommand is required: health, stats, entries, topology, command, snapshot")
 	}
 
 	switch remaining[0] {
@@ -43,6 +43,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return getJSON(ctx, client, cfg.addr, "/api/stats", stdout)
 	case "entries":
 		return runEntries(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "topology":
+		return runTopology(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "command":
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "snapshot":
@@ -74,6 +76,31 @@ func runEntries(ctx context.Context, client *http.Client, addr string, args []st
 	path := "/api/entries"
 	if *prefix != "" {
 		path += "?prefix=" + url.QueryEscape(*prefix)
+	}
+	return getJSON(ctx, client, addr, path, stdout)
+}
+
+func runTopology(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("topology", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	filePath := flags.String("file", "", "topology JSON file to upload")
+	key := flags.String("key", "", "cache key to route through the current topology")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *filePath != "" && *key != "" {
+		return errors.New("topology -file and -key are mutually exclusive")
+	}
+	if *filePath != "" {
+		data, err := os.ReadFile(*filePath)
+		if err != nil {
+			return err
+		}
+		return putJSON(ctx, client, addr, "/api/topology", data, stdout)
+	}
+	path := "/api/topology"
+	if *key != "" {
+		path += "?key=" + url.QueryEscape(*key)
 	}
 	return getJSON(ctx, client, addr, path, stdout)
 }
@@ -151,6 +178,16 @@ func getJSON(ctx context.Context, client *http.Client, addr string, path string,
 
 func postJSON(ctx context.Context, client *http.Client, addr string, path string, body []byte, stdout io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, path), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	return doAndCopy(client, req, stdout)
+}
+
+func putJSON(ctx context.Context, client *http.Client, addr string, path string, body []byte, stdout io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint(addr, path), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

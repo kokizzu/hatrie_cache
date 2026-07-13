@@ -235,3 +235,54 @@ func TestMonitoringHandlerRejectsForcedSnapshotWhenUnconfigured(t *testing.T) {
 		t.Fatalf("snapshot GET status = %d, want 405", resp.Code)
 	}
 }
+
+func TestMonitoringHandlerManagesTopology(t *testing.T) {
+	ht := newTestTrie(t)
+	store, err := NewTopologyStore(SingleNodeTopology("node-a", "127.0.0.1:8080"))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{Topology: store}).Handler()
+
+	getResp := httptest.NewRecorder()
+	handler.ServeHTTP(getResp, httptest.NewRequest(http.MethodGet, "/api/topology", nil))
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("topology GET status = %d, want 200", getResp.Code)
+	}
+	var got ClusterTopology
+	if err := json.Unmarshal(getResp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("topology GET JSON error = %v", err)
+	}
+	if got.Self != "node-a" || len(got.Shards) != 1 {
+		t.Fatalf("topology GET = %#v, want node-a single shard", got)
+	}
+
+	update := `{"version":1,"self":"node-b","nodes":[{"id":"node-b","address":"127.0.0.1:8081"}],"shards":[{"id":0,"primary":"node-b"}]}`
+	putResp := httptest.NewRecorder()
+	handler.ServeHTTP(putResp, httptest.NewRequest(http.MethodPut, "/api/topology", bytes.NewBufferString(update)))
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("topology PUT status = %d body %q, want 200", putResp.Code, putResp.Body.String())
+	}
+	if store.Get().Self != "node-b" {
+		t.Fatalf("stored topology = %#v, want node-b", store.Get())
+	}
+
+	routeResp := httptest.NewRecorder()
+	handler.ServeHTTP(routeResp, httptest.NewRequest(http.MethodGet, "/api/topology?key=session:1", nil))
+	if routeResp.Code != http.StatusOK {
+		t.Fatalf("topology route status = %d, want 200", routeResp.Code)
+	}
+	var route TopologyRoute
+	if err := json.Unmarshal(routeResp.Body.Bytes(), &route); err != nil {
+		t.Fatalf("route JSON error = %v", err)
+	}
+	if route.Key != "session:1" || route.Shard.Primary != "node-b" {
+		t.Fatalf("route = %#v, want node-b primary", route)
+	}
+
+	badResp := httptest.NewRecorder()
+	handler.ServeHTTP(badResp, httptest.NewRequest(http.MethodPut, "/api/topology", bytes.NewBufferString(`{"version":1}`)))
+	if badResp.Code != http.StatusBadRequest {
+		t.Fatalf("bad topology status = %d, want 400", badResp.Code)
+	}
+}

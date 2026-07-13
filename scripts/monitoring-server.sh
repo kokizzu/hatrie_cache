@@ -5,6 +5,8 @@ addr=${MONITORING_ADDR:-127.0.0.1:8080}
 web_dir=${MONITORING_WEB_DIR:-svelte-mpa/dist}
 tls_cert=${MONITORING_TLS_CERT:-}
 tls_key=${MONITORING_TLS_KEY:-}
+node_id=${NODE_ID:-}
+topology_path=${TOPOLOGY_PATH:-}
 grpc_addr=${GRPC_ADDR:-}
 db_path=${DB_PATH:-}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
@@ -22,6 +24,8 @@ exec go run ./cmd/hatrie-cache \
 	-monitoring-web-dir "$web_dir" \
 	-monitoring-tls-cert "$tls_cert" \
 	-monitoring-tls-key "$tls_key" \
+	-node-id "$node_id" \
+	-topology-path "$topology_path" \
 	-grpc-addr "$grpc_addr" \
 	-db-path "$db_path" \
 	-db-sync-interval "$db_sync_interval" \
