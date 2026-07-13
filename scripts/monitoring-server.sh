@@ -8,6 +8,10 @@ tls_key=${MONITORING_TLS_KEY:-}
 grpc_addr=${GRPC_ADDR:-}
 db_path=${DB_PATH:-}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
+db_hot_load=${DB_HOT_LOAD:-false}
+db_hot_load_max_bytes=${DB_HOT_LOAD_MAX_BYTES:-1024}
+db_hot_load_max_age=${DB_HOT_LOAD_MAX_AGE:-1h}
+db_hot_load_min_hits=${DB_HOT_LOAD_MIN_HITS:-1000}
 snapshot_path=${SNAPSHOT_PATH:-}
 snapshot_interval=${SNAPSHOT_INTERVAL:-0}
 journal_path=${JOURNAL_PATH:-}
@@ -21,6 +25,10 @@ exec go run ./cmd/hatrie-cache \
 	-grpc-addr "$grpc_addr" \
 	-db-path "$db_path" \
 	-db-sync-interval "$db_sync_interval" \
+	-db-hot-load="$db_hot_load" \
+	-db-hot-load-max-bytes "$db_hot_load_max_bytes" \
+	-db-hot-load-max-age "$db_hot_load_max_age" \
+	-db-hot-load-min-hits "$db_hot_load_min_hits" \
 	-snapshot-path "$snapshot_path" \
 	-snapshot-interval "$snapshot_interval" \
 	-journal-path "$journal_path"

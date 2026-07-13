@@ -29,6 +29,10 @@ type config struct {
 	grpcAddr          string
 	dbPath            string
 	dbSyncInterval    time.Duration
+	dbHotLoad         bool
+	dbHotLoadMaxBytes int64
+	dbHotLoadMaxAge   time.Duration
+	dbHotLoadMinHits  uint64
 	snapshotPath      string
 	snapshotInterval  time.Duration
 	journalPath       string
@@ -62,7 +66,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 	defer closeLevelDB(dbStore, stderr)
-	if err := loadLevelDBIfConfigured(trie, dbStore); err != nil {
+	if err := loadLevelDBIfConfigured(trie, dbStore, levelDBLoadPolicy(cfg)); err != nil {
 		return err
 	}
 	if dbStore != nil {
@@ -165,6 +169,10 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
+	flags.BoolVar(&cfg.dbHotLoad, "db-hot-load", false, "load cold LevelDB keys as lazy references and hot small values into memory")
+	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for LevelDB hot-load")
+	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for LevelDB hot-load")
+	flags.Uint64Var(&cfg.dbHotLoadMinHits, "db-hot-load-min-hits", 1000, "minimum hits required for LevelDB hot-load")
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional JSON snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
 	flags.StringVar(&cfg.journalPath, "journal-path", "", "optional command journal path to replay on startup and append mutating commands")
@@ -233,11 +241,23 @@ func openLevelDBIfConfigured(path string) (*hatriecache.LevelDBStore, error) {
 	return hatriecache.OpenLevelDBStore(path)
 }
 
-func loadLevelDBIfConfigured(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore) error {
+func levelDBLoadPolicy(cfg config) hatriecache.LevelDBLoadPolicy {
+	if !cfg.dbHotLoad {
+		return hatriecache.LevelDBLoadPolicy{}
+	}
+	return hatriecache.LevelDBLoadPolicy{
+		HotValuesOnly: true,
+		MaxValueBytes: cfg.dbHotLoadMaxBytes,
+		MaxLastHitAge: cfg.dbHotLoadMaxAge,
+		MinHits:       cfg.dbHotLoadMinHits,
+	}
+}
+
+func loadLevelDBIfConfigured(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, policy hatriecache.LevelDBLoadPolicy) error {
 	if store == nil {
 		return nil
 	}
-	_, err := store.Load(trie)
+	_, err := store.LoadWithPolicy(trie, policy)
 	return err
 }
 

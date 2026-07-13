@@ -153,6 +153,8 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 		out.Map = cloneMap(ht.maps.array[entry.Value.Index])
 	case DATAVALUE_TYPE_SLICE:
 		out.Slice = ht.slices.array[entry.Value.Index].Slice()
+	case DATAVALUE_TYPE_LEVELDB_REF:
+		return ht.levelDBReferenceSnapshotEntryLocked(entry.Key, entry.Value)
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -191,26 +193,52 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 }
 
 func (ht *HatTrie) applySnapshotOperation(operation snapshotOperation) error {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	_, err := ht.applySnapshotOperationLocked(operation)
+	return err
+}
+
+func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (HatValue, error) {
 	entry := operation.entry
+	rawPtr := ht.upsertLocation(entry.Key)
+	old := HatValue{}
+	old.fromValue(*rawPtr)
+	if !old.Empty() {
+		ht.returnStorage(old)
+	}
+	delete(ht.expires, entry.Key)
+
+	hval := HatValue{}
 	switch entry.Type {
 	case "counter":
-		ht.UpsertCounter(entry.Key, entry.Counter)
+		hval = HatValue{Index: entry.Counter, Flags: DATAVALUE_TYPE_COUNTER}
 	case "string":
-		ht.UpsertString(entry.Key, entry.String)
+		idx := ht.raws.Add([]byte(entry.String))
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}
 	case "bytes":
-		ht.UpsertBytes(entry.Key, operation.bytes)
+		ht.storeBytesLocked(rawPtr, HatValue{}, operation.bytes)
+		hval.fromValue(*rawPtr)
 	case "map":
-		ht.UpsertMap(entry.Key, entry.Map)
+		idx := ht.maps.Add(entry.Map)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}
 	case "slice":
-		ht.UpsertSlice(entry.Key, entry.Slice)
+		idx := ht.slices.Add(entry.Slice)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}
 	default:
-		return errors.New("hatriecache: unsupported snapshot value type")
+		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
-	if entry.ExpiresAt != nil && !ht.ExpireAt(entry.Key, *entry.ExpiresAt) {
-		return errors.New("hatriecache: failed to restore snapshot expiration")
+	if entry.Type != "bytes" {
+		*rawPtr = hval.toValue()
 	}
-	ht.restoreKeyStats(entry.Key, entry.Stats)
-	return nil
+	if entry.ExpiresAt != nil {
+		ht.expires[entry.Key] = *entry.ExpiresAt
+		hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
+		*rawPtr = hval.toValue()
+	}
+	ht.restoreKeyStatsLocked(entry.Key, entry.Stats)
+	return hval, nil
 }
 
 func writeFileAtomic(path string, data []byte) error {

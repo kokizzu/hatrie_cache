@@ -97,6 +97,125 @@ func TestLevelDBStoreRoundTripRestoresKeyStats(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	now := time.Unix(4600, 0)
+	source.now = func() time.Time { return now }
+
+	source.UpsertString("cold", "cold-value")
+	source.UpsertString("hot", "hot-value")
+	source.UpsertString("large-hot", string(bytes.Repeat([]byte("x"), 2048)))
+	for i := 0; i < 1001; i++ {
+		if got := source.GetString("hot"); got != "hot-value" {
+			t.Fatalf("GetString(hot) = %q, want hot-value", got)
+		}
+		if got := source.GetString("large-hot"); got == "" {
+			t.Fatal("GetString(large-hot) = empty, want value")
+		}
+	}
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now.Add(30 * time.Minute) }
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 3 || result.ValuesLoaded != 1 {
+		t.Fatalf("hot-load result = %#v, want 3 keys and 1 value", result)
+	}
+	valuesByKey := map[string]HatValue{}
+	for _, entry := range loaded.Entries(true) {
+		valuesByKey[entry.Key] = entry.Value
+	}
+	if !valuesByKey["hot"].IsStringAtRaws() {
+		t.Fatalf("hot value = %+v, want in-memory string", valuesByKey["hot"])
+	}
+	if !valuesByKey["cold"].IsLevelDBReference() {
+		t.Fatalf("cold value = %+v, want leveldb reference", valuesByKey["cold"])
+	}
+	if !valuesByKey["large-hot"].IsLevelDBReference() {
+		t.Fatalf("large-hot value = %+v, want leveldb reference", valuesByKey["large-hot"])
+	}
+	if !loaded.Exists("cold") {
+		t.Fatal("Exists(cold) = false, want true")
+	}
+	for _, entry := range loaded.Entries(true) {
+		if entry.Key == "cold" && !entry.Value.IsLevelDBReference() {
+			t.Fatalf("Exists(cold) hydrated value to %+v, want leveldb reference", entry.Value)
+		}
+	}
+
+	if got := loaded.GetString("cold"); got != "cold-value" {
+		t.Fatalf("hydrated cold value = %q, want cold-value", got)
+	}
+	if hval := loaded.Get("cold"); !hval.IsStringAtRaws() {
+		t.Fatalf("cold after hydration = %+v, want in-memory string", hval)
+	}
+	if err := store.Save(loaded); err != nil {
+		t.Fatalf("Save(after hot-load) error = %v", err)
+	}
+
+	roundTrip := newTestTrie(t)
+	if count, err := store.Load(roundTrip); err != nil || count != 3 {
+		t.Fatalf("Load(roundTrip) = %d/%v, want 3 nil", count, err)
+	}
+	if got := roundTrip.GetString("large-hot"); got == "" {
+		t.Fatal("large-hot was not preserved after saving hot-loaded trie")
+	}
+}
+
+func TestLevelDBStoreHotLoadCanDeleteColdReference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("cold", "value")
+	source.UpsertString("keep", "value")
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 2 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 2 keys and 0 values", result)
+	}
+	if !loaded.Delete("cold") {
+		t.Fatal("Delete(cold reference) = false, want true")
+	}
+	if err := store.Save(loaded); err != nil {
+		t.Fatalf("Save(after delete) error = %v", err)
+	}
+
+	roundTrip := newTestTrie(t)
+	if count, err := store.Load(roundTrip); err != nil || count != 1 {
+		t.Fatalf("Load(roundTrip) = %d/%v, want 1 nil", count, err)
+	}
+	if got := roundTrip.GetString("cold"); got != "" {
+		t.Fatalf("deleted cold value = %q, want empty", got)
+	}
+	if got := roundTrip.GetString("keep"); got != "value" {
+		t.Fatalf("keep = %q, want value", got)
+	}
+}
+
 func TestLevelDBStoreSkipsExpiredValuesOnLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

@@ -49,6 +49,7 @@ const (
 	DATAVALUE_TYPE_MAP
 	// Slice values are backed by a ring deque for stack/queue operations.
 	DATAVALUE_TYPE_SLICE
+	DATAVALUE_TYPE_LEVELDB_REF
 	// TODO: add more types (set, priority queue, etc).
 )
 
@@ -297,6 +298,10 @@ func (hval HatValue) IsSlice() bool {
 	return hval.Is(DATAVALUE_TYPE_SLICE)
 }
 
+func (hval HatValue) IsLevelDBReference() bool {
+	return hval.Is(DATAVALUE_TYPE_LEVELDB_REF)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -319,6 +324,8 @@ func (hval HatValue) String() string {
 		return "map at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_SLICE:
 		return "slice at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_LEVELDB_REF:
+		return "leveldb reference at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -564,6 +571,55 @@ func (ss *SliceStorage) Del(idx int32) {
 	ss.reusables[idx] = true
 }
 
+type LevelDBReference struct {
+	Key   string
+	Type  string
+	Store *LevelDBStore
+}
+
+type LevelDBReferenceStorage struct {
+	array     []LevelDBReference
+	reusables map[int32]bool
+}
+
+func CreateLevelDBReferenceStorage() *LevelDBReferenceStorage {
+	return &LevelDBReferenceStorage{
+		array:     []LevelDBReference{},
+		reusables: map[int32]bool{},
+	}
+}
+
+func (rs *LevelDBReferenceStorage) Append(value LevelDBReference) int32 {
+	rs.array = append(rs.array, value)
+	return int32(len(rs.array) - 1)
+}
+
+func (rs *LevelDBReferenceStorage) Add(value LevelDBReference) int32 {
+	if len(rs.reusables) > 0 {
+		for idx := range rs.reusables {
+			rs.array[idx] = value
+			delete(rs.reusables, idx)
+			return idx
+		}
+	}
+	return rs.Append(value)
+}
+
+func (rs *LevelDBReferenceStorage) Get(idx int32) (LevelDBReference, bool) {
+	if rs == nil || idx < 0 || int(idx) >= len(rs.array) {
+		return LevelDBReference{}, false
+	}
+	return rs.array[idx], !rs.reusables[idx]
+}
+
+func (rs *LevelDBReferenceStorage) Del(idx int32) {
+	if rs == nil || idx < 0 || int(idx) >= len(rs.array) {
+		return
+	}
+	rs.array[idx] = LevelDBReference{}
+	rs.reusables[idx] = true
+}
+
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing
 // pools referenced by compact HatValue records.
 type HatTrie struct {
@@ -573,6 +629,7 @@ type HatTrie struct {
 	disks    *DiskStorage
 	maps     *MapStorage
 	slices   *SliceStorage
+	dbrefs   *LevelDBReferenceStorage
 	expires  map[string]time.Time
 	stats    CacheStats
 	keyStats map[string]KeyStats
@@ -603,6 +660,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		disks:    disks,
 		maps:     CreateMapStorage(),
 		slices:   CreateSliceStorage(),
+		dbrefs:   CreateLevelDBReferenceStorage(),
 		expires:  map[string]time.Time{},
 		keyStats: map[string]KeyStats{},
 		now:      time.Now,
@@ -631,6 +689,7 @@ func (ht *HatTrie) Destroy() {
 	ht.disks = nil
 	ht.maps = nil
 	ht.slices = nil
+	ht.dbrefs = nil
 	ht.expires = nil
 	ht.keyStats = nil
 	ht.now = nil
@@ -658,8 +717,14 @@ func (ht *HatTrie) StatsForKey(key string) (KeyStats, bool) {
 	defer ht.mu.Unlock()
 
 	ht.ensureOpen()
-	if ht.getLocked(key).Empty() {
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
 		delete(ht.keyStats, key)
+		return KeyStats{}, false
+	}
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
 		return KeyStats{}, false
 	}
 	stats, ok := ht.keyStats[key]
@@ -671,6 +736,10 @@ func (ht *HatTrie) restoreKeyStats(key string, stats *KeyStats) {
 	defer ht.mu.Unlock()
 
 	ht.ensureOpen()
+	ht.restoreKeyStatsLocked(key, stats)
+}
+
+func (ht *HatTrie) restoreKeyStatsLocked(key string, stats *KeyStats) {
 	if stats == nil {
 		delete(ht.keyStats, key)
 		return
@@ -940,6 +1009,17 @@ func (ht *HatTrie) EntriesWithPrefix(prefix string, sorted bool) []Entry {
 	return ht.entriesWithPrefixLocked(prefix, sorted)
 }
 
+// Exists reports whether key exists without hydrating a cold LevelDB value.
+func (ht *HatTrie) Exists(key string) bool {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekLocked(key)
+	hit := !hval.Empty()
+	ht.recordReadLocked(hit, key)
+	return hit
+}
+
 func (ht *HatTrie) ensureOpen() {
 	if ht == nil || ht.root == nil {
 		panic("hatriecache: use of destroyed HatTrie")
@@ -1064,6 +1144,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.maps.Del(hval.Index)
 	case DATAVALUE_TYPE_SLICE:
 		ht.slices.Del(hval.Index)
+	case DATAVALUE_TYPE_LEVELDB_REF:
+		ht.dbrefs.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)
@@ -1235,6 +1317,20 @@ func (ht *HatTrie) Get(key string) HatValue {
 	return hval
 }
 
+func (ht *HatTrie) peekLocked(key string) HatValue {
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		delete(ht.expires, key)
+		return HatValue{}
+	}
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
+		return HatValue{}
+	}
+	return hval
+}
+
 func (ht *HatTrie) getLocked(key string) HatValue {
 	iter := ht.tryLocation(key)
 	hval := HatValue{}
@@ -1243,10 +1339,48 @@ func (ht *HatTrie) getLocked(key string) HatValue {
 		if ht.expireIfNeededLocked(key, hval) {
 			return HatValue{}
 		}
+		if hval.IsLevelDBReference() {
+			hydrated, err := ht.hydrateLevelDBReferenceLocked(key, hval)
+			if err != nil {
+				panic(err)
+			}
+			return hydrated
+		}
 	} else {
 		delete(ht.expires, key)
 	}
 	return hval
+}
+
+func (ht *HatTrie) hydrateLevelDBReferenceLocked(key string, hval HatValue) (HatValue, error) {
+	ref, ok := ht.dbrefs.Get(hval.Index)
+	if !ok || ref.Store == nil {
+		ht.deleteKnownLocked(key, hval)
+		return HatValue{}, nil
+	}
+
+	entry, ok, err := ref.Store.Entry(ref.Key)
+	if err != nil {
+		return HatValue{}, err
+	}
+	if !ok {
+		ht.deleteKnownLocked(key, hval)
+		return HatValue{}, nil
+	}
+	if entry.Key != key {
+		return HatValue{}, errors.New("hatriecache: leveldb reference key mismatch")
+	}
+	if entry.ExpiresAt != nil && !ht.currentTime().Before(*entry.ExpiresAt) {
+		if ht.deleteKnownLocked(key, hval) {
+			ht.recordExpirationLocked(key)
+		}
+		return HatValue{}, nil
+	}
+	operation, err := validateSnapshotEntry(entry)
+	if err != nil {
+		return HatValue{}, err
+	}
+	return ht.applySnapshotOperationLocked(operation)
 }
 
 // Delete removes key and returns whether it existed.

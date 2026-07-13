@@ -238,6 +238,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		value := ht.slices.array[hval.Index]
 		return int64(value.Len()), strconv.Itoa(value.Len()) + " items"
+	case DATAVALUE_TYPE_LEVELDB_REF:
+		ref, ok := ht.dbrefs.Get(hval.Index)
+		if !ok {
+			return 0, "missing cold value"
+		}
+		return 0, "cold " + ref.Type + " value"
 	default:
 		return 0, ""
 	}
@@ -255,6 +261,8 @@ func monitoringType(hval HatValue) string {
 		return "map"
 	case DATAVALUE_TYPE_SLICE:
 		return "slice"
+	case DATAVALUE_TYPE_LEVELDB_REF:
+		return "leveldb_ref"
 	default:
 		return "unknown"
 	}

@@ -104,12 +104,23 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 		"-monitoring-server",
 		"-db-path", "/tmp/cache.leveldb",
 		"-db-sync-interval", "10s",
+		"-db-hot-load",
+		"-db-hot-load-max-bytes", "2048",
+		"-db-hot-load-max-age", "30m",
+		"-db-hot-load-min-hits", "42",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
 	}
 	if cfg.dbPath != "/tmp/cache.leveldb" || cfg.dbSyncInterval != 10*time.Second {
 		t.Fatalf("cfg db = %q/%s, want explicit path and interval", cfg.dbPath, cfg.dbSyncInterval)
+	}
+	if !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 || cfg.dbHotLoadMaxAge != 30*time.Minute || cfg.dbHotLoadMinHits != 42 {
+		t.Fatalf("cfg hot-load = %#v, want explicit hot-load options", cfg)
+	}
+	policy := levelDBLoadPolicy(cfg)
+	if !policy.HotValuesOnly || policy.MaxValueBytes != 2048 || policy.MaxLastHitAge != 30*time.Minute || policy.MinHits != 42 {
+		t.Fatalf("levelDBLoadPolicy() = %#v, want explicit hot-load policy", policy)
 	}
 }
 
@@ -266,7 +277,7 @@ func TestLevelDBLifecycleHelpersLoadAndSave(t *testing.T) {
 
 	loaded := hatriecache.CreateHatTrie()
 	defer loaded.Destroy()
-	if err := loadLevelDBIfConfigured(loaded, store); err != nil {
+	if err := loadLevelDBIfConfigured(loaded, store, hatriecache.LevelDBLoadPolicy{}); err != nil {
 		t.Fatalf("loadLevelDBIfConfigured() error = %v", err)
 	}
 	if got := loaded.GetString("key"); got != "value" {

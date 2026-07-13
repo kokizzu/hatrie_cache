@@ -73,6 +73,16 @@ the server is running:
 make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
 ```
 
+Set `DB_HOT_LOAD=true` to load all non-expired LevelDB keys as compact
+references while only materializing hot values in memory. By default a hot value
+must be 1024 bytes or smaller, have a last hit within 1 hour, and have more than
+1000 recorded hits. Cold values are hydrated from LevelDB on first value access
+and are still preserved by later LevelDB saves:
+
+```
+make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
+```
+
 Set `SNAPSHOT_PATH` to load a JSON snapshot at startup and save it on shutdown.
 Set `SNAPSHOT_INTERVAL` to periodically write the same snapshot while the server
 runs:
@@ -202,7 +212,7 @@ deleted index saved on another map
 - [x] update statistics (last hit, last write, hit rate, cumulative hit rate) to disk
 - [x] on-load check for expired snapshot data
 - [x] when service starts, non-expired snapshot keys are loaded into memory
-- [ ] when service start, non-expired keys and (<1KB AND <1h last hit AND >1000 hit rate) values loaded from database to memory
+- [x] when service start, non-expired keys and (<1KB AND <1h last hit AND >1000 hit rate) values loaded from database to memory
 - [x] when service stopped/timer, snapshot data written to disk
 - [x] add explicit sync-write force API/CLI
 - [x] create iterator command to get all keys and keys based on certain prefix

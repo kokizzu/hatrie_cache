@@ -47,7 +47,7 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: value}
 	case "EXISTS":
-		if ht.Get(key).Empty() {
+		if !ht.Exists(key) {
 			return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
