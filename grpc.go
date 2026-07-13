@@ -11,10 +11,13 @@ import (
 )
 
 type CacheGRPCOptions struct {
-	NodeName string
-	StartAt  time.Time
-	Snapshot func() error
-	Journal  *CommandJournal
+	NodeName            string
+	StartAt             time.Time
+	Snapshot            func() error
+	Journal             *CommandJournal
+	Election            *ElectionStore
+	Replicator          *HTTPReplicator
+	EnforceLeaderWrites bool
 }
 
 type CacheGRPCServer struct {
@@ -94,12 +97,13 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 		return nil, err
 	}
 	command := cacheCommandRequestFromProto(request)
-	var response CacheCommandResponse
-	if server.options.Journal != nil {
-		response = server.options.Journal.ExecuteCommand(server.trie, command)
-	} else {
-		response = server.trie.ExecuteCommand(command)
-	}
+	response, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
+		NodeName:            server.options.NodeName,
+		Journal:             server.options.Journal,
+		Election:            server.options.Election,
+		Replicator:          server.options.Replicator,
+		EnforceLeaderWrites: server.options.EnforceLeaderWrites,
+	})
 	return grpcCommandResponse(response), nil
 }
 

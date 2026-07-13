@@ -33,6 +33,14 @@ type MonitoringHandler struct {
 	options MonitoringOptions
 }
 
+type commandExecutionOptions struct {
+	NodeName            string
+	Journal             *CommandJournal
+	Election            *ElectionStore
+	Replicator          *HTTPReplicator
+	EnforceLeaderWrites bool
+}
+
 type MonitoringHealth struct {
 	Status          string `json:"status"`
 	Node            string `json:"node"`
@@ -174,38 +182,51 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if requestContextDone(w, r) {
 		return
 	}
-	if response, rejected := handler.rejectNonLeaderWrite(request); rejected {
+	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
+		NodeName:            handler.options.NodeName,
+		Journal:             handler.options.Journal,
+		Election:            handler.options.Election,
+		Replicator:          handler.options.Replicator,
+		EnforceLeaderWrites: handler.options.EnforceLeaderWrites,
+	})
+	if rejected {
 		writeJSONStatus(w, http.StatusConflict, response)
 		return
-	}
-
-	var response CacheCommandResponse
-	if handler.options.Journal != nil {
-		response = handler.options.Journal.ExecuteCommand(handler.trie, request)
-	} else {
-		response = handler.trie.ExecuteCommand(request)
-	}
-	if handler.options.Replicator != nil {
-		handler.options.Replicator.ReplicateCommand(r.Context(), handler.trie, request, response)
 	}
 	writeJSON(w, response)
 }
 
-func (handler *MonitoringHandler) rejectNonLeaderWrite(request CacheCommandRequest) (CacheCommandResponse, bool) {
-	if !handler.options.EnforceLeaderWrites || !commandRequiresLeader(request) {
+func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
+	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
+		return response, true
+	}
+	var response CacheCommandResponse
+	if options.Journal != nil {
+		response = options.Journal.ExecuteCommand(trie, request)
+	} else {
+		response = trie.ExecuteCommand(request)
+	}
+	if options.Replicator != nil {
+		options.Replicator.ReplicateCommand(ctx, trie, request, response)
+	}
+	return response, false
+}
+
+func rejectNonLeaderWrite(request CacheCommandRequest, nodeName string, election *ElectionStore, enforce bool) (CacheCommandResponse, bool) {
+	if !enforce || !commandRequiresLeader(request) {
 		return CacheCommandResponse{}, false
 	}
-	if handler.options.Election == nil {
+	if election == nil {
 		return commandError("election store is not configured"), true
 	}
-	route, ok := handler.options.Election.LeaderForKey(strings.TrimSpace(request.Key))
+	route, ok := election.LeaderForKey(strings.TrimSpace(request.Key))
 	if !ok {
 		return commandError("topology cannot route key"), true
 	}
 	if !route.Leader.Available || route.Leader.Leader == "" {
 		return commandError("no elected leader for key"), true
 	}
-	if route.Leader.Leader != strings.TrimSpace(handler.options.NodeName) {
+	if route.Leader.Leader != strings.TrimSpace(nodeName) {
 		return commandError("local node is not elected leader for key; leader is " + route.Leader.Leader), true
 	}
 	return CacheCommandResponse{}, false

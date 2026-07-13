@@ -2,9 +2,13 @@ package hatriecache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,6 +390,126 @@ func TestCacheGRPCServerSnapshotAndJournal(t *testing.T) {
 	}
 	if !snapshotResp.GetOk() || !snapshotCalled {
 		t.Fatalf("Snapshot response/called = %#v/%v, want ok true", snapshotResp, snapshotCalled)
+	}
+}
+
+func TestCacheGRPCServerEnforcesLeaderWrites(t *testing.T) {
+	topology := replicationTestTopology(t, "127.0.0.1:1")
+	election := NewElectionStore(topology, ElectionOptions{})
+	if err := election.MarkOffline("node-a"); err != nil {
+		t.Fatalf("MarkOffline(node-a) error = %v", err)
+	}
+
+	followerTrie := newTestTrie(t)
+	followerClient, followerStop := newTestGRPCClient(t, followerTrie, CacheGRPCOptions{
+		NodeName:            "node-a",
+		Election:            election,
+		EnforceLeaderWrites: true,
+	})
+	defer followerStop()
+
+	rejected, err := followerClient.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "SETSTR",
+		Key:     "session:1",
+		Value:   "value",
+	})
+	if err != nil {
+		t.Fatalf("follower Command(SETSTR) error = %v", err)
+	}
+	if rejected.GetOk() || !strings.Contains(rejected.GetMessage(), "leader is node-b") {
+		t.Fatalf("follower SETSTR response = %#v, want leader rejection", rejected)
+	}
+	if got := followerTrie.GetString("session:1"); got != "" {
+		t.Fatalf("follower wrote value %q, want no local write", got)
+	}
+
+	internal, err := followerClient.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:1",
+		Value:   `{"type":"string","string":"replicated"}`,
+	})
+	if err != nil {
+		t.Fatalf("follower Command(INTERNALSET) error = %v", err)
+	}
+	if !internal.GetOk() {
+		t.Fatalf("follower INTERNALSET response = %#v, want ok", internal)
+	}
+	if got := followerTrie.GetString("session:1"); got != "replicated" {
+		t.Fatalf("internal replicated value = %q, want replicated", got)
+	}
+
+	leaderTrie := newTestTrie(t)
+	leaderClient, leaderStop := newTestGRPCClient(t, leaderTrie, CacheGRPCOptions{
+		NodeName:            "node-b",
+		Election:            election,
+		EnforceLeaderWrites: true,
+	})
+	defer leaderStop()
+	stored, err := leaderClient.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "SETSTR",
+		Key:     "session:1",
+		Value:   "leader-value",
+	})
+	if err != nil {
+		t.Fatalf("leader Command(SETSTR) error = %v", err)
+	}
+	if !stored.GetOk() {
+		t.Fatalf("leader SETSTR response = %#v, want ok", stored)
+	}
+	if got := leaderTrie.GetString("session:1"); got != "leader-value" {
+		t.Fatalf("leader wrote value %q, want leader-value", got)
+	}
+}
+
+func TestCacheGRPCServerReplicatesCommands(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/commands" {
+			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
+		}
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	ht := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{
+		NodeName:   "node-a",
+		Election:   election,
+		Replicator: replicator,
+	})
+	defer stop()
+
+	response, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "SETSTR",
+		Key:     "session:1",
+		Value:   "value",
+	})
+	if err != nil {
+		t.Fatalf("Command(SETSTR) error = %v", err)
+	}
+	if !response.GetOk() {
+		t.Fatalf("SETSTR response = %#v, want ok", response)
+	}
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
+			t.Fatalf("replicated request = %#v, want INTERNALSET snapshot", request)
+		}
+	default:
+		t.Fatal("gRPC write did not reach replication target")
 	}
 }
 

@@ -297,7 +297,9 @@ is idempotent; operations after close return `ErrLevelDBStoreClosed`.
 
 Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
 service in another Go process, or use the generated client in
-`internal/gen/hatriecache/v1`.
+`internal/gen/hatriecache/v1`. gRPC command handling can use the same journal,
+leader-write enforcement, and HTTP replication options as the monitoring
+command API.
 
 The bundled C HAT-trie tests can be compiled directly with GCC when autotools
 build files have not been generated.
