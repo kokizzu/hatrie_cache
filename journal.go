@@ -14,6 +14,8 @@ import (
 
 const commandJournalVersion = 1
 
+var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
+
 type commandJournalEntry struct {
 	Version    int                 `json:"version"`
 	Sequence   uint64              `json:"sequence"`
@@ -24,6 +26,8 @@ type commandJournalEntry struct {
 type CommandJournal struct {
 	mu           sync.Mutex
 	path         string
+	file         *os.File
+	closed       bool
 	nextSequence uint64
 }
 
@@ -34,24 +38,22 @@ func OpenCommandJournal(path string) (*CommandJournal, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	if err := file.Close(); err != nil {
-		return nil, err
-	}
-
 	entries, validBytes, err := readCommandJournalEntriesWithEnd(path)
 	if err != nil {
 		return nil, err
 	}
-	if info, err := os.Stat(path); err != nil {
+	if info, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		// The append handle below will create the first journal file.
+	} else if err != nil {
 		return nil, err
 	} else if validBytes < info.Size() {
 		if err := os.Truncate(path, validBytes); err != nil {
 			return nil, err
 		}
+	}
+	file, err := openCommandJournalAppendFile(path)
+	if err != nil {
+		return nil, err
 	}
 	var maxSequence uint64
 	for _, entry := range entries {
@@ -59,7 +61,21 @@ func OpenCommandJournal(path string) (*CommandJournal, error) {
 			maxSequence = entry.Sequence
 		}
 	}
-	return &CommandJournal{path: path, nextSequence: maxSequence + 1}, nil
+	return &CommandJournal{path: path, file: file, nextSequence: maxSequence + 1}, nil
+}
+
+func (journal *CommandJournal) Close() error {
+	if journal == nil {
+		return nil
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+
+	if journal.closed {
+		return nil
+	}
+	journal.closed = true
+	return journal.closeAppendFileLocked()
 }
 
 func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheCommandRequest) CacheCommandResponse {
@@ -80,6 +96,9 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
+	if journal.closed {
+		return 0, ErrCommandJournalClosed
+	}
 	entries, err := readCommandJournalEntries(journal.path)
 	if err != nil {
 		return 0, err
@@ -107,6 +126,9 @@ func (journal *CommandJournal) SaveSnapshot(trie *HatTrie, path string) error {
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
+	if journal.closed {
+		return ErrCommandJournalClosed
+	}
 	sequence := journal.lastSequenceLocked()
 	if err := trie.SaveSnapshotWithJournalSequence(path, sequence); err != nil {
 		return err
@@ -122,6 +144,9 @@ func (journal *CommandJournal) Sequence() uint64 {
 }
 
 func (journal *CommandJournal) appendLocked(request CacheCommandRequest) error {
+	if err := journal.ensureAppendFileLocked(); err != nil {
+		return err
+	}
 	entry := commandJournalEntry{
 		Version:  commandJournalVersion,
 		Sequence: journal.nextSequence,
@@ -133,19 +158,10 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) error {
 	}
 	data = append(data, '\n')
 
-	file, err := os.OpenFile(journal.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
+	if _, err := journal.file.Write(data); err != nil {
 		return err
 	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
+	if err := journal.file.Sync(); err != nil {
 		return err
 	}
 	journal.nextSequence++
@@ -181,7 +197,44 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 		data = append(data, payload...)
 		data = append(data, '\n')
 	}
-	return writeFileAtomic(journal.path, data)
+	if err := journal.closeAppendFileLocked(); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(journal.path, data); err != nil {
+		if reopenErr := journal.ensureAppendFileLocked(); reopenErr != nil {
+			return errors.Join(err, reopenErr)
+		}
+		return err
+	}
+	return journal.ensureAppendFileLocked()
+}
+
+func (journal *CommandJournal) ensureAppendFileLocked() error {
+	if journal.closed {
+		return ErrCommandJournalClosed
+	}
+	if journal.file != nil {
+		return nil
+	}
+	file, err := openCommandJournalAppendFile(journal.path)
+	if err != nil {
+		return err
+	}
+	journal.file = file
+	return nil
+}
+
+func (journal *CommandJournal) closeAppendFileLocked() error {
+	if journal.file == nil {
+		return nil
+	}
+	file := journal.file
+	journal.file = nil
+	return file.Close()
+}
+
+func openCommandJournalAppendFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 }
 
 func (journal *CommandJournal) lastSequenceLocked() uint64 {

@@ -89,6 +89,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	if err != nil {
 		return err
 	}
+	defer closeJournal(journal, stderr)
 	snapshotMetadata, err := loadSnapshotIfConfigured(trie, cfg.snapshotPath)
 	if err != nil {
 		return err
@@ -383,6 +384,15 @@ func openJournalIfConfigured(path string) (*hatriecache.CommandJournal, error) {
 		return nil, nil
 	}
 	return hatriecache.OpenCommandJournal(path)
+}
+
+func closeJournal(journal *hatriecache.CommandJournal, stderr io.Writer) {
+	if journal == nil {
+		return
+	}
+	if err := journal.Close(); err != nil {
+		fmt.Fprintf(stderr, "close journal: %v\n", err)
+	}
 }
 
 func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) (hatriecache.SnapshotMetadata, error) {

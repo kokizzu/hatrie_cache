@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -162,10 +163,6 @@ func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 		t.Fatalf("entries after compact = %#v/%v, want checkpoint sequence 2", entries, err)
 	}
 
-	journal, err = OpenCommandJournal(journalPath)
-	if err != nil {
-		t.Fatalf("OpenCommandJournal(after compact) error = %v", err)
-	}
 	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "views", Value: "3"})
 
 	loaded := newTestTrie(t)
@@ -189,6 +186,35 @@ func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 	}
 	if got := loaded.GetCounter("views"); got != 6 {
 		t.Fatalf("loaded views after replay = %d, want 6", got)
+	}
+}
+
+func TestCommandJournalCloseIsIdempotentAndRejectsWork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"})
+	if response.OK || response.Message != ErrCommandJournalClosed.Error() {
+		t.Fatalf("ExecuteCommand after close = %#v, want closed error", response)
+	}
+	if ht.Exists("name") {
+		t.Fatal("ExecuteCommand after close mutated trie")
+	}
+	if _, err := journal.Replay(ht, 0); !errors.Is(err, ErrCommandJournalClosed) {
+		t.Fatalf("Replay after close error = %v, want ErrCommandJournalClosed", err)
+	}
+	if err := journal.SaveSnapshot(ht, filepath.Join(t.TempDir(), "snapshot.json")); !errors.Is(err, ErrCommandJournalClosed) {
+		t.Fatalf("SaveSnapshot after close error = %v, want ErrCommandJournalClosed", err)
 	}
 }
 
