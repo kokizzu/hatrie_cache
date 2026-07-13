@@ -557,6 +557,27 @@ func TestStartSnapshotSaverWritesPeriodically(t *testing.T) {
 	t.Fatal("periodic snapshot was not written")
 }
 
+func TestStartSnapshotSaverWritesImmediately(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("key", "value")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	stop := startSnapshotSaver(ctx, ht, nil, path, time.Hour, &bytes.Buffer{})
+	defer stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("initial snapshot was not written")
+}
+
 func TestStartSnapshotSaverStopIsIdempotent(t *testing.T) {
 	ht := hatriecache.CreateHatTrie()
 	defer ht.Destroy()
@@ -604,6 +625,33 @@ func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("periodic LevelDB save was not written")
+}
+
+func TestStartLevelDBSaverWritesImmediately(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("key", "value")
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"))
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := startLevelDBSaver(ctx, ht, store, time.Hour, &bytes.Buffer{})
+	defer stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		entry, ok, err := store.Entry("key")
+		if err == nil && ok && entry.Type == "string" && entry.String == "value" {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("initial LevelDB save was not written")
 }
 
 func TestStartLevelDBSaverStopIsIdempotent(t *testing.T) {

@@ -382,15 +382,26 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
+	save := func() {
+		if err := store.Save(trie); err != nil {
+			fmt.Fprintf(stderr, "save leveldb: %v\n", err)
+		}
+	}
 	go func() {
 		defer close(stopped)
 		defer ticker.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		default:
+		}
+		save()
 		for {
 			select {
 			case <-ticker.C:
-				if err := store.Save(trie); err != nil {
-					fmt.Fprintf(stderr, "save leveldb: %v\n", err)
-				}
+				save()
 			case <-ctx.Done():
 				return
 			case <-done:
@@ -446,15 +457,26 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
+	save := func() {
+		if err := saveSnapshotIfConfigured(trie, journal, path); err != nil {
+			fmt.Fprintf(stderr, "save snapshot: %v\n", err)
+		}
+	}
 	go func() {
 		defer close(stopped)
 		defer ticker.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		default:
+		}
+		save()
 		for {
 			select {
 			case <-ticker.C:
-				if err := saveSnapshotIfConfigured(trie, journal, path); err != nil {
-					fmt.Fprintf(stderr, "save snapshot: %v\n", err)
-				}
+				save()
 			case <-ctx.Done():
 				return
 			case <-done:
