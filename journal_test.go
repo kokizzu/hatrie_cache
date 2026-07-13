@@ -119,6 +119,48 @@ func TestCommandJournalReplaysPriorityQueueMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysBloomFilterMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATEBF", Key: "seen", Value: "1000", Subkey: "0.001"}); !got.OK {
+		t.Fatalf("journaled CREATEBF response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDBF", Key: "seen", Values: Slice{"alpha", "beta"}}); !got.OK {
+		t.Fatalf("journaled ADDBF response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "HASBF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("journaled HASBF response = %#v, want local read hit", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want CREATEBF and ADDBF only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if !replayed.HasBloomFilter("seen", "alpha") || !replayed.HasBloomFilter("seen", "beta") {
+		t.Fatal("replayed Bloom filter does not contain journaled values")
+	}
+	if info, ok := replayed.BloomFilterInfo("seen"); !ok || info.Insertions != 2 {
+		t.Fatalf("replayed BloomFilterInfo = %#v/%v, want 2 insertions", info, ok)
+	}
+}
+
 func TestCommandJournalReplaysRelativeTTLsAsAbsoluteExpirations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

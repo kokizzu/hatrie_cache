@@ -371,6 +371,12 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 		return ok
 	case "POPPQ", "POPPRIORITY":
 		return true
+	case "CREATEBF", "RESERVEBF", "BFRESERVE":
+		_, _, err := commandBloomFilterConfig(request)
+		return err == nil
+	case "ADDBF", "BFADD":
+		_, ok := commandSliceValues(request)
+		return ok
 	default:
 		return false
 	}

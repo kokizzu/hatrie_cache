@@ -157,6 +157,65 @@ func TestHTTPReplicatorAcceptsNilContext(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATEBF", Key: "seen", Value: "1000", Subkey: "0.001"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATEBF response = %#v, want ok", response)
+	}
+	add := CacheCommandRequest{Command: "ADDBF", Key: "seen", Values: Slice{"alpha", "beta"}}
+	response := trie.ExecuteCommand(add)
+	if !response.OK {
+		t.Fatalf("ADDBF response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, add, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("Bloom filter replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "seen" || request.Value == "" {
+			t.Fatalf("replicated Bloom request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated Bloom snapshot JSON error = %v", err)
+		}
+		if entry.Type != "bloom_filter" || entry.BloomFilter == nil {
+			t.Fatalf("replicated Bloom snapshot = %#v, want bloom_filter payload", entry)
+		}
+	default:
+		t.Fatal("Bloom filter mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "HASBF", Key: "seen", Value: "alpha"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "HASBF", Key: "seen", Value: "alpha"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("Bloom filter read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestReplicationEndpointNormalizesAddresses(t *testing.T) {
 	got, err := replicationEndpoint("127.0.0.1:8080/base/")
 	if err != nil {
