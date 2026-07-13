@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
@@ -95,6 +97,18 @@ func TestMonitoringPreviewHandlesInvalidDiskByteIndex(t *testing.T) {
 		if size != 0 || preview != "" {
 			t.Fatalf("monitoringPreviewLocked(%d) = %d/%q, want empty preview", idx, size, preview)
 		}
+	}
+}
+
+func TestTruncatePreviewPreservesUTF8(t *testing.T) {
+	value := strings.Repeat("a", 76) + "\u65e5" + strings.Repeat("b", 20)
+	got := truncatePreview(value)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncatePreview produced invalid UTF-8: %q", got)
+	}
+	want := strings.Repeat("a", 76) + "..."
+	if got != want {
+		t.Fatalf("truncatePreview() = %q, want %q", got, want)
 	}
 }
 

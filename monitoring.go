@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type MonitoringOptions struct {
@@ -459,7 +460,11 @@ func truncatePreview(value string) string {
 	if len(value) <= 80 {
 		return value
 	}
-	return value[:77] + "..."
+	limit := 77
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
+	}
+	return value[:limit] + "..."
 }
 
 func writeJSON(w http.ResponseWriter, value interface{}) {
