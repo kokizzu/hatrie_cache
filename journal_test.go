@@ -218,6 +218,51 @@ func TestCommandJournalReplaysBloomFilterMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysCuckooFilterMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATECF", Key: "seen", Value: "128", Subkey: "0.001"}); !got.OK {
+		t.Fatalf("journaled CREATECF response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDCF", Key: "seen", Values: Slice{"alpha", "beta"}}); !got.OK {
+		t.Fatalf("journaled ADDCF response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "DELCF", Key: "seen", Value: "alpha"}); !got.OK {
+		t.Fatalf("journaled DELCF response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "HASCF", Key: "seen", Value: "beta"}); !got.OK || got.Value != "1" {
+		t.Fatalf("journaled HASCF response = %#v, want local read hit", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("journal entries = %d, want CREATECF, ADDCF, and DELCF only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if replayed.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("replayed Cuckoo filter contains deleted value alpha")
+	}
+	if !replayed.HasCuckooFilter("seen", "beta") {
+		t.Fatal("replayed Cuckoo filter does not contain journaled value beta")
+	}
+}
+
 func TestCommandJournalReplaysCountMinSketchMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

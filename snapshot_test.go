@@ -39,6 +39,10 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertTopK() error = %v", err)
 	}
 	ht.AddTopK("top", "alpha", 5)
+	if err := ht.UpsertCuckooFilter("cuckoo", 128, 0.001); err != nil {
+		t.Fatalf("UpsertCuckooFilter() error = %v", err)
+	}
+	ht.AddCuckooFilter("cuckoo", "alpha", "beta")
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -98,6 +102,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.TopKInfo("top"); !ok || info.Capacity != 3 || info.Total != 5 {
 		t.Fatalf("loaded TopKInfo = %#v/%v, want restored Top-K", info, ok)
+	}
+	if !loaded.HasCuckooFilter("cuckoo", "alpha") || !loaded.HasCuckooFilter("cuckoo", "beta") {
+		t.Fatal("loaded Cuckoo filter does not contain inserted values")
+	}
+	if info, ok := loaded.CuckooFilterInfo("cuckoo"); !ok || info.Count != 2 || info.Capacity < 128 {
+		t.Fatalf("loaded CuckooFilterInfo = %#v/%v, want restored Cuckoo filter", info, ok)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)

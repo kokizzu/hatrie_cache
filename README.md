@@ -10,6 +10,8 @@ stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
 O(1), and memory usage low without per-item node allocations.
 Bloom filter values use packed bitsets plus double hashing for fast,
 low-memory membership checks without storing inserted items.
+Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
+low-memory membership checks with approximate delete support.
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts
@@ -198,10 +200,11 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
-`POPPQ`, `GETPQ`, `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF`, `CREATECMS`,
-`INCRCMS`, `ESTCMS`, `INFOCMS`, `CREATEHLL`, `ADDHLL`, `COUNTHLL`,
-`INFOHLL`, `CREATETOPK`, `ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`,
-`DUMP`, `INTERNALSET`, and `INTERNALDEL`. `DUMP`,
+`POPPQ`, `GETPQ`, `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF`, `CREATECF`,
+`ADDCF`, `HASCF`, `DELCF`, `INFOCF`, `CREATECMS`, `INCRCMS`, `ESTCMS`,
+`INFOCMS`, `CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`,
+`ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`, `DUMP`, `INTERNALSET`, and
+`INTERNALDEL`. `DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence.
@@ -221,6 +224,9 @@ make cli ARGS='command -cmd POPPQ -key jobs'
 make cli ARGS='command -cmd CREATEBF -key seen:emails -value 10000'
 make cli ARGS='command -cmd ADDBF -key seen:emails -value user@example.com'
 make cli ARGS='command -cmd HASBF -key seen:emails -value user@example.com'
+make cli ARGS='command -cmd CREATECF -key active:users -value 10000 -subkey 0.01'
+make cli ARGS='command -cmd ADDCF -key active:users -value user-123'
+make cli ARGS='command -cmd DELCF -key active:users -value user-123'
 make cli ARGS='command -cmd CREATECMS -key freq:paths -value 2048 -subkey 4'
 make cli ARGS='command -cmd INCRCMS -key freq:paths -value /api/users -subkey 3'
 make cli ARGS='command -cmd ESTCMS -key freq:paths -value /api/users'

@@ -37,6 +37,7 @@ type snapshotEntry struct {
 	CountMinSketch *countMinSketchSnapshot `json:"count_min_sketch,omitempty"`
 	HyperLogLog    *hyperLogLogSnapshot    `json:"hyperloglog,omitempty"`
 	TopK           *topKSnapshot           `json:"top_k,omitempty"`
+	CuckooFilter   *cuckooFilterSnapshot   `json:"cuckoo_filter,omitempty"`
 	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
 	Stats          *KeyStats               `json:"stats,omitempty"`
 }
@@ -167,6 +168,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_TOP_K:
 		snapshot := ht.topKs.array[entry.Value.Index].Snapshot()
 		out.TopK = &snapshot
+	case DATAVALUE_TYPE_CUCKOO_FILTER:
+		snapshot := ht.cuckooFilters.array[entry.Value.Index].Snapshot()
+		out.CuckooFilter = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -221,6 +225,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: top-k snapshot is required")
 		}
 		if err := validateTopKSnapshot(*entry.TopK); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "cuckoo_filter":
+		if entry.CuckooFilter == nil {
+			return snapshotOperation{}, errors.New("hatriecache: cuckoo filter snapshot is required")
+		}
+		if err := validateCuckooFilterSnapshot(*entry.CuckooFilter); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -390,6 +402,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.topKs.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_TOP_K}
+	case "cuckoo_filter":
+		data, err := newCuckooFilterDataFromSnapshot(*entry.CuckooFilter)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.cuckooFilters.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_CUCKOO_FILTER}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

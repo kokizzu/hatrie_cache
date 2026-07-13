@@ -486,6 +486,12 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDBF", "BFADD":
 		_, ok := commandSliceValues(request)
 		return ok
+	case "CREATECF", "RESERVECF", "CFRESERVE":
+		_, _, err := commandCuckooFilterConfig(request)
+		return err == nil
+	case "ADDCF", "CFADD", "DELCF", "REMCF", "CFDEL":
+		_, ok := commandSliceValues(request)
+		return ok
 	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
 		_, _, err := commandCountMinSketchConfig(request)
 		return err == nil

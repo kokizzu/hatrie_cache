@@ -294,6 +294,11 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		}
 		data, err := json.Marshal(entry.TopK)
 		return int64(len(data)), err
+	case "cuckoo_filter":
+		if entry.CuckooFilter == nil {
+			return 0, errors.New("hatriecache: cuckoo filter snapshot is required")
+		}
+		return int64(entry.CuckooFilter.BucketCount * uint64(entry.CuckooFilter.BucketSize) * 2), nil
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

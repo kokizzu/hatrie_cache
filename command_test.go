@@ -293,6 +293,69 @@ func TestExecuteCommandBloomFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandCuckooFilterOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATECF", Key: "seen", Value: "128", Subkey: "0.001"}); !got.OK {
+		t.Fatalf("CREATECF response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDCF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDCF value response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDCF", Key: "seen", Values: Slice{"beta", "alpha"}}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDCF values response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASCF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASCF alpha response = %#v, want 1", got)
+	}
+	missing := cuckooFilterMissingValue(t, ht, "seen")
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASCF", Key: "seen", Value: missing}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASCF missing response = %#v, want 0", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "DELCF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("DELCF alpha response = %#v, want removed 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASCF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASCF deleted alpha response = %#v, want 0", got)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOCF", Key: "seen"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOCF response = %#v, want JSON info", infoResp)
+	}
+	var info CuckooFilterInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFOCF JSON error = %v", err)
+	}
+	if info.Count != 1 || info.BucketSize != cuckooFilterBucketSize || info.FingerprintBytes == 0 {
+		t.Fatalf("INFOCF = %#v, want populated filter info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "seen"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET cuckoo filter response = %#v, want JSON info", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDCF", Key: "auto", Value: "value"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDCF auto response = %#v, want added 1", got)
+	}
+	if !ht.Get("auto").IsCuckooFilter() {
+		t.Fatal("ADDCF on missing key did not create a Cuckoo filter")
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATECF",
+		Key:     "paired",
+		Pairs:   Map{"capacity": json.Number("64"), "false_positive_rate": json.Number("0.02")},
+	}); !got.OK {
+		t.Fatalf("CREATECF pairs response = %#v, want ok", got)
+	}
+	pairedInfo, ok := ht.CuckooFilterInfo("paired")
+	if !ok || pairedInfo.Capacity < 64 || pairedInfo.EstimatedFalsePositiveRate > 0.03 {
+		t.Fatalf("paired CuckooFilterInfo = %#v/%v, want configured filter", pairedInfo, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATECF", Key: "bad", Value: "0"}); got.OK {
+		t.Fatalf("CREATECF invalid response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

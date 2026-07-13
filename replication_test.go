@@ -293,6 +293,65 @@ func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesCuckooFilterMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATECF", Key: "seen", Value: "128", Subkey: "0.001"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATECF response = %#v, want ok", response)
+	}
+	add := CacheCommandRequest{Command: "ADDCF", Key: "seen", Values: Slice{"alpha", "beta"}}
+	response := trie.ExecuteCommand(add)
+	if !response.OK {
+		t.Fatalf("ADDCF response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, add, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("Cuckoo filter replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "seen" || request.Value == "" {
+			t.Fatalf("replicated Cuckoo request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated Cuckoo snapshot JSON error = %v", err)
+		}
+		if entry.Type != "cuckoo_filter" || entry.CuckooFilter == nil {
+			t.Fatalf("replicated Cuckoo snapshot = %#v, want cuckoo_filter payload", entry)
+		}
+	default:
+		t.Fatal("Cuckoo filter mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "HASCF", Key: "seen", Value: "alpha"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "HASCF", Key: "seen", Value: "alpha"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("Cuckoo filter read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestHTTPReplicatorReplicatesHyperLogLogMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

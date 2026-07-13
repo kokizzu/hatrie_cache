@@ -27,6 +27,10 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertBloomFilter() error = %v", err)
 	}
 	source.AddBloomFilter("bloom", "alpha", "beta")
+	if err := source.UpsertCuckooFilter("cuckoo", 128, 0.001); err != nil {
+		t.Fatalf("UpsertCuckooFilter() error = %v", err)
+	}
+	source.AddCuckooFilter("cuckoo", "alpha", "beta")
 	source.UpsertString("ttl", "alive")
 	if !source.Expire("ttl", time.Minute) {
 		t.Fatal("Expire(ttl) = false, want true")
@@ -42,8 +46,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
 	}
-	if count != 9 {
-		t.Fatalf("loaded count = %d, want 9", count)
+	if count != 10 {
+		t.Fatalf("loaded count = %d, want 10", count)
 	}
 
 	if got := loaded.GetCounter("counter"); got != -7 {
@@ -69,6 +73,9 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if !loaded.HasBloomFilter("bloom", "alpha") || !loaded.HasBloomFilter("bloom", "beta") {
 		t.Fatal("loaded Bloom filter does not contain inserted values")
+	}
+	if !loaded.HasCuckooFilter("cuckoo", "alpha") || !loaded.HasCuckooFilter("cuckoo", "beta") {
+		t.Fatal("loaded Cuckoo filter does not contain inserted values")
 	}
 	if got := loaded.TTL("ttl"); got <= 0 || got > time.Minute {
 		t.Fatalf("ttl = %s, want remaining positive TTL", got)
@@ -179,6 +186,26 @@ func TestSnapshotOperationValueSizeSupportsBloomFilter(t *testing.T) {
 	}
 	if size != filter.EncodedSize() {
 		t.Fatalf("snapshotOperationValueSize(bloom_filter) = %d, want %d", size, filter.EncodedSize())
+	}
+}
+
+func TestSnapshotOperationValueSizeSupportsCuckooFilter(t *testing.T) {
+	filter, err := newCuckooFilterData(100, 0.01)
+	if err != nil {
+		t.Fatalf("newCuckooFilterData() error = %v", err)
+	}
+	snapshot := filter.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:         "cuckoo_filter",
+			CuckooFilter: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(cuckoo_filter) error = %v", err)
+	}
+	if size != filter.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(cuckoo_filter) = %d, want %d", size, filter.EncodedSize())
 	}
 }
 

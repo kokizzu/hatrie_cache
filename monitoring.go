@@ -733,6 +733,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		info := ht.topKs.array[hval.Index].Info()
 		return ht.topKs.array[hval.Index].EncodedSize(), strconv.FormatUint(info.Tracked, 10) + "/" + strconv.FormatUint(info.Capacity, 10) + " tracked, " + strconv.FormatUint(info.Total, 10) + " total"
+	case DATAVALUE_TYPE_CUCKOO_FILTER:
+		if int(hval.Index) >= len(ht.cuckooFilters.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.cuckooFilters.array[hval.Index].Info()
+		return int64(info.FingerprintBytes), strconv.FormatUint(info.Count, 10) + "/" + strconv.FormatUint(info.Capacity, 10) + " slots, " + strconv.Itoa(int(info.FingerprintBits)) + "-bit fingerprints"
 	default:
 		return 0, ""
 	}
@@ -764,6 +770,8 @@ func monitoringType(hval HatValue) string {
 		return "hyperloglog"
 	case DATAVALUE_TYPE_TOP_K:
 		return "top_k"
+	case DATAVALUE_TYPE_CUCKOO_FILTER:
+		return "cuckoo_filter"
 	default:
 		return "unknown"
 	}

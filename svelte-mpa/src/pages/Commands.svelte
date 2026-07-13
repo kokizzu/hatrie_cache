@@ -12,11 +12,11 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
-  $: needsSubkey = ['CREATECMS', 'INCRCMS', 'ADDTOPK'].includes(command);
-  $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : 'Count';
+  $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK'].includes(command);
+  $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : command === 'CREATECF' ? 'False positive rate' : 'Count';
 
   async function submit() {
     const result = await runCommand({
@@ -65,6 +65,11 @@
           <option>ADDBF</option>
           <option>HASBF</option>
           <option>INFOBF</option>
+          <option>CREATECF</option>
+          <option>ADDCF</option>
+          <option>HASCF</option>
+          <option>DELCF</option>
+          <option>INFOCF</option>
           <option>CREATECMS</option>
           <option>INCRCMS</option>
           <option>ESTCMS</option>
@@ -103,7 +108,7 @@
       {#if needsSubkey}
         <label>
           <span>{subkeyLabel}</span>
-          <input bind:value={subkey} placeholder={command === 'CREATECMS' ? '4' : '1'} />
+          <input bind:value={subkey} placeholder={command === 'CREATECMS' ? '4' : command === 'CREATECF' ? '0.01' : '1'} />
         </label>
       {/if}
 

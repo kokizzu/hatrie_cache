@@ -3,7 +3,9 @@ package hatriecache
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -53,6 +55,10 @@ func topKIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.topKs.array) || ht.topKs.reusables.Has(idx)
 }
 
+func cuckooFilterIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.cuckooFilters.array) || ht.cuckooFilters.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
@@ -62,6 +68,18 @@ func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 		}
 	}
 	t.Fatal("could not find a Bloom filter value that reports absent")
+	return ""
+}
+
+func cuckooFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
+	t.Helper()
+	for idx := 0; idx < 1000; idx++ {
+		candidate := "missing-" + strconv.Itoa(idx)
+		if !ht.HasCuckooFilter(key, candidate) {
+			return candidate
+		}
+	}
+	t.Fatal("could not find a Cuckoo filter value that reports absent")
 	return ""
 }
 
@@ -1303,6 +1321,121 @@ func TestBloomFilterStorageReleasedOnOverwrite(t *testing.T) {
 	}
 	if got := ht.Get("new").Index; got != idx {
 		t.Fatalf("Bloom filter storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestCuckooFilterOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertCuckooFilter("seen", 128, 0.001); err != nil {
+		t.Fatalf("UpsertCuckooFilter() error = %v", err)
+	}
+	if hval := ht.Get("seen"); !hval.IsCuckooFilter() {
+		t.Fatalf("UpsertCuckooFilter stored type %+v, want cuckoo filter", hval)
+	}
+	if added := ht.AddCuckooFilter("seen", "alpha", "beta", "alpha"); added != 2 {
+		t.Fatalf("AddCuckooFilter() = %d, want 2 new values", added)
+	}
+	if !ht.HasCuckooFilter("seen", "alpha") || !ht.HasCuckooFilter("seen", "beta") {
+		t.Fatal("HasCuckooFilter(inserted values) = false, want true")
+	}
+	if missing := cuckooFilterMissingValue(t, ht, "seen"); ht.HasCuckooFilter("seen", missing) {
+		t.Fatal("HasCuckooFilter(missing) = true, want false")
+	}
+	if deleted := ht.DeleteCuckooFilter("seen", "alpha", "missing"); deleted != 1 {
+		t.Fatalf("DeleteCuckooFilter(alpha, missing) = %d, want 1", deleted)
+	}
+	if ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("HasCuckooFilter(alpha after delete) = true, want false")
+	}
+	info, ok := ht.CuckooFilterInfo("seen")
+	if !ok {
+		t.Fatal("CuckooFilterInfo(seen) = false, want true")
+	}
+	if info.Count != 1 || info.BucketSize != cuckooFilterBucketSize || info.FingerprintBits == 0 || info.FingerprintBytes == 0 || info.Capacity < 128 {
+		t.Fatalf("CuckooFilterInfo(seen) = %#v, want populated compact filter", info)
+	}
+
+	if err := ht.UpsertCuckooFilter("seen", 16, 0.1); err != nil {
+		t.Fatalf("UpsertCuckooFilter(replace) error = %v", err)
+	}
+	if ht.HasCuckooFilter("seen", "beta") {
+		t.Fatal("replacement Cuckoo filter retained old value")
+	}
+	if added := ht.AddCuckooFilter("auto", "value"); added != 1 {
+		t.Fatalf("AddCuckooFilter(auto) = %d, want 1", added)
+	}
+	if hval := ht.Get("auto"); !hval.IsCuckooFilter() {
+		t.Fatalf("AddCuckooFilter(auto) stored type %+v, want cuckoo filter", hval)
+	}
+}
+
+func TestCuckooFilterRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	tests := []struct {
+		name              string
+		capacity          uint64
+		falsePositiveRate float64
+	}{
+		{name: "zero capacity", capacity: 0, falsePositiveRate: 0.01},
+		{name: "zero fpr", capacity: 100, falsePositiveRate: 0},
+		{name: "one fpr", capacity: 100, falsePositiveRate: 1},
+		{name: "too small fpr", capacity: 100, falsePositiveRate: math.SmallestNonzeroFloat64},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ht.UpsertCuckooFilter("bad", tt.capacity, tt.falsePositiveRate); err == nil {
+				t.Fatal("UpsertCuckooFilter() error = nil, want error")
+			}
+			if got := ht.Get("bad"); !got.Empty() {
+				t.Fatalf("invalid Cuckoo filter config stored value %+v", got)
+			}
+		})
+	}
+}
+
+func TestCuckooFilterSnapshotValidationRejectsCorruptPayload(t *testing.T) {
+	filter, err := newCuckooFilterData(32, 0.01)
+	if err != nil {
+		t.Fatalf("newCuckooFilterData() error = %v", err)
+	}
+	filter.Add("alpha")
+	snapshot := filter.Snapshot()
+	snapshot.Count++
+	if err := validateCuckooFilterSnapshot(snapshot); err == nil {
+		t.Fatal("validateCuckooFilterSnapshot(mismatched count) error = nil, want error")
+	}
+
+	snapshot = filter.Snapshot()
+	raw, err := base64.StdEncoding.DecodeString(snapshot.Fingerprints)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	binary.LittleEndian.PutUint16(raw[:2], cuckooFilterFingerprintMask(snapshot.FingerprintBits)+1)
+	snapshot.Fingerprints = base64.StdEncoding.EncodeToString(raw)
+	if err := validateCuckooFilterSnapshot(snapshot); err == nil {
+		t.Fatal("validateCuckooFilterSnapshot(invalid fingerprint) error = nil, want error")
+	}
+}
+
+func TestCuckooFilterStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertCuckooFilter("seen", 100, 0.01); err != nil {
+		t.Fatalf("UpsertCuckooFilter() error = %v", err)
+	}
+	idx := ht.Get("seen").Index
+	ht.UpsertString("seen", "value")
+	if !cuckooFilterIndexReleased(ht, idx) {
+		t.Fatalf("overwritten Cuckoo filter index %d was not released", idx)
+	}
+
+	if err := ht.UpsertCuckooFilter("new", 100, 0.01); err != nil {
+		t.Fatalf("UpsertCuckooFilter(new) error = %v", err)
+	}
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("Cuckoo filter storage was not reused: got index %d, want %d", got, idx)
 	}
 }
 

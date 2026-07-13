@@ -305,6 +305,44 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATECF", "RESERVECF", "CFRESERVE":
+		capacity, falsePositiveRate, err := commandCuckooFilterConfig(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertCuckooFilter(key, capacity, falsePositiveRate); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created cuckoo filter"}
+	case "ADDCF", "CFADD":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		added := ht.AddCuckooFilter(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "added cuckoo filter values", Value: strconv.Itoa(added)}
+	case "HASCF", "CFHAS", "CFEXISTS":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		if ht.HasCuckooFilter(key, values[0]) {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	case "DELCF", "REMCF", "CFDEL":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		deleted := ht.DeleteCuckooFilter(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "removed cuckoo filter values", Value: strconv.Itoa(deleted)}
+	case "INFOCF", "CFINFO":
+		info, ok := ht.CuckooFilterInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
 		width, depth, err := commandCountMinSketchConfig(request)
 		if err != nil {
@@ -627,6 +665,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_CUCKOO_FILTER:
+		data, err := json.Marshal(ht.cuckooFilters.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
 		data, err := json.Marshal(ht.countMinSketches.array[hval.Index].Info())
 		if err != nil {
@@ -762,6 +806,44 @@ func commandBloomFilterConfig(request CacheCommandRequest) (uint64, float64, err
 		}
 	}
 	return expectedItems, falsePositiveRate, nil
+}
+
+func commandCuckooFilterConfig(request CacheCommandRequest) (uint64, float64, error) {
+	capacity := DefaultCuckooFilterCapacity
+	falsePositiveRate := DefaultCuckooFilterFalsePositiveRate
+	var err error
+
+	if strings.TrimSpace(request.Value) != "" {
+		capacity, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return 0, 0, errors.New("cuckoo filter capacity must be an unsigned integer")
+		}
+	}
+	if strings.TrimSpace(request.Subkey) != "" {
+		falsePositiveRate, err = strconv.ParseFloat(strings.TrimSpace(request.Subkey), 64)
+		if err != nil {
+			return 0, 0, errors.New("cuckoo filter false positive rate must be a number")
+		}
+	}
+	for _, key := range []string{"capacity", "expected_items", "expected", "items"} {
+		if value, ok := request.Pairs[key]; ok {
+			capacity, err = commandUint64Value(value)
+			if err != nil {
+				return 0, 0, errors.New("cuckoo filter capacity must be an unsigned integer")
+			}
+			break
+		}
+	}
+	for _, key := range []string{"false_positive_rate", "fpr"} {
+		if value, ok := request.Pairs[key]; ok {
+			falsePositiveRate, err = commandFloat64Value(value)
+			if err != nil {
+				return 0, 0, errors.New("cuckoo filter false positive rate must be a number")
+			}
+			break
+		}
+	}
+	return capacity, falsePositiveRate, nil
 }
 
 func commandCountMinSketchConfig(request CacheCommandRequest) (uint64, uint8, error) {
