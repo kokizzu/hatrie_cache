@@ -358,11 +358,16 @@ func commandSnapshotOperation(key string, payload string) (snapshotOperation, er
 	if strings.TrimSpace(payload) == "" {
 		return snapshotOperation{}, errors.New("snapshot entry JSON is required")
 	}
-	entry, err := decodeSnapshotEntryJSON([]byte(payload))
+	data := []byte(payload)
+	hasKey, err := snapshotEntryHasKey(data)
 	if err != nil {
 		return snapshotOperation{}, err
 	}
-	if strings.TrimSpace(entry.Key) == "" {
+	entry, err := decodeSnapshotEntryJSON(data)
+	if err != nil {
+		return snapshotOperation{}, err
+	}
+	if !hasKey {
 		entry.Key = key
 	} else if entry.Key != key {
 		return snapshotOperation{}, errors.New("snapshot entry key does not match request key")

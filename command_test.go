@@ -326,6 +326,14 @@ func TestExecuteCommandInternalSetValidation(t *testing.T) {
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INTERNALSET", Key: "key", Value: mismatch}); got.OK {
 		t.Fatalf("INTERNALSET mismatched key response = %#v, want not ok", got)
 	}
+	emptyKey := `{"key":"","type":"string","string":"value"}`
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INTERNALSET", Key: "key", Value: emptyKey}); got.OK {
+		t.Fatalf("INTERNALSET explicit empty key response = %#v, want not ok", got)
+	}
+	spaceKey := `{"key":" ","type":"string","string":"value"}`
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INTERNALSET", Key: "key", Value: spaceKey}); got.OK {
+		t.Fatalf("INTERNALSET explicit space key response = %#v, want not ok", got)
+	}
 	if got := ht.GetString("key"); got != "" {
 		t.Fatalf("invalid INTERNALSET stored key = %q, want empty", got)
 	}
