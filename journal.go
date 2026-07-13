@@ -285,6 +285,11 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 		return ok
 	case "DEL":
 		return true
+	case "INTERNALSET":
+		_, err := commandSnapshotOperation(key, request.Value)
+		return err == nil
+	case "INTERNALDEL":
+		return true
 	case "EXPIRE":
 		_, ok := requirePositiveTTL(request.TTLSeconds)
 		return ok
@@ -301,6 +306,9 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 		return ok
 	case "POPSLICE", "SHIFTSLICE":
 		return true
+	case "ADDSET", "REMSET":
+		_, ok := commandSliceValues(request)
+		return ok
 	default:
 		return false
 	}

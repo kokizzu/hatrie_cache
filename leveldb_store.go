@@ -1,10 +1,8 @@
 package hatriecache
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -300,21 +298,7 @@ func (trie *HatTrie) levelDBEntries() ([]snapshotEntry, error) {
 }
 
 func decodeLevelDBEntry(data []byte) (snapshotEntry, error) {
-	var entry snapshotEntry
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&entry); err != nil {
-		return snapshotEntry{}, err
-	}
-	var extra struct{}
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return snapshotEntry{}, errors.New("hatriecache: invalid leveldb entry JSON")
-		}
-		return snapshotEntry{}, err
-	}
-	return entry, nil
+	return decodeSnapshotEntryJSON(data)
 }
 
 func levelDBKey(key string) []byte {

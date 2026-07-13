@@ -1,6 +1,8 @@
 package hatriecache
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -168,6 +170,64 @@ func TestExecuteCommandSetOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
+	source := newTestTrie(t)
+	now := time.Unix(1400, 0)
+	source.now = func() time.Time { return now }
+	source.UpsertSet("tags", Set{"go", "cache", "go"})
+	if !source.Expire("tags", time.Minute) {
+		t.Fatal("Expire(tags) = false, want true")
+	}
+
+	dump := source.ExecuteCommand(CacheCommandRequest{Command: "DUMP", Key: "tags"})
+	if !dump.OK || dump.Value == "" {
+		t.Fatalf("DUMP response = %#v, want snapshot entry JSON", dump)
+	}
+	var dumped snapshotEntry
+	if err := json.Unmarshal([]byte(dump.Value), &dumped); err != nil {
+		t.Fatalf("DUMP value JSON error = %v", err)
+	}
+	if dumped.Key != "tags" || dumped.Type != "set" {
+		t.Fatalf("dumped entry = %#v, want tags set", dumped)
+	}
+	if missing := source.ExecuteCommand(CacheCommandRequest{Command: "DUMP", Key: "missing"}); !missing.OK || missing.Value != "" {
+		t.Fatalf("DUMP missing response = %#v, want key not found", missing)
+	}
+
+	target := newTestTrie(t)
+	target.now = func() time.Time { return now }
+	if got := target.ExecuteCommand(CacheCommandRequest{Command: "INTERNALSET", Key: "tags", Value: dump.Value}); !got.OK {
+		t.Fatalf("INTERNALSET response = %#v, want ok", got)
+	}
+	if got := target.GetSet("tags"); !reflect.DeepEqual(got, Set{"cache", "go"}) {
+		t.Fatalf("replicated set = %#v, want cache/go", got)
+	}
+	if got := target.TTL("tags"); got != time.Minute {
+		t.Fatalf("replicated TTL = %s, want 1m", got)
+	}
+	if got := target.ExecuteCommand(CacheCommandRequest{Command: "INTERNALDEL", Key: "tags"}); !got.OK || got.Message != "internal value deleted" {
+		t.Fatalf("INTERNALDEL response = %#v, want deleted", got)
+	}
+	if target.Exists("tags") {
+		t.Fatal("tags exists after INTERNALDEL")
+	}
+}
+
+func TestExecuteCommandInternalSetValidation(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INTERNALSET", Key: "key"}); got.OK {
+		t.Fatalf("INTERNALSET empty response = %#v, want not ok", got)
+	}
+	mismatch := `{"key":"other","type":"string","string":"value"}`
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INTERNALSET", Key: "key", Value: mismatch}); got.OK {
+		t.Fatalf("INTERNALSET mismatched key response = %#v, want not ok", got)
+	}
+	if got := ht.GetString("key"); got != "" {
+		t.Fatalf("invalid INTERNALSET stored key = %q, want empty", got)
+	}
+}
+
 func TestExecuteCommandValidation(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -187,6 +247,7 @@ func TestExecuteCommandValidation(t *testing.T) {
 		{Command: "ADDSET", Key: "key"},
 		{Command: "REMSET", Key: "key"},
 		{Command: "HASSET", Key: "key"},
+		{Command: "INTERNALSET", Key: "key"},
 		{Command: "UNKNOWN", Key: "key"},
 	} {
 		if got := ht.ExecuteCommand(request); got.OK {

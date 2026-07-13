@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,15 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	switch command {
 	case "GET", "GETSTR":
 		value, ok, err := ht.commandValue(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "key not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: value}
+	case "DUMP":
+		value, ok, err := ht.commandDumpEntry(key)
 		if err != nil {
 			return commandError(err.Error())
 		}
@@ -110,6 +120,16 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	case "DEL":
 		if ht.Delete(key) {
 			return CacheCommandResponse{OK: true, Message: "deleted"}
+		}
+		return CacheCommandResponse{OK: true, Message: "key not found"}
+	case "INTERNALSET":
+		if err := ht.commandInternalSet(key, request.Value); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "internal value stored"}
+	case "INTERNALDEL":
+		if ht.Delete(key) {
+			return CacheCommandResponse{OK: true, Message: "internal value deleted"}
 		}
 		return CacheCommandResponse{OK: true, Message: "key not found"}
 	case "TTL":
@@ -273,6 +293,58 @@ func (ht *HatTrie) commandPutMap(key string, fields Map) {
 	idx := ht.maps.Add(fields)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)
+}
+
+func (ht *HatTrie) commandDumpEntry(key string) (string, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekLocked(key)
+	if hval.Empty() {
+		ht.recordReadLocked(false, key)
+		return "", false, nil
+	}
+	entry, err := ht.snapshotEntryLocked(Entry{Key: key, Value: hval})
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return "", false, err
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return "", false, err
+	}
+	ht.recordReadLocked(true, key)
+	return string(data), true, nil
+}
+
+func (ht *HatTrie) commandInternalSet(key string, payload string) error {
+	operation, err := commandSnapshotOperation(key, payload)
+	if err != nil {
+		return err
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	_, err = ht.applySnapshotOperationLocked(operation)
+	return err
+}
+
+func commandSnapshotOperation(key string, payload string) (snapshotOperation, error) {
+	if strings.TrimSpace(payload) == "" {
+		return snapshotOperation{}, errors.New("snapshot entry JSON is required")
+	}
+	entry, err := decodeSnapshotEntryJSON([]byte(payload))
+	if err != nil {
+		return snapshotOperation{}, err
+	}
+	if strings.TrimSpace(entry.Key) == "" {
+		entry.Key = key
+	} else if entry.Key != key {
+		return snapshotOperation{}, errors.New("snapshot entry key does not match request key")
+	}
+	return validateSnapshotEntry(entry)
 }
 
 func (ht *HatTrie) applyCommandTTL(key string, ttlSeconds *int64) (CacheCommandResponse, bool) {

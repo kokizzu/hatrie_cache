@@ -195,6 +195,24 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 	}
 }
 
+func decodeSnapshotEntryJSON(data []byte) (snapshotEntry, error) {
+	var entry snapshotEntry
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&entry); err != nil {
+		return snapshotEntry{}, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return snapshotEntry{}, errors.New("hatriecache: invalid snapshot entry JSON")
+		}
+		return snapshotEntry{}, err
+	}
+	return entry, nil
+}
+
 func (ht *HatTrie) applySnapshotOperation(operation snapshotOperation) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()

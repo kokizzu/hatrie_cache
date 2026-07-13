@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -48,6 +49,37 @@ func TestCommandJournalReplaysMutatingCommands(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysSetAndInternalReplicationCommands(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDSET", Key: "tags", Values: Slice{"go", "cache"}})
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "REMSET", Key: "tags", Value: "go"})
+	payload := `{"key":"replicated","type":"string","string":"value"}`
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INTERNALSET", Key: "replicated", Value: payload}); !got.OK {
+		t.Fatalf("journaled INTERNALSET response = %#v, want ok", got)
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got := replayed.GetSet("tags"); !reflect.DeepEqual(got, Set{"cache"}) {
+		t.Fatalf("replayed tags = %#v, want cache", got)
+	}
+	if got := replayed.GetString("replicated"); got != "value" {
+		t.Fatalf("replayed replicated = %q, want value", got)
+	}
+}
+
 func TestCommandJournalSkipsInvalidAndReadOnlyCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)
@@ -59,6 +91,8 @@ func TestCommandJournalSkipsInvalidAndReadOnlyCommands(t *testing.T) {
 	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "GET", Key: "missing"})
 	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETINT", Key: "counter", Value: "bad"})
 	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "PUSHSLICE", Key: "slice"})
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDSET", Key: "set"})
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INTERNALSET", Key: "replicated", Value: `{"key":"other","type":"string","string":"value"}`})
 
 	entries, err := readCommandJournalEntries(path)
 	if err != nil {

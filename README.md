@@ -107,7 +107,10 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
-`TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, and `GETSET`.
+`TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `DUMP`, `INTERNALSET`,
+and `INTERNALDEL`. `DUMP`, `INTERNALSET`, and `INTERNALDEL` are low-level
+replication primitives that move one key as the same snapshot-entry JSON used by
+snapshot and LevelDB persistence.
 
 Use the HTTP client CLI against a running monitoring server:
 
@@ -119,6 +122,7 @@ make cli ARGS='command -cmd INC -key views'
 make cli ARGS="command -cmd PUTMAP -key user:1 -pairs '{\"name\":\"ivi\",\"age\":32}'"
 make cli ARGS="command -cmd PUSHSLICE -key jobs -values '[\"build\",\"verify\"]'"
 make cli ARGS="command -cmd ADDSET -key tags -values '[\"go\",\"cache\"]'"
+make cli ARGS='command -cmd DUMP -key tags'
 make cli ARGS='snapshot'
 ```
 
@@ -178,9 +182,10 @@ build files have not been generated.
 any type:
   SET/SETSTR/SETINT key value
   SETX/SETSTRX/SETINTX key ttl value
-  EXISTS/GET/GETSTR key
+  EXISTS/GET/GETSTR/DUMP key
    check the value on the hat_map
   DEL key
+  INTERNALSET/INTERNALDEL key
   TTL
    check if key exists -1 if expired or not exists, >0 if has ttl
   EXPIRE/EXPIREAT key
