@@ -24,6 +24,7 @@ char** xs;
 
 ahtable_t* T;
 str_map* M;
+int have_error = 0;
 
 
 void setup()
@@ -80,17 +81,19 @@ void test_ahtable_insert()
         if (*u != v) {
             fprintf(stderr, "[error] tally mismatch (reported: %lu, correct: %lu)\n",
                             *u, v);
+            have_error = 1;
         }
     }
     
     /* delete some keys */
-    for (j = 0; i < k/100; ++j) {
+    for (j = 0; j < k/100; ++j) {
         i = rand() % n;
         ahtable_del(T, xs[i], strlen(xs[i]));
         str_map_del(M, xs[i], strlen(xs[i]));
         u = ahtable_tryget(T, xs[i], strlen(xs[i]));
         if (u) {
             fprintf(stderr, "[error] deleted node found in ahtable\n");
+            have_error = 1;
         }
     }
 
@@ -121,9 +124,11 @@ void test_ahtable_iteration()
         if (*u != v) {
             if (v == 0) {
                 fprintf(stderr, "[error] incorrect iteration (%lu, %lu)\n", *u, v);
+                have_error = 1;
             }
             else {
                 fprintf(stderr, "[error] incorrect iteration tally (%lu, %lu)\n", *u, v);
+                have_error = 1;
             }
         }
 
@@ -137,6 +142,7 @@ void test_ahtable_iteration()
     if (count != M->m) {
         fprintf(stderr, "[error] iterated through %zu element, expected %zu\n",
                 count, M->m);
+        have_error = 1;
     }
 
     ahtable_iter_free(i);
@@ -176,6 +182,7 @@ void test_ahtable_sorted_iteration()
         key = ahtable_iter_key(i, &len);
         if (prev_key != NULL && cmpkey(prev_key, prev_len, key, len) > 0) {
             fprintf(stderr, "[error] iteration is not correctly ordered.\n");
+            have_error = 1;
         }
 
         u  = ahtable_iter_val(i);
@@ -184,9 +191,11 @@ void test_ahtable_sorted_iteration()
         if (*u != v) {
             if (v == 0) {
                 fprintf(stderr, "[error] incorrect iteration (%lu, %lu)\n", *u, v);
+                have_error = 1;
             }
             else {
                 fprintf(stderr, "[error] incorrect iteration tally (%lu, %lu)\n", *u, v);
+                have_error = 1;
             }
         }
 
@@ -216,5 +225,8 @@ int main()
     test_ahtable_sorted_iteration();
     teardown();
 
+    if (have_error) {
+        return -1;
+    }
     return 0;
 }

@@ -1,39 +1,40 @@
-package main
+package hatriecache
 
-// note: there should be no newline before import "C", also do not add code above this
-// cgo types: https://gist.github.com/zchee/b9c99695463d8902cd33
-
-// #cgo LDFLAGS: -L${SRCDIR} -L. -lhat-trie
-// #cgo CFLAGS: -g -Wall
-// #include "hat-trie/hat-trie.h"
-// extern hattrie_t* hattrie_create (void);
-// extern value_t* hattrie_get (hattrie_t*, const char* key, size_t len); // get and set
-// extern void       hattrie_free   (hattrie_t*);
-// extern value_t* hattrie_tryget (hattrie_t*, const char* key, size_t len);
-// extern int hattrie_del(hattrie_t* T, const char* key, size_t len);
+/*
+#cgo CFLAGS: -std=c99 -Wall -Wextra -I${SRCDIR}/luikore__hat-trie/src
+#include <stdlib.h>
+#include "luikore__hat-trie/src/hat-trie.h"
+*/
 import "C"
+
 import (
-	"fmt"
-	"github.com/kokizzu/gotro/A"
-	"github.com/kokizzu/gotro/M"
-	"github.com/kokizzu/gotro/S"
-	"github.com/kokizzu/gotro/X"
+	"runtime"
+	"strconv"
+	"sync"
+	"time"
 	"unsafe"
 )
 
-/////////////
-// HatValue: 5 bytes that saved on the hat_trie
+// HatValue is the compact value stored in the underlying HAT-trie.
+//
+// Index is either an int32 counter value or an index into one of the backing
+// storage pools. Flags stores the value type in the low six bits, with the high
+// two bits reserved for disk and TTL state.
 type HatValue struct {
-	Index int32 // 32bit index to HatTrie.raws or integer counter
-	Flags uint8 // 1bit TTL + 7bit TYPE
+	Index int32
+	Flags uint8
 }
 
-const DATAVALUE_SIZE_BYTE = 5
-const DATAVALUE_TTL_BIT_SHIFT = 8
-const DATAVALUE_DISK_BIT_SHIFT = 7
-const DATAVALUE_TTL_TYPE_BITS = 1 << DATAVALUE_TTL_DISK_BIT_SHIFT - 1
-const DATAVALUE_VALUE_OFFSET = 32
-const DATAVALUE_VALUE_BITS = 1 <<DATAVALUE_VALUE_OFFSET - 1
+const (
+	DATAVALUE_SIZE_BYTE      = 5
+	DATAVALUE_TYPE_BITS      = 6
+	DATAVALUE_DISK_BIT_SHIFT = 6
+	DATAVALUE_TTL_BIT_SHIFT  = 7
+	DATAVALUE_TTL_TYPE_BITS  = uint8((1 << DATAVALUE_TYPE_BITS) - 1)
+	DATAVALUE_VALUE_OFFSET   = 32
+	DATAVALUE_VALUE_BITS     = (uint64(1) << DATAVALUE_VALUE_OFFSET) - 1
+)
+
 const (
 	DATAVALUE_TYPE_NULL uint8 = iota
 	DATAVALUE_TYPE_COUNTER
@@ -41,11 +42,21 @@ const (
 	DATAVALUE_TYPE_RAW_STRING
 	DATAVALUE_TYPE_MAP
 	DATAVALUE_TYPE_SLICE
-	// TODO: add more types (deque, priority queue, etc)
+	// TODO: add more types (deque, priority queue, etc).
 )
 
+type Map = map[string]interface{}
+type Slice = []interface{}
+
+const NoTTL time.Duration = -1
+
+type Entry struct {
+	Key   string
+	Value HatValue
+}
+
 func (hval HatValue) Empty() bool {
-	return hval.Flags == 0 
+	return hval.Flags == 0
 }
 
 func (hval HatValue) Type() uint8 {
@@ -77,45 +88,52 @@ func (hval HatValue) IsSlice() bool {
 }
 
 func (hval HatValue) HasTtl() bool {
-	return (hval.Flags >> DATAVALUE_TTL_BIT_SHIFT) & 1 == 1
+	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
 
 func (hval HatValue) OnDisk() bool {
-	return (hval.Flags >> DATAVALUE_DISK_BIT_SHIFT) & 1 == 1
+	return hval.Flags&(1<<DATAVALUE_DISK_BIT_SHIFT) != 0
 }
 
 func (hval HatValue) String() string {
-	// hval.HasTtl()
-	switch hval.Flags & DATAVALUE_TTL_TYPE_BITS {
+	switch hval.Type() {
 	case DATAVALUE_TYPE_NULL:
-		return `null hat value`
+		return "null hat value"
 	case DATAVALUE_TYPE_COUNTER:
-		return `int32 counter: ` + X.ToS(hval.Index)
+		return "int32 counter: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_RAW_BYTES:
-		return `raw SV at index: ` + X.ToS(hval.Index)
+		return "raw bytes at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_RAW_STRING:
-		return `string at index: ` + X.ToS(hval.Index)
-	//case DATAVALUE_TYPE_MAP:
-	//	return `map at index: ` + X.ToS(hval.Index)
-	//case DATAVALUE_TYPE_SLICE:
-	//	return `slice at index: ` + X.ToS(hval.Index)
+		return "string at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_MAP:
+		return "map at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_SLICE:
+		return "slice at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
-	return `unknown type`
+	return "unknown type"
 }
 
 func (hval HatValue) ToUlong() C.ulong {
-	return C.ulong(uint64(hval.Flags) <<DATAVALUE_VALUE_OFFSET | uint64(hval.Index))
+	encoded := uint64(uint32(hval.Index))
+	encoded |= uint64(hval.Flags) << DATAVALUE_VALUE_OFFSET
+	return C.ulong(encoded)
 }
 
 func (hval *HatValue) FromUlong(ulong C.ulong) {
-	hval.Flags = uint8(ulong >> DATAVALUE_VALUE_OFFSET)
-	hval.Index = int32(ulong & DATAVALUE_VALUE_BITS)
+	encoded := uint64(ulong)
+	hval.Flags = uint8(encoded >> DATAVALUE_VALUE_OFFSET)
+	hval.Index = int32(uint32(encoded & DATAVALUE_VALUE_BITS))
 }
 
+func (hval HatValue) toValue() C.value_t {
+	return C.value_t(hval.ToUlong())
+}
 
-/////////////
-// BytesStorage, for string and bytes/serialized values
+func (hval *HatValue) fromValue(value C.value_t) {
+	hval.FromUlong(C.ulong(value))
+}
 
+// BytesStorage stores byte and string values outside the trie.
 type BytesStorage struct {
 	array     [][]byte
 	reusables map[int32]bool
@@ -129,145 +147,364 @@ func CreateBytesStorage() *BytesStorage {
 }
 
 func (bs *BytesStorage) Put(idx int32, value []byte) {
-	bs.array[idx] = value
+	if idx < 0 || int(idx) >= len(bs.array) {
+		return
+	}
+	bs.array[idx] = cloneBytes(value)
+	delete(bs.reusables, idx)
 }
 
 func (bs *BytesStorage) Append(value []byte) int32 {
-	bs.array = append(bs.array,value)
+	bs.array = append(bs.array, cloneBytes(value))
 	return int32(len(bs.array) - 1)
 }
 
 func (bs *BytesStorage) Add(value []byte) int32 {
 	if len(bs.reusables) > 0 {
-		freeIdx := int32(0)
 		for idx := range bs.reusables {
-			freeIdx = int32(idx)
-			break
+			bs.array[idx] = cloneBytes(value)
+			delete(bs.reusables, idx)
+			return idx
 		}
-		bs.array[freeIdx] = value
-		delete(bs.reusables,freeIdx)
-		return freeIdx
 	}
 	return bs.Append(value)
 }
 
 func (bs *BytesStorage) Del(idx int32) {
+	if idx < 0 || int(idx) >= len(bs.array) {
+		return
+	}
 	bs.array[idx] = nil
 	bs.reusables[idx] = true
 }
 
-/////////////
-// MapStorage
+// MapStorage stores map values outside the trie.
 type MapStorage struct {
-	array     []M.SX
+	array     []Map
 	reusables map[int32]bool
 }
 
-func CreateMapStorage() *MapStorage{
+func CreateMapStorage() *MapStorage {
 	return &MapStorage{
-		array:     []M.SX{},
+		array:     []Map{},
 		reusables: map[int32]bool{},
 	}
 }
 
-func (ms *MapStorage) Put(idx int32, value M.SX) {
-	ms.array[idx] = value
+func (ms *MapStorage) Put(idx int32, value Map) {
+	if idx < 0 || int(idx) >= len(ms.array) {
+		return
+	}
+	ms.array[idx] = cloneMap(value)
+	delete(ms.reusables, idx)
 }
 
-func (ms *MapStorage) Append(value M.SX) int32 {
-	ms.array = append(ms.array,value)
+func (ms *MapStorage) Append(value Map) int32 {
+	ms.array = append(ms.array, cloneMap(value))
 	return int32(len(ms.array) - 1)
 }
 
-func (ms *MapStorage) Add(value M.SX) int32 {
+func (ms *MapStorage) Add(value Map) int32 {
 	if len(ms.reusables) > 0 {
-		freeIdx := int32(0)
 		for idx := range ms.reusables {
-			freeIdx = int32(idx)
-			break
+			ms.array[idx] = cloneMap(value)
+			delete(ms.reusables, idx)
+			return idx
 		}
-		ms.array[freeIdx] = value
-		delete(ms.reusables,freeIdx)
-		return freeIdx
 	}
 	return ms.Append(value)
 }
 
 func (ms *MapStorage) Del(idx int32) {
+	if idx < 0 || int(idx) >= len(ms.array) {
+		return
+	}
 	ms.array[idx] = nil
 	ms.reusables[idx] = true
 }
 
-/////////////
-// SliceStorage
+// SliceStorage stores slice values outside the trie.
 type SliceStorage struct {
-	array     []A.X
+	array     []Slice
 	reusables map[int32]bool
 }
 
-func CreateSliceStorage() *SliceStorage{
+func CreateSliceStorage() *SliceStorage {
 	return &SliceStorage{
-		array:     []A.X{},
+		array:     []Slice{},
 		reusables: map[int32]bool{},
 	}
 }
 
-func (ss *SliceStorage) Put(idx int32, value A.X) {
-	ss.array[idx] = value
+func (ss *SliceStorage) Put(idx int32, value Slice) {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return
+	}
+	ss.array[idx] = cloneSlice(value)
+	delete(ss.reusables, idx)
 }
 
-func (ss *SliceStorage) Append(value A.X) int32 {
-	ss.array = append(ss.array,value)
+func (ss *SliceStorage) Append(value Slice) int32 {
+	ss.array = append(ss.array, cloneSlice(value))
 	return int32(len(ss.array) - 1)
 }
 
-func (ss *SliceStorage) Add(value A.X) int32 {
+func (ss *SliceStorage) Add(value Slice) int32 {
 	if len(ss.reusables) > 0 {
-		freeIdx := int32(0)
 		for idx := range ss.reusables {
-			freeIdx = int32(idx)
-			break
+			ss.array[idx] = cloneSlice(value)
+			delete(ss.reusables, idx)
+			return idx
 		}
-		ss.array[freeIdx] = value
-		delete(ss.reusables,freeIdx)
-		return freeIdx
 	}
 	return ss.Append(value)
 }
 
 func (ss *SliceStorage) Del(idx int32) {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return
+	}
 	ss.array[idx] = nil
 	ss.reusables[idx] = true
 }
 
-/////////////
-// HAT-Trie
+// HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing
+// pools referenced by compact HatValue records.
 type HatTrie struct {
-	root *C.struct_hattrie_t_
-	raws *BytesStorage
-	maps *MapStorage
-	slices *SliceStorage
+	mu      sync.RWMutex
+	root    *C.hattrie_t
+	raws    *BytesStorage
+	maps    *MapStorage
+	slices  *SliceStorage
+	expires map[string]time.Time
+	now     func() time.Time
 }
 
 func CreateHatTrie() *HatTrie {
-	return &HatTrie{
-		root: C.hattrie_create(), 
-		raws: CreateBytesStorage(),
-		maps: CreateMapStorage(),
-		slices: CreateSliceStorage(),
+	ht := &HatTrie{
+		root:    C.hattrie_create(),
+		raws:    CreateBytesStorage(),
+		maps:    CreateMapStorage(),
+		slices:  CreateSliceStorage(),
+		expires: map[string]time.Time{},
+		now:     time.Now,
 	}
+	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
+	return ht
 }
 
 func (ht *HatTrie) Destroy() {
+	if ht == nil {
+		return
+	}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if ht.root == nil {
+		return
+	}
+	runtime.SetFinalizer(ht, nil)
 	C.hattrie_free(ht.root)
+	ht.root = nil
+	ht.raws = nil
+	ht.maps = nil
+	ht.slices = nil
+	ht.expires = nil
+	ht.now = nil
 }
 
-func (ht *HatTrie) upsertLocation(key string) *C.ulong {
+func (ht *HatTrie) Size() int {
+	ht.mu.RLock()
+	defer ht.mu.RUnlock()
+
+	ht.ensureOpen()
+	return int(C.hattrie_size(ht.root))
+}
+
+// Expire sets a relative TTL for an existing key. A non-positive TTL deletes
+// an existing key immediately. It returns false when the key is missing or has
+// already expired.
+func (ht *HatTrie) Expire(key string, ttl time.Duration) bool {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if ttl <= 0 {
+		return ht.deleteLocked(key)
+	}
+	return ht.expireAtLocked(key, ht.currentTime().Add(ttl))
+}
+
+// ExpireAt sets an absolute expiration time for an existing key. Expiration is
+// enforced when the key is read or mutated.
+func (ht *HatTrie) ExpireAt(key string, at time.Time) bool {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	return ht.expireAtLocked(key, at)
+}
+
+// Persist removes an existing key's expiration.
+func (ht *HatTrie) Persist(key string) bool {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		delete(ht.expires, key)
+		return false
+	}
+
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
+		return false
+	}
+	if _, ok := ht.expires[key]; !ok {
+		return false
+	}
+
+	delete(ht.expires, key)
+	hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+	*rawPtr = hval.toValue()
+	return true
+}
+
+// TTL returns the remaining TTL for key, or NoTTL when the key is missing,
+// expired, or has no expiration.
+func (ht *HatTrie) TTL(key string) time.Duration {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		delete(ht.expires, key)
+		return NoTTL
+	}
+
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
+		return NoTTL
+	}
+
+	expiresAt, ok := ht.expires[key]
+	if !ok {
+		return NoTTL
+	}
+	ttl := expiresAt.Sub(ht.currentTime())
+	if ttl <= 0 {
+		ht.deleteKnownLocked(key, hval)
+		return NoTTL
+	}
+	return ttl
+}
+
+// VacuumExpired removes expired keys immediately and returns the number of
+// trie entries removed. It is safe to call concurrently with other operations.
+func (ht *HatTrie) VacuumExpired() int {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	return ht.vacuumExpiredLocked()
+}
+
+// StartExpirationCleaner starts a background cleaner that periodically removes
+// expired keys. The returned stop function is idempotent and waits for the
+// cleaner goroutine to exit.
+func (ht *HatTrie) StartExpirationCleaner(interval time.Duration) func() {
+	if interval <= 0 {
+		panic("hatriecache: expiration cleaner interval must be positive")
+	}
+
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	var stopOnce sync.Once
+
+	go func() {
+		defer close(stopped)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				ht.VacuumExpired()
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	return func() {
+		stopOnce.Do(func() {
+			close(done)
+			<-stopped
+		})
+	}
+}
+
+// Keys returns all non-expired keys. When sorted is true, keys are returned in
+// bytewise lexicographic order.
+func (ht *HatTrie) Keys(sorted bool) []string {
+	return ht.KeysWithPrefix("", sorted)
+}
+
+// KeysWithPrefix returns all non-expired keys that start with prefix. Prefixes
+// and keys may contain NUL bytes.
+func (ht *HatTrie) KeysWithPrefix(prefix string, sorted bool) []string {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	entries := ht.entriesWithPrefixLocked(prefix, sorted)
+	keys := make([]string, len(entries))
+	for i, entry := range entries {
+		keys[i] = entry.Key
+	}
+	return keys
+}
+
+// Entries returns all non-expired key/value metadata pairs. Returned HatValue
+// records are copies and remain valid after later trie mutations.
+func (ht *HatTrie) Entries(sorted bool) []Entry {
+	return ht.EntriesWithPrefix("", sorted)
+}
+
+// EntriesWithPrefix returns all non-expired key/value metadata pairs whose keys
+// start with prefix.
+func (ht *HatTrie) EntriesWithPrefix(prefix string, sorted bool) []Entry {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	return ht.entriesWithPrefixLocked(prefix, sorted)
+}
+
+func (ht *HatTrie) ensureOpen() {
+	if ht == nil || ht.root == nil {
+		panic("hatriecache: use of destroyed HatTrie")
+	}
+}
+
+func (ht *HatTrie) currentTime() time.Time {
+	if ht.now == nil {
+		return time.Now()
+	}
+	return ht.now()
+}
+
+func (ht *HatTrie) upsertLocation(key string) *C.value_t {
+	ht.ensureOpen()
 	cstr := C.CString(key)
 	defer C.free(unsafe.Pointer(cstr))
-	
-	iter := C.hattrie_get(ht.root, cstr, DATAVALUE_SIZE_BYTE)
-	return iter
+
+	return C.hattrie_get(ht.root, cstr, C.size_t(len(key)))
+}
+
+func (ht *HatTrie) tryLocation(key string) *C.value_t {
+	ht.ensureOpen()
+	cstr := C.CString(key)
+	defer C.free(unsafe.Pointer(cstr))
+
+	return C.hattrie_tryget(ht.root, cstr, C.size_t(len(key)))
 }
 
 func (ht *HatTrie) returnStorage(hval HatValue) {
@@ -284,347 +521,569 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 	}
 }
 
-func (ht *HatTrie) Get(key string) HatValue {
+func (ht *HatTrie) upsertFreshLocation(key string) (*C.value_t, HatValue) {
+	rawPtr := ht.upsertLocation(key)
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if hval.Empty() {
+		delete(ht.expires, key)
+		return rawPtr, hval
+	}
+	if ht.expireIfNeededLocked(key, hval) {
+		rawPtr = ht.upsertLocation(key)
+		hval = HatValue{}
+	}
+	return rawPtr, hval
+}
+
+func (ht *HatTrie) expireAtLocked(key string, at time.Time) bool {
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		delete(ht.expires, key)
+		return false
+	}
+
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
+		return false
+	}
+
+	ht.expires[key] = at
+	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
+	*rawPtr = hval.toValue()
+	return true
+}
+
+func (ht *HatTrie) expireIfNeededLocked(key string, hval HatValue) bool {
+	expiresAt, ok := ht.expires[key]
+	if !ok {
+		return false
+	}
+	if ht.currentTime().Before(expiresAt) {
+		return false
+	}
+	return ht.deleteKnownLocked(key, hval)
+}
+
+func (ht *HatTrie) deleteLocked(key string) bool {
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		delete(ht.expires, key)
+		return false
+	}
+
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	return ht.deleteKnownLocked(key, hval)
+}
+
+func (ht *HatTrie) deleteKnownLocked(key string, hval HatValue) bool {
 	cstr := C.CString(key)
 	defer C.free(unsafe.Pointer(cstr))
-	
-	iter := C.hattrie_tryget(ht.root, cstr, DATAVALUE_SIZE_BYTE)
+
+	if C.hattrie_del(ht.root, cstr, C.size_t(len(key))) != 0 {
+		return false
+	}
+	delete(ht.expires, key)
+	ht.returnStorage(hval)
+	return true
+}
+
+func (ht *HatTrie) vacuumExpiredLocked() int {
+	ht.ensureOpen()
+
+	now := ht.currentTime()
+	removed := 0
+	for key, expiresAt := range ht.expires {
+		if now.Before(expiresAt) {
+			continue
+		}
+
+		rawPtr := ht.tryLocation(key)
+		if rawPtr == nil {
+			delete(ht.expires, key)
+			continue
+		}
+
+		hval := HatValue{}
+		hval.fromValue(*rawPtr)
+		if ht.deleteKnownLocked(key, hval) {
+			removed++
+		}
+	}
+	return removed
+}
+
+func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
+	ht.ensureOpen()
+
+	var iter *C.hattrie_iter_t
+	if prefix == "" {
+		iter = C.hattrie_iter_begin(ht.root, C.bool(sorted))
+	} else {
+		cprefix := C.CString(prefix)
+		defer C.free(unsafe.Pointer(cprefix))
+		iter = C.hattrie_iter_with_prefix(ht.root, C.bool(sorted), cprefix, C.size_t(len(prefix)))
+	}
+
+	type expiredEntry struct {
+		key   string
+		value HatValue
+	}
+	entries := []Entry{}
+	expired := []expiredEntry{}
+
+	for !bool(C.hattrie_iter_finished(iter)) {
+		var keyLen C.size_t
+		keyPtr := C.hattrie_iter_key(iter, &keyLen)
+		key := string(C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen)))
+		if prefix != "" {
+			key = prefix + key
+		}
+
+		valPtr := C.hattrie_iter_val(iter)
+		hval := HatValue{}
+		if valPtr != nil {
+			hval.fromValue(*valPtr)
+		}
+
+		if expiresAt, ok := ht.expires[key]; ok && !ht.currentTime().Before(expiresAt) {
+			expired = append(expired, expiredEntry{key: key, value: hval})
+		} else {
+			entries = append(entries, Entry{Key: key, Value: hval})
+		}
+		C.hattrie_iter_next(iter)
+	}
+	C.hattrie_iter_free(iter)
+
+	for _, entry := range expired {
+		ht.deleteKnownLocked(entry.key, entry.value)
+	}
+
+	return entries
+}
+
+func (ht *HatTrie) Get(key string) HatValue {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	return ht.getLocked(key)
+}
+
+func (ht *HatTrie) getLocked(key string) HatValue {
+	iter := ht.tryLocation(key)
 	hval := HatValue{}
 	if iter != nil {
-		hval.FromUlong(*iter)
+		hval.fromValue(*iter)
+		if ht.expireIfNeededLocked(key, hval) {
+			return HatValue{}
+		}
+	} else {
+		delete(ht.expires, key)
 	}
 	return hval
 }
 
-// delete value at key
+// Delete removes key and returns whether it existed.
+func (ht *HatTrie) Delete(key string) bool {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	return ht.deleteLocked(key)
+}
+
+// Del removes key if it exists.
 func (ht *HatTrie) Del(key string) {
-	cstr := C.CString(key)
-	defer C.free(unsafe.Pointer(cstr))
-	
-	C.hattrie_del(ht.root, cstr, DATAVALUE_SIZE_BYTE)
+	ht.Delete(key)
 }
 
-/////////////
-//// counter type operations
-
-// set type as counter at key
+// UpsertCounter sets key to an int32 counter.
 func (ht *HatTrie) UpsertCounter(key string, val int32) {
-	*ht.upsertLocation(key) = HatValue{Index: val, Flags: DATAVALUE_TYPE_COUNTER}.ToUlong()
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if !hval.IsCounter() {
+		ht.returnStorage(hval)
+	}
+	delete(ht.expires, key)
+	*rawPtr = HatValue{Index: val, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
 }
 
-// increment counter at key, if type not type of counter, will reset the value to "by"
+// IncrementCounter increments key by by. If key is not a counter, it is reset
+// to by.
 func (ht *HatTrie) IncrementCounter(key string, by int32) {
-	hval := HatValue{}
-	rawPtr := ht.upsertLocation(key)
-	hval.FromUlong(*rawPtr)
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsCounter() {
-		hval.Index += by		
+		hval.Index += by
 	} else {
+		ht.returnStorage(hval)
+		delete(ht.expires, key)
 		hval.Flags = DATAVALUE_TYPE_COUNTER
 		hval.Index = by
 	}
-	*rawPtr = hval.ToUlong()
+	*rawPtr = hval.toValue()
 }
 
-// return 0 if type not counter
-func (ht *HatTrie) GetCounter(s string) int32 {
-	hval := ht.Get(s)
+// GetCounter returns 0 if key is missing or does not hold a counter.
+func (ht *HatTrie) GetCounter(key string) int32 {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
 	if hval.IsCounter() {
 		return hval.Index
 	}
 	return 0
 }
 
-/////////////
-//// string type operations
-
-// set type as string/raw index at key
+// UpsertString sets key to a string.
 func (ht *HatTrie) UpsertString(key string, val string) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsStringAtRaws() {
+		ht.raws.Put(hval.Index, []byte(val))
+		delete(ht.expires, key)
+		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+		*rawPtr = hval.toValue()
+		return
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
 	idx := ht.raws.Add([]byte(val))
-	*ht.upsertLocation(key) = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.ToUlong()
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 }
 
-// append string at key, if type not string, will reset the value to "str"
+// AppendString appends str to key. If key is not a string, it is reset to str.
 func (ht *HatTrie) AppendString(key string, str string) {
-	hval := HatValue{}
-	rawPtr := ht.upsertLocation(key)
-	hval.FromUlong(*rawPtr)
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
-		ht.raws.Put(hval.Index,[]byte(string(old) + str))
-	} else {
-		ht.returnStorage(hval)
-		hval.Index = ht.raws.Add([]byte(str))
-		hval.Flags = DATAVALUE_TYPE_RAW_STRING
-		*rawPtr = hval.ToUlong()
+		next := make([]byte, 0, len(old)+len(str))
+		next = append(next, old...)
+		next = append(next, str...)
+		ht.raws.Put(hval.Index, next)
+		*rawPtr = hval.toValue()
+		return
 	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
+	idx := ht.raws.Add([]byte(str))
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 }
 
-// prepend string at key, if type not string, will reset the value to "str"
+// PrependString prepends str to key. If key is not a string, it is reset to str.
 func (ht *HatTrie) PrependString(key string, str string) {
-	hval := HatValue{}
-	rawPtr := ht.upsertLocation(key)
-	hval.FromUlong(*rawPtr)
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
-		ht.raws.Put(hval.Index,[]byte(str+string(old)))
-	} else {
-		ht.returnStorage(hval)
-		hval.Index = ht.raws.Add([]byte(str))
-		hval.Flags = DATAVALUE_TYPE_RAW_STRING
-		*rawPtr = hval.ToUlong()
+		next := make([]byte, 0, len(str)+len(old))
+		next = append(next, str...)
+		next = append(next, old...)
+		ht.raws.Put(hval.Index, next)
+		*rawPtr = hval.toValue()
+		return
 	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
+	idx := ht.raws.Add([]byte(str))
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 }
 
-// return empty string if type not string/counter
+// GetString returns an empty string if key is missing or not a string/counter.
 func (ht *HatTrie) GetString(key string) string {
-	hval := ht.Get(key)
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
 	if hval.IsStringAtRaws() {
-		return string(ht.raws.array[hval.Index]) 
-	} else if hval.IsCounter() {
-		return X.ToS(hval.Index)
+		return string(ht.raws.array[hval.Index])
 	}
-	return ``
+	if hval.IsCounter() {
+		return strconv.FormatInt(int64(hval.Index), 10)
+	}
+	return ""
 }
 
-/////////////
-//// bytes (or serialized) operations
-
-// serialized type (bytes)
+// UpsertBytes sets key to a byte slice.
 func (ht *HatTrie) UpsertBytes(key string, val []byte) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsBytesAtRaws() {
+		ht.raws.Put(hval.Index, val)
+		delete(ht.expires, key)
+		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+		*rawPtr = hval.toValue()
+		return
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
 	idx := ht.raws.Add(val)
-	*ht.upsertLocation(key) = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}.ToUlong()
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}.toValue()
 }
 
-// return nil if type not string/bytes
+// GetBytes returns nil if key is missing or not a string/bytes value.
 func (ht *HatTrie) GetBytes(key string) []byte {
-	hval := ht.Get(key)
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
 	if hval.IsStringAtRaws() || hval.IsBytesAtRaws() {
-		return ht.raws.array[hval.Index] 
-	} 
+		return cloneBytes(ht.raws.array[hval.Index])
+	}
 	return nil
 }
 
-/////////////
-//// maps operations
+func (ht *HatTrie) UpsertMap(key string, val Map) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
 
-func (ht *HatTrie) UpsertMap(key string, val M.SX) {
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsMap() {
+		ht.maps.Put(hval.Index, val)
+		delete(ht.expires, key)
+		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+		*rawPtr = hval.toValue()
+		return
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
 	idx := ht.maps.Add(val)
-	*ht.upsertLocation(key) = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.ToUlong()
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 }
 
 func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
-	hval := HatValue{}
-	rawPtr := ht.upsertLocation(key)
-	hval.FromUlong(*rawPtr)
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsMap() {
 		old := ht.maps.array[hval.Index]
+		if old == nil {
+			old = Map{}
+		}
 		old[subkey] = val
-	} else {
-		ht.returnStorage(hval)
-		hval.Index = ht.maps.Add(M.SX{key:val})
-		hval.Flags = DATAVALUE_TYPE_RAW_BYTES
-		*rawPtr = hval.ToUlong()
-	}	
+		ht.maps.Put(hval.Index, old)
+		*rawPtr = hval.toValue()
+		return
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
+	idx := ht.maps.Add(Map{subkey: val})
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 }
 
 func (ht *HatTrie) PeekMap(key, subkey string) interface{} {
-	m := ht.GetMap(key) 
-	if m != nil {
-		return m[subkey]
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	m, ok := ht.mapRefLocked(key)
+	if !ok {
+		return nil
 	}
-	return nil
+	return m[subkey]
 }
 
 func (ht *HatTrie) TakeMap(key, subkey string) interface{} {
-	m := ht.GetMap(key) 
-	if m != nil {
-		val := m[subkey]
-		delete(m,subkey)
-		return val
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	m, ok := ht.mapRefLocked(key)
+	if !ok {
+		return nil
 	}
-	return nil
+	val := m[subkey]
+	delete(m, subkey)
+	return val
 }
 
-func (ht *HatTrie) GetMap(key string) M.SX {
-	hval := ht.Get(key)
+func (ht *HatTrie) GetMap(key string) Map {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	m, ok := ht.mapRefLocked(key)
+	if !ok {
+		return nil
+	}
+	return cloneMap(m)
+}
+
+func (ht *HatTrie) mapRefLocked(key string) (Map, bool) {
+	hval := ht.getLocked(key)
 	if hval.IsMap() {
-		return ht.maps.array[hval.Index]
+		return ht.maps.array[hval.Index], true
 	}
-	return nil
+	return nil, false
 }
 
-/////////////
-//// slices 
+func (ht *HatTrie) UpsertSlice(key string, val Slice) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
 
-func (ht *HatTrie) UpsertSlice(key string, val A.X) {
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsSlice() {
+		ht.slices.Put(hval.Index, val)
+		delete(ht.expires, key)
+		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+		*rawPtr = hval.toValue()
+		return
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
 	idx := ht.slices.Add(val)
-	*ht.upsertLocation(key) = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.ToUlong()
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 }
 
-func (ht *HatTrie) PushSlice(key string, val interface{}, vals... interface{}) {
-	hval := HatValue{}
-	rawPtr := ht.upsertLocation(key)
-	hval.FromUlong(*rawPtr)
+func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsSlice() {
 		old := ht.slices.array[hval.Index]
-		old = append(old,val)
+		old = append(old, val)
 		if len(vals) > 0 {
-			old = append(old,vals...)
+			old = append(old, vals...)
 		}
-		ht.slices.Put(hval.Index,old)
-	} else {
-		ht.returnStorage(hval)
-		arr := A.X{val}
-		if len(vals) > 0 {
-			arr = append(arr,vals...)
-		}		
-		hval.Index = ht.slices.Add(arr)
-		hval.Flags = DATAVALUE_TYPE_RAW_STRING
-		*rawPtr = hval.ToUlong()
-	}	
+		ht.slices.Put(hval.Index, old)
+		*rawPtr = hval.toValue()
+		return
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
+	arr := Slice{val}
+	if len(vals) > 0 {
+		arr = append(arr, vals...)
+	}
+	idx := ht.slices.Add(arr)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 }
 
 func (ht *HatTrie) PopSlice(key string) interface{} {
-	hval := HatValue{}
-	rawPtr := ht.upsertLocation(key)
-	hval.FromUlong(*rawPtr)
-	if hval.IsSlice() {
-		old := ht.slices.array[hval.Index]
-		last := len(old) - 1
-		if last > -1 {
-			val := old[last]
-			old = old[:last]
-			ht.slices.Put(hval.Index,old)
-			return val 
-		}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
+	if !hval.IsSlice() {
+		return nil
 	}
-	return nil
+
+	old := ht.slices.array[hval.Index]
+	last := len(old) - 1
+	if last < 0 {
+		return nil
+	}
+	val := old[last]
+	ht.slices.Put(hval.Index, old[:last])
+	return val
 }
 
 func (ht *HatTrie) ShiftSlice(key string) interface{} {
-	hval := HatValue{}
-	rawPtr := ht.upsertLocation(key)
-	hval.FromUlong(*rawPtr)
-	if hval.IsSlice() {
-		old := ht.slices.array[hval.Index]
-		if len(old) > 0 {
-			val := old[0]
-			old = old[1:]
-			ht.slices.Put(hval.Index,old)
-			return val 
-		}
-	} 
-	return nil
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
+	if !hval.IsSlice() {
+		return nil
+	}
+
+	old := ht.slices.array[hval.Index]
+	if len(old) == 0 {
+		return nil
+	}
+	val := old[0]
+	ht.slices.Put(hval.Index, old[1:])
+	return val
 }
 
 func (ht *HatTrie) HeadSlice(key string) interface{} {
-	sl := ht.GetSlice(key)
-	if sl != nil {
-		if len(sl) > 0 {
-			return sl[0]
-		}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	sl, ok := ht.sliceRefLocked(key)
+	if ok && len(sl) > 0 {
+		return sl[0]
 	}
 	return nil
 }
 
 func (ht *HatTrie) TailSlice(key string) interface{} {
-	sl := ht.GetSlice(key)
-	if sl != nil {
-		last := len(sl)-1
-		if last > -1 {
-			return sl[last]
-		}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	sl, ok := ht.sliceRefLocked(key)
+	if ok && len(sl) > 0 {
+		return sl[len(sl)-1]
 	}
 	return nil
 }
 
-func (ht *HatTrie) GetSlice(key string) A.X {
-	hval := ht.Get(key)
+func (ht *HatTrie) GetSlice(key string) Slice {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	sl, ok := ht.sliceRefLocked(key)
+	if !ok {
+		return nil
+	}
+	return cloneSlice(sl)
+}
+
+func (ht *HatTrie) sliceRefLocked(key string) (Slice, bool) {
+	hval := ht.getLocked(key)
 	if hval.IsSlice() {
-		return ht.slices.array[hval.Index]
+		return ht.slices.array[hval.Index], true
 	}
-	return nil
+	return nil, false
 }
 
+func cloneBytes(value []byte) []byte {
+	if value == nil {
+		return nil
+	}
+	out := make([]byte, len(value))
+	copy(out, value)
+	return out
+}
 
-// TODO: add sync to each operation, because all operation not thread safe
+func cloneMap(value Map) Map {
+	if value == nil {
+		return nil
+	}
+	out := make(Map, len(value))
+	for key, val := range value {
+		out[key] = val
+	}
+	return out
+}
 
-func main() {
-	// create and destroy
-	h := CreateHatTrie()
-	defer h.Destroy()
-	
-	// counter test
-	fmt.Println(`
--- counter test`)
-	const key1= `test`
-	h.UpsertCounter(key1, 5) // upsert
-	fmt.Println(h.Get(key1)) // get raw hatValue
-	fmt.Println(h.GetString(key1) + ` get as string`)
-	h.IncrementCounter(key1, -2)    // increment
-	fmt.Println(h.GetCounter(key1)) // get
-	h.Del(key1)                     // delete	
-	fmt.Println(h.Get(key1))        // check if deleted
-	
-	// string test
-	fmt.Println(`
--- string test`)
-	const key2= `foo`
-	h.UpsertString(key2, `eat`) // set
-	fmt.Println(h.GetString(key2))
-	h.AppendString(key2, ` nasi`) // append
-	fmt.Println(h.GetString(key2))
-	h.PrependString(key2, `i `) // prepend
-	fmt.Println(h.GetString(key2))
-	h.Del(key2)                            // delete
-	h.AppendString(key2, `mie ayam jamur`) // append again
-	fmt.Println(h.GetString(key2))
-	h.Del(key2)                        // delete
-	h.PrependString(key2, `pizza hut`) // prepend again
-	fmt.Println(h.GetString(key2))
-	
-	// serialized value test (without flatbuffer/fastbinaryencoding)
-	fmt.Println(`
--- bytes test`)
-	p1 := M.SX{`name`: `koki`, `age`: 32}
-	const key3= `test3`
-	h.UpsertBytes(key3, []byte(X.ToJson(p1)))   // upsert
-	p2 := S.JsonToMap(string(h.GetBytes(key3))) // get
-	fmt.Println(p2)
-	
-	// map test
-	fmt.Println(`
--- map test`)
-	const key4 = `tes`
-	h.UpsertMap(key4, M.SX{`test`:123}) // set
-	fmt.Println(h.GetMap(key4))
-	h.PutMap(key4, `name`, `ivi`) // put
-	fmt.Println(h.GetMap(key4))
-	v := h.PeekMap(key4,`test`) // peek
-	fmt.Println(v)
-	v = h.TakeMap(key4,`test`) // take
-	fmt.Println(h.GetMap(key4))
-	
-	// slice test
-	fmt.Println(`
--- slice test`)
-	const key5 = `slicetoy`
-	h.UpsertSlice(key5, A.X{1,2,`whoa`})
-	fmt.Println(h.GetSlice(key5))
-	h.PushSlice(key5,`nyaa`, 4, 5) // push
-	fmt.Println(h.GetSlice(key5))
-	v = h.ShiftSlice(key5) // shift
-	fmt.Println(v)
-	fmt.Println(h.GetSlice(key5))
-	v = h.PopSlice(key5) // pop
-	fmt.Println(v)
-	fmt.Println(h.GetSlice(key5))
-	v = h.HeadSlice(key5) // front
-	fmt.Println(v)
-	fmt.Println(h.GetSlice(key5))
-	v = h.TailSlice(key5) // tail
-	fmt.Println(v)
-	fmt.Println(h.GetSlice(key5))
-
+func cloneSlice(value Slice) Slice {
+	if value == nil {
+		return nil
+	}
+	out := make(Slice, len(value))
+	copy(out, value)
+	return out
 }

@@ -243,11 +243,15 @@ static void hattrie_split(hattrie_t* T, node_ptr parent, node_ptr node)
     all_m   = ahtable_size(node.b);
     left_m  = cs[j];
     right_m = all_m - left_m;
-    int d;
+    unsigned int d, cur_d;
 
     while (j + 1 < node.b->c1) {
-        d = abs((int) (left_m + cs[j + 1]) - (int) (right_m - cs[j + 1]));
-        if (d <= abs(left_m - right_m) && left_m + cs[j + 1] < all_m) {
+        unsigned int next_left_m  = left_m + cs[j + 1];
+        unsigned int next_right_m = right_m - cs[j + 1];
+        d = next_left_m > next_right_m ?
+            next_left_m - next_right_m : next_right_m - next_left_m;
+        cur_d = left_m > right_m ? left_m - right_m : right_m - left_m;
+        if (d <= cur_d && next_left_m < all_m) {
             j += 1;
             left_m  += cs[j];
             right_m -= cs[j];

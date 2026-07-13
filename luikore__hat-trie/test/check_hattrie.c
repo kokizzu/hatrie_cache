@@ -250,6 +250,7 @@ void test_trie_non_ascii()
     u = hattrie_tryget(T, txt, strlen(txt));
     if (*u != 10){
         fprintf(stderr, "can't store non-ascii strings\n");
+        have_error = 1;
     }
     hattrie_free(T);
 
@@ -302,9 +303,9 @@ void test_trie_walk()
     char* txt = "hello world20";
     hattrie_walk(T, txt, strlen(txt), &data, trie_walk_cb);
     EXPECT(data.size == 2);
-    EXPECT(data.lens[0] = strlen(txt3));
+    EXPECT(data.lens[0] == strlen(txt3));
     EXPECT(data.vals[0] == 3);
-    EXPECT(data.lens[1] = strlen(txt2));
+    EXPECT(data.lens[1] == strlen(txt2));
     EXPECT(data.vals[1] == 2);
 #undef EXPECT
 

@@ -1,0 +1,684 @@
+package hatriecache
+
+import (
+	"bytes"
+	"reflect"
+	"sort"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+)
+
+func newTestTrie(t *testing.T) *HatTrie {
+	t.Helper()
+	ht := CreateHatTrie()
+	t.Cleanup(ht.Destroy)
+	return ht
+}
+
+func TestHatValueRoundTripPreservesNegativeCountersAndFlags(t *testing.T) {
+	in := HatValue{Index: -42, Flags: DATAVALUE_TYPE_COUNTER | (1 << DATAVALUE_TTL_BIT_SHIFT)}
+	var out HatValue
+	out.FromUlong(in.ToUlong())
+
+	if out != in {
+		t.Fatalf("round trip mismatch: got %+v, want %+v", out, in)
+	}
+	if !out.IsCounter() || !out.HasTtl() {
+		t.Fatalf("decoded flags are wrong: %+v", out)
+	}
+}
+
+func TestCounterOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertCounter("counter", 5)
+	ht.IncrementCounter("counter", -7)
+	if got := ht.GetCounter("counter"); got != -2 {
+		t.Fatalf("GetCounter() = %d, want -2", got)
+	}
+	if got := ht.GetString("counter"); got != "-2" {
+		t.Fatalf("GetString(counter) = %q, want %q", got, "-2")
+	}
+}
+
+func TestKeysUseFullLengthAndSupportNULBytes(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertString("abcde-one", "one")
+	ht.UpsertString("abcde-two", "two")
+	ht.UpsertString("nul\x00key", "zero")
+
+	if got := ht.GetString("abcde-one"); got != "one" {
+		t.Fatalf("first long key = %q, want one", got)
+	}
+	if got := ht.GetString("abcde-two"); got != "two" {
+		t.Fatalf("second long key = %q, want two", got)
+	}
+	if got := ht.GetString("nul\x00key"); got != "zero" {
+		t.Fatalf("NUL-containing key = %q, want zero", got)
+	}
+}
+
+func TestStringOperationsReuseStorage(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertString("key", "middle")
+	idx := ht.Get("key").Index
+	ht.AppendString("key", "-tail")
+	ht.PrependString("key", "head-")
+
+	if got := ht.GetString("key"); got != "head-middle-tail" {
+		t.Fatalf("GetString() = %q, want head-middle-tail", got)
+	}
+	if got := ht.Get("key").Index; got != idx {
+		t.Fatalf("string update moved storage index: got %d, want %d", got, idx)
+	}
+	if got := len(ht.raws.array); got != 1 {
+		t.Fatalf("raw storage grew during same-type string updates: len=%d", got)
+	}
+}
+
+func TestBytesOperationsCopyInputsAndOutputs(t *testing.T) {
+	ht := newTestTrie(t)
+
+	input := []byte("abc")
+	ht.UpsertBytes("bytes", input)
+	input[0] = 'x'
+
+	got := ht.GetBytes("bytes")
+	if !bytes.Equal(got, []byte("abc")) {
+		t.Fatalf("stored bytes changed with caller input: got %q", got)
+	}
+
+	got[1] = 'y'
+	if again := ht.GetBytes("bytes"); !bytes.Equal(again, []byte("abc")) {
+		t.Fatalf("stored bytes changed through returned slice: got %q", again)
+	}
+}
+
+func TestMapOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.PutMap("map", "name", "ivi")
+	ht.PutMap("map", "age", 32)
+
+	if hval := ht.Get("map"); !hval.IsMap() {
+		t.Fatalf("PutMap on missing key stored type %+v, want map", hval)
+	}
+	if got := ht.PeekMap("map", "name"); got != "ivi" {
+		t.Fatalf("PeekMap() = %v, want ivi", got)
+	}
+	if got := ht.TakeMap("map", "name"); got != "ivi" {
+		t.Fatalf("TakeMap() = %v, want ivi", got)
+	}
+	if got := ht.PeekMap("map", "name"); got != nil {
+		t.Fatalf("PeekMap after TakeMap() = %v, want nil", got)
+	}
+
+	copied := ht.GetMap("map")
+	copied["age"] = 99
+	if got := ht.PeekMap("map", "age"); got != 32 {
+		t.Fatalf("GetMap exposed internal map: got age %v, want 32", got)
+	}
+}
+
+func TestSliceOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.PushSlice("slice", 1, 2, "three")
+	if hval := ht.Get("slice"); !hval.IsSlice() {
+		t.Fatalf("PushSlice on missing key stored type %+v, want slice", hval)
+	}
+	if got := ht.HeadSlice("slice"); got != 1 {
+		t.Fatalf("HeadSlice() = %v, want 1", got)
+	}
+	if got := ht.TailSlice("slice"); got != "three" {
+		t.Fatalf("TailSlice() = %v, want three", got)
+	}
+	if got := ht.ShiftSlice("slice"); got != 1 {
+		t.Fatalf("ShiftSlice() = %v, want 1", got)
+	}
+	if got := ht.PopSlice("slice"); got != "three" {
+		t.Fatalf("PopSlice() = %v, want three", got)
+	}
+	if got := ht.GetSlice("slice"); !reflect.DeepEqual(got, Slice{2}) {
+		t.Fatalf("GetSlice() = %#v, want %#v", got, Slice{2})
+	}
+
+	copied := ht.GetSlice("slice")
+	copied[0] = 99
+	if got := ht.HeadSlice("slice"); got != 2 {
+		t.Fatalf("GetSlice exposed internal slice: got head %v, want 2", got)
+	}
+}
+
+func TestPopAndShiftMissingSliceDoNotCreateKeys(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.PopSlice("missing"); got != nil {
+		t.Fatalf("PopSlice(missing) = %v, want nil", got)
+	}
+	if got := ht.ShiftSlice("missing"); got != nil {
+		t.Fatalf("ShiftSlice(missing) = %v, want nil", got)
+	}
+	if got := ht.Size(); got != 0 {
+		t.Fatalf("missing slice operations created keys: size=%d", got)
+	}
+}
+
+func TestDeleteReleasesBackingStorageForReuse(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertString("old", "value")
+	idx := ht.Get("old").Index
+	if !ht.Delete("old") {
+		t.Fatal("Delete(old) = false, want true")
+	}
+	if got := ht.Get("old"); !got.Empty() {
+		t.Fatalf("deleted key still exists: %+v", got)
+	}
+	if !ht.raws.reusables[idx] {
+		t.Fatalf("deleted raw index %d was not marked reusable", idx)
+	}
+
+	ht.UpsertString("new", "value")
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("raw storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertMap("key", Map{"old": true})
+	mapIdx := ht.Get("key").Index
+	ht.UpsertSlice("key", Slice{"new"})
+
+	if hval := ht.Get("key"); !hval.IsSlice() {
+		t.Fatalf("replacement type = %+v, want slice", hval)
+	}
+	if !ht.maps.reusables[mapIdx] {
+		t.Fatalf("replaced map index %d was not marked reusable", mapIdx)
+	}
+}
+
+func TestTTLExpiresOnReadAndReusesStorage(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(100, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("ttl", "value")
+	idx := ht.Get("ttl").Index
+	if !ht.Expire("ttl", 10*time.Second) {
+		t.Fatal("Expire(ttl) = false, want true")
+	}
+	if hval := ht.Get("ttl"); !hval.HasTtl() || !hval.IsStringAtRaws() {
+		t.Fatalf("TTL flag not set on value: %+v", hval)
+	}
+	if got := ht.TTL("ttl"); got != 10*time.Second {
+		t.Fatalf("TTL() = %s, want 10s", got)
+	}
+
+	now = now.Add(11 * time.Second)
+	if got := ht.GetString("ttl"); got != "" {
+		t.Fatalf("expired GetString() = %q, want empty string", got)
+	}
+	if got := ht.Get("ttl"); !got.Empty() {
+		t.Fatalf("expired key still exists: %+v", got)
+	}
+	if got := ht.Size(); got != 0 {
+		t.Fatalf("size after read-time expiration = %d, want 0", got)
+	}
+	if !ht.raws.reusables[idx] {
+		t.Fatalf("expired raw index %d was not reusable", idx)
+	}
+
+	ht.UpsertString("new", "value")
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("expired raw storage was not reused: got %d, want %d", got, idx)
+	}
+}
+
+func TestPersistRemovesTTL(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(200, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertCounter("counter", 7)
+	if !ht.ExpireAt("counter", now.Add(5*time.Second)) {
+		t.Fatal("ExpireAt(counter) = false, want true")
+	}
+	if !ht.Persist("counter") {
+		t.Fatal("Persist(counter) = false, want true")
+	}
+	if got := ht.TTL("counter"); got != NoTTL {
+		t.Fatalf("TTL after Persist() = %s, want NoTTL", got)
+	}
+	if hval := ht.Get("counter"); hval.HasTtl() {
+		t.Fatalf("TTL flag remains after Persist(): %+v", hval)
+	}
+
+	now = now.Add(10 * time.Second)
+	if got := ht.GetCounter("counter"); got != 7 {
+		t.Fatalf("persisted counter expired: got %d, want 7", got)
+	}
+}
+
+func TestPlainUpsertClearsTTL(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(300, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("key", "old")
+	if !ht.Expire("key", time.Minute) {
+		t.Fatal("Expire(key) = false, want true")
+	}
+	ht.UpsertString("key", "new")
+
+	if got := ht.TTL("key"); got != NoTTL {
+		t.Fatalf("TTL after plain UpsertString() = %s, want NoTTL", got)
+	}
+	if hval := ht.Get("key"); hval.HasTtl() {
+		t.Fatalf("TTL flag remains after plain upsert: %+v", hval)
+	}
+}
+
+func TestExpiredReadsAcrossValueFamilies(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(400, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertCounter("counter", 3)
+	ht.UpsertBytes("bytes", []byte("value"))
+	ht.UpsertMap("map", Map{"field": "value"})
+	ht.UpsertSlice("slice", Slice{"value"})
+	for _, key := range []string{"counter", "bytes", "map", "slice"} {
+		if !ht.Expire(key, time.Second) {
+			t.Fatalf("Expire(%q) = false, want true", key)
+		}
+	}
+
+	now = now.Add(2 * time.Second)
+	if got := ht.GetCounter("counter"); got != 0 {
+		t.Fatalf("expired counter = %d, want 0", got)
+	}
+	if got := ht.GetBytes("bytes"); got != nil {
+		t.Fatalf("expired bytes = %q, want nil", got)
+	}
+	if got := ht.PeekMap("map", "field"); got != nil {
+		t.Fatalf("expired map field = %v, want nil", got)
+	}
+	if got := ht.HeadSlice("slice"); got != nil {
+		t.Fatalf("expired slice head = %v, want nil", got)
+	}
+	if got := ht.Size(); got != 0 {
+		t.Fatalf("size after family expiration reads = %d, want 0", got)
+	}
+}
+
+func TestTTLAPIsHandleMissingAndImmediateExpiry(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if ht.Expire("missing", time.Second) {
+		t.Fatal("Expire(missing) = true, want false")
+	}
+	if ht.Persist("missing") {
+		t.Fatal("Persist(missing) = true, want false")
+	}
+	if got := ht.TTL("missing"); got != NoTTL {
+		t.Fatalf("TTL(missing) = %s, want NoTTL", got)
+	}
+
+	ht.UpsertString("key", "value")
+	if !ht.Expire("key", 0) {
+		t.Fatal("Expire(key, 0) = false, want true")
+	}
+	if got := ht.Get("key"); !got.Empty() {
+		t.Fatalf("immediately expired key still exists: %+v", got)
+	}
+}
+
+func TestKeysAndEntries(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertCounter("banana", 3)
+	ht.UpsertString("apple", "red")
+	ht.UpsertBytes("apricot", []byte("orange"))
+	ht.UpsertMap("map", Map{"field": "value"})
+	ht.UpsertSlice("slice", Slice{"item"})
+
+	wantKeys := []string{"apple", "apricot", "banana", "map", "slice"}
+	if got := ht.Keys(true); !reflect.DeepEqual(got, wantKeys) {
+		t.Fatalf("Keys(sorted) = %#v, want %#v", got, wantKeys)
+	}
+
+	entries := ht.Entries(true)
+	if got := entryKeys(entries); !reflect.DeepEqual(got, wantKeys) {
+		t.Fatalf("Entries(sorted) keys = %#v, want %#v", got, wantKeys)
+	}
+
+	values := entriesByKey(entries)
+	if got := values["banana"]; !got.IsCounter() || got.Index != 3 {
+		t.Fatalf("banana entry = %+v, want counter 3", got)
+	}
+	if got := values["apple"]; !got.IsStringAtRaws() {
+		t.Fatalf("apple entry = %+v, want string", got)
+	}
+	if got := values["apricot"]; !got.IsBytesAtRaws() {
+		t.Fatalf("apricot entry = %+v, want bytes", got)
+	}
+	if got := values["map"]; !got.IsMap() {
+		t.Fatalf("map entry = %+v, want map", got)
+	}
+	if got := values["slice"]; !got.IsSlice() {
+		t.Fatalf("slice entry = %+v, want slice", got)
+	}
+}
+
+func TestKeysWithPrefixReturnsFullKeys(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertString("app", "root")
+	ht.UpsertString("apple", "fruit")
+	ht.UpsertString("application", "program")
+	ht.UpsertString("banana", "fruit")
+	ht.UpsertString("pre\x00one", "one")
+	ht.UpsertString("pre\x00two", "two")
+
+	if got, want := ht.KeysWithPrefix("app", true), []string{"app", "apple", "application"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("KeysWithPrefix(app) = %#v, want %#v", got, want)
+	}
+	if got, want := ht.KeysWithPrefix("pre\x00", true), []string{"pre\x00one", "pre\x00two"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("KeysWithPrefix(NUL prefix) = %#v, want %#v", got, want)
+	}
+	if got := ht.KeysWithPrefix("missing", true); len(got) != 0 {
+		t.Fatalf("KeysWithPrefix(missing) = %#v, want empty", got)
+	}
+}
+
+func TestEntriesWithPrefixPreservesTTLMetadata(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(500, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("cache:a", "a")
+	ht.UpsertString("cache:b", "b")
+	ht.UpsertString("other", "value")
+	if !ht.Expire("cache:a", time.Minute) {
+		t.Fatal("Expire(cache:a) = false, want true")
+	}
+
+	entries := ht.EntriesWithPrefix("cache:", true)
+	if got, want := entryKeys(entries), []string{"cache:a", "cache:b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("EntriesWithPrefix keys = %#v, want %#v", got, want)
+	}
+	values := entriesByKey(entries)
+	if got := values["cache:a"]; !got.HasTtl() || !got.IsStringAtRaws() {
+		t.Fatalf("cache:a entry = %+v, want string with TTL", got)
+	}
+	if got := values["cache:b"]; got.HasTtl() || !got.IsStringAtRaws() {
+		t.Fatalf("cache:b entry = %+v, want persistent string", got)
+	}
+}
+
+func TestIterationCleansExpiredKeys(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(600, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("active", "value")
+	ht.UpsertString("expired", "value")
+	expiredIdx := ht.Get("expired").Index
+	if !ht.Expire("expired", time.Second) {
+		t.Fatal("Expire(expired) = false, want true")
+	}
+
+	now = now.Add(2 * time.Second)
+	if got, want := ht.Keys(true), []string{"active"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Keys after expiration = %#v, want %#v", got, want)
+	}
+	if got := ht.Get("expired"); !got.Empty() {
+		t.Fatalf("expired key still exists after iteration: %+v", got)
+	}
+	if !ht.raws.reusables[expiredIdx] {
+		t.Fatalf("expired raw index %d was not reusable", expiredIdx)
+	}
+}
+
+func TestVacuumExpiredRemovesOnlyExpiredKeys(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(700, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("expired:string", "value")
+	expiredRawIdx := ht.Get("expired:string").Index
+	ht.UpsertMap("expired:map", Map{"field": "value"})
+	expiredMapIdx := ht.Get("expired:map").Index
+	ht.UpsertString("active", "value")
+	ht.UpsertString("persistent", "value")
+
+	if !ht.Expire("expired:string", time.Second) {
+		t.Fatal("Expire(expired:string) = false, want true")
+	}
+	if !ht.Expire("expired:map", time.Second) {
+		t.Fatal("Expire(expired:map) = false, want true")
+	}
+	if !ht.Expire("active", time.Hour) {
+		t.Fatal("Expire(active) = false, want true")
+	}
+
+	now = now.Add(2 * time.Second)
+	if got := ht.VacuumExpired(); got != 2 {
+		t.Fatalf("VacuumExpired() = %d, want 2", got)
+	}
+	if got := ht.Keys(true); !reflect.DeepEqual(got, []string{"active", "persistent"}) {
+		t.Fatalf("keys after vacuum = %#v, want active and persistent", got)
+	}
+	if got := ht.Get("expired:string"); !got.Empty() {
+		t.Fatalf("expired string still exists: %+v", got)
+	}
+	if got := ht.Get("expired:map"); !got.Empty() {
+		t.Fatalf("expired map still exists: %+v", got)
+	}
+	if !ht.raws.reusables[expiredRawIdx] {
+		t.Fatalf("expired raw index %d was not reusable", expiredRawIdx)
+	}
+	if !ht.maps.reusables[expiredMapIdx] {
+		t.Fatalf("expired map index %d was not reusable", expiredMapIdx)
+	}
+	if got := ht.VacuumExpired(); got != 0 {
+		t.Fatalf("second VacuumExpired() = %d, want 0", got)
+	}
+}
+
+func TestStartExpirationCleanerRemovesExpiredKeysAndStops(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(800, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("key", "value")
+	if !ht.Expire("key", time.Second) {
+		t.Fatal("Expire(key) = false, want true")
+	}
+	now = now.Add(2 * time.Second)
+
+	stop := ht.StartExpirationCleaner(time.Millisecond)
+	waitUntil(t, 200*time.Millisecond, func() bool {
+		return ht.Size() == 0
+	})
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expiration cleaner stop did not return")
+	}
+}
+
+func TestStartExpirationCleanerRejectsInvalidInterval(t *testing.T) {
+	ht := newTestTrie(t)
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("StartExpirationCleaner(0) did not panic")
+		}
+	}()
+	_ = ht.StartExpirationCleaner(0)
+}
+
+func TestConcurrentIterationIsSynchronized(t *testing.T) {
+	ht := newTestTrie(t)
+
+	const (
+		workers    = 4
+		iterations = 50
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		worker := worker
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				key := "key:" + strconv.Itoa(worker) + ":" + strconv.Itoa(i)
+				ht.UpsertCounter(key, int32(i))
+				_ = ht.KeysWithPrefix("key:", true)
+				_ = ht.Entries(false)
+			}
+		}()
+	}
+	wg.Wait()
+
+	keys := ht.KeysWithPrefix("key:", true)
+	if !sort.StringsAreSorted(keys) {
+		t.Fatalf("KeysWithPrefix returned unsorted keys: %#v", keys)
+	}
+	if got, want := len(keys), workers*iterations; got != want {
+		t.Fatalf("key count = %d, want %d", got, want)
+	}
+}
+
+func TestConcurrentTTLOperationsAreSynchronized(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+
+	const (
+		workers    = 4
+		iterations = 50
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				ht.UpsertString("key", "value")
+				_ = ht.Expire("key", time.Minute)
+				_ = ht.TTL("key")
+				_ = ht.GetString("key")
+				_ = ht.Persist("key")
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestConcurrentOperationsAreSynchronized(t *testing.T) {
+	ht := newTestTrie(t)
+
+	const (
+		workers    = 6
+		iterations = 100
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		worker := worker
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				ht.IncrementCounter("counter", 1)
+				ht.AppendString("string", "x")
+				ht.UpsertBytes("bytes", []byte{byte(worker), byte(i)})
+				ht.PutMap("map", strconv.Itoa(worker)+"-"+strconv.Itoa(i), i)
+				ht.PushSlice("slice", worker, i)
+
+				_ = ht.GetCounter("counter")
+				_ = ht.GetString("string")
+				_ = ht.GetBytes("bytes")
+				_ = ht.GetMap("map")
+				_ = ht.GetSlice("slice")
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got, want := ht.GetCounter("counter"), int32(workers*iterations); got != want {
+		t.Fatalf("counter = %d, want %d", got, want)
+	}
+	if got, want := len(ht.GetString("string")), workers*iterations; got != want {
+		t.Fatalf("string length = %d, want %d", got, want)
+	}
+	if got, want := len(ht.GetMap("map")), workers*iterations; got != want {
+		t.Fatalf("map length = %d, want %d", got, want)
+	}
+	if got, want := len(ht.GetSlice("slice")), workers*iterations*2; got != want {
+		t.Fatalf("slice length = %d, want %d", got, want)
+	}
+}
+
+func TestDestroyIsIdempotentAndPreventsUse(t *testing.T) {
+	ht := CreateHatTrie()
+	ht.UpsertString("key", "value")
+	ht.Destroy()
+	ht.Destroy()
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Size after Destroy did not panic")
+		}
+	}()
+	_ = ht.Size()
+}
+
+func entryKeys(entries []Entry) []string {
+	keys := make([]string, len(entries))
+	for i, entry := range entries {
+		keys[i] = entry.Key
+	}
+	return keys
+}
+
+func entriesByKey(entries []Entry) map[string]HatValue {
+	values := make(map[string]HatValue, len(entries))
+	for _, entry := range entries {
+		values[entry.Key] = entry.Value
+	}
+	return values
+}
+
+func waitUntil(t *testing.T, timeout time.Duration, ready func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ready() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if ready() {
+		return
+	}
+	t.Fatal("condition was not met before timeout")
+}

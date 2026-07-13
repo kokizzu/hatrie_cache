@@ -3,12 +3,39 @@ Experimental **TO BE** distributed memcache using HAT-Trie (a data structure des
 
 _**warning**: this project obviously not ready for production_
 
+## Development
+
+Run the Go wrapper tests:
+
+```
+go test ./...
+```
+
+Run the raw byte backing-store benchmarks:
+
+```
+go test -bench=RawBytes -benchmem
+```
+
+The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
+and `TTL`. Expired entries are removed lazily when the key is read or mutated.
+`TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
+`VacuumExpired` for immediate cleanup or `StartExpirationCleaner` for periodic
+background cleanup.
+
+Use `Keys`, `KeysWithPrefix`, `Entries`, and `EntriesWithPrefix` to iterate
+over non-expired keys and value metadata. Prefix iteration returns full keys and
+supports keys containing NUL bytes.
+
+The bundled C HAT-trie tests can be compiled directly with GCC when autotools
+build files have not been generated.
+
 ## TODO:
 
 - [x] bind [HAT-Trie](https://github.com/luikore/hat-trie) to Go using CGO
 - [x] `hat_map<string,int+byte>` stores index or special types (deque/set/etc) to `[][]byte` (aka raws); raws can be serialized using [FlatBuffers](http://github.com/google/flatbuffers) or [FastBinaryEncoding](http://github.com/chronoxor/FastBinaryEncoding)
-- [ ] add TTL map, check for expiration when read, delete if expired 
-- [ ] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
+- [x] add TTL map, check for expiration when read, delete if expired
+- [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
 - [ ] create a web UI for management and monitoring (frontend: [Svelte](https://svelte.dev/))
 - [ ] create backend service using http2/grpc for APIs so it can be accessed from another language 
 - [ ] create a client CLI with for [statistics/cluster/server](https://redis.io/commands/#server) management and running commands:
@@ -39,7 +66,7 @@ slice/arr/stack/queue type:
   POPSLICE,SHIFTSLICE,HEADSLICE,TAILSLICE key
 ```
 - [ ] add option to shard/partition it or full replica, copy tarantool's vbucket/vshard logic
-- [ ] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
+- [x] make sure all read/write operation synchronized, so no stale read/data corruption (in cost of performance)
 - [ ] check if serializer can support Go's map
 - [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
 - [ ] binary data that are >64KB always stored on disk
@@ -48,8 +75,9 @@ slice/arr/stack/queue type:
 - [ ] on-load check for expired data
 - [ ] when service start, non-expired keys and (<1KB AND <1h last hit AND >1000 hit rate) values loaded from database to memory
 - [ ] when service stopped/timer/sync-write forced, data written to disk
-- [ ] create iterator command to get all keys and keys based on certain prefix
-- [ ] create timer/oom vacuum goroutine to clean expired data
+- [x] create iterator command to get all keys and keys based on certain prefix
+- [x] create timer vacuum goroutine to clean expired data
+- [ ] add OOM-triggered vacuum policy
 - [ ] when master/leader disconnected from all slave, new master/leader elected by remaining slave
 - [ ] the distributed part using emitter.io, 
       or offloaded to another MQ, 
