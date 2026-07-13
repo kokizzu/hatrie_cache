@@ -34,7 +34,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return err
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, command, snapshot")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot")
 	}
 
 	switch remaining[0] {
@@ -50,6 +50,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runElection(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "replication":
 		return runReplication(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "journal":
+		return runJournal(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "command":
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "snapshot":
@@ -178,6 +180,21 @@ func runReplication(ctx context.Context, client *http.Client, addr string, args 
 		return err
 	}
 	return postJSON(ctx, client, addr, "/api/replication", body, stdout)
+}
+
+func runJournal(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("journal", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	afterSequence := flags.Uint64("after-sequence", 0, "only return journal entries after this sequence")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	path := "/api/journal"
+	if *afterSequence > 0 {
+		path += "?after_sequence=" + strconv.FormatUint(*afterSequence, 10)
+	}
+	return getJSON(ctx, client, addr, path, stdout)
 }
 
 func runCommand(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {

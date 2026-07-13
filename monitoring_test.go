@@ -259,6 +259,51 @@ func TestMonitoringHandlerJournalsMutatingCommands(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerExposesJournalTail(t *testing.T) {
+	ht := newTestTrie(t)
+	journalPath := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !got.OK {
+		t.Fatalf("journaled SETSTR response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "views", Value: "2"}); !got.OK {
+		t.Fatalf("journaled INC response = %#v, want ok", got)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{Journal: journal}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/journal?after_sequence=1", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("journal status = %d, want 200", resp.Code)
+	}
+	var tail CommandJournalTail
+	if err := json.Unmarshal(resp.Body.Bytes(), &tail); err != nil {
+		t.Fatalf("journal JSON error = %v", err)
+	}
+	if tail.LastSequence != 2 || len(tail.Entries) != 1 {
+		t.Fatalf("journal tail = %#v, want one entry after sequence 1", tail)
+	}
+	if entry := tail.Entries[0]; entry.Sequence != 2 || entry.Request.Command != "INC" || entry.Request.Key != "views" {
+		t.Fatalf("journal tail entry = %#v, want sequence 2 INC views", entry)
+	}
+
+	badSequenceResp := httptest.NewRecorder()
+	handler.ServeHTTP(badSequenceResp, httptest.NewRequest(http.MethodGet, "/api/journal?after_sequence=bad", nil))
+	if badSequenceResp.Code != http.StatusBadRequest {
+		t.Fatalf("bad journal sequence status = %d, want 400", badSequenceResp.Code)
+	}
+
+	unconfigured := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	unconfiguredResp := httptest.NewRecorder()
+	unconfigured.ServeHTTP(unconfiguredResp, httptest.NewRequest(http.MethodGet, "/api/journal", nil))
+	if unconfiguredResp.Code != http.StatusConflict {
+		t.Fatalf("unconfigured journal status = %d, want 409", unconfiguredResp.Code)
+	}
+}
+
 func TestMonitoringHandlerRejectsInvalidCommandRequests(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()

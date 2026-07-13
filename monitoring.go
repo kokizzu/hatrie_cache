@@ -89,6 +89,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/topology", handler.handleTopology)
 	mux.HandleFunc("/api/election", handler.handleElection)
 	mux.HandleFunc("/api/replication", handler.handleReplication)
+	mux.HandleFunc("/api/journal", handler.handleJournal)
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
@@ -343,6 +344,39 @@ func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *ht
 		return
 	}
 	writeJSON(w, handler.options.Replicator.SyncAll(r.Context(), handler.trie, request.Prefix))
+}
+
+func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if handler.options.Journal == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("journal is not configured"))
+		return
+	}
+	afterSequence := uint64(0)
+	if raw := strings.TrimSpace(r.URL.Query().Get("after_sequence")); raw != "" {
+		value, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			writeJSONStatus(w, http.StatusBadRequest, commandError("after_sequence must be an unsigned integer"))
+			return
+		}
+		afterSequence = value
+	}
+	tail, err := handler.options.Journal.Tail(afterSequence)
+	if err != nil {
+		if errors.Is(err, ErrCommandJournalCompacted) {
+			writeJSONStatus(w, http.StatusConflict, commandError(err.Error()))
+			return
+		}
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	writeJSON(w, tail)
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {

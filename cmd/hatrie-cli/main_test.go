@@ -232,6 +232,29 @@ func TestRunReplicationRejectsPrefixWithoutSync(t *testing.T) {
 	}
 }
 
+func TestRunJournalFetchesTail(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		w.Write([]byte(`{"last_sequence":8,"entries":[{"sequence":8,"request":{"command":"INC","key":"views"}}]}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "journal", "-after-sequence", "7"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(journal) error = %v", err)
+	}
+	if gotPath != "/api/journal?after_sequence=7" {
+		t.Fatalf("path = %q, want /api/journal?after_sequence=7", gotPath)
+	}
+	if got := stdout.String(); got != "{\"last_sequence\":8,\"entries\":[{\"sequence\":8,\"request\":{\"command\":\"INC\",\"key\":\"views\"}}]}\n" {
+		t.Fatalf("stdout = %q, want journal JSON", got)
+	}
+}
+
 func TestRunCommandPostsJSON(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

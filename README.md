@@ -121,6 +121,11 @@ successful snapshot:
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json JOURNAL_PATH=data/commands.journal
 ```
 
+When journaling is enabled, `GET /api/journal?after_sequence=N` returns the
+ordered mutating commands after `N` plus the latest journal sequence. If `N` is
+older than the compacted snapshot checkpoint, the endpoint returns `409` so a
+replica can fall back to a snapshot or explicit replication sync.
+
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
 The topology endpoint validates nodes, shard ownership, and replicas, and can
 route a key to its shard. Topologies default to `mode: "sharded"`. Set
@@ -152,14 +157,16 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 ```
 
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
-`/api/entries`, `/api/topology`, `/api/election`, `/api/replication`, and
-`/api/commands`.
+`/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
+`/api/journal`, and `/api/commands`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader
 for that key. `POST /api/election` accepts `node` and `online` to record a
 heartbeat or mark a node offline. `GET /api/replication` returns the most recent
 replication result. `POST /api/replication` accepts optional `prefix` and
 pushes matching local entries to their remote topology owners.
+`GET /api/journal?after_sequence=...` returns the command journal tail when
+journaling is configured.
 `POST /api/commands` accepts `command`, `key`, optional `value`, `values`,
 `subkey`, `pairs`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
@@ -210,6 +217,7 @@ make cli ARGS='election -offline node-a'
 make cli ARGS='replication'
 make cli ARGS='replication -sync'
 make cli ARGS='replication -sync -prefix session:'
+make cli ARGS='journal -after-sequence 42'
 make cli ARGS='snapshot'
 ```
 

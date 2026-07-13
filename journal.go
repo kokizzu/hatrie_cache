@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,18 @@ import (
 const commandJournalVersion = 1
 
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
+var ErrCommandJournalCompacted = errors.New("hatriecache: command journal entries are compacted")
+
+type CommandJournalRecord struct {
+	Sequence uint64              `json:"sequence"`
+	Request  CacheCommandRequest `json:"request"`
+}
+
+type CommandJournalTail struct {
+	LastSequence     uint64                 `json:"last_sequence"`
+	CompactedThrough uint64                 `json:"compacted_through,omitempty"`
+	Entries          []CommandJournalRecord `json:"entries"`
+}
 
 type commandJournalEntry struct {
 	Version    int                 `json:"version"`
@@ -121,6 +134,41 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 		journal.nextSequence = maxSequence + 1
 	}
 	return maxSequence, nil
+}
+
+func (journal *CommandJournal) Tail(afterSequence uint64) (CommandJournalTail, error) {
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+
+	if journal.closed {
+		return CommandJournalTail{}, ErrCommandJournalClosed
+	}
+	entries, err := readCommandJournalEntries(journal.path)
+	if err != nil {
+		return CommandJournalTail{}, err
+	}
+	tail := CommandJournalTail{Entries: []CommandJournalRecord{}}
+	for _, entry := range entries {
+		if entry.Sequence > tail.LastSequence {
+			tail.LastSequence = entry.Sequence
+		}
+		if entry.Checkpoint && entry.Sequence > tail.CompactedThrough {
+			tail.CompactedThrough = entry.Sequence
+		}
+	}
+	if afterSequence < tail.CompactedThrough {
+		return tail, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, tail.CompactedThrough)
+	}
+	for _, entry := range entries {
+		if entry.Checkpoint || entry.Sequence <= afterSequence {
+			continue
+		}
+		tail.Entries = append(tail.Entries, CommandJournalRecord{
+			Sequence: entry.Sequence,
+			Request:  entry.Request,
+		})
+	}
+	return tail, nil
 }
 
 func (journal *CommandJournal) SaveSnapshot(trie *HatTrie, path string) error {
