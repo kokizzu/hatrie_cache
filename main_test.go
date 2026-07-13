@@ -268,6 +268,17 @@ func TestMapOperationsDeepCopyNestedValues(t *testing.T) {
 	if again := ht.PeekMap("map", "nested").(Map); again["name"] != "ivi" {
 		t.Fatalf("PeekMap exposed nested value: %#v", again)
 	}
+
+	patch := Map{"name": "put"}
+	ht.PutMap("map", "patch", patch)
+	patch["name"] = "caller"
+	if got := ht.PeekMap("map", "patch").(Map); got["name"] != "put" {
+		t.Fatalf("PutMap stored caller-owned nested value: %#v", got)
+	}
+	ht.PeekMap("map", "patch").(Map)["name"] = "from-peek"
+	if again := ht.PeekMap("map", "patch").(Map); again["name"] != "put" {
+		t.Fatalf("PeekMap exposed PutMap nested value: %#v", again)
+	}
 }
 
 func TestMapJSONSerializerRoundTrip(t *testing.T) {

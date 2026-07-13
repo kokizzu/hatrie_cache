@@ -692,8 +692,24 @@ func (ms *MapStorage) Put(idx int32, value Map) {
 	ms.reusables.Use(idx)
 }
 
+func (ms *MapStorage) PutEntry(idx int32, subkey string, value interface{}) {
+	if idx < 0 || int(idx) >= len(ms.array) {
+		return
+	}
+	if ms.array[idx] == nil {
+		ms.array[idx] = Map{}
+	}
+	ms.array[idx][subkey] = cloneValue(value)
+	ms.reusables.Use(idx)
+}
+
 func (ms *MapStorage) Append(value Map) int32 {
 	ms.array = append(ms.array, cloneMap(value))
+	return int32(len(ms.array) - 1)
+}
+
+func (ms *MapStorage) AppendEntry(subkey string, value interface{}) int32 {
+	ms.array = append(ms.array, Map{subkey: cloneValue(value)})
 	return int32(len(ms.array) - 1)
 }
 
@@ -703,6 +719,14 @@ func (ms *MapStorage) Add(value Map) int32 {
 		return idx
 	}
 	return ms.Append(value)
+}
+
+func (ms *MapStorage) AddEntry(subkey string, value interface{}) int32 {
+	if idx, ok := ms.reusables.Take(); ok {
+		ms.array[idx] = Map{subkey: cloneValue(value)}
+		return idx
+	}
+	return ms.AppendEntry(subkey, value)
 }
 
 func (ms *MapStorage) Del(idx int32) {
@@ -2043,12 +2067,7 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsMap() {
-		old := ht.maps.array[hval.Index]
-		if old == nil {
-			old = Map{}
-		}
-		old[subkey] = val
-		ht.maps.Put(hval.Index, old)
+		ht.maps.PutEntry(hval.Index, subkey, val)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return
@@ -2056,7 +2075,7 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.maps.Add(Map{subkey: val})
+	idx := ht.maps.AddEntry(subkey, val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)
 }
