@@ -903,6 +903,25 @@ func TestPriorityQueueOperations(t *testing.T) {
 	}
 }
 
+func TestPriorityQueueBulkUpsertPreservesTieOrderBeforeLaterPush(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertPriorityQueue("queue", PriorityQueue{
+		{Priority: 5, Value: "slow"},
+		{Priority: 1, Value: "first"},
+		{Priority: 1, Value: "second"},
+	})
+
+	if added := ht.PushPriorityQueue("queue", 1, "third"); added != 1 {
+		t.Fatalf("PushPriorityQueue(third) = %d, want 1", added)
+	}
+	for _, want := range []string{"first", "second", "third", "slow"} {
+		got, ok := ht.PopPriorityQueue("queue")
+		if !ok || got.Value != want {
+			t.Fatalf("PopPriorityQueue() = %#v/%v, want %q", got, ok, want)
+		}
+	}
+}
+
 func TestPriorityQueueOperationsDeepCopyNestedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	item := Map{"job": "build"}

@@ -35,9 +35,22 @@ func clonePriorityQueue(value PriorityQueue) PriorityQueue {
 }
 
 func newPriorityQueueData(values PriorityQueue) priorityQueueData {
-	out := priorityQueueData{}
-	for _, value := range values {
-		out.Push(value.Priority, value.Value)
+	if len(values) == 0 {
+		return priorityQueueData{}
+	}
+	out := priorityQueueData{
+		items:        make([]priorityQueueItem, len(values)),
+		nextSequence: uint64(len(values)),
+	}
+	for idx, value := range values {
+		out.items[idx] = priorityQueueItem{
+			Priority: value.Priority,
+			Sequence: uint64(idx),
+			Value:    cloneValue(value.Value),
+		}
+	}
+	for i := len(out.items)/2 - 1; i >= 0; i-- {
+		out.siftDown(i)
 	}
 	return out
 }
