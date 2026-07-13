@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -50,11 +51,13 @@ const (
 	// Slice values are backed by a ring deque for stack/queue operations.
 	DATAVALUE_TYPE_SLICE
 	DATAVALUE_TYPE_LEVELDB_REF
-	// TODO: add more types (set, priority queue, etc).
+	DATAVALUE_TYPE_SET
+	// TODO: add more types (priority queue, etc).
 )
 
 type Map = map[string]interface{}
 type Slice = []interface{}
+type Set = []interface{}
 
 type deque struct {
 	values []interface{}
@@ -302,6 +305,10 @@ func (hval HatValue) IsLevelDBReference() bool {
 	return hval.Is(DATAVALUE_TYPE_LEVELDB_REF)
 }
 
+func (hval HatValue) IsSet() bool {
+	return hval.Is(DATAVALUE_TYPE_SET)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -326,6 +333,8 @@ func (hval HatValue) String() string {
 		return "slice at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		return "leveldb reference at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_SET:
+		return "set at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -571,6 +580,123 @@ func (ss *SliceStorage) Del(idx int32) {
 	ss.reusables[idx] = true
 }
 
+type setData struct {
+	items map[string]interface{}
+}
+
+func newSetData(values Set) setData {
+	out := setData{}
+	out.Add(values...)
+	return out
+}
+
+func (set *setData) Len() int {
+	if set == nil {
+		return 0
+	}
+	return len(set.items)
+}
+
+func (set *setData) Add(values ...interface{}) int {
+	if set.items == nil {
+		set.items = make(map[string]interface{}, len(values))
+	}
+	added := 0
+	for _, value := range values {
+		key := mustSetItemKey(value)
+		if _, exists := set.items[key]; exists {
+			continue
+		}
+		set.items[key] = value
+		added++
+	}
+	return added
+}
+
+func (set *setData) Remove(values ...interface{}) int {
+	if set == nil || set.items == nil {
+		return 0
+	}
+	removed := 0
+	for _, value := range values {
+		key := mustSetItemKey(value)
+		if _, exists := set.items[key]; exists {
+			delete(set.items, key)
+			removed++
+		}
+	}
+	return removed
+}
+
+func (set *setData) Has(value interface{}) bool {
+	if set == nil || set.items == nil {
+		return false
+	}
+	_, ok := set.items[mustSetItemKey(value)]
+	return ok
+}
+
+func (set *setData) Values() Set {
+	if set == nil || set.items == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(set.items))
+	for key := range set.items {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make(Set, len(keys))
+	for idx, key := range keys {
+		out[idx] = set.items[key]
+	}
+	return out
+}
+
+// SetStorage stores set values outside the trie.
+type SetStorage struct {
+	array     []setData
+	reusables map[int32]bool
+}
+
+func CreateSetStorage() *SetStorage {
+	return &SetStorage{
+		array:     []setData{},
+		reusables: map[int32]bool{},
+	}
+}
+
+func (ss *SetStorage) Put(idx int32, value Set) {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return
+	}
+	ss.array[idx] = newSetData(value)
+	delete(ss.reusables, idx)
+}
+
+func (ss *SetStorage) Append(value Set) int32 {
+	ss.array = append(ss.array, newSetData(value))
+	return int32(len(ss.array) - 1)
+}
+
+func (ss *SetStorage) Add(value Set) int32 {
+	if len(ss.reusables) > 0 {
+		for idx := range ss.reusables {
+			ss.array[idx] = newSetData(value)
+			delete(ss.reusables, idx)
+			return idx
+		}
+	}
+	return ss.Append(value)
+}
+
+func (ss *SetStorage) Del(idx int32) {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return
+	}
+	ss.array[idx] = setData{}
+	ss.reusables[idx] = true
+}
+
 type LevelDBReference struct {
 	Key   string
 	Type  string
@@ -629,6 +755,7 @@ type HatTrie struct {
 	disks    *DiskStorage
 	maps     *MapStorage
 	slices   *SliceStorage
+	sets     *SetStorage
 	dbrefs   *LevelDBReferenceStorage
 	expires  map[string]time.Time
 	stats    CacheStats
@@ -660,6 +787,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		disks:    disks,
 		maps:     CreateMapStorage(),
 		slices:   CreateSliceStorage(),
+		sets:     CreateSetStorage(),
 		dbrefs:   CreateLevelDBReferenceStorage(),
 		expires:  map[string]time.Time{},
 		keyStats: map[string]KeyStats{},
@@ -689,6 +817,7 @@ func (ht *HatTrie) Destroy() {
 	ht.disks = nil
 	ht.maps = nil
 	ht.slices = nil
+	ht.sets = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.keyStats = nil
@@ -1146,6 +1275,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.slices.Del(hval.Index)
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		ht.dbrefs.Del(hval.Index)
+	case DATAVALUE_TYPE_SET:
+		ht.sets.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)
@@ -1861,6 +1992,99 @@ func (ht *HatTrie) sliceRefLocked(key string) (*deque, bool) {
 	return nil, false
 }
 
+func (ht *HatTrie) UpsertSet(key string, val Set) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsSet() {
+		ht.sets.Put(hval.Index, val)
+		delete(ht.expires, key)
+		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked(key)
+		return
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
+	idx := ht.sets.Add(val)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
+	ht.recordWriteLocked(key)
+}
+
+func (ht *HatTrie) AddSet(key string, val interface{}, vals ...interface{}) int {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	values := make(Set, 0, 1+len(vals))
+	values = append(values, val)
+	values = append(values, vals...)
+
+	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsSet() {
+		added := ht.sets.array[hval.Index].Add(values...)
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked(key)
+		return added
+	}
+
+	ht.returnStorage(hval)
+	delete(ht.expires, key)
+	idx := ht.sets.Add(values)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
+	ht.recordWriteLocked(key)
+	return ht.sets.array[idx].Len()
+}
+
+func (ht *HatTrie) RemoveSet(key string, val interface{}, vals ...interface{}) int {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
+	if !hval.IsSet() {
+		ht.recordReadLocked(false, key)
+		return 0
+	}
+
+	values := make(Set, 0, 1+len(vals))
+	values = append(values, val)
+	values = append(values, vals...)
+	removed := ht.sets.array[hval.Index].Remove(values...)
+	ht.recordReadLocked(removed > 0, key)
+	if removed > 0 {
+		ht.recordWriteLocked(key)
+	}
+	return removed
+}
+
+func (ht *HatTrie) HasSet(key string, val interface{}) bool {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
+	if !hval.IsSet() {
+		ht.recordReadLocked(false, key)
+		return false
+	}
+	hit := ht.sets.array[hval.Index].Has(val)
+	ht.recordReadLocked(hit, key)
+	return hit
+}
+
+func (ht *HatTrie) GetSet(key string) Set {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
+	if !hval.IsSet() {
+		ht.recordReadLocked(false, key)
+		return nil
+	}
+	ht.recordReadLocked(true, key)
+	return ht.sets.array[hval.Index].Values()
+}
+
 func cloneBytes(value []byte) []byte {
 	if value == nil {
 		return nil
@@ -1888,4 +2112,20 @@ func cloneSlice(value Slice) Slice {
 	out := make(Slice, len(value))
 	copy(out, value)
 	return out
+}
+
+func setItemKey(value interface{}) (string, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func mustSetItemKey(value interface{}) string {
+	key, err := setItemKey(value)
+	if err != nil {
+		panic(err)
+	}
+	return key
 }

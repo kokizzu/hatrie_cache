@@ -244,6 +244,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 			return 0, "missing cold value"
 		}
 		return 0, "cold " + ref.Type + " value"
+	case DATAVALUE_TYPE_SET:
+		if int(hval.Index) >= len(ht.sets.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		value := ht.sets.array[hval.Index]
+		return int64(value.Len()), strconv.Itoa(value.Len()) + " members"
 	default:
 		return 0, ""
 	}
@@ -263,6 +269,8 @@ func monitoringType(hval HatValue) string {
 		return "slice"
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		return "leveldb_ref"
+	case DATAVALUE_TYPE_SET:
+		return "set"
 	default:
 		return "unknown"
 	}

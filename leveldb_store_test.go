@@ -20,6 +20,7 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	source.UpsertBytes("bytes", []byte{0, 1, 2, 3})
 	source.UpsertMap("map", Map{"name": "ivi", "age": json.Number("32")})
 	source.UpsertSlice("slice", Slice{"a", json.Number("2")})
+	source.UpsertSet("set", Set{"a", json.Number("2"), "a"})
 	source.UpsertString("ttl", "alive")
 	if !source.Expire("ttl", time.Minute) {
 		t.Fatal("Expire(ttl) = false, want true")
@@ -35,8 +36,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
 	}
-	if count != 6 {
-		t.Fatalf("loaded count = %d, want 6", count)
+	if count != 7 {
+		t.Fatalf("loaded count = %d, want 7", count)
 	}
 
 	if got := loaded.GetCounter("counter"); got != -7 {
@@ -53,6 +54,9 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if got := loaded.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"a", json.Number("2")}) {
 		t.Fatalf("slice = %#v, want preserved json.Number", got)
+	}
+	if got := loaded.GetSet("set"); !reflect.DeepEqual(got, Set{"a", json.Number("2")}) {
+		t.Fatalf("set = %#v, want preserved json.Number", got)
 	}
 	if got := loaded.TTL("ttl"); got <= 0 || got > time.Minute {
 		t.Fatalf("ttl = %s, want remaining positive TTL", got)

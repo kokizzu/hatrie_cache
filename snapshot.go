@@ -31,6 +31,7 @@ type snapshotEntry struct {
 	Bytes     string     `json:"bytes,omitempty"`
 	Map       Map        `json:"map"`
 	Slice     Slice      `json:"slice"`
+	Set       Set        `json:"set"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	Stats     *KeyStats  `json:"stats,omitempty"`
 }
@@ -155,6 +156,8 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 		out.Slice = ht.slices.array[entry.Value.Index].Slice()
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		return ht.levelDBReferenceSnapshotEntryLocked(entry.Key, entry.Value)
+	case DATAVALUE_TYPE_SET:
+		out.Set = ht.sets.array[entry.Value.Index].Values()
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -178,7 +181,7 @@ func (ht *HatTrie) bytesValueLocked(hval HatValue) ([]byte, error) {
 func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 	operation := snapshotOperation{entry: entry}
 	switch entry.Type {
-	case "counter", "string", "map", "slice":
+	case "counter", "string", "map", "slice", "set":
 		return operation, nil
 	case "bytes":
 		value, err := base64.StdEncoding.DecodeString(entry.Bytes)
@@ -226,6 +229,9 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 	case "slice":
 		idx := ht.slices.Add(entry.Slice)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}
+	case "set":
+		idx := ht.sets.Add(entry.Set)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

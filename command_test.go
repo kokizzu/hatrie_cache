@@ -142,6 +142,32 @@ func TestExecuteCommandSliceOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandSetOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "tags", Value: "go"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDSET value response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "tags", Values: Slice{"cache", "go", 3}}); !got.OK || got.Value != "2" {
+		t.Fatalf("ADDSET values response = %#v, want added 2", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSET", Key: "tags", Value: "go"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASSET go response = %#v, want 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSET", Key: "tags", Value: "missing"}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASSET missing response = %#v, want 0", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETSET", Key: "tags"}); !got.OK || got.Value != `["cache","go",3]` {
+		t.Fatalf("GETSET response = %#v, want sorted JSON array", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "REMSET", Key: "tags", Values: Slice{"go", "missing"}}); !got.OK || got.Value != "1" {
+		t.Fatalf("REMSET response = %#v, want removed 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "tags"}); !got.OK || got.Value != `["cache",3]` {
+		t.Fatalf("GET set response = %#v, want JSON array", got)
+	}
+}
+
 func TestExecuteCommandValidation(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -158,6 +184,9 @@ func TestExecuteCommandValidation(t *testing.T) {
 		{Command: "PEEKMAP", Key: "key"},
 		{Command: "TAKEMAP", Key: "key"},
 		{Command: "PUSHSLICE", Key: "key"},
+		{Command: "ADDSET", Key: "key"},
+		{Command: "REMSET", Key: "key"},
+		{Command: "HASSET", Key: "key"},
 		{Command: "UNKNOWN", Key: "key"},
 	} {
 		if got := ht.ExecuteCommand(request); got.OK {
@@ -178,11 +207,15 @@ func TestExecuteCommandStructuredValues(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertMap("map", Map{"name": "ivi"})
 	ht.UpsertSlice("slice", Slice{"a", "b"})
+	ht.UpsertSet("set", Set{"b", "a"})
 
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "map"}); !got.OK || got.Value != `{"name":"ivi"}` {
 		t.Fatalf("GET map response = %#v, want JSON object", got)
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "slice"}); !got.OK || got.Value != `["a","b"]` {
 		t.Fatalf("GET slice response = %#v, want JSON array", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "set"}); !got.OK || got.Value != `["a","b"]` {
+		t.Fatalf("GET set response = %#v, want JSON array", got)
 	}
 }

@@ -547,6 +547,43 @@ func TestPopAndShiftMissingSliceDoNotCreateKeys(t *testing.T) {
 	}
 }
 
+func TestSetOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if added := ht.AddSet("set", "go", "cache", "go", json.Number("2")); added != 3 {
+		t.Fatalf("AddSet() = %d, want 3", added)
+	}
+	if hval := ht.Get("set"); !hval.IsSet() {
+		t.Fatalf("AddSet on missing key stored type %+v, want set", hval)
+	}
+	if !ht.HasSet("set", "go") {
+		t.Fatal("HasSet(go) = false, want true")
+	}
+	if ht.HasSet("set", "missing") {
+		t.Fatal("HasSet(missing) = true, want false")
+	}
+	if removed := ht.RemoveSet("set", "go", "missing"); removed != 1 {
+		t.Fatalf("RemoveSet() = %d, want 1", removed)
+	}
+	if ht.HasSet("set", "go") {
+		t.Fatal("HasSet(go) after remove = true, want false")
+	}
+	if got := ht.GetSet("set"); !reflect.DeepEqual(got, Set{"cache", json.Number("2")}) {
+		t.Fatalf("GetSet() = %#v, want deterministic values", got)
+	}
+
+	copied := ht.GetSet("set")
+	copied[0] = "changed"
+	if got := ht.GetSet("set"); !reflect.DeepEqual(got, Set{"cache", json.Number("2")}) {
+		t.Fatalf("GetSet exposed internal set: got %#v", got)
+	}
+
+	ht.UpsertSet("set", Set{"new", "new"})
+	if got := ht.GetSet("set"); !reflect.DeepEqual(got, Set{"new"}) {
+		t.Fatalf("UpsertSet dedupe result = %#v, want new", got)
+	}
+}
+
 func TestDeleteReleasesBackingStorageForReuse(t *testing.T) {
 	ht := newTestTrie(t)
 

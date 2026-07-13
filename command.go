@@ -194,6 +194,35 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
+	case "ADDSET":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		added := ht.AddSet(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "added set values", Value: strconv.Itoa(added)}
+	case "REMSET":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		removed := ht.RemoveSet(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "removed set values", Value: strconv.Itoa(removed)}
+	case "HASSET":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		if ht.HasSet(key, values[0]) {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	case "GETSET":
+		value := ht.GetSet(key)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
 	default:
 		return commandError("unsupported command")
 	}
@@ -315,6 +344,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		return string(data), nil
 	case DATAVALUE_TYPE_SLICE:
 		data, err := json.Marshal(ht.slices.array[hval.Index].Slice())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	case DATAVALUE_TYPE_SET:
+		data, err := json.Marshal(ht.sets.array[hval.Index].Values())
 		if err != nil {
 			return "", err
 		}

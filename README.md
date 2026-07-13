@@ -107,7 +107,7 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
-and `TAILSLICE`.
+`TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, and `GETSET`.
 
 Use the HTTP client CLI against a running monitoring server:
 
@@ -118,6 +118,7 @@ make cli ARGS='command -cmd SETSTR -key name -value ivi'
 make cli ARGS='command -cmd INC -key views'
 make cli ARGS="command -cmd PUTMAP -key user:1 -pairs '{\"name\":\"ivi\",\"age\":32}'"
 make cli ARGS="command -cmd PUSHSLICE -key jobs -values '[\"build\",\"verify\"]'"
+make cli ARGS="command -cmd ADDSET -key tags -values '[\"go\",\"cache\"]'"
 make cli ARGS='snapshot'
 ```
 
@@ -193,6 +194,10 @@ map type:
 slice/arr/stack/queue type:
   PUSHSLICE key val...
   POPSLICE,SHIFTSLICE,HEADSLICE,TAILSLICE key
+set type:
+  ADDSET,REMSET key val...
+  HASSET key val
+  GETSET key
 ```
 - [ ] add client CLI support for cluster/server topology management and replication internals:
 ```

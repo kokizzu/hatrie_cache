@@ -17,6 +17,7 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	ht.now = func() time.Time { return now }
 
 	ht.UpsertString("session:1", "active user")
+	ht.UpsertSet("session:tags", Set{"active", "paid"})
 	ht.UpsertCounter("counter:views", 42)
 	if !ht.Expire("session:1", time.Minute) {
 		t.Fatal("Expire(session:1) = false, want true")
@@ -62,8 +63,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 1 {
-		t.Fatalf("entries len = %d, want 1: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 2 {
+		t.Fatalf("entries len = %d, want 2: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -71,6 +72,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	}
 	if entry.TTLMillis == nil || *entry.TTLMillis != int64(time.Minute/time.Millisecond) {
 		t.Fatalf("entry TTL = %v, want 60000", entry.TTLMillis)
+	}
+	setEntry := entries.Entries[1]
+	if setEntry.Key != "session:tags" || setEntry.Type != "set" || setEntry.SizeBytes != 2 || setEntry.ValuePreview != "2 members" {
+		t.Fatalf("set entry = %#v, want set member preview", setEntry)
 	}
 }
 

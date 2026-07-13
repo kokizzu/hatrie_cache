@@ -21,6 +21,7 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	ht.UpsertBytes("bytes", []byte("payload"))
 	ht.UpsertMap("map", Map{"name": "ivi", "age": json.Number("32")})
 	ht.UpsertSlice("slice", Slice{"a", json.Number("2")})
+	ht.UpsertSet("set", Set{"a", json.Number("2"), "a"})
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -50,6 +51,9 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if got := loaded.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"a", json.Number("2")}) {
 		t.Fatalf("slice = %#v, want restored slice", got)
+	}
+	if got := loaded.GetSet("set"); !reflect.DeepEqual(got, Set{"a", json.Number("2")}) {
+		t.Fatalf("set = %#v, want restored set", got)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)
