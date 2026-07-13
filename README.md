@@ -8,14 +8,23 @@ _**warning**: this project obviously not ready for production_
 Run the Go wrapper tests:
 
 ```
-go test ./...
+make test
 ```
 
 Run the raw byte backing-store benchmarks:
 
 ```
-go test -bench=RawBytes -benchmem
+make bench
 ```
+
+The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
+
+```
+make frontend-install
+make frontend-dev
+```
+
+Run the full local verification suite with `make verify`.
 
 The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
 and `TTL`. Expired entries are removed lazily when the key is read or mutated.
@@ -48,7 +57,7 @@ build files have not been generated.
 - [x] `hat_map<string,int+byte>` stores index or special types (deque/set/etc) to `[][]byte` (aka raws); raws can be serialized using [FlatBuffers](http://github.com/google/flatbuffers) or [FastBinaryEncoding](http://github.com/chronoxor/FastBinaryEncoding)
 - [x] add TTL map, check for expiration when read, delete if expired
 - [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
-- [ ] create a web UI for management and monitoring (frontend: [Svelte](https://svelte.dev/))
+- [x] create a web UI for management and monitoring (frontend: Svelte MPA)
 - [ ] create backend service using http2/grpc for APIs so it can be accessed from another language 
 - [ ] create a client CLI with for [statistics/cluster/server](https://redis.io/commands/#server) management and running commands:
 ```		
