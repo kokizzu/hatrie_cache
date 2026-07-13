@@ -122,6 +122,39 @@ func TestEmptyKeyIsCountedIterableAndDeletable(t *testing.T) {
 	}
 }
 
+func TestBlankKeysIterateAsDistinctEntries(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("", "empty")
+	ht.UpsertString("\t", "tab")
+	ht.UpsertString(" ", "space")
+
+	wantKeys := []string{"", "\t", " "}
+	if got := ht.Keys(true); !reflect.DeepEqual(got, wantKeys) {
+		t.Fatalf("Keys() = %#v, want %#v", got, wantKeys)
+	}
+	if got := ht.KeysWithPrefix("", true); !reflect.DeepEqual(got, wantKeys) {
+		t.Fatalf("KeysWithPrefix(empty) = %#v, want %#v", got, wantKeys)
+	}
+	entries := ht.Entries(true)
+	if got := entryKeys(entries); !reflect.DeepEqual(got, wantKeys) {
+		t.Fatalf("Entries() keys = %#v, want %#v", got, wantKeys)
+	}
+
+	values := entriesByKey(entries)
+	for key, want := range map[string]string{
+		"":   "empty",
+		"\t": "tab",
+		" ":  "space",
+	} {
+		if !values[key].IsStringAtRaws() {
+			t.Fatalf("entry %q = %+v, want string value", key, values[key])
+		}
+		if got := ht.GetString(key); got != want {
+			t.Fatalf("GetString(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestStringOperationsReuseStorage(t *testing.T) {
 	ht := newTestTrie(t)
 
