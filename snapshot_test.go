@@ -315,10 +315,11 @@ func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 	dir := t.TempDir()
 
 	for name, payload := range map[string]string{
-		"broken":   `{broken`,
-		"version":  `{"version":999,"entries":[]}`,
-		"type":     `{"version":1,"entries":[{"key":"bad","type":"unknown"}]}`,
-		"trailing": `{"version":1,"entries":[]} trailing`,
+		"broken":      `{broken`,
+		"version":     `{"version":999,"entries":[]}`,
+		"type":        `{"version":1,"entries":[{"key":"bad","type":"unknown"}]}`,
+		"missing-key": `{"version":1,"entries":[{"type":"string","string":"value"}]}`,
+		"trailing":    `{"version":1,"entries":[]} trailing`,
 	} {
 		path := filepath.Join(dir, name+".json")
 		if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
