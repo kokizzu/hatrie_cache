@@ -1654,9 +1654,6 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 	ht.stats.updateRates()
 
 	for _, key := range keys {
-		if key == "" {
-			continue
-		}
 		stats, tracked := ht.keyStats[key]
 		if !hit && !tracked {
 			continue
@@ -1680,9 +1677,6 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	ht.stats.LastWrite = now
 
 	for _, key := range keys {
-		if key == "" {
-			continue
-		}
 		stats := ht.keyStats[key]
 		stats.Writes++
 		stats.LastWrite = now

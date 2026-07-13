@@ -558,6 +558,45 @@ func TestKeyStatsTrackExistingKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
 	}
 }
 
+func TestKeyStatsTrackEmptyKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(975, 0)
+	ht.now = func() time.Time { return now }
+
+	if got := ht.GetString(""); got != "" {
+		t.Fatalf("GetString(empty missing key) = %q, want empty", got)
+	}
+	if stats, ok := ht.StatsForKey(""); ok {
+		t.Fatalf("StatsForKey(empty missing key) = %#v, true; want false", stats)
+	}
+
+	ht.UpsertString("", "value")
+	writeAt := now
+	now = now.Add(time.Second)
+	if got := ht.GetString(""); got != "value" {
+		t.Fatalf("GetString(empty key) = %q, want value", got)
+	}
+	hitAt := now
+
+	stats, ok := ht.StatsForKey("")
+	if !ok {
+		t.Fatal("StatsForKey(empty key) = false, want true")
+	}
+	if stats.Writes != 1 || stats.Reads != 1 || stats.Hits != 1 || stats.Misses != 0 {
+		t.Fatalf("empty key stats = %+v, want writes 1 reads/hits 1 misses 0", stats)
+	}
+	if !stats.LastWrite.Equal(writeAt) || !stats.LastHit.Equal(hitAt) {
+		t.Fatalf("empty key timestamps = write %s hit %s, want %s/%s", stats.LastWrite, stats.LastHit, writeAt, hitAt)
+	}
+
+	if !ht.Delete("") {
+		t.Fatal("Delete(empty key) = false, want true")
+	}
+	if stats, ok := ht.StatsForKey(""); ok {
+		t.Fatalf("StatsForKey(deleted empty key) = %#v, true; want false", stats)
+	}
+}
+
 func TestStatsTrackExpirationsAndPersistToDisk(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(1000, 0)
