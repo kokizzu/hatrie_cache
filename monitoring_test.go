@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -194,6 +195,71 @@ func TestMonitoringHandlerRejectsInvalidCommandRequests(t *testing.T) {
 	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"GET","key":"x"} trailing`)))
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("invalid JSON status = %d, want 400", resp.Code)
+	}
+}
+
+func TestMonitoringHandlerSkipsCanceledMutationRequests(t *testing.T) {
+	ht := newTestTrie(t)
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a"},
+			{ID: "node-b"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	election := NewElectionStore(topology, ElectionOptions{})
+	snapshotCalled := false
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		Snapshot: func() error {
+			snapshotCalled = true
+			return nil
+		},
+		Topology: topology,
+		Election: election,
+	}).Handler()
+
+	commandResp := httptest.NewRecorder()
+	handler.ServeHTTP(commandResp, canceledMonitoringRequest(http.MethodPost, "/api/commands", `{"command":"SETSTR","key":"name","value":"ivi"}`))
+	if commandResp.Code != http.StatusRequestTimeout {
+		t.Fatalf("canceled command status = %d, want 408", commandResp.Code)
+	}
+	if ht.Exists("name") {
+		t.Fatal("canceled command stored name")
+	}
+
+	snapshotResp := httptest.NewRecorder()
+	handler.ServeHTTP(snapshotResp, canceledMonitoringRequest(http.MethodPost, "/api/snapshot", ""))
+	if snapshotResp.Code != http.StatusRequestTimeout {
+		t.Fatalf("canceled snapshot status = %d, want 408", snapshotResp.Code)
+	}
+	if snapshotCalled {
+		t.Fatal("canceled snapshot request called snapshot callback")
+	}
+
+	topologyUpdate := `{"version":1,"self":"node-b","nodes":[{"id":"node-b"}],"shards":[{"id":0,"primary":"node-b"}]}`
+	topologyResp := httptest.NewRecorder()
+	handler.ServeHTTP(topologyResp, canceledMonitoringRequest(http.MethodPut, "/api/topology", topologyUpdate))
+	if topologyResp.Code != http.StatusRequestTimeout {
+		t.Fatalf("canceled topology status = %d, want 408", topologyResp.Code)
+	}
+	if got := topology.Get().Self; got != "node-a" {
+		t.Fatalf("topology self = %q after canceled PUT, want node-a", got)
+	}
+
+	electionResp := httptest.NewRecorder()
+	handler.ServeHTTP(electionResp, canceledMonitoringRequest(http.MethodPost, "/api/election", `{"node":"node-a","online":false}`))
+	if electionResp.Code != http.StatusRequestTimeout {
+		t.Fatalf("canceled election status = %d, want 408", electionResp.Code)
+	}
+	if got := election.Status().Leaders[0]; got.Leader != "node-a" {
+		t.Fatalf("leader after canceled election update = %#v, want node-a", got)
 	}
 }
 
@@ -408,4 +474,10 @@ func TestMonitoringHandlerReplicatesCommands(t *testing.T) {
 	if len(result.Targets) != 1 || !result.Targets[0].OK {
 		t.Fatalf("replication result = %#v, want one ok target", result)
 	}
+}
+
+func canceledMonitoringRequest(method string, target string, body string) *http.Request {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return httptest.NewRequest(method, target, bytes.NewBufferString(body)).WithContext(ctx)
 }

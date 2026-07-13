@@ -85,6 +85,78 @@ func TestHTTPReplicatorSkipsWhenNotLeaderOrInternalCommand(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSkipsCanceledContextBeforeNetwork(t *testing.T) {
+	called := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called <- struct{}{}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "value")
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := replicator.ReplicateCommand(ctx, trie, CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}, CacheCommandResponse{OK: true})
+	if !result.Skipped || result.Reason != context.Canceled.Error() {
+		t.Fatalf("canceled replication result = %#v, want skipped context canceled", result)
+	}
+	select {
+	case <-called:
+		t.Fatal("canceled replication reached remote target")
+	default:
+	}
+	if got := replicator.LastResult(); !reflect.DeepEqual(got, result) {
+		t.Fatalf("LastResult() = %#v, want canceled result %#v", got, result)
+	}
+}
+
+func TestHTTPReplicatorAcceptsNilContext(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	response := trie.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"})
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	result := replicator.ReplicateCommand(nil, trie, CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("nil context replication result = %#v, want one ok target", result)
+	}
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
+			t.Fatalf("nil context replicated request = %#v, want INTERNALSET snapshot", request)
+		}
+	default:
+		t.Fatal("nil context replication did not reach remote target")
+	}
+}
+
 func TestReplicationEndpointNormalizesAddresses(t *testing.T) {
 	got, err := replicationEndpoint("127.0.0.1:8080/base/")
 	if err != nil {

@@ -95,6 +95,9 @@ func (handler *MonitoringHandler) handleHealth(w http.ResponseWriter, r *http.Re
 		writeMethodNotAllowed(w)
 		return
 	}
+	if requestContextDone(w, r) {
+		return
+	}
 
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -113,12 +116,18 @@ func (handler *MonitoringHandler) handleStats(w http.ResponseWriter, r *http.Req
 		writeMethodNotAllowed(w)
 		return
 	}
+	if requestContextDone(w, r) {
+		return
+	}
 	writeJSON(w, handler.trie.Stats())
 }
 
 func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
 		return
 	}
 	prefix := r.URL.Query().Get("prefix")
@@ -128,6 +137,9 @@ func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.R
 func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
 		return
 	}
 
@@ -142,6 +154,9 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		http.Error(w, "invalid command request", http.StatusBadRequest)
+		return
+	}
+	if requestContextDone(w, r) {
 		return
 	}
 
@@ -160,6 +175,9 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 func (handler *MonitoringHandler) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
 		return
 	}
 	if handler.options.Snapshot == nil {
@@ -181,6 +199,9 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 
 	switch r.Method {
 	case http.MethodGet:
+		if requestContextDone(w, r) {
+			return
+		}
 		key := r.URL.Query().Get("key")
 		if key != "" {
 			route, ok := handler.options.Topology.Route(key)
@@ -193,6 +214,9 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 		}
 		writeJSON(w, handler.options.Topology.Get())
 	case http.MethodPut:
+		if requestContextDone(w, r) {
+			return
+		}
 		var topology ClusterTopology
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		decoder.DisallowUnknownFields()
@@ -203,6 +227,9 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 		var extra struct{}
 		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 			http.Error(w, "invalid topology request", http.StatusBadRequest)
+			return
+		}
+		if requestContextDone(w, r) {
 			return
 		}
 		if err := handler.options.Topology.Set(topology); err != nil {
@@ -228,6 +255,9 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 
 	switch r.Method {
 	case http.MethodGet:
+		if requestContextDone(w, r) {
+			return
+		}
 		key := r.URL.Query().Get("key")
 		if key != "" {
 			route, ok := handler.options.Election.LeaderForKey(key)
@@ -240,6 +270,9 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 		}
 		writeJSON(w, handler.options.Election.Status())
 	case http.MethodPost:
+		if requestContextDone(w, r) {
+			return
+		}
 		var request electionUpdateRequest
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		decoder.DisallowUnknownFields()
@@ -250,6 +283,9 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 		var extra struct{}
 		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 			http.Error(w, "invalid election request", http.StatusBadRequest)
+			return
+		}
+		if requestContextDone(w, r) {
 			return
 		}
 		var err error
@@ -271,6 +307,9 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
 		return
 	}
 	if handler.options.Replicator == nil {
@@ -434,4 +473,12 @@ func writeJSONStatus(w http.ResponseWriter, status int, value interface{}) {
 
 func writeMethodNotAllowed(w http.ResponseWriter) {
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+func requestContextDone(w http.ResponseWriter, r *http.Request) bool {
+	if err := r.Context().Err(); err != nil {
+		writeJSONStatus(w, http.StatusRequestTimeout, commandError(err.Error()))
+		return true
+	}
+	return false
 }

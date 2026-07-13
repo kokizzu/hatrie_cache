@@ -91,6 +91,7 @@ func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *Ha
 }
 
 func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	ctx = replicationContext(ctx)
 	command := normalizedCommand(request.Command)
 	key := strings.TrimSpace(request.Key)
 	result := ReplicationResult{Command: command, Key: key}
@@ -102,6 +103,11 @@ func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *Ha
 	if trie == nil {
 		result.Skipped = true
 		result.Reason = "trie is not configured"
+		return result
+	}
+	if err := ctx.Err(); err != nil {
+		result.Skipped = true
+		result.Reason = err.Error()
 		return result
 	}
 	kind := replicationPayloadKindFor(request, response)
@@ -211,9 +217,14 @@ func (replicator *HTTPReplicator) replicationTargets(route ElectionKeyRoute) []T
 }
 
 func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, target TopologyNode, payload CacheCommandRequest) ReplicationTargetResult {
+	ctx = replicationContext(ctx)
 	result := ReplicationTargetResult{
 		Node:    target.ID,
 		Address: target.Address,
+	}
+	if err := ctx.Err(); err != nil {
+		result.Error = err.Error()
+		return result
 	}
 	endpoint, err := replicationEndpoint(target.Address)
 	if err != nil {
@@ -262,6 +273,13 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	result.OK = true
 	return result
+}
+
+func replicationContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 func replicationCommandPayload(trie *HatTrie, key string, kind replicationPayloadKind) (CacheCommandRequest, bool) {
