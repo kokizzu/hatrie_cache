@@ -59,6 +59,44 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreRoundTripRestoresKeyStats(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	now := time.Unix(4500, 0)
+	source.now = func() time.Time { return now }
+
+	source.UpsertBytes("hot", []byte("value"))
+	now = now.Add(time.Second)
+	if got := source.GetBytes("hot"); !bytes.Equal(got, []byte("value")) {
+		t.Fatalf("GetBytes(hot) = %q, want value", got)
+	}
+	now = now.Add(time.Second)
+	if got := source.GetMap("hot"); got != nil {
+		t.Fatalf("GetMap(hot) = %#v, want nil", got)
+	}
+	want, ok := source.StatsForKey("hot")
+	if !ok {
+		t.Fatal("StatsForKey(hot) = false, want true")
+	}
+
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now.Add(time.Hour) }
+	if _, err := loaded.LoadLevelDB(path); err != nil {
+		t.Fatalf("LoadLevelDB() error = %v", err)
+	}
+	got, ok := loaded.StatsForKey("hot")
+	if !ok {
+		t.Fatal("loaded StatsForKey(hot) = false, want true")
+	}
+	if got != want {
+		t.Fatalf("loaded key stats = %#v, want %#v", got, want)
+	}
+}
+
 func TestLevelDBStoreSkipsExpiredValuesOnLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

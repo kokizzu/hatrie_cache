@@ -132,16 +132,18 @@ the `HatValue.OnDisk()` flag. `CreateHatTrie` uses an owned temporary spill
 directory that is removed by `Destroy`; use `CreateHatTrieWithDiskDir` to supply
 a specific directory.
 
-Use `Stats` to read cache counters and hit-rate metadata. `SaveStats` writes the
-statistics snapshot as JSON, and `LoadStats` restores a saved snapshot.
+Use `Stats` to read cache counters and hit-rate metadata. `StatsForKey` returns
+per-key read/write counters and last access times without creating stats for
+unknown-key misses. `SaveStats` writes the global statistics snapshot as JSON,
+and `LoadStats` restores a saved snapshot.
 
 Use `SaveSnapshot` and `LoadSnapshot` for portable JSON data snapshots. Snapshot
-loads skip expired entries and re-apply the normal disk spill threshold for large
-byte values.
+loads skip expired entries, restore per-key access metadata when present, and
+re-apply the normal disk spill threshold for large byte values.
 
 Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
 disk persistence. The LevelDB writer uses Snappy compression and clears stale
-keys on each save.
+keys on each save while preserving per-key access metadata.
 
 Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
 service in another Go process, or use the generated client in

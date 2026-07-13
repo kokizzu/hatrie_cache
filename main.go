@@ -225,6 +225,19 @@ type CacheStats struct {
 	CumulativeHitRate float64   `json:"cumulative_hit_rate"`
 }
 
+// KeyStats records access metadata for one stored key.
+type KeyStats struct {
+	Reads             uint64    `json:"reads"`
+	Hits              uint64    `json:"hits"`
+	Misses            uint64    `json:"misses"`
+	Writes            uint64    `json:"writes"`
+	LastHit           time.Time `json:"last_hit,omitempty"`
+	LastMiss          time.Time `json:"last_miss,omitempty"`
+	LastWrite         time.Time `json:"last_write,omitempty"`
+	HitRate           float64   `json:"hit_rate"`
+	CumulativeHitRate float64   `json:"cumulative_hit_rate"`
+}
+
 func MarshalMapJSON(value Map) ([]byte, error) {
 	return json.Marshal(value)
 }
@@ -554,15 +567,16 @@ func (ss *SliceStorage) Del(idx int32) {
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing
 // pools referenced by compact HatValue records.
 type HatTrie struct {
-	mu      sync.RWMutex
-	root    *C.hattrie_t
-	raws    *BytesStorage
-	disks   *DiskStorage
-	maps    *MapStorage
-	slices  *SliceStorage
-	expires map[string]time.Time
-	stats   CacheStats
-	now     func() time.Time
+	mu       sync.RWMutex
+	root     *C.hattrie_t
+	raws     *BytesStorage
+	disks    *DiskStorage
+	maps     *MapStorage
+	slices   *SliceStorage
+	expires  map[string]time.Time
+	stats    CacheStats
+	keyStats map[string]KeyStats
+	now      func() time.Time
 }
 
 func CreateHatTrie() *HatTrie {
@@ -584,13 +598,14 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		return nil, err
 	}
 	ht := &HatTrie{
-		root:    C.hattrie_create(),
-		raws:    CreateBytesStorage(),
-		disks:   disks,
-		maps:    CreateMapStorage(),
-		slices:  CreateSliceStorage(),
-		expires: map[string]time.Time{},
-		now:     time.Now,
+		root:     C.hattrie_create(),
+		raws:     CreateBytesStorage(),
+		disks:    disks,
+		maps:     CreateMapStorage(),
+		slices:   CreateSliceStorage(),
+		expires:  map[string]time.Time{},
+		keyStats: map[string]KeyStats{},
+		now:      time.Now,
 	}
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
 	return ht, nil
@@ -617,6 +632,7 @@ func (ht *HatTrie) Destroy() {
 	ht.maps = nil
 	ht.slices = nil
 	ht.expires = nil
+	ht.keyStats = nil
 	ht.now = nil
 }
 
@@ -634,6 +650,34 @@ func (ht *HatTrie) Stats() CacheStats {
 
 	ht.ensureOpen()
 	return ht.stats
+}
+
+// StatsForKey returns access metadata for an existing key.
+func (ht *HatTrie) StatsForKey(key string) (KeyStats, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	ht.ensureOpen()
+	if ht.getLocked(key).Empty() {
+		delete(ht.keyStats, key)
+		return KeyStats{}, false
+	}
+	stats, ok := ht.keyStats[key]
+	return stats, ok
+}
+
+func (ht *HatTrie) restoreKeyStats(key string, stats *KeyStats) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	ht.ensureOpen()
+	if stats == nil {
+		delete(ht.keyStats, key)
+		return
+	}
+	restored := *stats
+	restored.updateRates()
+	ht.keyStats[key] = restored
 }
 
 func (ht *HatTrie) SaveStats(path string) error {
@@ -675,13 +719,13 @@ func (ht *HatTrie) Expire(key string, ttl time.Duration) bool {
 	if ttl <= 0 {
 		deleted := ht.deleteLocked(key)
 		if deleted {
-			ht.recordDeleteLocked()
+			ht.recordDeleteLocked(key)
 		}
 		return deleted
 	}
 	ok := ht.expireAtLocked(key, ht.currentTime().Add(ttl))
 	if ok {
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 	}
 	return ok
 }
@@ -694,7 +738,7 @@ func (ht *HatTrie) ExpireAt(key string, at time.Time) bool {
 
 	ok := ht.expireAtLocked(key, at)
 	if ok {
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 	}
 	return ok
 }
@@ -722,7 +766,7 @@ func (ht *HatTrie) Persist(key string) bool {
 	delete(ht.expires, key)
 	hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 	*rawPtr = hval.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 	return true
 }
 
@@ -735,31 +779,31 @@ func (ht *HatTrie) TTL(key string) time.Duration {
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
 		delete(ht.expires, key)
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return NoTTL
 	}
 
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
 	if ht.expireIfNeededLocked(key, hval) {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return NoTTL
 	}
 
 	expiresAt, ok := ht.expires[key]
 	if !ok {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return NoTTL
 	}
 	ttl := expiresAt.Sub(ht.currentTime())
 	if ttl <= 0 {
 		if ht.deleteKnownLocked(key, hval) {
-			ht.recordExpirationLocked()
+			ht.recordExpirationLocked(key)
 		}
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return NoTTL
 	}
-	ht.recordReadLocked(true)
+	ht.recordReadLocked(true, key)
 	return ttl
 }
 
@@ -909,7 +953,7 @@ func (ht *HatTrie) currentTime() time.Time {
 	return ht.now()
 }
 
-func (ht *HatTrie) recordReadLocked(hit bool) {
+func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 	now := ht.currentTime()
 	ht.stats.Reads++
 	if hit {
@@ -920,24 +964,71 @@ func (ht *HatTrie) recordReadLocked(hit bool) {
 		ht.stats.LastMiss = now
 	}
 	ht.stats.updateRates()
+
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		stats, tracked := ht.keyStats[key]
+		if !hit && !tracked {
+			continue
+		}
+		stats.Reads++
+		if hit {
+			stats.Hits++
+			stats.LastHit = now
+		} else {
+			stats.Misses++
+			stats.LastMiss = now
+		}
+		stats.updateRates()
+		ht.keyStats[key] = stats
+	}
 }
 
-func (ht *HatTrie) recordWriteLocked() {
+func (ht *HatTrie) recordWriteLocked(keys ...string) {
+	now := ht.currentTime()
 	ht.stats.Writes++
-	ht.stats.LastWrite = ht.currentTime()
+	ht.stats.LastWrite = now
+
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		stats := ht.keyStats[key]
+		stats.Writes++
+		stats.LastWrite = now
+		stats.updateRates()
+		ht.keyStats[key] = stats
+	}
 }
 
-func (ht *HatTrie) recordDeleteLocked() {
+func (ht *HatTrie) recordDeleteLocked(key string) {
 	ht.stats.Deletes++
 	ht.recordWriteLocked()
+	delete(ht.keyStats, key)
 }
 
-func (ht *HatTrie) recordExpirationLocked() {
+func (ht *HatTrie) recordExpirationLocked(keys ...string) {
 	ht.stats.Expirations++
 	ht.recordWriteLocked()
+	for _, key := range keys {
+		delete(ht.keyStats, key)
+	}
 }
 
 func (stats *CacheStats) updateRates() {
+	if stats.Reads == 0 {
+		stats.HitRate = 0
+		stats.CumulativeHitRate = 0
+		return
+	}
+	rate := float64(stats.Hits) / float64(stats.Reads)
+	stats.HitRate = rate
+	stats.CumulativeHitRate = rate
+}
+
+func (stats *KeyStats) updateRates() {
 	if stats.Reads == 0 {
 		stats.HitRate = 0
 		stats.CumulativeHitRate = 0
@@ -1028,7 +1119,7 @@ func (ht *HatTrie) expireIfNeededLocked(key string, hval HatValue) bool {
 	}
 	deleted := ht.deleteKnownLocked(key, hval)
 	if deleted {
-		ht.recordExpirationLocked()
+		ht.recordExpirationLocked(key)
 	}
 	return deleted
 }
@@ -1053,6 +1144,7 @@ func (ht *HatTrie) deleteKnownLocked(key string, hval HatValue) bool {
 		return false
 	}
 	delete(ht.expires, key)
+	delete(ht.keyStats, key)
 	ht.returnStorage(hval)
 	return true
 }
@@ -1076,7 +1168,7 @@ func (ht *HatTrie) vacuumExpiredLocked() int {
 		hval := HatValue{}
 		hval.fromValue(*rawPtr)
 		if ht.deleteKnownLocked(key, hval) {
-			ht.recordExpirationLocked()
+			ht.recordExpirationLocked(key)
 			removed++
 		}
 	}
@@ -1127,7 +1219,7 @@ func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
 
 	for _, entry := range expired {
 		if ht.deleteKnownLocked(entry.key, entry.value) {
-			ht.recordExpirationLocked()
+			ht.recordExpirationLocked(entry.key)
 		}
 	}
 
@@ -1139,7 +1231,7 @@ func (ht *HatTrie) Get(key string) HatValue {
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
-	ht.recordReadLocked(!hval.Empty())
+	ht.recordReadLocked(!hval.Empty(), key)
 	return hval
 }
 
@@ -1164,7 +1256,7 @@ func (ht *HatTrie) Delete(key string) bool {
 
 	deleted := ht.deleteLocked(key)
 	if deleted {
-		ht.recordDeleteLocked()
+		ht.recordDeleteLocked(key)
 	}
 	return deleted
 }
@@ -1185,7 +1277,7 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 	}
 	delete(ht.expires, key)
 	*rawPtr = HatValue{Index: val, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 // IncrementCounter increments key by by. If key is not a counter, it is reset
@@ -1204,7 +1296,7 @@ func (ht *HatTrie) IncrementCounter(key string, by int32) {
 		hval.Index = by
 	}
 	*rawPtr = hval.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 // GetCounter returns 0 if key is missing or does not hold a counter.
@@ -1213,7 +1305,7 @@ func (ht *HatTrie) GetCounter(key string) int32 {
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
-	ht.recordReadLocked(hval.IsCounter())
+	ht.recordReadLocked(hval.IsCounter(), key)
 	if hval.IsCounter() {
 		return hval.Index
 	}
@@ -1231,7 +1323,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 		delete(ht.expires, key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
@@ -1239,7 +1331,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 	delete(ht.expires, key)
 	idx := ht.raws.Add([]byte(val))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 // AppendString appends str to key. If key is not a string, it is reset to str.
@@ -1255,7 +1347,7 @@ func (ht *HatTrie) AppendString(key string, str string) {
 		next = append(next, str...)
 		ht.raws.Put(hval.Index, next)
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
@@ -1263,7 +1355,7 @@ func (ht *HatTrie) AppendString(key string, str string) {
 	delete(ht.expires, key)
 	idx := ht.raws.Add([]byte(str))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 // PrependString prepends str to key. If key is not a string, it is reset to str.
@@ -1279,7 +1371,7 @@ func (ht *HatTrie) PrependString(key string, str string) {
 		next = append(next, old...)
 		ht.raws.Put(hval.Index, next)
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
@@ -1287,7 +1379,7 @@ func (ht *HatTrie) PrependString(key string, str string) {
 	delete(ht.expires, key)
 	idx := ht.raws.Add([]byte(str))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 // GetString returns an empty string if key is missing or not a string/counter.
@@ -1296,7 +1388,7 @@ func (ht *HatTrie) GetString(key string) string {
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
-	ht.recordReadLocked(hval.IsStringAtRaws() || hval.IsCounter())
+	ht.recordReadLocked(hval.IsStringAtRaws() || hval.IsCounter(), key)
 	if hval.IsStringAtRaws() {
 		return string(ht.raws.array[hval.Index])
 	}
@@ -1316,14 +1408,14 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 		delete(ht.expires, key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		ht.storeBytesLocked(rawPtr, hval, val)
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
 	ht.returnStorage(hval)
 	delete(ht.expires, key)
 	ht.storeBytesLocked(rawPtr, HatValue{}, val)
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 // GetBytes returns nil if key is missing or not a string/bytes value.
@@ -1332,7 +1424,7 @@ func (ht *HatTrie) GetBytes(key string) []byte {
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
-	ht.recordReadLocked(hval.IsStringAtRaws() || hval.IsBytesAtRaws())
+	ht.recordReadLocked(hval.IsStringAtRaws() || hval.IsBytesAtRaws(), key)
 	if hval.IsStringAtRaws() {
 		return cloneBytes(ht.raws.array[hval.Index])
 	}
@@ -1393,7 +1485,7 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 		delete(ht.expires, key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
@@ -1401,7 +1493,7 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 	delete(ht.expires, key)
 	idx := ht.maps.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 func (ht *HatTrie) UpsertMapJSON(key string, data []byte) error {
@@ -1438,7 +1530,7 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 		old[subkey] = val
 		ht.maps.Put(hval.Index, old)
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
@@ -1446,7 +1538,7 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 	delete(ht.expires, key)
 	idx := ht.maps.Add(Map{subkey: val})
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 func (ht *HatTrie) PeekMap(key, subkey string) interface{} {
@@ -1455,11 +1547,11 @@ func (ht *HatTrie) PeekMap(key, subkey string) interface{} {
 
 	m, ok := ht.mapRefLocked(key)
 	if !ok {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return nil
 	}
 	val, exists := m[subkey]
-	ht.recordReadLocked(exists)
+	ht.recordReadLocked(exists, key)
 	return val
 }
 
@@ -1469,14 +1561,14 @@ func (ht *HatTrie) TakeMap(key, subkey string) interface{} {
 
 	m, ok := ht.mapRefLocked(key)
 	if !ok {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return nil
 	}
 	val, exists := m[subkey]
-	ht.recordReadLocked(exists)
+	ht.recordReadLocked(exists, key)
 	if exists {
 		delete(m, subkey)
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 	}
 	return val
 }
@@ -1486,7 +1578,7 @@ func (ht *HatTrie) GetMap(key string) Map {
 	defer ht.mu.Unlock()
 
 	m, ok := ht.mapRefLocked(key)
-	ht.recordReadLocked(ok)
+	ht.recordReadLocked(ok, key)
 	if !ok {
 		return nil
 	}
@@ -1511,7 +1603,7 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 		delete(ht.expires, key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
@@ -1519,7 +1611,7 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 	delete(ht.expires, key)
 	idx := ht.slices.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
@@ -1533,7 +1625,7 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 		values = append(values, vals...)
 		ht.slices.array[hval.Index].Push(values...)
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
@@ -1544,7 +1636,7 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 	arr = append(arr, vals...)
 	idx := ht.slices.Add(arr)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 func (ht *HatTrie) PopSlice(key string) interface{} {
@@ -1553,17 +1645,17 @@ func (ht *HatTrie) PopSlice(key string) interface{} {
 
 	hval := ht.getLocked(key)
 	if !hval.IsSlice() {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return nil
 	}
 
 	val, ok := ht.slices.array[hval.Index].Pop()
 	if !ok {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return nil
 	}
-	ht.recordReadLocked(true)
-	ht.recordWriteLocked()
+	ht.recordReadLocked(true, key)
+	ht.recordWriteLocked(key)
 	return val
 }
 
@@ -1573,17 +1665,17 @@ func (ht *HatTrie) ShiftSlice(key string) interface{} {
 
 	hval := ht.getLocked(key)
 	if !hval.IsSlice() {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return nil
 	}
 
 	val, ok := ht.slices.array[hval.Index].Shift()
 	if !ok {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return nil
 	}
-	ht.recordReadLocked(true)
-	ht.recordWriteLocked()
+	ht.recordReadLocked(true, key)
+	ht.recordWriteLocked(key)
 	return val
 }
 
@@ -1594,7 +1686,7 @@ func (ht *HatTrie) HeadSlice(key string) interface{} {
 	dq, ok := ht.sliceRefLocked(key)
 	val, hit := dq.Head()
 	hit = ok && hit
-	ht.recordReadLocked(hit)
+	ht.recordReadLocked(hit, key)
 	if hit {
 		return val
 	}
@@ -1608,7 +1700,7 @@ func (ht *HatTrie) TailSlice(key string) interface{} {
 	dq, ok := ht.sliceRefLocked(key)
 	val, hit := dq.Tail()
 	hit = ok && hit
-	ht.recordReadLocked(hit)
+	ht.recordReadLocked(hit, key)
 	if hit {
 		return val
 	}
@@ -1620,7 +1712,7 @@ func (ht *HatTrie) GetSlice(key string) Slice {
 	defer ht.mu.Unlock()
 
 	dq, ok := ht.sliceRefLocked(key)
-	ht.recordReadLocked(ok)
+	ht.recordReadLocked(ok, key)
 	if !ok {
 		return nil
 	}

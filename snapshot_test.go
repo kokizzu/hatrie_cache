@@ -56,6 +56,72 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestSnapshotRoundTripRestoresKeyStats(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(2050, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("hot", "value")
+	now = now.Add(time.Second)
+	if got := ht.GetString("hot"); got != "value" {
+		t.Fatalf("GetString(hot) = %q, want value", got)
+	}
+	now = now.Add(time.Second)
+	if got := ht.GetCounter("hot"); got != 0 {
+		t.Fatalf("GetCounter(hot) = %d, want 0", got)
+	}
+	want, ok := ht.StatsForKey("hot")
+	if !ok {
+		t.Fatal("StatsForKey(hot) = false, want true")
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := ht.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now.Add(time.Hour) }
+	if err := loaded.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	got, ok := loaded.StatsForKey("hot")
+	if !ok {
+		t.Fatal("loaded StatsForKey(hot) = false, want true")
+	}
+	if got != want {
+		t.Fatalf("loaded key stats = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadSnapshotWithoutKeyStatsDoesNotInventStats(t *testing.T) {
+	ht := newTestTrie(t)
+	data := snapshotFile{
+		Version: snapshotVersion,
+		Entries: []snapshotEntry{
+			{Key: "legacy", Type: "string", String: "value"},
+		},
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := ht.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if stats, ok := ht.StatsForKey("legacy"); ok {
+		t.Fatalf("StatsForKey(legacy) = %#v, true; want false", stats)
+	}
+	if got := ht.GetString("legacy"); got != "value" {
+		t.Fatalf("legacy value = %q, want value", got)
+	}
+}
+
 func TestSnapshotRoundTripRestoresLargeBytesToDisk(t *testing.T) {
 	ht := newTestTrie(t)
 	payload := testPayload(DiskBytesThreshold + 1)

@@ -216,7 +216,7 @@ func (ht *HatTrie) commandIncrementCounter(key string, by int32) (int32, bool) {
 		hval = HatValue{Index: by, Flags: DATAVALUE_TYPE_COUNTER}
 	}
 	*rawPtr = hval.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 	return hval.Index, true
 }
 
@@ -235,7 +235,7 @@ func (ht *HatTrie) commandPutMap(key string, fields Map) {
 		}
 		ht.maps.Put(hval.Index, current)
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked()
+		ht.recordWriteLocked(key)
 		return
 	}
 
@@ -243,7 +243,7 @@ func (ht *HatTrie) commandPutMap(key string, fields Map) {
 	delete(ht.expires, key)
 	idx := ht.maps.Add(fields)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
-	ht.recordWriteLocked()
+	ht.recordWriteLocked(key)
 }
 
 func (ht *HatTrie) applyCommandTTL(key string, ttlSeconds *int64) (CacheCommandResponse, bool) {
@@ -276,16 +276,16 @@ func (ht *HatTrie) commandValue(key string) (string, bool, error) {
 
 	hval := ht.getLocked(key)
 	if hval.Empty() {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return "", false, nil
 	}
 
 	value, err := ht.commandValueLocked(hval)
 	if err != nil {
-		ht.recordReadLocked(false)
+		ht.recordReadLocked(false, key)
 		return "", false, err
 	}
-	ht.recordReadLocked(true)
+	ht.recordReadLocked(true, key)
 	return value, true, nil
 }
 

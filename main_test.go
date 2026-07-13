@@ -347,6 +347,53 @@ func TestStatsTrackReadsWritesDeletesAndRates(t *testing.T) {
 	}
 }
 
+func TestKeyStatsTrackExistingKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(950, 0)
+	ht.now = func() time.Time { return now }
+
+	if got := ht.GetString("missing"); got != "" {
+		t.Fatalf("GetString(missing) = %q, want empty", got)
+	}
+	if stats, ok := ht.StatsForKey("missing"); ok {
+		t.Fatalf("StatsForKey(missing) = %#v, true; want false", stats)
+	}
+
+	ht.UpsertString("key", "value")
+	writeAt := now
+	now = now.Add(time.Second)
+	if got := ht.GetString("key"); got != "value" {
+		t.Fatalf("GetString(key) = %q, want value", got)
+	}
+	hitAt := now
+	now = now.Add(time.Second)
+	if got := ht.GetCounter("key"); got != 0 {
+		t.Fatalf("GetCounter(string key) = %d, want 0", got)
+	}
+	missAt := now
+
+	stats, ok := ht.StatsForKey("key")
+	if !ok {
+		t.Fatal("StatsForKey(key) = false, want true")
+	}
+	if stats.Reads != 2 || stats.Hits != 1 || stats.Misses != 1 || stats.Writes != 1 {
+		t.Fatalf("key stats counters = %#v, want 2 reads, 1 hit, 1 miss, 1 write", stats)
+	}
+	if stats.HitRate != 0.5 || stats.CumulativeHitRate != 0.5 {
+		t.Fatalf("key hit rates = %f/%f, want 0.5/0.5", stats.HitRate, stats.CumulativeHitRate)
+	}
+	if !stats.LastWrite.Equal(writeAt) || !stats.LastHit.Equal(hitAt) || !stats.LastMiss.Equal(missAt) {
+		t.Fatalf("key stats times = %#v, want write %s hit %s miss %s", stats, writeAt, hitAt, missAt)
+	}
+
+	if !ht.Delete("key") {
+		t.Fatal("Delete(key) = false, want true")
+	}
+	if stats, ok := ht.StatsForKey("key"); ok {
+		t.Fatalf("StatsForKey(deleted key) = %#v, true; want false", stats)
+	}
+}
+
 func TestStatsTrackExpirationsAndPersistToDisk(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(1000, 0)

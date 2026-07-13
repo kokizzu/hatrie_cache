@@ -32,6 +32,7 @@ type snapshotEntry struct {
 	Map       Map        `json:"map"`
 	Slice     Slice      `json:"slice"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Stats     *KeyStats  `json:"stats,omitempty"`
 }
 
 type snapshotOperation struct {
@@ -133,6 +134,10 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 		Type:      monitoringType(entry.Value),
 		ExpiresAt: snapshotExpiresAt(ht.expires[entry.Key]),
 	}
+	if stats, ok := ht.keyStats[entry.Key]; ok {
+		stats.updateRates()
+		out.Stats = &stats
+	}
 	switch entry.Value.Type() {
 	case DATAVALUE_TYPE_COUNTER:
 		out.Counter = entry.Value.Index
@@ -204,6 +209,7 @@ func (ht *HatTrie) applySnapshotOperation(operation snapshotOperation) error {
 	if entry.ExpiresAt != nil && !ht.ExpireAt(entry.Key, *entry.ExpiresAt) {
 		return errors.New("hatriecache: failed to restore snapshot expiration")
 	}
+	ht.restoreKeyStats(entry.Key, entry.Stats)
 	return nil
 }
 
