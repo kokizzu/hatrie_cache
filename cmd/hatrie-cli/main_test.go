@@ -350,6 +350,31 @@ func TestRunCommandPostsHyperLogLogOptions(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsTopKOptions(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"created top-k"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "CREATETOPK",
+		"-key", "top",
+		"-value", "100",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command CREATETOPK) error = %v", err)
+	}
+
+	if gotRequest.Command != "CREATETOPK" || gotRequest.Key != "top" || gotRequest.Value != "100" {
+		t.Fatalf("request = %#v, want CREATETOPK top value 100", gotRequest)
+	}
+}
+
 func TestRunSnapshotPostsToSnapshotEndpoint(t *testing.T) {
 	var gotPath string
 	var gotMethod string

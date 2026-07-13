@@ -36,6 +36,7 @@ type snapshotEntry struct {
 	BloomFilter    *bloomFilterSnapshot    `json:"bloom_filter,omitempty"`
 	CountMinSketch *countMinSketchSnapshot `json:"count_min_sketch,omitempty"`
 	HyperLogLog    *hyperLogLogSnapshot    `json:"hyperloglog,omitempty"`
+	TopK           *topKSnapshot           `json:"top_k,omitempty"`
 	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
 	Stats          *KeyStats               `json:"stats,omitempty"`
 }
@@ -163,6 +164,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_HYPERLOGLOG:
 		snapshot := ht.hyperLogLogs.array[entry.Value.Index].Snapshot()
 		out.HyperLogLog = &snapshot
+	case DATAVALUE_TYPE_TOP_K:
+		snapshot := ht.topKs.array[entry.Value.Index].Snapshot()
+		out.TopK = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -209,6 +213,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: hyperloglog snapshot is required")
 		}
 		if err := validateHyperLogLogSnapshot(*entry.HyperLogLog); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "top_k":
+		if entry.TopK == nil {
+			return snapshotOperation{}, errors.New("hatriecache: top-k snapshot is required")
+		}
+		if err := validateTopKSnapshot(*entry.TopK); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -371,6 +383,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.hyperLogLogs.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_HYPERLOGLOG}
+	case "top_k":
+		data, err := newTopKDataFromSnapshot(*entry.TopK)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.topKs.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_TOP_K}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

@@ -35,6 +35,10 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertHyperLogLog() error = %v", err)
 	}
 	ht.AddHyperLogLog("card", "alpha", "beta")
+	if err := ht.UpsertTopK("top", 3); err != nil {
+		t.Fatalf("UpsertTopK() error = %v", err)
+	}
+	ht.AddTopK("top", "alpha", 5)
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -88,6 +92,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.HyperLogLogInfo("card"); !ok || info.Precision != 10 || info.Observations != 2 {
 		t.Fatalf("loaded HyperLogLogInfo = %#v/%v, want restored HyperLogLog", info, ok)
+	}
+	if got := loaded.EstimateTopK("top", "alpha"); !got.Tracked || got.Count != 5 {
+		t.Fatalf("loaded Top-K estimate = %#v, want alpha count 5", got)
+	}
+	if info, ok := loaded.TopKInfo("top"); !ok || info.Capacity != 3 || info.Total != 5 {
+		t.Fatalf("loaded TopKInfo = %#v/%v, want restored Top-K", info, ok)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)

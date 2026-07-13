@@ -57,6 +57,7 @@ const (
 	DATAVALUE_TYPE_BLOOM_FILTER
 	DATAVALUE_TYPE_COUNT_MIN_SKETCH
 	DATAVALUE_TYPE_HYPERLOGLOG
+	DATAVALUE_TYPE_TOP_K
 )
 
 type Map = map[string]interface{}
@@ -597,6 +598,10 @@ func (hval HatValue) IsHyperLogLog() bool {
 	return hval.Is(DATAVALUE_TYPE_HYPERLOGLOG)
 }
 
+func (hval HatValue) IsTopK() bool {
+	return hval.Is(DATAVALUE_TYPE_TOP_K)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -631,6 +636,8 @@ func (hval HatValue) String() string {
 		return "count-min sketch at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_HYPERLOGLOG:
 		return "hyperloglog at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_TOP_K:
+		return "top-k at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -1254,6 +1261,7 @@ type HatTrie struct {
 	bloomFilters     *BloomFilterStorage
 	countMinSketches *CountMinSketchStorage
 	hyperLogLogs     *HyperLogLogStorage
+	topKs            *TopKStorage
 	dbrefs           *LevelDBReferenceStorage
 	expires          map[string]time.Time
 	expirations      expirationHeap
@@ -1291,6 +1299,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		bloomFilters:     CreateBloomFilterStorage(),
 		countMinSketches: CreateCountMinSketchStorage(),
 		hyperLogLogs:     CreateHyperLogLogStorage(),
+		topKs:            CreateTopKStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
 		keyStats:         map[string]KeyStats{},
@@ -1325,6 +1334,7 @@ func (ht *HatTrie) Destroy() {
 	ht.bloomFilters = nil
 	ht.countMinSketches = nil
 	ht.hyperLogLogs = nil
+	ht.topKs = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
@@ -1797,6 +1807,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.countMinSketches.Del(hval.Index)
 	case DATAVALUE_TYPE_HYPERLOGLOG:
 		ht.hyperLogLogs.Del(hval.Index)
+	case DATAVALUE_TYPE_TOP_K:
+		ht.topKs.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)

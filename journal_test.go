@@ -245,6 +245,48 @@ func TestCommandJournalReplaysHyperLogLogMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysTopKMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATETOPK", Key: "top", Value: "3"}); !got.OK {
+		t.Fatalf("journaled CREATETOPK response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDTOPK", Key: "top", Value: "alpha", Subkey: "5"}); !got.OK {
+		t.Fatalf("journaled ADDTOPK response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "GETTOPK", Key: "top"}); !got.OK || got.Value == "" {
+		t.Fatalf("journaled GETTOPK response = %#v, want local items", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want CREATETOPK and ADDTOPK only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got := replayed.EstimateTopK("top", "alpha"); !got.Tracked || got.Count != 5 {
+		t.Fatalf("replayed Top-K estimate = %#v, want alpha count 5", got)
+	}
+	if info, ok := replayed.TopKInfo("top"); !ok || info.Total != 5 || info.Tracked != 1 {
+		t.Fatalf("replayed TopKInfo = %#v/%v, want total 5", info, ok)
+	}
+}
+
 func TestCommandJournalReplaysRelativeTTLsAsAbsoluteExpirations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

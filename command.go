@@ -375,6 +375,50 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATETOPK", "RESERVETOPK", "TOPKRESERVE":
+		capacity, err := commandTopKCapacity(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertTopK(key, capacity); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created top-k"}
+	case "ADDTOPK", "TOPKADD":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		count, err := commandTopKCount(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if len(values) == 1 {
+			estimate := ht.AddTopK(key, values[0], count)
+			return commandValueResponse("added top-k value", estimate)
+		}
+		for _, value := range values {
+			ht.AddTopK(key, value, count)
+		}
+		return CacheCommandResponse{OK: true, Message: "added top-k values", Value: strconv.Itoa(len(values))}
+	case "ESTTOPK", "QUERYTOPK", "TOPKCOUNT":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value is required")
+		}
+		return commandValueResponse("ok", ht.EstimateTopK(key, values[0]))
+	case "GETTOPK", "TOPK":
+		value := ht.GetTopK(key)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
+	case "INFOTOPK", "TOPKINFO":
+		info, ok := ht.TopKInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	default:
 		return commandError("unsupported command")
 	}
@@ -595,6 +639,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_TOP_K:
+		data, err := json.Marshal(ht.topKs.array[hval.Index].Items())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	default:
 		return "", nil
 	}
@@ -811,6 +861,45 @@ func hyperLogLogPrecisionValue(value uint64) (uint8, error) {
 		return 0, errors.New("hatriecache: hyperloglog precision must be between " + strconv.Itoa(int(minHyperLogLogPrecision)) + " and " + strconv.Itoa(int(maxHyperLogLogPrecision)))
 	}
 	return uint8(value), nil
+}
+
+func commandTopKCapacity(request CacheCommandRequest) (uint64, error) {
+	capacity := DefaultTopKCapacity
+	var err error
+	if strings.TrimSpace(request.Value) != "" {
+		capacity, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return 0, errors.New("top-k capacity must be an unsigned integer")
+		}
+	}
+	if value, ok := request.Pairs["capacity"]; ok {
+		capacity, err = commandUint64Value(value)
+		if err != nil {
+			return 0, errors.New("top-k capacity must be an unsigned integer")
+		}
+	}
+	return topKCapacityValue(capacity)
+}
+
+func commandTopKCount(request CacheCommandRequest) (uint64, error) {
+	count := uint64(1)
+	var err error
+	if strings.TrimSpace(request.Subkey) != "" {
+		count, err = strconv.ParseUint(strings.TrimSpace(request.Subkey), 10, 64)
+		if err != nil {
+			return 0, errors.New("top-k count must be an unsigned integer")
+		}
+	}
+	if value, ok := request.Pairs["count"]; ok {
+		count, err = commandUint64Value(value)
+		if err != nil {
+			return 0, errors.New("top-k count must be an unsigned integer")
+		}
+	}
+	if count == 0 {
+		return 0, errors.New("top-k count must be positive")
+	}
+	return count, nil
 }
 
 func commandUint64Value(value interface{}) (uint64, error) {

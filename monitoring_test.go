@@ -35,6 +35,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 		t.Fatalf("UpsertHyperLogLog() error = %v", err)
 	}
 	ht.AddHyperLogLog("session:card", "user:1", "user:2")
+	if err := ht.UpsertTopK("session:top", 3); err != nil {
+		t.Fatalf("UpsertTopK() error = %v", err)
+	}
+	ht.AddTopK("session:top", "/api/users", 7)
 	ht.UpsertCounter("counter:views", 42)
 	if !ht.Expire("session:1", time.Minute) {
 		t.Fatal("Expire(session:1) = false, want true")
@@ -50,6 +54,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	hllInfo, ok := ht.HyperLogLogInfo("session:card")
 	if !ok {
 		t.Fatal("HyperLogLogInfo(session:card) = false, want true")
+	}
+	topKInfo, ok := ht.TopKInfo("session:top")
+	if !ok {
+		t.Fatal("TopKInfo(session:top) = false, want true")
 	}
 
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
@@ -92,8 +100,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 6 {
-		t.Fatalf("entries len = %d, want 6: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 7 {
+		t.Fatalf("entries len = %d, want 7: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -124,6 +132,11 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	setEntry := entries.Entries[5]
 	if setEntry.Key != "session:tags" || setEntry.Type != "set" || setEntry.SizeBytes != 2 || setEntry.ValuePreview != "2 members" {
 		t.Fatalf("set entry = %#v, want set member preview", setEntry)
+	}
+	topKEntry := entries.Entries[6]
+	wantTopKPreview := strconv.FormatUint(topKInfo.Tracked, 10) + "/" + strconv.FormatUint(topKInfo.Capacity, 10) + " tracked, " + strconv.FormatUint(topKInfo.Total, 10) + " total"
+	if topKEntry.Key != "session:top" || topKEntry.Type != "top_k" || topKEntry.ValuePreview != wantTopKPreview || topKEntry.SizeBytes <= 0 {
+		t.Fatalf("top-k entry = %#v, want compact heavy-hitter preview", topKEntry)
 	}
 }
 

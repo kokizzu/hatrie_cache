@@ -49,6 +49,10 @@ func hyperLogLogIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.hyperLogLogs.array) || ht.hyperLogLogs.reusables.Has(idx)
 }
 
+func topKIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.topKs.array) || ht.topKs.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
@@ -110,6 +114,7 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "bloom filter", value: HatValue{Index: 8, Flags: DATAVALUE_TYPE_BLOOM_FILTER}, want: "bloom filter at index: 8"},
 		{name: "count-min sketch", value: HatValue{Index: 9, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}, want: "count-min sketch at index: 9"},
 		{name: "hyperloglog", value: HatValue{Index: 10, Flags: DATAVALUE_TYPE_HYPERLOGLOG}, want: "hyperloglog at index: 10"},
+		{name: "top-k", value: HatValue{Index: 11, Flags: DATAVALUE_TYPE_TOP_K}, want: "top-k at index: 11"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -1495,6 +1500,129 @@ func TestHyperLogLogStorageReleasedOnOverwrite(t *testing.T) {
 	}
 	if got := ht.Get("new").Index; got != idx {
 		t.Fatalf("HyperLogLog storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestTopKOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertTopK("top", 3); err != nil {
+		t.Fatalf("UpsertTopK() error = %v", err)
+	}
+	if hval := ht.Get("top"); !hval.IsTopK() {
+		t.Fatalf("UpsertTopK stored type %+v, want top-k", hval)
+	}
+	if got := ht.AddTopK("top", "alpha", 5); !got.Tracked || got.Count != 5 {
+		t.Fatalf("AddTopK(alpha, 5) = %#v, want tracked count 5", got)
+	}
+	ht.AddTopK("top", "beta", 3)
+	ht.AddTopK("top", "gamma", 1)
+	ht.AddTopK("top", "delta", 2)
+	if got := ht.EstimateTopK("top", "alpha"); !got.Tracked || got.Count != 5 || got.Error != 0 {
+		t.Fatalf("EstimateTopK(alpha) = %#v, want exact tracked count 5", got)
+	}
+	if got := ht.EstimateTopK("top", "gamma"); got.Tracked {
+		t.Fatalf("EstimateTopK(evicted gamma) = %#v, want untracked", got)
+	}
+	items := ht.GetTopK("top")
+	if len(items) != 3 {
+		t.Fatalf("GetTopK len = %d, want capacity 3", len(items))
+	}
+	if items[0].Value != "alpha" || items[0].Count != 5 {
+		t.Fatalf("top item = %#v, want alpha count 5", items[0])
+	}
+	info, ok := ht.TopKInfo("top")
+	if !ok {
+		t.Fatal("TopKInfo(top) = false, want true")
+	}
+	if info.Capacity != 3 || info.Tracked != 3 || info.Total != 11 || info.MaxCount != 5 || info.MinCount == 0 {
+		t.Fatalf("TopKInfo(top) = %#v, want populated fixed-capacity sketch", info)
+	}
+
+	if err := ht.UpsertTopK("top", 2); err != nil {
+		t.Fatalf("UpsertTopK(replace) error = %v", err)
+	}
+	if got := ht.GetTopK("top"); len(got) != 0 {
+		t.Fatalf("GetTopK(after replace) = %#v, want empty sketch", got)
+	}
+	if got := ht.AddTopK("auto", "value", 1); !got.Tracked || got.Count != 1 {
+		t.Fatalf("AddTopK(auto) = %#v, want tracked count 1", got)
+	}
+	if hval := ht.Get("auto"); !hval.IsTopK() {
+		t.Fatalf("AddTopK(auto) stored type %+v, want top-k", hval)
+	}
+	if got := ht.AddTopK("noop", "value", 0); got.Tracked {
+		t.Fatalf("AddTopK(noop, 0) = %#v, want untracked missing estimate", got)
+	}
+	if hval := ht.Get("noop"); !hval.Empty() {
+		t.Fatalf("zero-count Top-K add created value %+v", hval)
+	}
+}
+
+func TestTopKClonesNestedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	value := Map{"path": "/api/users"}
+	if got := ht.AddTopK("top", value, 1); !got.Tracked {
+		t.Fatalf("AddTopK() = %#v, want tracked", got)
+	}
+	value["path"] = "/caller"
+	items := ht.GetTopK("top")
+	if got := items[0].Value.(Map)["path"]; got != "/api/users" {
+		t.Fatalf("stored Top-K value = %v, want cloned /api/users", got)
+	}
+	items[0].Value.(Map)["path"] = "/mutated"
+	if got := ht.GetTopK("top")[0].Value.(Map)["path"]; got != "/api/users" {
+		t.Fatalf("GetTopK exposed nested value: %v", got)
+	}
+}
+
+func TestTopKRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	for _, capacity := range []uint64{0, maxTopKCapacity + 1} {
+		if err := ht.UpsertTopK("bad", capacity); err == nil {
+			t.Fatalf("UpsertTopK(%d) error = nil, want error", capacity)
+		}
+		if got := ht.Get("bad"); !got.Empty() {
+			t.Fatalf("invalid Top-K config stored value %+v", got)
+		}
+	}
+}
+
+func TestTopKSnapshotValidationRejectsDuplicateAndMismatchedKeys(t *testing.T) {
+	snapshot := topKSnapshot{
+		Capacity: 2,
+		Items: []topKItem{
+			{Key: `"alpha"`, Value: "alpha", Count: 1},
+			{Key: `"alpha"`, Value: "alpha", Count: 2},
+		},
+	}
+	if err := validateTopKSnapshot(snapshot); err == nil {
+		t.Fatal("validateTopKSnapshot(duplicate key) error = nil, want error")
+	}
+	snapshot.Items = []topKItem{{Key: `"alpha"`, Value: "beta", Count: 1}}
+	if err := validateTopKSnapshot(snapshot); err == nil {
+		t.Fatal("validateTopKSnapshot(mismatched key) error = nil, want error")
+	}
+}
+
+func TestTopKStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertTopK("top", 10); err != nil {
+		t.Fatalf("UpsertTopK() error = %v", err)
+	}
+	idx := ht.Get("top").Index
+	ht.UpsertString("top", "value")
+	if !topKIndexReleased(ht, idx) {
+		t.Fatalf("overwritten Top-K index %d was not released", idx)
+	}
+
+	if err := ht.UpsertTopK("new", 10); err != nil {
+		t.Fatalf("UpsertTopK(new) error = %v", err)
+	}
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("Top-K storage was not reused: got index %d, want %d", got, idx)
 	}
 }
 

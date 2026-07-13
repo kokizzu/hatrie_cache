@@ -405,6 +405,87 @@ func TestExecuteCommandHyperLogLogOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandTopKOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATETOPK", Key: "top", Value: "3"}); !got.OK {
+		t.Fatalf("CREATETOPK response = %#v, want ok", got)
+	}
+	addResp := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDTOPK", Key: "top", Value: "alpha", Subkey: "5"})
+	if !addResp.OK || addResp.Value == "" {
+		t.Fatalf("ADDTOPK alpha response = %#v, want JSON estimate", addResp)
+	}
+	var estimate TopKEstimate
+	if err := json.Unmarshal([]byte(addResp.Value), &estimate); err != nil {
+		t.Fatalf("ADDTOPK estimate JSON error = %v", err)
+	}
+	if !estimate.Tracked || estimate.Count != 5 || estimate.Error != 0 {
+		t.Fatalf("ADDTOPK estimate = %#v, want tracked count 5", estimate)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDTOPK", Key: "top", Values: Slice{"beta", "gamma"}}); !got.OK || got.Value != "2" {
+		t.Fatalf("ADDTOPK values response = %#v, want 2 values", got)
+	}
+	estResp := ht.ExecuteCommand(CacheCommandRequest{Command: "ESTTOPK", Key: "top", Value: "alpha"})
+	if !estResp.OK || estResp.Value == "" {
+		t.Fatalf("ESTTOPK alpha response = %#v, want JSON estimate", estResp)
+	}
+	estimate = TopKEstimate{}
+	if err := json.Unmarshal([]byte(estResp.Value), &estimate); err != nil {
+		t.Fatalf("ESTTOPK estimate JSON error = %v", err)
+	}
+	if !estimate.Tracked || estimate.Count != 5 {
+		t.Fatalf("ESTTOPK estimate = %#v, want alpha count 5", estimate)
+	}
+	getResp := ht.ExecuteCommand(CacheCommandRequest{Command: "GETTOPK", Key: "top"})
+	if !getResp.OK || getResp.Value == "" {
+		t.Fatalf("GETTOPK response = %#v, want JSON items", getResp)
+	}
+	var items []TopKItem
+	if err := json.Unmarshal([]byte(getResp.Value), &items); err != nil {
+		t.Fatalf("GETTOPK JSON error = %v", err)
+	}
+	if len(items) != 3 || items[0].Value != "alpha" || items[0].Count != 5 {
+		t.Fatalf("GETTOPK items = %#v, want alpha first and three tracked values", items)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOTOPK", Key: "top"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOTOPK response = %#v, want JSON info", infoResp)
+	}
+	var info TopKInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFOTOPK JSON error = %v", err)
+	}
+	if info.Capacity != 3 || info.Tracked != 3 || info.Total != 7 {
+		t.Fatalf("INFOTOPK = %#v, want populated Top-K info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "top"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET top-k response = %#v, want JSON items", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDTOPK", Key: "auto", Value: "value"}); !got.OK || got.Value == "" {
+		t.Fatalf("ADDTOPK auto response = %#v, want JSON estimate", got)
+	}
+	if !ht.Get("auto").IsTopK() {
+		t.Fatal("ADDTOPK on missing key did not create a Top-K sketch")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATETOPK",
+		Key:     "paired",
+		Pairs:   Map{"capacity": json.Number("4")},
+	}); !got.OK {
+		t.Fatalf("CREATETOPK pairs response = %#v, want ok", got)
+	}
+	if info, ok := ht.TopKInfo("paired"); !ok || info.Capacity != 4 {
+		t.Fatalf("paired TopKInfo = %#v/%v, want capacity 4", info, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATETOPK", Key: "bad", Value: "0"}); got.OK {
+		t.Fatalf("CREATETOPK invalid response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDTOPK", Key: "top", Value: "alpha", Subkey: "0"}); got.OK {
+		t.Fatalf("ADDTOPK zero count response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
 	source := newTestTrie(t)
 	now := time.Unix(1400, 0)

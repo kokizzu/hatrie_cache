@@ -288,6 +288,12 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 			return 0, errors.New("hatriecache: hyperloglog snapshot is required")
 		}
 		return int64(hyperLogLogRegisterCount(entry.HyperLogLog.Precision)), nil
+	case "top_k":
+		if entry.TopK == nil {
+			return 0, errors.New("hatriecache: top-k snapshot is required")
+		}
+		data, err := json.Marshal(entry.TopK)
+		return int64(len(data)), err
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

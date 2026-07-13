@@ -275,6 +275,65 @@ func TestHTTPReplicatorReplicatesHyperLogLogMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesTopKMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATETOPK", Key: "top", Value: "3"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATETOPK response = %#v, want ok", response)
+	}
+	add := CacheCommandRequest{Command: "ADDTOPK", Key: "top", Value: "alpha", Subkey: "5"}
+	response := trie.ExecuteCommand(add)
+	if !response.OK {
+		t.Fatalf("ADDTOPK response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, add, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("Top-K replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "top" || request.Value == "" {
+			t.Fatalf("replicated Top-K request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated Top-K snapshot JSON error = %v", err)
+		}
+		if entry.Type != "top_k" || entry.TopK == nil {
+			t.Fatalf("replicated Top-K snapshot = %#v, want top_k payload", entry)
+		}
+	default:
+		t.Fatal("Top-K mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "GETTOPK", Key: "top"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "GETTOPK", Key: "top"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("Top-K read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestReplicationEndpointNormalizesAddresses(t *testing.T) {
 	got, err := replicationEndpoint("127.0.0.1:8080/base/")
 	if err != nil {

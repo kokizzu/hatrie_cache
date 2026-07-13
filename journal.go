@@ -392,6 +392,15 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDHLL", "HLLADD":
 		_, ok := commandSliceValues(request)
 		return ok
+	case "CREATETOPK", "RESERVETOPK", "TOPKRESERVE":
+		_, err := commandTopKCapacity(request)
+		return err == nil
+	case "ADDTOPK", "TOPKADD":
+		if _, ok := commandSliceValues(request); !ok {
+			return false
+		}
+		_, err := commandTopKCount(request)
+		return err == nil
 	default:
 		return false
 	}

@@ -63,6 +63,7 @@
         <option value="bloom_filter">Bloom Filter</option>
         <option value="count_min_sketch">Count-Min Sketch</option>
         <option value="hyperloglog">HyperLogLog</option>
+        <option value="top_k">Top-K</option>
       </select>
     </label>
   </section>

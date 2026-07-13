@@ -33,7 +33,8 @@ export type CacheEntry = {
     | 'priority_queue'
     | 'bloom_filter'
     | 'count_min_sketch'
-    | 'hyperloglog';
+    | 'hyperloglog'
+    | 'top_k';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -146,6 +147,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 16384,
     value_preview: '14 precision, 482120 estimated'
+  },
+  {
+    key: 'top:paths',
+    type: 'top_k',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 4096,
+    value_preview: '8/100 tracked, 918240 total'
   },
   {
     key: 'tags:active',

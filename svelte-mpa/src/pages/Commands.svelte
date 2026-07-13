@@ -12,10 +12,10 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCMS', 'COUNTHLL', 'INFOHLL'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
-  $: needsSubkey = ['CREATECMS', 'INCRCMS'].includes(command);
+  $: needsSubkey = ['CREATECMS', 'INCRCMS', 'ADDTOPK'].includes(command);
   $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : 'Count';
 
   async function submit() {
@@ -73,6 +73,11 @@
           <option>ADDHLL</option>
           <option>COUNTHLL</option>
           <option>INFOHLL</option>
+          <option>CREATETOPK</option>
+          <option>ADDTOPK</option>
+          <option>ESTTOPK</option>
+          <option>GETTOPK</option>
+          <option>INFOTOPK</option>
         </select>
       </label>
 

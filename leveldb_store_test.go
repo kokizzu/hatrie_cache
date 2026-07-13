@@ -222,6 +222,27 @@ func TestSnapshotOperationValueSizeSupportsHyperLogLog(t *testing.T) {
 	}
 }
 
+func TestSnapshotOperationValueSizeSupportsTopK(t *testing.T) {
+	top, err := newTopKData(3)
+	if err != nil {
+		t.Fatalf("newTopKData() error = %v", err)
+	}
+	top.Add("alpha", 5)
+	snapshot := top.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type: "top_k",
+			TopK: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(top_k) error = %v", err)
+	}
+	if size != top.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(top_k) = %d, want %d", size, top.EncodedSize())
+	}
+}
+
 func TestLevelDBShouldHotLoadRejectsNegativeLimits(t *testing.T) {
 	now := time.Unix(4600, 0)
 	operation := snapshotOperation{

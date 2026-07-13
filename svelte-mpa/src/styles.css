@@ -454,6 +454,11 @@ textarea {
   color: #9a2a62;
 }
 
+.type-pill.top_k {
+  background: #eaf7ff;
+  color: #18607d;
+}
+
 .preview {
   color: #62707d;
   max-width: 280px;

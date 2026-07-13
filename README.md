@@ -14,6 +14,8 @@ Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts
 without retaining the observed items.
+Top-K values use a bounded Space-Saving min-heap to track heavy hitters with
+fixed memory and O(log k) updates.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack
 and trim freed tail slots, avoiding per-index hash-map overhead while keeping
 reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
@@ -163,7 +165,8 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
 `POPPQ`, `GETPQ`, `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF`, `CREATECMS`,
 `INCRCMS`, `ESTCMS`, `INFOCMS`, `CREATEHLL`, `ADDHLL`, `COUNTHLL`,
-`INFOHLL`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`. `DUMP`,
+`INFOHLL`, `CREATETOPK`, `ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`,
+`DUMP`, `INTERNALSET`, and `INTERNALDEL`. `DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence.
@@ -189,6 +192,9 @@ make cli ARGS='command -cmd ESTCMS -key freq:paths -value /api/users'
 make cli ARGS='command -cmd CREATEHLL -key card:visitors -value 14'
 make cli ARGS='command -cmd ADDHLL -key card:visitors -value user-123'
 make cli ARGS='command -cmd COUNTHLL -key card:visitors'
+make cli ARGS='command -cmd CREATETOPK -key top:paths -value 100'
+make cli ARGS='command -cmd ADDTOPK -key top:paths -value /api/users -subkey 7'
+make cli ARGS='command -cmd GETTOPK -key top:paths'
 make cli ARGS='command -cmd DUMP -key tags'
 make cli ARGS='topology'
 make cli ARGS='topology -key session:1'
@@ -322,6 +328,10 @@ hyperloglog type:
   CREATEHLL key [precision]
   ADDHLL key val...
   COUNTHLL/INFOHLL key
+top-k heavy hitter type:
+  CREATETOPK key [capacity]
+  ADDTOPK key val [count]
+  ESTTOPK/GETTOPK/INFOTOPK key
 ```
 - [x] add client CLI support for cluster/server topology management and replication internals:
 ```

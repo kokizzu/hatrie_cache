@@ -278,6 +278,50 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOHLL response = %#v, want JSON info", infoHLLResp)
 	}
 
+	createTopKResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATETOPK",
+		Key:     "top",
+		Value:   "3",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATETOPK) error = %v", err)
+	}
+	if !createTopKResp.GetOk() {
+		t.Fatalf("CREATETOPK response = %#v, want ok", createTopKResp)
+	}
+	addTopKResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDTOPK",
+		Key:     "top",
+		Value:   "alpha",
+		Subkey:  "5",
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDTOPK) error = %v", err)
+	}
+	if !addTopKResp.GetOk() || addTopKResp.GetValue() == "" {
+		t.Fatalf("ADDTOPK response = %#v, want JSON estimate", addTopKResp)
+	}
+	getTopKResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "GETTOPK",
+		Key:     "top",
+	})
+	if err != nil {
+		t.Fatalf("Command(GETTOPK) error = %v", err)
+	}
+	if !getTopKResp.GetOk() || getTopKResp.GetValue() == "" {
+		t.Fatalf("GETTOPK response = %#v, want JSON items", getTopKResp)
+	}
+	infoTopKResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFOTOPK",
+		Key:     "top",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFOTOPK) error = %v", err)
+	}
+	if !infoTopKResp.GetOk() || infoTopKResp.GetValue() == "" {
+		t.Fatalf("INFOTOPK response = %#v, want JSON info", infoTopKResp)
+	}
+
 	stats, err := client.Stats(context.Background(), &hatriecachev1.StatsRequest{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)
