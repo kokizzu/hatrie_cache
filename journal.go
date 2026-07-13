@@ -16,6 +16,11 @@ import (
 
 const commandJournalVersion = 1
 
+const (
+	DefaultCommandJournalTailLimit = 1000
+	MaxCommandJournalTailLimit     = 10000
+)
+
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
 var ErrCommandJournalCompacted = errors.New("hatriecache: command journal entries are compacted")
 
@@ -27,6 +32,8 @@ type CommandJournalRecord struct {
 type CommandJournalTail struct {
 	LastSequence     uint64                 `json:"last_sequence"`
 	CompactedThrough uint64                 `json:"compacted_through,omitempty"`
+	Limit            int                    `json:"limit,omitempty"`
+	HasMore          bool                   `json:"has_more,omitempty"`
 	Entries          []CommandJournalRecord `json:"entries"`
 }
 
@@ -37,6 +44,7 @@ type CommandJournalPullResult struct {
 	CompactedThrough uint64 `json:"compacted_through,omitempty"`
 	Applied          int    `json:"applied"`
 	AppliedThrough   uint64 `json:"applied_through"`
+	HasMore          bool   `json:"has_more,omitempty"`
 }
 
 type commandJournalEntry struct {
@@ -145,37 +153,27 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 	return maxSequence, nil
 }
 
-func (journal *CommandJournal) Tail(afterSequence uint64) (CommandJournalTail, error) {
+func (journal *CommandJournal) Tail(afterSequence uint64, limit int) (CommandJournalTail, error) {
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
 	if journal.closed {
 		return CommandJournalTail{}, ErrCommandJournalClosed
 	}
-	entries, err := readCommandJournalEntries(journal.path)
+	if limit < 0 {
+		return CommandJournalTail{}, errors.New("hatriecache: journal tail limit must be non-negative")
+	}
+	if limit > MaxCommandJournalTailLimit {
+		return CommandJournalTail{}, fmt.Errorf("hatriecache: journal tail limit must be <= %d", MaxCommandJournalTailLimit)
+	}
+	tail, err := readCommandJournalTail(journal.path, afterSequence, limit)
 	if err != nil {
 		return CommandJournalTail{}, err
 	}
-	tail := CommandJournalTail{Entries: []CommandJournalRecord{}}
-	for _, entry := range entries {
-		if entry.Sequence > tail.LastSequence {
-			tail.LastSequence = entry.Sequence
-		}
-		if entry.Checkpoint && entry.Sequence > tail.CompactedThrough {
-			tail.CompactedThrough = entry.Sequence
-		}
-	}
 	if afterSequence < tail.CompactedThrough {
+		tail.Entries = []CommandJournalRecord{}
+		tail.HasMore = false
 		return tail, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, tail.CompactedThrough)
-	}
-	for _, entry := range entries {
-		if entry.Checkpoint || entry.Sequence <= afterSequence {
-			continue
-		}
-		tail.Entries = append(tail.Entries, CommandJournalRecord{
-			Sequence: entry.Sequence,
-			Request:  entry.Request,
-		})
 	}
 	return tail, nil
 }
@@ -336,6 +334,57 @@ func readCommandJournalEntriesWithEnd(path string) ([]commandJournalEntry, int64
 		}
 		if err != nil {
 			return nil, 0, err
+		}
+	}
+}
+
+func readCommandJournalTail(path string, afterSequence uint64, limit int) (CommandJournalTail, error) {
+	tail := CommandJournalTail{Entries: []CommandJournalRecord{}}
+	if limit > 0 {
+		tail.Limit = limit
+		tail.Entries = make([]CommandJournalRecord, 0, limit)
+	}
+
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return tail, nil
+	}
+	if err != nil {
+		return CommandJournalTail{}, err
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			entry, decodeErr := decodeCommandJournalEntry(line)
+			if decodeErr != nil {
+				return CommandJournalTail{}, decodeErr
+			}
+			if entry.Sequence > tail.LastSequence {
+				tail.LastSequence = entry.Sequence
+			}
+			if entry.Checkpoint && entry.Sequence > tail.CompactedThrough {
+				tail.CompactedThrough = entry.Sequence
+			}
+			if !entry.Checkpoint && entry.Sequence > afterSequence {
+				if limit > 0 && len(tail.Entries) >= limit {
+					tail.HasMore = true
+				} else {
+					tail.Entries = append(tail.Entries, CommandJournalRecord{
+						Sequence: entry.Sequence,
+						Request:  entry.Request,
+					})
+				}
+			}
+		}
+
+		if errors.Is(err, io.EOF) {
+			return tail, nil
+		}
+		if err != nil {
+			return CommandJournalTail{}, err
 		}
 	}
 }

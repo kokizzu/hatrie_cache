@@ -186,6 +186,7 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 	flags := flag.NewFlagSet("journal", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	afterSequence := flags.Uint64("after-sequence", 0, "only return journal entries after this sequence")
+	limit := flags.Uint64("limit", 0, "maximum journal entries to fetch or pull")
 	pullFrom := flags.String("pull-from", "", "source monitoring server base URL to pull and apply journal entries from")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -195,9 +196,11 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 		body, err := json.Marshal(struct {
 			Source        string `json:"source"`
 			AfterSequence uint64 `json:"after_sequence,omitempty"`
+			Limit         uint64 `json:"limit,omitempty"`
 		}{
 			Source:        strings.TrimSpace(*pullFrom),
 			AfterSequence: *afterSequence,
+			Limit:         *limit,
 		})
 		if err != nil {
 			return err
@@ -206,8 +209,15 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 	}
 
 	path := "/api/journal"
+	query := url.Values{}
 	if *afterSequence > 0 {
-		path += "?after_sequence=" + strconv.FormatUint(*afterSequence, 10)
+		query.Set("after_sequence", strconv.FormatUint(*afterSequence, 10))
+	}
+	if *limit > 0 {
+		query.Set("limit", strconv.FormatUint(*limit, 10))
+	}
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
 	}
 	return getJSON(ctx, client, addr, path, stdout)
 }

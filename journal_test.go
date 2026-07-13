@@ -63,7 +63,7 @@ func TestCommandJournalTailReturnsEntriesAfterSequence(t *testing.T) {
 	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "GET", Key: "name"})
 	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "views", Value: "2"})
 
-	tail, err := journal.Tail(1)
+	tail, err := journal.Tail(1, 0)
 	if err != nil {
 		t.Fatalf("Tail() error = %v", err)
 	}
@@ -73,6 +73,38 @@ func TestCommandJournalTailReturnsEntriesAfterSequence(t *testing.T) {
 	entry := tail.Entries[0]
 	if entry.Sequence != 2 || entry.Request.Command != "INC" || entry.Request.Key != "views" {
 		t.Fatalf("tail entry = %#v, want sequence 2 INC views", entry)
+	}
+}
+
+func TestCommandJournalTailLimitReportsMoreEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "one", Value: "1"})
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "two", Value: "2"})
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "three", Value: "3"})
+
+	tail, err := journal.Tail(0, 2)
+	if err != nil {
+		t.Fatalf("Tail(limit) error = %v", err)
+	}
+	if tail.LastSequence != 3 || tail.Limit != 2 || !tail.HasMore || len(tail.Entries) != 2 {
+		t.Fatalf("limited tail = %#v, want first two entries and has_more", tail)
+	}
+	if tail.Entries[0].Sequence != 1 || tail.Entries[1].Sequence != 2 {
+		t.Fatalf("limited tail entries = %#v, want sequences 1 and 2", tail.Entries)
+	}
+
+	next, err := journal.Tail(tail.Entries[1].Sequence, 2)
+	if err != nil {
+		t.Fatalf("Tail(next) error = %v", err)
+	}
+	if next.HasMore || len(next.Entries) != 1 || next.Entries[0].Sequence != 3 {
+		t.Fatalf("next tail = %#v, want final sequence only", next)
 	}
 }
 
@@ -468,10 +500,10 @@ func TestCommandJournalTailReportsCompactedBoundary(t *testing.T) {
 	}
 	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "views", Value: "3"})
 
-	if _, err := journal.Tail(0); !errors.Is(err, ErrCommandJournalCompacted) {
+	if _, err := journal.Tail(0, 0); !errors.Is(err, ErrCommandJournalCompacted) {
 		t.Fatalf("Tail(0) error = %v, want ErrCommandJournalCompacted", err)
 	}
-	tail, err := journal.Tail(2)
+	tail, err := journal.Tail(2, 0)
 	if err != nil {
 		t.Fatalf("Tail(2) error = %v", err)
 	}
@@ -507,7 +539,7 @@ func TestCommandJournalCloseIsIdempotentAndRejectsWork(t *testing.T) {
 	if _, err := journal.Replay(ht, 0); !errors.Is(err, ErrCommandJournalClosed) {
 		t.Fatalf("Replay after close error = %v, want ErrCommandJournalClosed", err)
 	}
-	if _, err := journal.Tail(0); !errors.Is(err, ErrCommandJournalClosed) {
+	if _, err := journal.Tail(0, 0); !errors.Is(err, ErrCommandJournalClosed) {
 		t.Fatalf("Tail after close error = %v, want ErrCommandJournalClosed", err)
 	}
 	if err := journal.SaveSnapshot(ht, filepath.Join(t.TempDir(), "snapshot.json")); !errors.Is(err, ErrCommandJournalClosed) {

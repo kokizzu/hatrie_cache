@@ -272,10 +272,13 @@ func TestMonitoringHandlerExposesJournalTail(t *testing.T) {
 	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "views", Value: "2"}); !got.OK {
 		t.Fatalf("journaled INC response = %#v, want ok", got)
 	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "next", Value: "batch"}); !got.OK {
+		t.Fatalf("journaled second SETSTR response = %#v, want ok", got)
+	}
 	handler := NewMonitoringHandler(ht, MonitoringOptions{Journal: journal}).Handler()
 
 	resp := httptest.NewRecorder()
-	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/journal?after_sequence=1", nil))
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/journal?after_sequence=1&limit=1", nil))
 	if resp.Code != http.StatusOK {
 		t.Fatalf("journal status = %d, want 200", resp.Code)
 	}
@@ -283,8 +286,8 @@ func TestMonitoringHandlerExposesJournalTail(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &tail); err != nil {
 		t.Fatalf("journal JSON error = %v", err)
 	}
-	if tail.LastSequence != 2 || len(tail.Entries) != 1 {
-		t.Fatalf("journal tail = %#v, want one entry after sequence 1", tail)
+	if tail.LastSequence != 3 || tail.Limit != 1 || !tail.HasMore || len(tail.Entries) != 1 {
+		t.Fatalf("journal tail = %#v, want one limited entry after sequence 1 with has_more", tail)
 	}
 	if entry := tail.Entries[0]; entry.Sequence != 2 || entry.Request.Command != "INC" || entry.Request.Key != "views" {
 		t.Fatalf("journal tail entry = %#v, want sequence 2 INC views", entry)
@@ -294,6 +297,11 @@ func TestMonitoringHandlerExposesJournalTail(t *testing.T) {
 	handler.ServeHTTP(badSequenceResp, httptest.NewRequest(http.MethodGet, "/api/journal?after_sequence=bad", nil))
 	if badSequenceResp.Code != http.StatusBadRequest {
 		t.Fatalf("bad journal sequence status = %d, want 400", badSequenceResp.Code)
+	}
+	badLimitResp := httptest.NewRecorder()
+	handler.ServeHTTP(badLimitResp, httptest.NewRequest(http.MethodGet, "/api/journal?limit=0", nil))
+	if badLimitResp.Code != http.StatusBadRequest {
+		t.Fatalf("bad journal limit status = %d, want 400", badLimitResp.Code)
 	}
 
 	unconfigured := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
@@ -313,6 +321,8 @@ func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
 		}
 		writeJSON(w, CommandJournalTail{
 			LastSequence: 3,
+			Limit:        2,
+			HasMore:      true,
 			Entries: []CommandJournalRecord{
 				{Sequence: 2, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
 				{Sequence: 3, Request: CacheCommandRequest{Command: "INC", Key: "views", Value: "2"}},
@@ -331,6 +341,7 @@ func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
 	body, err := json.Marshal(map[string]interface{}{
 		"source":         source.URL,
 		"after_sequence": 1,
+		"limit":          2,
 	})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
@@ -341,14 +352,14 @@ func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("journal pull status = %d, want 200: %s", resp.Code, resp.Body.String())
 	}
-	if gotSourcePath != "/api/journal?after_sequence=1" {
-		t.Fatalf("source path = %q, want /api/journal?after_sequence=1", gotSourcePath)
+	if gotSourcePath != "/api/journal?after_sequence=1&limit=2" {
+		t.Fatalf("source path = %q, want /api/journal?after_sequence=1&limit=2", gotSourcePath)
 	}
 	var result CommandJournalPullResult
 	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
 		t.Fatalf("journal pull JSON error = %v", err)
 	}
-	if result.Applied != 2 || result.AppliedThrough != 3 || result.LastSequence != 3 || result.AfterSequence != 1 || result.Source != source.URL {
+	if result.Applied != 2 || result.AppliedThrough != 3 || result.LastSequence != 3 || result.AfterSequence != 1 || result.Source != source.URL || !result.HasMore {
 		t.Fatalf("journal pull result = %#v, want applied through sequence 3", result)
 	}
 	if got := ht.GetString("name"); got != "ivi" {

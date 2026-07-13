@@ -70,6 +70,7 @@ type replicationSyncRequest struct {
 type journalPullRequest struct {
 	Source        string `json:"source"`
 	AfterSequence uint64 `json:"after_sequence,omitempty"`
+	Limit         uint64 `json:"limit,omitempty"`
 }
 
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
@@ -428,6 +429,11 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 		handler.handleJournalPull(w, r)
 		return
 	}
+	limit, err := commandJournalTailLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
 	afterSequence := uint64(0)
 	if raw := strings.TrimSpace(r.URL.Query().Get("after_sequence")); raw != "" {
 		value, err := strconv.ParseUint(raw, 10, 64)
@@ -437,7 +443,7 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 		}
 		afterSequence = value
 	}
-	tail, err := handler.options.Journal.Tail(afterSequence)
+	tail, err := handler.options.Journal.Tail(afterSequence, limit)
 	if err != nil {
 		if errors.Is(err, ErrCommandJournalCompacted) {
 			writeJSONStatus(w, http.StatusConflict, commandError(err.Error()))
@@ -463,7 +469,12 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		return
 	}
 	source := strings.TrimSpace(request.Source)
-	endpoint, err := commandJournalEndpoint(source, request.AfterSequence)
+	limit, err := normalizeCommandJournalTailLimit(request.Limit)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	endpoint, err := commandJournalEndpoint(source, request.AfterSequence, limit)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 		return
@@ -496,6 +507,7 @@ func (handler *MonitoringHandler) applyCommandJournalTail(source string, afterSe
 		LastSequence:     tail.LastSequence,
 		CompactedThrough: tail.CompactedThrough,
 		AppliedThrough:   afterSequence,
+		HasMore:          tail.HasMore,
 	}
 	for _, entry := range tail.Entries {
 		if entry.Sequence <= result.AppliedThrough {
@@ -549,7 +561,7 @@ func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint 
 	return tail, resp.StatusCode, nil
 }
 
-func commandJournalEndpoint(source string, afterSequence uint64) (string, error) {
+func commandJournalEndpoint(source string, afterSequence uint64, limit int) (string, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return "", errors.New("journal source is required")
@@ -571,9 +583,36 @@ func commandJournalEndpoint(source string, afterSequence uint64) (string, error)
 	} else {
 		query.Del("after_sequence")
 	}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	} else {
+		query.Del("limit")
+	}
 	parsed.RawQuery = query.Encode()
 	parsed.Fragment = ""
 	return parsed.String(), nil
+}
+
+func commandJournalTailLimit(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return DefaultCommandJournalTailLimit, nil
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || value == 0 {
+		return 0, errors.New("limit must be a positive unsigned integer")
+	}
+	return normalizeCommandJournalTailLimit(value)
+}
+
+func normalizeCommandJournalTailLimit(value uint64) (int, error) {
+	if value == 0 {
+		return DefaultCommandJournalTailLimit, nil
+	}
+	if value > uint64(MaxCommandJournalTailLimit) {
+		return 0, fmt.Errorf("limit must be <= %d", MaxCommandJournalTailLimit)
+	}
+	return int(value), nil
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {
