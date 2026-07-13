@@ -62,16 +62,28 @@ func (pq *priorityQueueData) Push(priority int64, values ...interface{}) int {
 		return 0
 	}
 	for _, value := range values {
-		item := priorityQueueItem{
-			Priority: priority,
-			Sequence: pq.nextSequence,
-			Value:    cloneValue(value),
-		}
-		pq.nextSequence++
-		pq.items = append(pq.items, item)
-		pq.siftUp(len(pq.items) - 1)
+		pq.pushValue(priority, value)
 	}
 	return len(values)
+}
+
+func (pq *priorityQueueData) PushOne(priority int64, value interface{}, values ...interface{}) int {
+	pq.pushValue(priority, value)
+	for _, value := range values {
+		pq.pushValue(priority, value)
+	}
+	return 1 + len(values)
+}
+
+func (pq *priorityQueueData) pushValue(priority int64, value interface{}) {
+	item := priorityQueueItem{
+		Priority: priority,
+		Sequence: pq.nextSequence,
+		Value:    cloneValue(value),
+	}
+	pq.nextSequence++
+	pq.items = append(pq.items, item)
+	pq.siftUp(len(pq.items) - 1)
 }
 
 func (pq *priorityQueueData) Peek() (PriorityItem, bool) {
@@ -293,13 +305,9 @@ func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	values := make([]interface{}, 0, 1+len(vals))
-	values = append(values, val)
-	values = append(values, vals...)
-
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsPriorityQueue() {
-		added := ht.priorityQueues.array[hval.Index].Push(priority, values...)
+		added := ht.priorityQueues.array[hval.Index].PushOne(priority, val, vals...)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return added
@@ -308,7 +316,7 @@ func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.priorityQueues.Add(nil)
-	added := ht.priorityQueues.array[idx].Push(priority, values...)
+	added := ht.priorityQueues.array[idx].PushOne(priority, val, vals...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}.toValue()
 	ht.recordWriteLocked(key)
 	return added

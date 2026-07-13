@@ -99,15 +99,30 @@ func (dq *deque) Push(values ...interface{}) {
 	if len(values) == 0 {
 		return
 	}
-	needed := dq.size + len(values)
+	dq.ensureCapacity(dq.size + len(values))
+	for _, value := range values {
+		dq.pushValue(value)
+	}
+}
+
+func (dq *deque) PushOne(value interface{}, values ...interface{}) {
+	dq.ensureCapacity(dq.size + 1 + len(values))
+	dq.pushValue(value)
+	for _, value := range values {
+		dq.pushValue(value)
+	}
+}
+
+func (dq *deque) ensureCapacity(needed int) {
 	if len(dq.values) < needed {
 		dq.resize(grownDequeCapacity(len(dq.values), needed))
 	}
-	for _, value := range values {
-		idx := (dq.head + dq.size) % len(dq.values)
-		dq.values[idx] = cloneValue(value)
-		dq.size++
-	}
+}
+
+func (dq *deque) pushValue(value interface{}) {
+	idx := (dq.head + dq.size) % len(dq.values)
+	dq.values[idx] = cloneValue(value)
+	dq.size++
 }
 
 func (dq *deque) Pop() (interface{}, bool) {
@@ -763,12 +778,29 @@ func (ss *SliceStorage) Append(value Slice) int32 {
 	return int32(len(ss.array) - 1)
 }
 
+func (ss *SliceStorage) AppendValues(value interface{}, values ...interface{}) int32 {
+	dq := deque{}
+	dq.PushOne(value, values...)
+	ss.array = append(ss.array, dq)
+	return int32(len(ss.array) - 1)
+}
+
 func (ss *SliceStorage) Add(value Slice) int32 {
 	if idx, ok := ss.reusables.Take(); ok {
 		ss.array[idx] = newDeque(value)
 		return idx
 	}
 	return ss.Append(value)
+}
+
+func (ss *SliceStorage) AddValues(value interface{}, values ...interface{}) int32 {
+	if idx, ok := ss.reusables.Take(); ok {
+		dq := deque{}
+		dq.PushOne(value, values...)
+		ss.array[idx] = dq
+		return idx
+	}
+	return ss.AppendValues(value, values...)
 }
 
 func (ss *SliceStorage) Del(idx int32) {
@@ -790,6 +822,12 @@ func newSetData(values Set) setData {
 	return out
 }
 
+func newSetDataValues(value interface{}, values ...interface{}) setData {
+	out := setData{}
+	out.AddOne(value, values...)
+	return out
+}
+
 func (set *setData) Len() int {
 	if set == nil {
 		return 0
@@ -798,17 +836,19 @@ func (set *setData) Len() int {
 }
 
 func (set *setData) Add(values ...interface{}) int {
-	if set.items == nil {
-		set.items = make(map[string]interface{}, len(values))
-	}
+	set.ensureCapacity(len(values))
 	added := 0
 	for _, value := range values {
-		key := mustSetItemKey(value)
-		if _, exists := set.items[key]; exists {
-			continue
-		}
-		set.items[key] = cloneValue(value)
-		added++
+		added += set.addValue(value)
+	}
+	return added
+}
+
+func (set *setData) AddOne(value interface{}, values ...interface{}) int {
+	set.ensureCapacity(1 + len(values))
+	added := set.addValue(value)
+	for _, value := range values {
+		added += set.addValue(value)
 	}
 	return added
 }
@@ -819,13 +859,44 @@ func (set *setData) Remove(values ...interface{}) int {
 	}
 	removed := 0
 	for _, value := range values {
-		key := mustSetItemKey(value)
-		if _, exists := set.items[key]; exists {
-			delete(set.items, key)
-			removed++
-		}
+		removed += set.removeValue(value)
 	}
 	return removed
+}
+
+func (set *setData) RemoveOne(value interface{}, values ...interface{}) int {
+	if set == nil || set.items == nil {
+		return 0
+	}
+	removed := set.removeValue(value)
+	for _, value := range values {
+		removed += set.removeValue(value)
+	}
+	return removed
+}
+
+func (set *setData) ensureCapacity(capacity int) {
+	if set.items == nil {
+		set.items = make(map[string]interface{}, capacity)
+	}
+}
+
+func (set *setData) addValue(value interface{}) int {
+	key := mustSetItemKey(value)
+	if _, exists := set.items[key]; exists {
+		return 0
+	}
+	set.items[key] = cloneValue(value)
+	return 1
+}
+
+func (set *setData) removeValue(value interface{}) int {
+	key := mustSetItemKey(value)
+	if _, exists := set.items[key]; !exists {
+		return 0
+	}
+	delete(set.items, key)
+	return 1
 }
 
 func (set *setData) Has(value interface{}) bool {
@@ -877,12 +948,25 @@ func (ss *SetStorage) Append(value Set) int32 {
 	return int32(len(ss.array) - 1)
 }
 
+func (ss *SetStorage) AppendValues(value interface{}, values ...interface{}) int32 {
+	ss.array = append(ss.array, newSetDataValues(value, values...))
+	return int32(len(ss.array) - 1)
+}
+
 func (ss *SetStorage) Add(value Set) int32 {
 	if idx, ok := ss.reusables.Take(); ok {
 		ss.array[idx] = newSetData(value)
 		return idx
 	}
 	return ss.Append(value)
+}
+
+func (ss *SetStorage) AddValues(value interface{}, values ...interface{}) int32 {
+	if idx, ok := ss.reusables.Take(); ok {
+		ss.array[idx] = newSetDataValues(value, values...)
+		return idx
+	}
+	return ss.AppendValues(value, values...)
 }
 
 func (ss *SetStorage) Del(idx int32) {
@@ -2159,10 +2243,7 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsSlice() {
-		values := make(Slice, 0, 1+len(vals))
-		values = append(values, val)
-		values = append(values, vals...)
-		ht.slices.array[hval.Index].Push(values...)
+		ht.slices.array[hval.Index].PushOne(val, vals...)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return
@@ -2170,10 +2251,7 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	arr := make(Slice, 0, 1+len(vals))
-	arr = append(arr, val)
-	arr = append(arr, vals...)
-	idx := ht.slices.Add(arr)
+	idx := ht.slices.AddValues(val, vals...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 	ht.recordWriteLocked(key)
 }
@@ -2291,13 +2369,9 @@ func (ht *HatTrie) AddSet(key string, val interface{}, vals ...interface{}) int 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	values := make(Set, 0, 1+len(vals))
-	values = append(values, val)
-	values = append(values, vals...)
-
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsSet() {
-		added := ht.sets.array[hval.Index].Add(values...)
+		added := ht.sets.array[hval.Index].AddOne(val, vals...)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return added
@@ -2305,7 +2379,7 @@ func (ht *HatTrie) AddSet(key string, val interface{}, vals ...interface{}) int 
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.sets.Add(values)
+	idx := ht.sets.AddValues(val, vals...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
 	ht.recordWriteLocked(key)
 	return ht.sets.array[idx].Len()
@@ -2321,10 +2395,7 @@ func (ht *HatTrie) RemoveSet(key string, val interface{}, vals ...interface{}) i
 		return 0
 	}
 
-	values := make(Set, 0, 1+len(vals))
-	values = append(values, val)
-	values = append(values, vals...)
-	removed := ht.sets.array[hval.Index].Remove(values...)
+	removed := ht.sets.array[hval.Index].RemoveOne(val, vals...)
 	ht.recordReadLocked(removed > 0, key)
 	if removed > 0 {
 		ht.recordWriteLocked(key)
