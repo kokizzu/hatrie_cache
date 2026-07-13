@@ -140,6 +140,34 @@ func TestMonitoringHandlerExecutesCommands(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerJournalsMutatingCommands(t *testing.T) {
+	ht := newTestTrie(t)
+	journalPath := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{Journal: journal}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"name","value":"ivi"}`)))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("SETSTR status = %d, want 200", resp.Code)
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got := replayed.GetString("name"); got != "ivi" {
+		t.Fatalf("replayed name = %q, want ivi", got)
+	}
+}
+
 func TestMonitoringHandlerRejectsInvalidCommandRequests(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()

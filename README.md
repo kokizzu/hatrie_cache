@@ -55,6 +55,15 @@ runs:
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_INTERVAL=30s
 ```
 
+Set `JOURNAL_PATH` to replay an append-only command journal at startup and fsync
+mutating cache commands before applying them. When `SNAPSHOT_PATH` is also set,
+snapshots store the journal checkpoint and compact older journal entries after a
+successful snapshot:
+
+```
+make monitoring-server SNAPSHOT_PATH=data/snapshot.json JOURNAL_PATH=data/commands.journal
+```
+
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, and `/api/commands`. `POST /api/commands` accepts
 `command`, `key`, optional `value`, `values`, `subkey`, `pairs`,
@@ -153,7 +162,7 @@ deleted index saved on another map
 - [x] add portable JSON snapshot persistence to disk
 - [ ] data persisted to disk using lmdb, leveldb, or rocksdb, preferably one with snappy compression
 - [x] binary data that are >64KB always stored on disk
-- [ ] write all pending transaction on journal (backup if program terminated unexpectedly)
+- [x] write all pending transaction on journal (backup if program terminated unexpectedly)
 - [x] update statistics (last hit, last write, hit rate, cumulative hit rate) to disk
 - [x] on-load check for expired snapshot data
 - [x] when service starts, non-expired snapshot keys are loaded into memory

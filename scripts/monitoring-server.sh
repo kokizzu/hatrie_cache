@@ -7,6 +7,7 @@ tls_cert=${MONITORING_TLS_CERT:-}
 tls_key=${MONITORING_TLS_KEY:-}
 snapshot_path=${SNAPSHOT_PATH:-}
 snapshot_interval=${SNAPSHOT_INTERVAL:-0}
+journal_path=${JOURNAL_PATH:-}
 
 exec go run ./cmd/hatrie-cache \
 	-monitoring-server \
@@ -15,4 +16,5 @@ exec go run ./cmd/hatrie-cache \
 	-monitoring-tls-cert "$tls_cert" \
 	-monitoring-tls-key "$tls_key" \
 	-snapshot-path "$snapshot_path" \
-	-snapshot-interval "$snapshot_interval"
+	-snapshot-interval "$snapshot_interval" \
+	-journal-path "$journal_path"

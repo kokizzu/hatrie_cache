@@ -14,8 +14,13 @@ import (
 const snapshotVersion = 1
 
 type snapshotFile struct {
-	Version int             `json:"version"`
-	Entries []snapshotEntry `json:"entries"`
+	Version         int             `json:"version"`
+	JournalSequence uint64          `json:"journal_sequence,omitempty"`
+	Entries         []snapshotEntry `json:"entries"`
+}
+
+type SnapshotMetadata struct {
+	JournalSequence uint64
 }
 
 type snapshotEntry struct {
@@ -35,10 +40,15 @@ type snapshotOperation struct {
 }
 
 func (ht *HatTrie) SaveSnapshot(path string) error {
+	return ht.SaveSnapshotWithJournalSequence(path, 0)
+}
+
+func (ht *HatTrie) SaveSnapshotWithJournalSequence(path string, journalSequence uint64) error {
 	snapshot, err := ht.snapshot()
 	if err != nil {
 		return err
 	}
+	snapshot.JournalSequence = journalSequence
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err
@@ -48,9 +58,14 @@ func (ht *HatTrie) SaveSnapshot(path string) error {
 }
 
 func (ht *HatTrie) LoadSnapshot(path string) error {
+	_, err := ht.LoadSnapshotWithMetadata(path)
+	return err
+}
+
+func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return SnapshotMetadata{}, err
 	}
 
 	var snapshot snapshotFile
@@ -58,17 +73,17 @@ func (ht *HatTrie) LoadSnapshot(path string) error {
 	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&snapshot); err != nil {
-		return err
+		return SnapshotMetadata{}, err
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return errors.New("hatriecache: invalid snapshot JSON")
+			return SnapshotMetadata{}, errors.New("hatriecache: invalid snapshot JSON")
 		}
-		return err
+		return SnapshotMetadata{}, err
 	}
 	if snapshot.Version != snapshotVersion {
-		return errors.New("hatriecache: unsupported snapshot version")
+		return SnapshotMetadata{}, errors.New("hatriecache: unsupported snapshot version")
 	}
 
 	now := ht.currentTime()
@@ -79,17 +94,17 @@ func (ht *HatTrie) LoadSnapshot(path string) error {
 		}
 		operation, err := validateSnapshotEntry(entry)
 		if err != nil {
-			return err
+			return SnapshotMetadata{}, err
 		}
 		operations = append(operations, operation)
 	}
 
 	for _, operation := range operations {
 		if err := ht.applySnapshotOperation(operation); err != nil {
-			return err
+			return SnapshotMetadata{}, err
 		}
 	}
-	return nil
+	return SnapshotMetadata{JournalSequence: snapshot.JournalSequence}, nil
 }
 
 func (ht *HatTrie) snapshot() (snapshotFile, error) {

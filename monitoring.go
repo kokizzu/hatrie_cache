@@ -17,6 +17,7 @@ type MonitoringOptions struct {
 	WebDir   string
 	StartAt  time.Time
 	Snapshot func() error
+	Journal  *CommandJournal
 }
 
 type MonitoringHandler struct {
@@ -128,6 +129,10 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if handler.options.Journal != nil {
+		writeJSON(w, handler.options.Journal.ExecuteCommand(handler.trie, request))
+		return
+	}
 	writeJSON(w, handler.trie.ExecuteCommand(request))
 }
 

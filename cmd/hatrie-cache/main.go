@@ -26,6 +26,7 @@ type config struct {
 	monitoringWebDir  string
 	snapshotPath      string
 	snapshotInterval  time.Duration
+	journalPath       string
 }
 
 func main() {
@@ -50,22 +51,39 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
-	if err := loadSnapshotIfConfigured(trie, cfg.snapshotPath); err != nil {
+
+	journal, err := openJournalIfConfigured(cfg.journalPath)
+	if err != nil {
 		return err
+	}
+	snapshotMetadata, err := loadSnapshotIfConfigured(trie, cfg.snapshotPath)
+	if err != nil {
+		return err
+	}
+	if journal != nil {
+		if _, err := journal.Replay(trie, snapshotMetadata.JournalSequence); err != nil {
+			return err
+		}
+		if cfg.snapshotPath != "" {
+			if err := saveSnapshotIfConfigured(trie, journal, cfg.snapshotPath); err != nil {
+				return err
+			}
+		}
 	}
 	if cfg.snapshotPath != "" {
 		defer func() {
-			if err := trie.SaveSnapshot(cfg.snapshotPath); err != nil {
+			if err := saveSnapshotIfConfigured(trie, journal, cfg.snapshotPath); err != nil {
 				fmt.Fprintf(stderr, "save snapshot: %v\n", err)
 			}
 		}()
 	}
-	stopSnapshots := startSnapshotSaver(ctx, trie, cfg.snapshotPath, cfg.snapshotInterval, stderr)
+	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, stderr)
 	defer stopSnapshots()
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
 		WebDir:   cfg.monitoringWebDir,
-		Snapshot: snapshotCallback(trie, cfg.snapshotPath),
+		Snapshot: snapshotCallback(trie, journal, cfg.snapshotPath),
+		Journal:  journal,
 	}).Handler()
 	server := &http.Server{
 		Addr:      cfg.monitoringAddr,
@@ -109,6 +127,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional JSON snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
+	flags.StringVar(&cfg.journalPath, "journal-path", "", "optional command journal path to replay on startup and append mutating commands")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -167,17 +186,35 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) error {
+func openJournalIfConfigured(path string) (*hatriecache.CommandJournal, error) {
+	if path == "" {
+		return nil, nil
+	}
+	return hatriecache.OpenCommandJournal(path)
+}
+
+func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) (hatriecache.SnapshotMetadata, error) {
+	if path == "" {
+		return hatriecache.SnapshotMetadata{}, nil
+	}
+	metadata, err := trie.LoadSnapshotWithMetadata(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return hatriecache.SnapshotMetadata{}, err
+	}
+	return metadata, nil
+}
+
+func saveSnapshotIfConfigured(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string) error {
 	if path == "" {
 		return nil
 	}
-	if err := trie.LoadSnapshot(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if journal != nil {
+		return journal.SaveSnapshot(trie, path)
 	}
-	return nil
+	return trie.SaveSnapshot(path)
 }
 
-func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, path string, interval time.Duration, stderr io.Writer) func() {
+func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, interval time.Duration, stderr io.Writer) func() {
 	if path == "" || interval <= 0 {
 		return func() {}
 	}
@@ -191,7 +228,7 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, path str
 		for {
 			select {
 			case <-ticker.C:
-				if err := trie.SaveSnapshot(path); err != nil {
+				if err := saveSnapshotIfConfigured(trie, journal, path); err != nil {
 					fmt.Fprintf(stderr, "save snapshot: %v\n", err)
 				}
 			case <-ctx.Done():
@@ -207,11 +244,11 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, path str
 	}
 }
 
-func snapshotCallback(trie *hatriecache.HatTrie, path string) func() error {
+func snapshotCallback(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string) func() error {
 	if path == "" {
 		return nil
 	}
 	return func() error {
-		return trie.SaveSnapshot(path)
+		return saveSnapshotIfConfigured(trie, journal, path)
 	}
 }

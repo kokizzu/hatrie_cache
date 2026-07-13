@@ -56,12 +56,16 @@ func TestParseConfigSnapshotFlags(t *testing.T) {
 		"-monitoring-server",
 		"-snapshot-path", "/tmp/cache.json",
 		"-snapshot-interval", "5s",
+		"-journal-path", "/tmp/cache.journal",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
 	}
 	if cfg.snapshotPath != "/tmp/cache.json" || cfg.snapshotInterval != 5*time.Second {
 		t.Fatalf("cfg snapshot = %q/%s, want explicit values", cfg.snapshotPath, cfg.snapshotInterval)
+	}
+	if cfg.journalPath != "/tmp/cache.journal" {
+		t.Fatalf("journalPath = %q, want explicit path", cfg.journalPath)
 	}
 }
 
@@ -185,7 +189,7 @@ func TestLoadSnapshotIfConfiguredIgnoresMissingSnapshot(t *testing.T) {
 	ht := hatriecache.CreateHatTrie()
 	defer ht.Destroy()
 
-	if err := loadSnapshotIfConfigured(ht, filepath.Join(t.TempDir(), "missing.json")); err != nil {
+	if _, err := loadSnapshotIfConfigured(ht, filepath.Join(t.TempDir(), "missing.json")); err != nil {
 		t.Fatalf("loadSnapshotIfConfigured(missing) error = %v", err)
 	}
 }
@@ -202,7 +206,7 @@ func TestSnapshotLifecycleHelpersLoadAndSave(t *testing.T) {
 
 	loaded := hatriecache.CreateHatTrie()
 	defer loaded.Destroy()
-	if err := loadSnapshotIfConfigured(loaded, path); err != nil {
+	if _, err := loadSnapshotIfConfigured(loaded, path); err != nil {
 		t.Fatalf("loadSnapshotIfConfigured() error = %v", err)
 	}
 	if got := loaded.GetString("key"); got != "value" {
@@ -282,7 +286,7 @@ func TestStartSnapshotSaverWritesPeriodically(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	path := filepath.Join(t.TempDir(), "snapshot.json")
-	stop := startSnapshotSaver(ctx, ht, path, time.Millisecond, &bytes.Buffer{})
+	stop := startSnapshotSaver(ctx, ht, nil, path, time.Millisecond, &bytes.Buffer{})
 	defer stop()
 
 	deadline := time.Now().Add(200 * time.Millisecond)
@@ -299,12 +303,12 @@ func TestSnapshotCallbackRequiresPath(t *testing.T) {
 	ht := hatriecache.CreateHatTrie()
 	defer ht.Destroy()
 
-	if got := snapshotCallback(ht, ""); got != nil {
+	if got := snapshotCallback(ht, nil, ""); got != nil {
 		t.Fatal("snapshotCallback(empty) returned callback, want nil")
 	}
 
 	path := filepath.Join(t.TempDir(), "snapshot.json")
-	callback := snapshotCallback(ht, path)
+	callback := snapshotCallback(ht, nil, path)
 	if callback == nil {
 		t.Fatal("snapshotCallback(path) = nil, want callback")
 	}
@@ -313,5 +317,44 @@ func TestSnapshotCallbackRequiresPath(t *testing.T) {
 	}
 	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
 		t.Fatalf("snapshot file info = %v/%v, want non-empty file", info, err)
+	}
+}
+
+func TestJournaledSnapshotHelpersCheckpointAndCompact(t *testing.T) {
+	dir := t.TempDir()
+	snapshotPath := filepath.Join(dir, "snapshot.json")
+	journalPath := filepath.Join(dir, "commands.journal")
+
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	journal, err := openJournalIfConfigured(journalPath)
+	if err != nil {
+		t.Fatalf("openJournalIfConfigured() error = %v", err)
+	}
+	if got := journal.ExecuteCommand(ht, hatriecache.CacheCommandRequest{Command: "SETINT", Key: "views", Value: "1"}); !got.OK {
+		t.Fatalf("journaled SETINT response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, hatriecache.CacheCommandRequest{Command: "INC", Key: "views", Value: "2"}); !got.OK {
+		t.Fatalf("journaled INC response = %#v, want ok", got)
+	}
+
+	if err := saveSnapshotIfConfigured(ht, journal, snapshotPath); err != nil {
+		t.Fatalf("saveSnapshotIfConfigured() error = %v", err)
+	}
+	if info, err := os.Stat(journalPath); err != nil || info.Size() == 0 {
+		t.Fatalf("journal file after compact = %v/%v, want checkpoint marker", info, err)
+	}
+
+	loaded := hatriecache.CreateHatTrie()
+	defer loaded.Destroy()
+	metadata, err := loadSnapshotIfConfigured(loaded, snapshotPath)
+	if err != nil {
+		t.Fatalf("loadSnapshotIfConfigured() error = %v", err)
+	}
+	if metadata.JournalSequence != 2 {
+		t.Fatalf("journal sequence = %d, want 2", metadata.JournalSequence)
+	}
+	if got := loaded.GetCounter("views"); got != 3 {
+		t.Fatalf("loaded views = %d, want 3", got)
 	}
 }
