@@ -299,6 +299,10 @@ set type:
 priority queue type:
   PUSHPQ key priority val...
   PEEKPQ/POPPQ/GETPQ key
+bloom filter type:
+  CREATEBF key expected_items [false_positive_rate]
+  ADDBF key val...
+  HASBF/INFOBF key
 ```
 - [x] add client CLI support for cluster/server topology management and replication internals:
 ```

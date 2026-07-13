@@ -144,6 +144,51 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("POPPQ response = %#v, want urgent priority item", popPQResp)
 	}
 
+	createBloomResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATEBF",
+		Key:     "seen",
+		Value:   "1000",
+		Subkey:  "0.001",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATEBF) error = %v", err)
+	}
+	if !createBloomResp.GetOk() {
+		t.Fatalf("CREATEBF response = %#v, want ok", createBloomResp)
+	}
+	addBloomResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDBF",
+		Key:     "seen",
+		Values:  []string{"alpha", "beta"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDBF) error = %v", err)
+	}
+	if !addBloomResp.GetOk() || addBloomResp.GetValue() != "2" {
+		t.Fatalf("ADDBF response = %#v, want added 2", addBloomResp)
+	}
+	hasBloomResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "HASBF",
+		Key:     "seen",
+		Value:   "alpha",
+	})
+	if err != nil {
+		t.Fatalf("Command(HASBF) error = %v", err)
+	}
+	if !hasBloomResp.GetOk() || hasBloomResp.GetValue() != "1" {
+		t.Fatalf("HASBF response = %#v, want hit", hasBloomResp)
+	}
+	infoBloomResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFOBF",
+		Key:     "seen",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFOBF) error = %v", err)
+	}
+	if !infoBloomResp.GetOk() || infoBloomResp.GetValue() == "" {
+		t.Fatalf("INFOBF response = %#v, want JSON info", infoBloomResp)
+	}
+
 	stats, err := client.Stats(context.Background(), &hatriecachev1.StatsRequest{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)

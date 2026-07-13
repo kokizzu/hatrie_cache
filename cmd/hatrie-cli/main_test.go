@@ -273,6 +273,32 @@ func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsBloomFilterOptions(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"created bloom filter"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "CREATEBF",
+		"-key", "seen",
+		"-value", "10000",
+		"-subkey", "0.001",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command CREATEBF) error = %v", err)
+	}
+
+	if gotRequest.Command != "CREATEBF" || gotRequest.Key != "seen" || gotRequest.Value != "10000" || gotRequest.Subkey != "0.001" {
+		t.Fatalf("request = %#v, want CREATEBF seen value 10000 subkey 0.001", gotRequest)
+	}
+}
+
 func TestRunSnapshotPostsToSnapshotEndpoint(t *testing.T) {
 	var gotPath string
 	var gotMethod string
