@@ -36,6 +36,22 @@ func sliceIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.slices.array) || ht.slices.reusables.Has(idx)
 }
 
+func bloomFilterIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.bloomFilters.array) || ht.bloomFilters.reusables.Has(idx)
+}
+
+func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
+	t.Helper()
+	for idx := 0; idx < 1000; idx++ {
+		candidate := "missing-" + strconv.Itoa(idx)
+		if !ht.HasBloomFilter(key, candidate) {
+			return candidate
+		}
+	}
+	t.Fatal("could not find a Bloom filter value that reports absent")
+	return ""
+}
+
 func TestHatValueRoundTripPreservesNegativeCountersAndFlags(t *testing.T) {
 	in := HatValue{Index: -42, Flags: DATAVALUE_TYPE_COUNTER | (1 << DATAVALUE_TTL_BIT_SHIFT)}
 	var out HatValue
@@ -1077,6 +1093,91 @@ func TestPriorityQueueOperationsDeepCopyNestedValues(t *testing.T) {
 	items[0].Value.(Map)["job"] = "get"
 	if again, ok := ht.PeekPriorityQueue("queue"); !ok || again.Value.(Map)["job"] != "build" {
 		t.Fatalf("GetPriorityQueue exposed nested value: %#v/%v", again, ok)
+	}
+}
+
+func TestBloomFilterOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertBloomFilter("seen", 1000, 0.001); err != nil {
+		t.Fatalf("UpsertBloomFilter() error = %v", err)
+	}
+	if hval := ht.Get("seen"); !hval.IsBloomFilter() {
+		t.Fatalf("UpsertBloomFilter stored type %+v, want bloom filter", hval)
+	}
+	if added := ht.AddBloomFilter("seen", "alpha", "beta", "alpha"); added != 2 {
+		t.Fatalf("AddBloomFilter() = %d, want 2 new values", added)
+	}
+	if !ht.HasBloomFilter("seen", "alpha") || !ht.HasBloomFilter("seen", "beta") {
+		t.Fatal("HasBloomFilter(inserted values) = false, want true")
+	}
+	if missing := bloomFilterMissingValue(t, ht, "seen"); ht.HasBloomFilter("seen", missing) {
+		t.Fatal("HasBloomFilter(missing) = true, want false")
+	}
+	info, ok := ht.BloomFilterInfo("seen")
+	if !ok {
+		t.Fatal("BloomFilterInfo(seen) = false, want true")
+	}
+	if info.BitCount < minBloomFilterBits || info.HashCount == 0 || info.Insertions != 2 || info.SetBits == 0 {
+		t.Fatalf("BloomFilterInfo(seen) = %#v, want populated compact filter", info)
+	}
+
+	if err := ht.UpsertBloomFilter("seen", 10, 0.1); err != nil {
+		t.Fatalf("UpsertBloomFilter(replace) error = %v", err)
+	}
+	if ht.HasBloomFilter("seen", "alpha") {
+		t.Fatal("replaced Bloom filter still contains old value")
+	}
+
+	if added := ht.AddBloomFilter("auto", "value"); added != 1 {
+		t.Fatalf("AddBloomFilter(auto) = %d, want 1", added)
+	}
+	if hval := ht.Get("auto"); !hval.IsBloomFilter() {
+		t.Fatalf("AddBloomFilter(auto) stored type %+v, want bloom filter", hval)
+	}
+}
+
+func TestBloomFilterRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	tests := []struct {
+		name              string
+		expectedItems     uint64
+		falsePositiveRate float64
+	}{
+		{name: "zero expected items", expectedItems: 0, falsePositiveRate: 0.01},
+		{name: "zero false positive rate", expectedItems: 100, falsePositiveRate: 0},
+		{name: "one false positive rate", expectedItems: 100, falsePositiveRate: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ht.UpsertBloomFilter("bad", tt.expectedItems, tt.falsePositiveRate); err == nil {
+				t.Fatal("UpsertBloomFilter() error = nil, want error")
+			}
+			if got := ht.Get("bad"); !got.Empty() {
+				t.Fatalf("invalid Bloom filter config stored value %+v", got)
+			}
+		})
+	}
+}
+
+func TestBloomFilterStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertBloomFilter("seen", 100, 0.01); err != nil {
+		t.Fatalf("UpsertBloomFilter() error = %v", err)
+	}
+	idx := ht.Get("seen").Index
+	ht.UpsertString("seen", "value")
+	if !bloomFilterIndexReleased(ht, idx) {
+		t.Fatalf("overwritten Bloom filter index %d was not released", idx)
+	}
+
+	if err := ht.UpsertBloomFilter("new", 100, 0.01); err != nil {
+		t.Fatalf("UpsertBloomFilter(new) error = %v", err)
+	}
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("Bloom filter storage was not reused: got index %d, want %d", got, idx)
 	}
 }
 

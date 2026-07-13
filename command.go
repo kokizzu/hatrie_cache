@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -273,6 +274,37 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
+	case "CREATEBF", "RESERVEBF", "BFRESERVE":
+		expectedItems, falsePositiveRate, err := commandBloomFilterConfig(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertBloomFilter(key, expectedItems, falsePositiveRate); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created bloom filter"}
+	case "ADDBF", "BFADD":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		added := ht.AddBloomFilter(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "added bloom filter values", Value: strconv.Itoa(added)}
+	case "HASBF", "BFHAS", "BFEXISTS":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		if ht.HasBloomFilter(key, values[0]) {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	case "INFOBF", "BFINFO":
+		info, ok := ht.BloomFilterInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	default:
 		return commandError("unsupported command")
 	}
@@ -475,6 +507,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_BLOOM_FILTER:
+		data, err := json.Marshal(ht.bloomFilters.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	default:
 		return "", nil
 	}
@@ -554,6 +592,115 @@ func commandPriority(request CacheCommandRequest) (int64, bool) {
 		return 0, false
 	}
 	return parsed, true
+}
+
+func commandBloomFilterConfig(request CacheCommandRequest) (uint64, float64, error) {
+	expectedItems := DefaultBloomFilterExpectedItems
+	falsePositiveRate := DefaultBloomFilterFalsePositiveRate
+	var err error
+
+	if strings.TrimSpace(request.Value) != "" {
+		expectedItems, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return 0, 0, errors.New("bloom filter expected items must be an unsigned integer")
+		}
+	}
+	if strings.TrimSpace(request.Subkey) != "" {
+		falsePositiveRate, err = strconv.ParseFloat(strings.TrimSpace(request.Subkey), 64)
+		if err != nil {
+			return 0, 0, errors.New("bloom filter false positive rate must be a number")
+		}
+	}
+	for _, key := range []string{"expected_items", "expected", "items"} {
+		if value, ok := request.Pairs[key]; ok {
+			expectedItems, err = commandUint64Value(value)
+			if err != nil {
+				return 0, 0, errors.New("bloom filter expected items must be an unsigned integer")
+			}
+			break
+		}
+	}
+	for _, key := range []string{"false_positive_rate", "fpr"} {
+		if value, ok := request.Pairs[key]; ok {
+			falsePositiveRate, err = commandFloat64Value(value)
+			if err != nil {
+				return 0, 0, errors.New("bloom filter false positive rate must be a number")
+			}
+			break
+		}
+	}
+	return expectedItems, falsePositiveRate, nil
+}
+
+func commandUint64Value(value interface{}) (uint64, error) {
+	switch typed := value.(type) {
+	case json.Number:
+		return strconv.ParseUint(typed.String(), 10, 64)
+	case string:
+		return strconv.ParseUint(strings.TrimSpace(typed), 10, 64)
+	case uint64:
+		return typed, nil
+	case uint:
+		return uint64(typed), nil
+	case uint32:
+		return uint64(typed), nil
+	case int:
+		if typed < 0 {
+			return 0, errors.New("negative value")
+		}
+		return uint64(typed), nil
+	case int64:
+		if typed < 0 {
+			return 0, errors.New("negative value")
+		}
+		return uint64(typed), nil
+	case int32:
+		if typed < 0 {
+			return 0, errors.New("negative value")
+		}
+		return uint64(typed), nil
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return 0, errors.New("invalid number")
+		}
+		if typed >= float64(^uint64(0)) {
+			return 0, errors.New("value too large")
+		}
+		converted := uint64(typed)
+		if typed < 0 || float64(converted) != typed {
+			return 0, errors.New("non-integer value")
+		}
+		return converted, nil
+	default:
+		return 0, errors.New("unsupported numeric value")
+	}
+}
+
+func commandFloat64Value(value interface{}) (float64, error) {
+	switch typed := value.(type) {
+	case json.Number:
+		return strconv.ParseFloat(typed.String(), 64)
+	case string:
+		return strconv.ParseFloat(strings.TrimSpace(typed), 64)
+	case float64:
+		return typed, nil
+	case float32:
+		return float64(typed), nil
+	case uint64:
+		return float64(typed), nil
+	case uint:
+		return float64(typed), nil
+	case uint32:
+		return float64(typed), nil
+	case int:
+		return float64(typed), nil
+	case int64:
+		return float64(typed), nil
+	case int32:
+		return float64(typed), nil
+	default:
+		return 0, errors.New("unsupported numeric value")
+	}
 }
 
 func commandValueResponse(message string, value interface{}) CacheCommandResponse {

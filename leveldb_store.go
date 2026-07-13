@@ -273,6 +273,11 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 	case "priority_queue":
 		data, err := json.Marshal(entry.PriorityQueue)
 		return int64(len(data)), err
+	case "bloom_filter":
+		if entry.BloomFilter == nil {
+			return 0, errors.New("hatriecache: bloom filter snapshot is required")
+		}
+		return int64(bloomFilterWordCount(entry.BloomFilter.BitCount) * 8), nil
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

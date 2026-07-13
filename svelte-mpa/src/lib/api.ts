@@ -23,7 +23,7 @@ export type CacheStats = {
 
 export type CacheEntry = {
   key: string;
-  type: 'counter' | 'string' | 'bytes' | 'map' | 'slice' | 'set' | 'priority_queue';
+  type: 'counter' | 'string' | 'bytes' | 'map' | 'slice' | 'set' | 'priority_queue' | 'bloom_filter';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -111,6 +111,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 6,
     value_preview: '6 priority items'
+  },
+  {
+    key: 'seen:emails',
+    type: 'bloom_filter',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 11984,
+    value_preview: '95851 bits, 7 hashes'
   },
   {
     key: 'tags:active',

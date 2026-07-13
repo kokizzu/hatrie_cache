@@ -23,6 +23,10 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	ht.UpsertSlice("slice", Slice{"a", json.Number("2")})
 	ht.UpsertSet("set", Set{"a", json.Number("2"), "a"})
 	ht.UpsertPriorityQueue("priority", PriorityQueue{{Priority: 5, Value: json.Number("2")}, {Priority: 1, Value: "urgent"}})
+	if err := ht.UpsertBloomFilter("bloom", 1000, 0.001); err != nil {
+		t.Fatalf("UpsertBloomFilter() error = %v", err)
+	}
+	ht.AddBloomFilter("bloom", "alpha", "beta")
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -58,6 +62,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if got := loaded.GetPriorityQueue("priority"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 1, Value: "urgent"}, {Priority: 5, Value: json.Number("2")}}) {
 		t.Fatalf("priority queue = %#v, want restored priority order", got)
+	}
+	if !loaded.HasBloomFilter("bloom", "alpha") || !loaded.HasBloomFilter("bloom", "beta") {
+		t.Fatal("loaded Bloom filter does not contain inserted values")
+	}
+	if info, ok := loaded.BloomFilterInfo("bloom"); !ok || info.Insertions != 2 {
+		t.Fatalf("loaded BloomFilterInfo = %#v/%v, want 2 insertions", info, ok)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)

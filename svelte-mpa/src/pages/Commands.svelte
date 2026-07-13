@@ -11,7 +11,7 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
 
@@ -57,6 +57,10 @@
           <option>PEEKPQ</option>
           <option>POPPQ</option>
           <option>GETPQ</option>
+          <option>CREATEBF</option>
+          <option>ADDBF</option>
+          <option>HASBF</option>
+          <option>INFOBF</option>
         </select>
       </label>
 

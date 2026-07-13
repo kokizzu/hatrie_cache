@@ -24,17 +24,18 @@ type SnapshotMetadata struct {
 }
 
 type snapshotEntry struct {
-	Key           string              `json:"key"`
-	Type          string              `json:"type"`
-	Counter       int32               `json:"counter,omitempty"`
-	String        string              `json:"string,omitempty"`
-	Bytes         string              `json:"bytes,omitempty"`
-	Map           Map                 `json:"map"`
-	Slice         Slice               `json:"slice"`
-	Set           Set                 `json:"set"`
-	PriorityQueue []priorityQueueItem `json:"priority_queue"`
-	ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
-	Stats         *KeyStats           `json:"stats,omitempty"`
+	Key           string               `json:"key"`
+	Type          string               `json:"type"`
+	Counter       int32                `json:"counter,omitempty"`
+	String        string               `json:"string,omitempty"`
+	Bytes         string               `json:"bytes,omitempty"`
+	Map           Map                  `json:"map"`
+	Slice         Slice                `json:"slice"`
+	Set           Set                  `json:"set"`
+	PriorityQueue []priorityQueueItem  `json:"priority_queue"`
+	BloomFilter   *bloomFilterSnapshot `json:"bloom_filter,omitempty"`
+	ExpiresAt     *time.Time           `json:"expires_at,omitempty"`
+	Stats         *KeyStats            `json:"stats,omitempty"`
 }
 
 type snapshotOperation struct {
@@ -151,6 +152,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 		out.Set = ht.sets.array[entry.Value.Index].Values()
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		out.PriorityQueue = ht.priorityQueues.array[entry.Value.Index].SnapshotItems()
+	case DATAVALUE_TYPE_BLOOM_FILTER:
+		snapshot := ht.bloomFilters.array[entry.Value.Index].Snapshot()
+		out.BloomFilter = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -175,6 +179,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 	operation := snapshotOperation{entry: entry}
 	switch entry.Type {
 	case "counter", "string", "map", "slice", "set", "priority_queue":
+		return operation, nil
+	case "bloom_filter":
+		if entry.BloomFilter == nil {
+			return snapshotOperation{}, errors.New("hatriecache: bloom filter snapshot is required")
+		}
+		if err := validateBloomFilterSnapshot(*entry.BloomFilter); err != nil {
+			return snapshotOperation{}, err
+		}
 		return operation, nil
 	case "bytes":
 		value, err := base64.StdEncoding.DecodeString(entry.Bytes)
@@ -314,6 +326,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 	case "priority_queue":
 		idx := ht.priorityQueues.AddItems(entry.PriorityQueue)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}
+	case "bloom_filter":
+		data, err := newBloomFilterDataFromSnapshot(*entry.BloomFilter)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.bloomFilters.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_BLOOM_FILTER}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

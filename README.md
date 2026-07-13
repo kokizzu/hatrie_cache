@@ -8,6 +8,8 @@ deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with
 stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
 O(1), and memory usage low without per-item node allocations.
+Bloom filter values use packed bitsets plus double hashing for fast,
+low-memory membership checks without storing inserted items.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack
 and trim freed tail slots, avoiding per-index hash-map overhead while keeping
 reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
@@ -155,7 +157,8 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
-`POPPQ`, `GETPQ`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`. `DUMP`,
+`POPPQ`, `GETPQ`, `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF`, `DUMP`,
+`INTERNALSET`, and `INTERNALDEL`. `DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence.
@@ -172,6 +175,9 @@ make cli ARGS="command -cmd PUSHSLICE -key jobs -values '[\"build\",\"verify\"]'
 make cli ARGS="command -cmd ADDSET -key tags -values '[\"go\",\"cache\"]'"
 make cli ARGS='command -cmd PUSHPQ -key jobs -priority 1 -value rebuild'
 make cli ARGS='command -cmd POPPQ -key jobs'
+make cli ARGS='command -cmd CREATEBF -key seen:emails -value 10000'
+make cli ARGS='command -cmd ADDBF -key seen:emails -value user@example.com'
+make cli ARGS='command -cmd HASBF -key seen:emails -value user@example.com'
 make cli ARGS='command -cmd DUMP -key tags'
 make cli ARGS='topology'
 make cli ARGS='topology -key session:1'

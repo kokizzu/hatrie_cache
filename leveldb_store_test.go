@@ -23,6 +23,10 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	source.UpsertSlice("slice", Slice{"a", json.Number("2")})
 	source.UpsertSet("set", Set{"a", json.Number("2"), "a"})
 	source.UpsertPriorityQueue("priority", PriorityQueue{{Priority: 5, Value: json.Number("2")}, {Priority: 1, Value: "urgent"}})
+	if err := source.UpsertBloomFilter("bloom", 1000, 0.001); err != nil {
+		t.Fatalf("UpsertBloomFilter() error = %v", err)
+	}
+	source.AddBloomFilter("bloom", "alpha", "beta")
 	source.UpsertString("ttl", "alive")
 	if !source.Expire("ttl", time.Minute) {
 		t.Fatal("Expire(ttl) = false, want true")
@@ -38,8 +42,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
 	}
-	if count != 8 {
-		t.Fatalf("loaded count = %d, want 8", count)
+	if count != 9 {
+		t.Fatalf("loaded count = %d, want 9", count)
 	}
 
 	if got := loaded.GetCounter("counter"); got != -7 {
@@ -62,6 +66,9 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if got := loaded.GetPriorityQueue("priority"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 1, Value: "urgent"}, {Priority: 5, Value: json.Number("2")}}) {
 		t.Fatalf("priority queue = %#v, want restored priority order", got)
+	}
+	if !loaded.HasBloomFilter("bloom", "alpha") || !loaded.HasBloomFilter("bloom", "beta") {
+		t.Fatal("loaded Bloom filter does not contain inserted values")
 	}
 	if got := loaded.TTL("ttl"); got <= 0 || got > time.Minute {
 		t.Fatalf("ttl = %s, want remaining positive TTL", got)
@@ -152,6 +159,26 @@ func TestSnapshotOperationValueSizeSupportsPriorityQueue(t *testing.T) {
 	}
 	if size == 0 {
 		t.Fatal("snapshotOperationValueSize(priority_queue) = 0, want encoded size")
+	}
+}
+
+func TestSnapshotOperationValueSizeSupportsBloomFilter(t *testing.T) {
+	filter, err := newBloomFilterData(100, 0.01)
+	if err != nil {
+		t.Fatalf("newBloomFilterData() error = %v", err)
+	}
+	snapshot := filter.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:        "bloom_filter",
+			BloomFilter: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(bloom_filter) error = %v", err)
+	}
+	if size != filter.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(bloom_filter) = %d, want %d", size, filter.EncodedSize())
 	}
 }
 

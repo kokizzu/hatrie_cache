@@ -54,6 +54,7 @@ const (
 	DATAVALUE_TYPE_LEVELDB_REF
 	DATAVALUE_TYPE_SET
 	DATAVALUE_TYPE_PRIORITY_QUEUE
+	DATAVALUE_TYPE_BLOOM_FILTER
 )
 
 type Map = map[string]interface{}
@@ -582,6 +583,10 @@ func (hval HatValue) IsPriorityQueue() bool {
 	return hval.Is(DATAVALUE_TYPE_PRIORITY_QUEUE)
 }
 
+func (hval HatValue) IsBloomFilter() bool {
+	return hval.Is(DATAVALUE_TYPE_BLOOM_FILTER)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -610,6 +615,8 @@ func (hval HatValue) String() string {
 		return "set at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		return "priority queue at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_BLOOM_FILTER:
+		return "bloom filter at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -1230,6 +1237,7 @@ type HatTrie struct {
 	slices         *SliceStorage
 	sets           *SetStorage
 	priorityQueues *PriorityQueueStorage
+	bloomFilters   *BloomFilterStorage
 	dbrefs         *LevelDBReferenceStorage
 	expires        map[string]time.Time
 	expirations    expirationHeap
@@ -1264,6 +1272,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		slices:         CreateSliceStorage(),
 		sets:           CreateSetStorage(),
 		priorityQueues: CreatePriorityQueueStorage(),
+		bloomFilters:   CreateBloomFilterStorage(),
 		dbrefs:         CreateLevelDBReferenceStorage(),
 		expires:        map[string]time.Time{},
 		keyStats:       map[string]KeyStats{},
@@ -1295,6 +1304,7 @@ func (ht *HatTrie) Destroy() {
 	ht.slices = nil
 	ht.sets = nil
 	ht.priorityQueues = nil
+	ht.bloomFilters = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
@@ -1761,6 +1771,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.sets.Del(hval.Index)
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		ht.priorityQueues.Del(hval.Index)
+	case DATAVALUE_TYPE_BLOOM_FILTER:
+		ht.bloomFilters.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)

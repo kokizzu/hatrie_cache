@@ -60,6 +60,7 @@
         <option value="slice">Slice</option>
         <option value="set">Set</option>
         <option value="priority_queue">Priority Queue</option>
+        <option value="bloom_filter">Bloom Filter</option>
       </select>
     </label>
   </section>

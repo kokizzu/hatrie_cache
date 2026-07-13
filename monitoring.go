@@ -427,6 +427,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		value := ht.priorityQueues.array[hval.Index]
 		return int64(value.Len()), strconv.Itoa(value.Len()) + " priority items"
+	case DATAVALUE_TYPE_BLOOM_FILTER:
+		if int(hval.Index) >= len(ht.bloomFilters.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.bloomFilters.array[hval.Index].Info()
+		return int64(info.BitBytes), strconv.FormatUint(info.BitCount, 10) + " bits, " + strconv.Itoa(int(info.HashCount)) + " hashes"
 	default:
 		return 0, ""
 	}
@@ -450,6 +456,8 @@ func monitoringType(hval HatValue) string {
 		return "set"
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		return "priority_queue"
+	case DATAVALUE_TYPE_BLOOM_FILTER:
+		return "bloom_filter"
 	default:
 		return "unknown"
 	}

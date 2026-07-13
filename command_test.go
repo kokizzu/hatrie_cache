@@ -238,6 +238,48 @@ func TestExecuteCommandPriorityQueueOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandBloomFilterOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEBF", Key: "seen", Value: "1000", Subkey: "0.001"}); !got.OK {
+		t.Fatalf("CREATEBF response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDBF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDBF value response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDBF", Key: "seen", Values: Slice{"beta", "alpha"}}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDBF values response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASBF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASBF alpha response = %#v, want 1", got)
+	}
+	missing := bloomFilterMissingValue(t, ht, "seen")
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASBF", Key: "seen", Value: missing}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASBF missing response = %#v, want 0", got)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOBF", Key: "seen"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOBF response = %#v, want JSON info", infoResp)
+	}
+	var info BloomFilterInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFOBF JSON error = %v", err)
+	}
+	if info.Insertions != 2 || info.HashCount == 0 || info.BitBytes == 0 {
+		t.Fatalf("INFOBF = %#v, want populated filter info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "seen"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET bloom filter response = %#v, want JSON info", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDBF", Key: "auto", Value: "value"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDBF auto response = %#v, want added 1", got)
+	}
+	if !ht.Get("auto").IsBloomFilter() {
+		t.Fatal("ADDBF on missing key did not create a Bloom filter")
+	}
+}
+
 func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
 	source := newTestTrie(t)
 	now := time.Unix(1400, 0)
@@ -364,6 +406,9 @@ func TestExecuteCommandValidation(t *testing.T) {
 		{Command: "HASSET", Key: "key"},
 		{Command: "PUSHPQ", Key: "key"},
 		{Command: "PUSHPQ", Key: "key", Value: "job"},
+		{Command: "CREATEBF", Key: "key", Value: "0"},
+		{Command: "ADDBF", Key: "key"},
+		{Command: "HASBF", Key: "key"},
 		{Command: "INTERNALSET", Key: "key"},
 		{Command: "UNKNOWN", Key: "key"},
 	} {
