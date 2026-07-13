@@ -381,6 +381,9 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		return int64(len(value)), truncatePreview(value)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
+			if int(hval.Index) >= len(ht.disks.paths) || hval.Index < 0 {
+				return 0, ""
+			}
 			path := ht.disks.paths[hval.Index]
 			info, err := os.Stat(path)
 			if err != nil {

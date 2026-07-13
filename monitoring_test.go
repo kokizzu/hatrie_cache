@@ -85,6 +85,19 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	}
 }
 
+func TestMonitoringPreviewHandlesInvalidDiskByteIndex(t *testing.T) {
+	ht := newTestTrie(t)
+	for _, idx := range []int32{-1, 99} {
+		size, preview := ht.monitoringPreviewLocked(HatValue{
+			Index: idx,
+			Flags: DATAVALUE_TYPE_RAW_BYTES | (1 << DATAVALUE_DISK_BIT_SHIFT),
+		})
+		if size != 0 || preview != "" {
+			t.Fatalf("monitoringPreviewLocked(%d) = %d/%q, want empty preview", idx, size, preview)
+		}
+	}
+}
+
 func TestMonitoringHandlerServesStaticWebDir(t *testing.T) {
 	ht := newTestTrie(t)
 	dir := t.TempDir()
