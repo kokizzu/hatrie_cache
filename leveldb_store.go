@@ -136,7 +136,8 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	}
 	operations := []levelDBLoadOperation{}
 	for iterator.Next() {
-		entry, err := decodeLevelDBEntry(iterator.Value())
+		key := string(iterator.Key()[len(levelDBEntryPrefix):])
+		entry, err := decodeLevelDBEntryForKey(key, iterator.Value())
 		if err != nil {
 			return LevelDBLoadResult{}, err
 		}
@@ -188,7 +189,7 @@ func (store *LevelDBStore) Entry(key string) (snapshotEntry, bool, error) {
 	if err != nil {
 		return snapshotEntry{}, false, err
 	}
-	entry, err := decodeLevelDBEntry(data)
+	entry, err := decodeLevelDBEntryForKey(key, data)
 	if err != nil {
 		return snapshotEntry{}, false, err
 	}
@@ -341,7 +342,18 @@ func (trie *HatTrie) levelDBEntries() ([]snapshotEntry, error) {
 }
 
 func decodeLevelDBEntry(data []byte) (snapshotEntry, error) {
-	return decodeSnapshotEntryJSON(data)
+	return decodeSnapshotEntryJSONRequiredKey(data, true)
+}
+
+func decodeLevelDBEntryForKey(key string, data []byte) (snapshotEntry, error) {
+	entry, err := decodeLevelDBEntry(data)
+	if err != nil {
+		return snapshotEntry{}, err
+	}
+	if entry.Key != key {
+		return snapshotEntry{}, errors.New("hatriecache: leveldb entry key does not match record key")
+	}
+	return entry, nil
 }
 
 func levelDBKey(key string) []byte {
