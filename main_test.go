@@ -242,6 +242,51 @@ func TestMapOperations(t *testing.T) {
 	}
 }
 
+func TestTakeMapLastEntryKeepsEmptyMapReadable(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertMap("map", Map{"only": "value"})
+
+	if got := ht.TakeMap("map", "only"); got != "value" {
+		t.Fatalf("TakeMap(only) = %v, want value", got)
+	}
+	value := ht.GetMap("map")
+	if value == nil || len(value) != 0 {
+		t.Fatalf("GetMap(after taking last entry) = %#v, want empty map", value)
+	}
+	if !ht.Get("map").IsMap() {
+		t.Fatal("taking last map entry removed map key")
+	}
+}
+
+func TestMapStorageCompactsSparseBackingMap(t *testing.T) {
+	store := CreateMapStorage()
+	value := make(Map, 96)
+	for idx := 0; idx < 96; idx++ {
+		value[strconv.Itoa(idx)] = idx
+	}
+	mapIdx := store.Add(value)
+
+	for idx := 0; idx < 48; idx++ {
+		key := strconv.Itoa(idx)
+		got, ok := store.TakeEntry(mapIdx, key)
+		if !ok || got != idx {
+			t.Fatalf("TakeEntry(%s) = %v/%v, want %d/true", key, got, ok, idx)
+		}
+	}
+	if store.deleted[mapIdx] != 0 {
+		t.Fatalf("deleted count after sparse compaction = %d, want 0", store.deleted[mapIdx])
+	}
+	if got := len(store.array[mapIdx]); got != 48 {
+		t.Fatalf("map len after removals = %d, want 48", got)
+	}
+	for idx := 48; idx < 96; idx++ {
+		key := strconv.Itoa(idx)
+		if got := store.array[mapIdx][key]; got != idx {
+			t.Fatalf("remaining map entry %s = %v, want %d", key, got, idx)
+		}
+	}
+}
+
 func TestMapOperationsDeepCopyNestedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	nested := Map{"name": "ivi"}

@@ -711,6 +711,7 @@ func (ds *DiskStorage) pathFor(idx int32) string {
 // MapStorage stores map values outside the trie.
 type MapStorage struct {
 	array     []Map
+	deleted   []int
 	reusables reusableIndexes
 }
 
@@ -725,6 +726,7 @@ func (ms *MapStorage) Put(idx int32, value Map) {
 		return
 	}
 	ms.array[idx] = cloneMap(value)
+	ms.deleted[idx] = 0
 	ms.reusables.Use(idx)
 }
 
@@ -734,6 +736,7 @@ func (ms *MapStorage) PutEntry(idx int32, subkey string, value interface{}) {
 	}
 	if ms.array[idx] == nil {
 		ms.array[idx] = Map{}
+		ms.deleted[idx] = 0
 	}
 	ms.array[idx][subkey] = cloneValue(value)
 	ms.reusables.Use(idx)
@@ -741,17 +744,20 @@ func (ms *MapStorage) PutEntry(idx int32, subkey string, value interface{}) {
 
 func (ms *MapStorage) Append(value Map) int32 {
 	ms.array = append(ms.array, cloneMap(value))
+	ms.deleted = append(ms.deleted, 0)
 	return int32(len(ms.array) - 1)
 }
 
 func (ms *MapStorage) AppendEntry(subkey string, value interface{}) int32 {
 	ms.array = append(ms.array, Map{subkey: cloneValue(value)})
+	ms.deleted = append(ms.deleted, 0)
 	return int32(len(ms.array) - 1)
 }
 
 func (ms *MapStorage) Add(value Map) int32 {
 	if idx, ok := ms.reusables.Take(); ok {
 		ms.array[idx] = cloneMap(value)
+		ms.deleted[idx] = 0
 		return idx
 	}
 	return ms.Append(value)
@@ -760,9 +766,25 @@ func (ms *MapStorage) Add(value Map) int32 {
 func (ms *MapStorage) AddEntry(subkey string, value interface{}) int32 {
 	if idx, ok := ms.reusables.Take(); ok {
 		ms.array[idx] = Map{subkey: cloneValue(value)}
+		ms.deleted[idx] = 0
 		return idx
 	}
 	return ms.AppendEntry(subkey, value)
+}
+
+func (ms *MapStorage) TakeEntry(idx int32, subkey string) (interface{}, bool) {
+	if idx < 0 || int(idx) >= len(ms.array) {
+		return nil, false
+	}
+	m := ms.array[idx]
+	val, exists := m[subkey]
+	if !exists {
+		return nil, false
+	}
+	delete(m, subkey)
+	ms.deleted[idx]++
+	ms.compactIfSparse(idx)
+	return val, true
 }
 
 func (ms *MapStorage) Del(idx int32) {
@@ -770,8 +792,28 @@ func (ms *MapStorage) Del(idx int32) {
 		return
 	}
 	ms.array[idx] = nil
+	ms.deleted[idx] = 0
 	ms.reusables.Mark(idx)
 	ms.array = trimReusableTail(ms.array, &ms.reusables)
+	ms.deleted = ms.deleted[:len(ms.array)]
+}
+
+func (ms *MapStorage) compactIfSparse(idx int32) {
+	m := ms.array[idx]
+	if len(m) == 0 {
+		ms.array[idx] = Map{}
+		ms.deleted[idx] = 0
+		return
+	}
+	if ms.deleted[idx] < 32 || ms.deleted[idx] < len(m) {
+		return
+	}
+	next := make(Map, len(m))
+	for key, value := range m {
+		next[key] = value
+	}
+	ms.array[idx] = next
+	ms.deleted[idx] = 0
 }
 
 // SliceStorage stores slice values outside the trie.
@@ -2233,15 +2275,14 @@ func (ht *HatTrie) TakeMap(key, subkey string) interface{} {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	m, ok := ht.mapRefLocked(key)
-	if !ok {
+	hval := ht.getLocked(key)
+	if !hval.IsMap() {
 		ht.recordReadLocked(false, key)
 		return nil
 	}
-	val, exists := m[subkey]
+	val, exists := ht.maps.TakeEntry(hval.Index, subkey)
 	ht.recordReadLocked(exists, key)
 	if exists {
-		delete(m, subkey)
 		ht.recordWriteLocked(key)
 	}
 	return val
