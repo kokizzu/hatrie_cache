@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const commandJournalVersion = 1
@@ -86,7 +87,7 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
-	if err := journal.appendLocked(request); err != nil {
+	if err := journal.appendLocked(normalizeJournalRequest(request, trie.currentTime())); err != nil {
 		return commandError(err.Error())
 	}
 	return trie.ExecuteCommand(request)
@@ -316,7 +317,7 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 
 	switch command {
 	case "SET", "SETSTR":
-		response, ok := validateOptionalCommandTTL(request.TTLSeconds)
+		response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds)
 		return !ok || response.OK
 	case "SETX", "SETSTRX":
 		_, ok := requirePositiveTTL(request.TTLSeconds)
@@ -325,7 +326,7 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 		if _, ok := parseCommandInt32(request.Value); !ok {
 			return false
 		}
-		response, ok := validateOptionalCommandTTL(request.TTLSeconds)
+		response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds)
 		return !ok || response.OK
 	case "SETINTX":
 		if _, ok := parseCommandInt32(request.Value); !ok {
@@ -373,4 +374,38 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeJournalRequest(request CacheCommandRequest, now time.Time) CacheCommandRequest {
+	command := strings.ToUpper(strings.TrimSpace(request.Command))
+	out := request
+	switch command {
+	case "SET", "SETSTR":
+		out.Command = command
+		normalizeRelativeTTL(&out, now)
+	case "SETX", "SETSTRX":
+		out.Command = "SETSTR"
+		normalizeRelativeTTL(&out, now)
+	case "SETINT":
+		out.Command = command
+		normalizeRelativeTTL(&out, now)
+	case "SETINTX":
+		out.Command = "SETINT"
+		normalizeRelativeTTL(&out, now)
+	case "EXPIRE":
+		out.Command = "EXPIREAT"
+		normalizeRelativeTTL(&out, now)
+	default:
+		out.Command = command
+	}
+	return out
+}
+
+func normalizeRelativeTTL(request *CacheCommandRequest, now time.Time) {
+	if request.TTLSeconds == nil {
+		return
+	}
+	expiresAt := now.Add(time.Duration(*request.TTLSeconds) * time.Second).Unix()
+	request.TTLSeconds = nil
+	request.UnixSeconds = &expiresAt
 }

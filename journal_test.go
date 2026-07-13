@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestCommandJournalReplaysMutatingCommands(t *testing.T) {
@@ -115,6 +116,75 @@ func TestCommandJournalReplaysPriorityQueueMutations(t *testing.T) {
 	}
 	if got := replayed.GetPriorityQueue("jobs"); len(got) != 0 {
 		t.Fatalf("replayed queue = %#v, want empty queue after push/pop", got)
+	}
+}
+
+func TestCommandJournalReplaysRelativeTTLsAsAbsoluteExpirations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	now := time.Unix(2000, 0)
+	ttlSeconds := int64(10)
+	ht := newTestTrie(t)
+	ht.now = func() time.Time { return now }
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "temp", Value: "value", TTLSeconds: &ttlSeconds}); !got.OK {
+		t.Fatalf("journaled SETSTR ttl response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "refresh", Value: "value"}); !got.OK {
+		t.Fatalf("journaled SETSTR refresh response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "EXPIRE", Key: "refresh", TTLSeconds: &ttlSeconds}); !got.OK {
+		t.Fatalf("journaled EXPIRE response = %#v, want ok", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if got, want := len(entries), 3; got != want {
+		t.Fatalf("journal entries = %d, want %d", got, want)
+	}
+	for _, idx := range []int{0, 2} {
+		if entries[idx].Request.TTLSeconds != nil {
+			t.Fatalf("entry %d retained relative ttl: %#v", idx, entries[idx].Request)
+		}
+		if entries[idx].Request.UnixSeconds == nil || *entries[idx].Request.UnixSeconds != now.Add(10*time.Second).Unix() {
+			t.Fatalf("entry %d unix expiration = %#v, want %d", idx, entries[idx].Request.UnixSeconds, now.Add(10*time.Second).Unix())
+		}
+	}
+	if entries[0].Request.Command != "SETSTR" {
+		t.Fatalf("first journal command = %q, want SETSTR", entries[0].Request.Command)
+	}
+	if entries[2].Request.Command != "EXPIREAT" {
+		t.Fatalf("expire journal command = %q, want EXPIREAT", entries[2].Request.Command)
+	}
+
+	replayedNow := now.Add(9 * time.Second)
+	replayed := newTestTrie(t)
+	replayed.now = func() time.Time { return replayedNow }
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got := replayed.TTL("temp"); got != time.Second {
+		t.Fatalf("replayed temp TTL = %s, want 1s", got)
+	}
+	if got := replayed.TTL("refresh"); got != time.Second {
+		t.Fatalf("replayed refresh TTL = %s, want 1s", got)
+	}
+
+	replayedNow = now.Add(11 * time.Second)
+	if got := replayed.GetString("temp"); got != "" {
+		t.Fatalf("replayed temp after original expiry = %q, want expired", got)
+	}
+	if got := replayed.GetString("refresh"); got != "" {
+		t.Fatalf("replayed refresh after original expiry = %q, want expired", got)
 	}
 }
 

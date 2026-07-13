@@ -63,11 +63,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
 	case "SET", "SETSTR":
-		if response, ok := validateOptionalCommandTTL(request.TTLSeconds); ok && !response.OK {
+		if response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds); ok && !response.OK {
 			return response
 		}
 		ht.UpsertString(key, request.Value)
-		if response, ok := ht.applyCommandTTL(key, request.TTLSeconds); ok {
+		if response, ok := ht.applyCommandExpiration(key, request.TTLSeconds, request.UnixSeconds); ok {
 			return response
 		}
 		return CacheCommandResponse{OK: true, Message: "stored string"}
@@ -86,11 +86,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value must be a 32-bit integer")
 		}
-		if response, ok := validateOptionalCommandTTL(request.TTLSeconds); ok && !response.OK {
+		if response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds); ok && !response.OK {
 			return response
 		}
 		ht.UpsertCounter(key, value)
-		if response, ok := ht.applyCommandTTL(key, request.TTLSeconds); ok {
+		if response, ok := ht.applyCommandExpiration(key, request.TTLSeconds, request.UnixSeconds); ok {
 			return response
 		}
 		return CacheCommandResponse{OK: true, Message: "stored counter"}
@@ -377,23 +377,38 @@ func commandSnapshotOperation(key string, payload string) (snapshotOperation, er
 	return validateSnapshotEntry(entry)
 }
 
-func (ht *HatTrie) applyCommandTTL(key string, ttlSeconds *int64) (CacheCommandResponse, bool) {
-	if ttlSeconds == nil {
+func (ht *HatTrie) applyCommandExpiration(key string, ttlSeconds *int64, unixSeconds *int64) (CacheCommandResponse, bool) {
+	if ttlSeconds == nil && unixSeconds == nil {
 		return CacheCommandResponse{}, false
 	}
-	ttl, ok := requirePositiveTTL(ttlSeconds)
-	if !ok {
-		return commandError("ttl_seconds must be positive"), true
+	if ttlSeconds != nil && unixSeconds != nil {
+		return commandError("ttl_seconds and unix_seconds are mutually exclusive"), true
 	}
-	if !ht.Expire(key, ttl) {
-		return commandError("failed to set ttl"), true
+	if ttlSeconds != nil {
+		ttl, ok := requirePositiveTTL(ttlSeconds)
+		if !ok {
+			return commandError("ttl_seconds must be positive"), true
+		}
+		if !ht.Expire(key, ttl) {
+			return commandError("failed to set ttl"), true
+		}
+		return CacheCommandResponse{OK: true, Message: "stored with ttl"}, true
 	}
-	return CacheCommandResponse{OK: true, Message: "stored with ttl"}, true
+	if !ht.ExpireAt(key, time.Unix(*unixSeconds, 0)) {
+		return commandError("failed to set expiration"), true
+	}
+	return CacheCommandResponse{OK: true, Message: "stored with expiration"}, true
 }
 
-func validateOptionalCommandTTL(ttlSeconds *int64) (CacheCommandResponse, bool) {
-	if ttlSeconds == nil {
+func validateOptionalCommandExpiration(ttlSeconds *int64, unixSeconds *int64) (CacheCommandResponse, bool) {
+	if ttlSeconds == nil && unixSeconds == nil {
 		return CacheCommandResponse{}, false
+	}
+	if ttlSeconds != nil && unixSeconds != nil {
+		return commandError("ttl_seconds and unix_seconds are mutually exclusive"), true
+	}
+	if unixSeconds != nil {
+		return CacheCommandResponse{OK: true}, true
 	}
 	if _, ok := requirePositiveTTL(ttlSeconds); !ok {
 		return commandError("ttl_seconds must be positive"), true

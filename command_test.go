@@ -70,6 +70,17 @@ func TestExecuteCommandExtendedTTLCommands(t *testing.T) {
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "counter"}); !got.OK || got.Value != "" {
 		t.Fatalf("GET expired EXPIREAT key = %#v, want not found", got)
 	}
+
+	absoluteExpiry := now.Add(5 * time.Second).Unix()
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "absolute", Value: "value", UnixSeconds: &absoluteExpiry}); !got.OK {
+		t.Fatalf("SETSTR absolute expiration response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "TTL", Key: "absolute"}); !got.OK || got.Value != "5" {
+		t.Fatalf("TTL after SETSTR absolute expiration = %#v, want 5", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "bad", Value: "value", TTLSeconds: &ttlSeconds, UnixSeconds: &absoluteExpiry}); got.OK {
+		t.Fatalf("SETSTR with two expirations response = %#v, want error", got)
+	}
 }
 
 func TestExecuteCommandIncrementCounter(t *testing.T) {
