@@ -720,7 +720,7 @@ func (ds *DiskStorage) Put(idx int32, value []byte) error {
 	if idx < 0 || int(idx) >= len(ds.paths) {
 		return nil
 	}
-	if err := writeFileAtomic(ds.paths[idx], value); err != nil {
+	if err := writeFileAtomic(ds.ensurePath(idx), value); err != nil {
 		return err
 	}
 	ds.reusables.Use(idx)
@@ -739,7 +739,7 @@ func (ds *DiskStorage) Append(value []byte) (int32, error) {
 
 func (ds *DiskStorage) Add(value []byte) (int32, error) {
 	if idx, ok := ds.reusables.Take(); ok {
-		if err := writeFileAtomic(ds.paths[idx], value); err != nil {
+		if err := writeFileAtomic(ds.ensurePath(idx), value); err != nil {
 			ds.reusables.Mark(idx)
 			return 0, err
 		}
@@ -752,6 +752,9 @@ func (ds *DiskStorage) Get(idx int32) ([]byte, error) {
 	if idx < 0 || int(idx) >= len(ds.paths) {
 		return nil, nil
 	}
+	if ds.paths[idx] == "" {
+		return nil, nil
+	}
 	return os.ReadFile(ds.paths[idx])
 }
 
@@ -759,7 +762,10 @@ func (ds *DiskStorage) Del(idx int32) {
 	if idx < 0 || int(idx) >= len(ds.paths) {
 		return
 	}
-	_ = os.Remove(ds.paths[idx])
+	if ds.paths[idx] != "" {
+		_ = os.Remove(ds.paths[idx])
+		ds.paths[idx] = ""
+	}
 	ds.reusables.Mark(idx)
 	ds.paths = trimReusableTail(ds.paths, &ds.reusables)
 }
@@ -773,8 +779,17 @@ func (ds *DiskStorage) Destroy() {
 		return
 	}
 	for _, path := range ds.paths {
-		_ = os.Remove(path)
+		if path != "" {
+			_ = os.Remove(path)
+		}
 	}
+}
+
+func (ds *DiskStorage) ensurePath(idx int32) string {
+	if ds.paths[idx] == "" {
+		ds.paths[idx] = ds.pathFor(idx)
+	}
+	return ds.paths[idx]
 }
 
 func (ds *DiskStorage) pathFor(idx int32) string {

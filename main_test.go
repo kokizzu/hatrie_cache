@@ -1157,6 +1157,48 @@ func TestDiskStorageWritesReplaceAndReuseAtomically(t *testing.T) {
 	assertNoAtomicTempFiles(t, disks.dir, filepath.Base(disks.paths[reused]))
 }
 
+func TestDiskStorageDeleteClearsMiddlePathAndRestoresOnReuse(t *testing.T) {
+	disks, err := CreateDiskStorage(t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("CreateDiskStorage() error = %v", err)
+	}
+
+	if _, err := disks.Add([]byte("zero")); err != nil {
+		t.Fatalf("Add(zero) error = %v", err)
+	}
+	middle, err := disks.Add([]byte("middle"))
+	if err != nil {
+		t.Fatalf("Add(middle) error = %v", err)
+	}
+	if _, err := disks.Add([]byte("tail")); err != nil {
+		t.Fatalf("Add(tail) error = %v", err)
+	}
+	middlePath := disks.paths[middle]
+
+	disks.Del(middle)
+
+	if got := disks.paths[middle]; got != "" {
+		t.Fatalf("deleted middle path = %q, want empty", got)
+	}
+	if _, err := os.Stat(middlePath); !os.IsNotExist(err) {
+		t.Fatalf("deleted middle file Stat() error = %v, want not exist", err)
+	}
+
+	reused, err := disks.Add([]byte("reused"))
+	if err != nil {
+		t.Fatalf("Add(reused) error = %v", err)
+	}
+	if reused != middle {
+		t.Fatalf("Add(reused) index = %d, want middle index %d", reused, middle)
+	}
+	if got := disks.paths[reused]; got != middlePath {
+		t.Fatalf("reused path = %q, want %q", got, middlePath)
+	}
+	if got, err := disks.Get(reused); err != nil || string(got) != "reused" {
+		t.Fatalf("Get(reused) = %q/%v, want reused/nil", got, err)
+	}
+}
+
 func TestDiskStorageWriteFailureCleansTemporaryFilesAndKeepsReusableIndex(t *testing.T) {
 	dir := t.TempDir()
 	disks, err := CreateDiskStorage(dir, false)
