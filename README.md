@@ -40,6 +40,12 @@ make monitoring-server MONITORING_ADDR=127.0.0.1:8080
 make run CMD='go run ./cmd/hatrie-cache'
 ```
 
+The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
+`/api/entries`, and `/api/commands`. `POST /api/commands` accepts
+`command`, `key`, optional `value`, and optional `ttl_seconds`; it currently
+supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
+`SETINT`, `SETINTX`, `DEL`, `TTL`, and `EXPIRE`.
+
 The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
 and `TTL`. Expired entries are removed lazily when the key is read or mutated.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use

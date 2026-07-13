@@ -2,6 +2,8 @@ package hatriecache
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"os"
 	"runtime"
@@ -62,6 +64,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/health", handler.handleHealth)
 	mux.HandleFunc("/api/stats", handler.handleStats)
 	mux.HandleFunc("/api/entries", handler.handleEntries)
+	mux.HandleFunc("/api/commands", handler.handleCommands)
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
@@ -101,6 +104,28 @@ func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.R
 	}
 	prefix := r.URL.Query().Get("prefix")
 	writeJSON(w, MonitoringEntriesResponse{Entries: handler.trie.monitoringEntries(prefix)})
+}
+
+func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+
+	var request CacheCommandRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid command request", http.StatusBadRequest)
+		return
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid command request", http.StatusBadRequest)
+		return
+	}
+
+	writeJSON(w, handler.trie.ExecuteCommand(request))
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {

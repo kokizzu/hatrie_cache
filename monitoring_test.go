@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -89,5 +90,55 @@ func TestMonitoringHandlerServesStaticWebDir(t *testing.T) {
 	}
 	if got := resp.Body.String(); got != "monitoring ui" {
 		t.Fatalf("static body = %q, want monitoring ui", got)
+	}
+}
+
+func TestMonitoringHandlerExecutesCommands(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	setResp := httptest.NewRecorder()
+	handler.ServeHTTP(setResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"name","value":"ivi"}`)))
+	if setResp.Code != http.StatusOK {
+		t.Fatalf("SETSTR status = %d, want 200", setResp.Code)
+	}
+	var setResult CacheCommandResponse
+	if err := json.Unmarshal(setResp.Body.Bytes(), &setResult); err != nil {
+		t.Fatalf("SETSTR JSON error = %v", err)
+	}
+	if !setResult.OK {
+		t.Fatalf("SETSTR response = %#v, want ok", setResult)
+	}
+
+	getResp := httptest.NewRecorder()
+	handler.ServeHTTP(getResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"GET","key":"name"}`)))
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200", getResp.Code)
+	}
+	var getResult CacheCommandResponse
+	if err := json.Unmarshal(getResp.Body.Bytes(), &getResult); err != nil {
+		t.Fatalf("GET JSON error = %v", err)
+	}
+	if !getResult.OK || getResult.Value != "ivi" {
+		t.Fatalf("GET response = %#v, want ivi", getResult)
+	}
+}
+
+func TestMonitoringHandlerRejectsInvalidCommandRequests(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	for _, method := range []string{http.MethodGet, http.MethodPut} {
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, httptest.NewRequest(method, "/api/commands", nil))
+		if resp.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("%s status = %d, want 405", method, resp.Code)
+		}
+	}
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"GET","key":"x"} trailing`)))
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("invalid JSON status = %d, want 400", resp.Code)
 	}
 }
