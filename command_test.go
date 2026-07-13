@@ -278,6 +278,18 @@ func TestExecuteCommandBloomFilterOperations(t *testing.T) {
 	if !ht.Get("auto").IsBloomFilter() {
 		t.Fatal("ADDBF on missing key did not create a Bloom filter")
 	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATEBF",
+		Key:     "paired",
+		Pairs:   Map{"expected_items": json.Number("128"), "false_positive_rate": json.Number("0.05")},
+	}); !got.OK {
+		t.Fatalf("CREATEBF pairs response = %#v, want ok", got)
+	}
+	info, ok := ht.BloomFilterInfo("paired")
+	if !ok || info.BitCount == 0 || info.HashCount == 0 {
+		t.Fatalf("paired BloomFilterInfo = %#v/%v, want configured filter", info, ok)
+	}
 }
 
 func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
@@ -407,6 +419,8 @@ func TestExecuteCommandValidation(t *testing.T) {
 		{Command: "PUSHPQ", Key: "key"},
 		{Command: "PUSHPQ", Key: "key", Value: "job"},
 		{Command: "CREATEBF", Key: "key", Value: "0"},
+		{Command: "CREATEBF", Key: "key", Pairs: Map{"expected_items": 1.5}},
+		{Command: "CREATEBF", Key: "key", Pairs: Map{"false_positive_rate": "not-number"}},
 		{Command: "ADDBF", Key: "key"},
 		{Command: "HASBF", Key: "key"},
 		{Command: "INTERNALSET", Key: "key"},

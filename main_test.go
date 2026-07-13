@@ -52,6 +52,24 @@ func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	return ""
 }
 
+func bloomFilterFNV64aString(value string) uint64 {
+	hash := bloomFilterFNVOffset64
+	for idx := 0; idx < len(value); idx++ {
+		hash ^= uint64(value[idx])
+		hash *= bloomFilterFNVPrime64
+	}
+	return hash
+}
+
+func bloomFilterFNV64String(value string) uint64 {
+	hash := bloomFilterFNVOffset64
+	for idx := 0; idx < len(value); idx++ {
+		hash *= bloomFilterFNVPrime64
+		hash ^= uint64(value[idx])
+	}
+	return hash
+}
+
 func TestHatValueRoundTripPreservesNegativeCountersAndFlags(t *testing.T) {
 	in := HatValue{Index: -42, Flags: DATAVALUE_TYPE_COUNTER | (1 << DATAVALUE_TTL_BIT_SHIFT)}
 	var out HatValue
@@ -1134,6 +1152,16 @@ func TestBloomFilterOperations(t *testing.T) {
 	}
 	if hval := ht.Get("auto"); !hval.IsBloomFilter() {
 		t.Fatalf("AddBloomFilter(auto) stored type %+v, want bloom filter", hval)
+	}
+}
+
+func TestBloomFilterHashesJSONRepresentationForCompatibility(t *testing.T) {
+	key := []byte(`"alpha"`)
+	if bloomFilterFNV64a(key) != bloomFilterFNV64aString(string(key)) {
+		t.Fatal("bloomFilterFNV64a changed from JSON string hash representation")
+	}
+	if bloomFilterFNV64(key) != bloomFilterFNV64String(string(key)) {
+		t.Fatal("bloomFilterFNV64 changed from JSON string hash representation")
 	}
 }
 

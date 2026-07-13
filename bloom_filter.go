@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"math"
 	mathbits "math/bits"
@@ -139,7 +140,7 @@ func (filter *bloomFilterData) Add(value interface{}) bool {
 	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
 		return false
 	}
-	key := mustSetItemKey(value)
+	key := mustBloomFilterItemKey(value)
 	changed := false
 	filter.visitIndexes(key, func(index uint64) {
 		word := index / 64
@@ -172,7 +173,7 @@ func (filter *bloomFilterData) Contains(value interface{}) bool {
 	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
 		return false
 	}
-	key := mustSetItemKey(value)
+	key := mustBloomFilterItemKey(value)
 	contains := true
 	filter.visitIndexes(key, func(index uint64) {
 		word := index / 64
@@ -226,7 +227,7 @@ func (filter bloomFilterData) EncodedSize() int64 {
 	return int64(len(filter.words) * 8)
 }
 
-func (filter *bloomFilterData) visitIndexes(key string, visit func(uint64)) {
+func (filter *bloomFilterData) visitIndexes(key []byte, visit func(uint64)) {
 	first := bloomFilterFNV64a(key)
 	step := bloomFilterFNV64(key)
 	if step == 0 {
@@ -246,7 +247,19 @@ func (filter *bloomFilterData) maskUnusedBits() {
 	filter.words[len(filter.words)-1] &= mask
 }
 
-func bloomFilterFNV64a(value string) uint64 {
+func mustBloomFilterItemKey(value interface{}) []byte {
+	key, err := bloomFilterItemKey(value)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}
+
+func bloomFilterItemKey(value interface{}) ([]byte, error) {
+	return json.Marshal(value)
+}
+
+func bloomFilterFNV64a(value []byte) uint64 {
 	hash := bloomFilterFNVOffset64
 	for idx := 0; idx < len(value); idx++ {
 		hash ^= uint64(value[idx])
@@ -255,7 +268,7 @@ func bloomFilterFNV64a(value string) uint64 {
 	return hash
 }
 
-func bloomFilterFNV64(value string) uint64 {
+func bloomFilterFNV64(value []byte) uint64 {
 	hash := bloomFilterFNVOffset64
 	for idx := 0; idx < len(value); idx++ {
 		hash *= bloomFilterFNVPrime64
