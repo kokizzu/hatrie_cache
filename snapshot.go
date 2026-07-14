@@ -993,11 +993,7 @@ func scanSnapshotEntriesJSON(decoder *json.Decoder, visit func(snapshotEntry) er
 	}
 
 	for decoder.More() {
-		var raw json.RawMessage
-		if err := decoder.Decode(&raw); err != nil {
-			return err
-		}
-		entry, err := decodeSnapshotEntryJSONRequiredKey(raw, true)
+		entry, err := decodeSnapshotEntryJSONDecoder(decoder, true)
 		if err != nil {
 			return err
 		}
@@ -1018,21 +1014,10 @@ func scanSnapshotEntriesJSON(decoder *json.Decoder, visit func(snapshotEntry) er
 }
 
 func decodeSnapshotEntryJSONRequiredKey(data []byte, requiredKey bool) (snapshotEntry, error) {
-	if requiredKey {
-		hasKey, err := snapshotEntryHasKey(data)
-		if err != nil {
-			return snapshotEntry{}, err
-		}
-		if !hasKey {
-			return snapshotEntry{}, errors.New("hatriecache: snapshot entry key is required")
-		}
-	}
-
-	var entry snapshotEntry
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&entry); err != nil {
+	entry, err := decodeSnapshotEntryJSONDecoder(decoder, requiredKey)
+	if err != nil {
 		return snapshotEntry{}, err
 	}
 	var extra struct{}
@@ -1043,6 +1028,106 @@ func decodeSnapshotEntryJSONRequiredKey(data []byte, requiredKey bool) (snapshot
 		return snapshotEntry{}, err
 	}
 	return entry, nil
+}
+
+func decodeSnapshotEntryJSONDecoder(decoder *json.Decoder, requiredKey bool) (snapshotEntry, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return snapshotEntry{}, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return snapshotEntry{}, errors.New("hatriecache: snapshot entry JSON must be an object")
+	}
+
+	var entry snapshotEntry
+	keySeen := false
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return snapshotEntry{}, err
+		}
+		field, ok := token.(string)
+		if !ok {
+			return snapshotEntry{}, errors.New("hatriecache: invalid snapshot entry JSON")
+		}
+		if err := decodeSnapshotEntryJSONField(decoder, field, &entry, &keySeen); err != nil {
+			return snapshotEntry{}, err
+		}
+	}
+
+	token, err = decoder.Token()
+	if err != nil {
+		return snapshotEntry{}, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '}' {
+		return snapshotEntry{}, errors.New("hatriecache: invalid snapshot entry JSON")
+	}
+	if requiredKey && !keySeen {
+		return snapshotEntry{}, errors.New("hatriecache: snapshot entry key is required")
+	}
+	return entry, nil
+}
+
+func decodeSnapshotEntryJSONField(decoder *json.Decoder, field string, entry *snapshotEntry, keySeen *bool) error {
+	switch field {
+	case "key":
+		*keySeen = true
+		var key *string
+		if err := decoder.Decode(&key); err != nil {
+			return err
+		}
+		if key == nil {
+			return errors.New("hatriecache: snapshot entry key must be a string")
+		}
+		entry.Key = *key
+	case "type":
+		return decoder.Decode(&entry.Type)
+	case "counter":
+		return decoder.Decode(&entry.Counter)
+	case "string":
+		return decoder.Decode(&entry.String)
+	case "bytes":
+		return decoder.Decode(&entry.Bytes)
+	case "map":
+		return decoder.Decode(&entry.Map)
+	case "slice":
+		return decoder.Decode(&entry.Slice)
+	case "set":
+		return decoder.Decode(&entry.Set)
+	case "priority_queue":
+		return decoder.Decode(&entry.PriorityQueue)
+	case "bloom_filter":
+		return decoder.Decode(&entry.BloomFilter)
+	case "count_min_sketch":
+		return decoder.Decode(&entry.CountMinSketch)
+	case "hyperloglog":
+		return decoder.Decode(&entry.HyperLogLog)
+	case "top_k":
+		return decoder.Decode(&entry.TopK)
+	case "cuckoo_filter":
+		return decoder.Decode(&entry.CuckooFilter)
+	case "roaring_bitmap":
+		return decoder.Decode(&entry.RoaringBitmap)
+	case "quantile_sketch":
+		return decoder.Decode(&entry.QuantileSketch)
+	case "fenwick_tree":
+		return decoder.Decode(&entry.FenwickTree)
+	case "sparse_bitset":
+		return decoder.Decode(&entry.SparseBitset)
+	case "reservoir_sample":
+		return decoder.Decode(&entry.ReservoirSample)
+	case "xor_filter":
+		return decoder.Decode(&entry.XorFilter)
+	case "radix_tree":
+		return decoder.Decode(&entry.RadixTree)
+	case "expires_at":
+		return decoder.Decode(&entry.ExpiresAt)
+	case "stats":
+		return decoder.Decode(&entry.Stats)
+	default:
+		return fmt.Errorf("hatriecache: unknown snapshot entry field %q", field)
+	}
+	return nil
 }
 
 func snapshotEntryHasKey(data []byte) (bool, error) {

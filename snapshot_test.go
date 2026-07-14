@@ -1206,6 +1206,37 @@ func TestSnapshotEntryHasKeyHandlesLargeEntries(t *testing.T) {
 	}
 }
 
+func TestDecodeSnapshotEntryJSONRequiredKeyStreamsEntryFields(t *testing.T) {
+	entry, err := decodeSnapshotEntryJSONRequiredKey([]byte(`{"key":"","type":"string","string":"blank"}`), true)
+	if err != nil {
+		t.Fatalf("decodeSnapshotEntryJSONRequiredKey(empty key) error = %v", err)
+	}
+	if entry.Key != "" || entry.String != "blank" {
+		t.Fatalf("decoded empty-key entry = %#v, want blank string entry", entry)
+	}
+
+	entry, err = decodeSnapshotEntryJSONRequiredKey([]byte(`{"type":"string","string":"value"}`), false)
+	if err != nil {
+		t.Fatalf("decodeSnapshotEntryJSONRequiredKey(optional key) error = %v", err)
+	}
+	if entry.Key != "" || entry.String != "value" {
+		t.Fatalf("decoded optional-key entry = %#v, want missing key accepted", entry)
+	}
+
+	for name, payload := range map[string]string{
+		"missing-key": `{"type":"string","string":"value"}`,
+		"null-key":    `{"key":null,"type":"string","string":"value"}`,
+		"unknown":     `{"key":"name","type":"string","string":"value","extra":true}`,
+		"trailing":    `{"key":"name","type":"string","string":"value"} true`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeSnapshotEntryJSONRequiredKey([]byte(payload), true); err == nil {
+				t.Fatal("decodeSnapshotEntryJSONRequiredKey() error = nil, want rejection")
+			}
+		})
+	}
+}
+
 func TestDecodeSnapshotFileJSONReaderRejectsTopLevelAmbiguity(t *testing.T) {
 	for name, payload := range map[string]string{
 		"unknown":   `{"version":1,"entries":[],"extra":true}`,
