@@ -162,6 +162,17 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
 		}
+	}
+	var compactedThrough uint64
+	for _, entry := range entries {
+		if entry.Checkpoint && entry.Sequence > compactedThrough {
+			compactedThrough = entry.Sequence
+		}
+	}
+	if afterSequence < compactedThrough {
+		return 0, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, compactedThrough)
+	}
+	for _, entry := range entries {
 		if entry.Checkpoint {
 			continue
 		}

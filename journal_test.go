@@ -913,6 +913,39 @@ func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplayReportsCompactedBoundary(t *testing.T) {
+	dir := t.TempDir()
+	journalPath := filepath.Join(dir, "commands.journal")
+	snapshotPath := filepath.Join(dir, "snapshot.json")
+	journal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	ht := newTestTrie(t)
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETINT", Key: "views", Value: "1"})
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "views", Value: "2"})
+	if err := journal.SaveSnapshot(ht, snapshotPath); err != nil {
+		t.Fatalf("SaveSnapshot() error = %v", err)
+	}
+	_ = journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "views", Value: "3"})
+
+	replayJournal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	replayed := newTestTrie(t)
+	maxSequence, err := replayJournal.Replay(replayed, 0)
+	if !errors.Is(err, ErrCommandJournalCompacted) {
+		t.Fatalf("Replay(before compacted boundary) error = %v, want ErrCommandJournalCompacted", err)
+	}
+	if maxSequence != 0 {
+		t.Fatalf("Replay(before compacted boundary) max sequence = %d, want 0", maxSequence)
+	}
+	if got := replayed.GetCounter("views"); got != 0 {
+		t.Fatalf("replayed views before compacted boundary = %d, want empty trie", got)
+	}
+}
+
 func TestCommandJournalTailReportsCompactedBoundary(t *testing.T) {
 	dir := t.TempDir()
 	journalPath := filepath.Join(dir, "commands.journal")
