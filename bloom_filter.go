@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	mathbits "math/bits"
 )
@@ -137,10 +138,38 @@ func newBloomFilterDataFromSnapshot(snapshot bloomFilterSnapshot) (bloomFilterDa
 }
 
 func (filter *bloomFilterData) Add(value interface{}) bool {
+	added, _ := filter.AddChecked(value)
+	return added
+}
+
+func (filter *bloomFilterData) AddChecked(value interface{}) (bool, error) {
+	added, err := filter.AddOneChecked(value)
+	return added > 0, err
+}
+
+func (filter *bloomFilterData) AddOne(value interface{}, values ...interface{}) int {
+	added, _ := filter.AddOneChecked(value, values...)
+	return added
+}
+
+func (filter *bloomFilterData) AddOneChecked(value interface{}, values ...interface{}) (int, error) {
 	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
-		return false
+		return 0, nil
 	}
-	key := mustBloomFilterItemKey(value)
+	keys, err := bloomFilterItemKeys(value, values...)
+	if err != nil {
+		return 0, err
+	}
+	added := 0
+	for _, key := range keys {
+		if filter.addKey(key) {
+			added++
+		}
+	}
+	return added, nil
+}
+
+func (filter *bloomFilterData) addKey(key []byte) bool {
 	changed := false
 	filter.visitIndexes(key, func(index uint64) {
 		word := index / 64
@@ -156,24 +185,23 @@ func (filter *bloomFilterData) Add(value interface{}) bool {
 	return changed
 }
 
-func (filter *bloomFilterData) AddOne(value interface{}, values ...interface{}) int {
-	added := 0
-	if filter.Add(value) {
-		added++
-	}
-	for _, value := range values {
-		if filter.Add(value) {
-			added++
-		}
-	}
-	return added
+func (filter *bloomFilterData) Contains(value interface{}) bool {
+	contains, _ := filter.ContainsChecked(value)
+	return contains
 }
 
-func (filter *bloomFilterData) Contains(value interface{}) bool {
+func (filter *bloomFilterData) ContainsChecked(value interface{}) (bool, error) {
 	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
-		return false
+		return false, nil
 	}
-	key := mustBloomFilterItemKey(value)
+	key, err := bloomFilterItemKey(value)
+	if err != nil {
+		return false, err
+	}
+	return filter.containsKey(key), nil
+}
+
+func (filter *bloomFilterData) containsKey(key []byte) bool {
 	contains := true
 	filter.visitIndexes(key, func(index uint64) {
 		word := index / 64
@@ -247,16 +275,29 @@ func (filter *bloomFilterData) maskUnusedBits() {
 	filter.words[len(filter.words)-1] &= mask
 }
 
-func mustBloomFilterItemKey(value interface{}) []byte {
+func bloomFilterItemKeys(value interface{}, values ...interface{}) ([][]byte, error) {
+	keys := make([][]byte, 0, 1+len(values))
 	key, err := bloomFilterItemKey(value)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return key
+	keys = append(keys, key)
+	for _, value := range values {
+		key, err := bloomFilterItemKey(value)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 func bloomFilterItemKey(value interface{}) ([]byte, error) {
-	return json.Marshal(value)
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("hatriecache: unsupported bloom filter value: %w", err)
+	}
+	return data, nil
 }
 
 func bloomFilterFNV64a(value []byte) uint64 {
@@ -351,38 +392,73 @@ func (ht *HatTrie) UpsertBloomFilter(key string, expectedItems uint64, falsePosi
 }
 
 func (ht *HatTrie) AddBloomFilter(key string, val interface{}, vals ...interface{}) int {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsBloomFilter() {
-		added := ht.bloomFilters.array[hval.Index].AddOne(val, vals...)
-		*rawPtr = hval.toValue()
-		ht.recordWriteLocked(key)
-		return added
-	}
-
-	ht.returnStorage(hval)
-	ht.clearExpirationLocked(key)
-	idx := ht.bloomFilters.AddData(newDefaultBloomFilterData())
-	added := ht.bloomFilters.array[idx].AddOne(val, vals...)
-	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_BLOOM_FILTER}.toValue()
-	ht.recordWriteLocked(key)
+	added, _ := ht.AddBloomFilterChecked(key, val, vals...)
 	return added
 }
 
+func (ht *HatTrie) AddBloomFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr != nil {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
+	} else {
+		ht.clearExpirationLocked(key)
+	}
+	if hval.IsBloomFilter() {
+		added, err := ht.bloomFilters.array[hval.Index].AddOneChecked(val, vals...)
+		if err != nil {
+			return 0, err
+		}
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked(key)
+		return added, nil
+	}
+
+	data := newDefaultBloomFilterData()
+	added, err := data.AddOneChecked(val, vals...)
+	if err != nil {
+		return 0, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.bloomFilters.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_BLOOM_FILTER}.toValue()
+	ht.recordWriteLocked(key)
+	return added, nil
+}
+
 func (ht *HatTrie) HasBloomFilter(key string, val interface{}) bool {
+	hit, _ := ht.HasBloomFilterChecked(key, val)
+	return hit
+}
+
+func (ht *HatTrie) HasBloomFilterChecked(key string, val interface{}) (bool, error) {
+	valueKey, err := bloomFilterItemKey(val)
+	if err != nil {
+		return false, err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
 	if !hval.IsBloomFilter() {
 		ht.recordReadLocked(false, key)
-		return false
+		return false, nil
 	}
-	hit := ht.bloomFilters.array[hval.Index].Contains(val)
+	hit := ht.bloomFilters.array[hval.Index].containsKey(valueKey)
 	ht.recordReadLocked(hit, key)
-	return hit
+	return hit, nil
 }
 
 func (ht *HatTrie) BloomFilterInfo(key string) (BloomFilterInfo, bool) {

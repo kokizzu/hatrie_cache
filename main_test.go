@@ -1307,6 +1307,50 @@ func TestBloomFilterHashesJSONRepresentationForCompatibility(t *testing.T) {
 	}
 }
 
+func TestBloomFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if added, err := ht.AddBloomFilterChecked("seen", "alpha"); err != nil || added != 1 {
+		t.Fatalf("AddBloomFilterChecked(alpha) = %d/%v, want 1/nil", added, err)
+	}
+
+	if added, err := ht.AddBloomFilterChecked("seen", "beta", func() {}); err == nil {
+		t.Fatalf("AddBloomFilterChecked(unsupported batch) = %d/nil, want error", added)
+	}
+	info, ok := ht.BloomFilterInfo("seen")
+	if !ok || info.Insertions != 1 {
+		t.Fatalf("BloomFilterInfo(after rejected batch) = %#v/%v, want one insertion", info, ok)
+	}
+	if !ht.HasBloomFilter("seen", "alpha") {
+		t.Fatal("rejected batch removed existing bloom filter value")
+	}
+
+	if added, err := ht.AddBloomFilterChecked("missing", func() {}); err == nil {
+		t.Fatalf("AddBloomFilterChecked(missing unsupported) = %d/nil, want error", added)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected missing-key Bloom filter left value %+v", got)
+	}
+	ht.UpsertString("string", "keep")
+	if added, err := ht.AddBloomFilterChecked("string", func() {}); err == nil {
+		t.Fatalf("AddBloomFilterChecked(replacement unsupported) = %d/nil, want error", added)
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected replacement changed string to %q, want keep", got)
+	}
+	if hit, err := ht.HasBloomFilterChecked("seen", func() {}); err == nil {
+		t.Fatalf("HasBloomFilterChecked(unsupported) = %v/nil, want error", hit)
+	}
+	if got := ht.AddBloomFilter("legacy", func() {}); got != 0 {
+		t.Fatalf("AddBloomFilter legacy unsupported = %d, want 0", got)
+	}
+	if got := ht.Get("legacy"); !got.Empty() {
+		t.Fatalf("legacy rejected Bloom filter left value %+v", got)
+	}
+	if ht.HasBloomFilter("seen", func() {}) {
+		t.Fatal("HasBloomFilter legacy unsupported = true, want false")
+	}
+}
+
 func TestBloomFilterRejectsInvalidConfig(t *testing.T) {
 	ht := newTestTrie(t)
 

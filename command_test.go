@@ -297,6 +297,50 @@ func TestExecuteCommandBloomFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandBloomFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDBF", Key: "seen", Value: "alpha"}); !got.OK {
+		t.Fatalf("ADDBF alpha response = %#v, want ok", got)
+	}
+
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDBF",
+		Key:     "seen",
+		Values:  Slice{"beta", func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDBF unsupported response = %#v, want error", got)
+	}
+	info, ok := ht.BloomFilterInfo("seen")
+	if !ok || info.Insertions != 1 {
+		t.Fatalf("BloomFilterInfo(after rejected command) = %#v/%v, want one insertion", info, ok)
+	}
+	if !ht.HasBloomFilter("seen", "alpha") {
+		t.Fatal("rejected ADDBF batch removed existing value")
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDBF",
+		Key:     "missing",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDBF missing unsupported response = %#v, want error", got)
+	}
+	if value := ht.Get("missing"); !value.Empty() {
+		t.Fatalf("rejected missing-key Bloom filter command left value %+v", value)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "HASBF",
+		Key:     "seen",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("HASBF unsupported response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandCuckooFilterOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

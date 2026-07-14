@@ -288,14 +288,21 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		added := ht.AddBloomFilter(key, values[0], values[1:]...)
+		added, err := ht.AddBloomFilterChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "added bloom filter values", Value: strconv.Itoa(added)}
 	case "HASBF", "BFHAS", "BFEXISTS":
 		values, ok := commandSliceValues(request)
 		if !ok {
 			return commandError("value or values is required")
 		}
-		if ht.HasBloomFilter(key, values[0]) {
+		hit, err := ht.HasBloomFilterChecked(key, values[0])
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if hit {
 			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
