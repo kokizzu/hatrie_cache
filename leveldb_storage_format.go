@@ -3,11 +3,9 @@ package hatriecache
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"strings"
 	"time"
 
@@ -78,52 +76,11 @@ func marshalLevelDBBytesEntryBinary(key string, raw []byte, expiresAt *time.Time
 }
 
 type levelDBBinaryWriter struct {
-	buf []byte
+	binaryFieldWriter
 }
 
 func newLevelDBBinaryWriter() levelDBBinaryWriter {
-	out := make([]byte, 0, 128)
-	out = append(out, levelDBBinaryMagic...)
-	return levelDBBinaryWriter{buf: out}
-}
-
-func (writer *levelDBBinaryWriter) bytes() []byte {
-	return writer.buf
-}
-
-func (writer *levelDBBinaryWriter) writeBool(value bool) {
-	if value {
-		writer.buf = append(writer.buf, 1)
-		return
-	}
-	writer.buf = append(writer.buf, 0)
-}
-
-func (writer *levelDBBinaryWriter) writeUvarint(value uint64) {
-	var scratch [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(scratch[:], value)
-	writer.buf = append(writer.buf, scratch[:n]...)
-}
-
-func (writer *levelDBBinaryWriter) writeVarint(value int64) {
-	var scratch [binary.MaxVarintLen64]byte
-	n := binary.PutVarint(scratch[:], value)
-	writer.buf = append(writer.buf, scratch[:n]...)
-}
-
-func (writer *levelDBBinaryWriter) writeBytes(value []byte) {
-	writer.writeUvarint(uint64(len(value)))
-	writer.buf = append(writer.buf, value...)
-}
-
-func (writer *levelDBBinaryWriter) writeString(value string) {
-	writer.writeBytes([]byte(value))
-}
-
-func (writer *levelDBBinaryWriter) writeFloat64(value float64) {
-	var scratch [8]byte
-	binary.LittleEndian.PutUint64(scratch[:], math.Float64bits(value))
-	writer.buf = append(writer.buf, scratch[:]...)
+	return levelDBBinaryWriter{binaryFieldWriter: newBinaryFieldWriter(levelDBBinaryMagic, 128)}
 }
 
 func (writer *levelDBBinaryWriter) writeTime(value time.Time) {
@@ -223,15 +180,14 @@ func marshalSnapshotEntryValueJSON(entry snapshotEntry) ([]byte, error) {
 }
 
 type levelDBBinaryReader struct {
-	data []byte
-	off  int
+	binaryFieldReader
 }
 
 func unmarshalLevelDBEntryBinary(data []byte) (snapshotEntry, error) {
 	if !levelDBEntryDataIsBinary(data) {
 		return snapshotEntry{}, errors.New("hatriecache: invalid binary leveldb entry")
 	}
-	reader := levelDBBinaryReader{data: data[len(levelDBBinaryMagic):]}
+	reader := levelDBBinaryReader{binaryFieldReader: newBinaryFieldReader(data[len(levelDBBinaryMagic):])}
 	key, err := reader.readString()
 	if err != nil {
 		return snapshotEntry{}, err
@@ -259,80 +215,6 @@ func unmarshalLevelDBEntryBinary(data []byte) (snapshotEntry, error) {
 		return snapshotEntry{}, errors.New("hatriecache: invalid trailing binary leveldb entry data")
 	}
 	return entry, nil
-}
-
-func (reader *levelDBBinaryReader) done() bool {
-	return reader.off == len(reader.data)
-}
-
-func (reader *levelDBBinaryReader) readBool() (bool, error) {
-	if reader.off >= len(reader.data) {
-		return false, io.ErrUnexpectedEOF
-	}
-	value := reader.data[reader.off]
-	reader.off++
-	switch value {
-	case 0:
-		return false, nil
-	case 1:
-		return true, nil
-	default:
-		return false, errors.New("hatriecache: invalid binary boolean")
-	}
-}
-
-func (reader *levelDBBinaryReader) readUvarint() (uint64, error) {
-	value, n := binary.Uvarint(reader.data[reader.off:])
-	if n == 0 {
-		return 0, io.ErrUnexpectedEOF
-	}
-	if n < 0 {
-		return 0, errors.New("hatriecache: invalid binary unsigned integer")
-	}
-	reader.off += n
-	return value, nil
-}
-
-func (reader *levelDBBinaryReader) readVarint() (int64, error) {
-	value, n := binary.Varint(reader.data[reader.off:])
-	if n == 0 {
-		return 0, io.ErrUnexpectedEOF
-	}
-	if n < 0 {
-		return 0, errors.New("hatriecache: invalid binary signed integer")
-	}
-	reader.off += n
-	return value, nil
-}
-
-func (reader *levelDBBinaryReader) readBytes() ([]byte, error) {
-	size, err := reader.readUvarint()
-	if err != nil {
-		return nil, err
-	}
-	if size > uint64(len(reader.data)-reader.off) {
-		return nil, io.ErrUnexpectedEOF
-	}
-	start := reader.off
-	reader.off += int(size)
-	return reader.data[start:reader.off], nil
-}
-
-func (reader *levelDBBinaryReader) readString() (string, error) {
-	value, err := reader.readBytes()
-	if err != nil {
-		return "", err
-	}
-	return string(value), nil
-}
-
-func (reader *levelDBBinaryReader) readFloat64() (float64, error) {
-	if len(reader.data)-reader.off < 8 {
-		return 0, io.ErrUnexpectedEOF
-	}
-	value := binary.LittleEndian.Uint64(reader.data[reader.off : reader.off+8])
-	reader.off += 8
-	return math.Float64frombits(value), nil
 }
 
 func (reader *levelDBBinaryReader) readTime() (time.Time, error) {

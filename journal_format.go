@@ -2,7 +2,6 @@ package hatriecache
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -66,64 +65,23 @@ func marshalCommandJournalEntryBinary(entry commandJournalEntry) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]byte, 0, len(commandJournalBinaryMagic)+binary.MaxVarintLen64+len(payload))
-	out = append(out, commandJournalBinaryMagic...)
-	var scratch [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(scratch[:], uint64(len(payload)))
-	out = append(out, scratch[:n]...)
-	out = append(out, payload...)
-	return out, nil
+	writer := newBinaryFieldWriter(commandJournalBinaryMagic, len(commandJournalBinaryMagic)+binaryFieldMaxVarintLen64+len(payload))
+	writer.writeBytes(payload)
+	return writer.bytes(), nil
 }
 
 func marshalCommandJournalEntryBinaryPayload(entry commandJournalEntry) ([]byte, error) {
-	writer := journalBinaryWriter{}
+	writer := newBinaryFieldWriter(nil, 64)
 	writer.writeUvarint(uint64(entry.Version))
 	writer.writeUvarint(entry.Sequence)
 	writer.writeBool(entry.Checkpoint)
-	if err := writer.writeCommandRequest(entry.Request); err != nil {
+	if err := writeCommandJournalRequestBinary(&writer, entry.Request); err != nil {
 		return nil, err
 	}
 	return writer.bytes(), nil
 }
 
-type journalBinaryWriter struct {
-	buf []byte
-}
-
-func (writer *journalBinaryWriter) bytes() []byte {
-	return writer.buf
-}
-
-func (writer *journalBinaryWriter) writeBool(value bool) {
-	if value {
-		writer.buf = append(writer.buf, 1)
-		return
-	}
-	writer.buf = append(writer.buf, 0)
-}
-
-func (writer *journalBinaryWriter) writeUvarint(value uint64) {
-	var scratch [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(scratch[:], value)
-	writer.buf = append(writer.buf, scratch[:n]...)
-}
-
-func (writer *journalBinaryWriter) writeVarint(value int64) {
-	var scratch [binary.MaxVarintLen64]byte
-	n := binary.PutVarint(scratch[:], value)
-	writer.buf = append(writer.buf, scratch[:n]...)
-}
-
-func (writer *journalBinaryWriter) writeBytes(value []byte) {
-	writer.writeUvarint(uint64(len(value)))
-	writer.buf = append(writer.buf, value...)
-}
-
-func (writer *journalBinaryWriter) writeString(value string) {
-	writer.writeBytes([]byte(value))
-}
-
-func (writer *journalBinaryWriter) writeOptionalInt64(value *int64) {
+func writeCommandJournalOptionalInt64Binary(writer *binaryFieldWriter, value *int64) {
 	if value == nil {
 		writer.writeBool(false)
 		return
@@ -132,14 +90,14 @@ func (writer *journalBinaryWriter) writeOptionalInt64(value *int64) {
 	writer.writeVarint(*value)
 }
 
-func (writer *journalBinaryWriter) writeCommandRequest(request CacheCommandRequest) error {
+func writeCommandJournalRequestBinary(writer *binaryFieldWriter, request CacheCommandRequest) error {
 	writer.writeString(request.Command)
 	writer.writeString(request.Key)
 	writer.writeString(request.Value)
 	writer.writeString(request.Subkey)
-	writer.writeOptionalInt64(request.Priority)
-	writer.writeOptionalInt64(request.TTLSeconds)
-	writer.writeOptionalInt64(request.UnixSeconds)
+	writeCommandJournalOptionalInt64Binary(writer, request.Priority)
+	writeCommandJournalOptionalInt64Binary(writer, request.TTLSeconds)
+	writeCommandJournalOptionalInt64Binary(writer, request.UnixSeconds)
 	values, err := marshalJournalDynamicJSON(request.Values)
 	if err != nil {
 		return err
@@ -202,7 +160,7 @@ func decodeCommandJournalEntryBinary(data []byte) (commandJournalEntry, error) {
 	if !commandJournalRecordIsBinary(data) {
 		return commandJournalEntry{}, errors.New("hatriecache: invalid binary command journal record")
 	}
-	reader := journalBinaryReader{data: data[len(commandJournalBinaryMagic):]}
+	reader := newBinaryFieldReader(data[len(commandJournalBinaryMagic):])
 	payload, err := reader.readBytes()
 	if err != nil {
 		return commandJournalEntry{}, err
@@ -214,7 +172,7 @@ func decodeCommandJournalEntryBinary(data []byte) (commandJournalEntry, error) {
 }
 
 func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, error) {
-	reader := journalBinaryReader{data: data}
+	reader := newBinaryFieldReader(data)
 	version, err := reader.readUvarint()
 	if err != nil {
 		return commandJournalEntry{}, err
@@ -230,7 +188,7 @@ func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, e
 	if err != nil {
 		return commandJournalEntry{}, err
 	}
-	request, err := reader.readCommandRequest()
+	request, err := readCommandJournalRequestBinary(&reader)
 	if err != nil {
 		return commandJournalEntry{}, err
 	}
@@ -249,77 +207,7 @@ func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, e
 	return entry, nil
 }
 
-type journalBinaryReader struct {
-	data []byte
-	off  int
-}
-
-func (reader *journalBinaryReader) done() bool {
-	return reader.off == len(reader.data)
-}
-
-func (reader *journalBinaryReader) readBool() (bool, error) {
-	if reader.off >= len(reader.data) {
-		return false, io.ErrUnexpectedEOF
-	}
-	value := reader.data[reader.off]
-	reader.off++
-	switch value {
-	case 0:
-		return false, nil
-	case 1:
-		return true, nil
-	default:
-		return false, errors.New("hatriecache: invalid binary boolean")
-	}
-}
-
-func (reader *journalBinaryReader) readUvarint() (uint64, error) {
-	value, n := binary.Uvarint(reader.data[reader.off:])
-	if n == 0 {
-		return 0, io.ErrUnexpectedEOF
-	}
-	if n < 0 {
-		return 0, errors.New("hatriecache: invalid binary unsigned integer")
-	}
-	reader.off += n
-	return value, nil
-}
-
-func (reader *journalBinaryReader) readVarint() (int64, error) {
-	value, n := binary.Varint(reader.data[reader.off:])
-	if n == 0 {
-		return 0, io.ErrUnexpectedEOF
-	}
-	if n < 0 {
-		return 0, errors.New("hatriecache: invalid binary signed integer")
-	}
-	reader.off += n
-	return value, nil
-}
-
-func (reader *journalBinaryReader) readBytes() ([]byte, error) {
-	size, err := reader.readUvarint()
-	if err != nil {
-		return nil, err
-	}
-	if size > uint64(len(reader.data)-reader.off) {
-		return nil, io.ErrUnexpectedEOF
-	}
-	start := reader.off
-	reader.off += int(size)
-	return reader.data[start:reader.off], nil
-}
-
-func (reader *journalBinaryReader) readString() (string, error) {
-	value, err := reader.readBytes()
-	if err != nil {
-		return "", err
-	}
-	return string(value), nil
-}
-
-func (reader *journalBinaryReader) readOptionalInt64() (*int64, error) {
+func readCommandJournalOptionalInt64Binary(reader *binaryFieldReader) (*int64, error) {
 	present, err := reader.readBool()
 	if err != nil {
 		return nil, err
@@ -334,7 +222,7 @@ func (reader *journalBinaryReader) readOptionalInt64() (*int64, error) {
 	return &value, nil
 }
 
-func (reader *journalBinaryReader) readCommandRequest() (CacheCommandRequest, error) {
+func readCommandJournalRequestBinary(reader *binaryFieldReader) (CacheCommandRequest, error) {
 	var request CacheCommandRequest
 	var err error
 	if request.Command, err = reader.readString(); err != nil {
@@ -349,13 +237,13 @@ func (reader *journalBinaryReader) readCommandRequest() (CacheCommandRequest, er
 	if request.Subkey, err = reader.readString(); err != nil {
 		return CacheCommandRequest{}, err
 	}
-	if request.Priority, err = reader.readOptionalInt64(); err != nil {
+	if request.Priority, err = readCommandJournalOptionalInt64Binary(reader); err != nil {
 		return CacheCommandRequest{}, err
 	}
-	if request.TTLSeconds, err = reader.readOptionalInt64(); err != nil {
+	if request.TTLSeconds, err = readCommandJournalOptionalInt64Binary(reader); err != nil {
 		return CacheCommandRequest{}, err
 	}
-	if request.UnixSeconds, err = reader.readOptionalInt64(); err != nil {
+	if request.UnixSeconds, err = readCommandJournalOptionalInt64Binary(reader); err != nil {
 		return CacheCommandRequest{}, err
 	}
 	values, err := reader.readBytes()
