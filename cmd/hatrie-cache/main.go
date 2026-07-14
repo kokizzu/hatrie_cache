@@ -84,15 +84,6 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	if err := loadLevelDBIfConfigured(trie, dbStore, levelDBLoadPolicy(cfg)); err != nil {
 		return err
 	}
-	if dbStore != nil {
-		defer func() {
-			if err := dbStore.Save(trie); err != nil {
-				fmt.Fprintf(stderr, "save leveldb: %v\n", err)
-			}
-		}()
-	}
-	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, cfg.dbSyncInterval, stderr)
-	defer stopDBSync()
 
 	journal, err := openJournalIfConfigured(cfg.journalPath)
 	if err != nil {
@@ -120,6 +111,15 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			}
 		}()
 	}
+	if dbStore != nil {
+		defer func() {
+			if err := dbStore.Save(trie); err != nil {
+				fmt.Fprintf(stderr, "save leveldb: %v\n", err)
+			}
+		}()
+	}
+	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, cfg.dbSyncInterval, stderr)
+	defer stopDBSync()
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, stderr)
 	defer stopSnapshots()
 	if cfg.journalPullSource != "" && journal == nil {

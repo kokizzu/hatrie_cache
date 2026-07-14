@@ -564,6 +564,55 @@ func TestLevelDBLifecycleHelpersLoadAndSave(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotSaveLevelDBWhenRestoreFails(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cache.leveldb")
+	dbSource := hatriecache.CreateHatTrie()
+	defer dbSource.Destroy()
+	dbSource.UpsertString("key", "leveldb")
+	if err := dbSource.SaveLevelDB(dbPath); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	snapshotDir := t.TempDir()
+	snapshotPath := filepath.Join(snapshotDir, "snapshot.json")
+	snapshotSource := hatriecache.CreateHatTrie()
+	defer snapshotSource.Destroy()
+	snapshotSource.UpsertString("key", "snapshot")
+	if err := snapshotSource.SaveSnapshot(snapshotPath); err != nil {
+		t.Fatalf("SaveSnapshot() error = %v", err)
+	}
+	if err := os.Chmod(snapshotDir, 0o500); err != nil {
+		t.Fatalf("Chmod(snapshot dir) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(snapshotDir, 0o700)
+	})
+	probePath := filepath.Join(snapshotDir, "probe")
+	if err := os.WriteFile(probePath, []byte("probe"), 0o600); err == nil {
+		_ = os.Remove(probePath)
+		t.Skip("snapshot directory remains writable after chmod")
+	}
+
+	err := run(context.Background(), []string{
+		"-monitoring-server",
+		"-db-path", dbPath,
+		"-snapshot-path", snapshotPath,
+		"-journal-path", filepath.Join(t.TempDir(), "commands.journal"),
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("run() error = nil, want snapshot save error")
+	}
+
+	loaded := hatriecache.CreateHatTrie()
+	defer loaded.Destroy()
+	if _, err := loaded.LoadLevelDB(dbPath); err != nil {
+		t.Fatalf("LoadLevelDB() error = %v", err)
+	}
+	if got := loaded.GetString("key"); got != "leveldb" {
+		t.Fatalf("LevelDB key after failed restore = %q, want original leveldb value", got)
+	}
+}
+
 func TestTopologyLifecycleHelperLoadsAndSaves(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "topology.json")
 	store, err := openTopologyIfConfigured(path, "node-a", "127.0.0.1:8080")
