@@ -229,6 +229,7 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
 `/api/journal`, and `/api/commands`.
+Responses are gzip-compressed when clients send `Accept-Encoding: gzip`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader
 for that key. `POST /api/election` accepts `node` and `online` to record a

@@ -118,7 +118,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
-	return mux
+	return gzipHTTPHandler(mux)
 }
 
 func (handler *MonitoringHandler) handleHealth(w http.ResponseWriter, r *http.Request) {

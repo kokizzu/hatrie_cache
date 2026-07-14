@@ -2,8 +2,10 @@ package hatriecache
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -244,6 +246,104 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if reservoirEntry.Key != "session:zzsample" || reservoirEntry.Type != "reservoir_sample" || reservoirEntry.SizeBytes != reservoirInfo.EncodedBytes || reservoirEntry.ValuePreview != wantReservoirPreview {
 		t.Fatalf("reservoir sample entry = %#v, want compact bounded-sample preview", reservoirEntry)
 	}
+}
+
+func TestMonitoringHandlerCompressesJSONWhenAccepted(t *testing.T) {
+	ht := newTestTrie(t)
+	for idx := 0; idx < 32; idx++ {
+		ht.UpsertString("session:"+strconv.Itoa(idx), strings.Repeat("value", 16))
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/entries?prefix=session:", nil)
+	request.Header.Set("Accept-Encoding", "br, gzip")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, request)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("entries status = %d, want 200", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	if got := resp.Header().Values("Vary"); !headerValuesContain(got, "Accept-Encoding") {
+		t.Fatalf("Vary = %#v, want Accept-Encoding", got)
+	}
+
+	data := gunzipResponseBody(t, resp.Body.Bytes())
+	var body MonitoringEntriesResponse
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("compressed entries JSON error = %v", err)
+	}
+	if len(body.Entries) != 32 {
+		t.Fatalf("compressed entries count = %d, want 32", len(body.Entries))
+	}
+}
+
+func TestMonitoringHandlerSkipsGzipWhenNotAccepted(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("session:1", "active")
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/entries?prefix=session:", nil)
+	request.Header.Set("Accept-Encoding", "br")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, request)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("entries status = %d, want 200", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("Content-Encoding = %q, want empty", got)
+	}
+	var body MonitoringEntriesResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("plain entries JSON error = %v", err)
+	}
+	if len(body.Entries) != 1 {
+		t.Fatalf("plain entries count = %d, want 1", len(body.Entries))
+	}
+}
+
+func TestMonitoringHandlerHonorsGzipQualityZero(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("session:1", "active")
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/entries?prefix=session:", nil)
+	request.Header.Set("Accept-Encoding", "gzip;q=0, *;q=1")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, request)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("entries status = %d, want 200", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("Content-Encoding = %q, want empty when gzip q=0", got)
+	}
+}
+
+func gunzipResponseBody(t *testing.T, data []byte) []byte {
+	t.Helper()
+
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("NewReader(gzip response) error = %v", err)
+	}
+	defer reader.Close()
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll(gzip response) error = %v", err)
+	}
+	return out
+}
+
+func headerValuesContain(values []string, want string) bool {
+	for _, value := range values {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestMonitoringHandlerPreviewsCoreValueFamilies(t *testing.T) {
