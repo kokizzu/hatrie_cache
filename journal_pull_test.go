@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -39,6 +40,57 @@ func TestPullCommandJournalValidationErrorsCarryHTTPStatus(t *testing.T) {
 	pullErr = nil
 	if !errors.As(err, &pullErr) || pullErr.Status != http.StatusConflict || !strings.Contains(err.Error(), "journal is not configured") {
 		t.Fatalf("PullCommandJournal(nil journal) error = %v/%#v, want 409 pull error", err, pullErr)
+	}
+}
+
+func TestApplyCommandJournalTailRejectsSequenceGap(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := applyCommandJournalTail(ht, journal, "source", 1, CommandJournalTail{
+		LastSequence: 3,
+		Entries: []CommandJournalRecord{
+			{Sequence: 3, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not continue after 1") {
+		t.Fatalf("applyCommandJournalTail(gap) error = %v, want sequence gap error", err)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 1 {
+		t.Fatalf("gap result = %#v, want no progress after sequence 1", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("gap applied value = %q, want empty", got)
+	}
+}
+
+func TestApplyCommandJournalTailRejectsCompactedGap(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := applyCommandJournalTail(ht, journal, "source", 1, CommandJournalTail{
+		LastSequence:     3,
+		CompactedThrough: 2,
+		Entries: []CommandJournalRecord{
+			{Sequence: 3, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+		},
+	})
+	if !errors.Is(err, ErrCommandJournalCompacted) {
+		t.Fatalf("applyCommandJournalTail(compacted) error = %v, want ErrCommandJournalCompacted", err)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 1 || result.CompactedThrough != 2 {
+		t.Fatalf("compacted result = %#v, want no progress with compacted boundary", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("compacted gap applied value = %q, want empty", got)
 	}
 }
 
