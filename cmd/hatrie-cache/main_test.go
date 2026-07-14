@@ -291,6 +291,66 @@ func TestRunDoesNotStartServerByDefault(t *testing.T) {
 	}
 }
 
+func TestRunRejectsJournalPullWithoutJournalPath(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	err := run(context.Background(), []string{
+		"-monitoring-server",
+		"-monitoring-addr", freeTCPAddr(t),
+		"-journal-pull-source", "http://leader:8080",
+	}, stdout, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "journal pull requires -journal-path") {
+		t.Fatalf("run() error = %v, want journal path requirement", err)
+	}
+	if strings.Contains(stdout.String(), "monitoring server listening") {
+		t.Fatalf("stdout = %q, want no monitoring startup message", stdout.String())
+	}
+}
+
+func TestRunJournalPullDefaultsStatePath(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := hatriecache.CommandJournalTail{
+			LastSequence: 1,
+			Entries: []hatriecache.CommandJournalRecord{
+				{Sequence: 1, Request: hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+
+	dir := t.TempDir()
+	journalPath := filepath.Join(dir, "commands.journal")
+	statePath := journalPath + ".pull_state.json"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, []string{
+			"-monitoring-server",
+			"-monitoring-addr", freeTCPAddr(t),
+			"-journal-path", journalPath,
+			"-journal-pull-source", source.URL,
+		}, &bytes.Buffer{}, &bytes.Buffer{})
+	}()
+
+	waitUntil(t, time.Second, func() bool {
+		after, err := loadJournalPullState(statePath, source.URL)
+		return err == nil && after == 1
+	})
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run() error = %v, want clean shutdown", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("run() did not stop after context cancel")
+	}
+}
+
 func TestRunDoesNotStartMonitoringWhenGRPCBindFails(t *testing.T) {
 	monitoringAddr := freeTCPAddr(t)
 	blocker, err := net.Listen("tcp", "127.0.0.1:0")
