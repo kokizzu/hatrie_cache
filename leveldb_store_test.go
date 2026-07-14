@@ -630,6 +630,35 @@ func TestSnapshotOperationValueSizeSupportsStreamingBytes(t *testing.T) {
 	}
 }
 
+func TestValidatedBase64DecodedSize(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		encoded string
+		want    int64
+	}{
+		{name: "empty", encoded: "", want: 0},
+		{name: "single padding", encoded: base64.StdEncoding.EncodeToString([]byte("ab")), want: 2},
+		{name: "double padding", encoded: base64.StdEncoding.EncodeToString([]byte("a")), want: 1},
+		{name: "no padding", encoded: base64.StdEncoding.EncodeToString([]byte("abc")), want: 3},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validatedBase64DecodedSize(tt.encoded)
+			if err != nil {
+				t.Fatalf("validatedBase64DecodedSize(%s) error = %v", tt.name, err)
+			}
+			if got != tt.want {
+				t.Fatalf("validatedBase64DecodedSize(%s) = %d, want %d", tt.name, got, tt.want)
+			}
+		})
+	}
+
+	for _, encoded := range []string{"!!!!", "abc"} {
+		if _, err := validatedBase64DecodedSize(encoded); err == nil {
+			t.Fatalf("validatedBase64DecodedSize(%q) error = nil, want invalid base64 error", encoded)
+		}
+	}
+}
+
 func TestSnapshotOperationValueSizeSupportsBloomFilter(t *testing.T) {
 	filter, err := newBloomFilterData(100, 0.01)
 	if err != nil {

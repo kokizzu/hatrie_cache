@@ -423,6 +423,17 @@ func base64DecodedSize(encoded string) (int64, bool) {
 	return int64(len(encoded)/4*3 - padding), true
 }
 
+func validatedBase64DecodedSize(encoded string) (int64, error) {
+	size, ok := base64DecodedSize(encoded)
+	if err := validateBase64String(encoded); err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, errors.New("hatriecache: invalid base64 encoding")
+	}
+	return size, nil
+}
+
 func validateLevelDBReferenceEntry(entry snapshotEntry) error {
 	if err := validateKey(entry.Key); err != nil {
 		return err
@@ -484,20 +495,17 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.BloomFilter == nil {
 			return 0, errors.New("hatriecache: bloom filter snapshot is required")
 		}
-		raw, err := base64.StdEncoding.DecodeString(entry.BloomFilter.Bits)
-		return int64(len(raw)), err
+		return validatedBase64DecodedSize(entry.BloomFilter.Bits)
 	case "count_min_sketch":
 		if entry.CountMinSketch == nil {
 			return 0, errors.New("hatriecache: count-min sketch snapshot is required")
 		}
-		raw, err := base64.StdEncoding.DecodeString(entry.CountMinSketch.Counters)
-		return int64(len(raw)), err
+		return validatedBase64DecodedSize(entry.CountMinSketch.Counters)
 	case "hyperloglog":
 		if entry.HyperLogLog == nil {
 			return 0, errors.New("hatriecache: hyperloglog snapshot is required")
 		}
-		raw, err := base64.StdEncoding.DecodeString(entry.HyperLogLog.Registers)
-		return int64(len(raw)), err
+		return validatedBase64DecodedSize(entry.HyperLogLog.Registers)
 	case "top_k":
 		if entry.TopK == nil {
 			return 0, errors.New("hatriecache: top-k snapshot is required")
@@ -507,8 +515,7 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.CuckooFilter == nil {
 			return 0, errors.New("hatriecache: cuckoo filter snapshot is required")
 		}
-		raw, err := base64.StdEncoding.DecodeString(entry.CuckooFilter.Fingerprints)
-		return int64(len(raw)), err
+		return validatedBase64DecodedSize(entry.CuckooFilter.Fingerprints)
 	case "roaring_bitmap":
 		if entry.RoaringBitmap == nil {
 			return 0, errors.New("hatriecache: roaring bitmap snapshot is required")
@@ -573,11 +580,7 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 
 func newXorFilterSizeFromSnapshot(snapshot xorFilterSnapshot) (int64, error) {
 	if snapshot.Built {
-		raw, err := base64.StdEncoding.DecodeString(snapshot.Fingerprints)
-		if err != nil {
-			return 0, err
-		}
-		return int64(len(raw)), nil
+		return validatedBase64DecodedSize(snapshot.Fingerprints)
 	}
 	return jsonEncodedSize(snapshot.Staged)
 }
