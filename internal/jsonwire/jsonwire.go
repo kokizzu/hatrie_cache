@@ -1,12 +1,15 @@
 package jsonwire
 
 import (
+	"bytes"
 	"compress/gzip"
 	"io"
 	"sync"
 
 	json "github.com/goccy/go-json"
 )
+
+type Decoder = json.Decoder
 
 var gzipWriterPool = sync.Pool{
 	New: func() interface{} {
@@ -27,6 +30,49 @@ func AcquireGzipWriter(writer io.Writer) *gzip.Writer {
 func ReleaseGzipWriter(writer *gzip.Writer) {
 	writer.Reset(io.Discard)
 	gzipWriterPool.Put(writer)
+}
+
+func Marshal(value interface{}) ([]byte, error) {
+	return json.MarshalWithOption(value, json.DisableHTMLEscape())
+}
+
+func NewEncoder(writer io.Writer) *json.Encoder {
+	encoder := json.NewEncoder(writer)
+	encoder.SetEscapeHTML(false)
+	return encoder
+}
+
+func NewDecoder(reader io.Reader) *json.Decoder {
+	return json.NewDecoder(reader)
+}
+
+func RequestBody(value interface{}, estimatedSize int, compressionThreshold int) (io.Reader, string, error) {
+	if compressionThreshold > 0 && estimatedSize >= compressionThreshold {
+		return StreamingGzipJSONReader(value), "gzip", nil
+	}
+	data, err := Marshal(value)
+	if err != nil {
+		return nil, "", err
+	}
+	return EncodedRequestBody(data, compressionThreshold)
+}
+
+func EncodedRequestBody(data []byte, compressionThreshold int) (io.Reader, string, error) {
+	if compressionThreshold <= 0 || len(data) < compressionThreshold {
+		return bytes.NewReader(data), "", nil
+	}
+	var compressed bytes.Buffer
+	writer := AcquireGzipWriter(&compressed)
+	_, writeErr := writer.Write(data)
+	closeErr := writer.Close()
+	ReleaseGzipWriter(writer)
+	if writeErr != nil {
+		return nil, "", writeErr
+	}
+	if closeErr != nil {
+		return nil, "", closeErr
+	}
+	return bytes.NewReader(compressed.Bytes()), "gzip", nil
 }
 
 func StreamingGzipJSONReader(value interface{}) io.Reader {
@@ -57,7 +103,7 @@ func (body *StreamingGzipJSONBody) Close() error {
 func (body *StreamingGzipJSONBody) write() {
 	go func() {
 		gzipWriter := AcquireGzipWriter(body.writer)
-		encodeErr := json.NewEncoder(gzipWriter).Encode(body.value)
+		encodeErr := NewEncoder(gzipWriter).Encode(body.value)
 		closeErr := gzipWriter.Close()
 		ReleaseGzipWriter(gzipWriter)
 		if encodeErr != nil {

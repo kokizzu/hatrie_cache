@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	json "github.com/goccy/go-json"
+	"hatrie_cache/internal/jsonwire"
 )
 
 const maxCommandJournalTailResponseBytes = 1 << 20
@@ -551,7 +551,7 @@ func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint 
 
 func decodeCommandJournalTailResponse(body io.Reader) (CommandJournalTail, error) {
 	limited := &io.LimitedReader{R: body, N: maxCommandJournalTailResponseBytes + 1}
-	decoder := json.NewDecoder(limited)
+	decoder := jsonwire.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
 	var tail CommandJournalTail
 	if err := decoder.Decode(&tail); err != nil {
@@ -908,17 +908,17 @@ func writeJSON(w http.ResponseWriter, value interface{}) {
 func writeJSONStatus(w http.ResponseWriter, status int, value interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
+	if err := jsonwire.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func monitoringJSONDecoder(w http.ResponseWriter, r *http.Request) (*json.Decoder, func(), bool) {
+func monitoringJSONDecoder(w http.ResponseWriter, r *http.Request) (*jsonwire.Decoder, func(), bool) {
 	body, closeBody, ok := limitedEncodedRequestBody(w, r, maxMonitoringJSONRequestBytes)
 	if !ok {
 		return nil, nil, false
 	}
-	return json.NewDecoder(body), closeBody, true
+	return jsonwire.NewDecoder(body), closeBody, true
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {

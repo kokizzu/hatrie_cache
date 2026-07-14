@@ -13,6 +13,124 @@ import (
 	gojson "github.com/goccy/go-json"
 )
 
+func TestMarshalDisablesHTMLEscape(t *testing.T) {
+	data, err := Marshal(struct {
+		Value string `json:"value"`
+	}{
+		Value: "<tag>&",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if got, want := string(data), `{"value":"<tag>&"}`; got != want {
+		t.Fatalf("Marshal() = %q, want %q", got, want)
+	}
+
+	var decoded map[string]string
+	if err := stdjson.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("encoding/json Unmarshal() error = %v", err)
+	}
+	if decoded["value"] != "<tag>&" {
+		t.Fatalf("decoded value = %q, want <tag>&", decoded["value"])
+	}
+}
+
+func TestNewEncoderDisablesHTMLEscape(t *testing.T) {
+	var out bytes.Buffer
+	if err := NewEncoder(&out).Encode(struct {
+		Value string `json:"value"`
+	}{
+		Value: "<tag>&",
+	}); err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+	if got, want := strings.TrimSpace(out.String()), `{"value":"<tag>&"}`; got != want {
+		t.Fatalf("Encode() = %q, want %q", got, want)
+	}
+}
+
+func TestRequestBodyLeavesSmallPayloadPlain(t *testing.T) {
+	body, contentEncoding, err := RequestBody(struct {
+		Value string `json:"value"`
+	}{
+		Value: "<tag>&",
+	}, 0, 1024)
+	if err != nil {
+		t.Fatalf("RequestBody() error = %v", err)
+	}
+	if contentEncoding != "" {
+		t.Fatalf("Content-Encoding = %q, want empty", contentEncoding)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll(plain body) error = %v", err)
+	}
+	if got, want := string(data), `{"value":"<tag>&"}`; got != want {
+		t.Fatalf("plain body = %q, want %q", got, want)
+	}
+}
+
+func TestRequestBodyCompressesActualLargePayload(t *testing.T) {
+	payload := struct {
+		Value string `json:"value"`
+	}{
+		Value: strings.Repeat("<tag>&", 16),
+	}
+	body, contentEncoding, err := RequestBody(payload, 0, 16)
+	if err != nil {
+		t.Fatalf("RequestBody() error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+
+	reader, err := gzip.NewReader(body)
+	if err != nil {
+		t.Fatalf("NewReader(compressed body) error = %v", err)
+	}
+	defer reader.Close()
+
+	var decoded struct {
+		Value string `json:"value"`
+	}
+	if err := stdjson.NewDecoder(reader).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(compressed body) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, payload) {
+		t.Fatalf("decoded body = %#v, want %#v", decoded, payload)
+	}
+}
+
+func TestRequestBodyStreamsEstimatedLargePayload(t *testing.T) {
+	body, contentEncoding, err := RequestBody(struct {
+		Value string `json:"value"`
+	}{
+		Value: strings.Repeat("x", 32),
+	}, 32, 16)
+	if err != nil {
+		t.Fatalf("RequestBody() error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	if _, ok := body.(*StreamingGzipJSONBody); !ok {
+		t.Fatalf("RequestBody() body = %T, want streaming gzip body", body)
+	}
+}
+
+func TestRequestBodyReportsMarshalErrors(t *testing.T) {
+	body, contentEncoding, err := RequestBody(map[string]interface{}{"bad": func() {}}, 0, 1024)
+	if err == nil {
+		t.Fatal("RequestBody(unsupported) error = nil, want error")
+	}
+	if body != nil {
+		t.Fatalf("RequestBody(unsupported) body = %T, want nil", body)
+	}
+	if contentEncoding != "" {
+		t.Fatalf("Content-Encoding = %q, want empty", contentEncoding)
+	}
+}
+
 func TestStreamingGzipJSONReaderEncodesValue(t *testing.T) {
 	value := map[string]interface{}{
 		"command": "SETSTR",

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -14,8 +13,6 @@ import (
 	"strings"
 
 	"hatrie_cache/internal/jsonwire"
-
-	json "github.com/goccy/go-json"
 
 	hatriecache "hatrie_cache"
 )
@@ -152,7 +149,7 @@ func runElection(ctx context.Context, client *http.Client, addr string, args []s
 }
 
 func postElectionUpdate(ctx context.Context, client *http.Client, addr string, node string, online bool, stdout io.Writer) error {
-	body, err := json.Marshal(struct {
+	body, err := jsonwire.Marshal(struct {
 		Node   string `json:"node"`
 		Online bool   `json:"online"`
 	}{
@@ -179,7 +176,7 @@ func runReplication(ctx context.Context, client *http.Client, addr string, args 
 	if !*sync {
 		return getJSON(ctx, client, addr, "/api/replication", stdout)
 	}
-	body, err := json.Marshal(struct {
+	body, err := jsonwire.Marshal(struct {
 		Prefix string `json:"prefix,omitempty"`
 	}{
 		Prefix: *prefix,
@@ -209,7 +206,7 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 	}
 
 	if strings.TrimSpace(*pullFrom) != "" {
-		body, err := json.Marshal(struct {
+		body, err := jsonwire.Marshal(struct {
 			Source        string `json:"source"`
 			AfterSequence uint64 `json:"after_sequence,omitempty"`
 			Limit         uint64 `json:"limit,omitempty"`
@@ -296,7 +293,7 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 
 func decodeJSONFlag[T any](value string) (T, error) {
 	var out T
-	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder := jsonwire.NewDecoder(strings.NewReader(value))
 	decoder.UseNumber()
 	if err := decoder.Decode(&out); err != nil {
 		return out, err
@@ -347,32 +344,11 @@ func postJSONReaderWithEncoding(ctx context.Context, client *http.Client, addr s
 }
 
 func jsonValueRequestBody(value interface{}, estimatedSize int) (io.Reader, string, error) {
-	if estimatedSize >= minCompressedJSONRequestBytes {
-		return jsonwire.StreamingGzipJSONReader(value), "gzip", nil
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return nil, "", err
-	}
-	return jsonRequestBody(data)
+	return jsonwire.RequestBody(value, estimatedSize, minCompressedJSONRequestBytes)
 }
 
 func jsonRequestBody(data []byte) (io.Reader, string, error) {
-	if len(data) < minCompressedJSONRequestBytes {
-		return bytes.NewReader(data), "", nil
-	}
-	var compressed bytes.Buffer
-	writer := jsonwire.AcquireGzipWriter(&compressed)
-	_, writeErr := writer.Write(data)
-	closeErr := writer.Close()
-	jsonwire.ReleaseGzipWriter(writer)
-	if writeErr != nil {
-		return nil, "", writeErr
-	}
-	if closeErr != nil {
-		return nil, "", closeErr
-	}
-	return bytes.NewReader(compressed.Bytes()), "gzip", nil
+	return jsonwire.EncodedRequestBody(data, minCompressedJSONRequestBytes)
 }
 
 func estimatedCommandRequestBytes(request hatriecache.CacheCommandRequest) int {

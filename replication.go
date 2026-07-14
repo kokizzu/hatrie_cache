@@ -1,7 +1,6 @@
 package hatriecache
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -13,8 +12,6 @@ import (
 	"time"
 
 	"hatrie_cache/internal/jsonwire"
-
-	json "github.com/goccy/go-json"
 )
 
 const DefaultReplicationTimeout = 2 * time.Second
@@ -689,7 +686,7 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 
 func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, error) {
 	limited := &io.LimitedReader{R: body, N: maxHTTPReplicationResponseBytes + 1}
-	decoder := json.NewDecoder(limited)
+	decoder := jsonwire.NewDecoder(limited)
 	var response CacheCommandResponse
 	if err := decoder.Decode(&response); err != nil {
 		if limitedReaderExceeded(limited) {
@@ -717,34 +714,7 @@ func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, err
 }
 
 func replicationRequestBody(payload CacheCommandRequest) (io.Reader, string, error) {
-	if shouldStreamCompressedReplicationRequest(payload) {
-		return jsonwire.StreamingGzipJSONReader(payload), "gzip", nil
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, "", err
-	}
-	if len(data) < minCompressedReplicationRequestBytes {
-		return bytes.NewReader(data), "", nil
-	}
-
-	var compressed bytes.Buffer
-	writer := jsonwire.AcquireGzipWriter(&compressed)
-	_, writeErr := writer.Write(data)
-	closeErr := writer.Close()
-	jsonwire.ReleaseGzipWriter(writer)
-	if writeErr != nil {
-		return nil, "", writeErr
-	}
-	if closeErr != nil {
-		return nil, "", closeErr
-	}
-	return bytes.NewReader(compressed.Bytes()), "gzip", nil
-}
-
-func shouldStreamCompressedReplicationRequest(payload CacheCommandRequest) bool {
-	return estimatedReplicationRequestBytes(payload) >= minCompressedReplicationRequestBytes
+	return jsonwire.RequestBody(payload, estimatedReplicationRequestBytes(payload), minCompressedReplicationRequestBytes)
 }
 
 func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {
