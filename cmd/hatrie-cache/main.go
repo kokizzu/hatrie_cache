@@ -35,6 +35,10 @@ type config struct {
 	topologyPath          string
 	electionTimeout       time.Duration
 	replication           bool
+	replicationAsync      bool
+	replicationQueueSize  int
+	replicationRetry      time.Duration
+	replicationAttempts   uint
 	enforceLeaderWrites   bool
 	grpcAddr              string
 	dbPath                string
@@ -150,10 +154,14 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	var replicator *hatriecache.HTTPReplicator
 	if cfg.replication {
 		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
-			Self:     defaultNodeID(cfg.nodeID),
-			Topology: topology,
-			Election: election,
+			Self:               defaultNodeID(cfg.nodeID),
+			Topology:           topology,
+			Election:           election,
+			AsyncQueueSize:     replicationQueueSize(cfg),
+			AsyncRetryInterval: cfg.replicationRetry,
+			AsyncMaxAttempts:   cfg.replicationAttempts,
 		})
+		defer replicator.Close()
 	}
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
@@ -236,6 +244,10 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
 	flags.DurationVar(&cfg.electionTimeout, "election-timeout", cfg.electionTimeout, "node heartbeat timeout for deterministic topology leader election")
 	flags.BoolVar(&cfg.replication, "replication", false, "replicate successful leader writes to topology owners over HTTP")
+	flags.BoolVar(&cfg.replicationAsync, "replication-async", false, "queue successful leader-write replication in a bounded async worker")
+	flags.IntVar(&cfg.replicationQueueSize, "replication-queue-size", 1024, "maximum queued async replication jobs")
+	flags.DurationVar(&cfg.replicationRetry, "replication-retry-interval", hatriecache.DefaultReplicationRetryInterval, "delay between async replication retry attempts")
+	flags.UintVar(&cfg.replicationAttempts, "replication-max-attempts", 3, "maximum async replication delivery attempts")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
@@ -264,7 +276,26 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.dbHotLoadMaxAge < 0 {
 		return config{}, errors.New("db hot-load max age must be non-negative")
 	}
+	if cfg.replicationQueueSize < 0 {
+		return config{}, errors.New("replication queue size must be non-negative")
+	}
+	if cfg.replicationAsync && cfg.replicationQueueSize == 0 {
+		return config{}, errors.New("replication async requires positive queue size")
+	}
+	if cfg.replicationAsync && cfg.replicationAttempts == 0 {
+		return config{}, errors.New("replication async requires positive max attempts")
+	}
+	if cfg.replicationRetry < 0 {
+		return config{}, errors.New("replication retry interval must be non-negative")
+	}
 	return cfg, nil
+}
+
+func replicationQueueSize(cfg config) int {
+	if !cfg.replicationAsync {
+		return 0
+	}
+	return cfg.replicationQueueSize
 }
 
 func newMonitoringListener(cfg config) (net.Listener, error) {

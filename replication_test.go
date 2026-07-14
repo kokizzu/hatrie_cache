@@ -3,11 +3,14 @@ package hatriecache
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -258,6 +261,173 @@ func TestHTTPReplicatorAcceptsNilContext(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAsyncQueuesMaterializedPayload(t *testing.T) {
+	release := make(chan struct{})
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 2,
+	})
+	defer replicator.Close()
+
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "first"}
+	response := trie.ExecuteCommand(write)
+	result := replicator.ReplicateCommand(context.Background(), trie, write, response)
+	if !result.Queued || result.Skipped || len(result.Targets) != 1 {
+		t.Fatalf("async enqueue result = %#v, want one queued target", result)
+	}
+	trie.UpsertString("session:1", "second")
+	close(release)
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "session:1" {
+			t.Fatalf("async request = %#v, want INTERNALSET session:1", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("async snapshot JSON error = %v", err)
+		}
+		if entry.String != "first" {
+			t.Fatalf("async snapshot string = %q, want first", entry.String)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("async replication did not deliver queued request")
+	}
+	waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
+		return !result.Queued && !result.Skipped && len(result.Targets) == 1 && result.Targets[0].OK
+	})
+}
+
+func TestHTTPReplicatorAsyncRetriesFailedDelivery(t *testing.T) {
+	attempts := make(chan struct{}, 2)
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			attempts <- struct{}{}
+			if len(attempts) == 1 {
+				return nil, errors.New("temporary failure")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"message":"ok"}`)),
+				Request:    request,
+			}, nil
+		}),
+	}
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, "http://node-b.local")
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:               "node-a",
+		Topology:           topology,
+		Election:           election,
+		Client:             client,
+		AsyncQueueSize:     2,
+		AsyncMaxAttempts:   2,
+		AsyncRetryInterval: time.Millisecond,
+	})
+	defer replicator.Close()
+
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}
+	response := trie.ExecuteCommand(write)
+	result := replicator.ReplicateCommand(context.Background(), trie, write, response)
+	if !result.Queued || result.Skipped {
+		t.Fatalf("async enqueue result = %#v, want queued", result)
+	}
+	waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
+		return !result.Queued && len(result.Targets) == 1 && result.Targets[0].OK
+	})
+	if got := len(attempts); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
+	}
+}
+
+func TestHTTPReplicatorAsyncReportsFullQueue(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-release
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+	defer close(release)
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 1,
+	})
+	defer replicator.Close()
+
+	first := CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "one"}
+	firstResponse := trie.ExecuteCommand(first)
+	if result := replicator.ReplicateCommand(context.Background(), trie, first, firstResponse); !result.Queued || result.Skipped {
+		t.Fatalf("first enqueue result = %#v, want queued", result)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not start first queued delivery")
+	}
+	second := CacheCommandRequest{Command: "SETSTR", Key: "session:2", Value: "two"}
+	secondResponse := trie.ExecuteCommand(second)
+	if result := replicator.ReplicateCommand(context.Background(), trie, second, secondResponse); !result.Queued || result.Skipped {
+		t.Fatalf("second enqueue result = %#v, want queued while worker is blocked", result)
+	}
+	third := CacheCommandRequest{Command: "SETSTR", Key: "session:3", Value: "three"}
+	thirdResponse := trie.ExecuteCommand(third)
+	result := replicator.ReplicateCommand(context.Background(), trie, third, thirdResponse)
+	if !result.Skipped || result.Reason != "replication queue is full" || result.Queued {
+		t.Fatalf("third enqueue result = %#v, want full queue skip", result)
+	}
+}
+
+func TestHTTPReplicatorAsyncCloseIsIdempotentAndRejectsEnqueue(t *testing.T) {
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, "http://node-b.local")
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		AsyncQueueSize: 1,
+	})
+	replicator.Close()
+	replicator.Close()
+
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}
+	response := trie.ExecuteCommand(write)
+	result := replicator.ReplicateCommand(context.Background(), trie, write, response)
+	if !result.Skipped || result.Reason != "replication queue is closed" || result.Queued {
+		t.Fatalf("post-close replicate result = %#v, want closed queue skip", result)
+	}
+}
+
 func TestHTTPReplicatorUsesTopologyWhenElectionUnconfigured(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -405,6 +575,21 @@ func TestPostReplicationCommandDrainsErrorResponseBody(t *testing.T) {
 	if !body.drained || !body.closed {
 		t.Fatalf("response body drained=%v closed=%v, want both true", body.drained, body.closed)
 	}
+}
+
+func waitForReplicationLastResult(t *testing.T, replicator *HTTPReplicator, accept func(ReplicationResult) bool) ReplicationResult {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	var result ReplicationResult
+	for time.Now().Before(deadline) {
+		result = replicator.LastResult()
+		if accept(result) {
+			return result
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("LastResult() = %#v did not satisfy predicate", result)
+	return ReplicationResult{}
 }
 
 func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {

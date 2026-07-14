@@ -120,6 +120,10 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-topology-path", "/tmp/topology.json",
 		"-election-timeout", "30s",
 		"-replication",
+		"-replication-async",
+		"-replication-queue-size", "16",
+		"-replication-retry-interval", "50ms",
+		"-replication-max-attempts", "5",
 		"-enforce-leader-writes",
 	}, &bytes.Buffer{})
 	if err != nil {
@@ -127,6 +131,48 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if cfg.nodeID != "node-a" || cfg.topologyPath != "/tmp/topology.json" || cfg.electionTimeout != 30*time.Second || !cfg.replication || !cfg.enforceLeaderWrites {
 		t.Fatalf("cfg topology = %#v, want explicit node and path", cfg)
+	}
+	if !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 50*time.Millisecond || cfg.replicationAttempts != 5 {
+		t.Fatalf("cfg replication async = %#v, want explicit async queue settings", cfg)
+	}
+	if got := replicationQueueSize(cfg); got != 16 {
+		t.Fatalf("replicationQueueSize(async cfg) = %d, want 16", got)
+	}
+	cfg.replicationAsync = false
+	if got := replicationQueueSize(cfg); got != 0 {
+		t.Fatalf("replicationQueueSize(sync cfg) = %d, want 0", got)
+	}
+}
+
+func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "negative queue",
+			args: []string{"-replication-queue-size", "-1"},
+		},
+		{
+			name: "async zero queue",
+			args: []string{"-replication-async", "-replication-queue-size", "0"},
+		},
+		{
+			name: "async zero attempts",
+			args: []string{"-replication-async", "-replication-max-attempts", "0"},
+		},
+		{
+			name: "negative retry",
+			args: []string{"-replication-retry-interval", "-1s"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := parseConfig(tt.args, &bytes.Buffer{}); err == nil {
+				t.Fatal("parseConfig() error = nil, want error")
+			}
+		})
 	}
 }
 

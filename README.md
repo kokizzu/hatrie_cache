@@ -184,6 +184,17 @@ current topology replicas:
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true
 ```
 
+Set `REPLICATION_ASYNC=true` to enqueue replication in a bounded in-process
+outbox instead of waiting for remote owners in the write request path. Queued
+jobs store the already-materialized internal snapshot payload, so later local
+mutations do not change what is delivered for the original write. Tune
+`REPLICATION_QUEUE_SIZE`, `REPLICATION_RETRY_INTERVAL`, and
+`REPLICATION_MAX_ATTEMPTS` to bound memory and retry failed HTTP deliveries:
+
+```
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true
+```
+
 Set `ENFORCE_LEADER_WRITES=true` on clustered nodes to reject mutating client
 commands unless the local node is the elected leader for the command key.
 Internal replication commands are still accepted so followers can apply leader

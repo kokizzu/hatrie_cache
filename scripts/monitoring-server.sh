@@ -9,6 +9,10 @@ node_id=${NODE_ID:-}
 topology_path=${TOPOLOGY_PATH:-}
 election_timeout=${ELECTION_TIMEOUT:-15s}
 replication=${REPLICATION:-false}
+replication_async=${REPLICATION_ASYNC:-false}
+replication_queue_size=${REPLICATION_QUEUE_SIZE:-1024}
+replication_retry_interval=${REPLICATION_RETRY_INTERVAL:-250ms}
+replication_max_attempts=${REPLICATION_MAX_ATTEMPTS:-3}
 enforce_leader_writes=${ENFORCE_LEADER_WRITES:-false}
 grpc_addr=${GRPC_ADDR:-}
 db_path=${DB_PATH:-}
@@ -36,6 +40,10 @@ exec go run ./cmd/hatrie-cache \
 	-topology-path "$topology_path" \
 	-election-timeout "$election_timeout" \
 	-replication="$replication" \
+	-replication-async="$replication_async" \
+	-replication-queue-size "$replication_queue_size" \
+	-replication-retry-interval "$replication_retry_interval" \
+	-replication-max-attempts "$replication_max_attempts" \
 	-enforce-leader-writes="$enforce_leader_writes" \
 	-grpc-addr "$grpc_addr" \
 	-db-path "$db_path" \

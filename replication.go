@@ -15,14 +15,18 @@ import (
 )
 
 const DefaultReplicationTimeout = 2 * time.Second
+const DefaultReplicationRetryInterval = 250 * time.Millisecond
 const maxHTTPResponseDrainBytes = 1 << 20
 
 type HTTPReplicatorOptions struct {
-	Self     string
-	Topology *TopologyStore
-	Election *ElectionStore
-	Client   *http.Client
-	Timeout  time.Duration
+	Self               string
+	Topology           *TopologyStore
+	Election           *ElectionStore
+	Client             *http.Client
+	Timeout            time.Duration
+	AsyncQueueSize     int
+	AsyncRetryInterval time.Duration
+	AsyncMaxAttempts   uint
 }
 
 type HTTPReplicator struct {
@@ -32,6 +36,14 @@ type HTTPReplicator struct {
 	election *ElectionStore
 	client   *http.Client
 	timeout  time.Duration
+	queue    chan replicationJob
+	retry    time.Duration
+	attempts uint
+	done     chan struct{}
+	stopped  chan struct{}
+	cancel   context.CancelFunc
+	close    sync.Once
+	closed   bool
 	last     ReplicationResult
 }
 
@@ -39,6 +51,7 @@ type ReplicationResult struct {
 	Command string                    `json:"command,omitempty"`
 	Key     string                    `json:"key,omitempty"`
 	Entries int                       `json:"entries,omitempty"`
+	Queued  bool                      `json:"queued,omitempty"`
 	Skipped bool                      `json:"skipped"`
 	Reason  string                    `json:"reason,omitempty"`
 	Targets []ReplicationTargetResult `json:"targets,omitempty"`
@@ -61,6 +74,16 @@ const (
 	replicationPayloadDelete
 )
 
+type replicationTask struct {
+	target  TopologyNode
+	payload CacheCommandRequest
+}
+
+type replicationJob struct {
+	result ReplicationResult
+	tasks  []replicationTask
+}
+
 func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 	client := options.Client
 	if client == nil {
@@ -70,13 +93,32 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 	if timeout == 0 {
 		timeout = DefaultReplicationTimeout
 	}
-	return &HTTPReplicator{
+	replicator := &HTTPReplicator{
 		self:     strings.TrimSpace(options.Self),
 		topology: options.Topology,
 		election: options.Election,
 		client:   client,
 		timeout:  timeout,
 	}
+	if options.AsyncQueueSize > 0 {
+		retry := options.AsyncRetryInterval
+		if retry <= 0 {
+			retry = DefaultReplicationRetryInterval
+		}
+		attempts := options.AsyncMaxAttempts
+		if attempts == 0 {
+			attempts = 1
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		replicator.queue = make(chan replicationJob, options.AsyncQueueSize)
+		replicator.retry = retry
+		replicator.attempts = attempts
+		replicator.done = make(chan struct{})
+		replicator.stopped = make(chan struct{})
+		replicator.cancel = cancel
+		go replicator.runAsync(ctx)
+	}
+	return replicator
 }
 
 func (replicator *HTTPReplicator) LastResult() ReplicationResult {
@@ -88,8 +130,27 @@ func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 	return cloneReplicationResult(replicator.last)
 }
 
+func (replicator *HTTPReplicator) Close() {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	replicator.close.Do(func() {
+		replicator.mu.Lock()
+		replicator.closed = true
+		replicator.mu.Unlock()
+		replicator.cancel()
+		close(replicator.done)
+		<-replicator.stopped
+	})
+}
+
 func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
-	result := replicator.replicateCommand(ctx, trie, request, response)
+	var result ReplicationResult
+	if replicator != nil && replicator.queue != nil {
+		result = replicator.enqueueReplication(ctx, trie, request, response)
+	} else {
+		result = replicator.replicateCommand(ctx, trie, request, response)
+	}
 	replicator.storeLastResult(result)
 	return result
 }
@@ -101,6 +162,67 @@ func (replicator *HTTPReplicator) SyncAll(ctx context.Context, trie *HatTrie, pr
 }
 
 func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	result, tasks := replicator.planReplication(ctx, trie, request, response)
+	if len(tasks) == 0 {
+		return result
+	}
+	return replicator.executeReplicationTasks(ctx, result, tasks)
+}
+
+func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	if replicator.asyncClosed() {
+		return ReplicationResult{
+			Command: normalizedCommand(request.Command),
+			Key:     strings.TrimSpace(request.Key),
+			Skipped: true,
+			Reason:  "replication queue is closed",
+		}
+	}
+	result, tasks := replicator.planReplication(ctx, trie, request, response)
+	if len(tasks) == 0 {
+		return result
+	}
+	result.Queued = true
+	result.Targets = plannedReplicationTargets(tasks)
+	job := replicationJob{
+		result: cloneReplicationResult(result),
+		tasks:  tasks,
+	}
+	if replicator.asyncClosed() {
+		result.Queued = false
+		result.Skipped = true
+		result.Reason = "replication queue is closed"
+		result.Targets = nil
+		return result
+	}
+	select {
+	case replicator.queue <- job:
+		return result
+	case <-replicator.done:
+		result.Queued = false
+		result.Skipped = true
+		result.Reason = "replication queue is closed"
+		result.Targets = nil
+		return result
+	default:
+		result.Queued = false
+		result.Skipped = true
+		result.Reason = "replication queue is full"
+		result.Targets = nil
+		return result
+	}
+}
+
+func (replicator *HTTPReplicator) asyncClosed() bool {
+	if replicator == nil {
+		return true
+	}
+	replicator.mu.RLock()
+	defer replicator.mu.RUnlock()
+	return replicator.closed
+}
+
+func (replicator *HTTPReplicator) planReplication(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) (ReplicationResult, []replicationTask) {
 	ctx = replicationContext(ctx)
 	command := normalizedCommand(request.Command)
 	key := strings.TrimSpace(request.Key)
@@ -108,54 +230,145 @@ func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *Ha
 	if replicator == nil {
 		result.Skipped = true
 		result.Reason = "replication is not configured"
-		return result
+		return result, nil
 	}
 	if trie == nil {
 		result.Skipped = true
 		result.Reason = "trie is not configured"
-		return result
+		return result, nil
 	}
 	if err := ctx.Err(); err != nil {
 		result.Skipped = true
 		result.Reason = err.Error()
-		return result
+		return result, nil
 	}
 	kind := replicationPayloadKindFor(request, response)
 	if kind == replicationPayloadNone {
 		result.Skipped = true
 		result.Reason = "command is not replicated"
-		return result
+		return result, nil
 	}
 
 	route, ok := replicator.routeForKey(key)
 	if !ok {
 		result.Skipped = true
 		result.Reason = "topology cannot route key"
-		return result
+		return result, nil
 	}
 	if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
 		result.Skipped = true
 		result.Reason = "local node is not elected leader"
-		return result
+		return result, nil
 	}
 
 	targets := replicator.replicationTargets(route)
 	if len(targets) == 0 {
 		result.Skipped = true
 		result.Reason = "no remote replication targets"
-		return result
+		return result, nil
 	}
 
 	payload, ok := replicationCommandPayload(trie, key, kind)
 	if !ok {
 		result.Skipped = true
 		result.Reason = "no local value to replicate"
-		return result
+		return result, nil
 	}
+	tasks := make([]replicationTask, 0, len(targets))
 	for _, target := range targets {
-		result.Targets = append(result.Targets, replicator.postReplicationCommand(ctx, target, payload))
+		tasks = append(tasks, replicationTask{target: target, payload: payload})
+	}
+	return result, tasks
+}
+
+func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, result ReplicationResult, tasks []replicationTask) ReplicationResult {
+	result.Queued = false
+	result.Targets = make([]ReplicationTargetResult, 0, len(tasks))
+	for _, task := range tasks {
+		result.Targets = append(result.Targets, replicator.postReplicationCommand(ctx, task.target, task.payload))
 	}
 	return result
+}
+
+func (replicator *HTTPReplicator) runAsync(ctx context.Context) {
+	defer close(replicator.stopped)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-replicator.done:
+			return
+		case job := <-replicator.queue:
+			replicator.runAsyncJob(ctx, job)
+		}
+	}
+}
+
+func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicationJob) {
+	attempts := replicator.attempts
+	if attempts == 0 {
+		attempts = 1
+	}
+	var result ReplicationResult
+	for attempt := uint(1); attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			result = job.result
+			result.Queued = false
+			result.Skipped = true
+			result.Reason = err.Error()
+			result.Targets = nil
+			replicator.storeLastResult(result)
+			return
+		}
+		result = replicator.executeReplicationTasks(ctx, job.result, job.tasks)
+		replicator.storeLastResult(result)
+		if !replicationNeedsRetry(result) || attempt == attempts {
+			return
+		}
+		if !replicator.waitForRetry(ctx) {
+			return
+		}
+	}
+}
+
+func (replicator *HTTPReplicator) waitForRetry(ctx context.Context) bool {
+	retry := replicator.retry
+	if retry <= 0 {
+		return true
+	}
+	timer := time.NewTimer(retry)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-replicator.done:
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func replicationNeedsRetry(result ReplicationResult) bool {
+	if result.Skipped {
+		return false
+	}
+	for _, target := range result.Targets {
+		if !target.OK {
+			return true
+		}
+	}
+	return false
+}
+
+func plannedReplicationTargets(tasks []replicationTask) []ReplicationTargetResult {
+	out := make([]ReplicationTargetResult, len(tasks))
+	for idx, task := range tasks {
+		out[idx] = ReplicationTargetResult{
+			Node:    task.target.ID,
+			Address: task.target.Address,
+		}
+	}
+	return out
 }
 
 func (replicator *HTTPReplicator) syncAll(ctx context.Context, trie *HatTrie, prefix string) ReplicationResult {
