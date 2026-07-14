@@ -308,6 +308,51 @@ func TestMonitoringHandlerLimitsEntries(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerPagesAfterEmptyKey(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("", "empty")
+	ht.UpsertString("alpha", "one")
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/entries?limit=1", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("limited entries status = %d, want 200", resp.Code)
+	}
+	var body MonitoringEntriesResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("limited entries JSON error = %v", err)
+	}
+	if !body.HasMore || body.NextAfterKey != "" {
+		t.Fatalf("limited entries metadata = has_more %v next %q, want true/empty", body.HasMore, body.NextAfterKey)
+	}
+	if !bytes.Contains(resp.Body.Bytes(), []byte(`"next_after_key":""`)) {
+		t.Fatalf("limited entries JSON = %s, want present empty next_after_key", resp.Body.String())
+	}
+	if got := entryKeysFromMonitoring(body.Entries); !reflect.DeepEqual(got, []string{""}) {
+		t.Fatalf("limited entries keys = %#v, want empty key", got)
+	}
+
+	nextResp := httptest.NewRecorder()
+	handler.ServeHTTP(nextResp, httptest.NewRequest(http.MethodGet, "/api/entries?limit=1&after_key=", nil))
+	if nextResp.Code != http.StatusOK {
+		t.Fatalf("next entries status = %d, want 200", nextResp.Code)
+	}
+	var nextBody MonitoringEntriesResponse
+	if err := json.Unmarshal(nextResp.Body.Bytes(), &nextBody); err != nil {
+		t.Fatalf("next entries JSON error = %v", err)
+	}
+	if nextBody.AfterKey != "" || nextBody.HasMore || nextBody.NextAfterKey != "" {
+		t.Fatalf("next entries metadata = after %q has_more %v next %q, want empty/false/empty", nextBody.AfterKey, nextBody.HasMore, nextBody.NextAfterKey)
+	}
+	if !bytes.Contains(nextResp.Body.Bytes(), []byte(`"after_key":""`)) {
+		t.Fatalf("next entries JSON = %s, want present empty after_key", nextResp.Body.String())
+	}
+	if got := entryKeysFromMonitoring(nextBody.Entries); !reflect.DeepEqual(got, []string{"alpha"}) {
+		t.Fatalf("next entries keys = %#v, want key after empty cursor", got)
+	}
+}
+
 func TestMonitoringHandlerRejectsInvalidEntriesLimit(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("session:1", "one")

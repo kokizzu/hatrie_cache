@@ -91,11 +91,11 @@ func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecache
 	if limit > maxMonitoringEntriesLimit {
 		return nil, status.Errorf(codes.InvalidArgument, "limit must be <= %d", maxMonitoringEntriesLimit)
 	}
-	afterKey, err := monitoringEntriesAfterKey(request.GetPrefix(), request.GetAfterKey())
+	afterKey, hasAfterKey, err := monitoringEntriesAfterKey(request.GetPrefix(), request.GetAfterKey(), request != nil && request.AfterKey != nil)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	entries := server.trie.monitoringEntriesPage(request.GetPrefix(), afterKey, int(limit))
+	entries := server.trie.monitoringEntriesPage(request.GetPrefix(), afterKey, hasAfterKey, int(limit))
 	out := make([]*hatriecachev1.Entry, 0, len(entries.Entries))
 	for _, entry := range entries.Entries {
 		out = append(out, grpcEntry(entry))

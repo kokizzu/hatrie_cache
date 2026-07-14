@@ -47,7 +47,7 @@ message StatsResponse {
 message EntriesRequest {
   string prefix = 1;
   uint64 limit = 2;
-  string after_key = 3;
+  optional string after_key = 3;
 }
 
 message Entry {

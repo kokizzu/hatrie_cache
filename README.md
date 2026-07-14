@@ -242,7 +242,8 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/journal`, and `/api/commands`.
 Use `GET /api/entries?prefix=...&limit=N` to bound large key listings; limited
 responses include `has_more` and `next_after_key` for cursor paging with
-`after_key`.
+`after_key`. Empty keys are valid, so when `next_after_key` is empty and
+`has_more` is true, send an explicit empty cursor as `after_key=`.
 The Svelte MPA dashboard and key browser use bounded entry requests by default.
 `/api/commands` accepts JSON and protobuf command request bodies based on
 `Content-Type`; regular browser/API clients can continue to use JSON.
@@ -461,7 +462,9 @@ command API. Clients may request gRPC transfer compression with the standard
 `gzip` compressor; the server registers it at the fastest compression level.
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with
 `next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
-page. The
+page. Empty keys are valid, so Go clients should set the optional `AfterKey`
+field to a pointer to `""` when `has_more` is true and `next_after_key` is empty.
+The
 `Replication` RPC returns the same last result and async queue stats as
 `GET /api/replication`; set `sync=true` with an optional `prefix` to run the
 same anti-entropy sync exposed by `POST /api/replication`. The `Topology`,

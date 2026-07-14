@@ -824,10 +824,11 @@ func TestCacheGRPCServerLimitsEntries(t *testing.T) {
 		t.Fatalf("limited entries keys = %#v, want first two sorted session keys", got)
 	}
 
+	afterKey := limited.GetNextAfterKey()
 	next, err := client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
 		Prefix:   "session:",
 		Limit:    2,
-		AfterKey: limited.GetNextAfterKey(),
+		AfterKey: &afterKey,
 	})
 	if err != nil {
 		t.Fatalf("Entries(next page) error = %v", err)
@@ -854,6 +855,40 @@ func TestCacheGRPCServerLimitsEntries(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerPagesAfterEmptyKey(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("", "empty")
+	ht.UpsertString("alpha", "one")
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+
+	limited, err := client.Entries(context.Background(), &hatriecachev1.EntriesRequest{Limit: 1})
+	if err != nil {
+		t.Fatalf("Entries(limit=1) error = %v", err)
+	}
+	if !limited.GetHasMore() || limited.GetNextAfterKey() != "" {
+		t.Fatalf("limited entries metadata = has_more %v next %q, want true/empty", limited.GetHasMore(), limited.GetNextAfterKey())
+	}
+	if got := grpcEntryKeys(limited.GetEntries()); !reflect.DeepEqual(got, []string{""}) {
+		t.Fatalf("limited entries keys = %#v, want empty key", got)
+	}
+
+	emptyCursor := limited.GetNextAfterKey()
+	next, err := client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
+		Limit:    1,
+		AfterKey: &emptyCursor,
+	})
+	if err != nil {
+		t.Fatalf("Entries(after empty key) error = %v", err)
+	}
+	if next.GetAfterKey() != "" || next.GetHasMore() || next.GetNextAfterKey() != "" {
+		t.Fatalf("next entries metadata = after %q has_more %v next %q, want empty/false/empty", next.GetAfterKey(), next.GetHasMore(), next.GetNextAfterKey())
+	}
+	if got := grpcEntryKeys(next.GetEntries()); !reflect.DeepEqual(got, []string{"alpha"}) {
+		t.Fatalf("next entries keys = %#v, want key after empty cursor", got)
+	}
+}
+
 func TestCacheGRPCServerRejectsOversizedEntriesLimit(t *testing.T) {
 	ht := newTestTrie(t)
 	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
@@ -865,9 +900,10 @@ func TestCacheGRPCServerRejectsOversizedEntriesLimit(t *testing.T) {
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("Entries(oversized limit) error = %v, want InvalidArgument", err)
 	}
+	afterKey := "other:1"
 	_, err = client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
 		Prefix:   "session:",
-		AfterKey: "other:1",
+		AfterKey: &afterKey,
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("Entries(cursor prefix mismatch) error = %v, want InvalidArgument", err)

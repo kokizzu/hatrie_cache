@@ -73,6 +73,31 @@ type MonitoringEntriesResponse struct {
 	HasMore      bool              `json:"has_more,omitempty"`
 	AfterKey     string            `json:"after_key,omitempty"`
 	NextAfterKey string            `json:"next_after_key,omitempty"`
+
+	afterKeySet     bool
+	nextAfterKeySet bool
+}
+
+func (response MonitoringEntriesResponse) MarshalJSON() ([]byte, error) {
+	type monitoringEntriesResponseJSON struct {
+		Entries      []MonitoringEntry `json:"entries"`
+		Limit        uint64            `json:"limit,omitempty"`
+		HasMore      bool              `json:"has_more,omitempty"`
+		AfterKey     *string           `json:"after_key,omitempty"`
+		NextAfterKey *string           `json:"next_after_key,omitempty"`
+	}
+	out := monitoringEntriesResponseJSON{
+		Entries: response.Entries,
+		Limit:   response.Limit,
+		HasMore: response.HasMore,
+	}
+	if response.afterKeySet || response.AfterKey != "" {
+		out.AfterKey = &response.AfterKey
+	}
+	if response.nextAfterKeySet || response.NextAfterKey != "" {
+		out.NextAfterKey = &response.NextAfterKey
+	}
+	return jsonwire.Marshal(out)
 }
 
 type replicationSyncRequest struct {
@@ -168,18 +193,19 @@ func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.R
 	if requestContextDone(w, r) {
 		return
 	}
-	prefix := r.URL.Query().Get("prefix")
-	limit, err := monitoringEntriesLimit(r.URL.Query().Get("limit"))
+	values := r.URL.Query()
+	prefix := values.Get("prefix")
+	limit, err := monitoringEntriesLimit(values.Get("limit"))
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 		return
 	}
-	afterKey, err := monitoringEntriesAfterKey(prefix, r.URL.Query().Get("after_key"))
+	afterKey, hasAfterKey, err := monitoringEntriesAfterKey(prefix, values.Get("after_key"), values.Has("after_key"))
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 		return
 	}
-	writeJSON(w, handler.trie.monitoringEntriesPage(prefix, afterKey, limit))
+	writeJSON(w, handler.trie.monitoringEntriesPage(prefix, afterKey, hasAfterKey, limit))
 }
 
 func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.Request) {
@@ -652,17 +678,17 @@ func monitoringEntriesLimit(raw string) (int, error) {
 	return int(value), nil
 }
 
-func monitoringEntriesAfterKey(prefix string, raw string) (string, error) {
-	if raw == "" {
-		return "", nil
+func monitoringEntriesAfterKey(prefix string, raw string, present bool) (string, bool, error) {
+	if !present {
+		return "", false, nil
 	}
 	if err := validateKey(raw); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if prefix != "" && !strings.HasPrefix(raw, prefix) {
-		return "", errors.New("after_key must match prefix")
+		return "", false, errors.New("after_key must match prefix")
 	}
-	return raw, nil
+	return raw, true, nil
 }
 
 func normalizeCommandJournalTailLimit(value uint64) (int, error) {
@@ -713,10 +739,10 @@ func (ht *HatTrie) monitoringEntries(prefix string) []MonitoringEntry {
 }
 
 func (ht *HatTrie) monitoringEntriesLimited(prefix string, limit int) MonitoringEntriesResponse {
-	return ht.monitoringEntriesPage(prefix, "", limit)
+	return ht.monitoringEntriesPage(prefix, "", false, limit)
 }
 
-func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, limit int) MonitoringEntriesResponse {
+func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, hasAfterKey bool, limit int) MonitoringEntriesResponse {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -728,11 +754,12 @@ func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, limit i
 	if limit > 0 {
 		response.Limit = uint64(limit)
 	}
-	if afterKey != "" {
+	if hasAfterKey {
 		response.AfterKey = afterKey
+		response.afterKeySet = true
 	}
 	err := ht.scanEntriesWithPrefixAtLockedChecked(prefix, true, now, func(entry Entry) error {
-		if afterKey != "" && entry.Key <= afterKey {
+		if hasAfterKey && entry.Key <= afterKey {
 			return nil
 		}
 		if limit > 0 && len(response.Entries) >= limit {
@@ -759,6 +786,7 @@ func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, limit i
 	}
 	if response.HasMore && len(response.Entries) > 0 {
 		response.NextAfterKey = response.Entries[len(response.Entries)-1].Key
+		response.nextAfterKeySet = true
 	}
 	return response
 }
