@@ -497,7 +497,7 @@ func doCommandAndCopy(client *http.Client, req *http.Request, stdout io.Writer) 
 	}
 	response, err := hatriecache.DecodeCommandResponseWire(resp.Body, contentType, maxErrorBodyBytes)
 	if err != nil {
-		if unsupportedCommandResponseContentType(err) {
+		if errors.Is(err, hatriecache.ErrUnsupportedCommandResponseContentType) {
 			return copyAndEnsureTrailingNewline(stdout, resp.Body)
 		}
 		return err
@@ -521,10 +521,6 @@ type commandHTTPError struct {
 
 func (err *commandHTTPError) Error() string {
 	return fmt.Sprintf("server returned %s: %s", err.status, err.message)
-}
-
-func unsupportedCommandResponseContentType(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "unsupported command response content type")
 }
 
 func endpoint(addr string, path string) string {

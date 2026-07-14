@@ -508,6 +508,30 @@ func TestRunCommandPostsProtobufByDefault(t *testing.T) {
 	}
 }
 
+func TestRunCommandCopiesSuccessfulUnsupportedResponseContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "application/x-protobuf" {
+			t.Fatalf("Accept = %q, want application/x-protobuf", got)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("legacy command ok"))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "GET",
+		"-key", "name",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command legacy response) error = %v", err)
+	}
+	if got := stdout.String(); got != "legacy command ok\n" {
+		t.Fatalf("stdout = %q, want raw legacy response", got)
+	}
+}
+
 func TestRunCommandAutoRetriesJSONWhenServerRejectsProtobuf(t *testing.T) {
 	var attempts int32
 	var gotRequest hatriecache.CacheCommandRequest

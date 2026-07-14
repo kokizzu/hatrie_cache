@@ -31,6 +31,10 @@ const (
 
 const DefaultCommandWireFormat = CommandWireFormatProtobuf
 
+// ErrUnsupportedCommandResponseContentType is returned when an HTTP command
+// response advertises a content type that the command wire decoder cannot read.
+var ErrUnsupportedCommandResponseContentType = errors.New("hatriecache: unsupported command response content type")
+
 func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", string(CommandWireFormatProtobuf), "proto", "pb":
@@ -169,7 +173,7 @@ func CommandRequestBody(request CacheCommandRequest, format CommandWireFormat, e
 func decodeCommandResponseWire(reader io.Reader, contentType string, limit int64) (CacheCommandResponse, error) {
 	format, ok := commandWireFormatFromContentType(contentType)
 	if !ok {
-		return CacheCommandResponse{}, errors.New("hatriecache: unsupported command response content type")
+		return CacheCommandResponse{}, fmt.Errorf("%w: %q", ErrUnsupportedCommandResponseContentType, contentType)
 	}
 	if format == CommandWireFormatProtobuf {
 		data, err := readLimitedCommandWire(reader, limit)

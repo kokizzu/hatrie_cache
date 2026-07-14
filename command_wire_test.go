@@ -167,8 +167,8 @@ func TestCommandWireFormatFromAcceptRespectsQuality(t *testing.T) {
 }
 
 func TestDecodeCommandResponseWireRejectsUnsupportedAndOversized(t *testing.T) {
-	if _, err := decodeCommandResponseWire(strings.NewReader(`{"ok":true}`), "application/xml", 1<<20); err == nil {
-		t.Fatal("decodeCommandResponseWire(unsupported) error = nil, want error")
+	if _, err := decodeCommandResponseWire(strings.NewReader(`{"ok":true}`), "application/xml", 1<<20); !errors.Is(err, ErrUnsupportedCommandResponseContentType) {
+		t.Fatalf("decodeCommandResponseWire(unsupported) error = %v, want ErrUnsupportedCommandResponseContentType", err)
 	}
 
 	if _, err := decodeCommandResponseWire(strings.NewReader(`{"ok":true}`), commandWireContentTypeJSON, 4); !errors.Is(err, errReplicationResponseTooLarge) {
