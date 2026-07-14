@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -220,6 +223,34 @@ func TestSnapshotRoundTripPreservesBlankKeys(t *testing.T) {
 	}
 }
 
+func TestSaveSnapshotStreamsLargeHistory(t *testing.T) {
+	ht := newTestTrie(t)
+	large := strings.Repeat("x", 70*1024)
+	for idx := 0; idx < 64; idx++ {
+		ht.UpsertString(fmt.Sprintf("key:%03d", idx), large)
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := ht.SaveSnapshotWithJournalSequence(path, 123); err != nil {
+		t.Fatalf("SaveSnapshotWithJournalSequence() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	metadata, err := loaded.LoadSnapshotWithMetadata(path)
+	if err != nil {
+		t.Fatalf("LoadSnapshotWithMetadata() error = %v", err)
+	}
+	if metadata.JournalSequence != 123 {
+		t.Fatalf("journal sequence = %d, want 123", metadata.JournalSequence)
+	}
+	if got := loaded.Size(); got != 64 {
+		t.Fatalf("loaded snapshot size = %d, want 64", got)
+	}
+	if got := loaded.GetString("key:063"); got != large {
+		t.Fatalf("loaded large value length = %d, want %d", len(got), len(large))
+	}
+}
+
 func TestPriorityQueueSnapshotPreservesTieOrderAndNextSequence(t *testing.T) {
 	ht := newTestTrie(t)
 	if added := ht.PushPriorityQueue("jobs", 1, "first", "second"); added != 2 {
@@ -263,6 +294,26 @@ func TestWriteFileAtomicReplacesFileAndCleansTemporaryFiles(t *testing.T) {
 	}
 	if string(data) != "second" {
 		t.Fatalf("file payload = %q, want second", data)
+	}
+	assertNoAtomicTempFiles(t, dir, "data.json")
+}
+
+func TestWriteFileAtomicStreamCleansTemporaryFileOnError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.json")
+	errBoom := errors.New("boom")
+
+	err := writeFileAtomicStream(path, func(writer io.Writer) error {
+		if _, err := writer.Write([]byte("partial")); err != nil {
+			return err
+		}
+		return errBoom
+	})
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("writeFileAtomicStream() error = %v, want boom", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("target Stat() error = %v, want not exist", err)
 	}
 	assertNoAtomicTempFiles(t, dir, "data.json")
 }
@@ -961,9 +1012,22 @@ func TestSaveSnapshotRejectsUnsupportedJSONValues(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertMap("bad", Map{"ch": make(chan int)})
 
-	if err := ht.SaveSnapshot(filepath.Join(t.TempDir(), "snapshot.json")); err == nil {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "snapshot.json")
+	if err := writeFileAtomic(path, []byte("previous")); err != nil {
+		t.Fatalf("writeFileAtomic(previous) error = %v", err)
+	}
+	if err := ht.SaveSnapshot(path); err == nil {
 		t.Fatal("SaveSnapshot() error = nil, want unsupported JSON value error")
 	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "previous" {
+		t.Fatalf("snapshot target after failed save = %q, want previous", data)
+	}
+	assertNoAtomicTempFiles(t, dir, "snapshot.json")
 }
 
 func assertNoAtomicTempFiles(t *testing.T, dir string, base string) {

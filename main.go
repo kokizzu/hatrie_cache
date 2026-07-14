@@ -2494,9 +2494,21 @@ func (ht *HatTrie) entriesWithPrefixLockedChecked(prefix string, sorted bool) ([
 }
 
 func (ht *HatTrie) entriesWithPrefixAtLockedChecked(prefix string, sorted bool, now time.Time) ([]Entry, error) {
+	entries := []Entry{}
+	err := ht.scanEntriesWithPrefixAtLockedChecked(prefix, sorted, now, func(entry Entry) error {
+		entries = append(entries, entry)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func (ht *HatTrie) scanEntriesWithPrefixAtLockedChecked(prefix string, sorted bool, now time.Time, visit func(Entry) error) error {
 	ht.ensureOpen()
 	if err := validateKey(prefix); err != nil {
-		return nil, err
+		return err
 	}
 
 	var iter *C.hattrie_iter_t
@@ -2512,8 +2524,8 @@ func (ht *HatTrie) entriesWithPrefixAtLockedChecked(prefix string, sorted bool, 
 		key   string
 		value HatValue
 	}
-	entries := []Entry{}
 	expired := []expiredEntry{}
+	var scanErr error
 
 	for !bool(C.hattrie_iter_finished(iter)) {
 		var keyLen C.size_t
@@ -2532,7 +2544,12 @@ func (ht *HatTrie) entriesWithPrefixAtLockedChecked(prefix string, sorted bool, 
 		if expiresAt, ok := ht.expires[key]; ok && !now.Before(expiresAt) {
 			expired = append(expired, expiredEntry{key: key, value: hval})
 		} else {
-			entries = append(entries, Entry{Key: key, Value: hval})
+			if visit != nil {
+				if err := visit(Entry{Key: key, Value: hval}); err != nil {
+					scanErr = err
+					break
+				}
+			}
 		}
 		C.hattrie_iter_next(iter)
 	}
@@ -2544,7 +2561,7 @@ func (ht *HatTrie) entriesWithPrefixAtLockedChecked(prefix string, sorted bool, 
 		}
 	}
 
-	return entries, nil
+	return scanErr
 }
 
 func (ht *HatTrie) Get(key string) HatValue {

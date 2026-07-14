@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
@@ -65,17 +66,9 @@ func (ht *HatTrie) SaveSnapshot(path string) error {
 }
 
 func (ht *HatTrie) SaveSnapshotWithJournalSequence(path string, journalSequence uint64) error {
-	snapshot, err := ht.snapshot()
-	if err != nil {
-		return err
-	}
-	snapshot.JournalSequence = journalSequence
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return writeFileAtomic(path, data)
+	return writeFileAtomicStream(path, func(writer io.Writer) error {
+		return ht.writeSnapshotJSON(writer, journalSequence)
+	})
 }
 
 func (ht *HatTrie) LoadSnapshot(path string) error {
@@ -158,6 +151,82 @@ func (ht *HatTrie) snapshot() (snapshotFile, error) {
 		snapshot.Entries = append(snapshot.Entries, snapshotEntry)
 	}
 	return snapshot, nil
+}
+
+func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) error {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	ht.ensureOpen()
+	if _, err := io.WriteString(writer, "{\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "  \"version\": %d,\n", snapshotVersion); err != nil {
+		return err
+	}
+	if journalSequence != 0 {
+		if _, err := fmt.Fprintf(writer, "  \"journal_sequence\": %d,\n", journalSequence); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(writer, "  \"entries\": ["); err != nil {
+		return err
+	}
+
+	now := time.Time{}
+	if len(ht.expires) > 0 {
+		now = ht.currentTime()
+	}
+	first := true
+	err := ht.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
+		snapshotEntry, err := ht.snapshotEntryLocked(entry)
+		if err != nil {
+			return err
+		}
+		if first {
+			if _, err := io.WriteString(writer, "\n"); err != nil {
+				return err
+			}
+			first = false
+		} else if _, err := io.WriteString(writer, ",\n"); err != nil {
+			return err
+		}
+		return writeIndentedJSON(writer, snapshotEntry, "    ")
+	})
+	if err != nil {
+		return err
+	}
+	if first {
+		if _, err := io.WriteString(writer, "]\n"); err != nil {
+			return err
+		}
+	} else if _, err := io.WriteString(writer, "\n  ]\n"); err != nil {
+		return err
+	}
+	_, err = io.WriteString(writer, "}\n")
+	return err
+}
+
+func writeIndentedJSON(writer io.Writer, value interface{}, prefix string) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	lines := bytes.Split(data, []byte{'\n'})
+	for idx, line := range lines {
+		if _, err := io.WriteString(writer, prefix); err != nil {
+			return err
+		}
+		if _, err := writer.Write(line); err != nil {
+			return err
+		}
+		if idx < len(lines)-1 {
+			if _, err := io.WriteString(writer, "\n"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
@@ -808,6 +877,13 @@ func (ht *HatTrie) deleteKeysLocked(keys map[string]struct{}) {
 }
 
 func writeFileAtomic(path string, data []byte) error {
+	return writeFileAtomicStream(path, func(writer io.Writer) error {
+		_, err := writer.Write(data)
+		return err
+	})
+}
+
+func writeFileAtomicStream(path string, write func(io.Writer) error) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -821,7 +897,12 @@ func writeFileAtomic(path string, data []byte) error {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 	}
-	if _, err := tmp.Write(data); err != nil {
+	buffered := bufio.NewWriter(tmp)
+	if err := write(buffered); err != nil {
+		cleanup()
+		return err
+	}
+	if err := buffered.Flush(); err != nil {
 		cleanup()
 		return err
 	}
