@@ -1016,6 +1016,38 @@ func TestReplicationRequestBodyStreamsLargeStringPayload(t *testing.T) {
 	}
 }
 
+func TestReplicationRequestBodyStreamsEscapedLargeStringPayload(t *testing.T) {
+	payload := CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:escaped",
+		Value:   strings.Repeat("\n", minCompressedReplicationRequestBytes/2),
+	}
+	body, contentEncoding, err := replicationRequestBody(payload)
+	if err != nil {
+		t.Fatalf("replicationRequestBody(escaped value) error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	if _, ok := body.(*jsonwire.StreamingGzipJSONBody); !ok {
+		t.Fatalf("replicationRequestBody(escaped value) body = %T, want streaming gzip body", body)
+	}
+
+	reader, err := gzip.NewReader(body)
+	if err != nil {
+		t.Fatalf("NewReader(streaming gzip body) error = %v", err)
+	}
+	defer reader.Close()
+
+	var decoded CacheCommandRequest
+	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(streaming escaped body) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, payload) {
+		t.Fatalf("decoded escaped payload = %#v, want %#v", decoded, payload)
+	}
+}
+
 func TestReplicationRequestBodyLeavesSmallPayloadPlain(t *testing.T) {
 	payload := CacheCommandRequest{
 		Command: "INTERNALDEL",

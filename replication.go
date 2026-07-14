@@ -787,7 +787,11 @@ func replicationRequestBodyForFormat(payload CacheCommandRequest, format Command
 }
 
 func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {
-	estimate := 64 + len(payload.Command) + len(payload.Key) + len(payload.Value) + len(payload.Subkey)
+	estimate := 64 +
+		jsonwire.EstimateJSONStringBytes(payload.Command) +
+		jsonwire.EstimateJSONStringBytes(payload.Key) +
+		jsonwire.EstimateJSONStringBytes(payload.Value) +
+		jsonwire.EstimateJSONStringBytes(payload.Subkey)
 	if estimate >= minCompressedReplicationRequestBytes {
 		return minCompressedReplicationRequestBytes
 	}
@@ -798,7 +802,11 @@ func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {
 		}
 	}
 	for key, value := range payload.Pairs {
-		estimate = jsonwire.AddEstimate(estimate, len(key)+jsonwire.EstimateJSONValueBytes(value, minCompressedReplicationRequestBytes), minCompressedReplicationRequestBytes)
+		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONStringBytes(key)+1, minCompressedReplicationRequestBytes)
+		if estimate >= minCompressedReplicationRequestBytes {
+			return minCompressedReplicationRequestBytes
+		}
+		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(value, minCompressedReplicationRequestBytes), minCompressedReplicationRequestBytes)
 		if estimate >= minCompressedReplicationRequestBytes {
 			return minCompressedReplicationRequestBytes
 		}

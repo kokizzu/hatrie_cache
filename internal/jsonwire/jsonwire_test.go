@@ -210,6 +210,7 @@ func TestEstimateJSONValueBytesScalars(t *testing.T) {
 	}{
 		{name: "nil", value: nil, want: 4},
 		{name: "string", value: "abc", want: 5},
+		{name: "escaped string", value: "a\"b\n", want: 8},
 		{name: "number", value: gojson.Number("123.5"), want: 5},
 		{name: "true", value: true, want: 4},
 		{name: "false", value: false, want: 5},
@@ -233,16 +234,35 @@ func TestEstimateJSONValueBytesCollectionsWithoutCap(t *testing.T) {
 		value interface{}
 		want  int
 	}{
-		{name: "slice", value: []interface{}{"a", gojson.Number("12"), true}, want: 11},
-		{name: "string slice", value: []string{"a", "bb"}, want: 9},
-		{name: "map", value: map[string]interface{}{"n": gojson.Number("12"), "b": false}, want: 11},
-		{name: "string map", value: map[string]string{"a": "b"}, want: 6},
+		{name: "slice", value: []interface{}{"a", gojson.Number("12"), true}, want: 13},
+		{name: "string slice", value: []string{"a", "bb"}, want: 10},
+		{name: "map", value: map[string]interface{}{"n": gojson.Number("12"), "b": false}, want: 18},
+		{name: "string map", value: map[string]string{"a": "b"}, want: 9},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := EstimateJSONValueBytes(tt.value, 1024); got != tt.want {
 				t.Fatalf("EstimateJSONValueBytes(%s) = %d, want %d", tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEstimateJSONValueBytesDoesNotUndercountSupportedValues(t *testing.T) {
+	for _, value := range []interface{}{
+		"a\"b\n",
+		[]interface{}{"a", gojson.Number("12"), true},
+		[]string{"a", "bb"},
+		map[string]interface{}{"n": gojson.Number("12"), "b": false},
+		map[string]string{"a": "b"},
+		map[string]interface{}{"escaped\"key": "line\nbreak"},
+	} {
+		data, err := Marshal(value)
+		if err != nil {
+			t.Fatalf("Marshal(%#v) error = %v", value, err)
+		}
+		if got := EstimateJSONValueBytes(value, 1024); got < len(data) {
+			t.Fatalf("EstimateJSONValueBytes(%#v) = %d, below marshaled size %d (%s)", value, got, len(data), data)
+		}
 	}
 }
 

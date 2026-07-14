@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"io"
 	"sync"
+	"unicode/utf8"
 
 	json "github.com/goccy/go-json"
 )
@@ -119,7 +120,7 @@ func EstimateJSONValueBytes(value interface{}, threshold int) int {
 	case nil:
 		return 4
 	case string:
-		return len(value) + 2
+		return EstimateJSONStringBytes(value)
 	case json.Number:
 		return len(value.String())
 	case bool:
@@ -135,7 +136,13 @@ func EstimateJSONValueBytes(value interface{}, threshold int) int {
 		return 24
 	case []interface{}:
 		estimate := 2
-		for _, item := range value {
+		for idx, item := range value {
+			if idx > 0 {
+				estimate = AddEstimate(estimate, 1, threshold)
+				if estimate >= threshold {
+					return threshold
+				}
+			}
 			estimate = AddEstimate(estimate, EstimateJSONValueBytes(item, threshold), threshold)
 			if estimate >= threshold {
 				return threshold
@@ -144,8 +151,14 @@ func EstimateJSONValueBytes(value interface{}, threshold int) int {
 		return estimate
 	case []string:
 		estimate := 2
-		for _, item := range value {
-			estimate = AddEstimate(estimate, len(item)+2, threshold)
+		for idx, item := range value {
+			if idx > 0 {
+				estimate = AddEstimate(estimate, 1, threshold)
+				if estimate >= threshold {
+					return threshold
+				}
+			}
+			estimate = AddEstimate(estimate, EstimateJSONStringBytes(item), threshold)
 			if estimate >= threshold {
 				return threshold
 			}
@@ -153,8 +166,20 @@ func EstimateJSONValueBytes(value interface{}, threshold int) int {
 		return estimate
 	case map[string]interface{}:
 		estimate := 2
+		idx := 0
 		for key, item := range value {
-			estimate = AddEstimate(estimate, len(key)+EstimateJSONValueBytes(item, threshold), threshold)
+			if idx > 0 {
+				estimate = AddEstimate(estimate, 1, threshold)
+				if estimate >= threshold {
+					return threshold
+				}
+			}
+			idx++
+			estimate = AddEstimate(estimate, EstimateJSONStringBytes(key)+1, threshold)
+			if estimate >= threshold {
+				return threshold
+			}
+			estimate = AddEstimate(estimate, EstimateJSONValueBytes(item, threshold), threshold)
 			if estimate >= threshold {
 				return threshold
 			}
@@ -162,8 +187,20 @@ func EstimateJSONValueBytes(value interface{}, threshold int) int {
 		return estimate
 	case map[string]string:
 		estimate := 2
+		idx := 0
 		for key, item := range value {
-			estimate = AddEstimate(estimate, len(key)+len(item)+2, threshold)
+			if idx > 0 {
+				estimate = AddEstimate(estimate, 1, threshold)
+				if estimate >= threshold {
+					return threshold
+				}
+			}
+			idx++
+			estimate = AddEstimate(estimate, EstimateJSONStringBytes(key)+1, threshold)
+			if estimate >= threshold {
+				return threshold
+			}
+			estimate = AddEstimate(estimate, EstimateJSONStringBytes(item), threshold)
 			if estimate >= threshold {
 				return threshold
 			}
@@ -172,6 +209,27 @@ func EstimateJSONValueBytes(value interface{}, threshold int) int {
 	default:
 		return 0
 	}
+}
+
+func EstimateJSONStringBytes(value string) int {
+	estimate := 2
+	for _, char := range value {
+		switch char {
+		case '\\', '"', '\b', '\f', '\n', '\r', '\t':
+			estimate += 2
+		default:
+			if char < 0x20 {
+				estimate += 6
+			} else {
+				size := utf8.RuneLen(char)
+				if size < 0 {
+					size = len("\ufffd")
+				}
+				estimate += size
+			}
+		}
+	}
+	return estimate
 }
 
 func AddEstimate(total, value, threshold int) int {

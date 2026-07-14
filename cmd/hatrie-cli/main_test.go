@@ -819,6 +819,33 @@ func TestRunCommandCompressesLargeJSONPost(t *testing.T) {
 	}
 }
 
+func TestCommandRequestBodyCompressesEscapedLargeJSONValue(t *testing.T) {
+	payload := hatriecache.CacheCommandRequest{
+		Command: "SETSTR",
+		Key:     "escaped",
+		Value:   strings.Repeat("\n", minCompressedJSONRequestBytes/2),
+	}
+	body, contentType, contentEncoding, err := commandRequestBody(payload, "json")
+	if err != nil {
+		t.Fatalf("commandRequestBody(escaped value) error = %v", err)
+	}
+	if contentType != "application/json" || contentEncoding != "gzip" {
+		t.Fatalf("content type/encoding = %q/%q, want JSON/gzip", contentType, contentEncoding)
+	}
+	reader, err := gzip.NewReader(body)
+	if err != nil {
+		t.Fatalf("NewReader(compressed body) error = %v", err)
+	}
+	defer reader.Close()
+	var decoded hatriecache.CacheCommandRequest
+	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(compressed escaped body) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, payload) {
+		t.Fatalf("decoded escaped payload = %#v, want %#v", decoded, payload)
+	}
+}
+
 func TestJSONRequestBodyLeavesSmallBodyPlain(t *testing.T) {
 	payload := []byte(`{"ok":true}`)
 	body, contentEncoding, err := jsonRequestBody(payload)

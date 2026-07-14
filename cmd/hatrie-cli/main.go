@@ -446,7 +446,11 @@ func commandRequestBody(request hatriecache.CacheCommandRequest, wireFormat stri
 }
 
 func estimatedCommandRequestBytes(request hatriecache.CacheCommandRequest) int {
-	estimate := 64 + len(request.Command) + len(request.Key) + len(request.Value) + len(request.Subkey)
+	estimate := 64 +
+		jsonwire.EstimateJSONStringBytes(request.Command) +
+		jsonwire.EstimateJSONStringBytes(request.Key) +
+		jsonwire.EstimateJSONStringBytes(request.Value) +
+		jsonwire.EstimateJSONStringBytes(request.Subkey)
 	if estimate >= minCompressedJSONRequestBytes {
 		return minCompressedJSONRequestBytes
 	}
@@ -457,7 +461,11 @@ func estimatedCommandRequestBytes(request hatriecache.CacheCommandRequest) int {
 		}
 	}
 	for key, value := range request.Pairs {
-		estimate = jsonwire.AddEstimate(estimate, len(key)+jsonwire.EstimateJSONValueBytes(value, minCompressedJSONRequestBytes), minCompressedJSONRequestBytes)
+		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONStringBytes(key)+1, minCompressedJSONRequestBytes)
+		if estimate >= minCompressedJSONRequestBytes {
+			return minCompressedJSONRequestBytes
+		}
+		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(value, minCompressedJSONRequestBytes), minCompressedJSONRequestBytes)
 		if estimate >= minCompressedJSONRequestBytes {
 			return minCompressedJSONRequestBytes
 		}
