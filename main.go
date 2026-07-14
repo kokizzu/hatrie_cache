@@ -79,6 +79,8 @@ type deque struct {
 	size   int
 }
 
+var errDequeCapacityTooLarge = errors.New("hatriecache: slice capacity is too large")
+
 func newDeque(value Slice) deque {
 	cloned := cloneSlice(value)
 	if cloned == nil {
@@ -110,27 +112,62 @@ func (dq *deque) Slice() Slice {
 }
 
 func (dq *deque) Push(values ...interface{}) {
+	_ = dq.PushChecked(values...)
+}
+
+func (dq *deque) PushChecked(values ...interface{}) error {
 	if len(values) == 0 {
-		return
+		return nil
 	}
-	dq.ensureCapacity(dq.size + len(values))
+	needed, ok := checkedDequeNeeded(dq.size, len(values))
+	if !ok {
+		return errDequeCapacityTooLarge
+	}
+	if err := dq.ensureCapacityChecked(needed); err != nil {
+		return err
+	}
 	for _, value := range values {
 		dq.pushValue(value)
 	}
+	return nil
 }
 
 func (dq *deque) PushOne(value interface{}, values ...interface{}) {
-	dq.ensureCapacity(dq.size + 1 + len(values))
+	_ = dq.PushOneChecked(value, values...)
+}
+
+func (dq *deque) PushOneChecked(value interface{}, values ...interface{}) error {
+	additional, ok := checkedDequeNeeded(1, len(values))
+	if !ok {
+		return errDequeCapacityTooLarge
+	}
+	needed, ok := checkedDequeNeeded(dq.size, additional)
+	if !ok {
+		return errDequeCapacityTooLarge
+	}
+	if err := dq.ensureCapacityChecked(needed); err != nil {
+		return err
+	}
 	dq.pushValue(value)
 	for _, value := range values {
 		dq.pushValue(value)
 	}
+	return nil
 }
 
 func (dq *deque) ensureCapacity(needed int) {
+	_ = dq.ensureCapacityChecked(needed)
+}
+
+func (dq *deque) ensureCapacityChecked(needed int) error {
 	if len(dq.values) < needed {
-		dq.resize(grownDequeCapacity(len(dq.values), needed))
+		capacity, ok := grownDequeCapacity(len(dq.values), needed)
+		if !ok {
+			return errDequeCapacityTooLarge
+		}
+		dq.resize(capacity)
 	}
+	return nil
 }
 
 func (dq *deque) pushValue(value interface{}) {
@@ -219,15 +256,39 @@ func (dq *deque) copyTo(out []interface{}) {
 	copy(out[n:], dq.values[:dq.size-n])
 }
 
-func grownDequeCapacity(current int, needed int) int {
+func grownDequeCapacity(current int, needed int) (int, bool) {
+	if current < 0 || needed < 0 {
+		return 0, false
+	}
+	if current >= needed {
+		return current, true
+	}
+	max := int(^uint(0) >> 1)
+	if current > max/2 {
+		return 0, false
+	}
 	capacity := current * 2
 	if capacity < 4 {
 		capacity = 4
 	}
 	for capacity < needed {
+		if capacity > max/2 {
+			return 0, false
+		}
 		capacity *= 2
 	}
-	return capacity
+	return capacity, true
+}
+
+func checkedDequeNeeded(size int, additional int) (int, bool) {
+	if size < 0 || additional < 0 {
+		return 0, false
+	}
+	max := int(^uint(0) >> 1)
+	if size > max-additional {
+		return 0, false
+	}
+	return size + additional, true
 }
 
 func maxInt(a, b int) int {
@@ -1062,10 +1123,17 @@ func (ss *SliceStorage) Append(value Slice) int32 {
 }
 
 func (ss *SliceStorage) AppendValues(value interface{}, values ...interface{}) int32 {
+	idx, _ := ss.AppendValuesChecked(value, values...)
+	return idx
+}
+
+func (ss *SliceStorage) AppendValuesChecked(value interface{}, values ...interface{}) (int32, error) {
 	dq := deque{}
-	dq.PushOne(value, values...)
+	if err := dq.PushOneChecked(value, values...); err != nil {
+		return -1, err
+	}
 	ss.array = append(ss.array, dq)
-	return int32(len(ss.array) - 1)
+	return int32(len(ss.array) - 1), nil
 }
 
 func (ss *SliceStorage) Add(value Slice) int32 {
@@ -1077,13 +1145,21 @@ func (ss *SliceStorage) Add(value Slice) int32 {
 }
 
 func (ss *SliceStorage) AddValues(value interface{}, values ...interface{}) int32 {
+	idx, _ := ss.AddValuesChecked(value, values...)
+	return idx
+}
+
+func (ss *SliceStorage) AddValuesChecked(value interface{}, values ...interface{}) (int32, error) {
 	if idx, ok := ss.reusables.Take(); ok {
 		dq := deque{}
-		dq.PushOne(value, values...)
+		if err := dq.PushOneChecked(value, values...); err != nil {
+			ss.reusables.Mark(idx)
+			return -1, err
+		}
 		ss.array[idx] = dq
-		return idx
+		return idx, nil
 	}
-	return ss.AppendValues(value, values...)
+	return ss.AppendValuesChecked(value, values...)
 }
 
 func (ss *SliceStorage) Del(idx int32) {
@@ -3177,18 +3253,23 @@ func (ht *HatTrie) pushSlice(key string, val interface{}, vals ...interface{}) e
 		return err
 	}
 	if hval.IsSlice() {
-		ht.slices.array[hval.Index].PushOne(val, vals...)
+		if err := ht.slices.array[hval.Index].PushOneChecked(val, vals...); err != nil {
+			return err
+		}
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return nil
 	}
 
+	idx, err := ht.slices.AddValuesChecked(val, vals...)
+	if err != nil {
+		return err
+	}
 	if rawPtr == nil {
 		rawPtr = ht.upsertLocation(key)
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.slices.AddValues(val, vals...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 	ht.recordWriteLocked(key)
 	return nil

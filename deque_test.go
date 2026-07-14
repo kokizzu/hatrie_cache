@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -75,6 +76,29 @@ func TestDequeReleasesBackingArrayWhenDrained(t *testing.T) {
 	}
 	if got := dq.Slice(); got == nil || len(got) != 0 {
 		t.Fatalf("Slice() after drain = %#v, want non-nil empty slice", got)
+	}
+}
+
+func TestDequeGrowthRejectsCapacityOverflow(t *testing.T) {
+	capacity, ok := grownDequeCapacity(2, 5)
+	if !ok || capacity != 8 {
+		t.Fatalf("grownDequeCapacity(2, 5) = %d/%v, want 8/true", capacity, ok)
+	}
+
+	max := int(^uint(0) >> 1)
+	if capacity, ok := grownDequeCapacity(max/2+1, max); ok {
+		t.Fatalf("grownDequeCapacity(overflow) = %d/true, want rejection", capacity)
+	}
+	if _, ok := checkedDequeNeeded(max, 1); ok {
+		t.Fatal("checkedDequeNeeded(max, 1) ok = true, want overflow rejection")
+	}
+
+	dq := deque{size: max}
+	if err := dq.PushOneChecked("value"); !errors.Is(err, errDequeCapacityTooLarge) {
+		t.Fatalf("PushOneChecked(overflow) error = %v, want errDequeCapacityTooLarge", err)
+	}
+	if got := dq.size; got != max {
+		t.Fatalf("PushOneChecked(overflow) size = %d, want unchanged %d", got, max)
 	}
 }
 

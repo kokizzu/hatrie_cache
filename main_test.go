@@ -1645,6 +1645,22 @@ func TestCheckedSliceMutationsRejectUnsupportedValues(t *testing.T) {
 	}
 }
 
+func TestPushSliceCheckedRejectsCapacityOverflowWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertSlice("slice", Slice{"keep"})
+	hval := ht.Get("slice")
+	max := int(^uint(0) >> 1)
+	ht.slices.array[hval.Index].size = max
+
+	if err := ht.PushSliceChecked("slice", "new"); !errors.Is(err, errDequeCapacityTooLarge) {
+		t.Fatalf("PushSliceChecked(overflow) error = %v, want errDequeCapacityTooLarge", err)
+	}
+	got := ht.slices.array[hval.Index]
+	if got.size != max || len(got.values) != 1 || got.values[0] != "keep" {
+		t.Fatalf("slice after rejected overflow = size %d values %#v, want unchanged sentinel state", got.size, got.values)
+	}
+}
+
 func TestUpsertSliceReplacesExistingSliceAndClearsTTL(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertSlice("slice", Slice{"old", "values"})
