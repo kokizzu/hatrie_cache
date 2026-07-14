@@ -244,6 +244,99 @@ func TestSnapshotFormatDefaultsToGzipJSONAndLoadsPlainJSON(t *testing.T) {
 	}
 }
 
+func TestSnapshotSavePreservesUnchangedColdLevelDBReferenceRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	raw := []byte(`{"key":"cold","type":"string","string":"value"}`)
+	if err := store.db.Put(levelDBKey("cold"), raw, nil); err != nil {
+		t.Fatalf("Put(raw) error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 1 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 1 key and 0 values", result)
+	}
+
+	var snapshot bytes.Buffer
+	if err := loaded.writeSnapshot(&snapshot, 0, SnapshotFormatJSON); err != nil {
+		t.Fatalf("writeSnapshot(cold ref) error = %v", err)
+	}
+	if got := snapshot.String(); !strings.Contains(got, "    "+string(raw)) {
+		t.Fatalf("snapshot did not preserve raw cold record:\n%s", got)
+	}
+
+	roundTrip := newTestTrie(t)
+	snapshotPath := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(snapshotPath, snapshot.Bytes(), 0o600); err != nil {
+		t.Fatalf("WriteFile(snapshot) error = %v", err)
+	}
+	if err := roundTrip.LoadSnapshot(snapshotPath); err != nil {
+		t.Fatalf("LoadSnapshot(raw cold ref snapshot) error = %v", err)
+	}
+	if got := roundTrip.GetString("cold"); got != "value" {
+		t.Fatalf("round-trip cold value = %q, want value", got)
+	}
+}
+
+func TestSnapshotSaveRewritesColdLevelDBReferenceWhenStatsChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	raw := []byte(`{"key":"cold","type":"string","string":"value"}`)
+	if err := store.db.Put(levelDBKey("cold"), raw, nil); err != nil {
+		t.Fatalf("Put(raw) error = %v", err)
+	}
+
+	now := time.Unix(4900, 0)
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now }
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if !loaded.Exists("cold") {
+		t.Fatal("Exists(cold) = false, want true")
+	}
+
+	var snapshot bytes.Buffer
+	if err := loaded.writeSnapshot(&snapshot, 0, SnapshotFormatJSON); err != nil {
+		t.Fatalf("writeSnapshot(stats-changed cold ref) error = %v", err)
+	}
+	if got := snapshot.String(); strings.Contains(got, "    "+string(raw)) {
+		t.Fatalf("stats-changed cold ref reused raw record:\n%s", got)
+	}
+
+	var entry snapshotEntry
+	metadata, err := scanSnapshotFileReader(bytes.NewReader(snapshot.Bytes()), func(candidate snapshotEntry) error {
+		entry = candidate
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scanSnapshotFileReader(stats snapshot) error = %v", err)
+	}
+	if metadata.Version != snapshotVersion {
+		t.Fatalf("snapshot version = %d, want %d", metadata.Version, snapshotVersion)
+	}
+	if entry.Key != "cold" || entry.String != "value" {
+		t.Fatalf("snapshot entry = %#v, want cold string value", entry)
+	}
+	if entry.Stats == nil || entry.Stats.Reads != 1 || entry.Stats.Hits != 1 || entry.Stats.LastHit != now {
+		t.Fatalf("snapshot stats = %#v, want one hit at %s", entry.Stats, now)
+	}
+}
+
 func TestSnapshotRoundTripPreservesBlankKeys(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("", "empty")

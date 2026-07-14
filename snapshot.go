@@ -307,6 +307,14 @@ func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) e
 }
 
 func (ht *HatTrie) writeSnapshotEntryJSONLocked(writer io.Writer, entry Entry, prefix string) error {
+	if entry.Value.Type() == DATAVALUE_TYPE_LEVELDB_REF {
+		if data, ok, err := ht.levelDBReferenceEntryDataLocked(entry.Key, entry.Value); err != nil || ok {
+			if err != nil {
+				return err
+			}
+			return writeSnapshotRawEntryJSON(writer, data, prefix)
+		}
+	}
 	if entry.Value.Type() == DATAVALUE_TYPE_RAW_BYTES && entry.Value.OnDisk() {
 		return ht.writeSnapshotDiskBytesEntryJSONLocked(writer, entry, prefix)
 	}
@@ -315,6 +323,17 @@ func (ht *HatTrie) writeSnapshotEntryJSONLocked(writer io.Writer, entry Entry, p
 		return err
 	}
 	return writeSnapshotEntryFieldsJSON(writer, snapshotEntry, prefix)
+}
+
+func writeSnapshotRawEntryJSON(writer io.Writer, data []byte, prefix string) error {
+	data = bytes.TrimSpace(data)
+	if prefix != "" {
+		if _, err := io.WriteString(writer, prefix); err != nil {
+			return err
+		}
+	}
+	_, err := writer.Write(data)
+	return err
 }
 
 func (ht *HatTrie) writeSnapshotDiskBytesEntryJSONLocked(writer io.Writer, entry Entry, prefix string) error {
