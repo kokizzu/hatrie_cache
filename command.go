@@ -317,7 +317,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 	case "INFOBF", "BFINFO":
-		info, ok := ht.BloomFilterInfo(key)
+		info, ok, err := ht.BloomFilterInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -365,7 +368,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "removed cuckoo filter values", Value: strconv.Itoa(deleted)}
 	case "INFOCF", "CFINFO":
-		info, ok := ht.CuckooFilterInfo(key)
+		info, ok, err := ht.CuckooFilterInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -403,7 +409,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		info, ok := ht.XorFilterInfo(key)
+		info, ok, err := ht.XorFilterInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -422,7 +431,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 	case "INFOXF", "XFINFO":
-		info, ok := ht.XorFilterInfo(key)
+		info, ok, err := ht.XorFilterInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}

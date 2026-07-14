@@ -745,6 +745,16 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 		t.Fatalf("hot-load result = %#v, want 13 cold keys", result)
 	}
 
+	if info, ok, err := loaded.BloomFilterInfoChecked("bloom"); err != nil || !ok || info.Insertions != 1 {
+		t.Fatalf("BloomFilterInfoChecked(cold ref) = %#v/%v/%v, want one insertion", info, ok, err)
+	}
+	if info, ok, err := loaded.CuckooFilterInfoChecked("cuckoo"); err != nil || !ok || info.Count != 1 {
+		t.Fatalf("CuckooFilterInfoChecked(cold ref) = %#v/%v/%v, want one insertion", info, ok, err)
+	}
+	if info, ok, err := loaded.XorFilterInfoChecked("xor"); err != nil || !ok || info.Staged != 1 {
+		t.Fatalf("XorFilterInfoChecked(cold ref) = %#v/%v/%v, want one staged item", info, ok, err)
+	}
+
 	if added, err := loaded.AddSetChecked("set", "new"); err != nil || added != 1 {
 		t.Fatalf("AddSetChecked(cold ref) = %d/%v, want 1/nil", added, err)
 	}
@@ -901,6 +911,14 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	source.AddHyperLogLog("cmd-hll", "old")
 	source.AddTopK("cmd-top", "old", 2)
 	source.AddReservoirSample("cmd-sample", "old")
+	source.AddBloomFilter("cmd-bloom", "old")
+	source.AddCuckooFilter("cmd-cuckoo", "old")
+	if _, err := source.AddXorFilter("cmd-xor", "old"); err != nil {
+		t.Fatalf("AddXorFilter(cmd-xor) error = %v", err)
+	}
+	if _, ok, err := source.BuildXorFilter("cmd-xor"); err != nil || !ok {
+		t.Fatalf("BuildXorFilter(cmd-xor) ok=%v err=%v, want ok nil", ok, err)
+	}
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -988,15 +1006,30 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFORS", Key: "cmd-sample"}); got.OK {
 		t.Fatalf("INFORS closed cold ref response = %#v, want error", got)
 	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFOBF", Key: "cmd-bloom"}); got.OK {
+		t.Fatalf("INFOBF closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFOCF", Key: "cmd-cuckoo"}); got.OK {
+		t.Fatalf("INFOCF closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "HASXF", Key: "cmd-xor", Value: "old"}); got.OK {
+		t.Fatalf("HASXF closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFOXF", Key: "cmd-xor"}); got.OK {
+		t.Fatalf("INFOXF closed cold ref response = %#v, want error", got)
+	}
 
 	keys := []string{
 		"append",
+		"cmd-bloom",
 		"cmd-counter",
 		"cmd-cms",
+		"cmd-cuckoo",
 		"cmd-hll",
 		"cmd-map",
 		"cmd-sample",
 		"cmd-top",
+		"cmd-xor",
 		"counter",
 		"fw",
 		"map",
@@ -1062,6 +1095,8 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	source.UpsertMap("map", Map{"field": "value"})
 	source.UpsertSlice("slice", Slice{"value"})
 	source.UpsertSet("set", Set{"value"})
+	source.AddBloomFilter("bloom", "value")
+	source.AddCuckooFilter("cuckoo", "value")
 	source.PushPriorityQueue("queue", 1, "job")
 	source.UpsertRoaringBitmap("rb")
 	source.AddRoaringBitmap("rb", 1)
@@ -1083,6 +1118,9 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	source.AddHyperLogLog("hll", "old")
 	source.AddTopK("top", "old", 2)
 	source.AddReservoirSample("sample", "old")
+	if _, err := source.AddXorFilter("xor", "old"); err != nil {
+		t.Fatalf("AddXorFilter(xor) error = %v", err)
+	}
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -1146,6 +1184,12 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	}
 	if got, ok, err := loaded.GetSetChecked("set"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("GetSetChecked(set closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.BloomFilterInfoChecked("bloom"); got.Insertions != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("BloomFilterInfoChecked(bloom closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.CuckooFilterInfoChecked("cuckoo"); got.Count != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("CuckooFilterInfoChecked(cuckoo closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
 	if got, ok, err := loaded.PeekPriorityQueueChecked("queue"); got.Priority != 0 || got.Value != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("PeekPriorityQueueChecked(queue closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
@@ -1231,13 +1275,16 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if got, ok, err := loaded.ReservoirSampleInfoChecked("sample"); got.Seen != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("ReservoirSampleInfoChecked(sample closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
+	if got, ok, err := loaded.XorFilterInfoChecked("xor"); got.Items != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("XorFilterInfoChecked(xor closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "cold"}); got.OK {
 		t.Fatalf("GET cold closed ref response = %#v, want error", got)
 	}
 
 	entries := loaded.Entries(true)
-	if len(entries) != 16 {
-		t.Fatalf("Entries(after closed ref reads) len = %d, want 16", len(entries))
+	if len(entries) != 19 {
+		t.Fatalf("Entries(after closed ref reads) len = %d, want 19", len(entries))
 	}
 	for _, entry := range entries {
 		if !entry.Value.IsLevelDBReference() {
@@ -1303,11 +1350,17 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	if _, err := loaded.HasBloomFilterChecked("bloom", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("HasBloomFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
+	if _, _, err := loaded.BloomFilterInfoChecked("bloom"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("BloomFilterInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
 	if _, err := loaded.HasCuckooFilterChecked("cuckoo", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("HasCuckooFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, err := loaded.DeleteCuckooFilterChecked("cuckoo", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("DeleteCuckooFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.CuckooFilterInfoChecked("cuckoo"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("CuckooFilterInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, err := loaded.AddRoaringBitmapChecked("rb", 2); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("AddRoaringBitmapChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
@@ -1371,6 +1424,9 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	}
 	if _, _, err := loaded.HasXorFilterChecked("xor", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("HasXorFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.XorFilterInfoChecked("xor"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("XorFilterInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 }
 

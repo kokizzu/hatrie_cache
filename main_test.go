@@ -2018,6 +2018,51 @@ func TestCuckooFilterStorageReleasedOnOverwrite(t *testing.T) {
 	}
 }
 
+func TestCheckedFilterInfoOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if added, err := ht.AddBloomFilterChecked("bloom", "alpha"); err != nil || added != 1 {
+		t.Fatalf("AddBloomFilterChecked(alpha) = %d/%v, want 1/nil", added, err)
+	}
+	bloomInfo, ok, err := ht.BloomFilterInfoChecked("bloom")
+	if err != nil || !ok || bloomInfo.Insertions != 1 || bloomInfo.BitBytes == 0 {
+		t.Fatalf("BloomFilterInfoChecked(bloom) = %#v/%v/%v, want one insertion", bloomInfo, ok, err)
+	}
+	if missing, ok, err := ht.BloomFilterInfoChecked("missing-bloom"); err != nil || ok || missing.Insertions != 0 {
+		t.Fatalf("BloomFilterInfoChecked(missing) = %#v/%v/%v, want zero/false/nil", missing, ok, err)
+	}
+
+	if added, err := ht.AddCuckooFilterChecked("cuckoo", "alpha"); err != nil || added != 1 {
+		t.Fatalf("AddCuckooFilterChecked(alpha) = %d/%v, want 1/nil", added, err)
+	}
+	cuckooInfo, ok, err := ht.CuckooFilterInfoChecked("cuckoo")
+	if err != nil || !ok || cuckooInfo.Count != 1 || cuckooInfo.FingerprintBytes == 0 {
+		t.Fatalf("CuckooFilterInfoChecked(cuckoo) = %#v/%v/%v, want one insertion", cuckooInfo, ok, err)
+	}
+	if missing, ok, err := ht.CuckooFilterInfoChecked("missing-cuckoo"); err != nil || ok || missing.Count != 0 {
+		t.Fatalf("CuckooFilterInfoChecked(missing) = %#v/%v/%v, want zero/false/nil", missing, ok, err)
+	}
+
+	if added, err := ht.AddXorFilter("xor", "alpha"); err != nil || added != 1 {
+		t.Fatalf("AddXorFilter(alpha) = %d/%v, want 1/nil", added, err)
+	}
+	xorInfo, ok, err := ht.XorFilterInfoChecked("xor")
+	if err != nil || !ok || xorInfo.Built || xorInfo.Staged != 1 {
+		t.Fatalf("XorFilterInfoChecked(staged) = %#v/%v/%v, want one staged item", xorInfo, ok, err)
+	}
+	xorInfo, ok, err = ht.BuildXorFilter("xor")
+	if err != nil || !ok || !xorInfo.Built || xorInfo.Items != 1 {
+		t.Fatalf("BuildXorFilter(xor) = %#v/%v/%v, want one built item", xorInfo, ok, err)
+	}
+	xorInfo, ok, err = ht.XorFilterInfoChecked("xor")
+	if err != nil || !ok || !xorInfo.Built || xorInfo.Items != 1 {
+		t.Fatalf("XorFilterInfoChecked(built) = %#v/%v/%v, want one built item", xorInfo, ok, err)
+	}
+	if missing, ok, err := ht.XorFilterInfoChecked("missing-xor"); err != nil || ok || missing.Items != 0 {
+		t.Fatalf("XorFilterInfoChecked(missing) = %#v/%v/%v, want zero/false/nil", missing, ok, err)
+	}
+}
+
 func TestRoaringBitmapOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

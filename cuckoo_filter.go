@@ -643,14 +643,23 @@ func (ht *HatTrie) DeleteCuckooFilterChecked(key string, val interface{}, vals .
 }
 
 func (ht *HatTrie) CuckooFilterInfo(key string) (CuckooFilterInfo, bool) {
+	info, ok, _ := ht.CuckooFilterInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) CuckooFilterInfoChecked(key string) (CuckooFilterInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return CuckooFilterInfo{}, false, err
+	}
 	if !hval.IsCuckooFilter() {
 		ht.recordReadLocked(false, key)
-		return CuckooFilterInfo{}, false
+		return CuckooFilterInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.cuckooFilters.array[hval.Index].Info(), true
+	return ht.cuckooFilters.array[hval.Index].Info(), true, nil
 }

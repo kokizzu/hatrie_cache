@@ -459,14 +459,23 @@ func (ht *HatTrie) HasBloomFilterChecked(key string, val interface{}) (bool, err
 }
 
 func (ht *HatTrie) BloomFilterInfo(key string) (BloomFilterInfo, bool) {
+	info, ok, _ := ht.BloomFilterInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) BloomFilterInfoChecked(key string) (BloomFilterInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return BloomFilterInfo{}, false, err
+	}
 	if !hval.IsBloomFilter() {
 		ht.recordReadLocked(false, key)
-		return BloomFilterInfo{}, false
+		return BloomFilterInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.bloomFilters.array[hval.Index].Info(), true
+	return ht.bloomFilters.array[hval.Index].Info(), true, nil
 }

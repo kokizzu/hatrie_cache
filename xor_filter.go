@@ -638,14 +638,23 @@ func (ht *HatTrie) HasXorFilterChecked(key string, val interface{}) (bool, bool,
 }
 
 func (ht *HatTrie) XorFilterInfo(key string) (XorFilterInfo, bool) {
+	info, ok, _ := ht.XorFilterInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) XorFilterInfoChecked(key string) (XorFilterInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return XorFilterInfo{}, false, err
+	}
 	if !hval.IsXorFilter() {
 		ht.recordReadLocked(false, key)
-		return XorFilterInfo{}, false
+		return XorFilterInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.xorFilters.array[hval.Index].Info(), true
+	return ht.xorFilters.array[hval.Index].Info(), true, nil
 }
