@@ -115,6 +115,77 @@ func TestHTTPReplicatorSkipsWhenNotLeaderOrInternalCommand(t *testing.T) {
 	}
 }
 
+func TestReplicationPayloadKindUsesJournaledMutationClassification(t *testing.T) {
+	ttl := int64(30)
+	priority := int64(5)
+	for _, tt := range []struct {
+		name    string
+		request CacheCommandRequest
+		want    replicationPayloadKind
+	}{
+		{
+			name:    "read command",
+			request: CacheCommandRequest{Command: "GET", Key: "key"},
+			want:    replicationPayloadNone,
+		},
+		{
+			name:    "failed write response",
+			request: CacheCommandRequest{Command: "SETSTR", Key: "key", Value: "value"},
+			want:    replicationPayloadNone,
+		},
+		{
+			name:    "internal set",
+			request: CacheCommandRequest{Command: "INTERNALSET", Key: "key", Value: `{"type":"string","string":"value"}`},
+			want:    replicationPayloadNone,
+		},
+		{
+			name:    "internal delete",
+			request: CacheCommandRequest{Command: "INTERNALDEL", Key: "key"},
+			want:    replicationPayloadNone,
+		},
+		{
+			name:    "delete",
+			request: CacheCommandRequest{Command: "DEL", Key: "key"},
+			want:    replicationPayloadDelete,
+		},
+		{
+			name:    "ttl alias",
+			request: CacheCommandRequest{Command: "SETSTRX", Key: "key", Value: "value", TTLSeconds: &ttl},
+			want:    replicationPayloadSet,
+		},
+		{
+			name:    "priority queue alias",
+			request: CacheCommandRequest{Command: "PUSHPRIORITY", Key: "jobs", Value: "job", Priority: &priority},
+			want:    replicationPayloadSet,
+		},
+		{
+			name:    "top-k alias",
+			request: CacheCommandRequest{Command: "TOPKRESERVE", Key: "top", Value: "3"},
+			want:    replicationPayloadSet,
+		},
+		{
+			name:    "quantile alias",
+			request: CacheCommandRequest{Command: "QADD", Key: "latency", Value: "12.5"},
+			want:    replicationPayloadSet,
+		},
+		{
+			name:    "fenwick alias",
+			request: CacheCommandRequest{Command: "FWADD", Key: "scores", Values: Slice{json.Number("2"), json.Number("7")}},
+			want:    replicationPayloadSet,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			response := CacheCommandResponse{OK: true}
+			if tt.name == "failed write response" {
+				response.OK = false
+			}
+			if got := replicationPayloadKindFor(tt.request, response); got != tt.want {
+				t.Fatalf("replicationPayloadKindFor(%#v) = %v, want %v", tt.request, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHTTPReplicatorSkipsCanceledContextBeforeNetwork(t *testing.T) {
 	called := make(chan struct{}, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
