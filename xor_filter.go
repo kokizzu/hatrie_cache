@@ -596,7 +596,11 @@ func (ht *HatTrie) BuildXorFilter(key string) (XorFilterInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return XorFilterInfo{}, false, err
+	}
 	if !hval.IsXorFilter() {
 		ht.recordReadLocked(false, key)
 		return XorFilterInfo{}, false, nil

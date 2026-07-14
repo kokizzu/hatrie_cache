@@ -1090,6 +1090,9 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "HASXF", Key: "cmd-xor", Value: "old"}); got.OK {
 		t.Fatalf("HASXF closed cold ref response = %#v, want error", got)
 	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "BUILDXF", Key: "cmd-xor"}); got.OK {
+		t.Fatalf("BUILDXF closed cold ref response = %#v, want error", got)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFOXF", Key: "cmd-xor"}); got.OK {
 		t.Fatalf("INFOXF closed cold ref response = %#v, want error", got)
 	}
@@ -1527,6 +1530,9 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	}
 	if _, _, err := loaded.HasXorFilterChecked("xor", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("HasXorFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.BuildXorFilter("xor"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("BuildXorFilter(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, _, err := loaded.XorFilterInfoChecked("xor"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("XorFilterInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
