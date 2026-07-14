@@ -16,7 +16,10 @@ import (
 
 const DefaultReplicationTimeout = 2 * time.Second
 const DefaultReplicationRetryInterval = 250 * time.Millisecond
+const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
+
+var errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
 
 type HTTPReplicatorOptions struct {
 	Self               string
@@ -647,8 +650,8 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 		result.Error = resp.Status
 		return result
 	}
-	var commandResponse CacheCommandResponse
-	if err := json.NewDecoder(resp.Body).Decode(&commandResponse); err != nil {
+	commandResponse, err := decodeReplicationCommandResponse(resp.Body)
+	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
@@ -658,6 +661,29 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	result.OK = true
 	return result
+}
+
+func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, error) {
+	data, err := io.ReadAll(io.LimitReader(body, maxHTTPReplicationResponseBytes+1))
+	if err != nil {
+		return CacheCommandResponse{}, err
+	}
+	if len(data) > maxHTTPReplicationResponseBytes {
+		return CacheCommandResponse{}, errReplicationResponseTooLarge
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var response CacheCommandResponse
+	if err := decoder.Decode(&response); err != nil {
+		return CacheCommandResponse{}, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return CacheCommandResponse{}, errors.New("hatriecache: invalid replication response JSON")
+		}
+		return CacheCommandResponse{}, err
+	}
+	return response, nil
 }
 
 func drainAndClose(body io.ReadCloser) {

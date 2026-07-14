@@ -665,6 +665,53 @@ func TestPostReplicationCommandDrainsErrorResponseBody(t *testing.T) {
 	}
 }
 
+func TestPostReplicationCommandRejectsOversizedResponseBody(t *testing.T) {
+	body := `{"ok":true,"message":"` + strings.Repeat("x", maxHTTPReplicationResponseBytes) + `"}`
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    request,
+			}, nil
+		}),
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: client})
+
+	result := replicator.postReplicationCommand(context.Background(), TopologyNode{
+		ID:      "node-b",
+		Address: "127.0.0.1:8080",
+	}, CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: "{}"})
+	if result.OK || result.Status != http.StatusOK || !strings.Contains(result.Error, "replication response is too large") {
+		t.Fatalf("postReplicationCommand() = %#v, want oversized response error", result)
+	}
+}
+
+func TestPostReplicationCommandRejectsTrailingResponseJSON(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"message":"ok"}{"ok":true,"message":"ok"}`)),
+				Request:    request,
+			}, nil
+		}),
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: client})
+
+	result := replicator.postReplicationCommand(context.Background(), TopologyNode{
+		ID:      "node-b",
+		Address: "127.0.0.1:8080",
+	}, CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: "{}"})
+	if result.OK || result.Status != http.StatusOK || !strings.Contains(result.Error, "invalid replication response JSON") {
+		t.Fatalf("postReplicationCommand() = %#v, want trailing JSON error", result)
+	}
+}
+
 func waitForReplicationLastResult(t *testing.T, replicator *HTTPReplicator, accept func(ReplicationResult) bool) ReplicationResult {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
