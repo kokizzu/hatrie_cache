@@ -1,10 +1,28 @@
 package hatriecache
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+type closeTrackingBody struct {
+	*strings.Reader
+	closed bool
+}
+
+func newCloseTrackingBody(data []byte) *closeTrackingBody {
+	return &closeTrackingBody{Reader: strings.NewReader(string(data))}
+}
+
+func (body *closeTrackingBody) Close() error {
+	body.closed = true
+	return nil
+}
 
 func TestGzipHTTPHandlerLeavesNoBodyResponsesUncompressed(t *testing.T) {
 	handler := gzipHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,4 +64,70 @@ func TestGzipHTTPHandlerSkipsRangeRequests(t *testing.T) {
 	if got := resp.Body.String(); got != "partial" {
 		t.Fatalf("body = %q, want partial", got)
 	}
+}
+
+func TestLimitedEncodedRequestBodyClosesIdentityBody(t *testing.T) {
+	body := newCloseTrackingBody([]byte(`{"ok":true}`))
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Body = body
+
+	reader, closeBody, ok := limitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
+	if !ok {
+		t.Fatal("limitedEncodedRequestBody(identity) ok = false, want true")
+	}
+	if _, err := io.ReadAll(reader); err != nil {
+		t.Fatalf("ReadAll(identity body) error = %v", err)
+	}
+	closeBody()
+	if !body.closed {
+		t.Fatal("identity request body was not closed")
+	}
+}
+
+func TestLimitedEncodedRequestBodyClosesGzipBody(t *testing.T) {
+	body := newCloseTrackingBody(gzipHTTPTestBytes(t, []byte(`{"ok":true}`)))
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Body = body
+	request.Header.Set("Content-Encoding", "gzip")
+
+	reader, closeBody, ok := limitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
+	if !ok {
+		t.Fatal("limitedEncodedRequestBody(gzip) ok = false, want true")
+	}
+	if _, err := io.ReadAll(reader); err != nil {
+		t.Fatalf("ReadAll(gzip body) error = %v", err)
+	}
+	closeBody()
+	if !body.closed {
+		t.Fatal("gzip request body was not closed")
+	}
+}
+
+func TestLimitedEncodedRequestBodyClosesInvalidGzipBody(t *testing.T) {
+	body := newCloseTrackingBody([]byte("not gzip"))
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Body = body
+	request.Header.Set("Content-Encoding", "gzip")
+
+	_, _, ok := limitedEncodedRequestBody(httptest.NewRecorder(), request, 1024)
+	if ok {
+		t.Fatal("limitedEncodedRequestBody(invalid gzip) ok = true, want false")
+	}
+	if !body.closed {
+		t.Fatal("invalid gzip request body was not closed")
+	}
+}
+
+func gzipHTTPTestBytes(t *testing.T, data []byte) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	if _, err := writer.Write(data); err != nil {
+		t.Fatalf("gzip Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("gzip Close() error = %v", err)
+	}
+	return buffer.Bytes()
 }

@@ -139,18 +139,24 @@ func responseAllowsBody(statusCode int) bool {
 func limitedEncodedRequestBody(w http.ResponseWriter, r *http.Request, limit int64) (io.Reader, func(), bool) {
 	encoding := strings.TrimSpace(r.Header.Get("Content-Encoding"))
 	if encoding == "" || strings.EqualFold(encoding, "identity") {
-		return http.MaxBytesReader(w, r.Body, limit), func() {}, true
+		body := http.MaxBytesReader(w, r.Body, limit)
+		return body, func() { _ = body.Close() }, true
 	}
 	if !strings.EqualFold(encoding, "gzip") {
+		_ = r.Body.Close()
 		http.Error(w, "unsupported request content encoding", http.StatusUnsupportedMediaType)
 		return nil, nil, false
 	}
 
 	reader, err := gzip.NewReader(r.Body)
 	if err != nil {
+		_ = r.Body.Close()
 		http.Error(w, "invalid gzip request", http.StatusBadRequest)
 		return nil, nil, false
 	}
 	body := http.MaxBytesReader(w, reader, limit)
-	return body, func() { _ = body.Close() }, true
+	return body, func() {
+		_ = body.Close()
+		_ = r.Body.Close()
+	}, true
 }
