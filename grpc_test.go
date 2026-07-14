@@ -1197,6 +1197,94 @@ func TestCacheGRPCServerTopologyAndElection(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerTopologyPreservesBucketRangesAndShardReplicas(t *testing.T) {
+	topology, err := NewTopologyStore(SingleNodeTopology("node-a", "http://127.0.0.1:1"))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	client, stop := newTestGRPCClient(t, newTestTrie(t), CacheGRPCOptions{
+		Topology: topology,
+	})
+	defer stop()
+
+	updated, err := client.UpdateTopology(context.Background(), &hatriecachev1.UpdateTopologyRequest{
+		Topology: &hatriecachev1.ClusterTopology{
+			Version:     1,
+			Mode:        TopologyModeSharded,
+			BucketCount: 16,
+			Self:        "node-a",
+			BucketRanges: []*hatriecachev1.TopologyBucketRange{
+				{Start: 8, End: 15, Shard: 1},
+				{Start: 0, End: 7, Shard: 0},
+			},
+			Nodes: []*hatriecachev1.TopologyNode{
+				{Id: "node-a", Address: "http://127.0.0.1:1", Role: "primary"},
+				{Id: "node-b", Address: "http://127.0.0.1:2", Role: "replica"},
+				{Id: "node-c", Address: "http://127.0.0.1:3", Role: "replica"},
+			},
+			Shards: []*hatriecachev1.TopologyShard{
+				{Id: 1, Primary: "node-a", Replicas: []string{"node-c", "node-b"}},
+				{Id: 0, Primary: "node-b", Replicas: []string{"node-c", "node-a"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateTopology(bucketed) error = %v", err)
+	}
+	got := updated.GetTopology()
+	if !updated.GetOk() || got.GetBucketCount() != 16 || got.GetMode() != TopologyModeSharded {
+		t.Fatalf("UpdateTopology(bucketed) = %#v, want sharded bucketed topology", updated)
+	}
+	if gotRanges := protoBucketRanges(got.GetBucketRanges()); !reflect.DeepEqual(gotRanges, []TopologyBucketRange{
+		{Start: 0, End: 7, Shard: 0},
+		{Start: 8, End: 15, Shard: 1},
+	}) {
+		t.Fatalf("bucket ranges = %#v, want sorted compact ranges", gotRanges)
+	}
+	if len(got.GetShards()) != 2 {
+		t.Fatalf("shards = %d, want 2", len(got.GetShards()))
+	}
+	if shard := got.GetShards()[0]; shard.GetId() != 0 || shard.GetPrimary() != "node-b" || !reflect.DeepEqual(shard.GetReplicas(), []string{"node-a", "node-c"}) {
+		t.Fatalf("shard[0] = %#v, want shard 0 primary node-b replicas node-a,node-c", shard)
+	}
+	if shard := got.GetShards()[1]; shard.GetId() != 1 || shard.GetPrimary() != "node-a" || !reflect.DeepEqual(shard.GetReplicas(), []string{"node-b", "node-c"}) {
+		t.Fatalf("shard[1] = %#v, want shard 1 primary node-a replicas node-b,node-c", shard)
+	}
+
+	key := "session:bucketed"
+	bucket := hashKeyToBucket(key, got.GetBucketCount())
+	wantShardID := uint32(0)
+	wantOwners := []string{"node-b", "node-a", "node-c"}
+	if bucket >= 8 {
+		wantShardID = 1
+		wantOwners = []string{"node-a", "node-b", "node-c"}
+	}
+	routed, err := client.Topology(context.Background(), &hatriecachev1.TopologyRequest{Key: key})
+	if err != nil {
+		t.Fatalf("Topology(bucketed key) error = %v", err)
+	}
+	route := routed.GetRoute()
+	if !routed.GetOk() || route == nil || route.Bucket == nil || route.GetBucket() != bucket || route.GetShard().GetId() != wantShardID || !reflect.DeepEqual(route.GetOwners(), wantOwners) {
+		t.Fatalf("Topology(bucketed key) = %#v, want bucket %d shard %d owners %#v", routed, bucket, wantShardID, wantOwners)
+	}
+}
+
+func protoBucketRanges(ranges []*hatriecachev1.TopologyBucketRange) []TopologyBucketRange {
+	out := make([]TopologyBucketRange, 0, len(ranges))
+	for _, bucketRange := range ranges {
+		if bucketRange == nil {
+			out = append(out, TopologyBucketRange{})
+			continue
+		}
+		out = append(out, TopologyBucketRange{
+			Start: bucketRange.GetStart(),
+			End:   bucketRange.GetEnd(),
+			Shard: bucketRange.GetShard(),
+		})
+	}
+	return out
+}
+
 func TestCacheGRPCServerTopologyAndElectionRequireStores(t *testing.T) {
 	client, stop := newTestGRPCClient(t, newTestTrie(t), CacheGRPCOptions{})
 	defer stop()
