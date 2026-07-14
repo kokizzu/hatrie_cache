@@ -68,32 +68,36 @@ func commandWireFormatFromAccept(value string, fallback CommandWireFormat) (Comm
 	if strings.TrimSpace(value) == "" {
 		return fallback, true
 	}
-	specific := map[CommandWireFormat]float64{}
+	jsonQuality := -1.0
+	protobufQuality := -1.0
 	wildcardQuality := -1.0
-	for _, part := range strings.Split(value, ",") {
+	for {
+		part, rest, ok := strings.Cut(value, ",")
 		mediaType, quality := parseCommandWireAccept(part)
-		switch strings.ToLower(mediaType) {
-		case commandWireContentTypeProtobuf, "application/protobuf", "application/octet-stream":
-			if current, ok := specific[CommandWireFormatProtobuf]; !ok || quality > current {
-				specific[CommandWireFormatProtobuf] = quality
+		switch {
+		case commandWireAcceptMatchesProtobuf(mediaType):
+			if quality > protobufQuality {
+				protobufQuality = quality
 			}
-		case commandWireContentTypeJSON, "text/json":
-			if current, ok := specific[CommandWireFormatJSON]; !ok || quality > current {
-				specific[CommandWireFormatJSON] = quality
+		case commandWireAcceptMatchesJSON(mediaType):
+			if quality > jsonQuality {
+				jsonQuality = quality
 			}
-		case "*/*", "application/*":
+		case commandWireAcceptMatchesWildcard(mediaType):
 			if quality > wildcardQuality {
 				wildcardQuality = quality
 			}
 		}
+		if !ok {
+			break
+		}
+		value = rest
 	}
 	bestFormat := fallback
 	bestQuality := -1.0
 	for _, format := range commandWireAcceptPreference(fallback) {
-		quality, ok := specific[format]
-		if !ok && wildcardQuality >= 0 {
-			quality = wildcardQuality
-		} else if !ok {
+		quality := commandWireAcceptQuality(format, jsonQuality, protobufQuality, wildcardQuality)
+		if quality < 0 {
 			continue
 		}
 		if quality > bestQuality && quality > 0 {
@@ -107,16 +111,47 @@ func commandWireFormatFromAccept(value string, fallback CommandWireFormat) (Comm
 	return bestFormat, true
 }
 
+func commandWireAcceptMatchesJSON(mediaType string) bool {
+	return strings.EqualFold(mediaType, commandWireContentTypeJSON) ||
+		strings.EqualFold(mediaType, "text/json")
+}
+
+func commandWireAcceptMatchesProtobuf(mediaType string) bool {
+	return strings.EqualFold(mediaType, commandWireContentTypeProtobuf) ||
+		strings.EqualFold(mediaType, "application/protobuf") ||
+		strings.EqualFold(mediaType, "application/octet-stream")
+}
+
+func commandWireAcceptMatchesWildcard(mediaType string) bool {
+	return mediaType == "*/*" || strings.EqualFold(mediaType, "application/*")
+}
+
+func commandWireAcceptQuality(format CommandWireFormat, jsonQuality float64, protobufQuality float64, wildcardQuality float64) float64 {
+	switch format {
+	case CommandWireFormatJSON:
+		if jsonQuality >= 0 {
+			return jsonQuality
+		}
+	case CommandWireFormatProtobuf:
+		if protobufQuality >= 0 {
+			return protobufQuality
+		}
+	}
+	return wildcardQuality
+}
+
 func parseCommandWireAccept(value string) (string, float64) {
-	parts := strings.Split(value, ";")
-	mediaType := strings.TrimSpace(parts[0])
+	mediaType, params, _ := strings.Cut(value, ";")
+	mediaType = strings.TrimSpace(mediaType)
 	if mediaType == "" {
 		return "", 0
 	}
 	quality := 1.0
-	for _, part := range parts[1:] {
-		key, raw, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(key), "q") {
+	for params != "" {
+		var part string
+		part, params, _ = strings.Cut(params, ";")
+		key, raw, hasValue := strings.Cut(strings.TrimSpace(part), "=")
+		if !hasValue || !strings.EqualFold(strings.TrimSpace(key), "q") {
 			continue
 		}
 		parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)

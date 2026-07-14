@@ -16,6 +16,17 @@ func BenchmarkCommandWireProtobuf(b *testing.B) {
 	benchmarkCommandWireFormat(b, CommandWireFormatProtobuf)
 }
 
+func BenchmarkCommandWireAcceptNegotiation(b *testing.B) {
+	accept := "application/json; charset=utf-8; q=0.2, application/x-protobuf;q=0.9, */*;q=0.1"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		format, ok := commandWireFormatFromAccept(accept, CommandWireFormatProtobuf)
+		if !ok || format != CommandWireFormatProtobuf {
+			b.Fatalf("commandWireFormatFromAccept() = %q/%v, want protobuf/true", format, ok)
+		}
+	}
+}
+
 func BenchmarkCommandJournalEncodeJSON(b *testing.B) {
 	benchmarkCommandJournalEncodeFormat(b, CommandJournalFormatJSON)
 }
