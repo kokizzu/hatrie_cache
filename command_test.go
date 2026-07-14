@@ -333,6 +333,37 @@ func TestExecuteCommandPriorityQueueOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandPriorityQueueRejectsUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+	priority := int64(1)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command:  "PUSHPQ",
+		Key:      "jobs",
+		Values:   Slice{unsupported},
+		Priority: &priority,
+	}); got.OK {
+		t.Fatalf("PUSHPQ unsupported response = %#v, want error", got)
+	}
+	if hval := ht.Get("jobs"); !hval.Empty() {
+		t.Fatalf("PUSHPQ unsupported created value %+v", hval)
+	}
+
+	ht.UpsertPriorityQueue("jobs", PriorityQueue{{Priority: 2, Value: "keep"}})
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command:  "PUSHPQ",
+		Key:      "jobs",
+		Values:   Slice{unsupported},
+		Priority: &priority,
+	}); got.OK {
+		t.Fatalf("PUSHPQ unsupported existing response = %#v, want error", got)
+	}
+	if got := ht.GetPriorityQueue("jobs"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 2, Value: "keep"}}) {
+		t.Fatalf("PUSHPQ unsupported existing queue = %#v, want unchanged queue", got)
+	}
+}
+
 func TestExecuteCommandBloomFilterOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

@@ -1816,6 +1816,47 @@ func TestCheckedPriorityQueueOperationsReturnValuesAndCopies(t *testing.T) {
 	}
 }
 
+func TestCheckedPriorityQueueRejectsUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	ht.UpsertPriorityQueue("queue", PriorityQueue{{Priority: 1, Value: "keep"}})
+	if added, err := ht.PushPriorityQueueChecked("queue", 1, unsupported); err == nil || added != 0 {
+		t.Fatalf("PushPriorityQueueChecked(unsupported) = %d/%v, want 0/error", added, err)
+	}
+	if got := ht.GetPriorityQueue("queue"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 1, Value: "keep"}}) {
+		t.Fatalf("GetPriorityQueue(queue after rejected push) = %#v, want unchanged queue", got)
+	}
+
+	if added, err := ht.PushPriorityQueueChecked("missing", 1, unsupported); err == nil || added != 0 {
+		t.Fatalf("PushPriorityQueueChecked(missing unsupported) = %d/%v, want 0/error", added, err)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected PushPriorityQueueChecked created value %+v", got)
+	}
+
+	ht.UpsertString("string", "keep")
+	if added, err := ht.PushPriorityQueueChecked("string", 1, unsupported); err == nil || added != 0 {
+		t.Fatalf("PushPriorityQueueChecked(replace unsupported) = %d/%v, want 0/error", added, err)
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected PushPriorityQueueChecked changed string to %q, want keep", got)
+	}
+
+	if err := ht.UpsertPriorityQueueChecked("queue", PriorityQueue{{Priority: 1, Value: unsupported}}); err == nil {
+		t.Fatal("UpsertPriorityQueueChecked(unsupported) error = nil, want error")
+	}
+	if got := ht.GetPriorityQueue("queue"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 1, Value: "keep"}}) {
+		t.Fatalf("GetPriorityQueue(queue after rejected upsert) = %#v, want unchanged queue", got)
+	}
+	if err := ht.UpsertPriorityQueueChecked("checked", PriorityQueue{{Priority: 2, Value: Map{"job": "ok"}}}); err != nil {
+		t.Fatalf("UpsertPriorityQueueChecked(valid) error = %v", err)
+	}
+	if got := ht.GetPriorityQueue("checked"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 2, Value: Map{"job": "ok"}}}) {
+		t.Fatalf("GetPriorityQueue(checked) = %#v, want stored queue", got)
+	}
+}
+
 func TestBloomFilterOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

@@ -1,5 +1,10 @@
 package hatriecache
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // PriorityItem is one value stored in a priority queue. Lower priority values
 // are returned first; equal priorities keep insertion order.
 type PriorityItem struct {
@@ -32,6 +37,32 @@ func clonePriorityQueue(value PriorityQueue) PriorityQueue {
 		}
 	}
 	return out
+}
+
+func validatePriorityQueueValue(value PriorityQueue) error {
+	if _, err := json.Marshal(value); err != nil {
+		return fmt.Errorf("hatriecache: unsupported priority queue value: %w", err)
+	}
+	return nil
+}
+
+func validatePriorityQueuePayload(value interface{}, values ...interface{}) error {
+	if err := validatePriorityQueueItemValue(value); err != nil {
+		return err
+	}
+	for _, value := range values {
+		if err := validatePriorityQueueItemValue(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePriorityQueueItemValue(value interface{}) error {
+	if _, err := json.Marshal(value); err != nil {
+		return fmt.Errorf("hatriecache: unsupported priority queue value: %w", err)
+	}
+	return nil
 }
 
 func newPriorityQueueData(values PriorityQueue) priorityQueueData {
@@ -320,6 +351,22 @@ func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	ht.upsertPriorityQueueLocked(key, val)
+}
+
+func (ht *HatTrie) UpsertPriorityQueueChecked(key string, val PriorityQueue) error {
+	if err := validatePriorityQueueValue(val); err != nil {
+		return err
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	ht.upsertPriorityQueueLocked(key, val)
+	return nil
+}
+
+func (ht *HatTrie) upsertPriorityQueueLocked(key string, val PriorityQueue) {
 	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsPriorityQueue() {
 		ht.priorityQueues.Put(hval.Index, val)
@@ -338,11 +385,18 @@ func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {
 }
 
 func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}, vals ...interface{}) int {
-	added, _ := ht.PushPriorityQueueChecked(key, priority, val, vals...)
+	added, _ := ht.pushPriorityQueue(key, priority, val, vals...)
 	return added
 }
 
 func (ht *HatTrie) PushPriorityQueueChecked(key string, priority int64, val interface{}, vals ...interface{}) (int, error) {
+	if err := validatePriorityQueuePayload(val, vals...); err != nil {
+		return 0, err
+	}
+	return ht.pushPriorityQueue(key, priority, val, vals...)
+}
+
+func (ht *HatTrie) pushPriorityQueue(key string, priority int64, val interface{}, vals ...interface{}) (int, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
