@@ -868,6 +868,38 @@ func TestExecuteCommandHyperLogLogOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandHyperLogLogRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDHLL", Key: "card", Value: "alpha"}); !got.OK {
+		t.Fatalf("ADDHLL alpha response = %#v, want ok", got)
+	}
+
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDHLL",
+		Key:     "card",
+		Values:  Slice{"beta", func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDHLL unsupported response = %#v, want error", got)
+	}
+	info, ok := ht.HyperLogLogInfo("card")
+	if !ok || info.Observations != 1 || info.Estimate < 1 {
+		t.Fatalf("HyperLogLogInfo(after rejected command) = %#v/%v, want one observation", info, ok)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDHLL",
+		Key:     "missing",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDHLL missing unsupported response = %#v, want error", got)
+	}
+	if value := ht.Get("missing"); !value.Empty() {
+		t.Fatalf("rejected missing-key HyperLogLog command left value %+v", value)
+	}
+}
+
 func TestExecuteCommandTopKOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

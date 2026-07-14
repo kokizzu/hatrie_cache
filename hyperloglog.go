@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	mathbits "math/bits"
 	"strconv"
@@ -101,10 +102,38 @@ func newHyperLogLogDataFromSnapshot(snapshot hyperLogLogSnapshot) (hyperLogLogDa
 }
 
 func (hll *hyperLogLogData) Add(value interface{}) bool {
+	changed, _ := hll.AddChecked(value)
+	return changed
+}
+
+func (hll *hyperLogLogData) AddChecked(value interface{}) (bool, error) {
+	changed, err := hll.AddOneChecked(value)
+	return changed > 0, err
+}
+
+func (hll *hyperLogLogData) AddOne(value interface{}, values ...interface{}) int {
+	changed, _ := hll.AddOneChecked(value, values...)
+	return changed
+}
+
+func (hll *hyperLogLogData) AddOneChecked(value interface{}, values ...interface{}) (int, error) {
 	if hll == nil || hll.precision == 0 || len(hll.registers) == 0 {
-		return false
+		return 0, nil
 	}
-	key := mustHyperLogLogItemKey(value)
+	keys, err := hyperLogLogItemKeys(value, values...)
+	if err != nil {
+		return 0, err
+	}
+	changed := 0
+	for _, key := range keys {
+		if hll.addKey(key) {
+			changed++
+		}
+	}
+	return changed, nil
+}
+
+func (hll *hyperLogLogData) addKey(key []byte) bool {
 	index, rank := hyperLogLogIndexAndRank(bloomFilterFNV64a(key), hll.precision)
 	hll.observations = saturatingAddUint64(hll.observations, 1)
 	if rank <= hll.registers[index] {
@@ -112,19 +141,6 @@ func (hll *hyperLogLogData) Add(value interface{}) bool {
 	}
 	hll.registers[index] = rank
 	return true
-}
-
-func (hll *hyperLogLogData) AddOne(value interface{}, values ...interface{}) int {
-	changed := 0
-	if hll.Add(value) {
-		changed++
-	}
-	for _, value := range values {
-		if hll.Add(value) {
-			changed++
-		}
-	}
-	return changed
 }
 
 func (hll hyperLogLogData) Count() uint64 {
@@ -239,16 +255,29 @@ func hyperLogLogIndexAndRank(hash uint64, precision uint8) (int, uint8) {
 	return index, uint8(rank)
 }
 
-func mustHyperLogLogItemKey(value interface{}) []byte {
+func hyperLogLogItemKeys(value interface{}, values ...interface{}) ([][]byte, error) {
+	keys := make([][]byte, 0, 1+len(values))
 	key, err := hyperLogLogItemKey(value)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return key
+	keys = append(keys, key)
+	for _, value := range values {
+		key, err := hyperLogLogItemKey(value)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 func hyperLogLogItemKey(value interface{}) ([]byte, error) {
-	return json.Marshal(value)
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("hatriecache: unsupported hyperloglog value: %w", err)
+	}
+	return data, nil
 }
 
 // HyperLogLogStorage stores HyperLogLog values outside the trie.
@@ -321,24 +350,47 @@ func (ht *HatTrie) UpsertHyperLogLog(key string, precision uint8) error {
 }
 
 func (ht *HatTrie) AddHyperLogLog(key string, val interface{}, vals ...interface{}) uint64 {
+	estimate, _ := ht.AddHyperLogLogChecked(key, val, vals...)
+	return estimate
+}
+
+func (ht *HatTrie) AddHyperLogLogChecked(key string, val interface{}, vals ...interface{}) (uint64, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr != nil {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
+	} else {
+		ht.clearExpirationLocked(key)
+	}
 	if hval.IsHyperLogLog() {
-		ht.hyperLogLogs.array[hval.Index].AddOne(val, vals...)
+		if _, err := ht.hyperLogLogs.array[hval.Index].AddOneChecked(val, vals...); err != nil {
+			return 0, err
+		}
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return ht.hyperLogLogs.array[hval.Index].Count()
+		return ht.hyperLogLogs.array[hval.Index].Count(), nil
 	}
 
+	data := newDefaultHyperLogLogData()
+	if _, err := data.AddOneChecked(val, vals...); err != nil {
+		return 0, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.hyperLogLogs.AddData(newDefaultHyperLogLogData())
-	ht.hyperLogLogs.array[idx].AddOne(val, vals...)
+	idx := ht.hyperLogLogs.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_HYPERLOGLOG}.toValue()
 	ht.recordWriteLocked(key)
-	return ht.hyperLogLogs.array[idx].Count()
+	return ht.hyperLogLogs.array[idx].Count(), nil
 }
 
 func (ht *HatTrie) CountHyperLogLog(key string) (uint64, bool) {

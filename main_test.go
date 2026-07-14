@@ -2147,6 +2147,41 @@ func TestHyperLogLogOperations(t *testing.T) {
 	}
 }
 
+func TestHyperLogLogRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if estimate, err := ht.AddHyperLogLogChecked("card", "alpha"); err != nil || estimate < 1 {
+		t.Fatalf("AddHyperLogLogChecked(alpha) = %d/%v, want estimate at least 1", estimate, err)
+	}
+
+	if estimate, err := ht.AddHyperLogLogChecked("card", "beta", func() {}); err == nil {
+		t.Fatalf("AddHyperLogLogChecked(unsupported batch) = %d/nil, want error", estimate)
+	}
+	info, ok := ht.HyperLogLogInfo("card")
+	if !ok || info.Observations != 1 || info.Estimate < 1 {
+		t.Fatalf("HyperLogLogInfo(after rejected batch) = %#v/%v, want one observation", info, ok)
+	}
+
+	if estimate, err := ht.AddHyperLogLogChecked("missing", func() {}); err == nil {
+		t.Fatalf("AddHyperLogLogChecked(missing unsupported) = %d/nil, want error", estimate)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected missing-key HyperLogLog left value %+v", got)
+	}
+	ht.UpsertString("string", "keep")
+	if estimate, err := ht.AddHyperLogLogChecked("string", func() {}); err == nil {
+		t.Fatalf("AddHyperLogLogChecked(replacement unsupported) = %d/nil, want error", estimate)
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected replacement changed string to %q, want keep", got)
+	}
+	if got := ht.AddHyperLogLog("legacy", func() {}); got != 0 {
+		t.Fatalf("AddHyperLogLog legacy unsupported = %d, want 0", got)
+	}
+	if got := ht.Get("legacy"); !got.Empty() {
+		t.Fatalf("legacy rejected HyperLogLog left value %+v", got)
+	}
+}
+
 func TestHyperLogLogRejectsInvalidConfig(t *testing.T) {
 	ht := newTestTrie(t)
 

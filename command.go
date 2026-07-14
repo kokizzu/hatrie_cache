@@ -614,7 +614,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		estimate := ht.AddHyperLogLog(key, values[0], values[1:]...)
+		estimate, err := ht.AddHyperLogLogChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(estimate, 10)}
 	case "COUNTHLL", "ESTHLL", "HLLCOUNT", "HLLCARD":
 		count, ok := ht.CountHyperLogLog(key)
