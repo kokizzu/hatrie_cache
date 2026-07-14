@@ -66,6 +66,44 @@ func TestGzipHTTPHandlerSkipsRangeRequests(t *testing.T) {
 	}
 }
 
+func TestGzipHTTPHandlerAddsVaryWhenResponseIsPlain(t *testing.T) {
+	handler := gzipHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("plain"))
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Accept-Encoding", "br")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, request)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("Content-Encoding = %q, want empty", got)
+	}
+	if got := resp.Header().Values("Vary"); !headerValuesContain(got, "Accept-Encoding") {
+		t.Fatalf("Vary = %#v, want Accept-Encoding", got)
+	}
+	if got := resp.Body.String(); got != "plain" {
+		t.Fatalf("body = %q, want plain", got)
+	}
+}
+
+func TestAddVaryHeaderDeduplicatesCommaSeparatedValues(t *testing.T) {
+	header := http.Header{}
+	header.Add("Vary", "Accept, Accept-Encoding")
+	addVaryHeader(header, "accept-encoding")
+	addVaryHeader(header, "Accept")
+	addVaryHeader(header, "Origin")
+
+	if got := header.Values("Vary"); len(got) != 2 {
+		t.Fatalf("Vary values = %#v, want original plus Origin", got)
+	}
+	if got := header.Values("Vary"); !headerValuesContain(got, "Accept-Encoding") || !headerValuesContain(got, "Accept") || !headerValuesContain(got, "Origin") {
+		t.Fatalf("Vary = %#v, want Accept, Accept-Encoding, Origin", got)
+	}
+}
+
 func TestLimitedEncodedRequestBodyClosesIdentityBody(t *testing.T) {
 	body := newCloseTrackingBody([]byte(`{"ok":true}`))
 	request := httptest.NewRequest(http.MethodPost, "/", nil)

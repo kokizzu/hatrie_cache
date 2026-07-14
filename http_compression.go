@@ -19,16 +19,27 @@ type gzipResponseWriter struct {
 
 func gzipHTTPHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		addVaryHeader(w.Header(), "Accept-Encoding")
 		if !requestAcceptsGzip(r) || r.Method == http.MethodHead || r.Header.Get("Range") != "" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		w.Header().Add("Vary", "Accept-Encoding")
 		gzipWriter := &gzipResponseWriter{ResponseWriter: w}
 		defer gzipWriter.Close()
 		next.ServeHTTP(gzipWriter, r)
 	})
+}
+
+func addVaryHeader(header http.Header, value string) {
+	for _, existing := range header.Values("Vary") {
+		for _, token := range strings.Split(existing, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), value) || strings.TrimSpace(token) == "*" {
+				return
+			}
+		}
+	}
+	header.Add("Vary", value)
 }
 
 func requestAcceptsGzip(r *http.Request) bool {

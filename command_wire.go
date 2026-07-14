@@ -252,7 +252,7 @@ func decodeCommandRequestProto(reader io.Reader, limit int64) (CacheCommandReque
 }
 
 func writeCommandResponseWire(w http.ResponseWriter, r *http.Request, status int, response CacheCommandResponse, fallback CommandWireFormat) {
-	w.Header().Add("Vary", "Accept")
+	addVaryHeader(w.Header(), "Accept")
 	format, ok := commandWireFormatFromAccept(r.Header.Get("Accept"), fallback)
 	if !ok {
 		http.Error(w, "no acceptable command response content type", http.StatusNotAcceptable)
