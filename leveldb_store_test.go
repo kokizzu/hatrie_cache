@@ -704,6 +704,10 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	source.UpsertSet("set", Set{"old"})
 	source.AddBloomFilter("bloom", "old")
 	source.AddCuckooFilter("cuckoo", "old")
+	source.UpsertRoaringBitmap("rb")
+	source.AddRoaringBitmap("rb", 1)
+	source.UpsertSparseBitset("sb")
+	source.AddSparseBitset("sb", 1)
 	source.IncrementCountMinSketch("cms", "old", 2)
 	source.AddHyperLogLog("hll", "old")
 	source.AddTopK("top", "old", 2)
@@ -725,8 +729,8 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
 	}
-	if result.KeysLoaded != 8 || result.ValuesLoaded != 0 {
-		t.Fatalf("hot-load result = %#v, want 8 cold keys", result)
+	if result.KeysLoaded != 10 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 10 cold keys", result)
 	}
 
 	if added, err := loaded.AddSetChecked("set", "new"); err != nil || added != 1 {
@@ -756,6 +760,20 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	}
 	if !loaded.HasCuckooFilter("cuckoo", "old") || !loaded.HasCuckooFilter("cuckoo", "new") {
 		t.Fatal("Cuckoo filter cold add did not retain old and new values")
+	}
+
+	if added, err := loaded.AddRoaringBitmapChecked("rb", 2); err != nil || added != 1 {
+		t.Fatalf("AddRoaringBitmapChecked(cold ref) = %d/%v, want 1/nil", added, err)
+	}
+	if got := loaded.GetRoaringBitmap("rb"); !reflect.DeepEqual(got, []uint32{1, 2}) {
+		t.Fatalf("GetRoaringBitmap(after cold add) = %#v, want old and new values", got)
+	}
+
+	if added, err := loaded.AddSparseBitsetChecked("sb", 2); err != nil || added != 1 {
+		t.Fatalf("AddSparseBitsetChecked(cold ref) = %d/%v, want 1/nil", added, err)
+	}
+	if got := loaded.GetSparseBitset("sb"); !reflect.DeepEqual(got, []uint64{1, 2}) {
+		t.Fatalf("GetSparseBitset(after cold add) = %#v, want old and new values", got)
 	}
 
 	if estimate, err := loaded.IncrementCountMinSketchChecked("cms", "new", 3); err != nil || estimate < 3 {
@@ -873,6 +891,12 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	if added := loaded.AddSparseBitset("sb", 2); added != 0 {
 		t.Fatalf("AddSparseBitset(closed cold ref) = %d, want 0", added)
 	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "ADDRB", Key: "rb", Value: "2"}); got.OK {
+		t.Fatalf("ADDRB closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "HASSB", Key: "sb", Value: "1"}); got.OK {
+		t.Fatalf("HASSB closed cold ref response = %#v, want error", got)
+	}
 	if update, ok := loaded.AddFenwickTree("fw", 2, 3); ok || update.Total != 0 {
 		t.Fatalf("AddFenwickTree(closed cold ref) = %#v/%v, want zero/false", update, ok)
 	}
@@ -962,6 +986,10 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	source.UpsertSlice("slice", Slice{"value"})
 	source.UpsertSet("set", Set{"value"})
 	source.PushPriorityQueue("queue", 1, "job")
+	source.UpsertRoaringBitmap("rb")
+	source.AddRoaringBitmap("rb", 1)
+	source.UpsertSparseBitset("sb")
+	source.AddSparseBitset("sb", 1)
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -1035,13 +1063,37 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if got, ok, err := loaded.GetPriorityQueueChecked("queue"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("GetPriorityQueueChecked(queue closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
+	if hit, err := loaded.HasRoaringBitmapChecked("rb", 1); hit || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HasRoaringBitmapChecked(rb closed ref) = %v/%v, want false/ErrLevelDBStoreClosed", hit, err)
+	}
+	if got, ok, err := loaded.CountRoaringBitmapChecked("rb"); got != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("CountRoaringBitmapChecked(rb closed ref) = %d/%v/%v, want 0/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetRoaringBitmapChecked("rb"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetRoaringBitmapChecked(rb closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.RoaringBitmapInfoChecked("rb"); got.Cardinality != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("RoaringBitmapInfoChecked(rb closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if hit, err := loaded.HasSparseBitsetChecked("sb", 1); hit || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HasSparseBitsetChecked(sb closed ref) = %v/%v, want false/ErrLevelDBStoreClosed", hit, err)
+	}
+	if got, ok, err := loaded.CountSparseBitsetChecked("sb"); got != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("CountSparseBitsetChecked(sb closed ref) = %d/%v/%v, want 0/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetSparseBitsetChecked("sb"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetSparseBitsetChecked(sb closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.SparseBitsetInfoChecked("sb"); got.Cardinality != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("SparseBitsetInfoChecked(sb closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "cold"}); got.OK {
 		t.Fatalf("GET cold closed ref response = %#v, want error", got)
 	}
 
 	entries := loaded.Entries(true)
-	if len(entries) != 7 {
-		t.Fatalf("Entries(after closed ref reads) len = %d, want 7", len(entries))
+	if len(entries) != 9 {
+		t.Fatalf("Entries(after closed ref reads) len = %d, want 9", len(entries))
 	}
 	for _, entry := range entries {
 		if !entry.Value.IsLevelDBReference() {
@@ -1056,6 +1108,10 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	source.UpsertSet("set", Set{"alpha"})
 	source.AddBloomFilter("bloom", "alpha")
 	source.AddCuckooFilter("cuckoo", "alpha")
+	source.UpsertRoaringBitmap("rb")
+	source.AddRoaringBitmap("rb", 1)
+	source.UpsertSparseBitset("sb")
+	source.AddSparseBitset("sb", 1)
 	source.IncrementCountMinSketch("cms", "alpha", 1)
 	source.AddTopK("top", "alpha", 1)
 	if _, err := source.AddXorFilter("xor", "alpha"); err != nil {
@@ -1094,6 +1150,18 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	}
 	if _, err := loaded.DeleteCuckooFilterChecked("cuckoo", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("DeleteCuckooFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.AddRoaringBitmapChecked("rb", 2); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("AddRoaringBitmapChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.RemoveRoaringBitmapChecked("rb", 1); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("RemoveRoaringBitmapChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.AddSparseBitsetChecked("sb", 2); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("AddSparseBitsetChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.RemoveSparseBitsetChecked("sb", 1); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("RemoveSparseBitsetChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, _, err := loaded.EstimateCountMinSketchChecked("cms", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("EstimateCountMinSketchChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)

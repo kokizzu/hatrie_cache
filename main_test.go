@@ -2067,6 +2067,47 @@ func TestRoaringBitmapOperations(t *testing.T) {
 	}
 }
 
+func TestCheckedRoaringBitmapOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	added, err := ht.AddRoaringBitmapChecked("ids", 3, 1, 3, 1<<16+7)
+	if err != nil || added != 3 {
+		t.Fatalf("AddRoaringBitmapChecked(ids) = %d/%v, want 3/nil", added, err)
+	}
+	if hit, err := ht.HasRoaringBitmapChecked("ids", 1<<16+7); err != nil || !hit {
+		t.Fatalf("HasRoaringBitmapChecked(inserted) = %v/%v, want true/nil", hit, err)
+	}
+	if hit, err := ht.HasRoaringBitmapChecked("ids", 2); err != nil || hit {
+		t.Fatalf("HasRoaringBitmapChecked(missing) = %v/%v, want false/nil", hit, err)
+	}
+	if removed, err := ht.RemoveRoaringBitmapChecked("ids", 3, 4); err != nil || removed != 1 {
+		t.Fatalf("RemoveRoaringBitmapChecked(ids) = %d/%v, want 1/nil", removed, err)
+	}
+	if count, ok, err := ht.CountRoaringBitmapChecked("ids"); err != nil || !ok || count != 2 {
+		t.Fatalf("CountRoaringBitmapChecked(ids) = %d/%v/%v, want 2/true/nil", count, ok, err)
+	}
+	if got, ok, err := ht.GetRoaringBitmapChecked("ids"); err != nil || !ok || !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7}) {
+		t.Fatalf("GetRoaringBitmapChecked(ids) = %#v/%v/%v, want sorted values", got, ok, err)
+	}
+	if info, ok, err := ht.RoaringBitmapInfoChecked("ids"); err != nil || !ok || info.Cardinality != 2 || info.Containers != 2 {
+		t.Fatalf("RoaringBitmapInfoChecked(ids) = %#v/%v/%v, want two values", info, ok, err)
+	}
+
+	ht.UpsertString("string", "value")
+	if _, err := ht.AddRoaringBitmapChecked("string", 9); err != nil {
+		t.Fatalf("AddRoaringBitmapChecked(replace string) error = %v", err)
+	}
+	if hval := ht.Get("string"); !hval.IsRoaringBitmap() {
+		t.Fatalf("AddRoaringBitmapChecked(replace string) stored %+v, want roaring bitmap", hval)
+	}
+	if removed, err := ht.RemoveRoaringBitmapChecked("missing", 1); err != nil || removed != 0 {
+		t.Fatalf("RemoveRoaringBitmapChecked(missing) = %d/%v, want 0/nil", removed, err)
+	}
+	if _, ok, err := ht.GetRoaringBitmapChecked("missing"); err != nil || ok {
+		t.Fatalf("GetRoaringBitmapChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
+	}
+}
+
 func TestRoaringBitmapConvertsDenseContainers(t *testing.T) {
 	ht := newTestTrie(t)
 	for idx := 0; idx <= roaringBitmapArrayMaxSize; idx++ {
@@ -2195,6 +2236,48 @@ func TestSparseBitsetOperations(t *testing.T) {
 	}
 	if hval := ht.Get("auto"); !hval.IsSparseBitset() {
 		t.Fatalf("AddSparseBitset(auto) stored type %+v, want sparse bitset", hval)
+	}
+}
+
+func TestCheckedSparseBitsetOperations(t *testing.T) {
+	ht := newTestTrie(t)
+	maxID := ^uint64(0)
+
+	added, err := ht.AddSparseBitsetChecked("ids", 3, 1, 3, 1<<32+7, maxID)
+	if err != nil || added != 4 {
+		t.Fatalf("AddSparseBitsetChecked(ids) = %d/%v, want 4/nil", added, err)
+	}
+	if hit, err := ht.HasSparseBitsetChecked("ids", maxID); err != nil || !hit {
+		t.Fatalf("HasSparseBitsetChecked(inserted) = %v/%v, want true/nil", hit, err)
+	}
+	if hit, err := ht.HasSparseBitsetChecked("ids", 2); err != nil || hit {
+		t.Fatalf("HasSparseBitsetChecked(missing) = %v/%v, want false/nil", hit, err)
+	}
+	if removed, err := ht.RemoveSparseBitsetChecked("ids", 3, 4); err != nil || removed != 1 {
+		t.Fatalf("RemoveSparseBitsetChecked(ids) = %d/%v, want 1/nil", removed, err)
+	}
+	if count, ok, err := ht.CountSparseBitsetChecked("ids"); err != nil || !ok || count != 3 {
+		t.Fatalf("CountSparseBitsetChecked(ids) = %d/%v/%v, want 3/true/nil", count, ok, err)
+	}
+	if got, ok, err := ht.GetSparseBitsetChecked("ids"); err != nil || !ok || !reflect.DeepEqual(got, []uint64{1, 1<<32 + 7, maxID}) {
+		t.Fatalf("GetSparseBitsetChecked(ids) = %#v/%v/%v, want sorted values", got, ok, err)
+	}
+	if info, ok, err := ht.SparseBitsetInfoChecked("ids"); err != nil || !ok || info.Cardinality != 3 || info.Containers != 3 {
+		t.Fatalf("SparseBitsetInfoChecked(ids) = %#v/%v/%v, want three values", info, ok, err)
+	}
+
+	ht.UpsertString("string", "value")
+	if _, err := ht.AddSparseBitsetChecked("string", 9); err != nil {
+		t.Fatalf("AddSparseBitsetChecked(replace string) error = %v", err)
+	}
+	if hval := ht.Get("string"); !hval.IsSparseBitset() {
+		t.Fatalf("AddSparseBitsetChecked(replace string) stored %+v, want sparse bitset", hval)
+	}
+	if removed, err := ht.RemoveSparseBitsetChecked("missing", 1); err != nil || removed != 0 {
+		t.Fatalf("RemoveSparseBitsetChecked(missing) = %d/%v, want 0/nil", removed, err)
+	}
+	if _, ok, err := ht.GetSparseBitsetChecked("missing"); err != nil || ok {
+		t.Fatalf("GetSparseBitsetChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
 	}
 }
 

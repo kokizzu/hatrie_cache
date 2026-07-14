@@ -561,12 +561,17 @@ func (ht *HatTrie) UpsertSparseBitset(key string) {
 }
 
 func (ht *HatTrie) AddSparseBitset(key string, value uint64, values ...uint64) int {
+	added, _ := ht.AddSparseBitsetChecked(key, value, values...)
+	return added
+}
+
+func (ht *HatTrie) AddSparseBitsetChecked(key string, value uint64, values ...uint64) (int, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return 0
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, err
 	}
 	if hval.IsSparseBitset() {
 		added := ht.sparseBitsets.array[hval.Index].AddOne(value, values...)
@@ -574,86 +579,134 @@ func (ht *HatTrie) AddSparseBitset(key string, value uint64, values ...uint64) i
 		if added > 0 {
 			ht.recordWriteLocked(key)
 		}
-		return added
+		return added, nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.sparseBitsets.AddData(newSparseBitsetData())
 	added := ht.sparseBitsets.array[idx].AddOne(value, values...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SPARSE_BITSET}.toValue()
 	ht.recordWriteLocked(key)
-	return added
+	return added, nil
 }
 
 func (ht *HatTrie) RemoveSparseBitset(key string, value uint64, values ...uint64) int {
+	removed, _ := ht.RemoveSparseBitsetChecked(key, value, values...)
+	return removed
+}
+
+func (ht *HatTrie) RemoveSparseBitsetChecked(key string, value uint64, values ...uint64) (int, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, err
+	}
 	if !hval.IsSparseBitset() {
 		ht.recordReadLocked(false, key)
-		return 0
+		return 0, nil
 	}
 	removed := ht.sparseBitsets.array[hval.Index].RemoveOne(value, values...)
 	ht.recordReadLocked(removed > 0, key)
 	if removed > 0 {
 		ht.recordWriteLocked(key)
 	}
-	return removed
+	return removed, nil
 }
 
 func (ht *HatTrie) HasSparseBitset(key string, value uint64) bool {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.getLocked(key)
-	if !hval.IsSparseBitset() {
-		ht.recordReadLocked(false, key)
-		return false
-	}
-	hit := ht.sparseBitsets.array[hval.Index].Contains(value)
-	ht.recordReadLocked(hit, key)
+	hit, _ := ht.HasSparseBitsetChecked(key, value)
 	return hit
 }
 
-func (ht *HatTrie) CountSparseBitset(key string) (uint64, bool) {
+func (ht *HatTrie) HasSparseBitsetChecked(key string, value uint64) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
 	if !hval.IsSparseBitset() {
 		ht.recordReadLocked(false, key)
-		return 0, false
+		return false, nil
+	}
+	hit := ht.sparseBitsets.array[hval.Index].Contains(value)
+	ht.recordReadLocked(hit, key)
+	return hit, nil
+}
+
+func (ht *HatTrie) CountSparseBitset(key string) (uint64, bool) {
+	count, ok, _ := ht.CountSparseBitsetChecked(key)
+	return count, ok
+}
+
+func (ht *HatTrie) CountSparseBitsetChecked(key string) (uint64, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
+	if !hval.IsSparseBitset() {
+		ht.recordReadLocked(false, key)
+		return 0, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.sparseBitsets.array[hval.Index].Count(), true
+	return ht.sparseBitsets.array[hval.Index].Count(), true, nil
 }
 
 func (ht *HatTrie) GetSparseBitset(key string) []uint64 {
+	values, _, _ := ht.GetSparseBitsetChecked(key)
+	return values
+}
+
+func (ht *HatTrie) GetSparseBitsetChecked(key string) ([]uint64, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsSparseBitset() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.sparseBitsets.array[hval.Index].Values()
+	return ht.sparseBitsets.array[hval.Index].Values(), true, nil
 }
 
 func (ht *HatTrie) SparseBitsetInfo(key string) (SparseBitsetInfo, bool) {
+	info, ok, _ := ht.SparseBitsetInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) SparseBitsetInfoChecked(key string) (SparseBitsetInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return SparseBitsetInfo{}, false, err
+	}
 	if !hval.IsSparseBitset() {
 		ht.recordReadLocked(false, key)
-		return SparseBitsetInfo{}, false
+		return SparseBitsetInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.sparseBitsets.array[hval.Index].Info(), true
+	return ht.sparseBitsets.array[hval.Index].Info(), true, nil
 }
 
 func sparseBitsetValuesFromCommand(request CacheCommandRequest) ([]uint64, error) {

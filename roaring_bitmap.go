@@ -557,12 +557,17 @@ func (ht *HatTrie) UpsertRoaringBitmap(key string) {
 }
 
 func (ht *HatTrie) AddRoaringBitmap(key string, value uint32, values ...uint32) int {
+	added, _ := ht.AddRoaringBitmapChecked(key, value, values...)
+	return added
+}
+
+func (ht *HatTrie) AddRoaringBitmapChecked(key string, value uint32, values ...uint32) (int, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return 0
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, err
 	}
 	if hval.IsRoaringBitmap() {
 		added := ht.roaringBitmaps.array[hval.Index].AddOne(value, values...)
@@ -570,86 +575,134 @@ func (ht *HatTrie) AddRoaringBitmap(key string, value uint32, values ...uint32) 
 		if added > 0 {
 			ht.recordWriteLocked(key)
 		}
-		return added
+		return added, nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.roaringBitmaps.AddData(newRoaringBitmapData())
 	added := ht.roaringBitmaps.array[idx].AddOne(value, values...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_ROARING_BITMAP}.toValue()
 	ht.recordWriteLocked(key)
-	return added
+	return added, nil
 }
 
 func (ht *HatTrie) RemoveRoaringBitmap(key string, value uint32, values ...uint32) int {
+	removed, _ := ht.RemoveRoaringBitmapChecked(key, value, values...)
+	return removed
+}
+
+func (ht *HatTrie) RemoveRoaringBitmapChecked(key string, value uint32, values ...uint32) (int, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, err
+	}
 	if !hval.IsRoaringBitmap() {
 		ht.recordReadLocked(false, key)
-		return 0
+		return 0, nil
 	}
 	removed := ht.roaringBitmaps.array[hval.Index].RemoveOne(value, values...)
 	ht.recordReadLocked(removed > 0, key)
 	if removed > 0 {
 		ht.recordWriteLocked(key)
 	}
-	return removed
+	return removed, nil
 }
 
 func (ht *HatTrie) HasRoaringBitmap(key string, value uint32) bool {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.getLocked(key)
-	if !hval.IsRoaringBitmap() {
-		ht.recordReadLocked(false, key)
-		return false
-	}
-	hit := ht.roaringBitmaps.array[hval.Index].Contains(value)
-	ht.recordReadLocked(hit, key)
+	hit, _ := ht.HasRoaringBitmapChecked(key, value)
 	return hit
 }
 
-func (ht *HatTrie) CountRoaringBitmap(key string) (uint64, bool) {
+func (ht *HatTrie) HasRoaringBitmapChecked(key string, value uint32) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
 	if !hval.IsRoaringBitmap() {
 		ht.recordReadLocked(false, key)
-		return 0, false
+		return false, nil
+	}
+	hit := ht.roaringBitmaps.array[hval.Index].Contains(value)
+	ht.recordReadLocked(hit, key)
+	return hit, nil
+}
+
+func (ht *HatTrie) CountRoaringBitmap(key string) (uint64, bool) {
+	count, ok, _ := ht.CountRoaringBitmapChecked(key)
+	return count, ok
+}
+
+func (ht *HatTrie) CountRoaringBitmapChecked(key string) (uint64, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
+	if !hval.IsRoaringBitmap() {
+		ht.recordReadLocked(false, key)
+		return 0, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.roaringBitmaps.array[hval.Index].Count(), true
+	return ht.roaringBitmaps.array[hval.Index].Count(), true, nil
 }
 
 func (ht *HatTrie) GetRoaringBitmap(key string) []uint32 {
+	values, _, _ := ht.GetRoaringBitmapChecked(key)
+	return values
+}
+
+func (ht *HatTrie) GetRoaringBitmapChecked(key string) ([]uint32, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsRoaringBitmap() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.roaringBitmaps.array[hval.Index].Values()
+	return ht.roaringBitmaps.array[hval.Index].Values(), true, nil
 }
 
 func (ht *HatTrie) RoaringBitmapInfo(key string) (RoaringBitmapInfo, bool) {
+	info, ok, _ := ht.RoaringBitmapInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) RoaringBitmapInfoChecked(key string) (RoaringBitmapInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return RoaringBitmapInfo{}, false, err
+	}
 	if !hval.IsRoaringBitmap() {
 		ht.recordReadLocked(false, key)
-		return RoaringBitmapInfo{}, false
+		return RoaringBitmapInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.roaringBitmaps.array[hval.Index].Info(), true
+	return ht.roaringBitmaps.array[hval.Index].Info(), true, nil
 }
 
 func roaringBitmapValuesFromCommand(request CacheCommandRequest) ([]uint32, error) {

@@ -435,38 +435,57 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if err != nil {
 			return commandError(err.Error())
 		}
-		added := ht.AddRoaringBitmap(key, values[0], values[1:]...)
+		added, err := ht.AddRoaringBitmapChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "added roaring bitmap values", Value: strconv.Itoa(added)}
 	case "REMRB", "DELRB", "RBREM", "RBDEL":
 		values, err := roaringBitmapValuesFromCommand(request)
 		if err != nil {
 			return commandError(err.Error())
 		}
-		removed := ht.RemoveRoaringBitmap(key, values[0], values[1:]...)
+		removed, err := ht.RemoveRoaringBitmapChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "removed roaring bitmap values", Value: strconv.Itoa(removed)}
 	case "HASRB", "RBHAS", "RBEXISTS":
 		values, err := roaringBitmapValuesFromCommand(request)
 		if err != nil {
 			return commandError(err.Error())
 		}
-		if ht.HasRoaringBitmap(key, values[0]) {
+		hit, err := ht.HasRoaringBitmapChecked(key, values[0])
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if hit {
 			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 	case "COUNTRB", "RBCOUNT":
-		count, ok := ht.CountRoaringBitmap(key)
+		count, ok, err := ht.CountRoaringBitmapChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(count, 10)}
 	case "GETRB", "RBGET":
-		values := ht.GetRoaringBitmap(key)
-		if values == nil {
+		values, ok, err := ht.GetRoaringBitmapChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", values)
 	case "INFORB", "RBINFO":
-		info, ok := ht.RoaringBitmapInfo(key)
+		info, ok, err := ht.RoaringBitmapInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -479,38 +498,57 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if err != nil {
 			return commandError(err.Error())
 		}
-		added := ht.AddSparseBitset(key, values[0], values[1:]...)
+		added, err := ht.AddSparseBitsetChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "added sparse bitset values", Value: strconv.Itoa(added)}
 	case "REMSB", "DELSB", "SBREM", "SBDEL":
 		values, err := sparseBitsetValuesFromCommand(request)
 		if err != nil {
 			return commandError(err.Error())
 		}
-		removed := ht.RemoveSparseBitset(key, values[0], values[1:]...)
+		removed, err := ht.RemoveSparseBitsetChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "removed sparse bitset values", Value: strconv.Itoa(removed)}
 	case "HASSB", "SBHAS", "SBEXISTS":
 		values, err := sparseBitsetValuesFromCommand(request)
 		if err != nil {
 			return commandError(err.Error())
 		}
-		if ht.HasSparseBitset(key, values[0]) {
+		hit, err := ht.HasSparseBitsetChecked(key, values[0])
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if hit {
 			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 	case "COUNTSB", "SBCOUNT":
-		count, ok := ht.CountSparseBitset(key)
+		count, ok, err := ht.CountSparseBitsetChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(count, 10)}
 	case "GETSB", "SBGET":
-		values := ht.GetSparseBitset(key)
-		if values == nil {
+		values, ok, err := ht.GetSparseBitsetChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", values)
 	case "INFOSB", "SBINFO":
-		info, ok := ht.SparseBitsetInfo(key)
+		info, ok, err := ht.SparseBitsetInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
