@@ -24,6 +24,7 @@ type clientConfig struct {
 const maxErrorBodyBytes = 1 << 20
 const maxResponseDrainBytes = 1 << 20
 const minCompressedJSONRequestBytes = 16 << 10
+const defaultCommandWireFormat = "auto"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, http.DefaultClient); err != nil {
@@ -251,6 +252,7 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 	priority := flags.String("priority", "", "priority for priority queue push")
 	ttlSeconds := flags.Int64("ttl-seconds", -1, "optional ttl in seconds")
 	unixSeconds := flags.Int64("unix-seconds", -1, "optional absolute expiration as Unix seconds")
+	wireFormat := flags.String("wire-format", defaultCommandWireFormat, "command request wire format: auto, protobuf, or json")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -288,7 +290,7 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 		}
 		request.Pairs = pairs
 	}
-	return postJSONValue(ctx, client, addr, "/api/commands", request, estimatedCommandRequestBytes(request), stdout)
+	return postCommandValue(ctx, client, addr, request, *wireFormat, stdout)
 }
 
 func decodeJSONFlag[T any](value string) (T, error) {
@@ -330,6 +332,23 @@ func postJSONValue(ctx context.Context, client *http.Client, addr string, path s
 	return postJSONReaderWithEncoding(ctx, client, addr, path, reader, contentEncoding, stdout)
 }
 
+func postCommandValue(ctx context.Context, client *http.Client, addr string, request hatriecache.CacheCommandRequest, wireFormat string, stdout io.Writer) error {
+	reader, contentType, contentEncoding, err := commandRequestBody(request, wireFormat)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, "/api/commands"), reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", contentType)
+	if contentEncoding != "" {
+		req.Header.Set("Content-Encoding", contentEncoding)
+	}
+	return doAndCopy(client, req, stdout)
+}
+
 func postJSONReaderWithEncoding(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, contentEncoding string, stdout io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, path), body)
 	if err != nil {
@@ -349,6 +368,24 @@ func jsonValueRequestBody(value interface{}, estimatedSize int) (io.Reader, stri
 
 func jsonRequestBody(data []byte) (io.Reader, string, error) {
 	return jsonwire.EncodedRequestBody(data, minCompressedJSONRequestBytes)
+}
+
+func commandRequestBody(request hatriecache.CacheCommandRequest, wireFormat string) (io.Reader, string, string, error) {
+	estimatedSize := estimatedCommandRequestBytes(request)
+	switch strings.ToLower(strings.TrimSpace(wireFormat)) {
+	case "", defaultCommandWireFormat:
+		body, contentType, contentEncoding, err := hatriecache.CommandRequestBody(request, hatriecache.CommandWireFormatProtobuf, estimatedSize, minCompressedJSONRequestBytes)
+		if err == nil {
+			return body, contentType, contentEncoding, nil
+		}
+		return hatriecache.CommandRequestBody(request, hatriecache.CommandWireFormatJSON, estimatedSize, minCompressedJSONRequestBytes)
+	case string(hatriecache.CommandWireFormatJSON):
+		return hatriecache.CommandRequestBody(request, hatriecache.CommandWireFormatJSON, estimatedSize, minCompressedJSONRequestBytes)
+	case string(hatriecache.CommandWireFormatProtobuf), "proto", "pb":
+		return hatriecache.CommandRequestBody(request, hatriecache.CommandWireFormatProtobuf, estimatedSize, minCompressedJSONRequestBytes)
+	default:
+		return nil, "", "", fmt.Errorf("unsupported command wire format %q", wireFormat)
+	}
 }
 
 func estimatedCommandRequestBytes(request hatriecache.CacheCommandRequest) int {

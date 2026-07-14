@@ -17,7 +17,10 @@ import (
 	"testing/iotest"
 
 	hatriecache "hatrie_cache"
+	"hatrie_cache/internal/gen/hatriecache/v1"
 	"hatrie_cache/internal/jsonwire"
+
+	"google.golang.org/protobuf/proto"
 )
 
 type cliRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -455,7 +458,52 @@ func TestRunJournalRejectsInvalidFollowFlags(t *testing.T) {
 	}
 }
 
-func TestRunCommandPostsJSON(t *testing.T) {
+func TestRunCommandPostsProtobufByDefault(t *testing.T) {
+	var gotRequest hatriecachev1.CommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/x-protobuf" {
+			t.Fatalf("Content-Type = %q, want application/x-protobuf", got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("Accept = %q, want application/json", got)
+		}
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll() error = %v", err)
+		}
+		if err := proto.Unmarshal(data, &gotRequest); err != nil {
+			t.Fatalf("Unmarshal() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"stored"}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "SETSTR",
+		"-key", "name",
+		"-value", "ivi",
+		"-ttl-seconds", "60",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command) error = %v", err)
+	}
+	if gotRequest.GetCommand() != "SETSTR" || gotRequest.GetKey() != "name" || gotRequest.GetValue() != "ivi" {
+		t.Fatalf("request = %q/%q/%q, want SETSTR/name/ivi", gotRequest.GetCommand(), gotRequest.GetKey(), gotRequest.GetValue())
+	}
+	if gotRequest.TtlSeconds == nil || gotRequest.GetTtlSeconds() != 60 {
+		t.Fatalf("ttl = %v, want 60", gotRequest.TtlSeconds)
+	}
+	if got := stdout.String(); got != "{\"ok\":true,\"message\":\"stored\"}\n" {
+		t.Fatalf("stdout = %q, want command response", got)
+	}
+}
+
+func TestRunCommandPostsJSONWhenRequested(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -478,6 +526,7 @@ func TestRunCommandPostsJSON(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "SETSTR",
 		"-key", "name",
 		"-value", "ivi",
@@ -518,6 +567,7 @@ func TestRunCommandCompressesLargeJSONPost(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "SETSTR",
 		"-key", "large",
 		"-value", large,
@@ -620,6 +670,60 @@ func TestJSONValueRequestBodyStreamsLargeStructuredCommandPayload(t *testing.T) 
 	}
 }
 
+func TestCommandRequestBodyAutoFallsBackToJSONForComplexPayload(t *testing.T) {
+	payload := hatriecache.CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs: hatriecache.Map{
+			"nested": hatriecache.Map{"city": "Singapore"},
+		},
+	}
+	body, contentType, contentEncoding, err := commandRequestBody(payload, "auto")
+	if err != nil {
+		t.Fatalf("commandRequestBody(auto complex) error = %v", err)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("contentType = %q, want application/json", contentType)
+	}
+	if contentEncoding != "" {
+		t.Fatalf("contentEncoding = %q, want empty", contentEncoding)
+	}
+	var decoded hatriecache.CacheCommandRequest
+	if err := json.NewDecoder(body).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(auto fallback JSON) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.Pairs, payload.Pairs) {
+		t.Fatalf("decoded pairs = %#v, want %#v", decoded.Pairs, payload.Pairs)
+	}
+}
+
+func TestCommandRequestBodyForcedProtobufRejectsComplexPayload(t *testing.T) {
+	payload := hatriecache.CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs: hatriecache.Map{
+			"nested": hatriecache.Map{"city": "Singapore"},
+		},
+	}
+	body, contentType, contentEncoding, err := commandRequestBody(payload, "protobuf")
+	if err == nil {
+		t.Fatal("commandRequestBody(protobuf complex) error = nil, want unsupported value error")
+	}
+	if body != nil || contentType != "" || contentEncoding != "" {
+		t.Fatalf("commandRequestBody(protobuf complex) = %T/%q/%q, want nil/empty/empty", body, contentType, contentEncoding)
+	}
+}
+
+func TestCommandRequestBodyRejectsUnsupportedWireFormat(t *testing.T) {
+	body, contentType, contentEncoding, err := commandRequestBody(hatriecache.CacheCommandRequest{Command: "GET", Key: "key"}, "msgpack")
+	if err == nil || !strings.Contains(err.Error(), "unsupported command wire format") {
+		t.Fatalf("commandRequestBody(msgpack) error = %v, want unsupported format", err)
+	}
+	if body != nil || contentType != "" || contentEncoding != "" {
+		t.Fatalf("commandRequestBody(msgpack) = %T/%q/%q, want nil/empty/empty", body, contentType, contentEncoding)
+	}
+}
+
 func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -636,6 +740,7 @@ func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "PUTMAP",
 		"-key", "profile",
 		"-subkey", "city",
@@ -688,6 +793,7 @@ func TestRunCommandPostsRadixTreeFields(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "PUTRT",
 		"-key", "index",
 		"-subkey", "user:100/profile",
@@ -698,6 +804,7 @@ func TestRunCommandPostsRadixTreeFields(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "PUTRT",
 		"-key", "index",
 		"-pairs", `{"user:101/profile":"idle","user:102/profile":42}`,
@@ -821,6 +928,7 @@ func TestRunCommandPostsBloomFilterOptions(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "CREATEBF",
 		"-key", "seen",
 		"-value", "10000",
@@ -847,6 +955,7 @@ func TestRunCommandPostsCuckooFilterOptions(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "CREATECF",
 		"-key", "active",
 		"-value", "10000",
@@ -875,6 +984,7 @@ func TestRunCommandPostsRoaringBitmapValues(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "ADDRB",
 		"-key", "ids",
 		"-values", `[1,65543]`,
@@ -903,6 +1013,7 @@ func TestRunCommandPostsCountMinSketchOptions(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "CREATECMS",
 		"-key", "freq",
 		"-value", "2048",
@@ -929,6 +1040,7 @@ func TestRunCommandPostsHyperLogLogOptions(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "CREATEHLL",
 		"-key", "card",
 		"-value", "14",
@@ -954,6 +1066,7 @@ func TestRunCommandPostsTopKOptions(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "CREATETOPK",
 		"-key", "top",
 		"-value", "100",
@@ -979,6 +1092,7 @@ func TestRunCommandPostsReservoirSampleOptions(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "CREATERS",
 		"-key", "sample",
 		"-value", "128",
@@ -1004,6 +1118,7 @@ func TestRunCommandPostsQuantileSketchOptions(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "CREATEQ",
 		"-key", "latency",
 		"-value", "0.02",
@@ -1029,6 +1144,7 @@ func TestRunCommandPostsFenwickTreeOptions(t *testing.T) {
 	if err := run(context.Background(), []string{
 		"-addr", server.URL,
 		"command",
+		"-wire-format", "json",
 		"-cmd", "ADDFW",
 		"-key", "scores",
 		"-value", "2",

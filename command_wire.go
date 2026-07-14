@@ -161,6 +161,11 @@ func commandRequestBody(request CacheCommandRequest, format CommandWireFormat, e
 	return body, commandWireContentTypeJSON, contentEncoding, nil
 }
 
+// CommandRequestBody serializes a cache command request for the HTTP command API.
+func CommandRequestBody(request CacheCommandRequest, format CommandWireFormat, estimatedJSONSize int, compressionThreshold int) (io.Reader, string, string, error) {
+	return commandRequestBody(request, format, estimatedJSONSize, compressionThreshold)
+}
+
 func decodeCommandResponseWire(reader io.Reader, contentType string, limit int64) (CacheCommandResponse, error) {
 	format, ok := commandWireFormatFromContentType(contentType)
 	if !ok {
