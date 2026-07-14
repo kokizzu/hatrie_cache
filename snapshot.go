@@ -93,6 +93,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 
 	now := ht.currentTime()
 	operations := make([]snapshotOperation, 0, len(snapshot.Entries))
+	seenKeys := make(map[string]struct{}, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
 			continue
@@ -101,6 +102,10 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 		if err != nil {
 			return SnapshotMetadata{}, err
 		}
+		if _, exists := seenKeys[entry.Key]; exists {
+			return SnapshotMetadata{}, errors.New("hatriecache: snapshot contains duplicate active key")
+		}
+		seenKeys[entry.Key] = struct{}{}
 		operations = append(operations, operation)
 	}
 

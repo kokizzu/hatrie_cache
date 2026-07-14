@@ -512,6 +512,26 @@ func TestLoadSnapshotRejectsInvalidCollectionsWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotRejectsDuplicateActiveKeysWithoutMutation(t *testing.T) {
+	payload := []byte(`{"version":1,"entries":[{"key":"existing","type":"string","string":"changed"},{"key":"dup","type":"string","string":"first"},{"key":"dup","type":"string","string":"second"}]}`)
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	ht.UpsertString("existing", "keep")
+	if err := ht.LoadSnapshot(path); err == nil || !strings.Contains(err.Error(), "duplicate active key") {
+		t.Fatalf("LoadSnapshot(duplicate key) error = %v, want duplicate active key error", err)
+	}
+	if got := ht.GetString("existing"); got != "keep" {
+		t.Fatalf("existing after rejected duplicate snapshot = %q, want keep", got)
+	}
+	if ht.Exists("dup") {
+		t.Fatal("duplicate snapshot created dup key")
+	}
+}
+
 func TestLoadSnapshotRejectsTooLongKey(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("existing", "keep")
