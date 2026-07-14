@@ -3474,11 +3474,91 @@ func TestHyperLogLogOperations(t *testing.T) {
 	if got, ok := ht.CountHyperLogLog("card"); !ok || got != 0 {
 		t.Fatalf("CountHyperLogLog(card after replace) = %d/%v, want 0 hit", got, ok)
 	}
+	info, ok = ht.HyperLogLogInfo("card")
+	if !ok || info.Precision != 8 || info.RegisterCount != 1<<8 || info.RegisterBytes != 0 || info.Observations != 0 {
+		t.Fatalf("HyperLogLogInfo(card after replace) = %#v/%v, want lazy empty registers", info, ok)
+	}
 	if got := ht.AddHyperLogLog("auto", "value"); got < 1 {
 		t.Fatalf("AddHyperLogLog(auto) = %d, want at least 1", got)
 	}
 	if hval := ht.Get("auto"); !hval.IsHyperLogLog() {
 		t.Fatalf("AddHyperLogLog(auto) stored type %+v, want hyperloglog", hval)
+	}
+}
+
+func TestHyperLogLogEmptyRegistersAllocatesLazily(t *testing.T) {
+	hll, err := newHyperLogLogData(maxHyperLogLogPrecision)
+	if err != nil {
+		t.Fatalf("newHyperLogLogData(max) error = %v", err)
+	}
+	if len(hll.registers) != 0 {
+		t.Fatalf("newHyperLogLogData(max) allocated %d registers, want lazy empty backing", len(hll.registers))
+	}
+	if got := hll.Count(); got != 0 {
+		t.Fatalf("Count(empty max) = %d, want 0", got)
+	}
+	info := hll.Info()
+	if info.Precision != maxHyperLogLogPrecision || info.RegisterCount != 1<<maxHyperLogLogPrecision || info.RegisterBytes != 0 || info.Estimate != 0 {
+		t.Fatalf("Info(empty max) = %#v, want logical shape with no backing bytes", info)
+	}
+	snapshot := hll.Snapshot()
+	if snapshot.Precision != maxHyperLogLogPrecision || snapshot.Registers != "" {
+		t.Fatalf("Snapshot(empty max) = %#v, want compact empty registers", snapshot)
+	}
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:        "hyperloglog",
+			HyperLogLog: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(empty hyperloglog) error = %v", err)
+	}
+	if size != 0 {
+		t.Fatalf("snapshotOperationValueSize(empty hyperloglog) = %d, want 0", size)
+	}
+	if _, err := hll.AddOneChecked(func() {}); err == nil {
+		t.Fatal("AddOneChecked(unsupported empty) error = nil, want error")
+	}
+	if len(hll.registers) != 0 {
+		t.Fatalf("AddOneChecked(unsupported empty) allocated %d registers, want none", len(hll.registers))
+	}
+
+	legacyZero := hyperLogLogSnapshot{
+		Precision: maxHyperLogLogPrecision,
+		Registers: base64.StdEncoding.EncodeToString(make([]byte, hyperLogLogRegisterCount(maxHyperLogLogPrecision))),
+	}
+	restored, err := newHyperLogLogDataFromSnapshot(legacyZero)
+	if err != nil {
+		t.Fatalf("newHyperLogLogDataFromSnapshot(legacy zero) error = %v", err)
+	}
+	if len(restored.registers) != 0 {
+		t.Fatalf("restored legacy zero allocated %d registers, want lazy empty backing", len(restored.registers))
+	}
+	if estimate, err := restored.AddOneChecked("alpha"); err != nil || estimate != 1 {
+		t.Fatalf("AddOneChecked(restored legacy zero) = %d/%v, want one changed register", estimate, err)
+	}
+	if len(restored.registers) != hyperLogLogRegisterCount(maxHyperLogLogPrecision) {
+		t.Fatalf("AddOneChecked(restored legacy zero) allocated %d registers, want %d", len(restored.registers), hyperLogLogRegisterCount(maxHyperLogLogPrecision))
+	}
+
+	ht := newTestTrie(t)
+	if err := ht.UpsertHyperLogLog("card", 10); err != nil {
+		t.Fatalf("UpsertHyperLogLog() error = %v", err)
+	}
+	info, ok := ht.HyperLogLogInfo("card")
+	if !ok || info.Precision != 10 || info.RegisterCount != 1<<10 || info.RegisterBytes != 0 || info.Observations != 0 {
+		t.Fatalf("HyperLogLogInfo(empty upsert) = %#v/%v, want lazy empty registers", info, ok)
+	}
+	if got, ok := ht.CountHyperLogLog("card"); !ok || got != 0 {
+		t.Fatalf("CountHyperLogLog(empty upsert) = %d/%v, want 0/true", got, ok)
+	}
+	if got := ht.AddHyperLogLog("card", "alpha"); got < 1 {
+		t.Fatalf("AddHyperLogLog(first observation) = %d, want nonzero estimate", got)
+	}
+	info, ok = ht.HyperLogLogInfo("card")
+	if !ok || info.RegisterBytes != 1<<10 || info.Observations != 1 || info.NonZeroRegisters == 0 || info.Estimate == 0 {
+		t.Fatalf("HyperLogLogInfo(after first observation) = %#v/%v, want allocated registers", info, ok)
 	}
 }
 
@@ -3535,6 +3615,7 @@ func TestHyperLogLogSnapshotValidationRejectsInvalidRegisterRank(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newHyperLogLogData() error = %v", err)
 	}
+	hll.Add("alpha")
 	snapshot := hll.Snapshot()
 	raw, err := base64.StdEncoding.DecodeString(snapshot.Registers)
 	if err != nil {
@@ -3548,20 +3629,34 @@ func TestHyperLogLogSnapshotValidationRejectsInvalidRegisterRank(t *testing.T) {
 }
 
 func TestHyperLogLogSnapshotValidationRejectsImpossibleObservations(t *testing.T) {
-	hll, err := newHyperLogLogData(10)
-	if err != nil {
-		t.Fatalf("newHyperLogLogData() error = %v", err)
+	raw := make([]byte, hyperLogLogRegisterCount(10))
+	raw[0] = 1
+	raw[1] = 1
+	snapshot := hyperLogLogSnapshot{
+		Precision:    10,
+		Observations: 1,
+		Registers:    base64.StdEncoding.EncodeToString(raw),
 	}
-	hll.registers[0] = 1
-	hll.registers[1] = 1
-	snapshot := hll.Snapshot()
-	snapshot.Observations = 1
 	if err := validateHyperLogLogSnapshot(snapshot); err == nil {
 		t.Fatal("validateHyperLogLogSnapshot(nonzero registers) error = nil, want error")
 	}
 	snapshot.Observations = 2
 	if err := validateHyperLogLogSnapshot(snapshot); err != nil {
 		t.Fatalf("validateHyperLogLogSnapshot(two observations) error = %v, want nil", err)
+	}
+
+	emptyObserved := hyperLogLogSnapshot{Precision: 10, Observations: 1}
+	if err := validateHyperLogLogSnapshot(emptyObserved); err == nil {
+		t.Fatal("validateHyperLogLogSnapshot(empty observed) error = nil, want error")
+	}
+
+	zeroObserved := hyperLogLogSnapshot{
+		Precision:    10,
+		Observations: 1,
+		Registers:    base64.StdEncoding.EncodeToString(make([]byte, hyperLogLogRegisterCount(10))),
+	}
+	if err := validateHyperLogLogSnapshot(zeroObserved); err == nil {
+		t.Fatal("validateHyperLogLogSnapshot(zero observed) error = nil, want error")
 	}
 }
 

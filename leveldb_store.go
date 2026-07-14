@@ -310,7 +310,8 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.HyperLogLog == nil {
 			return 0, errors.New("hatriecache: hyperloglog snapshot is required")
 		}
-		return int64(hyperLogLogRegisterCount(entry.HyperLogLog.Precision)), nil
+		raw, err := base64.StdEncoding.DecodeString(entry.HyperLogLog.Registers)
+		return int64(len(raw)), err
 	case "top_k":
 		if entry.TopK == nil {
 			return 0, errors.New("hatriecache: top-k snapshot is required")

@@ -44,7 +44,6 @@ func newHyperLogLogData(precision uint8) (hyperLogLogData, error) {
 		return hyperLogLogData{}, err
 	}
 	return hyperLogLogData{
-		registers: make([]uint8, hyperLogLogRegisterCount(precision)),
 		precision: precision,
 	}, nil
 }
@@ -72,6 +71,12 @@ func validateHyperLogLogSnapshot(snapshot hyperLogLogSnapshot) error {
 	if err != nil {
 		return err
 	}
+	if len(data) == 0 {
+		if snapshot.Observations != 0 {
+			return errors.New("hatriecache: empty hyperloglog registers have observations")
+		}
+		return nil
+	}
 	if len(data) != hyperLogLogRegisterCount(snapshot.Precision) {
 		return errors.New("hatriecache: invalid hyperloglog register length")
 	}
@@ -88,6 +93,9 @@ func validateHyperLogLogSnapshot(snapshot hyperLogLogSnapshot) error {
 	if nonZeroRegisters > snapshot.Observations {
 		return errors.New("hatriecache: hyperloglog snapshot has more nonzero registers than observations")
 	}
+	if snapshot.Observations > 0 && nonZeroRegisters == 0 {
+		return errors.New("hatriecache: observed hyperloglog snapshot has no registers")
+	}
 	return nil
 }
 
@@ -99,13 +107,16 @@ func newHyperLogLogDataFromSnapshot(snapshot hyperLogLogSnapshot) (hyperLogLogDa
 	if err != nil {
 		return hyperLogLogData{}, err
 	}
-	registers := make([]uint8, len(raw))
-	copy(registers, raw)
-	return hyperLogLogData{
-		registers:    registers,
+	out := hyperLogLogData{
 		precision:    snapshot.Precision,
 		observations: snapshot.Observations,
-	}, nil
+	}
+	if len(raw) == 0 || (snapshot.Observations == 0 && !hyperLogLogRawHasRegisters(raw)) {
+		return out, nil
+	}
+	out.registers = make([]uint8, len(raw))
+	copy(out.registers, raw)
+	return out, nil
 }
 
 func (hll *hyperLogLogData) Add(value interface{}) bool {
@@ -124,7 +135,7 @@ func (hll *hyperLogLogData) AddOne(value interface{}, values ...interface{}) int
 }
 
 func (hll *hyperLogLogData) AddOneChecked(value interface{}, values ...interface{}) (int, error) {
-	if hll == nil || hll.precision == 0 || len(hll.registers) == 0 {
+	if hll == nil || hll.precision == 0 {
 		return 0, nil
 	}
 	keys, err := hyperLogLogItemKeys(value, values...)
@@ -141,6 +152,7 @@ func (hll *hyperLogLogData) AddOneChecked(value interface{}, values ...interface
 }
 
 func (hll *hyperLogLogData) addKey(key []byte) bool {
+	hll.ensureRegisters()
 	index, rank := hyperLogLogIndexAndRank(bloomFilterFNV64a(key), hll.precision)
 	hll.observations = saturatingAddUint64(hll.observations, 1)
 	if rank <= hll.registers[index] {
@@ -163,7 +175,7 @@ func (hll hyperLogLogData) Info() HyperLogLogInfo {
 	}
 	return HyperLogLogInfo{
 		Precision:        hll.precision,
-		RegisterCount:    uint64(len(hll.registers)),
+		RegisterCount:    uint64(hll.logicalRegisterCount()),
 		RegisterBytes:    uint64(len(hll.registers)),
 		Observations:     hll.observations,
 		NonZeroRegisters: nonZero,
@@ -181,6 +193,19 @@ func (hll hyperLogLogData) Snapshot() hyperLogLogSnapshot {
 
 func (hll hyperLogLogData) EncodedSize() int64 {
 	return int64(len(hll.registers))
+}
+
+func (hll hyperLogLogData) logicalRegisterCount() int {
+	if hll.precision == 0 {
+		return 0
+	}
+	return hyperLogLogRegisterCount(hll.precision)
+}
+
+func (hll *hyperLogLogData) ensureRegisters() {
+	if hll != nil && len(hll.registers) == 0 && hll.precision > 0 {
+		hll.registers = make([]uint8, hyperLogLogRegisterCount(hll.precision))
+	}
 }
 
 func (hll hyperLogLogData) estimate() float64 {
@@ -238,6 +263,15 @@ func hyperLogLogEstimateUint64(value float64) uint64 {
 
 func hyperLogLogRegisterCount(precision uint8) int {
 	return 1 << precision
+}
+
+func hyperLogLogRawHasRegisters(data []byte) bool {
+	for _, register := range data {
+		if register != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func hyperLogLogMaxRank(precision uint8) uint8 {
