@@ -253,6 +253,12 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			bytes:       raw,
 			encodedSize: size,
 		}, nil
+	case "map":
+		return prepareLevelDBBinaryCollectionValue(entry.Map)
+	case "slice":
+		return prepareLevelDBBinaryCollectionValue(entry.Slice)
+	case "set":
+		return prepareLevelDBBinaryCollectionValue(entry.Set)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -268,6 +274,29 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			encodedSize: size,
 		}, nil
 	}
+}
+
+func prepareLevelDBBinaryCollectionValue(value interface{}) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotCollectionValueBinary(value)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	if !ok {
+		var marshalErr error
+		payload, marshalErr = json.Marshal(value)
+		if marshalErr != nil {
+			return levelDBBinaryPreparedValue{}, marshalErr
+		}
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
 }
 
 func (writer *levelDBBinaryWriter) writePreparedSnapshotEntryValue(value levelDBBinaryPreparedValue) {
@@ -499,10 +528,46 @@ func (reader *levelDBBinaryReader) readSnapshotEntryValue(entry *snapshotEntry) 
 func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 	switch entry.Type {
 	case "map":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			m, ok := value.(Map)
+			if !ok {
+				return errors.New("hatriecache: binary map value is not an object")
+			}
+			entry.Map = m
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.Map)
 	case "slice":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			items, ok := value.(Slice)
+			if !ok {
+				return errors.New("hatriecache: binary slice value is not an array")
+			}
+			entry.Slice = items
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.Slice)
 	case "set":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			items, ok := value.(Slice)
+			if !ok {
+				return errors.New("hatriecache: binary set value is not an array")
+			}
+			entry.Set = Set(items)
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.Set)
 	case "priority_queue":
 		return decodeLevelDBStorageJSON(data, &entry.PriorityQueue)

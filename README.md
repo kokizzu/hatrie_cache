@@ -124,10 +124,12 @@ make monitoring-server GRPC_ADDR=127.0.0.1:9090
 Set `DB_PATH` to load and save cache data through LevelDB with Snappy
 compression. LevelDB records use the binary storage format by default
 (`DB_FORMAT=binary`), which avoids JSON object-field overhead and stores byte
-values as raw bytes instead of base64. Existing JSON records still load
-automatically. Set `DB_FORMAT=json` to keep writing the previous JSON record
-layout. `DB_SYNC_INTERVAL` periodically syncs changed LevelDB records while the
-server is running:
+values as raw bytes instead of base64. Map, slice, and set values use a
+recursive binary value codec for JSON-compatible scalar, array, and object
+payloads, with automatic JSON fallback for values outside that compact codec.
+Existing JSON records still load automatically. Set `DB_FORMAT=json` to keep
+writing the previous JSON record layout. `DB_SYNC_INTERVAL` periodically syncs
+changed LevelDB records while the server is running:
 
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
@@ -330,8 +332,9 @@ about 1.6x faster to encode, about 1.3x faster to decode, about 2% smaller, and
 use less heap; JSON remains easier to inspect manually. Snapshot and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
 carry empty collection fields. Binary snapshots reuse the compact LevelDB record
-codec and avoid base64 for byte values. The gzip-best-binary snapshot default
-uses about 18% fewer snapshot bytes than the previous gzip-best JSON default,
+codec, avoid base64 for byte values, and use the same compact map/slice/set
+payload codec when possible. The gzip-best-binary snapshot default uses about
+18% fewer snapshot bytes than the previous gzip-best JSON default,
 about 27% fewer bytes than the fast gzip-binary format, and about 99% less
 storage than plain JSON. It also uses far fewer allocations and lower heap than
 gzip-best JSON, but about 1.3x the save CPU in this benchmark. Use

@@ -169,6 +169,181 @@ func TestLevelDBBinaryRecordsPreallocateStringAndComplexValues(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryMapSliceSetUseBinaryValuePayloads(t *testing.T) {
+	stringItems := make(Slice, 0, 12)
+	for idx := 0; idx < 12; idx++ {
+		stringItems = append(stringItems, fmt.Sprintf("line-%02d\nquoted\"value", idx))
+	}
+	tests := []struct {
+		name  string
+		entry snapshotEntry
+	}{
+		{
+			name: "map",
+			entry: snapshotEntry{
+				Key:  "profile",
+				Type: "map",
+				Map: Map{
+					"name":   "ivi",
+					"age":    json.Number("32"),
+					"active": true,
+					"tags":   Slice{"alpha", "beta", "gamma"},
+					"nested": Map{"role": "admin"},
+				},
+			},
+		},
+		{
+			name: "slice",
+			entry: snapshotEntry{
+				Key:   "events",
+				Type:  "slice",
+				Slice: stringItems,
+			},
+		},
+		{
+			name: "set",
+			entry: snapshotEntry{
+				Key:  "tags",
+				Type: "set",
+				Set:  Set{"alpha", json.Number("7"), false, Map{"nested": "value"}},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data, err := marshalLevelDBEntry(test.entry, StorageFormatBinary)
+			if err != nil {
+				t.Fatalf("marshalLevelDBEntry(%s) error = %v", test.name, err)
+			}
+			_, payload := levelDBBinaryValuePayloadForTest(t, data)
+			if !snapshotValueDataIsBinary(payload) {
+				t.Fatalf("%s payload header = % x, want binary snapshot value", test.name, payload[:shortHeaderLen(payload)])
+			}
+
+			decoded, err := decodeLevelDBEntry(data)
+			if err != nil {
+				t.Fatalf("decodeLevelDBEntry(%s) error = %v", test.name, err)
+			}
+			if decoded.Key != test.entry.Key || decoded.Type != test.entry.Type {
+				t.Fatalf("decoded %s metadata = %#v, want key/type preserved", test.name, decoded)
+			}
+			switch test.entry.Type {
+			case "map":
+				if !reflect.DeepEqual(decoded.Map, test.entry.Map) {
+					t.Fatalf("decoded map = %#v, want %#v", decoded.Map, test.entry.Map)
+				}
+			case "slice":
+				if !reflect.DeepEqual(decoded.Slice, test.entry.Slice) {
+					t.Fatalf("decoded slice = %#v, want %#v", decoded.Slice, test.entry.Slice)
+				}
+			case "set":
+				if !reflect.DeepEqual(decoded.Set, test.entry.Set) {
+					t.Fatalf("decoded set = %#v, want %#v", decoded.Set, test.entry.Set)
+				}
+			}
+		})
+	}
+}
+
+func TestLevelDBBinaryCollectionPayloadCanBeSmallerThanJSON(t *testing.T) {
+	items := make(Slice, 0, 64)
+	for idx := 0; idx < 64; idx++ {
+		items = append(items, fmt.Sprintf("escaped\nstring\twith\"quotes\"-%02d", idx))
+	}
+	entry := snapshotEntry{Key: "items", Type: "slice", Slice: items}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary slice) error = %v", err)
+	}
+	_, binaryPayload := levelDBBinaryValuePayloadForTest(t, data)
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(slice) error = %v", err)
+	}
+	if len(binaryPayload) >= len(jsonPayload) {
+		t.Fatalf("binary slice payload size = %d, want smaller than JSON payload %d", len(binaryPayload), len(jsonPayload))
+	}
+}
+
+func TestLevelDBBinaryCollectionFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "payload",
+		Type: "map",
+		Map:  Map{"bytes": []byte("value")},
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary map with bytes) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if snapshotValueDataIsBinary(payload) {
+		t.Fatalf("map with bytes payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	}
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(JSON fallback map) error = %v", err)
+	}
+	if got := decoded.Map["bytes"]; got != base64.StdEncoding.EncodeToString([]byte("value")) {
+		t.Fatalf("decoded fallback bytes = %#v, want base64 JSON string", got)
+	}
+}
+
+func TestLevelDBBinaryCollectionStillReadsLegacyJSONPayload(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "legacy",
+		Type: "map",
+		Map:  Map{"name": "ivi", "age": json.Number("32")},
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(map) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON map) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.Map, entry.Map) {
+		t.Fatalf("decoded legacy inner JSON map = %#v, want %#v", decoded.Map, entry.Map)
+	}
+}
+
+func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
+	t.Helper()
+	if !levelDBEntryDataIsBinary(data) {
+		t.Fatalf("record header = % x, want binary LevelDB record", data[:shortHeaderLen(data)])
+	}
+	reader := newBinaryFieldReader(data[len(levelDBBinaryMagic):])
+	if _, err := reader.readString(); err != nil {
+		t.Fatalf("read key error = %v", err)
+	}
+	entryType, err := reader.readString()
+	if err != nil {
+		t.Fatalf("read type error = %v", err)
+	}
+	payload, err := reader.readBytes()
+	if err != nil {
+		t.Fatalf("read value payload error = %v", err)
+	}
+	return entryType, payload
+}
+
 func TestLevelDBBinaryBytesRecordAvoidsBase64StorageExpansion(t *testing.T) {
 	raw := testPayload(256)
 	entry := snapshotEntry{
