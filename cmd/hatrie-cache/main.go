@@ -677,7 +677,22 @@ func writeJSONFileAtomic(path string, value interface{}) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	return syncJSONDirectory(dir)
+}
+
+func syncJSONDirectory(dir string) error {
+	file, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func snapshotCallback(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string) func() error {

@@ -876,6 +876,42 @@ func TestJournalPullStateRejectsSourceMismatch(t *testing.T) {
 	}
 }
 
+func TestWriteJSONFileAtomicReplacesFileAndCleansTemporaryFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	if err := writeJSONFileAtomic(path, map[string]interface{}{"sequence": 1}); err != nil {
+		t.Fatalf("writeJSONFileAtomic(first) error = %v", err)
+	}
+	if err := writeJSONFileAtomic(path, map[string]interface{}{"sequence": 2}); err != nil {
+		t.Fatalf("writeJSONFileAtomic(second) error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(data), `"sequence": 2`) {
+		t.Fatalf("file payload = %q, want second JSON payload", data)
+	}
+	assertNoJSONAtomicTempFiles(t, dir, "state.json")
+}
+
+func TestWriteJSONFileAtomicCleansTemporaryFileOnRenameError(t *testing.T) {
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "state.json")
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+
+	if err := writeJSONFileAtomic(targetDir, map[string]interface{}{"sequence": 1}); err == nil {
+		t.Fatal("writeJSONFileAtomic(directory target) error = nil, want error")
+	}
+	assertNoJSONAtomicTempFiles(t, dir, "state.json")
+	if info, err := os.Stat(targetDir); err != nil || !info.IsDir() {
+		t.Fatalf("target directory = %v/%v, want existing directory", info, err)
+	}
+}
+
 func TestJournaledSnapshotHelpersCheckpointAndCompact(t *testing.T) {
 	dir := t.TempDir()
 	snapshotPath := filepath.Join(dir, "snapshot.json")
@@ -925,4 +961,18 @@ func waitUntil(t *testing.T, timeout time.Duration, ready func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("condition did not become true before timeout")
+}
+
+func assertNoJSONAtomicTempFiles(t *testing.T, dir string, base string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s) error = %v", dir, err)
+	}
+	prefix := "." + base + ".tmp-"
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			t.Fatalf("temporary file %q was not cleaned up", entry.Name())
+		}
+	}
 }
