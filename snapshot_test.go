@@ -576,6 +576,42 @@ func TestValidateSnapshotEntryRejectsUnsupportedCollectionValues(t *testing.T) {
 	}
 }
 
+func TestValidateSnapshotEntryRejectsInconsistentKeyStats(t *testing.T) {
+	entry := snapshotEntry{
+		Key:    "bad-stats",
+		Type:   "string",
+		String: "value",
+		Stats: &KeyStats{
+			Reads:  1,
+			Hits:   2,
+			Misses: 0,
+		},
+	}
+	if _, err := validateSnapshotEntry(entry); err == nil || !strings.Contains(err.Error(), "key stats reads must equal hits plus misses") {
+		t.Fatalf("validateSnapshotEntry(inconsistent key stats) error = %v, want key stats read count error", err)
+	}
+}
+
+func TestLoadSnapshotRejectsInconsistentKeyStatsWithoutMutation(t *testing.T) {
+	payload := []byte(`{"version":1,"entries":[{"key":"existing","type":"string","string":"changed"},{"key":"bad-stats","type":"string","string":"value","stats":{"reads":1,"hits":2,"misses":0}}]}`)
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	ht.UpsertString("existing", "keep")
+	if err := ht.LoadSnapshot(path); err == nil || !strings.Contains(err.Error(), "key stats reads must equal hits plus misses") {
+		t.Fatalf("LoadSnapshot(inconsistent key stats) error = %v, want key stats read count error", err)
+	}
+	if got := ht.GetString("existing"); got != "keep" {
+		t.Fatalf("existing after rejected key stats snapshot = %q, want keep", got)
+	}
+	if ht.Exists("bad-stats") {
+		t.Fatal("invalid key stats snapshot created bad-stats key")
+	}
+}
+
 func TestValidateSnapshotEntryRejectsCorruptPriorityQueueSequences(t *testing.T) {
 	tests := []snapshotEntry{
 		{

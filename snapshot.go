@@ -228,6 +228,9 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 	if err := validateKey(entry.Key); err != nil {
 		return snapshotOperation{}, err
 	}
+	if err := validateKeyStatsSnapshot(entry.Stats); err != nil {
+		return snapshotOperation{}, err
+	}
 
 	operation := snapshotOperation{entry: entry}
 	switch entry.Type {

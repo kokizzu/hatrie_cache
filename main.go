@@ -1629,6 +1629,9 @@ func (ht *HatTrie) LoadStats(path string) error {
 	if err := json.Unmarshal(data, &stats); err != nil {
 		return err
 	}
+	if err := validateCacheStatsSnapshot(stats); err != nil {
+		return err
+	}
 	stats.updateRates()
 
 	ht.mu.Lock()
@@ -2053,6 +2056,24 @@ func (stats *KeyStats) updateRates() {
 	rate := float64(stats.Hits) / float64(stats.Reads)
 	stats.HitRate = rate
 	stats.CumulativeHitRate = rate
+}
+
+func validateCacheStatsSnapshot(stats CacheStats) error {
+	return validateReadStatsSnapshot(stats.Reads, stats.Hits, stats.Misses, "cache stats")
+}
+
+func validateKeyStatsSnapshot(stats *KeyStats) error {
+	if stats == nil {
+		return nil
+	}
+	return validateReadStatsSnapshot(stats.Reads, stats.Hits, stats.Misses, "key stats")
+}
+
+func validateReadStatsSnapshot(reads uint64, hits uint64, misses uint64, label string) error {
+	if hits > reads || misses > reads || reads-hits != misses {
+		return fmt.Errorf("hatriecache: %s reads must equal hits plus misses", label)
+	}
+	return nil
 }
 
 func (ht *HatTrie) upsertLocation(key string) *C.value_t {

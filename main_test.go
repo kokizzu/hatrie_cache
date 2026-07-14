@@ -1454,6 +1454,24 @@ func TestLoadStatsRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestLoadStatsRejectsInconsistentReadCountsWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+	_ = ht.GetString("key")
+	before := ht.Stats()
+
+	path := filepath.Join(t.TempDir(), "stats.json")
+	if err := os.WriteFile(path, []byte(`{"reads":1,"hits":2,"misses":0}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := ht.LoadStats(path); err == nil || !strings.Contains(err.Error(), "reads must equal hits plus misses") {
+		t.Fatalf("LoadStats(inconsistent counts) error = %v, want read count error", err)
+	}
+	if got := ht.Stats(); !cacheStatsEqual(got, before) {
+		t.Fatalf("stats after rejected LoadStats = %#v, want %#v", got, before)
+	}
+}
+
 func TestConcurrentStatsUpdatesAreSynchronized(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("key", "value")
