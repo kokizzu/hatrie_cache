@@ -4,8 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -129,6 +131,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	now := trie.currentTime()
 	type levelDBLoadOperation struct {
 		operation snapshotOperation
+		entry     snapshotEntry
 		reference bool
 	}
 	operations := []levelDBLoadOperation{}
@@ -142,14 +145,27 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
 			continue
 		}
+		if policy.HotValuesOnly && (!levelDBShouldHotLoadMetadata(entry, now, policy) || levelDBEntryExceedsMaxValueBytes(entry, policy)) {
+			if err := validateLevelDBReferenceEntry(entry); err != nil {
+				return LevelDBLoadResult{}, err
+			}
+			activeKeys[entry.Key] = struct{}{}
+			operations = append(operations, levelDBLoadOperation{
+				entry:     entry,
+				reference: true,
+			})
+			continue
+		}
 		operation, err := validateSnapshotEntry(entry)
 		if err != nil {
 			return LevelDBLoadResult{}, err
 		}
+		reference := policy.HotValuesOnly && !levelDBShouldHotLoad(operation, now, policy)
 		activeKeys[entry.Key] = struct{}{}
 		operations = append(operations, levelDBLoadOperation{
 			operation: operation,
-			reference: policy.HotValuesOnly && !levelDBShouldHotLoad(operation, now, policy),
+			entry:     entry,
+			reference: reference,
 		})
 	}
 	if err := iterator.Error(); err != nil {
@@ -162,12 +178,12 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	createdKeys := make(map[string]struct{})
 	rollbackOperations := make([]snapshotOperation, 0)
 	for _, operation := range operations {
-		rollbackOperation, existed, err := trie.restoreRollbackOperationLocked(operation.operation.entry.Key)
+		rollbackOperation, existed, err := trie.restoreRollbackOperationLocked(operation.entry.Key)
 		if err != nil {
 			return LevelDBLoadResult{}, err
 		}
 		if operation.reference {
-			if _, err := trie.applyLevelDBReferenceLocked(store, operation.operation.entry); err != nil {
+			if _, err := trie.applyLevelDBReferenceLocked(store, operation.entry); err != nil {
 				if existed {
 					rollbackOperations = append(rollbackOperations, rollbackOperation)
 				}
@@ -244,20 +260,7 @@ func (trie *HatTrie) LoadLevelDB(path string) (int, error) {
 }
 
 func levelDBShouldHotLoad(operation snapshotOperation, now time.Time, policy LevelDBLoadPolicy) bool {
-	if !policy.HotValuesOnly {
-		return true
-	}
-	if policy.MaxLastHitAge < 0 || policy.MaxValueBytes < 0 {
-		return false
-	}
-	stats := operation.entry.Stats
-	if stats == nil || stats.LastHit.IsZero() {
-		return false
-	}
-	if policy.MaxLastHitAge > 0 && now.Sub(stats.LastHit) > policy.MaxLastHitAge {
-		return false
-	}
-	if stats.Hits < policy.MinHits {
+	if !levelDBShouldHotLoadMetadata(operation.entry, now, policy) {
 		return false
 	}
 	if policy.MaxValueBytes > 0 {
@@ -267,6 +270,87 @@ func levelDBShouldHotLoad(operation snapshotOperation, now time.Time, policy Lev
 		}
 	}
 	return true
+}
+
+func levelDBShouldHotLoadMetadata(entry snapshotEntry, now time.Time, policy LevelDBLoadPolicy) bool {
+	if !policy.HotValuesOnly {
+		return true
+	}
+	if policy.MaxLastHitAge < 0 || policy.MaxValueBytes < 0 {
+		return false
+	}
+	stats := entry.Stats
+	if stats == nil || stats.LastHit.IsZero() {
+		return false
+	}
+	if policy.MaxLastHitAge > 0 && now.Sub(stats.LastHit) > policy.MaxLastHitAge {
+		return false
+	}
+	if stats.Hits < policy.MinHits {
+		return false
+	}
+	return true
+}
+
+func levelDBEntryExceedsMaxValueBytes(entry snapshotEntry, policy LevelDBLoadPolicy) bool {
+	if !policy.HotValuesOnly || policy.MaxValueBytes <= 0 {
+		return false
+	}
+	switch entry.Type {
+	case "counter":
+		return 4 > policy.MaxValueBytes
+	case "string":
+		return int64(len(entry.String)) > policy.MaxValueBytes
+	case "bytes":
+		size, ok := base64DecodedSize(entry.Bytes)
+		return ok && size > policy.MaxValueBytes
+	default:
+		return false
+	}
+}
+
+func base64DecodedSize(encoded string) (int64, bool) {
+	if len(encoded)%4 != 0 {
+		return 0, false
+	}
+	padding := 0
+	if strings.HasSuffix(encoded, "==") {
+		padding = 2
+	} else if strings.HasSuffix(encoded, "=") {
+		padding = 1
+	}
+	return int64(len(encoded)/4*3 - padding), true
+}
+
+func validateLevelDBReferenceEntry(entry snapshotEntry) error {
+	if err := validateKey(entry.Key); err != nil {
+		return err
+	}
+	if err := validateKeyStatsSnapshot(entry.Stats); err != nil {
+		return err
+	}
+	switch entry.Type {
+	case "counter", "string":
+		return nil
+	case "bytes":
+		return validateBase64String(entry.Bytes)
+	default:
+		_, err := validateSnapshotEntry(entry)
+		return err
+	}
+}
+
+func validateBase64String(encoded string) error {
+	decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
+	var buf [32 * 1024]byte
+	for {
+		if _, err := decoder.Read(buf[:]); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
 }
 
 func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {

@@ -741,6 +741,89 @@ func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T)
 	}
 }
 
+func TestLevelDBStoreHotLoadKeepsLargeBytesColdWithoutMaterializing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	now := time.Unix(4625, 0)
+	source.now = func() time.Time { return now }
+	payload := testPayload(70 * 1024)
+	source.UpsertBytes("large", payload)
+	policy := DefaultLevelDBHotLoadPolicy()
+	for i := uint64(0); i < policy.MinHits; i++ {
+		if got := source.GetBytes("large"); !bytes.Equal(got, payload) {
+			t.Fatalf("GetBytes(large) changed before save")
+		}
+	}
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now.Add(time.Minute) }
+	result, err := store.LoadWithPolicy(loaded, policy)
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 1 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want cold large bytes reference only", result)
+	}
+	entries := loaded.Entries(true)
+	if len(entries) != 1 || entries[0].Key != "large" || !entries[0].Value.IsLevelDBReference() {
+		t.Fatalf("entries after hot-load = %#v, want large leveldb reference", entries)
+	}
+	if got := len(loaded.disks.paths); got != 0 {
+		t.Fatalf("disk paths before hydration = %d, want 0", got)
+	}
+	if got := loaded.GetBytes("large"); !bytes.Equal(got, payload) {
+		t.Fatalf("hydrated large bytes changed")
+	}
+	if hval := loaded.Get("large"); !hval.IsBytesAtRaws() || !hval.OnDisk() {
+		t.Fatalf("large value after hydration = %+v, want on-disk bytes", hval)
+	}
+}
+
+func TestLevelDBStoreHotLoadRejectsCorruptColdBytesWithoutMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	entry := snapshotEntry{Key: "bad", Type: "bytes", Bytes: "not-base64!!!"}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("Marshal(bad entry) error = %v", err)
+	}
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		t.Fatalf("lockDB() error = %v", err)
+	}
+	if err := db.Put(levelDBKey("bad"), data, nil); err != nil {
+		unlock()
+		t.Fatalf("db.Put(bad) error = %v", err)
+	}
+	unlock()
+
+	loaded := newTestTrie(t)
+	loaded.UpsertString("existing", "keep")
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err == nil {
+		t.Fatal("LoadWithPolicy(corrupt cold bytes) error = nil, want base64 error")
+	}
+	if got := loaded.GetString("existing"); got != "keep" {
+		t.Fatalf("existing after rejected load = %q, want keep", got)
+	}
+	if loaded.Exists("bad") {
+		t.Fatal("corrupt cold bytes created bad key")
+	}
+}
+
 func TestLevelDBStoreCloseIsIdempotentAndRejectsOperations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
