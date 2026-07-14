@@ -62,8 +62,6 @@ func newTopKData(capacity uint64) (topKData, error) {
 	}
 	return topKData{
 		capacity: capacity,
-		items:    make([]topKItem, 0, int(capacity)),
-		byKey:    make(map[string]int, int(capacity)),
 	}, nil
 }
 
@@ -139,7 +137,9 @@ func newTopKDataFromSnapshot(snapshot topKSnapshot) (topKData, error) {
 		capacity: snapshot.Capacity,
 		total:    snapshot.Total,
 		items:    make([]topKItem, len(snapshot.Items)),
-		byKey:    make(map[string]int, int(snapshot.Capacity)),
+	}
+	if len(snapshot.Items) > 0 {
+		data.byKey = make(map[string]int, len(snapshot.Items))
 	}
 	for idx, item := range snapshot.Items {
 		data.items[idx] = topKItem{
@@ -182,7 +182,7 @@ func (top *topKData) AddOneChecked(value interface{}, count uint64, values ...in
 		return top.estimateKey(prepared[len(prepared)-1].Key), nil
 	}
 	if top.byKey == nil {
-		top.byKey = make(map[string]int, int(top.capacity))
+		top.byKey = make(map[string]int, topKInitialIndexCapacity(top.capacity, len(top.items)+len(prepared)))
 	}
 	estimate := TopKEstimate{}
 	for _, item := range prepared {
@@ -211,6 +211,16 @@ func (top topKData) estimateKey(key string) TopKEstimate {
 	}
 	item := top.items[idx]
 	return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+}
+
+func topKInitialIndexCapacity(capacity uint64, needed int) int {
+	if needed <= 0 {
+		return 0
+	}
+	if uint64(needed) > capacity {
+		return int(capacity)
+	}
+	return needed
 }
 
 func (top *topKData) addPrepared(item topKItem, count uint64) TopKEstimate {

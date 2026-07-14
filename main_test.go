@@ -3473,6 +3473,37 @@ func TestTopKRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestTopKLargeEmptyCapacityAllocatesLazily(t *testing.T) {
+	ht := newTestTrie(t)
+	if err := ht.UpsertTopK("top", maxTopKCapacity); err != nil {
+		t.Fatalf("UpsertTopK(max) error = %v", err)
+	}
+	hval := ht.Get("top")
+	top := ht.topKs.array[hval.Index]
+	if cap(top.items) != 0 || top.byKey != nil {
+		t.Fatalf("empty max-capacity Top-K allocated cap(items)=%d byKey nil=%v, want lazy empty backing", cap(top.items), top.byKey == nil)
+	}
+	if info, ok := ht.TopKInfo("top"); !ok || info.Capacity != maxTopKCapacity || info.Tracked != 0 {
+		t.Fatalf("TopKInfo(empty max) = %#v/%v, want logical max capacity without tracked items", info, ok)
+	}
+
+	if estimate, err := ht.AddTopKChecked("top", "alpha", 1); err != nil || !estimate.Tracked || estimate.Count != 1 {
+		t.Fatalf("AddTopKChecked(first) = %#v/%v, want first tracked item", estimate, err)
+	}
+	top = ht.topKs.array[hval.Index]
+	if len(top.items) != 1 || len(top.byKey) != 1 {
+		t.Fatalf("Top-K backing after first add = items %d index %d, want one tracked item", len(top.items), len(top.byKey))
+	}
+
+	restored, err := newTopKDataFromSnapshot(topKSnapshot{Capacity: maxTopKCapacity})
+	if err != nil {
+		t.Fatalf("newTopKDataFromSnapshot(empty max) error = %v", err)
+	}
+	if cap(restored.items) != 0 || restored.byKey != nil {
+		t.Fatalf("restored empty max-capacity Top-K allocated cap(items)=%d byKey nil=%v, want lazy empty backing", cap(restored.items), restored.byKey == nil)
+	}
+}
+
 func TestTopKSnapshotValidationRejectsDuplicateAndMismatchedKeys(t *testing.T) {
 	snapshot := topKSnapshot{
 		Capacity: 2,
@@ -3752,6 +3783,37 @@ func TestReservoirSampleRejectsInvalidConfig(t *testing.T) {
 		if got := ht.Get("bad"); !got.Empty() {
 			t.Fatalf("invalid reservoir sample config stored value %+v", got)
 		}
+	}
+}
+
+func TestReservoirSampleLargeEmptyCapacityAllocatesLazily(t *testing.T) {
+	ht := newTestTrie(t)
+	if err := ht.UpsertReservoirSample("sample", maxReservoirSampleCapacity); err != nil {
+		t.Fatalf("UpsertReservoirSample(max) error = %v", err)
+	}
+	hval := ht.Get("sample")
+	sample := ht.reservoirSamples.array[hval.Index]
+	if cap(sample.items) != 0 {
+		t.Fatalf("empty max-capacity reservoir sample allocated cap(items)=%d, want lazy empty backing", cap(sample.items))
+	}
+	if info, ok := ht.ReservoirSampleInfo("sample"); !ok || info.Capacity != maxReservoirSampleCapacity || info.Tracked != 0 {
+		t.Fatalf("ReservoirSampleInfo(empty max) = %#v/%v, want logical max capacity without tracked items", info, ok)
+	}
+
+	if update, err := ht.AddReservoirSampleChecked("sample", "alpha"); err != nil || !update.Accepted || update.Tracked != 1 {
+		t.Fatalf("AddReservoirSampleChecked(first) = %#v/%v, want first tracked item", update, err)
+	}
+	sample = ht.reservoirSamples.array[hval.Index]
+	if len(sample.items) != 1 {
+		t.Fatalf("reservoir backing after first add = %d items, want one tracked item", len(sample.items))
+	}
+
+	restored, err := newReservoirSampleDataFromSnapshot(reservoirSampleSnapshot{Capacity: maxReservoirSampleCapacity})
+	if err != nil {
+		t.Fatalf("newReservoirSampleDataFromSnapshot(empty max) error = %v", err)
+	}
+	if cap(restored.items) != 0 {
+		t.Fatalf("restored empty max-capacity reservoir sample allocated cap(items)=%d, want lazy empty backing", cap(restored.items))
 	}
 }
 

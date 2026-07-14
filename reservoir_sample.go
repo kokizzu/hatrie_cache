@@ -68,7 +68,6 @@ func newReservoirSampleData(capacity uint64) (reservoirSampleData, error) {
 	}
 	return reservoirSampleData{
 		capacity: capacity,
-		items:    make([]reservoirSampleItem, 0, int(capacity)),
 	}, nil
 }
 
