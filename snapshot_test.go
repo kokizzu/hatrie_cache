@@ -366,6 +366,19 @@ func TestWriteSnapshotEntryFieldsJSONPreservesPrefixedMarshalIndentLayout(t *tes
 	}
 }
 
+func TestWriteSnapshotJSONFieldStreamsCompactValue(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeSnapshotJSONField(&buf, "  ", "values", Slice{"alpha", json.Number("2")}, true); err != nil {
+		t.Fatalf("writeSnapshotJSONField() error = %v", err)
+	}
+	if got, want := buf.String(), "  \"values\": [\"alpha\",2],\n"; got != want {
+		t.Fatalf("writeSnapshotJSONField() = %q, want %q", got, want)
+	}
+	if err := writeSnapshotJSONField(&buf, "  ", "bad", make(chan int), false); err == nil {
+		t.Fatal("writeSnapshotJSONField(unsupported) error = nil, want error")
+	}
+}
+
 func TestWriteFileAtomicCleansTemporaryFileOnRenameError(t *testing.T) {
 	dir := t.TempDir()
 	targetDir := filepath.Join(dir, "target.json")

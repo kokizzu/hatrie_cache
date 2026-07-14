@@ -327,14 +327,11 @@ func (ht *HatTrie) writeSnapshotBytesEntryJSONLocked(writer io.Writer, entry Ent
 }
 
 func writeSnapshotJSONField(writer io.Writer, prefix string, name string, value interface{}, comma bool) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
 	if _, err := fmt.Fprintf(writer, "%s%q: ", prefix, name); err != nil {
 		return err
 	}
-	if _, err := writer.Write(data); err != nil {
+	encoder := json.NewEncoder(&prefixedJSONLineWriter{writer: writer})
+	if err := encoder.Encode(value); err != nil {
 		return err
 	}
 	if comma {
@@ -342,7 +339,7 @@ func writeSnapshotJSONField(writer io.Writer, prefix string, name string, value 
 			return err
 		}
 	}
-	_, err = io.WriteString(writer, "\n")
+	_, err := io.WriteString(writer, "\n")
 	return err
 }
 
