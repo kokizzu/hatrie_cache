@@ -738,6 +738,14 @@ func TestPostReplicationCommandRejectsOversizedResponseBody(t *testing.T) {
 	}
 }
 
+func TestDecodeReplicationCommandResponseRejectsOversizedTrailingWhitespace(t *testing.T) {
+	body := `{"ok":true,"message":"ok"}` + strings.Repeat(" ", maxHTTPReplicationResponseBytes+1)
+	_, err := decodeReplicationCommandResponse(strings.NewReader(body))
+	if !errors.Is(err, errReplicationResponseTooLarge) {
+		t.Fatalf("decodeReplicationCommandResponse() error = %v, want response too large", err)
+	}
+}
+
 func TestPostReplicationCommandRejectsTrailingResponseJSON(t *testing.T) {
 	client := &http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

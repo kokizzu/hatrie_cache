@@ -663,24 +663,30 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 }
 
 func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, error) {
-	data, err := io.ReadAll(io.LimitReader(body, maxHTTPReplicationResponseBytes+1))
-	if err != nil {
-		return CacheCommandResponse{}, err
-	}
-	if len(data) > maxHTTPReplicationResponseBytes {
-		return CacheCommandResponse{}, errReplicationResponseTooLarge
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
+	limited := &io.LimitedReader{R: body, N: maxHTTPReplicationResponseBytes + 1}
+	decoder := json.NewDecoder(limited)
 	var response CacheCommandResponse
 	if err := decoder.Decode(&response); err != nil {
+		if limited.N <= 0 {
+			return CacheCommandResponse{}, errReplicationResponseTooLarge
+		}
 		return CacheCommandResponse{}, err
+	}
+	if limited.N <= 0 {
+		return CacheCommandResponse{}, errReplicationResponseTooLarge
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if limited.N <= 0 {
+			return CacheCommandResponse{}, errReplicationResponseTooLarge
+		}
 		if err == nil {
 			return CacheCommandResponse{}, errors.New("hatriecache: invalid replication response JSON")
 		}
 		return CacheCommandResponse{}, err
+	}
+	if limited.N <= 0 {
+		return CacheCommandResponse{}, errReplicationResponseTooLarge
 	}
 	return response, nil
 }
