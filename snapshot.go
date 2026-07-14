@@ -41,6 +41,7 @@ type snapshotEntry struct {
 	RoaringBitmap  *roaringBitmapSnapshot  `json:"roaring_bitmap,omitempty"`
 	QuantileSketch *quantileSketchSnapshot `json:"quantile_sketch,omitempty"`
 	FenwickTree    *fenwickTreeSnapshot    `json:"fenwick_tree,omitempty"`
+	SparseBitset   *sparseBitsetSnapshot   `json:"sparse_bitset,omitempty"`
 	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
 	Stats          *KeyStats               `json:"stats,omitempty"`
 }
@@ -183,6 +184,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_FENWICK_TREE:
 		snapshot := ht.fenwickTrees.array[entry.Value.Index].Snapshot()
 		out.FenwickTree = &snapshot
+	case DATAVALUE_TYPE_SPARSE_BITSET:
+		snapshot := ht.sparseBitsets.array[entry.Value.Index].Snapshot()
+		out.SparseBitset = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -269,6 +273,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: fenwick tree snapshot is required")
 		}
 		if err := validateFenwickTreeSnapshot(*entry.FenwickTree); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "sparse_bitset":
+		if entry.SparseBitset == nil {
+			return snapshotOperation{}, errors.New("hatriecache: sparse bitset snapshot is required")
+		}
+		if err := validateSparseBitsetSnapshot(*entry.SparseBitset); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -466,6 +478,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.fenwickTrees.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_FENWICK_TREE}
+	case "sparse_bitset":
+		data, err := newSparseBitsetDataFromSnapshot(*entry.SparseBitset)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.sparseBitsets.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SPARSE_BITSET}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

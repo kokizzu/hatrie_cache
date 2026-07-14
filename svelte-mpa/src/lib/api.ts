@@ -34,6 +34,7 @@ export type CacheEntry = {
     | 'bloom_filter'
     | 'cuckoo_filter'
     | 'roaring_bitmap'
+    | 'sparse_bitset'
     | 'count_min_sketch'
     | 'hyperloglog'
     | 'top_k'
@@ -175,6 +176,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 8200,
     value_preview: '1024 counters, 128440 total'
+  },
+  {
+    key: 'ids:active64',
+    type: 'sparse_bitset',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 24,
+    value_preview: '12 integers, 3 containers'
   },
   {
     key: 'tags:active',

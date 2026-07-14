@@ -54,6 +54,8 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	ht.AddCuckooFilter("cuckoo", "alpha", "beta")
 	ht.UpsertRoaringBitmap("bitmap")
 	ht.AddRoaringBitmap("bitmap", 1, 1<<16+7)
+	ht.UpsertSparseBitset("bitset")
+	ht.AddSparseBitset("bitset", 1, 1<<32+7, ^uint64(0))
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -140,6 +142,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.RoaringBitmapInfo("bitmap"); !ok || info.Cardinality != 2 || info.Containers != 2 {
 		t.Fatalf("loaded RoaringBitmapInfo = %#v/%v, want restored Roaring bitmap", info, ok)
+	}
+	if got := loaded.GetSparseBitset("bitset"); !reflect.DeepEqual(got, []uint64{1, 1<<32 + 7, ^uint64(0)}) {
+		t.Fatalf("loaded sparse bitset = %#v, want restored uint64 set", got)
+	}
+	if info, ok := loaded.SparseBitsetInfo("bitset"); !ok || info.Cardinality != 3 || info.Containers != 3 {
+		t.Fatalf("loaded SparseBitsetInfo = %#v/%v, want restored sparse bitset", info, ok)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)

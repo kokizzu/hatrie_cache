@@ -46,6 +46,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	ht.AddTopK("session:top", "/api/users", 7)
 	ht.UpsertRoaringBitmap("session:bitmap")
 	ht.AddRoaringBitmap("session:bitmap", 1, 1<<16+7)
+	ht.UpsertSparseBitset("session:bitset")
+	ht.AddSparseBitset("session:bitset", 1, 1<<32+7, ^uint64(0))
 	if err := ht.UpsertQuantileSketch("session:zquantiles", 0.01); err != nil {
 		t.Fatalf("UpsertQuantileSketch() error = %v", err)
 	}
@@ -82,6 +84,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	roaringInfo, ok := ht.RoaringBitmapInfo("session:bitmap")
 	if !ok {
 		t.Fatal("RoaringBitmapInfo(session:bitmap) = false, want true")
+	}
+	sparseInfo, ok := ht.SparseBitsetInfo("session:bitset")
+	if !ok {
+		t.Fatal("SparseBitsetInfo(session:bitset) = false, want true")
 	}
 	quantileInfo, ok := ht.QuantileSketchInfo("session:zquantiles")
 	if !ok {
@@ -132,8 +138,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 11 {
-		t.Fatalf("entries len = %d, want 11: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 12 {
+		t.Fatalf("entries len = %d, want 12: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -147,45 +153,50 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if roaringEntry.Key != "session:bitmap" || roaringEntry.Type != "roaring_bitmap" || roaringEntry.SizeBytes != int64(roaringInfo.EncodedBytes) || roaringEntry.ValuePreview != wantRoaringPreview {
 		t.Fatalf("roaring bitmap entry = %#v, want compact integer-set preview", roaringEntry)
 	}
-	hllEntry := entries.Entries[2]
+	sparseEntry := entries.Entries[2]
+	wantSparsePreview := strconv.FormatUint(sparseInfo.Cardinality, 10) + " integers, " + strconv.FormatUint(sparseInfo.Containers, 10) + " containers"
+	if sparseEntry.Key != "session:bitset" || sparseEntry.Type != "sparse_bitset" || sparseEntry.SizeBytes != int64(sparseInfo.EncodedBytes) || sparseEntry.ValuePreview != wantSparsePreview {
+		t.Fatalf("sparse bitset entry = %#v, want compact uint64-set preview", sparseEntry)
+	}
+	hllEntry := entries.Entries[3]
 	wantHLLPreview := strconv.Itoa(int(hllInfo.Precision)) + " precision, " + strconv.FormatUint(hllInfo.Estimate, 10) + " estimated"
 	if hllEntry.Key != "session:card" || hllEntry.Type != "hyperloglog" || hllEntry.SizeBytes != int64(hllInfo.RegisterBytes) || hllEntry.ValuePreview != wantHLLPreview {
 		t.Fatalf("hyperloglog entry = %#v, want compact register preview", hllEntry)
 	}
-	cuckooEntry := entries.Entries[3]
+	cuckooEntry := entries.Entries[4]
 	wantCuckooPreview := strconv.FormatUint(cuckooInfo.Count, 10) + "/" + strconv.FormatUint(cuckooInfo.Capacity, 10) + " slots, " + strconv.Itoa(int(cuckooInfo.FingerprintBits)) + "-bit fingerprints"
 	if cuckooEntry.Key != "session:cf" || cuckooEntry.Type != "cuckoo_filter" || cuckooEntry.SizeBytes != int64(cuckooInfo.FingerprintBytes) || cuckooEntry.ValuePreview != wantCuckooPreview {
 		t.Fatalf("cuckoo filter entry = %#v, want compact fingerprint preview", cuckooEntry)
 	}
-	fenwickEntry := entries.Entries[4]
+	fenwickEntry := entries.Entries[5]
 	wantFenwickPreview := strconv.FormatUint(fenwickInfo.Size, 10) + " counters, " + strconv.FormatInt(fenwickInfo.Total, 10) + " total"
 	if fenwickEntry.Key != "session:fenwick" || fenwickEntry.Type != "fenwick_tree" || fenwickEntry.SizeBytes != int64(fenwickInfo.TreeBytes) || fenwickEntry.ValuePreview != wantFenwickPreview {
 		t.Fatalf("fenwick tree entry = %#v, want compact prefix-sum preview", fenwickEntry)
 	}
-	sketchEntry := entries.Entries[5]
+	sketchEntry := entries.Entries[6]
 	wantSketchPreview := strconv.FormatUint(sketchInfo.Width, 10) + "x" + strconv.Itoa(int(sketchInfo.Depth)) + " counters, " + strconv.FormatUint(sketchInfo.TotalCount, 10) + " total"
 	if sketchEntry.Key != "session:freq" || sketchEntry.Type != "count_min_sketch" || sketchEntry.SizeBytes != int64(sketchInfo.CounterBytes) || sketchEntry.ValuePreview != wantSketchPreview {
 		t.Fatalf("count-min sketch entry = %#v, want compact counter preview", sketchEntry)
 	}
-	queueEntry := entries.Entries[6]
+	queueEntry := entries.Entries[7]
 	if queueEntry.Key != "session:jobs" || queueEntry.Type != "priority_queue" || queueEntry.SizeBytes != 2 || queueEntry.ValuePreview != "2 priority items" {
 		t.Fatalf("priority queue entry = %#v, want priority queue item preview", queueEntry)
 	}
-	bloomEntry := entries.Entries[7]
+	bloomEntry := entries.Entries[8]
 	wantBloomPreview := strconv.FormatUint(bloomInfo.BitCount, 10) + " bits, " + strconv.Itoa(int(bloomInfo.HashCount)) + " hashes"
 	if bloomEntry.Key != "session:seen" || bloomEntry.Type != "bloom_filter" || bloomEntry.SizeBytes != int64(bloomInfo.BitBytes) || bloomEntry.ValuePreview != wantBloomPreview {
 		t.Fatalf("bloom filter entry = %#v, want compact bitset preview", bloomEntry)
 	}
-	setEntry := entries.Entries[8]
+	setEntry := entries.Entries[9]
 	if setEntry.Key != "session:tags" || setEntry.Type != "set" || setEntry.SizeBytes != 2 || setEntry.ValuePreview != "2 members" {
 		t.Fatalf("set entry = %#v, want set member preview", setEntry)
 	}
-	topKEntry := entries.Entries[9]
+	topKEntry := entries.Entries[10]
 	wantTopKPreview := strconv.FormatUint(topKInfo.Tracked, 10) + "/" + strconv.FormatUint(topKInfo.Capacity, 10) + " tracked, " + strconv.FormatUint(topKInfo.Total, 10) + " total"
 	if topKEntry.Key != "session:top" || topKEntry.Type != "top_k" || topKEntry.ValuePreview != wantTopKPreview || topKEntry.SizeBytes <= 0 {
 		t.Fatalf("top-k entry = %#v, want compact heavy-hitter preview", topKEntry)
 	}
-	quantileEntry := entries.Entries[10]
+	quantileEntry := entries.Entries[11]
 	wantQuantilePreview := strconv.FormatUint(quantileInfo.Count, 10) + " samples, " + strconv.FormatUint(quantileInfo.SummarySize, 10) + " summary points"
 	if quantileEntry.Key != "session:zquantiles" || quantileEntry.Type != "quantile_sketch" || quantileEntry.SizeBytes != quantileInfo.EncodedBytes || quantileEntry.ValuePreview != wantQuantilePreview {
 		t.Fatalf("quantile sketch entry = %#v, want compact quantile preview", quantileEntry)

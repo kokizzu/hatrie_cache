@@ -12,7 +12,7 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'INFOQ', 'INFOFW'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'CREATESB', 'COUNTSB', 'GETSB', 'INFOSB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'INFOQ', 'INFOFW'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
   $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK', 'ADDFW', 'RANGEFW'].includes(command);
@@ -80,6 +80,13 @@
           <option>COUNTRB</option>
           <option>GETRB</option>
           <option>INFORB</option>
+          <option>CREATESB</option>
+          <option>ADDSB</option>
+          <option>REMSB</option>
+          <option>HASSB</option>
+          <option>COUNTSB</option>
+          <option>GETSB</option>
+          <option>INFOSB</option>
           <option>CREATECMS</option>
           <option>INCRCMS</option>
           <option>ESTCMS</option>

@@ -497,6 +497,11 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDRB", "RBADD", "REMRB", "DELRB", "RBREM", "RBDEL":
 		_, err := roaringBitmapValuesFromCommand(request)
 		return err == nil
+	case "CREATESB", "CREATESPARSEBITSET", "SBRESERVE":
+		return true
+	case "ADDSB", "SBADD", "REMSB", "DELSB", "SBREM", "SBDEL":
+		_, err := sparseBitsetValuesFromCommand(request)
+		return err == nil
 	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
 		_, _, err := commandCountMinSketchConfig(request)
 		return err == nil

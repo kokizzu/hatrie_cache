@@ -71,6 +71,10 @@ func fenwickTreeIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.fenwickTrees.array) || ht.fenwickTrees.reusables.Has(idx)
 }
 
+func sparseBitsetIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.sparseBitsets.array) || ht.sparseBitsets.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
@@ -148,6 +152,7 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "roaring bitmap", value: HatValue{Index: 12, Flags: DATAVALUE_TYPE_ROARING_BITMAP}, want: "roaring bitmap at index: 12"},
 		{name: "quantile sketch", value: HatValue{Index: 13, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}, want: "quantile sketch at index: 13"},
 		{name: "fenwick tree", value: HatValue{Index: 14, Flags: DATAVALUE_TYPE_FENWICK_TREE}, want: "fenwick tree at index: 14"},
+		{name: "sparse bitset", value: HatValue{Index: 15, Flags: DATAVALUE_TYPE_SPARSE_BITSET}, want: "sparse bitset at index: 15"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -1705,6 +1710,137 @@ func TestRoaringBitmapStorageReleasedOnOverwrite(t *testing.T) {
 	}
 }
 
+func TestSparseBitsetOperations(t *testing.T) {
+	ht := newTestTrie(t)
+	maxID := ^uint64(0)
+
+	ht.UpsertSparseBitset("ids")
+	if hval := ht.Get("ids"); !hval.IsSparseBitset() {
+		t.Fatalf("UpsertSparseBitset stored type %+v, want sparse bitset", hval)
+	}
+	if added := ht.AddSparseBitset("ids", 1, 2, 1, 1<<32+7, maxID); added != 4 {
+		t.Fatalf("AddSparseBitset() = %d, want 4 unique values", added)
+	}
+	if !ht.HasSparseBitset("ids", 1) || !ht.HasSparseBitset("ids", 1<<32+7) || !ht.HasSparseBitset("ids", maxID) {
+		t.Fatal("HasSparseBitset(inserted values) = false, want true")
+	}
+	if ht.HasSparseBitset("ids", 3) {
+		t.Fatal("HasSparseBitset(missing) = true, want false")
+	}
+	if removed := ht.RemoveSparseBitset("ids", 2, 3); removed != 1 {
+		t.Fatalf("RemoveSparseBitset(2, 3) = %d, want 1", removed)
+	}
+	if count, ok := ht.CountSparseBitset("ids"); !ok || count != 3 {
+		t.Fatalf("CountSparseBitset(ids) = %d/%v, want 3", count, ok)
+	}
+	if got := ht.GetSparseBitset("ids"); !reflect.DeepEqual(got, []uint64{1, 1<<32 + 7, maxID}) {
+		t.Fatalf("GetSparseBitset(ids) = %#v, want sorted uint64 values", got)
+	}
+	info, ok := ht.SparseBitsetInfo("ids")
+	if !ok {
+		t.Fatal("SparseBitsetInfo(ids) = false, want true")
+	}
+	if info.Cardinality != 3 || info.Containers != 3 || info.ArrayContainers != 3 || info.EncodedBytes != 6 {
+		t.Fatalf("SparseBitsetInfo(ids) = %#v, want sparse compact arrays", info)
+	}
+	idx := ht.Get("ids").Index
+	ht.UpsertSparseBitset("ids")
+	if got := ht.Get("ids"); !got.IsSparseBitset() || got.Index != idx {
+		t.Fatalf("UpsertSparseBitset replacement stored %+v, want same sparse bitset slot %d", got, idx)
+	}
+	if count, ok := ht.CountSparseBitset("ids"); !ok || count != 0 {
+		t.Fatalf("CountSparseBitset(ids after replacement) = %d/%v, want empty bitset", count, ok)
+	}
+
+	if added := ht.AddSparseBitset("auto", 42); added != 1 {
+		t.Fatalf("AddSparseBitset(auto) = %d, want 1", added)
+	}
+	if hval := ht.Get("auto"); !hval.IsSparseBitset() {
+		t.Fatalf("AddSparseBitset(auto) stored type %+v, want sparse bitset", hval)
+	}
+}
+
+func TestSparseBitsetConvertsDenseContainers(t *testing.T) {
+	ht := newTestTrie(t)
+	for idx := 0; idx <= sparseBitsetArrayMaxSize; idx++ {
+		ht.AddSparseBitset("dense", uint64(idx))
+	}
+	info, ok := ht.SparseBitsetInfo("dense")
+	if !ok {
+		t.Fatal("SparseBitsetInfo(dense) = false, want true")
+	}
+	if info.BitmapContainers != 1 || info.ArrayContainers != 0 || info.EncodedBytes != sparseBitsetBitmapWords*8 {
+		t.Fatalf("dense SparseBitsetInfo = %#v, want one bitmap container", info)
+	}
+	for idx := sparseBitsetArrayShrinkSize; idx <= sparseBitsetArrayMaxSize; idx++ {
+		ht.RemoveSparseBitset("dense", uint64(idx))
+	}
+	info, ok = ht.SparseBitsetInfo("dense")
+	if !ok {
+		t.Fatal("SparseBitsetInfo(dense after shrink) = false, want true")
+	}
+	if info.ArrayContainers != 1 || info.BitmapContainers != 0 || info.EncodedBytes != uint64(sparseBitsetArrayShrinkSize*2) {
+		t.Fatalf("shrunk SparseBitsetInfo = %#v, want one compact array container", info)
+	}
+}
+
+func TestSparseBitsetRejectsInvalidCommandValues(t *testing.T) {
+	if _, err := sparseBitsetValuesFromCommand(CacheCommandRequest{Values: Slice{"1", json.Number("18446744073709551615")}}); err != nil {
+		t.Fatalf("sparseBitsetValuesFromCommand(valid) error = %v", err)
+	}
+	tests := []CacheCommandRequest{
+		{},
+		{Value: "-1"},
+		{Value: "18446744073709551616"},
+		{Values: Slice{1.5}},
+	}
+	for _, request := range tests {
+		if _, err := sparseBitsetValuesFromCommand(request); err == nil {
+			t.Fatalf("sparseBitsetValuesFromCommand(%#v) error = nil, want error", request)
+		}
+	}
+}
+
+func TestSparseBitsetSnapshotValidationRejectsCorruptPayload(t *testing.T) {
+	data := newSparseBitsetData()
+	for idx := 0; idx <= sparseBitsetArrayMaxSize; idx++ {
+		data.Add(uint64(idx))
+	}
+	snapshot := data.Snapshot()
+	snapshot.Cardinality++
+	if err := validateSparseBitsetSnapshot(snapshot); err == nil {
+		t.Fatal("validateSparseBitsetSnapshot(mismatched cardinality) error = nil, want error")
+	}
+
+	snapshot = data.Snapshot()
+	snapshot.Containers[0].Cardinality++
+	if err := validateSparseBitsetSnapshot(snapshot); err == nil {
+		t.Fatal("validateSparseBitsetSnapshot(mismatched container cardinality) error = nil, want error")
+	}
+
+	snapshot = data.Snapshot()
+	snapshot.Containers[0].Kind = "unknown"
+	if err := validateSparseBitsetSnapshot(snapshot); err == nil {
+		t.Fatal("validateSparseBitsetSnapshot(unknown kind) error = nil, want error")
+	}
+}
+
+func TestSparseBitsetStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	ht.UpsertSparseBitset("ids")
+	idx := ht.Get("ids").Index
+	ht.UpsertString("ids", "value")
+	if !sparseBitsetIndexReleased(ht, idx) {
+		t.Fatalf("overwritten sparse bitset index %d was not released", idx)
+	}
+
+	ht.UpsertSparseBitset("new")
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("sparse bitset storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
 func TestCountMinSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -3225,9 +3361,11 @@ func TestDestroyIsIdempotentAndPreventsUse(t *testing.T) {
 		t.Fatalf("UpsertFenwickTree() error = %v", err)
 	}
 	ht.AddFenwickTree("scores", 2, 7)
+	ht.UpsertSparseBitset("ids")
+	ht.AddSparseBitset("ids", 1, ^uint64(0))
 	ht.Destroy()
 	ht.Destroy()
-	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.fenwickTrees != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
+	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.fenwickTrees != nil || ht.sparseBitsets != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
 		t.Fatalf("Destroy retained backing state: %+v", ht)
 	}
 

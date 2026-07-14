@@ -33,6 +33,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	source.AddCuckooFilter("cuckoo", "alpha", "beta")
 	source.UpsertRoaringBitmap("bitmap")
 	source.AddRoaringBitmap("bitmap", 1, 1<<16+7)
+	source.UpsertSparseBitset("bitset")
+	source.AddSparseBitset("bitset", 1, 1<<32+7, ^uint64(0))
 	source.UpsertString("ttl", "alive")
 	if !source.Expire("ttl", time.Minute) {
 		t.Fatal("Expire(ttl) = false, want true")
@@ -48,8 +50,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
 	}
-	if count != 11 {
-		t.Fatalf("loaded count = %d, want 11", count)
+	if count != 12 {
+		t.Fatalf("loaded count = %d, want 12", count)
 	}
 
 	if got := loaded.GetCounter("counter"); got != -7 {
@@ -81,6 +83,9 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if got := loaded.GetRoaringBitmap("bitmap"); !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7}) {
 		t.Fatalf("loaded Roaring bitmap = %#v, want restored integer set", got)
+	}
+	if got := loaded.GetSparseBitset("bitset"); !reflect.DeepEqual(got, []uint64{1, 1<<32 + 7, ^uint64(0)}) {
+		t.Fatalf("loaded sparse bitset = %#v, want restored uint64 set", got)
 	}
 	if got := loaded.TTL("ttl"); got <= 0 || got > time.Minute {
 		t.Fatalf("ttl = %s, want remaining positive TTL", got)
@@ -231,6 +236,26 @@ func TestSnapshotOperationValueSizeSupportsRoaringBitmap(t *testing.T) {
 	}
 	if size != bitmap.EncodedSize() {
 		t.Fatalf("snapshotOperationValueSize(roaring_bitmap) = %d, want %d", size, bitmap.EncodedSize())
+	}
+}
+
+func TestSnapshotOperationValueSizeSupportsSparseBitset(t *testing.T) {
+	bitset := newSparseBitsetData()
+	for idx := 0; idx <= sparseBitsetArrayMaxSize; idx++ {
+		bitset.Add(uint64(idx))
+	}
+	snapshot := bitset.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:         "sparse_bitset",
+			SparseBitset: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(sparse_bitset) error = %v", err)
+	}
+	if size != bitset.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(sparse_bitset) = %d, want %d", size, bitset.EncodedSize())
 	}
 }
 

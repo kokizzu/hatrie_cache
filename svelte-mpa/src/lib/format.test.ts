@@ -9,7 +9,8 @@ const entries: CacheEntry[] = [
   { key: 'card:visitors', type: 'hyperloglog', ttl_ms: null, on_disk: false, size_bytes: 16384, value_preview: '14 precision' },
   { key: 'top:paths', type: 'top_k', ttl_ms: null, on_disk: false, size_bytes: 4096, value_preview: '8/100 tracked' },
   { key: 'latency:p95', type: 'quantile_sketch', ttl_ms: null, on_disk: false, size_bytes: 3072, value_preview: '100 samples' },
-  { key: 'scores:hourly', type: 'fenwick_tree', ttl_ms: null, on_disk: false, size_bytes: 8200, value_preview: '1024 counters' }
+  { key: 'scores:hourly', type: 'fenwick_tree', ttl_ms: null, on_disk: false, size_bytes: 8200, value_preview: '1024 counters' },
+  { key: 'ids:active64', type: 'sparse_bitset', ttl_ms: null, on_disk: false, size_bytes: 24, value_preview: '12 integers' }
 ];
 
 describe('format helpers', () => {
@@ -34,6 +35,7 @@ describe('format helpers', () => {
     expect(filterEntries(entries, '', 'top_k')).toEqual([entries[4]]);
     expect(filterEntries(entries, '', 'quantile_sketch')).toEqual([entries[5]]);
     expect(filterEntries(entries, '', 'fenwick_tree')).toEqual([entries[6]]);
+    expect(filterEntries(entries, '', 'sparse_bitset')).toEqual([entries[7]]);
     expect(filterEntries(entries, 'missing', 'all')).toHaveLength(0);
   });
 });

@@ -62,6 +62,7 @@ const (
 	DATAVALUE_TYPE_ROARING_BITMAP
 	DATAVALUE_TYPE_QUANTILE_SKETCH
 	DATAVALUE_TYPE_FENWICK_TREE
+	DATAVALUE_TYPE_SPARSE_BITSET
 )
 
 type Map = map[string]interface{}
@@ -622,6 +623,10 @@ func (hval HatValue) IsFenwickTree() bool {
 	return hval.Is(DATAVALUE_TYPE_FENWICK_TREE)
 }
 
+func (hval HatValue) IsSparseBitset() bool {
+	return hval.Is(DATAVALUE_TYPE_SPARSE_BITSET)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -666,6 +671,8 @@ func (hval HatValue) String() string {
 		return "quantile sketch at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_FENWICK_TREE:
 		return "fenwick tree at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_SPARSE_BITSET:
+		return "sparse bitset at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -1294,6 +1301,7 @@ type HatTrie struct {
 	roaringBitmaps   *RoaringBitmapStorage
 	quantileSketches *QuantileSketchStorage
 	fenwickTrees     *FenwickTreeStorage
+	sparseBitsets    *SparseBitsetStorage
 	dbrefs           *LevelDBReferenceStorage
 	expires          map[string]time.Time
 	expirations      expirationHeap
@@ -1336,6 +1344,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		roaringBitmaps:   CreateRoaringBitmapStorage(),
 		quantileSketches: CreateQuantileSketchStorage(),
 		fenwickTrees:     CreateFenwickTreeStorage(),
+		sparseBitsets:    CreateSparseBitsetStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
 		keyStats:         map[string]KeyStats{},
@@ -1375,6 +1384,7 @@ func (ht *HatTrie) Destroy() {
 	ht.roaringBitmaps = nil
 	ht.quantileSketches = nil
 	ht.fenwickTrees = nil
+	ht.sparseBitsets = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
@@ -1857,6 +1867,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.quantileSketches.Del(hval.Index)
 	case DATAVALUE_TYPE_FENWICK_TREE:
 		ht.fenwickTrees.Del(hval.Index)
+	case DATAVALUE_TYPE_SPARSE_BITSET:
+		ht.sparseBitsets.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)

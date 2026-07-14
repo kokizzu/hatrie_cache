@@ -413,6 +413,60 @@ func TestExecuteCommandRoaringBitmapOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandSparseBitsetOperations(t *testing.T) {
+	ht := newTestTrie(t)
+	maxID := strconv.FormatUint(^uint64(0), 10)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATESB", Key: "ids"}); !got.OK {
+		t.Fatalf("CREATESB response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSB", Key: "ids", Value: "1"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDSB value response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSB", Key: "ids", Values: Slice{json.Number("4294967303"), maxID, "1"}}); !got.OK || got.Value != "2" {
+		t.Fatalf("ADDSB values response = %#v, want added 2", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSB", Key: "ids", Value: maxID}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASSB present response = %#v, want 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSB", Key: "ids", Value: "2"}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASSB missing response = %#v, want 0", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "REMSB", Key: "ids", Value: "1"}); !got.OK || got.Value != "1" {
+		t.Fatalf("REMSB response = %#v, want removed 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "COUNTSB", Key: "ids"}); !got.OK || got.Value != "2" {
+		t.Fatalf("COUNTSB response = %#v, want 2", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETSB", Key: "ids"}); !got.OK || got.Value != "[4294967303,18446744073709551615]" {
+		t.Fatalf("GETSB response = %#v, want remaining sorted values", got)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOSB", Key: "ids"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOSB response = %#v, want JSON info", infoResp)
+	}
+	var info SparseBitsetInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFOSB JSON error = %v", err)
+	}
+	if info.Cardinality != 2 || info.Containers != 2 || info.EncodedBytes != 4 {
+		t.Fatalf("INFOSB = %#v, want compact sparse values", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "ids"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET sparse bitset response = %#v, want JSON info", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSB", Key: "auto", Value: "42"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDSB auto response = %#v, want added 1", got)
+	}
+	if !ht.Get("auto").IsSparseBitset() {
+		t.Fatal("ADDSB on missing key did not create a sparse bitset")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSB", Key: "bad", Value: "-1"}); got.OK {
+		t.Fatalf("ADDSB invalid response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

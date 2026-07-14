@@ -387,6 +387,50 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATESB", "CREATESPARSEBITSET", "SBRESERVE":
+		ht.UpsertSparseBitset(key)
+		return CacheCommandResponse{OK: true, Message: "created sparse bitset"}
+	case "ADDSB", "SBADD":
+		values, err := sparseBitsetValuesFromCommand(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		added := ht.AddSparseBitset(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "added sparse bitset values", Value: strconv.Itoa(added)}
+	case "REMSB", "DELSB", "SBREM", "SBDEL":
+		values, err := sparseBitsetValuesFromCommand(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		removed := ht.RemoveSparseBitset(key, values[0], values[1:]...)
+		return CacheCommandResponse{OK: true, Message: "removed sparse bitset values", Value: strconv.Itoa(removed)}
+	case "HASSB", "SBHAS", "SBEXISTS":
+		values, err := sparseBitsetValuesFromCommand(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if ht.HasSparseBitset(key, values[0]) {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	case "COUNTSB", "SBCOUNT":
+		count, ok := ht.CountSparseBitset(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(count, 10)}
+	case "GETSB", "SBGET":
+		values := ht.GetSparseBitset(key)
+		if values == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", values)
+	case "INFOSB", "SBINFO":
+		info, ok := ht.SparseBitsetInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
 		width, depth, err := commandCountMinSketchConfig(request)
 		if err != nil {
@@ -804,6 +848,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		return string(data), nil
 	case DATAVALUE_TYPE_ROARING_BITMAP:
 		data, err := json.Marshal(ht.roaringBitmaps.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	case DATAVALUE_TYPE_SPARSE_BITSET:
+		data, err := json.Marshal(ht.sparseBitsets.array[hval.Index].Info())
 		if err != nil {
 			return "", err
 		}

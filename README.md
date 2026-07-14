@@ -14,6 +14,9 @@ Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
 low-memory membership checks with approximate delete support.
 Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
 exact uint32 sets with fast membership, remove, count, and sorted iteration.
+Sparse bitset values use sorted 16-bit containers keyed by the upper 48 bits,
+promoting dense ranges to packed bitsets for exact uint64 membership with low
+memory overhead on sparse high-cardinality IDs.
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts
@@ -211,7 +214,8 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
 `POPPQ`, `GETPQ`, `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF`, `CREATECF`,
 `ADDCF`, `HASCF`, `DELCF`, `INFOCF`, `CREATERB`, `ADDRB`, `REMRB`, `HASRB`,
-`COUNTRB`, `GETRB`, `INFORB`, `CREATECMS`, `INCRCMS`, `ESTCMS`, `INFOCMS`,
+`COUNTRB`, `GETRB`, `INFORB`, `CREATESB`, `ADDSB`, `REMSB`, `HASSB`,
+`COUNTSB`, `GETSB`, `INFOSB`, `CREATECMS`, `INCRCMS`, `ESTCMS`, `INFOCMS`,
 `CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`, `ADDTOPK`,
 `ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`,
 `CREATEFW`, `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW`, `DUMP`,
@@ -242,6 +246,9 @@ make cli ARGS='command -cmd DELCF -key active:users -value user-123'
 make cli ARGS='command -cmd CREATERB -key cohort:ids'
 make cli ARGS='command -cmd ADDRB -key cohort:ids -value 65543'
 make cli ARGS='command -cmd COUNTRB -key cohort:ids'
+make cli ARGS='command -cmd CREATESB -key ids:active64'
+make cli ARGS='command -cmd ADDSB -key ids:active64 -value 18446744073709551615'
+make cli ARGS='command -cmd COUNTSB -key ids:active64'
 make cli ARGS='command -cmd CREATECMS -key freq:paths -value 2048 -subkey 4'
 make cli ARGS='command -cmd INCRCMS -key freq:paths -value /api/users -subkey 3'
 make cli ARGS='command -cmd ESTCMS -key freq:paths -value /api/users'
@@ -398,6 +405,10 @@ roaring bitmap type:
   CREATERB key
   ADDRB,REMRB key uint32...
   HASRB/COUNTRB/GETRB/INFORB key
+sparse bitset type:
+  CREATESB key
+  ADDSB,REMSB,HASSB key uint64...
+  COUNTSB/GETSB/INFOSB key
 count-min sketch type:
   CREATECMS key width [depth]
   INCRCMS key val [count]

@@ -315,6 +315,22 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 			}
 		}
 		return total, nil
+	case "sparse_bitset":
+		if entry.SparseBitset == nil {
+			return 0, errors.New("hatriecache: sparse bitset snapshot is required")
+		}
+		var total int64
+		for _, container := range entry.SparseBitset.Containers {
+			switch container.Kind {
+			case sparseBitsetContainerKindArray:
+				total += int64(container.Cardinality) * 2
+			case sparseBitsetContainerKindBits:
+				total += sparseBitsetBitmapWords * 8
+			default:
+				return 0, errors.New("hatriecache: unsupported sparse bitset container kind")
+			}
+		}
+		return total, nil
 	case "quantile_sketch":
 		if entry.QuantileSketch == nil {
 			return 0, errors.New("hatriecache: quantile sketch snapshot is required")

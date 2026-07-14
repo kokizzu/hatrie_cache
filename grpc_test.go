@@ -337,6 +337,66 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFORB = %#v, want one compact bitmap value", roaringInfo)
 	}
 
+	createSparseResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATESB",
+		Key:     "ids64",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATESB) error = %v", err)
+	}
+	if !createSparseResp.GetOk() {
+		t.Fatalf("CREATESB response = %#v, want ok", createSparseResp)
+	}
+	addSparseResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDSB",
+		Key:     "ids64",
+		Values:  []string{"1", "4294967303", "18446744073709551615"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDSB) error = %v", err)
+	}
+	if !addSparseResp.GetOk() || addSparseResp.GetValue() != "3" {
+		t.Fatalf("ADDSB response = %#v, want added 3", addSparseResp)
+	}
+	hasSparseResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "HASSB",
+		Key:     "ids64",
+		Value:   "18446744073709551615",
+	})
+	if err != nil {
+		t.Fatalf("Command(HASSB) error = %v", err)
+	}
+	if !hasSparseResp.GetOk() || hasSparseResp.GetValue() != "1" {
+		t.Fatalf("HASSB response = %#v, want hit", hasSparseResp)
+	}
+	countSparseResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "COUNTSB",
+		Key:     "ids64",
+	})
+	if err != nil {
+		t.Fatalf("Command(COUNTSB) error = %v", err)
+	}
+	if !countSparseResp.GetOk() || countSparseResp.GetValue() != "3" {
+		t.Fatalf("COUNTSB response = %#v, want count 3", countSparseResp)
+	}
+	infoSparseResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFOSB",
+		Key:     "ids64",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFOSB) error = %v", err)
+	}
+	if !infoSparseResp.GetOk() || infoSparseResp.GetValue() == "" {
+		t.Fatalf("INFOSB response = %#v, want JSON info", infoSparseResp)
+	}
+	var sparseInfo SparseBitsetInfo
+	if err := json.Unmarshal([]byte(infoSparseResp.GetValue()), &sparseInfo); err != nil {
+		t.Fatalf("INFOSB JSON error = %v", err)
+	}
+	if sparseInfo.Cardinality != 3 || sparseInfo.Containers != 3 || sparseInfo.EncodedBytes != 6 {
+		t.Fatalf("INFOSB = %#v, want compact sparse bitset value", sparseInfo)
+	}
+
 	createSketchResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
 		Command: "CREATECMS",
 		Key:     "freq",
