@@ -69,6 +69,56 @@ func TestCommandJournalReplaysMutatingCommands(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplayScansLargeHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	entries := []commandJournalEntry{
+		{
+			Version:  commandJournalVersion,
+			Sequence: 1,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "large", Value: strings.Repeat("x", 70*1024)},
+		},
+	}
+	for sequence := uint64(2); sequence <= 96; sequence++ {
+		entries = append(entries, commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: sequence,
+			Request:  CacheCommandRequest{Command: "INC", Key: "count"},
+		})
+	}
+	entries = append(entries, commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 97,
+		Request:  CacheCommandRequest{Command: "SETSTR", Key: "last", Value: "ok"},
+	})
+	writeCommandJournalTestEntries(t, path, entries...)
+
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	if got := journal.Sequence(); got != uint64(len(entries)) {
+		t.Fatalf("Sequence() after open = %d, want %d", got, len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	maxSequence, err := journal.Replay(replayed, 0)
+	if err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if maxSequence != uint64(len(entries)) {
+		t.Fatalf("Replay() max sequence = %d, want %d", maxSequence, len(entries))
+	}
+	if got := replayed.GetString("large"); got != entries[0].Request.Value {
+		t.Fatalf("replayed large value length = %d, want %d", len(got), len(entries[0].Request.Value))
+	}
+	if got := replayed.GetCounter("count"); got != 95 {
+		t.Fatalf("replayed count = %d, want 95", got)
+	}
+	if got := replayed.GetString("last"); got != "ok" {
+		t.Fatalf("replayed last = %q, want ok", got)
+	}
+}
+
 func TestCommandJournalReplayRejectsFailedEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	writeCommandJournalTestEntries(t, path,

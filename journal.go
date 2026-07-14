@@ -80,7 +80,13 @@ func OpenCommandJournal(path string) (*CommandJournal, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	entries, validBytes, err := readCommandJournalEntriesWithEnd(path)
+	var maxSequence uint64
+	validBytes, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
+		if entry.Sequence > maxSequence {
+			maxSequence = entry.Sequence
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -96,12 +102,6 @@ func OpenCommandJournal(path string) (*CommandJournal, error) {
 	file, err := openCommandJournalAppendFile(path)
 	if err != nil {
 		return nil, err
-	}
-	var maxSequence uint64
-	for _, entry := range entries {
-		if entry.Sequence > maxSequence {
-			maxSequence = entry.Sequence
-		}
 	}
 	journal := &CommandJournal{path: path, file: file}
 	journal.advanceSequenceLocked(maxSequence)
@@ -153,36 +153,36 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 	if journal.closed {
 		return 0, ErrCommandJournalClosed
 	}
-	entries, err := readCommandJournalEntries(journal.path)
-	if err != nil {
-		return 0, err
-	}
 	var maxSequence uint64
-	for _, entry := range entries {
+	var compactedThrough uint64
+	if _, err := scanCommandJournalEntries(journal.path, func(entry commandJournalEntry) error {
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
 		}
-	}
-	var compactedThrough uint64
-	for _, entry := range entries {
 		if entry.Checkpoint && entry.Sequence > compactedThrough {
 			compactedThrough = entry.Sequence
 		}
+		return nil
+	}); err != nil {
+		return 0, err
 	}
 	if afterSequence < compactedThrough {
 		return 0, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, compactedThrough)
 	}
-	for _, entry := range entries {
+	if _, err := scanCommandJournalEntries(journal.path, func(entry commandJournalEntry) error {
 		if entry.Checkpoint {
-			continue
+			return nil
 		}
 		if entry.Sequence <= afterSequence {
-			continue
+			return nil
 		}
 		response := trie.ExecuteCommand(entry.Request)
 		if !response.OK {
-			return 0, fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, response.Message)
+			return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, response.Message)
 		}
+		return nil
+	}); err != nil {
+		return 0, err
 	}
 	journal.advanceSequenceLocked(maxSequence)
 	return maxSequence, nil
@@ -410,16 +410,27 @@ func readCommandJournalEntries(path string) ([]commandJournalEntry, error) {
 }
 
 func readCommandJournalEntriesWithEnd(path string) ([]commandJournalEntry, int64, error) {
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, 0, nil
-	}
+	var entries []commandJournalEntry
+	validBytes, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
+		entries = append(entries, entry)
+		return nil
+	})
 	if err != nil {
 		return nil, 0, err
 	}
+	return entries, validBytes, nil
+}
+
+func scanCommandJournalEntries(path string, visit func(commandJournalEntry) error) (int64, error) {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
 	defer file.Close()
 
-	var entries []commandJournalEntry
 	var validBytes int64
 	var previousSequence uint64
 	var hasPreviousSequence bool
@@ -429,22 +440,26 @@ func readCommandJournalEntriesWithEnd(path string) ([]commandJournalEntry, int64
 		if len(line) > 0 && line[len(line)-1] == '\n' {
 			entry, err := decodeCommandJournalEntry(line)
 			if err != nil {
-				return nil, 0, err
+				return 0, err
 			}
 			if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {
-				return nil, 0, err
+				return 0, err
 			}
-			entries = append(entries, entry)
+			if visit != nil {
+				if err := visit(entry); err != nil {
+					return validBytes, err
+				}
+			}
 			validBytes += int64(len(line))
 			previousSequence = entry.Sequence
 			hasPreviousSequence = true
 		}
 
 		if errors.Is(err, io.EOF) {
-			return entries, validBytes, nil
+			return validBytes, nil
 		}
 		if err != nil {
-			return nil, 0, err
+			return 0, err
 		}
 	}
 }
