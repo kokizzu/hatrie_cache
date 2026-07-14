@@ -904,7 +904,7 @@ func TestReplicationRequestBodyLeavesSmallPayloadPlain(t *testing.T) {
 	}
 }
 
-func TestReplicationRequestBodyBuffersLargeStructuredPayload(t *testing.T) {
+func TestReplicationRequestBodyStreamsLargeStructuredPayload(t *testing.T) {
 	values := make(Slice, 0, minCompressedReplicationRequestBytes/4)
 	for len(values) < cap(values) {
 		values = append(values, strings.Repeat("value", 4))
@@ -921,22 +921,59 @@ func TestReplicationRequestBodyBuffersLargeStructuredPayload(t *testing.T) {
 	if contentEncoding != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
 	}
-	if _, ok := body.(*streamingGzipJSONBody); ok {
-		t.Fatalf("replicationRequestBody() body = %T, want buffered gzip body", body)
+	if _, ok := body.(*streamingGzipJSONBody); !ok {
+		t.Fatalf("replicationRequestBody() body = %T, want streaming gzip body", body)
 	}
 
 	reader, err := gzip.NewReader(body)
 	if err != nil {
-		t.Fatalf("NewReader(buffered gzip body) error = %v", err)
+		t.Fatalf("NewReader(streaming gzip body) error = %v", err)
 	}
 	defer reader.Close()
 
 	var decoded CacheCommandRequest
 	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
-		t.Fatalf("Decode(buffered gzip body) error = %v", err)
+		t.Fatalf("Decode(streaming gzip body) error = %v", err)
 	}
 	if !reflect.DeepEqual(decoded, payload) {
-		t.Fatalf("decoded buffered payload = %#v, want %#v", decoded, payload)
+		t.Fatalf("decoded streaming payload = %#v, want %#v", decoded, payload)
+	}
+}
+
+func TestReplicationRequestBodyStreamsLargePairPayload(t *testing.T) {
+	pairs := make(Map, minCompressedReplicationRequestBytes/128)
+	for len(pairs) < minCompressedReplicationRequestBytes/128 {
+		key := strings.Repeat("profile:", 2) + string(rune('a'+len(pairs)/26)) + string(rune('a'+len(pairs)%26))
+		pairs[key] = strings.Repeat("value", 32)
+	}
+	payload := CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:pairs",
+		Pairs:   pairs,
+	}
+	body, contentEncoding, err := replicationRequestBody(payload)
+	if err != nil {
+		t.Fatalf("replicationRequestBody() error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	if _, ok := body.(*streamingGzipJSONBody); !ok {
+		t.Fatalf("replicationRequestBody() body = %T, want streaming gzip body", body)
+	}
+
+	reader, err := gzip.NewReader(body)
+	if err != nil {
+		t.Fatalf("NewReader(streaming gzip body) error = %v", err)
+	}
+	defer reader.Close()
+
+	var decoded CacheCommandRequest
+	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(streaming gzip body) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, payload) {
+		t.Fatalf("decoded streaming payload = %#v, want %#v", decoded, payload)
 	}
 }
 

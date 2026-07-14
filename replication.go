@@ -742,7 +742,103 @@ func replicationRequestBody(payload CacheCommandRequest) (io.Reader, string, err
 }
 
 func shouldStreamCompressedReplicationRequest(payload CacheCommandRequest) bool {
-	return len(payload.Command)+len(payload.Key)+len(payload.Value)+len(payload.Subkey) >= minCompressedReplicationRequestBytes
+	return estimatedReplicationRequestBytes(payload) >= minCompressedReplicationRequestBytes
+}
+
+func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {
+	estimate := 64 + len(payload.Command) + len(payload.Key) + len(payload.Value) + len(payload.Subkey)
+	if estimate >= minCompressedReplicationRequestBytes {
+		return minCompressedReplicationRequestBytes
+	}
+	for _, value := range payload.Values {
+		estimate = addReplicationRequestEstimate(estimate, estimatedReplicationJSONValueBytes(value))
+		if estimate >= minCompressedReplicationRequestBytes {
+			return minCompressedReplicationRequestBytes
+		}
+	}
+	for key, value := range payload.Pairs {
+		estimate = addReplicationRequestEstimate(estimate, len(key)+estimatedReplicationJSONValueBytes(value))
+		if estimate >= minCompressedReplicationRequestBytes {
+			return minCompressedReplicationRequestBytes
+		}
+	}
+	if payload.Priority != nil {
+		estimate = addReplicationRequestEstimate(estimate, 20)
+	}
+	if payload.TTLSeconds != nil {
+		estimate = addReplicationRequestEstimate(estimate, 20)
+	}
+	if payload.UnixSeconds != nil {
+		estimate = addReplicationRequestEstimate(estimate, 20)
+	}
+	return estimate
+}
+
+func estimatedReplicationJSONValueBytes(value interface{}) int {
+	switch value := value.(type) {
+	case nil:
+		return 4
+	case string:
+		return len(value) + 2
+	case json.Number:
+		return len(value.String())
+	case bool:
+		if value {
+			return 4
+		}
+		return 5
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return 20
+	case float32:
+		return 15
+	case float64:
+		return 24
+	case []interface{}:
+		estimate := 2
+		for _, item := range value {
+			estimate = addReplicationRequestEstimate(estimate, estimatedReplicationJSONValueBytes(item))
+			if estimate >= minCompressedReplicationRequestBytes {
+				return minCompressedReplicationRequestBytes
+			}
+		}
+		return estimate
+	case []string:
+		estimate := 2
+		for _, item := range value {
+			estimate = addReplicationRequestEstimate(estimate, len(item)+2)
+			if estimate >= minCompressedReplicationRequestBytes {
+				return minCompressedReplicationRequestBytes
+			}
+		}
+		return estimate
+	case map[string]interface{}:
+		estimate := 2
+		for key, item := range value {
+			estimate = addReplicationRequestEstimate(estimate, len(key)+estimatedReplicationJSONValueBytes(item))
+			if estimate >= minCompressedReplicationRequestBytes {
+				return minCompressedReplicationRequestBytes
+			}
+		}
+		return estimate
+	case map[string]string:
+		estimate := 2
+		for key, item := range value {
+			estimate = addReplicationRequestEstimate(estimate, len(key)+len(item)+2)
+			if estimate >= minCompressedReplicationRequestBytes {
+				return minCompressedReplicationRequestBytes
+			}
+		}
+		return estimate
+	default:
+		return 0
+	}
+}
+
+func addReplicationRequestEstimate(total, value int) int {
+	if value >= minCompressedReplicationRequestBytes || total >= minCompressedReplicationRequestBytes-value {
+		return minCompressedReplicationRequestBytes
+	}
+	return total + value
 }
 
 func streamingGzipJSONReader(value interface{}) io.Reader {
