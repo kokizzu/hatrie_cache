@@ -521,7 +521,35 @@ func decodeCommandJournalEntry(data []byte) (commandJournalEntry, error) {
 	if entry.Sequence == 0 {
 		return commandJournalEntry{}, errors.New("hatriecache: invalid journal sequence")
 	}
+	if err := validateCommandJournalEntryRequest(entry); err != nil {
+		return commandJournalEntry{}, err
+	}
 	return entry, nil
+}
+
+func validateCommandJournalEntryRequest(entry commandJournalEntry) error {
+	if entry.Checkpoint {
+		if commandJournalRequestEmpty(entry.Request) {
+			return nil
+		}
+		return errors.New("hatriecache: command journal checkpoint cannot include a request")
+	}
+	if !commandShouldJournal(entry.Request) {
+		return errors.New("hatriecache: command journal entry request is not journalable")
+	}
+	return nil
+}
+
+func commandJournalRequestEmpty(request CacheCommandRequest) bool {
+	return strings.TrimSpace(request.Command) == "" &&
+		strings.TrimSpace(request.Key) == "" &&
+		request.Value == "" &&
+		len(request.Values) == 0 &&
+		request.Subkey == "" &&
+		len(request.Pairs) == 0 &&
+		request.Priority == nil &&
+		request.TTLSeconds == nil &&
+		request.UnixSeconds == nil
 }
 
 func validateCommandJournalEntrySequence(previous uint64, hasPrevious bool, entry commandJournalEntry) error {

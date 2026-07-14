@@ -151,6 +151,53 @@ func TestCommandJournalRejectsNonContiguousSequences(t *testing.T) {
 	})
 }
 
+func TestCommandJournalRejectsMalformedEntryRequests(t *testing.T) {
+	t.Run("checkpoint with request", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "commands.journal")
+		writeCommandJournalTestEntries(t, path, commandJournalEntry{
+			Version:    commandJournalVersion,
+			Sequence:   1,
+			Checkpoint: true,
+			Request:    CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"},
+		})
+		if _, err := OpenCommandJournal(path); err == nil || !strings.Contains(err.Error(), "checkpoint cannot include a request") {
+			t.Fatalf("OpenCommandJournal(checkpoint request) error = %v, want checkpoint request error", err)
+		}
+		if _, err := readCommandJournalTail(path, 0, 0); err == nil || !strings.Contains(err.Error(), "checkpoint cannot include a request") {
+			t.Fatalf("readCommandJournalTail(checkpoint request) error = %v, want checkpoint request error", err)
+		}
+	})
+
+	t.Run("empty command", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "commands.journal")
+		writeCommandJournalTestEntries(t, path, commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 1,
+		})
+		if _, err := OpenCommandJournal(path); err == nil || !strings.Contains(err.Error(), "request is not journalable") {
+			t.Fatalf("OpenCommandJournal(empty request) error = %v, want non-journalable request error", err)
+		}
+		if _, err := readCommandJournalTail(path, 0, 0); err == nil || !strings.Contains(err.Error(), "request is not journalable") {
+			t.Fatalf("readCommandJournalTail(empty request) error = %v, want non-journalable request error", err)
+		}
+	})
+
+	t.Run("read-only command", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "commands.journal")
+		writeCommandJournalTestEntries(t, path, commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 1,
+			Request:  CacheCommandRequest{Command: "GET", Key: "name"},
+		})
+		if _, err := OpenCommandJournal(path); err == nil || !strings.Contains(err.Error(), "request is not journalable") {
+			t.Fatalf("OpenCommandJournal(read-only request) error = %v, want non-journalable request error", err)
+		}
+		if _, err := readCommandJournalTail(path, 0, 0); err == nil || !strings.Contains(err.Error(), "request is not journalable") {
+			t.Fatalf("readCommandJournalTail(read-only request) error = %v, want non-journalable request error", err)
+		}
+	})
+}
+
 func TestCommandJournalTailReturnsEntriesAfterSequence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)
