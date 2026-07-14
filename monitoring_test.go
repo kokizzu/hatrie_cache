@@ -981,6 +981,53 @@ func TestMonitoringHandlerReplicatesCommands(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerReportsAsyncReplicationQueue(t *testing.T) {
+	ht := newTestTrie(t)
+	release := make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
+	}))
+	defer target.Close()
+	defer close(release)
+
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 2,
+	})
+	defer replicator.Close()
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:   "node-a",
+		Topology:   topology,
+		Election:   election,
+		Replicator: replicator,
+	}).Handler()
+
+	commandResp := httptest.NewRecorder()
+	handler.ServeHTTP(commandResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"session:1","value":"value"}`)))
+	if commandResp.Code != http.StatusOK {
+		t.Fatalf("command status = %d, want 200", commandResp.Code)
+	}
+
+	replicationResp := httptest.NewRecorder()
+	handler.ServeHTTP(replicationResp, httptest.NewRequest(http.MethodGet, "/api/replication", nil))
+	if replicationResp.Code != http.StatusOK {
+		t.Fatalf("replication status = %d, want 200", replicationResp.Code)
+	}
+	var result ReplicationResult
+	if err := json.Unmarshal(replicationResp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("replication JSON error = %v", err)
+	}
+	if !result.Queued || result.Queue == nil || !result.Queue.Enabled || result.Queue.Capacity != 2 || result.Queue.Enqueued != 1 {
+		t.Fatalf("async replication result = %#v, want queued result with queue stats", result)
+	}
+}
+
 func TestMonitoringHandlerSyncsReplication(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("session:1", "value")

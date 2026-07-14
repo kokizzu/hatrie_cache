@@ -30,21 +30,22 @@ type HTTPReplicatorOptions struct {
 }
 
 type HTTPReplicator struct {
-	mu       sync.RWMutex
-	self     string
-	topology *TopologyStore
-	election *ElectionStore
-	client   *http.Client
-	timeout  time.Duration
-	queue    chan replicationJob
-	retry    time.Duration
-	attempts uint
-	done     chan struct{}
-	stopped  chan struct{}
-	cancel   context.CancelFunc
-	close    sync.Once
-	closed   bool
-	last     ReplicationResult
+	mu         sync.RWMutex
+	self       string
+	topology   *TopologyStore
+	election   *ElectionStore
+	client     *http.Client
+	timeout    time.Duration
+	queue      chan replicationJob
+	retry      time.Duration
+	attempts   uint
+	done       chan struct{}
+	stopped    chan struct{}
+	cancel     context.CancelFunc
+	close      sync.Once
+	closed     bool
+	queueStats ReplicationQueueStats
+	last       ReplicationResult
 }
 
 type ReplicationResult struct {
@@ -54,7 +55,22 @@ type ReplicationResult struct {
 	Queued  bool                      `json:"queued,omitempty"`
 	Skipped bool                      `json:"skipped"`
 	Reason  string                    `json:"reason,omitempty"`
+	Queue   *ReplicationQueueStats    `json:"queue,omitempty"`
 	Targets []ReplicationTargetResult `json:"targets,omitempty"`
+}
+
+// ReplicationQueueStats reports bounded async replication outbox health.
+type ReplicationQueueStats struct {
+	Enabled   bool   `json:"enabled"`
+	Depth     int    `json:"depth"`
+	Capacity  int    `json:"capacity"`
+	Enqueued  uint64 `json:"enqueued"`
+	Dropped   uint64 `json:"dropped"`
+	Attempts  uint64 `json:"attempts"`
+	Successes uint64 `json:"successes"`
+	Failures  uint64 `json:"failures"`
+	Retried   uint64 `json:"retried"`
+	Closed    bool   `json:"closed"`
 }
 
 type ReplicationTargetResult struct {
@@ -116,6 +132,10 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		replicator.done = make(chan struct{})
 		replicator.stopped = make(chan struct{})
 		replicator.cancel = cancel
+		replicator.queueStats = ReplicationQueueStats{
+			Enabled:  true,
+			Capacity: options.AsyncQueueSize,
+		}
 		go replicator.runAsync(ctx)
 	}
 	return replicator
@@ -127,7 +147,12 @@ func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 	}
 	replicator.mu.RLock()
 	defer replicator.mu.RUnlock()
-	return cloneReplicationResult(replicator.last)
+	result := cloneReplicationResult(replicator.last)
+	if replicator.queue != nil {
+		stats := replicator.queueStatsLocked()
+		result.Queue = &stats
+	}
+	return result
 }
 
 func (replicator *HTTPReplicator) Close() {
@@ -137,6 +162,7 @@ func (replicator *HTTPReplicator) Close() {
 	replicator.close.Do(func() {
 		replicator.mu.Lock()
 		replicator.closed = true
+		replicator.queueStats.Closed = true
 		replicator.mu.Unlock()
 		replicator.cancel()
 		close(replicator.done)
@@ -171,6 +197,7 @@ func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *Ha
 
 func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
 	if replicator.asyncClosed() {
+		replicator.recordAsyncDropped()
 		return ReplicationResult{
 			Command: normalizedCommand(request.Command),
 			Key:     strings.TrimSpace(request.Key),
@@ -193,22 +220,26 @@ func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *
 		result.Skipped = true
 		result.Reason = "replication queue is closed"
 		result.Targets = nil
+		replicator.recordAsyncDropped()
 		return result
 	}
 	select {
 	case replicator.queue <- job:
+		replicator.recordAsyncEnqueued()
 		return result
 	case <-replicator.done:
 		result.Queued = false
 		result.Skipped = true
 		result.Reason = "replication queue is closed"
 		result.Targets = nil
+		replicator.recordAsyncDropped()
 		return result
 	default:
 		result.Queued = false
 		result.Skipped = true
 		result.Reason = "replication queue is full"
 		result.Targets = nil
+		replicator.recordAsyncDropped()
 		return result
 	}
 }
@@ -220,6 +251,52 @@ func (replicator *HTTPReplicator) asyncClosed() bool {
 	replicator.mu.RLock()
 	defer replicator.mu.RUnlock()
 	return replicator.closed
+}
+
+func (replicator *HTTPReplicator) recordAsyncEnqueued() {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.queueStats.Enqueued++
+}
+
+func (replicator *HTTPReplicator) recordAsyncDropped() {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.queueStats.Dropped++
+}
+
+func (replicator *HTTPReplicator) recordAsyncAttempt(result ReplicationResult, retried bool) {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.queueStats.Attempts += uint64(len(result.Targets))
+	for _, target := range result.Targets {
+		if target.OK {
+			replicator.queueStats.Successes++
+		} else {
+			replicator.queueStats.Failures++
+		}
+	}
+	if retried {
+		replicator.queueStats.Retried++
+	}
+}
+
+func (replicator *HTTPReplicator) queueStatsLocked() ReplicationQueueStats {
+	stats := replicator.queueStats
+	if replicator.queue != nil {
+		stats.Depth = len(replicator.queue)
+		stats.Capacity = cap(replicator.queue)
+	}
+	return stats
 }
 
 func (replicator *HTTPReplicator) planReplication(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) (ReplicationResult, []replicationTask) {
@@ -321,8 +398,11 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 			return
 		}
 		result = replicator.executeReplicationTasks(ctx, job.result, job.tasks)
+		needsRetry := replicationNeedsRetry(result)
+		willRetry := needsRetry && attempt < attempts
+		replicator.recordAsyncAttempt(result, willRetry)
 		replicator.storeLastResult(result)
-		if !replicationNeedsRetry(result) || attempt == attempts {
+		if !needsRetry || attempt == attempts {
 			return
 		}
 		if !replicator.waitForRetry(ctx) {

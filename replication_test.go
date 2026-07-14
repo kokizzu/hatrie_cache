@@ -311,9 +311,12 @@ func TestHTTPReplicatorAsyncQueuesMaterializedPayload(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("async replication did not deliver queued request")
 	}
-	waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
+	final := waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
 		return !result.Queued && !result.Skipped && len(result.Targets) == 1 && result.Targets[0].OK
 	})
+	if final.Queue == nil || !final.Queue.Enabled || final.Queue.Capacity != 2 || final.Queue.Enqueued != 1 || final.Queue.Attempts != 1 || final.Queue.Successes != 1 || final.Queue.Failures != 0 || final.Queue.Dropped != 0 {
+		t.Fatalf("async queue stats = %#v, want one successful queued delivery", final.Queue)
+	}
 }
 
 func TestHTTPReplicatorAsyncRetriesFailedDelivery(t *testing.T) {
@@ -353,11 +356,14 @@ func TestHTTPReplicatorAsyncRetriesFailedDelivery(t *testing.T) {
 	if !result.Queued || result.Skipped {
 		t.Fatalf("async enqueue result = %#v, want queued", result)
 	}
-	waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
+	final := waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
 		return !result.Queued && len(result.Targets) == 1 && result.Targets[0].OK
 	})
 	if got := len(attempts); got != 2 {
 		t.Fatalf("attempts = %d, want 2", got)
+	}
+	if final.Queue == nil || final.Queue.Enqueued != 1 || final.Queue.Attempts != 2 || final.Queue.Successes != 1 || final.Queue.Failures != 1 || final.Queue.Retried != 1 {
+		t.Fatalf("retry queue stats = %#v, want one failed attempt, one retry, one success", final.Queue)
 	}
 }
 
@@ -405,6 +411,10 @@ func TestHTTPReplicatorAsyncReportsFullQueue(t *testing.T) {
 	if !result.Skipped || result.Reason != "replication queue is full" || result.Queued {
 		t.Fatalf("third enqueue result = %#v, want full queue skip", result)
 	}
+	last := replicator.LastResult()
+	if last.Queue == nil || last.Queue.Enqueued != 2 || last.Queue.Dropped != 1 || last.Queue.Depth != 1 || last.Queue.Capacity != 1 {
+		t.Fatalf("full queue stats = %#v, want two enqueued, one dropped, one pending", last.Queue)
+	}
 }
 
 func TestHTTPReplicatorAsyncCloseIsIdempotentAndRejectsEnqueue(t *testing.T) {
@@ -425,6 +435,10 @@ func TestHTTPReplicatorAsyncCloseIsIdempotentAndRejectsEnqueue(t *testing.T) {
 	result := replicator.ReplicateCommand(context.Background(), trie, write, response)
 	if !result.Skipped || result.Reason != "replication queue is closed" || result.Queued {
 		t.Fatalf("post-close replicate result = %#v, want closed queue skip", result)
+	}
+	last := replicator.LastResult()
+	if last.Queue == nil || !last.Queue.Closed || last.Queue.Dropped != 1 {
+		t.Fatalf("closed queue stats = %#v, want closed with one dropped enqueue", last.Queue)
 	}
 }
 
