@@ -3006,6 +3006,24 @@ func TestHyperLogLogSnapshotValidationRejectsInvalidRegisterRank(t *testing.T) {
 	}
 }
 
+func TestHyperLogLogSnapshotValidationRejectsImpossibleObservations(t *testing.T) {
+	hll, err := newHyperLogLogData(10)
+	if err != nil {
+		t.Fatalf("newHyperLogLogData() error = %v", err)
+	}
+	hll.registers[0] = 1
+	hll.registers[1] = 1
+	snapshot := hll.Snapshot()
+	snapshot.Observations = 1
+	if err := validateHyperLogLogSnapshot(snapshot); err == nil {
+		t.Fatal("validateHyperLogLogSnapshot(nonzero registers) error = nil, want error")
+	}
+	snapshot.Observations = 2
+	if err := validateHyperLogLogSnapshot(snapshot); err != nil {
+		t.Fatalf("validateHyperLogLogSnapshot(two observations) error = %v, want nil", err)
+	}
+}
+
 func TestHyperLogLogStorageReleasedOnOverwrite(t *testing.T) {
 	ht := newTestTrie(t)
 

@@ -76,10 +76,17 @@ func validateHyperLogLogSnapshot(snapshot hyperLogLogSnapshot) error {
 		return errors.New("hatriecache: invalid hyperloglog register length")
 	}
 	maxRank := hyperLogLogMaxRank(snapshot.Precision)
+	nonZeroRegisters := uint64(0)
 	for _, register := range data {
 		if register > maxRank {
 			return errors.New("hatriecache: invalid hyperloglog register rank")
 		}
+		if register != 0 {
+			nonZeroRegisters++
+		}
+	}
+	if nonZeroRegisters > snapshot.Observations {
+		return errors.New("hatriecache: hyperloglog snapshot has more nonzero registers than observations")
 	}
 	return nil
 }
