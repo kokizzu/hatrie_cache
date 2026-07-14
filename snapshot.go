@@ -260,7 +260,7 @@ func (ht *HatTrie) writeSnapshotEntryJSONLocked(writer io.Writer, entry Entry, p
 	if err != nil {
 		return err
 	}
-	return writeIndentedJSON(writer, snapshotEntry, prefix)
+	return writeSnapshotEntryFieldsJSON(writer, snapshotEntry, prefix)
 }
 
 func (ht *HatTrie) writeSnapshotDiskBytesEntryJSONLocked(writer io.Writer, entry Entry, prefix string) error {
@@ -372,26 +372,166 @@ func writeSnapshotBase64Field(writer io.Writer, prefix string, name string, read
 	return err
 }
 
-func writeIndentedJSON(writer io.Writer, value interface{}, prefix string) error {
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
+func writeSnapshotEntryFieldsJSON(writer io.Writer, entry snapshotEntry, prefix string) error {
+	if _, err := io.WriteString(writer, prefix+"{\n"); err != nil {
 		return err
 	}
-	lines := bytes.Split(data, []byte{'\n'})
-	for idx, line := range lines {
-		if _, err := io.WriteString(writer, prefix); err != nil {
-			return err
+	fieldPrefix := prefix + "  "
+	first := true
+	writeField := func(name string, value interface{}) error {
+		return writeSnapshotIndentedJSONField(writer, fieldPrefix, name, value, &first)
+	}
+	writeOptionalField := func(ok bool, name string, value interface{}) error {
+		if !ok {
+			return nil
 		}
-		if _, err := writer.Write(line); err != nil {
+		return writeField(name, value)
+	}
+
+	if err := writeField("key", entry.Key); err != nil {
+		return err
+	}
+	if err := writeField("type", entry.Type); err != nil {
+		return err
+	}
+	if entry.Counter != 0 {
+		if err := writeField("counter", entry.Counter); err != nil {
 			return err
-		}
-		if idx < len(lines)-1 {
-			if _, err := io.WriteString(writer, "\n"); err != nil {
-				return err
-			}
 		}
 	}
-	return nil
+	if entry.String != "" {
+		if err := writeField("string", entry.String); err != nil {
+			return err
+		}
+	}
+	if entry.Bytes != "" {
+		if err := writeField("bytes", entry.Bytes); err != nil {
+			return err
+		}
+	}
+	if err := writeField("map", entry.Map); err != nil {
+		return err
+	}
+	if err := writeField("slice", entry.Slice); err != nil {
+		return err
+	}
+	if err := writeField("set", entry.Set); err != nil {
+		return err
+	}
+	if err := writeField("priority_queue", entry.PriorityQueue); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.BloomFilter != nil, "bloom_filter", entry.BloomFilter); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.CountMinSketch != nil, "count_min_sketch", entry.CountMinSketch); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.HyperLogLog != nil, "hyperloglog", entry.HyperLogLog); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.TopK != nil, "top_k", entry.TopK); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.CuckooFilter != nil, "cuckoo_filter", entry.CuckooFilter); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.RoaringBitmap != nil, "roaring_bitmap", entry.RoaringBitmap); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.QuantileSketch != nil, "quantile_sketch", entry.QuantileSketch); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.FenwickTree != nil, "fenwick_tree", entry.FenwickTree); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.SparseBitset != nil, "sparse_bitset", entry.SparseBitset); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.ReservoirSample != nil, "reservoir_sample", entry.ReservoirSample); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.XorFilter != nil, "xor_filter", entry.XorFilter); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.RadixTree != nil, "radix_tree", entry.RadixTree); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.ExpiresAt != nil, "expires_at", entry.ExpiresAt); err != nil {
+		return err
+	}
+	if err := writeOptionalField(entry.Stats != nil, "stats", entry.Stats); err != nil {
+		return err
+	}
+	_, err := io.WriteString(writer, "\n"+prefix+"}")
+	return err
+}
+
+func writeSnapshotIndentedJSONField(writer io.Writer, prefix string, name string, value interface{}, first *bool) error {
+	if !*first {
+		if _, err := io.WriteString(writer, ",\n"); err != nil {
+			return err
+		}
+	}
+	*first = false
+	if _, err := fmt.Fprintf(writer, "%s%q: ", prefix, name); err != nil {
+		return err
+	}
+	prefixed := &prefixedJSONLineWriter{
+		writer: writer,
+		prefix: prefix,
+	}
+	encoder := json.NewEncoder(prefixed)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}
+
+type prefixedJSONLineWriter struct {
+	writer         io.Writer
+	prefix         string
+	lineStart      bool
+	pendingNewline bool
+}
+
+func (writer *prefixedJSONLineWriter) Write(data []byte) (int, error) {
+	written := 0
+	for len(data) > 0 {
+		if writer.pendingNewline {
+			if _, err := io.WriteString(writer.writer, "\n"); err != nil {
+				return written, err
+			}
+			writer.lineStart = true
+			writer.pendingNewline = false
+		}
+		if data[0] == '\n' {
+			writer.pendingNewline = true
+			data = data[1:]
+			written++
+			continue
+		}
+		if writer.lineStart {
+			if _, err := io.WriteString(writer.writer, writer.prefix); err != nil {
+				return written, err
+			}
+			writer.lineStart = false
+		}
+		nextNewline := bytes.IndexByte(data, '\n')
+		if nextNewline < 0 {
+			if _, err := writer.writer.Write(data); err != nil {
+				return written, err
+			}
+			written += len(data)
+			return written, nil
+		}
+		if nextNewline > 0 {
+			if _, err := writer.writer.Write(data[:nextNewline]); err != nil {
+				return written, err
+			}
+			written += nextNewline
+			data = data[nextNewline:]
+		}
+	}
+	return written, nil
 }
 
 func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {

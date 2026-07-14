@@ -342,6 +342,30 @@ func TestWriteJSONFileAtomicStreamsAndCleansTemporaryFileOnEncodeError(t *testin
 	assertNoAtomicTempFiles(t, dir, "data.json")
 }
 
+func TestWriteSnapshotEntryFieldsJSONPreservesPrefixedMarshalIndentLayout(t *testing.T) {
+	value := snapshotEntry{
+		Key:  "profile",
+		Type: "map",
+		Map:  Map{"name": "ivi", "age": json.Number("32")},
+	}
+	expected, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := writeSnapshotEntryFieldsJSON(&buf, value, "    "); err != nil {
+		t.Fatalf("writeSnapshotEntryFieldsJSON() error = %v", err)
+	}
+	want := "    " + strings.ReplaceAll(string(expected), "\n", "\n    ")
+	if got := buf.String(); got != want {
+		t.Fatalf("writeSnapshotEntryFieldsJSON() = %q, want %q", got, want)
+	}
+	if strings.HasSuffix(buf.String(), "\n") {
+		t.Fatalf("writeSnapshotEntryFieldsJSON() added trailing newline: %q", buf.String())
+	}
+}
+
 func TestWriteFileAtomicCleansTemporaryFileOnRenameError(t *testing.T) {
 	dir := t.TempDir()
 	targetDir := filepath.Join(dir, "target.json")
