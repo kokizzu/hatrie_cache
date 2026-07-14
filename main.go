@@ -2490,6 +2490,9 @@ func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 	}
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
+		if str == "" {
+			return string(old), nil
+		}
 		next := make([]byte, 0, len(old)+len(str))
 		next = append(next, old...)
 		next = append(next, str...)
@@ -2525,6 +2528,9 @@ func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) 
 	}
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
+		if str == "" {
+			return string(old), nil
+		}
 		next := make([]byte, 0, len(str)+len(old))
 		next = append(next, str...)
 		next = append(next, old...)

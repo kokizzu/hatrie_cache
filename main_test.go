@@ -319,6 +319,42 @@ func TestStringOperationsReuseStorage(t *testing.T) {
 	}
 }
 
+func TestEmptyAppendPrependStringDoNotRecordWrites(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(330, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("key", "value")
+	idx := ht.Get("key").Index
+	writeAt := now
+	writes := ht.Stats().Writes
+
+	now = now.Add(time.Second)
+	if got, err := ht.AppendStringChecked("key", ""); err != nil || got != "value" {
+		t.Fatalf("AppendStringChecked(empty) = %q/%v, want value/nil", got, err)
+	}
+	stats := ht.Stats()
+	if stats.Writes != writes || !stats.LastWrite.Equal(writeAt) {
+		t.Fatalf("stats after empty append = %#v, want writes %d and last write %s", stats, writes, writeAt)
+	}
+
+	now = now.Add(time.Second)
+	if got, err := ht.PrependStringChecked("key", ""); err != nil || got != "value" {
+		t.Fatalf("PrependStringChecked(empty) = %q/%v, want value/nil", got, err)
+	}
+	stats = ht.Stats()
+	if stats.Writes != writes || !stats.LastWrite.Equal(writeAt) {
+		t.Fatalf("stats after empty prepend = %#v, want writes %d and last write %s", stats, writes, writeAt)
+	}
+	if got := ht.Get("key").Index; got != idx {
+		t.Fatalf("empty string append/prepend moved storage index: got %d, want %d", got, idx)
+	}
+	keyStats, ok := ht.StatsForKey("key")
+	if !ok || keyStats.Writes != 1 || !keyStats.LastWrite.Equal(writeAt) {
+		t.Fatalf("StatsForKey(key) = %#v/%v, want unchanged write stats", keyStats, ok)
+	}
+}
+
 func TestBytesOperationsCopyInputsAndOutputs(t *testing.T) {
 	ht := newTestTrie(t)
 
