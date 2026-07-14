@@ -360,9 +360,11 @@ The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
 and `TTL`. Expired entries are removed lazily when the key is read or mutated.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
 `VacuumExpired` for immediate cleanup or `StartExpirationCleaner` for periodic
-background cleanup. Use `VacuumExpiredOnMemoryPressure` or
+background cleanup. Use `StartExpirationCleanerContext` when cleaner lifetime
+should follow a parent service context. Use `VacuumExpiredOnMemoryPressure` or
 `StartMemoryPressureVacuum` to remove expired keys only when heap allocation is
-above a configured threshold.
+above a configured threshold; `StartMemoryPressureVacuumContext` also stops on
+context cancellation.
 
 Use `Keys`, `KeysWithPrefix`, `Entries`, and `EntriesWithPrefix` to iterate
 over non-expired keys and value metadata. Prefix iteration returns full keys and

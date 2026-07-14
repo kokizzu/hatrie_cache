@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -5641,6 +5642,25 @@ func TestStartExpirationCleanerRemovesExpiredKeysAndStops(t *testing.T) {
 	}
 }
 
+func TestStartExpirationCleanerContextStopsOnCancel(t *testing.T) {
+	ht := newTestTrie(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := ht.StartExpirationCleanerContext(ctx, time.Hour)
+
+	cancel()
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expiration cleaner stop after context cancel did not return")
+	}
+}
+
 func TestStartExpirationCleanerRejectsInvalidInterval(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -5703,6 +5723,25 @@ func TestStartMemoryPressureVacuumRemovesExpiredKeysAndStops(t *testing.T) {
 	case <-stopped:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("memory pressure vacuum stop did not return")
+	}
+}
+
+func TestStartMemoryPressureVacuumContextStopsOnCancel(t *testing.T) {
+	ht := newTestTrie(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := ht.StartMemoryPressureVacuumContext(ctx, time.Hour, 1)
+
+	cancel()
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("memory pressure vacuum stop after context cancel did not return")
 	}
 }
 
