@@ -12,6 +12,10 @@ import (
 
 var snapshotBinaryMagic = []byte{'h', 'c', 's', 'n', 1}
 
+const maxSnapshotBinaryRecordBytes = 1 << 30
+
+var errSnapshotBinaryRecordTooLarge = errors.New("hatriecache: binary snapshot entry is too large")
+
 func (ht *HatTrie) writeSnapshotBinary(writer io.Writer, journalSequence uint64) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -60,6 +64,9 @@ func (ht *HatTrie) snapshotEntryBinaryRecordLocked(entry Entry) ([]byte, error) 
 }
 
 func writeSnapshotBinaryRecord(writer io.Writer, data []byte) error {
+	if err := validateSnapshotBinaryRecordSize(uint64(len(data))); err != nil {
+		return err
+	}
 	var scratch [binary.MaxVarintLen64]byte
 	n := binary.PutUvarint(scratch[:], uint64(len(data)))
 	if err := writeSnapshotBinaryBytes(writer, scratch[:n]); err != nil {
@@ -123,8 +130,8 @@ func scanSnapshotFileBinaryReader(reader *bufio.Reader, visit func(snapshotEntry
 		if err != nil {
 			return snapshotFileMetadata{}, err
 		}
-		if size > uint64(int(^uint(0)>>1)) {
-			return snapshotFileMetadata{}, errors.New("hatriecache: binary snapshot entry is too large")
+		if err := validateSnapshotBinaryRecordSize(size); err != nil {
+			return snapshotFileMetadata{}, err
 		}
 		data := make([]byte, int(size))
 		if _, err := io.ReadFull(reader, data); err != nil {
@@ -140,4 +147,11 @@ func scanSnapshotFileBinaryReader(reader *bufio.Reader, visit func(snapshotEntry
 			}
 		}
 	}
+}
+
+func validateSnapshotBinaryRecordSize(size uint64) error {
+	if size > maxSnapshotBinaryRecordBytes || size > uint64(int(^uint(0)>>1)) {
+		return errSnapshotBinaryRecordTooLarge
+	}
+	return nil
 }

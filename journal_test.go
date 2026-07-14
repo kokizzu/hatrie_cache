@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -218,6 +219,16 @@ func TestCommandJournalIgnoresPartialBinaryTail(t *testing.T) {
 	}
 	if !bytes.Equal(after, before) {
 		t.Fatalf("journal after partial tail truncate length = %d, want %d", len(after), len(before))
+	}
+}
+
+func TestCommandJournalRejectsOversizedBinaryRecordBeforeAllocation(t *testing.T) {
+	writer := newBinaryFieldWriter(commandJournalBinaryMagic, len(commandJournalBinaryMagic)+binaryFieldMaxVarintLen64)
+	writer.writeUvarint(maxCommandJournalBinaryRecordBytes + 1)
+
+	_, _, _, err := readCommandJournalRecord(bufio.NewReader(bytes.NewReader(writer.bytes())))
+	if !errors.Is(err, errCommandJournalBinaryRecordTooLarge) {
+		t.Fatalf("readCommandJournalRecord(oversized binary) error = %v, want record too large", err)
 	}
 }
 

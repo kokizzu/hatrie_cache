@@ -65,6 +65,9 @@ func marshalCommandJournalEntryBinary(entry commandJournalEntry) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
+	if err := validateCommandJournalBinaryRecordSize(uint64(len(payload))); err != nil {
+		return nil, err
+	}
 	writer := newBinaryFieldWriter(commandJournalBinaryMagic, len(commandJournalBinaryMagic)+binaryFieldMaxVarintLen64+len(payload))
 	writer.writeBytes(payload)
 	return writer.bytes(), nil

@@ -311,6 +311,18 @@ func TestSnapshotBinaryReaderRejectsTruncatedRecord(t *testing.T) {
 	}
 }
 
+func TestSnapshotBinaryReaderRejectsOversizedRecordBeforeAllocation(t *testing.T) {
+	writer := newBinaryFieldWriter(snapshotBinaryMagic, len(snapshotBinaryMagic)+(3*binaryFieldMaxVarintLen64))
+	writer.writeUvarint(uint64(snapshotVersion))
+	writer.writeUvarint(0)
+	writer.writeUvarint(maxSnapshotBinaryRecordBytes + 1)
+
+	_, err := scanSnapshotFileReader(bytes.NewReader(writer.bytes()), nil)
+	if !errors.Is(err, errSnapshotBinaryRecordTooLarge) {
+		t.Fatalf("scanSnapshotFileReader(oversized binary) error = %v, want record too large", err)
+	}
+}
+
 func TestSnapshotFormatDefaultsToGzipBestBinaryAndLoadsOlderFormats(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("key", "value")

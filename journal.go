@@ -16,6 +16,8 @@ import (
 
 const commandJournalVersion = 1
 
+const maxCommandJournalBinaryRecordBytes = 1 << 30
+
 const (
 	DefaultCommandJournalTailLimit   = 1000
 	MaxCommandJournalTailLimit       = 10000
@@ -26,6 +28,7 @@ const (
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
 var ErrCommandJournalCompacted = errors.New("hatriecache: command journal entries are compacted")
 var ErrCommandJournalSequenceExhausted = errors.New("hatriecache: command journal sequence is exhausted")
+var errCommandJournalBinaryRecordTooLarge = errors.New("hatriecache: command journal binary record is too large")
 
 type CommandJournalRecord struct {
 	Sequence uint64              `json:"sequence"`
@@ -507,8 +510,8 @@ func readCommandJournalBinaryRecord(reader *bufio.Reader) ([]byte, int, bool, er
 		return nil, 0, complete, err
 	}
 	record = append(record, sizeBytes...)
-	if size > uint64(int(^uint(0)>>1)) {
-		return nil, 0, false, errors.New("hatriecache: command journal binary record is too large")
+	if err := validateCommandJournalBinaryRecordSize(size); err != nil {
+		return nil, 0, false, err
 	}
 	payload := make([]byte, int(size))
 	if _, err := io.ReadFull(reader, payload); err != nil {
@@ -519,6 +522,13 @@ func readCommandJournalBinaryRecord(reader *bufio.Reader) ([]byte, int, bool, er
 	}
 	record = append(record, payload...)
 	return record, len(record), true, nil
+}
+
+func validateCommandJournalBinaryRecordSize(size uint64) error {
+	if size > maxCommandJournalBinaryRecordBytes || size > uint64(int(^uint(0)>>1)) {
+		return errCommandJournalBinaryRecordTooLarge
+	}
+	return nil
 }
 
 func readCommandJournalRecordSize(reader *bufio.Reader) (uint64, []byte, bool, error) {
