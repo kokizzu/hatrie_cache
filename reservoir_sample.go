@@ -457,29 +457,50 @@ func (ht *HatTrie) AddReservoirSampleChecked(key string, val interface{}, vals .
 }
 
 func (ht *HatTrie) GetReservoirSample(key string) []ReservoirSampleItem {
+	items, ok, _ := ht.GetReservoirSampleChecked(key)
+	if !ok {
+		return nil
+	}
+	return items
+}
+
+func (ht *HatTrie) GetReservoirSampleChecked(key string) ([]ReservoirSampleItem, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsReservoirSample() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.reservoirSamples.array[hval.Index].Items()
+	return ht.reservoirSamples.array[hval.Index].Items(), true, nil
 }
 
 func (ht *HatTrie) ReservoirSampleInfo(key string) (ReservoirSampleInfo, bool) {
+	info, ok, _ := ht.ReservoirSampleInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) ReservoirSampleInfoChecked(key string) (ReservoirSampleInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return ReservoirSampleInfo{}, false, err
+	}
 	if !hval.IsReservoirSample() {
 		ht.recordReadLocked(false, key)
-		return ReservoirSampleInfo{}, false
+		return ReservoirSampleInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.reservoirSamples.array[hval.Index].Info(), true
+	return ht.reservoirSamples.array[hval.Index].Info(), true, nil
 }
 
 func reservoirSampleCapacityValue(value uint64) (uint64, error) {

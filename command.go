@@ -666,7 +666,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(estimate, 10)}
 	case "INFOCMS", "CMSINFO":
-		info, ok := ht.CountMinSketchInfo(key)
+		info, ok, err := ht.CountMinSketchInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -691,13 +694,19 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(estimate, 10)}
 	case "COUNTHLL", "ESTHLL", "HLLCOUNT", "HLLCARD":
-		count, ok := ht.CountHyperLogLog(key)
+		count, ok, err := ht.CountHyperLogLogChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(count, 10)}
 	case "INFOHLL", "HLLINFO":
-		info, ok := ht.HyperLogLogInfo(key)
+		info, ok, err := ht.HyperLogLogInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -742,13 +751,19 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return commandValueResponse("ok", estimate)
 	case "GETTOPK", "TOPK":
-		value := ht.GetTopK(key)
-		if value == nil {
+		value, ok, err := ht.GetTopKChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
 	case "INFOTOPK", "TOPKINFO":
-		info, ok := ht.TopKInfo(key)
+		info, ok, err := ht.TopKInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -773,13 +788,19 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return commandValueResponse("added reservoir sample values", update)
 	case "GETRS", "RSGET", "SAMPLE":
-		value := ht.GetReservoirSample(key)
-		if value == nil {
+		value, ok, err := ht.GetReservoirSampleChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
 	case "INFORS", "RSINFO":
-		info, ok := ht.ReservoirSampleInfo(key)
+		info, ok, err := ht.ReservoirSampleInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}

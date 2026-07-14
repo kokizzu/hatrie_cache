@@ -523,29 +523,50 @@ func (ht *HatTrie) EstimateTopKChecked(key string, val interface{}) (TopKEstimat
 }
 
 func (ht *HatTrie) GetTopK(key string) []TopKItem {
+	items, ok, _ := ht.GetTopKChecked(key)
+	if !ok {
+		return nil
+	}
+	return items
+}
+
+func (ht *HatTrie) GetTopKChecked(key string) ([]TopKItem, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsTopK() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.topKs.array[hval.Index].Items()
+	return ht.topKs.array[hval.Index].Items(), true, nil
 }
 
 func (ht *HatTrie) TopKInfo(key string) (TopKInfo, bool) {
+	info, ok, _ := ht.TopKInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) TopKInfoChecked(key string) (TopKInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return TopKInfo{}, false, err
+	}
 	if !hval.IsTopK() {
 		ht.recordReadLocked(false, key)
-		return TopKInfo{}, false
+		return TopKInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.topKs.array[hval.Index].Info(), true
+	return ht.topKs.array[hval.Index].Info(), true, nil
 }
 
 func topKCapacityValue(value uint64) (uint64, error) {

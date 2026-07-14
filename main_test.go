@@ -2885,6 +2885,77 @@ func TestReservoirSampleClonesNestedValues(t *testing.T) {
 	}
 }
 
+func TestCheckedSketchAndSampleReadOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if estimate, err := ht.IncrementCountMinSketchChecked("cms", "alpha", 2); err != nil || estimate < 2 {
+		t.Fatalf("IncrementCountMinSketchChecked(alpha) = %d/%v, want estimate at least 2", estimate, err)
+	}
+	cmsInfo, ok, err := ht.CountMinSketchInfoChecked("cms")
+	if err != nil || !ok || cmsInfo.TotalCount != 2 {
+		t.Fatalf("CountMinSketchInfoChecked(cms) = %#v/%v/%v, want total count 2", cmsInfo, ok, err)
+	}
+	if missing, ok, err := ht.CountMinSketchInfoChecked("missing-cms"); err != nil || ok || missing.TotalCount != 0 {
+		t.Fatalf("CountMinSketchInfoChecked(missing) = %#v/%v/%v, want zero/false/nil", missing, ok, err)
+	}
+
+	if count, err := ht.AddHyperLogLogChecked("hll", "alpha", "beta"); err != nil || count < 2 {
+		t.Fatalf("AddHyperLogLogChecked(alpha,beta) = %d/%v, want estimate at least 2", count, err)
+	}
+	if count, ok, err := ht.CountHyperLogLogChecked("hll"); err != nil || !ok || count < 2 {
+		t.Fatalf("CountHyperLogLogChecked(hll) = %d/%v/%v, want estimate at least 2", count, ok, err)
+	}
+	hllInfo, ok, err := ht.HyperLogLogInfoChecked("hll")
+	if err != nil || !ok || hllInfo.Observations != 2 || hllInfo.Estimate < 2 {
+		t.Fatalf("HyperLogLogInfoChecked(hll) = %#v/%v/%v, want two observations", hllInfo, ok, err)
+	}
+	if count, ok, err := ht.CountHyperLogLogChecked("missing-hll"); err != nil || ok || count != 0 {
+		t.Fatalf("CountHyperLogLogChecked(missing) = %d/%v/%v, want 0/false/nil", count, ok, err)
+	}
+
+	topValue := Map{"path": "/api/users"}
+	if estimate, err := ht.AddTopKChecked("top", topValue, 3); err != nil || !estimate.Tracked || estimate.Count != 3 {
+		t.Fatalf("AddTopKChecked(top) = %#v/%v, want tracked count 3", estimate, err)
+	}
+	topValue["path"] = "/caller"
+	topItems, ok, err := ht.GetTopKChecked("top")
+	if err != nil || !ok || len(topItems) != 1 || topItems[0].Value.(Map)["path"] != "/api/users" {
+		t.Fatalf("GetTopKChecked(top) = %#v/%v/%v, want cloned item", topItems, ok, err)
+	}
+	topItems[0].Value.(Map)["path"] = "/mutated"
+	if again, ok, err := ht.GetTopKChecked("top"); err != nil || !ok || again[0].Value.(Map)["path"] != "/api/users" {
+		t.Fatalf("GetTopKChecked(after caller mutation) = %#v/%v/%v, want original value", again, ok, err)
+	}
+	topInfo, ok, err := ht.TopKInfoChecked("top")
+	if err != nil || !ok || topInfo.Total != 3 || topInfo.Tracked != 1 {
+		t.Fatalf("TopKInfoChecked(top) = %#v/%v/%v, want one tracked item", topInfo, ok, err)
+	}
+	if items, ok, err := ht.GetTopKChecked("missing-top"); err != nil || ok || items != nil {
+		t.Fatalf("GetTopKChecked(missing) = %#v/%v/%v, want nil/false/nil", items, ok, err)
+	}
+
+	sampleValue := Map{"path": "/api/users"}
+	if update, err := ht.AddReservoirSampleChecked("sample", sampleValue); err != nil || !update.Accepted {
+		t.Fatalf("AddReservoirSampleChecked(sample) = %#v/%v, want accepted", update, err)
+	}
+	sampleValue["path"] = "/caller"
+	sampleItems, ok, err := ht.GetReservoirSampleChecked("sample")
+	if err != nil || !ok || len(sampleItems) != 1 || sampleItems[0].Value.(Map)["path"] != "/api/users" {
+		t.Fatalf("GetReservoirSampleChecked(sample) = %#v/%v/%v, want cloned item", sampleItems, ok, err)
+	}
+	sampleItems[0].Value.(Map)["path"] = "/mutated"
+	if again, ok, err := ht.GetReservoirSampleChecked("sample"); err != nil || !ok || again[0].Value.(Map)["path"] != "/api/users" {
+		t.Fatalf("GetReservoirSampleChecked(after caller mutation) = %#v/%v/%v, want original value", again, ok, err)
+	}
+	sampleInfo, ok, err := ht.ReservoirSampleInfoChecked("sample")
+	if err != nil || !ok || sampleInfo.Seen != 1 || sampleInfo.Tracked != 1 {
+		t.Fatalf("ReservoirSampleInfoChecked(sample) = %#v/%v/%v, want one tracked item", sampleInfo, ok, err)
+	}
+	if items, ok, err := ht.GetReservoirSampleChecked("missing-sample"); err != nil || ok || items != nil {
+		t.Fatalf("GetReservoirSampleChecked(missing) = %#v/%v/%v, want nil/false/nil", items, ok, err)
+	}
+}
+
 func TestReservoirSampleRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	if update, err := ht.AddReservoirSampleChecked("sample", "alpha"); err != nil || !update.Accepted {

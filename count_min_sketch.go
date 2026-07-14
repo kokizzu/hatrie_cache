@@ -414,16 +414,25 @@ func (ht *HatTrie) EstimateCountMinSketchChecked(key string, val interface{}) (u
 }
 
 func (ht *HatTrie) CountMinSketchInfo(key string) (CountMinSketchInfo, bool) {
+	info, ok, _ := ht.CountMinSketchInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) CountMinSketchInfoChecked(key string) (CountMinSketchInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return CountMinSketchInfo{}, false, err
+	}
 	if !hval.IsCountMinSketch() {
 		ht.recordReadLocked(false, key)
-		return CountMinSketchInfo{}, false
+		return CountMinSketchInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.countMinSketches.array[hval.Index].Info(), true
+	return ht.countMinSketches.array[hval.Index].Info(), true, nil
 }
 
 func countMinSketchDepthValue(value uint64) (uint8, error) {

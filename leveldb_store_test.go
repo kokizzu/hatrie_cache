@@ -897,6 +897,10 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	source.PutRadixTree("radix", "old", "value")
 	source.UpsertCounter("cmd-counter", 5)
 	source.UpsertMap("cmd-map", Map{"old": "value"})
+	source.IncrementCountMinSketch("cmd-cms", "old", 2)
+	source.AddHyperLogLog("cmd-hll", "old")
+	source.AddTopK("cmd-top", "old", 2)
+	source.AddReservoirSample("cmd-sample", "old")
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -963,11 +967,36 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PUTMAP", Key: "cmd-map", Subkey: "new", Value: "value"}); !got.OK {
 		t.Fatalf("PUTMAP closed cold ref response = %#v, want legacy ok/no-op", got)
 	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFOCMS", Key: "cmd-cms"}); got.OK {
+		t.Fatalf("INFOCMS closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "COUNTHLL", Key: "cmd-hll"}); got.OK {
+		t.Fatalf("COUNTHLL closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFOHLL", Key: "cmd-hll"}); got.OK {
+		t.Fatalf("INFOHLL closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GETTOPK", Key: "cmd-top"}); got.OK {
+		t.Fatalf("GETTOPK closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFOTOPK", Key: "cmd-top"}); got.OK {
+		t.Fatalf("INFOTOPK closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GETRS", Key: "cmd-sample"}); got.OK {
+		t.Fatalf("GETRS closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFORS", Key: "cmd-sample"}); got.OK {
+		t.Fatalf("INFORS closed cold ref response = %#v, want error", got)
+	}
 
 	keys := []string{
 		"append",
 		"cmd-counter",
+		"cmd-cms",
+		"cmd-hll",
 		"cmd-map",
+		"cmd-sample",
+		"cmd-top",
 		"counter",
 		"fw",
 		"map",
@@ -1050,6 +1079,10 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	source.AddQuantileSketch("quantile", 10)
 	source.UpsertRadixTree("radix")
 	source.PutRadixTree("radix", "old", Map{"field": "value"})
+	source.IncrementCountMinSketch("cms", "old", 2)
+	source.AddHyperLogLog("hll", "old")
+	source.AddTopK("top", "old", 2)
+	source.AddReservoirSample("sample", "old")
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -1177,13 +1210,34 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if got, ok, err := loaded.RadixTreeInfoChecked("radix"); got.Items != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("RadixTreeInfoChecked(radix closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
+	if got, ok, err := loaded.CountMinSketchInfoChecked("cms"); got.TotalCount != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("CountMinSketchInfoChecked(cms closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.CountHyperLogLogChecked("hll"); got != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("CountHyperLogLogChecked(hll closed ref) = %d/%v/%v, want 0/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.HyperLogLogInfoChecked("hll"); got.Observations != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HyperLogLogInfoChecked(hll closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetTopKChecked("top"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetTopKChecked(top closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.TopKInfoChecked("top"); got.Total != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("TopKInfoChecked(top closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetReservoirSampleChecked("sample"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetReservoirSampleChecked(sample closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.ReservoirSampleInfoChecked("sample"); got.Seen != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("ReservoirSampleInfoChecked(sample closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "cold"}); got.OK {
 		t.Fatalf("GET cold closed ref response = %#v, want error", got)
 	}
 
 	entries := loaded.Entries(true)
-	if len(entries) != 12 {
-		t.Fatalf("Entries(after closed ref reads) len = %d, want 12", len(entries))
+	if len(entries) != 16 {
+		t.Fatalf("Entries(after closed ref reads) len = %d, want 16", len(entries))
 	}
 	for _, entry := range entries {
 		if !entry.Value.IsLevelDBReference() {
@@ -1215,7 +1269,9 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	source.UpsertRadixTree("radix")
 	source.PutRadixTree("radix", "old", "value")
 	source.IncrementCountMinSketch("cms", "alpha", 1)
+	source.AddHyperLogLog("hll", "alpha")
 	source.AddTopK("top", "alpha", 1)
+	source.AddReservoirSample("sample", "alpha")
 	if _, err := source.AddXorFilter("xor", "alpha"); err != nil {
 		t.Fatalf("AddXorFilter() error = %v", err)
 	}
@@ -1289,8 +1345,29 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	if _, _, err := loaded.EstimateCountMinSketchChecked("cms", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("EstimateCountMinSketchChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
+	if _, _, err := loaded.CountMinSketchInfoChecked("cms"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("CountMinSketchInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.CountHyperLogLogChecked("hll"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("CountHyperLogLogChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.HyperLogLogInfoChecked("hll"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HyperLogLogInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
 	if _, err := loaded.EstimateTopKChecked("top", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("EstimateTopKChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.GetTopKChecked("top"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetTopKChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.TopKInfoChecked("top"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("TopKInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.GetReservoirSampleChecked("sample"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetReservoirSampleChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.ReservoirSampleInfoChecked("sample"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("ReservoirSampleInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, _, err := loaded.HasXorFilterChecked("xor", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("HasXorFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)

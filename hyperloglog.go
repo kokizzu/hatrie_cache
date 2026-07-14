@@ -387,28 +387,46 @@ func (ht *HatTrie) AddHyperLogLogChecked(key string, val interface{}, vals ...in
 }
 
 func (ht *HatTrie) CountHyperLogLog(key string) (uint64, bool) {
+	count, ok, _ := ht.CountHyperLogLogChecked(key)
+	return count, ok
+}
+
+func (ht *HatTrie) CountHyperLogLogChecked(key string) (uint64, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
 	if !hval.IsHyperLogLog() {
 		ht.recordReadLocked(false, key)
-		return 0, false
+		return 0, false, nil
 	}
 	count := ht.hyperLogLogs.array[hval.Index].Count()
 	ht.recordReadLocked(true, key)
-	return count, true
+	return count, true, nil
 }
 
 func (ht *HatTrie) HyperLogLogInfo(key string) (HyperLogLogInfo, bool) {
+	info, ok, _ := ht.HyperLogLogInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) HyperLogLogInfoChecked(key string) (HyperLogLogInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return HyperLogLogInfo{}, false, err
+	}
 	if !hval.IsHyperLogLog() {
 		ht.recordReadLocked(false, key)
-		return HyperLogLogInfo{}, false
+		return HyperLogLogInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.hyperLogLogs.array[hval.Index].Info(), true
+	return ht.hyperLogLogs.array[hval.Index].Info(), true, nil
 }
