@@ -36,7 +36,8 @@ export type CacheEntry = {
     | 'roaring_bitmap'
     | 'count_min_sketch'
     | 'hyperloglog'
-    | 'top_k';
+    | 'top_k'
+    | 'quantile_sketch';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -157,6 +158,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 4096,
     value_preview: '8/100 tracked, 918240 total'
+  },
+  {
+    key: 'latency:p95',
+    type: 'quantile_sketch',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 3072,
+    value_preview: '918240 samples, 318 summary points'
   },
   {
     key: 'tags:active',

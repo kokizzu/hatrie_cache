@@ -12,7 +12,7 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'INFOQ'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
   $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK'].includes(command);
@@ -90,6 +90,10 @@
           <option>ESTTOPK</option>
           <option>GETTOPK</option>
           <option>INFOTOPK</option>
+          <option>CREATEQ</option>
+          <option>ADDQ</option>
+          <option>ESTQ</option>
+          <option>INFOQ</option>
         </select>
       </label>
 

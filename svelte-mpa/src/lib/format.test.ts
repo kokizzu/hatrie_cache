@@ -7,7 +7,8 @@ const entries: CacheEntry[] = [
   { key: 'asset:large', type: 'bytes', ttl_ms: 5000, on_disk: true, size_bytes: 70000, value_preview: 'bytes' },
   { key: 'freq:paths', type: 'count_min_sketch', ttl_ms: null, on_disk: false, size_bytes: 32768, value_preview: '2048x4 counters' },
   { key: 'card:visitors', type: 'hyperloglog', ttl_ms: null, on_disk: false, size_bytes: 16384, value_preview: '14 precision' },
-  { key: 'top:paths', type: 'top_k', ttl_ms: null, on_disk: false, size_bytes: 4096, value_preview: '8/100 tracked' }
+  { key: 'top:paths', type: 'top_k', ttl_ms: null, on_disk: false, size_bytes: 4096, value_preview: '8/100 tracked' },
+  { key: 'latency:p95', type: 'quantile_sketch', ttl_ms: null, on_disk: false, size_bytes: 3072, value_preview: '100 samples' }
 ];
 
 describe('format helpers', () => {
@@ -30,6 +31,7 @@ describe('format helpers', () => {
     expect(filterEntries(entries, '', 'count_min_sketch')).toEqual([entries[2]]);
     expect(filterEntries(entries, '', 'hyperloglog')).toEqual([entries[3]]);
     expect(filterEntries(entries, '', 'top_k')).toEqual([entries[4]]);
+    expect(filterEntries(entries, '', 'quantile_sketch')).toEqual([entries[5]]);
     expect(filterEntries(entries, 'missing', 'all')).toHaveLength(0);
   });
 });

@@ -459,6 +459,11 @@ textarea {
   color: #18607d;
 }
 
+.type-pill.quantile_sketch {
+  background: #f0f8e8;
+  color: #456b19;
+}
+
 .preview {
   color: #62707d;
   max-width: 280px;

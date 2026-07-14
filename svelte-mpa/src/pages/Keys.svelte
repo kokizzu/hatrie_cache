@@ -64,6 +64,7 @@
         <option value="count_min_sketch">Count-Min Sketch</option>
         <option value="hyperloglog">HyperLogLog</option>
         <option value="top_k">Top-K</option>
+        <option value="quantile_sketch">Quantile Sketch</option>
       </select>
     </label>
   </section>
