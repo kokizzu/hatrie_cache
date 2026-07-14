@@ -515,7 +515,11 @@ func (ht *HatTrie) EstimateTopKChecked(key string, val interface{}) (TopKEstimat
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return TopKEstimate{}, err
+	}
 	if !hval.IsTopK() {
 		ht.recordReadLocked(false, key)
 		return TopKEstimate{}, nil

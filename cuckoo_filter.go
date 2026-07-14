@@ -598,7 +598,11 @@ func (ht *HatTrie) HasCuckooFilterChecked(key string, val interface{}) (bool, er
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
 	if !hval.IsCuckooFilter() {
 		ht.recordReadLocked(false, key)
 		return false, nil
@@ -622,7 +626,11 @@ func (ht *HatTrie) DeleteCuckooFilterChecked(key string, val interface{}, vals .
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, err
+	}
 	if !hval.IsCuckooFilter() {
 		ht.recordReadLocked(false, key)
 		return 0, nil

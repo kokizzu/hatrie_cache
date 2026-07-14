@@ -630,7 +630,11 @@ func (ht *HatTrie) HasXorFilterChecked(key string, val interface{}) (bool, bool,
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, false, err
+	}
 	if !hval.IsXorFilter() {
 		ht.recordReadLocked(false, key)
 		return false, false, nil

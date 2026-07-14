@@ -451,7 +451,11 @@ func (ht *HatTrie) HasBloomFilterChecked(key string, val interface{}) (bool, err
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
 	if !hval.IsBloomFilter() {
 		ht.recordReadLocked(false, key)
 		return false, nil

@@ -717,6 +717,62 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	}
 }
 
+func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertSet("set", Set{"alpha"})
+	source.AddBloomFilter("bloom", "alpha")
+	source.AddCuckooFilter("cuckoo", "alpha")
+	source.IncrementCountMinSketch("cms", "alpha", 1)
+	source.AddTopK("top", "alpha", 1)
+	if _, err := source.AddXorFilter("xor", "alpha"); err != nil {
+		t.Fatalf("AddXorFilter() error = %v", err)
+	}
+	if _, ok, err := source.BuildXorFilter("xor"); err != nil || !ok {
+		t.Fatalf("BuildXorFilter() = ok %v err %v, want ok nil", ok, err)
+	}
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	loaded := newTestTrie(t)
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if _, err := loaded.HasSetChecked("set", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HasSetChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.RemoveSetChecked("set", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("RemoveSetChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.HasBloomFilterChecked("bloom", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HasBloomFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.HasCuckooFilterChecked("cuckoo", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HasCuckooFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.DeleteCuckooFilterChecked("cuckoo", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("DeleteCuckooFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.EstimateCountMinSketchChecked("cms", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("EstimateCountMinSketchChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.EstimateTopKChecked("top", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("EstimateTopKChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.HasXorFilterChecked("xor", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HasXorFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+}
+
 func TestLevelDBStoreHotLoadCanDeleteColdReference(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

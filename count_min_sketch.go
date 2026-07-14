@@ -406,7 +406,11 @@ func (ht *HatTrie) EstimateCountMinSketchChecked(key string, val interface{}) (u
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
 	if !hval.IsCountMinSketch() {
 		ht.recordReadLocked(false, key)
 		return 0, false, nil

@@ -2920,7 +2920,11 @@ func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interfa
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, err
+	}
 	if !hval.IsSet() {
 		ht.recordReadLocked(false, key)
 		return 0, nil
@@ -2948,7 +2952,11 @@ func (ht *HatTrie) HasSetChecked(key string, val interface{}) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
 	if !hval.IsSet() {
 		ht.recordReadLocked(false, key)
 		return false, nil
