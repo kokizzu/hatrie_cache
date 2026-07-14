@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -143,6 +144,61 @@ func TestLevelDBBinaryBytesRecordAvoidsBase64StorageExpansion(t *testing.T) {
 	}
 	if decoded.Key != "blob" || decoded.Type != "bytes" || !bytes.Equal(value, raw) {
 		t.Fatalf("decoded binary entry = %#v bytes %v, want original", decoded, value)
+	}
+}
+
+func TestMarshalLevelDBBytesEntryBinaryFromReaderPreallocatesRecord(t *testing.T) {
+	raw := testPayload(DiskBytesThreshold + 257)
+	expiresAt := time.Unix(1234, 5678)
+	stats := &KeyStats{
+		Reads:             7,
+		Hits:              5,
+		Misses:            2,
+		Writes:            3,
+		LastHit:           time.Unix(1235, 0),
+		LastMiss:          time.Unix(1236, 0),
+		LastWrite:         time.Unix(1237, 0),
+		HitRate:           0.75,
+		CumulativeHitRate: 0.625,
+	}
+
+	data, err := marshalLevelDBBytesEntryBinaryFromReader("blob", int64(len(raw)), bytes.NewReader(raw), &expiresAt, stats)
+	if err != nil {
+		t.Fatalf("marshalLevelDBBytesEntryBinaryFromReader() error = %v", err)
+	}
+	if cap(data) != len(data) {
+		t.Fatalf("binary record cap = %d, want exact len %d", cap(data), len(data))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(reader binary) error = %v", err)
+	}
+	value, err := base64.StdEncoding.DecodeString(decoded.Bytes)
+	if err != nil {
+		t.Fatalf("DecodeString(reader binary bytes) error = %v", err)
+	}
+	if decoded.Key != "blob" || decoded.Type != "bytes" || !bytes.Equal(value, raw) {
+		t.Fatalf("decoded reader binary entry = %#v bytes %v, want original", decoded, value)
+	}
+	if decoded.ExpiresAt == nil || !decoded.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("decoded expires_at = %v, want %v", decoded.ExpiresAt, expiresAt)
+	}
+	if !keyStatsPtrEqual(decoded.Stats, stats) {
+		t.Fatalf("decoded stats = %#v, want %#v", decoded.Stats, stats)
+	}
+}
+
+func TestMarshalLevelDBBytesEntryBinaryFromReaderRequiresExactSize(t *testing.T) {
+	raw := []byte("payload")
+	if _, err := marshalLevelDBBytesEntryBinaryFromReader("blob", int64(len(raw)+1), bytes.NewReader(raw), nil, nil); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("marshalLevelDBBytesEntryBinaryFromReader(short) error = %v, want unexpected EOF", err)
+	}
+	if _, err := marshalLevelDBBytesEntryBinaryFromReader("blob", int64(len(raw)-1), bytes.NewReader(raw), nil, nil); err == nil {
+		t.Fatal("marshalLevelDBBytesEntryBinaryFromReader(long) error = nil, want size mismatch")
+	}
+	if _, err := levelDBBinaryRecordCapacity("blob", "bytes", int64(int(^uint(0)>>1)), nil, nil); !errors.Is(err, errLevelDBBinaryRecordTooLarge) {
+		t.Fatalf("levelDBBinaryRecordCapacity(too large) error = %v, want too large", err)
 	}
 }
 

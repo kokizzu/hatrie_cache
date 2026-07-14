@@ -26,6 +26,11 @@ func (writer *binaryFieldWriter) bytes() []byte {
 	return writer.buf
 }
 
+func (writer *binaryFieldWriter) Write(data []byte) (int, error) {
+	writer.buf = append(writer.buf, data...)
+	return len(data), nil
+}
+
 func (writer *binaryFieldWriter) writeBool(value bool) {
 	if value {
 		writer.buf = append(writer.buf, 1)
@@ -59,6 +64,20 @@ func (writer *binaryFieldWriter) writeFloat64(value float64) {
 	var scratch [8]byte
 	binary.LittleEndian.PutUint64(scratch[:], math.Float64bits(value))
 	writer.buf = append(writer.buf, scratch[:]...)
+}
+
+func binaryUvarintSize(value uint64) int {
+	size := 1
+	for value >= 0x80 {
+		value >>= 7
+		size++
+	}
+	return size
+}
+
+func binaryVarintSize(value int64) int {
+	var scratch [binaryFieldMaxVarintLen64]byte
+	return binary.PutVarint(scratch[:], value)
 }
 
 type binaryFieldReader struct {

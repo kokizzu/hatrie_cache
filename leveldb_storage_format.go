@@ -23,6 +23,8 @@ const DefaultStorageFormat = StorageFormatBinary
 
 var levelDBBinaryMagic = []byte{'h', 'c', 'd', 'b', 1}
 
+var errLevelDBBinaryRecordTooLarge = errors.New("hatriecache: binary leveldb entry is too large")
+
 func ParseStorageFormat(value string) (StorageFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", string(StorageFormatBinary), "bin":
@@ -66,10 +68,41 @@ func marshalLevelDBEntryBinary(entry snapshotEntry) ([]byte, error) {
 }
 
 func marshalLevelDBBytesEntryBinary(key string, raw []byte, expiresAt *time.Time, stats *KeyStats) ([]byte, error) {
-	writer := newLevelDBBinaryWriter()
+	capacity, err := levelDBBinaryRecordCapacity(key, "bytes", int64(len(raw)), expiresAt, stats)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
 	writer.writeString(key)
 	writer.writeString("bytes")
 	writer.writeBytes(raw)
+	writer.writeTimePtr(expiresAt)
+	writer.writeKeyStatsPtr(stats)
+	return writer.bytes(), nil
+}
+
+func marshalLevelDBBytesEntryBinaryFromReader(key string, rawSize int64, reader io.Reader, expiresAt *time.Time, stats *KeyStats) ([]byte, error) {
+	if rawSize < 0 {
+		return nil, errLevelDBBinaryRecordTooLarge
+	}
+	capacity, err := levelDBBinaryRecordCapacity(key, "bytes", rawSize, expiresAt, stats)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(key)
+	writer.writeString("bytes")
+	writer.writeUvarint(uint64(rawSize))
+	written, err := io.Copy(&writer, io.LimitReader(reader, rawSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if written != rawSize {
+		if written < rawSize {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return nil, errors.New("hatriecache: binary leveldb bytes changed while encoding")
+	}
 	writer.writeTimePtr(expiresAt)
 	writer.writeKeyStatsPtr(stats)
 	return writer.bytes(), nil
@@ -81,6 +114,87 @@ type levelDBBinaryWriter struct {
 
 func newLevelDBBinaryWriter() levelDBBinaryWriter {
 	return levelDBBinaryWriter{binaryFieldWriter: newBinaryFieldWriter(levelDBBinaryMagic, 128)}
+}
+
+func newLevelDBBinaryWriterWithCapacity(capacity int) levelDBBinaryWriter {
+	return levelDBBinaryWriter{binaryFieldWriter: newBinaryFieldWriter(levelDBBinaryMagic, capacity)}
+}
+
+func levelDBBinaryRecordCapacity(key string, entryType string, valueBytes int64, expiresAt *time.Time, stats *KeyStats) (int, error) {
+	if valueBytes < 0 {
+		return 0, errLevelDBBinaryRecordTooLarge
+	}
+	keySize, err := binaryLengthPrefixedSize(int64(len(key)))
+	if err != nil {
+		return 0, err
+	}
+	typeSize, err := binaryLengthPrefixedSize(int64(len(entryType)))
+	if err != nil {
+		return 0, err
+	}
+	valueSize, err := binaryLengthPrefixedSize(valueBytes)
+	if err != nil {
+		return 0, err
+	}
+	total := int64(len(levelDBBinaryMagic))
+	for _, size := range []int64{
+		keySize,
+		typeSize,
+		valueSize,
+		int64(levelDBBinaryTimePtrSize(expiresAt)),
+		int64(levelDBBinaryKeyStatsPtrSize(stats)),
+	} {
+		var err error
+		total, err = addLevelDBBinaryRecordSize(total, size)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return int(total), nil
+}
+
+func binaryLengthPrefixedSize(payloadBytes int64) (int64, error) {
+	if payloadBytes < 0 {
+		return 0, errLevelDBBinaryRecordTooLarge
+	}
+	return addLevelDBBinaryRecordSize(int64(binaryUvarintSize(uint64(payloadBytes))), payloadBytes)
+}
+
+func addLevelDBBinaryRecordSize(left int64, right int64) (int64, error) {
+	max := int64(int(^uint(0) >> 1))
+	if right < 0 || left > max-right {
+		return 0, errLevelDBBinaryRecordTooLarge
+	}
+	return left + right, nil
+}
+
+func levelDBBinaryTimeSize(value time.Time) int {
+	if value.IsZero() {
+		return 1
+	}
+	return 1 + binaryVarintSize(value.UnixNano())
+}
+
+func levelDBBinaryTimePtrSize(value *time.Time) int {
+	if value == nil {
+		return 1
+	}
+	return 1 + binaryVarintSize(value.UnixNano())
+}
+
+func levelDBBinaryKeyStatsPtrSize(stats *KeyStats) int {
+	if stats == nil {
+		return 1
+	}
+	return 1 +
+		binaryUvarintSize(stats.Reads) +
+		binaryUvarintSize(stats.Hits) +
+		binaryUvarintSize(stats.Misses) +
+		binaryUvarintSize(stats.Writes) +
+		levelDBBinaryTimeSize(stats.LastHit) +
+		levelDBBinaryTimeSize(stats.LastMiss) +
+		levelDBBinaryTimeSize(stats.LastWrite) +
+		16
 }
 
 func (writer *levelDBBinaryWriter) writeTime(value time.Time) {

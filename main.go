@@ -1012,6 +1012,30 @@ func (ds *DiskStorage) Get(idx int32) ([]byte, error) {
 	return os.ReadFile(ds.paths[idx])
 }
 
+func (ds *DiskStorage) open(idx int32) (*os.File, int64, error) {
+	if idx < 0 || int(idx) >= len(ds.paths) {
+		return nil, 0, nil
+	}
+	path := ds.paths[idx]
+	if path == "" {
+		return nil, 0, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, 0, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, 0, errors.New("hatriecache: disk bytes path is a directory")
+	}
+	return file, info.Size(), nil
+}
+
 func (ds *DiskStorage) Del(idx int32) {
 	if idx < 0 || int(idx) >= len(ds.paths) {
 		return

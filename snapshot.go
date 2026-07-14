@@ -423,16 +423,12 @@ func writeSnapshotRawEntryJSON(writer io.Writer, data []byte, prefix string) err
 }
 
 func (ht *HatTrie) writeSnapshotDiskBytesEntryJSONLocked(writer io.Writer, entry Entry, prefix string) error {
-	if entry.Value.Index < 0 || int(entry.Value.Index) >= len(ht.disks.paths) {
-		return ht.writeSnapshotBytesEntryJSONLocked(writer, entry, prefix, nil)
-	}
-	path := ht.disks.paths[entry.Value.Index]
-	if path == "" {
-		return ht.writeSnapshotBytesEntryJSONLocked(writer, entry, prefix, nil)
-	}
-	file, err := os.Open(path)
+	file, _, err := ht.disks.open(entry.Value.Index)
 	if err != nil {
 		return err
+	}
+	if file == nil {
+		return ht.writeSnapshotBytesEntryJSONLocked(writer, entry, prefix, nil)
 	}
 	defer file.Close()
 	return ht.writeSnapshotBytesEntryJSONLocked(writer, entry, prefix, file)

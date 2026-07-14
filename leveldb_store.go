@@ -757,17 +757,21 @@ func (trie *HatTrie) levelDBEntryDataForStoreLocked(entry Entry, currentStore *L
 }
 
 func (trie *HatTrie) levelDBDiskBytesEntryDataBinaryLocked(entry Entry) ([]byte, error) {
-	raw, err := trie.bytesValueLocked(entry.Value)
-	if err != nil {
-		return nil, err
-	}
 	expiresAt := snapshotExpiresAt(trie.expires[entry.Key])
 	var stats *KeyStats
 	if keyStats, ok := trie.keyStats[entry.Key]; ok {
 		keyStats.updateRates()
 		stats = &keyStats
 	}
-	return marshalLevelDBBytesEntryBinary(entry.Key, raw, expiresAt, stats)
+	file, size, err := trie.disks.open(entry.Value.Index)
+	if err != nil {
+		return nil, err
+	}
+	if file == nil {
+		return marshalLevelDBBytesEntryBinary(entry.Key, nil, expiresAt, stats)
+	}
+	defer file.Close()
+	return marshalLevelDBBytesEntryBinaryFromReader(entry.Key, size, file, expiresAt, stats)
 }
 
 func decodeLevelDBEntry(data []byte) (snapshotEntry, error) {
