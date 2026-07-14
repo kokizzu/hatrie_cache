@@ -85,33 +85,56 @@ func (store *LevelDBStore) Close() error {
 }
 
 func (store *LevelDBStore) Save(trie *HatTrie) error {
-	putBatch, err := trie.levelDBPutBatch()
-	if err != nil {
-		return err
-	}
-
 	db, unlock, err := store.lockDB()
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	batch := new(leveldb.Batch)
-	iterator := db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
-	for iterator.Next() {
-		key := cloneBytes(iterator.Key())
-		batch.Delete(key)
-	}
-	if err := iterator.Error(); err != nil {
-		iterator.Release()
+	batch, err := levelDBDiffBatch(db, trie)
+	if err != nil {
 		return err
 	}
-	iterator.Release()
-
-	if err := putBatch.Replay(batch); err != nil {
-		return err
+	if batch.Len() == 0 {
+		return nil
 	}
 	return db.Write(batch, &opt.WriteOptions{Sync: true})
+}
+
+func levelDBDiffBatch(db *leveldb.DB, trie *HatTrie) (*leveldb.Batch, error) {
+	batch := new(leveldb.Batch)
+	iterator := db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
+	defer iterator.Release()
+
+	hasExisting := iterator.Next()
+	err := trie.scanLevelDBEntryData(func(key string, data []byte) error {
+		dbKey := levelDBKey(key)
+		for hasExisting && bytes.Compare(iterator.Key(), dbKey) < 0 {
+			batch.Delete(cloneBytes(iterator.Key()))
+			hasExisting = iterator.Next()
+		}
+		if hasExisting && bytes.Equal(iterator.Key(), dbKey) {
+			if !bytes.Equal(iterator.Value(), data) {
+				batch.Put(dbKey, data)
+			}
+			hasExisting = iterator.Next()
+			return nil
+		}
+		batch.Put(dbKey, data)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for hasExisting {
+		batch.Delete(cloneBytes(iterator.Key()))
+		hasExisting = iterator.Next()
+	}
+	if err := iterator.Error(); err != nil {
+		return nil, err
+	}
+	return batch, nil
 }
 
 func (store *LevelDBStore) Load(trie *HatTrie) (int, error) {
@@ -651,18 +674,6 @@ func (trie *HatTrie) levelDBReferenceSnapshotEntryLocked(key string, hval HatVal
 		entry.Stats = nil
 	}
 	return entry, nil
-}
-
-func (trie *HatTrie) levelDBPutBatch() (*leveldb.Batch, error) {
-	batch := new(leveldb.Batch)
-	err := trie.scanLevelDBEntryData(func(key string, data []byte) error {
-		batch.Put(levelDBKey(key), data)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return batch, nil
 }
 
 func (trie *HatTrie) scanLevelDBEntryData(visit func(string, []byte) error) error {

@@ -2131,6 +2131,87 @@ func TestLevelDBStoreSavePreservesUnchangedColdReferenceRecordBytes(t *testing.T
 	}
 }
 
+func TestLevelDBDiffBatchSkipsUnchangedEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("key", "value")
+	if err := store.Save(trie); err != nil {
+		t.Fatalf("Save(initial) error = %v", err)
+	}
+
+	batch, err := levelDBDiffBatch(store.db, trie)
+	if err != nil {
+		t.Fatalf("levelDBDiffBatch(unchanged) error = %v", err)
+	}
+	if batch.Len() != 0 {
+		t.Fatalf("levelDBDiffBatch(unchanged) len = %d, want 0", batch.Len())
+	}
+}
+
+func TestLevelDBDiffBatchTracksAddsUpdatesAndDeletes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("added-later", "old")
+	trie.UpsertString("changed", "old")
+	trie.UpsertString("stale", "old")
+	if err := store.Save(trie); err != nil {
+		t.Fatalf("Save(initial) error = %v", err)
+	}
+
+	if !trie.Delete("added-later") {
+		t.Fatal("Delete(added-later) = false, want true")
+	}
+	trie.UpsertString("added", "new")
+	trie.UpsertString("changed", "new")
+	if !trie.Delete("stale") {
+		t.Fatal("Delete(stale) = false, want true")
+	}
+
+	batch, err := levelDBDiffBatch(store.db, trie)
+	if err != nil {
+		t.Fatalf("levelDBDiffBatch(changed) error = %v", err)
+	}
+	if batch.Len() != 4 {
+		t.Fatalf("levelDBDiffBatch(changed) len = %d, want add/update/delete/delete", batch.Len())
+	}
+	if err := store.Save(trie); err != nil {
+		t.Fatalf("Save(changed) error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	count, err := store.Load(loaded)
+	if err != nil {
+		t.Fatalf("Load(changed) error = %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("Load(changed) count = %d, want 2", count)
+	}
+	if got := loaded.GetString("added"); got != "new" {
+		t.Fatalf("added = %q, want new", got)
+	}
+	if got := loaded.GetString("changed"); got != "new" {
+		t.Fatalf("changed = %q, want new", got)
+	}
+	if got := loaded.GetString("stale"); got != "" {
+		t.Fatalf("stale = %q, want empty", got)
+	}
+	if got := loaded.GetString("added-later"); got != "" {
+		t.Fatalf("added-later = %q, want empty", got)
+	}
+}
+
 func TestLevelDBStoreSaveRewritesColdReferenceWhenStatsChange(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	store, err := OpenLevelDBStore(path)
