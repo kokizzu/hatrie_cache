@@ -285,7 +285,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		added := ht.PushPriorityQueue(key, priority, values[0], values[1:]...)
+		added, err := ht.PushPriorityQueueChecked(key, priority, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "pushed priority queue values", Value: strconv.Itoa(added)}
 	case "PEEKPQ", "PEEKPRIORITY":
 		value, ok, err := ht.PeekPriorityQueueChecked(key)

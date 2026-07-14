@@ -1567,6 +1567,21 @@ func TestCheckedPriorityQueueOperationsReturnValuesAndCopies(t *testing.T) {
 		t.Fatalf("PeekPriorityQueueChecked exposed nested value: %#v", again)
 	}
 
+	added, err := ht.PushPriorityQueueChecked("created", 2, "first", "second")
+	if err != nil || added != 2 {
+		t.Fatalf("PushPriorityQueueChecked(created) = %d/%v, want 2/nil", added, err)
+	}
+	if hval := ht.Get("created"); !hval.IsPriorityQueue() {
+		t.Fatalf("PushPriorityQueueChecked(created) stored %+v, want priority queue", hval)
+	}
+	createdItems, ok, err := ht.GetPriorityQueueChecked("created")
+	if err != nil || !ok || !reflect.DeepEqual(createdItems, PriorityQueue{
+		{Priority: 2, Value: "first"},
+		{Priority: 2, Value: "second"},
+	}) {
+		t.Fatalf("GetPriorityQueueChecked(created) = %#v/%v/%v, want pushed values", createdItems, ok, err)
+	}
+
 	ht.UpsertString("string", "value")
 	if _, ok, err := ht.GetPriorityQueueChecked("missing"); err != nil || ok {
 		t.Fatalf("GetPriorityQueueChecked(missing) ok/error = %v/%v, want false/nil", ok, err)

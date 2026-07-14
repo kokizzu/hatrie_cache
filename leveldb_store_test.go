@@ -720,6 +720,7 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	source.AddQuantileSketch("quantile", 10)
 	source.UpsertRadixTree("radix")
 	source.PutRadixTree("radix", "old", "value")
+	source.PushPriorityQueue("queue", 5, "old")
 	source.IncrementCountMinSketch("cms", "old", 2)
 	source.AddHyperLogLog("hll", "old")
 	source.AddTopK("top", "old", 2)
@@ -741,8 +742,8 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
 	}
-	if result.KeysLoaded != 13 || result.ValuesLoaded != 0 {
-		t.Fatalf("hot-load result = %#v, want 13 cold keys", result)
+	if result.KeysLoaded != 14 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 14 cold keys", result)
 	}
 
 	if info, ok, err := loaded.BloomFilterInfoChecked("bloom"); err != nil || !ok || info.Insertions != 1 {
@@ -820,6 +821,16 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	}
 	if newValue, ok := loaded.GetRadixTree("radix", "new"); !ok || newValue != "value" {
 		t.Fatalf("GetRadixTree(new after cold put) = %#v/%v, want new value", newValue, ok)
+	}
+
+	if added, err := loaded.PushPriorityQueueChecked("queue", 1, "new"); err != nil || added != 1 {
+		t.Fatalf("PushPriorityQueueChecked(cold ref) = %d/%v, want 1/nil", added, err)
+	}
+	if got, ok := loaded.PopPriorityQueue("queue"); !ok || got.Value != "new" {
+		t.Fatalf("first PopPriorityQueue(after cold push) = %#v/%v, want new", got, ok)
+	}
+	if got, ok := loaded.PopPriorityQueue("queue"); !ok || got.Value != "old" {
+		t.Fatalf("second PopPriorityQueue(after cold push) = %#v/%v, want old", got, ok)
 	}
 
 	if estimate, err := loaded.IncrementCountMinSketchChecked("cms", "new", 3); err != nil || estimate < 3 {
@@ -943,6 +954,9 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	loaded.PushSlice("slice", "new")
 	if added := loaded.PushPriorityQueue("queue", 1, "new"); added != 0 {
 		t.Fatalf("PushPriorityQueue(closed cold ref) = %d, want 0", added)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PUSHPQ", Key: "queue", Value: "new", Subkey: "1"}); got.OK {
+		t.Fatalf("PUSHPQ closed cold ref response = %#v, want error", got)
 	}
 	if added := loaded.AddRoaringBitmap("rb", 2); added != 0 {
 		t.Fatalf("AddRoaringBitmap(closed cold ref) = %d, want 0", added)
@@ -1331,6 +1345,7 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	source.UpsertSet("set", Set{"alpha"})
 	source.AddBloomFilter("bloom", "alpha")
 	source.AddCuckooFilter("cuckoo", "alpha")
+	source.PushPriorityQueue("queue", 1, "alpha")
 	source.UpsertRoaringBitmap("rb")
 	source.AddRoaringBitmap("rb", 1)
 	source.UpsertSparseBitset("sb")
@@ -1393,6 +1408,9 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	}
 	if _, _, err := loaded.CuckooFilterInfoChecked("cuckoo"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("CuckooFilterInfoChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.PushPriorityQueueChecked("queue", 1, "beta"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PushPriorityQueueChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, err := loaded.AddRoaringBitmapChecked("rb", 2); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("AddRoaringBitmapChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)

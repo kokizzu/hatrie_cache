@@ -338,27 +338,35 @@ func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {
 }
 
 func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}, vals ...interface{}) int {
+	added, _ := ht.PushPriorityQueueChecked(key, priority, val, vals...)
+	return added
+}
+
+func (ht *HatTrie) PushPriorityQueueChecked(key string, priority int64, val interface{}, vals ...interface{}) (int, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return 0
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, err
 	}
 	if hval.IsPriorityQueue() {
 		added := ht.priorityQueues.array[hval.Index].PushOne(priority, val, vals...)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return added
+		return added, nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.priorityQueues.Add(nil)
 	added := ht.priorityQueues.array[idx].PushOne(priority, val, vals...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}.toValue()
 	ht.recordWriteLocked(key)
-	return added
+	return added, nil
 }
 
 func (ht *HatTrie) PeekPriorityQueue(key string) (PriorityItem, bool) {
