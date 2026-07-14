@@ -275,13 +275,16 @@ func grpcElectionError(message string) *hatriecachev1.ElectionResponse {
 
 func grpcReplicationResponse(result ReplicationResult) *hatriecachev1.ReplicationResponse {
 	out := &hatriecachev1.ReplicationResponse{
-		Command: result.Command,
-		Key:     result.Key,
-		Entries: uint64(result.Entries),
-		Queued:  result.Queued,
-		Skipped: result.Skipped,
-		Reason:  result.Reason,
-		Targets: make([]*hatriecachev1.ReplicationTarget, 0, len(result.Targets)),
+		Command:            result.Command,
+		Key:                result.Key,
+		Entries:            uint64(result.Entries),
+		Queued:             result.Queued,
+		Skipped:            result.Skipped,
+		Reason:             result.Reason,
+		StartedAtUnixNano:  unixNanoPtrOrZero(result.StartedAt),
+		FinishedAtUnixNano: unixNanoPtrOrZero(result.FinishedAt),
+		DurationMillis:     result.DurationMillis,
+		Targets:            make([]*hatriecachev1.ReplicationTarget, 0, len(result.Targets)),
 	}
 	if result.Queue != nil {
 		out.Queue = &hatriecachev1.ReplicationQueue{

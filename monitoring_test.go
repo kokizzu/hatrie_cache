@@ -1339,6 +1339,7 @@ func TestMonitoringHandlerReplicatesCommands(t *testing.T) {
 	if len(result.Targets) != 1 || !result.Targets[0].OK {
 		t.Fatalf("replication result = %#v, want one ok target", result)
 	}
+	assertReplicationResultTiming(t, result)
 }
 
 func TestMonitoringHandlerReportsAsyncReplicationQueue(t *testing.T) {

@@ -1108,6 +1108,9 @@ func TestCacheGRPCServerReplicatesCommands(t *testing.T) {
 	if len(replication.GetTargets()) != 1 || !replication.GetTargets()[0].GetOk() {
 		t.Fatalf("replication targets = %#v, want one ok target", replication.GetTargets())
 	}
+	if replication.GetStartedAtUnixNano() <= 0 || replication.GetFinishedAtUnixNano() < replication.GetStartedAtUnixNano() || replication.GetDurationMillis() < 0 {
+		t.Fatalf("replication timing = started %d finished %d duration %d, want ordered timestamps", replication.GetStartedAtUnixNano(), replication.GetFinishedAtUnixNano(), replication.GetDurationMillis())
+	}
 }
 
 func TestCacheGRPCServerReplicationReportsNotConfigured(t *testing.T) {

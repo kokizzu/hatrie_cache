@@ -61,14 +61,17 @@ type HTTPReplicator struct {
 }
 
 type ReplicationResult struct {
-	Command string                    `json:"command,omitempty"`
-	Key     string                    `json:"key,omitempty"`
-	Entries int                       `json:"entries,omitempty"`
-	Queued  bool                      `json:"queued,omitempty"`
-	Skipped bool                      `json:"skipped"`
-	Reason  string                    `json:"reason,omitempty"`
-	Queue   *ReplicationQueueStats    `json:"queue,omitempty"`
-	Targets []ReplicationTargetResult `json:"targets,omitempty"`
+	Command        string                    `json:"command,omitempty"`
+	Key            string                    `json:"key,omitempty"`
+	Entries        int                       `json:"entries,omitempty"`
+	Queued         bool                      `json:"queued,omitempty"`
+	Skipped        bool                      `json:"skipped"`
+	Reason         string                    `json:"reason,omitempty"`
+	StartedAt      *time.Time                `json:"started_at,omitempty"`
+	FinishedAt     *time.Time                `json:"finished_at,omitempty"`
+	DurationMillis int64                     `json:"duration_millis,omitempty"`
+	Queue          *ReplicationQueueStats    `json:"queue,omitempty"`
+	Targets        []ReplicationTargetResult `json:"targets,omitempty"`
 }
 
 // ReplicationQueueStats reports bounded async replication outbox health.
@@ -206,12 +209,14 @@ func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *Ha
 		}
 	}
 
+	startedAt := time.Now().UTC()
 	var result ReplicationResult
 	if replicator.queue != nil {
 		result = replicator.enqueueReplication(ctx, trie, request, response)
 	} else {
 		result = replicator.replicateCommand(ctx, trie, request, response)
 	}
+	result = finishReplicationResult(result, startedAt)
 	replicator.storeLastResult(result)
 	return result
 }
@@ -226,7 +231,8 @@ func (replicator *HTTPReplicator) SyncAll(ctx context.Context, trie *HatTrie, pr
 		}
 	}
 
-	result := replicator.syncAll(ctx, trie, prefix)
+	startedAt := time.Now().UTC()
+	result := finishReplicationResult(replicator.syncAll(ctx, trie, prefix), startedAt)
 	replicator.storeLastResult(result)
 	return result
 }
@@ -452,7 +458,8 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 			replicator.storeLastResult(result)
 			return
 		}
-		result = replicator.executeReplicationTasks(ctx, job.result, job.tasks)
+		startedAt := time.Now().UTC()
+		result = finishReplicationResult(replicator.executeReplicationTasks(ctx, job.result, job.tasks), startedAt)
 		needsRetry := replicationNeedsRetry(result)
 		willRetry := needsRetry && attempt < attempts
 		replicator.recordAsyncAttempt(result, willRetry)
@@ -646,6 +653,20 @@ func (replicator *HTTPReplicator) storeLastResult(result ReplicationResult) {
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
 	replicator.last = cloneReplicationResult(result)
+}
+
+func finishReplicationResult(result ReplicationResult, startedAt time.Time) ReplicationResult {
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	finishedAt := time.Now().UTC()
+	result.StartedAt = cloneTimePtr(&startedAt)
+	result.FinishedAt = cloneTimePtr(&finishedAt)
+	result.DurationMillis = finishedAt.Sub(startedAt).Milliseconds()
+	if result.DurationMillis < 0 {
+		result.DurationMillis = 0
+	}
+	return result
 }
 
 func (replicator *HTTPReplicator) routeForKey(key string) (ElectionKeyRoute, bool) {
@@ -916,6 +937,8 @@ func onlineElectionNodes(election *ElectionStore) map[string]bool {
 
 func cloneReplicationResult(result ReplicationResult) ReplicationResult {
 	out := result
+	out.StartedAt = cloneTimePtr(result.StartedAt)
+	out.FinishedAt = cloneTimePtr(result.FinishedAt)
 	if result.Targets != nil {
 		out.Targets = append([]ReplicationTargetResult(nil), result.Targets...)
 	}

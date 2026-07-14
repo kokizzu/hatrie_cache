@@ -265,8 +265,9 @@ mutations do not change what is delivered for the original write. Tune
 `REPLICATION_MAX_ATTEMPTS` to bound memory and retry failed HTTP deliveries.
 Library users can pass `HTTPReplicatorOptions.Context` to tie the async worker
 lifetime to a parent service context.
-`GET /api/replication` includes async queue depth, capacity, enqueue/drop
-counts, delivery attempts, successes, failures, retries, and closed state:
+`GET /api/replication` includes the latest replication start/finish timestamps,
+duration, async queue depth, capacity, enqueue/drop counts, delivery attempts,
+successes, failures, retries, and closed state:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true
@@ -348,8 +349,9 @@ JSON request bodies may also be sent with `Content-Encoding: gzip`.
 `GET /api/election?key=...` returns the topology route plus the elected leader
 for that key. `POST /api/election` accepts `node` and `online` to record a
 heartbeat or mark a node offline. `GET /api/replication` returns the most recent
-replication result. `POST /api/replication` accepts optional `prefix` and
-pushes matching local entries to their remote topology owners.
+replication result with timing metadata. `POST /api/replication` accepts
+optional `prefix` and pushes matching local entries to their remote topology
+owners.
 `GET /api/journal?after_sequence=...&limit=...` returns the command journal tail
 when journaling is configured. `POST /api/journal` pulls a remote journal tail
 from `source` and applies it locally.
@@ -536,11 +538,11 @@ command API. Clients may request gRPC transfer compression with the standard
 page. Empty keys are valid, so Go clients should set the optional `AfterKey`
 field to a pointer to `""` when `has_more` is true and `next_after_key` is empty.
 The
-`Replication` RPC returns the same last result and async queue stats as
-`GET /api/replication`; set `sync=true` with an optional `prefix` to run the
-same anti-entropy sync exposed by `POST /api/replication`. The `Topology`,
-`UpdateTopology`, `Election`, and `UpdateElection` RPCs mirror the HTTP
-topology/election endpoints for generated clients.
+`Replication` RPC returns the same last result, timing metadata, and async queue
+stats as `GET /api/replication`; set `sync=true` with an optional `prefix` to
+run the same anti-entropy sync exposed by `POST /api/replication`. The
+`Topology`, `UpdateTopology`, `Election`, and `UpdateElection` RPCs mirror the
+HTTP topology/election endpoints for generated clients.
 
 The bundled C HAT-trie tests can be compiled directly with GCC when autotools
 build files have not been generated.

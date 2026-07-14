@@ -33,6 +33,19 @@ func mustDecodeReplicationTestCommand(t *testing.T, w http.ResponseWriter, r *ht
 	return request
 }
 
+func assertReplicationResultTiming(t *testing.T, result ReplicationResult) {
+	t.Helper()
+	if result.StartedAt == nil || result.FinishedAt == nil {
+		t.Fatalf("replication timing = %v/%v, want started and finished timestamps", result.StartedAt, result.FinishedAt)
+	}
+	if result.StartedAt.IsZero() || result.FinishedAt.IsZero() || result.FinishedAt.Before(*result.StartedAt) {
+		t.Fatalf("replication timing = %s/%s, want ordered non-zero timestamps", result.StartedAt, result.FinishedAt)
+	}
+	if result.DurationMillis < 0 {
+		t.Fatalf("replication duration = %d, want non-negative", result.DurationMillis)
+	}
+}
+
 func writeReplicationTestCommandResponse(w http.ResponseWriter, r *http.Request, response CacheCommandResponse) {
 	writeCommandResponseWire(w, r, http.StatusOK, response, CommandWireFormatJSON)
 }
@@ -695,6 +708,7 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	if result.Skipped || result.Command != "SYNC" || result.Key != "session:" || result.Entries != 2 || len(result.Targets) != 2 {
 		t.Fatalf("sync result = %#v, want two synced entries", result)
 	}
+	assertReplicationResultTiming(t, result)
 	targetKeys := map[string]bool{}
 	for _, target := range result.Targets {
 		if !target.OK || target.Key == "" {
