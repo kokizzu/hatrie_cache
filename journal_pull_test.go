@@ -441,6 +441,14 @@ func TestFetchCommandJournalTailRejectsOversizedResponseBody(t *testing.T) {
 	}
 }
 
+func TestDecodeCommandJournalTailResponseRejectsOversizedTrailingWhitespace(t *testing.T) {
+	body := `{"entries":[]}` + strings.Repeat(" ", maxCommandJournalTailResponseBytes+1)
+	_, err := decodeCommandJournalTailResponse(strings.NewReader(body))
+	if !errors.Is(err, errCommandJournalTailResponseTooLarge) {
+		t.Fatalf("decodeCommandJournalTailResponse() error = %v, want response too large", err)
+	}
+}
+
 func TestFetchCommandJournalTailRejectsTrailingResponseJSON(t *testing.T) {
 	client := &http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
