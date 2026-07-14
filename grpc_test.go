@@ -193,6 +193,150 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOBF response = %#v, want JSON info", infoBloomResp)
 	}
 
+	createCuckooResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATECF",
+		Key:     "active",
+		Value:   "128",
+		Subkey:  "0.001",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATECF) error = %v", err)
+	}
+	if !createCuckooResp.GetOk() {
+		t.Fatalf("CREATECF response = %#v, want ok", createCuckooResp)
+	}
+	addCuckooResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDCF",
+		Key:     "active",
+		Values:  []string{"alpha", "beta"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDCF) error = %v", err)
+	}
+	if !addCuckooResp.GetOk() || addCuckooResp.GetValue() != "2" {
+		t.Fatalf("ADDCF response = %#v, want added 2", addCuckooResp)
+	}
+	hasCuckooResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "HASCF",
+		Key:     "active",
+		Value:   "alpha",
+	})
+	if err != nil {
+		t.Fatalf("Command(HASCF) error = %v", err)
+	}
+	if !hasCuckooResp.GetOk() || hasCuckooResp.GetValue() != "1" {
+		t.Fatalf("HASCF response = %#v, want hit", hasCuckooResp)
+	}
+	delCuckooResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "DELCF",
+		Key:     "active",
+		Value:   "alpha",
+	})
+	if err != nil {
+		t.Fatalf("Command(DELCF) error = %v", err)
+	}
+	if !delCuckooResp.GetOk() || delCuckooResp.GetValue() != "1" {
+		t.Fatalf("DELCF response = %#v, want removed 1", delCuckooResp)
+	}
+	infoCuckooResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFOCF",
+		Key:     "active",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFOCF) error = %v", err)
+	}
+	if !infoCuckooResp.GetOk() || infoCuckooResp.GetValue() == "" {
+		t.Fatalf("INFOCF response = %#v, want JSON info", infoCuckooResp)
+	}
+	var cuckooInfo CuckooFilterInfo
+	if err := json.Unmarshal([]byte(infoCuckooResp.GetValue()), &cuckooInfo); err != nil {
+		t.Fatalf("INFOCF JSON error = %v", err)
+	}
+	if cuckooInfo.Count != 1 || cuckooInfo.BucketSize != cuckooFilterBucketSize || cuckooInfo.FingerprintBytes == 0 {
+		t.Fatalf("INFOCF = %#v, want one compact filter value", cuckooInfo)
+	}
+
+	createRoaringResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATERB",
+		Key:     "ids",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATERB) error = %v", err)
+	}
+	if !createRoaringResp.GetOk() {
+		t.Fatalf("CREATERB response = %#v, want ok", createRoaringResp)
+	}
+	addRoaringResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDRB",
+		Key:     "ids",
+		Values:  []string{"1", "65543"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDRB) error = %v", err)
+	}
+	if !addRoaringResp.GetOk() || addRoaringResp.GetValue() != "2" {
+		t.Fatalf("ADDRB response = %#v, want added 2", addRoaringResp)
+	}
+	hasRoaringResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "HASRB",
+		Key:     "ids",
+		Value:   "65543",
+	})
+	if err != nil {
+		t.Fatalf("Command(HASRB) error = %v", err)
+	}
+	if !hasRoaringResp.GetOk() || hasRoaringResp.GetValue() != "1" {
+		t.Fatalf("HASRB response = %#v, want hit", hasRoaringResp)
+	}
+	removeRoaringResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "REMRB",
+		Key:     "ids",
+		Value:   "1",
+	})
+	if err != nil {
+		t.Fatalf("Command(REMRB) error = %v", err)
+	}
+	if !removeRoaringResp.GetOk() || removeRoaringResp.GetValue() != "1" {
+		t.Fatalf("REMRB response = %#v, want removed 1", removeRoaringResp)
+	}
+	countRoaringResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "COUNTRB",
+		Key:     "ids",
+	})
+	if err != nil {
+		t.Fatalf("Command(COUNTRB) error = %v", err)
+	}
+	if !countRoaringResp.GetOk() || countRoaringResp.GetValue() != "1" {
+		t.Fatalf("COUNTRB response = %#v, want count 1", countRoaringResp)
+	}
+	getRoaringResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "GETRB",
+		Key:     "ids",
+	})
+	if err != nil {
+		t.Fatalf("Command(GETRB) error = %v", err)
+	}
+	if !getRoaringResp.GetOk() || getRoaringResp.GetValue() != "[65543]" {
+		t.Fatalf("GETRB response = %#v, want remaining sorted integer", getRoaringResp)
+	}
+	infoRoaringResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFORB",
+		Key:     "ids",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFORB) error = %v", err)
+	}
+	if !infoRoaringResp.GetOk() || infoRoaringResp.GetValue() == "" {
+		t.Fatalf("INFORB response = %#v, want JSON info", infoRoaringResp)
+	}
+	var roaringInfo RoaringBitmapInfo
+	if err := json.Unmarshal([]byte(infoRoaringResp.GetValue()), &roaringInfo); err != nil {
+		t.Fatalf("INFORB JSON error = %v", err)
+	}
+	if roaringInfo.Cardinality != 1 || roaringInfo.Containers != 1 || roaringInfo.EncodedBytes != 2 {
+		t.Fatalf("INFORB = %#v, want one compact bitmap value", roaringInfo)
+	}
+
 	createSketchResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
 		Command: "CREATECMS",
 		Key:     "freq",
