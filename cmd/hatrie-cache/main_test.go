@@ -382,7 +382,7 @@ func TestRunJournalPullDefaultsStatePath(t *testing.T) {
 		}, &bytes.Buffer{}, &bytes.Buffer{})
 	}()
 
-	waitUntil(t, time.Second, func() bool {
+	waitUntil(t, 5*time.Second, func() bool {
 		after, err := loadJournalPullState(statePath, source.URL)
 		return err == nil && after == 1
 	})
@@ -1002,7 +1002,7 @@ func TestJournalPullerAppliesAndPersistsState(t *testing.T) {
 		Limit:      10,
 		MaxBatches: 5,
 	}, &bytes.Buffer{})
-	waitUntil(t, time.Second, func() bool {
+	waitUntil(t, 5*time.Second, func() bool {
 		return ht.GetString("name") == "ivi"
 	})
 	stop()

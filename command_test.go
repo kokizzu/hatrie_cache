@@ -757,6 +757,37 @@ func TestExecuteCommandRoaringBitmapOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandRoaringBitmapRejectsInvalidBatchesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRB", Key: "ids", Value: "1"}); !got.OK {
+		t.Fatalf("ADDRB initial response = %#v, want ok", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRB", Key: "ids", Values: Slice{json.Number("2"), "-1"}}); got.OK {
+		t.Fatalf("ADDRB invalid batch response = %#v, want error", got)
+	}
+	if hit, err := ht.HasRoaringBitmapChecked("ids", 2); err != nil || hit {
+		t.Fatalf("HasRoaringBitmapChecked(2 after rejected add) = %v/%v, want false/nil", hit, err)
+	}
+	if info, ok := ht.RoaringBitmapInfo("ids"); !ok || info.Cardinality != 1 {
+		t.Fatalf("RoaringBitmapInfo(after rejected add) = %#v/%v, want one value", info, ok)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "REMRB", Key: "ids", Values: Slice{"1", "-1"}}); got.OK {
+		t.Fatalf("REMRB invalid batch response = %#v, want error", got)
+	}
+	if hit, err := ht.HasRoaringBitmapChecked("ids", 1); err != nil || !hit {
+		t.Fatalf("HasRoaringBitmapChecked(1 after rejected remove) = %v/%v, want true/nil", hit, err)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRB", Key: "missing", Values: Slice{"-1"}}); got.OK {
+		t.Fatalf("ADDRB missing invalid response = %#v, want error", got)
+	}
+	if hval := ht.Get("missing"); !hval.Empty() {
+		t.Fatalf("ADDRB missing invalid created value %+v", hval)
+	}
+}
+
 func TestExecuteCommandSparseBitsetOperations(t *testing.T) {
 	ht := newTestTrie(t)
 	maxID := strconv.FormatUint(^uint64(0), 10)
@@ -808,6 +839,37 @@ func TestExecuteCommandSparseBitsetOperations(t *testing.T) {
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSB", Key: "bad", Value: "-1"}); got.OK {
 		t.Fatalf("ADDSB invalid response = %#v, want error", got)
+	}
+}
+
+func TestExecuteCommandSparseBitsetRejectsInvalidBatchesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSB", Key: "ids", Value: "1"}); !got.OK {
+		t.Fatalf("ADDSB initial response = %#v, want ok", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSB", Key: "ids", Values: Slice{json.Number("2"), "-1"}}); got.OK {
+		t.Fatalf("ADDSB invalid batch response = %#v, want error", got)
+	}
+	if hit, err := ht.HasSparseBitsetChecked("ids", 2); err != nil || hit {
+		t.Fatalf("HasSparseBitsetChecked(2 after rejected add) = %v/%v, want false/nil", hit, err)
+	}
+	if info, ok := ht.SparseBitsetInfo("ids"); !ok || info.Cardinality != 1 {
+		t.Fatalf("SparseBitsetInfo(after rejected add) = %#v/%v, want one value", info, ok)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "REMSB", Key: "ids", Values: Slice{"1", "-1"}}); got.OK {
+		t.Fatalf("REMSB invalid batch response = %#v, want error", got)
+	}
+	if hit, err := ht.HasSparseBitsetChecked("ids", 1); err != nil || !hit {
+		t.Fatalf("HasSparseBitsetChecked(1 after rejected remove) = %v/%v, want true/nil", hit, err)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSB", Key: "missing", Values: Slice{"-1"}}); got.OK {
+		t.Fatalf("ADDSB missing invalid response = %#v, want error", got)
+	}
+	if hval := ht.Get("missing"); !hval.Empty() {
+		t.Fatalf("ADDSB missing invalid created value %+v", hval)
 	}
 }
 
@@ -1429,6 +1491,27 @@ func TestExecuteCommandQuantileSketchOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandQuantileSketchRejectsInvalidBatchesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDQ", Key: "latency", Values: Slice{"10", "20"}}); !got.OK {
+		t.Fatalf("ADDQ initial response = %#v, want ok", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDQ", Key: "latency", Values: Slice{"30", "NaN"}}); got.OK {
+		t.Fatalf("ADDQ invalid batch response = %#v, want error", got)
+	}
+	if info, ok := ht.QuantileSketchInfo("latency"); !ok || info.Count != 2 {
+		t.Fatalf("QuantileSketchInfo(after rejected add) = %#v/%v, want two values", info, ok)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDQ", Key: "missing", Values: Slice{"NaN"}}); got.OK {
+		t.Fatalf("ADDQ missing invalid response = %#v, want error", got)
+	}
+	if hval := ht.Get("missing"); !hval.Empty() {
+		t.Fatalf("ADDQ missing invalid created value %+v", hval)
+	}
+}
+
 func TestExecuteCommandFenwickTreeOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -1515,6 +1598,34 @@ func TestExecuteCommandFenwickTreeOperations(t *testing.T) {
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "RANGEFW", Key: "scores", Value: "4", Subkey: "3"}); got.OK {
 		t.Fatalf("RANGEFW inverted range response = %#v, want error", got)
+	}
+}
+
+func TestExecuteCommandFenwickTreeRejectsInvalidUpdatesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "scores", Value: "2", Subkey: "5"}); !got.OK {
+		t.Fatalf("ADDFW initial response = %#v, want ok", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "scores", Value: "2", Subkey: "0"}); got.OK {
+		t.Fatalf("ADDFW zero-delta response = %#v, want error", got)
+	}
+	if got, ok := ht.GetFenwickTree("scores", 2); !ok || got != 5 {
+		t.Fatalf("GetFenwickTree(2 after rejected zero-delta) = %d/%v, want 5/true", got, ok)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "scores", Value: strconv.FormatUint(maxFenwickTreeSize, 10), Subkey: "1"}); got.OK {
+		t.Fatalf("ADDFW out-of-range response = %#v, want error", got)
+	}
+	if info, ok := ht.FenwickTreeInfo("scores"); !ok || info.Updates != 1 || info.Total != 5 {
+		t.Fatalf("FenwickTreeInfo(after rejected update) = %#v/%v, want one update total 5", info, ok)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "missing", Value: "1", Subkey: "0"}); got.OK {
+		t.Fatalf("ADDFW missing invalid response = %#v, want error", got)
+	}
+	if hval := ht.Get("missing"); !hval.Empty() {
+		t.Fatalf("ADDFW missing invalid created value %+v", hval)
 	}
 }
 
