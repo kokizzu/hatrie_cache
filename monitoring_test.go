@@ -165,6 +165,57 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerPreviewsCoreValueFamilies(t *testing.T) {
+	ht := newTestTrie(t)
+	memoryBytes := []byte{1, 2, 3, 4, 5}
+	diskBytes := bytes.Repeat([]byte("x"), DiskBytesThreshold+1)
+	ht.UpsertCounter("preview:counter", 7)
+	ht.UpsertBytes("preview:bytes:disk", diskBytes)
+	ht.UpsertBytes("preview:bytes:memory", memoryBytes)
+	ht.UpsertMap("preview:map", Map{"first": "one", "second": 2})
+	ht.UpsertSlice("preview:slice", Slice{"first", "second"})
+
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/entries?prefix=preview:", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("entries status = %d, want 200", resp.Code)
+	}
+	var entries MonitoringEntriesResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("entries JSON error = %v", err)
+	}
+	if len(entries.Entries) != 5 {
+		t.Fatalf("entries len = %d, want 5: %#v", len(entries.Entries), entries.Entries)
+	}
+	byKey := make(map[string]MonitoringEntry, len(entries.Entries))
+	for _, entry := range entries.Entries {
+		byKey[entry.Key] = entry
+	}
+
+	counter := byKey["preview:counter"]
+	if counter.Type != "counter" || counter.SizeBytes != 4 || counter.ValuePreview != "7" || counter.OnDisk {
+		t.Fatalf("counter entry = %#v, want counter preview", counter)
+	}
+	disk := byKey["preview:bytes:disk"]
+	wantDiskPreview := strconv.Itoa(len(diskBytes)) + " bytes"
+	if disk.Type != "bytes" || !disk.OnDisk || disk.SizeBytes != int64(len(diskBytes)) || disk.ValuePreview != wantDiskPreview {
+		t.Fatalf("disk bytes entry = %#v, want on-disk byte preview", disk)
+	}
+	memory := byKey["preview:bytes:memory"]
+	if memory.Type != "bytes" || memory.OnDisk || memory.SizeBytes != int64(len(memoryBytes)) || memory.ValuePreview != strconv.Itoa(len(memoryBytes))+" bytes" {
+		t.Fatalf("memory bytes entry = %#v, want in-memory byte preview", memory)
+	}
+	mapEntry := byKey["preview:map"]
+	if mapEntry.Type != "map" || mapEntry.SizeBytes != 2 || mapEntry.ValuePreview != "2 fields" || mapEntry.OnDisk {
+		t.Fatalf("map entry = %#v, want field-count preview", mapEntry)
+	}
+	sliceEntry := byKey["preview:slice"]
+	if sliceEntry.Type != "slice" || sliceEntry.SizeBytes != 2 || sliceEntry.ValuePreview != "2 items" || sliceEntry.OnDisk {
+		t.Fatalf("slice entry = %#v, want item-count preview", sliceEntry)
+	}
+}
+
 func TestMonitoringPreviewHandlesInvalidDiskByteIndex(t *testing.T) {
 	ht := newTestTrie(t)
 	for _, idx := range []int32{-1, 99} {
