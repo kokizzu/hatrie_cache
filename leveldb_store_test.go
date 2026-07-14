@@ -701,6 +701,9 @@ func TestLevelDBColdReferencesHydrateBeforeIncrementalMutations(t *testing.T) {
 func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
+	source.UpsertCounter("counter", 5)
+	source.UpsertString("append", "old")
+	source.UpsertString("prepend", "old")
 	source.UpsertMap("map", Map{"old": "value"})
 	source.PushSlice("slice", "old")
 	source.UpsertSet("set", Set{"old"})
@@ -744,10 +747,19 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
 	}
-	if result.KeysLoaded != 16 || result.ValuesLoaded != 0 {
-		t.Fatalf("hot-load result = %#v, want 16 cold keys", result)
+	if result.KeysLoaded != 19 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 19 cold keys", result)
 	}
 
+	if got, err := loaded.IncrementCounterChecked("counter", 2); err != nil || got != 7 {
+		t.Fatalf("IncrementCounterChecked(cold ref) = %d/%v, want 7/nil", got, err)
+	}
+	if got, err := loaded.AppendStringChecked("append", "-new"); err != nil || got != "old-new" {
+		t.Fatalf("AppendStringChecked(cold ref) = %q/%v, want old-new/nil", got, err)
+	}
+	if got, err := loaded.PrependStringChecked("prepend", "new-"); err != nil || got != "new-old" {
+		t.Fatalf("PrependStringChecked(cold ref) = %q/%v, want new-old/nil", got, err)
+	}
 	if err := loaded.PutMapChecked("map", "new", "value"); err != nil {
 		t.Fatalf("PutMapChecked(cold ref) error = %v, want nil", err)
 	}
@@ -1360,6 +1372,9 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
+	source.UpsertCounter("counter", 5)
+	source.UpsertString("append", "old")
+	source.UpsertString("prepend", "old")
 	source.UpsertMap("map", Map{"alpha": "value"})
 	source.PushSlice("slice", "alpha")
 	source.UpsertSet("set", Set{"alpha"})
@@ -1422,6 +1437,15 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	}
 	if err := loaded.PushSliceChecked("slice", "beta"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("PushSliceChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.IncrementCounterChecked("counter", 1); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("IncrementCounterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.AppendStringChecked("append", "-new"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("AppendStringChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.PrependStringChecked("prepend", "new-"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PrependStringChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, err := loaded.HasBloomFilterChecked("bloom", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("HasBloomFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)

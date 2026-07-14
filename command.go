@@ -114,7 +114,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value must be a 32-bit integer")
 		}
-		value, ok := ht.commandIncrementCounter(key, by)
+		value, ok, err := ht.commandIncrementCounter(key, by)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return commandError("counter overflow")
 		}
@@ -970,28 +973,12 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	}
 }
 
-func (ht *HatTrie) commandIncrementCounter(key string, by int32) (int32, bool) {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return 0, false
+func (ht *HatTrie) commandIncrementCounter(key string, by int32) (int32, bool, error) {
+	value, ok, err := ht.incrementCounterChecked(key, by, true)
+	if err != nil {
+		return 0, false, err
 	}
-	if hval.IsCounter() {
-		next := int64(hval.Index) + int64(by)
-		if next < minCommandInt32 || next > maxCommandInt32 {
-			return 0, false
-		}
-		hval.Index = int32(next)
-	} else {
-		ht.returnStorage(hval)
-		ht.clearExpirationLocked(key)
-		hval = HatValue{Index: by, Flags: DATAVALUE_TYPE_COUNTER}
-	}
-	*rawPtr = hval.toValue()
-	ht.recordWriteLocked(key)
-	return hval.Index, true
+	return value, ok, nil
 }
 
 func (ht *HatTrie) commandPutMap(key string, fields Map) error {

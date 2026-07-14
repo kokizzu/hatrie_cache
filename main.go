@@ -2398,16 +2398,36 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 // IncrementCounter increments key by by. If key is not a counter, it is reset
 // to by.
 func (ht *HatTrie) IncrementCounter(key string, by int32) {
+	_, _ = ht.IncrementCounterChecked(key, by)
+}
+
+func (ht *HatTrie) IncrementCounterChecked(key string, by int32) (int32, error) {
+	value, _, err := ht.incrementCounterChecked(key, by, false)
+	return value, err
+}
+
+func (ht *HatTrie) incrementCounterChecked(key string, by int32, checkOverflow bool) (int32, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, false, err
 	}
 	if hval.IsCounter() {
-		hval.Index += by
+		if checkOverflow {
+			next := int64(hval.Index) + int64(by)
+			if next < minCommandInt32 || next > maxCommandInt32 {
+				return hval.Index, false, nil
+			}
+			hval.Index = int32(next)
+		} else {
+			hval.Index += by
+		}
 	} else {
+		if rawPtr == nil {
+			rawPtr = ht.upsertLocation(key)
+		}
 		ht.returnStorage(hval)
 		ht.clearExpirationLocked(key)
 		hval.Flags = DATAVALUE_TYPE_COUNTER
@@ -2415,6 +2435,7 @@ func (ht *HatTrie) IncrementCounter(key string, by int32) {
 	}
 	*rawPtr = hval.toValue()
 	ht.recordWriteLocked(key)
+	return hval.Index, true, nil
 }
 
 // GetCounter returns 0 if key is missing or does not hold a counter.
@@ -2463,12 +2484,16 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 
 // AppendString appends str to key. If key is not a string, it is reset to str.
 func (ht *HatTrie) AppendString(key string, str string) {
+	_, _ = ht.AppendStringChecked(key, str)
+}
+
+func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return "", err
 	}
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
@@ -2478,24 +2503,32 @@ func (ht *HatTrie) AppendString(key string, str string) {
 		ht.raws.putOwned(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return string(next), nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.raws.addOwned([]byte(str))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
+	return str, nil
 }
 
 // PrependString prepends str to key. If key is not a string, it is reset to str.
 func (ht *HatTrie) PrependString(key string, str string) {
+	_, _ = ht.PrependStringChecked(key, str)
+}
+
+func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return "", err
 	}
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
@@ -2505,14 +2538,18 @@ func (ht *HatTrie) PrependString(key string, str string) {
 		ht.raws.putOwned(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return string(next), nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.raws.addOwned([]byte(str))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
+	return str, nil
 }
 
 // GetString returns an empty string if key is missing or not a string/counter.

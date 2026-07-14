@@ -180,8 +180,18 @@ func TestCounterOperations(t *testing.T) {
 	if got := ht.GetCounter("counter"); got != -2 {
 		t.Fatalf("GetCounter() = %d, want -2", got)
 	}
-	if got := ht.GetString("counter"); got != "-2" {
-		t.Fatalf("GetString(counter) = %q, want %q", got, "-2")
+	if got, err := ht.IncrementCounterChecked("counter", 4); err != nil || got != 2 {
+		t.Fatalf("IncrementCounterChecked(counter, 4) = %d/%v, want 2/nil", got, err)
+	}
+	if got, err := ht.IncrementCounterChecked("created", 3); err != nil || got != 3 {
+		t.Fatalf("IncrementCounterChecked(created, 3) = %d/%v, want 3/nil", got, err)
+	}
+	ht.UpsertString("string", "value")
+	if got, err := ht.IncrementCounterChecked("string", 8); err != nil || got != 8 {
+		t.Fatalf("IncrementCounterChecked(string, 8) = %d/%v, want 8/nil", got, err)
+	}
+	if got := ht.GetString("counter"); got != "2" {
+		t.Fatalf("GetString(counter) = %q, want %q", got, "2")
 	}
 }
 
@@ -285,15 +295,27 @@ func TestStringOperationsReuseStorage(t *testing.T) {
 	idx := ht.Get("key").Index
 	ht.AppendString("key", "-tail")
 	ht.PrependString("key", "head-")
+	if got, err := ht.AppendStringChecked("key", "-checked-tail"); err != nil || got != "head-middle-tail-checked-tail" {
+		t.Fatalf("AppendStringChecked(key) = %q/%v, want appended string", got, err)
+	}
+	if got, err := ht.PrependStringChecked("key", "checked-head-"); err != nil || got != "checked-head-head-middle-tail-checked-tail" {
+		t.Fatalf("PrependStringChecked(key) = %q/%v, want prepended string", got, err)
+	}
 
-	if got := ht.GetString("key"); got != "head-middle-tail" {
-		t.Fatalf("GetString() = %q, want head-middle-tail", got)
+	if got := ht.GetString("key"); got != "checked-head-head-middle-tail-checked-tail" {
+		t.Fatalf("GetString() = %q, want checked string", got)
 	}
 	if got := ht.Get("key").Index; got != idx {
 		t.Fatalf("string update moved storage index: got %d, want %d", got, idx)
 	}
 	if got := len(ht.raws.array); got != 1 {
 		t.Fatalf("raw storage grew during same-type string updates: len=%d", got)
+	}
+	if got, err := ht.AppendStringChecked("created-append", "tail"); err != nil || got != "tail" {
+		t.Fatalf("AppendStringChecked(created-append) = %q/%v, want tail/nil", got, err)
+	}
+	if got, err := ht.PrependStringChecked("created-prepend", "head"); err != nil || got != "head" {
+		t.Fatalf("PrependStringChecked(created-prepend) = %q/%v, want head/nil", got, err)
 	}
 }
 
