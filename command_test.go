@@ -1850,6 +1850,57 @@ func TestCommandUint64ValueRejectsInvalidNativeNumericValues(t *testing.T) {
 	}
 }
 
+func TestCommandInt64ValueAcceptsNativeNumericTypes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+		want  int64
+	}{
+		{name: "json number", value: json.Number("-42"), want: -42},
+		{name: "string", value: " 43 ", want: 43},
+		{name: "int64 min", value: int64(minFenwickTreeInt64), want: minFenwickTreeInt64},
+		{name: "int", value: int(-44), want: -44},
+		{name: "int32", value: int32(-45), want: -45},
+		{name: "uint64 max int64", value: uint64(maxFenwickTreeInt64), want: maxFenwickTreeInt64},
+		{name: "uint", value: uint(46), want: 46},
+		{name: "uint32", value: uint32(47), want: 47},
+		{name: "float64 integer", value: float64(-48), want: -48},
+		{name: "float64 min", value: float64(minFenwickTreeInt64), want: minFenwickTreeInt64},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := commandInt64Value(tt.value)
+			if err != nil || got != tt.want {
+				t.Fatalf("commandInt64Value(%#v) = %d/%v, want %d/nil", tt.value, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommandInt64ValueRejectsInvalidNativeNumericValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+	}{
+		{name: "invalid json number", value: json.Number("nope")},
+		{name: "overflow json number", value: json.Number("9223372036854775808")},
+		{name: "invalid string", value: "not-int"},
+		{name: "uint64 too large", value: uint64(maxFenwickTreeInt64) + 1},
+		{name: "fractional float", value: float64(1.5)},
+		{name: "float too large", value: float64(maxFenwickTreeInt64)},
+		{name: "NaN", value: math.NaN()},
+		{name: "positive infinity", value: math.Inf(1)},
+		{name: "unsupported type", value: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, err := commandInt64Value(tt.value); err == nil {
+				t.Fatalf("commandInt64Value(%#v) = %d/nil, want error", tt.value, got)
+			}
+		})
+	}
+}
+
 func TestCommandFloat64ValueAcceptsNativeNumericTypes(t *testing.T) {
 	tests := []struct {
 		name  string
