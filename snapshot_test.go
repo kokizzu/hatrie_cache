@@ -423,6 +423,43 @@ func TestSnapshotRoundTripRestoresLargeBytesToDisk(t *testing.T) {
 	}
 }
 
+func TestSaveSnapshotStreamsOnDiskBytesWithMetadata(t *testing.T) {
+	now := time.Unix(6200, 0)
+	expiresAt := now.Add(time.Hour)
+	ht := newTestTrie(t)
+	ht.now = func() time.Time { return now }
+	payload := testPayload(DiskBytesThreshold + 1)
+
+	ht.UpsertBytes("large", payload)
+	if got := ht.GetBytes("large"); !bytes.Equal(got, payload) {
+		t.Fatalf("GetBytes(large) = %q, want payload", got)
+	}
+	if !ht.ExpireAt("large", expiresAt) {
+		t.Fatal("ExpireAt(large) = false, want true")
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := ht.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now }
+	if err := loaded.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if hval := loaded.Get("large"); !hval.OnDisk() || !hval.HasTtl() {
+		t.Fatalf("loaded large metadata = %+v, want on-disk bytes with TTL", hval)
+	}
+	stats, ok := loaded.StatsForKey("large")
+	if !ok || stats.Reads == 0 || stats.Writes == 0 {
+		t.Fatalf("loaded large stats = %#v/%v, want persisted read/write stats", stats, ok)
+	}
+	if got := loaded.GetBytes("large"); !bytes.Equal(got, payload) {
+		t.Fatalf("loaded large bytes changed")
+	}
+}
+
 func TestPrepareSnapshotBytesOperationStreamsLargePayload(t *testing.T) {
 	smallPayload := []byte("small")
 	small, err := prepareSnapshotBytesOperation(snapshotEntry{

@@ -248,10 +248,6 @@ func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) e
 	}
 	first := true
 	err := ht.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		snapshotEntry, err := ht.snapshotEntryLocked(entry)
-		if err != nil {
-			return err
-		}
 		if first {
 			if _, err := io.WriteString(writer, "\n"); err != nil {
 				return err
@@ -260,7 +256,7 @@ func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) e
 		} else if _, err := io.WriteString(writer, ",\n"); err != nil {
 			return err
 		}
-		return writeIndentedJSON(writer, snapshotEntry, "    ")
+		return ht.writeSnapshotEntryJSONLocked(writer, entry, "    ")
 	})
 	if err != nil {
 		return err
@@ -273,6 +269,126 @@ func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) e
 		return err
 	}
 	_, err = io.WriteString(writer, "}\n")
+	return err
+}
+
+func (ht *HatTrie) writeSnapshotEntryJSONLocked(writer io.Writer, entry Entry, prefix string) error {
+	if entry.Value.Type() == DATAVALUE_TYPE_RAW_BYTES && entry.Value.OnDisk() {
+		return ht.writeSnapshotDiskBytesEntryJSONLocked(writer, entry, prefix)
+	}
+	snapshotEntry, err := ht.snapshotEntryLocked(entry)
+	if err != nil {
+		return err
+	}
+	return writeIndentedJSON(writer, snapshotEntry, prefix)
+}
+
+func (ht *HatTrie) writeSnapshotDiskBytesEntryJSONLocked(writer io.Writer, entry Entry, prefix string) error {
+	if entry.Value.Index < 0 || int(entry.Value.Index) >= len(ht.disks.paths) {
+		return ht.writeSnapshotBytesEntryJSONLocked(writer, entry, prefix, nil)
+	}
+	path := ht.disks.paths[entry.Value.Index]
+	if path == "" {
+		return ht.writeSnapshotBytesEntryJSONLocked(writer, entry, prefix, nil)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return ht.writeSnapshotBytesEntryJSONLocked(writer, entry, prefix, file)
+}
+
+func (ht *HatTrie) writeSnapshotBytesEntryJSONLocked(writer io.Writer, entry Entry, prefix string, reader io.Reader) error {
+	expiresAt := snapshotExpiresAt(ht.expires[entry.Key])
+	var stats *KeyStats
+	if keyStats, ok := ht.keyStats[entry.Key]; ok {
+		keyStats.updateRates()
+		stats = &keyStats
+	}
+
+	if _, err := io.WriteString(writer, prefix+"{\n"); err != nil {
+		return err
+	}
+	fieldPrefix := prefix + "  "
+	if err := writeSnapshotJSONField(writer, fieldPrefix, "key", entry.Key, true); err != nil {
+		return err
+	}
+	if err := writeSnapshotJSONField(writer, fieldPrefix, "type", "bytes", true); err != nil {
+		return err
+	}
+	if err := writeSnapshotBase64Field(writer, fieldPrefix, "bytes", reader, true); err != nil {
+		return err
+	}
+	if err := writeSnapshotJSONField(writer, fieldPrefix, "map", nil, true); err != nil {
+		return err
+	}
+	if err := writeSnapshotJSONField(writer, fieldPrefix, "slice", nil, true); err != nil {
+		return err
+	}
+	if err := writeSnapshotJSONField(writer, fieldPrefix, "set", nil, true); err != nil {
+		return err
+	}
+	if err := writeSnapshotJSONField(writer, fieldPrefix, "priority_queue", nil, expiresAt != nil || stats != nil); err != nil {
+		return err
+	}
+	if expiresAt != nil {
+		if err := writeSnapshotJSONField(writer, fieldPrefix, "expires_at", expiresAt, stats != nil); err != nil {
+			return err
+		}
+	}
+	if stats != nil {
+		if err := writeSnapshotJSONField(writer, fieldPrefix, "stats", stats, false); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(writer, prefix+"}")
+	return err
+}
+
+func writeSnapshotJSONField(writer io.Writer, prefix string, name string, value interface{}, comma bool) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "%s%q: ", prefix, name); err != nil {
+		return err
+	}
+	if _, err := writer.Write(data); err != nil {
+		return err
+	}
+	if comma {
+		if _, err := io.WriteString(writer, ","); err != nil {
+			return err
+		}
+	}
+	_, err = io.WriteString(writer, "\n")
+	return err
+}
+
+func writeSnapshotBase64Field(writer io.Writer, prefix string, name string, reader io.Reader, comma bool) error {
+	if _, err := fmt.Fprintf(writer, "%s%q: \"", prefix, name); err != nil {
+		return err
+	}
+	encoder := base64.NewEncoder(base64.StdEncoding, writer)
+	if reader != nil {
+		if _, err := io.Copy(encoder, reader); err != nil {
+			_ = encoder.Close()
+			return err
+		}
+	}
+	if err := encoder.Close(); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(writer, "\""); err != nil {
+		return err
+	}
+	if comma {
+		if _, err := io.WriteString(writer, ","); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(writer, "\n")
 	return err
 }
 
