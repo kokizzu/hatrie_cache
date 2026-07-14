@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 )
 
@@ -64,6 +65,9 @@ func validateRadixTreeSnapshot(snapshot radixTreeSnapshot) error {
 	for idx, item := range snapshot.Items {
 		if idx > 0 && item.Key <= previous {
 			return errors.New("hatriecache: radix tree items must be sorted and unique")
+		}
+		if err := validateRadixTreeValue(item.Value); err != nil {
+			return err
 		}
 		previous = item.Key
 	}
@@ -402,6 +406,20 @@ func radixTreeValueSize(value interface{}) uint64 {
 	}
 }
 
+func validateRadixTreeValue(value interface{}) error {
+	if _, err := json.Marshal(value); err != nil {
+		return fmt.Errorf("hatriecache: unsupported radix tree value: %w", err)
+	}
+	return nil
+}
+
+func validateRadixTreeEntries(entries Map) error {
+	if _, err := json.Marshal(entries); err != nil {
+		return fmt.Errorf("hatriecache: unsupported radix tree value: %w", err)
+	}
+	return nil
+}
+
 // RadixTreeStorage stores compressed radix tree values outside the trie.
 type RadixTreeStorage struct {
 	array     []radixTreeData
@@ -466,11 +484,18 @@ func (ht *HatTrie) UpsertRadixTree(key string) {
 }
 
 func (ht *HatTrie) PutRadixTree(key string, subkey string, val interface{}) bool {
-	added, _ := ht.PutRadixTreeChecked(key, subkey, val)
+	added, _ := ht.putRadixTree(key, subkey, val)
 	return added
 }
 
 func (ht *HatTrie) PutRadixTreeChecked(key string, subkey string, val interface{}) (bool, error) {
+	if err := validateRadixTreeValue(val); err != nil {
+		return false, err
+	}
+	return ht.putRadixTree(key, subkey, val)
+}
+
+func (ht *HatTrie) putRadixTree(key string, subkey string, val interface{}) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -499,11 +524,21 @@ func (ht *HatTrie) PutRadixTreeChecked(key string, subkey string, val interface{
 }
 
 func (ht *HatTrie) PutRadixTreeEntries(key string, entries Map) int {
-	added, _ := ht.PutRadixTreeEntriesChecked(key, entries)
+	added, _ := ht.putRadixTreeEntries(key, entries)
 	return added
 }
 
 func (ht *HatTrie) PutRadixTreeEntriesChecked(key string, entries Map) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	if err := validateRadixTreeEntries(entries); err != nil {
+		return 0, err
+	}
+	return ht.putRadixTreeEntries(key, entries)
+}
+
+func (ht *HatTrie) putRadixTreeEntries(key string, entries Map) (int, error) {
 	if len(entries) == 0 {
 		return 0, nil
 	}

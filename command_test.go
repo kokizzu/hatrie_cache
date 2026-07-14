@@ -885,6 +885,44 @@ func TestExecuteCommandRadixTreeOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandRadixTreeRejectsUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUTRT",
+		Key:     "index",
+		Pairs:   Map{"bad": unsupported},
+	})
+	if got.OK {
+		t.Fatalf("PUTRT unsupported missing response = %#v, want error", got)
+	}
+	if hval := ht.Get("index"); !hval.Empty() {
+		t.Fatalf("PUTRT unsupported missing stored value %+v", hval)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTRT", Key: "index", Subkey: "keep", Value: "value"}); !got.OK {
+		t.Fatalf("PUTRT keep response = %#v, want ok", got)
+	}
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUTRT",
+		Key:     "index",
+		Pairs:   Map{"new": "value", "bad": unsupported},
+	})
+	if got.OK {
+		t.Fatalf("PUTRT unsupported existing response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRT", Key: "index", Subkey: "keep"}); !got.OK || got.Value != "value" {
+		t.Fatalf("GETRT keep after rejected PUTRT = %#v, want value", got)
+	}
+	if hit, err := ht.HasRadixTreeChecked("index", "new"); err != nil || hit {
+		t.Fatalf("HasRadixTreeChecked(new after rejected PUTRT) = %v/%v, want false/nil", hit, err)
+	}
+	if info, ok := ht.RadixTreeInfo("index"); !ok || info.Items != 1 {
+		t.Fatalf("RadixTreeInfo(after rejected PUTRT) = %#v/%v, want one item", info, ok)
+	}
+}
+
 func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

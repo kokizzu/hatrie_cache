@@ -131,6 +131,12 @@ func TestRadixTreeSnapshotValidationRejectsCorruptPayload(t *testing.T) {
 	}); err == nil {
 		t.Fatal("validateRadixTreeSnapshot(duplicate) error = nil, want error")
 	}
+	if err := validateRadixTreeSnapshot(radixTreeSnapshot{
+		Count: 1,
+		Items: []RadixTreeItem{{Key: "a", Value: func() {}}},
+	}); err == nil {
+		t.Fatal("validateRadixTreeSnapshot(unsupported value) error = nil, want error")
+	}
 }
 
 func TestHatTrieRadixTreeOperations(t *testing.T) {
@@ -245,6 +251,45 @@ func TestCheckedRadixTreeOperationsReturnValuesAndCopies(t *testing.T) {
 	}
 	if items, ok, err := ht.ScanRadixTreeChecked("missing", ""); err != nil || ok || items != nil {
 		t.Fatalf("ScanRadixTreeChecked(missing) = %#v/%v/%v, want nil/false/nil", items, ok, err)
+	}
+}
+
+func TestCheckedRadixTreeRejectsUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	if added, err := ht.PutRadixTreeChecked("index", "bad", unsupported); err == nil || added {
+		t.Fatalf("PutRadixTreeChecked(unsupported missing) = %v/%v, want false/error", added, err)
+	}
+	if hval := ht.Get("index"); !hval.Empty() {
+		t.Fatalf("PutRadixTreeChecked(unsupported missing) stored value %+v", hval)
+	}
+
+	if added, err := ht.PutRadixTreeChecked("index", "keep", "value"); err != nil || !added {
+		t.Fatalf("PutRadixTreeChecked(keep) = %v/%v, want true/nil", added, err)
+	}
+	if added, err := ht.PutRadixTreeChecked("index", "bad", unsupported); err == nil || added {
+		t.Fatalf("PutRadixTreeChecked(unsupported existing) = %v/%v, want false/error", added, err)
+	}
+	if got, ok, err := ht.GetRadixTreeChecked("index", "keep"); err != nil || !ok || got != "value" {
+		t.Fatalf("GetRadixTreeChecked(keep after rejected put) = %#v/%v/%v, want value/true/nil", got, ok, err)
+	}
+	if hit, err := ht.HasRadixTreeChecked("index", "bad"); err != nil || hit {
+		t.Fatalf("HasRadixTreeChecked(bad after rejected put) = %v/%v, want false/nil", hit, err)
+	}
+
+	if added, err := ht.PutRadixTreeEntriesChecked("index", Map{"new": "value", "bad": unsupported}); err == nil || added != 0 {
+		t.Fatalf("PutRadixTreeEntriesChecked(unsupported) = %d/%v, want 0/error", added, err)
+	}
+	if hit, err := ht.HasRadixTreeChecked("index", "new"); err != nil || hit {
+		t.Fatalf("HasRadixTreeChecked(new after rejected batch) = %v/%v, want false/nil", hit, err)
+	}
+	if info, ok, err := ht.RadixTreeInfoChecked("index"); err != nil || !ok || info.Items != 1 {
+		t.Fatalf("RadixTreeInfoChecked(after rejected batch) = %#v/%v/%v, want one item", info, ok, err)
+	}
+
+	if added := ht.PutRadixTree("unchecked", "bad", unsupported); !added {
+		t.Fatal("PutRadixTree unchecked unsupported value = false, want legacy permissive insert")
 	}
 }
 
