@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"strconv"
 	"testing"
@@ -747,6 +748,88 @@ func TestExecuteCommandValidation(t *testing.T) {
 	}
 	if got := ht.Get("bad-ttl"); !got.Empty() {
 		t.Fatalf("SETSTR with invalid TTL stored value: %+v", got)
+	}
+}
+
+func TestCommandUint64ValueAcceptsNativeNumericTypes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+		want  uint64
+	}{
+		{name: "json number", value: json.Number("42"), want: 42},
+		{name: "string", value: " 43 ", want: 43},
+		{name: "uint64", value: uint64(44), want: 44},
+		{name: "uint", value: uint(45), want: 45},
+		{name: "uint32", value: uint32(46), want: 46},
+		{name: "int", value: int(47), want: 47},
+		{name: "int64", value: int64(48), want: 48},
+		{name: "int32", value: int32(49), want: 49},
+		{name: "float64 integer", value: float64(50), want: 50},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := commandUint64Value(tt.value)
+			if err != nil || got != tt.want {
+				t.Fatalf("commandUint64Value(%#v) = %d/%v, want %d/nil", tt.value, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommandUint64ValueRejectsInvalidNativeNumericValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+	}{
+		{name: "negative int", value: int(-1)},
+		{name: "negative int64", value: int64(-1)},
+		{name: "negative int32", value: int32(-1)},
+		{name: "negative float", value: float64(-1)},
+		{name: "fractional float", value: float64(1.5)},
+		{name: "NaN", value: math.NaN()},
+		{name: "positive infinity", value: math.Inf(1)},
+		{name: "unsupported type", value: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, err := commandUint64Value(tt.value); err == nil {
+				t.Fatalf("commandUint64Value(%#v) = %d/nil, want error", tt.value, got)
+			}
+		})
+	}
+}
+
+func TestCommandFloat64ValueAcceptsNativeNumericTypes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+		want  float64
+	}{
+		{name: "json number", value: json.Number("0.25"), want: 0.25},
+		{name: "string", value: " 0.5 ", want: 0.5},
+		{name: "float64", value: float64(0.75), want: 0.75},
+		{name: "float32", value: float32(1.25), want: 1.25},
+		{name: "uint64", value: uint64(2), want: 2},
+		{name: "uint", value: uint(3), want: 3},
+		{name: "uint32", value: uint32(4), want: 4},
+		{name: "int", value: int(5), want: 5},
+		{name: "int64", value: int64(6), want: 6},
+		{name: "int32", value: int32(7), want: 7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := commandFloat64Value(tt.value)
+			if err != nil || got != tt.want {
+				t.Fatalf("commandFloat64Value(%#v) = %v/%v, want %v/nil", tt.value, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommandFloat64ValueRejectsUnsupportedValues(t *testing.T) {
+	if got, err := commandFloat64Value(true); err == nil {
+		t.Fatalf("commandFloat64Value(true) = %v/nil, want error", got)
 	}
 }
 
