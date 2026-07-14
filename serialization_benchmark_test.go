@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -62,6 +63,46 @@ func BenchmarkSnapshotFormatGzipJSON(b *testing.B) {
 	benchmarkSnapshotFormat(b, SnapshotFormatGzipJSON)
 }
 
+func BenchmarkLevelDBSaveMaterialized(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Close()
+	trie := benchmarkSnapshotTrie()
+	defer trie.Destroy()
+	if err := store.Save(trie); err != nil {
+		b.Fatal(err)
+	}
+	benchmarkLevelDBSave(b, store, trie)
+}
+
+func BenchmarkLevelDBSaveColdReferences(b *testing.B) {
+	store, trie := benchmarkColdLevelDBTrie(b)
+	benchmarkLevelDBSave(b, store, trie)
+}
+
+func BenchmarkLevelDBSaveColdReferencesStatsChanged(b *testing.B) {
+	store, trie := benchmarkColdLevelDBTrie(b)
+	for idx := 0; idx < benchmarkSnapshotEntries; idx++ {
+		if !trie.Exists(fmt.Sprintf("session:%04d", idx)) {
+			b.Fatalf("Exists(session:%04d) = false, want true", idx)
+		}
+	}
+	benchmarkLevelDBSave(b, store, trie)
+}
+
+func BenchmarkLevelDBLoadMaterialized(b *testing.B) {
+	store := benchmarkPopulatedLevelDBStore(b)
+	benchmarkLevelDBLoad(b, store, LevelDBLoadPolicy{}, benchmarkSnapshotEntries)
+}
+
+func BenchmarkLevelDBLoadColdReferences(b *testing.B) {
+	store := benchmarkPopulatedLevelDBStore(b)
+	benchmarkLevelDBLoad(b, store, DefaultLevelDBHotLoadPolicy(), 0)
+}
+
 func benchmarkSnapshotFormat(b *testing.B, format SnapshotFormat) {
 	trie := benchmarkSnapshotTrie()
 	defer trie.Destroy()
@@ -88,8 +129,108 @@ func benchmarkSnapshotBytes(b *testing.B, trie *HatTrie, format SnapshotFormat) 
 func benchmarkSnapshotTrie() *HatTrie {
 	trie := CreateHatTrie()
 	payload := strings.Repeat("payload-", 64)
-	for idx := 0; idx < 512; idx++ {
+	for idx := 0; idx < benchmarkSnapshotEntries; idx++ {
 		trie.UpsertString(fmt.Sprintf("session:%04d", idx), payload)
 	}
 	return trie
+}
+
+const benchmarkSnapshotEntries = 512
+
+func benchmarkColdLevelDBTrie(b *testing.B) (*LevelDBStore, *HatTrie) {
+	b.Helper()
+	store := benchmarkPopulatedLevelDBStore(b)
+	trie := CreateHatTrie()
+	result, err := store.LoadWithPolicy(trie, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		trie.Destroy()
+		_ = store.Close()
+		b.Fatal(err)
+	}
+	if result.KeysLoaded != benchmarkSnapshotEntries || result.ValuesLoaded != 0 {
+		trie.Destroy()
+		_ = store.Close()
+		b.Fatalf("LoadWithPolicy() = %#v, want %d cold keys", result, benchmarkSnapshotEntries)
+	}
+	b.Cleanup(func() {
+		trie.Destroy()
+		_ = store.Close()
+	})
+	return store, trie
+}
+
+func benchmarkPopulatedLevelDBStore(b *testing.B) *LevelDBStore {
+	b.Helper()
+	path := filepath.Join(b.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	source := benchmarkSnapshotTrie()
+	if err := store.Save(source); err != nil {
+		source.Destroy()
+		_ = store.Close()
+		b.Fatal(err)
+	}
+	source.Destroy()
+	b.Cleanup(func() {
+		_ = store.Close()
+	})
+	return store
+}
+
+func benchmarkLevelDBLoad(b *testing.B, store *LevelDBStore, policy LevelDBLoadPolicy, wantValuesLoaded int) {
+	recordBytes := benchmarkLevelDBRecordBytes(b, store)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "record_B/op")
+	b.ReportMetric(float64(wantValuesLoaded), "values_loaded/op")
+	for i := 0; i < b.N; i++ {
+		trie := CreateHatTrie()
+		result, err := store.LoadWithPolicy(trie, policy)
+		if err != nil {
+			trie.Destroy()
+			b.Fatal(err)
+		}
+		if result.KeysLoaded != benchmarkSnapshotEntries || result.ValuesLoaded != wantValuesLoaded {
+			trie.Destroy()
+			b.Fatalf("LoadWithPolicy() = %#v, want %d keys and %d values", result, benchmarkSnapshotEntries, wantValuesLoaded)
+		}
+		trie.Destroy()
+	}
+}
+
+func benchmarkLevelDBSave(b *testing.B, store *LevelDBStore, trie *HatTrie) {
+	recordBytes := benchmarkLevelDBRecordBytes(b, store)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "record_B/op")
+	for i := 0; i < b.N; i++ {
+		if err := store.Save(trie); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func benchmarkLevelDBRecordBytes(b *testing.B, store *LevelDBStore) int {
+	b.Helper()
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer unlock()
+	snapshot, err := db.GetSnapshot()
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer snapshot.Release()
+
+	total := 0
+	if err := scanLevelDBSnapshotEntryData(snapshot, func(_ snapshotEntry, data []byte) error {
+		total += len(data)
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+	return total
 }

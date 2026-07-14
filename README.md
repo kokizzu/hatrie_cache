@@ -248,6 +248,8 @@ Serialization tradeoffs measured with
 `make run CMD='go test -run __nomatch__ -bench BenchmarkCommandWire -benchmem .'`
 and
 `make run CMD='go test -run __nomatch__ -bench BenchmarkSnapshotFormat -benchmem .'`
+and
+`make run CMD='go test -run __nomatch__ -bench "BenchmarkLevelDB(Load|Save)" -benchmem .'`
 on an AMD Ryzen 9 5950X:
 
 | Path | Format | CPU | Wire/disk bytes | Heap bytes | Allocs |
@@ -256,11 +258,21 @@ on an AMD Ryzen 9 5950X:
 | HTTP command wire | protobuf (default) | 2,434 ns/op | 3,203 wire_B/op | 3,664 B/op | 3 |
 | Snapshot save | JSON | 3,664,822 ns/op | 511,483 disk_B/op | 836,557 B/op | 24,070 |
 | Snapshot save | gzip JSON (default) | 5,279,050 ns/op | 8,923 disk_B/op | 959,903 B/op | 39,433 |
+| LevelDB save | materialized values | 14,799,769 ns/op | 423,343 record_B/op | 5,333,625 B/op | 14,396 |
+| LevelDB save | unchanged cold refs | 14,434,558 ns/op | 423,345 record_B/op | 5,849,290 B/op | 14,039 |
+| LevelDB save | stats-changed cold refs | 19,247,881 ns/op | 423,338 record_B/op | 7,789,096 B/op | 24,983 |
+| LevelDB load | materialized values | 7,352,933 ns/op | 423,389 record_B/op | 3,982,012 B/op | 16,501 |
+| LevelDB load | cold refs | 7,690,446 ns/op | 423,357 record_B/op | 3,845,869 B/op | 16,501 |
 
 For the benchmark payload, protobuf command wire is about 2.2x faster with a
 small byte reduction and equivalent allocation count. Gzip snapshots trade about
 44% more save CPU and 15% more heap bytes for about 98% less snapshot storage on
-the repetitive snapshot dataset.
+the repetitive snapshot dataset. LevelDB hot-load keeps cold values as compact
+references and unchanged cold-reference saves reuse the stored record bytes.
+That makes unchanged cold-reference saves comparable to materialized saves on
+the benchmark payload, while read-stat changes force a validated rewrite and
+cost more CPU and heap. Cold-reference loads avoid materializing values, saving
+some heap at the cost of similar startup CPU.
 JSON request bodies may also be sent with `Content-Encoding: gzip`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader
