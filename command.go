@@ -400,7 +400,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !info.Built {
 			return commandError("xor filter is not built")
 		}
-		hit, queryable := ht.HasXorFilter(key, values[0])
+		hit, queryable, err := ht.HasXorFilterChecked(key, values[0])
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !queryable {
 			return commandError("xor filter is not built")
 		}

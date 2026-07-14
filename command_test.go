@@ -531,6 +531,58 @@ func TestExecuteCommandXorFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandXorFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDXF", Key: "seen", Value: "alpha"}); !got.OK {
+		t.Fatalf("ADDXF alpha response = %#v, want ok", got)
+	}
+
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDXF",
+		Key:     "seen",
+		Values:  Slice{"beta", func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDXF unsupported response = %#v, want error", got)
+	}
+	info, ok := ht.XorFilterInfo("seen")
+	if !ok || info.Staged != 1 || info.Items != 1 {
+		t.Fatalf("XorFilterInfo(after rejected command) = %#v/%v, want one staged item", info, ok)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDXF",
+		Key:     "missing",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDXF missing unsupported response = %#v, want error", got)
+	}
+	if value := ht.Get("missing"); !value.Empty() {
+		t.Fatalf("rejected missing-key XOR filter command left value %+v", value)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "HASXF",
+		Key:     "seen",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("HASXF unsupported pending response = %#v, want error", got)
+	}
+	if build := ht.ExecuteCommand(CacheCommandRequest{Command: "BUILDXF", Key: "seen"}); !build.OK {
+		t.Fatalf("BUILDXF response = %#v, want ok", build)
+	}
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "HASXF",
+		Key:     "seen",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("HASXF unsupported built response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandRoaringBitmapOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

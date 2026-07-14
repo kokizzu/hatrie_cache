@@ -137,6 +137,49 @@ func TestHatTrieXorFilterOperations(t *testing.T) {
 	}
 }
 
+func TestHatTrieXorFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	added, err := ht.AddXorFilter("seen", "alpha")
+	if err != nil || added != 1 {
+		t.Fatalf("AddXorFilter(alpha) = %d/%v, want 1/nil", added, err)
+	}
+
+	if added, err := ht.AddXorFilter("seen", "beta", func() {}); err == nil {
+		t.Fatalf("AddXorFilter(unsupported batch) = %d/nil, want error", added)
+	}
+	info, ok := ht.XorFilterInfo("seen")
+	if !ok || info.Staged != 1 || info.Items != 1 {
+		t.Fatalf("XorFilterInfo(after rejected add) = %#v/%v, want one staged item", info, ok)
+	}
+
+	if added, err := ht.AddXorFilter("missing", func() {}); err == nil {
+		t.Fatalf("AddXorFilter(missing unsupported) = %d/nil, want error", added)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected missing-key XOR filter left value %+v", got)
+	}
+	ht.UpsertString("string", "keep")
+	if added, err := ht.AddXorFilter("string", func() {}); err == nil {
+		t.Fatalf("AddXorFilter(replacement unsupported) = %d/nil, want error", added)
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected replacement changed string to %q, want keep", got)
+	}
+
+	if _, _, err := ht.HasXorFilterChecked("seen", func() {}); err == nil {
+		t.Fatal("HasXorFilterChecked(unsupported) error = nil, want error")
+	}
+	if hit, queryable := ht.HasXorFilter("seen", func() {}); hit || queryable {
+		t.Fatalf("HasXorFilter legacy unsupported = %v/%v, want false/false", hit, queryable)
+	}
+	if _, _, err := ht.BuildXorFilter("seen"); err != nil {
+		t.Fatalf("BuildXorFilter() error = %v", err)
+	}
+	if hit, queryable, err := ht.HasXorFilterChecked("seen", func() {}); err == nil {
+		t.Fatalf("HasXorFilterChecked(unsupported built) = %v/%v/nil, want error", hit, queryable)
+	}
+}
+
 func TestHatTrieXorFilterRejectsInvalidExpectedItems(t *testing.T) {
 	for _, expectedItems := range []uint64{0, maxXorFilterItems + 1} {
 		if err := htUpsertXorFilterForTest(expectedItems); err == nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -196,13 +197,19 @@ func (filter *xorFilterData) AddOne(value interface{}, values ...interface{}) (i
 	}
 	pending := make([]xorFilterPendingItem, 0, 1+len(values))
 	seen := make(map[string]struct{}, 1+len(values))
-	key := mustXorFilterItemKey(value)
+	key, err := xorFilterItemKey(value)
+	if err != nil {
+		return 0, err
+	}
 	if _, ok := filter.staged[key]; !ok {
 		pending = append(pending, xorFilterPendingItem{key: key, value: value})
 		seen[key] = struct{}{}
 	}
 	for _, value := range values {
-		key := mustXorFilterItemKey(value)
+		key, err := xorFilterItemKey(value)
+		if err != nil {
+			return 0, err
+		}
 		if _, ok := filter.staged[key]; ok {
 			continue
 		}
@@ -264,6 +271,20 @@ func (filter *xorFilterData) Build() error {
 }
 
 func (filter xorFilterData) Contains(value interface{}) (bool, bool) {
+	hit, queryable, _ := filter.ContainsChecked(value)
+	return hit, queryable
+}
+
+func (filter xorFilterData) ContainsChecked(value interface{}) (bool, bool, error) {
+	key, err := xorFilterItemKey(value)
+	if err != nil {
+		return false, false, err
+	}
+	hit, queryable := filter.containsKey(key)
+	return hit, queryable, nil
+}
+
+func (filter xorFilterData) containsKey(key string) (bool, bool) {
 	if !filter.built {
 		return false, false
 	}
@@ -273,7 +294,6 @@ func (filter xorFilterData) Contains(value interface{}) (bool, bool) {
 	if len(filter.fingerprints) != int(filter.blockLength)*3 {
 		return false, false
 	}
-	key := mustXorFilterItemKey(value)
 	hash := xorFilterHashString(key, filter.seed)
 	fingerprint := xorFilterFingerprint(hash)
 	for _, index := range xorFilterIndexes(hash, filter.blockLength) {
@@ -459,18 +479,10 @@ func xorFilterFingerprint(hash uint64) uint8 {
 	return fingerprint
 }
 
-func mustXorFilterItemKey(value interface{}) string {
-	key, err := xorFilterItemKey(value)
-	if err != nil {
-		panic(err)
-	}
-	return key
-}
-
 func xorFilterItemKey(value interface{}) (string, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("hatriecache: unsupported xor filter value: %w", err)
 	}
 	return string(data), nil
 }
@@ -548,7 +560,17 @@ func (ht *HatTrie) AddXorFilter(key string, val interface{}, vals ...interface{}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr != nil {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
+	} else {
+		ht.clearExpirationLocked(key)
+	}
 	if hval.IsXorFilter() {
 		added, err := ht.xorFilters.array[hval.Index].AddOne(val, vals...)
 		if err != nil {
@@ -565,6 +587,9 @@ func (ht *HatTrie) AddXorFilter(key string, val interface{}, vals ...interface{}
 	added, err := data.AddOne(val, vals...)
 	if err != nil {
 		return 0, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
@@ -592,17 +617,27 @@ func (ht *HatTrie) BuildXorFilter(key string) (XorFilterInfo, bool, error) {
 }
 
 func (ht *HatTrie) HasXorFilter(key string, val interface{}) (bool, bool) {
+	hit, queryable, _ := ht.HasXorFilterChecked(key, val)
+	return hit, queryable
+}
+
+func (ht *HatTrie) HasXorFilterChecked(key string, val interface{}) (bool, bool, error) {
+	valueKey, err := xorFilterItemKey(val)
+	if err != nil {
+		return false, false, err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
 	if !hval.IsXorFilter() {
 		ht.recordReadLocked(false, key)
-		return false, false
+		return false, false, nil
 	}
-	hit, queryable := ht.xorFilters.array[hval.Index].Contains(val)
+	hit, queryable := ht.xorFilters.array[hval.Index].containsKey(valueKey)
 	ht.recordReadLocked(queryable && hit, key)
-	return hit, queryable
+	return hit, queryable, nil
 }
 
 func (ht *HatTrie) XorFilterInfo(key string) (XorFilterInfo, bool) {
