@@ -52,6 +52,9 @@ make frontend-dev
 ```
 
 Run the full local verification suite with `make verify`.
+The C verifier automatically runs AddressSanitizer/UBSan leak and undefined
+behavior checks when the local compiler supports them; use
+`make verify-c SANITIZE_C=0` to skip that pass or `SANITIZE_C=1` to require it.
 
 Run one-off commands through the Makefile/script wrapper:
 

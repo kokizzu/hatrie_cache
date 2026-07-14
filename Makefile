@@ -22,6 +22,7 @@ JOURNAL_PULL_STATE_PATH ?=
 JOURNAL_PULL_INTERVAL ?= 0
 JOURNAL_PULL_LIMIT ?= 0
 JOURNAL_PULL_MAX_BATCHES ?= 0
+SANITIZE_C ?= auto
 
 .PHONY: test verify verify-go verify-c verify-frontend bench run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
@@ -33,7 +34,7 @@ verify-go:
 	./scripts/verify-go.sh
 
 verify-c:
-	./scripts/verify-c.sh
+	SANITIZE_C='$(SANITIZE_C)' ./scripts/verify-c.sh
 
 verify-frontend:
 	./scripts/frontend.sh verify
