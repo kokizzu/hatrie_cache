@@ -112,12 +112,12 @@ func validateXorFilterSnapshot(snapshot xorFilterSnapshot) error {
 		if len(snapshot.Staged) != 0 {
 			return errors.New("hatriecache: built xor filter snapshot cannot contain staged values")
 		}
-		raw, err := base64.StdEncoding.DecodeString(snapshot.Fingerprints)
-		if err != nil {
-			return err
+		size, ok := base64DecodedSize(snapshot.Fingerprints)
+		if !ok {
+			return errors.New("hatriecache: invalid base64 encoding")
 		}
 		if snapshot.BlockLength == 0 {
-			if len(raw) != 0 || snapshot.Items != 0 {
+			if size != 0 || snapshot.Items != 0 {
 				return errors.New("hatriecache: invalid empty xor filter snapshot")
 			}
 			return nil
@@ -128,8 +128,11 @@ func validateXorFilterSnapshot(snapshot xorFilterSnapshot) error {
 		if snapshot.BlockLength != xorFilterBlockLength(snapshot.Items) {
 			return errors.New("hatriecache: xor filter snapshot block length does not match item count")
 		}
-		if len(raw) != int(snapshot.BlockLength)*3 {
+		if size != int64(snapshot.BlockLength)*3 {
 			return errors.New("hatriecache: invalid xor filter fingerprint length")
+		}
+		if _, err := base64.StdEncoding.DecodeString(snapshot.Fingerprints); err != nil {
+			return err
 		}
 		return nil
 	}

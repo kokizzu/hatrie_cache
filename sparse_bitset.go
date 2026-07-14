@@ -88,18 +88,22 @@ func validateSparseBitsetSnapshot(snapshot sparseBitsetSnapshot) error {
 func validateSparseBitsetContainerSnapshot(snapshot sparseBitsetContainerSnapshot) (uint32, error) {
 	switch snapshot.Kind {
 	case sparseBitsetContainerKindArray:
+		size, ok := base64DecodedSize(snapshot.Values)
+		if !ok {
+			return 0, errors.New("hatriecache: invalid base64 encoding")
+		}
+		if size%2 != 0 {
+			return 0, errors.New("hatriecache: invalid sparse bitset array payload")
+		}
+		if size/2 > sparseBitsetArrayMaxSize {
+			return 0, errors.New("hatriecache: sparse bitset array container is too large")
+		}
+		if uint32(size/2) != snapshot.Cardinality {
+			return 0, errors.New("hatriecache: sparse bitset array cardinality mismatch")
+		}
 		raw, err := base64.StdEncoding.DecodeString(snapshot.Values)
 		if err != nil {
 			return 0, err
-		}
-		if len(raw)%2 != 0 {
-			return 0, errors.New("hatriecache: invalid sparse bitset array payload")
-		}
-		if len(raw)/2 > sparseBitsetArrayMaxSize {
-			return 0, errors.New("hatriecache: sparse bitset array container is too large")
-		}
-		if uint32(len(raw)/2) != snapshot.Cardinality {
-			return 0, errors.New("hatriecache: sparse bitset array cardinality mismatch")
 		}
 		var previous uint16
 		for idx := 0; idx < len(raw)/2; idx++ {
@@ -111,12 +115,16 @@ func validateSparseBitsetContainerSnapshot(snapshot sparseBitsetContainerSnapsho
 		}
 		return snapshot.Cardinality, nil
 	case sparseBitsetContainerKindBits:
+		size, ok := base64DecodedSize(snapshot.Bits)
+		if !ok {
+			return 0, errors.New("hatriecache: invalid base64 encoding")
+		}
+		if size != sparseBitsetBitmapWords*8 {
+			return 0, errors.New("hatriecache: invalid sparse bitset bitset payload")
+		}
 		raw, err := base64.StdEncoding.DecodeString(snapshot.Bits)
 		if err != nil {
 			return 0, err
-		}
-		if len(raw) != sparseBitsetBitmapWords*8 {
-			return 0, errors.New("hatriecache: invalid sparse bitset bitset payload")
 		}
 		var cardinality uint32
 		for idx := 0; idx < sparseBitsetBitmapWords; idx++ {

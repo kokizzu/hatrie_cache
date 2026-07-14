@@ -84,18 +84,22 @@ func validateRoaringBitmapSnapshot(snapshot roaringBitmapSnapshot) error {
 func validateRoaringBitmapContainerSnapshot(snapshot roaringBitmapContainerSnapshot) (uint32, error) {
 	switch snapshot.Kind {
 	case roaringBitmapContainerKindArray:
+		size, ok := base64DecodedSize(snapshot.Values)
+		if !ok {
+			return 0, errors.New("hatriecache: invalid base64 encoding")
+		}
+		if size%2 != 0 {
+			return 0, errors.New("hatriecache: invalid roaring bitmap array payload")
+		}
+		if size/2 > roaringBitmapArrayMaxSize {
+			return 0, errors.New("hatriecache: roaring bitmap array container is too large")
+		}
+		if uint32(size/2) != snapshot.Cardinality {
+			return 0, errors.New("hatriecache: roaring bitmap array cardinality mismatch")
+		}
 		raw, err := base64.StdEncoding.DecodeString(snapshot.Values)
 		if err != nil {
 			return 0, err
-		}
-		if len(raw)%2 != 0 {
-			return 0, errors.New("hatriecache: invalid roaring bitmap array payload")
-		}
-		if len(raw)/2 > roaringBitmapArrayMaxSize {
-			return 0, errors.New("hatriecache: roaring bitmap array container is too large")
-		}
-		if uint32(len(raw)/2) != snapshot.Cardinality {
-			return 0, errors.New("hatriecache: roaring bitmap array cardinality mismatch")
 		}
 		var previous uint16
 		for idx := 0; idx < len(raw)/2; idx++ {
@@ -107,12 +111,16 @@ func validateRoaringBitmapContainerSnapshot(snapshot roaringBitmapContainerSnaps
 		}
 		return snapshot.Cardinality, nil
 	case roaringBitmapContainerKindBits:
+		size, ok := base64DecodedSize(snapshot.Bits)
+		if !ok {
+			return 0, errors.New("hatriecache: invalid base64 encoding")
+		}
+		if size != roaringBitmapBitmapWords*8 {
+			return 0, errors.New("hatriecache: invalid roaring bitmap bitset payload")
+		}
 		raw, err := base64.StdEncoding.DecodeString(snapshot.Bits)
 		if err != nil {
 			return 0, err
-		}
-		if len(raw) != roaringBitmapBitmapWords*8 {
-			return 0, errors.New("hatriecache: invalid roaring bitmap bitset payload")
 		}
 		var cardinality uint32
 		for idx := 0; idx < roaringBitmapBitmapWords; idx++ {

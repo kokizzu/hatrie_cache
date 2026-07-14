@@ -3811,6 +3811,76 @@ func TestProbabilisticSnapshotsRejectMismatchedBase64PayloadSizes(t *testing.T) 
 	}
 }
 
+func TestBitmapAndXorSnapshotsRejectMismatchedBase64PayloadSizes(t *testing.T) {
+	oversized := strings.Repeat("AAAA", 4096)
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "roaring array",
+			err: validateRoaringBitmapSnapshot(roaringBitmapSnapshot{
+				Cardinality: 1,
+				Containers: []roaringBitmapContainerSnapshot{{
+					Kind:        roaringBitmapContainerKindArray,
+					Cardinality: 1,
+					Values:      oversized,
+				}},
+			}),
+			want: "roaring bitmap array container is too large",
+		},
+		{
+			name: "roaring bitmap",
+			err: validateRoaringBitmapSnapshot(roaringBitmapSnapshot{
+				Containers: []roaringBitmapContainerSnapshot{{
+					Kind: roaringBitmapContainerKindBits,
+					Bits: oversized,
+				}},
+			}),
+			want: "invalid roaring bitmap bitset payload",
+		},
+		{
+			name: "sparse array",
+			err: validateSparseBitsetSnapshot(sparseBitsetSnapshot{
+				Cardinality: 1,
+				Containers: []sparseBitsetContainerSnapshot{{
+					Kind:        sparseBitsetContainerKindArray,
+					Cardinality: 1,
+					Values:      oversized,
+				}},
+			}),
+			want: "sparse bitset array container is too large",
+		},
+		{
+			name: "sparse bitmap",
+			err: validateSparseBitsetSnapshot(sparseBitsetSnapshot{
+				Containers: []sparseBitsetContainerSnapshot{{
+					Kind: sparseBitsetContainerKindBits,
+					Bits: oversized,
+				}},
+			}),
+			want: "invalid sparse bitset bitset payload",
+		},
+		{
+			name: "xor filter",
+			err: validateXorFilterSnapshot(xorFilterSnapshot{
+				ExpectedItems: 8,
+				Built:         true,
+				Items:         2,
+				BlockLength:   xorFilterBlockLength(2),
+				Fingerprints:  oversized,
+			}),
+			want: "invalid xor filter fingerprint length",
+		},
+	}
+	for _, tt := range tests {
+		if tt.err == nil || !strings.Contains(tt.err.Error(), tt.want) {
+			t.Fatalf("%s validation error = %v, want %q", tt.name, tt.err, tt.want)
+		}
+	}
+}
+
 func TestHyperLogLogStorageReleasedOnOverwrite(t *testing.T) {
 	ht := newTestTrie(t)
 
