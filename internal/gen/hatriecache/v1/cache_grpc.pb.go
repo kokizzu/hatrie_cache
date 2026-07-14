@@ -27,6 +27,7 @@ type CacheServiceClient interface {
 	Entries(ctx context.Context, in *EntriesRequest, opts ...grpc.CallOption) (*EntriesResponse, error)
 	Command(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*CommandResponse, error)
+	Replication(ctx context.Context, in *ReplicationRequest, opts ...grpc.CallOption) (*ReplicationResponse, error)
 }
 
 type cacheServiceClient struct {
@@ -82,6 +83,15 @@ func (c *cacheServiceClient) Snapshot(ctx context.Context, in *SnapshotRequest, 
 	return out, nil
 }
 
+func (c *cacheServiceClient) Replication(ctx context.Context, in *ReplicationRequest, opts ...grpc.CallOption) (*ReplicationResponse, error) {
+	out := new(ReplicationResponse)
+	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/Replication", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CacheServiceServer is the server API for CacheService service.
 // All implementations must embed UnimplementedCacheServiceServer
 // for forward compatibility
@@ -91,6 +101,7 @@ type CacheServiceServer interface {
 	Entries(context.Context, *EntriesRequest) (*EntriesResponse, error)
 	Command(context.Context, *CommandRequest) (*CommandResponse, error)
 	Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error)
+	Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error)
 	mustEmbedUnimplementedCacheServiceServer()
 }
 
@@ -112,6 +123,9 @@ func (UnimplementedCacheServiceServer) Command(context.Context, *CommandRequest)
 }
 func (UnimplementedCacheServiceServer) Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Snapshot not implemented")
+}
+func (UnimplementedCacheServiceServer) Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Replication not implemented")
 }
 func (UnimplementedCacheServiceServer) mustEmbedUnimplementedCacheServiceServer() {}
 
@@ -216,6 +230,24 @@ func _CacheService_Snapshot_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CacheService_Replication_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CacheServiceServer).Replication(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/hatriecache.v1.CacheService/Replication",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CacheServiceServer).Replication(ctx, req.(*ReplicationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CacheService_ServiceDesc is the grpc.ServiceDesc for CacheService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -242,6 +274,10 @@ var CacheService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Snapshot",
 			Handler:    _CacheService_Snapshot_Handler,
+		},
+		{
+			MethodName: "Replication",
+			Handler:    _CacheService_Replication_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

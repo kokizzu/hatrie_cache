@@ -10,6 +10,7 @@ service CacheService {
   rpc Entries(EntriesRequest) returns (EntriesResponse);
   rpc Command(CommandRequest) returns (CommandResponse);
   rpc Snapshot(SnapshotRequest) returns (CommandResponse);
+  rpc Replication(ReplicationRequest) returns (ReplicationResponse);
 }
 
 message HealthRequest {}
@@ -75,3 +76,41 @@ message CommandResponse {
 }
 
 message SnapshotRequest {}
+
+message ReplicationRequest {
+  bool sync = 1;
+  string prefix = 2;
+}
+
+message ReplicationResponse {
+  string command = 1;
+  string key = 2;
+  uint64 entries = 3;
+  bool queued = 4;
+  bool skipped = 5;
+  string reason = 6;
+  ReplicationQueue queue = 7;
+  repeated ReplicationTarget targets = 8;
+}
+
+message ReplicationQueue {
+  bool enabled = 1;
+  int64 depth = 2;
+  int64 capacity = 3;
+  uint64 enqueued = 4;
+  uint64 dropped = 5;
+  uint64 attempts = 6;
+  uint64 successes = 7;
+  uint64 failures = 8;
+  uint64 retried = 9;
+  bool closed = 10;
+}
+
+message ReplicationTarget {
+  string node = 1;
+  string key = 2;
+  string address = 3;
+  bool ok = 4;
+  int32 status = 5;
+  string error = 6;
+}

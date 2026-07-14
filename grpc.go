@@ -120,6 +120,19 @@ func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.Sn
 	return grpcCommandResponse(CacheCommandResponse{OK: true, Message: "snapshot saved"}), nil
 }
 
+func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriecachev1.ReplicationRequest) (*hatriecachev1.ReplicationResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if request == nil {
+		request = &hatriecachev1.ReplicationRequest{}
+	}
+	if request.GetSync() {
+		return grpcReplicationResponse(server.options.Replicator.SyncAll(ctx, server.trie, request.GetPrefix())), nil
+	}
+	return grpcReplicationResponse(server.options.Replicator.LastResult()), nil
+}
+
 func grpcEntry(entry MonitoringEntry) *hatriecachev1.Entry {
 	out := &hatriecachev1.Entry{
 		Key:          entry.Key,
@@ -130,6 +143,43 @@ func grpcEntry(entry MonitoringEntry) *hatriecachev1.Entry {
 	}
 	if entry.TTLMillis != nil {
 		out.TtlMillis = entry.TTLMillis
+	}
+	return out
+}
+
+func grpcReplicationResponse(result ReplicationResult) *hatriecachev1.ReplicationResponse {
+	out := &hatriecachev1.ReplicationResponse{
+		Command: result.Command,
+		Key:     result.Key,
+		Entries: uint64(result.Entries),
+		Queued:  result.Queued,
+		Skipped: result.Skipped,
+		Reason:  result.Reason,
+		Targets: make([]*hatriecachev1.ReplicationTarget, 0, len(result.Targets)),
+	}
+	if result.Queue != nil {
+		out.Queue = &hatriecachev1.ReplicationQueue{
+			Enabled:   result.Queue.Enabled,
+			Depth:     int64(result.Queue.Depth),
+			Capacity:  int64(result.Queue.Capacity),
+			Enqueued:  result.Queue.Enqueued,
+			Dropped:   result.Queue.Dropped,
+			Attempts:  result.Queue.Attempts,
+			Successes: result.Queue.Successes,
+			Failures:  result.Queue.Failures,
+			Retried:   result.Queue.Retried,
+			Closed:    result.Queue.Closed,
+		}
+	}
+	for _, target := range result.Targets {
+		out.Targets = append(out.Targets, &hatriecachev1.ReplicationTarget{
+			Node:    target.Node,
+			Key:     target.Key,
+			Address: target.Address,
+			Ok:      target.OK,
+			Status:  int32(target.Status),
+			Error:   target.Error,
+		})
 	}
 	return out
 }

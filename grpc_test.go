@@ -814,6 +814,152 @@ func TestCacheGRPCServerReplicatesCommands(t *testing.T) {
 	default:
 		t.Fatal("gRPC write did not reach replication target")
 	}
+
+	replication, err := client.Replication(context.Background(), &hatriecachev1.ReplicationRequest{})
+	if err != nil {
+		t.Fatalf("Replication() error = %v", err)
+	}
+	if replication.GetSkipped() || replication.GetCommand() != "SETSTR" || replication.GetKey() != "session:1" {
+		t.Fatalf("replication status = %#v, want SETSTR session:1", replication)
+	}
+	if len(replication.GetTargets()) != 1 || !replication.GetTargets()[0].GetOk() {
+		t.Fatalf("replication targets = %#v, want one ok target", replication.GetTargets())
+	}
+}
+
+func TestCacheGRPCServerReplicationReportsNotConfigured(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+
+	replication, err := client.Replication(context.Background(), &hatriecachev1.ReplicationRequest{})
+	if err != nil {
+		t.Fatalf("Replication() error = %v", err)
+	}
+	if !replication.GetSkipped() || replication.GetReason() != "replication is not configured" {
+		t.Fatalf("replication status = %#v, want not configured skip", replication)
+	}
+}
+
+func TestCacheGRPCServerSyncsReplication(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("session:1", "value")
+	ht.UpsertString("other:1", "ignored")
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/commands" {
+			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
+		}
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
+	}))
+	defer target.Close()
+
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{
+		NodeName:   "node-a",
+		Election:   election,
+		Replicator: replicator,
+	})
+	defer stop()
+
+	replication, err := client.Replication(context.Background(), &hatriecachev1.ReplicationRequest{
+		Sync:   true,
+		Prefix: "session:",
+	})
+	if err != nil {
+		t.Fatalf("Replication(sync) error = %v", err)
+	}
+	if replication.GetSkipped() || replication.GetCommand() != "SYNC" || replication.GetKey() != "session:" || replication.GetEntries() != 1 {
+		t.Fatalf("replication sync = %#v, want one synced session entry", replication)
+	}
+	if len(replication.GetTargets()) != 1 || !replication.GetTargets()[0].GetOk() || replication.GetTargets()[0].GetKey() != "session:1" {
+		t.Fatalf("replication sync targets = %#v, want one ok session:1 target", replication.GetTargets())
+	}
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
+			t.Fatalf("replication sync request = %#v, want INTERNALSET snapshot", request)
+		}
+	default:
+		t.Fatal("gRPC replication sync did not reach remote target")
+	}
+}
+
+func TestCacheGRPCServerReportsAsyncReplicationQueue(t *testing.T) {
+	release := make(chan struct{})
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		<-release
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
+	}))
+	t.Cleanup(target.Close)
+
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 2,
+	})
+	t.Cleanup(replicator.Close)
+	t.Cleanup(func() {
+		close(release)
+	})
+
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{
+		NodeName:   "node-a",
+		Election:   election,
+		Replicator: replicator,
+	})
+	defer stop()
+
+	response, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "SETSTR",
+		Key:     "session:1",
+		Value:   "value",
+	})
+	if err != nil {
+		t.Fatalf("Command(SETSTR) error = %v", err)
+	}
+	if !response.GetOk() {
+		t.Fatalf("SETSTR response = %#v, want ok", response)
+	}
+
+	replication, err := client.Replication(context.Background(), &hatriecachev1.ReplicationRequest{})
+	if err != nil {
+		t.Fatalf("Replication() error = %v", err)
+	}
+	queue := replication.GetQueue()
+	if !replication.GetQueued() || queue == nil || !queue.GetEnabled() || queue.GetCapacity() != 2 || queue.GetEnqueued() != 1 {
+		t.Fatalf("async replication status = %#v, want queued status with queue stats", replication)
+	}
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
+			t.Fatalf("async replication request = %#v, want INTERNALSET snapshot", request)
+		}
+	default:
+	}
 }
 
 func TestCacheGRPCServerSnapshotRequiresCallback(t *testing.T) {
@@ -858,6 +1004,9 @@ func TestCacheGRPCServerHonorsCanceledContexts(t *testing.T) {
 	}
 	if _, err := server.Snapshot(ctx, &hatriecachev1.SnapshotRequest{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Snapshot(canceled) error = %v, want context.Canceled", err)
+	}
+	if _, err := server.Replication(ctx, &hatriecachev1.ReplicationRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Replication(canceled) error = %v, want context.Canceled", err)
 	}
 }
 

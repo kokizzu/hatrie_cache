@@ -359,7 +359,9 @@ Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
 service in another Go process, or use the generated client in
 `internal/gen/hatriecache/v1`. gRPC command handling can use the same journal,
 leader-write enforcement, and HTTP replication options as the monitoring
-command API.
+command API. The `Replication` RPC returns the same last result and async queue
+stats as `GET /api/replication`; set `sync=true` with an optional `prefix` to
+run the same anti-entropy sync exposed by `POST /api/replication`.
 
 The bundled C HAT-trie tests can be compiled directly with GCC when autotools
 build files have not been generated.
