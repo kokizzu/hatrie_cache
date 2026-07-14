@@ -318,6 +318,30 @@ func TestWriteFileAtomicStreamCleansTemporaryFileOnError(t *testing.T) {
 	assertNoAtomicTempFiles(t, dir, "data.json")
 }
 
+func TestWriteJSONFileAtomicStreamsAndCleansTemporaryFileOnEncodeError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.json")
+
+	if err := writeJSONFileAtomic(path, map[string]interface{}{"sequence": 1}); err != nil {
+		t.Fatalf("writeJSONFileAtomic(previous) error = %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(before) error = %v", err)
+	}
+	if err := writeJSONFileAtomic(path, map[string]interface{}{"bad": make(chan int)}); err == nil {
+		t.Fatal("writeJSONFileAtomic(unsupported value) error = nil, want error")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(after) error = %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("file after failed JSON write = %q, want previous %q", after, before)
+	}
+	assertNoAtomicTempFiles(t, dir, "data.json")
+}
+
 func TestWriteFileAtomicCleansTemporaryFileOnRenameError(t *testing.T) {
 	dir := t.TempDir()
 	targetDir := filepath.Join(dir, "target.json")

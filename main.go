@@ -1744,13 +1744,7 @@ func (ht *HatTrie) restoreKeyStatsLocked(key string, stats *KeyStats) {
 }
 
 func (ht *HatTrie) SaveStats(path string) error {
-	stats := ht.Stats()
-	data, err := json.MarshalIndent(stats, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return writeFileAtomic(path, data)
+	return writeJSONFileAtomic(path, ht.Stats())
 }
 
 func (ht *HatTrie) LoadStats(path string) error {

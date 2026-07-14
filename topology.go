@@ -137,12 +137,7 @@ func SaveTopology(path string, topology ClusterTopology) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(normalized, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return writeFileAtomic(path, data)
+	return writeJSONFileAtomic(path, normalized)
 }
 
 // Get returns a copy of the current topology.

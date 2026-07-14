@@ -1134,6 +1134,14 @@ func writeFileAtomic(path string, data []byte) error {
 	})
 }
 
+func writeJSONFileAtomic(path string, value interface{}) error {
+	return writeFileAtomicStream(path, func(writer io.Writer) error {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(value)
+	})
+}
+
 func writeFileAtomicStream(path string, write func(io.Writer) error) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
