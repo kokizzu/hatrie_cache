@@ -585,6 +585,57 @@ func TestLoadSnapshotRemovesKeysMissingFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotStreamsMissingKeyCleanup(t *testing.T) {
+	const keepEntries = 16
+	large := strings.Repeat("x", 70*1024)
+	entries := make([]snapshotEntry, 0, keepEntries)
+	for idx := 0; idx < keepEntries; idx++ {
+		entries = append(entries, snapshotEntry{
+			Key:    fmt.Sprintf("keep:%02d", idx),
+			Type:   "string",
+			String: large,
+		})
+	}
+	payload, err := json.Marshal(snapshotFile{Version: snapshotVersion, Entries: entries})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	for idx := 0; idx < keepEntries; idx++ {
+		ht.UpsertString(fmt.Sprintf("keep:%02d", idx), "old")
+		ht.UpsertString(fmt.Sprintf("stale:%02d", idx), "old")
+	}
+	ht.UpsertBytes("stale-large", testPayload(DiskBytesThreshold+1))
+	staleValue := ht.Get("stale-large")
+	stalePath := ht.disks.paths[staleValue.Index]
+
+	if err := ht.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if got := ht.Size(); got != len(entries) {
+		t.Fatalf("size after snapshot load = %d, want %d", got, len(entries))
+	}
+	if got := ht.GetString("keep:15"); got != large {
+		t.Fatalf("keep:15 after snapshot load length = %d, want %d", len(got), len(large))
+	}
+	for idx := 0; idx < keepEntries; idx++ {
+		if got := ht.GetString(fmt.Sprintf("stale:%02d", idx)); got != "" {
+			t.Fatalf("stale:%02d after snapshot load = %q, want empty", idx, got)
+		}
+	}
+	if got := ht.GetBytes("stale-large"); got != nil {
+		t.Fatalf("stale-large after snapshot load = %q, want nil", got)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("stale disk file Stat() error = %v, want not exist", err)
+	}
+}
+
 func TestLoadSnapshotCleansCreatedKeysAfterApplyFailure(t *testing.T) {
 	payload := testPayload(DiskBytesThreshold + 1)
 	encoded := base64.StdEncoding.EncodeToString(payload)

@@ -861,11 +861,15 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 }
 
 func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]bool, now time.Time) {
-	entries := ht.entriesWithPrefixAtLocked("", false, now)
-	for _, entry := range entries {
+	var stale []Entry
+	_ = ht.scanEntriesWithPrefixAtLockedChecked("", false, now, func(entry Entry) error {
 		if _, ok := keep[entry.Key]; ok {
-			continue
+			return nil
 		}
+		stale = append(stale, entry)
+		return nil
+	})
+	for _, entry := range stale {
 		ht.deleteKnownLocked(entry.Key, entry.Value)
 	}
 }
