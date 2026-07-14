@@ -168,7 +168,10 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 		if entry.Sequence <= afterSequence {
 			continue
 		}
-		trie.ExecuteCommand(entry.Request)
+		response := trie.ExecuteCommand(entry.Request)
+		if !response.OK {
+			return 0, fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, response.Message)
+		}
 	}
 	journal.advanceSequenceLocked(maxSequence)
 	return maxSequence, nil

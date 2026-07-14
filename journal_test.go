@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,6 +66,49 @@ func TestCommandJournalReplaysMutatingCommands(t *testing.T) {
 	}
 	if got := replayed.GetCounter("views"); got != 1 {
 		t.Fatalf("replayed views = %d, want 1", got)
+	}
+}
+
+func TestCommandJournalReplayRejectsFailedEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	writeCommandJournalTestEntries(t, path,
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 1,
+			Request:  CacheCommandRequest{Command: "SETINT", Key: "max", Value: "2147483647"},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 2,
+			Request:  CacheCommandRequest{Command: "INC", Key: "max", Value: "1"},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 3,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "after", Value: "bad"},
+		},
+	)
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	replayed := newTestTrie(t)
+
+	maxSequence, err := journal.Replay(replayed, 0)
+	if err == nil {
+		t.Fatal("Replay(failed entry) error = nil, want replay error")
+	}
+	if !strings.Contains(err.Error(), "entry 2 failed: counter overflow") {
+		t.Fatalf("Replay(failed entry) error = %v, want sequence-specific counter overflow", err)
+	}
+	if maxSequence != 0 {
+		t.Fatalf("Replay(failed entry) max sequence = %d, want 0", maxSequence)
+	}
+	if got := replayed.GetCounter("max"); got != maxCommandInt32 {
+		t.Fatalf("counter before failed replay entry = %d, want max int32", got)
+	}
+	if got := replayed.GetString("after"); got != "" {
+		t.Fatalf("entry after failed replay applied value = %q, want empty", got)
 	}
 }
 
