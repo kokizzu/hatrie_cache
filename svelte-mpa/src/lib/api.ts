@@ -37,7 +37,8 @@ export type CacheEntry = {
     | 'count_min_sketch'
     | 'hyperloglog'
     | 'top_k'
-    | 'quantile_sketch';
+    | 'quantile_sketch'
+    | 'fenwick_tree';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -166,6 +167,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 3072,
     value_preview: '918240 samples, 318 summary points'
+  },
+  {
+    key: 'scores:hourly',
+    type: 'fenwick_tree',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 8200,
+    value_preview: '1024 counters, 128440 total'
   },
   {
     key: 'tags:active',

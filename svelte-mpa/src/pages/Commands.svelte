@@ -12,11 +12,14 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'INFOQ'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'INFOQ', 'INFOFW'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
-  $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK'].includes(command);
-  $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : command === 'CREATECF' ? 'False positive rate' : 'Count';
+  $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK', 'ADDFW', 'RANGEFW'].includes(command);
+  $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : command === 'CREATECF' ? 'False positive rate' : command === 'ADDFW' ? 'Delta' : command === 'RANGEFW' ? 'End index' : 'Count';
+  $: valueLabel = command === 'CREATEFW' ? 'Size' : ['ADDFW', 'GETFW', 'SUMFW'].includes(command) ? 'Index' : command === 'RANGEFW' ? 'Start index' : 'Value';
+  $: valuePlaceholder = command === 'CREATEFW' ? '1024' : ['ADDFW', 'GETFW', 'SUMFW', 'RANGEFW'].includes(command) ? '0' : 'value';
+  $: subkeyPlaceholder = command === 'CREATECMS' ? '4' : command === 'CREATECF' ? '0.01' : command === 'RANGEFW' ? '10' : '1';
 
   async function submit() {
     const result = await runCommand({
@@ -94,6 +97,12 @@
           <option>ADDQ</option>
           <option>ESTQ</option>
           <option>INFOQ</option>
+          <option>CREATEFW</option>
+          <option>ADDFW</option>
+          <option>GETFW</option>
+          <option>SUMFW</option>
+          <option>RANGEFW</option>
+          <option>INFOFW</option>
         </select>
       </label>
 
@@ -104,8 +113,8 @@
 
       {#if needsValue}
         <label>
-          <span>Value</span>
-          <textarea bind:value={value} rows="4" placeholder="value"></textarea>
+          <span>{valueLabel}</span>
+          <textarea bind:value={value} rows="4" placeholder={valuePlaceholder}></textarea>
         </label>
       {/if}
 
@@ -119,7 +128,7 @@
       {#if needsSubkey}
         <label>
           <span>{subkeyLabel}</span>
-          <input bind:value={subkey} placeholder={command === 'CREATECMS' ? '4' : command === 'CREATECF' ? '0.01' : '1'} />
+          <input bind:value={subkey} placeholder={subkeyPlaceholder} />
         </label>
       {/if}
 

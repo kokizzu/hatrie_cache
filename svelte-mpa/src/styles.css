@@ -464,6 +464,11 @@ textarea {
   color: #456b19;
 }
 
+.type-pill.fenwick_tree {
+  background: #e9f7f4;
+  color: #146454;
+}
+
 .preview {
   color: #62707d;
   max-width: 280px;

@@ -65,6 +65,7 @@
         <option value="hyperloglog">HyperLogLog</option>
         <option value="top_k">Top-K</option>
         <option value="quantile_sketch">Quantile Sketch</option>
+        <option value="fenwick_tree">Fenwick Tree</option>
       </select>
     </label>
   </section>
