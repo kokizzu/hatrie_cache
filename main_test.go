@@ -1018,6 +1018,68 @@ func TestSetOperations(t *testing.T) {
 	}
 }
 
+func TestSetRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	added, err := ht.AddSetChecked("set", "go")
+	if err != nil || added != 1 {
+		t.Fatalf("AddSetChecked(go) = %d, %v; want 1, nil", added, err)
+	}
+
+	if added, err := ht.AddSetChecked("set", "cache", unsupported); err == nil || added != 0 {
+		t.Fatalf("AddSetChecked(with unsupported) = %d, %v; want 0, error", added, err)
+	}
+	if got := ht.GetSet("set"); !reflect.DeepEqual(got, Set{"go"}) {
+		t.Fatalf("GetSet(after rejected add) = %#v, want original set", got)
+	}
+
+	if removed, err := ht.RemoveSetChecked("set", "go", unsupported); err == nil || removed != 0 {
+		t.Fatalf("RemoveSetChecked(with unsupported) = %d, %v; want 0, error", removed, err)
+	}
+	if !ht.HasSet("set", "go") {
+		t.Fatal("RemoveSetChecked removed a value before returning an error")
+	}
+
+	if added, err := ht.AddSetChecked("missing", unsupported); err == nil || added != 0 {
+		t.Fatalf("AddSetChecked(missing unsupported) = %d, %v; want 0, error", added, err)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("AddSetChecked(missing unsupported) created value %+v", got)
+	}
+
+	ht.UpsertString("string", "keep")
+	if added, err := ht.AddSetChecked("string", unsupported); err == nil || added != 0 {
+		t.Fatalf("AddSetChecked(replace unsupported) = %d, %v; want 0, error", added, err)
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("AddSetChecked(replace unsupported) mutated value %q, want keep", got)
+	}
+
+	if err := ht.UpsertSetChecked("set", Set{"new", unsupported}); err == nil {
+		t.Fatal("UpsertSetChecked(with unsupported) = nil, want error")
+	}
+	if got := ht.GetSet("set"); !reflect.DeepEqual(got, Set{"go"}) {
+		t.Fatalf("GetSet(after rejected upsert) = %#v, want original set", got)
+	}
+
+	if hit, err := ht.HasSetChecked("set", unsupported); err == nil || hit {
+		t.Fatalf("HasSetChecked(unsupported) = %t, %v; want false, error", hit, err)
+	}
+	if added := ht.AddSet("legacy", unsupported); added != 0 {
+		t.Fatalf("legacy AddSet(unsupported) = %d, want 0", added)
+	}
+	if got := ht.Get("legacy"); !got.Empty() {
+		t.Fatalf("legacy AddSet(unsupported) created value %+v", got)
+	}
+	if removed := ht.RemoveSet("set", unsupported); removed != 0 {
+		t.Fatalf("legacy RemoveSet(unsupported) = %d, want 0", removed)
+	}
+	if ht.HasSet("set", unsupported) {
+		t.Fatal("legacy HasSet(unsupported) = true, want false")
+	}
+}
+
 func TestSetRemoveLastValueKeepsEmptySetReadable(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertSet("set", Set{"only"})

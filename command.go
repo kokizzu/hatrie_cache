@@ -221,21 +221,31 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		added := ht.AddSet(key, values[0], values[1:]...)
+		added, err := ht.AddSetChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "added set values", Value: strconv.Itoa(added)}
 	case "REMSET":
 		values, ok := commandSliceValues(request)
 		if !ok {
 			return commandError("value or values is required")
 		}
-		removed := ht.RemoveSet(key, values[0], values[1:]...)
+		removed, err := ht.RemoveSetChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "removed set values", Value: strconv.Itoa(removed)}
 	case "HASSET":
 		values, ok := commandSliceValues(request)
 		if !ok {
 			return commandError("value or values is required")
 		}
-		if ht.HasSet(key, values[0]) {
+		hit, err := ht.HasSetChecked(key, values[0])
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if hit {
 			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}

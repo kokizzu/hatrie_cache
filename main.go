@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	mathbits "math/bits"
 	"os"
@@ -1067,15 +1068,29 @@ type setData struct {
 }
 
 func newSetData(values Set) setData {
-	out := setData{}
-	out.Add(values...)
+	out, _ := newSetDataChecked(values)
 	return out
 }
 
-func newSetDataValues(value interface{}, values ...interface{}) setData {
+func newSetDataChecked(values Set) (setData, error) {
 	out := setData{}
-	out.AddOne(value, values...)
+	if _, err := out.AddChecked(values...); err != nil {
+		return setData{}, err
+	}
+	return out, nil
+}
+
+func newSetDataValues(value interface{}, values ...interface{}) setData {
+	out, _ := newSetDataValuesChecked(value, values...)
 	return out
+}
+
+func newSetDataValuesChecked(value interface{}, values ...interface{}) (setData, error) {
+	out := setData{}
+	if _, err := out.AddOneChecked(value, values...); err != nil {
+		return setData{}, err
+	}
+	return out, nil
 }
 
 func (set *setData) Len() int {
@@ -1086,46 +1101,67 @@ func (set *setData) Len() int {
 }
 
 func (set *setData) Add(values ...interface{}) int {
-	if len(values) == 0 {
-		return 0
-	}
-	set.ensureCapacity(len(values))
-	added := 0
-	for _, value := range values {
-		added += set.addValue(value)
-	}
+	added, _ := set.AddChecked(values...)
 	return added
+}
+
+func (set *setData) AddChecked(values ...interface{}) (int, error) {
+	if len(values) == 0 {
+		return 0, nil
+	}
+	keys, err := setItemKeys(values...)
+	if err != nil {
+		return 0, err
+	}
+	return set.addValuesWithKeys(keys, values), nil
 }
 
 func (set *setData) AddOne(value interface{}, values ...interface{}) int {
-	set.ensureCapacity(1 + len(values))
-	added := set.addValue(value)
-	for _, value := range values {
-		added += set.addValue(value)
-	}
+	added, _ := set.AddOneChecked(value, values...)
 	return added
 }
 
+func (set *setData) AddOneChecked(value interface{}, values ...interface{}) (int, error) {
+	keys, err := setItemKeysOne(value, values...)
+	if err != nil {
+		return 0, err
+	}
+	return set.addOneWithKeys(keys, value, values...), nil
+}
+
 func (set *setData) Remove(values ...interface{}) int {
-	if set == nil || set.items == nil {
-		return 0
-	}
-	removed := 0
-	for _, value := range values {
-		removed += set.removeValue(value)
-	}
+	removed, _ := set.RemoveChecked(values...)
 	return removed
 }
 
-func (set *setData) RemoveOne(value interface{}, values ...interface{}) int {
+func (set *setData) RemoveChecked(values ...interface{}) (int, error) {
+	if len(values) == 0 {
+		return 0, nil
+	}
+	keys, err := setItemKeys(values...)
+	if err != nil {
+		return 0, err
+	}
 	if set == nil || set.items == nil {
-		return 0
+		return 0, nil
 	}
-	removed := set.removeValue(value)
-	for _, value := range values {
-		removed += set.removeValue(value)
-	}
+	return set.removeKeys(keys), nil
+}
+
+func (set *setData) RemoveOne(value interface{}, values ...interface{}) int {
+	removed, _ := set.RemoveOneChecked(value, values...)
 	return removed
+}
+
+func (set *setData) RemoveOneChecked(value interface{}, values ...interface{}) (int, error) {
+	keys, err := setItemKeysOne(value, values...)
+	if err != nil {
+		return 0, err
+	}
+	if set == nil || set.items == nil {
+		return 0, nil
+	}
+	return set.removeKeys(keys), nil
 }
 
 func (set *setData) ensureCapacity(capacity int) {
@@ -1135,8 +1171,25 @@ func (set *setData) ensureCapacity(capacity int) {
 	}
 }
 
-func (set *setData) addValue(value interface{}) int {
-	key := mustSetItemKey(value)
+func (set *setData) addValuesWithKeys(keys []string, values []interface{}) int {
+	set.ensureCapacity(len(values))
+	added := 0
+	for idx, value := range values {
+		added += set.addKeyValue(keys[idx], value)
+	}
+	return added
+}
+
+func (set *setData) addOneWithKeys(keys []string, value interface{}, values ...interface{}) int {
+	set.ensureCapacity(1 + len(values))
+	added := set.addKeyValue(keys[0], value)
+	for idx, value := range values {
+		added += set.addKeyValue(keys[idx+1], value)
+	}
+	return added
+}
+
+func (set *setData) addKeyValue(key string, value interface{}) int {
 	if _, exists := set.items[key]; exists {
 		return 0
 	}
@@ -1144,8 +1197,15 @@ func (set *setData) addValue(value interface{}) int {
 	return 1
 }
 
-func (set *setData) removeValue(value interface{}) int {
-	key := mustSetItemKey(value)
+func (set *setData) removeKeys(keys []string) int {
+	removed := 0
+	for _, key := range keys {
+		removed += set.removeKey(key)
+	}
+	return removed
+}
+
+func (set *setData) removeKey(key string) int {
 	if _, exists := set.items[key]; !exists {
 		return 0
 	}
@@ -1156,11 +1216,20 @@ func (set *setData) removeValue(value interface{}) int {
 }
 
 func (set *setData) Has(value interface{}) bool {
-	if set == nil || set.items == nil {
-		return false
-	}
-	_, ok := set.items[mustSetItemKey(value)]
+	ok, _ := set.HasChecked(value)
 	return ok
+}
+
+func (set *setData) HasChecked(value interface{}) (bool, error) {
+	key, err := setItemKey(value)
+	if err != nil {
+		return false, err
+	}
+	if set == nil || set.items == nil {
+		return false, nil
+	}
+	_, ok := set.items[key]
+	return ok, nil
 }
 
 func (set *setData) Values() Set {
@@ -1222,6 +1291,14 @@ func (ss *SetStorage) Put(idx int32, value Set) {
 	ss.reusables.Use(idx)
 }
 
+func (ss *SetStorage) PutData(idx int32, value setData) {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return
+	}
+	ss.array[idx] = value
+	ss.reusables.Use(idx)
+}
+
 func (ss *SetStorage) Append(value Set) int32 {
 	ss.array = append(ss.array, newSetData(value))
 	return int32(len(ss.array) - 1)
@@ -1229,6 +1306,11 @@ func (ss *SetStorage) Append(value Set) int32 {
 
 func (ss *SetStorage) AppendValues(value interface{}, values ...interface{}) int32 {
 	ss.array = append(ss.array, newSetDataValues(value, values...))
+	return int32(len(ss.array) - 1)
+}
+
+func (ss *SetStorage) AppendData(value setData) int32 {
+	ss.array = append(ss.array, value)
 	return int32(len(ss.array) - 1)
 }
 
@@ -1246,6 +1328,14 @@ func (ss *SetStorage) AddValues(value interface{}, values ...interface{}) int32 
 		return idx
 	}
 	return ss.AppendValues(value, values...)
+}
+
+func (ss *SetStorage) AddData(value setData) int32 {
+	if idx, ok := ss.reusables.Take(); ok {
+		ss.array[idx] = value
+		return idx
+	}
+	return ss.AppendData(value)
 }
 
 func (ss *SetStorage) Del(idx int32) {
@@ -2694,76 +2784,131 @@ func (ht *HatTrie) sliceRefLocked(key string) (*deque, bool) {
 }
 
 func (ht *HatTrie) UpsertSet(key string, val Set) {
+	_ = ht.UpsertSetChecked(key, val)
+}
+
+func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
+	data, err := newSetDataChecked(val)
+	if err != nil {
+		return err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
 	if hval.IsSet() {
-		ht.sets.Put(hval.Index, val)
+		ht.sets.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.sets.Add(val)
+	idx := ht.sets.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 func (ht *HatTrie) AddSet(key string, val interface{}, vals ...interface{}) int {
+	added, _ := ht.AddSetChecked(key, val, vals...)
+	return added
+}
+
+func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	keys, err := setItemKeysOne(val, vals...)
+	if err != nil {
+		return 0, err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr == nil {
+		ht.clearExpirationLocked(key)
+	} else {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
+	}
 	if hval.IsSet() {
-		added := ht.sets.array[hval.Index].AddOne(val, vals...)
+		added := ht.sets.array[hval.Index].addOneWithKeys(keys, val, vals...)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return added
+		return added, nil
 	}
 
+	var data setData
+	added := data.addOneWithKeys(keys, val, vals...)
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.sets.AddValues(val, vals...)
+	idx := ht.sets.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
 	ht.recordWriteLocked(key)
-	return ht.sets.array[idx].Len()
+	return added, nil
 }
 
 func (ht *HatTrie) RemoveSet(key string, val interface{}, vals ...interface{}) int {
+	removed, _ := ht.RemoveSetChecked(key, val, vals...)
+	return removed
+}
+
+func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	keys, err := setItemKeysOne(val, vals...)
+	if err != nil {
+		return 0, err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
 	if !hval.IsSet() {
 		ht.recordReadLocked(false, key)
-		return 0
+		return 0, nil
 	}
 
-	removed := ht.sets.array[hval.Index].RemoveOne(val, vals...)
+	removed := ht.sets.array[hval.Index].removeKeys(keys)
 	ht.recordReadLocked(removed > 0, key)
 	if removed > 0 {
 		ht.recordWriteLocked(key)
 	}
-	return removed
+	return removed, nil
 }
 
 func (ht *HatTrie) HasSet(key string, val interface{}) bool {
+	hit, _ := ht.HasSetChecked(key, val)
+	return hit
+}
+
+func (ht *HatTrie) HasSetChecked(key string, val interface{}) (bool, error) {
+	valueKey, err := setItemKey(val)
+	if err != nil {
+		return false, err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
 	if !hval.IsSet() {
 		ht.recordReadLocked(false, key)
-		return false
+		return false, nil
 	}
-	hit := ht.sets.array[hval.Index].Has(val)
+	_, hit := ht.sets.array[hval.Index].items[valueKey]
 	ht.recordReadLocked(hit, key)
-	return hit
+	return hit, nil
 }
 
 func (ht *HatTrie) GetSet(key string) Set {
@@ -2828,15 +2973,36 @@ func cloneValue(value interface{}) interface{} {
 func setItemKey(value interface{}) (string, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("hatriecache: unsupported set value: %w", err)
 	}
 	return string(data), nil
 }
 
-func mustSetItemKey(value interface{}) string {
+func setItemKeys(values ...interface{}) ([]string, error) {
+	keys := make([]string, len(values))
+	for idx, value := range values {
+		key, err := setItemKey(value)
+		if err != nil {
+			return nil, err
+		}
+		keys[idx] = key
+	}
+	return keys, nil
+}
+
+func setItemKeysOne(value interface{}, values ...interface{}) ([]string, error) {
+	keys := make([]string, 1+len(values))
 	key, err := setItemKey(value)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return key
+	keys[0] = key
+	for idx, value := range values {
+		key, err := setItemKey(value)
+		if err != nil {
+			return nil, err
+		}
+		keys[idx+1] = key
+	}
+	return keys, nil
 }

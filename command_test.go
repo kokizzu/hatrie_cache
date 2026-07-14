@@ -215,6 +215,40 @@ func TestExecuteCommandSetOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandSetRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "tags", Value: "go"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDSET seed response = %#v, want added 1", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "tags", Values: Slice{"cache", unsupported}}); got.OK {
+		t.Fatalf("ADDSET unsupported response = %#v, want error", got)
+	}
+	if got := ht.GetSet("tags"); !reflect.DeepEqual(got, Set{"go"}) {
+		t.Fatalf("GetSet(after rejected ADDSET) = %#v, want original set", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "REMSET", Key: "tags", Values: Slice{"go", unsupported}}); got.OK {
+		t.Fatalf("REMSET unsupported response = %#v, want error", got)
+	}
+	if !ht.HasSet("tags", "go") {
+		t.Fatal("REMSET removed a value before returning an error")
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "missing", Values: Slice{unsupported}}); got.OK {
+		t.Fatalf("ADDSET missing unsupported response = %#v, want error", got)
+	}
+	if hval := ht.Get("missing"); !hval.Empty() {
+		t.Fatalf("ADDSET missing unsupported created value %+v", hval)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSET", Key: "tags", Values: Slice{unsupported}}); got.OK {
+		t.Fatalf("HASSET unsupported response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandPriorityQueueOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
