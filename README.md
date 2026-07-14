@@ -72,6 +72,10 @@ Run the full local verification suite with `make verify`.
 The C verifier automatically runs AddressSanitizer/UBSan leak and undefined
 behavior checks when the local compiler supports them; use
 `make verify-c SANITIZE_C=0` to skip that pass or `SANITIZE_C=1` to require it.
+On hosts with `vm.overcommit_memory=2`, auto mode skips that sanitizer pass
+because AddressSanitizer can reserve a large shadow-memory range that strict
+commit accounting rejects. Use `SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=1` only to
+force that pass anyway.
 
 Run one-off commands through the Makefile/script wrapper:
 

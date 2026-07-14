@@ -27,6 +27,8 @@ JOURNAL_PULL_INTERVAL ?= 0
 JOURNAL_PULL_LIMIT ?= 0
 JOURNAL_PULL_MAX_BATCHES ?= 0
 SANITIZE_C ?= auto
+SANITIZE_C_ALLOW_STRICT_OVERCOMMIT ?= 0
+SANITIZE_C_OVERCOMMIT_MEMORY_PATH ?=
 BENCH ?= .
 
 .PHONY: test verify verify-go verify-c verify-frontend bench run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
@@ -39,7 +41,8 @@ verify-go:
 	./scripts/verify-go.sh
 
 verify-c:
-	SANITIZE_C='$(SANITIZE_C)' ./scripts/verify-c.sh
+	./scripts/verify-c-policy-test.sh
+	SANITIZE_C='$(SANITIZE_C)' SANITIZE_C_ALLOW_STRICT_OVERCOMMIT='$(SANITIZE_C_ALLOW_STRICT_OVERCOMMIT)' SANITIZE_C_OVERCOMMIT_MEMORY_PATH='$(SANITIZE_C_OVERCOMMIT_MEMORY_PATH)' ./scripts/verify-c.sh
 
 verify-frontend:
 	./scripts/frontend.sh verify

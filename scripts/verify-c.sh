@@ -4,6 +4,26 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SANITIZE_C=${SANITIZE_C:-auto}
 
+. "$ROOT/scripts/c-sanitizer-policy.sh"
+
+case "$SANITIZE_C" in
+	auto|1|true|yes|0|false|no)
+		;;
+	*)
+		echo "SANITIZE_C must be auto, 1, or 0" >&2
+		exit 2
+		;;
+esac
+
+case "$SANITIZE_C" in
+	1|true|yes)
+		if strict_overcommit_blocks_sanitizers; then
+			echo "SANITIZE_C=1 requested but vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations; set SANITIZE_C=0 or SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=1 to override" >&2
+			exit 2
+		fi
+		;;
+esac
+
 build_c_check() {
 	output=$1
 	test_file=$2
@@ -57,7 +77,10 @@ compiler_supports_sanitizers() {
 }
 
 if [ "$SANITIZE_C" = "auto" ]; then
-	if compiler_supports_sanitizers; then
+	if strict_overcommit_blocks_sanitizers; then
+		echo "skipping C sanitizer pass: vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations" >&2
+		SANITIZE_C=0
+	elif compiler_supports_sanitizers; then
 		SANITIZE_C=1
 	else
 		echo "skipping C sanitizer pass: compiler/runtime does not support AddressSanitizer and UBSan" >&2
