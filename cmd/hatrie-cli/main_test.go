@@ -529,6 +529,60 @@ func TestRunCommandCompressesLargeJSONPost(t *testing.T) {
 	}
 }
 
+func TestJSONRequestBodyLeavesSmallBodyPlain(t *testing.T) {
+	payload := []byte(`{"ok":true}`)
+	body, contentEncoding, err := jsonRequestBody(payload)
+	if err != nil {
+		t.Fatalf("jsonRequestBody() error = %v", err)
+	}
+	if contentEncoding != "" {
+		t.Fatalf("Content-Encoding = %q, want empty", contentEncoding)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll(plain body) error = %v", err)
+	}
+	if !bytes.Equal(data, payload) {
+		t.Fatalf("plain body = %q, want %q", data, payload)
+	}
+}
+
+func TestJSONRequestBodyCompressesLargeBody(t *testing.T) {
+	payload := []byte(`{"value":"` + strings.Repeat("x", minCompressedJSONRequestBytes) + `"}`)
+	body, contentEncoding, err := jsonRequestBody(payload)
+	if err != nil {
+		t.Fatalf("jsonRequestBody() error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	reader, err := gzip.NewReader(body)
+	if err != nil {
+		t.Fatalf("NewReader(compressed body) error = %v", err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll(compressed body) error = %v", err)
+	}
+	if !bytes.Equal(data, payload) {
+		t.Fatalf("decompressed body = %q, want %q", data, payload)
+	}
+}
+
+func TestJSONValueRequestBodyReportsMarshalErrors(t *testing.T) {
+	body, contentEncoding, err := jsonValueRequestBody(map[string]interface{}{"bad": func() {}}, 0)
+	if err == nil {
+		t.Fatal("jsonValueRequestBody(unsupported) error = nil, want marshal error")
+	}
+	if body != nil {
+		t.Fatalf("body = %T, want nil", body)
+	}
+	if contentEncoding != "" {
+		t.Fatalf("Content-Encoding = %q, want empty", contentEncoding)
+	}
+}
+
 func TestJSONValueRequestBodyStreamsLargeStructuredCommandPayload(t *testing.T) {
 	values := make(hatriecache.Slice, 0, minCompressedJSONRequestBytes/4)
 	for len(values) < cap(values) {
