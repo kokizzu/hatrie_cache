@@ -125,87 +125,124 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	}
 	defer unlock()
 
-	iterator := db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
-	defer iterator.Release()
+	snapshot, err := db.GetSnapshot()
+	if err != nil {
+		return LevelDBLoadResult{}, err
+	}
+	defer snapshot.Release()
 
 	now := trie.currentTime()
-	type levelDBLoadOperation struct {
-		operation snapshotOperation
-		entry     snapshotEntry
-		reference bool
-	}
-	operations := []levelDBLoadOperation{}
 	activeKeys := map[string]struct{}{}
-	for iterator.Next() {
-		key := string(iterator.Key()[len(levelDBEntryPrefix):])
-		entry, err := decodeLevelDBEntryForKey(key, iterator.Value())
+	result := LevelDBLoadResult{}
+	if err := scanLevelDBSnapshotEntries(snapshot, func(entry snapshotEntry) error {
+		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy)
 		if err != nil {
-			return LevelDBLoadResult{}, err
+			return err
 		}
-		if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
-			continue
+		if !active {
+			return nil
 		}
-		if policy.HotValuesOnly && (!levelDBShouldHotLoadMetadata(entry, now, policy) || levelDBEntryExceedsMaxValueBytes(entry, policy)) {
-			if err := validateLevelDBReferenceEntry(entry); err != nil {
-				return LevelDBLoadResult{}, err
-			}
-			activeKeys[entry.Key] = struct{}{}
-			operations = append(operations, levelDBLoadOperation{
-				entry:     entry,
-				reference: true,
-			})
-			continue
-		}
-		operation, err := validateSnapshotEntry(entry)
-		if err != nil {
-			return LevelDBLoadResult{}, err
-		}
-		reference := policy.HotValuesOnly && !levelDBShouldHotLoad(operation, now, policy)
-		activeKeys[entry.Key] = struct{}{}
-		operations = append(operations, levelDBLoadOperation{
-			operation: operation,
-			entry:     entry,
-			reference: reference,
-		})
-	}
-	if err := iterator.Error(); err != nil {
+		activeKeys[loadEntry.entry.Key] = struct{}{}
+		result.KeysLoaded++
+		return nil
+	}); err != nil {
 		return LevelDBLoadResult{}, err
 	}
 
-	result := LevelDBLoadResult{KeysLoaded: len(operations)}
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
 	createdKeys := make(map[string]struct{})
 	rollbackOperations := make([]snapshotOperation, 0)
-	for _, operation := range operations {
-		rollbackOperation, existed, err := trie.restoreRollbackOperationLocked(operation.entry.Key)
+	applied := false
+	if err := scanLevelDBSnapshotEntries(snapshot, func(entry snapshotEntry) error {
+		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy)
 		if err != nil {
-			return LevelDBLoadResult{}, err
+			return err
 		}
-		if operation.reference {
-			if _, err := trie.applyLevelDBReferenceLocked(store, operation.entry); err != nil {
+		if !active {
+			return nil
+		}
+		rollbackOperation, existed, err := trie.restoreRollbackOperationLocked(loadEntry.entry.Key)
+		if err != nil {
+			return err
+		}
+		if loadEntry.reference {
+			if _, err := trie.applyLevelDBReferenceLocked(store, loadEntry.entry); err != nil {
 				if existed {
 					rollbackOperations = append(rollbackOperations, rollbackOperation)
 				}
-				return LevelDBLoadResult{}, trie.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
+				return err
 			}
 		} else {
-			if _, err := trie.applySnapshotOperationAtLocked(operation.operation, now); err != nil {
+			if _, err := trie.applySnapshotOperationAtLocked(loadEntry.operation, now); err != nil {
 				if existed {
 					rollbackOperations = append(rollbackOperations, rollbackOperation)
 				}
-				return LevelDBLoadResult{}, trie.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
+				return err
 			}
 			result.ValuesLoaded++
 		}
+		applied = true
 		if existed {
 			rollbackOperations = append(rollbackOperations, rollbackOperation)
 		} else {
-			createdKeys[operation.operation.entry.Key] = struct{}{}
+			createdKeys[loadEntry.entry.Key] = struct{}{}
 		}
+		return nil
+	}); err != nil {
+		if applied {
+			return LevelDBLoadResult{}, trie.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
+		}
+		return LevelDBLoadResult{}, err
 	}
 	trie.deleteKeysNotInLocked(activeKeys, now)
 	return result, nil
+}
+
+type levelDBLoadEntry struct {
+	operation snapshotOperation
+	entry     snapshotEntry
+	reference bool
+}
+
+func prepareLevelDBLoadEntry(entry snapshotEntry, now time.Time, policy LevelDBLoadPolicy) (levelDBLoadEntry, bool, error) {
+	if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
+		return levelDBLoadEntry{}, false, nil
+	}
+	if policy.HotValuesOnly && (!levelDBShouldHotLoadMetadata(entry, now, policy) || levelDBEntryExceedsMaxValueBytes(entry, policy)) {
+		if err := validateLevelDBReferenceEntry(entry); err != nil {
+			return levelDBLoadEntry{}, false, err
+		}
+		return levelDBLoadEntry{entry: entry, reference: true}, true, nil
+	}
+	operation, err := validateSnapshotEntry(entry)
+	if err != nil {
+		return levelDBLoadEntry{}, false, err
+	}
+	return levelDBLoadEntry{
+		operation: operation,
+		entry:     entry,
+		reference: policy.HotValuesOnly && !levelDBShouldHotLoad(operation, now, policy),
+	}, true, nil
+}
+
+func scanLevelDBSnapshotEntries(snapshot *leveldb.Snapshot, visit func(snapshotEntry) error) error {
+	iterator := snapshot.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
+	defer iterator.Release()
+
+	for iterator.Next() {
+		key := string(iterator.Key()[len(levelDBEntryPrefix):])
+		entry, err := decodeLevelDBEntryForKey(key, iterator.Value())
+		if err != nil {
+			return err
+		}
+		if visit != nil {
+			if err := visit(entry); err != nil {
+				return err
+			}
+		}
+	}
+	return iterator.Error()
 }
 
 func (store *LevelDBStore) Entry(key string) (snapshotEntry, bool, error) {

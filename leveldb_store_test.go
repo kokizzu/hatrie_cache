@@ -796,8 +796,13 @@ func TestLevelDBStoreHotLoadRejectsCorruptColdBytesWithoutMutation(t *testing.T)
 	}
 	defer store.Close()
 
-	entry := snapshotEntry{Key: "bad", Type: "bytes", Bytes: "not-base64!!!"}
-	data, err := json.Marshal(entry)
+	good := snapshotEntry{Key: "a-good", Type: "string", String: "value"}
+	goodData, err := json.Marshal(good)
+	if err != nil {
+		t.Fatalf("Marshal(good entry) error = %v", err)
+	}
+	bad := snapshotEntry{Key: "z-bad", Type: "bytes", Bytes: "not-base64!!!"}
+	badData, err := json.Marshal(bad)
 	if err != nil {
 		t.Fatalf("Marshal(bad entry) error = %v", err)
 	}
@@ -805,7 +810,11 @@ func TestLevelDBStoreHotLoadRejectsCorruptColdBytesWithoutMutation(t *testing.T)
 	if err != nil {
 		t.Fatalf("lockDB() error = %v", err)
 	}
-	if err := db.Put(levelDBKey("bad"), data, nil); err != nil {
+	if err := db.Put(levelDBKey(good.Key), goodData, nil); err != nil {
+		unlock()
+		t.Fatalf("db.Put(good) error = %v", err)
+	}
+	if err := db.Put(levelDBKey(bad.Key), badData, nil); err != nil {
 		unlock()
 		t.Fatalf("db.Put(bad) error = %v", err)
 	}
@@ -819,7 +828,10 @@ func TestLevelDBStoreHotLoadRejectsCorruptColdBytesWithoutMutation(t *testing.T)
 	if got := loaded.GetString("existing"); got != "keep" {
 		t.Fatalf("existing after rejected load = %q, want keep", got)
 	}
-	if loaded.Exists("bad") {
+	if loaded.Exists("a-good") {
+		t.Fatal("rejected load created earlier valid key")
+	}
+	if loaded.Exists("z-bad") {
 		t.Fatal("corrupt cold bytes created bad key")
 	}
 }
