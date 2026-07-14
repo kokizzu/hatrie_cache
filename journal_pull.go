@@ -118,7 +118,10 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 		return result, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, tail.CompactedThrough)
 	}
 	for _, entry := range tail.Entries {
-		nextSequence := result.AppliedThrough + 1
+		nextSequence, err := nextCommandJournalPullSequence(result.AppliedThrough)
+		if err != nil {
+			return result, err
+		}
 		if entry.Sequence != nextSequence {
 			return result, fmt.Errorf("journal tail sequence %d does not continue after %d", entry.Sequence, result.AppliedThrough)
 		}
@@ -130,4 +133,11 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 		result.AppliedThrough = entry.Sequence
 	}
 	return result, nil
+}
+
+func nextCommandJournalPullSequence(appliedThrough uint64) (uint64, error) {
+	if appliedThrough == ^uint64(0) {
+		return 0, ErrCommandJournalSequenceExhausted
+	}
+	return appliedThrough + 1, nil
 }

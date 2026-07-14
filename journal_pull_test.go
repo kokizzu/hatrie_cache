@@ -70,6 +70,34 @@ func TestApplyCommandJournalTailRejectsSequenceGap(t *testing.T) {
 	}
 }
 
+func TestApplyCommandJournalTailRejectsSequenceExhaustionWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := applyCommandJournalTail(ht, journal, "source", ^uint64(0), CommandJournalTail{
+		LastSequence: ^uint64(0),
+		Entries: []CommandJournalRecord{
+			{Sequence: 0, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+		},
+	})
+	if !errors.Is(err, ErrCommandJournalSequenceExhausted) {
+		t.Fatalf("applyCommandJournalTail(exhausted) error = %v, want ErrCommandJournalSequenceExhausted", err)
+	}
+	if result.Applied != 0 || result.AppliedThrough != ^uint64(0) {
+		t.Fatalf("exhausted result = %#v, want no progress after max sequence", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("exhausted tail applied value = %q, want empty", got)
+	}
+	if entries, err := readCommandJournalEntries(journal.path); err != nil || len(entries) != 0 {
+		t.Fatalf("journal entries after exhausted tail = %#v/%v, want none", entries, err)
+	}
+}
+
 func TestApplyCommandJournalTailRejectsCompactedGap(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
@@ -93,6 +121,45 @@ func TestApplyCommandJournalTailRejectsCompactedGap(t *testing.T) {
 	}
 	if got := ht.GetString("name"); got != "" {
 		t.Fatalf("compacted gap applied value = %q, want empty", got)
+	}
+}
+
+func TestPullCommandJournalReportsSequenceExhaustionAsBadGateway(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := CommandJournalTail{
+			LastSequence: ^uint64(0),
+			Entries: []CommandJournalRecord{
+				{Sequence: 0, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := PullCommandJournal(context.Background(), ht, journal, CommandJournalPullOptions{
+		Source:        source.URL,
+		AfterSequence: ^uint64(0),
+		Limit:         10,
+	})
+	var pullErr *CommandJournalPullError
+	if !errors.As(err, &pullErr) || pullErr.Status != http.StatusBadGateway || !errors.Is(err, ErrCommandJournalSequenceExhausted) {
+		t.Fatalf("PullCommandJournal(exhausted tail) error = %v/%#v, want 502 sequence exhausted", err, pullErr)
+	}
+	if result.Applied != 0 || result.AppliedThrough != ^uint64(0) || result.LastSequence != ^uint64(0) {
+		t.Fatalf("exhausted pull result = %#v, want no progress at max sequence", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("exhausted pull applied value = %q, want empty", got)
 	}
 }
 
