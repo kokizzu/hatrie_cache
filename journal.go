@@ -444,9 +444,10 @@ func scanCommandJournalEntries(path string, visit func(commandJournalEntry) erro
 	var validBytes int64
 	var previousSequence uint64
 	var hasPreviousSequence bool
+	var readBuffer commandJournalReadBuffer
 	reader := bufio.NewReader(file)
 	for {
-		entry, bytesRead, complete, err := readCommandJournalEntry(reader)
+		entry, bytesRead, complete, err := readCommandJournalEntryBuffered(reader, &readBuffer)
 		if err != nil {
 			return 0, err
 		}
@@ -467,7 +468,15 @@ func scanCommandJournalEntries(path string, visit func(commandJournalEntry) erro
 	}
 }
 
+type commandJournalReadBuffer struct {
+	payload []byte
+}
+
 func readCommandJournalEntry(reader *bufio.Reader) (commandJournalEntry, int, bool, error) {
+	return readCommandJournalEntryBuffered(reader, nil)
+}
+
+func readCommandJournalEntryBuffered(reader *bufio.Reader, buffer *commandJournalReadBuffer) (commandJournalEntry, int, bool, error) {
 	header, err := reader.Peek(len(commandJournalBinaryMagic))
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -476,7 +485,7 @@ func readCommandJournalEntry(reader *bufio.Reader) (commandJournalEntry, int, bo
 		return commandJournalEntry{}, 0, false, err
 	}
 	if bytes.Equal(header, commandJournalBinaryMagic) {
-		return readCommandJournalBinaryEntry(reader)
+		return readCommandJournalBinaryEntry(reader, buffer)
 	}
 	return readCommandJournalJSONEntry(reader)
 }
@@ -527,7 +536,7 @@ func readCommandJournalJSONRecordLimited(reader *bufio.Reader, limit int) ([]byt
 	}
 }
 
-func readCommandJournalBinaryEntry(reader *bufio.Reader) (commandJournalEntry, int, bool, error) {
+func readCommandJournalBinaryEntry(reader *bufio.Reader, buffer *commandJournalReadBuffer) (commandJournalEntry, int, bool, error) {
 	bytesRead, err := reader.Discard(len(commandJournalBinaryMagic))
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
@@ -543,7 +552,7 @@ func readCommandJournalBinaryEntry(reader *bufio.Reader) (commandJournalEntry, i
 	if err := validateCommandJournalBinaryRecordSize(size); err != nil {
 		return commandJournalEntry{}, 0, false, err
 	}
-	payload := make([]byte, int(size))
+	payload := commandJournalPayloadBuffer(buffer, int(size))
 	if _, err := io.ReadFull(reader, payload); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return commandJournalEntry{}, 0, false, nil
@@ -556,6 +565,18 @@ func readCommandJournalBinaryEntry(reader *bufio.Reader) (commandJournalEntry, i
 		return commandJournalEntry{}, 0, false, err
 	}
 	return entry, bytesRead, true, nil
+}
+
+func commandJournalPayloadBuffer(buffer *commandJournalReadBuffer, size int) []byte {
+	if buffer == nil {
+		return make([]byte, size)
+	}
+	if size > cap(buffer.payload) {
+		buffer.payload = make([]byte, size)
+	} else {
+		buffer.payload = buffer.payload[:size]
+	}
+	return buffer.payload
 }
 
 func validateCommandJournalBinaryRecordSize(size uint64) error {

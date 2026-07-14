@@ -218,6 +218,44 @@ func TestCommandJournalBinaryEntryReaderDecodesPayloadAndCountsBytes(t *testing.
 	}
 }
 
+func TestCommandJournalBinaryEntryReaderPreservesEntriesWhenReusingPayloadBuffer(t *testing.T) {
+	first := commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 1,
+		Request:  CacheCommandRequest{Command: "SETSTR", Key: "first", Value: strings.Repeat("x", 128)},
+	}
+	firstRaw, err := marshalCommandJournalEntry(first, CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntry(first) error = %v", err)
+	}
+	second := commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 2,
+		Request:  CacheCommandRequest{Command: "SETSTR", Key: "second", Value: "y"},
+	}
+	secondRaw, err := marshalCommandJournalEntry(second, CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntry(second) error = %v", err)
+	}
+
+	var buffer commandJournalReadBuffer
+	reader := bufio.NewReader(bytes.NewReader(append(firstRaw, secondRaw...)))
+	gotFirst, firstBytes, firstComplete, err := readCommandJournalEntryBuffered(reader, &buffer)
+	if err != nil || !firstComplete {
+		t.Fatalf("read first binary entry = %#v/%d/%v/%v, want complete entry", gotFirst, firstBytes, firstComplete, err)
+	}
+	gotSecond, secondBytes, secondComplete, err := readCommandJournalEntryBuffered(reader, &buffer)
+	if err != nil || !secondComplete {
+		t.Fatalf("read second binary entry = %#v/%d/%v/%v, want complete entry", gotSecond, secondBytes, secondComplete, err)
+	}
+	if firstBytes != len(firstRaw) || secondBytes != len(secondRaw) {
+		t.Fatalf("binary journal bytes = %d/%d, want %d/%d", firstBytes, secondBytes, len(firstRaw), len(secondRaw))
+	}
+	if !reflect.DeepEqual(gotFirst, first) || !reflect.DeepEqual(gotSecond, second) {
+		t.Fatalf("binary journal entries = %#v/%#v, want %#v/%#v", gotFirst, gotSecond, first, second)
+	}
+}
+
 func TestCommandJournalIgnoresPartialBinaryTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)
