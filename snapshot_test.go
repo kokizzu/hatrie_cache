@@ -437,17 +437,49 @@ func TestLoadSnapshotSchedulesExpirationForVacuum(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotAcceptsEmptyCollectionPayloads(t *testing.T) {
+	payload := []byte(`{"version":1,"entries":[{"key":"map","type":"map","map":{}},{"key":"slice","type":"slice","slice":[]},{"key":"set","type":"set","set":[]},{"key":"priority","type":"priority_queue","priority_queue":[]}]}`)
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if err := ht.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+
+	if got, ok, err := ht.GetMapChecked("map"); err != nil || !ok || got == nil || len(got) != 0 {
+		t.Fatalf("GetMapChecked(map) = %#v/%v/%v, want empty map", got, ok, err)
+	}
+	if got, ok, err := ht.GetSliceChecked("slice"); err != nil || !ok || got == nil || len(got) != 0 {
+		t.Fatalf("GetSliceChecked(slice) = %#v/%v/%v, want empty slice", got, ok, err)
+	}
+	if got, ok, err := ht.GetSetChecked("set"); err != nil || !ok || got == nil || len(got) != 0 {
+		t.Fatalf("GetSetChecked(set) = %#v/%v/%v, want empty set", got, ok, err)
+	}
+	if got, ok, err := ht.GetPriorityQueueChecked("priority"); err != nil || !ok || got == nil || len(got) != 0 {
+		t.Fatalf("GetPriorityQueueChecked(priority) = %#v/%v/%v, want empty priority queue", got, ok, err)
+	}
+}
+
 func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 	ht := newTestTrie(t)
 	dir := t.TempDir()
 
 	for name, payload := range map[string]string{
-		"broken":      `{broken`,
-		"version":     `{"version":999,"entries":[]}`,
-		"type":        `{"version":1,"entries":[{"key":"bad","type":"unknown"}]}`,
-		"missing-key": `{"version":1,"entries":[{"type":"string","string":"value"}]}`,
-		"null-key":    `{"version":1,"entries":[{"key":null,"type":"string","string":"value"}]}`,
-		"trailing":    `{"version":1,"entries":[]} trailing`,
+		"broken":           `{broken`,
+		"version":          `{"version":999,"entries":[]}`,
+		"type":             `{"version":1,"entries":[{"key":"bad","type":"unknown"}]}`,
+		"missing-key":      `{"version":1,"entries":[{"type":"string","string":"value"}]}`,
+		"null-key":         `{"version":1,"entries":[{"key":null,"type":"string","string":"value"}]}`,
+		"map-missing":      `{"version":1,"entries":[{"key":"bad","type":"map"}]}`,
+		"map-null":         `{"version":1,"entries":[{"key":"bad","type":"map","map":null}]}`,
+		"slice-missing":    `{"version":1,"entries":[{"key":"bad","type":"slice"}]}`,
+		"set-missing":      `{"version":1,"entries":[{"key":"bad","type":"set"}]}`,
+		"priority-missing": `{"version":1,"entries":[{"key":"bad","type":"priority_queue"}]}`,
+		"priority-null":    `{"version":1,"entries":[{"key":"bad","type":"priority_queue","priority_queue":null}]}`,
+		"trailing":         `{"version":1,"entries":[]} trailing`,
 	} {
 		path := filepath.Join(dir, name+".json")
 		if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
@@ -455,6 +487,41 @@ func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 		}
 		if err := ht.LoadSnapshot(path); err == nil {
 			t.Fatalf("LoadSnapshot(%s) error = nil, want error", name)
+		}
+	}
+}
+
+func TestLoadSnapshotRejectsInvalidCollectionsWithoutMutation(t *testing.T) {
+	payload := []byte(`{"version":1,"entries":[{"key":"existing","type":"string","string":"changed"},{"key":"bad","type":"map"}]}`)
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	ht.UpsertString("existing", "keep")
+	if err := ht.LoadSnapshot(path); err == nil {
+		t.Fatal("LoadSnapshot() error = nil, want invalid collection payload error")
+	}
+	if got := ht.GetString("existing"); got != "keep" {
+		t.Fatalf("existing after rejected snapshot = %q, want keep", got)
+	}
+	if ht.Exists("bad") {
+		t.Fatal("invalid snapshot created bad key")
+	}
+}
+
+func TestValidateSnapshotEntryRejectsUnsupportedCollectionValues(t *testing.T) {
+	unsupported := func() {}
+	tests := []snapshotEntry{
+		{Key: "map", Type: "map", Map: Map{"bad": unsupported}},
+		{Key: "slice", Type: "slice", Slice: Slice{unsupported}},
+		{Key: "set", Type: "set", Set: Set{unsupported}},
+		{Key: "priority", Type: "priority_queue", PriorityQueue: []priorityQueueItem{{Value: unsupported}}},
+	}
+	for _, entry := range tests {
+		if _, err := validateSnapshotEntry(entry); err == nil {
+			t.Fatalf("validateSnapshotEntry(%s) error = nil, want unsupported value error", entry.Type)
 		}
 	}
 }

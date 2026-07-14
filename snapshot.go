@@ -222,7 +222,39 @@ func (ht *HatTrie) bytesValueLocked(hval HatValue) ([]byte, error) {
 func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 	operation := snapshotOperation{entry: entry}
 	switch entry.Type {
-	case "counter", "string", "map", "slice", "set", "priority_queue":
+	case "counter", "string":
+		return operation, nil
+	case "map":
+		if entry.Map == nil {
+			return snapshotOperation{}, errors.New("hatriecache: map snapshot is required")
+		}
+		if err := validateMapValue(entry.Map); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "slice":
+		if entry.Slice == nil {
+			return snapshotOperation{}, errors.New("hatriecache: slice snapshot is required")
+		}
+		if err := validateSliceValue(entry.Slice); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "set":
+		if entry.Set == nil {
+			return snapshotOperation{}, errors.New("hatriecache: set snapshot is required")
+		}
+		if _, err := newSetDataChecked(entry.Set); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "priority_queue":
+		if entry.PriorityQueue == nil {
+			return snapshotOperation{}, errors.New("hatriecache: priority queue snapshot is required")
+		}
+		if err := validatePriorityQueueSnapshotItems(entry.PriorityQueue); err != nil {
+			return snapshotOperation{}, err
+		}
 		return operation, nil
 	case "bloom_filter":
 		if entry.BloomFilter == nil {
@@ -330,6 +362,15 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 	default:
 		return snapshotOperation{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
+}
+
+func validatePriorityQueueSnapshotItems(items []priorityQueueItem) error {
+	for _, item := range items {
+		if err := validatePriorityQueueItemValue(item.Value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func decodeSnapshotEntryJSON(data []byte) (snapshotEntry, error) {
