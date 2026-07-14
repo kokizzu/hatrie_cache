@@ -209,6 +209,32 @@ func TestDecodeCommandResponseWireRejectsUnsupportedAndOversized(t *testing.T) {
 	}
 }
 
+func TestReadLimitedCommandWireBoundaryLimits(t *testing.T) {
+	data, err := readLimitedCommandWire(strings.NewReader(""), 0)
+	if err != nil {
+		t.Fatalf("readLimitedCommandWire(empty, zero limit) error = %v", err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("readLimitedCommandWire(empty, zero limit) len = %d, want 0", len(data))
+	}
+
+	if _, err := readLimitedCommandWire(strings.NewReader("x"), 0); !errors.Is(err, errReplicationResponseTooLarge) {
+		t.Fatalf("readLimitedCommandWire(non-empty, zero limit) error = %v, want errReplicationResponseTooLarge", err)
+	}
+}
+
+func TestReadLimitedCommandWireRejectsInvalidLimitWithoutRead(t *testing.T) {
+	for _, limit := range []int64{-1, maxCommandWireReadLimit + 1} {
+		body := &commandWireTrackingBody{reader: strings.NewReader("payload")}
+		if _, err := readLimitedCommandWire(body, limit); !errors.Is(err, errCommandWireInvalidLimit) {
+			t.Fatalf("readLimitedCommandWire(limit %d) error = %v, want errCommandWireInvalidLimit", limit, err)
+		}
+		if body.read {
+			t.Fatalf("readLimitedCommandWire(limit %d) read from body", limit)
+		}
+	}
+}
+
 func TestCacheCommandRequestToProtoConvertsScalarValuesAndPairs(t *testing.T) {
 	priority := int64(7)
 	ttl := int64(30)

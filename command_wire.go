@@ -19,6 +19,7 @@ import (
 const (
 	commandWireContentTypeJSON     = "application/json"
 	commandWireContentTypeProtobuf = "application/x-protobuf"
+	maxCommandWireReadLimit        = int64(1<<63 - 2)
 )
 
 type CommandWireFormat string
@@ -33,6 +34,8 @@ const DefaultCommandWireFormat = CommandWireFormatProtobuf
 // ErrUnsupportedCommandResponseContentType is returned when an HTTP command
 // response advertises a content type that the command wire decoder cannot read.
 var ErrUnsupportedCommandResponseContentType = errors.New("hatriecache: unsupported command response content type")
+
+var errCommandWireInvalidLimit = errors.New("hatriecache: command wire read limit is invalid")
 
 func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -262,6 +265,9 @@ func decodeCommandResponseJSON(reader io.Reader, limit int64) (CacheCommandRespo
 }
 
 func readLimitedCommandWire(reader io.Reader, limit int64) ([]byte, error) {
+	if limit < 0 || limit > maxCommandWireReadLimit {
+		return nil, errCommandWireInvalidLimit
+	}
 	limited := &io.LimitedReader{R: reader, N: limit + 1}
 	data, err := io.ReadAll(limited)
 	if err != nil {
