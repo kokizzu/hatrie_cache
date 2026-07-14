@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -112,13 +113,21 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 	createdKeys := make(map[string]struct{})
+	rollbackOperations := make([]snapshotOperation, 0)
 	for _, operation := range operations {
-		existed := ht.restoreOperationExistedLocked(operation.entry.Key)
-		if _, err := ht.applySnapshotOperationAtLocked(operation, now); err != nil {
-			ht.deleteKeysLocked(createdKeys)
+		rollbackOperation, existed, err := ht.restoreRollbackOperationLocked(operation.entry.Key)
+		if err != nil {
 			return SnapshotMetadata{}, err
 		}
-		if !existed {
+		if _, err := ht.applySnapshotOperationAtLocked(operation, now); err != nil {
+			if existed {
+				rollbackOperations = append(rollbackOperations, rollbackOperation)
+			}
+			return SnapshotMetadata{}, ht.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
+		}
+		if existed {
+			rollbackOperations = append(rollbackOperations, rollbackOperation)
+		} else {
 			createdKeys[operation.entry.Key] = struct{}{}
 		}
 	}
@@ -650,8 +659,39 @@ func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]struct{}, now time.Time
 	}
 }
 
-func (ht *HatTrie) restoreOperationExistedLocked(key string) bool {
-	return ht.tryLocation(key) != nil
+func (ht *HatTrie) restoreRollbackOperationLocked(key string) (snapshotOperation, bool, error) {
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		return snapshotOperation{}, false, nil
+	}
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	entry, err := ht.snapshotEntryLocked(Entry{Key: key, Value: hval})
+	if err != nil {
+		return snapshotOperation{}, true, err
+	}
+	operation, err := validateSnapshotEntry(entry)
+	if err != nil {
+		return snapshotOperation{}, true, err
+	}
+	return operation, true, nil
+}
+
+func (ht *HatTrie) restoreApplyErrorLocked(err error, createdKeys map[string]struct{}, rollbackOperations []snapshotOperation, now time.Time) error {
+	if rollbackErr := ht.rollbackRestoreLocked(createdKeys, rollbackOperations, now); rollbackErr != nil {
+		return errors.Join(err, fmt.Errorf("hatriecache: restore rollback failed: %w", rollbackErr))
+	}
+	return err
+}
+
+func (ht *HatTrie) rollbackRestoreLocked(createdKeys map[string]struct{}, rollbackOperations []snapshotOperation, now time.Time) error {
+	ht.deleteKeysLocked(createdKeys)
+	for idx := len(rollbackOperations) - 1; idx >= 0; idx-- {
+		if _, err := ht.applySnapshotOperationAtLocked(rollbackOperations[idx], now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (ht *HatTrie) deleteKeysLocked(keys map[string]struct{}) {

@@ -530,6 +530,50 @@ func TestLoadSnapshotCleansCreatedKeysAfterApplyFailure(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotRollsBackExistingKeysAfterApplyFailure(t *testing.T) {
+	payload := testPayload(DiskBytesThreshold + 1)
+	encoded := base64.StdEncoding.EncodeToString(payload)
+	data := snapshotFile{
+		Version: snapshotVersion,
+		Entries: []snapshotEntry{
+			{Key: "a-existing", Type: "bytes", Bytes: encoded},
+			{Key: "b-blocked", Type: "bytes", Bytes: encoded},
+		},
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	ht.UpsertString("a-existing", "keep")
+	firstPath := ht.disks.pathFor(0)
+	blockedPath := ht.disks.pathFor(1)
+	if err := os.Mkdir(blockedPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(blocked path) error = %v", err)
+	}
+
+	if err := ht.LoadSnapshot(path); err == nil {
+		t.Fatal("LoadSnapshot() error = nil, want blocked disk write error")
+	}
+	if got := ht.GetString("a-existing"); got != "keep" {
+		t.Fatalf("a-existing after failed snapshot load = %q, want keep", got)
+	}
+	if ht.Exists("b-blocked") {
+		t.Fatal("failed snapshot load left blocked key b-blocked")
+	}
+	if _, err := os.Stat(firstPath); !os.IsNotExist(err) {
+		t.Fatalf("rolled-back disk file Stat() error = %v, want not exist", err)
+	}
+	if got := len(ht.disks.paths); got != 0 {
+		t.Fatalf("disk paths after failed snapshot rollback = %d, want 0", got)
+	}
+}
+
 func TestLoadSnapshotSchedulesExpirationForVacuum(t *testing.T) {
 	now := time.Unix(3050, 0)
 	expiresAt := now.Add(time.Minute)
