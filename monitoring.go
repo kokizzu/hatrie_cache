@@ -1004,11 +1004,15 @@ func writeJSON(w http.ResponseWriter, value interface{}) {
 }
 
 func writeJSONStatus(w http.ResponseWriter, status int, value interface{}) {
+	data, err := jsonwire.Marshal(value)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data = append(data, '\n')
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := jsonwire.NewEncoder(w).Encode(value); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	_, _ = w.Write(data)
 }
 
 func monitoringJSONDecoder(w http.ResponseWriter, r *http.Request) (*jsonwire.Decoder, func(), bool) {

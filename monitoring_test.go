@@ -18,6 +18,37 @@ import (
 	"unicode/utf8"
 )
 
+func TestWriteJSONStatusWritesRequestedStatus(t *testing.T) {
+	resp := httptest.NewRecorder()
+	writeJSONStatus(resp, http.StatusCreated, commandError("created"))
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusCreated)
+	}
+	if contentType := resp.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", contentType)
+	}
+	var got CacheCommandResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response JSON error = %v", err)
+	}
+	if got.OK || got.Message != "created" {
+		t.Fatalf("response = %#v, want error message", got)
+	}
+}
+
+func TestWriteJSONStatusRejectsEncodeErrorBeforeHeader(t *testing.T) {
+	resp := httptest.NewRecorder()
+	writeJSONStatus(resp, http.StatusCreated, map[string]interface{}{"bad": make(chan int)})
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusInternalServerError)
+	}
+	if resp.Body.Len() == 0 {
+		t.Fatal("body is empty, want encoder error")
+	}
+}
+
 func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(1000, 0)
