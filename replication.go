@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,6 +15,7 @@ import (
 )
 
 const DefaultReplicationTimeout = 2 * time.Second
+const maxReplicationResponseDrainBytes = 1 << 20
 
 type HTTPReplicatorOptions struct {
 	Self     string
@@ -327,7 +329,7 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 		result.Error = err.Error()
 		return result
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp.Body)
 
 	result.Status = resp.StatusCode
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -345,6 +347,14 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	result.OK = true
 	return result
+}
+
+func drainAndClose(body io.ReadCloser) {
+	if body == nil {
+		return
+	}
+	_, _ = io.CopyN(io.Discard, body, maxReplicationResponseDrainBytes)
+	_ = body.Close()
 }
 
 func replicationContext(ctx context.Context) context.Context {

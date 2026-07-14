@@ -6,8 +6,38 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+type trackingReadCloser struct {
+	reader  *strings.Reader
+	closed  bool
+	drained bool
+}
+
+func newTrackingReadCloser(value string) *trackingReadCloser {
+	return &trackingReadCloser{reader: strings.NewReader(value)}
+}
+
+func (body *trackingReadCloser) Read(data []byte) (int, error) {
+	n, err := body.reader.Read(data)
+	if err != nil {
+		body.drained = true
+	}
+	return n, err
+}
+
+func (body *trackingReadCloser) Close() error {
+	body.closed = true
+	return nil
+}
 
 func TestHTTPReplicatorReplicatesSetAndDeleteToOwners(t *testing.T) {
 	var requests []CacheCommandRequest
@@ -276,6 +306,33 @@ func TestHTTPReplicatorSyncAllSkipsNoEntries(t *testing.T) {
 	}
 	if got := replicator.LastResult(); !reflect.DeepEqual(got, result) {
 		t.Fatalf("LastResult() = %#v, want empty sync result %#v", got, result)
+	}
+}
+
+func TestPostReplicationCommandDrainsErrorResponseBody(t *testing.T) {
+	body := newTrackingReadCloser(strings.Repeat("error body ", 32))
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Status:     "503 Service Unavailable",
+				Header:     make(http.Header),
+				Body:       body,
+				Request:    request,
+			}, nil
+		}),
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: client})
+
+	result := replicator.postReplicationCommand(context.Background(), TopologyNode{
+		ID:      "node-b",
+		Address: "127.0.0.1:8080",
+	}, CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: "{}"})
+	if result.OK || result.Status != http.StatusServiceUnavailable || result.Error != "503 Service Unavailable" {
+		t.Fatalf("postReplicationCommand() = %#v, want 503 error result", result)
+	}
+	if !body.drained || !body.closed {
+		t.Fatalf("response body drained=%v closed=%v, want both true", body.drained, body.closed)
 	}
 }
 
