@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -24,6 +25,8 @@ type priorityQueueData struct {
 	items        []priorityQueueItem
 	nextSequence uint64
 }
+
+var errPriorityQueueSequenceExhausted = errors.New("hatriecache: priority queue sequence is exhausted")
 
 func clonePriorityQueue(value PriorityQueue) PriorityQueue {
 	if value == nil {
@@ -116,14 +119,36 @@ func (pq *priorityQueueData) Len() int {
 }
 
 func (pq *priorityQueueData) PushOne(priority int64, value interface{}, values ...interface{}) int {
+	added, _ := pq.PushOneChecked(priority, value, values...)
+	return added
+}
+
+func (pq *priorityQueueData) PushOneChecked(priority int64, value interface{}, values ...interface{}) (int, error) {
+	count := 1 + len(values)
+	if err := pq.ensureSequenceCapacity(count); err != nil {
+		return 0, err
+	}
 	if len(values) > 0 {
-		pq.reserveCapacity(len(pq.items) + 1 + len(values))
+		pq.reserveCapacity(len(pq.items) + count)
 	}
 	pq.pushValue(priority, value)
 	for _, value := range values {
 		pq.pushValue(priority, value)
 	}
-	return 1 + len(values)
+	return count, nil
+}
+
+func (pq *priorityQueueData) ensureSequenceCapacity(count int) error {
+	if count <= 0 {
+		return nil
+	}
+	if pq.nextSequence == ^uint64(0) {
+		return errPriorityQueueSequenceExhausted
+	}
+	if uint64(count-1) >= ^uint64(0)-pq.nextSequence {
+		return errPriorityQueueSequenceExhausted
+	}
+	return nil
 }
 
 func (pq *priorityQueueData) reserveCapacity(needed int) {
@@ -405,7 +430,10 @@ func (ht *HatTrie) pushPriorityQueue(key string, priority int64, val interface{}
 		return 0, err
 	}
 	if hval.IsPriorityQueue() {
-		added := ht.priorityQueues.array[hval.Index].PushOne(priority, val, vals...)
+		added, err := ht.priorityQueues.array[hval.Index].PushOneChecked(priority, val, vals...)
+		if err != nil {
+			return 0, err
+		}
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return added, nil
@@ -417,7 +445,10 @@ func (ht *HatTrie) pushPriorityQueue(key string, priority int64, val interface{}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.priorityQueues.Add(nil)
-	added := ht.priorityQueues.array[idx].PushOne(priority, val, vals...)
+	added, err := ht.priorityQueues.array[idx].PushOneChecked(priority, val, vals...)
+	if err != nil {
+		return 0, err
+	}
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}.toValue()
 	ht.recordWriteLocked(key)
 	return added, nil

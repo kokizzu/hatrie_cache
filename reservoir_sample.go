@@ -60,6 +60,8 @@ type reservoirSampleData struct {
 	items    []reservoirSampleItem
 }
 
+var errReservoirSampleSequenceExhausted = errors.New("hatriecache: reservoir sample sequence is exhausted")
+
 func newReservoirSampleData(capacity uint64) (reservoirSampleData, error) {
 	if err := validateReservoirSampleCapacity(capacity); err != nil {
 		return reservoirSampleData{}, err
@@ -164,16 +166,19 @@ func (sample *reservoirSampleData) AddOneChecked(value interface{}, values ...in
 	if sample == nil || sample.capacity == 0 {
 		return ReservoirSampleUpdate{}, nil
 	}
+	if err := sample.ensureSequenceCapacity(1 + len(values)); err != nil {
+		return ReservoirSampleUpdate{}, err
+	}
 	prepared := make([]reservoirSampleItem, 0, 1+len(values))
 	nextSequence := sample.seen
-	item, err := prepareReservoirSampleItem(saturatingAddUint64(nextSequence, 1), value)
+	item, err := prepareReservoirSampleItem(nextSequence+1, value)
 	if err != nil {
 		return ReservoirSampleUpdate{}, err
 	}
 	prepared = append(prepared, item)
 	nextSequence = item.Sequence
 	for _, value := range values {
-		item, err := prepareReservoirSampleItem(saturatingAddUint64(nextSequence, 1), value)
+		item, err := prepareReservoirSampleItem(nextSequence+1, value)
 		if err != nil {
 			return ReservoirSampleUpdate{}, err
 		}
@@ -186,6 +191,19 @@ func (sample *reservoirSampleData) AddOneChecked(value interface{}, values ...in
 		update = sample.addPrepared(item)
 	}
 	return update, nil
+}
+
+func (sample *reservoirSampleData) ensureSequenceCapacity(count int) error {
+	if count <= 0 {
+		return nil
+	}
+	if sample.seen == ^uint64(0) {
+		return errReservoirSampleSequenceExhausted
+	}
+	if uint64(count) > ^uint64(0)-sample.seen {
+		return errReservoirSampleSequenceExhausted
+	}
+	return nil
 }
 
 func (sample *reservoirSampleData) addPrepared(item reservoirSampleItem) ReservoirSampleUpdate {

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -1857,6 +1858,40 @@ func TestCheckedPriorityQueueRejectsUnsupportedValues(t *testing.T) {
 	}
 }
 
+func TestPriorityQueueRejectsSequenceExhaustionWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if added := ht.PushPriorityQueue("queue", 1, "keep"); added != 1 {
+		t.Fatalf("PushPriorityQueue(keep) = %d, want 1", added)
+	}
+	hval := ht.Get("queue")
+	ht.priorityQueues.array[hval.Index].nextSequence = ^uint64(0) - 1
+
+	if added, err := ht.PushPriorityQueueChecked("queue", 1, "last"); err != nil || added != 1 {
+		t.Fatalf("PushPriorityQueueChecked(last) = %d/%v, want 1/nil", added, err)
+	}
+	if got := ht.priorityQueues.array[hval.Index].nextSequence; got != ^uint64(0) {
+		t.Fatalf("next sequence after final valid push = %d, want max uint64", got)
+	}
+	want := PriorityQueue{{Priority: 1, Value: "keep"}, {Priority: 1, Value: "last"}}
+	if got := ht.GetPriorityQueue("queue"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetPriorityQueue(after final valid push) = %#v, want %#v", got, want)
+	}
+
+	if added, err := ht.PushPriorityQueueChecked("queue", 1, "overflow"); !errors.Is(err, errPriorityQueueSequenceExhausted) || added != 0 {
+		t.Fatalf("PushPriorityQueueChecked(overflow) = %d/%v, want 0/sequence exhausted", added, err)
+	}
+	if got := ht.GetPriorityQueue("queue"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetPriorityQueue(after rejected checked push) = %#v, want unchanged %#v", got, want)
+	}
+	if added := ht.PushPriorityQueue("queue", 1, "legacy-overflow"); added != 0 {
+		t.Fatalf("PushPriorityQueue(legacy overflow) = %d, want 0", added)
+	}
+	if got := ht.GetPriorityQueue("queue"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetPriorityQueue(after rejected legacy push) = %#v, want unchanged %#v", got, want)
+	}
+}
+
 func TestBloomFilterOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -3454,6 +3489,45 @@ func TestReservoirSampleRejectsInvalidConfig(t *testing.T) {
 		if got := ht.Get("bad"); !got.Empty() {
 			t.Fatalf("invalid reservoir sample config stored value %+v", got)
 		}
+	}
+}
+
+func TestReservoirSampleRejectsSequenceExhaustionWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertReservoirSample("sample", 2); err != nil {
+		t.Fatalf("UpsertReservoirSample() error = %v", err)
+	}
+	if update, err := ht.AddReservoirSampleChecked("sample", "alpha", "beta"); err != nil || update.Seen != 2 || update.Tracked != 2 {
+		t.Fatalf("AddReservoirSampleChecked(seed) = %#v/%v, want full sample", update, err)
+	}
+	hval := ht.Get("sample")
+	sample := &ht.reservoirSamples.array[hval.Index]
+	sample.seen = ^uint64(0) - 1
+
+	before := sample.Snapshot()
+	if update, err := ht.AddReservoirSampleChecked("sample", "too-many", "overflow"); !errors.Is(err, errReservoirSampleSequenceExhausted) || update != (ReservoirSampleUpdate{}) {
+		t.Fatalf("AddReservoirSampleChecked(overflow batch) = %#v/%v, want zero/sequence exhausted", update, err)
+	}
+	if after := sample.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("reservoir sample changed after rejected overflow batch: before=%#v after=%#v", before, after)
+	}
+
+	if update, err := ht.AddReservoirSampleChecked("sample", "last"); err != nil || update.Seen != ^uint64(0) || update.Tracked != 2 {
+		t.Fatalf("AddReservoirSampleChecked(last) = %#v/%v, want final valid sequence", update, err)
+	}
+	before = sample.Snapshot()
+	if update, err := ht.AddReservoirSampleChecked("sample", "past-end"); !errors.Is(err, errReservoirSampleSequenceExhausted) || update != (ReservoirSampleUpdate{}) {
+		t.Fatalf("AddReservoirSampleChecked(past-end) = %#v/%v, want zero/sequence exhausted", update, err)
+	}
+	if after := sample.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("reservoir sample changed after rejected exhausted add: before=%#v after=%#v", before, after)
+	}
+	if update := ht.AddReservoirSample("sample", "legacy-past-end"); update != (ReservoirSampleUpdate{}) {
+		t.Fatalf("AddReservoirSample(legacy exhausted) = %#v, want zero update", update)
+	}
+	if after := sample.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("reservoir sample changed after rejected legacy add: before=%#v after=%#v", before, after)
 	}
 }
 
