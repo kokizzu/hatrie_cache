@@ -321,6 +321,11 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		}
 		data, err := json.Marshal(entry.QuantileSketch)
 		return int64(len(data)), err
+	case "fenwick_tree":
+		if entry.FenwickTree == nil {
+			return 0, errors.New("hatriecache: fenwick tree snapshot is required")
+		}
+		return int64(len(entry.FenwickTree.Tree) * 8), nil
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

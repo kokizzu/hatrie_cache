@@ -751,6 +751,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		info := ht.quantileSketches.array[hval.Index].Info()
 		return info.EncodedBytes, strconv.FormatUint(info.Count, 10) + " samples, " + strconv.FormatUint(info.SummarySize, 10) + " summary points"
+	case DATAVALUE_TYPE_FENWICK_TREE:
+		if int(hval.Index) >= len(ht.fenwickTrees.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.fenwickTrees.array[hval.Index].Info()
+		return int64(info.TreeBytes), strconv.FormatUint(info.Size, 10) + " counters, " + strconv.FormatInt(info.Total, 10) + " total"
 	default:
 		return 0, ""
 	}
@@ -788,6 +794,8 @@ func monitoringType(hval HatValue) string {
 		return "roaring_bitmap"
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		return "quantile_sketch"
+	case DATAVALUE_TYPE_FENWICK_TREE:
+		return "fenwick_tree"
 	default:
 		return "unknown"
 	}

@@ -527,6 +527,12 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDQ", "ADDQS", "QADD", "QSADD":
 		_, err := quantileSketchValuesFromCommand(request)
 		return err == nil
+	case "CREATEFW", "CREATEFENWICK", "RESERVEFW", "FWRESERVE":
+		_, err := commandFenwickTreeSize(request)
+		return err == nil
+	case "ADDFW", "FWADD":
+		_, _, err := commandFenwickTreeUpdate(request)
+		return err == nil
 	default:
 		return false
 	}

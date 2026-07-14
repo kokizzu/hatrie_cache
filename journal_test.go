@@ -477,6 +477,48 @@ func TestCommandJournalReplaysQuantileSketchMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysFenwickTreeMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATEFW", Key: "scores", Value: "8"}); !got.OK {
+		t.Fatalf("journaled CREATEFW response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDFW", Key: "scores", Value: "2", Subkey: "5"}); !got.OK {
+		t.Fatalf("journaled ADDFW response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SUMFW", Key: "scores", Value: "2"}); !got.OK || got.Value != "5" {
+		t.Fatalf("journaled SUMFW response = %#v, want local prefix sum", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want CREATEFW and ADDFW only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got, ok := replayed.PrefixSumFenwickTree("scores", 2); !ok || got != 5 {
+		t.Fatalf("replayed Fenwick prefix sum = %d/%v, want 5", got, ok)
+	}
+	if info, ok := replayed.FenwickTreeInfo("scores"); !ok || info.Size != 8 || info.Updates != 1 || info.Total != 5 {
+		t.Fatalf("replayed FenwickTreeInfo = %#v/%v, want one update", info, ok)
+	}
+}
+
 func TestCommandJournalReplaysRelativeTTLsAsAbsoluteExpirations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

@@ -533,6 +533,61 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATEFW", "CREATEFENWICK", "RESERVEFW", "FWRESERVE":
+		size, err := commandFenwickTreeSize(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertFenwickTree(key, size); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created fenwick tree"}
+	case "ADDFW", "FWADD":
+		index, delta, err := commandFenwickTreeUpdate(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		update, ok := ht.AddFenwickTree(key, index, delta)
+		if !ok {
+			return commandError("fenwick tree update is out of range or overflows")
+		}
+		return commandValueResponse("updated fenwick tree", update)
+	case "GETFW", "FWGET":
+		index, err := commandFenwickTreeIndex(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		value, ok := ht.GetFenwickTree(key, index)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatInt(value, 10)}
+	case "SUMFW", "PREFIXFW", "FWPREFIX", "FWSUM":
+		index, err := commandFenwickTreeIndex(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		value, ok := ht.PrefixSumFenwickTree(key, index)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatInt(value, 10)}
+	case "RANGEFW", "FWRANGE":
+		start, end, err := commandFenwickTreeRange(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		value, ok := ht.RangeSumFenwickTree(key, start, end)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatInt(value, 10)}
+	case "INFOFW", "FWINFO":
+		info, ok := ht.FenwickTreeInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	default:
 		return commandError("unsupported command")
 	}
@@ -773,6 +828,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		return string(data), nil
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		data, err := json.Marshal(ht.quantileSketches.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	case DATAVALUE_TYPE_FENWICK_TREE:
+		data, err := json.Marshal(ht.fenwickTrees.array[hval.Index].Info())
 		if err != nil {
 			return "", err
 		}
@@ -1137,6 +1198,121 @@ func commandQuantileValue(request CacheCommandRequest) (float64, error) {
 	return quantile, nil
 }
 
+func commandFenwickTreeSize(request CacheCommandRequest) (uint64, error) {
+	size := DefaultFenwickTreeSize
+	var err error
+	if strings.TrimSpace(request.Value) != "" {
+		size, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return 0, errors.New("fenwick tree size must be an unsigned integer")
+		}
+	}
+	for _, key := range []string{"size", "capacity"} {
+		if value, ok := request.Pairs[key]; ok {
+			size, err = commandUint64Value(value)
+			if err != nil {
+				return 0, errors.New("fenwick tree size must be an unsigned integer")
+			}
+			break
+		}
+	}
+	if err := validateFenwickTreeSize(size); err != nil {
+		return 0, err
+	}
+	return size, nil
+}
+
+func commandFenwickTreeUpdate(request CacheCommandRequest) (uint64, int64, error) {
+	indexValue := interface{}(strings.TrimSpace(request.Value))
+	deltaValue := interface{}(strings.TrimSpace(request.Subkey))
+	if len(request.Values) > 0 {
+		indexValue = request.Values[0]
+	}
+	if len(request.Values) > 1 {
+		deltaValue = request.Values[1]
+	}
+	if value, ok := request.Pairs["index"]; ok {
+		indexValue = value
+	}
+	if value, ok := request.Pairs["delta"]; ok {
+		deltaValue = value
+	}
+	index, err := commandFenwickTreeIndexValue(indexValue)
+	if err != nil {
+		return 0, 0, err
+	}
+	delta, err := commandFenwickTreeDeltaValue(deltaValue)
+	if err != nil {
+		return 0, 0, err
+	}
+	return index, delta, nil
+}
+
+func commandFenwickTreeIndex(request CacheCommandRequest) (uint64, error) {
+	value := interface{}(strings.TrimSpace(request.Value))
+	if strings.TrimSpace(request.Subkey) != "" {
+		value = strings.TrimSpace(request.Subkey)
+	}
+	if len(request.Values) > 0 {
+		value = request.Values[0]
+	}
+	for _, key := range []string{"index", "end"} {
+		if pairValue, ok := request.Pairs[key]; ok {
+			value = pairValue
+			break
+		}
+	}
+	return commandFenwickTreeIndexValue(value)
+}
+
+func commandFenwickTreeRange(request CacheCommandRequest) (uint64, uint64, error) {
+	startValue := interface{}(strings.TrimSpace(request.Value))
+	endValue := interface{}(strings.TrimSpace(request.Subkey))
+	if len(request.Values) > 0 {
+		startValue = request.Values[0]
+	}
+	if len(request.Values) > 1 {
+		endValue = request.Values[1]
+	}
+	if value, ok := request.Pairs["start"]; ok {
+		startValue = value
+	}
+	if value, ok := request.Pairs["end"]; ok {
+		endValue = value
+	}
+	start, err := commandFenwickTreeIndexValue(startValue)
+	if err != nil {
+		return 0, 0, errors.New("fenwick tree range start must be an unsigned integer")
+	}
+	end, err := commandFenwickTreeIndexValue(endValue)
+	if err != nil {
+		return 0, 0, errors.New("fenwick tree range end must be an unsigned integer")
+	}
+	if start > end {
+		return 0, 0, errors.New("fenwick tree range start must be less than or equal to end")
+	}
+	return start, end, nil
+}
+
+func commandFenwickTreeIndexValue(value interface{}) (uint64, error) {
+	index, err := commandUint64Value(value)
+	if err != nil {
+		return 0, errors.New("fenwick tree index must be an unsigned integer")
+	}
+	return index, nil
+}
+
+func commandFenwickTreeDeltaValue(value interface{}) (int64, error) {
+	delta, err := commandInt64Value(value)
+	if err != nil {
+		return 0, errors.New("fenwick tree delta must be a 64-bit integer")
+	}
+	if delta == 0 {
+		return 0, errors.New("fenwick tree delta must be non-zero")
+	}
+	return delta, nil
+}
+
 func commandUint64Value(value interface{}) (uint64, error) {
 	switch typed := value.(type) {
 	case json.Number:
@@ -1173,6 +1349,47 @@ func commandUint64Value(value interface{}) (uint64, error) {
 		}
 		converted := uint64(typed)
 		if typed < 0 || float64(converted) != typed {
+			return 0, errors.New("non-integer value")
+		}
+		return converted, nil
+	default:
+		return 0, errors.New("unsupported numeric value")
+	}
+}
+
+func commandInt64Value(value interface{}) (int64, error) {
+	switch typed := value.(type) {
+	case json.Number:
+		return strconv.ParseInt(typed.String(), 10, 64)
+	case string:
+		return strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+	case int64:
+		return typed, nil
+	case int:
+		return int64(typed), nil
+	case int32:
+		return int64(typed), nil
+	case uint64:
+		if typed > uint64(maxFenwickTreeInt64) {
+			return 0, errors.New("value too large")
+		}
+		return int64(typed), nil
+	case uint:
+		if uint64(typed) > uint64(maxFenwickTreeInt64) {
+			return 0, errors.New("value too large")
+		}
+		return int64(typed), nil
+	case uint32:
+		return int64(typed), nil
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return 0, errors.New("invalid number")
+		}
+		if typed < float64(minFenwickTreeInt64) || typed >= float64(maxFenwickTreeInt64) {
+			return 0, errors.New("value too large")
+		}
+		converted := int64(typed)
+		if float64(converted) != typed {
 			return 0, errors.New("non-integer value")
 		}
 		return converted, nil

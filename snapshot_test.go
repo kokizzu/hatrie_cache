@@ -43,6 +43,11 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertQuantileSketch() error = %v", err)
 	}
 	ht.AddQuantileSketch("latency", 10, 20, 30)
+	if err := ht.UpsertFenwickTree("scores", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	ht.AddFenwickTree("scores", 2, 5)
+	ht.AddFenwickTree("scores", 6, 7)
 	if err := ht.UpsertCuckooFilter("cuckoo", 128, 0.001); err != nil {
 		t.Fatalf("UpsertCuckooFilter() error = %v", err)
 	}
@@ -114,6 +119,15 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.QuantileSketchInfo("latency"); !ok || info.Epsilon != 0.01 || info.Count != 3 {
 		t.Fatalf("loaded QuantileSketchInfo = %#v/%v, want restored quantile sketch", info, ok)
+	}
+	if got, ok := loaded.PrefixSumFenwickTree("scores", 6); !ok || got != 12 {
+		t.Fatalf("loaded Fenwick prefix sum = %d/%v, want 12", got, ok)
+	}
+	if got, ok := loaded.RangeSumFenwickTree("scores", 3, 6); !ok || got != 7 {
+		t.Fatalf("loaded Fenwick range sum = %d/%v, want 7", got, ok)
+	}
+	if info, ok := loaded.FenwickTreeInfo("scores"); !ok || info.Size != 8 || info.Updates != 2 || info.Total != 12 {
+		t.Fatalf("loaded FenwickTreeInfo = %#v/%v, want restored Fenwick tree", info, ok)
 	}
 	if !loaded.HasCuckooFilter("cuckoo", "alpha") || !loaded.HasCuckooFilter("cuckoo", "beta") {
 		t.Fatal("loaded Cuckoo filter does not contain inserted values")

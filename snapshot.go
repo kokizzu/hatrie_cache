@@ -40,6 +40,7 @@ type snapshotEntry struct {
 	CuckooFilter   *cuckooFilterSnapshot   `json:"cuckoo_filter,omitempty"`
 	RoaringBitmap  *roaringBitmapSnapshot  `json:"roaring_bitmap,omitempty"`
 	QuantileSketch *quantileSketchSnapshot `json:"quantile_sketch,omitempty"`
+	FenwickTree    *fenwickTreeSnapshot    `json:"fenwick_tree,omitempty"`
 	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
 	Stats          *KeyStats               `json:"stats,omitempty"`
 }
@@ -179,6 +180,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		snapshot := ht.quantileSketches.array[entry.Value.Index].Snapshot()
 		out.QuantileSketch = &snapshot
+	case DATAVALUE_TYPE_FENWICK_TREE:
+		snapshot := ht.fenwickTrees.array[entry.Value.Index].Snapshot()
+		out.FenwickTree = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -257,6 +261,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: quantile sketch snapshot is required")
 		}
 		if err := validateQuantileSketchSnapshot(*entry.QuantileSketch); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "fenwick_tree":
+		if entry.FenwickTree == nil {
+			return snapshotOperation{}, errors.New("hatriecache: fenwick tree snapshot is required")
+		}
+		if err := validateFenwickTreeSnapshot(*entry.FenwickTree); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -447,6 +459,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.quantileSketches.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}
+	case "fenwick_tree":
+		data, err := newFenwickTreeDataFromSnapshot(*entry.FenwickTree)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.fenwickTrees.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_FENWICK_TREE}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

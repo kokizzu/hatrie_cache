@@ -67,6 +67,10 @@ func quantileSketchIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.quantileSketches.array) || ht.quantileSketches.reusables.Has(idx)
 }
 
+func fenwickTreeIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.fenwickTrees.array) || ht.fenwickTrees.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
@@ -143,6 +147,7 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "top-k", value: HatValue{Index: 11, Flags: DATAVALUE_TYPE_TOP_K}, want: "top-k at index: 11"},
 		{name: "roaring bitmap", value: HatValue{Index: 12, Flags: DATAVALUE_TYPE_ROARING_BITMAP}, want: "roaring bitmap at index: 12"},
 		{name: "quantile sketch", value: HatValue{Index: 13, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}, want: "quantile sketch at index: 13"},
+		{name: "fenwick tree", value: HatValue{Index: 14, Flags: DATAVALUE_TYPE_FENWICK_TREE}, want: "fenwick tree at index: 14"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -2138,6 +2143,153 @@ func TestQuantileSketchStorageReleasedOnOverwrite(t *testing.T) {
 	}
 }
 
+func TestFenwickTreeOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertFenwickTree("scores", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	if hval := ht.Get("scores"); !hval.IsFenwickTree() {
+		t.Fatalf("UpsertFenwickTree stored type %+v, want fenwick tree", hval)
+	}
+	if update, ok := ht.AddFenwickTree("scores", 0, 5); !ok || update.Value != 5 || update.PrefixSum != 5 || update.Total != 5 {
+		t.Fatalf("AddFenwickTree(index 0) = %#v/%v, want first update", update, ok)
+	}
+	if update, ok := ht.AddFenwickTree("scores", 3, 7); !ok || update.Value != 7 || update.PrefixSum != 12 || update.Total != 12 {
+		t.Fatalf("AddFenwickTree(index 3) = %#v/%v, want prefix 12", update, ok)
+	}
+	if update, ok := ht.AddFenwickTree("scores", 3, -2); !ok || update.Value != 5 || update.PrefixSum != 10 || update.Total != 10 || update.Updates != 3 {
+		t.Fatalf("AddFenwickTree(negative delta) = %#v/%v, want adjusted value", update, ok)
+	}
+	if got, ok := ht.GetFenwickTree("scores", 3); !ok || got != 5 {
+		t.Fatalf("GetFenwickTree(3) = %d/%v, want 5", got, ok)
+	}
+	if got, ok := ht.PrefixSumFenwickTree("scores", 2); !ok || got != 5 {
+		t.Fatalf("PrefixSumFenwickTree(2) = %d/%v, want 5", got, ok)
+	}
+	if got, ok := ht.RangeSumFenwickTree("scores", 1, 3); !ok || got != 5 {
+		t.Fatalf("RangeSumFenwickTree(1, 3) = %d/%v, want 5", got, ok)
+	}
+	info, ok := ht.FenwickTreeInfo("scores")
+	if !ok {
+		t.Fatal("FenwickTreeInfo(scores) = false, want true")
+	}
+	if info.Size != 8 || info.Updates != 3 || info.Total != 10 || info.TreeBytes != 72 || info.EncodedBytes <= 0 {
+		t.Fatalf("FenwickTreeInfo(scores) = %#v, want compact populated tree", info)
+	}
+
+	if err := ht.UpsertFenwickTree("scores", 4); err != nil {
+		t.Fatalf("UpsertFenwickTree(replace) error = %v", err)
+	}
+	if info, ok := ht.FenwickTreeInfo("scores"); !ok || info.Size != 4 || info.Total != 0 || info.Updates != 0 {
+		t.Fatalf("FenwickTreeInfo(after replace) = %#v/%v, want empty replacement", info, ok)
+	}
+	if update, ok := ht.AddFenwickTree("auto", 2, 9); !ok || update.Value != 9 || update.PrefixSum != 9 {
+		t.Fatalf("AddFenwickTree(auto) = %#v/%v, want created default tree", update, ok)
+	}
+	if hval := ht.Get("auto"); !hval.IsFenwickTree() {
+		t.Fatalf("AddFenwickTree(auto) stored type %+v, want fenwick tree", hval)
+	}
+	if update, ok := ht.AddFenwickTree("noop", 0, 0); ok || update.Total != 0 {
+		t.Fatalf("AddFenwickTree(zero delta) = %#v/%v, want false", update, ok)
+	}
+	if hval := ht.Get("noop"); !hval.Empty() {
+		t.Fatalf("zero-delta Fenwick update created key %+v", hval)
+	}
+}
+
+func TestFenwickTreeRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	for _, size := range []uint64{0, maxFenwickTreeSize + 1} {
+		if err := ht.UpsertFenwickTree("bad", size); err == nil {
+			t.Fatalf("UpsertFenwickTree(%d) error = nil, want error", size)
+		}
+		if got := ht.Get("bad"); !got.Empty() {
+			t.Fatalf("invalid Fenwick tree config stored value %+v", got)
+		}
+	}
+}
+
+func TestFenwickTreeRejectsOverflowAndInvalidUpdates(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertFenwickTree("scores", 4); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	if _, ok := ht.AddFenwickTree("scores", 4, 1); ok {
+		t.Fatal("AddFenwickTree(out of range) ok = true, want false")
+	}
+	if update, ok := ht.AddFenwickTree("scores", 1, maxFenwickTreeInt64); !ok || update.Total != maxFenwickTreeInt64 {
+		t.Fatalf("AddFenwickTree(max) = %#v/%v, want max total", update, ok)
+	}
+	if _, ok := ht.AddFenwickTree("scores", 1, 1); ok {
+		t.Fatal("AddFenwickTree(point overflow) ok = true, want false")
+	}
+	if got, ok := ht.GetFenwickTree("scores", 1); !ok || got != maxFenwickTreeInt64 {
+		t.Fatalf("GetFenwickTree(after overflow) = %d/%v, want unchanged max", got, ok)
+	}
+
+	if err := ht.UpsertFenwickTree("negative", 2); err != nil {
+		t.Fatalf("UpsertFenwickTree(negative) error = %v", err)
+	}
+	if update, ok := ht.AddFenwickTree("negative", 0, minFenwickTreeInt64); !ok || update.Total != minFenwickTreeInt64 {
+		t.Fatalf("AddFenwickTree(min) = %#v/%v, want min total", update, ok)
+	}
+	if _, ok := ht.AddFenwickTree("negative", 0, -1); ok {
+		t.Fatal("AddFenwickTree(negative overflow) ok = true, want false")
+	}
+}
+
+func TestFenwickTreeSnapshotValidationRejectsCorruptPayload(t *testing.T) {
+	tree, err := newFenwickTreeData(4)
+	if err != nil {
+		t.Fatalf("newFenwickTreeData() error = %v", err)
+	}
+	tree.Add(0, 5)
+	tree.Add(3, 7)
+	snapshot := tree.Snapshot()
+
+	badLength := snapshot
+	badLength.Tree = append([]int64(nil), snapshot.Tree[:len(snapshot.Tree)-1]...)
+	if err := validateFenwickTreeSnapshot(badLength); err == nil {
+		t.Fatal("validateFenwickTreeSnapshot(bad length) error = nil, want error")
+	}
+
+	badSentinel := snapshot
+	badSentinel.Tree = append([]int64(nil), snapshot.Tree...)
+	badSentinel.Tree[0] = 1
+	if err := validateFenwickTreeSnapshot(badSentinel); err == nil {
+		t.Fatal("validateFenwickTreeSnapshot(bad sentinel) error = nil, want error")
+	}
+
+	badTotal := snapshot
+	badTotal.Total++
+	if err := validateFenwickTreeSnapshot(badTotal); err == nil {
+		t.Fatal("validateFenwickTreeSnapshot(bad total) error = nil, want error")
+	}
+}
+
+func TestFenwickTreeStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertFenwickTree("scores", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	idx := ht.Get("scores").Index
+	ht.UpsertString("scores", "value")
+	if !fenwickTreeIndexReleased(ht, idx) {
+		t.Fatalf("overwritten Fenwick tree index %d was not released", idx)
+	}
+
+	if err := ht.UpsertFenwickTree("new", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree(new) error = %v", err)
+	}
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("Fenwick tree storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
 func TestDeleteReleasesBackingStorageForReuse(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -3069,9 +3221,13 @@ func TestDestroyIsIdempotentAndPreventsUse(t *testing.T) {
 		t.Fatalf("UpsertQuantileSketch() error = %v", err)
 	}
 	ht.AddQuantileSketch("latency", 10, 20, 30)
+	if err := ht.UpsertFenwickTree("scores", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	ht.AddFenwickTree("scores", 2, 7)
 	ht.Destroy()
 	ht.Destroy()
-	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
+	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.fenwickTrees != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
 		t.Fatalf("Destroy retained backing state: %+v", ht)
 	}
 

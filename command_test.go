@@ -695,6 +695,95 @@ func TestExecuteCommandQuantileSketchOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandFenwickTreeOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEFW", Key: "scores", Value: "8"}); !got.OK {
+		t.Fatalf("CREATEFW response = %#v, want ok", got)
+	}
+	addResp := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDFW",
+		Key:     "scores",
+		Values:  Slice{json.Number("2"), json.Number("5")},
+	})
+	if !addResp.OK || addResp.Value == "" {
+		t.Fatalf("ADDFW response = %#v, want JSON update", addResp)
+	}
+	var update FenwickTreeUpdate
+	if err := json.Unmarshal([]byte(addResp.Value), &update); err != nil {
+		t.Fatalf("ADDFW update JSON error = %v", err)
+	}
+	if update.Index != 2 || update.Delta != 5 || update.Value != 5 || update.PrefixSum != 5 || update.Total != 5 {
+		t.Fatalf("ADDFW update = %#v, want populated Fenwick update", update)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "scores", Value: "4", Subkey: "7"}); !got.OK {
+		t.Fatalf("ADDFW value/subkey response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETFW", Key: "scores", Value: "4"}); !got.OK || got.Value != "7" {
+		t.Fatalf("GETFW response = %#v, want 7", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SUMFW", Key: "scores", Value: "4"}); !got.OK || got.Value != "12" {
+		t.Fatalf("SUMFW response = %#v, want 12", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "RANGEFW", Key: "scores", Value: "3", Subkey: "4"}); !got.OK || got.Value != "7" {
+		t.Fatalf("RANGEFW response = %#v, want 7", got)
+	}
+
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOFW", Key: "scores"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOFW response = %#v, want JSON info", infoResp)
+	}
+	var info FenwickTreeInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFOFW JSON error = %v", err)
+	}
+	if info.Size != 8 || info.Updates != 2 || info.Total != 12 || info.TreeBytes != 72 {
+		t.Fatalf("INFOFW = %#v, want populated Fenwick tree info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "scores"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET Fenwick tree response = %#v, want JSON info", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "auto", Value: "1", Subkey: "3"}); !got.OK || got.Value == "" {
+		t.Fatalf("ADDFW auto response = %#v, want JSON update", got)
+	}
+	if !ht.Get("auto").IsFenwickTree() {
+		t.Fatal("ADDFW on missing key did not create a Fenwick tree")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATEFW",
+		Key:     "paired",
+		Pairs:   Map{"size": json.Number("4")},
+	}); !got.OK {
+		t.Fatalf("CREATEFW pairs response = %#v, want ok", got)
+	}
+	if info, ok := ht.FenwickTreeInfo("paired"); !ok || info.Size != 4 {
+		t.Fatalf("paired FenwickTreeInfo = %#v/%v, want size 4", info, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDFW",
+		Key:     "paired",
+		Pairs:   Map{"index": json.Number("3"), "delta": json.Number("-2")},
+	}); !got.OK {
+		t.Fatalf("ADDFW pairs response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PREFIXFW", Key: "paired", Pairs: Map{"end": json.Number("3")}}); !got.OK || got.Value != "-2" {
+		t.Fatalf("PREFIXFW pairs response = %#v, want -2", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEFW", Key: "bad", Value: "0"}); got.OK {
+		t.Fatalf("CREATEFW invalid response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "scores", Value: "9", Subkey: "1"}); got.OK {
+		t.Fatalf("ADDFW out-of-range response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "scores", Value: "1", Subkey: "0"}); got.OK {
+		t.Fatalf("ADDFW zero delta response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "RANGEFW", Key: "scores", Value: "4", Subkey: "3"}); got.OK {
+		t.Fatalf("RANGEFW inverted range response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
 	source := newTestTrie(t)
 	now := time.Unix(1400, 0)

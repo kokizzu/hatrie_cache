@@ -61,6 +61,7 @@ const (
 	DATAVALUE_TYPE_CUCKOO_FILTER
 	DATAVALUE_TYPE_ROARING_BITMAP
 	DATAVALUE_TYPE_QUANTILE_SKETCH
+	DATAVALUE_TYPE_FENWICK_TREE
 )
 
 type Map = map[string]interface{}
@@ -617,6 +618,10 @@ func (hval HatValue) IsQuantileSketch() bool {
 	return hval.Is(DATAVALUE_TYPE_QUANTILE_SKETCH)
 }
 
+func (hval HatValue) IsFenwickTree() bool {
+	return hval.Is(DATAVALUE_TYPE_FENWICK_TREE)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -659,6 +664,8 @@ func (hval HatValue) String() string {
 		return "roaring bitmap at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		return "quantile sketch at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_FENWICK_TREE:
+		return "fenwick tree at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -1286,6 +1293,7 @@ type HatTrie struct {
 	cuckooFilters    *CuckooFilterStorage
 	roaringBitmaps   *RoaringBitmapStorage
 	quantileSketches *QuantileSketchStorage
+	fenwickTrees     *FenwickTreeStorage
 	dbrefs           *LevelDBReferenceStorage
 	expires          map[string]time.Time
 	expirations      expirationHeap
@@ -1327,6 +1335,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		cuckooFilters:    CreateCuckooFilterStorage(),
 		roaringBitmaps:   CreateRoaringBitmapStorage(),
 		quantileSketches: CreateQuantileSketchStorage(),
+		fenwickTrees:     CreateFenwickTreeStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
 		keyStats:         map[string]KeyStats{},
@@ -1365,6 +1374,7 @@ func (ht *HatTrie) Destroy() {
 	ht.cuckooFilters = nil
 	ht.roaringBitmaps = nil
 	ht.quantileSketches = nil
+	ht.fenwickTrees = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
@@ -1845,6 +1855,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.roaringBitmaps.Del(hval.Index)
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		ht.quantileSketches.Del(hval.Index)
+	case DATAVALUE_TYPE_FENWICK_TREE:
+		ht.fenwickTrees.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)

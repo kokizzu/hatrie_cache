@@ -50,6 +50,11 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 		t.Fatalf("UpsertQuantileSketch() error = %v", err)
 	}
 	ht.AddQuantileSketch("session:zquantiles", 10, 20, 30)
+	if err := ht.UpsertFenwickTree("session:fenwick", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	ht.AddFenwickTree("session:fenwick", 2, 5)
+	ht.AddFenwickTree("session:fenwick", 6, 7)
 	ht.UpsertCounter("counter:views", 42)
 	if !ht.Expire("session:1", time.Minute) {
 		t.Fatal("Expire(session:1) = false, want true")
@@ -81,6 +86,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	quantileInfo, ok := ht.QuantileSketchInfo("session:zquantiles")
 	if !ok {
 		t.Fatal("QuantileSketchInfo(session:zquantiles) = false, want true")
+	}
+	fenwickInfo, ok := ht.FenwickTreeInfo("session:fenwick")
+	if !ok {
+		t.Fatal("FenwickTreeInfo(session:fenwick) = false, want true")
 	}
 
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
@@ -123,8 +132,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 10 {
-		t.Fatalf("entries len = %d, want 10: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 11 {
+		t.Fatalf("entries len = %d, want 11: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -148,30 +157,35 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if cuckooEntry.Key != "session:cf" || cuckooEntry.Type != "cuckoo_filter" || cuckooEntry.SizeBytes != int64(cuckooInfo.FingerprintBytes) || cuckooEntry.ValuePreview != wantCuckooPreview {
 		t.Fatalf("cuckoo filter entry = %#v, want compact fingerprint preview", cuckooEntry)
 	}
-	sketchEntry := entries.Entries[4]
+	fenwickEntry := entries.Entries[4]
+	wantFenwickPreview := strconv.FormatUint(fenwickInfo.Size, 10) + " counters, " + strconv.FormatInt(fenwickInfo.Total, 10) + " total"
+	if fenwickEntry.Key != "session:fenwick" || fenwickEntry.Type != "fenwick_tree" || fenwickEntry.SizeBytes != int64(fenwickInfo.TreeBytes) || fenwickEntry.ValuePreview != wantFenwickPreview {
+		t.Fatalf("fenwick tree entry = %#v, want compact prefix-sum preview", fenwickEntry)
+	}
+	sketchEntry := entries.Entries[5]
 	wantSketchPreview := strconv.FormatUint(sketchInfo.Width, 10) + "x" + strconv.Itoa(int(sketchInfo.Depth)) + " counters, " + strconv.FormatUint(sketchInfo.TotalCount, 10) + " total"
 	if sketchEntry.Key != "session:freq" || sketchEntry.Type != "count_min_sketch" || sketchEntry.SizeBytes != int64(sketchInfo.CounterBytes) || sketchEntry.ValuePreview != wantSketchPreview {
 		t.Fatalf("count-min sketch entry = %#v, want compact counter preview", sketchEntry)
 	}
-	queueEntry := entries.Entries[5]
+	queueEntry := entries.Entries[6]
 	if queueEntry.Key != "session:jobs" || queueEntry.Type != "priority_queue" || queueEntry.SizeBytes != 2 || queueEntry.ValuePreview != "2 priority items" {
 		t.Fatalf("priority queue entry = %#v, want priority queue item preview", queueEntry)
 	}
-	bloomEntry := entries.Entries[6]
+	bloomEntry := entries.Entries[7]
 	wantBloomPreview := strconv.FormatUint(bloomInfo.BitCount, 10) + " bits, " + strconv.Itoa(int(bloomInfo.HashCount)) + " hashes"
 	if bloomEntry.Key != "session:seen" || bloomEntry.Type != "bloom_filter" || bloomEntry.SizeBytes != int64(bloomInfo.BitBytes) || bloomEntry.ValuePreview != wantBloomPreview {
 		t.Fatalf("bloom filter entry = %#v, want compact bitset preview", bloomEntry)
 	}
-	setEntry := entries.Entries[7]
+	setEntry := entries.Entries[8]
 	if setEntry.Key != "session:tags" || setEntry.Type != "set" || setEntry.SizeBytes != 2 || setEntry.ValuePreview != "2 members" {
 		t.Fatalf("set entry = %#v, want set member preview", setEntry)
 	}
-	topKEntry := entries.Entries[8]
+	topKEntry := entries.Entries[9]
 	wantTopKPreview := strconv.FormatUint(topKInfo.Tracked, 10) + "/" + strconv.FormatUint(topKInfo.Capacity, 10) + " tracked, " + strconv.FormatUint(topKInfo.Total, 10) + " total"
 	if topKEntry.Key != "session:top" || topKEntry.Type != "top_k" || topKEntry.ValuePreview != wantTopKPreview || topKEntry.SizeBytes <= 0 {
 		t.Fatalf("top-k entry = %#v, want compact heavy-hitter preview", topKEntry)
 	}
-	quantileEntry := entries.Entries[9]
+	quantileEntry := entries.Entries[10]
 	wantQuantilePreview := strconv.FormatUint(quantileInfo.Count, 10) + " samples, " + strconv.FormatUint(quantileInfo.SummarySize, 10) + " summary points"
 	if quantileEntry.Key != "session:zquantiles" || quantileEntry.Type != "quantile_sketch" || quantileEntry.SizeBytes != quantileInfo.EncodedBytes || quantileEntry.ValuePreview != wantQuantilePreview {
 		t.Fatalf("quantile sketch entry = %#v, want compact quantile preview", quantileEntry)

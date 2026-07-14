@@ -316,6 +316,28 @@ func TestSnapshotOperationValueSizeSupportsQuantileSketch(t *testing.T) {
 	}
 }
 
+func TestSnapshotOperationValueSizeSupportsFenwickTree(t *testing.T) {
+	tree, err := newFenwickTreeData(8)
+	if err != nil {
+		t.Fatalf("newFenwickTreeData() error = %v", err)
+	}
+	tree.Add(2, 5)
+	tree.Add(6, 7)
+	snapshot := tree.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:        "fenwick_tree",
+			FenwickTree: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(fenwick_tree) error = %v", err)
+	}
+	if size != int64(len(snapshot.Tree)*8) {
+		t.Fatalf("snapshotOperationValueSize(fenwick_tree) = %d, want %d", size, len(snapshot.Tree)*8)
+	}
+}
+
 func TestLevelDBShouldHotLoadRejectsNegativeLimits(t *testing.T) {
 	now := time.Unix(4600, 0)
 	operation := snapshotOperation{
