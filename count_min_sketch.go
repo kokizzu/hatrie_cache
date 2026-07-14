@@ -345,7 +345,10 @@ func (ht *HatTrie) UpsertCountMinSketch(key string, width uint64, depth uint8) e
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsCountMinSketch() {
 		ht.countMinSketches.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

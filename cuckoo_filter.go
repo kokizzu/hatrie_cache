@@ -518,7 +518,10 @@ func (ht *HatTrie) UpsertCuckooFilter(key string, capacity uint64, falsePositive
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsCuckooFilter() {
 		ht.cuckooFilters.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

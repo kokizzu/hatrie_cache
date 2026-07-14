@@ -389,7 +389,10 @@ func (ht *HatTrie) UpsertBloomFilter(key string, expectedItems uint64, falsePosi
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsBloomFilter() {
 		ht.bloomFilters.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

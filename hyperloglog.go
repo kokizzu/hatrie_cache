@@ -338,7 +338,10 @@ func (ht *HatTrie) UpsertHyperLogLog(key string, precision uint8) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsHyperLogLog() {
 		ht.hyperLogLogs.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

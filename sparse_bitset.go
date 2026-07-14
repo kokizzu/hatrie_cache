@@ -543,7 +543,10 @@ func (ht *HatTrie) UpsertSparseBitset(key string) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return
+	}
 	if hval.IsSparseBitset() {
 		ht.sparseBitsets.PutData(hval.Index, newSparseBitsetData())
 		ht.clearExpirationLocked(key)

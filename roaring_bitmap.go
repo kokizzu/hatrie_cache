@@ -539,7 +539,10 @@ func (ht *HatTrie) UpsertRoaringBitmap(key string) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return
+	}
 	if hval.IsRoaringBitmap() {
 		ht.roaringBitmaps.PutData(hval.Index, newRoaringBitmapData())
 		ht.clearExpirationLocked(key)

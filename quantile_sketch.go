@@ -350,7 +350,10 @@ func (ht *HatTrie) UpsertQuantileSketch(key string, epsilon float64) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsQuantileSketch() {
 		ht.quantileSketches.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

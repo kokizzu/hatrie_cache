@@ -401,8 +401,9 @@ func trimReusableTail[T any](values []T, reusables *reusableIndexes) []T {
 }
 
 const (
-	NoTTL              time.Duration = -1
-	DiskBytesThreshold               = 64 * 1024
+	NoTTL               time.Duration = -1
+	DiskBytesThreshold                = 64 * 1024
+	maxHATTrieKeyLength               = 1<<15 - 1
 )
 
 type Entry struct {
@@ -547,6 +548,17 @@ func validateSliceValues(value interface{}, values ...interface{}) error {
 	items = append(items, value)
 	items = append(items, values...)
 	return validateSliceValue(items)
+}
+
+func validateKey(key string) error {
+	if len(key) > maxHATTrieKeyLength {
+		return fmt.Errorf("hatriecache: key length %d exceeds maximum %d", len(key), maxHATTrieKeyLength)
+	}
+	return nil
+}
+
+func validKey(key string) bool {
+	return len(key) <= maxHATTrieKeyLength
 }
 
 func UnmarshalMapJSON(data []byte) (Map, error) {
@@ -1954,6 +1966,9 @@ func (stats *KeyStats) updateRates() {
 
 func (ht *HatTrie) upsertLocation(key string) *C.value_t {
 	ht.ensureOpen()
+	if !validKey(key) {
+		return nil
+	}
 
 	cstr, keyLen := cKey(key)
 	value := C.hattrie_get(ht.root, cstr, keyLen)
@@ -1963,6 +1978,9 @@ func (ht *HatTrie) upsertLocation(key string) *C.value_t {
 
 func (ht *HatTrie) tryLocation(key string) *C.value_t {
 	ht.ensureOpen()
+	if !validKey(key) {
+		return nil
+	}
 
 	cstr, keyLen := cKey(key)
 	value := C.hattrie_tryget(ht.root, cstr, keyLen)
@@ -2027,22 +2045,28 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 	}
 }
 
-func (ht *HatTrie) upsertReplacementLocation(key string) (*C.value_t, HatValue) {
+func (ht *HatTrie) upsertReplacementLocation(key string) (*C.value_t, HatValue, error) {
+	if err := validateKey(key); err != nil {
+		return nil, HatValue{}, err
+	}
 	rawPtr := ht.upsertLocation(key)
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
 	if hval.Empty() {
 		ht.clearExpirationLocked(key)
-		return rawPtr, hval
+		return rawPtr, hval, nil
 	}
 	if ht.expireIfNeededLocked(key, hval) {
 		rawPtr = ht.upsertLocation(key)
 		hval = HatValue{}
 	}
-	return rawPtr, hval
+	return rawPtr, hval, nil
 }
 
 func (ht *HatTrie) freshLocationCheckedLocked(key string) (*C.value_t, HatValue, error) {
+	if err := validateKey(key); err != nil {
+		return nil, HatValue{}, err
+	}
 	rawPtr := ht.tryLocation(key)
 	hval := HatValue{}
 	if rawPtr == nil {
@@ -2152,6 +2176,9 @@ func (ht *HatTrie) expireIfNeededLocked(key string, hval HatValue) bool {
 }
 
 func (ht *HatTrie) deleteLocked(key string) bool {
+	if !validKey(key) {
+		return false
+	}
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
 		ht.clearExpirationLocked(key)
@@ -2164,6 +2191,9 @@ func (ht *HatTrie) deleteLocked(key string) bool {
 }
 
 func (ht *HatTrie) deleteKnownLocked(key string, hval HatValue) bool {
+	if !validKey(key) {
+		return false
+	}
 	cstr, keyLen := cKey(key)
 
 	deleted := C.hattrie_del(ht.root, cstr, keyLen)
@@ -2215,6 +2245,9 @@ func (ht *HatTrie) vacuumExpiredLocked() int {
 
 func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
 	ht.ensureOpen()
+	if !validKey(prefix) {
+		return []Entry{}
+	}
 
 	var iter *C.hattrie_iter_t
 	if prefix == "" {
@@ -2287,6 +2320,9 @@ func (ht *HatTrie) GetChecked(key string) (HatValue, error) {
 }
 
 func (ht *HatTrie) peekLocked(key string) HatValue {
+	if !validKey(key) {
+		return HatValue{}
+	}
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
 		ht.clearExpirationLocked(key)
@@ -2306,6 +2342,9 @@ func (ht *HatTrie) getLocked(key string) HatValue {
 }
 
 func (ht *HatTrie) getLockedChecked(key string) (HatValue, error) {
+	if err := validateKey(key); err != nil {
+		return HatValue{}, err
+	}
 	iter := ht.tryLocation(key)
 	hval := HatValue{}
 	if iter != nil {
@@ -2404,7 +2443,10 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return
+	}
 	if !hval.IsCounter() {
 		ht.returnStorage(hval)
 	}
@@ -2483,7 +2525,10 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return
+	}
 	if hval.IsStringAtRaws() {
 		ht.raws.putOwned(hval.Index, []byte(val))
 		ht.clearExpirationLocked(key)
@@ -2607,6 +2652,10 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 }
 
 func (ht *HatTrie) UpsertBytesChecked(key string, val []byte) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2715,7 +2764,7 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	ht.upsertMapLocked(key, val)
+	_ = ht.upsertMapLocked(key, val)
 }
 
 func (ht *HatTrie) UpsertMapChecked(key string, val Map) error {
@@ -2726,19 +2775,21 @@ func (ht *HatTrie) UpsertMapChecked(key string, val Map) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	ht.upsertMapLocked(key, val)
-	return nil
+	return ht.upsertMapLocked(key, val)
 }
 
-func (ht *HatTrie) upsertMapLocked(key string, val Map) {
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+func (ht *HatTrie) upsertMapLocked(key string, val Map) error {
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsMap() {
 		ht.maps.Put(hval.Index, val)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
 	ht.returnStorage(hval)
@@ -2746,6 +2797,7 @@ func (ht *HatTrie) upsertMapLocked(key string, val Map) {
 	idx := ht.maps.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 func (ht *HatTrie) UpsertMapJSON(key string, data []byte) error {
@@ -2753,8 +2805,7 @@ func (ht *HatTrie) UpsertMapJSON(key string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	ht.UpsertMap(key, value)
-	return nil
+	return ht.UpsertMapChecked(key, value)
 }
 
 func (ht *HatTrie) GetMapJSON(key string) ([]byte, bool, error) {
@@ -2913,7 +2964,7 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	ht.upsertSliceLocked(key, val)
+	_ = ht.upsertSliceLocked(key, val)
 }
 
 func (ht *HatTrie) UpsertSliceChecked(key string, val Slice) error {
@@ -2924,19 +2975,21 @@ func (ht *HatTrie) UpsertSliceChecked(key string, val Slice) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	ht.upsertSliceLocked(key, val)
-	return nil
+	return ht.upsertSliceLocked(key, val)
 }
 
-func (ht *HatTrie) upsertSliceLocked(key string, val Slice) {
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+func (ht *HatTrie) upsertSliceLocked(key string, val Slice) error {
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsSlice() {
 		ht.slices.Put(hval.Index, val)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
 	ht.returnStorage(hval)
@@ -2944,6 +2997,7 @@ func (ht *HatTrie) upsertSliceLocked(key string, val Slice) {
 	idx := ht.slices.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
@@ -3138,7 +3192,10 @@ func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsSet() {
 		ht.sets.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

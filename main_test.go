@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -217,6 +218,44 @@ func TestKeysUseFullLengthAndSupportNULBytes(t *testing.T) {
 	}
 	if got := ht.GetString("nul\x00key"); got != "" {
 		t.Fatalf("GetString(NUL-containing key after delete) = %q, want empty", got)
+	}
+}
+
+func TestKeysRespectEmbeddedTrieLengthLimit(t *testing.T) {
+	ht := newTestTrie(t)
+
+	maxKey := strings.Repeat("k", maxHATTrieKeyLength)
+	ht.UpsertString(maxKey, "max")
+	if got := ht.GetString(maxKey); got != "max" {
+		t.Fatalf("GetString(max-length key) = %q, want max", got)
+	}
+	if entries := ht.EntriesWithPrefix(maxKey[:maxHATTrieKeyLength-1], true); len(entries) != 1 || entries[0].Key != maxKey {
+		t.Fatalf("EntriesWithPrefix(max-length prefix) = %#v, want max key", entries)
+	}
+
+	tooLong := maxKey + "x"
+	if err := ht.UpsertBytesChecked(tooLong, []byte("bad")); err == nil || !strings.Contains(err.Error(), "key length") {
+		t.Fatalf("UpsertBytesChecked(too-long key) error = %v, want key length error", err)
+	}
+	if _, _, err := ht.GetStringChecked(tooLong); err == nil || !strings.Contains(err.Error(), "key length") {
+		t.Fatalf("GetStringChecked(too-long key) error = %v, want key length error", err)
+	}
+
+	before := ht.Size()
+	ht.UpsertString(tooLong, "ignored")
+	ht.UpsertCounter(tooLong, 42)
+	ht.UpsertRoaringBitmap(tooLong)
+	if got := ht.Size(); got != before {
+		t.Fatalf("unchecked writes with too-long key changed size to %d, want %d", got, before)
+	}
+	if ht.Delete(tooLong) {
+		t.Fatal("Delete(too-long key) = true, want false")
+	}
+	if entries := ht.EntriesWithPrefix(tooLong, true); len(entries) != 0 {
+		t.Fatalf("EntriesWithPrefix(too-long prefix) = %#v, want empty", entries)
+	}
+	if got := ht.GetString(maxKey); got != "max" {
+		t.Fatalf("max key changed after rejected oversized operations: %q", got)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"math"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -37,6 +38,22 @@ func TestExecuteCommandStringCounterTTLAndDelete(t *testing.T) {
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "name"}); !got.OK || got.Value != "0" {
 		t.Fatalf("EXISTS response = %#v, want 0", got)
+	}
+}
+
+func TestExecuteCommandRejectsTooLongKey(t *testing.T) {
+	ht := newTestTrie(t)
+
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "SETSTR",
+		Key:     strings.Repeat("k", maxHATTrieKeyLength+1),
+		Value:   "value",
+	})
+	if got.OK {
+		t.Fatalf("SETSTR with too-long key response = %#v, want error", got)
+	}
+	if ht.Size() != 0 {
+		t.Fatalf("trie size after too-long command = %d, want 0", ht.Size())
 	}
 }
 

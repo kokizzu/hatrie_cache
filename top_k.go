@@ -449,7 +449,10 @@ func (ht *HatTrie) UpsertTopK(key string, capacity uint64) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsTopK() {
 		ht.topKs.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

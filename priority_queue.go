@@ -376,7 +376,7 @@ func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	ht.upsertPriorityQueueLocked(key, val)
+	_ = ht.upsertPriorityQueueLocked(key, val)
 }
 
 func (ht *HatTrie) UpsertPriorityQueueChecked(key string, val PriorityQueue) error {
@@ -387,19 +387,21 @@ func (ht *HatTrie) UpsertPriorityQueueChecked(key string, val PriorityQueue) err
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	ht.upsertPriorityQueueLocked(key, val)
-	return nil
+	return ht.upsertPriorityQueueLocked(key, val)
 }
 
-func (ht *HatTrie) upsertPriorityQueueLocked(key string, val PriorityQueue) {
-	rawPtr, hval := ht.upsertReplacementLocation(key)
+func (ht *HatTrie) upsertPriorityQueueLocked(key string, val PriorityQueue) error {
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
 	if hval.IsPriorityQueue() {
 		ht.priorityQueues.Put(hval.Index, val)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
 	ht.returnStorage(hval)
@@ -407,6 +409,7 @@ func (ht *HatTrie) upsertPriorityQueueLocked(key string, val PriorityQueue) {
 	idx := ht.priorityQueues.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}, vals ...interface{}) int {

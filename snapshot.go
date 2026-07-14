@@ -220,6 +220,10 @@ func (ht *HatTrie) bytesValueLocked(hval HatValue) ([]byte, error) {
 }
 
 func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
+	if err := validateKey(entry.Key); err != nil {
+		return snapshotOperation{}, err
+	}
+
 	operation := snapshotOperation{entry: entry}
 	switch entry.Type {
 	case "counter", "string":
@@ -470,6 +474,9 @@ func (ht *HatTrie) applySnapshotOperation(operation snapshotOperation) error {
 
 func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (HatValue, error) {
 	entry := operation.entry
+	if err := validateKey(entry.Key); err != nil {
+		return HatValue{}, err
+	}
 	if entry.ExpiresAt != nil && !ht.currentTime().Before(*entry.ExpiresAt) {
 		if ht.deleteLocked(entry.Key) {
 			ht.recordExpirationLocked(entry.Key)

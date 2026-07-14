@@ -38,6 +38,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	if key == "" {
 		return commandError("key is required")
 	}
+	if err := validateKey(key); err != nil {
+		return commandError(err.Error())
+	}
 
 	switch command {
 	case "GET", "GETSTR":

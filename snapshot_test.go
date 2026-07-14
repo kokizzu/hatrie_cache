@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -508,6 +509,35 @@ func TestLoadSnapshotRejectsInvalidCollectionsWithoutMutation(t *testing.T) {
 	}
 	if ht.Exists("bad") {
 		t.Fatal("invalid snapshot created bad key")
+	}
+}
+
+func TestLoadSnapshotRejectsTooLongKey(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("existing", "keep")
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	data, err := json.Marshal(snapshotFile{
+		Version: snapshotVersion,
+		Entries: []snapshotEntry{
+			{Key: strings.Repeat("k", maxHATTrieKeyLength+1), Type: "string", String: "bad"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := ht.LoadSnapshot(path); err == nil || !strings.Contains(err.Error(), "key length") {
+		t.Fatalf("LoadSnapshot(too-long key) error = %v, want key length error", err)
+	}
+	if got := ht.GetString("existing"); got != "keep" {
+		t.Fatalf("existing value after rejected snapshot = %q, want keep", got)
+	}
+	if got := ht.Size(); got != 1 {
+		t.Fatalf("size after rejected snapshot = %d, want 1", got)
 	}
 }
 
