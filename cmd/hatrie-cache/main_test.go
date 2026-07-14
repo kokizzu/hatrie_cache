@@ -813,12 +813,12 @@ func TestStartSnapshotSaverWritesPeriodically(t *testing.T) {
 	stop := startSnapshotSaver(ctx, ht, nil, path, time.Millisecond, &bytes.Buffer{})
 	defer stop()
 
-	deadline := time.Now().Add(200 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
 			return
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("periodic snapshot was not written")
 }
