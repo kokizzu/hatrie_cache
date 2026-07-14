@@ -15,6 +15,7 @@ type CacheGRPCOptions struct {
 	StartAt             time.Time
 	Snapshot            func() error
 	Journal             *CommandJournal
+	Topology            *TopologyStore
 	Election            *ElectionStore
 	Replicator          *HTTPReplicator
 	EnforceLeaderWrites bool
@@ -133,6 +134,101 @@ func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriec
 	return grpcReplicationResponse(server.options.Replicator.LastResult()), nil
 }
 
+func (server *CacheGRPCServer) Topology(ctx context.Context, request *hatriecachev1.TopologyRequest) (*hatriecachev1.TopologyResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if server.options.Topology == nil {
+		return grpcTopologyError("topology store is not configured"), nil
+	}
+	key := request.GetKey()
+	if key != "" {
+		route, ok := server.options.Topology.Route(key)
+		if !ok {
+			return grpcTopologyError("topology has no shards"), nil
+		}
+		return &hatriecachev1.TopologyResponse{
+			Ok:      true,
+			Message: "ok",
+			Route:   grpcTopologyRoute(route),
+		}, nil
+	}
+	return &hatriecachev1.TopologyResponse{
+		Ok:       true,
+		Message:  "ok",
+		Topology: grpcClusterTopology(server.options.Topology.Get()),
+	}, nil
+}
+
+func (server *CacheGRPCServer) UpdateTopology(ctx context.Context, request *hatriecachev1.UpdateTopologyRequest) (*hatriecachev1.TopologyResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if server.options.Topology == nil {
+		return grpcTopologyError("topology store is not configured"), nil
+	}
+	if err := server.options.Topology.Set(clusterTopologyFromProto(request.GetTopology())); err != nil {
+		return grpcTopologyError(err.Error()), nil
+	}
+	return &hatriecachev1.TopologyResponse{
+		Ok:       true,
+		Message:  "ok",
+		Topology: grpcClusterTopology(server.options.Topology.Get()),
+	}, nil
+}
+
+func (server *CacheGRPCServer) Election(ctx context.Context, request *hatriecachev1.ElectionRequest) (*hatriecachev1.ElectionResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if server.options.Election == nil {
+		return grpcElectionError("election store is not configured"), nil
+	}
+	key := request.GetKey()
+	if key != "" {
+		route, ok := server.options.Election.LeaderForKey(key)
+		if !ok {
+			return grpcElectionError("topology cannot route key"), nil
+		}
+		return &hatriecachev1.ElectionResponse{
+			Ok:      true,
+			Message: "ok",
+			Route:   grpcElectionKeyRoute(route),
+		}, nil
+	}
+	return &hatriecachev1.ElectionResponse{
+		Ok:      true,
+		Message: "ok",
+		Status:  grpcElectionStatus(server.options.Election.Status()),
+	}, nil
+}
+
+func (server *CacheGRPCServer) UpdateElection(ctx context.Context, request *hatriecachev1.UpdateElectionRequest) (*hatriecachev1.ElectionResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if server.options.Election == nil {
+		return grpcElectionError("election store is not configured"), nil
+	}
+	if request == nil {
+		request = &hatriecachev1.UpdateElectionRequest{}
+	}
+	var err error
+	if request.Online == nil || request.GetOnline() {
+		err = server.options.Election.Heartbeat(request.GetNode())
+	} else {
+		err = server.options.Election.MarkOffline(request.GetNode())
+	}
+	if err != nil {
+		return grpcElectionError(err.Error()), nil
+	}
+	return &hatriecachev1.ElectionResponse{
+		Ok:      true,
+		Message: "ok",
+		Status:  grpcElectionStatus(server.options.Election.Status()),
+	}, nil
+}
+
 func grpcEntry(entry MonitoringEntry) *hatriecachev1.Entry {
 	out := &hatriecachev1.Entry{
 		Key:          entry.Key,
@@ -145,6 +241,20 @@ func grpcEntry(entry MonitoringEntry) *hatriecachev1.Entry {
 		out.TtlMillis = entry.TTLMillis
 	}
 	return out
+}
+
+func grpcTopologyError(message string) *hatriecachev1.TopologyResponse {
+	return &hatriecachev1.TopologyResponse{
+		Ok:      false,
+		Message: message,
+	}
+}
+
+func grpcElectionError(message string) *hatriecachev1.ElectionResponse {
+	return &hatriecachev1.ElectionResponse{
+		Ok:      false,
+		Message: message,
+	}
 }
 
 func grpcReplicationResponse(result ReplicationResult) *hatriecachev1.ReplicationResponse {
@@ -182,6 +292,166 @@ func grpcReplicationResponse(result ReplicationResult) *hatriecachev1.Replicatio
 		})
 	}
 	return out
+}
+
+func grpcClusterTopology(topology ClusterTopology) *hatriecachev1.ClusterTopology {
+	out := &hatriecachev1.ClusterTopology{
+		Version:      topology.Version,
+		Mode:         topology.Mode,
+		BucketCount:  topology.BucketCount,
+		BucketRanges: make([]*hatriecachev1.TopologyBucketRange, 0, len(topology.BucketRanges)),
+		Self:         topology.Self,
+		Nodes:        make([]*hatriecachev1.TopologyNode, 0, len(topology.Nodes)),
+		Shards:       make([]*hatriecachev1.TopologyShard, 0, len(topology.Shards)),
+	}
+	for _, bucketRange := range topology.BucketRanges {
+		out.BucketRanges = append(out.BucketRanges, grpcTopologyBucketRange(bucketRange))
+	}
+	for _, node := range topology.Nodes {
+		out.Nodes = append(out.Nodes, grpcTopologyNode(node))
+	}
+	for _, shard := range topology.Shards {
+		out.Shards = append(out.Shards, grpcTopologyShard(shard))
+	}
+	return out
+}
+
+func grpcTopologyNode(node TopologyNode) *hatriecachev1.TopologyNode {
+	return &hatriecachev1.TopologyNode{
+		Id:      node.ID,
+		Address: node.Address,
+		Role:    node.Role,
+	}
+}
+
+func grpcTopologyShard(shard TopologyShard) *hatriecachev1.TopologyShard {
+	return &hatriecachev1.TopologyShard{
+		Id:       shard.ID,
+		Primary:  shard.Primary,
+		Replicas: append([]string(nil), shard.Replicas...),
+	}
+}
+
+func grpcTopologyBucketRange(bucketRange TopologyBucketRange) *hatriecachev1.TopologyBucketRange {
+	return &hatriecachev1.TopologyBucketRange{
+		Start: bucketRange.Start,
+		End:   bucketRange.End,
+		Shard: bucketRange.Shard,
+	}
+}
+
+func grpcTopologyRoute(route TopologyRoute) *hatriecachev1.TopologyRoute {
+	out := &hatriecachev1.TopologyRoute{
+		Key:    route.Key,
+		Mode:   route.Mode,
+		Shard:  grpcTopologyShard(route.Shard),
+		Owners: append([]string(nil), route.Owners...),
+	}
+	if route.Bucket != nil {
+		bucket := *route.Bucket
+		out.Bucket = &bucket
+	}
+	return out
+}
+
+func clusterTopologyFromProto(topology *hatriecachev1.ClusterTopology) ClusterTopology {
+	if topology == nil {
+		return ClusterTopology{}
+	}
+	out := ClusterTopology{
+		Version:      topology.GetVersion(),
+		Mode:         topology.GetMode(),
+		BucketCount:  topology.GetBucketCount(),
+		BucketRanges: make([]TopologyBucketRange, 0, len(topology.GetBucketRanges())),
+		Self:         topology.GetSelf(),
+		Nodes:        make([]TopologyNode, 0, len(topology.GetNodes())),
+		Shards:       make([]TopologyShard, 0, len(topology.GetShards())),
+	}
+	for _, bucketRange := range topology.GetBucketRanges() {
+		out.BucketRanges = append(out.BucketRanges, topologyBucketRangeFromProto(bucketRange))
+	}
+	for _, node := range topology.GetNodes() {
+		out.Nodes = append(out.Nodes, topologyNodeFromProto(node))
+	}
+	for _, shard := range topology.GetShards() {
+		out.Shards = append(out.Shards, topologyShardFromProto(shard))
+	}
+	return out
+}
+
+func topologyNodeFromProto(node *hatriecachev1.TopologyNode) TopologyNode {
+	if node == nil {
+		return TopologyNode{}
+	}
+	return TopologyNode{
+		ID:      node.GetId(),
+		Address: node.GetAddress(),
+		Role:    node.GetRole(),
+	}
+}
+
+func topologyShardFromProto(shard *hatriecachev1.TopologyShard) TopologyShard {
+	if shard == nil {
+		return TopologyShard{}
+	}
+	return TopologyShard{
+		ID:       shard.GetId(),
+		Primary:  shard.GetPrimary(),
+		Replicas: append([]string(nil), shard.GetReplicas()...),
+	}
+}
+
+func topologyBucketRangeFromProto(bucketRange *hatriecachev1.TopologyBucketRange) TopologyBucketRange {
+	if bucketRange == nil {
+		return TopologyBucketRange{}
+	}
+	return TopologyBucketRange{
+		Start: bucketRange.GetStart(),
+		End:   bucketRange.GetEnd(),
+		Shard: bucketRange.GetShard(),
+	}
+}
+
+func grpcElectionStatus(status ElectionStatus) *hatriecachev1.ElectionStatus {
+	out := &hatriecachev1.ElectionStatus{
+		TimeoutMillis: status.TimeoutMillis,
+		Nodes:         make([]*hatriecachev1.ElectionNodeStatus, 0, len(status.Nodes)),
+		Leaders:       make([]*hatriecachev1.ElectionLeader, 0, len(status.Leaders)),
+	}
+	for _, node := range status.Nodes {
+		out.Nodes = append(out.Nodes, grpcElectionNodeStatus(node))
+	}
+	for _, leader := range status.Leaders {
+		out.Leaders = append(out.Leaders, grpcElectionLeader(leader))
+	}
+	return out
+}
+
+func grpcElectionNodeStatus(node ElectionNodeStatus) *hatriecachev1.ElectionNodeStatus {
+	return &hatriecachev1.ElectionNodeStatus{
+		Id:               node.ID,
+		Online:           node.Online,
+		Reason:           node.Reason,
+		LastSeenUnixNano: unixNanoPtrOrZero(node.LastSeen),
+	}
+}
+
+func grpcElectionLeader(leader ElectionLeader) *hatriecachev1.ElectionLeader {
+	return &hatriecachev1.ElectionLeader{
+		Shard:      leader.Shard,
+		Leader:     leader.Leader,
+		Available:  leader.Available,
+		Primary:    leader.Primary,
+		Candidates: append([]string(nil), leader.Candidates...),
+	}
+}
+
+func grpcElectionKeyRoute(route ElectionKeyRoute) *hatriecachev1.ElectionKeyRoute {
+	return &hatriecachev1.ElectionKeyRoute{
+		Key:    route.Key,
+		Route:  grpcTopologyRoute(route.Route),
+		Leader: grpcElectionLeader(route.Leader),
+	}
 }
 
 func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) CacheCommandRequest {
@@ -231,4 +501,11 @@ func unixNanoOrZero(value time.Time) int64 {
 		return 0
 	}
 	return value.UnixNano()
+}
+
+func unixNanoPtrOrZero(value *time.Time) int64 {
+	if value == nil {
+		return 0
+	}
+	return unixNanoOrZero(*value)
 }

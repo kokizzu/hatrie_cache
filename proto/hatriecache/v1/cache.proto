@@ -11,6 +11,10 @@ service CacheService {
   rpc Command(CommandRequest) returns (CommandResponse);
   rpc Snapshot(SnapshotRequest) returns (CommandResponse);
   rpc Replication(ReplicationRequest) returns (ReplicationResponse);
+  rpc Topology(TopologyRequest) returns (TopologyResponse);
+  rpc UpdateTopology(UpdateTopologyRequest) returns (TopologyResponse);
+  rpc Election(ElectionRequest) returns (ElectionResponse);
+  rpc UpdateElection(UpdateElectionRequest) returns (ElectionResponse);
 }
 
 message HealthRequest {}
@@ -113,4 +117,98 @@ message ReplicationTarget {
   bool ok = 4;
   int32 status = 5;
   string error = 6;
+}
+
+message TopologyRequest {
+  string key = 1;
+}
+
+message UpdateTopologyRequest {
+  ClusterTopology topology = 1;
+}
+
+message TopologyResponse {
+  bool ok = 1;
+  string message = 2;
+  ClusterTopology topology = 3;
+  TopologyRoute route = 4;
+}
+
+message ClusterTopology {
+  uint64 version = 1;
+  string mode = 2;
+  uint32 bucket_count = 3;
+  repeated TopologyBucketRange bucket_ranges = 4;
+  string self = 5;
+  repeated TopologyNode nodes = 6;
+  repeated TopologyShard shards = 7;
+}
+
+message TopologyNode {
+  string id = 1;
+  string address = 2;
+  string role = 3;
+}
+
+message TopologyShard {
+  uint32 id = 1;
+  string primary = 2;
+  repeated string replicas = 3;
+}
+
+message TopologyBucketRange {
+  uint32 start = 1;
+  uint32 end = 2;
+  uint32 shard = 3;
+}
+
+message TopologyRoute {
+  string key = 1;
+  string mode = 2;
+  optional uint32 bucket = 3;
+  TopologyShard shard = 4;
+  repeated string owners = 5;
+}
+
+message ElectionRequest {
+  string key = 1;
+}
+
+message UpdateElectionRequest {
+  string node = 1;
+  optional bool online = 2;
+}
+
+message ElectionResponse {
+  bool ok = 1;
+  string message = 2;
+  ElectionStatus status = 3;
+  ElectionKeyRoute route = 4;
+}
+
+message ElectionStatus {
+  int64 timeout_millis = 1;
+  repeated ElectionNodeStatus nodes = 2;
+  repeated ElectionLeader leaders = 3;
+}
+
+message ElectionNodeStatus {
+  string id = 1;
+  bool online = 2;
+  string reason = 3;
+  int64 last_seen_unix_nano = 4;
+}
+
+message ElectionLeader {
+  uint32 shard = 1;
+  string leader = 2;
+  bool available = 3;
+  string primary = 4;
+  repeated string candidates = 5;
+}
+
+message ElectionKeyRoute {
+  string key = 1;
+  TopologyRoute route = 2;
+  ElectionLeader leader = 3;
 }

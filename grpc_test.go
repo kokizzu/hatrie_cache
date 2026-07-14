@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1049,6 +1050,127 @@ func TestCacheGRPCServerReportsAsyncReplicationQueue(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerTopologyAndElection(t *testing.T) {
+	topology := replicationTestTopology(t, "http://127.0.0.1:2")
+	election := NewElectionStore(topology, ElectionOptions{})
+	client, stop := newTestGRPCClient(t, newTestTrie(t), CacheGRPCOptions{
+		NodeName: "node-a",
+		Topology: topology,
+		Election: election,
+	})
+	defer stop()
+
+	topologyResp, err := client.Topology(context.Background(), &hatriecachev1.TopologyRequest{})
+	if err != nil {
+		t.Fatalf("Topology() error = %v", err)
+	}
+	if !topologyResp.GetOk() || topologyResp.GetTopology().GetSelf() != "node-a" || len(topologyResp.GetTopology().GetNodes()) != 2 {
+		t.Fatalf("Topology() = %#v, want node-a topology with two nodes", topologyResp)
+	}
+
+	routeResp, err := client.Topology(context.Background(), &hatriecachev1.TopologyRequest{Key: "session:1"})
+	if err != nil {
+		t.Fatalf("Topology(key) error = %v", err)
+	}
+	route := routeResp.GetRoute()
+	if !routeResp.GetOk() || route.GetKey() != "session:1" || route.GetShard().GetPrimary() != "node-a" || !reflect.DeepEqual(route.GetOwners(), []string{"node-a", "node-b"}) {
+		t.Fatalf("Topology(key) = %#v, want node-a/node-b route", routeResp)
+	}
+
+	electionResp, err := client.Election(context.Background(), &hatriecachev1.ElectionRequest{})
+	if err != nil {
+		t.Fatalf("Election() error = %v", err)
+	}
+	if !electionResp.GetOk() || len(electionResp.GetStatus().GetLeaders()) != 1 || electionResp.GetStatus().GetLeaders()[0].GetLeader() != "node-a" {
+		t.Fatalf("Election() = %#v, want node-a leader", electionResp)
+	}
+
+	offline := false
+	updatedElection, err := client.UpdateElection(context.Background(), &hatriecachev1.UpdateElectionRequest{
+		Node:   "node-a",
+		Online: &offline,
+	})
+	if err != nil {
+		t.Fatalf("UpdateElection(offline) error = %v", err)
+	}
+	if !updatedElection.GetOk() || updatedElection.GetStatus().GetLeaders()[0].GetLeader() != "node-b" {
+		t.Fatalf("UpdateElection(offline) = %#v, want node-b leader", updatedElection)
+	}
+
+	keyElection, err := client.Election(context.Background(), &hatriecachev1.ElectionRequest{Key: "session:1"})
+	if err != nil {
+		t.Fatalf("Election(key) error = %v", err)
+	}
+	if !keyElection.GetOk() || keyElection.GetRoute().GetLeader().GetLeader() != "node-b" || keyElection.GetRoute().GetRoute().GetKey() != "session:1" {
+		t.Fatalf("Election(key) = %#v, want session route with node-b leader", keyElection)
+	}
+
+	updatedTopology, err := client.UpdateTopology(context.Background(), &hatriecachev1.UpdateTopologyRequest{
+		Topology: &hatriecachev1.ClusterTopology{
+			Version: 1,
+			Mode:    TopologyModeFullReplica,
+			Self:    "node-b",
+			Nodes: []*hatriecachev1.TopologyNode{
+				{Id: "node-a", Address: "http://127.0.0.1:1"},
+				{Id: "node-b", Address: "http://127.0.0.1:2"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateTopology() error = %v", err)
+	}
+	if !updatedTopology.GetOk() || updatedTopology.GetTopology().GetMode() != TopologyModeFullReplica || updatedTopology.GetTopology().GetSelf() != "node-b" {
+		t.Fatalf("UpdateTopology() = %#v, want full-replica topology for node-b", updatedTopology)
+	}
+
+	invalidTopology, err := client.UpdateTopology(context.Background(), &hatriecachev1.UpdateTopologyRequest{
+		Topology: &hatriecachev1.ClusterTopology{Version: 1},
+	})
+	if err != nil {
+		t.Fatalf("UpdateTopology(invalid) error = %v", err)
+	}
+	if invalidTopology.GetOk() || !strings.Contains(invalidTopology.GetMessage(), "requires at least one node") {
+		t.Fatalf("UpdateTopology(invalid) = %#v, want validation error", invalidTopology)
+	}
+}
+
+func TestCacheGRPCServerTopologyAndElectionRequireStores(t *testing.T) {
+	client, stop := newTestGRPCClient(t, newTestTrie(t), CacheGRPCOptions{})
+	defer stop()
+
+	topology, err := client.Topology(context.Background(), &hatriecachev1.TopologyRequest{})
+	if err != nil {
+		t.Fatalf("Topology() error = %v", err)
+	}
+	if topology.GetOk() || !strings.Contains(topology.GetMessage(), "topology store is not configured") {
+		t.Fatalf("Topology() = %#v, want missing topology store response", topology)
+	}
+
+	updateTopology, err := client.UpdateTopology(context.Background(), &hatriecachev1.UpdateTopologyRequest{})
+	if err != nil {
+		t.Fatalf("UpdateTopology() error = %v", err)
+	}
+	if updateTopology.GetOk() || !strings.Contains(updateTopology.GetMessage(), "topology store is not configured") {
+		t.Fatalf("UpdateTopology() = %#v, want missing topology store response", updateTopology)
+	}
+
+	election, err := client.Election(context.Background(), &hatriecachev1.ElectionRequest{})
+	if err != nil {
+		t.Fatalf("Election() error = %v", err)
+	}
+	if election.GetOk() || !strings.Contains(election.GetMessage(), "election store is not configured") {
+		t.Fatalf("Election() = %#v, want missing election store response", election)
+	}
+
+	updateElection, err := client.UpdateElection(context.Background(), &hatriecachev1.UpdateElectionRequest{})
+	if err != nil {
+		t.Fatalf("UpdateElection() error = %v", err)
+	}
+	if updateElection.GetOk() || !strings.Contains(updateElection.GetMessage(), "election store is not configured") {
+		t.Fatalf("UpdateElection() = %#v, want missing election store response", updateElection)
+	}
+}
+
 func TestCacheGRPCServerSnapshotRequiresCallback(t *testing.T) {
 	ht := newTestTrie(t)
 	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
@@ -1094,6 +1216,18 @@ func TestCacheGRPCServerHonorsCanceledContexts(t *testing.T) {
 	}
 	if _, err := server.Replication(ctx, &hatriecachev1.ReplicationRequest{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Replication(canceled) error = %v, want context.Canceled", err)
+	}
+	if _, err := server.Topology(ctx, &hatriecachev1.TopologyRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Topology(canceled) error = %v, want context.Canceled", err)
+	}
+	if _, err := server.UpdateTopology(ctx, &hatriecachev1.UpdateTopologyRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("UpdateTopology(canceled) error = %v, want context.Canceled", err)
+	}
+	if _, err := server.Election(ctx, &hatriecachev1.ElectionRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Election(canceled) error = %v, want context.Canceled", err)
+	}
+	if _, err := server.UpdateElection(ctx, &hatriecachev1.UpdateElectionRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("UpdateElection(canceled) error = %v, want context.Canceled", err)
 	}
 }
 

@@ -376,7 +376,9 @@ service in another Go process, or use the generated client in
 leader-write enforcement, and HTTP replication options as the monitoring
 command API. The `Replication` RPC returns the same last result and async queue
 stats as `GET /api/replication`; set `sync=true` with an optional `prefix` to
-run the same anti-entropy sync exposed by `POST /api/replication`.
+run the same anti-entropy sync exposed by `POST /api/replication`. The
+`Topology`, `UpdateTopology`, `Election`, and `UpdateElection` RPCs mirror the
+HTTP topology/election endpoints for generated clients.
 
 The bundled C HAT-trie tests can be compiled directly with GCC when autotools
 build files have not been generated.

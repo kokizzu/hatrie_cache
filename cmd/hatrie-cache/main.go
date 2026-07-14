@@ -180,7 +180,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		TLSConfig: monitoringTLSConfig(nil),
 	}
 
-	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath), election, replicator)
+	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath), topology, election, replicator)
 	if err != nil {
 		return err
 	}
@@ -408,7 +408,7 @@ func closeLevelDB(store *hatriecache.LevelDBStore, stderr io.Writer) {
 	}
 }
 
-func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator) (*grpc.Server, net.Listener, error) {
+func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator) (*grpc.Server, net.Listener, error) {
 	if cfg.grpcAddr == "" {
 		return nil, nil, nil
 	}
@@ -421,6 +421,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		NodeName:            defaultNodeID(cfg.nodeID),
 		Snapshot:            snapshot,
 		Journal:             journal,
+		Topology:            topology,
 		Election:            election,
 		Replicator:          replicator,
 		EnforceLeaderWrites: cfg.enforceLeaderWrites,

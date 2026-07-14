@@ -77,6 +77,10 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 	readme := string(data)
 	for _, token := range []string{
 		"Replication` RPC",
+		"`Topology`",
+		"`UpdateTopology`",
+		"`Election`",
+		"`UpdateElection`",
 		"`GET /api/replication`",
 		"`POST /api/replication`",
 	} {

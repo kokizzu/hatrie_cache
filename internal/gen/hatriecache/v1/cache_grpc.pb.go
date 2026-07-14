@@ -28,6 +28,10 @@ type CacheServiceClient interface {
 	Command(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	Replication(ctx context.Context, in *ReplicationRequest, opts ...grpc.CallOption) (*ReplicationResponse, error)
+	Topology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
+	UpdateTopology(ctx context.Context, in *UpdateTopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
+	Election(ctx context.Context, in *ElectionRequest, opts ...grpc.CallOption) (*ElectionResponse, error)
+	UpdateElection(ctx context.Context, in *UpdateElectionRequest, opts ...grpc.CallOption) (*ElectionResponse, error)
 }
 
 type cacheServiceClient struct {
@@ -92,6 +96,42 @@ func (c *cacheServiceClient) Replication(ctx context.Context, in *ReplicationReq
 	return out, nil
 }
 
+func (c *cacheServiceClient) Topology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error) {
+	out := new(TopologyResponse)
+	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/Topology", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cacheServiceClient) UpdateTopology(ctx context.Context, in *UpdateTopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error) {
+	out := new(TopologyResponse)
+	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/UpdateTopology", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cacheServiceClient) Election(ctx context.Context, in *ElectionRequest, opts ...grpc.CallOption) (*ElectionResponse, error) {
+	out := new(ElectionResponse)
+	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/Election", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cacheServiceClient) UpdateElection(ctx context.Context, in *UpdateElectionRequest, opts ...grpc.CallOption) (*ElectionResponse, error) {
+	out := new(ElectionResponse)
+	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/UpdateElection", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CacheServiceServer is the server API for CacheService service.
 // All implementations must embed UnimplementedCacheServiceServer
 // for forward compatibility
@@ -102,6 +142,10 @@ type CacheServiceServer interface {
 	Command(context.Context, *CommandRequest) (*CommandResponse, error)
 	Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error)
 	Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error)
+	Topology(context.Context, *TopologyRequest) (*TopologyResponse, error)
+	UpdateTopology(context.Context, *UpdateTopologyRequest) (*TopologyResponse, error)
+	Election(context.Context, *ElectionRequest) (*ElectionResponse, error)
+	UpdateElection(context.Context, *UpdateElectionRequest) (*ElectionResponse, error)
 	mustEmbedUnimplementedCacheServiceServer()
 }
 
@@ -126,6 +170,18 @@ func (UnimplementedCacheServiceServer) Snapshot(context.Context, *SnapshotReques
 }
 func (UnimplementedCacheServiceServer) Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Replication not implemented")
+}
+func (UnimplementedCacheServiceServer) Topology(context.Context, *TopologyRequest) (*TopologyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Topology not implemented")
+}
+func (UnimplementedCacheServiceServer) UpdateTopology(context.Context, *UpdateTopologyRequest) (*TopologyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTopology not implemented")
+}
+func (UnimplementedCacheServiceServer) Election(context.Context, *ElectionRequest) (*ElectionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Election not implemented")
+}
+func (UnimplementedCacheServiceServer) UpdateElection(context.Context, *UpdateElectionRequest) (*ElectionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateElection not implemented")
 }
 func (UnimplementedCacheServiceServer) mustEmbedUnimplementedCacheServiceServer() {}
 
@@ -248,6 +304,78 @@ func _CacheService_Replication_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CacheService_Topology_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TopologyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CacheServiceServer).Topology(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/hatriecache.v1.CacheService/Topology",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CacheServiceServer).Topology(ctx, req.(*TopologyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CacheService_UpdateTopology_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTopologyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CacheServiceServer).UpdateTopology(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/hatriecache.v1.CacheService/UpdateTopology",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CacheServiceServer).UpdateTopology(ctx, req.(*UpdateTopologyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CacheService_Election_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ElectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CacheServiceServer).Election(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/hatriecache.v1.CacheService/Election",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CacheServiceServer).Election(ctx, req.(*ElectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CacheService_UpdateElection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateElectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CacheServiceServer).UpdateElection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/hatriecache.v1.CacheService/UpdateElection",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CacheServiceServer).UpdateElection(ctx, req.(*UpdateElectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CacheService_ServiceDesc is the grpc.ServiceDesc for CacheService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -278,6 +406,22 @@ var CacheService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Replication",
 			Handler:    _CacheService_Replication_Handler,
+		},
+		{
+			MethodName: "Topology",
+			Handler:    _CacheService_Topology_Handler,
+		},
+		{
+			MethodName: "UpdateTopology",
+			Handler:    _CacheService_UpdateTopology_Handler,
+		},
+		{
+			MethodName: "Election",
+			Handler:    _CacheService_Election_Handler,
+		},
+		{
+			MethodName: "UpdateElection",
+			Handler:    _CacheService_UpdateElection_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
