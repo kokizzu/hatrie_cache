@@ -26,6 +26,7 @@ type clientConfig struct {
 
 const maxErrorBodyBytes = 1 << 20
 const maxResponseDrainBytes = 1 << 20
+const truncatedErrorBodySuffix = "\n... response body truncated"
 const minCompressedJSONRequestBytes = 16 << 10
 const defaultCommandWireFormat = "auto"
 const defaultRequestTimeout = 30 * time.Second
@@ -563,7 +564,16 @@ func endpoint(addr string, path string) string {
 }
 
 func readErrorBody(body io.Reader) ([]byte, error) {
-	return io.ReadAll(io.LimitReader(body, maxErrorBodyBytes))
+	data, err := io.ReadAll(io.LimitReader(body, maxErrorBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) <= maxErrorBodyBytes {
+		return data, nil
+	}
+	data = data[:maxErrorBodyBytes]
+	data = append(data, truncatedErrorBodySuffix...)
+	return data, nil
 }
 
 func drainAndCloseResponse(body io.ReadCloser) {

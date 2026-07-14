@@ -196,6 +196,9 @@ func TestRunBoundsErrorResponseBody(t *testing.T) {
 	if strings.Contains(err.Error(), "tail-marker") {
 		t.Fatalf("error included body beyond limit")
 	}
+	if !strings.Contains(err.Error(), truncatedErrorBodySuffix) {
+		t.Fatalf("error = %q, want truncation suffix", err)
+	}
 	if len(err.Error()) > maxErrorBodyBytes+128 {
 		t.Fatalf("error length = %d, want bounded body", len(err.Error()))
 	}
@@ -734,6 +737,37 @@ func TestRunCommandReportsProtobufErrorResponseAsJSON(t *testing.T) {
 	}, stdout, &bytes.Buffer{}, server.Client())
 	if err == nil || !strings.Contains(err.Error(), `server returned 409 Conflict: {"ok":false,"message":"not leader"}`) {
 		t.Fatalf("run(command conflict) error = %v, want decoded protobuf command response", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout len = %d, want empty on command error", stdout.Len())
+	}
+}
+
+func TestRunCommandMarksTruncatedErrorResponseBody(t *testing.T) {
+	payload := strings.Repeat("x", maxErrorBodyBytes+128) + "tail-marker"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(payload))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "SETSTR",
+		"-key", "name",
+		"-value", "ivi",
+	}, stdout, &bytes.Buffer{}, server.Client())
+	if err == nil || !strings.Contains(err.Error(), "server returned 409 Conflict") {
+		t.Fatalf("run(command conflict) error = %v, want conflict", err)
+	}
+	if strings.Contains(err.Error(), "tail-marker") {
+		t.Fatalf("command error included body beyond limit")
+	}
+	if !strings.Contains(err.Error(), truncatedErrorBodySuffix) {
+		t.Fatalf("command error = %q, want truncation suffix", err)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout len = %d, want empty on command error", stdout.Len())
