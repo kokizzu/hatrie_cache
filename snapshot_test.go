@@ -526,6 +526,51 @@ func TestValidateSnapshotEntryRejectsUnsupportedCollectionValues(t *testing.T) {
 	}
 }
 
+func TestValidateSnapshotEntryRejectsCorruptPriorityQueueSequences(t *testing.T) {
+	tests := []snapshotEntry{
+		{
+			Key:  "duplicate",
+			Type: "priority_queue",
+			PriorityQueue: []priorityQueueItem{
+				{Priority: 1, Sequence: 7, Value: "first"},
+				{Priority: 1, Sequence: 7, Value: "second"},
+			},
+		},
+		{
+			Key:  "overflow",
+			Type: "priority_queue",
+			PriorityQueue: []priorityQueueItem{
+				{Priority: 1, Sequence: ^uint64(0), Value: "last"},
+			},
+		},
+	}
+	for _, entry := range tests {
+		if _, err := validateSnapshotEntry(entry); err == nil {
+			t.Fatalf("validateSnapshotEntry(%s) error = nil, want corrupt priority queue sequence error", entry.Key)
+		}
+	}
+}
+
+func TestLoadSnapshotRejectsCorruptPriorityQueueWithoutMutation(t *testing.T) {
+	payload := []byte(`{"version":1,"entries":[{"key":"existing","type":"string","string":"changed"},{"key":"jobs","type":"priority_queue","priority_queue":[{"priority":1,"sequence":2,"value":"first"},{"priority":1,"sequence":2,"value":"second"}]}]}`)
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	ht.UpsertString("existing", "keep")
+	if err := ht.LoadSnapshot(path); err == nil {
+		t.Fatal("LoadSnapshot() error = nil, want corrupt priority queue error")
+	}
+	if got := ht.GetString("existing"); got != "keep" {
+		t.Fatalf("existing after rejected snapshot = %q, want keep", got)
+	}
+	if ht.Exists("jobs") {
+		t.Fatal("invalid priority queue snapshot created jobs key")
+	}
+}
+
 func TestSaveSnapshotRejectsUnsupportedJSONValues(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertMap("bad", Map{"ch": make(chan int)})

@@ -365,10 +365,18 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 }
 
 func validatePriorityQueueSnapshotItems(items []priorityQueueItem) error {
+	seenSequences := make(map[uint64]struct{}, len(items))
 	for _, item := range items {
 		if err := validatePriorityQueueItemValue(item.Value); err != nil {
 			return err
 		}
+		if item.Sequence == ^uint64(0) {
+			return errors.New("hatriecache: priority queue snapshot sequence is too large")
+		}
+		if _, exists := seenSequences[item.Sequence]; exists {
+			return errors.New("hatriecache: priority queue snapshot contains duplicate sequence")
+		}
+		seenSequences[item.Sequence] = struct{}{}
 	}
 	return nil
 }
