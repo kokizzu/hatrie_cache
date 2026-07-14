@@ -2822,6 +2822,51 @@ func TestCountMinSketchRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestCountMinSketchSnapshotValidationRejectsInvalidCounterTotals(t *testing.T) {
+	encodeCounters := func(values ...uint32) string {
+		data := make([]byte, len(values)*4)
+		for idx, value := range values {
+			binary.LittleEndian.PutUint32(data[idx*4:idx*4+4], value)
+		}
+		return base64.StdEncoding.EncodeToString(data)
+	}
+
+	tests := map[string]countMinSketchSnapshot{
+		"row below total": {
+			Width:      2,
+			Depth:      2,
+			TotalCount: 3,
+			Counters:   encodeCounters(2, 1, 2, 0),
+		},
+		"row above total": {
+			Width:      2,
+			Depth:      2,
+			TotalCount: 3,
+			Counters:   encodeCounters(2, 1, 3, 1),
+		},
+	}
+	for name, snapshot := range tests {
+		if err := validateCountMinSketchSnapshot(snapshot); err == nil {
+			t.Fatalf("validateCountMinSketchSnapshot(%s) error = nil, want invalid counter total error", name)
+		}
+	}
+}
+
+func TestCountMinSketchSnapshotValidationAllowsSaturatedCounters(t *testing.T) {
+	data := make([]byte, 2*4)
+	binary.LittleEndian.PutUint32(data[:4], maxCountMinSketchCounter)
+	binary.LittleEndian.PutUint32(data[4:], maxCountMinSketchCounter)
+	snapshot := countMinSketchSnapshot{
+		Width:      1,
+		Depth:      2,
+		TotalCount: uint64(maxCountMinSketchCounter) + 1,
+		Counters:   base64.StdEncoding.EncodeToString(data),
+	}
+	if err := validateCountMinSketchSnapshot(snapshot); err != nil {
+		t.Fatalf("validateCountMinSketchSnapshot(saturated counters) error = %v, want nil", err)
+	}
+}
+
 func TestCountMinSketchCountersSaturate(t *testing.T) {
 	sketch, err := newCountMinSketchData(16, 3)
 	if err != nil {

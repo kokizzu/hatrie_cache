@@ -88,6 +88,28 @@ func validateCountMinSketchSnapshot(snapshot countMinSketchSnapshot) error {
 	if uint64(len(data)) != snapshot.Width*uint64(snapshot.Depth)*4 {
 		return errors.New("hatriecache: invalid count-min sketch counter length")
 	}
+	if err := validateCountMinSketchCounterTotals(data, snapshot.Width, snapshot.Depth, snapshot.TotalCount); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateCountMinSketchCounterTotals(data []byte, width uint64, depth uint8, total uint64) error {
+	for row := uint8(0); row < depth; row++ {
+		var rowTotal uint64
+		rowOffset := uint64(row) * width
+		for column := uint64(0); column < width; column++ {
+			counterOffset := (rowOffset + column) * 4
+			counter := binary.LittleEndian.Uint32(data[counterOffset : counterOffset+4])
+			rowTotal += uint64(counter)
+		}
+		if rowTotal > total {
+			return errors.New("hatriecache: count-min sketch row counters exceed total count")
+		}
+		if total <= uint64(maxCountMinSketchCounter) && rowTotal != total {
+			return errors.New("hatriecache: count-min sketch row counters do not match total count")
+		}
+	}
 	return nil
 }
 
