@@ -79,7 +79,6 @@ func newXorFilterData(expectedItems uint64) (xorFilterData, error) {
 	}
 	return xorFilterData{
 		expectedItems: expectedItems,
-		staged:        make(map[string]interface{}, int(expectedItems)),
 	}, nil
 }
 
@@ -179,7 +178,9 @@ func newXorFilterDataFromSnapshot(snapshot xorFilterSnapshot) (xorFilterData, er
 		copy(data.fingerprints, raw)
 		return data, nil
 	}
-	data.staged = make(map[string]interface{}, len(snapshot.Staged))
+	if len(snapshot.Staged) > 0 {
+		data.staged = make(map[string]interface{}, len(snapshot.Staged))
+	}
 	for _, item := range snapshot.Staged {
 		data.staged[item.Key] = cloneValue(item.Value)
 	}
@@ -197,9 +198,6 @@ func (filter *xorFilterData) AddOne(value interface{}, values ...interface{}) (i
 	}
 	if filter.built {
 		return 0, errors.New("hatriecache: xor filter is already built")
-	}
-	if filter.staged == nil {
-		filter.staged = make(map[string]interface{})
 	}
 	pending := make([]xorFilterPendingItem, 0, 1+len(values))
 	seen := make(map[string]struct{}, 1+len(values))
@@ -227,6 +225,9 @@ func (filter *xorFilterData) AddOne(value interface{}, values ...interface{}) (i
 	}
 	if uint64(len(filter.staged)+len(pending)) > maxXorFilterItems {
 		return 0, errors.New("hatriecache: xor filter staged item count is too large")
+	}
+	if filter.staged == nil && len(pending) > 0 {
+		filter.staged = make(map[string]interface{}, len(pending))
 	}
 	for _, item := range pending {
 		filter.staged[item.key] = cloneValue(item.value)

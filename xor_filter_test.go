@@ -238,6 +238,49 @@ func TestHatTrieXorFilterRejectsInvalidExpectedItems(t *testing.T) {
 	}
 }
 
+func TestXorFilterLargeEmptyExpectedItemsAllocatesLazily(t *testing.T) {
+	filter, err := newXorFilterData(maxXorFilterItems)
+	if err != nil {
+		t.Fatalf("newXorFilterData(max) error = %v", err)
+	}
+	if filter.staged != nil {
+		t.Fatal("empty max-sized XOR filter allocated staged map, want lazy nil map")
+	}
+	if info := filter.Info(); info.ExpectedItems != maxXorFilterItems || info.Staged != 0 || info.Items != 0 || info.Built {
+		t.Fatalf("Info(empty max) = %#v, want pending filter with logical expected item count", info)
+	}
+
+	restored, err := newXorFilterDataFromSnapshot(xorFilterSnapshot{ExpectedItems: maxXorFilterItems})
+	if err != nil {
+		t.Fatalf("newXorFilterDataFromSnapshot(empty max) error = %v", err)
+	}
+	if restored.staged != nil {
+		t.Fatal("restored empty max-sized XOR filter allocated staged map, want lazy nil map")
+	}
+
+	if added, err := filter.AddOne("alpha"); err != nil || added != 1 {
+		t.Fatalf("AddOne(first) = %d/%v, want one staged item", added, err)
+	}
+	if len(filter.staged) != 1 {
+		t.Fatalf("staged map after first add has %d items, want 1", len(filter.staged))
+	}
+
+	ht := newTestTrie(t)
+	if err := ht.UpsertXorFilter("seen", maxXorFilterItems); err != nil {
+		t.Fatalf("UpsertXorFilter(max) error = %v", err)
+	}
+	hval := ht.Get("seen")
+	if ht.xorFilters.array[hval.Index].staged != nil {
+		t.Fatal("empty trie XOR filter allocated staged map, want lazy nil map")
+	}
+	if added, err := ht.AddXorFilterChecked("seen", "alpha"); err != nil || added != 1 {
+		t.Fatalf("AddXorFilterChecked(first) = %d/%v, want one staged item", added, err)
+	}
+	if len(ht.xorFilters.array[hval.Index].staged) != 1 {
+		t.Fatalf("trie XOR filter staged map after first add has %d items, want 1", len(ht.xorFilters.array[hval.Index].staged))
+	}
+}
+
 func htUpsertXorFilterForTest(expectedItems uint64) error {
 	ht := CreateHatTrie()
 	defer ht.Destroy()
