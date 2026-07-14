@@ -42,6 +42,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if cfg.replicationWireFormat != string(hatriecache.DefaultCommandWireFormat) {
 		t.Fatalf("replicationWireFormat = %q, want default", cfg.replicationWireFormat)
 	}
+	if cfg.dbFormat != string(hatriecache.DefaultStorageFormat) {
+		t.Fatalf("dbFormat = %q, want default", cfg.dbFormat)
+	}
 	if cfg.snapshotFormat != string(hatriecache.DefaultSnapshotFormat) {
 		t.Fatalf("snapshotFormat = %q, want default", cfg.snapshotFormat)
 	}
@@ -282,6 +285,7 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"-monitoring-server",
 		"-db-path", "/tmp/cache.leveldb",
+		"-db-format", "json",
 		"-db-sync-interval", "10s",
 		"-db-hot-load",
 		"-db-hot-load-max-bytes", "2048",
@@ -293,6 +297,9 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 	}
 	if cfg.dbPath != "/tmp/cache.leveldb" || cfg.dbSyncInterval != 10*time.Second {
 		t.Fatalf("cfg db = %q/%s, want explicit path and interval", cfg.dbPath, cfg.dbSyncInterval)
+	}
+	if cfg.dbFormat != "json" || storageFormat(cfg) != hatriecache.StorageFormatJSON {
+		t.Fatalf("db format = %q, want json", cfg.dbFormat)
 	}
 	if !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 || cfg.dbHotLoadMaxAge != 30*time.Minute || cfg.dbHotLoadMinHits != 42 {
 		t.Fatalf("cfg hot-load = %#v, want explicit hot-load options", cfg)
@@ -324,6 +331,16 @@ func TestParseConfigRejectsNegativeHotLoadLimits(t *testing.T) {
 				t.Fatal("parseConfig() error = nil, want error")
 			}
 		})
+	}
+}
+
+func TestParseConfigRejectsInvalidDBFormat(t *testing.T) {
+	_, err := parseConfig([]string{
+		"-monitoring-server",
+		"-db-format", "msgpack",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "unsupported storage format") {
+		t.Fatalf("parseConfig(invalid db format) error = %v, want unsupported storage format", err)
 	}
 }
 
@@ -771,7 +788,7 @@ func TestLevelDBLifecycleHelpersLoadAndSave(t *testing.T) {
 	defer source.Destroy()
 	source.UpsertString("key", "value")
 
-	store, err := openLevelDBIfConfigured(path)
+	store, err := openLevelDBIfConfigured(path, hatriecache.DefaultStorageFormat)
 	if err != nil {
 		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
 	}
@@ -988,7 +1005,7 @@ func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
 	defer ht.Destroy()
 	ht.UpsertString("key", "value")
 
-	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"))
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
 	if err != nil {
 		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
 	}
@@ -1015,7 +1032,7 @@ func TestStartLevelDBSaverWritesImmediately(t *testing.T) {
 	defer ht.Destroy()
 	ht.UpsertString("key", "value")
 
-	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"))
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
 	if err != nil {
 		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
 	}
@@ -1041,7 +1058,7 @@ func TestStartLevelDBSaverStopIsIdempotent(t *testing.T) {
 	ht := hatriecache.CreateHatTrie()
 	defer ht.Destroy()
 
-	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"))
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
 	if err != nil {
 		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
 	}

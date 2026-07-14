@@ -122,12 +122,28 @@ make monitoring-server GRPC_ADDR=127.0.0.1:9090
 ```
 
 Set `DB_PATH` to load and save cache data through LevelDB with Snappy
-compression. `DB_SYNC_INTERVAL` periodically syncs changed LevelDB records while
-the server is running:
+compression. LevelDB records use the binary storage format by default
+(`DB_FORMAT=binary`), which avoids JSON object-field overhead and stores byte
+values as raw bytes instead of base64. Existing JSON records still load
+automatically. Set `DB_FORMAT=json` to keep writing the previous JSON record
+layout. `DB_SYNC_INTERVAL` periodically syncs changed LevelDB records while the
+server is running:
 
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
+make monitoring-server DB_PATH=data/cache.leveldb DB_FORMAT=json
 ```
+
+Local storage benchmark (`go test -run=^$ -bench=BenchmarkLevelDB.*Materialized
+-benchmem -benchtime=20x`, AMD Ryzen 9 5950X, 512 materialized string entries):
+
+| Format | Save CPU | Load CPU | Record bytes | Save heap | Load heap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| binary | 0.78 ms/op | 1.29 ms/op | 293,376 B/op | 722,542 B/op | 1,205,033 B/op |
+| json | 1.52 ms/op | 2.62 ms/op | 394,221 B/op | 1,150,754 B/op | 1,912,316 B/op |
+
+The tradeoff is readability: binary is faster and about 26% smaller for this
+workload, while JSON remains easier to inspect with standard text tools.
 
 Set `DB_HOT_LOAD=true` to load all non-expired LevelDB keys as compact
 references while only materializing hot values in memory. By default a hot value

@@ -19,6 +19,7 @@ replication_wire_format=${REPLICATION_WIRE_FORMAT:-protobuf}
 enforce_leader_writes=${ENFORCE_LEADER_WRITES:-false}
 grpc_addr=${GRPC_ADDR:-}
 db_path=${DB_PATH:-}
+db_format=${DB_FORMAT:-binary}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
 db_hot_load=${DB_HOT_LOAD:-false}
 db_hot_load_max_bytes=${DB_HOT_LOAD_MAX_BYTES:-1024}
@@ -55,6 +56,7 @@ exec go run ./cmd/hatrie-cache \
 	-enforce-leader-writes="$enforce_leader_writes" \
 	-grpc-addr "$grpc_addr" \
 	-db-path "$db_path" \
+	-db-format "$db_format" \
 	-db-sync-interval "$db_sync_interval" \
 	-db-hot-load="$db_hot_load" \
 	-db-hot-load-max-bytes "$db_hot_load_max_bytes" \

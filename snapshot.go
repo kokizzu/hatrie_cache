@@ -374,7 +374,7 @@ func (ht *HatTrie) writeSnapshotEntryJSONLocked(writer io.Writer, entry Entry, p
 			if err != nil {
 				return err
 			}
-			return writeSnapshotRawEntryJSON(writer, data, prefix)
+			return writeLevelDBRecordSnapshotJSON(writer, entry.Key, data, prefix)
 		}
 	}
 	if entry.Value.Type() == DATAVALUE_TYPE_RAW_BYTES && entry.Value.OnDisk() {

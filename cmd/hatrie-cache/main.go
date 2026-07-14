@@ -50,6 +50,7 @@ type config struct {
 	enforceLeaderWrites         bool
 	grpcAddr                    string
 	dbPath                      string
+	dbFormat                    string
 	dbSyncInterval              time.Duration
 	dbHotLoad                   bool
 	dbHotLoadMaxBytes           int64
@@ -90,7 +91,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
 
-	dbStore, err := openLevelDBIfConfigured(cfg.dbPath)
+	dbStore, err := openLevelDBIfConfigured(cfg.dbPath, storageFormat(cfg))
 	if err != nil {
 		return err
 	}
@@ -266,6 +267,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
+	flags.StringVar(&cfg.dbFormat, "db-format", string(hatriecache.DefaultStorageFormat), "LevelDB record storage format: binary or json")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
 	flags.BoolVar(&cfg.dbHotLoad, "db-hot-load", false, "load cold LevelDB keys as lazy references and hot small values into memory")
 	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for LevelDB hot-load")
@@ -317,6 +319,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if _, err := hatriecache.ParseCommandWireFormat(cfg.replicationWireFormat); err != nil {
 		return config{}, err
 	}
+	if _, err := hatriecache.ParseStorageFormat(cfg.dbFormat); err != nil {
+		return config{}, err
+	}
 	if _, err := hatriecache.ParseSnapshotFormat(cfg.snapshotFormat); err != nil {
 		return config{}, err
 	}
@@ -342,6 +347,14 @@ func snapshotFormat(cfg config) hatriecache.SnapshotFormat {
 	format, err := hatriecache.ParseSnapshotFormat(cfg.snapshotFormat)
 	if err != nil {
 		return hatriecache.DefaultSnapshotFormat
+	}
+	return format
+}
+
+func storageFormat(cfg config) hatriecache.StorageFormat {
+	format, err := hatriecache.ParseStorageFormat(cfg.dbFormat)
+	if err != nil {
+		return hatriecache.DefaultStorageFormat
 	}
 	return format
 }
@@ -430,11 +443,11 @@ func defaultNodeID(nodeID string) string {
 	return "local"
 }
 
-func openLevelDBIfConfigured(path string) (*hatriecache.LevelDBStore, error) {
+func openLevelDBIfConfigured(path string, format hatriecache.StorageFormat) (*hatriecache.LevelDBStore, error) {
 	if path == "" {
 		return nil, nil
 	}
-	return hatriecache.OpenLevelDBStore(path)
+	return hatriecache.OpenLevelDBStoreWithFormat(path, format)
 }
 
 func levelDBLoadPolicy(cfg config) hatriecache.LevelDBLoadPolicy {

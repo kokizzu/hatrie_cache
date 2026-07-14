@@ -48,13 +48,22 @@ func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
 }
 
 type LevelDBStore struct {
-	mu sync.RWMutex
-	db *leveldb.DB
+	mu     sync.RWMutex
+	db     *leveldb.DB
+	format StorageFormat
 }
 
 func OpenLevelDBStore(path string) (*LevelDBStore, error) {
+	return OpenLevelDBStoreWithFormat(path, DefaultStorageFormat)
+}
+
+func OpenLevelDBStoreWithFormat(path string, format StorageFormat) (*LevelDBStore, error) {
 	if path == "" {
 		return nil, errors.New("hatriecache: leveldb path is required")
+	}
+	format, err := ParseStorageFormat(string(format))
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -65,7 +74,7 @@ func OpenLevelDBStore(path string) (*LevelDBStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &LevelDBStore{db: db}, nil
+	return &LevelDBStore{db: db, format: format}, nil
 }
 
 func (store *LevelDBStore) Close() error {
@@ -105,7 +114,7 @@ func levelDBDiffBatch(store *LevelDBStore, db *leveldb.DB, trie *HatTrie) (*leve
 	defer iterator.Release()
 
 	hasExisting := iterator.Next()
-	err := trie.scanLevelDBEntryDataForStore(store, db, func(key string, data []byte) error {
+	err := trie.scanLevelDBEntryDataForStore(store, db, store.format, func(key string, data []byte) error {
 		dbKey := levelDBKey(key)
 		for hasExisting && bytes.Compare(iterator.Key(), dbKey) < 0 {
 			batch.Delete(cloneBytes(iterator.Key()))
@@ -330,7 +339,11 @@ func (store *LevelDBStore) lockDB() (*leveldb.DB, func(), error) {
 }
 
 func (trie *HatTrie) SaveLevelDB(path string) error {
-	store, err := OpenLevelDBStore(path)
+	return trie.SaveLevelDBWithFormat(path, DefaultStorageFormat)
+}
+
+func (trie *HatTrie) SaveLevelDBWithFormat(path string, format StorageFormat) error {
+	store, err := OpenLevelDBStoreWithFormat(path, format)
 	if err != nil {
 		return err
 	}
@@ -685,20 +698,24 @@ func (trie *HatTrie) levelDBReferenceSnapshotEntryForStoreLocked(key string, hva
 }
 
 func (trie *HatTrie) scanLevelDBEntryData(visit func(string, []byte) error) error {
-	return trie.scanLevelDBEntryDataForStore(nil, nil, visit)
+	return trie.scanLevelDBEntryDataForStore(nil, nil, DefaultStorageFormat, visit)
 }
 
-func (trie *HatTrie) scanLevelDBEntryDataForStore(currentStore *LevelDBStore, currentDB *leveldb.DB, visit func(string, []byte) error) error {
+func (trie *HatTrie) scanLevelDBEntryDataForStore(currentStore *LevelDBStore, currentDB *leveldb.DB, format StorageFormat, visit func(string, []byte) error) error {
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
 
+	format, err := ParseStorageFormat(string(format))
+	if err != nil {
+		return err
+	}
 	trie.ensureOpen()
 	now := time.Time{}
 	if len(trie.expires) > 0 {
 		now = trie.currentTime()
 	}
 	return trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		data, err := trie.levelDBEntryDataForStoreLocked(entry, currentStore, currentDB)
+		data, err := trie.levelDBEntryDataForStoreLocked(entry, currentStore, currentDB, format)
 		if err != nil {
 			return err
 		}
@@ -710,16 +727,19 @@ func (trie *HatTrie) scanLevelDBEntryDataForStore(currentStore *LevelDBStore, cu
 }
 
 func (trie *HatTrie) levelDBEntryDataLocked(entry Entry) ([]byte, error) {
-	return trie.levelDBEntryDataForStoreLocked(entry, nil, nil)
+	return trie.levelDBEntryDataForStoreLocked(entry, nil, nil, DefaultStorageFormat)
 }
 
-func (trie *HatTrie) levelDBEntryDataForStoreLocked(entry Entry, currentStore *LevelDBStore, currentDB *leveldb.DB) ([]byte, error) {
+func (trie *HatTrie) levelDBEntryDataForStoreLocked(entry Entry, currentStore *LevelDBStore, currentDB *leveldb.DB, format StorageFormat) ([]byte, error) {
 	if entry.Value.Type() == DATAVALUE_TYPE_LEVELDB_REF {
 		if data, ok, err := trie.levelDBReferenceEntryDataForStoreLocked(entry.Key, entry.Value, currentStore, currentDB); err != nil || ok {
 			return data, err
 		}
 	}
 	if entry.Value.Type() == DATAVALUE_TYPE_RAW_BYTES && entry.Value.OnDisk() {
+		if format == StorageFormatBinary {
+			return trie.levelDBDiskBytesEntryDataBinaryLocked(entry)
+		}
 		var buffer bytes.Buffer
 		if err := trie.writeSnapshotEntryJSONLocked(&buffer, entry, ""); err != nil {
 			return nil, err
@@ -730,10 +750,27 @@ func (trie *HatTrie) levelDBEntryDataForStoreLocked(entry Entry, currentStore *L
 	if err != nil {
 		return nil, err
 	}
-	return marshalSnapshotEntryJSON(snapshotEntry)
+	return marshalLevelDBEntry(snapshotEntry, format)
+}
+
+func (trie *HatTrie) levelDBDiskBytesEntryDataBinaryLocked(entry Entry) ([]byte, error) {
+	raw, err := trie.bytesValueLocked(entry.Value)
+	if err != nil {
+		return nil, err
+	}
+	expiresAt := snapshotExpiresAt(trie.expires[entry.Key])
+	var stats *KeyStats
+	if keyStats, ok := trie.keyStats[entry.Key]; ok {
+		keyStats.updateRates()
+		stats = &keyStats
+	}
+	return marshalLevelDBBytesEntryBinary(entry.Key, raw, expiresAt, stats)
 }
 
 func decodeLevelDBEntry(data []byte) (snapshotEntry, error) {
+	if levelDBEntryDataIsBinary(data) {
+		return unmarshalLevelDBEntryBinary(data)
+	}
 	return decodeSnapshotEntryJSONRequiredKey(data, true)
 }
 

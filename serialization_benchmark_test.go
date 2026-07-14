@@ -68,8 +68,16 @@ func BenchmarkSnapshotFormatGzipBestJSON(b *testing.B) {
 }
 
 func BenchmarkLevelDBSaveMaterialized(b *testing.B) {
+	benchmarkLevelDBSaveMaterializedFormat(b, DefaultStorageFormat)
+}
+
+func BenchmarkLevelDBSaveMaterializedJSON(b *testing.B) {
+	benchmarkLevelDBSaveMaterializedFormat(b, StorageFormatJSON)
+}
+
+func benchmarkLevelDBSaveMaterializedFormat(b *testing.B, format StorageFormat) {
 	path := filepath.Join(b.TempDir(), "cache.leveldb")
-	store, err := OpenLevelDBStore(path)
+	store, err := OpenLevelDBStoreWithFormat(path, format)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -98,7 +106,12 @@ func BenchmarkLevelDBSaveColdReferencesStatsChanged(b *testing.B) {
 }
 
 func BenchmarkLevelDBLoadMaterialized(b *testing.B) {
-	store := benchmarkPopulatedLevelDBStore(b)
+	store := benchmarkPopulatedLevelDBStoreWithFormat(b, DefaultStorageFormat)
+	benchmarkLevelDBLoad(b, store, LevelDBLoadPolicy{}, benchmarkSnapshotEntries)
+}
+
+func BenchmarkLevelDBLoadMaterializedJSON(b *testing.B) {
+	store := benchmarkPopulatedLevelDBStoreWithFormat(b, StorageFormatJSON)
 	benchmarkLevelDBLoad(b, store, LevelDBLoadPolicy{}, benchmarkSnapshotEntries)
 }
 
@@ -164,9 +177,13 @@ func benchmarkColdLevelDBTrie(b *testing.B) (*LevelDBStore, *HatTrie) {
 }
 
 func benchmarkPopulatedLevelDBStore(b *testing.B) *LevelDBStore {
+	return benchmarkPopulatedLevelDBStoreWithFormat(b, DefaultStorageFormat)
+}
+
+func benchmarkPopulatedLevelDBStoreWithFormat(b *testing.B, format StorageFormat) *LevelDBStore {
 	b.Helper()
 	path := filepath.Join(b.TempDir(), "cache.leveldb")
-	store, err := OpenLevelDBStore(path)
+	store, err := OpenLevelDBStoreWithFormat(path, format)
 	if err != nil {
 		b.Fatal(err)
 	}

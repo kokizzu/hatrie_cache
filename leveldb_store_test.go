@@ -14,6 +14,145 @@ import (
 	"time"
 )
 
+func TestParseStorageFormat(t *testing.T) {
+	for _, tt := range []struct {
+		value string
+		want  StorageFormat
+	}{
+		{value: "", want: StorageFormatBinary},
+		{value: " binary ", want: StorageFormatBinary},
+		{value: "bin", want: StorageFormatBinary},
+		{value: "json", want: StorageFormatJSON},
+	} {
+		got, err := ParseStorageFormat(tt.value)
+		if err != nil {
+			t.Fatalf("ParseStorageFormat(%q) error = %v", tt.value, err)
+		}
+		if got != tt.want {
+			t.Fatalf("ParseStorageFormat(%q) = %q, want %q", tt.value, got, tt.want)
+		}
+	}
+	if _, err := ParseStorageFormat("msgpack"); err == nil {
+		t.Fatal("ParseStorageFormat(msgpack) error = nil, want unsupported format error")
+	}
+}
+
+func TestLevelDBStoreDefaultFormatWritesBinaryAndLoadsLegacyJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("binary", "value")
+	source.UpsertBytes("blob", []byte{0, 1, 2, 3})
+
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB(default) error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	data, ok, err := store.entryData("binary")
+	if err != nil || !ok {
+		t.Fatalf("entryData(binary) = %v/%v, want saved record", err, ok)
+	}
+	if !levelDBEntryDataIsBinary(data) {
+		t.Fatalf("default LevelDB record header = % x, want binary", data[:shortHeaderLen(data)])
+	}
+
+	if err := store.db.Put(levelDBKey("legacy"), []byte(`{"key":"legacy","type":"string","string":"json"}`), nil); err != nil {
+		t.Fatalf("Put(legacy JSON) error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	count, err := store.Load(loaded)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("Load() count = %d, want 3", count)
+	}
+	if got := loaded.GetString("binary"); got != "value" {
+		t.Fatalf("loaded binary = %q, want value", got)
+	}
+	if got := loaded.GetString("legacy"); got != "json" {
+		t.Fatalf("loaded legacy = %q, want json", got)
+	}
+	if got := loaded.GetBytes("blob"); !bytes.Equal(got, []byte{0, 1, 2, 3}) {
+		t.Fatalf("loaded blob = %v, want [0 1 2 3]", got)
+	}
+}
+
+func TestLevelDBStoreJSONFormatWritesPreviousLayout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStoreWithFormat(path, StorageFormatJSON)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStoreWithFormat(json) error = %v", err)
+	}
+	defer store.Close()
+	source := newTestTrie(t)
+	source.UpsertString("json", "value")
+
+	if err := store.Save(source); err != nil {
+		t.Fatalf("Save(json format) error = %v", err)
+	}
+	data, ok, err := store.entryData("json")
+	if err != nil || !ok {
+		t.Fatalf("entryData(json) = %v/%v, want saved record", err, ok)
+	}
+	if levelDBEntryDataIsBinary(data) || len(data) == 0 || data[0] != '{' {
+		t.Fatalf("json LevelDB record = %q, want previous JSON layout", data)
+	}
+	entry, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(json) error = %v", err)
+	}
+	if entry.Key != "json" || entry.Type != "string" || entry.String != "value" {
+		t.Fatalf("decoded JSON entry = %#v, want string value", entry)
+	}
+}
+
+func TestLevelDBBinaryBytesRecordAvoidsBase64StorageExpansion(t *testing.T) {
+	raw := testPayload(256)
+	entry := snapshotEntry{
+		Key:   "blob",
+		Type:  "bytes",
+		Bytes: base64.StdEncoding.EncodeToString(raw),
+	}
+	jsonData, err := marshalLevelDBEntry(entry, StorageFormatJSON)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(json) error = %v", err)
+	}
+	binaryData, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary) error = %v", err)
+	}
+	if !levelDBEntryDataIsBinary(binaryData) {
+		t.Fatalf("binary record header = % x, want binary", binaryData[:shortHeaderLen(binaryData)])
+	}
+	if len(binaryData) >= len(jsonData) {
+		t.Fatalf("binary record size = %d, want smaller than JSON size %d", len(binaryData), len(jsonData))
+	}
+	decoded, err := decodeLevelDBEntry(binaryData)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary) error = %v", err)
+	}
+	value, err := base64.StdEncoding.DecodeString(decoded.Bytes)
+	if err != nil {
+		t.Fatalf("DecodeString(decoded bytes) error = %v", err)
+	}
+	if decoded.Key != "blob" || decoded.Type != "bytes" || !bytes.Equal(value, raw) {
+		t.Fatalf("decoded binary entry = %#v bytes %v, want original", decoded, value)
+	}
+}
+
+func shortHeaderLen(data []byte) int {
+	if len(data) < len(levelDBBinaryMagic) {
+		return len(data)
+	}
+	return len(levelDBBinaryMagic)
+}
+
 func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
@@ -2169,9 +2308,9 @@ func TestLevelDBStoreSavePreservesUnchangedColdReferenceRecordBytes(t *testing.T
 
 func TestLevelDBStoreSaveOmitsUnrelatedNullSnapshotFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
-	store, err := OpenLevelDBStore(path)
+	store, err := OpenLevelDBStoreWithFormat(path, StorageFormatJSON)
 	if err != nil {
-		t.Fatalf("OpenLevelDBStore() error = %v", err)
+		t.Fatalf("OpenLevelDBStoreWithFormat(json) error = %v", err)
 	}
 	defer store.Close()
 
