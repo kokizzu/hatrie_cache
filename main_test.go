@@ -1375,6 +1375,127 @@ func TestCuckooFilterOperations(t *testing.T) {
 	}
 }
 
+func TestCuckooFilterRelocatesIntoReachableEmptyBucket(t *testing.T) {
+	filter := newCuckooFilterDataWithShape(4, minCuckooFilterFingerprintBits)
+	mask := cuckooFilterFingerprintMask(filter.fingerprintBits)
+
+	for candidate := 0; candidate < 10000; candidate++ {
+		value := "relocate-" + strconv.Itoa(candidate)
+		hash, fp, index, alternate := cuckooFilterPlacement(&filter, value)
+		currentIndex := index
+		if (splitmix64(hash)^uint64(fp))&1 == 1 {
+			currentIndex = alternate
+		}
+		relocationSlot := int(splitmix64(hash+uint64(fp)) % uint64(cuckooFilterBucketSize))
+
+		for evicted := uint16(1); evicted <= mask; evicted++ {
+			if evicted == fp {
+				continue
+			}
+			target := filter.alternateIndex(currentIndex, evicted)
+			if target == index || target == alternate {
+				continue
+			}
+
+			filter = newCuckooFilterDataWithShape(4, minCuckooFilterFingerprintBits)
+			fillCuckooBucketExcluding(t, &filter, index, fp)
+			fillCuckooBucketExcluding(t, &filter, alternate, fp)
+			filter.fingerprints[filter.bucketOffset(currentIndex, relocationSlot)] = evicted
+			filter.count = 2 * uint64(cuckooFilterBucketSize)
+
+			if !cuckooBucketFull(&filter, index) || !cuckooBucketFull(&filter, alternate) || filter.containsFingerprint(index, alternate, fp) {
+				continue
+			}
+
+			if !filter.Add(value) {
+				t.Fatalf("Add(%q) = false, want relocation into bucket %d", value, target)
+			}
+			if filter.count != 2*uint64(cuckooFilterBucketSize)+1 {
+				t.Fatalf("count = %d, want %d after relocation", filter.count, 2*uint64(cuckooFilterBucketSize)+1)
+			}
+			if !filter.Contains(value) {
+				t.Fatalf("Contains(%q) = false after relocation", value)
+			}
+			if !filter.bucketContains(target, evicted) {
+				t.Fatalf("target bucket %d does not contain relocated fingerprint %d", target, evicted)
+			}
+			return
+		}
+	}
+	t.Fatal("could not build a deterministic Cuckoo filter relocation scenario")
+}
+
+func TestCuckooFilterRelocationFailureRollsBack(t *testing.T) {
+	filter := newCuckooFilterDataWithShape(2, minCuckooFilterFingerprintBits)
+	mask := cuckooFilterFingerprintMask(filter.fingerprintBits)
+	for idx := range filter.fingerprints {
+		filter.fingerprints[idx] = uint16(idx%int(mask)) + 1
+	}
+	filter.count = uint64(len(filter.fingerprints))
+	before := append([]uint16(nil), filter.fingerprints...)
+
+	for candidate := 0; candidate < 10000; candidate++ {
+		value := "full-" + strconv.Itoa(candidate)
+		_, fp, index, alternate := cuckooFilterPlacement(&filter, value)
+		if filter.containsFingerprint(index, alternate, fp) {
+			continue
+		}
+
+		if filter.Add(value) {
+			t.Fatalf("Add(%q) = true on full Cuckoo filter, want failure", value)
+		}
+		if filter.count != uint64(len(before)) {
+			t.Fatalf("count = %d after failed relocation, want %d", filter.count, len(before))
+		}
+		if !reflect.DeepEqual(filter.fingerprints, before) {
+			t.Fatalf("fingerprints changed after failed relocation: got %#v, want %#v", filter.fingerprints, before)
+		}
+		return
+	}
+	t.Fatal("could not find a non-matching value for a full Cuckoo filter")
+}
+
+func cuckooFilterPlacement(filter *cuckooFilterData, value interface{}) (uint64, uint16, uint64, uint64) {
+	key := mustCuckooFilterItemKey(value)
+	hash := bloomFilterFNV64a(key)
+	fp := filter.fingerprint(hash)
+	index := filter.index(hash)
+	return hash, fp, index, filter.alternateIndex(index, fp)
+}
+
+func fillCuckooBucketExcluding(t *testing.T, filter *cuckooFilterData, index uint64, excluded ...uint16) {
+	t.Helper()
+	next := uint16(1)
+	for slot := 0; slot < int(cuckooFilterBucketSize); slot++ {
+		for cuckooFingerprintExcluded(next, excluded) {
+			next++
+			if next > cuckooFilterFingerprintMask(filter.fingerprintBits) {
+				t.Fatalf("not enough Cuckoo fingerprints to fill bucket %d", index)
+			}
+		}
+		filter.fingerprints[filter.bucketOffset(index, slot)] = next
+		next++
+	}
+}
+
+func cuckooFingerprintExcluded(fp uint16, excluded []uint16) bool {
+	for _, candidate := range excluded {
+		if fp == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func cuckooBucketFull(filter *cuckooFilterData, index uint64) bool {
+	for slot := 0; slot < int(cuckooFilterBucketSize); slot++ {
+		if filter.fingerprints[filter.bucketOffset(index, slot)] == 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func TestCuckooFilterRejectsInvalidConfig(t *testing.T) {
 	ht := newTestTrie(t)
 
