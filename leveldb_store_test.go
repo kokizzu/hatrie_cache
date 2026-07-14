@@ -113,6 +113,45 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestLevelDBLoadUsesSingleExpirationClock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	base := time.Unix(4050, 0)
+
+	source := newTestTrie(t)
+	source.now = func() time.Time { return base }
+	source.UpsertString("soon", "value")
+	if !source.Expire("soon", time.Second) {
+		t.Fatal("Expire(soon) = false, want true")
+	}
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	clockReads := 0
+	loaded.now = func() time.Time {
+		clockReads++
+		if clockReads == 1 {
+			return base
+		}
+		return base.Add(2 * time.Second)
+	}
+	count, err := loaded.LoadLevelDB(path)
+	if err != nil {
+		t.Fatalf("LoadLevelDB() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("LoadLevelDB() count = %d, want 1", count)
+	}
+	if clockReads != 1 {
+		t.Fatalf("LoadLevelDB clock reads = %d, want one captured load time", clockReads)
+	}
+	loaded.now = func() time.Time { return base }
+	if got := loaded.GetString("soon"); got != "value" {
+		t.Fatalf("soon after LevelDB load = %q, want value", got)
+	}
+}
+
 func TestLevelDBStoreRoundTripPreservesBlankKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

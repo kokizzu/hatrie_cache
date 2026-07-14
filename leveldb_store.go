@@ -168,7 +168,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 			}
 			continue
 		}
-		if _, err := trie.applySnapshotOperationLocked(operation.operation); err != nil {
+		if _, err := trie.applySnapshotOperationAtLocked(operation.operation, now); err != nil {
 			return LevelDBLoadResult{}, err
 		}
 		result.ValuesLoaded++

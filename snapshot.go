@@ -109,8 +109,10 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 		operations = append(operations, operation)
 	}
 
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
 	for _, operation := range operations {
-		if err := ht.applySnapshotOperation(operation); err != nil {
+		if _, err := ht.applySnapshotOperationAtLocked(operation, now); err != nil {
 			return SnapshotMetadata{}, err
 		}
 	}
@@ -481,11 +483,15 @@ func (ht *HatTrie) applySnapshotOperation(operation snapshotOperation) error {
 }
 
 func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (HatValue, error) {
+	return ht.applySnapshotOperationAtLocked(operation, ht.currentTime())
+}
+
+func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, now time.Time) (HatValue, error) {
 	entry := operation.entry
 	if err := validateKey(entry.Key); err != nil {
 		return HatValue{}, err
 	}
-	if entry.ExpiresAt != nil && !ht.currentTime().Before(*entry.ExpiresAt) {
+	if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
 		if ht.deleteLocked(entry.Key) {
 			ht.recordExpirationLocked(entry.Key)
 		}

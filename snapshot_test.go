@@ -405,6 +405,46 @@ func TestLoadSnapshotSkipsExpiredEntries(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotUsesSingleExpirationClock(t *testing.T) {
+	base := time.Unix(3025, 0)
+	expiresAt := base.Add(time.Second)
+	data := snapshotFile{
+		Version: snapshotVersion,
+		Entries: []snapshotEntry{
+			{Key: "soon", Type: "string", String: "value", ExpiresAt: &expiresAt},
+		},
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	clockReads := 0
+	ht.now = func() time.Time {
+		clockReads++
+		if clockReads == 1 {
+			return base
+		}
+		return base.Add(2 * time.Second)
+	}
+	if err := ht.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if clockReads != 1 {
+		t.Fatalf("LoadSnapshot clock reads = %d, want one captured load time", clockReads)
+	}
+	ht.now = func() time.Time { return base }
+	if got := ht.GetString("soon"); got != "value" {
+		t.Fatalf("soon after snapshot load = %q, want value", got)
+	}
+}
+
 func TestLoadSnapshotSchedulesExpirationForVacuum(t *testing.T) {
 	now := time.Unix(3050, 0)
 	expiresAt := now.Add(time.Minute)
