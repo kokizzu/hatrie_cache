@@ -10,6 +10,22 @@ import (
 	"time"
 )
 
+func writeCommandJournalTestEntries(t *testing.T, path string, entries ...commandJournalEntry) {
+	t.Helper()
+	data := []byte{}
+	for _, entry := range entries {
+		payload, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatalf("Marshal(commandJournalEntry) error = %v", err)
+		}
+		data = append(data, payload...)
+		data = append(data, '\n')
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+}
+
 func TestCommandJournalReplaysMutatingCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)
@@ -855,6 +871,94 @@ func TestCommandJournalCloseIsIdempotentAndRejectsWork(t *testing.T) {
 	}
 	if err := journal.SaveSnapshot(ht, filepath.Join(t.TempDir(), "snapshot.json")); !errors.Is(err, ErrCommandJournalClosed) {
 		t.Fatalf("SaveSnapshot after close error = %v, want ErrCommandJournalClosed", err)
+	}
+}
+
+func TestCommandJournalRejectsAppendAfterSequenceExhaustionWithoutMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	journal.nextSequence = ^uint64(0)
+	ht := newTestTrie(t)
+
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "last", Value: "ok"}); !response.OK {
+		t.Fatalf("ExecuteCommand(final sequence) = %#v, want ok", response)
+	}
+	if got := journal.Sequence(); got != ^uint64(0) {
+		t.Fatalf("Sequence() after final append = %d, want max uint64", got)
+	}
+	if got := ht.GetString("last"); got != "ok" {
+		t.Fatalf("final journaled command stored %q, want ok", got)
+	}
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Sequence != ^uint64(0) {
+		t.Fatalf("entries after final append = %#v, want one max sequence entry", entries)
+	}
+
+	response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "overflow", Value: "bad"})
+	if response.OK || response.Message != ErrCommandJournalSequenceExhausted.Error() {
+		t.Fatalf("ExecuteCommand(exhausted) = %#v, want sequence exhausted error", response)
+	}
+	if ht.Exists("overflow") {
+		t.Fatal("ExecuteCommand(exhausted) mutated trie")
+	}
+	entries, err = readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries(after exhausted) error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Sequence != ^uint64(0) {
+		t.Fatalf("entries after exhausted append = %#v, want original max sequence entry only", entries)
+	}
+}
+
+func TestOpenCommandJournalAtMaxSequenceReplaysButRejectsAppend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	writeCommandJournalTestEntries(t, path, commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: ^uint64(0),
+		Request:  CacheCommandRequest{Command: "SETSTR", Key: "last", Value: "ok"},
+	})
+
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(max sequence) error = %v", err)
+	}
+	if got := journal.Sequence(); got != ^uint64(0) {
+		t.Fatalf("Sequence() after open = %d, want max uint64", got)
+	}
+	tail, err := journal.Tail(^uint64(0)-1, 0)
+	if err != nil {
+		t.Fatalf("Tail(max-1) error = %v", err)
+	}
+	if tail.LastSequence != ^uint64(0) || len(tail.Entries) != 1 || tail.Entries[0].Sequence != ^uint64(0) {
+		t.Fatalf("Tail(max-1) = %#v, want max sequence entry", tail)
+	}
+
+	replayed := newTestTrie(t)
+	if maxSequence, err := journal.Replay(replayed, 0); err != nil || maxSequence != ^uint64(0) {
+		t.Fatalf("Replay(max sequence) = %d/%v, want max/nil", maxSequence, err)
+	}
+	if got := replayed.GetString("last"); got != "ok" {
+		t.Fatalf("replayed last = %q, want ok", got)
+	}
+	response := journal.ExecuteCommand(replayed, CacheCommandRequest{Command: "SETSTR", Key: "overflow", Value: "bad"})
+	if response.OK || response.Message != ErrCommandJournalSequenceExhausted.Error() {
+		t.Fatalf("ExecuteCommand(after max open) = %#v, want sequence exhausted error", response)
+	}
+	if replayed.Exists("overflow") {
+		t.Fatal("ExecuteCommand(after max open) mutated trie")
+	}
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Sequence != ^uint64(0) {
+		t.Fatalf("entries after rejected append = %#v, want original max sequence entry only", entries)
 	}
 }
 

@@ -25,6 +25,7 @@ const (
 
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
 var ErrCommandJournalCompacted = errors.New("hatriecache: command journal entries are compacted")
+var ErrCommandJournalSequenceExhausted = errors.New("hatriecache: command journal sequence is exhausted")
 
 type CommandJournalRecord struct {
 	Sequence uint64              `json:"sequence"`
@@ -58,11 +59,12 @@ type commandJournalEntry struct {
 }
 
 type CommandJournal struct {
-	mu           sync.Mutex
-	path         string
-	file         *os.File
-	closed       bool
-	nextSequence uint64
+	mu                sync.Mutex
+	path              string
+	file              *os.File
+	closed            bool
+	nextSequence      uint64
+	sequenceExhausted bool
 }
 
 func OpenCommandJournal(path string) (*CommandJournal, error) {
@@ -95,7 +97,12 @@ func OpenCommandJournal(path string) (*CommandJournal, error) {
 			maxSequence = entry.Sequence
 		}
 	}
-	return &CommandJournal{path: path, file: file, nextSequence: maxSequence + 1}, nil
+	journal := &CommandJournal{path: path, file: file}
+	journal.advanceSequenceLocked(maxSequence)
+	if journal.nextSequence == 0 && !journal.sequenceExhausted {
+		journal.nextSequence = 1
+	}
+	return journal, nil
 }
 
 func (journal *CommandJournal) Close() error {
@@ -150,9 +157,7 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 		}
 		trie.ExecuteCommand(entry.Request)
 	}
-	if maxSequence >= journal.nextSequence {
-		journal.nextSequence = maxSequence + 1
-	}
+	journal.advanceSequenceLocked(maxSequence)
 	return maxSequence, nil
 }
 
@@ -206,9 +211,13 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) error {
 	if err := journal.ensureAppendFileLocked(); err != nil {
 		return err
 	}
+	sequence, err := journal.nextAppendSequenceLocked()
+	if err != nil {
+		return err
+	}
 	entry := commandJournalEntry{
 		Version:  commandJournalVersion,
-		Sequence: journal.nextSequence,
+		Sequence: sequence,
 		Request:  request,
 	}
 	data, err := json.Marshal(entry)
@@ -223,7 +232,7 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) error {
 	if err := journal.file.Sync(); err != nil {
 		return err
 	}
-	journal.nextSequence++
+	journal.markAppendedLocked(sequence)
 	return nil
 }
 
@@ -297,10 +306,40 @@ func openCommandJournalAppendFile(path string) (*os.File, error) {
 }
 
 func (journal *CommandJournal) lastSequenceLocked() uint64 {
+	if journal.sequenceExhausted {
+		return ^uint64(0)
+	}
 	if journal.nextSequence == 0 {
 		return 0
 	}
 	return journal.nextSequence - 1
+}
+
+func (journal *CommandJournal) advanceSequenceLocked(maxSequence uint64) {
+	if maxSequence == 0 || journal.sequenceExhausted || maxSequence <= journal.lastSequenceLocked() {
+		return
+	}
+	if maxSequence == ^uint64(0) {
+		journal.nextSequence = ^uint64(0)
+		journal.sequenceExhausted = true
+		return
+	}
+	journal.nextSequence = maxSequence + 1
+}
+
+func (journal *CommandJournal) nextAppendSequenceLocked() (uint64, error) {
+	if journal.sequenceExhausted || journal.nextSequence == 0 {
+		return 0, ErrCommandJournalSequenceExhausted
+	}
+	return journal.nextSequence, nil
+}
+
+func (journal *CommandJournal) markAppendedLocked(sequence uint64) {
+	if sequence == ^uint64(0) {
+		journal.sequenceExhausted = true
+		return
+	}
+	journal.nextSequence = sequence + 1
 }
 
 func readCommandJournalEntries(path string) ([]commandJournalEntry, error) {
