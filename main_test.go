@@ -259,6 +259,122 @@ func TestKeysRespectEmbeddedTrieLengthLimit(t *testing.T) {
 	}
 }
 
+func TestCheckedLifecycleAPIsRespectEmbeddedTrieLengthLimit(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(275, 0)
+	ht.now = func() time.Time { return now }
+
+	key := strings.Repeat("l", maxHATTrieKeyLength)
+	if err := ht.UpsertStringChecked(key, "value"); err != nil {
+		t.Fatalf("UpsertStringChecked(max key) error = %v, want nil", err)
+	}
+	if exists, err := ht.ExistsChecked(key); err != nil || !exists {
+		t.Fatalf("ExistsChecked(max key) = %v/%v, want true/nil", exists, err)
+	}
+	if stats, ok, err := ht.StatsForKeyChecked(key); err != nil || !ok || stats.Writes != 1 {
+		t.Fatalf("StatsForKeyChecked(max key) = %#v/%v/%v, want one write", stats, ok, err)
+	}
+	if ok, err := ht.ExpireChecked(key, time.Minute); err != nil || !ok {
+		t.Fatalf("ExpireChecked(max key) = %v/%v, want true/nil", ok, err)
+	}
+	if ttl, err := ht.TTLChecked(key); err != nil || ttl != time.Minute {
+		t.Fatalf("TTLChecked(max key) = %s/%v, want 1m/nil", ttl, err)
+	}
+	if ok, err := ht.PersistChecked(key); err != nil || !ok {
+		t.Fatalf("PersistChecked(max key) = %v/%v, want true/nil", ok, err)
+	}
+	if ttl, err := ht.TTLChecked(key); err != nil || ttl != NoTTL {
+		t.Fatalf("TTLChecked(max key after persist) = %s/%v, want NoTTL/nil", ttl, err)
+	}
+	if ok, err := ht.ExpireAtChecked(key, now.Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("ExpireAtChecked(max key) = %v/%v, want true/nil", ok, err)
+	}
+	if deleted, err := ht.DeleteChecked(key); err != nil || !deleted {
+		t.Fatalf("DeleteChecked(max key) = %v/%v, want true/nil", deleted, err)
+	}
+	if exists, err := ht.ExistsChecked(key); err != nil || exists {
+		t.Fatalf("ExistsChecked(deleted max key) = %v/%v, want false/nil", exists, err)
+	}
+
+	tooLong := strings.Repeat("x", maxHATTrieKeyLength+1)
+	beforeSize := ht.Size()
+	beforeStats := ht.Stats()
+	assertKeyLengthError := func(name string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), "key length") {
+			t.Fatalf("%s error = %v, want key length error", name, err)
+		}
+	}
+	if _, err := ht.DeleteChecked(tooLong); err == nil {
+		t.Fatal("DeleteChecked(too-long key) error = nil, want key length error")
+	} else {
+		assertKeyLengthError("DeleteChecked(too-long key)", err)
+	}
+	if _, err := ht.ExpireChecked(tooLong, time.Second); err == nil {
+		t.Fatal("ExpireChecked(too-long key) error = nil, want key length error")
+	} else {
+		assertKeyLengthError("ExpireChecked(too-long key)", err)
+	}
+	if _, err := ht.ExpireAtChecked(tooLong, now.Add(time.Second)); err == nil {
+		t.Fatal("ExpireAtChecked(too-long key) error = nil, want key length error")
+	} else {
+		assertKeyLengthError("ExpireAtChecked(too-long key)", err)
+	}
+	if _, err := ht.PersistChecked(tooLong); err == nil {
+		t.Fatal("PersistChecked(too-long key) error = nil, want key length error")
+	} else {
+		assertKeyLengthError("PersistChecked(too-long key)", err)
+	}
+	if ttl, err := ht.TTLChecked(tooLong); err == nil || ttl != NoTTL {
+		t.Fatalf("TTLChecked(too-long key) = %s/%v, want NoTTL/key length error", ttl, err)
+	} else {
+		assertKeyLengthError("TTLChecked(too-long key)", err)
+	}
+	if exists, err := ht.ExistsChecked(tooLong); err == nil || exists {
+		t.Fatalf("ExistsChecked(too-long key) = %v/%v, want false/key length error", exists, err)
+	} else {
+		assertKeyLengthError("ExistsChecked(too-long key)", err)
+	}
+	if stats, ok, err := ht.StatsForKeyChecked(tooLong); err == nil || ok || stats != (KeyStats{}) {
+		t.Fatalf("StatsForKeyChecked(too-long key) = %#v/%v/%v, want zero/false/key length error", stats, ok, err)
+	} else {
+		assertKeyLengthError("StatsForKeyChecked(too-long key)", err)
+	}
+	if got := ht.Size(); got != beforeSize {
+		t.Fatalf("checked oversized lifecycle APIs changed size to %d, want %d", got, beforeSize)
+	}
+	if got := ht.Stats(); !cacheStatsEqual(got, beforeStats) {
+		t.Fatalf("checked oversized lifecycle APIs changed stats to %#v, want %#v", got, beforeStats)
+	}
+}
+
+func TestCheckedPrefixAPIsRespectEmbeddedTrieLengthLimit(t *testing.T) {
+	ht := newTestTrie(t)
+
+	maxPrefix := strings.Repeat("p", maxHATTrieKeyLength)
+	ht.UpsertString(maxPrefix, "value")
+	if keys, err := ht.KeysWithPrefixChecked(maxPrefix, true); err != nil || !reflect.DeepEqual(keys, []string{maxPrefix}) {
+		t.Fatalf("KeysWithPrefixChecked(max prefix) = %#v/%v, want max key", keys, err)
+	}
+	if entries, err := ht.EntriesWithPrefixChecked(maxPrefix, true); err != nil || len(entries) != 1 || entries[0].Key != maxPrefix {
+		t.Fatalf("EntriesWithPrefixChecked(max prefix) = %#v/%v, want max entry", entries, err)
+	}
+
+	tooLong := maxPrefix + "x"
+	if keys, err := ht.KeysWithPrefixChecked(tooLong, true); err == nil || keys != nil || !strings.Contains(err.Error(), "key length") {
+		t.Fatalf("KeysWithPrefixChecked(too-long prefix) = %#v/%v, want nil/key length error", keys, err)
+	}
+	if entries, err := ht.EntriesWithPrefixChecked(tooLong, true); err == nil || entries != nil || !strings.Contains(err.Error(), "key length") {
+		t.Fatalf("EntriesWithPrefixChecked(too-long prefix) = %#v/%v, want nil/key length error", entries, err)
+	}
+	if got := ht.KeysWithPrefix(tooLong, true); len(got) != 0 {
+		t.Fatalf("KeysWithPrefix legacy wrapper = %#v, want empty", got)
+	}
+	if got := ht.EntriesWithPrefix(tooLong, true); len(got) != 0 {
+		t.Fatalf("EntriesWithPrefix legacy wrapper = %#v, want empty", got)
+	}
+}
+
 func TestCheckedUpsertAPIsRespectEmbeddedTrieLengthLimit(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -4468,6 +4584,28 @@ func TestExpireAtPastDeletesImmediatelyAndReusesStorage(t *testing.T) {
 	ht.UpsertBytes("next", []byte("value"))
 	if got := ht.Get("next").Index; got != idx {
 		t.Fatalf("raw storage after immediate ExpireAt = %d, want reused %d", got, idx)
+	}
+}
+
+func TestExpireAtPastRecordsSingleDeleteWrite(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(260, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("key", "value")
+	before := ht.Stats()
+	if !ht.ExpireAt("key", now) {
+		t.Fatal("ExpireAt(key, now) = false, want true")
+	}
+	stats := ht.Stats()
+	if stats.Deletes != before.Deletes+1 {
+		t.Fatalf("deletes after immediate ExpireAt = %d, want %d", stats.Deletes, before.Deletes+1)
+	}
+	if stats.Writes != before.Writes+1 {
+		t.Fatalf("writes after immediate ExpireAt = %d, want %d", stats.Writes, before.Writes+1)
+	}
+	if keyStats, ok := ht.StatsForKey("key"); ok {
+		t.Fatalf("StatsForKey(deleted key) = %#v, true; want false", keyStats)
 	}
 }
 

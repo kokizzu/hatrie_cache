@@ -1564,22 +1564,32 @@ func (ht *HatTrie) Stats() CacheStats {
 
 // StatsForKey returns access metadata for an existing key.
 func (ht *HatTrie) StatsForKey(key string) (KeyStats, bool) {
+	stats, ok, _ := ht.StatsForKeyChecked(key)
+	return stats, ok
+}
+
+// StatsForKeyChecked returns access metadata for an existing key and reports
+// key validation errors.
+func (ht *HatTrie) StatsForKeyChecked(key string) (KeyStats, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	if err := validateKey(key); err != nil {
+		return KeyStats{}, false, err
+	}
 	ht.ensureOpen()
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
 		delete(ht.keyStats, key)
-		return KeyStats{}, false
+		return KeyStats{}, false, nil
 	}
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
 	if ht.expireIfNeededLocked(key, hval) {
-		return KeyStats{}, false
+		return KeyStats{}, false, nil
 	}
 	stats, ok := ht.keyStats[key]
-	return stats, ok
+	return stats, ok, nil
 }
 
 func (ht *HatTrie) restoreKeyStats(key string, stats *KeyStats) {
@@ -1633,87 +1643,135 @@ func (ht *HatTrie) LoadStats(path string) error {
 // an existing key immediately. It returns false when the key is missing or has
 // already expired.
 func (ht *HatTrie) Expire(key string, ttl time.Duration) bool {
+	ok, _ := ht.ExpireChecked(key, ttl)
+	return ok
+}
+
+// ExpireChecked sets a relative TTL for an existing key and reports key
+// validation errors.
+func (ht *HatTrie) ExpireChecked(key string, ttl time.Duration) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	if err := validateKey(key); err != nil {
+		return false, err
+	}
 	if ttl <= 0 {
 		deleted := ht.deleteLocked(key)
 		if deleted {
 			ht.recordDeleteLocked(key)
 		}
-		return deleted
+		return deleted, nil
 	}
-	ok := ht.expireAtLocked(key, ht.currentTime().Add(ttl))
+	ok, deleted := ht.expireAtLocked(key, ht.currentTime().Add(ttl))
 	if ok {
-		ht.recordWriteLocked(key)
+		if deleted {
+			ht.recordDeleteLocked(key)
+		} else {
+			ht.recordWriteLocked(key)
+		}
 	}
-	return ok
+	return ok, nil
 }
 
 // ExpireAt sets an absolute expiration time for an existing key. Expiration is
 // enforced when the key is read or mutated.
 func (ht *HatTrie) ExpireAt(key string, at time.Time) bool {
+	ok, _ := ht.ExpireAtChecked(key, at)
+	return ok
+}
+
+// ExpireAtChecked sets an absolute expiration time for an existing key and
+// reports key validation errors.
+func (ht *HatTrie) ExpireAtChecked(key string, at time.Time) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	ok := ht.expireAtLocked(key, at)
-	if ok {
-		ht.recordWriteLocked(key)
+	if err := validateKey(key); err != nil {
+		return false, err
 	}
-	return ok
+	ok, deleted := ht.expireAtLocked(key, at)
+	if ok {
+		if deleted {
+			ht.recordDeleteLocked(key)
+		} else {
+			ht.recordWriteLocked(key)
+		}
+	}
+	return ok, nil
 }
 
 // Persist removes an existing key's expiration.
 func (ht *HatTrie) Persist(key string) bool {
+	ok, _ := ht.PersistChecked(key)
+	return ok
+}
+
+// PersistChecked removes an existing key's expiration and reports key
+// validation errors.
+func (ht *HatTrie) PersistChecked(key string) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	if err := validateKey(key); err != nil {
+		return false, err
+	}
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
 		ht.clearExpirationLocked(key)
-		return false
+		return false, nil
 	}
 
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
 	if ht.expireIfNeededLocked(key, hval) {
-		return false
+		return false, nil
 	}
 	if _, ok := ht.expires[key]; !ok {
-		return false
+		return false, nil
 	}
 
 	ht.clearExpirationLocked(key)
 	hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 	*rawPtr = hval.toValue()
 	ht.recordWriteLocked(key)
-	return true
+	return true, nil
 }
 
 // TTL returns the remaining TTL for key, or NoTTL when the key is missing,
 // expired, or has no expiration.
 func (ht *HatTrie) TTL(key string) time.Duration {
+	ttl, _ := ht.TTLChecked(key)
+	return ttl
+}
+
+// TTLChecked returns the remaining TTL for key and reports key validation
+// errors.
+func (ht *HatTrie) TTLChecked(key string) (time.Duration, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	if err := validateKey(key); err != nil {
+		return NoTTL, err
+	}
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
 		ht.clearExpirationLocked(key)
 		ht.recordReadLocked(false, key)
-		return NoTTL
+		return NoTTL, nil
 	}
 
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
 	if ht.expireIfNeededLocked(key, hval) {
 		ht.recordReadLocked(false, key)
-		return NoTTL
+		return NoTTL, nil
 	}
 
 	expiresAt, ok := ht.expires[key]
 	if !ok {
 		ht.recordReadLocked(false, key)
-		return NoTTL
+		return NoTTL, nil
 	}
 	ttl := expiresAt.Sub(ht.currentTime())
 	if ttl <= 0 {
@@ -1721,10 +1779,10 @@ func (ht *HatTrie) TTL(key string) time.Duration {
 			ht.recordExpirationLocked(key)
 		}
 		ht.recordReadLocked(false, key)
-		return NoTTL
+		return NoTTL, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ttl
+	return ttl, nil
 }
 
 // VacuumExpired removes expired keys immediately and returns the number of
@@ -1834,15 +1892,28 @@ func (ht *HatTrie) Keys(sorted bool) []string {
 // KeysWithPrefix returns all non-expired keys that start with prefix. Prefixes
 // and keys may contain NUL bytes.
 func (ht *HatTrie) KeysWithPrefix(prefix string, sorted bool) []string {
+	keys, err := ht.KeysWithPrefixChecked(prefix, sorted)
+	if err != nil {
+		return []string{}
+	}
+	return keys
+}
+
+// KeysWithPrefixChecked returns all non-expired keys that start with prefix and
+// reports prefix validation errors.
+func (ht *HatTrie) KeysWithPrefixChecked(prefix string, sorted bool) ([]string, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	entries := ht.entriesWithPrefixLocked(prefix, sorted)
+	entries, err := ht.entriesWithPrefixLockedChecked(prefix, sorted)
+	if err != nil {
+		return nil, err
+	}
 	keys := make([]string, len(entries))
 	for i, entry := range entries {
 		keys[i] = entry.Key
 	}
-	return keys
+	return keys, nil
 }
 
 // Entries returns all non-expired key/value metadata pairs. Returned HatValue
@@ -1854,21 +1925,41 @@ func (ht *HatTrie) Entries(sorted bool) []Entry {
 // EntriesWithPrefix returns all non-expired key/value metadata pairs whose keys
 // start with prefix.
 func (ht *HatTrie) EntriesWithPrefix(prefix string, sorted bool) []Entry {
+	entries, err := ht.EntriesWithPrefixChecked(prefix, sorted)
+	if err != nil {
+		return []Entry{}
+	}
+	return entries
+}
+
+// EntriesWithPrefixChecked returns all non-expired key/value metadata pairs
+// whose keys start with prefix and reports prefix validation errors.
+func (ht *HatTrie) EntriesWithPrefixChecked(prefix string, sorted bool) ([]Entry, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	return ht.entriesWithPrefixLocked(prefix, sorted)
+	return ht.entriesWithPrefixLockedChecked(prefix, sorted)
 }
 
 // Exists reports whether key exists without hydrating a cold LevelDB value.
 func (ht *HatTrie) Exists(key string) bool {
+	ok, _ := ht.ExistsChecked(key)
+	return ok
+}
+
+// ExistsChecked reports whether key exists without hydrating a cold LevelDB
+// value and reports key validation errors.
+func (ht *HatTrie) ExistsChecked(key string) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	if err := validateKey(key); err != nil {
+		return false, err
+	}
 	hval := ht.peekLocked(key)
 	hit := !hval.Empty()
 	ht.recordReadLocked(hit, key)
-	return hit
+	return hit, nil
 }
 
 func (ht *HatTrie) ensureOpen() {
@@ -2092,28 +2183,25 @@ func (ht *HatTrie) freshLocationCheckedLocked(key string) (*C.value_t, HatValue,
 	return rawPtr, hval, nil
 }
 
-func (ht *HatTrie) expireAtLocked(key string, at time.Time) bool {
+func (ht *HatTrie) expireAtLocked(key string, at time.Time) (bool, bool) {
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
 		ht.clearExpirationLocked(key)
-		return false
+		return false, false
 	}
 
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
 	if ht.expireIfNeededLocked(key, hval) {
-		return false
+		return false, false
 	}
 	if !ht.currentTime().Before(at) {
 		deleted := ht.deleteKnownLocked(key, hval)
-		if deleted {
-			ht.recordDeleteLocked(key)
-		}
-		return deleted
+		return deleted, deleted
 	}
 
 	ht.setExpirationLocked(key, at, rawPtr, hval)
-	return true
+	return true, false
 }
 
 func (ht *HatTrie) setExpirationLocked(key string, at time.Time, rawPtr *C.value_t, hval HatValue) HatValue {
@@ -2244,9 +2332,14 @@ func (ht *HatTrie) vacuumExpiredLocked() int {
 }
 
 func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
+	entries, _ := ht.entriesWithPrefixLockedChecked(prefix, sorted)
+	return entries
+}
+
+func (ht *HatTrie) entriesWithPrefixLockedChecked(prefix string, sorted bool) ([]Entry, error) {
 	ht.ensureOpen()
-	if !validKey(prefix) {
-		return []Entry{}
+	if err := validateKey(prefix); err != nil {
+		return nil, err
 	}
 
 	var iter *C.hattrie_iter_t
@@ -2298,7 +2391,7 @@ func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
 		}
 	}
 
-	return entries
+	return entries, nil
 }
 
 func (ht *HatTrie) Get(key string) HatValue {
@@ -2423,14 +2516,23 @@ func (ht *HatTrie) hydrateLevelDBReferenceLocked(key string, hval HatValue) (Hat
 
 // Delete removes key and returns whether it existed.
 func (ht *HatTrie) Delete(key string) bool {
+	deleted, _ := ht.DeleteChecked(key)
+	return deleted
+}
+
+// DeleteChecked removes key and reports key validation errors.
+func (ht *HatTrie) DeleteChecked(key string) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	if err := validateKey(key); err != nil {
+		return false, err
+	}
 	deleted := ht.deleteLocked(key)
 	if deleted {
 		ht.recordDeleteLocked(key)
 	}
-	return deleted
+	return deleted, nil
 }
 
 // Del removes key if it exists.
