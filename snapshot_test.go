@@ -348,6 +348,33 @@ func TestSnapshotBinaryReaderPreservesEntriesWhenReusingRecordBuffer(t *testing.
 	}
 }
 
+func TestSnapshotBinaryRecordBufferDoesNotRetainOversizedRecord(t *testing.T) {
+	small, retained := snapshotBinaryRecordBuffer(nil, 32)
+	if len(small) != 32 {
+		t.Fatalf("small record buffer length = %d, want 32", len(small))
+	}
+	if cap(retained) != cap(small) || cap(retained) == 0 {
+		t.Fatalf("retained small buffer cap = %d, small cap = %d, want retained reusable buffer", cap(retained), cap(small))
+	}
+
+	large, nextRetained := snapshotBinaryRecordBuffer(retained, maxSnapshotBinaryReusableRecordBufferBytes+1)
+	if len(large) != maxSnapshotBinaryReusableRecordBufferBytes+1 {
+		t.Fatalf("large record buffer length = %d, want %d", len(large), maxSnapshotBinaryReusableRecordBufferBytes+1)
+	}
+	if cap(nextRetained) != cap(retained) {
+		t.Fatalf("retained buffer cap after large record = %d, want previous cap %d", cap(nextRetained), cap(retained))
+	}
+
+	oversizedRetained := make([]byte, 8, maxSnapshotBinaryReusableRecordBufferBytes+1)
+	shrunk, retained := snapshotBinaryRecordBuffer(oversizedRetained, 16)
+	if len(shrunk) != 16 {
+		t.Fatalf("shrunk record buffer length = %d, want 16", len(shrunk))
+	}
+	if cap(retained) > maxSnapshotBinaryReusableRecordBufferBytes {
+		t.Fatalf("retained buffer cap = %d, want at most %d", cap(retained), maxSnapshotBinaryReusableRecordBufferBytes)
+	}
+}
+
 func TestSnapshotBinaryReaderRejectsOversizedRecordBeforeAllocation(t *testing.T) {
 	writer := newBinaryFieldWriter(snapshotBinaryMagic, len(snapshotBinaryMagic)+(3*binaryFieldMaxVarintLen64))
 	writer.writeUvarint(uint64(snapshotVersion))
