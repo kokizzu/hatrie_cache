@@ -302,6 +302,30 @@ func TestCommandJournalBinaryEntryReaderPreservesEntriesWhenReusingPayloadBuffer
 	}
 }
 
+func TestCommandJournalPayloadBufferDoesNotRetainOversizedPayload(t *testing.T) {
+	var buffer commandJournalReadBuffer
+	small := commandJournalPayloadBuffer(&buffer, 32)
+	if cap(buffer.payload) != cap(small) || cap(buffer.payload) == 0 {
+		t.Fatalf("small payload buffer cap = %d/%d, want retained reusable buffer", cap(buffer.payload), cap(small))
+	}
+	large := commandJournalPayloadBuffer(&buffer, maxCommandJournalReusablePayloadBufferBytes+1)
+	if len(large) != maxCommandJournalReusablePayloadBufferBytes+1 {
+		t.Fatalf("large payload len = %d, want %d", len(large), maxCommandJournalReusablePayloadBufferBytes+1)
+	}
+	if cap(buffer.payload) != cap(small) {
+		t.Fatalf("retained payload buffer cap = %d after oversized read, want small cap %d", cap(buffer.payload), cap(small))
+	}
+
+	buffer.payload = make([]byte, 8, maxCommandJournalReusablePayloadBufferBytes+1)
+	shrunk := commandJournalPayloadBuffer(&buffer, 16)
+	if len(shrunk) != 16 {
+		t.Fatalf("shrunk payload len = %d, want 16", len(shrunk))
+	}
+	if cap(buffer.payload) > maxCommandJournalReusablePayloadBufferBytes {
+		t.Fatalf("payload buffer retained oversized cap = %d", cap(buffer.payload))
+	}
+}
+
 func TestCommandJournalIgnoresPartialBinaryTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

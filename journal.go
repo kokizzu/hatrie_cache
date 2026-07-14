@@ -18,6 +18,7 @@ const commandJournalVersion = 1
 
 const maxCommandJournalBinaryRecordBytes = 1 << 30
 const maxCommandJournalJSONRecordBytes = 1 << 30
+const maxCommandJournalReusablePayloadBufferBytes = 1 << 20
 
 const (
 	DefaultCommandJournalTailLimit   = 1000
@@ -568,10 +569,10 @@ func readCommandJournalBinaryEntry(reader *bufio.Reader, buffer *commandJournalR
 }
 
 func commandJournalPayloadBuffer(buffer *commandJournalReadBuffer, size int) []byte {
-	if buffer == nil {
+	if buffer == nil || size > maxCommandJournalReusablePayloadBufferBytes {
 		return make([]byte, size)
 	}
-	if size > cap(buffer.payload) {
+	if size > cap(buffer.payload) || cap(buffer.payload) > maxCommandJournalReusablePayloadBufferBytes {
 		buffer.payload = make([]byte, size)
 	} else {
 		buffer.payload = buffer.payload[:size]
