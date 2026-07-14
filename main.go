@@ -2696,25 +2696,41 @@ func (ht *HatTrie) GetMapJSON(key string) ([]byte, bool, error) {
 }
 
 func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
+	_ = ht.PutMapChecked(key, subkey, val)
+}
+
+func (ht *HatTrie) PutMapChecked(key string, subkey string, val interface{}) error {
+	return ht.PutMapEntriesChecked(key, Map{subkey: val})
+}
+
+func (ht *HatTrie) PutMapEntriesChecked(key string, fields Map) error {
+	if len(fields) == 0 {
+		return nil
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return err
 	}
 	if hval.IsMap() {
-		ht.maps.PutEntry(hval.Index, subkey, val)
+		ht.maps.PutEntries(hval.Index, fields)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.maps.AddEntry(subkey, val)
+	idx := ht.maps.Add(fields)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 func (ht *HatTrie) PeekMap(key, subkey string) interface{} {
@@ -2828,25 +2844,33 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 }
 
 func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
+	_ = ht.PushSliceChecked(key, val, vals...)
+}
+
+func (ht *HatTrie) PushSliceChecked(key string, val interface{}, vals ...interface{}) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return err
 	}
 	if hval.IsSlice() {
 		ht.slices.array[hval.Index].PushOne(val, vals...)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.slices.AddValues(val, vals...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 func (ht *HatTrie) PopSlice(key string) interface{} {

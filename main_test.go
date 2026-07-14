@@ -447,6 +447,21 @@ func TestCheckedMapAndSliceOperationsReturnValuesAndCopies(t *testing.T) {
 	})
 	ht.UpsertSlice("slice", Slice{Map{"field": "first"}, "second", "third"})
 
+	patch := Map{"field": "put"}
+	if err := ht.PutMapChecked("map", "patch", patch); err != nil {
+		t.Fatalf("PutMapChecked(patch) error = %v", err)
+	}
+	patch["field"] = "caller"
+	if got, ok, err := ht.PeekMapChecked("map", "patch"); err != nil || !ok || got.(Map)["field"] != "put" {
+		t.Fatalf("PeekMapChecked(patch) = %#v/%v/%v, want stored clone", got, ok, err)
+	}
+	if err := ht.PutMapEntriesChecked("created-map", Map{"one": "value", "two": 2}); err != nil {
+		t.Fatalf("PutMapEntriesChecked(created-map) error = %v", err)
+	}
+	if got, ok, err := ht.GetMapChecked("created-map"); err != nil || !ok || !reflect.DeepEqual(got, Map{"one": "value", "two": 2}) {
+		t.Fatalf("GetMapChecked(created-map) = %#v/%v/%v, want inserted map", got, ok, err)
+	}
+
 	peeked, ok, err := ht.PeekMapChecked("map", "nested")
 	if err != nil || !ok || peeked.(Map)["field"] != "value" {
 		t.Fatalf("PeekMapChecked(nested) = %#v/%v/%v, want stored map", peeked, ok, err)
@@ -486,6 +501,20 @@ func TestCheckedMapAndSliceOperationsReturnValuesAndCopies(t *testing.T) {
 	}
 	if got := ht.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"second"}) {
 		t.Fatalf("GetSlice(after pop/shift) = %#v, want second only", got)
+	}
+	pushed := Map{"field": "pushed"}
+	if err := ht.PushSliceChecked("slice", pushed, "last"); err != nil {
+		t.Fatalf("PushSliceChecked(slice) error = %v", err)
+	}
+	pushed["field"] = "caller"
+	if got, ok, err := ht.GetSliceChecked("slice"); err != nil || !ok || len(got) != 3 || got[1].(Map)["field"] != "pushed" || got[2] != "last" {
+		t.Fatalf("GetSliceChecked(after push) = %#v/%v/%v, want pushed clone and last", got, ok, err)
+	}
+	if err := ht.PushSliceChecked("created-slice", "one", "two"); err != nil {
+		t.Fatalf("PushSliceChecked(created-slice) error = %v", err)
+	}
+	if got, ok, err := ht.GetSliceChecked("created-slice"); err != nil || !ok || !reflect.DeepEqual(got, Slice{"one", "two"}) {
+		t.Fatalf("GetSliceChecked(created-slice) = %#v/%v/%v, want inserted slice", got, ok, err)
 	}
 	if _, ok, err := ht.PopSliceChecked("missing"); err != nil || ok {
 		t.Fatalf("PopSliceChecked(missing) ok/error = %v/%v, want false/nil", ok, err)

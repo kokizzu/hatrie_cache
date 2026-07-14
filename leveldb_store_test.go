@@ -701,6 +701,8 @@ func TestLevelDBColdReferencesHydrateBeforeIncrementalMutations(t *testing.T) {
 func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
+	source.UpsertMap("map", Map{"old": "value"})
+	source.PushSlice("slice", "old")
 	source.UpsertSet("set", Set{"old"})
 	source.AddBloomFilter("bloom", "old")
 	source.AddCuckooFilter("cuckoo", "old")
@@ -742,8 +744,21 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
 	}
-	if result.KeysLoaded != 14 || result.ValuesLoaded != 0 {
-		t.Fatalf("hot-load result = %#v, want 14 cold keys", result)
+	if result.KeysLoaded != 16 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 16 cold keys", result)
+	}
+
+	if err := loaded.PutMapChecked("map", "new", "value"); err != nil {
+		t.Fatalf("PutMapChecked(cold ref) error = %v, want nil", err)
+	}
+	if got := loaded.GetMap("map"); !reflect.DeepEqual(got, Map{"new": "value", "old": "value"}) {
+		t.Fatalf("GetMap(after cold put) = %#v, want old and new", got)
+	}
+	if err := loaded.PushSliceChecked("slice", "new"); err != nil {
+		t.Fatalf("PushSliceChecked(cold ref) error = %v, want nil", err)
+	}
+	if got := loaded.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"old", "new"}) {
+		t.Fatalf("GetSlice(after cold push) = %#v, want old and new", got)
 	}
 
 	if info, ok, err := loaded.BloomFilterInfoChecked("bloom"); err != nil || !ok || info.Insertions != 1 {
@@ -997,8 +1012,11 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INC", Key: "cmd-counter", Value: "2"}); got.OK {
 		t.Fatalf("INC closed cold ref response = %#v, want error", got)
 	}
-	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PUTMAP", Key: "cmd-map", Subkey: "new", Value: "value"}); !got.OK {
-		t.Fatalf("PUTMAP closed cold ref response = %#v, want legacy ok/no-op", got)
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PUTMAP", Key: "cmd-map", Subkey: "new", Value: "value"}); got.OK {
+		t.Fatalf("PUTMAP closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PUSHSLICE", Key: "slice", Value: "new"}); got.OK {
+		t.Fatalf("PUSHSLICE closed cold ref response = %#v, want error", got)
 	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PEEKMAP", Key: "map", Subkey: "old"}); got.OK {
 		t.Fatalf("PEEKMAP closed cold ref response = %#v, want error", got)
@@ -1342,6 +1360,8 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
+	source.UpsertMap("map", Map{"alpha": "value"})
+	source.PushSlice("slice", "alpha")
 	source.UpsertSet("set", Set{"alpha"})
 	source.AddBloomFilter("bloom", "alpha")
 	source.AddCuckooFilter("cuckoo", "alpha")
@@ -1393,6 +1413,15 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	}
 	if _, err := loaded.RemoveSetChecked("set", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("RemoveSetChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if err := loaded.PutMapChecked("map", "beta", "value"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PutMapChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if err := loaded.PutMapEntriesChecked("map", Map{"beta": "value"}); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PutMapEntriesChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if err := loaded.PushSliceChecked("slice", "beta"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PushSliceChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, err := loaded.HasBloomFilterChecked("bloom", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("HasBloomFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)

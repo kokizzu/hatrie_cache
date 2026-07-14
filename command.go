@@ -163,7 +163,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("subkey/value or pairs is required")
 		}
-		ht.commandPutMap(key, fields)
+		if err := ht.commandPutMap(key, fields); err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "stored map fields"}
 	case "PEEKMAP":
 		subkey := strings.TrimSpace(request.Subkey)
@@ -196,7 +198,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		ht.PushSlice(key, values[0], values[1:]...)
+		if err := ht.PushSliceChecked(key, values[0], values[1:]...); err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "pushed slice values"}
 	case "POPSLICE":
 		value, ok, err := ht.PopSliceChecked(key)
@@ -990,26 +994,8 @@ func (ht *HatTrie) commandIncrementCounter(key string, by int32) (int32, bool) {
 	return hval.Index, true
 }
 
-func (ht *HatTrie) commandPutMap(key string, fields Map) {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return
-	}
-	if hval.IsMap() {
-		ht.maps.PutEntries(hval.Index, fields)
-		*rawPtr = hval.toValue()
-		ht.recordWriteLocked(key)
-		return
-	}
-
-	ht.returnStorage(hval)
-	ht.clearExpirationLocked(key)
-	idx := ht.maps.Add(fields)
-	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
-	ht.recordWriteLocked(key)
+func (ht *HatTrie) commandPutMap(key string, fields Map) error {
+	return ht.PutMapEntriesChecked(key, fields)
 }
 
 func (ht *HatTrie) commandDumpEntry(key string) (string, bool, error) {
