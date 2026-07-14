@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,6 +113,31 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if got := loaded.TTL("ttl"); got <= 0 || got > time.Minute {
 		t.Fatalf("ttl = %s, want remaining positive TTL", got)
+	}
+}
+
+func TestLevelDBStoreSaveScansLargeHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	large := strings.Repeat("x", 70*1024)
+	for idx := 0; idx < 64; idx++ {
+		source.UpsertString(fmt.Sprintf("key:%03d", idx), large)
+	}
+
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	count, err := loaded.LoadLevelDB(path)
+	if err != nil {
+		t.Fatalf("LoadLevelDB() error = %v", err)
+	}
+	if count != 64 {
+		t.Fatalf("LoadLevelDB() count = %d, want 64", count)
+	}
+	if got := loaded.GetString("key:063"); got != large {
+		t.Fatalf("loaded large value length = %d, want %d", len(got), len(large))
 	}
 }
 
@@ -2012,6 +2039,36 @@ func TestLevelDBStoreSaveRemovesStaleKeys(t *testing.T) {
 	}
 	if got := loaded.GetString("stale"); got != "" {
 		t.Fatalf("stale = %q, want empty", got)
+	}
+}
+
+func TestLevelDBStoreFailedSavePreservesExistingStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("keep", "value")
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB(initial) error = %v", err)
+	}
+
+	bad := newTestTrie(t)
+	bad.UpsertMap("bad", Map{"ch": make(chan int)})
+	if err := bad.SaveLevelDB(path); err == nil {
+		t.Fatal("SaveLevelDB(invalid) error = nil, want unsupported JSON value error")
+	}
+
+	loaded := newTestTrie(t)
+	count, err := loaded.LoadLevelDB(path)
+	if err != nil {
+		t.Fatalf("LoadLevelDB(after failed save) error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("LoadLevelDB(after failed save) count = %d, want 1", count)
+	}
+	if got := loaded.GetString("keep"); got != "value" {
+		t.Fatalf("keep after failed save = %q, want value", got)
+	}
+	if loaded.Exists("bad") {
+		t.Fatal("failed LevelDB save wrote invalid bad key")
 	}
 }
 

@@ -79,7 +79,7 @@ func (store *LevelDBStore) Close() error {
 }
 
 func (store *LevelDBStore) Save(trie *HatTrie) error {
-	entries, err := trie.levelDBEntries()
+	putBatch, err := trie.levelDBPutBatch()
 	if err != nil {
 		return err
 	}
@@ -102,12 +102,8 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 	}
 	iterator.Release()
 
-	for _, entry := range entries {
-		data, err := json.Marshal(entry)
-		if err != nil {
-			return err
-		}
-		batch.Put(levelDBKey(entry.Key), data)
+	if err := putBatch.Replay(batch); err != nil {
+		return err
 	}
 	return db.Write(batch, &opt.WriteOptions{Sync: true})
 }
@@ -455,20 +451,52 @@ func (trie *HatTrie) levelDBReferenceSnapshotEntryLocked(key string, hval HatVal
 }
 
 func (trie *HatTrie) levelDBEntries() ([]snapshotEntry, error) {
+	out := []snapshotEntry{}
+	err := trie.scanLevelDBEntries(func(entry snapshotEntry) error {
+		out = append(out, entry)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (trie *HatTrie) levelDBPutBatch() (*leveldb.Batch, error) {
+	batch := new(leveldb.Batch)
+	err := trie.scanLevelDBEntries(func(entry snapshotEntry) error {
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		batch.Put(levelDBKey(entry.Key), data)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
+func (trie *HatTrie) scanLevelDBEntries(visit func(snapshotEntry) error) error {
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
 
 	trie.ensureOpen()
-	entries := trie.entriesWithPrefixLocked("", true)
-	out := make([]snapshotEntry, 0, len(entries))
-	for _, entry := range entries {
+	now := time.Time{}
+	if len(trie.expires) > 0 {
+		now = trie.currentTime()
+	}
+	return trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
 		snapshotEntry, err := trie.snapshotEntryLocked(entry)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, snapshotEntry)
-	}
-	return out, nil
+		if visit != nil {
+			return visit(snapshotEntry)
+		}
+		return nil
+	})
 }
 
 func decodeLevelDBEntry(data []byte) (snapshotEntry, error) {
