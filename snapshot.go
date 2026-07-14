@@ -105,6 +105,32 @@ type snapshotOperation struct {
 	bytes []byte
 }
 
+const (
+	snapshotEntryJSONFieldKey uint64 = 1 << iota
+	snapshotEntryJSONFieldType
+	snapshotEntryJSONFieldCounter
+	snapshotEntryJSONFieldString
+	snapshotEntryJSONFieldBytes
+	snapshotEntryJSONFieldMap
+	snapshotEntryJSONFieldSlice
+	snapshotEntryJSONFieldSet
+	snapshotEntryJSONFieldPriorityQueue
+	snapshotEntryJSONFieldBloomFilter
+	snapshotEntryJSONFieldCountMinSketch
+	snapshotEntryJSONFieldHyperLogLog
+	snapshotEntryJSONFieldTopK
+	snapshotEntryJSONFieldCuckooFilter
+	snapshotEntryJSONFieldRoaringBitmap
+	snapshotEntryJSONFieldQuantileSketch
+	snapshotEntryJSONFieldFenwickTree
+	snapshotEntryJSONFieldSparseBitset
+	snapshotEntryJSONFieldReservoirSample
+	snapshotEntryJSONFieldXorFilter
+	snapshotEntryJSONFieldRadixTree
+	snapshotEntryJSONFieldExpiresAt
+	snapshotEntryJSONFieldStats
+)
+
 func (ht *HatTrie) SaveSnapshot(path string) error {
 	return ht.SaveSnapshotWithFormat(path, DefaultSnapshotFormat)
 }
@@ -1205,7 +1231,7 @@ func decodeSnapshotEntryJSONDecoder(decoder *json.Decoder, requiredKey bool) (sn
 	}
 
 	var entry snapshotEntry
-	keySeen := false
+	var seen uint64
 	for decoder.More() {
 		token, err := decoder.Token()
 		if err != nil {
@@ -1215,7 +1241,10 @@ func decodeSnapshotEntryJSONDecoder(decoder *json.Decoder, requiredKey bool) (sn
 		if !ok {
 			return snapshotEntry{}, errors.New("hatriecache: invalid snapshot entry JSON")
 		}
-		if err := decodeSnapshotEntryJSONField(decoder, field, &entry, &keySeen); err != nil {
+		if err := markSnapshotEntryJSONField(field, &seen); err != nil {
+			return snapshotEntry{}, err
+		}
+		if err := decodeSnapshotEntryJSONField(decoder, field, &entry); err != nil {
 			return snapshotEntry{}, err
 		}
 	}
@@ -1227,16 +1256,80 @@ func decodeSnapshotEntryJSONDecoder(decoder *json.Decoder, requiredKey bool) (sn
 	if delim, ok := token.(json.Delim); !ok || delim != '}' {
 		return snapshotEntry{}, errors.New("hatriecache: invalid snapshot entry JSON")
 	}
-	if requiredKey && !keySeen {
+	if requiredKey && seen&snapshotEntryJSONFieldKey == 0 {
 		return snapshotEntry{}, errors.New("hatriecache: snapshot entry key is required")
 	}
 	return entry, nil
 }
 
-func decodeSnapshotEntryJSONField(decoder *json.Decoder, field string, entry *snapshotEntry, keySeen *bool) error {
+func markSnapshotEntryJSONField(field string, seen *uint64) error {
+	bit := snapshotEntryJSONFieldBit(field)
+	if bit == 0 {
+		return fmt.Errorf("hatriecache: unknown snapshot entry field %q", field)
+	}
+	if *seen&bit != 0 {
+		return fmt.Errorf("hatriecache: duplicate snapshot entry field %q", field)
+	}
+	*seen |= bit
+	return nil
+}
+
+func snapshotEntryJSONFieldBit(field string) uint64 {
 	switch field {
 	case "key":
-		*keySeen = true
+		return snapshotEntryJSONFieldKey
+	case "type":
+		return snapshotEntryJSONFieldType
+	case "counter":
+		return snapshotEntryJSONFieldCounter
+	case "string":
+		return snapshotEntryJSONFieldString
+	case "bytes":
+		return snapshotEntryJSONFieldBytes
+	case "map":
+		return snapshotEntryJSONFieldMap
+	case "slice":
+		return snapshotEntryJSONFieldSlice
+	case "set":
+		return snapshotEntryJSONFieldSet
+	case "priority_queue":
+		return snapshotEntryJSONFieldPriorityQueue
+	case "bloom_filter":
+		return snapshotEntryJSONFieldBloomFilter
+	case "count_min_sketch":
+		return snapshotEntryJSONFieldCountMinSketch
+	case "hyperloglog":
+		return snapshotEntryJSONFieldHyperLogLog
+	case "top_k":
+		return snapshotEntryJSONFieldTopK
+	case "cuckoo_filter":
+		return snapshotEntryJSONFieldCuckooFilter
+	case "roaring_bitmap":
+		return snapshotEntryJSONFieldRoaringBitmap
+	case "quantile_sketch":
+		return snapshotEntryJSONFieldQuantileSketch
+	case "fenwick_tree":
+		return snapshotEntryJSONFieldFenwickTree
+	case "sparse_bitset":
+		return snapshotEntryJSONFieldSparseBitset
+	case "reservoir_sample":
+		return snapshotEntryJSONFieldReservoirSample
+	case "xor_filter":
+		return snapshotEntryJSONFieldXorFilter
+	case "radix_tree":
+		return snapshotEntryJSONFieldRadixTree
+	case "expires_at":
+		return snapshotEntryJSONFieldExpiresAt
+	case "stats":
+		return snapshotEntryJSONFieldStats
+	default:
+		return 0
+	}
+}
+
+func decodeSnapshotEntryJSONField(decoder *json.Decoder, field string, entry *snapshotEntry) error {
+	switch field {
+	case "key":
 		var key *string
 		if err := decoder.Decode(&key); err != nil {
 			return err

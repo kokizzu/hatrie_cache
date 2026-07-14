@@ -1203,6 +1203,7 @@ func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 		"priority-missing": `{"version":1,"entries":[{"key":"bad","type":"priority_queue"}]}`,
 		"priority-null":    `{"version":1,"entries":[{"key":"bad","type":"priority_queue","priority_queue":null}]}`,
 		"bytes-invalid":    `{"version":1,"entries":[{"key":"bad","type":"bytes","bytes":"not-base64!!!"}]}`,
+		"entry-duplicate":  `{"version":1,"entries":[{"key":"bad","type":"string","string":"first","string":"second"}]}`,
 		"entries-missing":  `{"version":1}`,
 		"entries-null":     `{"version":1,"entries":null}`,
 		"entries-object":   `{"version":1,"entries":{}}`,
@@ -1301,10 +1302,12 @@ func TestDecodeSnapshotEntryJSONRequiredKeyStreamsEntryFields(t *testing.T) {
 	}
 
 	for name, payload := range map[string]string{
-		"missing-key": `{"type":"string","string":"value"}`,
-		"null-key":    `{"key":null,"type":"string","string":"value"}`,
-		"unknown":     `{"key":"name","type":"string","string":"value","extra":true}`,
-		"trailing":    `{"key":"name","type":"string","string":"value"} true`,
+		"missing-key":     `{"type":"string","string":"value"}`,
+		"null-key":        `{"key":null,"type":"string","string":"value"}`,
+		"duplicate-key":   `{"key":"name","key":"other","type":"string","string":"value"}`,
+		"duplicate-value": `{"key":"name","type":"string","string":"first","string":"second"}`,
+		"unknown":         `{"key":"name","type":"string","string":"value","extra":true}`,
+		"trailing":        `{"key":"name","type":"string","string":"value"} true`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decodeSnapshotEntryJSONRequiredKey([]byte(payload), true); err == nil {
