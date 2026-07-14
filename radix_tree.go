@@ -448,7 +448,7 @@ func (ht *HatTrie) UpsertRadixTree(key string) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsRadixTree() {
 		ht.radixTrees.PutData(hval.Index, newRadixTreeData())
 		ht.clearExpirationLocked(key)

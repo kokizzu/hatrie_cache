@@ -918,6 +918,165 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	}
 }
 
+func TestLevelDBColdReferencesOverwriteWithoutHydration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertCounter("counter", 5)
+	source.UpsertString("string", "old")
+	source.UpsertMap("map", Map{"old": "value"})
+	source.PushSlice("slice", "old")
+	source.UpsertSet("set", Set{"old"})
+	source.PushPriorityQueue("queue", 5, "old")
+	source.AddBloomFilter("bloom", "old")
+	source.AddCuckooFilter("cuckoo", "old")
+	if _, err := source.AddXorFilter("xor", "old"); err != nil {
+		t.Fatalf("AddXorFilter(old) error = %v", err)
+	}
+	source.UpsertRoaringBitmap("rb")
+	source.AddRoaringBitmap("rb", 1)
+	source.UpsertSparseBitset("sb")
+	source.AddSparseBitset("sb", 1)
+	if err := source.UpsertFenwickTree("fw", 4); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	if _, ok := source.AddFenwickTree("fw", 1, 5); !ok {
+		t.Fatal("AddFenwickTree(seed) = false, want true")
+	}
+	if err := source.UpsertQuantileSketch("quantile", DefaultQuantileSketchEpsilon); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	source.AddQuantileSketch("quantile", 10)
+	source.IncrementCountMinSketch("cms", "old", 2)
+	source.AddHyperLogLog("hll", "old")
+	source.AddTopK("top", "old", 2)
+	source.AddReservoirSample("sample", "old")
+	source.UpsertRadixTree("radix")
+	source.PutRadixTree("radix", "old", "value")
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 18 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 18 cold keys", result)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	loaded.UpsertCounter("counter", 9)
+	loaded.UpsertString("string", "new")
+	loaded.UpsertMap("map", Map{"new": "value"})
+	loaded.UpsertSlice("slice", Slice{"new"})
+	if err := loaded.UpsertSetChecked("set", Set{"new"}); err != nil {
+		t.Fatalf("UpsertSetChecked() error = %v", err)
+	}
+	loaded.UpsertPriorityQueue("queue", PriorityQueue{{Priority: 1, Value: "new"}})
+	if err := loaded.UpsertBloomFilter("bloom", 100, DefaultBloomFilterFalsePositiveRate); err != nil {
+		t.Fatalf("UpsertBloomFilter() error = %v", err)
+	}
+	if err := loaded.UpsertCuckooFilter("cuckoo", 100, DefaultCuckooFilterFalsePositiveRate); err != nil {
+		t.Fatalf("UpsertCuckooFilter() error = %v", err)
+	}
+	if err := loaded.UpsertXorFilter("xor", 8); err != nil {
+		t.Fatalf("UpsertXorFilter() error = %v", err)
+	}
+	loaded.UpsertRoaringBitmap("rb")
+	loaded.UpsertSparseBitset("sb")
+	if err := loaded.UpsertFenwickTree("fw", 4); err != nil {
+		t.Fatalf("UpsertFenwickTree(replace) error = %v", err)
+	}
+	if err := loaded.UpsertQuantileSketch("quantile", DefaultQuantileSketchEpsilon); err != nil {
+		t.Fatalf("UpsertQuantileSketch(replace) error = %v", err)
+	}
+	if err := loaded.UpsertCountMinSketch("cms", 32, 3); err != nil {
+		t.Fatalf("UpsertCountMinSketch(replace) error = %v", err)
+	}
+	if err := loaded.UpsertHyperLogLog("hll", 8); err != nil {
+		t.Fatalf("UpsertHyperLogLog(replace) error = %v", err)
+	}
+	if err := loaded.UpsertTopK("top", 2); err != nil {
+		t.Fatalf("UpsertTopK(replace) error = %v", err)
+	}
+	if err := loaded.UpsertReservoirSample("sample", 2); err != nil {
+		t.Fatalf("UpsertReservoirSample(replace) error = %v", err)
+	}
+	loaded.UpsertRadixTree("radix")
+
+	if got := loaded.GetCounter("counter"); got != 9 {
+		t.Fatalf("GetCounter(counter) = %d, want 9", got)
+	}
+	if got := loaded.GetString("string"); got != "new" {
+		t.Fatalf("GetString(string) = %q, want new", got)
+	}
+	if got := loaded.GetMap("map"); !reflect.DeepEqual(got, Map{"new": "value"}) {
+		t.Fatalf("GetMap(map) = %#v, want replacement map", got)
+	}
+	if got := loaded.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"new"}) {
+		t.Fatalf("GetSlice(slice) = %#v, want replacement slice", got)
+	}
+	if got := loaded.GetSet("set"); !reflect.DeepEqual(got, Set{"new"}) {
+		t.Fatalf("GetSet(set) = %#v, want replacement set", got)
+	}
+	if got := loaded.GetPriorityQueue("queue"); !reflect.DeepEqual(got, PriorityQueue{{Priority: 1, Value: "new"}}) {
+		t.Fatalf("GetPriorityQueue(queue) = %#v, want replacement queue", got)
+	}
+	if info, ok := loaded.BloomFilterInfo("bloom"); !ok || info.Insertions != 0 {
+		t.Fatalf("BloomFilterInfo(bloom) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info, ok := loaded.CuckooFilterInfo("cuckoo"); !ok || info.Count != 0 {
+		t.Fatalf("CuckooFilterInfo(cuckoo) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info, ok := loaded.XorFilterInfo("xor"); !ok || info.Staged != 0 || info.Built {
+		t.Fatalf("XorFilterInfo(xor) = %#v/%v, want empty unbuilt replacement", info, ok)
+	}
+	if count, ok := loaded.CountRoaringBitmap("rb"); !ok || count != 0 {
+		t.Fatalf("CountRoaringBitmap(rb) = %d/%v, want empty replacement", count, ok)
+	}
+	if count, ok := loaded.CountSparseBitset("sb"); !ok || count != 0 {
+		t.Fatalf("CountSparseBitset(sb) = %d/%v, want empty replacement", count, ok)
+	}
+	if info, ok := loaded.FenwickTreeInfo("fw"); !ok || info.Size != 4 || info.Total != 0 {
+		t.Fatalf("FenwickTreeInfo(fw) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info, ok := loaded.QuantileSketchInfo("quantile"); !ok || info.Count != 0 {
+		t.Fatalf("QuantileSketchInfo(quantile) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info, ok := loaded.CountMinSketchInfo("cms"); !ok || info.TotalCount != 0 {
+		t.Fatalf("CountMinSketchInfo(cms) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info, ok := loaded.HyperLogLogInfo("hll"); !ok || info.Observations != 0 {
+		t.Fatalf("HyperLogLogInfo(hll) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info, ok := loaded.TopKInfo("top"); !ok || info.Total != 0 || info.Capacity != 2 {
+		t.Fatalf("TopKInfo(top) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info, ok := loaded.ReservoirSampleInfo("sample"); !ok || info.Seen != 0 || info.Capacity != 2 {
+		t.Fatalf("ReservoirSampleInfo(sample) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info, ok := loaded.RadixTreeInfo("radix"); !ok || info.Items != 0 {
+		t.Fatalf("RadixTreeInfo(radix) = %#v/%v, want empty replacement", info, ok)
+	}
+
+	entries := loaded.Entries(true)
+	if len(entries) != 18 {
+		t.Fatalf("Entries(after replacement) len = %d, want 18", len(entries))
+	}
+	for _, entry := range entries {
+		if entry.Value.IsLevelDBReference() {
+			t.Fatalf("entry after replacement = %#v, want materialized value", entry)
+		}
+	}
+}
+
 func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

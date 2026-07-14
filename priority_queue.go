@@ -320,7 +320,7 @@ func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsPriorityQueue() {
 		ht.priorityQueues.Put(hval.Index, val)
 		ht.clearExpirationLocked(key)

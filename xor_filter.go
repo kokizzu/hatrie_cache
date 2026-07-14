@@ -538,7 +538,7 @@ func (ht *HatTrie) UpsertXorFilter(key string, expectedItems uint64) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsXorFilter() {
 		ht.xorFilters.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

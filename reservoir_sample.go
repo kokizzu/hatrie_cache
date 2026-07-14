@@ -399,7 +399,7 @@ func (ht *HatTrie) UpsertReservoirSample(key string, capacity uint64) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsReservoirSample() {
 		ht.reservoirSamples.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

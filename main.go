@@ -2006,7 +2006,7 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 	}
 }
 
-func (ht *HatTrie) upsertFreshLocation(key string) (*C.value_t, HatValue) {
+func (ht *HatTrie) upsertReplacementLocation(key string) (*C.value_t, HatValue) {
 	rawPtr := ht.upsertLocation(key)
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
@@ -2017,13 +2017,6 @@ func (ht *HatTrie) upsertFreshLocation(key string) (*C.value_t, HatValue) {
 	if ht.expireIfNeededLocked(key, hval) {
 		rawPtr = ht.upsertLocation(key)
 		hval = HatValue{}
-	}
-	if hval.IsLevelDBReference() {
-		hydrated, err := ht.hydrateLevelDBReferenceLocked(key, hval)
-		if err == nil {
-			rawPtr = ht.upsertLocation(key)
-			hval = hydrated
-		}
 	}
 	return rawPtr, hval
 }
@@ -2386,7 +2379,7 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if !hval.IsCounter() {
 		ht.returnStorage(hval)
 	}
@@ -2465,7 +2458,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsStringAtRaws() {
 		ht.raws.putOwned(hval.Index, []byte(val))
 		ht.clearExpirationLocked(key)
@@ -2691,7 +2684,7 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsMap() {
 		ht.maps.Put(hval.Index, val)
 		ht.clearExpirationLocked(key)
@@ -2863,7 +2856,7 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsSlice() {
 		ht.slices.Put(hval.Index, val)
 		ht.clearExpirationLocked(key)
@@ -3065,7 +3058,7 @@ func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsSet() {
 		ht.sets.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)

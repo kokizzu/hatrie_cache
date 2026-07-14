@@ -309,7 +309,7 @@ func (ht *HatTrie) UpsertFenwickTree(key string, size uint64) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsFenwickTree() {
 		ht.fenwickTrees.PutData(hval.Index, data)
 		ht.clearExpirationLocked(key)
