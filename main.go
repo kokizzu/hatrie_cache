@@ -80,6 +80,8 @@ type deque struct {
 }
 
 var errDequeCapacityTooLarge = errors.New("hatriecache: slice capacity is too large")
+var errRawValueCapacityTooLarge = errors.New("hatriecache: raw value capacity is too large")
+var maxRawValueCapacity = int(^uint(0) >> 1)
 
 func newDeque(value Slice) deque {
 	cloned := cloneSlice(value)
@@ -289,6 +291,16 @@ func checkedDequeNeeded(size int, additional int) (int, bool) {
 		return 0, false
 	}
 	return size + additional, true
+}
+
+func checkedByteCapacity(left int, right int) (int, bool) {
+	if left < 0 || right < 0 {
+		return 0, false
+	}
+	if left > maxRawValueCapacity-right {
+		return 0, false
+	}
+	return left + right, true
 }
 
 func maxInt(a, b int) int {
@@ -2796,7 +2808,11 @@ func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 		if str == "" {
 			return string(old), nil
 		}
-		next := make([]byte, 0, len(old)+len(str))
+		capacity, ok := checkedByteCapacity(len(old), len(str))
+		if !ok {
+			return "", errRawValueCapacityTooLarge
+		}
+		next := make([]byte, 0, capacity)
 		next = append(next, old...)
 		next = append(next, str...)
 		ht.raws.putOwned(hval.Index, next)
@@ -2834,7 +2850,11 @@ func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) 
 		if str == "" {
 			return string(old), nil
 		}
-		next := make([]byte, 0, len(str)+len(old))
+		capacity, ok := checkedByteCapacity(len(str), len(old))
+		if !ok {
+			return "", errRawValueCapacityTooLarge
+		}
+		next := make([]byte, 0, capacity)
 		next = append(next, str...)
 		next = append(next, old...)
 		ht.raws.putOwned(hval.Index, next)

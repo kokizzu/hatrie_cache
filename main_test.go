@@ -583,6 +583,40 @@ func TestEmptyAppendPrependStringDoNotRecordWrites(t *testing.T) {
 	}
 }
 
+func TestAppendPrependStringCheckedRejectsCapacityOverflowWithoutMutation(t *testing.T) {
+	max := int(^uint(0) >> 1)
+	if _, ok := checkedByteCapacity(max, 1); ok {
+		t.Fatal("checkedByteCapacity(max, 1) ok = true, want overflow rejection")
+	}
+
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+	originalLimit := maxRawValueCapacity
+	maxRawValueCapacity = len("value")
+	defer func() { maxRawValueCapacity = originalLimit }()
+	writes := ht.Stats().Writes
+
+	if got, err := ht.AppendStringChecked("key", "x"); got != "" || !errors.Is(err, errRawValueCapacityTooLarge) {
+		t.Fatalf("AppendStringChecked(overflow) = %q/%v, want empty/raw capacity error", got, err)
+	}
+	if got := ht.GetString("key"); got != "value" {
+		t.Fatalf("GetString after rejected append = %q, want value", got)
+	}
+	if got := ht.Stats().Writes; got != writes {
+		t.Fatalf("writes after rejected append = %d, want unchanged %d", got, writes)
+	}
+
+	if got, err := ht.PrependStringChecked("key", "x"); got != "" || !errors.Is(err, errRawValueCapacityTooLarge) {
+		t.Fatalf("PrependStringChecked(overflow) = %q/%v, want empty/raw capacity error", got, err)
+	}
+	if got := ht.GetString("key"); got != "value" {
+		t.Fatalf("GetString after rejected prepend = %q, want value", got)
+	}
+	if got := ht.Stats().Writes; got != writes {
+		t.Fatalf("writes after rejected prepend = %d, want unchanged %d", got, writes)
+	}
+}
+
 func TestBytesOperationsCopyInputsAndOutputs(t *testing.T) {
 	ht := newTestTrie(t)
 
