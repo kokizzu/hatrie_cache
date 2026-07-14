@@ -304,7 +304,8 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.CountMinSketch == nil {
 			return 0, errors.New("hatriecache: count-min sketch snapshot is required")
 		}
-		return int64(entry.CountMinSketch.Width * uint64(entry.CountMinSketch.Depth) * 4), nil
+		raw, err := base64.StdEncoding.DecodeString(entry.CountMinSketch.Counters)
+		return int64(len(raw)), err
 	case "hyperloglog":
 		if entry.HyperLogLog == nil {
 			return 0, errors.New("hatriecache: hyperloglog snapshot is required")

@@ -47,9 +47,8 @@ func newCountMinSketchData(width uint64, depth uint8) (countMinSketchData, error
 		return countMinSketchData{}, err
 	}
 	return countMinSketchData{
-		counters: make([]uint32, int(width*uint64(depth))),
-		width:    width,
-		depth:    depth,
+		width: width,
+		depth: depth,
 	}, nil
 }
 
@@ -85,6 +84,12 @@ func validateCountMinSketchSnapshot(snapshot countMinSketchSnapshot) error {
 	if err != nil {
 		return err
 	}
+	if len(data) == 0 {
+		if snapshot.TotalCount != 0 {
+			return errors.New("hatriecache: empty count-min sketch counters have total count")
+		}
+		return nil
+	}
 	if uint64(len(data)) != snapshot.Width*uint64(snapshot.Depth)*4 {
 		return errors.New("hatriecache: invalid count-min sketch counter length")
 	}
@@ -113,6 +118,15 @@ func validateCountMinSketchCounterTotals(data []byte, width uint64, depth uint8,
 	return nil
 }
 
+func countMinSketchRawHasCounters(data []byte) bool {
+	for idx := 0; idx < len(data)/4; idx++ {
+		if binary.LittleEndian.Uint32(data[idx*4:idx*4+4]) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func newCountMinSketchDataFromSnapshot(snapshot countMinSketchSnapshot) (countMinSketchData, error) {
 	if err := validateCountMinSketchSnapshot(snapshot); err != nil {
 		return countMinSketchData{}, err
@@ -121,16 +135,19 @@ func newCountMinSketchDataFromSnapshot(snapshot countMinSketchSnapshot) (countMi
 	if err != nil {
 		return countMinSketchData{}, err
 	}
-	counters := make([]uint32, len(raw)/4)
-	for idx := range counters {
-		counters[idx] = binary.LittleEndian.Uint32(raw[idx*4 : idx*4+4])
+	out := countMinSketchData{
+		width: snapshot.Width,
+		depth: snapshot.Depth,
+		total: snapshot.TotalCount,
 	}
-	return countMinSketchData{
-		counters: counters,
-		width:    snapshot.Width,
-		depth:    snapshot.Depth,
-		total:    snapshot.TotalCount,
-	}, nil
+	if len(raw) == 0 || (snapshot.TotalCount == 0 && !countMinSketchRawHasCounters(raw)) {
+		return out, nil
+	}
+	out.counters = make([]uint32, len(raw)/4)
+	for idx := range out.counters {
+		out.counters[idx] = binary.LittleEndian.Uint32(raw[idx*4 : idx*4+4])
+	}
+	return out, nil
 }
 
 func (sketch *countMinSketchData) Add(value interface{}, count uint32) uint64 {
@@ -166,6 +183,7 @@ func (sketch *countMinSketchData) AddOneChecked(value interface{}, count uint32,
 }
 
 func (sketch *countMinSketchData) addKey(key []byte, count uint32) uint64 {
+	sketch.ensureCounters()
 	estimate := uint64(maxCountMinSketchCounter)
 	sketch.visitIndexes(key, func(index uint64) {
 		next := saturatingAddUint32(sketch.counters[index], count)
@@ -195,6 +213,9 @@ func (sketch *countMinSketchData) EstimateChecked(value interface{}) (uint64, er
 }
 
 func (sketch *countMinSketchData) estimateKey(key []byte) uint64 {
+	if len(sketch.counters) == 0 {
+		return 0
+	}
 	estimate := maxCountMinSketchCounter
 	sketch.visitIndexes(key, func(index uint64) {
 		if sketch.counters[index] < estimate {
@@ -226,9 +247,12 @@ func (sketch countMinSketchData) Info() CountMinSketchInfo {
 }
 
 func (sketch countMinSketchData) Snapshot() countMinSketchSnapshot {
-	data := make([]byte, len(sketch.counters)*4)
-	for idx, counter := range sketch.counters {
-		binary.LittleEndian.PutUint32(data[idx*4:idx*4+4], counter)
+	var data []byte
+	if len(sketch.counters) > 0 {
+		data = make([]byte, len(sketch.counters)*4)
+		for idx, counter := range sketch.counters {
+			binary.LittleEndian.PutUint32(data[idx*4:idx*4+4], counter)
+		}
 	}
 	return countMinSketchSnapshot{
 		Width:      sketch.width,
@@ -253,6 +277,13 @@ func (sketch *countMinSketchData) visitIndexes(key []byte, visit func(uint64)) {
 		column := (first + uint64(row)*step) % sketch.width
 		visit(uint64(row)*sketch.width + column)
 	}
+}
+
+func (sketch *countMinSketchData) ensureCounters() {
+	if sketch == nil || len(sketch.counters) > 0 || sketch.width == 0 || sketch.depth == 0 {
+		return
+	}
+	sketch.counters = make([]uint32, int(sketch.width*uint64(sketch.depth)))
 }
 
 func saturatingAddUint32(value uint32, delta uint32) uint32 {

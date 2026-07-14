@@ -3291,6 +3291,67 @@ func TestCountMinSketchRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestCountMinSketchEmptyCountersAllocatesLazily(t *testing.T) {
+	sketch, err := newCountMinSketchData(maxCountMinSketchCounters, 1)
+	if err != nil {
+		t.Fatalf("newCountMinSketchData(max) error = %v", err)
+	}
+	if len(sketch.counters) != 0 || sketch.EncodedSize() != 0 {
+		t.Fatalf("empty max Count-Min Sketch allocated %d counters/%d bytes, want lazy empty backing", len(sketch.counters), sketch.EncodedSize())
+	}
+	if got := sketch.Estimate("alpha"); got != 0 {
+		t.Fatalf("Estimate(empty) = %d, want 0", got)
+	}
+	if info := sketch.Info(); info.Width != maxCountMinSketchCounters || info.CounterBytes != 0 || info.TotalCount != 0 || info.MaxCounter != 0 {
+		t.Fatalf("Info(empty max) = %#v, want logical shape without allocated counters", info)
+	}
+	snapshot := sketch.Snapshot()
+	if snapshot.Counters != "" {
+		t.Fatalf("empty Count-Min snapshot counters length = %d, want compact empty counters", len(snapshot.Counters))
+	}
+	if size, err := snapshotOperationValueSize(snapshotOperation{entry: snapshotEntry{Type: "count_min_sketch", CountMinSketch: &snapshot}}); err != nil || size != 0 {
+		t.Fatalf("snapshotOperationValueSize(empty count-min) = %d/%v, want 0/nil", size, err)
+	}
+
+	oldData := make([]byte, 2*2*4)
+	restored, err := newCountMinSketchDataFromSnapshot(countMinSketchSnapshot{
+		Width:      2,
+		Depth:      2,
+		TotalCount: 0,
+		Counters:   base64.StdEncoding.EncodeToString(oldData),
+	})
+	if err != nil {
+		t.Fatalf("newCountMinSketchDataFromSnapshot(full zero counters) error = %v", err)
+	}
+	if len(restored.counters) != 0 || restored.EncodedSize() != 0 {
+		t.Fatalf("restored empty Count-Min Sketch allocated %d counters/%d bytes, want lazy empty backing", len(restored.counters), restored.EncodedSize())
+	}
+
+	ht := newTestTrie(t)
+	if err := ht.UpsertCountMinSketch("freq", 128, 4); err != nil {
+		t.Fatalf("UpsertCountMinSketch() error = %v", err)
+	}
+	hval := ht.Get("freq")
+	if len(ht.countMinSketches.array[hval.Index].counters) != 0 {
+		t.Fatalf("empty trie Count-Min Sketch allocated %d counters, want lazy empty backing", len(ht.countMinSketches.array[hval.Index].counters))
+	}
+	if info, ok := ht.CountMinSketchInfo("freq"); !ok || info.CounterBytes != 0 || info.TotalCount != 0 {
+		t.Fatalf("CountMinSketchInfo(empty) = %#v/%v, want no allocated counter bytes", info, ok)
+	}
+	if estimate, ok := ht.EstimateCountMinSketch("freq", "alpha"); !ok || estimate != 0 {
+		t.Fatalf("EstimateCountMinSketch(empty) = %d/%v, want 0/true", estimate, ok)
+	}
+	if estimate, err := ht.IncrementCountMinSketchChecked("freq", "alpha", 1); err != nil || estimate < 1 {
+		t.Fatalf("IncrementCountMinSketchChecked(first) = %d/%v, want first estimate", estimate, err)
+	}
+	if info, ok := ht.CountMinSketchInfo("freq"); !ok || info.CounterBytes == 0 || info.TotalCount != 1 || info.MaxCounter == 0 {
+		t.Fatalf("CountMinSketchInfo(after first add) = %#v/%v, want allocated populated counters", info, ok)
+	}
+	if estimate, ok := ht.EstimateCountMinSketch("freq", "alpha"); !ok || estimate < 1 {
+		t.Fatalf("EstimateCountMinSketch(alpha after lazy allocation) = %d/%v, want hit", estimate, ok)
+	}
+}
+
 func TestCountMinSketchSnapshotValidationRejectsInvalidCounterTotals(t *testing.T) {
 	encodeCounters := func(values ...uint32) string {
 		data := make([]byte, len(values)*4)
@@ -3318,6 +3379,17 @@ func TestCountMinSketchSnapshotValidationRejectsInvalidCounterTotals(t *testing.
 		if err := validateCountMinSketchSnapshot(snapshot); err == nil {
 			t.Fatalf("validateCountMinSketchSnapshot(%s) error = nil, want invalid counter total error", name)
 		}
+	}
+}
+
+func TestCountMinSketchSnapshotValidationRejectsInconsistentEmptyState(t *testing.T) {
+	if err := validateCountMinSketchSnapshot(countMinSketchSnapshot{
+		Width:      2,
+		Depth:      2,
+		TotalCount: 1,
+		Counters:   "",
+	}); err == nil {
+		t.Fatal("validateCountMinSketchSnapshot(empty counters with total) error = nil, want error")
 	}
 }
 
