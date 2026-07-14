@@ -273,6 +273,42 @@ func TestLoadLevelDBRemovesKeysMissingFromStore(t *testing.T) {
 	}
 }
 
+func TestLoadLevelDBRemovesKeysExpiredInStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	base := time.Unix(4525, 0)
+	source := newTestTrie(t)
+	source.now = func() time.Time { return base }
+	source.UpsertString("expired", "from-store")
+	source.UpsertString("keep", "value")
+	if !source.Expire("expired", time.Second) {
+		t.Fatal("Expire(expired) = false, want true")
+	}
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return base.Add(2 * time.Second) }
+	loaded.UpsertString("expired", "old")
+	loaded.UpsertString("missing", "old")
+	count, err := loaded.LoadLevelDB(path)
+	if err != nil {
+		t.Fatalf("LoadLevelDB() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("LoadLevelDB() count = %d, want 1", count)
+	}
+	if got := loaded.GetString("keep"); got != "value" {
+		t.Fatalf("keep after LevelDB load = %q, want value", got)
+	}
+	if loaded.Exists("expired") {
+		t.Fatal("expired store key survived LevelDB load")
+	}
+	if loaded.Exists("missing") {
+		t.Fatal("missing store key survived LevelDB load")
+	}
+}
+
 func TestLoadLevelDBCleansCreatedKeysAfterApplyFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	payload := testPayload(DiskBytesThreshold + 1)

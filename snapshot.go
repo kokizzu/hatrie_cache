@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1510,6 +1511,10 @@ func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]bool, now time.Time) {
 	ht.deleteKeysNotInBatchesLocked(keep, now, defaultDeleteKeysNotInBatchSize)
 }
 
+func (ht *HatTrie) deleteKeysNotInSortedLocked(keep []string, now time.Time) {
+	ht.deleteKeysNotInSortedBatchesLocked(keep, now, defaultDeleteKeysNotInBatchSize)
+}
+
 func (ht *HatTrie) deleteKeysNotInBatchesLocked(keep map[string]bool, now time.Time, limit int) {
 	if limit <= 0 {
 		limit = 1
@@ -1519,6 +1524,26 @@ func (ht *HatTrie) deleteKeysNotInBatchesLocked(keep map[string]bool, now time.T
 	hasAfterKey := false
 	for {
 		page := ht.staleKeysNotInPageLocked(keep, now, afterKey, hasAfterKey, limit)
+		for _, entry := range page.entries {
+			ht.deleteKnownLocked(entry.Key, entry.Value)
+		}
+		if !page.hasMore {
+			return
+		}
+		afterKey = page.nextAfterKey
+		hasAfterKey = true
+	}
+}
+
+func (ht *HatTrie) deleteKeysNotInSortedBatchesLocked(keep []string, now time.Time, limit int) {
+	if limit <= 0 {
+		limit = 1
+	}
+
+	afterKey := ""
+	hasAfterKey := false
+	for {
+		page := ht.staleKeysNotInSortedPageLocked(keep, now, afterKey, hasAfterKey, limit)
 		for _, entry := range page.entries {
 			ht.deleteKnownLocked(entry.Key, entry.Value)
 		}
@@ -1546,6 +1571,41 @@ func (ht *HatTrie) staleKeysNotInPageLocked(keep map[string]bool, now time.Time,
 			return nil
 		}
 		if _, ok := keep[entry.Key]; ok {
+			return nil
+		}
+		page.entries = append(page.entries, entry)
+		page.nextAfterKey = entry.Key
+		if len(page.entries) >= limit {
+			page.hasMore = true
+			return errDeleteKeysNotInPageFull
+		}
+		return nil
+	})
+	if !errors.Is(err, errDeleteKeysNotInPageFull) {
+		page.hasMore = false
+	}
+	return page
+}
+
+func (ht *HatTrie) staleKeysNotInSortedPageLocked(keep []string, now time.Time, afterKey string, hasAfterKey bool, limit int) staleKeysNotInPage {
+	if limit <= 0 {
+		limit = 1
+	}
+	keepIndex := 0
+	if hasAfterKey {
+		keepIndex = sort.Search(len(keep), func(idx int) bool {
+			return keep[idx] > afterKey
+		})
+	}
+	page := staleKeysNotInPage{entries: make([]Entry, 0, limit)}
+	err := ht.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
+		if hasAfterKey && entry.Key <= afterKey {
+			return nil
+		}
+		for keepIndex < len(keep) && keep[keepIndex] < entry.Key {
+			keepIndex++
+		}
+		if keepIndex < len(keep) && keep[keepIndex] == entry.Key {
 			return nil
 		}
 		page.entries = append(page.entries, entry)

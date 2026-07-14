@@ -157,27 +157,12 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	defer snapshot.Release()
 
 	now := trie.currentTime()
-	activeKeys := map[string]bool{}
-	result := LevelDBLoadResult{}
-	if err := scanLevelDBSnapshotEntries(snapshot, func(entry snapshotEntry) error {
-		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy, false)
-		if err != nil {
-			return err
-		}
-		if !active {
-			return nil
-		}
-		activeKeys[loadEntry.entry.Key] = true
-		result.KeysLoaded++
-		return nil
-	}); err != nil {
-		return LevelDBLoadResult{}, err
-	}
-
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
 	createdKeys := make(map[string]struct{})
 	rollbackOperations := make([]snapshotOperation, 0)
+	activeKeys := []string{}
+	result := LevelDBLoadResult{}
 	applied := false
 	if err := scanLevelDBSnapshotEntryData(snapshot, func(entry snapshotEntry, data []byte) error {
 		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy, true)
@@ -187,6 +172,8 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		if !active {
 			return nil
 		}
+		activeKeys = append(activeKeys, loadEntry.entry.Key)
+		result.KeysLoaded++
 		rollbackOperation, existed, err := trie.restoreRollbackOperationLocked(loadEntry.entry.Key)
 		if err != nil {
 			return err
@@ -220,7 +207,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		}
 		return LevelDBLoadResult{}, err
 	}
-	trie.deleteKeysNotInLocked(activeKeys, now)
+	trie.deleteKeysNotInSortedLocked(activeKeys, now)
 	return result, nil
 }
 
@@ -266,15 +253,6 @@ func prepareLevelDBLoadEntry(entry snapshotEntry, now time.Time, policy LevelDBL
 		entry:     entry,
 		reference: policy.HotValuesOnly && !levelDBShouldHotLoad(operation, now, policy),
 	}, true, nil
-}
-
-func scanLevelDBSnapshotEntries(snapshot *leveldb.Snapshot, visit func(snapshotEntry) error) error {
-	return scanLevelDBSnapshotEntryData(snapshot, func(entry snapshotEntry, _ []byte) error {
-		if visit == nil {
-			return nil
-		}
-		return visit(entry)
-	})
 }
 
 func scanLevelDBSnapshotEntryData(snapshot *leveldb.Snapshot, visit func(snapshotEntry, []byte) error) error {

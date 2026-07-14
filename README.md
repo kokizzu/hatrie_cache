@@ -256,7 +256,7 @@ Serialization tradeoffs measured with
 and
 `make run CMD='go test -run __nomatch__ -bench BenchmarkSnapshotFormat -benchmem .'`
 and
-`make run CMD='go test -run __nomatch__ -bench "BenchmarkLevelDB(Load|Save)" -benchmem .'`
+`make run CMD='go test -run __nomatch__ -bench BenchmarkLevelDB -benchmem .'`
 on an AMD Ryzen 9 5950X:
 
 | Path | Format | CPU | Wire/disk bytes | Heap bytes | Allocs |
@@ -266,11 +266,11 @@ on an AMD Ryzen 9 5950X:
 | Snapshot save | JSON | 2,782,644 ns/op | 465,944 disk_B/op | 655,312 B/op | 15,877 |
 | Snapshot save | gzip JSON (fast fallback) | 4,338,040 ns/op | 7,520 disk_B/op | 761,890 B/op | 29,192 |
 | Snapshot save | gzip best JSON (default) | 5,978,653 ns/op | 5,357 disk_B/op | 762,619 B/op | 29,193 |
-| LevelDB save | materialized values | 2,197,619 ns/op | 394,149 record_B/op | 1,148,430 B/op | 6,162 |
-| LevelDB save | unchanged cold refs | 1,681,950 ns/op | 394,168 record_B/op | 999,820 B/op | 4,625 |
-| LevelDB save | stats-changed cold refs | 7,447,860 ns/op | 394,178 record_B/op | 3,168,086 B/op | 19,990 |
-| LevelDB load | materialized values | 6,356,626 ns/op | 394,175 record_B/op | 3,143,865 B/op | 22,644 |
-| LevelDB load | cold refs | 8,461,249 ns/op | 394,150 record_B/op | 3,007,437 B/op | 22,644 |
+| LevelDB save | materialized values | 2,529,545 ns/op | 394,157 record_B/op | 1,148,954 B/op | 6,162 |
+| LevelDB save | unchanged cold refs | 1,710,595 ns/op | 394,235 record_B/op | 1,000,845 B/op | 4,625 |
+| LevelDB save | stats-changed cold refs | 6,163,872 ns/op | 394,177 record_B/op | 3,165,016 B/op | 19,990 |
+| LevelDB load | materialized values | 3,384,252 ns/op | 394,192 record_B/op | 1,912,318 B/op | 12,386 |
+| LevelDB load | cold refs | 3,452,032 ns/op | 394,192 record_B/op | 1,775,911 B/op | 12,386 |
 
 For the benchmark payload, protobuf command wire is about 2.2x faster with a
 small byte reduction and equivalent allocation count. Snapshot and LevelDB
@@ -282,8 +282,9 @@ JSON. LevelDB saves stream the sorted trie against the sorted LevelDB keyspace,
 skip unchanged records, delete stale records, and avoid the synced write
 entirely when the diff batch is empty. Unchanged cold-reference saves reuse
 stored record bytes; read-stat changes force a validated rewrite and cost more
-CPU and heap. Cold-reference loads avoid materializing values, saving some heap
-at the cost of similar startup CPU.
+CPU and heap. LevelDB loads apply records once and use a sorted active-key
+merge for stale deletion instead of an active-key hash map; cold-reference loads
+avoid materializing values, saving some heap at similar startup CPU.
 JSON request bodies may also be sent with `Content-Encoding: gzip`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader
