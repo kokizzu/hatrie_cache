@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { sampleCommandResponse } from './api';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runCommand, sampleCommandResponse } from './api';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('command fallback', () => {
   it('rejects commands without a key', () => {
@@ -18,5 +22,45 @@ describe('command fallback', () => {
       ok: true,
       message: 'Set TTL for session:1 to 30s.'
     });
+  });
+
+  it('posts Fenwick command payloads', async () => {
+    const fetchMock = vi.fn(async (_path: string | URL | Request, init?: RequestInit) => {
+      expect(_path).toBe('/api/commands');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toMatchObject({ 'content-type': 'application/json' });
+      expect(JSON.parse(String(init?.body))).toEqual({
+        command: 'ADDFW',
+        key: 'scores:hourly',
+        value: '13',
+        subkey: '7'
+      });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          message: 'updated fenwick tree',
+          value: '{"index":13,"delta":7,"value":7}'
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      runCommand({
+        command: 'ADDFW',
+        key: 'scores:hourly',
+        value: '13',
+        subkey: '7'
+      })
+    ).resolves.toEqual({
+      ok: true,
+      message: 'updated fenwick tree',
+      value: '{"index":13,"delta":7,"value":7}'
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
