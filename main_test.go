@@ -5250,6 +5250,68 @@ func TestDiskStorageAddStreamFailureRestoresReusableIndexWithoutPath(t *testing.
 	}
 }
 
+func TestDiskStorageDestroyReleasesMetadataAndFiles(t *testing.T) {
+	dir := t.TempDir()
+	disks, err := CreateDiskStorage(dir, false)
+	if err != nil {
+		t.Fatalf("CreateDiskStorage() error = %v", err)
+	}
+	kept, err := disks.Add([]byte("kept"))
+	if err != nil {
+		t.Fatalf("Add(kept) error = %v", err)
+	}
+	reusable, err := disks.Add([]byte("reusable"))
+	if err != nil {
+		t.Fatalf("Add(reusable) error = %v", err)
+	}
+	keptPath := disks.paths[kept]
+	reusablePath := disks.paths[reusable]
+	disks.Del(reusable)
+
+	disks.Destroy()
+	disks.Destroy()
+
+	if _, err := os.Stat(keptPath); !os.IsNotExist(err) {
+		t.Fatalf("kept file Stat() error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(reusablePath); !os.IsNotExist(err) {
+		t.Fatalf("reusable file Stat() error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("non-owned disk dir Stat() error = %v, want directory kept", err)
+	}
+	if disks.paths != nil {
+		t.Fatalf("paths after Destroy = %#v, want nil", disks.paths)
+	}
+	if disks.reusables.Len() != 0 || disks.reusables.stack != nil || disks.reusables.bits != nil {
+		t.Fatalf("reusables after Destroy = %#v, want cleared", disks.reusables)
+	}
+}
+
+func TestOwnedDiskStorageDestroyReleasesMetadataAndDirectory(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "owned")
+	disks, err := CreateDiskStorage(dir, true)
+	if err != nil {
+		t.Fatalf("CreateDiskStorage() error = %v", err)
+	}
+	if _, err := disks.Add([]byte("payload")); err != nil {
+		t.Fatalf("Add(payload) error = %v", err)
+	}
+
+	disks.Destroy()
+
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("owned disk dir Stat() error = %v, want not exist", err)
+	}
+	if disks.paths != nil {
+		t.Fatalf("paths after owned Destroy = %#v, want nil", disks.paths)
+	}
+	if disks.reusables.Len() != 0 || disks.reusables.stack != nil || disks.reusables.bits != nil {
+		t.Fatalf("reusables after owned Destroy = %#v, want cleared", disks.reusables)
+	}
+}
+
 func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {
 	ht := newTestTrie(t)
 

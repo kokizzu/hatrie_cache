@@ -1028,6 +1028,10 @@ func (ds *DiskStorage) Destroy() {
 	if ds == nil {
 		return
 	}
+	defer func() {
+		ds.paths = nil
+		ds.reusables.Compact(0)
+	}()
 	if ds.ownedDir {
 		_ = os.RemoveAll(ds.dir)
 		return
