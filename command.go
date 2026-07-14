@@ -170,8 +170,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if subkey == "" {
 			return commandError("subkey is required")
 		}
-		value := ht.PeekMap(key, subkey)
-		if value == nil {
+		value, ok, err := ht.PeekMapChecked(key, subkey)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
@@ -180,8 +183,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if subkey == "" {
 			return commandError("subkey is required")
 		}
-		value := ht.TakeMap(key, subkey)
-		if value == nil {
+		value, ok, err := ht.TakeMapChecked(key, subkey)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("removed", value)
@@ -193,26 +199,38 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		ht.PushSlice(key, values[0], values[1:]...)
 		return CacheCommandResponse{OK: true, Message: "pushed slice values"}
 	case "POPSLICE":
-		value := ht.PopSlice(key)
-		if value == nil {
+		value, ok, err := ht.PopSliceChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("removed", value)
 	case "SHIFTSLICE":
-		value := ht.ShiftSlice(key)
-		if value == nil {
+		value, ok, err := ht.ShiftSliceChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("removed", value)
 	case "HEADSLICE":
-		value := ht.HeadSlice(key)
-		if value == nil {
+		value, ok, err := ht.HeadSliceChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
 	case "TAILSLICE":
-		value := ht.TailSlice(key)
-		if value == nil {
+		value, ok, err := ht.TailSliceChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
@@ -250,8 +268,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 	case "GETSET":
-		value := ht.GetSet(key)
-		if value == nil {
+		value, ok, err := ht.GetSetChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
@@ -267,20 +288,29 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		added := ht.PushPriorityQueue(key, priority, values[0], values[1:]...)
 		return CacheCommandResponse{OK: true, Message: "pushed priority queue values", Value: strconv.Itoa(added)}
 	case "PEEKPQ", "PEEKPRIORITY":
-		value, ok := ht.PeekPriorityQueue(key)
+		value, ok, err := ht.PeekPriorityQueueChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)
 	case "POPPQ", "POPPRIORITY":
-		value, ok := ht.PopPriorityQueue(key)
+		value, ok, err := ht.PopPriorityQueueChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("removed", value)
 	case "GETPQ", "GETPRIORITY":
-		value := ht.GetPriorityQueue(key)
-		if value == nil {
+		value, ok, err := ht.GetPriorityQueueChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", value)

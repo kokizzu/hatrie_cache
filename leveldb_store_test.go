@@ -888,6 +888,7 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	source.UpsertString("prepend", "old")
 	source.UpsertMap("map", Map{"old": "value"})
 	source.PushSlice("slice", "old")
+	source.UpsertSet("set", Set{"old"})
 	source.PushPriorityQueue("queue", 5, "old")
 	source.UpsertRoaringBitmap("rb")
 	source.AddRoaringBitmap("rb", 1)
@@ -985,6 +986,36 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PUTMAP", Key: "cmd-map", Subkey: "new", Value: "value"}); !got.OK {
 		t.Fatalf("PUTMAP closed cold ref response = %#v, want legacy ok/no-op", got)
 	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PEEKMAP", Key: "map", Subkey: "old"}); got.OK {
+		t.Fatalf("PEEKMAP closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "TAKEMAP", Key: "map", Subkey: "old"}); got.OK {
+		t.Fatalf("TAKEMAP closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "HEADSLICE", Key: "slice"}); got.OK {
+		t.Fatalf("HEADSLICE closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "TAILSLICE", Key: "slice"}); got.OK {
+		t.Fatalf("TAILSLICE closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "POPSLICE", Key: "slice"}); got.OK {
+		t.Fatalf("POPSLICE closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "SHIFTSLICE", Key: "slice"}); got.OK {
+		t.Fatalf("SHIFTSLICE closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GETSET", Key: "set"}); got.OK {
+		t.Fatalf("GETSET closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PEEKPQ", Key: "queue"}); got.OK {
+		t.Fatalf("PEEKPQ closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "POPPQ", Key: "queue"}); got.OK {
+		t.Fatalf("POPPQ closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GETPQ", Key: "queue"}); got.OK {
+		t.Fatalf("GETPQ closed cold ref response = %#v, want error", got)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INFOCMS", Key: "cmd-cms"}); got.OK {
 		t.Fatalf("INFOCMS closed cold ref response = %#v, want error", got)
 	}
@@ -1039,6 +1070,7 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 		"radix",
 		"rb",
 		"sb",
+		"set",
 		"slice",
 	}
 	entries := loaded.Entries(true)
