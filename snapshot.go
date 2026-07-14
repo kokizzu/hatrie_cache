@@ -79,12 +79,13 @@ func (ht *HatTrie) LoadSnapshot(path string) error {
 }
 
 func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
+	defer file.Close()
 
-	snapshot, err := decodeSnapshotFileJSON(data)
+	snapshot, err := decodeSnapshotFileJSONReader(file)
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
@@ -416,16 +417,64 @@ func decodeSnapshotEntryJSON(data []byte) (snapshotEntry, error) {
 }
 
 func decodeSnapshotFileJSON(data []byte) (snapshotFile, error) {
-	var raw struct {
-		Version         int             `json:"version"`
-		JournalSequence uint64          `json:"journal_sequence,omitempty"`
-		Entries         json.RawMessage `json:"entries"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
+	return decodeSnapshotFileJSONReader(bytes.NewReader(data))
+}
+
+func decodeSnapshotFileJSONReader(reader io.Reader) (snapshotFile, error) {
+	decoder := json.NewDecoder(reader)
 	decoder.UseNumber()
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&raw); err != nil {
+	token, err := decoder.Token()
+	if err != nil {
 		return snapshotFile{}, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return snapshotFile{}, errors.New("hatriecache: snapshot JSON must be an object")
+	}
+
+	var snapshot snapshotFile
+	seenFields := map[string]struct{}{}
+	entriesSeen := false
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return snapshotFile{}, err
+		}
+		field, ok := token.(string)
+		if !ok {
+			return snapshotFile{}, errors.New("hatriecache: invalid snapshot JSON")
+		}
+		if _, ok := seenFields[field]; ok {
+			return snapshotFile{}, errors.New("hatriecache: duplicate snapshot field")
+		}
+		seenFields[field] = struct{}{}
+
+		switch field {
+		case "version":
+			if err := decoder.Decode(&snapshot.Version); err != nil {
+				return snapshotFile{}, err
+			}
+		case "journal_sequence":
+			if err := decoder.Decode(&snapshot.JournalSequence); err != nil {
+				return snapshotFile{}, err
+			}
+		case "entries":
+			entriesSeen = true
+			entries, err := decodeSnapshotEntriesJSON(decoder)
+			if err != nil {
+				return snapshotFile{}, err
+			}
+			snapshot.Entries = entries
+		default:
+			return snapshotFile{}, fmt.Errorf("hatriecache: unknown snapshot field %q", field)
+		}
+	}
+
+	token, err = decoder.Token()
+	if err != nil {
+		return snapshotFile{}, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '}' {
+		return snapshotFile{}, errors.New("hatriecache: invalid snapshot JSON")
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
@@ -434,30 +483,41 @@ func decodeSnapshotFileJSON(data []byte) (snapshotFile, error) {
 		}
 		return snapshotFile{}, err
 	}
-	if len(raw.Entries) == 0 {
+	if !entriesSeen {
 		return snapshotFile{}, errors.New("hatriecache: snapshot entries are required")
 	}
-	if bytes.Equal(bytes.TrimSpace(raw.Entries), []byte("null")) {
-		return snapshotFile{}, errors.New("hatriecache: snapshot entries must be an array")
+	return snapshot, nil
+}
+
+func decodeSnapshotEntriesJSON(decoder *json.Decoder) ([]snapshotEntry, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
 	}
-	var rawEntries []json.RawMessage
-	if err := json.Unmarshal(raw.Entries, &rawEntries); err != nil {
-		return snapshotFile{}, err
+	if delim, ok := token.(json.Delim); !ok || delim != '[' {
+		return nil, errors.New("hatriecache: snapshot entries must be an array")
 	}
 
-	snapshot := snapshotFile{
-		Version:         raw.Version,
-		JournalSequence: raw.JournalSequence,
-		Entries:         make([]snapshotEntry, 0, len(rawEntries)),
-	}
-	for _, data := range rawEntries {
-		entry, err := decodeSnapshotEntryJSONRequiredKey(data, true)
-		if err != nil {
-			return snapshotFile{}, err
+	entries := make([]snapshotEntry, 0)
+	for decoder.More() {
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return nil, err
 		}
-		snapshot.Entries = append(snapshot.Entries, entry)
+		entry, err := decodeSnapshotEntryJSONRequiredKey(raw, true)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
 	}
-	return snapshot, nil
+	token, err = decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != ']' {
+		return nil, errors.New("hatriecache: invalid snapshot entries JSON")
+	}
+	return entries, nil
 }
 
 func decodeSnapshotEntryJSONRequiredKey(data []byte, requiredKey bool) (snapshotEntry, error) {

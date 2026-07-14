@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -661,6 +662,39 @@ func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 		if err := ht.LoadSnapshot(path); err == nil {
 			t.Fatalf("LoadSnapshot(%s) error = nil, want error", name)
 		}
+	}
+}
+
+func TestDecodeSnapshotFileJSONReaderStreamsEntries(t *testing.T) {
+	payload := `{"version":1,"journal_sequence":7,"entries":[{"key":"name","type":"string","string":"ivi"},{"key":"views","type":"counter","counter":42}]}`
+	snapshot, err := decodeSnapshotFileJSONReader(iotest.OneByteReader(strings.NewReader(payload)))
+	if err != nil {
+		t.Fatalf("decodeSnapshotFileJSONReader() error = %v", err)
+	}
+	if snapshot.Version != snapshotVersion || snapshot.JournalSequence != 7 {
+		t.Fatalf("snapshot metadata = version %d sequence %d, want %d/7", snapshot.Version, snapshot.JournalSequence, snapshotVersion)
+	}
+	if len(snapshot.Entries) != 2 {
+		t.Fatalf("snapshot entries = %d, want 2", len(snapshot.Entries))
+	}
+	if snapshot.Entries[0].Key != "name" || snapshot.Entries[0].String != "ivi" {
+		t.Fatalf("first entry = %#v, want restored string entry", snapshot.Entries[0])
+	}
+	if snapshot.Entries[1].Key != "views" || snapshot.Entries[1].Counter != 42 {
+		t.Fatalf("second entry = %#v, want restored counter entry", snapshot.Entries[1])
+	}
+}
+
+func TestDecodeSnapshotFileJSONReaderRejectsTopLevelAmbiguity(t *testing.T) {
+	for name, payload := range map[string]string{
+		"unknown":   `{"version":1,"entries":[],"extra":true}`,
+		"duplicate": `{"version":1,"entries":[],"version":1}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeSnapshotFileJSONReader(strings.NewReader(payload)); err == nil {
+				t.Fatal("decodeSnapshotFileJSONReader() error = nil, want rejection")
+			}
+		})
 	}
 }
 
