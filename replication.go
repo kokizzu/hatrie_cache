@@ -171,8 +171,17 @@ func (replicator *HTTPReplicator) Close() {
 }
 
 func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	if replicator == nil {
+		return ReplicationResult{
+			Command: normalizedCommand(request.Command),
+			Key:     strings.TrimSpace(request.Key),
+			Skipped: true,
+			Reason:  "replication is not configured",
+		}
+	}
+
 	var result ReplicationResult
-	if replicator != nil && replicator.queue != nil {
+	if replicator.queue != nil {
 		result = replicator.enqueueReplication(ctx, trie, request, response)
 	} else {
 		result = replicator.replicateCommand(ctx, trie, request, response)
@@ -182,6 +191,15 @@ func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *Ha
 }
 
 func (replicator *HTTPReplicator) SyncAll(ctx context.Context, trie *HatTrie, prefix string) ReplicationResult {
+	if replicator == nil {
+		return ReplicationResult{
+			Command: "SYNC",
+			Key:     prefix,
+			Skipped: true,
+			Reason:  "replication is not configured",
+		}
+	}
+
 	result := replicator.syncAll(ctx, trie, prefix)
 	replicator.storeLastResult(result)
 	return result

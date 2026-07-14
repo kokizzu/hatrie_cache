@@ -93,6 +93,29 @@ func TestHTTPReplicatorReplicatesSetAndDeleteToOwners(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorNilReceiverReportsNotConfigured(t *testing.T) {
+	var replicator *HTTPReplicator
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "value")
+
+	result := replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{
+		Command: "SETSTR",
+		Key:     "session:1",
+		Value:   "value",
+	}, CacheCommandResponse{OK: true})
+	if !result.Skipped || result.Command != "SETSTR" || result.Key != "session:1" || result.Reason != "replication is not configured" {
+		t.Fatalf("ReplicateCommand(nil) = %#v, want not configured skip", result)
+	}
+
+	result = replicator.SyncAll(context.Background(), trie, "session:")
+	if !result.Skipped || result.Command != "SYNC" || result.Key != "session:" || result.Reason != "replication is not configured" {
+		t.Fatalf("SyncAll(nil) = %#v, want not configured sync skip", result)
+	}
+	if got := replicator.LastResult(); !got.Skipped || got.Reason != "replication is not configured" {
+		t.Fatalf("LastResult(nil) = %#v, want not configured skip", got)
+	}
+}
+
 func TestHTTPReplicatorSkipsWhenNotLeaderOrInternalCommand(t *testing.T) {
 	trie := newTestTrie(t)
 	topology := replicationTestTopology(t, "127.0.0.1:1")

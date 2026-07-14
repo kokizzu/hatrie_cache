@@ -979,6 +979,17 @@ func TestCacheGRPCServerReplicationReportsNotConfigured(t *testing.T) {
 	if !replication.GetSkipped() || replication.GetReason() != "replication is not configured" {
 		t.Fatalf("replication status = %#v, want not configured skip", replication)
 	}
+
+	replication, err = client.Replication(context.Background(), &hatriecachev1.ReplicationRequest{
+		Sync:   true,
+		Prefix: "session:",
+	})
+	if err != nil {
+		t.Fatalf("Replication(sync) error = %v", err)
+	}
+	if !replication.GetSkipped() || replication.GetCommand() != "SYNC" || replication.GetKey() != "session:" || replication.GetReason() != "replication is not configured" {
+		t.Fatalf("replication sync status = %#v, want not configured sync skip", replication)
+	}
 }
 
 func TestCacheGRPCServerSyncsReplication(t *testing.T) {
