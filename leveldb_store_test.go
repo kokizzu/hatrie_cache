@@ -267,7 +267,7 @@ func TestLevelDBBinaryCollectionPayloadCanBeSmallerThanJSON(t *testing.T) {
 	}
 }
 
-func TestLevelDBBinaryCollectionFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+func TestLevelDBBinaryCollectionEncodesBytesAsBase64String(t *testing.T) {
 	entry := snapshotEntry{
 		Key:  "payload",
 		Type: "map",
@@ -278,15 +278,43 @@ func TestLevelDBBinaryCollectionFallsBackToJSONForUnsupportedBinaryValue(t *test
 		t.Fatalf("marshalLevelDBEntry(binary map with bytes) error = %v", err)
 	}
 	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("map with bytes payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary map with bytes) error = %v", err)
+	}
+	if got := decoded.Map["bytes"]; got != base64.StdEncoding.EncodeToString([]byte("value")) {
+		t.Fatalf("decoded bytes = %#v, want base64 JSON string", got)
+	}
+}
+
+func TestLevelDBBinaryCollectionFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "payload",
+		Type: "map",
+		Map:  Map{"queue": PriorityQueue{{Priority: 1, Value: "job"}}},
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary map with priority queue) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
 	if snapshotValueDataIsBinary(payload) {
-		t.Fatalf("map with bytes payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+		t.Fatalf("map with priority queue payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {
 		t.Fatalf("decodeLevelDBEntry(JSON fallback map) error = %v", err)
 	}
-	if got := decoded.Map["bytes"]; got != base64.StdEncoding.EncodeToString([]byte("value")) {
-		t.Fatalf("decoded fallback bytes = %#v, want base64 JSON string", got)
+	queue, ok := decoded.Map["queue"].([]interface{})
+	if !ok || len(queue) != 1 {
+		t.Fatalf("decoded fallback queue = %#v, want one JSON array item", decoded.Map["queue"])
+	}
+	item, ok := queue[0].(map[string]interface{})
+	if !ok || item["priority"] != json.Number("1") || item["value"] != "job" {
+		t.Fatalf("decoded fallback queue item = %#v, want JSON object with priority/value", queue[0])
 	}
 }
 

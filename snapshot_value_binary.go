@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -48,6 +49,13 @@ func snapshotValueBinarySize(value interface{}) (int, bool, error) {
 		return 1, true, nil
 	case string:
 		size, err := snapshotValueBinaryBytesSize(len(v))
+		if err != nil {
+			return 0, true, err
+		}
+		total, err := snapshotValueBinaryAdd(1, size)
+		return total, true, err
+	case []byte:
+		size, err := snapshotValueBinaryBytesSize(base64.StdEncoding.EncodedLen(len(v)))
 		if err != nil {
 			return 0, true, err
 		}
@@ -155,6 +163,10 @@ func writeSnapshotValueBinary(writer *binaryFieldWriter, value interface{}) bool
 	case string:
 		writer.buf = append(writer.buf, snapshotValueBinaryString)
 		writer.writeString(v)
+	case []byte:
+		writer.buf = append(writer.buf, snapshotValueBinaryString)
+		writer.writeUvarint(uint64(base64.StdEncoding.EncodedLen(len(v))))
+		writer.buf = base64.StdEncoding.AppendEncode(writer.buf, v)
 	case json.Number:
 		writer.buf = append(writer.buf, snapshotValueBinaryNumber)
 		writer.writeString(v.String())
