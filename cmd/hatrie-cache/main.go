@@ -155,6 +155,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	var replicator *hatriecache.HTTPReplicator
 	if cfg.replication {
 		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
+			Context:            ctx,
 			Self:               defaultNodeID(cfg.nodeID),
 			Topology:           topology,
 			Election:           election,

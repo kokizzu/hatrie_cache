@@ -467,6 +467,43 @@ func TestHTTPReplicatorAsyncCloseIsIdempotentAndRejectsEnqueue(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAsyncContextCancelStopsQueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Context:        ctx,
+		AsyncQueueSize: 1,
+	})
+	cancel()
+	waitUntil(t, time.Second, func() bool {
+		last := replicator.LastResult()
+		return last.Queue != nil && last.Queue.Closed
+	})
+
+	trie := newTestTrie(t)
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}
+	response := trie.ExecuteCommand(write)
+	result := replicator.ReplicateCommand(context.Background(), trie, write, response)
+	if !result.Skipped || result.Reason != "replication queue is closed" || result.Queued {
+		t.Fatalf("post-cancel replicate result = %#v, want closed queue skip", result)
+	}
+	last := replicator.LastResult()
+	if last.Queue == nil || !last.Queue.Closed || last.Queue.Dropped != 1 {
+		t.Fatalf("closed queue stats after context cancel = %#v, want closed with one dropped enqueue", last.Queue)
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		replicator.Close()
+		replicator.Close()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("async replicator Close did not return after context cancel")
+	}
+}
+
 func TestHTTPReplicatorAsyncCloseCancelsInFlightDelivery(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})

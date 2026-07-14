@@ -211,6 +211,8 @@ jobs store the already-materialized internal snapshot payload, so later local
 mutations do not change what is delivered for the original write. Tune
 `REPLICATION_QUEUE_SIZE`, `REPLICATION_RETRY_INTERVAL`, and
 `REPLICATION_MAX_ATTEMPTS` to bound memory and retry failed HTTP deliveries.
+Library users can pass `HTTPReplicatorOptions.Context` to tie the async worker
+lifetime to a parent service context.
 `GET /api/replication` includes async queue depth, capacity, enqueue/drop
 counts, delivery attempts, successes, failures, retries, and closed state:
 

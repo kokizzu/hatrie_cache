@@ -24,6 +24,7 @@ const minCompressedReplicationRequestBytes = 16 << 10
 var errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
 
 type HTTPReplicatorOptions struct {
+	Context            context.Context
 	Self               string
 	Topology           *TopologyStore
 	Election           *ElectionStore
@@ -46,6 +47,7 @@ type HTTPReplicator struct {
 	attempts   uint
 	done       chan struct{}
 	stopped    chan struct{}
+	asyncCtx   context.Context
 	cancel     context.CancelFunc
 	close      sync.Once
 	closed     bool
@@ -130,12 +132,17 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		if attempts == 0 {
 			attempts = 1
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		parent := options.Context
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithCancel(parent)
 		replicator.queue = make(chan replicationJob, options.AsyncQueueSize)
 		replicator.retry = retry
 		replicator.attempts = attempts
 		replicator.done = make(chan struct{})
 		replicator.stopped = make(chan struct{})
+		replicator.asyncCtx = ctx
 		replicator.cancel = cancel
 		replicator.queueStats = ReplicationQueueStats{
 			Enabled:  true,
@@ -273,7 +280,17 @@ func (replicator *HTTPReplicator) asyncClosed() bool {
 	}
 	replicator.mu.RLock()
 	defer replicator.mu.RUnlock()
-	return replicator.closed
+	return replicator.closed || (replicator.asyncCtx != nil && replicator.asyncCtx.Err() != nil)
+}
+
+func (replicator *HTTPReplicator) markAsyncClosed() {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.closed = true
+	replicator.queueStats.Closed = true
 }
 
 func (replicator *HTTPReplicator) recordAsyncEnqueued() {
@@ -392,6 +409,7 @@ func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, r
 
 func (replicator *HTTPReplicator) runAsync(ctx context.Context) {
 	defer close(replicator.stopped)
+	defer replicator.markAsyncClosed()
 	for {
 		select {
 		case <-ctx.Done():
