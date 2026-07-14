@@ -817,8 +817,26 @@ func TestCacheGRPCServerLimitsEntries(t *testing.T) {
 	if limited.GetLimit() != 2 || !limited.GetHasMore() {
 		t.Fatalf("limited entries metadata = limit %d has_more %v, want 2/true", limited.GetLimit(), limited.GetHasMore())
 	}
+	if limited.GetNextAfterKey() != "session:2" {
+		t.Fatalf("limited entries next_after_key = %q, want session:2", limited.GetNextAfterKey())
+	}
 	if got := grpcEntryKeys(limited.GetEntries()); !reflect.DeepEqual(got, []string{"session:1", "session:2"}) {
 		t.Fatalf("limited entries keys = %#v, want first two sorted session keys", got)
+	}
+
+	next, err := client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
+		Prefix:   "session:",
+		Limit:    2,
+		AfterKey: limited.GetNextAfterKey(),
+	})
+	if err != nil {
+		t.Fatalf("Entries(next page) error = %v", err)
+	}
+	if next.GetAfterKey() != "session:2" || next.GetHasMore() || next.GetNextAfterKey() != "" {
+		t.Fatalf("next entries metadata = after %q has_more %v next %q, want session:2/false/empty", next.GetAfterKey(), next.GetHasMore(), next.GetNextAfterKey())
+	}
+	if got := grpcEntryKeys(next.GetEntries()); !reflect.DeepEqual(got, []string{"session:3"}) {
+		t.Fatalf("next entries keys = %#v, want remaining session key", got)
 	}
 
 	exact, err := client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
@@ -846,6 +864,13 @@ func TestCacheGRPCServerRejectsOversizedEntriesLimit(t *testing.T) {
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("Entries(oversized limit) error = %v, want InvalidArgument", err)
+	}
+	_, err = client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
+		Prefix:   "session:",
+		AfterKey: "other:1",
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Entries(cursor prefix mismatch) error = %v, want InvalidArgument", err)
 	}
 }
 

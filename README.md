@@ -241,7 +241,8 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
 `/api/journal`, and `/api/commands`.
 Use `GET /api/entries?prefix=...&limit=N` to bound large key listings; limited
-responses include `has_more` when another matching entry exists.
+responses include `has_more` and `next_after_key` for cursor paging with
+`after_key`.
 The Svelte MPA dashboard and key browser use bounded entry requests by default.
 `/api/commands` accepts JSON and protobuf command request bodies based on
 `Content-Type`; regular browser/API clients can continue to use JSON.
@@ -315,6 +316,7 @@ Use the HTTP client CLI against a running monitoring server:
 make cli ARGS='stats'
 make cli ARGS='entries -prefix session:'
 make cli ARGS='entries -prefix session: -limit 1000'
+make cli ARGS='entries -prefix session: -limit 1000 -after-key session:1000'
 make cli ARGS='command -cmd SETSTR -key name -value ivi'
 make cli ARGS='command -cmd INC -key views'
 make cli ARGS="command -cmd PUTMAP -key user:1 -pairs '{\"name\":\"ivi\",\"age\":32}'"
@@ -457,8 +459,9 @@ service in another Go process, or use the generated client in
 leader-write enforcement, and HTTP replication options as the monitoring
 command API. Clients may request gRPC transfer compression with the standard
 `gzip` compressor; the server registers it at the fastest compression level.
-`EntriesRequest.limit` bounds large key listings and returns `has_more` when
-another matching entry exists after the returned page. The
+`EntriesRequest.limit` bounds large key listings and returns `has_more` with
+`next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
+page. The
 `Replication` RPC returns the same last result and async queue stats as
 `GET /api/replication`; set `sync=true` with an optional `prefix` to run the
 same anti-entropy sync exposed by `POST /api/replication`. The `Topology`,

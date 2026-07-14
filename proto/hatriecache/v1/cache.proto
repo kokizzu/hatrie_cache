@@ -47,6 +47,7 @@ message StatsResponse {
 message EntriesRequest {
   string prefix = 1;
   uint64 limit = 2;
+  string after_key = 3;
 }
 
 message Entry {
@@ -62,6 +63,8 @@ message EntriesResponse {
   repeated Entry entries = 1;
   uint64 limit = 2;
   bool has_more = 3;
+  string after_key = 4;
+  string next_after_key = 5;
 }
 
 message CommandRequest {

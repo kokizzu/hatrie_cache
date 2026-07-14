@@ -226,6 +226,12 @@ nav a:hover {
   margin-bottom: 14px;
 }
 
+.panel-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 14px;
+}
+
 .status-badge {
   border-radius: 999px;
   font-size: 0.82rem;
@@ -309,6 +315,21 @@ nav a:hover {
   color: #1f6feb;
   font-weight: 700;
   text-decoration: none;
+}
+
+button.text-link {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 4px;
+  padding: 0;
+}
+
+button.text-link:disabled {
+  color: #8b98a5;
+  cursor: not-allowed;
 }
 
 .table-wrap {

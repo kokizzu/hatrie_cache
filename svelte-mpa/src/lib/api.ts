@@ -53,6 +53,8 @@ export type EntriesResponse = {
   entries: CacheEntry[];
   limit?: number;
   has_more?: boolean;
+  after_key?: string;
+  next_after_key?: string;
 };
 
 export const DEFAULT_ENTRIES_LIMIT = 1000;
@@ -274,16 +276,24 @@ export async function loadStats(): Promise<CacheStats> {
   return readJSON<CacheStats>('/api/stats', sampleStats);
 }
 
-export async function loadEntries(prefix = '', limit = 0): Promise<EntriesResponse> {
+export async function loadEntries(prefix = '', limit = 0, afterKey = ''): Promise<EntriesResponse> {
   const query = new URLSearchParams();
   if (prefix) query.set('prefix', prefix);
   if (limit > 0) query.set('limit', String(limit));
+  if (afterKey) query.set('after_key', afterKey);
   const encoded = query.toString();
   const path = encoded ? `/api/entries?${encoded}` : '/api/entries';
-  const matchedEntries = sampleEntries.filter((entry) => entry.key.startsWith(prefix));
+  const matchedEntries = sampleEntries
+    .filter((entry) => entry.key.startsWith(prefix))
+    .sort((left, right) => left.key.localeCompare(right.key));
+  const cursorEntries = afterKey ? matchedEntries.filter((entry) => entry.key > afterKey) : matchedEntries;
+  const entries = cursorEntries.slice(0, limit > 0 ? limit : undefined);
+  const hasMore = limit > 0 && cursorEntries.length > limit;
   const fallback = {
-    entries: matchedEntries.slice(0, limit > 0 ? limit : undefined),
-    ...(limit > 0 ? { limit, has_more: matchedEntries.length > limit } : {})
+    entries,
+    ...(limit > 0 ? { limit, has_more: hasMore } : {}),
+    ...(afterKey ? { after_key: afterKey } : {}),
+    ...(hasMore && entries.length > 0 ? { next_after_key: entries[entries.length - 1].key } : {})
   };
   return readJSON<EntriesResponse>(path, fallback);
 }

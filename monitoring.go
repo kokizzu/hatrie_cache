@@ -68,9 +68,11 @@ type MonitoringEntry struct {
 }
 
 type MonitoringEntriesResponse struct {
-	Entries []MonitoringEntry `json:"entries"`
-	Limit   uint64            `json:"limit,omitempty"`
-	HasMore bool              `json:"has_more,omitempty"`
+	Entries      []MonitoringEntry `json:"entries"`
+	Limit        uint64            `json:"limit,omitempty"`
+	HasMore      bool              `json:"has_more,omitempty"`
+	AfterKey     string            `json:"after_key,omitempty"`
+	NextAfterKey string            `json:"next_after_key,omitempty"`
 }
 
 type replicationSyncRequest struct {
@@ -172,7 +174,12 @@ func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.R
 		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 		return
 	}
-	writeJSON(w, handler.trie.monitoringEntriesLimited(prefix, limit))
+	afterKey, err := monitoringEntriesAfterKey(prefix, r.URL.Query().Get("after_key"))
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	writeJSON(w, handler.trie.monitoringEntriesPage(prefix, afterKey, limit))
 }
 
 func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.Request) {
@@ -645,6 +652,19 @@ func monitoringEntriesLimit(raw string) (int, error) {
 	return int(value), nil
 }
 
+func monitoringEntriesAfterKey(prefix string, raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	if err := validateKey(raw); err != nil {
+		return "", err
+	}
+	if prefix != "" && !strings.HasPrefix(raw, prefix) {
+		return "", errors.New("after_key must match prefix")
+	}
+	return raw, nil
+}
+
 func normalizeCommandJournalTailLimit(value uint64) (int, error) {
 	if value == 0 {
 		return DefaultCommandJournalTailLimit, nil
@@ -693,6 +713,10 @@ func (ht *HatTrie) monitoringEntries(prefix string) []MonitoringEntry {
 }
 
 func (ht *HatTrie) monitoringEntriesLimited(prefix string, limit int) MonitoringEntriesResponse {
+	return ht.monitoringEntriesPage(prefix, "", limit)
+}
+
+func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, limit int) MonitoringEntriesResponse {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -704,7 +728,13 @@ func (ht *HatTrie) monitoringEntriesLimited(prefix string, limit int) Monitoring
 	if limit > 0 {
 		response.Limit = uint64(limit)
 	}
+	if afterKey != "" {
+		response.AfterKey = afterKey
+	}
 	err := ht.scanEntriesWithPrefixAtLockedChecked(prefix, true, now, func(entry Entry) error {
+		if afterKey != "" && entry.Key <= afterKey {
+			return nil
+		}
 		if limit > 0 && len(response.Entries) >= limit {
 			response.HasMore = true
 			return errMonitoringEntriesLimitReached
@@ -726,6 +756,9 @@ func (ht *HatTrie) monitoringEntriesLimited(prefix string, limit int) Monitoring
 	}
 	if response.Entries == nil {
 		response.Entries = []MonitoringEntry{}
+	}
+	if response.HasMore && len(response.Entries) > 0 {
+		response.NextAfterKey = response.Entries[len(response.Entries)-1].Key
 	}
 	return response
 }

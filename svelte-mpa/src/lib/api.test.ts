@@ -31,14 +31,16 @@ describe('command fallback', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('loads entries with prefix and limit query params', async () => {
+  it('loads entries with prefix, limit, and cursor query params', async () => {
     const fetchMock = vi.fn(async (path: string | URL | Request) => {
-      expect(path).toBe('/api/entries?prefix=session%3A&limit=2');
+      expect(path).toBe('/api/entries?prefix=session%3A&limit=2&after_key=session%3A2');
       return new Response(
         JSON.stringify({
           entries: [],
           limit: 2,
-          has_more: true
+          has_more: true,
+          after_key: 'session:2',
+          next_after_key: 'session:4'
         }),
         {
           status: 200,
@@ -48,12 +50,32 @@ describe('command fallback', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(loadEntries('session:', 2)).resolves.toEqual({
+    await expect(loadEntries('session:', 2, 'session:2')).resolves.toEqual({
       entries: [],
       limit: 2,
-      has_more: true
+      has_more: true,
+      after_key: 'session:2',
+      next_after_key: 'session:4'
     });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to cursor-paged sample entries', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error('offline');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadEntries('', 2, 'asset:hero:raw')).resolves.toMatchObject({
+      entries: [
+        expect.objectContaining({ key: 'card:visitors' }),
+        expect.objectContaining({ key: 'counter:article:87' })
+      ],
+      limit: 2,
+      has_more: true,
+      after_key: 'asset:hero:raw',
+      next_after_key: 'counter:article:87'
+    });
   });
 
   it('rejects commands without a key', () => {

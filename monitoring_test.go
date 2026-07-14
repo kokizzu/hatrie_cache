@@ -268,8 +268,27 @@ func TestMonitoringHandlerLimitsEntries(t *testing.T) {
 	if body.Limit != 2 || !body.HasMore {
 		t.Fatalf("limited entries metadata = limit %d has_more %v, want 2/true", body.Limit, body.HasMore)
 	}
+	if body.NextAfterKey != "session:2" {
+		t.Fatalf("limited entries next_after_key = %q, want session:2", body.NextAfterKey)
+	}
 	if got := entryKeysFromMonitoring(body.Entries); !reflect.DeepEqual(got, []string{"session:1", "session:2"}) {
 		t.Fatalf("limited entries keys = %#v, want first two sorted session keys", got)
+	}
+
+	nextResp := httptest.NewRecorder()
+	handler.ServeHTTP(nextResp, httptest.NewRequest(http.MethodGet, "/api/entries?prefix=session:&limit=2&after_key=session:2", nil))
+	if nextResp.Code != http.StatusOK {
+		t.Fatalf("next entries status = %d, want 200", nextResp.Code)
+	}
+	var nextBody MonitoringEntriesResponse
+	if err := json.Unmarshal(nextResp.Body.Bytes(), &nextBody); err != nil {
+		t.Fatalf("next entries JSON error = %v", err)
+	}
+	if nextBody.AfterKey != "session:2" || nextBody.HasMore || nextBody.NextAfterKey != "" {
+		t.Fatalf("next entries metadata = after %q has_more %v next %q, want session:2/false/empty", nextBody.AfterKey, nextBody.HasMore, nextBody.NextAfterKey)
+	}
+	if got := entryKeysFromMonitoring(nextBody.Entries); !reflect.DeepEqual(got, []string{"session:3"}) {
+		t.Fatalf("next entries keys = %#v, want remaining session key", got)
 	}
 
 	exactResp := httptest.NewRecorder()
@@ -294,7 +313,7 @@ func TestMonitoringHandlerRejectsInvalidEntriesLimit(t *testing.T) {
 	ht.UpsertString("session:1", "one")
 	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
 
-	for _, target := range []string{"/api/entries?limit=0", "/api/entries?limit=bad", "/api/entries?limit=100001"} {
+	for _, target := range []string{"/api/entries?limit=0", "/api/entries?limit=bad", "/api/entries?limit=100001", "/api/entries?prefix=session:&after_key=other:1"} {
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, target, nil))
 		if resp.Code != http.StatusBadRequest {
@@ -304,8 +323,8 @@ func TestMonitoringHandlerRejectsInvalidEntriesLimit(t *testing.T) {
 		if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
 			t.Fatalf("%s JSON error = %v", target, err)
 		}
-		if body.OK || !strings.Contains(body.Message, "limit") {
-			t.Fatalf("%s body = %#v, want limit error", target, body)
+		if body.OK || !(strings.Contains(body.Message, "limit") || strings.Contains(body.Message, "after_key")) {
+			t.Fatalf("%s body = %#v, want entries validation error", target, body)
 		}
 	}
 }

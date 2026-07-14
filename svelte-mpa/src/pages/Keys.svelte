@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { HardDrive, RefreshCw, Search, Trash2 } from '@lucide/svelte';
+  import { ChevronRight, HardDrive, RefreshCw, Search, Trash2 } from '@lucide/svelte';
   import Shell from '../components/Shell.svelte';
   import { DEFAULT_ENTRIES_LIMIT, loadEntries, runCommand, type CacheEntry } from '../lib/api';
   import { filterEntries, formatBytes, formatTTL } from '../lib/format';
@@ -10,20 +10,33 @@
   let entriesLimit = DEFAULT_ENTRIES_LIMIT;
   let loadedLimit = DEFAULT_ENTRIES_LIMIT;
   let hasMore = false;
+  let currentAfterKey = '';
+  let nextAfterKey = '';
   let query = '';
   let type = 'all';
   let message = '';
   let loading = true;
 
   async function refresh() {
+    await loadPage('');
+  }
+
+  async function loadPage(afterKey: string) {
     loading = true;
     const requestedLimit = Math.max(1, Math.floor(Number(entriesLimit) || DEFAULT_ENTRIES_LIMIT));
     entriesLimit = requestedLimit;
-    const response = await loadEntries(prefix, requestedLimit);
+    const response = await loadEntries(prefix, requestedLimit, afterKey);
     entries = response.entries;
     loadedLimit = response.limit ?? requestedLimit;
     hasMore = Boolean(response.has_more);
+    currentAfterKey = response.after_key ?? afterKey;
+    nextAfterKey = response.next_after_key ?? '';
     loading = false;
+  }
+
+  async function loadNextPage() {
+    if (!nextAfterKey) return;
+    await loadPage(nextAfterKey);
   }
 
   async function removeKey(key: string) {
@@ -95,12 +108,20 @@
       <div>
         <h2>{filtered.length.toLocaleString()} keys</h2>
         <p>
-          Filtered from {entries.length.toLocaleString()} loaded entries{hasMore
+          Filtered from {entries.length.toLocaleString()} loaded entries{currentAfterKey
+            ? ` after ${currentAfterKey}`
+            : ''}{hasMore
             ? `, limited to ${loadedLimit.toLocaleString()} with more available`
             : ''}
         </p>
       </div>
-      <HardDrive size={18} aria-hidden="true" />
+      <div class="panel-actions">
+        <button class="text-link" type="button" on:click={loadNextPage} disabled={!hasMore || loading} title="Load next page">
+          <span>Next page</span>
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
+        <HardDrive size={18} aria-hidden="true" />
+      </div>
     </div>
 
     <div class="table-wrap">

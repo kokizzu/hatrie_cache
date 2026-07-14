@@ -83,6 +83,7 @@ func runEntries(ctx context.Context, client *http.Client, addr string, args []st
 	flags.SetOutput(stderr)
 	prefix := flags.String("prefix", "", "key prefix filter")
 	limit := flags.Uint64("limit", 0, "maximum entries to fetch")
+	afterKey := flags.String("after-key", "", "only return entries after this key")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -94,6 +95,9 @@ func runEntries(ctx context.Context, client *http.Client, addr string, args []st
 	}
 	if *limit > 0 {
 		query.Set("limit", strconv.FormatUint(*limit, 10))
+	}
+	if *afterKey != "" {
+		query.Set("after_key", *afterKey)
 	}
 	if encoded := query.Encode(); encoded != "" {
 		path += "?" + encoded
