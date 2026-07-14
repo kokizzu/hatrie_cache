@@ -961,6 +961,7 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	source.UpsertMap("map", Map{"field": "value"})
 	source.UpsertSlice("slice", Slice{"value"})
 	source.UpsertSet("set", Set{"value"})
+	source.PushPriorityQueue("queue", 1, "job")
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -1025,13 +1026,22 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if got, ok, err := loaded.GetSetChecked("set"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("GetSetChecked(set closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
+	if got, ok, err := loaded.PeekPriorityQueueChecked("queue"); got.Priority != 0 || got.Value != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PeekPriorityQueueChecked(queue closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.PopPriorityQueueChecked("queue"); got.Priority != 0 || got.Value != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PopPriorityQueueChecked(queue closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetPriorityQueueChecked("queue"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetPriorityQueueChecked(queue closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "cold"}); got.OK {
 		t.Fatalf("GET cold closed ref response = %#v, want error", got)
 	}
 
 	entries := loaded.Entries(true)
-	if len(entries) != 6 {
-		t.Fatalf("Entries(after closed ref reads) len = %d, want 6", len(entries))
+	if len(entries) != 7 {
+		t.Fatalf("Entries(after closed ref reads) len = %d, want 7", len(entries))
 	}
 	for _, entry := range entries {
 		if !entry.Value.IsLevelDBReference() {

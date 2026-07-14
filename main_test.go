@@ -1530,6 +1530,55 @@ func TestPriorityQueueOperationsDeepCopyNestedValues(t *testing.T) {
 	}
 }
 
+func TestCheckedPriorityQueueOperationsReturnValuesAndCopies(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertPriorityQueue("queue", PriorityQueue{
+		{Priority: 5, Value: Map{"job": "old"}},
+		{Priority: 1, Value: "new"},
+	})
+
+	peek, ok, err := ht.PeekPriorityQueueChecked("queue")
+	if err != nil || !ok || peek.Priority != 1 || peek.Value != "new" {
+		t.Fatalf("PeekPriorityQueueChecked(queue) = %#v/%v/%v, want new priority 1", peek, ok, err)
+	}
+
+	items, ok, err := ht.GetPriorityQueueChecked("queue")
+	if err != nil || !ok || !reflect.DeepEqual(items, PriorityQueue{
+		{Priority: 1, Value: "new"},
+		{Priority: 5, Value: Map{"job": "old"}},
+	}) {
+		t.Fatalf("GetPriorityQueueChecked(queue) = %#v/%v/%v, want priority order", items, ok, err)
+	}
+	items[1].Value.(Map)["job"] = "changed"
+	if again, _, _ := ht.GetPriorityQueueChecked("queue"); again[1].Value.(Map)["job"] != "old" {
+		t.Fatalf("GetPriorityQueueChecked exposed nested value: %#v", again)
+	}
+
+	popped, ok, err := ht.PopPriorityQueueChecked("queue")
+	if err != nil || !ok || popped.Priority != 1 || popped.Value != "new" {
+		t.Fatalf("PopPriorityQueueChecked(queue) = %#v/%v/%v, want new priority 1", popped, ok, err)
+	}
+	next, ok, err := ht.PeekPriorityQueueChecked("queue")
+	if err != nil || !ok || next.Priority != 5 || next.Value.(Map)["job"] != "old" {
+		t.Fatalf("PeekPriorityQueueChecked(after pop) = %#v/%v/%v, want old priority 5", next, ok, err)
+	}
+	next.Value.(Map)["job"] = "peek"
+	if again, _, _ := ht.PeekPriorityQueueChecked("queue"); again.Value.(Map)["job"] != "old" {
+		t.Fatalf("PeekPriorityQueueChecked exposed nested value: %#v", again)
+	}
+
+	ht.UpsertString("string", "value")
+	if _, ok, err := ht.GetPriorityQueueChecked("missing"); err != nil || ok {
+		t.Fatalf("GetPriorityQueueChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
+	}
+	if _, ok, err := ht.PeekPriorityQueueChecked("string"); err != nil || ok {
+		t.Fatalf("PeekPriorityQueueChecked(wrong type) ok/error = %v/%v, want false/nil", ok, err)
+	}
+	if _, ok, err := ht.PopPriorityQueueChecked("string"); err != nil || ok {
+		t.Fatalf("PopPriorityQueueChecked(wrong type) ok/error = %v/%v, want false/nil", ok, err)
+	}
+}
+
 func TestBloomFilterOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

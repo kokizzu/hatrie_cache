@@ -362,47 +362,74 @@ func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}
 }
 
 func (ht *HatTrie) PeekPriorityQueue(key string) (PriorityItem, bool) {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.getLocked(key)
-	if !hval.IsPriorityQueue() {
-		ht.recordReadLocked(false, key)
-		return PriorityItem{}, false
-	}
-	item, ok := ht.priorityQueues.array[hval.Index].Peek()
-	ht.recordReadLocked(ok, key)
+	item, ok, _ := ht.PeekPriorityQueueChecked(key)
 	return item, ok
 }
 
-func (ht *HatTrie) PopPriorityQueue(key string) (PriorityItem, bool) {
+func (ht *HatTrie) PeekPriorityQueueChecked(key string) (PriorityItem, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return PriorityItem{}, false, err
+	}
 	if !hval.IsPriorityQueue() {
 		ht.recordReadLocked(false, key)
-		return PriorityItem{}, false
+		return PriorityItem{}, false, nil
+	}
+	item, ok := ht.priorityQueues.array[hval.Index].Peek()
+	ht.recordReadLocked(ok, key)
+	return item, ok, nil
+}
+
+func (ht *HatTrie) PopPriorityQueue(key string) (PriorityItem, bool) {
+	item, ok, _ := ht.PopPriorityQueueChecked(key)
+	return item, ok
+}
+
+func (ht *HatTrie) PopPriorityQueueChecked(key string) (PriorityItem, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return PriorityItem{}, false, err
+	}
+	if !hval.IsPriorityQueue() {
+		ht.recordReadLocked(false, key)
+		return PriorityItem{}, false, nil
 	}
 	item, ok := ht.priorityQueues.array[hval.Index].Pop()
 	if !ok {
 		ht.recordReadLocked(false, key)
-		return PriorityItem{}, false
+		return PriorityItem{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
 	ht.recordWriteLocked(key)
-	return item, true
+	return item, true, nil
 }
 
 func (ht *HatTrie) GetPriorityQueue(key string) PriorityQueue {
+	value, _, _ := ht.GetPriorityQueueChecked(key)
+	return value
+}
+
+func (ht *HatTrie) GetPriorityQueueChecked(key string) (PriorityQueue, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsPriorityQueue() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.priorityQueues.array[hval.Index].Items()
+	return ht.priorityQueues.array[hval.Index].Items(), true, nil
 }
