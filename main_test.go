@@ -4959,6 +4959,266 @@ func TestBytesStorageClonesCallerOwnedValues(t *testing.T) {
 	}
 }
 
+func TestMapStorageDirectAPIsCloneAndReuseSlots(t *testing.T) {
+	store := CreateMapStorage()
+	nested := Map{"field": "stored"}
+	payload := []byte("bytes")
+	idx := store.Append(Map{"nested": nested, "payload": payload})
+	nested["field"] = "caller"
+	payload[0] = 'X'
+	if got := store.array[idx]["nested"].(Map)["field"]; got != "stored" {
+		t.Fatalf("Append() stored caller-owned nested map: %v", got)
+	}
+	if got := string(store.array[idx]["payload"].([]byte)); got != "bytes" {
+		t.Fatalf("Append() stored caller-owned bytes: %q", got)
+	}
+
+	entry := Slice{"one"}
+	store.PutEntry(idx, "entry", entry)
+	entry[0] = "caller"
+	if got := store.array[idx]["entry"]; !reflect.DeepEqual(got, Slice{"one"}) {
+		t.Fatalf("PutEntry() stored caller-owned slice: %#v", got)
+	}
+
+	fields := Map{"bulk": Map{"state": "stored"}}
+	store.PutEntries(idx, fields)
+	fields["bulk"].(Map)["state"] = "caller"
+	if got := store.array[idx]["bulk"].(Map)["state"]; got != "stored" {
+		t.Fatalf("PutEntries() stored caller-owned map: %v", got)
+	}
+	if got, ok := store.TakeEntry(idx, "entry"); !ok || !reflect.DeepEqual(got, Slice{"one"}) {
+		t.Fatalf("TakeEntry(entry) = %#v/%v, want cloned slice/true", got, ok)
+	}
+	if entryIdx := store.AppendEntry("single", "value"); !reflect.DeepEqual(store.array[entryIdx], Map{"single": "value"}) {
+		t.Fatalf("AppendEntry() slot = %#v, want single value", store.array[entryIdx])
+	}
+
+	replacementBytes := []byte("next")
+	store.Put(idx, Map{"payload": replacementBytes})
+	replacementBytes[0] = 'X'
+	if got := string(store.array[idx]["payload"].([]byte)); got != "next" {
+		t.Fatalf("Put() stored caller-owned bytes: %q", got)
+	}
+
+	reuse := CreateMapStorage()
+	reuse.Add(Map{"zero": true})
+	middle := reuse.Add(Map{"middle": true})
+	reuse.Add(Map{"tail": true})
+	reuse.Del(middle)
+	if got := reuse.Add(Map{"reused": "map"}); got != middle {
+		t.Fatalf("Add() after middle delete = %d, want reused index %d", got, middle)
+	}
+	if got := reuse.array[middle]; !reflect.DeepEqual(got, Map{"reused": "map"}) {
+		t.Fatalf("reused map slot after Add() = %#v, want reused map", got)
+	}
+	reuse.Del(middle)
+	if got := reuse.AddEntry("reused", "yes"); got != middle {
+		t.Fatalf("AddEntry() after middle delete = %d, want reused index %d", got, middle)
+	}
+	if got := reuse.array[middle]; !reflect.DeepEqual(got, Map{"reused": "yes"}) {
+		t.Fatalf("reused map slot = %#v, want reused entry", got)
+	}
+}
+
+func TestSliceStorageDirectAPIsCloneAndReuseSlots(t *testing.T) {
+	store := CreateSliceStorage()
+	nested := Map{"field": "stored"}
+	payload := []byte("bytes")
+	idx := store.Append(Slice{nested, payload})
+	nested["field"] = "caller"
+	payload[0] = 'X'
+	if got := store.array[idx].Slice(); !reflect.DeepEqual(got, Slice{Map{"field": "stored"}, []byte("bytes")}) {
+		t.Fatalf("Append() stored caller-owned values: %#v", got)
+	}
+
+	replacement := Slice{Map{"state": "stored"}}
+	store.Put(idx, replacement)
+	replacement[0].(Map)["state"] = "caller"
+	if got := store.array[idx].Slice(); !reflect.DeepEqual(got, Slice{Map{"state": "stored"}}) {
+		t.Fatalf("Put() stored caller-owned values: %#v", got)
+	}
+
+	value := Map{"name": "first"}
+	more := []byte("second")
+	valuesIdx := store.AppendValues(value, more)
+	value["name"] = "caller"
+	more[0] = 'X'
+	if got := store.array[valuesIdx].Slice(); !reflect.DeepEqual(got, Slice{Map{"name": "first"}, []byte("second")}) {
+		t.Fatalf("AppendValues() stored caller-owned values: %#v", got)
+	}
+
+	if checkedIdx, err := store.AppendValuesChecked("checked", "tail"); err != nil {
+		t.Fatalf("AppendValuesChecked() error = %v", err)
+	} else if got := store.array[checkedIdx].Slice(); !reflect.DeepEqual(got, Slice{"checked", "tail"}) {
+		t.Fatalf("AppendValuesChecked() values = %#v, want checked tail", got)
+	}
+
+	reuse := CreateSliceStorage()
+	reuse.Add(Slice{"zero"})
+	middle := reuse.Add(Slice{"middle"})
+	reuse.Add(Slice{"tail"})
+	reuse.Del(middle)
+	if got := reuse.Add(Slice{"reused"}); got != middle {
+		t.Fatalf("Add() after middle delete = %d, want reused index %d", got, middle)
+	}
+	if got := reuse.array[middle].Slice(); !reflect.DeepEqual(got, Slice{"reused"}) {
+		t.Fatalf("reused slice slot after Add() = %#v, want reused value", got)
+	}
+	reuse.Del(middle)
+	if got := reuse.AddValues("reused", "slot"); got != middle {
+		t.Fatalf("AddValues() after middle delete = %d, want reused index %d", got, middle)
+	}
+	if got := reuse.array[middle].Slice(); !reflect.DeepEqual(got, Slice{"reused", "slot"}) {
+		t.Fatalf("reused slice slot = %#v, want reused values", got)
+	}
+}
+
+func TestSetStorageDirectAPIsCloneDedupeAndReuseSlots(t *testing.T) {
+	store := CreateSetStorage()
+	idx := store.AppendValues("b", "a", "b")
+	if got := store.array[idx].Values(); !reflect.DeepEqual(got, Set{"a", "b"}) {
+		t.Fatalf("AppendValues() = %#v, want sorted deduped set", got)
+	}
+
+	if added := store.array[idx].AddOne("c", "a"); added != 1 {
+		t.Fatalf("AddOne(c, duplicate a) = %d, want 1", added)
+	}
+	if removed := store.array[idx].RemoveOne("a", "missing"); removed != 1 {
+		t.Fatalf("RemoveOne(a, missing) = %d, want 1", removed)
+	}
+	nested := Map{"field": "stored"}
+	if added := store.array[idx].AddOne(nested); added != 1 {
+		t.Fatalf("AddOne(nested) = %d, want 1", added)
+	}
+	nested["field"] = "caller"
+	if ok := store.array[idx].Has(Map{"field": "stored"}); !ok {
+		t.Fatal("Has(stored nested map) = false, want true")
+	}
+	if got := store.array[idx].Values(); !reflect.DeepEqual(got, Set{"b", "c", Map{"field": "stored"}}) {
+		t.Fatalf("Values() = %#v, want sorted cloned values", got)
+	}
+
+	copied := store.array[idx].Values()
+	copied[2].(Map)["field"] = "changed"
+	if got := store.array[idx].Values(); !reflect.DeepEqual(got, Set{"b", "c", Map{"field": "stored"}}) {
+		t.Fatalf("Values() exposed internal set value: %#v", got)
+	}
+
+	if added, err := store.array[idx].AddOneChecked(func() {}); err == nil || added != 0 {
+		t.Fatalf("AddOneChecked(unsupported) = %d/%v, want 0/error", added, err)
+	}
+	if removed, err := store.array[idx].RemoveOneChecked(func() {}); err == nil || removed != 0 {
+		t.Fatalf("RemoveOneChecked(unsupported) = %d/%v, want 0/error", removed, err)
+	}
+	if _, err := newSetDataValuesChecked(func() {}); err == nil {
+		t.Fatal("newSetDataValuesChecked(unsupported) error = nil, want error")
+	}
+
+	putValue := Set{Map{"state": "stored"}}
+	store.Put(idx, putValue)
+	putValue[0].(Map)["state"] = "caller"
+	if got := store.array[idx].Values(); !reflect.DeepEqual(got, Set{Map{"state": "stored"}}) {
+		t.Fatalf("Put() stored caller-owned values: %#v", got)
+	}
+	if addValuesIdx := store.AddValues("x", "y", "x"); addValuesIdx <= idx {
+		t.Fatalf("AddValues() index = %d, want new appended slot after %d", addValuesIdx, idx)
+	} else if got := store.array[addValuesIdx].Values(); !reflect.DeepEqual(got, Set{"x", "y"}) {
+		t.Fatalf("AddValues() values = %#v, want deduped values", got)
+	}
+
+	reuse := CreateSetStorage()
+	reuse.Add(Set{"zero"})
+	middle := reuse.Add(Set{"middle"})
+	reuse.Add(Set{"tail"})
+	reuse.Del(middle)
+	if got := reuse.Add(Set{"reused"}); got != middle {
+		t.Fatalf("Add() after middle delete = %d, want reused index %d", got, middle)
+	}
+	if got := reuse.array[middle].Values(); !reflect.DeepEqual(got, Set{"reused"}) {
+		t.Fatalf("reused set slot after Add() = %#v, want reused value", got)
+	}
+	reuse.Del(middle)
+	if got := reuse.AddValues("values", "values"); got != middle {
+		t.Fatalf("AddValues() after middle delete = %d, want reused index %d", got, middle)
+	}
+	if got := reuse.array[middle].Values(); !reflect.DeepEqual(got, Set{"values"}) {
+		t.Fatalf("reused set slot after AddValues() = %#v, want deduped values", got)
+	}
+	reuse.Del(middle)
+	if got := reuse.AddData(newSetDataValues("reused", "reused")); got != middle {
+		t.Fatalf("AddData() after middle delete = %d, want reused index %d", got, middle)
+	}
+	reuse.PutData(middle, newSetDataValues("put"))
+	if got := reuse.array[middle].Values(); !reflect.DeepEqual(got, Set{"put"}) {
+		t.Fatalf("PutData() values = %#v, want put", got)
+	}
+}
+
+func TestPriorityQueueStorageDirectAPIsCloneOrderAndReuseSlots(t *testing.T) {
+	store := CreatePriorityQueueStorage()
+	nested := Map{"job": "slow"}
+	idx := store.Append(PriorityQueue{
+		{Priority: 5, Value: nested},
+		{Priority: 1, Value: "fast"},
+	})
+	nested["job"] = "caller"
+	if got := store.array[idx].Items(); !reflect.DeepEqual(got, PriorityQueue{
+		{Priority: 1, Value: "fast"},
+		{Priority: 5, Value: Map{"job": "slow"}},
+	}) {
+		t.Fatalf("Append() queue items = %#v, want priority order with cloned value", got)
+	}
+
+	putBytes := []byte("bytes")
+	store.Put(idx, PriorityQueue{{Priority: 2, Value: putBytes}})
+	putBytes[0] = 'X'
+	if got := store.array[idx].Items(); !reflect.DeepEqual(got, PriorityQueue{{Priority: 2, Value: []byte("bytes")}}) {
+		t.Fatalf("Put() queue items = %#v, want cloned bytes", got)
+	}
+
+	itemBytes := []byte("item")
+	store.PutItems(idx, []priorityQueueItem{
+		{Priority: 3, Sequence: 3, Value: "late"},
+		{Priority: 1, Sequence: 2, Value: itemBytes},
+	})
+	itemBytes[0] = 'X'
+	if got := store.array[idx].nextSequence; got != 4 {
+		t.Fatalf("PutItems() next sequence = %d, want 4", got)
+	}
+	if added := store.array[idx].PushOne(1, "tie"); added != 1 {
+		t.Fatalf("PushOne(tie) = %d, want 1", added)
+	}
+	if got := store.array[idx].Items(); !reflect.DeepEqual(got, PriorityQueue{
+		{Priority: 1, Value: []byte("item")},
+		{Priority: 1, Value: "tie"},
+		{Priority: 3, Value: "late"},
+	}) {
+		t.Fatalf("PutItems()/PushOne() queue items = %#v, want stable priority order", got)
+	}
+
+	reuse := CreatePriorityQueueStorage()
+	reuse.Add(PriorityQueue{{Priority: 1, Value: "zero"}})
+	middle := reuse.Add(PriorityQueue{{Priority: 1, Value: "middle"}})
+	reuse.Add(PriorityQueue{{Priority: 1, Value: "tail"}})
+	reuse.Del(middle)
+	if got := reuse.Add(PriorityQueue{{Priority: 0, Value: "reused-add"}}); got != middle {
+		t.Fatalf("Add() after middle delete = %d, want reused index %d", got, middle)
+	}
+	if got := reuse.array[middle].Items(); !reflect.DeepEqual(got, PriorityQueue{{Priority: 0, Value: "reused-add"}}) {
+		t.Fatalf("reused priority queue slot after Add() = %#v, want reused item", got)
+	}
+	reuse.Del(middle)
+	if got := reuse.AddItems([]priorityQueueItem{{Priority: 0, Sequence: 7, Value: "reused"}}); got != middle {
+		t.Fatalf("AddItems() after middle delete = %d, want reused index %d", got, middle)
+	}
+	if got := reuse.array[middle].Items(); !reflect.DeepEqual(got, PriorityQueue{{Priority: 0, Value: "reused"}}) {
+		t.Fatalf("reused priority queue slot = %#v, want reused item", got)
+	}
+	if got := reuse.AppendItems([]priorityQueueItem{{Priority: -1, Sequence: 9, Value: "append"}}); got != 3 {
+		t.Fatalf("AppendItems() index = %d, want 3", got)
+	}
+}
+
 func TestStoragePoolsTrimReusableTailSlots(t *testing.T) {
 	raws := CreateBytesStorage()
 	raws.Add([]byte("zero"))
