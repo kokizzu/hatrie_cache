@@ -24,41 +24,47 @@ import (
 	"google.golang.org/grpc"
 )
 
-const serverShutdownTimeout = 5 * time.Second
+const (
+	serverShutdownTimeout              = 5 * time.Second
+	defaultMonitoringReadHeaderTimeout = 5 * time.Second
+	defaultMonitoringIdleTimeout       = 2 * time.Minute
+)
 
 type config struct {
-	monitoringServer      bool
-	monitoringAddr        string
-	monitoringTLSCert     string
-	monitoringTLSKey      string
-	monitoringWebDir      string
-	nodeID                string
-	topologyPath          string
-	electionTimeout       time.Duration
-	replication           bool
-	replicationAsync      bool
-	replicationQueueSize  int
-	replicationRetry      time.Duration
-	replicationAttempts   uint
-	replicationWireFormat string
-	enforceLeaderWrites   bool
-	grpcAddr              string
-	dbPath                string
-	dbSyncInterval        time.Duration
-	dbHotLoad             bool
-	dbHotLoadMaxBytes     int64
-	dbHotLoadMaxAge       time.Duration
-	dbHotLoadMinHits      uint64
-	snapshotPath          string
-	snapshotInterval      time.Duration
-	snapshotFormat        string
-	journalPath           string
-	journalPullSource     string
-	journalPullStatePath  string
-	journalPullInterval   time.Duration
-	journalPullTimeout    time.Duration
-	journalPullLimit      uint64
-	journalPullMaxBatches uint64
+	monitoringServer            bool
+	monitoringAddr              string
+	monitoringTLSCert           string
+	monitoringTLSKey            string
+	monitoringWebDir            string
+	monitoringReadHeaderTimeout time.Duration
+	monitoringIdleTimeout       time.Duration
+	nodeID                      string
+	topologyPath                string
+	electionTimeout             time.Duration
+	replication                 bool
+	replicationAsync            bool
+	replicationQueueSize        int
+	replicationRetry            time.Duration
+	replicationAttempts         uint
+	replicationWireFormat       string
+	enforceLeaderWrites         bool
+	grpcAddr                    string
+	dbPath                      string
+	dbSyncInterval              time.Duration
+	dbHotLoad                   bool
+	dbHotLoadMaxBytes           int64
+	dbHotLoadMaxAge             time.Duration
+	dbHotLoadMinHits            uint64
+	snapshotPath                string
+	snapshotInterval            time.Duration
+	snapshotFormat              string
+	journalPath                 string
+	journalPullSource           string
+	journalPullStatePath        string
+	journalPullInterval         time.Duration
+	journalPullTimeout          time.Duration
+	journalPullLimit            uint64
+	journalPullMaxBatches       uint64
 }
 
 func main() {
@@ -181,11 +187,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Replicator:          replicator,
 		EnforceLeaderWrites: cfg.enforceLeaderWrites,
 	}).Handler()
-	server := &http.Server{
-		Addr:      cfg.monitoringAddr,
-		Handler:   handler,
-		TLSConfig: monitoringTLSConfig(nil),
-	}
+	server := newMonitoringServer(cfg, handler)
 
 	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator)
 	if err != nil {
@@ -236,10 +238,12 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 
 func parseConfig(args []string, output io.Writer) (config, error) {
 	cfg := config{
-		monitoringAddr:     "127.0.0.1:8080",
-		monitoringWebDir:   "svelte-mpa/dist",
-		electionTimeout:    hatriecache.DefaultElectionTimeout,
-		journalPullTimeout: hatriecache.DefaultCommandJournalPullTimeout,
+		monitoringAddr:              "127.0.0.1:8080",
+		monitoringWebDir:            "svelte-mpa/dist",
+		monitoringReadHeaderTimeout: defaultMonitoringReadHeaderTimeout,
+		monitoringIdleTimeout:       defaultMonitoringIdleTimeout,
+		electionTimeout:             hatriecache.DefaultElectionTimeout,
+		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
 	}
 	flags := flag.NewFlagSet("hatrie-cache", flag.ContinueOnError)
 	flags.SetOutput(output)
@@ -248,6 +252,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
+	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
+	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
 	flags.StringVar(&cfg.nodeID, "node-id", "", "local cluster node id")
 	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
 	flags.DurationVar(&cfg.electionTimeout, "election-timeout", cfg.electionTimeout, "node heartbeat timeout for deterministic topology leader election")
@@ -280,6 +286,12 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if (cfg.monitoringTLSCert == "") != (cfg.monitoringTLSKey == "") {
 		return config{}, errors.New("monitoring TLS requires both -monitoring-tls-cert and -monitoring-tls-key")
+	}
+	if cfg.monitoringReadHeaderTimeout < 0 {
+		return config{}, errors.New("monitoring read header timeout must be non-negative")
+	}
+	if cfg.monitoringIdleTimeout < 0 {
+		return config{}, errors.New("monitoring idle timeout must be non-negative")
 	}
 	if cfg.dbHotLoadMaxBytes < 0 {
 		return config{}, errors.New("db hot-load max bytes must be non-negative")
@@ -332,6 +344,16 @@ func snapshotFormat(cfg config) hatriecache.SnapshotFormat {
 		return hatriecache.DefaultSnapshotFormat
 	}
 	return format
+}
+
+func newMonitoringServer(cfg config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              cfg.monitoringAddr,
+		Handler:           handler,
+		TLSConfig:         monitoringTLSConfig(nil),
+		ReadHeaderTimeout: cfg.monitoringReadHeaderTimeout,
+		IdleTimeout:       cfg.monitoringIdleTimeout,
+	}
 }
 
 func newMonitoringListener(cfg config) (net.Listener, error) {

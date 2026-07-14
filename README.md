@@ -96,10 +96,14 @@ make generate-proto
 ```
 
 The monitoring web/API server is opt-in. It does not run unless the
-`-monitoring-server` flag is set:
+`-monitoring-server` flag is set. Monitoring HTTP uses a 5 second request
+header timeout and 2 minute idle keep-alive timeout by default; set
+`MONITORING_READ_HEADER_TIMEOUT=0` or `MONITORING_IDLE_TIMEOUT=0` to disable a
+bound deliberately:
 
 ```
 make monitoring-server MONITORING_ADDR=127.0.0.1:8080
+make monitoring-server MONITORING_READ_HEADER_TIMEOUT=10s MONITORING_IDLE_TIMEOUT=30s
 make run CMD='go run ./cmd/hatrie-cache'
 ```
 

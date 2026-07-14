@@ -45,6 +45,12 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if cfg.snapshotFormat != string(hatriecache.DefaultSnapshotFormat) {
 		t.Fatalf("snapshotFormat = %q, want default", cfg.snapshotFormat)
 	}
+	if cfg.monitoringReadHeaderTimeout != defaultMonitoringReadHeaderTimeout {
+		t.Fatalf("monitoring read header timeout = %s, want %s", cfg.monitoringReadHeaderTimeout, defaultMonitoringReadHeaderTimeout)
+	}
+	if cfg.monitoringIdleTimeout != defaultMonitoringIdleTimeout {
+		t.Fatalf("monitoring idle timeout = %s, want %s", cfg.monitoringIdleTimeout, defaultMonitoringIdleTimeout)
+	}
 }
 
 func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
@@ -52,6 +58,8 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 		"-monitoring-server",
 		"-monitoring-addr", "127.0.0.1:9090",
 		"-monitoring-web-dir", "/tmp/web",
+		"-monitoring-read-header-timeout", "750ms",
+		"-monitoring-idle-timeout", "15s",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
@@ -61,6 +69,58 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	}
 	if cfg.monitoringAddr != "127.0.0.1:9090" || cfg.monitoringWebDir != "/tmp/web" {
 		t.Fatalf("cfg = %#v, want explicit address and web dir", cfg)
+	}
+	if cfg.monitoringReadHeaderTimeout != 750*time.Millisecond || cfg.monitoringIdleTimeout != 15*time.Second {
+		t.Fatalf("monitoring timeouts = %s/%s, want 750ms/15s", cfg.monitoringReadHeaderTimeout, cfg.monitoringIdleTimeout)
+	}
+}
+
+func TestParseConfigRejectsNegativeMonitoringTimeouts(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "read header",
+			args: []string{"-monitoring-read-header-timeout", "-1s"},
+			want: "monitoring read header timeout must be non-negative",
+		},
+		{
+			name: "idle",
+			args: []string{"-monitoring-idle-timeout", "-1s"},
+			want: "monitoring idle timeout must be non-negative",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseConfig(tt.args, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("parseConfig(%s) error = %v, want %q", tt.name, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewMonitoringServerAppliesTimeouts(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	cfg := config{
+		monitoringAddr:              "127.0.0.1:9090",
+		monitoringReadHeaderTimeout: 2 * time.Second,
+		monitoringIdleTimeout:       30 * time.Second,
+	}
+	server := newMonitoringServer(cfg, handler)
+
+	if server.Addr != cfg.monitoringAddr {
+		t.Fatalf("server Addr = %q, want %q", server.Addr, cfg.monitoringAddr)
+	}
+	if server.Handler == nil {
+		t.Fatal("server Handler = nil")
+	}
+	if server.ReadHeaderTimeout != 2*time.Second || server.IdleTimeout != 30*time.Second {
+		t.Fatalf("server timeouts = %s/%s, want 2s/30s", server.ReadHeaderTimeout, server.IdleTimeout)
+	}
+	if server.TLSConfig == nil || !containsString(server.TLSConfig.NextProtos, "h2") {
+		t.Fatalf("server TLSConfig NextProtos = %#v, want h2 enabled", server.TLSConfig)
 	}
 }
 
