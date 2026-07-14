@@ -718,6 +718,8 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 		t.Fatalf("UpsertQuantileSketch() error = %v", err)
 	}
 	source.AddQuantileSketch("quantile", 10)
+	source.UpsertRadixTree("radix")
+	source.PutRadixTree("radix", "old", "value")
 	source.IncrementCountMinSketch("cms", "old", 2)
 	source.AddHyperLogLog("hll", "old")
 	source.AddTopK("top", "old", 2)
@@ -739,8 +741,8 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
 	}
-	if result.KeysLoaded != 12 || result.ValuesLoaded != 0 {
-		t.Fatalf("hot-load result = %#v, want 12 cold keys", result)
+	if result.KeysLoaded != 13 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 13 cold keys", result)
 	}
 
 	if added, err := loaded.AddSetChecked("set", "new"); err != nil || added != 1 {
@@ -798,6 +800,16 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	}
 	if estimate, ok := loaded.EstimateQuantileSketch("quantile", 0.5); !ok || estimate.Count != 2 || estimate.Value < 10 || estimate.Value > 20 {
 		t.Fatalf("EstimateQuantileSketch(after cold add) = %#v/%v, want retained values", estimate, ok)
+	}
+
+	if added, err := loaded.PutRadixTreeChecked("radix", "new", "value"); err != nil || !added {
+		t.Fatalf("PutRadixTreeChecked(cold ref) = %v/%v, want true/nil", added, err)
+	}
+	if oldValue, ok := loaded.GetRadixTree("radix", "old"); !ok || oldValue != "value" {
+		t.Fatalf("GetRadixTree(old after cold put) = %#v/%v, want retained value", oldValue, ok)
+	}
+	if newValue, ok := loaded.GetRadixTree("radix", "new"); !ok || newValue != "value" {
+		t.Fatalf("GetRadixTree(new after cold put) = %#v/%v, want new value", newValue, ok)
 	}
 
 	if estimate, err := loaded.IncrementCountMinSketchChecked("cms", "new", 3); err != nil || estimate < 3 {
@@ -939,6 +951,12 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	if added := loaded.PutRadixTreeEntries("radix", Map{"new": "value"}); added != 0 {
 		t.Fatalf("PutRadixTreeEntries(closed cold ref) = %d, want 0", added)
 	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PUTRT", Key: "radix", Subkey: "new", Value: "value"}); got.OK {
+		t.Fatalf("PUTRT closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GETRT", Key: "radix", Subkey: "old"}); got.OK {
+		t.Fatalf("GETRT closed cold ref response = %#v, want error", got)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INC", Key: "cmd-counter", Value: "2"}); got.OK {
 		t.Fatalf("INC closed cold ref response = %#v, want error", got)
 	}
@@ -1030,6 +1048,8 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 		t.Fatalf("UpsertQuantileSketch() error = %v", err)
 	}
 	source.AddQuantileSketch("quantile", 10)
+	source.UpsertRadixTree("radix")
+	source.PutRadixTree("radix", "old", Map{"field": "value"})
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -1145,13 +1165,25 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if got, ok, err := loaded.QuantileSketchInfoChecked("quantile"); got.Count != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("QuantileSketchInfoChecked(quantile closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
+	if got, ok, err := loaded.GetRadixTreeChecked("radix", "old"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetRadixTreeChecked(radix closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if hit, err := loaded.HasRadixTreeChecked("radix", "old"); hit || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HasRadixTreeChecked(radix closed ref) = %v/%v, want false/ErrLevelDBStoreClosed", hit, err)
+	}
+	if got, ok, err := loaded.ScanRadixTreeChecked("radix", ""); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("ScanRadixTreeChecked(radix closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.RadixTreeInfoChecked("radix"); got.Items != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("RadixTreeInfoChecked(radix closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "cold"}); got.OK {
 		t.Fatalf("GET cold closed ref response = %#v, want error", got)
 	}
 
 	entries := loaded.Entries(true)
-	if len(entries) != 11 {
-		t.Fatalf("Entries(after closed ref reads) len = %d, want 11", len(entries))
+	if len(entries) != 12 {
+		t.Fatalf("Entries(after closed ref reads) len = %d, want 12", len(entries))
 	}
 	for _, entry := range entries {
 		if !entry.Value.IsLevelDBReference() {
@@ -1180,6 +1212,8 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 		t.Fatalf("UpsertQuantileSketch() error = %v", err)
 	}
 	source.AddQuantileSketch("quantile", 10)
+	source.UpsertRadixTree("radix")
+	source.PutRadixTree("radix", "old", "value")
 	source.IncrementCountMinSketch("cms", "alpha", 1)
 	source.AddTopK("top", "alpha", 1)
 	if _, err := source.AddXorFilter("xor", "alpha"); err != nil {
@@ -1242,6 +1276,15 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	}
 	if _, _, err := loaded.EstimateQuantileSketchChecked("quantile", 0.5); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("EstimateQuantileSketchChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.PutRadixTreeChecked("radix", "new", "value"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PutRadixTreeChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.GetRadixTreeChecked("radix", "old"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetRadixTreeChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.DeleteRadixTreeChecked("radix", "old"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("DeleteRadixTreeChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, _, err := loaded.EstimateCountMinSketchChecked("cms", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("EstimateCountMinSketchChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)

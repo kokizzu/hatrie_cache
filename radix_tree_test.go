@@ -182,6 +182,72 @@ func TestHatTrieRadixTreeOperations(t *testing.T) {
 	}
 }
 
+func TestCheckedRadixTreeOperationsReturnValuesAndCopies(t *testing.T) {
+	ht := newTestTrie(t)
+
+	added, err := ht.PutRadixTreeChecked("index", "user:100/profile", Map{"status": "active"})
+	if err != nil || !added {
+		t.Fatalf("PutRadixTreeChecked(new) = %v/%v, want true/nil", added, err)
+	}
+	addedCount, err := ht.PutRadixTreeEntriesChecked("index", Map{
+		"asset:logo":       []byte("png"),
+		"user:101/profile": "pending",
+	})
+	if err != nil || addedCount != 2 {
+		t.Fatalf("PutRadixTreeEntriesChecked(new) = %d/%v, want 2/nil", addedCount, err)
+	}
+
+	value, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile")
+	if err != nil || !ok || !reflect.DeepEqual(value, Map{"status": "active"}) {
+		t.Fatalf("GetRadixTreeChecked(user:100/profile) = %#v/%v/%v, want stored map", value, ok, err)
+	}
+	value.(Map)["status"] = "changed"
+	if again, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile"); err != nil || !ok || again.(Map)["status"] != "active" {
+		t.Fatalf("GetRadixTreeChecked(after caller mutation) = %#v/%v/%v, want original map", again, ok, err)
+	}
+
+	items, ok, err := ht.ScanRadixTreeChecked("index", "user:")
+	if err != nil || !ok || !reflect.DeepEqual(radixTreeItemKeys(items), []string{"user:100/profile", "user:101/profile"}) {
+		t.Fatalf("ScanRadixTreeChecked(user:) = %#v/%v/%v, want sorted user keys", items, ok, err)
+	}
+	items[0].Value.(Map)["status"] = "scan"
+	if again, ok, err := ht.GetRadixTreeChecked("index", "user:100/profile"); err != nil || !ok || again.(Map)["status"] != "active" {
+		t.Fatalf("GetRadixTreeChecked(after scan mutation) = %#v/%v/%v, want original map", again, ok, err)
+	}
+
+	hit, err := ht.HasRadixTreeChecked("index", "asset:logo")
+	if err != nil || !hit {
+		t.Fatalf("HasRadixTreeChecked(asset:logo) = %v/%v, want true/nil", hit, err)
+	}
+	info, ok, err := ht.RadixTreeInfoChecked("index")
+	if err != nil || !ok || info.Items != 3 || info.Nodes == 0 {
+		t.Fatalf("RadixTreeInfoChecked(index) = %#v/%v/%v, want populated tree", info, ok, err)
+	}
+	deleted, err := ht.DeleteRadixTreeChecked("index", "asset:logo")
+	if err != nil || !deleted {
+		t.Fatalf("DeleteRadixTreeChecked(asset:logo) = %v/%v, want true/nil", deleted, err)
+	}
+	hit, err = ht.HasRadixTreeChecked("index", "asset:logo")
+	if err != nil || hit {
+		t.Fatalf("HasRadixTreeChecked(asset:logo after delete) = %v/%v, want false/nil", hit, err)
+	}
+
+	ht.UpsertString("string", "value")
+	added, err = ht.PutRadixTreeChecked("string", "key", "value")
+	if err != nil || !added {
+		t.Fatalf("PutRadixTreeChecked(overwrite string) = %v/%v, want true/nil", added, err)
+	}
+	if hval := ht.Get("string"); !hval.IsRadixTree() {
+		t.Fatalf("PutRadixTreeChecked(overwrite string) stored %+v, want radix tree", hval)
+	}
+	if value, ok, err := ht.GetRadixTreeChecked("missing", "key"); err != nil || ok || value != nil {
+		t.Fatalf("GetRadixTreeChecked(missing) = %#v/%v/%v, want nil/false/nil", value, ok, err)
+	}
+	if items, ok, err := ht.ScanRadixTreeChecked("missing", ""); err != nil || ok || items != nil {
+		t.Fatalf("ScanRadixTreeChecked(missing) = %#v/%v/%v, want nil/false/nil", items, ok, err)
+	}
+}
+
 func TestRadixTreeStorageReleasedOnOverwrite(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertRadixTree("index")

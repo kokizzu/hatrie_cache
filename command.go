@@ -561,14 +561,20 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("subkey/value or pairs is required")
 		}
-		added := ht.PutRadixTreeEntries(key, fields)
+		added, err := ht.PutRadixTreeEntriesChecked(key, fields)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "stored radix tree values", Value: strconv.Itoa(added)}
 	case "GETRT", "RTGET":
 		subkey, ok := commandRadixTreeSubkey(request)
 		if !ok {
 			return commandError("subkey is required")
 		}
-		value, ok := ht.GetRadixTree(key, subkey)
+		value, ok, err := ht.GetRadixTreeChecked(key, subkey)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -578,7 +584,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("subkey is required")
 		}
-		if ht.DeleteRadixTree(key, subkey) {
+		deleted, err := ht.DeleteRadixTreeChecked(key, subkey)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if deleted {
 			return CacheCommandResponse{OK: true, Message: "removed radix tree value", Value: "1"}
 		}
 		return CacheCommandResponse{OK: true, Message: "value not found", Value: "0"}
@@ -587,18 +597,28 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("subkey is required")
 		}
-		if ht.HasRadixTree(key, subkey) {
+		hit, err := ht.HasRadixTreeChecked(key, subkey)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if hit {
 			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 	case "PREFIXRT", "SCANRT", "RTPREFIX", "RTSCAN":
-		items, ok := ht.ScanRadixTree(key, strings.TrimSpace(request.Subkey))
+		items, ok, err := ht.ScanRadixTreeChecked(key, strings.TrimSpace(request.Subkey))
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", items)
 	case "INFORT", "RTINFO":
-		info, ok := ht.RadixTreeInfo(key)
+		info, ok, err := ht.RadixTreeInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}

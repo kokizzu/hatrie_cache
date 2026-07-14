@@ -466,20 +466,28 @@ func (ht *HatTrie) UpsertRadixTree(key string) {
 }
 
 func (ht *HatTrie) PutRadixTree(key string, subkey string, val interface{}) bool {
+	added, _ := ht.PutRadixTreeChecked(key, subkey, val)
+	return added
+}
+
+func (ht *HatTrie) PutRadixTreeChecked(key string, subkey string, val interface{}) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return false
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return false, err
 	}
 	if hval.IsRadixTree() {
 		added := ht.radixTrees.array[hval.Index].Put(subkey, val)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return added
+		return added, nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	data := newRadixTreeData()
@@ -487,28 +495,36 @@ func (ht *HatTrie) PutRadixTree(key string, subkey string, val interface{}) bool
 	idx := ht.radixTrees.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RADIX_TREE}.toValue()
 	ht.recordWriteLocked(key)
-	return added
+	return added, nil
 }
 
 func (ht *HatTrie) PutRadixTreeEntries(key string, entries Map) int {
+	added, _ := ht.PutRadixTreeEntriesChecked(key, entries)
+	return added
+}
+
+func (ht *HatTrie) PutRadixTreeEntriesChecked(key string, entries Map) (int, error) {
 	if len(entries) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return 0
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, err
 	}
 	if hval.IsRadixTree() {
 		added := ht.radixTrees.array[hval.Index].PutEntries(entries)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return added
+		return added, nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	data := newRadixTreeData()
@@ -516,76 +532,121 @@ func (ht *HatTrie) PutRadixTreeEntries(key string, entries Map) int {
 	idx := ht.radixTrees.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RADIX_TREE}.toValue()
 	ht.recordWriteLocked(key)
-	return added
+	return added, nil
 }
 
 func (ht *HatTrie) GetRadixTree(key string, subkey string) (interface{}, bool) {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.getLocked(key)
-	if !hval.IsRadixTree() {
-		ht.recordReadLocked(false, key)
-		return nil, false
-	}
-	value, ok := ht.radixTrees.array[hval.Index].Get(subkey)
-	ht.recordReadLocked(ok, key)
+	value, ok, _ := ht.GetRadixTreeChecked(key, subkey)
 	return value, ok
 }
 
-func (ht *HatTrie) DeleteRadixTree(key string, subkey string) bool {
+func (ht *HatTrie) GetRadixTreeChecked(key string, subkey string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsRadixTree() {
 		ht.recordReadLocked(false, key)
-		return false
+		return nil, false, nil
+	}
+	value, ok := ht.radixTrees.array[hval.Index].Get(subkey)
+	ht.recordReadLocked(ok, key)
+	return value, ok, nil
+}
+
+func (ht *HatTrie) DeleteRadixTree(key string, subkey string) bool {
+	deleted, _ := ht.DeleteRadixTreeChecked(key, subkey)
+	return deleted
+}
+
+func (ht *HatTrie) DeleteRadixTreeChecked(key string, subkey string) (bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
+	if !hval.IsRadixTree() {
+		ht.recordReadLocked(false, key)
+		return false, nil
 	}
 	deleted := ht.radixTrees.array[hval.Index].Delete(subkey)
 	ht.recordReadLocked(deleted, key)
 	if deleted {
 		ht.recordWriteLocked(key)
 	}
-	return deleted
+	return deleted, nil
 }
 
 func (ht *HatTrie) HasRadixTree(key string, subkey string) bool {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.getLocked(key)
-	if !hval.IsRadixTree() {
-		ht.recordReadLocked(false, key)
-		return false
-	}
-	hit := ht.radixTrees.array[hval.Index].Contains(subkey)
-	ht.recordReadLocked(hit, key)
+	hit, _ := ht.HasRadixTreeChecked(key, subkey)
 	return hit
 }
 
-func (ht *HatTrie) ScanRadixTree(key string, prefix string) ([]RadixTreeItem, bool) {
+func (ht *HatTrie) HasRadixTreeChecked(key string, subkey string) (bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
 	if !hval.IsRadixTree() {
 		ht.recordReadLocked(false, key)
-		return nil, false
+		return false, nil
+	}
+	hit := ht.radixTrees.array[hval.Index].Contains(subkey)
+	ht.recordReadLocked(hit, key)
+	return hit, nil
+}
+
+func (ht *HatTrie) ScanRadixTree(key string, prefix string) ([]RadixTreeItem, bool) {
+	items, ok, _ := ht.ScanRadixTreeChecked(key, prefix)
+	return items, ok
+}
+
+func (ht *HatTrie) ScanRadixTreeChecked(key string, prefix string) ([]RadixTreeItem, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
+	if !hval.IsRadixTree() {
+		ht.recordReadLocked(false, key)
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.radixTrees.array[hval.Index].ItemsWithPrefix(prefix), true
+	return ht.radixTrees.array[hval.Index].ItemsWithPrefix(prefix), true, nil
 }
 
 func (ht *HatTrie) RadixTreeInfo(key string) (RadixTreeInfo, bool) {
+	info, ok, _ := ht.RadixTreeInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) RadixTreeInfoChecked(key string) (RadixTreeInfo, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return RadixTreeInfo{}, false, err
+	}
 	if !hval.IsRadixTree() {
 		ht.recordReadLocked(false, key)
-		return RadixTreeInfo{}, false
+		return RadixTreeInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.radixTrees.array[hval.Index].Info(), true
+	return ht.radixTrees.array[hval.Index].Info(), true, nil
 }
