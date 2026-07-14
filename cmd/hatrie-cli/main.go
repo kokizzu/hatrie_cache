@@ -338,7 +338,19 @@ func postCommandValue(ctx context.Context, client *http.Client, addr string, req
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, "/api/commands"), reader)
+	err = postCommandReader(ctx, client, addr, reader, contentType, contentEncoding, stdout)
+	if shouldRetryCommandAsJSON(wireFormat, contentType, err) {
+		reader, contentType, contentEncoding, err = hatriecache.CommandRequestBody(request, hatriecache.CommandWireFormatJSON, estimatedCommandRequestBytes(request), minCompressedJSONRequestBytes)
+		if err != nil {
+			return err
+		}
+		return postCommandReader(ctx, client, addr, reader, contentType, contentEncoding, stdout)
+	}
+	return err
+}
+
+func postCommandReader(ctx context.Context, client *http.Client, addr string, body io.Reader, contentType string, contentEncoding string, stdout io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, "/api/commands"), body)
 	if err != nil {
 		return err
 	}
@@ -348,6 +360,23 @@ func postCommandValue(ctx context.Context, client *http.Client, addr string, req
 		req.Header.Set("Content-Encoding", contentEncoding)
 	}
 	return doCommandAndCopy(client, req, stdout)
+}
+
+func shouldRetryCommandAsJSON(wireFormat string, contentType string, err error) bool {
+	if !commandWireFormatAuto(wireFormat) || contentType != "application/x-protobuf" {
+		return false
+	}
+	var httpErr *commandHTTPError
+	return errors.As(err, &httpErr) && httpErr.statusCode == http.StatusUnsupportedMediaType
+}
+
+func commandWireFormatAuto(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", defaultCommandWireFormat:
+		return true
+	default:
+		return false
+	}
 }
 
 func postJSONReaderWithEncoding(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, contentEncoding string, stdout io.Writer) error {
@@ -464,7 +493,7 @@ func doCommandAndCopy(client *http.Client, req *http.Request, stdout io.Writer) 
 				message = string(data)
 			}
 		}
-		return fmt.Errorf("server returned %s: %s", resp.Status, message)
+		return &commandHTTPError{status: resp.Status, statusCode: resp.StatusCode, message: message}
 	}
 	response, err := hatriecache.DecodeCommandResponseWire(resp.Body, contentType, maxErrorBodyBytes)
 	if err != nil {
@@ -482,6 +511,16 @@ func doCommandAndCopy(client *http.Client, req *http.Request, stdout io.Writer) 
 	}
 	_, err = stdout.Write([]byte{'\n'})
 	return err
+}
+
+type commandHTTPError struct {
+	status     string
+	statusCode int
+	message    string
+}
+
+func (err *commandHTTPError) Error() string {
+	return fmt.Sprintf("server returned %s: %s", err.status, err.message)
 }
 
 func unsupportedCommandResponseContentType(err error) bool {

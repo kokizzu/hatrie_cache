@@ -375,9 +375,11 @@ make cli ARGS='snapshot'
 
 The CLI `command` subcommand uses `-wire-format auto` by default, which uses
 protobuf request/response bodies when the command payload can be represented as
-protobuf and falls back to JSON requests for complex values. CLI output remains
-JSON. Use `-wire-format json` to force the previous JSON request/response body
-format or `-wire-format protobuf` to require protobuf-only request encoding.
+protobuf and falls back to JSON requests for complex values or servers that
+reject protobuf request bodies with `415 Unsupported Media Type`. CLI output
+remains JSON. Use `-wire-format json` to force the previous JSON
+request/response body format or `-wire-format protobuf` to require
+protobuf-only request encoding.
 
 Example sharded topology with 1024 virtual buckets:
 

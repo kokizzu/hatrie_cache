@@ -508,6 +508,87 @@ func TestRunCommandPostsProtobufByDefault(t *testing.T) {
 	}
 }
 
+func TestRunCommandAutoRetriesJSONWhenServerRejectsProtobuf(t *testing.T) {
+	var attempts int32
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt := atomic.AddInt32(&attempts, 1)
+		switch attempt {
+		case 1:
+			if got := r.Header.Get("Content-Type"); got != "application/x-protobuf" {
+				t.Fatalf("first Content-Type = %q, want application/x-protobuf", got)
+			}
+			http.Error(w, "unsupported command request content type", http.StatusUnsupportedMediaType)
+		case 2:
+			if got := r.Header.Get("Content-Type"); got != "application/json" {
+				t.Fatalf("retry Content-Type = %q, want application/json", got)
+			}
+			if got := r.Header.Get("Accept"); got != "application/json" {
+				t.Fatalf("retry Accept = %q, want application/json", got)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+				t.Fatalf("Decode(retry) error = %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true,"message":"stored after retry"}`))
+		default:
+			t.Fatalf("unexpected attempt %d", attempt)
+		}
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "SETSTR",
+		"-key", "name",
+		"-value", "ivi",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command retry) error = %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if gotRequest.Command != "SETSTR" || gotRequest.Key != "name" || gotRequest.Value != "ivi" {
+		t.Fatalf("retry request = %#v, want SETSTR name ivi", gotRequest)
+	}
+	if got := stdout.String(); got != "{\"ok\":true,\"message\":\"stored after retry\"}\n" {
+		t.Fatalf("stdout = %q, want retry command response", got)
+	}
+}
+
+func TestRunCommandForcedProtobufDoesNotRetryJSON(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		if got := r.Header.Get("Content-Type"); got != "application/x-protobuf" {
+			t.Fatalf("Content-Type = %q, want application/x-protobuf", got)
+		}
+		http.Error(w, "unsupported command request content type", http.StatusUnsupportedMediaType)
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-wire-format", "protobuf",
+		"-cmd", "SETSTR",
+		"-key", "name",
+		"-value", "ivi",
+	}, stdout, &bytes.Buffer{}, server.Client())
+	if err == nil || !strings.Contains(err.Error(), "415 Unsupported Media Type") {
+		t.Fatalf("run(command forced protobuf) error = %v, want 415", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout len = %d, want empty", stdout.Len())
+	}
+}
+
 func TestRunCommandReportsProtobufErrorResponseAsJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Accept"); got != "application/x-protobuf" {
