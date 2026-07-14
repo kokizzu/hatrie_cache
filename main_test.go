@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -5147,6 +5148,106 @@ func TestDiskStorageWriteFailureCleansTemporaryFilesAndKeepsReusableIndex(t *tes
 		t.Fatal("failed Add did not restore reusable disk index")
 	}
 	assertNoAtomicTempFiles(t, dir, "bytes-0.bin")
+}
+
+func TestDiskStorageStreamFailureDoesNotRestoreDeletedPath(t *testing.T) {
+	dir := t.TempDir()
+	disks, err := CreateDiskStorage(dir, false)
+	if err != nil {
+		t.Fatalf("CreateDiskStorage() error = %v", err)
+	}
+	if _, err := disks.Add([]byte("zero")); err != nil {
+		t.Fatalf("Add(zero) error = %v", err)
+	}
+	middle, err := disks.Add([]byte("middle"))
+	if err != nil {
+		t.Fatalf("Add(middle) error = %v", err)
+	}
+	if _, err := disks.Add([]byte("tail")); err != nil {
+		t.Fatalf("Add(tail) error = %v", err)
+	}
+	middlePath := disks.paths[middle]
+	disks.Del(middle)
+
+	boom := errors.New("boom")
+	if err := disks.PutStream(middle, func(writer io.Writer) error {
+		_, _ = writer.Write([]byte("partial"))
+		return boom
+	}); !errors.Is(err, boom) {
+		t.Fatalf("PutStream(failing) error = %v, want boom", err)
+	}
+	if got := disks.paths[middle]; got != "" {
+		t.Fatalf("path after failed PutStream = %q, want empty", got)
+	}
+	if !disks.reusables.Has(middle) {
+		t.Fatal("failed PutStream did not keep reusable middle index")
+	}
+	assertNoAtomicTempFiles(t, dir, filepath.Base(middlePath))
+
+	if err := disks.PutStream(middle, func(writer io.Writer) error {
+		_, err := writer.Write([]byte("put-stream"))
+		return err
+	}); err != nil {
+		t.Fatalf("PutStream(retry) error = %v", err)
+	}
+	if got := disks.paths[middle]; got != middlePath {
+		t.Fatalf("path after PutStream retry = %q, want %q", got, middlePath)
+	}
+	if got, err := disks.Get(middle); err != nil || string(got) != "put-stream" {
+		t.Fatalf("Get(after PutStream retry) = %q/%v, want put-stream/nil", got, err)
+	}
+}
+
+func TestDiskStorageAddStreamFailureRestoresReusableIndexWithoutPath(t *testing.T) {
+	dir := t.TempDir()
+	disks, err := CreateDiskStorage(dir, false)
+	if err != nil {
+		t.Fatalf("CreateDiskStorage() error = %v", err)
+	}
+	if _, err := disks.Add([]byte("zero")); err != nil {
+		t.Fatalf("Add(zero) error = %v", err)
+	}
+	middle, err := disks.Add([]byte("middle"))
+	if err != nil {
+		t.Fatalf("Add(middle) error = %v", err)
+	}
+	if _, err := disks.Add([]byte("tail")); err != nil {
+		t.Fatalf("Add(tail) error = %v", err)
+	}
+	middlePath := disks.paths[middle]
+	disks.Del(middle)
+
+	boom := errors.New("boom")
+	if _, err := disks.AddStream(func(writer io.Writer) error {
+		_, _ = writer.Write([]byte("partial"))
+		return boom
+	}); !errors.Is(err, boom) {
+		t.Fatalf("AddStream(failing) error = %v, want boom", err)
+	}
+	if got := disks.paths[middle]; got != "" {
+		t.Fatalf("path after failed AddStream = %q, want empty", got)
+	}
+	if !disks.reusables.Has(middle) {
+		t.Fatal("failed AddStream did not restore reusable middle index")
+	}
+	assertNoAtomicTempFiles(t, dir, filepath.Base(middlePath))
+
+	reused, err := disks.AddStream(func(writer io.Writer) error {
+		_, err := writer.Write([]byte("add-stream"))
+		return err
+	})
+	if err != nil {
+		t.Fatalf("AddStream(retry) error = %v", err)
+	}
+	if reused != middle {
+		t.Fatalf("AddStream(retry) index = %d, want middle index %d", reused, middle)
+	}
+	if got := disks.paths[reused]; got != middlePath {
+		t.Fatalf("path after AddStream retry = %q, want %q", got, middlePath)
+	}
+	if got, err := disks.Get(reused); err != nil || string(got) != "add-stream" {
+		t.Fatalf("Get(after AddStream retry) = %q/%v, want add-stream/nil", got, err)
+	}
 }
 
 func TestTypeReplacementReleasesPreviousStorage(t *testing.T) {

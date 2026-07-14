@@ -926,8 +926,12 @@ func (ds *DiskStorage) Put(idx int32, value []byte) error {
 	if idx < 0 || int(idx) >= len(ds.paths) {
 		return nil
 	}
-	if err := writeFileAtomic(ds.ensurePath(idx), value); err != nil {
+	path, restored := ds.writePath(idx)
+	if err := writeFileAtomic(path, value); err != nil {
 		return err
+	}
+	if restored {
+		ds.paths[idx] = path
 	}
 	ds.reusables.Use(idx)
 	return nil
@@ -937,8 +941,12 @@ func (ds *DiskStorage) PutStream(idx int32, write func(io.Writer) error) error {
 	if idx < 0 || int(idx) >= len(ds.paths) {
 		return nil
 	}
-	if err := writeFileAtomicStream(ds.ensurePath(idx), write); err != nil {
+	path, restored := ds.writePath(idx)
+	if err := writeFileAtomicStream(path, write); err != nil {
 		return err
+	}
+	if restored {
+		ds.paths[idx] = path
 	}
 	ds.reusables.Use(idx)
 	return nil
@@ -966,9 +974,13 @@ func (ds *DiskStorage) AppendStream(write func(io.Writer) error) (int32, error) 
 
 func (ds *DiskStorage) Add(value []byte) (int32, error) {
 	if idx, ok := ds.reusables.Take(); ok {
-		if err := writeFileAtomic(ds.ensurePath(idx), value); err != nil {
+		path, restored := ds.writePath(idx)
+		if err := writeFileAtomic(path, value); err != nil {
 			ds.reusables.Mark(idx)
 			return 0, err
+		}
+		if restored {
+			ds.paths[idx] = path
 		}
 		return idx, nil
 	}
@@ -977,9 +989,13 @@ func (ds *DiskStorage) Add(value []byte) (int32, error) {
 
 func (ds *DiskStorage) AddStream(write func(io.Writer) error) (int32, error) {
 	if idx, ok := ds.reusables.Take(); ok {
-		if err := writeFileAtomicStream(ds.ensurePath(idx), write); err != nil {
+		path, restored := ds.writePath(idx)
+		if err := writeFileAtomicStream(path, write); err != nil {
 			ds.reusables.Mark(idx)
 			return 0, err
+		}
+		if restored {
+			ds.paths[idx] = path
 		}
 		return idx, nil
 	}
@@ -1023,11 +1039,11 @@ func (ds *DiskStorage) Destroy() {
 	}
 }
 
-func (ds *DiskStorage) ensurePath(idx int32) string {
-	if ds.paths[idx] == "" {
-		ds.paths[idx] = ds.pathFor(idx)
+func (ds *DiskStorage) writePath(idx int32) (string, bool) {
+	if ds.paths[idx] != "" {
+		return ds.paths[idx], false
 	}
-	return ds.paths[idx]
+	return ds.pathFor(idx), true
 }
 
 func (ds *DiskStorage) pathFor(idx int32) string {
