@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,17 +46,17 @@ func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
 }
 
 func commandWireFormatFromContentType(value string) (CommandWireFormat, bool) {
-	mediaType := strings.TrimSpace(value)
+	mediaType, _, _ := strings.Cut(value, ";")
+	mediaType = strings.TrimSpace(mediaType)
 	if mediaType == "" {
 		return CommandWireFormatJSON, true
 	}
-	if parsed, _, err := mime.ParseMediaType(mediaType); err == nil {
-		mediaType = parsed
-	}
-	switch strings.ToLower(mediaType) {
-	case commandWireContentTypeJSON, "text/json":
+	switch {
+	case strings.EqualFold(mediaType, commandWireContentTypeJSON), strings.EqualFold(mediaType, "text/json"):
 		return CommandWireFormatJSON, true
-	case commandWireContentTypeProtobuf, "application/protobuf", "application/octet-stream":
+	case strings.EqualFold(mediaType, commandWireContentTypeProtobuf),
+		strings.EqualFold(mediaType, "application/protobuf"),
+		strings.EqualFold(mediaType, "application/octet-stream"):
 		return CommandWireFormatProtobuf, true
 	default:
 		return "", false

@@ -28,6 +28,17 @@ func BenchmarkCommandWireAcceptNegotiation(b *testing.B) {
 	}
 }
 
+func BenchmarkCommandWireContentTypeNegotiation(b *testing.B) {
+	contentType := "Application/X-Protobuf ; proto=cache"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		format, ok := commandWireFormatFromContentType(contentType)
+		if !ok || format != CommandWireFormatProtobuf {
+			b.Fatalf("commandWireFormatFromContentType() = %q/%v, want protobuf/true", format, ok)
+		}
+	}
+}
+
 func BenchmarkAcceptEncodingGzipNegotiation(b *testing.B) {
 	request, err := http.NewRequest(http.MethodGet, "/", nil)
 	if err != nil {

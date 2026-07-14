@@ -63,8 +63,10 @@ func TestCommandWireFormatFromContentTypeAliases(t *testing.T) {
 	}{
 		{value: "", want: CommandWireFormatJSON},
 		{value: "application/json; charset=utf-8", want: CommandWireFormatJSON},
+		{value: " Application/JSON ; charset=utf-8", want: CommandWireFormatJSON},
 		{value: "text/json", want: CommandWireFormatJSON},
 		{value: "application/x-protobuf", want: CommandWireFormatProtobuf},
+		{value: "Application/X-Protobuf ; proto=cache", want: CommandWireFormatProtobuf},
 		{value: "application/protobuf", want: CommandWireFormatProtobuf},
 		{value: "application/octet-stream", want: CommandWireFormatProtobuf},
 	}
