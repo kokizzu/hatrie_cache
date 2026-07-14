@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"hatrie_cache/internal/jsonwire"
 
@@ -19,13 +20,15 @@ import (
 )
 
 type clientConfig struct {
-	addr string
+	addr    string
+	timeout time.Duration
 }
 
 const maxErrorBodyBytes = 1 << 20
 const maxResponseDrainBytes = 1 << 20
 const minCompressedJSONRequestBytes = 16 << 10
 const defaultCommandWireFormat = "auto"
+const defaultRequestTimeout = 30 * time.Second
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, http.DefaultClient); err != nil {
@@ -38,6 +41,14 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 	cfg, remaining, err := parseGlobalFlags(args, stderr)
 	if err != nil {
 		return err
+	}
+	if cfg.timeout < 0 {
+		return errors.New("timeout must be non-negative")
+	}
+	if cfg.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.timeout)
+		defer cancel()
 	}
 	if len(remaining) == 0 {
 		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot")
@@ -68,10 +79,14 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 }
 
 func parseGlobalFlags(args []string, output io.Writer) (clientConfig, []string, error) {
-	cfg := clientConfig{addr: "http://127.0.0.1:8080"}
+	cfg := clientConfig{
+		addr:    "http://127.0.0.1:8080",
+		timeout: defaultRequestTimeout,
+	}
 	flags := flag.NewFlagSet("hatrie-cli", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.StringVar(&cfg.addr, "addr", cfg.addr, "monitoring server base URL")
+	flags.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "request timeout; use 0 to disable")
 	if err := flags.Parse(args); err != nil {
 		return clientConfig{}, nil, err
 	}

@@ -322,6 +322,8 @@ Use the HTTP client CLI against a running monitoring server:
 
 ```
 make cli ARGS='stats'
+make cli ARGS='-timeout 5s health'
+make cli ARGS='-timeout 0 journal -pull-from http://leader:8080 -until-current'
 make cli ARGS='entries -prefix session:'
 make cli ARGS='entries -prefix session: -limit 1000'
 make cli ARGS='entries -prefix session: -limit 1000 -after-key session:1000'
@@ -394,6 +396,9 @@ reject protobuf request bodies with `415 Unsupported Media Type`. CLI output
 remains JSON. Use `-wire-format json` to force the previous JSON
 request/response body format or `-wire-format protobuf` to require
 protobuf-only request encoding.
+All CLI requests use a 30 second timeout by default; pass global
+`-timeout 0` before the subcommand to disable it for a deliberate long-running
+operation.
 
 Example sharded topology with 1024 virtual buckets:
 

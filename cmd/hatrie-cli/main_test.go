@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/iotest"
+	"time"
 
 	hatriecache "hatrie_cache"
 	"hatrie_cache/internal/gen/hatriecache/v1"
@@ -58,6 +59,85 @@ func TestRunRequiresSubcommand(t *testing.T) {
 	err := run(context.Background(), nil, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
 	if err == nil || !strings.Contains(err.Error(), "subcommand is required") {
 		t.Fatalf("run() error = %v, want subcommand error", err)
+	}
+}
+
+func TestParseGlobalFlagsConfiguresTimeout(t *testing.T) {
+	cfg, remaining, err := parseGlobalFlags([]string{"-addr", "http://cache", "-timeout", "250ms", "stats"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseGlobalFlags() error = %v", err)
+	}
+	if cfg.addr != "http://cache" {
+		t.Fatalf("addr = %q, want http://cache", cfg.addr)
+	}
+	if cfg.timeout != 250*time.Millisecond {
+		t.Fatalf("timeout = %s, want 250ms", cfg.timeout)
+	}
+	if !reflect.DeepEqual(remaining, []string{"stats"}) {
+		t.Fatalf("remaining = %#v, want stats", remaining)
+	}
+
+	cfg, _, err = parseGlobalFlags([]string{"-timeout", "0", "stats"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseGlobalFlags(timeout 0) error = %v", err)
+	}
+	if cfg.timeout != 0 {
+		t.Fatalf("timeout disabled = %s, want 0", cfg.timeout)
+	}
+}
+
+func TestRunAppliesRequestTimeout(t *testing.T) {
+	var gotTimeout bool
+	client := &http.Client{Transport: cliRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		deadline, ok := request.Context().Deadline()
+		if !ok {
+			t.Fatal("request context has no deadline")
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 || remaining > time.Second {
+			t.Fatalf("request deadline remaining = %s, want within configured timeout", remaining)
+		}
+		gotTimeout = true
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader(`{"status":"online"}`)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Request:    request,
+		}, nil
+	})}
+
+	if err := run(context.Background(), []string{"-timeout", "1s", "health"}, &bytes.Buffer{}, &bytes.Buffer{}, client); err != nil {
+		t.Fatalf("run(health) error = %v", err)
+	}
+	if !gotTimeout {
+		t.Fatal("test transport was not called")
+	}
+}
+
+func TestRunAllowsDisablingRequestTimeout(t *testing.T) {
+	client := &http.Client{Transport: cliRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if _, ok := request.Context().Deadline(); ok {
+			t.Fatal("request context has deadline with -timeout 0")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader(`{"status":"online"}`)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Request:    request,
+		}, nil
+	})}
+
+	if err := run(context.Background(), []string{"-timeout", "0", "health"}, &bytes.Buffer{}, &bytes.Buffer{}, client); err != nil {
+		t.Fatalf("run(health -timeout 0) error = %v", err)
+	}
+}
+
+func TestRunRejectsNegativeTimeout(t *testing.T) {
+	err := run(context.Background(), []string{"-timeout", "-1s", "health"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "timeout must be non-negative") {
+		t.Fatalf("run(negative timeout) error = %v, want non-negative timeout error", err)
 	}
 }
 
