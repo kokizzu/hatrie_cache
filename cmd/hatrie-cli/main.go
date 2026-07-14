@@ -25,6 +25,7 @@ type clientConfig struct {
 }
 
 const maxErrorBodyBytes = 1 << 20
+const maxResponseDrainBytes = 1 << 20
 const minCompressedJSONRequestBytes = 16 << 10
 
 func main() {
@@ -418,7 +419,7 @@ func doAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drainAndCloseResponse(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, err := readErrorBody(resp.Body)
@@ -436,6 +437,14 @@ func endpoint(addr string, path string) string {
 
 func readErrorBody(body io.Reader) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(body, maxErrorBodyBytes))
+}
+
+func drainAndCloseResponse(body io.ReadCloser) {
+	if body == nil {
+		return
+	}
+	_, _ = io.CopyN(io.Discard, body, maxResponseDrainBytes)
+	_ = body.Close()
 }
 
 type trailingNewlineWriter struct {

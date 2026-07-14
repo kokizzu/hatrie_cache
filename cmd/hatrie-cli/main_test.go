@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,37 @@ import (
 	hatriecache "hatrie_cache"
 	"hatrie_cache/internal/jsonwire"
 )
+
+type cliRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn cliRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+type trackingResponseBody struct {
+	reader *strings.Reader
+	closed bool
+	eof    bool
+	read   int
+}
+
+func newTrackingResponseBody(value string) *trackingResponseBody {
+	return &trackingResponseBody{reader: strings.NewReader(value)}
+}
+
+func (body *trackingResponseBody) Read(data []byte) (int, error) {
+	n, err := body.reader.Read(data)
+	body.read += n
+	if err == io.EOF {
+		body.eof = true
+	}
+	return n, err
+}
+
+func (body *trackingResponseBody) Close() error {
+	body.closed = true
+	return nil
+}
 
 func TestRunRequiresSubcommand(t *testing.T) {
 	err := run(context.Background(), nil, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
@@ -86,6 +118,42 @@ func TestRunBoundsErrorResponseBody(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout len = %d, want empty on server error", stdout.Len())
+	}
+}
+
+func TestDoAndCopyDrainsAndClosesErrorResponse(t *testing.T) {
+	payload := strings.Repeat("x", maxErrorBodyBytes+128)
+	body := newTrackingResponseBody(payload)
+	client := &http.Client{Transport: cliRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Status:     "500 Internal Server Error",
+			Body:       body,
+			Header:     make(http.Header),
+			Request:    request,
+		}, nil
+	})}
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.invalid/stats", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext() error = %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	err = doAndCopy(client, request, stdout)
+	if err == nil || !strings.Contains(err.Error(), "500 Internal Server Error") {
+		t.Fatalf("doAndCopy() error = %v, want server error", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout len = %d, want empty on server error", stdout.Len())
+	}
+	if !body.eof {
+		t.Fatal("response body was not drained to EOF")
+	}
+	if !body.closed {
+		t.Fatal("response body was not closed")
+	}
+	if body.read != len(payload) {
+		t.Fatalf("response body read = %d, want %d", body.read, len(payload))
 	}
 }
 
