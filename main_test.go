@@ -3756,6 +3756,61 @@ func TestHyperLogLogSnapshotValidationRejectsImpossibleObservations(t *testing.T
 	}
 }
 
+func TestProbabilisticSnapshotsRejectMismatchedBase64PayloadSizes(t *testing.T) {
+	oversized := strings.Repeat("AAAA", 4096)
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "bloom",
+			err: validateBloomFilterSnapshot(bloomFilterSnapshot{
+				BitCount:   minBloomFilterBits,
+				HashCount:  1,
+				Insertions: 1,
+				Bits:       oversized,
+			}),
+			want: "invalid bloom filter bitset length",
+		},
+		{
+			name: "cuckoo",
+			err: validateCuckooFilterSnapshot(cuckooFilterSnapshot{
+				BucketCount:     minCuckooFilterBuckets,
+				BucketSize:      cuckooFilterBucketSize,
+				FingerprintBits: minCuckooFilterFingerprintBits,
+				Count:           1,
+				Fingerprints:    oversized,
+			}),
+			want: "invalid cuckoo filter fingerprint length",
+		},
+		{
+			name: "count-min sketch",
+			err: validateCountMinSketchSnapshot(countMinSketchSnapshot{
+				Width:      1,
+				Depth:      1,
+				TotalCount: 1,
+				Counters:   oversized,
+			}),
+			want: "invalid count-min sketch counter length",
+		},
+		{
+			name: "hyperloglog",
+			err: validateHyperLogLogSnapshot(hyperLogLogSnapshot{
+				Precision:    minHyperLogLogPrecision,
+				Observations: 1,
+				Registers:    oversized,
+			}),
+			want: "invalid hyperloglog register length",
+		},
+	}
+	for _, tt := range tests {
+		if tt.err == nil || !strings.Contains(tt.err.Error(), tt.want) {
+			t.Fatalf("%s validation error = %v, want %q", tt.name, tt.err, tt.want)
+		}
+	}
+}
+
 func TestHyperLogLogStorageReleasedOnOverwrite(t *testing.T) {
 	ht := newTestTrie(t)
 

@@ -68,18 +68,22 @@ func validateHyperLogLogSnapshot(snapshot hyperLogLogSnapshot) error {
 	if err := validateHyperLogLogPrecision(snapshot.Precision); err != nil {
 		return err
 	}
-	data, err := base64.StdEncoding.DecodeString(snapshot.Registers)
-	if err != nil {
-		return err
+	size, ok := base64DecodedSize(snapshot.Registers)
+	if !ok {
+		return errors.New("hatriecache: invalid base64 encoding")
 	}
-	if len(data) == 0 {
+	if size == 0 {
 		if snapshot.Observations != 0 {
 			return errors.New("hatriecache: empty hyperloglog registers have observations")
 		}
 		return nil
 	}
-	if len(data) != hyperLogLogRegisterCount(snapshot.Precision) {
+	if size != int64(hyperLogLogRegisterCount(snapshot.Precision)) {
 		return errors.New("hatriecache: invalid hyperloglog register length")
+	}
+	data, err := base64.StdEncoding.DecodeString(snapshot.Registers)
+	if err != nil {
+		return err
 	}
 	maxRank := hyperLogLogMaxRank(snapshot.Precision)
 	nonZeroRegisters := uint64(0)

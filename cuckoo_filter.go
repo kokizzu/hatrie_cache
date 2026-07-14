@@ -115,18 +115,22 @@ func validateCuckooFilterSnapshot(snapshot cuckooFilterSnapshot) error {
 	if snapshot.Count > snapshot.BucketCount*uint64(cuckooFilterBucketSize) {
 		return errors.New("hatriecache: invalid cuckoo filter count")
 	}
-	raw, err := base64.StdEncoding.DecodeString(snapshot.Fingerprints)
-	if err != nil {
-		return err
+	size, ok := base64DecodedSize(snapshot.Fingerprints)
+	if !ok {
+		return errors.New("hatriecache: invalid base64 encoding")
 	}
-	if len(raw) == 0 {
+	if size == 0 {
 		if snapshot.Count != 0 {
 			return errors.New("hatriecache: empty cuckoo filter fingerprints have count")
 		}
 		return nil
 	}
-	if uint64(len(raw)) != snapshot.BucketCount*uint64(cuckooFilterBucketSize)*2 {
+	if uint64(size) != snapshot.BucketCount*uint64(cuckooFilterBucketSize)*2 {
 		return errors.New("hatriecache: invalid cuckoo filter fingerprint length")
+	}
+	raw, err := base64.StdEncoding.DecodeString(snapshot.Fingerprints)
+	if err != nil {
+		return err
 	}
 	occupied, err := cuckooFilterRawOccupied(raw, snapshot.FingerprintBits)
 	if err != nil {

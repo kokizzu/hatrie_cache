@@ -81,18 +81,22 @@ func validateCountMinSketchSnapshot(snapshot countMinSketchSnapshot) error {
 	if err := validateCountMinSketchShape(snapshot.Width, snapshot.Depth); err != nil {
 		return err
 	}
-	data, err := base64.StdEncoding.DecodeString(snapshot.Counters)
-	if err != nil {
-		return err
+	size, ok := base64DecodedSize(snapshot.Counters)
+	if !ok {
+		return errors.New("hatriecache: invalid base64 encoding")
 	}
-	if len(data) == 0 {
+	if size == 0 {
 		if snapshot.TotalCount != 0 {
 			return errors.New("hatriecache: empty count-min sketch counters have total count")
 		}
 		return nil
 	}
-	if uint64(len(data)) != snapshot.Width*uint64(snapshot.Depth)*4 {
+	if uint64(size) != snapshot.Width*uint64(snapshot.Depth)*4 {
 		return errors.New("hatriecache: invalid count-min sketch counter length")
+	}
+	data, err := base64.StdEncoding.DecodeString(snapshot.Counters)
+	if err != nil {
+		return err
 	}
 	if err := validateCountMinSketchCounterTotals(data, snapshot.Width, snapshot.Depth, snapshot.TotalCount); err != nil {
 		return err

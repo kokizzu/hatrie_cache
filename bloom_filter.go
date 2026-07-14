@@ -104,18 +104,22 @@ func validateBloomFilterSnapshot(snapshot bloomFilterSnapshot) error {
 	if snapshot.HashCount == 0 || snapshot.HashCount > maxBloomFilterHashes {
 		return errors.New("hatriecache: invalid bloom filter hash count")
 	}
-	data, err := base64.StdEncoding.DecodeString(snapshot.Bits)
-	if err != nil {
-		return err
+	size, ok := base64DecodedSize(snapshot.Bits)
+	if !ok {
+		return errors.New("hatriecache: invalid base64 encoding")
 	}
-	if len(data) == 0 {
+	if size == 0 {
 		if snapshot.Insertions != 0 {
 			return errors.New("hatriecache: empty bloom filter bitset has insertions")
 		}
 		return nil
 	}
-	if uint64(len(data)) != bloomFilterWordCount(snapshot.BitCount)*8 {
+	if uint64(size) != bloomFilterWordCount(snapshot.BitCount)*8 {
 		return errors.New("hatriecache: invalid bloom filter bitset length")
+	}
+	data, err := base64.StdEncoding.DecodeString(snapshot.Bits)
+	if err != nil {
+		return err
 	}
 	if err := validateBloomFilterUnusedBits(snapshot.BitCount, data); err != nil {
 		return err
