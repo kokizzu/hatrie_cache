@@ -528,6 +528,27 @@ func MarshalMapJSON(value Map) ([]byte, error) {
 	return json.Marshal(value)
 }
 
+func validateMapValue(value Map) error {
+	if _, err := MarshalMapJSON(value); err != nil {
+		return fmt.Errorf("hatriecache: unsupported map value: %w", err)
+	}
+	return nil
+}
+
+func validateSliceValue(value Slice) error {
+	if _, err := json.Marshal(value); err != nil {
+		return fmt.Errorf("hatriecache: unsupported slice value: %w", err)
+	}
+	return nil
+}
+
+func validateSliceValues(value interface{}, values ...interface{}) error {
+	items := make(Slice, 0, 1+len(values))
+	items = append(items, value)
+	items = append(items, values...)
+	return validateSliceValue(items)
+}
+
 func UnmarshalMapJSON(data []byte) (Map, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
@@ -2694,6 +2715,22 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	ht.upsertMapLocked(key, val)
+}
+
+func (ht *HatTrie) UpsertMapChecked(key string, val Map) error {
+	if err := validateMapValue(val); err != nil {
+		return err
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	ht.upsertMapLocked(key, val)
+	return nil
+}
+
+func (ht *HatTrie) upsertMapLocked(key string, val Map) {
 	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsMap() {
 		ht.maps.Put(hval.Index, val)
@@ -2736,7 +2773,7 @@ func (ht *HatTrie) GetMapJSON(key string) ([]byte, bool, error) {
 }
 
 func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
-	_ = ht.PutMapChecked(key, subkey, val)
+	_ = ht.putMapEntries(key, Map{subkey: val})
 }
 
 func (ht *HatTrie) PutMapChecked(key string, subkey string, val interface{}) error {
@@ -2744,6 +2781,16 @@ func (ht *HatTrie) PutMapChecked(key string, subkey string, val interface{}) err
 }
 
 func (ht *HatTrie) PutMapEntriesChecked(key string, fields Map) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	if err := validateMapValue(fields); err != nil {
+		return err
+	}
+	return ht.putMapEntries(key, fields)
+}
+
+func (ht *HatTrie) putMapEntries(key string, fields Map) error {
 	if len(fields) == 0 {
 		return nil
 	}
@@ -2866,6 +2913,22 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	ht.upsertSliceLocked(key, val)
+}
+
+func (ht *HatTrie) UpsertSliceChecked(key string, val Slice) error {
+	if err := validateSliceValue(val); err != nil {
+		return err
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	ht.upsertSliceLocked(key, val)
+	return nil
+}
+
+func (ht *HatTrie) upsertSliceLocked(key string, val Slice) {
 	rawPtr, hval := ht.upsertReplacementLocation(key)
 	if hval.IsSlice() {
 		ht.slices.Put(hval.Index, val)
@@ -2884,10 +2947,17 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 }
 
 func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
-	_ = ht.PushSliceChecked(key, val, vals...)
+	_ = ht.pushSlice(key, val, vals...)
 }
 
 func (ht *HatTrie) PushSliceChecked(key string, val interface{}, vals ...interface{}) error {
+	if err := validateSliceValues(val, vals...); err != nil {
+		return err
+	}
+	return ht.pushSlice(key, val, vals...)
+}
+
+func (ht *HatTrie) pushSlice(key string, val interface{}, vals ...interface{}) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

@@ -163,6 +163,34 @@ func TestExecuteCommandPutMapClonesNestedValues(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandPutMapRejectsUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs:   Map{"bad": unsupported},
+	}); got.OK {
+		t.Fatalf("PUTMAP unsupported response = %#v, want error", got)
+	}
+	if hval := ht.Get("profile"); !hval.Empty() {
+		t.Fatalf("PUTMAP unsupported created value %+v", hval)
+	}
+
+	ht.UpsertMap("profile", Map{"keep": "value"})
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs:   Map{"bad": unsupported},
+	}); got.OK {
+		t.Fatalf("PUTMAP unsupported existing response = %#v, want error", got)
+	}
+	if got := ht.GetMap("profile"); !reflect.DeepEqual(got, Map{"keep": "value"}) {
+		t.Fatalf("PUTMAP unsupported existing map = %#v, want unchanged map", got)
+	}
+}
+
 func TestExecuteCommandSliceOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -186,6 +214,34 @@ func TestExecuteCommandSliceOperations(t *testing.T) {
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HEADSLICE", Key: "queue"}); !got.OK || got.Value != "second" {
 		t.Fatalf("HEADSLICE remaining response = %#v, want second", got)
+	}
+}
+
+func TestExecuteCommandPushSliceRejectsUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUSHSLICE",
+		Key:     "queue",
+		Values:  Slice{unsupported},
+	}); got.OK {
+		t.Fatalf("PUSHSLICE unsupported response = %#v, want error", got)
+	}
+	if hval := ht.Get("queue"); !hval.Empty() {
+		t.Fatalf("PUSHSLICE unsupported created value %+v", hval)
+	}
+
+	ht.UpsertSlice("queue", Slice{"keep"})
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUSHSLICE",
+		Key:     "queue",
+		Values:  Slice{unsupported},
+	}); got.OK {
+		t.Fatalf("PUSHSLICE unsupported existing response = %#v, want error", got)
+	}
+	if got := ht.GetSlice("queue"); !reflect.DeepEqual(got, Slice{"keep"}) {
+		t.Fatalf("PUSHSLICE unsupported existing slice = %#v, want unchanged slice", got)
 	}
 }
 

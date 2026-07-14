@@ -845,6 +845,47 @@ func TestMapOperationsDeepCopyNestedValues(t *testing.T) {
 	}
 }
 
+func TestCheckedMapMutationsRejectUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	ht.UpsertMap("map", Map{"keep": "value"})
+	if err := ht.PutMapChecked("map", "bad", unsupported); err == nil {
+		t.Fatal("PutMapChecked(unsupported) error = nil, want error")
+	}
+	if got := ht.GetMap("map"); !reflect.DeepEqual(got, Map{"keep": "value"}) {
+		t.Fatalf("GetMap(map after rejected PutMapChecked) = %#v, want unchanged map", got)
+	}
+
+	if err := ht.PutMapEntriesChecked("missing", Map{"bad": unsupported}); err == nil {
+		t.Fatal("PutMapEntriesChecked(missing unsupported) error = nil, want error")
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected PutMapEntriesChecked created value %+v", got)
+	}
+
+	ht.UpsertString("string", "keep")
+	if err := ht.PutMapChecked("string", "bad", unsupported); err == nil {
+		t.Fatal("PutMapChecked(replace unsupported) error = nil, want error")
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected PutMapChecked changed string to %q, want keep", got)
+	}
+
+	if err := ht.UpsertMapChecked("map", Map{"bad": unsupported}); err == nil {
+		t.Fatal("UpsertMapChecked(unsupported) error = nil, want error")
+	}
+	if got := ht.GetMap("map"); !reflect.DeepEqual(got, Map{"keep": "value"}) {
+		t.Fatalf("GetMap(map after rejected UpsertMapChecked) = %#v, want unchanged map", got)
+	}
+	if err := ht.UpsertMapChecked("checked-map", Map{"nested": Slice{"value"}}); err != nil {
+		t.Fatalf("UpsertMapChecked(valid) error = %v", err)
+	}
+	if got := ht.GetMap("checked-map"); !reflect.DeepEqual(got, Map{"nested": Slice{"value"}}) {
+		t.Fatalf("GetMap(checked-map) = %#v, want stored map", got)
+	}
+}
+
 func TestMapJSONSerializerRoundTrip(t *testing.T) {
 	input := Map{
 		"name": "ivi",
@@ -1296,6 +1337,47 @@ func TestSliceOperationsDeepCopyNestedValues(t *testing.T) {
 	values[0].(Map)["field"] = "get"
 	if again := ht.GetSlice("slice"); again[0].(Map)["field"] != "value" {
 		t.Fatalf("GetSlice exposed nested value: %#v", again)
+	}
+}
+
+func TestCheckedSliceMutationsRejectUnsupportedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	unsupported := func() {}
+
+	ht.UpsertSlice("slice", Slice{"keep"})
+	if err := ht.PushSliceChecked("slice", unsupported); err == nil {
+		t.Fatal("PushSliceChecked(unsupported) error = nil, want error")
+	}
+	if got := ht.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"keep"}) {
+		t.Fatalf("GetSlice(slice after rejected PushSliceChecked) = %#v, want unchanged slice", got)
+	}
+
+	if err := ht.PushSliceChecked("missing", unsupported); err == nil {
+		t.Fatal("PushSliceChecked(missing unsupported) error = nil, want error")
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected PushSliceChecked created value %+v", got)
+	}
+
+	ht.UpsertString("string", "keep")
+	if err := ht.PushSliceChecked("string", unsupported); err == nil {
+		t.Fatal("PushSliceChecked(replace unsupported) error = nil, want error")
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected PushSliceChecked changed string to %q, want keep", got)
+	}
+
+	if err := ht.UpsertSliceChecked("slice", Slice{unsupported}); err == nil {
+		t.Fatal("UpsertSliceChecked(unsupported) error = nil, want error")
+	}
+	if got := ht.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"keep"}) {
+		t.Fatalf("GetSlice(slice after rejected UpsertSliceChecked) = %#v, want unchanged slice", got)
+	}
+	if err := ht.UpsertSliceChecked("checked-slice", Slice{Map{"ok": "value"}}); err != nil {
+		t.Fatalf("UpsertSliceChecked(valid) error = %v", err)
+	}
+	if got := ht.GetSlice("checked-slice"); !reflect.DeepEqual(got, Slice{Map{"ok": "value"}}) {
+		t.Fatalf("GetSlice(checked-slice) = %#v, want stored slice", got)
 	}
 }
 
