@@ -74,6 +74,12 @@ func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *Command
 		}
 		batchResult, err := applyCommandJournalTail(trie, journal, source, result.AppliedThrough, tail)
 		if err != nil {
+			result.LastSequence = batchResult.LastSequence
+			result.CompactedThrough = batchResult.CompactedThrough
+			result.Applied += batchResult.Applied
+			result.AppliedThrough = batchResult.AppliedThrough
+			result.HasMore = batchResult.HasMore
+			result.Batches++
 			return result, commandJournalPullError(http.StatusBadGateway, err)
 		}
 		result.LastSequence = batchResult.LastSequence

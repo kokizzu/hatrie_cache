@@ -915,6 +915,56 @@ func TestJournalPullerAppliesAndPersistsState(t *testing.T) {
 	}
 }
 
+func TestPullJournalOncePersistsPartialProgressOnApplyError(t *testing.T) {
+	badTTL := int64(-1)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := hatriecache.CommandJournalTail{
+			LastSequence: 2,
+			Entries: []hatriecache.CommandJournalRecord{
+				{Sequence: 1, Request: hatriecache.CacheCommandRequest{Command: "INC", Key: "views", Value: "1"}},
+				{Sequence: 2, Request: hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "bad", Value: "value", TTLSeconds: &badTTL}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	journal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+	statePath := filepath.Join(t.TempDir(), "pull-state.json")
+
+	result, err := pullJournalOnce(context.Background(), ht, journal, journalPullerConfig{
+		Source:     source.URL,
+		StatePath:  statePath,
+		Limit:      10,
+		MaxBatches: 1,
+	})
+	if err == nil {
+		t.Fatal("pullJournalOnce() error = nil, want apply error")
+	}
+	if result.Applied != 1 || result.AppliedThrough != 1 {
+		t.Fatalf("pull result = %#v, want one applied entry through sequence 1", result)
+	}
+	if got := ht.GetCounter("views"); got != 1 {
+		t.Fatalf("views after partial pull = %d, want 1", got)
+	}
+	after, err := loadJournalPullState(statePath, source.URL)
+	if err != nil {
+		t.Fatalf("loadJournalPullState() error = %v", err)
+	}
+	if after != 1 {
+		t.Fatalf("pull state after partial error = %d, want 1", after)
+	}
+}
+
 func TestJournalPullerStopCancelsInFlightPull(t *testing.T) {
 	entered := make(chan struct{})
 	released := make(chan struct{})

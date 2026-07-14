@@ -609,6 +609,11 @@ func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *ha
 		MaxBatches:    cfg.MaxBatches,
 	})
 	if err != nil {
+		if result.AppliedThrough > afterSequence {
+			if saveErr := saveJournalPullState(cfg.StatePath, cfg.Source, result.AppliedThrough); saveErr != nil {
+				return result, errors.Join(err, saveErr)
+			}
+		}
 		return result, err
 	}
 	if result.AppliedThrough >= afterSequence {
