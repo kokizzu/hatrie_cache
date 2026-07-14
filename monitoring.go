@@ -778,6 +778,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 			return int64(info.FingerprintBytes), strconv.FormatUint(info.Items, 10) + " items, " + strconv.FormatUint(info.FingerprintBytes, 10) + " fingerprint bytes"
 		}
 		return ht.xorFilters.array[hval.Index].EncodedSize(), strconv.FormatUint(info.Staged, 10) + " staged items"
+	case DATAVALUE_TYPE_RADIX_TREE:
+		if int(hval.Index) >= len(ht.radixTrees.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.radixTrees.array[hval.Index].Info()
+		return int64(info.EncodedBytes), strconv.FormatUint(info.Items, 10) + " items, " + strconv.FormatUint(info.Nodes, 10) + " nodes"
 	default:
 		return 0, ""
 	}
@@ -823,6 +829,8 @@ func monitoringType(hval HatValue) string {
 		return "reservoir_sample"
 	case DATAVALUE_TYPE_XOR_FILTER:
 		return "xor_filter"
+	case DATAVALUE_TYPE_RADIX_TREE:
+		return "radix_tree"
 	default:
 		return "unknown"
 	}

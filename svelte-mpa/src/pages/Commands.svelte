@@ -12,14 +12,14 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'BUILDXF', 'INFOXF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'CREATESB', 'COUNTSB', 'GETSB', 'INFOSB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'GETRS', 'INFORS', 'INFOQ', 'INFOFW'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'BUILDXF', 'INFOXF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'CREATESB', 'COUNTSB', 'GETSB', 'INFOSB', 'CREATERT', 'GETRT', 'DELRT', 'HASRT', 'PREFIXRT', 'INFORT', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'GETRS', 'INFORS', 'INFOQ', 'INFOFW'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
-  $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK', 'ADDFW', 'RANGEFW'].includes(command);
-  $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : command === 'CREATECF' ? 'False positive rate' : command === 'ADDFW' ? 'Delta' : command === 'RANGEFW' ? 'End index' : 'Count';
+  $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK', 'ADDFW', 'RANGEFW', 'PUTRT', 'GETRT', 'DELRT', 'HASRT', 'PREFIXRT'].includes(command);
+  $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : command === 'CREATECF' ? 'False positive rate' : command === 'ADDFW' ? 'Delta' : command === 'RANGEFW' ? 'End index' : command === 'PREFIXRT' ? 'Prefix' : ['PUTRT', 'GETRT', 'DELRT', 'HASRT'].includes(command) ? 'Nested key' : 'Count';
   $: valueLabel = command === 'CREATEFW' ? 'Size' : command === 'CREATERS' || command === 'CREATEXF' ? 'Capacity' : ['ADDFW', 'GETFW', 'SUMFW'].includes(command) ? 'Index' : command === 'RANGEFW' ? 'Start index' : 'Value';
   $: valuePlaceholder = command === 'CREATEFW' ? '1024' : command === 'CREATERS' ? '128' : command === 'CREATEXF' ? '10000' : ['ADDFW', 'GETFW', 'SUMFW', 'RANGEFW'].includes(command) ? '0' : 'value';
-  $: subkeyPlaceholder = command === 'CREATECMS' ? '4' : command === 'CREATECF' ? '0.01' : command === 'RANGEFW' ? '10' : '1';
+  $: subkeyPlaceholder = command === 'CREATECMS' ? '4' : command === 'CREATECF' ? '0.01' : command === 'RANGEFW' ? '10' : command === 'PREFIXRT' ? 'user:' : ['PUTRT', 'GETRT', 'DELRT', 'HASRT'].includes(command) ? 'user:100/profile' : '1';
 
   async function submit() {
     const result = await runCommand({
@@ -92,6 +92,13 @@
           <option>COUNTSB</option>
           <option>GETSB</option>
           <option>INFOSB</option>
+          <option>CREATERT</option>
+          <option>PUTRT</option>
+          <option>GETRT</option>
+          <option>DELRT</option>
+          <option>HASRT</option>
+          <option>PREFIXRT</option>
+          <option>INFORT</option>
           <option>CREATECMS</option>
           <option>INCRCMS</option>
           <option>ESTCMS</option>

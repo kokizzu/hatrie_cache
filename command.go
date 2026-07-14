@@ -485,6 +485,56 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATERT", "CREATERADIX", "RTCREATE":
+		ht.UpsertRadixTree(key)
+		return CacheCommandResponse{OK: true, Message: "created radix tree"}
+	case "PUTRT", "RTPUT":
+		fields, ok := commandRadixTreeFields(request)
+		if !ok {
+			return commandError("subkey/value or pairs is required")
+		}
+		added := ht.PutRadixTreeEntries(key, fields)
+		return CacheCommandResponse{OK: true, Message: "stored radix tree values", Value: strconv.Itoa(added)}
+	case "GETRT", "RTGET":
+		subkey, ok := commandRadixTreeSubkey(request)
+		if !ok {
+			return commandError("subkey is required")
+		}
+		value, ok := ht.GetRadixTree(key, subkey)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
+	case "DELRT", "REMRT", "RTDEL", "RTREM":
+		subkey, ok := commandRadixTreeSubkey(request)
+		if !ok {
+			return commandError("subkey is required")
+		}
+		if ht.DeleteRadixTree(key, subkey) {
+			return CacheCommandResponse{OK: true, Message: "removed radix tree value", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "value not found", Value: "0"}
+	case "HASRT", "RTEXISTS", "RTHAS":
+		subkey, ok := commandRadixTreeSubkey(request)
+		if !ok {
+			return commandError("subkey is required")
+		}
+		if ht.HasRadixTree(key, subkey) {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	case "PREFIXRT", "SCANRT", "RTPREFIX", "RTSCAN":
+		items, ok := ht.ScanRadixTree(key, strings.TrimSpace(request.Subkey))
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", items)
+	case "INFORT", "RTINFO":
+		info, ok := ht.RadixTreeInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
 		width, depth, err := commandCountMinSketchConfig(request)
 		if err != nil {
@@ -970,6 +1020,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_RADIX_TREE:
+		data, err := json.Marshal(ht.radixTrees.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		data, err := json.Marshal(ht.quantileSketches.array[hval.Index].Info())
 		if err != nil {
@@ -1037,6 +1093,32 @@ func commandMapFields(request CacheCommandRequest) (Map, bool) {
 		return nil, false
 	}
 	return fields, true
+}
+
+func commandRadixTreeFields(request CacheCommandRequest) (Map, bool) {
+	fields := Map{}
+	for subkey, value := range request.Pairs {
+		if strings.TrimSpace(subkey) == "" {
+			return nil, false
+		}
+		fields[subkey] = value
+	}
+	subkey := strings.TrimSpace(request.Subkey)
+	if subkey != "" {
+		fields[subkey] = request.Value
+	}
+	if len(fields) == 0 {
+		return nil, false
+	}
+	return fields, true
+}
+
+func commandRadixTreeSubkey(request CacheCommandRequest) (string, bool) {
+	subkey := strings.TrimSpace(request.Subkey)
+	if subkey == "" {
+		return "", false
+	}
+	return subkey, true
 }
 
 func commandSliceValues(request CacheCommandRequest) (Slice, bool) {

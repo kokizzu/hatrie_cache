@@ -444,6 +444,11 @@ textarea {
   color: #426915;
 }
 
+.type-pill.radix_tree {
+  background: #edf6ff;
+  color: #235c8f;
+}
+
 .type-pill.count_min_sketch {
   background: #eef0ff;
   color: #384aa0;

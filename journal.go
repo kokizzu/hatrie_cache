@@ -510,6 +510,13 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDSB", "SBADD", "REMSB", "DELSB", "SBREM", "SBDEL":
 		_, err := sparseBitsetValuesFromCommand(request)
 		return err == nil
+	case "CREATERT", "CREATERADIX", "RTCREATE":
+		return true
+	case "PUTRT", "RTPUT":
+		_, ok := commandRadixTreeFields(request)
+		return ok
+	case "DELRT", "REMRT", "RTDEL", "RTREM":
+		return strings.TrimSpace(request.Subkey) != ""
 	case "CREATECMS", "RESERVECMS", "CMSRESERVE":
 		_, _, err := commandCountMinSketchConfig(request)
 		return err == nil

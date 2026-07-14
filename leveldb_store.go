@@ -354,6 +354,11 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 			return 0, errors.New("hatriecache: xor filter snapshot is required")
 		}
 		return newXorFilterSizeFromSnapshot(*entry.XorFilter)
+	case "radix_tree":
+		if entry.RadixTree == nil {
+			return 0, errors.New("hatriecache: radix tree snapshot is required")
+		}
+		return newRadixTreeSizeFromSnapshot(*entry.RadixTree)
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -368,6 +373,11 @@ func newXorFilterSizeFromSnapshot(snapshot xorFilterSnapshot) (int64, error) {
 		return int64(len(raw)), nil
 	}
 	data, err := json.Marshal(snapshot.Staged)
+	return int64(len(data)), err
+}
+
+func newRadixTreeSizeFromSnapshot(snapshot radixTreeSnapshot) (int64, error) {
+	data, err := json.Marshal(snapshot.Items)
 	return int64(len(data)), err
 }
 

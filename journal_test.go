@@ -354,6 +354,55 @@ func TestCommandJournalReplaysRoaringBitmapMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysRadixTreeMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATERT", Key: "index"}); !got.OK {
+		t.Fatalf("journaled CREATERT response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{
+		Command: "PUTRT",
+		Key:     "index",
+		Pairs:   Map{"user:100": "active", "user:101": json.Number("42")},
+	}); !got.OK {
+		t.Fatalf("journaled PUTRT response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "DELRT", Key: "index", Subkey: "user:100"}); !got.OK {
+		t.Fatalf("journaled DELRT response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "HASRT", Key: "index", Subkey: "user:101"}); !got.OK || got.Value != "1" {
+		t.Fatalf("journaled HASRT response = %#v, want local read hit", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("journal entries = %d, want CREATERT, PUTRT, and DELRT only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if replayed.HasRadixTree("index", "user:100") {
+		t.Fatal("replayed radix tree contains removed value user:100")
+	}
+	if value, ok := replayed.GetRadixTree("index", "user:101"); !ok || value != json.Number("42") {
+		t.Fatalf("replayed radix tree user:101 = %#v/%v, want json.Number 42", value, ok)
+	}
+}
+
 func TestCommandJournalReplaysCountMinSketchMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

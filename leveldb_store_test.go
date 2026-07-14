@@ -40,6 +40,9 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if _, ok, err := source.BuildXorFilter("xor"); err != nil || !ok {
 		t.Fatalf("BuildXorFilter() = %v/%v, want ok", err, ok)
 	}
+	source.UpsertRadixTree("radix")
+	source.PutRadixTree("radix", "user:100/profile", Map{"status": "active"})
+	source.PutRadixTree("radix", "user:101/profile", json.Number("42"))
 	source.UpsertRoaringBitmap("bitmap")
 	source.AddRoaringBitmap("bitmap", 1, 1<<16+7)
 	source.UpsertSparseBitset("bitset")
@@ -59,8 +62,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
 	}
-	if count != 13 {
-		t.Fatalf("loaded count = %d, want 13", count)
+	if count != 14 {
+		t.Fatalf("loaded count = %d, want 14", count)
 	}
 
 	if got := loaded.GetCounter("counter"); got != -7 {
@@ -92,6 +95,12 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if hit, queryable := loaded.HasXorFilter("xor", "alpha"); !queryable || !hit {
 		t.Fatalf("loaded XOR filter alpha = %v/%v, want hit", hit, queryable)
+	}
+	if value, ok := loaded.GetRadixTree("radix", "user:100/profile"); !ok || !reflect.DeepEqual(value, Map{"status": "active"}) {
+		t.Fatalf("loaded radix user:100/profile = %#v/%v, want restored nested value", value, ok)
+	}
+	if value, ok := loaded.GetRadixTree("radix", "user:101/profile"); !ok || value != json.Number("42") {
+		t.Fatalf("loaded radix user:101/profile = %#v/%v, want restored json.Number", value, ok)
 	}
 	if got := loaded.GetRoaringBitmap("bitmap"); !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7}) {
 		t.Fatalf("loaded Roaring bitmap = %#v, want restored integer set", got)
@@ -376,6 +385,29 @@ func TestSnapshotOperationValueSizeSupportsXorFilter(t *testing.T) {
 	}
 	if size != filter.EncodedSize() {
 		t.Fatalf("snapshotOperationValueSize(xor_filter) = %d, want %d", size, filter.EncodedSize())
+	}
+}
+
+func TestSnapshotOperationValueSizeSupportsRadixTree(t *testing.T) {
+	tree := newRadixTreeData()
+	tree.Put("user:100/profile", Map{"status": "active"})
+	tree.Put("user:101/profile", json.Number("42"))
+	snapshot := tree.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:      "radix_tree",
+			RadixTree: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(radix_tree) error = %v", err)
+	}
+	want, err := newRadixTreeSizeFromSnapshot(snapshot)
+	if err != nil {
+		t.Fatalf("newRadixTreeSizeFromSnapshot() error = %v", err)
+	}
+	if size != want {
+		t.Fatalf("snapshotOperationValueSize(radix_tree) = %d, want %d", size, want)
 	}
 }
 

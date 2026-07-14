@@ -158,6 +158,8 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "fenwick tree", value: HatValue{Index: 14, Flags: DATAVALUE_TYPE_FENWICK_TREE}, want: "fenwick tree at index: 14"},
 		{name: "sparse bitset", value: HatValue{Index: 15, Flags: DATAVALUE_TYPE_SPARSE_BITSET}, want: "sparse bitset at index: 15"},
 		{name: "reservoir sample", value: HatValue{Index: 16, Flags: DATAVALUE_TYPE_RESERVOIR_SAMPLE}, want: "reservoir sample at index: 16"},
+		{name: "xor filter", value: HatValue{Index: 17, Flags: DATAVALUE_TYPE_XOR_FILTER}, want: "xor filter at index: 17"},
+		{name: "radix tree", value: HatValue{Index: 18, Flags: DATAVALUE_TYPE_RADIX_TREE}, want: "radix tree at index: 18"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -3499,9 +3501,11 @@ func TestDestroyIsIdempotentAndPreventsUse(t *testing.T) {
 		t.Fatalf("UpsertReservoirSample() error = %v", err)
 	}
 	ht.AddReservoirSample("sample", "alpha", "beta")
+	ht.UpsertRadixTree("radix")
+	ht.PutRadixTree("radix", "user:100", "active")
 	ht.Destroy()
 	ht.Destroy()
-	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.fenwickTrees != nil || ht.sparseBitsets != nil || ht.reservoirSamples != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
+	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.fenwickTrees != nil || ht.sparseBitsets != nil || ht.reservoirSamples != nil || ht.xorFilters != nil || ht.radixTrees != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
 		t.Fatalf("Destroy retained backing state: %+v", ht)
 	}
 

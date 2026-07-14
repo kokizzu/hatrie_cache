@@ -44,6 +44,7 @@ type snapshotEntry struct {
 	SparseBitset    *sparseBitsetSnapshot    `json:"sparse_bitset,omitempty"`
 	ReservoirSample *reservoirSampleSnapshot `json:"reservoir_sample,omitempty"`
 	XorFilter       *xorFilterSnapshot       `json:"xor_filter,omitempty"`
+	RadixTree       *radixTreeSnapshot       `json:"radix_tree,omitempty"`
 	ExpiresAt       *time.Time               `json:"expires_at,omitempty"`
 	Stats           *KeyStats                `json:"stats,omitempty"`
 }
@@ -195,6 +196,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_XOR_FILTER:
 		snapshot := ht.xorFilters.array[entry.Value.Index].Snapshot()
 		out.XorFilter = &snapshot
+	case DATAVALUE_TYPE_RADIX_TREE:
+		snapshot := ht.radixTrees.array[entry.Value.Index].Snapshot()
+		out.RadixTree = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -305,6 +309,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: xor filter snapshot is required")
 		}
 		if err := validateXorFilterSnapshot(*entry.XorFilter); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "radix_tree":
+		if entry.RadixTree == nil {
+			return snapshotOperation{}, errors.New("hatriecache: radix tree snapshot is required")
+		}
+		if err := validateRadixTreeSnapshot(*entry.RadixTree); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -523,6 +535,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.xorFilters.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_XOR_FILTER}
+	case "radix_tree":
+		data, err := newRadixTreeDataFromSnapshot(*entry.RadixTree)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.radixTrees.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RADIX_TREE}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

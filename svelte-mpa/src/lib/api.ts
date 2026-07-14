@@ -41,7 +41,8 @@ export type CacheEntry = {
     | 'top_k'
     | 'quantile_sketch'
     | 'fenwick_tree'
-    | 'reservoir_sample';
+    | 'reservoir_sample'
+    | 'radix_tree';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -146,6 +147,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 12384,
     value_preview: '10000 items, 12384 fingerprint bytes'
+  },
+  {
+    key: 'index:sessions',
+    type: 'radix_tree',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 6144,
+    value_preview: '2500 items, 381 nodes'
   },
   {
     key: 'freq:paths',

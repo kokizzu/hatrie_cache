@@ -726,6 +726,64 @@ func TestHTTPReplicatorReplicatesXorFilterMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesRadixTreeMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	if response := trie.ExecuteCommand(CacheCommandRequest{Command: "CREATERT", Key: "index"}); !response.OK {
+		t.Fatalf("CREATERT response = %#v, want ok", response)
+	}
+	put := CacheCommandRequest{Command: "PUTRT", Key: "index", Subkey: "user:100/profile", Value: "active"}
+	response := trie.ExecuteCommand(put)
+	if !response.OK {
+		t.Fatalf("PUTRT response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, put, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("radix tree replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "index" || request.Value == "" {
+			t.Fatalf("replicated radix request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated radix snapshot JSON error = %v", err)
+		}
+		if entry.Type != "radix_tree" || entry.RadixTree == nil || entry.RadixTree.Count != 1 {
+			t.Fatalf("replicated radix snapshot = %#v, want radix_tree payload", entry)
+		}
+	default:
+		t.Fatal("radix tree mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "HASRT", Key: "index", Subkey: "user:100/profile"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "HASRT", Key: "index", Subkey: "user:100/profile"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("radix tree read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestHTTPReplicatorReplicatesCuckooFilterMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

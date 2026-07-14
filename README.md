@@ -20,6 +20,9 @@ exact uint32 sets with fast membership, remove, count, and sorted iteration.
 Sparse bitset values use sorted 16-bit containers keyed by the upper 48 bits,
 promoting dense ranges to packed bitsets for exact uint64 membership with low
 memory overhead on sparse high-cardinality IDs.
+Radix tree values use path-compressed string edges for exact nested key/value
+indexes with fast lookup, sorted prefix scans, and low overhead for keys that
+share long prefixes.
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts
@@ -236,11 +239,13 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `ADDCF`, `HASCF`, `DELCF`, `INFOCF`, `CREATEXF`, `ADDXF`, `BUILDXF`,
 `HASXF`, `INFOXF`, `CREATERB`, `ADDRB`, `REMRB`, `HASRB`,
 `COUNTRB`, `GETRB`, `INFORB`, `CREATESB`, `ADDSB`, `REMSB`, `HASSB`,
-`COUNTSB`, `GETSB`, `INFOSB`, `CREATECMS`, `INCRCMS`, `ESTCMS`, `INFOCMS`,
-`CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`, `ADDTOPK`,
-`ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATERS`, `ADDRS`, `GETRS`, `INFORS`,
-`CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`, `CREATEFW`, `ADDFW`, `GETFW`, `SUMFW`,
-`RANGEFW`, `INFOFW`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`.
+`COUNTSB`, `GETSB`, `INFOSB`, `CREATERT`, `PUTRT`, `GETRT`, `DELRT`,
+`HASRT`, `PREFIXRT`, `INFORT`, `CREATECMS`, `INCRCMS`, `ESTCMS`,
+`INFOCMS`, `CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`,
+`ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATERS`, `ADDRS`,
+`GETRS`, `INFORS`, `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`, `CREATEFW`,
+`ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW`, `DUMP`, `INTERNALSET`,
+and `INTERNALDEL`.
 `DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
@@ -274,6 +279,9 @@ make cli ARGS='command -cmd COUNTRB -key cohort:ids'
 make cli ARGS='command -cmd CREATESB -key ids:active64'
 make cli ARGS='command -cmd ADDSB -key ids:active64 -value 18446744073709551615'
 make cli ARGS='command -cmd COUNTSB -key ids:active64'
+make cli ARGS='command -cmd CREATERT -key index:sessions'
+make cli ARGS='command -cmd PUTRT -key index:sessions -subkey user:100/profile -value active'
+make cli ARGS='command -cmd PREFIXRT -key index:sessions -subkey user:'
 make cli ARGS='command -cmd CREATECMS -key freq:paths -value 2048 -subkey 4'
 make cli ARGS='command -cmd INCRCMS -key freq:paths -value /api/users -subkey 3'
 make cli ARGS='command -cmd ESTCMS -key freq:paths -value /api/users'
@@ -446,6 +454,11 @@ sparse bitset type:
   CREATESB key
   ADDSB,REMSB,HASSB key uint64...
   COUNTSB/GETSB/INFOSB key
+radix tree type:
+  CREATERT key
+  PUTRT key subkey value
+  GETRT/DELRT/HASRT key subkey
+  PREFIXRT/INFORT key [prefix]
 count-min sketch type:
   CREATECMS key width [depth]
   INCRCMS key val [count]

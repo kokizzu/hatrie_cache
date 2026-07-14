@@ -534,6 +534,80 @@ func TestExecuteCommandSparseBitsetOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandRadixTreeOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATERT", Key: "index"}); !got.OK {
+		t.Fatalf("CREATERT response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTRT", Key: "index", Subkey: "user:100", Value: "active"}); !got.OK || got.Value != "1" {
+		t.Fatalf("PUTRT subkey response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "PUTRT",
+		Key:     "index",
+		Pairs:   Map{"asset:logo": "logo.png", "user:101": json.Number("42")},
+	}); !got.OK || got.Value != "2" {
+		t.Fatalf("PUTRT pairs response = %#v, want added 2", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRT", Key: "index", Subkey: "user:100"}); !got.OK || got.Value != "active" {
+		t.Fatalf("GETRT user:100 response = %#v, want active", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRT", Key: "index", Subkey: "user:101"}); !got.OK || got.Value != "42" {
+		t.Fatalf("GETRT user:101 response = %#v, want json.Number scalar", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASRT", Key: "index", Subkey: "asset:logo"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASRT asset:logo response = %#v, want 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASRT", Key: "index", Subkey: "asset:missing"}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASRT missing response = %#v, want 0", got)
+	}
+	prefixResp := ht.ExecuteCommand(CacheCommandRequest{Command: "PREFIXRT", Key: "index", Subkey: "user:"})
+	if !prefixResp.OK || prefixResp.Value == "" {
+		t.Fatalf("PREFIXRT response = %#v, want JSON items", prefixResp)
+	}
+	var items []RadixTreeItem
+	if err := json.Unmarshal([]byte(prefixResp.Value), &items); err != nil {
+		t.Fatalf("PREFIXRT JSON error = %v", err)
+	}
+	if got, want := radixTreeItemKeys(items), []string{"user:100", "user:101"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("PREFIXRT keys = %#v, want %#v", got, want)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFORT", Key: "index"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFORT response = %#v, want JSON info", infoResp)
+	}
+	var info RadixTreeInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFORT JSON error = %v", err)
+	}
+	if info.Items != 3 || info.Nodes == 0 || info.EncodedBytes == 0 {
+		t.Fatalf("INFORT = %#v, want populated radix tree info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "index"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET radix tree response = %#v, want JSON info", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "DELRT", Key: "index", Subkey: "user:100"}); !got.OK || got.Value != "1" {
+		t.Fatalf("DELRT response = %#v, want removed 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASRT", Key: "index", Subkey: "user:100"}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASRT removed response = %#v, want 0", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTRT", Key: "auto", Subkey: "key", Value: "value"}); !got.OK || got.Value != "1" {
+		t.Fatalf("PUTRT auto response = %#v, want added 1", got)
+	}
+	if !ht.Get("auto").IsRadixTree() {
+		t.Fatal("PUTRT on missing key did not create a radix tree")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRT", Key: "index"}); got.OK {
+		t.Fatalf("GETRT missing subkey response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTRT", Key: "bad"}); got.OK {
+		t.Fatalf("PUTRT missing fields response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

@@ -61,6 +61,9 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if _, ok, err := ht.BuildXorFilter("xor"); err != nil || !ok {
 		t.Fatalf("BuildXorFilter() = %v/%v, want ok", err, ok)
 	}
+	ht.UpsertRadixTree("radix")
+	ht.PutRadixTree("radix", "user:100/profile", Map{"status": "active"})
+	ht.PutRadixTree("radix", "user:101/profile", json.Number("42"))
 	ht.UpsertRoaringBitmap("bitmap")
 	ht.AddRoaringBitmap("bitmap", 1, 1<<16+7)
 	ht.UpsertSparseBitset("bitset")
@@ -155,6 +158,15 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.XorFilterInfo("xor"); !ok || !info.Built || info.Items != 2 {
 		t.Fatalf("loaded XorFilterInfo = %#v/%v, want restored XOR filter", info, ok)
+	}
+	if value, ok := loaded.GetRadixTree("radix", "user:100/profile"); !ok || !reflect.DeepEqual(value, Map{"status": "active"}) {
+		t.Fatalf("loaded radix user:100/profile = %#v/%v, want restored nested value", value, ok)
+	}
+	if value, ok := loaded.GetRadixTree("radix", "user:101/profile"); !ok || value != json.Number("42") {
+		t.Fatalf("loaded radix user:101/profile = %#v/%v, want restored json.Number", value, ok)
+	}
+	if info, ok := loaded.RadixTreeInfo("radix"); !ok || info.Items != 2 || info.Nodes == 0 {
+		t.Fatalf("loaded RadixTreeInfo = %#v/%v, want restored radix tree", info, ok)
 	}
 	if got := loaded.GetRoaringBitmap("bitmap"); !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7}) {
 		t.Fatalf("loaded Roaring bitmap = %#v, want restored integer set", got)

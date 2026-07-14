@@ -442,6 +442,58 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOSB = %#v, want compact sparse bitset value", sparseInfo)
 	}
 
+	createRadixResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATERT",
+		Key:     "index",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATERT) error = %v", err)
+	}
+	if !createRadixResp.GetOk() {
+		t.Fatalf("CREATERT response = %#v, want ok", createRadixResp)
+	}
+	putRadixResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "PUTRT",
+		Key:     "index",
+		Subkey:  "user:100/profile",
+		Value:   "active",
+	})
+	if err != nil {
+		t.Fatalf("Command(PUTRT) error = %v", err)
+	}
+	if !putRadixResp.GetOk() || putRadixResp.GetValue() != "1" {
+		t.Fatalf("PUTRT response = %#v, want added 1", putRadixResp)
+	}
+	getRadixResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "GETRT",
+		Key:     "index",
+		Subkey:  "user:100/profile",
+	})
+	if err != nil {
+		t.Fatalf("Command(GETRT) error = %v", err)
+	}
+	if !getRadixResp.GetOk() || getRadixResp.GetValue() != "active" {
+		t.Fatalf("GETRT response = %#v, want active", getRadixResp)
+	}
+	prefixRadixResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "PREFIXRT",
+		Key:     "index",
+		Subkey:  "user:",
+	})
+	if err != nil {
+		t.Fatalf("Command(PREFIXRT) error = %v", err)
+	}
+	if !prefixRadixResp.GetOk() || prefixRadixResp.GetValue() == "" {
+		t.Fatalf("PREFIXRT response = %#v, want JSON items", prefixRadixResp)
+	}
+	var radixItems []RadixTreeItem
+	if err := json.Unmarshal([]byte(prefixRadixResp.GetValue()), &radixItems); err != nil {
+		t.Fatalf("PREFIXRT JSON error = %v", err)
+	}
+	if got, want := radixTreeItemKeys(radixItems), []string{"user:100/profile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("PREFIXRT keys = %#v, want %#v", got, want)
+	}
+
 	createSketchResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
 		Command: "CREATECMS",
 		Key:     "freq",
