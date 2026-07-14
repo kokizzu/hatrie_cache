@@ -427,17 +427,13 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		}
 		return int64(len(operation.bytes)), nil
 	case "map":
-		data, err := json.Marshal(entry.Map)
-		return int64(len(data)), err
+		return jsonEncodedSize(entry.Map)
 	case "slice":
-		data, err := json.Marshal(entry.Slice)
-		return int64(len(data)), err
+		return jsonEncodedSize(entry.Slice)
 	case "set":
-		data, err := json.Marshal(entry.Set)
-		return int64(len(data)), err
+		return jsonEncodedSize(entry.Set)
 	case "priority_queue":
-		data, err := json.Marshal(entry.PriorityQueue)
-		return int64(len(data)), err
+		return jsonEncodedSize(entry.PriorityQueue)
 	case "bloom_filter":
 		if entry.BloomFilter == nil {
 			return 0, errors.New("hatriecache: bloom filter snapshot is required")
@@ -460,8 +456,7 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.TopK == nil {
 			return 0, errors.New("hatriecache: top-k snapshot is required")
 		}
-		data, err := json.Marshal(entry.TopK)
-		return int64(len(data)), err
+		return jsonEncodedSize(entry.TopK)
 	case "cuckoo_filter":
 		if entry.CuckooFilter == nil {
 			return 0, errors.New("hatriecache: cuckoo filter snapshot is required")
@@ -504,8 +499,7 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.QuantileSketch == nil {
 			return 0, errors.New("hatriecache: quantile sketch snapshot is required")
 		}
-		data, err := json.Marshal(entry.QuantileSketch)
-		return int64(len(data)), err
+		return jsonEncodedSize(entry.QuantileSketch)
 	case "fenwick_tree":
 		if entry.FenwickTree == nil {
 			return 0, errors.New("hatriecache: fenwick tree snapshot is required")
@@ -515,8 +509,7 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.ReservoirSample == nil {
 			return 0, errors.New("hatriecache: reservoir sample snapshot is required")
 		}
-		data, err := json.Marshal(entry.ReservoirSample)
-		return int64(len(data)), err
+		return jsonEncodedSize(entry.ReservoirSample)
 	case "xor_filter":
 		if entry.XorFilter == nil {
 			return 0, errors.New("hatriecache: xor filter snapshot is required")
@@ -540,13 +533,11 @@ func newXorFilterSizeFromSnapshot(snapshot xorFilterSnapshot) (int64, error) {
 		}
 		return int64(len(raw)), nil
 	}
-	data, err := json.Marshal(snapshot.Staged)
-	return int64(len(data)), err
+	return jsonEncodedSize(snapshot.Staged)
 }
 
 func newRadixTreeSizeFromSnapshot(snapshot radixTreeSnapshot) (int64, error) {
-	data, err := json.Marshal(snapshot.Items)
-	return int64(len(data)), err
+	return jsonEncodedSize(snapshot.Items)
 }
 
 func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snapshotEntry) (HatValue, error) {
