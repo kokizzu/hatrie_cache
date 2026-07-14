@@ -4,7 +4,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestTopologyStoreValidatesNormalizesAndRoutes(t *testing.T) {
@@ -218,5 +220,29 @@ func TestTopologyStorePersistsToDisk(t *testing.T) {
 	}
 	if !reflect.DeepEqual(reloaded, store.Get()) {
 		t.Fatalf("reloaded topology = %#v, want store topology %#v", reloaded, store.Get())
+	}
+}
+
+func TestDecodeTopologyJSONReaderStreamsTopology(t *testing.T) {
+	payload := `{"version":1,"self":"node-a","nodes":[{"id":"node-a","address":"127.0.0.1:8080"}],"shards":[{"id":0,"primary":"node-a"}]}`
+	topology, err := decodeTopologyJSONReader(iotest.OneByteReader(strings.NewReader(payload)))
+	if err != nil {
+		t.Fatalf("decodeTopologyJSONReader() error = %v", err)
+	}
+	if topology.Version != clusterTopologyVersion || topology.Self != "node-a" || len(topology.Nodes) != 1 || len(topology.Shards) != 1 {
+		t.Fatalf("decoded topology = %#v, want one-node topology", topology)
+	}
+}
+
+func TestDecodeTopologyJSONReaderRejectsInvalidEnvelope(t *testing.T) {
+	for name, payload := range map[string]string{
+		"unknown":  `{"version":1,"nodes":[{"id":"node-a"}],"shards":[{"id":0,"primary":"node-a"}],"extra":true}`,
+		"trailing": `{"version":1,"nodes":[{"id":"node-a"}],"shards":[{"id":0,"primary":"node-a"}]} trailing`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeTopologyJSONReader(strings.NewReader(payload)); err == nil {
+				t.Fatal("decodeTopologyJSONReader() error = nil, want rejection")
+			}
+		})
 	}
 }

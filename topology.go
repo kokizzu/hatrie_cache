@@ -118,11 +118,13 @@ func NewTopologyStore(topology ClusterTopology) (*TopologyStore, error) {
 
 // LoadTopology reads and validates topology JSON from disk.
 func LoadTopology(path string) (ClusterTopology, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return ClusterTopology{}, err
 	}
-	topology, err := decodeTopologyJSON(data)
+	defer file.Close()
+
+	topology, err := decodeTopologyJSONReader(file)
 	if err != nil {
 		return ClusterTopology{}, err
 	}
@@ -230,8 +232,12 @@ func (topology ClusterTopology) RouteForKey(key string) (TopologyRoute, bool) {
 }
 
 func decodeTopologyJSON(data []byte) (ClusterTopology, error) {
+	return decodeTopologyJSONReader(bytes.NewReader(data))
+}
+
+func decodeTopologyJSONReader(reader io.Reader) (ClusterTopology, error) {
 	var topology ClusterTopology
-	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&topology); err != nil {
 		return ClusterTopology{}, err
