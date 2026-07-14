@@ -54,10 +54,11 @@ Run the Go wrapper tests:
 make test
 ```
 
-Run the raw byte backing-store benchmarks:
+Run the backing-store and compact-structure benchmarks:
 
 ```
 make bench
+make bench BENCH=RoaringBitmap
 ```
 
 The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:

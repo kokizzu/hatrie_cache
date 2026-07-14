@@ -27,6 +27,7 @@ JOURNAL_PULL_INTERVAL ?= 0
 JOURNAL_PULL_LIMIT ?= 0
 JOURNAL_PULL_MAX_BATCHES ?= 0
 SANITIZE_C ?= auto
+BENCH ?= .
 
 .PHONY: test verify verify-go verify-c verify-frontend bench run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
@@ -44,7 +45,7 @@ verify-frontend:
 	./scripts/frontend.sh verify
 
 bench:
-	go test -run '^$$' -bench=RawBytes -benchmem
+	go test -run '^$$' -bench='$(BENCH)' -benchmem
 
 run:
 	@CMD='$(CMD)' ./scripts/run.sh

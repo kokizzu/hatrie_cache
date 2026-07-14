@@ -10,6 +10,7 @@ const (
 var (
 	benchmarkIndexSink int32
 	benchmarkBytesSink []byte
+	benchmarkBoolSink  bool
 )
 
 func BenchmarkRawBytesSliceAdd(b *testing.B) {
@@ -140,6 +141,98 @@ func BenchmarkRawBytesMapDeleteSet(b *testing.B) {
 	}
 }
 
+func BenchmarkBloomFilterAddKey(b *testing.B) {
+	payloads := benchmarkPayloads(benchmarkStorageItems, 16)
+	mask := benchmarkStorageItems - 1
+	filter := newDefaultBloomFilterData()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if i > 0 && i&mask == 0 {
+			filter = newDefaultBloomFilterData()
+		}
+		benchmarkBoolSink = filter.addKey(payloads[i&mask])
+	}
+}
+
+func BenchmarkBloomFilterContainsKey(b *testing.B) {
+	payloads := benchmarkPayloads(benchmarkStorageItems, 16)
+	mask := benchmarkStorageItems - 1
+	filter := newDefaultBloomFilterData()
+	for _, payload := range payloads {
+		filter.addKey(payload)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		benchmarkBoolSink = filter.containsKey(payloads[(i*2654435761)&mask])
+	}
+}
+
+func BenchmarkRoaringBitmapAdd(b *testing.B) {
+	mask := benchmarkStorageItems - 1
+	bitmap := newRoaringBitmapData()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if i > 0 && i&mask == 0 {
+			bitmap = newRoaringBitmapData()
+		}
+		benchmarkBoolSink = bitmap.Add(uint32(i & mask))
+	}
+}
+
+func BenchmarkRoaringBitmapContains(b *testing.B) {
+	mask := benchmarkStorageItems - 1
+	bitmap := newRoaringBitmapData()
+	for i := 0; i < benchmarkStorageItems; i++ {
+		bitmap.Add(uint32(i))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		benchmarkBoolSink = bitmap.Contains(uint32((i * 2654435761) & mask))
+	}
+}
+
+func BenchmarkSparseBitsetAdd(b *testing.B) {
+	mask := benchmarkStorageItems - 1
+	bitset := newSparseBitsetData()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if i > 0 && i&mask == 0 {
+			bitset = newSparseBitsetData()
+		}
+		benchmarkBoolSink = bitset.Add(benchmarkSparseBitsetValue(i & mask))
+	}
+}
+
+func BenchmarkSparseBitsetContains(b *testing.B) {
+	mask := benchmarkStorageItems - 1
+	bitset := newSparseBitsetData()
+	for i := 0; i < benchmarkStorageItems; i++ {
+		bitset.Add(benchmarkSparseBitsetValue(i))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		benchmarkBoolSink = bitset.Contains(benchmarkSparseBitsetValue((i * 2654435761) & mask))
+	}
+}
+
 func benchmarkRawBytesStores() (*BytesStorage, map[int32][]byte) {
 	payloads := benchmarkPayloads(benchmarkStorageItems, benchmarkPayloadSize)
 	store := CreateBytesStorage()
@@ -152,6 +245,11 @@ func benchmarkRawBytesStores() (*BytesStorage, map[int32][]byte) {
 	}
 
 	return store, values
+}
+
+func benchmarkSparseBitsetValue(idx int) uint64 {
+	value := uint64(idx)
+	return (value << 32) | value
 }
 
 func benchmarkPayloads(count, size int) [][]byte {
