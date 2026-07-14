@@ -1672,6 +1672,34 @@ func TestLoadSnapshotRejectsDuplicateActiveKeysWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestSnapshotActiveKeysSortsAndTracksSeenKeysCompactly(t *testing.T) {
+	active, err := newSnapshotActiveKeys([]string{"zeta", "", "alpha"})
+	if err != nil {
+		t.Fatalf("newSnapshotActiveKeys() error = %v", err)
+	}
+	if want := []string{"", "alpha", "zeta"}; !reflect.DeepEqual(active.keys, want) {
+		t.Fatalf("active keys = %#v, want %#v", active.keys, want)
+	}
+	if len(active.seen) != 1 {
+		t.Fatalf("seen words = %d, want 1 compact word", len(active.seen))
+	}
+	if err := active.markSeen("alpha"); err != nil {
+		t.Fatalf("markSeen(alpha) error = %v", err)
+	}
+	if err := active.markSeen("missing"); !errors.Is(err, errSnapshotChangedDuringLoad) {
+		t.Fatalf("markSeen(missing) error = %v, want snapshot changed", err)
+	}
+	if err := active.markSeen("alpha"); !errors.Is(err, errSnapshotDuplicateActiveKey) {
+		t.Fatalf("markSeen(alpha duplicate) error = %v, want duplicate active key", err)
+	}
+}
+
+func TestSnapshotActiveKeysRejectsDuplicateEmptyKey(t *testing.T) {
+	if _, err := newSnapshotActiveKeys([]string{"", ""}); !errors.Is(err, errSnapshotDuplicateActiveKey) {
+		t.Fatalf("newSnapshotActiveKeys(duplicate empty) error = %v, want duplicate active key", err)
+	}
+}
+
 func TestLoadSnapshotRejectsTooLongKey(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("existing", "keep")

@@ -24,7 +24,11 @@ import (
 const snapshotVersion = 1
 const defaultDeleteKeysNotInBatchSize = 1024
 
-var errDeleteKeysNotInPageFull = errors.New("hatriecache: delete missing keys page full")
+var (
+	errDeleteKeysNotInPageFull    = errors.New("hatriecache: delete missing keys page full")
+	errSnapshotChangedDuringLoad  = errors.New("hatriecache: snapshot changed during load")
+	errSnapshotDuplicateActiveKey = errors.New("hatriecache: snapshot contains duplicate active key")
+)
 
 type SnapshotFormat string
 
@@ -207,7 +211,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	defer file.Close()
 
 	now := ht.currentTime()
-	activeKeys := make(map[string]bool)
+	var activeKeyList []string
 	metadata, err := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
 		operation, active, err := validateSnapshotLoadEntry(entry, now, false)
 		if err != nil {
@@ -216,10 +220,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 		if !active {
 			return nil
 		}
-		if _, exists := activeKeys[operation.entry.Key]; exists {
-			return errors.New("hatriecache: snapshot contains duplicate active key")
-		}
-		activeKeys[operation.entry.Key] = false
+		activeKeyList = append(activeKeyList, operation.entry.Key)
 		return nil
 	})
 	if err != nil {
@@ -231,11 +232,15 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return SnapshotMetadata{}, err
 	}
+	activeKeys, err := newSnapshotActiveKeys(activeKeyList)
+	if err != nil {
+		return SnapshotMetadata{}, err
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
-	createdKeys := make(map[string]struct{}, len(activeKeys))
-	rollbackOperations := make([]snapshotOperation, 0, len(activeKeys))
+	createdKeys := make(map[string]struct{}, len(activeKeys.keys))
+	rollbackOperations := make([]snapshotOperation, 0, len(activeKeys.keys))
 	applied := 0
 	applyMetadata, err := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
 		operation, active, err := validateSnapshotLoadEntry(entry, now, true)
@@ -245,14 +250,9 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 		if !active {
 			return nil
 		}
-		seen, exists := activeKeys[operation.entry.Key]
-		if !exists {
-			return errors.New("hatriecache: snapshot changed during load")
+		if err := activeKeys.markSeen(operation.entry.Key); err != nil {
+			return err
 		}
-		if seen {
-			return errors.New("hatriecache: snapshot contains duplicate active key")
-		}
-		activeKeys[operation.entry.Key] = true
 
 		rollbackOperation, existed, err := ht.restoreRollbackOperationLocked(operation.entry.Key)
 		if err != nil {
@@ -275,12 +275,43 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	if err != nil {
 		return SnapshotMetadata{}, ht.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
 	}
-	if applyMetadata.Version != snapshotVersion || applyMetadata.JournalSequence != metadata.JournalSequence || applied != len(activeKeys) {
-		err := errors.New("hatriecache: snapshot changed during load")
-		return SnapshotMetadata{}, ht.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
+	if applyMetadata.Version != snapshotVersion || applyMetadata.JournalSequence != metadata.JournalSequence || applied != len(activeKeys.keys) {
+		return SnapshotMetadata{}, ht.restoreApplyErrorLocked(errSnapshotChangedDuringLoad, createdKeys, rollbackOperations, now)
 	}
-	ht.deleteKeysNotInLocked(activeKeys, now)
+	ht.deleteKeysNotInSortedLocked(activeKeys.keys, now)
 	return SnapshotMetadata{JournalSequence: metadata.JournalSequence}, nil
+}
+
+type snapshotActiveKeys struct {
+	keys []string
+	seen []uint64
+}
+
+func newSnapshotActiveKeys(keys []string) (snapshotActiveKeys, error) {
+	sort.Strings(keys)
+	for idx := 1; idx < len(keys); idx++ {
+		if keys[idx] == keys[idx-1] {
+			return snapshotActiveKeys{}, errSnapshotDuplicateActiveKey
+		}
+	}
+	return snapshotActiveKeys{
+		keys: keys,
+		seen: make([]uint64, (len(keys)+63)/64),
+	}, nil
+}
+
+func (keys snapshotActiveKeys) markSeen(key string) error {
+	idx := sort.SearchStrings(keys.keys, key)
+	if idx == len(keys.keys) || keys.keys[idx] != key {
+		return errSnapshotChangedDuringLoad
+	}
+	word := idx / 64
+	mask := uint64(1) << uint(idx%64)
+	if keys.seen[word]&mask != 0 {
+		return errSnapshotDuplicateActiveKey
+	}
+	keys.seen[word] |= mask
+	return nil
 }
 
 func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time, prepareOperation bool) (snapshotOperation, bool, error) {
