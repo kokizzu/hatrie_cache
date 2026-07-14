@@ -261,23 +261,23 @@ on an AMD Ryzen 9 5950X:
 
 | Path | Format | CPU | Wire/disk bytes | Heap bytes | Allocs |
 | --- | --- | ---: | ---: | ---: | ---: |
-| HTTP command wire | JSON | 3,247 ns/op | 3,185 wire_B/op | 3,384 B/op | 3 |
-| HTTP command wire | protobuf (default) | 1,455 ns/op | 3,146 wire_B/op | 3,408 B/op | 3 |
-| Snapshot save | JSON | 1,988,009 ns/op | 465,926 disk_B/op | 754,104 B/op | 16,901 |
-| Snapshot save | gzip JSON (fast fallback) | 3,023,609 ns/op | 8,259 disk_B/op | 860,689 B/op | 30,216 |
-| Snapshot save | gzip best JSON (default) | 4,589,867 ns/op | 5,384 disk_B/op | 861,405 B/op | 30,217 |
-| LevelDB save | materialized values | 1,309,604 ns/op | 394,185 record_B/op | 1,149,390 B/op | 6,162 |
-| LevelDB save | unchanged cold refs | 1,028,908 ns/op | 394,184 record_B/op | 1,000,842 B/op | 4,625 |
-| LevelDB save | stats-changed cold refs | 3,253,820 ns/op | 394,186 record_B/op | 3,160,894 B/op | 19,990 |
-| LevelDB load | materialized values | 3,536,172 ns/op | 394,218 record_B/op | 3,143,857 B/op | 22,644 |
-| LevelDB load | cold refs | 3,706,891 ns/op | 394,199 record_B/op | 3,007,433 B/op | 22,644 |
+| HTTP command wire | JSON | 4,968 ns/op | 3,185 wire_B/op | 3,385 B/op | 3 |
+| HTTP command wire | protobuf (default) | 2,226 ns/op | 3,146 wire_B/op | 3,408 B/op | 3 |
+| Snapshot save | JSON | 2,782,644 ns/op | 465,944 disk_B/op | 655,312 B/op | 15,877 |
+| Snapshot save | gzip JSON (fast fallback) | 4,338,040 ns/op | 7,520 disk_B/op | 761,890 B/op | 29,192 |
+| Snapshot save | gzip best JSON (default) | 5,978,653 ns/op | 5,357 disk_B/op | 762,619 B/op | 29,193 |
+| LevelDB save | materialized values | 2,197,619 ns/op | 394,149 record_B/op | 1,148,430 B/op | 6,162 |
+| LevelDB save | unchanged cold refs | 1,681,950 ns/op | 394,168 record_B/op | 999,820 B/op | 4,625 |
+| LevelDB save | stats-changed cold refs | 7,447,860 ns/op | 394,178 record_B/op | 3,168,086 B/op | 19,990 |
+| LevelDB load | materialized values | 6,356,626 ns/op | 394,175 record_B/op | 3,143,865 B/op | 22,644 |
+| LevelDB load | cold refs | 8,461,249 ns/op | 394,150 record_B/op | 3,007,437 B/op | 22,644 |
 
 For the benchmark payload, protobuf command wire is about 2.2x faster with a
 small byte reduction and equivalent allocation count. Snapshot and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
 carry empty collection fields. The storage-optimized gzip snapshot default uses
-about 35% fewer snapshot bytes than the previous fast gzip format, with similar
-heap use and about 1.5x its save CPU; it uses about 99% less storage than plain
+about 29% fewer snapshot bytes than the previous fast gzip format, with similar
+heap use and about 1.4x its save CPU; it uses about 99% less storage than plain
 JSON. LevelDB saves stream the sorted trie against the sorted LevelDB keyspace,
 skip unchanged records, delete stale records, and avoid the synced write
 entirely when the diff batch is empty. Unchanged cold-reference saves reuse

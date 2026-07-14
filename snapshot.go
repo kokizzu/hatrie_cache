@@ -422,11 +422,6 @@ func (ht *HatTrie) writeSnapshotBytesEntryJSONLocked(writer io.Writer, entry Ent
 	return err
 }
 
-type snapshotEntryJSONField struct {
-	name  string
-	value interface{}
-}
-
 func writeSnapshotJSONField(writer io.Writer, prefix string, name string, value interface{}, comma bool) error {
 	if _, err := fmt.Fprintf(writer, "%s%q: ", prefix, name); err != nil {
 		return err
@@ -475,16 +470,17 @@ func writeSnapshotEntryFieldsJSON(writer io.Writer, entry snapshotEntry, prefix 
 		return err
 	}
 	fieldPrefix := prefix + "  "
-	fields := snapshotEntryJSONFields(entry)
-	for idx, field := range fields {
-		if idx > 0 {
+	first := true
+	if err := visitSnapshotEntryJSONFields(entry, func(name string, value interface{}) error {
+		if !first {
 			if _, err := io.WriteString(writer, ",\n"); err != nil {
 				return err
 			}
 		}
-		if err := writeSnapshotIndentedJSONField(writer, fieldPrefix, field.name, field.value); err != nil {
-			return err
-		}
+		first = false
+		return writeSnapshotIndentedJSONField(writer, fieldPrefix, name, value)
+	}); err != nil {
+		return err
 	}
 	_, err := io.WriteString(writer, "\n"+prefix+"}")
 	return err
@@ -576,91 +572,135 @@ func marshalSnapshotEntryJSON(entry snapshotEntry) ([]byte, error) {
 	return json.Marshal(compactSnapshotEntryJSON(entry))
 }
 
-func snapshotEntryJSONFields(entry snapshotEntry) []snapshotEntryJSONField {
-	fields := []snapshotEntryJSONField{
-		{name: "key", value: entry.Key},
-		{name: "type", value: entry.Type},
+func visitSnapshotEntryJSONFields(entry snapshotEntry, visit func(string, interface{}) error) error {
+	if err := visit("key", entry.Key); err != nil {
+		return err
 	}
-	add := func(name string, value interface{}) {
-		fields = append(fields, snapshotEntryJSONField{name: name, value: value})
+	if err := visit("type", entry.Type); err != nil {
+		return err
+	}
+	add := func(name string, value interface{}) error {
+		return visit(name, value)
 	}
 	switch entry.Type {
 	case "counter":
 		if entry.Counter != 0 {
-			add("counter", entry.Counter)
+			if err := add("counter", entry.Counter); err != nil {
+				return err
+			}
 		}
 	case "string":
 		if entry.String != "" {
-			add("string", entry.String)
+			if err := add("string", entry.String); err != nil {
+				return err
+			}
 		}
 	case "bytes":
 		if entry.Bytes != "" {
-			add("bytes", entry.Bytes)
+			if err := add("bytes", entry.Bytes); err != nil {
+				return err
+			}
 		}
 	case "map":
-		add("map", entry.Map)
+		if err := add("map", entry.Map); err != nil {
+			return err
+		}
 	case "slice":
-		add("slice", entry.Slice)
+		if err := add("slice", entry.Slice); err != nil {
+			return err
+		}
 	case "set":
-		add("set", entry.Set)
+		if err := add("set", entry.Set); err != nil {
+			return err
+		}
 	case "priority_queue":
-		add("priority_queue", entry.PriorityQueue)
+		if err := add("priority_queue", entry.PriorityQueue); err != nil {
+			return err
+		}
 	case "bloom_filter":
 		if entry.BloomFilter != nil {
-			add("bloom_filter", entry.BloomFilter)
+			if err := add("bloom_filter", entry.BloomFilter); err != nil {
+				return err
+			}
 		}
 	case "count_min_sketch":
 		if entry.CountMinSketch != nil {
-			add("count_min_sketch", entry.CountMinSketch)
+			if err := add("count_min_sketch", entry.CountMinSketch); err != nil {
+				return err
+			}
 		}
 	case "hyperloglog":
 		if entry.HyperLogLog != nil {
-			add("hyperloglog", entry.HyperLogLog)
+			if err := add("hyperloglog", entry.HyperLogLog); err != nil {
+				return err
+			}
 		}
 	case "top_k":
 		if entry.TopK != nil {
-			add("top_k", entry.TopK)
+			if err := add("top_k", entry.TopK); err != nil {
+				return err
+			}
 		}
 	case "cuckoo_filter":
 		if entry.CuckooFilter != nil {
-			add("cuckoo_filter", entry.CuckooFilter)
+			if err := add("cuckoo_filter", entry.CuckooFilter); err != nil {
+				return err
+			}
 		}
 	case "roaring_bitmap":
 		if entry.RoaringBitmap != nil {
-			add("roaring_bitmap", entry.RoaringBitmap)
+			if err := add("roaring_bitmap", entry.RoaringBitmap); err != nil {
+				return err
+			}
 		}
 	case "quantile_sketch":
 		if entry.QuantileSketch != nil {
-			add("quantile_sketch", entry.QuantileSketch)
+			if err := add("quantile_sketch", entry.QuantileSketch); err != nil {
+				return err
+			}
 		}
 	case "fenwick_tree":
 		if entry.FenwickTree != nil {
-			add("fenwick_tree", entry.FenwickTree)
+			if err := add("fenwick_tree", entry.FenwickTree); err != nil {
+				return err
+			}
 		}
 	case "sparse_bitset":
 		if entry.SparseBitset != nil {
-			add("sparse_bitset", entry.SparseBitset)
+			if err := add("sparse_bitset", entry.SparseBitset); err != nil {
+				return err
+			}
 		}
 	case "reservoir_sample":
 		if entry.ReservoirSample != nil {
-			add("reservoir_sample", entry.ReservoirSample)
+			if err := add("reservoir_sample", entry.ReservoirSample); err != nil {
+				return err
+			}
 		}
 	case "xor_filter":
 		if entry.XorFilter != nil {
-			add("xor_filter", entry.XorFilter)
+			if err := add("xor_filter", entry.XorFilter); err != nil {
+				return err
+			}
 		}
 	case "radix_tree":
 		if entry.RadixTree != nil {
-			add("radix_tree", entry.RadixTree)
+			if err := add("radix_tree", entry.RadixTree); err != nil {
+				return err
+			}
 		}
 	}
 	if entry.ExpiresAt != nil {
-		add("expires_at", entry.ExpiresAt)
+		if err := add("expires_at", entry.ExpiresAt); err != nil {
+			return err
+		}
 	}
 	if entry.Stats != nil {
-		add("stats", entry.Stats)
+		if err := add("stats", entry.Stats); err != nil {
+			return err
+		}
 	}
-	return fields
+	return nil
 }
 
 func writeSnapshotIndentedJSONField(writer io.Writer, prefix string, name string, value interface{}) error {
