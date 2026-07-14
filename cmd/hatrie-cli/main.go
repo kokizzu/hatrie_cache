@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	json "github.com/goccy/go-json"
 
@@ -289,11 +290,7 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 		}
 		request.Pairs = pairs
 	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		return err
-	}
-	return postJSON(ctx, client, addr, "/api/commands", body, stdout)
+	return postJSONValue(ctx, client, addr, "/api/commands", request, estimatedCommandRequestBytes(request), stdout)
 }
 
 func decodeJSONFlag[T any](value string) (T, error) {
@@ -324,7 +321,19 @@ func postJSON(ctx context.Context, client *http.Client, addr string, path string
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, path), reader)
+	return postJSONReaderWithEncoding(ctx, client, addr, path, reader, contentEncoding, stdout)
+}
+
+func postJSONValue(ctx context.Context, client *http.Client, addr string, path string, value interface{}, estimatedSize int, stdout io.Writer) error {
+	reader, contentEncoding, err := jsonValueRequestBody(value, estimatedSize)
+	if err != nil {
+		return err
+	}
+	return postJSONReaderWithEncoding(ctx, client, addr, path, reader, contentEncoding, stdout)
+}
+
+func postJSONReaderWithEncoding(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, contentEncoding string, stdout io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, path), body)
 	if err != nil {
 		return err
 	}
@@ -334,6 +343,17 @@ func postJSON(ctx context.Context, client *http.Client, addr string, path string
 		req.Header.Set("Content-Encoding", contentEncoding)
 	}
 	return doAndCopy(client, req, stdout)
+}
+
+func jsonValueRequestBody(value interface{}, estimatedSize int) (io.Reader, string, error) {
+	if estimatedSize >= minCompressedJSONRequestBytes {
+		return streamingGzipJSONReader(value), "gzip", nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, "", err
+	}
+	return jsonRequestBody(data)
 }
 
 func jsonRequestBody(data []byte) (io.Reader, string, error) {
@@ -354,6 +374,144 @@ func jsonRequestBody(data []byte) (io.Reader, string, error) {
 		return nil, "", closeErr
 	}
 	return bytes.NewReader(compressed.Bytes()), "gzip", nil
+}
+
+func streamingGzipJSONReader(value interface{}) io.Reader {
+	reader, writer := io.Pipe()
+	return &streamingGzipJSONBody{
+		reader: reader,
+		writer: writer,
+		value:  value,
+	}
+}
+
+type streamingGzipJSONBody struct {
+	start  sync.Once
+	reader *io.PipeReader
+	writer *io.PipeWriter
+	value  interface{}
+}
+
+func (body *streamingGzipJSONBody) Read(data []byte) (int, error) {
+	body.start.Do(body.write)
+	return body.reader.Read(data)
+}
+
+func (body *streamingGzipJSONBody) Close() error {
+	return body.reader.Close()
+}
+
+func (body *streamingGzipJSONBody) write() {
+	go func() {
+		gzipWriter, err := gzip.NewWriterLevel(body.writer, gzip.BestSpeed)
+		if err != nil {
+			_ = body.writer.CloseWithError(err)
+			return
+		}
+		encodeErr := json.NewEncoder(gzipWriter).Encode(body.value)
+		closeErr := gzipWriter.Close()
+		if encodeErr != nil {
+			_ = body.writer.CloseWithError(encodeErr)
+			return
+		}
+		_ = body.writer.CloseWithError(closeErr)
+	}()
+}
+
+func estimatedCommandRequestBytes(request hatriecache.CacheCommandRequest) int {
+	estimate := 64 + len(request.Command) + len(request.Key) + len(request.Value) + len(request.Subkey)
+	if estimate >= minCompressedJSONRequestBytes {
+		return minCompressedJSONRequestBytes
+	}
+	for _, value := range request.Values {
+		estimate = addJSONRequestEstimate(estimate, estimatedJSONValueBytes(value))
+		if estimate >= minCompressedJSONRequestBytes {
+			return minCompressedJSONRequestBytes
+		}
+	}
+	for key, value := range request.Pairs {
+		estimate = addJSONRequestEstimate(estimate, len(key)+estimatedJSONValueBytes(value))
+		if estimate >= minCompressedJSONRequestBytes {
+			return minCompressedJSONRequestBytes
+		}
+	}
+	if request.Priority != nil {
+		estimate = addJSONRequestEstimate(estimate, 20)
+	}
+	if request.TTLSeconds != nil {
+		estimate = addJSONRequestEstimate(estimate, 20)
+	}
+	if request.UnixSeconds != nil {
+		estimate = addJSONRequestEstimate(estimate, 20)
+	}
+	return estimate
+}
+
+func estimatedJSONValueBytes(value interface{}) int {
+	switch value := value.(type) {
+	case nil:
+		return 4
+	case string:
+		return len(value) + 2
+	case json.Number:
+		return len(value.String())
+	case bool:
+		if value {
+			return 4
+		}
+		return 5
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return 20
+	case float32:
+		return 15
+	case float64:
+		return 24
+	case []interface{}:
+		estimate := 2
+		for _, item := range value {
+			estimate = addJSONRequestEstimate(estimate, estimatedJSONValueBytes(item))
+			if estimate >= minCompressedJSONRequestBytes {
+				return minCompressedJSONRequestBytes
+			}
+		}
+		return estimate
+	case []string:
+		estimate := 2
+		for _, item := range value {
+			estimate = addJSONRequestEstimate(estimate, len(item)+2)
+			if estimate >= minCompressedJSONRequestBytes {
+				return minCompressedJSONRequestBytes
+			}
+		}
+		return estimate
+	case map[string]interface{}:
+		estimate := 2
+		for key, item := range value {
+			estimate = addJSONRequestEstimate(estimate, len(key)+estimatedJSONValueBytes(item))
+			if estimate >= minCompressedJSONRequestBytes {
+				return minCompressedJSONRequestBytes
+			}
+		}
+		return estimate
+	case map[string]string:
+		estimate := 2
+		for key, item := range value {
+			estimate = addJSONRequestEstimate(estimate, len(key)+len(item)+2)
+			if estimate >= minCompressedJSONRequestBytes {
+				return minCompressedJSONRequestBytes
+			}
+		}
+		return estimate
+	default:
+		return 0
+	}
+}
+
+func addJSONRequestEstimate(total, value int) int {
+	if value >= minCompressedJSONRequestBytes || total >= minCompressedJSONRequestBytes-value {
+		return minCompressedJSONRequestBytes
+	}
+	return total + value
 }
 
 func putJSONReader(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, stdout io.Writer) error {

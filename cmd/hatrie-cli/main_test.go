@@ -460,6 +460,43 @@ func TestRunCommandCompressesLargeJSONPost(t *testing.T) {
 	}
 }
 
+func TestJSONValueRequestBodyStreamsLargeStructuredCommandPayload(t *testing.T) {
+	values := make(hatriecache.Slice, 0, minCompressedJSONRequestBytes/4)
+	for len(values) < cap(values) {
+		values = append(values, strings.Repeat("value", 4))
+	}
+	payload := hatriecache.CacheCommandRequest{
+		Command: "PUSHL",
+		Key:     "jobs",
+		Values:  values,
+	}
+
+	body, contentEncoding, err := jsonValueRequestBody(payload, estimatedCommandRequestBytes(payload))
+	if err != nil {
+		t.Fatalf("jsonValueRequestBody() error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	if _, ok := body.(*streamingGzipJSONBody); !ok {
+		t.Fatalf("jsonValueRequestBody() body = %T, want streaming gzip body", body)
+	}
+
+	reader, err := gzip.NewReader(body)
+	if err != nil {
+		t.Fatalf("NewReader(streaming gzip body) error = %v", err)
+	}
+	defer reader.Close()
+
+	var decoded hatriecache.CacheCommandRequest
+	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(streaming gzip body) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, payload) {
+		t.Fatalf("decoded streaming payload = %#v, want %#v", decoded, payload)
+	}
+}
+
 func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
