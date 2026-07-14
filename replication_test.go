@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"hatrie_cache/internal/jsonwire"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -859,7 +861,7 @@ func TestReplicationRequestBodyStreamsLargeStringPayload(t *testing.T) {
 	if contentEncoding != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
 	}
-	if _, ok := body.(*streamingGzipJSONBody); !ok {
+	if _, ok := body.(*jsonwire.StreamingGzipJSONBody); !ok {
 		t.Fatalf("replicationRequestBody() body = %T, want streaming gzip body", body)
 	}
 
@@ -921,7 +923,7 @@ func TestReplicationRequestBodyStreamsLargeStructuredPayload(t *testing.T) {
 	if contentEncoding != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
 	}
-	if _, ok := body.(*streamingGzipJSONBody); !ok {
+	if _, ok := body.(*jsonwire.StreamingGzipJSONBody); !ok {
 		t.Fatalf("replicationRequestBody() body = %T, want streaming gzip body", body)
 	}
 
@@ -958,7 +960,7 @@ func TestReplicationRequestBodyStreamsLargePairPayload(t *testing.T) {
 	if contentEncoding != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
 	}
-	if _, ok := body.(*streamingGzipJSONBody); !ok {
+	if _, ok := body.(*jsonwire.StreamingGzipJSONBody); !ok {
 		t.Fatalf("replicationRequestBody() body = %T, want streaming gzip body", body)
 	}
 

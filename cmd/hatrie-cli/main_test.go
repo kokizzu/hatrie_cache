@@ -16,6 +16,7 @@ import (
 	"testing/iotest"
 
 	hatriecache "hatrie_cache"
+	"hatrie_cache/internal/jsonwire"
 )
 
 func TestRunRequiresSubcommand(t *testing.T) {
@@ -478,7 +479,7 @@ func TestJSONValueRequestBodyStreamsLargeStructuredCommandPayload(t *testing.T) 
 	if contentEncoding != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
 	}
-	if _, ok := body.(*streamingGzipJSONBody); !ok {
+	if _, ok := body.(*jsonwire.StreamingGzipJSONBody); !ok {
 		t.Fatalf("jsonValueRequestBody() body = %T, want streaming gzip body", body)
 	}
 

@@ -6,18 +6,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
-)
 
-var gzipWriterPool = sync.Pool{
-	New: func() interface{} {
-		writer, err := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
-		if err != nil {
-			panic(err)
-		}
-		return writer
-	},
-}
+	"hatrie_cache/internal/jsonwire"
+)
 
 type gzipResponseWriter struct {
 	http.ResponseWriter
@@ -95,7 +86,7 @@ func (w *gzipResponseWriter) WriteHeader(statusCode int) {
 		header := w.Header()
 		header.Del("Content-Length")
 		header.Set("Content-Encoding", "gzip")
-		w.writer = acquireGzipWriter(w.ResponseWriter)
+		w.writer = jsonwire.AcquireGzipWriter(w.ResponseWriter)
 	}
 	w.ResponseWriter.WriteHeader(statusCode)
 }
@@ -117,19 +108,8 @@ func (w *gzipResponseWriter) Close() error {
 	writer := w.writer
 	w.writer = nil
 	err := writer.Close()
-	releaseGzipWriter(writer)
+	jsonwire.ReleaseGzipWriter(writer)
 	return err
-}
-
-func acquireGzipWriter(writer io.Writer) *gzip.Writer {
-	gzipWriter := gzipWriterPool.Get().(*gzip.Writer)
-	gzipWriter.Reset(writer)
-	return gzipWriter
-}
-
-func releaseGzipWriter(writer *gzip.Writer) {
-	writer.Reset(io.Discard)
-	gzipWriterPool.Put(writer)
 }
 
 func responseAllowsBody(statusCode int) bool {

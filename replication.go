@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"hatrie_cache/internal/jsonwire"
+
 	json "github.com/goccy/go-json"
 )
 
@@ -716,7 +718,7 @@ func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, err
 
 func replicationRequestBody(payload CacheCommandRequest) (io.Reader, string, error) {
 	if shouldStreamCompressedReplicationRequest(payload) {
-		return streamingGzipJSONReader(payload), "gzip", nil
+		return jsonwire.StreamingGzipJSONReader(payload), "gzip", nil
 	}
 
 	data, err := json.Marshal(payload)
@@ -728,10 +730,10 @@ func replicationRequestBody(payload CacheCommandRequest) (io.Reader, string, err
 	}
 
 	var compressed bytes.Buffer
-	writer := acquireGzipWriter(&compressed)
+	writer := jsonwire.AcquireGzipWriter(&compressed)
 	_, writeErr := writer.Write(data)
 	closeErr := writer.Close()
-	releaseGzipWriter(writer)
+	jsonwire.ReleaseGzipWriter(writer)
 	if writeErr != nil {
 		return nil, "", writeErr
 	}
@@ -751,133 +753,27 @@ func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {
 		return minCompressedReplicationRequestBytes
 	}
 	for _, value := range payload.Values {
-		estimate = addReplicationRequestEstimate(estimate, estimatedReplicationJSONValueBytes(value))
+		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(value, minCompressedReplicationRequestBytes), minCompressedReplicationRequestBytes)
 		if estimate >= minCompressedReplicationRequestBytes {
 			return minCompressedReplicationRequestBytes
 		}
 	}
 	for key, value := range payload.Pairs {
-		estimate = addReplicationRequestEstimate(estimate, len(key)+estimatedReplicationJSONValueBytes(value))
+		estimate = jsonwire.AddEstimate(estimate, len(key)+jsonwire.EstimateJSONValueBytes(value, minCompressedReplicationRequestBytes), minCompressedReplicationRequestBytes)
 		if estimate >= minCompressedReplicationRequestBytes {
 			return minCompressedReplicationRequestBytes
 		}
 	}
 	if payload.Priority != nil {
-		estimate = addReplicationRequestEstimate(estimate, 20)
+		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedReplicationRequestBytes)
 	}
 	if payload.TTLSeconds != nil {
-		estimate = addReplicationRequestEstimate(estimate, 20)
+		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedReplicationRequestBytes)
 	}
 	if payload.UnixSeconds != nil {
-		estimate = addReplicationRequestEstimate(estimate, 20)
+		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedReplicationRequestBytes)
 	}
 	return estimate
-}
-
-func estimatedReplicationJSONValueBytes(value interface{}) int {
-	switch value := value.(type) {
-	case nil:
-		return 4
-	case string:
-		return len(value) + 2
-	case json.Number:
-		return len(value.String())
-	case bool:
-		if value {
-			return 4
-		}
-		return 5
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return 20
-	case float32:
-		return 15
-	case float64:
-		return 24
-	case []interface{}:
-		estimate := 2
-		for _, item := range value {
-			estimate = addReplicationRequestEstimate(estimate, estimatedReplicationJSONValueBytes(item))
-			if estimate >= minCompressedReplicationRequestBytes {
-				return minCompressedReplicationRequestBytes
-			}
-		}
-		return estimate
-	case []string:
-		estimate := 2
-		for _, item := range value {
-			estimate = addReplicationRequestEstimate(estimate, len(item)+2)
-			if estimate >= minCompressedReplicationRequestBytes {
-				return minCompressedReplicationRequestBytes
-			}
-		}
-		return estimate
-	case map[string]interface{}:
-		estimate := 2
-		for key, item := range value {
-			estimate = addReplicationRequestEstimate(estimate, len(key)+estimatedReplicationJSONValueBytes(item))
-			if estimate >= minCompressedReplicationRequestBytes {
-				return minCompressedReplicationRequestBytes
-			}
-		}
-		return estimate
-	case map[string]string:
-		estimate := 2
-		for key, item := range value {
-			estimate = addReplicationRequestEstimate(estimate, len(key)+len(item)+2)
-			if estimate >= minCompressedReplicationRequestBytes {
-				return minCompressedReplicationRequestBytes
-			}
-		}
-		return estimate
-	default:
-		return 0
-	}
-}
-
-func addReplicationRequestEstimate(total, value int) int {
-	if value >= minCompressedReplicationRequestBytes || total >= minCompressedReplicationRequestBytes-value {
-		return minCompressedReplicationRequestBytes
-	}
-	return total + value
-}
-
-func streamingGzipJSONReader(value interface{}) io.Reader {
-	reader, writer := io.Pipe()
-	return &streamingGzipJSONBody{
-		reader: reader,
-		writer: writer,
-		value:  value,
-	}
-}
-
-type streamingGzipJSONBody struct {
-	start  sync.Once
-	reader *io.PipeReader
-	writer *io.PipeWriter
-	value  interface{}
-}
-
-func (body *streamingGzipJSONBody) Read(data []byte) (int, error) {
-	body.start.Do(body.write)
-	return body.reader.Read(data)
-}
-
-func (body *streamingGzipJSONBody) Close() error {
-	return body.reader.Close()
-}
-
-func (body *streamingGzipJSONBody) write() {
-	go func() {
-		gzipWriter := acquireGzipWriter(body.writer)
-		encodeErr := json.NewEncoder(gzipWriter).Encode(body.value)
-		closeErr := gzipWriter.Close()
-		releaseGzipWriter(gzipWriter)
-		if encodeErr != nil {
-			_ = body.writer.CloseWithError(encodeErr)
-			return
-		}
-		_ = body.writer.CloseWithError(closeErr)
-	}()
 }
 
 func drainAndClose(body io.ReadCloser) {
