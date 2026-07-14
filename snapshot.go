@@ -111,9 +111,15 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
+	createdKeys := make(map[string]struct{})
 	for _, operation := range operations {
+		existed := ht.restoreOperationExistedLocked(operation.entry.Key)
 		if _, err := ht.applySnapshotOperationAtLocked(operation, now); err != nil {
+			ht.deleteKeysLocked(createdKeys)
 			return SnapshotMetadata{}, err
+		}
+		if !existed {
+			createdKeys[operation.entry.Key] = struct{}{}
 		}
 	}
 	ht.deleteKeysNotInLocked(seenKeys, now)
@@ -641,6 +647,23 @@ func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]struct{}, now time.Time
 			continue
 		}
 		ht.deleteKnownLocked(entry.Key, entry.Value)
+	}
+}
+
+func (ht *HatTrie) restoreOperationExistedLocked(key string) bool {
+	return ht.tryLocation(key) != nil
+}
+
+func (ht *HatTrie) deleteKeysLocked(keys map[string]struct{}) {
+	for key := range keys {
+		rawPtr := ht.tryLocation(key)
+		if rawPtr == nil {
+			ht.clearExpirationLocked(key)
+			continue
+		}
+		hval := HatValue{}
+		hval.fromValue(*rawPtr)
+		ht.deleteKnownLocked(key, hval)
 	}
 }
 

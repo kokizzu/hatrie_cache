@@ -187,6 +187,44 @@ func TestLoadLevelDBRemovesKeysMissingFromStore(t *testing.T) {
 	}
 }
 
+func TestLoadLevelDBCleansCreatedKeysAfterApplyFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	payload := testPayload(DiskBytesThreshold + 1)
+	source := newTestTrie(t)
+	source.UpsertBytes("a-created", payload)
+	source.UpsertBytes("b-blocked", payload)
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	loaded.UpsertString("existing", "keep")
+	firstPath := loaded.disks.pathFor(0)
+	blockedPath := loaded.disks.pathFor(1)
+	if err := os.Mkdir(blockedPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(blocked path) error = %v", err)
+	}
+
+	if _, err := loaded.LoadLevelDB(path); err == nil {
+		t.Fatal("LoadLevelDB() error = nil, want blocked disk write error")
+	}
+	if loaded.Exists("a-created") {
+		t.Fatal("failed LevelDB load left created key a-created")
+	}
+	if loaded.Exists("b-blocked") {
+		t.Fatal("failed LevelDB load left blocked key b-blocked")
+	}
+	if got := loaded.GetString("existing"); got != "keep" {
+		t.Fatalf("existing after failed LevelDB load = %q, want keep", got)
+	}
+	if _, err := os.Stat(firstPath); !os.IsNotExist(err) {
+		t.Fatalf("created disk file Stat() error = %v, want not exist", err)
+	}
+	if got := len(loaded.disks.paths); got != 0 {
+		t.Fatalf("disk paths after failed LevelDB load = %d, want 0", got)
+	}
+}
+
 func TestLevelDBStoreRoundTripPreservesBlankKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

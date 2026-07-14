@@ -163,17 +163,24 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	result := LevelDBLoadResult{KeysLoaded: len(operations)}
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
+	createdKeys := make(map[string]struct{})
 	for _, operation := range operations {
+		existed := trie.restoreOperationExistedLocked(operation.operation.entry.Key)
 		if operation.reference {
 			if _, err := trie.applyLevelDBReferenceLocked(store, operation.operation.entry); err != nil {
+				trie.deleteKeysLocked(createdKeys)
 				return LevelDBLoadResult{}, err
 			}
-			continue
+		} else {
+			if _, err := trie.applySnapshotOperationAtLocked(operation.operation, now); err != nil {
+				trie.deleteKeysLocked(createdKeys)
+				return LevelDBLoadResult{}, err
+			}
+			result.ValuesLoaded++
 		}
-		if _, err := trie.applySnapshotOperationAtLocked(operation.operation, now); err != nil {
-			return LevelDBLoadResult{}, err
+		if !existed {
+			createdKeys[operation.operation.entry.Key] = struct{}{}
 		}
-		result.ValuesLoaded++
 	}
 	trie.deleteKeysNotInLocked(activeKeys, now)
 	return result, nil
