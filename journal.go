@@ -262,14 +262,25 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (comman
 	}
 	data = append(data, '\n')
 
-	if _, err := journal.file.Write(data); err != nil {
-		return commandJournalAppendState{}, err
+	n, err := journal.file.Write(data)
+	if err != nil {
+		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+	}
+	if n != len(data) {
+		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, io.ErrShortWrite)
 	}
 	if err := journal.file.Sync(); err != nil {
-		return commandJournalAppendState{}, err
+		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
 	}
 	journal.markAppendedLocked(sequence)
 	return appendState, nil
+}
+
+func (journal *CommandJournal) rollbackFailedAppendLocked(state commandJournalAppendState, cause error) error {
+	if err := journal.rollbackAppendLocked(state); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
 }
 
 func (journal *CommandJournal) rollbackAppendLocked(state commandJournalAppendState) error {

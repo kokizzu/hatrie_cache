@@ -1058,6 +1058,62 @@ func TestCommandJournalRemovesRejectedRuntimeCommand(t *testing.T) {
 	}
 }
 
+func TestCommandJournalRollbackFailedAppendRemovesPartialBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	ht := newTestTrie(t)
+
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "first", Value: "ok"}); !response.OK {
+		t.Fatalf("ExecuteCommand(first) = %#v, want ok", response)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(before) error = %v", err)
+	}
+	info, err := journal.file.Stat()
+	if err != nil {
+		t.Fatalf("journal Stat() error = %v", err)
+	}
+	state := commandJournalAppendState{
+		offset:            info.Size(),
+		nextSequence:      journal.nextSequence,
+		sequenceExhausted: journal.sequenceExhausted,
+	}
+
+	if _, err := journal.file.WriteString(`{"version":1,"sequence":2,`); err != nil {
+		t.Fatalf("WriteString(partial) error = %v", err)
+	}
+	journal.nextSequence = 99
+	errBoom := errors.New("boom")
+	if err := journal.rollbackFailedAppendLocked(state, errBoom); !errors.Is(err, errBoom) {
+		t.Fatalf("rollbackFailedAppendLocked() error = %v, want boom", err)
+	}
+	if journal.nextSequence != state.nextSequence || journal.sequenceExhausted != state.sequenceExhausted {
+		t.Fatalf("journal sequence after rollback = %d/%v, want %d/%v", journal.nextSequence, journal.sequenceExhausted, state.nextSequence, state.sequenceExhausted)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(after rollback) error = %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("journal after rollback = %q, want original %q", after, before)
+	}
+
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "second", Value: "ok"}); !response.OK {
+		t.Fatalf("ExecuteCommand(second) = %#v, want ok", response)
+	}
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 || entries[0].Sequence != 1 || entries[1].Sequence != 2 || entries[1].Request.Key != "second" {
+		t.Fatalf("entries after rollback and append = %#v, want contiguous first/second commands", entries)
+	}
+}
+
 func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 	dir := t.TempDir()
 	journalPath := filepath.Join(dir, "commands.journal")
