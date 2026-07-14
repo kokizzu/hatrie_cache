@@ -157,6 +157,51 @@ func TestHTTPReplicatorAcceptsNilContext(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorUsesTopologyWhenElectionUnconfigured(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	response := trie.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"})
+	topology := replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Client:   target.Client(),
+	})
+
+	result := replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("topology-only replication result = %#v, want one ok target", result)
+	}
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
+			t.Fatalf("topology-only replicated request = %#v, want INTERNALSET snapshot", request)
+		}
+	default:
+		t.Fatal("topology-only replication did not reach remote target")
+	}
+
+	follower := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-b",
+		Topology: topology,
+		Client:   target.Client(),
+	})
+	result = follower.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}, response)
+	if !result.Skipped || result.Reason != "local node is not elected leader" {
+		t.Fatalf("topology-only follower result = %#v, want skipped not leader", result)
+	}
+}
+
 func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 2)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
