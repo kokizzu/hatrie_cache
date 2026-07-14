@@ -1049,6 +1049,78 @@ func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 	}
 }
 
+func TestCommandJournalCompactionStreamsLargeHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	largeValue := strings.Repeat("x", 70*1024)
+	writeCommandJournalTestEntries(t, path,
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 1,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "old-large", Value: largeValue},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 2,
+			Request:  CacheCommandRequest{Command: "INC", Key: "views"},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 3,
+			Request:  CacheCommandRequest{Command: "INC", Key: "views"},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 4,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "kept-large", Value: largeValue},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 5,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "kept-small", Value: "ok"},
+		},
+	)
+
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	journal.mu.Lock()
+	err = journal.compactLocked(3)
+	journal.mu.Unlock()
+	if err != nil {
+		t.Fatalf("compactLocked() error = %v", err)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entries after compact = %#v, want checkpoint plus two retained entries", entries)
+	}
+	if !entries[0].Checkpoint || entries[0].Sequence != 3 {
+		t.Fatalf("compaction checkpoint = %#v, want sequence 3 checkpoint", entries[0])
+	}
+	if entries[1].Sequence != 4 || entries[1].Request.Key != "kept-large" || entries[1].Request.Value != largeValue {
+		t.Fatalf("first retained entry = %#v, want sequence 4 kept-large", entries[1])
+	}
+	if entries[2].Sequence != 5 || entries[2].Request.Key != "kept-small" {
+		t.Fatalf("second retained entry = %#v, want sequence 5 kept-small", entries[2])
+	}
+
+	ht := newTestTrie(t)
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "after", Value: "append"}); !response.OK {
+		t.Fatalf("ExecuteCommand(after compact) = %#v, want ok", response)
+	}
+	entries, err = readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries(after append) error = %v", err)
+	}
+	if last := entries[len(entries)-1]; last.Sequence != 6 || last.Request.Key != "after" {
+		t.Fatalf("entry after compact append = %#v, want sequence 6 after", last)
+	}
+}
+
 func TestCommandJournalReplayReportsCompactedBoundary(t *testing.T) {
 	dir := t.TempDir()
 	journalPath := filepath.Join(dir, "commands.journal")

@@ -291,52 +291,50 @@ func (journal *CommandJournal) rollbackAppendLocked(state commandJournalAppendSt
 }
 
 func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
-	entries, err := readCommandJournalEntries(journal.path)
-	if err != nil {
-		return err
-	}
-
-	capacity := len(entries)
-	if throughSequence > 0 {
-		nextCapacity, ok := checkedBatchSize(capacity, 1)
-		if !ok {
-			return errBatchSizeTooLarge
-		}
-		capacity = nextCapacity
-	}
-	remaining := make([]commandJournalEntry, 0, capacity)
-	if throughSequence > 0 {
-		remaining = append(remaining, commandJournalEntry{
-			Version:    commandJournalVersion,
-			Sequence:   throughSequence,
-			Checkpoint: true,
-		})
-	}
-	for _, entry := range entries {
-		if !entry.Checkpoint && entry.Sequence > throughSequence {
-			remaining = append(remaining, entry)
-		}
-	}
-
-	data := []byte{}
-	for _, entry := range remaining {
-		payload, err := json.Marshal(entry)
-		if err != nil {
-			return err
-		}
-		data = append(data, payload...)
-		data = append(data, '\n')
-	}
 	if err := journal.closeAppendFileLocked(); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(journal.path, data); err != nil {
+
+	if err := writeCommandJournalCompacted(journal.path, throughSequence); err != nil {
 		if reopenErr := journal.ensureAppendFileLocked(); reopenErr != nil {
 			return errors.Join(err, reopenErr)
 		}
 		return err
 	}
 	return journal.ensureAppendFileLocked()
+}
+
+func writeCommandJournalCompacted(path string, throughSequence uint64) error {
+	return writeFileAtomicStream(path, func(writer io.Writer) error {
+		if throughSequence > 0 {
+			if err := writeCommandJournalEntry(writer, commandJournalEntry{
+				Version:    commandJournalVersion,
+				Sequence:   throughSequence,
+				Checkpoint: true,
+			}); err != nil {
+				return err
+			}
+		}
+		_, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
+			if entry.Checkpoint || entry.Sequence <= throughSequence {
+				return nil
+			}
+			return writeCommandJournalEntry(writer, entry)
+		})
+		return err
+	})
+}
+
+func writeCommandJournalEntry(writer io.Writer, entry commandJournalEntry) error {
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	if _, err := writer.Write(payload); err != nil {
+		return err
+	}
+	_, err = io.WriteString(writer, "\n")
+	return err
 }
 
 func (journal *CommandJournal) ensureAppendFileLocked() error {
