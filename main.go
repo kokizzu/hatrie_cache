@@ -2402,6 +2402,9 @@ func (ht *HatTrie) IncrementCounter(key string, by int32) {
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return
+	}
 	if hval.IsCounter() {
 		hval.Index += by
 	} else {
@@ -2464,6 +2467,9 @@ func (ht *HatTrie) AppendString(key string, str string) {
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return
+	}
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
 		next := make([]byte, 0, len(old)+len(str))
@@ -2488,6 +2494,9 @@ func (ht *HatTrie) PrependString(key string, str string) {
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return
+	}
 	if hval.IsStringAtRaws() {
 		old := ht.raws.array[hval.Index]
 		next := make([]byte, 0, len(str)+len(old))
@@ -2691,6 +2700,9 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return
+	}
 	if hval.IsMap() {
 		ht.maps.PutEntry(hval.Index, subkey, val)
 		*rawPtr = hval.toValue()
@@ -2799,6 +2811,9 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return
+	}
 	if hval.IsSlice() {
 		ht.slices.array[hval.Index].PushOne(val, vals...)
 		*rawPtr = hval.toValue()

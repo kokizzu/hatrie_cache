@@ -561,6 +561,9 @@ func (ht *HatTrie) AddRoaringBitmap(key string, value uint32, values ...uint32) 
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return 0
+	}
 	if hval.IsRoaringBitmap() {
 		added := ht.roaringBitmaps.array[hval.Index].AddOne(value, values...)
 		*rawPtr = hval.toValue()

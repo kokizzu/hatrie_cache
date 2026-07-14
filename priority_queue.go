@@ -342,6 +342,9 @@ func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return 0
+	}
 	if hval.IsPriorityQueue() {
 		added := ht.priorityQueues.array[hval.Index].PushOne(priority, val, vals...)
 		*rawPtr = hval.toValue()

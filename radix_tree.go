@@ -470,6 +470,9 @@ func (ht *HatTrie) PutRadixTree(key string, subkey string, val interface{}) bool
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return false
+	}
 	if hval.IsRadixTree() {
 		added := ht.radixTrees.array[hval.Index].Put(subkey, val)
 		*rawPtr = hval.toValue()
@@ -496,6 +499,9 @@ func (ht *HatTrie) PutRadixTreeEntries(key string, entries Map) int {
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return 0
+	}
 	if hval.IsRadixTree() {
 		added := ht.radixTrees.array[hval.Index].PutEntries(entries)
 		*rawPtr = hval.toValue()

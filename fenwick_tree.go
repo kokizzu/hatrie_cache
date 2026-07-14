@@ -336,6 +336,9 @@ func (ht *HatTrie) AddFenwickTree(key string, index uint64, delta int64) (Fenwic
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return FenwickTreeUpdate{}, false
+	}
 	if hval.IsFenwickTree() {
 		update, ok := ht.fenwickTrees.array[hval.Index].Add(index, delta)
 		if !ok {

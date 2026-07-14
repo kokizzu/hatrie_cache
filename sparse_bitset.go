@@ -565,6 +565,9 @@ func (ht *HatTrie) AddSparseBitset(key string, value uint64, values ...uint64) i
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return 0
+	}
 	if hval.IsSparseBitset() {
 		added := ht.sparseBitsets.array[hval.Index].AddOne(value, values...)
 		*rawPtr = hval.toValue()

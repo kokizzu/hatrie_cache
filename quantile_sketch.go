@@ -369,6 +369,9 @@ func (ht *HatTrie) AddQuantileSketch(key string, val float64, vals ...float64) Q
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return QuantileEstimate{}
+	}
 	if hval.IsQuantileSketch() {
 		estimate := ht.quantileSketches.array[hval.Index].Add(val, vals...)
 		*rawPtr = hval.toValue()

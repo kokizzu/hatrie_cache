@@ -816,6 +816,114 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	}
 }
 
+func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertCounter("counter", 5)
+	source.UpsertString("append", "old")
+	source.UpsertString("prepend", "old")
+	source.UpsertMap("map", Map{"old": "value"})
+	source.PushSlice("slice", "old")
+	source.PushPriorityQueue("queue", 5, "old")
+	source.UpsertRoaringBitmap("rb")
+	source.AddRoaringBitmap("rb", 1)
+	source.UpsertSparseBitset("sb")
+	source.AddSparseBitset("sb", 1)
+	if err := source.UpsertFenwickTree("fw", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	if _, ok := source.AddFenwickTree("fw", 1, 5); !ok {
+		t.Fatal("AddFenwickTree(seed) = false, want true")
+	}
+	if err := source.UpsertQuantileSketch("quantile", DefaultQuantileSketchEpsilon); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	source.AddQuantileSketch("quantile", 10)
+	source.UpsertRadixTree("radix")
+	source.PutRadixTree("radix", "old", "value")
+	source.UpsertCounter("cmd-counter", 5)
+	source.UpsertMap("cmd-map", Map{"old": "value"})
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	loaded := newTestTrie(t)
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	loaded.IncrementCounter("counter", 2)
+	loaded.AppendString("append", "-new")
+	loaded.PrependString("prepend", "new-")
+	loaded.PutMap("map", "new", "value")
+	loaded.PushSlice("slice", "new")
+	if added := loaded.PushPriorityQueue("queue", 1, "new"); added != 0 {
+		t.Fatalf("PushPriorityQueue(closed cold ref) = %d, want 0", added)
+	}
+	if added := loaded.AddRoaringBitmap("rb", 2); added != 0 {
+		t.Fatalf("AddRoaringBitmap(closed cold ref) = %d, want 0", added)
+	}
+	if added := loaded.AddSparseBitset("sb", 2); added != 0 {
+		t.Fatalf("AddSparseBitset(closed cold ref) = %d, want 0", added)
+	}
+	if update, ok := loaded.AddFenwickTree("fw", 2, 3); ok || update.Total != 0 {
+		t.Fatalf("AddFenwickTree(closed cold ref) = %#v/%v, want zero/false", update, ok)
+	}
+	if estimate := loaded.AddQuantileSketch("quantile", 20); estimate.Count != 0 {
+		t.Fatalf("AddQuantileSketch(closed cold ref) = %#v, want zero estimate", estimate)
+	}
+	if added := loaded.PutRadixTree("radix", "new", "value"); added {
+		t.Fatal("PutRadixTree(closed cold ref) = true, want false")
+	}
+	if added := loaded.PutRadixTreeEntries("radix", Map{"new": "value"}); added != 0 {
+		t.Fatalf("PutRadixTreeEntries(closed cold ref) = %d, want 0", added)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "INC", Key: "cmd-counter", Value: "2"}); got.OK {
+		t.Fatalf("INC closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "PUTMAP", Key: "cmd-map", Subkey: "new", Value: "value"}); !got.OK {
+		t.Fatalf("PUTMAP closed cold ref response = %#v, want legacy ok/no-op", got)
+	}
+
+	keys := []string{
+		"append",
+		"cmd-counter",
+		"cmd-map",
+		"counter",
+		"fw",
+		"map",
+		"prepend",
+		"quantile",
+		"queue",
+		"radix",
+		"rb",
+		"sb",
+		"slice",
+	}
+	entries := loaded.Entries(true)
+	if len(entries) != len(keys) {
+		t.Fatalf("entries after blocked mutations = %d, want %d", len(entries), len(keys))
+	}
+	for _, key := range keys {
+		hval, err := loaded.GetChecked(key)
+		if !hval.Empty() || !errors.Is(err, ErrLevelDBStoreClosed) {
+			t.Fatalf("GetChecked(%s after blocked mutation) = %+v/%v, want empty/ErrLevelDBStoreClosed", key, hval, err)
+		}
+	}
+	for _, entry := range entries {
+		if !entry.Value.IsLevelDBReference() {
+			t.Fatalf("entry after blocked mutation = %#v, want leveldb reference", entry)
+		}
+	}
+}
+
 func TestHydrateLevelDBReferencesReportsClosedStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

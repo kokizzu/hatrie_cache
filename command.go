@@ -823,6 +823,9 @@ func (ht *HatTrie) commandIncrementCounter(key string, by int32) (int32, bool) {
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return 0, false
+	}
 	if hval.IsCounter() {
 		next := int64(hval.Index) + int64(by)
 		if next < minCommandInt32 || next > maxCommandInt32 {
@@ -844,6 +847,9 @@ func (ht *HatTrie) commandPutMap(key string, fields Map) {
 	defer ht.mu.Unlock()
 
 	rawPtr, hval := ht.upsertFreshLocation(key)
+	if hval.IsLevelDBReference() {
+		return
+	}
 	if hval.IsMap() {
 		ht.maps.PutEntries(hval.Index, fields)
 		*rawPtr = hval.toValue()
