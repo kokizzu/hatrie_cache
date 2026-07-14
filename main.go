@@ -3097,7 +3097,9 @@ func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{
 	if hval.IsSet() {
 		added := ht.sets.array[hval.Index].addOneWithKeys(keys, val, vals...)
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked(key)
+		if added > 0 {
+			ht.recordWriteLocked(key)
+		}
 		return added, nil
 	}
 

@@ -410,7 +410,9 @@ func (ht *HatTrie) AddBloomFilterChecked(key string, val interface{}, vals ...in
 			return 0, err
 		}
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked(key)
+		if added > 0 {
+			ht.recordWriteLocked(key)
+		}
 		return added, nil
 	}
 

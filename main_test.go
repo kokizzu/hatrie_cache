@@ -930,6 +930,59 @@ func TestStatsTrackReadsWritesDeletesAndRates(t *testing.T) {
 	}
 }
 
+func TestNoopSetAndBloomAddsDoNotRecordWrites(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(920, 0)
+	ht.now = func() time.Time { return now }
+
+	if added := ht.AddSet("set", "go"); added != 1 {
+		t.Fatalf("AddSet(first) = %d, want 1", added)
+	}
+	setWriteAt := now
+	setWrites := ht.Stats().Writes
+	setKeyStats, ok := ht.StatsForKey("set")
+	if !ok || setKeyStats.Writes != 1 {
+		t.Fatalf("StatsForKey(set) = %#v/%v, want one write", setKeyStats, ok)
+	}
+
+	now = now.Add(time.Second)
+	if added := ht.AddSet("set", "go", "go"); added != 0 {
+		t.Fatalf("AddSet(duplicates) = %d, want 0", added)
+	}
+	stats := ht.Stats()
+	if stats.Writes != setWrites || !stats.LastWrite.Equal(setWriteAt) {
+		t.Fatalf("stats after duplicate set add = %#v, want writes %d and last write %s", stats, setWrites, setWriteAt)
+	}
+	setKeyStats, ok = ht.StatsForKey("set")
+	if !ok || setKeyStats.Writes != 1 || !setKeyStats.LastWrite.Equal(setWriteAt) {
+		t.Fatalf("StatsForKey(set after duplicate add) = %#v/%v, want unchanged write stats", setKeyStats, ok)
+	}
+
+	now = now.Add(time.Second)
+	if added := ht.AddBloomFilter("bloom", "seen"); added != 1 {
+		t.Fatalf("AddBloomFilter(first) = %d, want 1", added)
+	}
+	bloomWriteAt := now
+	bloomWrites := ht.Stats().Writes
+	bloomKeyStats, ok := ht.StatsForKey("bloom")
+	if !ok || bloomKeyStats.Writes != 1 {
+		t.Fatalf("StatsForKey(bloom) = %#v/%v, want one write", bloomKeyStats, ok)
+	}
+
+	now = now.Add(time.Second)
+	if added := ht.AddBloomFilter("bloom", "seen"); added != 0 {
+		t.Fatalf("AddBloomFilter(duplicate) = %d, want 0", added)
+	}
+	stats = ht.Stats()
+	if stats.Writes != bloomWrites || !stats.LastWrite.Equal(bloomWriteAt) {
+		t.Fatalf("stats after duplicate Bloom add = %#v, want writes %d and last write %s", stats, bloomWrites, bloomWriteAt)
+	}
+	bloomKeyStats, ok = ht.StatsForKey("bloom")
+	if !ok || bloomKeyStats.Writes != 1 || !bloomKeyStats.LastWrite.Equal(bloomWriteAt) {
+		t.Fatalf("StatsForKey(bloom after duplicate add) = %#v/%v, want unchanged write stats", bloomKeyStats, ok)
+	}
+}
+
 func TestKeyStatsTrackExistingKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(950, 0)
