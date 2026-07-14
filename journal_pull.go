@@ -146,6 +146,18 @@ func validateCommandJournalTailSequences(afterSequence uint64, tail CommandJourn
 		}
 		appliedThrough = entry.Sequence
 	}
+	if tail.HasMore {
+		if len(tail.Entries) == 0 {
+			return errors.New("journal tail reported more entries without returning entries")
+		}
+		if tail.LastSequence <= appliedThrough {
+			return fmt.Errorf("journal tail reported more entries after %d but last sequence is %d", appliedThrough, tail.LastSequence)
+		}
+		return nil
+	}
+	if tail.LastSequence > appliedThrough {
+		return fmt.Errorf("journal tail last sequence %d exceeds applied sequence %d without has_more", tail.LastSequence, appliedThrough)
+	}
 	return nil
 }
 

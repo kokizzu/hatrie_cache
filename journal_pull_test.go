@@ -130,6 +130,63 @@ func TestApplyCommandJournalTailRejectsEntryPastLastSequenceWithoutMutation(t *t
 	}
 }
 
+func TestApplyCommandJournalTailRejectsIncompleteTailWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := applyCommandJournalTail(ht, journal, "source", 0, CommandJournalTail{
+		LastSequence: 2,
+		Entries: []CommandJournalRecord{
+			{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "without has_more") {
+		t.Fatalf("applyCommandJournalTail(incomplete) error = %v, want missing has_more error", err)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 0 || result.LastSequence != 2 {
+		t.Fatalf("incomplete result = %#v, want no progress with last sequence 2", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("incomplete tail applied value = %q, want empty", got)
+	}
+	if entries, err := readCommandJournalEntries(journal.path); err != nil || len(entries) != 0 {
+		t.Fatalf("journal entries after incomplete tail = %#v/%v, want none", entries, err)
+	}
+}
+
+func TestApplyCommandJournalTailRejectsImpossibleHasMoreWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := applyCommandJournalTail(ht, journal, "source", 0, CommandJournalTail{
+		LastSequence: 1,
+		HasMore:      true,
+		Entries: []CommandJournalRecord{
+			{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "reported more entries after 1") {
+		t.Fatalf("applyCommandJournalTail(impossible has_more) error = %v, want has_more last sequence error", err)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 0 || result.LastSequence != 1 || !result.HasMore {
+		t.Fatalf("impossible has_more result = %#v, want no progress with has_more preserved", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("impossible has_more tail applied value = %q, want empty", got)
+	}
+	if entries, err := readCommandJournalEntries(journal.path); err != nil || len(entries) != 0 {
+		t.Fatalf("journal entries after impossible has_more tail = %#v/%v, want none", entries, err)
+	}
+}
+
 func TestApplyCommandJournalTailRejectsSequenceExhaustionWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
@@ -259,6 +316,44 @@ func TestPullCommandJournalReportsEntryPastLastSequenceAsBadGateway(t *testing.T
 	}
 	if got := ht.GetString("name"); got != "" {
 		t.Fatalf("past-last pull applied value = %q, want empty", got)
+	}
+}
+
+func TestPullCommandJournalReportsEmptyHasMoreTailAsBadGateway(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := CommandJournalTail{
+			LastSequence: 2,
+			HasMore:      true,
+			Entries:      []CommandJournalRecord{},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := PullCommandJournal(context.Background(), ht, journal, CommandJournalPullOptions{
+		Source:        source.URL,
+		AfterSequence: 0,
+		Limit:         10,
+	})
+	var pullErr *CommandJournalPullError
+	if !errors.As(err, &pullErr) || pullErr.Status != http.StatusBadGateway || !strings.Contains(err.Error(), "without returning entries") {
+		t.Fatalf("PullCommandJournal(empty has_more tail) error = %v/%#v, want 502 has_more error", err, pullErr)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 0 || result.LastSequence != 2 || !result.HasMore {
+		t.Fatalf("empty has_more pull result = %#v, want no progress with has_more preserved", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("empty has_more pull applied value = %q, want empty", got)
 	}
 }
 

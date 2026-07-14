@@ -477,7 +477,7 @@ func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
 			t.Fatalf("source method = %s, want GET", r.Method)
 		}
 		writeJSON(w, CommandJournalTail{
-			LastSequence: 3,
+			LastSequence: 4,
 			Limit:        2,
 			HasMore:      true,
 			Entries: []CommandJournalRecord{
@@ -516,7 +516,7 @@ func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
 		t.Fatalf("journal pull JSON error = %v", err)
 	}
-	if result.Applied != 2 || result.AppliedThrough != 3 || result.LastSequence != 3 || result.AfterSequence != 1 || result.Source != source.URL || !result.HasMore {
+	if result.Applied != 2 || result.AppliedThrough != 3 || result.LastSequence != 4 || result.AfterSequence != 1 || result.Source != source.URL || !result.HasMore {
 		t.Fatalf("journal pull result = %#v, want applied through sequence 3", result)
 	}
 	if got := ht.GetString("name"); got != "ivi" {
