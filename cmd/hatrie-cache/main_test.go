@@ -220,6 +220,8 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-retry-interval", "50ms",
 		"-replication-max-attempts", "5",
 		"-replication-wire-format", "json",
+		"-replication-sync-interval", "10s",
+		"-replication-sync-prefix", "session:",
 		"-enforce-leader-writes",
 	}, &bytes.Buffer{})
 	if err != nil {
@@ -233,6 +235,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if cfg.replicationWireFormat != "json" || replicationWireFormat(cfg) != hatriecache.CommandWireFormatJSON {
 		t.Fatalf("replication wire format = %q, want json", cfg.replicationWireFormat)
+	}
+	if cfg.replicationSyncInterval != 10*time.Second || cfg.replicationSyncPrefix != "session:" {
+		t.Fatalf("cfg replication sync = %s/%q, want 10s/session:", cfg.replicationSyncInterval, cfg.replicationSyncPrefix)
 	}
 	if got := replicationQueueSize(cfg); got != 16 {
 		t.Fatalf("replicationQueueSize(async cfg) = %d, want 16", got)
@@ -264,6 +269,14 @@ func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
 			name: "negative retry",
 			args: []string{"-replication-retry-interval", "-1s"},
 		},
+		{
+			name: "negative sync interval",
+			args: []string{"-replication", "-replication-sync-interval", "-1s"},
+		},
+		{
+			name: "sync without replication",
+			args: []string{"-replication-sync-interval", "1s"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -272,6 +285,93 @@ func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
 				t.Fatal("parseConfig() error = nil, want error")
 			}
 		})
+	}
+}
+
+func TestStartReplicationSyncerRunsImmediatePrefixSync(t *testing.T) {
+	requests := make(chan hatriecache.CacheCommandRequest, 2)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/commands" {
+			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
+		}
+		var request hatriecache.CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode(replication request) error = %v", err)
+		}
+		requests <- request
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(hatriecache.CacheCommandResponse{OK: true, Message: "ok"}); err != nil {
+			t.Fatalf("Encode(replication response) error = %v", err)
+		}
+	}))
+	defer target.Close()
+
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("session:1", "value")
+	ht.UpsertString("other:1", "ignored")
+	topology, err := hatriecache.NewTopologyStore(hatriecache.ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://127.0.0.1:1"},
+			{ID: "node-b", Address: target.URL},
+		},
+		Shards: []hatriecache.TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	replicator := hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
+		Self:       "node-a",
+		Topology:   topology,
+		Client:     target.Client(),
+		WireFormat: hatriecache.CommandWireFormatJSON,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := startReplicationSyncer(ctx, ht, replicator, time.Hour, "session:", &bytes.Buffer{})
+	defer stop()
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
+			t.Fatalf("replication sync request = %#v, want session INTERNALSET", request)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("replication sync did not run")
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("unexpected replication sync request = %#v", request)
+	default:
+	}
+	var result hatriecache.ReplicationResult
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		result = replicator.LastResult()
+		if result.Command == "SYNC" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if result.Skipped || result.Command != "SYNC" || result.Key != "session:" || result.Entries != 1 || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("replication sync last result = %#v, want one synced session entry", result)
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("replication syncer repeated stop did not return")
 	}
 }
 

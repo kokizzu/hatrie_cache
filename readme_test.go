@@ -69,6 +69,8 @@ func TestREADMEListsAsyncReplicationOptions(t *testing.T) {
 		"REPLICATION_QUEUE_SIZE",
 		"REPLICATION_RETRY_INTERVAL",
 		"REPLICATION_MAX_ATTEMPTS",
+		"REPLICATION_SYNC_INTERVAL",
+		"REPLICATION_SYNC_PREFIX",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md does not document %s", token)

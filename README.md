@@ -247,6 +247,16 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_WIRE_FORMAT=json
 ```
 
+Set `REPLICATION_SYNC_INTERVAL` to run the same anti-entropy sync
+periodically from the local leader. The first sync runs immediately at startup,
+then repeats at the configured interval. Set `REPLICATION_SYNC_PREFIX` to limit
+the scheduled sync to one key prefix:
+
+```
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_SYNC_INTERVAL=30s
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_SYNC_INTERVAL=30s REPLICATION_SYNC_PREFIX=session:
+```
+
 Set `REPLICATION_ASYNC=true` to enqueue replication in a bounded in-process
 outbox instead of waiting for remote owners in the write request path. Queued
 jobs store the already-materialized internal snapshot payload, so later local

@@ -16,6 +16,8 @@ replication_queue_size=${REPLICATION_QUEUE_SIZE:-1024}
 replication_retry_interval=${REPLICATION_RETRY_INTERVAL:-250ms}
 replication_max_attempts=${REPLICATION_MAX_ATTEMPTS:-3}
 replication_wire_format=${REPLICATION_WIRE_FORMAT:-protobuf}
+replication_sync_interval=${REPLICATION_SYNC_INTERVAL:-0}
+replication_sync_prefix=${REPLICATION_SYNC_PREFIX:-}
 enforce_leader_writes=${ENFORCE_LEADER_WRITES:-false}
 grpc_addr=${GRPC_ADDR:-}
 db_path=${DB_PATH:-}
@@ -54,6 +56,8 @@ exec go run ./cmd/hatrie-cache \
 	-replication-retry-interval "$replication_retry_interval" \
 	-replication-max-attempts "$replication_max_attempts" \
 	-replication-wire-format "$replication_wire_format" \
+	-replication-sync-interval "$replication_sync_interval" \
+	-replication-sync-prefix "$replication_sync_prefix" \
 	-enforce-leader-writes="$enforce_leader_writes" \
 	-grpc-addr "$grpc_addr" \
 	-db-path "$db_path" \

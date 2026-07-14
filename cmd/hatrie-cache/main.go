@@ -47,6 +47,8 @@ type config struct {
 	replicationRetry            time.Duration
 	replicationAttempts         uint
 	replicationWireFormat       string
+	replicationSyncInterval     time.Duration
+	replicationSyncPrefix       string
 	enforceLeaderWrites         bool
 	grpcAddr                    string
 	dbPath                      string
@@ -178,6 +180,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		})
 		defer replicator.Close()
 	}
+	stopReplicationSyncer := startReplicationSyncer(ctx, trie, replicator, cfg.replicationSyncInterval, cfg.replicationSyncPrefix, stderr)
+	defer stopReplicationSyncer()
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
 		NodeName:            defaultNodeID(cfg.nodeID),
@@ -265,6 +269,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.replicationRetry, "replication-retry-interval", hatriecache.DefaultReplicationRetryInterval, "delay between async replication retry attempts")
 	flags.UintVar(&cfg.replicationAttempts, "replication-max-attempts", 3, "maximum async replication delivery attempts")
 	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", string(hatriecache.DefaultCommandWireFormat), "HTTP replication command wire format: protobuf or json")
+	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
+	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
@@ -314,6 +320,12 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.replicationRetry < 0 {
 		return config{}, errors.New("replication retry interval must be non-negative")
+	}
+	if cfg.replicationSyncInterval < 0 {
+		return config{}, errors.New("replication sync interval must be non-negative")
+	}
+	if cfg.replicationSyncInterval > 0 && !cfg.replication {
+		return config{}, errors.New("replication sync interval requires -replication")
 	}
 	if cfg.journalPullTimeout < 0 {
 		return config{}, errors.New("journal pull timeout must be non-negative")
@@ -704,6 +716,72 @@ func electionHeartbeatInterval(timeout time.Duration) time.Duration {
 		interval = 5 * time.Second
 	}
 	return interval
+}
+
+func startReplicationSyncer(ctx context.Context, trie *hatriecache.HatTrie, replicator *hatriecache.HTTPReplicator, interval time.Duration, prefix string, stderr io.Writer) func() {
+	if replicator == nil || interval <= 0 {
+		return func() {}
+	}
+
+	syncCtx, cancelSync := context.WithCancel(ctx)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	syncOnce := func() {
+		result := replicator.SyncAll(syncCtx, trie, prefix)
+		if replicationSyncResultNeedsLog(result) {
+			fmt.Fprintf(stderr, "replication sync: %s\n", replicationSyncResultLogMessage(result))
+		}
+	}
+	go func() {
+		defer close(stopped)
+		defer cancelSync()
+		select {
+		case <-syncCtx.Done():
+			return
+		case <-done:
+			return
+		default:
+		}
+		syncOnce()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				syncOnce()
+			case <-syncCtx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
+	return cancelingPeriodicStopper(cancelSync, done, stopped)
+}
+
+func replicationSyncResultNeedsLog(result hatriecache.ReplicationResult) bool {
+	if result.Skipped {
+		return result.Reason != "" && result.Reason != "no entries to sync"
+	}
+	for _, target := range result.Targets {
+		if !target.OK {
+			return true
+		}
+	}
+	return false
+}
+
+func replicationSyncResultLogMessage(result hatriecache.ReplicationResult) string {
+	if result.Skipped {
+		return result.Reason
+	}
+	failures := 0
+	for _, target := range result.Targets {
+		if !target.OK {
+			failures++
+		}
+	}
+	return fmt.Sprintf("%d/%d target deliveries failed", failures, len(result.Targets))
 }
 
 type journalPullerConfig struct {
