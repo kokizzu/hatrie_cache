@@ -649,6 +649,9 @@ func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 		"set-missing":      `{"version":1,"entries":[{"key":"bad","type":"set"}]}`,
 		"priority-missing": `{"version":1,"entries":[{"key":"bad","type":"priority_queue"}]}`,
 		"priority-null":    `{"version":1,"entries":[{"key":"bad","type":"priority_queue","priority_queue":null}]}`,
+		"entries-missing":  `{"version":1}`,
+		"entries-null":     `{"version":1,"entries":null}`,
+		"entries-object":   `{"version":1,"entries":{}}`,
 		"trailing":         `{"version":1,"entries":[]} trailing`,
 	} {
 		path := filepath.Join(dir, name+".json")
@@ -658,6 +661,32 @@ func TestLoadSnapshotRejectsInvalidInput(t *testing.T) {
 		if err := ht.LoadSnapshot(path); err == nil {
 			t.Fatalf("LoadSnapshot(%s) error = nil, want error", name)
 		}
+	}
+}
+
+func TestLoadSnapshotRejectsMissingEntriesWithoutMutation(t *testing.T) {
+	for name, payload := range map[string]string{
+		"missing": `{"version":1}`,
+		"null":    `{"version":1,"entries":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "snapshot.json")
+			if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+
+			ht := newTestTrie(t)
+			ht.UpsertString("existing", "keep")
+			if err := ht.LoadSnapshot(path); err == nil {
+				t.Fatal("LoadSnapshot() error = nil, want missing entries error")
+			}
+			if got := ht.GetString("existing"); got != "keep" {
+				t.Fatalf("existing after rejected snapshot = %q, want keep", got)
+			}
+			if got := ht.Size(); got != 1 {
+				t.Fatalf("size after rejected snapshot = %d, want 1", got)
+			}
+		})
 	}
 }
 

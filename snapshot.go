@@ -417,9 +417,9 @@ func decodeSnapshotEntryJSON(data []byte) (snapshotEntry, error) {
 
 func decodeSnapshotFileJSON(data []byte) (snapshotFile, error) {
 	var raw struct {
-		Version         int               `json:"version"`
-		JournalSequence uint64            `json:"journal_sequence,omitempty"`
-		Entries         []json.RawMessage `json:"entries"`
+		Version         int             `json:"version"`
+		JournalSequence uint64          `json:"journal_sequence,omitempty"`
+		Entries         json.RawMessage `json:"entries"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
@@ -434,13 +434,23 @@ func decodeSnapshotFileJSON(data []byte) (snapshotFile, error) {
 		}
 		return snapshotFile{}, err
 	}
+	if len(raw.Entries) == 0 {
+		return snapshotFile{}, errors.New("hatriecache: snapshot entries are required")
+	}
+	if bytes.Equal(bytes.TrimSpace(raw.Entries), []byte("null")) {
+		return snapshotFile{}, errors.New("hatriecache: snapshot entries must be an array")
+	}
+	var rawEntries []json.RawMessage
+	if err := json.Unmarshal(raw.Entries, &rawEntries); err != nil {
+		return snapshotFile{}, err
+	}
 
 	snapshot := snapshotFile{
 		Version:         raw.Version,
 		JournalSequence: raw.JournalSequence,
-		Entries:         make([]snapshotEntry, 0, len(raw.Entries)),
+		Entries:         make([]snapshotEntry, 0, len(rawEntries)),
 	}
-	for _, data := range raw.Entries {
+	for _, data := range rawEntries {
 		entry, err := decodeSnapshotEntryJSONRequiredKey(data, true)
 		if err != nil {
 			return snapshotFile{}, err
