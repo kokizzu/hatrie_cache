@@ -3095,6 +3095,7 @@ func TestTopKRejectsInvalidConfig(t *testing.T) {
 func TestTopKSnapshotValidationRejectsDuplicateAndMismatchedKeys(t *testing.T) {
 	snapshot := topKSnapshot{
 		Capacity: 2,
+		Total:    3,
 		Items: []topKItem{
 			{Key: `"alpha"`, Value: "alpha", Count: 1},
 			{Key: `"alpha"`, Value: "alpha", Count: 2},
@@ -3116,6 +3117,55 @@ func TestTopKSnapshotValidationRejectsDuplicateAndMismatchedKeys(t *testing.T) {
 	}
 	if err := validateTopKSnapshot(snapshot); err == nil {
 		t.Fatal("validateTopKSnapshot(unsupported value) error = nil, want error")
+	}
+}
+
+func TestTopKSnapshotValidationRejectsInvalidTotals(t *testing.T) {
+	tests := map[string]topKSnapshot{
+		"empty nonzero total": {
+			Capacity: 2,
+			Total:    1,
+		},
+		"zero item count": {
+			Capacity: 2,
+			Total:    0,
+			Items: []topKItem{
+				{Key: `"alpha"`, Value: "alpha"},
+			},
+		},
+		"count sum below total": {
+			Capacity: 2,
+			Total:    3,
+			Items: []topKItem{
+				{Key: `"alpha"`, Value: "alpha", Count: 1},
+			},
+		},
+		"count sum above total": {
+			Capacity: 2,
+			Total:    1,
+			Items: []topKItem{
+				{Key: `"alpha"`, Value: "alpha", Count: 2},
+			},
+		},
+	}
+	for name, snapshot := range tests {
+		if err := validateTopKSnapshot(snapshot); err == nil {
+			t.Fatalf("validateTopKSnapshot(%s) error = nil, want invalid total error", name)
+		}
+	}
+}
+
+func TestTopKSnapshotValidationAllowsSaturatedTotal(t *testing.T) {
+	snapshot := topKSnapshot{
+		Capacity: 2,
+		Total:    ^uint64(0),
+		Items: []topKItem{
+			{Key: `"alpha"`, Value: "alpha", Count: ^uint64(0), Error: ^uint64(0)},
+			{Key: `"beta"`, Value: "beta", Count: 1},
+		},
+	}
+	if err := validateTopKSnapshot(snapshot); err != nil {
+		t.Fatalf("validateTopKSnapshot(saturated) error = %v, want nil", err)
 	}
 }
 

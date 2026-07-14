@@ -92,10 +92,17 @@ func validateTopKSnapshot(snapshot topKSnapshot) error {
 	if uint64(len(snapshot.Items)) > snapshot.Capacity {
 		return errors.New("hatriecache: top-k snapshot has too many items")
 	}
+	if len(snapshot.Items) == 0 && snapshot.Total != 0 {
+		return errors.New("hatriecache: empty top-k snapshot has nonzero total")
+	}
 	seen := make(map[string]struct{}, len(snapshot.Items))
+	var countTotal uint64
 	for _, item := range snapshot.Items {
 		if item.Key == "" {
 			return errors.New("hatriecache: top-k snapshot item key is required")
+		}
+		if item.Count == 0 {
+			return errors.New("hatriecache: top-k snapshot item count must be positive")
 		}
 		if _, ok := seen[item.Key]; ok {
 			return errors.New("hatriecache: duplicate top-k snapshot item")
@@ -110,7 +117,16 @@ func validateTopKSnapshot(snapshot topKSnapshot) error {
 		if item.Error > item.Count {
 			return errors.New("hatriecache: top-k snapshot item error exceeds count")
 		}
+		if snapshot.Total != ^uint64(0) {
+			if item.Count > snapshot.Total-countTotal {
+				return errors.New("hatriecache: top-k snapshot item counts exceed total")
+			}
+			countTotal += item.Count
+		}
 		seen[item.Key] = struct{}{}
+	}
+	if snapshot.Total != ^uint64(0) && countTotal != snapshot.Total {
+		return errors.New("hatriecache: top-k snapshot item counts do not match total")
 	}
 	return nil
 }
