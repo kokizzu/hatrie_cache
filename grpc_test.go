@@ -796,6 +796,38 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerAcceptsGzipCompressedCalls(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{
+		NodeName: "test-node",
+	})
+	defer stop()
+
+	value := strings.Repeat("value", 64)
+	resp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "SETSTR",
+		Key:     "compressed",
+		Value:   value,
+	}, grpc.UseCompressor("gzip"))
+	if err != nil {
+		t.Fatalf("Command(gzip) error = %v", err)
+	}
+	if !resp.GetOk() {
+		t.Fatalf("Command(gzip) response = %#v, want ok", resp)
+	}
+	if got := ht.GetString("compressed"); got != value {
+		t.Fatalf("compressed value = %q, want %q", got, value)
+	}
+
+	health, err := client.Health(context.Background(), &hatriecachev1.HealthRequest{}, grpc.UseCompressor("gzip"))
+	if err != nil {
+		t.Fatalf("Health(gzip) error = %v", err)
+	}
+	if health.GetStatus() != "online" || health.GetNode() != "test-node" {
+		t.Fatalf("Health(gzip) = %#v, want online test-node", health)
+	}
+}
+
 func TestCacheGRPCServerSnapshotAndJournal(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
