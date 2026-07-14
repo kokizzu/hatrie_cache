@@ -196,7 +196,8 @@ Set `REPLICATION=true` to let an elected leader broadcast successful local
 mutations to the current key's topology owners over HTTP. Replication uses the
 internal `DUMP`/`INTERNALSET` and `INTERNALDEL` commands, skips internal
 replication commands to avoid loops, and records the last replication attempt at
-`/api/replication`. `POST /api/replication` runs an explicit anti-entropy sync
+`/api/replication`. Large HTTP replication request bodies are gzip-compressed.
+`POST /api/replication` runs an explicit anti-entropy sync
 that pushes the local leader-owned keys, optionally filtered by prefix, to their
 current topology replicas:
 
@@ -230,6 +231,7 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
 `/api/journal`, and `/api/commands`.
 Responses are gzip-compressed when clients send `Accept-Encoding: gzip`.
+JSON request bodies may also be sent with `Content-Encoding: gzip`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader
 for that key. `POST /api/election` accepts `node` and `online` to record a

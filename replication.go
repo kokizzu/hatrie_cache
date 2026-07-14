@@ -19,6 +19,7 @@ const DefaultReplicationTimeout = 2 * time.Second
 const DefaultReplicationRetryInterval = 250 * time.Millisecond
 const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
+const minCompressedReplicationRequestBytes = 16 << 10
 
 var errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
 
@@ -631,13 +632,21 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(postCtx, http.MethodPost, endpoint, bytes.NewReader(data))
+	body, contentEncoding, err := replicationRequestBody(data)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	req, err := http.NewRequestWithContext(postCtx, http.MethodPost, endpoint, body)
 	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
+	if contentEncoding != "" {
+		req.Header.Set("Content-Encoding", contentEncoding)
+	}
 	resp, err := replicator.client.Do(req)
 	if err != nil {
 		result.Error = err.Error()
@@ -690,6 +699,25 @@ func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, err
 		return CacheCommandResponse{}, errReplicationResponseTooLarge
 	}
 	return response, nil
+}
+
+func replicationRequestBody(data []byte) (io.Reader, string, error) {
+	if len(data) < minCompressedReplicationRequestBytes {
+		return bytes.NewReader(data), "", nil
+	}
+
+	var compressed bytes.Buffer
+	writer := acquireGzipWriter(&compressed)
+	_, writeErr := writer.Write(data)
+	closeErr := writer.Close()
+	releaseGzipWriter(writer)
+	if writeErr != nil {
+		return nil, "", writeErr
+	}
+	if closeErr != nil {
+		return nil, "", closeErr
+	}
+	return bytes.NewReader(compressed.Bytes()), "gzip", nil
 }
 
 func drainAndClose(body io.ReadCloser) {

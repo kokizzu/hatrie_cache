@@ -769,6 +769,44 @@ func TestPostReplicationCommandRejectsTrailingResponseJSON(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorCompressesLargeReplicationRequests(t *testing.T) {
+	follower := newTestTrie(t)
+	var contentEncoding string
+	handler := NewMonitoringHandler(follower, MonitoringOptions{}).Handler()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contentEncoding = r.Header.Get("Content-Encoding")
+		handler.ServeHTTP(w, r)
+	}))
+	defer target.Close()
+
+	leader := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+	large := strings.Repeat("x", minCompressedReplicationRequestBytes)
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:large", Value: large}
+	response := leader.ExecuteCommand(write)
+	if !response.OK {
+		t.Fatalf("leader SETSTR response = %#v, want ok", response)
+	}
+
+	result := replicator.ReplicateCommand(context.Background(), leader, write, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("large replication result = %#v, want one ok target", result)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("replication Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	if got := follower.GetString("session:large"); got != large {
+		t.Fatalf("follower value length = %d, want %d", len(got), len(large))
+	}
+}
+
 func waitForReplicationLastResult(t *testing.T, replicator *HTTPReplicator, accept func(ReplicationResult) bool) ReplicationResult {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

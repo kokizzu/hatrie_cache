@@ -320,6 +320,39 @@ func TestMonitoringHandlerHonorsGzipQualityZero(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerAcceptsGzipCommandRequest(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	body := gzipBytes(t, []byte(`{"command":"SETSTR","key":"compressed","value":"ok"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewReader(body))
+	request.Header.Set("Content-Encoding", "gzip")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, request)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("compressed command status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	if got := ht.GetString("compressed"); got != "ok" {
+		t.Fatalf("compressed command stored %q, want ok", got)
+	}
+}
+
+func TestMonitoringHandlerRejectsUnsupportedRequestEncoding(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"GET","key":"x"}`))
+	request.Header.Set("Content-Encoding", "br")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, request)
+	if resp.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("unsupported encoding status = %d, want 415", resp.Code)
+	}
+	if got := ht.GetString("x"); got != "" {
+		t.Fatalf("unsupported encoding mutated trie: x=%q", got)
+	}
+}
+
 func gunzipResponseBody(t *testing.T, data []byte) []byte {
 	t.Helper()
 
@@ -333,6 +366,20 @@ func gunzipResponseBody(t *testing.T, data []byte) []byte {
 		t.Fatalf("ReadAll(gzip response) error = %v", err)
 	}
 	return out
+}
+
+func gzipBytes(t *testing.T, data []byte) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	if _, err := writer.Write(data); err != nil {
+		t.Fatalf("gzip Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("gzip Close() error = %v", err)
+	}
+	return buffer.Bytes()
 }
 
 func headerValuesContain(values []string, want string) bool {

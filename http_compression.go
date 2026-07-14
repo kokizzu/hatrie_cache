@@ -135,3 +135,22 @@ func releaseGzipWriter(writer *gzip.Writer) {
 func responseAllowsBody(statusCode int) bool {
 	return statusCode >= 200 && statusCode != http.StatusNoContent && statusCode != http.StatusNotModified
 }
+
+func limitedEncodedRequestBody(w http.ResponseWriter, r *http.Request, limit int64) (io.Reader, func(), bool) {
+	encoding := strings.TrimSpace(r.Header.Get("Content-Encoding"))
+	if encoding == "" || strings.EqualFold(encoding, "identity") {
+		return http.MaxBytesReader(w, r.Body, limit), func() {}, true
+	}
+	if !strings.EqualFold(encoding, "gzip") {
+		http.Error(w, "unsupported request content encoding", http.StatusUnsupportedMediaType)
+		return nil, nil, false
+	}
+
+	reader, err := gzip.NewReader(r.Body)
+	if err != nil {
+		http.Error(w, "invalid gzip request", http.StatusBadRequest)
+		return nil, nil, false
+	}
+	body := http.MaxBytesReader(w, reader, limit)
+	return body, func() { _ = body.Close() }, true
+}

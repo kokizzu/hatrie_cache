@@ -18,6 +18,7 @@ import (
 )
 
 const maxCommandJournalTailResponseBytes = 1 << 20
+const maxMonitoringJSONRequestBytes = 1 << 20
 
 var errCommandJournalTailResponseTooLarge = errors.New("hatriecache: journal source response is too large")
 
@@ -175,7 +176,11 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	}
 
 	var request CacheCommandRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+	if !ok {
+		return
+	}
+	defer closeBody()
 	decoder.DisallowUnknownFields()
 	decoder.UseNumber()
 	if err := decoder.Decode(&request); err != nil {
@@ -298,7 +303,11 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 			return
 		}
 		var topology ClusterTopology
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+		if !ok {
+			return
+		}
+		defer closeBody()
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&topology); err != nil {
 			http.Error(w, "invalid topology request", http.StatusBadRequest)
@@ -354,7 +363,11 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 			return
 		}
 		var request electionUpdateRequest
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+		if !ok {
+			return
+		}
+		defer closeBody()
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil {
 			http.Error(w, "invalid election request", http.StatusBadRequest)
@@ -402,7 +415,11 @@ func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *ht
 	}
 
 	var request replicationSyncRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+	if !ok {
+		return
+	}
+	defer closeBody()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil && !errors.Is(err, io.EOF) {
 		http.Error(w, "invalid replication request", http.StatusBadRequest)
@@ -464,7 +481,11 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 
 func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *http.Request) {
 	var request journalPullRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+	if !ok {
+		return
+	}
+	defer closeBody()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		http.Error(w, "invalid journal pull request", http.StatusBadRequest)
@@ -890,6 +911,14 @@ func writeJSONStatus(w http.ResponseWriter, status int, value interface{}) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func monitoringJSONDecoder(w http.ResponseWriter, r *http.Request) (*json.Decoder, func(), bool) {
+	body, closeBody, ok := limitedEncodedRequestBody(w, r, maxMonitoringJSONRequestBytes)
+	if !ok {
+		return nil, nil, false
+	}
+	return json.NewDecoder(body), closeBody, true
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {
