@@ -768,6 +768,50 @@ func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandCountMinSketchRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "2"}); !got.OK {
+		t.Fatalf("INCRCMS alpha response = %#v, want ok", got)
+	}
+
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "INCRCMS",
+		Key:     "freq",
+		Values:  Slice{"beta", func() {}},
+	})
+	if got.OK {
+		t.Fatalf("INCRCMS unsupported response = %#v, want error", got)
+	}
+	info, ok := ht.CountMinSketchInfo("freq")
+	if !ok || info.TotalCount != 2 {
+		t.Fatalf("CountMinSketchInfo(after rejected command) = %#v/%v, want total count 2", info, ok)
+	}
+	if estimate, ok := ht.EstimateCountMinSketch("freq", "alpha"); !ok || estimate < 2 {
+		t.Fatalf("EstimateCountMinSketch(alpha after rejected command) = %d/%v, want retained alpha", estimate, ok)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "INCRCMS",
+		Key:     "missing",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("INCRCMS missing unsupported response = %#v, want error", got)
+	}
+	if value := ht.Get("missing"); !value.Empty() {
+		t.Fatalf("rejected missing-key Count-Min Sketch command left value %+v", value)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ESTCMS",
+		Key:     "freq",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ESTCMS unsupported response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandHyperLogLogOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

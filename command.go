@@ -571,11 +571,14 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return commandError(err.Error())
 		}
 		if len(values) == 1 {
-			estimate := ht.IncrementCountMinSketch(key, values[0], count)
+			estimate, err := ht.IncrementCountMinSketchChecked(key, values[0], count)
+			if err != nil {
+				return commandError(err.Error())
+			}
 			return CacheCommandResponse{OK: true, Message: "incremented count-min sketch", Value: strconv.FormatUint(estimate, 10)}
 		}
-		for _, value := range values {
-			ht.IncrementCountMinSketch(key, value, count)
+		if _, err := ht.IncrementCountMinSketchChecked(key, values[0], count, values[1:]...); err != nil {
+			return commandError(err.Error())
 		}
 		return CacheCommandResponse{OK: true, Message: "incremented count-min sketch values", Value: strconv.Itoa(len(values))}
 	case "ESTCMS", "QUERYCMS", "CMSQUERY", "CMSCOUNT":
@@ -583,7 +586,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value is required")
 		}
-		estimate, ok := ht.EstimateCountMinSketch(key, values[0])
+		estimate, ok, err := ht.EstimateCountMinSketchChecked(key, values[0])
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}

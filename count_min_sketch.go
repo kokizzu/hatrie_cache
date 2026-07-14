@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 )
 
@@ -111,13 +112,38 @@ func newCountMinSketchDataFromSnapshot(snapshot countMinSketchSnapshot) (countMi
 }
 
 func (sketch *countMinSketchData) Add(value interface{}, count uint32) uint64 {
+	estimate, _ := sketch.AddChecked(value, count)
+	return estimate
+}
+
+func (sketch *countMinSketchData) AddChecked(value interface{}, count uint32) (uint64, error) {
+	return sketch.AddOneChecked(value, count)
+}
+
+func (sketch *countMinSketchData) AddOne(value interface{}, count uint32, values ...interface{}) uint64 {
+	estimate, _ := sketch.AddOneChecked(value, count, values...)
+	return estimate
+}
+
+func (sketch *countMinSketchData) AddOneChecked(value interface{}, count uint32, values ...interface{}) (uint64, error) {
 	if sketch == nil || sketch.width == 0 || sketch.depth == 0 {
-		return 0
+		return 0, nil
+	}
+	keys, err := countMinSketchItemKeys(value, values...)
+	if err != nil {
+		return 0, err
 	}
 	if count == 0 {
-		return sketch.Estimate(value)
+		return sketch.estimateKey(keys[len(keys)-1]), nil
 	}
-	key := mustCountMinSketchItemKey(value)
+	estimate := uint64(0)
+	for _, key := range keys {
+		estimate = sketch.addKey(key, count)
+	}
+	return estimate, nil
+}
+
+func (sketch *countMinSketchData) addKey(key []byte, count uint32) uint64 {
 	estimate := uint64(maxCountMinSketchCounter)
 	sketch.visitIndexes(key, func(index uint64) {
 		next := saturatingAddUint32(sketch.counters[index], count)
@@ -131,10 +157,22 @@ func (sketch *countMinSketchData) Add(value interface{}, count uint32) uint64 {
 }
 
 func (sketch *countMinSketchData) Estimate(value interface{}) uint64 {
+	estimate, _ := sketch.EstimateChecked(value)
+	return estimate
+}
+
+func (sketch *countMinSketchData) EstimateChecked(value interface{}) (uint64, error) {
 	if sketch == nil || sketch.width == 0 || sketch.depth == 0 {
-		return 0
+		return 0, nil
 	}
-	key := mustCountMinSketchItemKey(value)
+	key, err := countMinSketchItemKey(value)
+	if err != nil {
+		return 0, err
+	}
+	return sketch.estimateKey(key), nil
+}
+
+func (sketch *countMinSketchData) estimateKey(key []byte) uint64 {
 	estimate := maxCountMinSketchCounter
 	sketch.visitIndexes(key, func(index uint64) {
 		if sketch.counters[index] < estimate {
@@ -209,16 +247,29 @@ func saturatingAddUint64(value uint64, delta uint64) uint64 {
 	return value + delta
 }
 
-func mustCountMinSketchItemKey(value interface{}) []byte {
+func countMinSketchItemKeys(value interface{}, values ...interface{}) ([][]byte, error) {
+	keys := make([][]byte, 0, 1+len(values))
 	key, err := countMinSketchItemKey(value)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return key
+	keys = append(keys, key)
+	for _, value := range values {
+		key, err := countMinSketchItemKey(value)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 func countMinSketchItemKey(value interface{}) ([]byte, error) {
-	return json.Marshal(value)
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("hatriecache: unsupported count-min sketch value: %w", err)
+	}
+	return data, nil
 }
 
 // CountMinSketchStorage stores Count-Min Sketch values outside the trie.
@@ -291,43 +342,78 @@ func (ht *HatTrie) UpsertCountMinSketch(key string, width uint64, depth uint8) e
 }
 
 func (ht *HatTrie) IncrementCountMinSketch(key string, val interface{}, count uint32) uint64 {
+	estimate, _ := ht.IncrementCountMinSketchChecked(key, val, count)
+	return estimate
+}
+
+func (ht *HatTrie) IncrementCountMinSketchChecked(key string, val interface{}, count uint32, vals ...interface{}) (uint64, error) {
 	if count == 0 {
-		estimate, _ := ht.EstimateCountMinSketch(key, val)
-		return estimate
+		estimate, _, err := ht.EstimateCountMinSketchChecked(key, val)
+		return estimate, err
 	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr != nil {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
+	} else {
+		ht.clearExpirationLocked(key)
+	}
 	if hval.IsCountMinSketch() {
-		estimate := ht.countMinSketches.array[hval.Index].Add(val, count)
+		estimate, err := ht.countMinSketches.array[hval.Index].AddOneChecked(val, count, vals...)
+		if err != nil {
+			return 0, err
+		}
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return estimate
+		return estimate, nil
 	}
 
+	data := newDefaultCountMinSketchData()
+	estimate, err := data.AddOneChecked(val, count, vals...)
+	if err != nil {
+		return 0, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.countMinSketches.AddData(newDefaultCountMinSketchData())
-	estimate := ht.countMinSketches.array[idx].Add(val, count)
+	idx := ht.countMinSketches.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}.toValue()
 	ht.recordWriteLocked(key)
-	return estimate
+	return estimate, nil
 }
 
 func (ht *HatTrie) EstimateCountMinSketch(key string, val interface{}) (uint64, bool) {
+	estimate, ok, _ := ht.EstimateCountMinSketchChecked(key, val)
+	return estimate, ok
+}
+
+func (ht *HatTrie) EstimateCountMinSketchChecked(key string, val interface{}) (uint64, bool, error) {
+	valueKey, err := countMinSketchItemKey(val)
+	if err != nil {
+		return 0, false, err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
 	if !hval.IsCountMinSketch() {
 		ht.recordReadLocked(false, key)
-		return 0, false
+		return 0, false, nil
 	}
-	estimate := ht.countMinSketches.array[hval.Index].Estimate(val)
+	estimate := ht.countMinSketches.array[hval.Index].estimateKey(valueKey)
 	ht.recordReadLocked(true, key)
-	return estimate, true
+	return estimate, true, nil
 }
 
 func (ht *HatTrie) CountMinSketchInfo(key string) (CountMinSketchInfo, bool) {

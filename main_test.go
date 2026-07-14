@@ -2005,6 +2005,50 @@ func TestCountMinSketchOperations(t *testing.T) {
 	}
 }
 
+func TestCountMinSketchRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if estimate, err := ht.IncrementCountMinSketchChecked("freq", "alpha", 2); err != nil || estimate < 2 {
+		t.Fatalf("IncrementCountMinSketchChecked(alpha) = %d/%v, want estimate at least 2", estimate, err)
+	}
+
+	if estimate, err := ht.IncrementCountMinSketchChecked("freq", "beta", 1, func() {}); err == nil {
+		t.Fatalf("IncrementCountMinSketchChecked(unsupported batch) = %d/nil, want error", estimate)
+	}
+	info, ok := ht.CountMinSketchInfo("freq")
+	if !ok || info.TotalCount != 2 {
+		t.Fatalf("CountMinSketchInfo(after rejected batch) = %#v/%v, want total count 2", info, ok)
+	}
+	if estimate, ok := ht.EstimateCountMinSketch("freq", "alpha"); !ok || estimate < 2 {
+		t.Fatalf("EstimateCountMinSketch(alpha after rejected batch) = %d/%v, want retained alpha", estimate, ok)
+	}
+
+	if estimate, err := ht.IncrementCountMinSketchChecked("missing", func() {}, 1); err == nil {
+		t.Fatalf("IncrementCountMinSketchChecked(missing unsupported) = %d/nil, want error", estimate)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected missing-key Count-Min Sketch left value %+v", got)
+	}
+	ht.UpsertString("string", "keep")
+	if estimate, err := ht.IncrementCountMinSketchChecked("string", func() {}, 1); err == nil {
+		t.Fatalf("IncrementCountMinSketchChecked(replacement unsupported) = %d/nil, want error", estimate)
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected replacement changed string to %q, want keep", got)
+	}
+	if estimate, ok, err := ht.EstimateCountMinSketchChecked("freq", func() {}); err == nil {
+		t.Fatalf("EstimateCountMinSketchChecked(unsupported) = %d/%v/nil, want error", estimate, ok)
+	}
+	if got := ht.IncrementCountMinSketch("legacy", func() {}, 1); got != 0 {
+		t.Fatalf("IncrementCountMinSketch legacy unsupported = %d, want 0", got)
+	}
+	if got := ht.Get("legacy"); !got.Empty() {
+		t.Fatalf("legacy rejected Count-Min Sketch left value %+v", got)
+	}
+	if estimate, ok := ht.EstimateCountMinSketch("freq", func() {}); estimate != 0 || ok {
+		t.Fatalf("EstimateCountMinSketch legacy unsupported = %d/%v, want 0/false", estimate, ok)
+	}
+}
+
 func TestCountMinSketchRejectsInvalidConfig(t *testing.T) {
 	ht := newTestTrie(t)
 
