@@ -2218,12 +2218,21 @@ func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
 }
 
 func (ht *HatTrie) Get(key string) HatValue {
+	hval, _ := ht.GetChecked(key)
+	return hval
+}
+
+func (ht *HatTrie) GetChecked(key string) (HatValue, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return HatValue{}, err
+	}
 	ht.recordReadLocked(!hval.Empty(), key)
-	return hval
+	return hval, nil
 }
 
 func (ht *HatTrie) peekLocked(key string) HatValue {
@@ -2241,24 +2250,29 @@ func (ht *HatTrie) peekLocked(key string) HatValue {
 }
 
 func (ht *HatTrie) getLocked(key string) HatValue {
+	hval, _ := ht.getLockedChecked(key)
+	return hval
+}
+
+func (ht *HatTrie) getLockedChecked(key string) (HatValue, error) {
 	iter := ht.tryLocation(key)
 	hval := HatValue{}
 	if iter != nil {
 		hval.fromValue(*iter)
 		if ht.expireIfNeededLocked(key, hval) {
-			return HatValue{}
+			return HatValue{}, nil
 		}
 		if hval.IsLevelDBReference() {
 			hydrated, err := ht.hydrateLevelDBReferenceLocked(key, hval)
 			if err != nil {
-				panic(err)
+				return HatValue{}, err
 			}
-			return hydrated
+			return hydrated, nil
 		}
 	} else {
 		ht.clearExpirationLocked(key)
 	}
-	return hval
+	return hval, nil
 }
 
 // HydrateLevelDBReferences materializes all lazy LevelDB-backed values into the
@@ -2514,7 +2528,11 @@ func (ht *HatTrie) GetBytesChecked(key string) ([]byte, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, err
+	}
 	if hval.IsStringAtRaws() {
 		ht.recordReadLocked(true, key)
 		return cloneBytes(ht.raws.array[hval.Index]), nil

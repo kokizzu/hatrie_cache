@@ -958,7 +958,11 @@ func (ht *HatTrie) commandValue(key string) (string, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return "", false, err
+	}
 	if hval.Empty() {
 		ht.recordReadLocked(false, key)
 		return "", false, nil

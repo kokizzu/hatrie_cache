@@ -669,6 +669,54 @@ func TestHydrateLevelDBReferencesReportsClosedStore(t *testing.T) {
 	}
 }
 
+func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("cold", "value")
+	source.UpsertBytes("bytes", []byte("payload"))
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	loaded := newTestTrie(t)
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if hval, err := loaded.GetChecked("cold"); !hval.Empty() || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetChecked(cold closed ref) = %+v/%v, want empty/ErrLevelDBStoreClosed", hval, err)
+	}
+	if hval := loaded.Get("cold"); !hval.Empty() {
+		t.Fatalf("legacy Get(cold closed ref) = %+v, want empty", hval)
+	}
+	if got := loaded.GetString("cold"); got != "" {
+		t.Fatalf("legacy GetString(cold closed ref) = %q, want empty", got)
+	}
+	if got, err := loaded.GetBytesChecked("bytes"); got != nil || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetBytesChecked(bytes closed ref) = %q/%v, want nil/ErrLevelDBStoreClosed", got, err)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "cold"}); got.OK {
+		t.Fatalf("GET cold closed ref response = %#v, want error", got)
+	}
+
+	entries := loaded.Entries(true)
+	if len(entries) != 2 {
+		t.Fatalf("Entries(after closed ref reads) len = %d, want 2", len(entries))
+	}
+	for _, entry := range entries {
+		if !entry.Value.IsLevelDBReference() {
+			t.Fatalf("entry after failed read = %#v, want leveldb reference", entry)
+		}
+	}
+}
+
 func TestLevelDBStoreHotLoadCanDeleteColdReference(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
