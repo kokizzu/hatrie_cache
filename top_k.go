@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 )
@@ -140,63 +141,88 @@ func newTopKDataFromSnapshot(snapshot topKSnapshot) (topKData, error) {
 }
 
 func (top *topKData) Add(value interface{}, count uint64) TopKEstimate {
+	estimate, _ := top.AddChecked(value, count)
+	return estimate
+}
+
+func (top *topKData) AddChecked(value interface{}, count uint64) (TopKEstimate, error) {
+	return top.AddOneChecked(value, count)
+}
+
+func (top *topKData) AddOne(value interface{}, count uint64, values ...interface{}) TopKEstimate {
+	estimate, _ := top.AddOneChecked(value, count, values...)
+	return estimate
+}
+
+func (top *topKData) AddOneChecked(value interface{}, count uint64, values ...interface{}) (TopKEstimate, error) {
 	if top == nil || top.capacity == 0 {
-		return TopKEstimate{}
+		return TopKEstimate{}, nil
+	}
+	prepared, err := prepareTopKItems(value, values...)
+	if err != nil {
+		return TopKEstimate{}, err
 	}
 	if count == 0 {
-		return top.Estimate(value)
+		return top.estimateKey(prepared[len(prepared)-1].Key), nil
 	}
 	if top.byKey == nil {
 		top.byKey = make(map[string]int, int(top.capacity))
 	}
-	key := mustTopKItemKey(value)
-	top.total = saturatingAddUint64(top.total, count)
-	if idx, ok := top.byKey[key]; ok {
-		top.items[idx].Count = saturatingAddUint64(top.items[idx].Count, count)
-		top.siftDown(idx)
-		item := top.items[top.byKey[key]]
-		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+	estimate := TopKEstimate{}
+	for _, item := range prepared {
+		estimate = top.addPrepared(item, count)
 	}
-	if uint64(len(top.items)) < top.capacity {
-		item := topKItem{Key: key, Value: cloneValue(value), Count: count}
-		top.items = append(top.items, item)
-		idx := len(top.items) - 1
-		top.byKey[key] = idx
-		top.siftUp(idx)
-		item = top.items[top.byKey[key]]
-		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
-	}
-
-	evicted := top.items[0]
-	delete(top.byKey, evicted.Key)
-	next := topKItem{
-		Key:   key,
-		Value: cloneValue(value),
-		Count: saturatingAddUint64(evicted.Count, count),
-		Error: evicted.Count,
-	}
-	top.items[0] = next
-	top.byKey[key] = 0
-	top.siftDown(0)
-	item := top.items[top.byKey[key]]
-	return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
-}
-
-func (top *topKData) AddOne(value interface{}, count uint64, values ...interface{}) TopKEstimate {
-	estimate := top.Add(value, count)
-	for _, value := range values {
-		estimate = top.Add(value, count)
-	}
-	return estimate
+	return estimate, nil
 }
 
 func (top topKData) Estimate(value interface{}) TopKEstimate {
-	key := mustTopKItemKey(value)
+	estimate, _ := top.EstimateChecked(value)
+	return estimate
+}
+
+func (top topKData) EstimateChecked(value interface{}) (TopKEstimate, error) {
+	key, err := topKItemKey(value)
+	if err != nil {
+		return TopKEstimate{}, err
+	}
+	return top.estimateKey(key), nil
+}
+
+func (top topKData) estimateKey(key string) TopKEstimate {
 	idx, ok := top.byKey[key]
 	if !ok {
 		return TopKEstimate{}
 	}
 	item := top.items[idx]
+	return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+}
+
+func (top *topKData) addPrepared(item topKItem, count uint64) TopKEstimate {
+	top.total = saturatingAddUint64(top.total, count)
+	if idx, ok := top.byKey[item.Key]; ok {
+		top.items[idx].Count = saturatingAddUint64(top.items[idx].Count, count)
+		top.siftDown(idx)
+		item := top.items[top.byKey[item.Key]]
+		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+	}
+	if uint64(len(top.items)) < top.capacity {
+		item.Count = count
+		top.items = append(top.items, item)
+		idx := len(top.items) - 1
+		top.byKey[item.Key] = idx
+		top.siftUp(idx)
+		item = top.items[top.byKey[item.Key]]
+		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+	}
+
+	evicted := top.items[0]
+	delete(top.byKey, evicted.Key)
+	item.Count = saturatingAddUint64(evicted.Count, count)
+	item.Error = evicted.Count
+	top.items[0] = item
+	top.byKey[item.Key] = 0
+	top.siftDown(0)
+	item = top.items[top.byKey[item.Key]]
 	return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
 }
 
@@ -320,18 +346,38 @@ func topKHeapLess(a, b topKItem) bool {
 	return a.Key < b.Key
 }
 
-func mustTopKItemKey(value interface{}) string {
+func prepareTopKItems(value interface{}, values ...interface{}) ([]topKItem, error) {
+	items := make([]topKItem, 0, 1+len(values))
+	item, err := prepareTopKItem(value)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, item)
+	for _, value := range values {
+		item, err := prepareTopKItem(value)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func prepareTopKItem(value interface{}) (topKItem, error) {
 	key, err := topKItemKey(value)
 	if err != nil {
-		panic(err)
+		return topKItem{}, err
 	}
-	return key
+	return topKItem{
+		Key:   key,
+		Value: cloneValue(value),
+	}, nil
 }
 
 func topKItemKey(value interface{}) (string, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("hatriecache: unsupported top-k value: %w", err)
 	}
 	return string(data), nil
 }
@@ -406,42 +452,77 @@ func (ht *HatTrie) UpsertTopK(key string, capacity uint64) error {
 }
 
 func (ht *HatTrie) AddTopK(key string, val interface{}, count uint64, vals ...interface{}) TopKEstimate {
+	estimate, _ := ht.AddTopKChecked(key, val, count, vals...)
+	return estimate
+}
+
+func (ht *HatTrie) AddTopKChecked(key string, val interface{}, count uint64, vals ...interface{}) (TopKEstimate, error) {
 	if count == 0 {
-		return ht.EstimateTopK(key, val)
+		return ht.EstimateTopKChecked(key, val)
 	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr != nil {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
+	} else {
+		ht.clearExpirationLocked(key)
+	}
 	if hval.IsTopK() {
-		estimate := ht.topKs.array[hval.Index].AddOne(val, count, vals...)
+		estimate, err := ht.topKs.array[hval.Index].AddOneChecked(val, count, vals...)
+		if err != nil {
+			return TopKEstimate{}, err
+		}
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return estimate
+		return estimate, nil
 	}
 
+	data := newDefaultTopKData()
+	estimate, err := data.AddOneChecked(val, count, vals...)
+	if err != nil {
+		return TopKEstimate{}, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.topKs.AddData(newDefaultTopKData())
-	estimate := ht.topKs.array[idx].AddOne(val, count, vals...)
+	idx := ht.topKs.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_TOP_K}.toValue()
 	ht.recordWriteLocked(key)
-	return estimate
+	return estimate, nil
 }
 
 func (ht *HatTrie) EstimateTopK(key string, val interface{}) TopKEstimate {
+	estimate, _ := ht.EstimateTopKChecked(key, val)
+	return estimate
+}
+
+func (ht *HatTrie) EstimateTopKChecked(key string, val interface{}) (TopKEstimate, error) {
+	valueKey, err := topKItemKey(val)
+	if err != nil {
+		return TopKEstimate{}, err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
 	if !hval.IsTopK() {
 		ht.recordReadLocked(false, key)
-		return TopKEstimate{}
+		return TopKEstimate{}, nil
 	}
-	estimate := ht.topKs.array[hval.Index].Estimate(val)
+	estimate := ht.topKs.array[hval.Index].estimateKey(valueKey)
 	ht.recordReadLocked(estimate.Tracked, key)
-	return estimate
+	return estimate, nil
 }
 
 func (ht *HatTrie) GetTopK(key string) []TopKItem {

@@ -624,11 +624,14 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return commandError(err.Error())
 		}
 		if len(values) == 1 {
-			estimate := ht.AddTopK(key, values[0], count)
+			estimate, err := ht.AddTopKChecked(key, values[0], count)
+			if err != nil {
+				return commandError(err.Error())
+			}
 			return commandValueResponse("added top-k value", estimate)
 		}
-		for _, value := range values {
-			ht.AddTopK(key, value, count)
+		if _, err := ht.AddTopKChecked(key, values[0], count, values[1:]...); err != nil {
+			return commandError(err.Error())
 		}
 		return CacheCommandResponse{OK: true, Message: "added top-k values", Value: strconv.Itoa(len(values))}
 	case "ESTTOPK", "QUERYTOPK", "TOPKCOUNT":
@@ -636,7 +639,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value is required")
 		}
-		return commandValueResponse("ok", ht.EstimateTopK(key, values[0]))
+		estimate, err := ht.EstimateTopKChecked(key, values[0])
+		if err != nil {
+			return commandError(err.Error())
+		}
+		return commandValueResponse("ok", estimate)
 	case "GETTOPK", "TOPK":
 		value := ht.GetTopK(key)
 		if value == nil {

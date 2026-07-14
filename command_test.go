@@ -801,6 +801,51 @@ func TestExecuteCommandTopKOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandTopKRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDTOPK", Key: "top", Value: "alpha", Subkey: "2"}); !got.OK {
+		t.Fatalf("ADDTOPK alpha response = %#v, want ok", got)
+	}
+
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDTOPK",
+		Key:     "top",
+		Values:  Slice{"beta", func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDTOPK unsupported response = %#v, want error", got)
+	}
+	info, ok := ht.TopKInfo("top")
+	if !ok || info.Total != 2 || info.Tracked != 1 {
+		t.Fatalf("TopKInfo(after rejected command) = %#v/%v, want unchanged sketch", info, ok)
+	}
+	items := ht.GetTopK("top")
+	if len(items) != 1 || items[0].Value != "alpha" || items[0].Count != 2 {
+		t.Fatalf("GetTopK(after rejected command) = %#v, want alpha count 2 only", items)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDTOPK",
+		Key:     "missing",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDTOPK missing unsupported response = %#v, want error", got)
+	}
+	if value := ht.Get("missing"); !value.Empty() {
+		t.Fatalf("rejected missing-key Top-K command left value %+v", value)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ESTTOPK",
+		Key:     "top",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ESTTOPK unsupported response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandReservoirSampleOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

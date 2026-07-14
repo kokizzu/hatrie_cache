@@ -2118,6 +2118,51 @@ func TestTopKClonesNestedValues(t *testing.T) {
 	}
 }
 
+func TestTopKRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if estimate, err := ht.AddTopKChecked("top", "alpha", 2); err != nil || !estimate.Tracked || estimate.Count != 2 {
+		t.Fatalf("AddTopKChecked(alpha) = %#v/%v, want tracked count 2", estimate, err)
+	}
+
+	if estimate, err := ht.AddTopKChecked("top", "beta", 1, func() {}); err == nil {
+		t.Fatalf("AddTopKChecked(unsupported batch) = %#v/nil, want error", estimate)
+	}
+	info, ok := ht.TopKInfo("top")
+	if !ok || info.Total != 2 || info.Tracked != 1 {
+		t.Fatalf("TopKInfo(after rejected batch) = %#v/%v, want unchanged one-item sketch", info, ok)
+	}
+	items := ht.GetTopK("top")
+	if len(items) != 1 || items[0].Value != "alpha" || items[0].Count != 2 {
+		t.Fatalf("GetTopK(after rejected batch) = %#v, want alpha count 2 only", items)
+	}
+
+	if estimate, err := ht.AddTopKChecked("missing", func() {}, 1); err == nil {
+		t.Fatalf("AddTopKChecked(missing unsupported) = %#v/nil, want error", estimate)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected missing-key Top-K left value %+v", got)
+	}
+	ht.UpsertString("string", "keep")
+	if estimate, err := ht.AddTopKChecked("string", func() {}, 1); err == nil {
+		t.Fatalf("AddTopKChecked(replacement unsupported) = %#v/nil, want error", estimate)
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected replacement changed string to %q, want keep", got)
+	}
+	if estimate, err := ht.EstimateTopKChecked("top", func() {}); err == nil {
+		t.Fatalf("EstimateTopKChecked(unsupported) = %#v/nil, want error", estimate)
+	}
+	if got := ht.AddTopK("legacy", func() {}, 1); got != (TopKEstimate{}) {
+		t.Fatalf("AddTopK legacy unsupported = %#v, want zero estimate", got)
+	}
+	if got := ht.Get("legacy"); !got.Empty() {
+		t.Fatalf("legacy rejected Top-K left value %+v", got)
+	}
+	if got := ht.EstimateTopK("top", func() {}); got != (TopKEstimate{}) {
+		t.Fatalf("EstimateTopK legacy unsupported = %#v, want zero estimate", got)
+	}
+}
+
 func TestTopKRejectsInvalidConfig(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -2145,6 +2190,16 @@ func TestTopKSnapshotValidationRejectsDuplicateAndMismatchedKeys(t *testing.T) {
 	snapshot.Items = []topKItem{{Key: `"alpha"`, Value: "beta", Count: 1}}
 	if err := validateTopKSnapshot(snapshot); err == nil {
 		t.Fatal("validateTopKSnapshot(mismatched key) error = nil, want error")
+	}
+	snapshot = topKSnapshot{
+		Capacity: 1,
+		Total:    1,
+		Items: []topKItem{
+			{Key: "fn", Value: func() {}, Count: 1},
+		},
+	}
+	if err := validateTopKSnapshot(snapshot); err == nil {
+		t.Fatal("validateTopKSnapshot(unsupported value) error = nil, want error")
 	}
 }
 
