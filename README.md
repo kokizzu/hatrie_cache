@@ -240,6 +240,8 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
 `/api/journal`, and `/api/commands`.
+Use `GET /api/entries?prefix=...&limit=N` to bound large key listings; limited
+responses include `has_more` when another matching entry exists.
 `/api/commands` accepts JSON and protobuf command request bodies based on
 `Content-Type`; regular browser/API clients can continue to use JSON.
 Responses are gzip-compressed when clients send `Accept-Encoding: gzip`.
@@ -311,6 +313,7 @@ Use the HTTP client CLI against a running monitoring server:
 ```
 make cli ARGS='stats'
 make cli ARGS='entries -prefix session:'
+make cli ARGS='entries -prefix session: -limit 1000'
 make cli ARGS='command -cmd SETSTR -key name -value ivi'
 make cli ARGS='command -cmd INC -key views'
 make cli ARGS="command -cmd PUTMAP -key user:1 -pairs '{\"name\":\"ivi\",\"age\":32}'"

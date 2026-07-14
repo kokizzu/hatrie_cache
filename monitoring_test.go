@@ -248,6 +248,68 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerLimitsEntries(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("session:1", "one")
+	ht.UpsertString("session:2", "two")
+	ht.UpsertString("session:3", "three")
+	ht.UpsertString("other:1", "ignored")
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/entries?prefix=session:&limit=2", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("limited entries status = %d, want 200", resp.Code)
+	}
+	var body MonitoringEntriesResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("limited entries JSON error = %v", err)
+	}
+	if body.Limit != 2 || !body.HasMore {
+		t.Fatalf("limited entries metadata = limit %d has_more %v, want 2/true", body.Limit, body.HasMore)
+	}
+	if got := entryKeysFromMonitoring(body.Entries); !reflect.DeepEqual(got, []string{"session:1", "session:2"}) {
+		t.Fatalf("limited entries keys = %#v, want first two sorted session keys", got)
+	}
+
+	exactResp := httptest.NewRecorder()
+	handler.ServeHTTP(exactResp, httptest.NewRequest(http.MethodGet, "/api/entries?prefix=session:&limit=3", nil))
+	if exactResp.Code != http.StatusOK {
+		t.Fatalf("exact entries status = %d, want 200", exactResp.Code)
+	}
+	var exactBody MonitoringEntriesResponse
+	if err := json.Unmarshal(exactResp.Body.Bytes(), &exactBody); err != nil {
+		t.Fatalf("exact entries JSON error = %v", err)
+	}
+	if exactBody.Limit != 3 || exactBody.HasMore {
+		t.Fatalf("exact entries metadata = limit %d has_more %v, want 3/false", exactBody.Limit, exactBody.HasMore)
+	}
+	if got := entryKeysFromMonitoring(exactBody.Entries); !reflect.DeepEqual(got, []string{"session:1", "session:2", "session:3"}) {
+		t.Fatalf("exact entries keys = %#v, want all sorted session keys", got)
+	}
+}
+
+func TestMonitoringHandlerRejectsInvalidEntriesLimit(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("session:1", "one")
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	for _, target := range []string{"/api/entries?limit=0", "/api/entries?limit=bad", "/api/entries?limit=100001"} {
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, target, nil))
+		if resp.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d, want 400", target, resp.Code)
+		}
+		var body CacheCommandResponse
+		if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s JSON error = %v", target, err)
+		}
+		if body.OK || !strings.Contains(body.Message, "limit") {
+			t.Fatalf("%s body = %#v, want limit error", target, body)
+		}
+	}
+}
+
 func TestMonitoringHandlerCompressesJSONWhenAccepted(t *testing.T) {
 	ht := newTestTrie(t)
 	for idx := 0; idx < 32; idx++ {
@@ -1323,4 +1385,12 @@ func canceledMonitoringRequest(method string, target string, body string) *http.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	return httptest.NewRequest(method, target, bytes.NewBufferString(body)).WithContext(ctx)
+}
+
+func entryKeysFromMonitoring(entries []MonitoringEntry) []string {
+	keys := make([]string, len(entries))
+	for idx, entry := range entries {
+		keys[idx] = entry.Key
+	}
+	return keys
 }

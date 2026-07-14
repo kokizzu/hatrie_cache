@@ -51,6 +51,8 @@ export type CacheEntry = {
 
 export type EntriesResponse = {
   entries: CacheEntry[];
+  limit?: number;
+  has_more?: boolean;
 };
 
 export type CommandRequest = {
@@ -270,10 +272,16 @@ export async function loadStats(): Promise<CacheStats> {
   return readJSON<CacheStats>('/api/stats', sampleStats);
 }
 
-export async function loadEntries(prefix = ''): Promise<EntriesResponse> {
-  const path = prefix ? `/api/entries?prefix=${encodeURIComponent(prefix)}` : '/api/entries';
+export async function loadEntries(prefix = '', limit = 0): Promise<EntriesResponse> {
+  const query = new URLSearchParams();
+  if (prefix) query.set('prefix', prefix);
+  if (limit > 0) query.set('limit', String(limit));
+  const encoded = query.toString();
+  const path = encoded ? `/api/entries?${encoded}` : '/api/entries';
+  const matchedEntries = sampleEntries.filter((entry) => entry.key.startsWith(prefix));
   const fallback = {
-    entries: sampleEntries.filter((entry) => entry.key.startsWith(prefix))
+    entries: matchedEntries.slice(0, limit > 0 ? limit : undefined),
+    ...(limit > 0 ? { limit, has_more: matchedEntries.length > limit } : {})
   };
   return readJSON<EntriesResponse>(path, fallback);
 }

@@ -176,6 +176,22 @@ func TestRunEntriesPassesPrefix(t *testing.T) {
 	}
 }
 
+func TestRunEntriesPassesLimit(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		w.Write([]byte(`{"entries":[],"limit":2}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{"-addr", server.URL, "entries", "-prefix", "session:", "-limit", "2"}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(entries -limit) error = %v", err)
+	}
+	if gotPath != "/api/entries?limit=2&prefix=session%3A" {
+		t.Fatalf("path = %q, want prefix and limit query", gotPath)
+	}
+}
+
 func TestRunTopologyGetsAndRoutes(t *testing.T) {
 	var gotPaths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

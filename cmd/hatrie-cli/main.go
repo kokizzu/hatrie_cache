@@ -82,13 +82,21 @@ func runEntries(ctx context.Context, client *http.Client, addr string, args []st
 	flags := flag.NewFlagSet("entries", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	prefix := flags.String("prefix", "", "key prefix filter")
+	limit := flags.Uint64("limit", 0, "maximum entries to fetch")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
 	path := "/api/entries"
+	query := url.Values{}
 	if *prefix != "" {
-		path += "?prefix=" + url.QueryEscape(*prefix)
+		query.Set("prefix", *prefix)
+	}
+	if *limit > 0 {
+		query.Set("limit", strconv.FormatUint(*limit, 10))
+	}
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
 	}
 	return getJSON(ctx, client, addr, path, stdout)
 }

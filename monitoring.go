@@ -19,8 +19,10 @@ import (
 
 const maxCommandJournalTailResponseBytes = 1 << 20
 const maxMonitoringJSONRequestBytes = 1 << 20
+const maxMonitoringEntriesLimit = 100000
 
 var errCommandJournalTailResponseTooLarge = errors.New("hatriecache: journal source response is too large")
+var errMonitoringEntriesLimitReached = errors.New("hatriecache: monitoring entries limit reached")
 
 type MonitoringOptions struct {
 	NodeName            string
@@ -67,6 +69,8 @@ type MonitoringEntry struct {
 
 type MonitoringEntriesResponse struct {
 	Entries []MonitoringEntry `json:"entries"`
+	Limit   uint64            `json:"limit,omitempty"`
+	HasMore bool              `json:"has_more,omitempty"`
 }
 
 type replicationSyncRequest struct {
@@ -163,7 +167,12 @@ func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.R
 		return
 	}
 	prefix := r.URL.Query().Get("prefix")
-	writeJSON(w, MonitoringEntriesResponse{Entries: handler.trie.monitoringEntries(prefix)})
+	limit, err := monitoringEntriesLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	writeJSON(w, handler.trie.monitoringEntriesLimited(prefix, limit))
 }
 
 func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.Request) {
@@ -621,6 +630,21 @@ func commandJournalTailLimit(raw string) (int, error) {
 	return normalizeCommandJournalTailLimit(value)
 }
 
+func monitoringEntriesLimit(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || value == 0 {
+		return 0, errors.New("limit must be a positive unsigned integer")
+	}
+	if value > maxMonitoringEntriesLimit {
+		return 0, fmt.Errorf("limit must be <= %d", maxMonitoringEntriesLimit)
+	}
+	return int(value), nil
+}
+
 func normalizeCommandJournalTailLimit(value uint64) (int, error) {
 	if value == 0 {
 		return DefaultCommandJournalTailLimit, nil
@@ -665,6 +689,10 @@ func (ht *HatTrie) diskSpillBytes() uint64 {
 }
 
 func (ht *HatTrie) monitoringEntries(prefix string) []MonitoringEntry {
+	return ht.monitoringEntriesLimited(prefix, 0).Entries
+}
+
+func (ht *HatTrie) monitoringEntriesLimited(prefix string, limit int) MonitoringEntriesResponse {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -672,11 +700,18 @@ func (ht *HatTrie) monitoringEntries(prefix string) []MonitoringEntry {
 	if len(ht.expires) > 0 {
 		now = ht.currentTime()
 	}
-	out := []MonitoringEntry{}
+	response := MonitoringEntriesResponse{}
+	if limit > 0 {
+		response.Limit = uint64(limit)
+	}
 	err := ht.scanEntriesWithPrefixAtLockedChecked(prefix, true, now, func(entry Entry) error {
+		if limit > 0 && len(response.Entries) >= limit {
+			response.HasMore = true
+			return errMonitoringEntriesLimitReached
+		}
 		ttl := ttlMillis(ht.expires[entry.Key], now)
 		size, preview := ht.monitoringPreviewLocked(entry.Value)
-		out = append(out, MonitoringEntry{
+		response.Entries = append(response.Entries, MonitoringEntry{
 			Key:          entry.Key,
 			Type:         monitoringType(entry.Value),
 			TTLMillis:    ttl,
@@ -686,10 +721,13 @@ func (ht *HatTrie) monitoringEntries(prefix string) []MonitoringEntry {
 		})
 		return nil
 	})
-	if err != nil {
-		return []MonitoringEntry{}
+	if err != nil && !errors.Is(err, errMonitoringEntriesLimitReached) {
+		return MonitoringEntriesResponse{Entries: []MonitoringEntry{}, Limit: response.Limit}
 	}
-	return out
+	if response.Entries == nil {
+		response.Entries = []MonitoringEntry{}
+	}
+	return response
 }
 
 func ttlMillis(expiresAt time.Time, now time.Time) *int64 {

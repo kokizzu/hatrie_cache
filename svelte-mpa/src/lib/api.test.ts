@@ -1,11 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runCommand, sampleCommandResponse } from './api';
+import { loadEntries, runCommand, sampleCommandResponse } from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('command fallback', () => {
+  it('loads entries with prefix and limit query params', async () => {
+    const fetchMock = vi.fn(async (path: string | URL | Request) => {
+      expect(path).toBe('/api/entries?prefix=session%3A&limit=2');
+      return new Response(
+        JSON.stringify({
+          entries: [],
+          limit: 2,
+          has_more: true
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadEntries('session:', 2)).resolves.toEqual({
+      entries: [],
+      limit: 2,
+      has_more: true
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('rejects commands without a key', () => {
     expect(sampleCommandResponse({ command: 'GET', key: ' ' })).toEqual({
       ok: false,
