@@ -19,8 +19,12 @@ const DefaultReplicationRetryInterval = 250 * time.Millisecond
 const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
 const minCompressedReplicationRequestBytes = 16 << 10
+const defaultReplicationSyncKeyPageSize = 1024
 
-var errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
+var (
+	errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
+	errReplicationSyncKeyPageFull  = errors.New("hatriecache: replication sync key page full")
+)
 
 type HTTPReplicatorOptions struct {
 	Context            context.Context
@@ -503,6 +507,10 @@ func plannedReplicationTargets(tasks []replicationTask) []ReplicationTargetResul
 }
 
 func (replicator *HTTPReplicator) syncAll(ctx context.Context, trie *HatTrie, prefix string) ReplicationResult {
+	return replicator.syncAllPaged(ctx, trie, prefix, defaultReplicationSyncKeyPageSize)
+}
+
+func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTrie, prefix string, pageSize int) ReplicationResult {
 	ctx = replicationContext(ctx)
 	result := ReplicationResult{Command: "SYNC", Key: prefix}
 	if replicator == nil {
@@ -520,49 +528,115 @@ func (replicator *HTTPReplicator) syncAll(ctx context.Context, trie *HatTrie, pr
 		result.Reason = err.Error()
 		return result
 	}
-
-	keys := trie.KeysWithPrefix(prefix, true)
-	if len(keys) == 0 {
-		result.Skipped = true
-		result.Reason = "no entries to sync"
-		return result
+	if pageSize <= 0 {
+		pageSize = defaultReplicationSyncKeyPageSize
 	}
 
-	for _, key := range keys {
-		if err := ctx.Err(); err != nil {
+	afterKey := ""
+	hasAfterKey := false
+	seenKeys := false
+	for {
+		page, err := replicationSyncKeysPage(trie, prefix, afterKey, hasAfterKey, pageSize)
+		if err != nil {
 			if len(result.Targets) == 0 {
 				result.Skipped = true
-				result.Reason = err.Error()
+				result.Reason = "no entries to sync"
 			}
 			return result
 		}
-		route, ok := replicator.routeForKey(key)
-		if !ok {
-			continue
+		if len(page.keys) == 0 {
+			if !seenKeys {
+				result.Skipped = true
+				result.Reason = "no entries to sync"
+				return result
+			}
+			break
 		}
-		if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
-			continue
+		seenKeys = true
+
+		for _, key := range page.keys {
+			if err := ctx.Err(); err != nil {
+				if len(result.Targets) == 0 {
+					result.Skipped = true
+					result.Reason = err.Error()
+				}
+				return result
+			}
+			route, ok := replicator.routeForKey(key)
+			if !ok {
+				continue
+			}
+			if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
+				continue
+			}
+			targets := replicator.replicationTargets(route)
+			if len(targets) == 0 {
+				continue
+			}
+			payload, ok := replicationCommandPayload(trie, key, replicationPayloadSet)
+			if !ok {
+				continue
+			}
+			result.Entries++
+			for _, target := range targets {
+				targetResult := replicator.postReplicationCommand(ctx, target, payload)
+				targetResult.Key = key
+				result.Targets = append(result.Targets, targetResult)
+			}
 		}
-		targets := replicator.replicationTargets(route)
-		if len(targets) == 0 {
-			continue
+
+		if !page.hasMore {
+			break
 		}
-		payload, ok := replicationCommandPayload(trie, key, replicationPayloadSet)
-		if !ok {
-			continue
-		}
-		result.Entries++
-		for _, target := range targets {
-			targetResult := replicator.postReplicationCommand(ctx, target, payload)
-			targetResult.Key = key
-			result.Targets = append(result.Targets, targetResult)
-		}
+		afterKey = page.nextAfterKey
+		hasAfterKey = true
 	}
 	if len(result.Targets) == 0 {
 		result.Skipped = true
 		result.Reason = "no sync targets"
 	}
 	return result
+}
+
+type replicationSyncKeyPage struct {
+	keys         []string
+	nextAfterKey string
+	hasMore      bool
+}
+
+func replicationSyncKeysPage(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int) (replicationSyncKeyPage, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+
+	trie.mu.Lock()
+	defer trie.mu.Unlock()
+
+	now := time.Time{}
+	if len(trie.expires) > 0 {
+		now = trie.currentTime()
+	}
+
+	page := replicationSyncKeyPage{keys: make([]string, 0, limit)}
+	err := trie.scanEntriesWithPrefixAtLockedChecked(prefix, true, now, func(entry Entry) error {
+		if hasAfterKey && entry.Key <= afterKey {
+			return nil
+		}
+		if len(page.keys) >= limit {
+			page.hasMore = true
+			return errReplicationSyncKeyPageFull
+		}
+		page.keys = append(page.keys, entry.Key)
+		page.nextAfterKey = entry.Key
+		return nil
+	})
+	if errors.Is(err, errReplicationSyncKeyPageFull) {
+		return page, nil
+	}
+	if err != nil {
+		return replicationSyncKeyPage{}, err
+	}
+	return page, nil
 }
 
 func (replicator *HTTPReplicator) storeLastResult(result ReplicationResult) {

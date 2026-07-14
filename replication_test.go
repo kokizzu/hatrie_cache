@@ -721,6 +721,80 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 3)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "value-1")
+	trie.UpsertString("session:2", "value-2")
+	trie.UpsertString("session:3", "value-3")
+	trie.UpsertString("other:1", "ignored")
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	result := replicator.syncAllPaged(context.Background(), trie, "session:", 2)
+	if result.Skipped || result.Entries != 3 || len(result.Targets) != 3 {
+		t.Fatalf("paged sync result = %#v, want three synced entries", result)
+	}
+	targetKeys := map[string]bool{}
+	for _, target := range result.Targets {
+		if !target.OK || target.Key == "" {
+			t.Fatalf("paged sync target = %#v, want ok target with key", target)
+		}
+		targetKeys[target.Key] = true
+	}
+	for _, key := range []string{"session:1", "session:2", "session:3"} {
+		if !targetKeys[key] {
+			t.Fatalf("paged sync target keys = %#v, missing %s", targetKeys, key)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		request := <-requests
+		if request.Command != "INTERNALSET" || request.Value == "" || !strings.HasPrefix(request.Key, "session:") {
+			t.Fatalf("paged sync request = %#v, want INTERNALSET session snapshot", request)
+		}
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("unexpected paged sync request = %#v", request)
+	default:
+	}
+}
+
+func TestReplicationSyncKeysPageAdvancesAfterEmptyKey(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("", "empty")
+	trie.UpsertString("session:1", "value")
+
+	page, err := replicationSyncKeysPage(trie, "", "", false, 1)
+	if err != nil {
+		t.Fatalf("replicationSyncKeysPage(first) error = %v", err)
+	}
+	if !reflect.DeepEqual(page.keys, []string{""}) || !page.hasMore || page.nextAfterKey != "" {
+		t.Fatalf("first page = %#v, want empty key with more entries", page)
+	}
+
+	page, err = replicationSyncKeysPage(trie, "", page.nextAfterKey, true, 1)
+	if err != nil {
+		t.Fatalf("replicationSyncKeysPage(second) error = %v", err)
+	}
+	if !reflect.DeepEqual(page.keys, []string{"session:1"}) || page.hasMore || page.nextAfterKey != "session:1" {
+		t.Fatalf("second page = %#v, want session key without more entries", page)
+	}
+}
+
 func TestHTTPReplicatorSyncAllSkipsExpiredEntries(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 2)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
