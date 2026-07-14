@@ -112,6 +112,45 @@ func TestCommandJournalReplayRejectsFailedEntry(t *testing.T) {
 	}
 }
 
+func TestCommandJournalRejectsNonContiguousSequences(t *testing.T) {
+	t.Run("gap", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "commands.journal")
+		writeCommandJournalTestEntries(t, path,
+			commandJournalEntry{
+				Version:  commandJournalVersion,
+				Sequence: 1,
+				Request:  CacheCommandRequest{Command: "SETSTR", Key: "one", Value: "1"},
+			},
+			commandJournalEntry{
+				Version:  commandJournalVersion,
+				Sequence: 3,
+				Request:  CacheCommandRequest{Command: "SETSTR", Key: "three", Value: "3"},
+			},
+		)
+		if _, err := OpenCommandJournal(path); err == nil || !strings.Contains(err.Error(), "does not continue after 1") {
+			t.Fatalf("OpenCommandJournal(gap) error = %v, want sequence gap error", err)
+		}
+		if _, err := readCommandJournalTail(path, 0, 0); err == nil || !strings.Contains(err.Error(), "does not continue after 1") {
+			t.Fatalf("readCommandJournalTail(gap) error = %v, want sequence gap error", err)
+		}
+	})
+
+	t.Run("missing prefix", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "commands.journal")
+		writeCommandJournalTestEntries(t, path, commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 2,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "two", Value: "2"},
+		})
+		if _, err := OpenCommandJournal(path); err == nil || !strings.Contains(err.Error(), "starts at sequence 2 without checkpoint") {
+			t.Fatalf("OpenCommandJournal(missing prefix) error = %v, want missing prefix error", err)
+		}
+		if _, err := readCommandJournalTail(path, 0, 0); err == nil || !strings.Contains(err.Error(), "starts at sequence 2 without checkpoint") {
+			t.Fatalf("readCommandJournalTail(missing prefix) error = %v, want missing prefix error", err)
+		}
+	})
+}
+
 func TestCommandJournalTailReturnsEntriesAfterSequence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)
@@ -1011,11 +1050,15 @@ func TestCommandJournalCloseIsIdempotentAndRejectsWork(t *testing.T) {
 
 func TestCommandJournalRejectsAppendAfterSequenceExhaustionWithoutMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
+	writeCommandJournalTestEntries(t, path, commandJournalEntry{
+		Version:    commandJournalVersion,
+		Sequence:   ^uint64(0) - 1,
+		Checkpoint: true,
+	})
 	journal, err := OpenCommandJournal(path)
 	if err != nil {
 		t.Fatalf("OpenCommandJournal() error = %v", err)
 	}
-	journal.nextSequence = ^uint64(0)
 	ht := newTestTrie(t)
 
 	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "last", Value: "ok"}); !response.OK {
@@ -1031,8 +1074,8 @@ func TestCommandJournalRejectsAppendAfterSequenceExhaustionWithoutMutation(t *te
 	if err != nil {
 		t.Fatalf("readCommandJournalEntries() error = %v", err)
 	}
-	if len(entries) != 1 || entries[0].Sequence != ^uint64(0) {
-		t.Fatalf("entries after final append = %#v, want one max sequence entry", entries)
+	if len(entries) != 2 || entries[0].Sequence != ^uint64(0)-1 || !entries[0].Checkpoint || entries[1].Sequence != ^uint64(0) {
+		t.Fatalf("entries after final append = %#v, want checkpoint and max sequence entry", entries)
 	}
 
 	response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "overflow", Value: "bad"})
@@ -1046,18 +1089,25 @@ func TestCommandJournalRejectsAppendAfterSequenceExhaustionWithoutMutation(t *te
 	if err != nil {
 		t.Fatalf("readCommandJournalEntries(after exhausted) error = %v", err)
 	}
-	if len(entries) != 1 || entries[0].Sequence != ^uint64(0) {
-		t.Fatalf("entries after exhausted append = %#v, want original max sequence entry only", entries)
+	if len(entries) != 2 || entries[0].Sequence != ^uint64(0)-1 || !entries[0].Checkpoint || entries[1].Sequence != ^uint64(0) {
+		t.Fatalf("entries after exhausted append = %#v, want checkpoint and original max sequence entry only", entries)
 	}
 }
 
 func TestOpenCommandJournalAtMaxSequenceReplaysButRejectsAppend(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
-	writeCommandJournalTestEntries(t, path, commandJournalEntry{
-		Version:  commandJournalVersion,
-		Sequence: ^uint64(0),
-		Request:  CacheCommandRequest{Command: "SETSTR", Key: "last", Value: "ok"},
-	})
+	writeCommandJournalTestEntries(t, path,
+		commandJournalEntry{
+			Version:    commandJournalVersion,
+			Sequence:   ^uint64(0) - 1,
+			Checkpoint: true,
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: ^uint64(0),
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "last", Value: "ok"},
+		},
+	)
 
 	journal, err := OpenCommandJournal(path)
 	if err != nil {
@@ -1075,7 +1125,7 @@ func TestOpenCommandJournalAtMaxSequenceReplaysButRejectsAppend(t *testing.T) {
 	}
 
 	replayed := newTestTrie(t)
-	if maxSequence, err := journal.Replay(replayed, 0); err != nil || maxSequence != ^uint64(0) {
+	if maxSequence, err := journal.Replay(replayed, ^uint64(0)-1); err != nil || maxSequence != ^uint64(0) {
 		t.Fatalf("Replay(max sequence) = %d/%v, want max/nil", maxSequence, err)
 	}
 	if got := replayed.GetString("last"); got != "ok" {
@@ -1092,8 +1142,8 @@ func TestOpenCommandJournalAtMaxSequenceReplaysButRejectsAppend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readCommandJournalEntries() error = %v", err)
 	}
-	if len(entries) != 1 || entries[0].Sequence != ^uint64(0) {
-		t.Fatalf("entries after rejected append = %#v, want original max sequence entry only", entries)
+	if len(entries) != 2 || entries[0].Sequence != ^uint64(0)-1 || !entries[0].Checkpoint || entries[1].Sequence != ^uint64(0) {
+		t.Fatalf("entries after rejected append = %#v, want checkpoint and original max sequence entry only", entries)
 	}
 }
 

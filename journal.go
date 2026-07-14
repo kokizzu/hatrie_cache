@@ -413,6 +413,8 @@ func readCommandJournalEntriesWithEnd(path string) ([]commandJournalEntry, int64
 
 	var entries []commandJournalEntry
 	var validBytes int64
+	var previousSequence uint64
+	var hasPreviousSequence bool
 	reader := bufio.NewReader(file)
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -421,8 +423,13 @@ func readCommandJournalEntriesWithEnd(path string) ([]commandJournalEntry, int64
 			if err != nil {
 				return nil, 0, err
 			}
+			if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {
+				return nil, 0, err
+			}
 			entries = append(entries, entry)
 			validBytes += int64(len(line))
+			previousSequence = entry.Sequence
+			hasPreviousSequence = true
 		}
 
 		if errors.Is(err, io.EOF) {
@@ -450,6 +457,8 @@ func readCommandJournalTail(path string, afterSequence uint64, limit int) (Comma
 	}
 	defer file.Close()
 
+	var previousSequence uint64
+	var hasPreviousSequence bool
 	reader := bufio.NewReader(file)
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -458,6 +467,11 @@ func readCommandJournalTail(path string, afterSequence uint64, limit int) (Comma
 			if decodeErr != nil {
 				return CommandJournalTail{}, decodeErr
 			}
+			if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {
+				return CommandJournalTail{}, err
+			}
+			previousSequence = entry.Sequence
+			hasPreviousSequence = true
 			if entry.Sequence > tail.LastSequence {
 				tail.LastSequence = entry.Sequence
 			}
@@ -508,6 +522,23 @@ func decodeCommandJournalEntry(data []byte) (commandJournalEntry, error) {
 		return commandJournalEntry{}, errors.New("hatriecache: invalid journal sequence")
 	}
 	return entry, nil
+}
+
+func validateCommandJournalEntrySequence(previous uint64, hasPrevious bool, entry commandJournalEntry) error {
+	if !hasPrevious {
+		if entry.Checkpoint || entry.Sequence == 1 {
+			return nil
+		}
+		return fmt.Errorf("hatriecache: command journal starts at sequence %d without checkpoint", entry.Sequence)
+	}
+	if previous == ^uint64(0) {
+		return fmt.Errorf("hatriecache: command journal sequence %d follows exhausted sequence", entry.Sequence)
+	}
+	expected := previous + 1
+	if entry.Sequence != expected {
+		return fmt.Errorf("hatriecache: command journal sequence %d does not continue after %d", entry.Sequence, previous)
+	}
+	return nil
 }
 
 func commandShouldJournal(request CacheCommandRequest) bool {
