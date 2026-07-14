@@ -514,6 +514,61 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOQ response = %#v, want JSON info", infoQuantileResp)
 	}
 
+	createFenwickResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATEFW",
+		Key:     "scores",
+		Value:   "8",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATEFW) error = %v", err)
+	}
+	if !createFenwickResp.GetOk() {
+		t.Fatalf("CREATEFW response = %#v, want ok", createFenwickResp)
+	}
+	addFenwickResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDFW",
+		Key:     "scores",
+		Values:  []string{"2", "5"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDFW) error = %v", err)
+	}
+	if !addFenwickResp.GetOk() || addFenwickResp.GetValue() == "" {
+		t.Fatalf("ADDFW response = %#v, want JSON update", addFenwickResp)
+	}
+	sumFenwickResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "SUMFW",
+		Key:     "scores",
+		Value:   "2",
+	})
+	if err != nil {
+		t.Fatalf("Command(SUMFW) error = %v", err)
+	}
+	if !sumFenwickResp.GetOk() || sumFenwickResp.GetValue() != "5" {
+		t.Fatalf("SUMFW response = %#v, want 5", sumFenwickResp)
+	}
+	rangeFenwickResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "RANGEFW",
+		Key:     "scores",
+		Values:  []string{"2", "4"},
+	})
+	if err != nil {
+		t.Fatalf("Command(RANGEFW) error = %v", err)
+	}
+	if !rangeFenwickResp.GetOk() || rangeFenwickResp.GetValue() != "5" {
+		t.Fatalf("RANGEFW response = %#v, want 5", rangeFenwickResp)
+	}
+	infoFenwickResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFOFW",
+		Key:     "scores",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFOFW) error = %v", err)
+	}
+	if !infoFenwickResp.GetOk() || infoFenwickResp.GetValue() == "" {
+		t.Fatalf("INFOFW response = %#v, want JSON info", infoFenwickResp)
+	}
+
 	stats, err := client.Stats(context.Background(), &hatriecachev1.StatsRequest{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)
