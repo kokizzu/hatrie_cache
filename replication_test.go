@@ -882,6 +882,81 @@ func TestReplicationRequestBodyStreamsLargeStringPayload(t *testing.T) {
 	}
 }
 
+func TestReplicationRequestBodyLeavesSmallPayloadPlain(t *testing.T) {
+	payload := CacheCommandRequest{
+		Command: "INTERNALDEL",
+		Key:     "session:small",
+	}
+	body, contentEncoding, err := replicationRequestBody(payload)
+	if err != nil {
+		t.Fatalf("replicationRequestBody() error = %v", err)
+	}
+	if contentEncoding != "" {
+		t.Fatalf("Content-Encoding = %q, want empty", contentEncoding)
+	}
+
+	var decoded CacheCommandRequest
+	if err := json.NewDecoder(body).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(plain body) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, payload) {
+		t.Fatalf("decoded plain payload = %#v, want %#v", decoded, payload)
+	}
+}
+
+func TestReplicationRequestBodyBuffersLargeStructuredPayload(t *testing.T) {
+	values := make(Slice, 0, minCompressedReplicationRequestBytes/4)
+	for len(values) < cap(values) {
+		values = append(values, strings.Repeat("value", 4))
+	}
+	payload := CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:structured",
+		Values:  values,
+	}
+	body, contentEncoding, err := replicationRequestBody(payload)
+	if err != nil {
+		t.Fatalf("replicationRequestBody() error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	if _, ok := body.(*streamingGzipJSONBody); ok {
+		t.Fatalf("replicationRequestBody() body = %T, want buffered gzip body", body)
+	}
+
+	reader, err := gzip.NewReader(body)
+	if err != nil {
+		t.Fatalf("NewReader(buffered gzip body) error = %v", err)
+	}
+	defer reader.Close()
+
+	var decoded CacheCommandRequest
+	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(buffered gzip body) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, payload) {
+		t.Fatalf("decoded buffered payload = %#v, want %#v", decoded, payload)
+	}
+}
+
+func TestReplicationRequestBodyReportsMarshalErrors(t *testing.T) {
+	body, contentEncoding, err := replicationRequestBody(CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:bad",
+		Values:  Slice{func() {}},
+	})
+	if err == nil {
+		t.Fatal("replicationRequestBody(unsupported) error = nil, want error")
+	}
+	if body != nil {
+		t.Fatalf("replicationRequestBody(unsupported) body = %T, want nil", body)
+	}
+	if contentEncoding != "" {
+		t.Fatalf("Content-Encoding = %q, want empty on marshal error", contentEncoding)
+	}
+}
+
 func waitForReplicationLastResult(t *testing.T, replicator *HTTPReplicator, accept func(ReplicationResult) bool) ReplicationResult {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
