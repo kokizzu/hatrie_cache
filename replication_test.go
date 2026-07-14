@@ -1,6 +1,8 @@
 package hatriecache
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -804,6 +806,42 @@ func TestHTTPReplicatorCompressesLargeReplicationRequests(t *testing.T) {
 	}
 	if got := follower.GetString("session:large"); got != large {
 		t.Fatalf("follower value length = %d, want %d", len(got), len(large))
+	}
+}
+
+func TestReplicationRequestBodyStreamsLargeStringPayload(t *testing.T) {
+	payload := CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:large",
+		Value:   strings.Repeat("x", minCompressedReplicationRequestBytes),
+	}
+	body, contentEncoding, err := replicationRequestBody(payload)
+	if err != nil {
+		t.Fatalf("replicationRequestBody() error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	if _, ok := body.(*streamingGzipJSONBody); !ok {
+		t.Fatalf("replicationRequestBody() body = %T, want streaming gzip body", body)
+	}
+
+	compressed, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll(compressed body) error = %v", err)
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatalf("NewReader(compressed body) error = %v", err)
+	}
+	defer reader.Close()
+
+	var decoded CacheCommandRequest
+	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(compressed body) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, payload) {
+		t.Fatalf("decoded payload = %#v, want %#v", decoded, payload)
 	}
 }
 

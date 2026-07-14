@@ -620,11 +620,6 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 		result.Error = err.Error()
 		return result
 	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
 	postCtx := ctx
 	cancel := func() {}
 	if replicator.timeout > 0 {
@@ -632,7 +627,7 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	defer cancel()
 
-	body, contentEncoding, err := replicationRequestBody(data)
+	body, contentEncoding, err := replicationRequestBody(payload)
 	if err != nil {
 		result.Error = err.Error()
 		return result
@@ -701,7 +696,15 @@ func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, err
 	return response, nil
 }
 
-func replicationRequestBody(data []byte) (io.Reader, string, error) {
+func replicationRequestBody(payload CacheCommandRequest) (io.Reader, string, error) {
+	if shouldStreamCompressedReplicationRequest(payload) {
+		return streamingGzipJSONReader(payload), "gzip", nil
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
 	if len(data) < minCompressedReplicationRequestBytes {
 		return bytes.NewReader(data), "", nil
 	}
@@ -718,6 +721,49 @@ func replicationRequestBody(data []byte) (io.Reader, string, error) {
 		return nil, "", closeErr
 	}
 	return bytes.NewReader(compressed.Bytes()), "gzip", nil
+}
+
+func shouldStreamCompressedReplicationRequest(payload CacheCommandRequest) bool {
+	return len(payload.Command)+len(payload.Key)+len(payload.Value)+len(payload.Subkey) >= minCompressedReplicationRequestBytes
+}
+
+func streamingGzipJSONReader(value interface{}) io.Reader {
+	reader, writer := io.Pipe()
+	return &streamingGzipJSONBody{
+		reader: reader,
+		writer: writer,
+		value:  value,
+	}
+}
+
+type streamingGzipJSONBody struct {
+	start  sync.Once
+	reader *io.PipeReader
+	writer *io.PipeWriter
+	value  interface{}
+}
+
+func (body *streamingGzipJSONBody) Read(data []byte) (int, error) {
+	body.start.Do(body.write)
+	return body.reader.Read(data)
+}
+
+func (body *streamingGzipJSONBody) Close() error {
+	return body.reader.Close()
+}
+
+func (body *streamingGzipJSONBody) write() {
+	go func() {
+		gzipWriter := acquireGzipWriter(body.writer)
+		encodeErr := json.NewEncoder(gzipWriter).Encode(body.value)
+		closeErr := gzipWriter.Close()
+		releaseGzipWriter(gzipWriter)
+		if encodeErr != nil {
+			_ = body.writer.CloseWithError(encodeErr)
+			return
+		}
+		_ = body.writer.CloseWithError(closeErr)
+	}()
 }
 
 func drainAndClose(body io.ReadCloser) {
