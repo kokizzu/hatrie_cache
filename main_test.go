@@ -1441,13 +1441,73 @@ func TestCuckooFilterOperations(t *testing.T) {
 	}
 }
 
+func TestCuckooFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if added, err := ht.AddCuckooFilterChecked("seen", "alpha"); err != nil || added != 1 {
+		t.Fatalf("AddCuckooFilterChecked(alpha) = %d/%v, want 1/nil", added, err)
+	}
+
+	if added, err := ht.AddCuckooFilterChecked("seen", "beta", func() {}); err == nil {
+		t.Fatalf("AddCuckooFilterChecked(unsupported batch) = %d/nil, want error", added)
+	}
+	info, ok := ht.CuckooFilterInfo("seen")
+	if !ok || info.Count != 1 {
+		t.Fatalf("CuckooFilterInfo(after rejected add) = %#v/%v, want one item", info, ok)
+	}
+	if !ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("rejected add removed existing Cuckoo filter value")
+	}
+	if deleted, err := ht.DeleteCuckooFilterChecked("seen", "alpha", func() {}); err == nil {
+		t.Fatalf("DeleteCuckooFilterChecked(unsupported batch) = %d/nil, want error", deleted)
+	}
+	info, ok = ht.CuckooFilterInfo("seen")
+	if !ok || info.Count != 1 {
+		t.Fatalf("CuckooFilterInfo(after rejected delete) = %#v/%v, want one item", info, ok)
+	}
+	if !ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("rejected delete removed existing Cuckoo filter value")
+	}
+
+	if added, err := ht.AddCuckooFilterChecked("missing", func() {}); err == nil {
+		t.Fatalf("AddCuckooFilterChecked(missing unsupported) = %d/nil, want error", added)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected missing-key Cuckoo filter left value %+v", got)
+	}
+	ht.UpsertString("string", "keep")
+	if added, err := ht.AddCuckooFilterChecked("string", func() {}); err == nil {
+		t.Fatalf("AddCuckooFilterChecked(replacement unsupported) = %d/nil, want error", added)
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("rejected replacement changed string to %q, want keep", got)
+	}
+	if hit, err := ht.HasCuckooFilterChecked("seen", func() {}); err == nil {
+		t.Fatalf("HasCuckooFilterChecked(unsupported) = %v/nil, want error", hit)
+	}
+	if deleted, err := ht.DeleteCuckooFilterChecked("seen", func() {}); err == nil {
+		t.Fatalf("DeleteCuckooFilterChecked(unsupported) = %d/nil, want error", deleted)
+	}
+	if got := ht.AddCuckooFilter("legacy", func() {}); got != 0 {
+		t.Fatalf("AddCuckooFilter legacy unsupported = %d, want 0", got)
+	}
+	if got := ht.Get("legacy"); !got.Empty() {
+		t.Fatalf("legacy rejected Cuckoo filter left value %+v", got)
+	}
+	if ht.HasCuckooFilter("seen", func() {}) {
+		t.Fatal("HasCuckooFilter legacy unsupported = true, want false")
+	}
+	if got := ht.DeleteCuckooFilter("seen", func() {}); got != 0 {
+		t.Fatalf("DeleteCuckooFilter legacy unsupported = %d, want 0", got)
+	}
+}
+
 func TestCuckooFilterRelocatesIntoReachableEmptyBucket(t *testing.T) {
 	filter := newCuckooFilterDataWithShape(4, minCuckooFilterFingerprintBits)
 	mask := cuckooFilterFingerprintMask(filter.fingerprintBits)
 
 	for candidate := 0; candidate < 10000; candidate++ {
 		value := "relocate-" + strconv.Itoa(candidate)
-		hash, fp, index, alternate := cuckooFilterPlacement(&filter, value)
+		hash, fp, index, alternate := cuckooFilterPlacement(t, &filter, value)
 		currentIndex := index
 		if (splitmix64(hash)^uint64(fp))&1 == 1 {
 			currentIndex = alternate
@@ -1502,7 +1562,7 @@ func TestCuckooFilterRelocationFailureRollsBack(t *testing.T) {
 
 	for candidate := 0; candidate < 10000; candidate++ {
 		value := "full-" + strconv.Itoa(candidate)
-		_, fp, index, alternate := cuckooFilterPlacement(&filter, value)
+		_, fp, index, alternate := cuckooFilterPlacement(t, &filter, value)
 		if filter.containsFingerprint(index, alternate, fp) {
 			continue
 		}
@@ -1521,8 +1581,12 @@ func TestCuckooFilterRelocationFailureRollsBack(t *testing.T) {
 	t.Fatal("could not find a non-matching value for a full Cuckoo filter")
 }
 
-func cuckooFilterPlacement(filter *cuckooFilterData, value interface{}) (uint64, uint16, uint64, uint64) {
-	key := mustCuckooFilterItemKey(value)
+func cuckooFilterPlacement(t *testing.T, filter *cuckooFilterData, value interface{}) (uint64, uint16, uint64, uint64) {
+	t.Helper()
+	key, err := cuckooFilterItemKey(value)
+	if err != nil {
+		t.Fatalf("cuckooFilterItemKey(%#v) error = %v", value, err)
+	}
 	hash := bloomFilterFNV64a(key)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)

@@ -326,14 +326,21 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		added := ht.AddCuckooFilter(key, values[0], values[1:]...)
+		added, err := ht.AddCuckooFilterChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "added cuckoo filter values", Value: strconv.Itoa(added)}
 	case "HASCF", "CFHAS", "CFEXISTS":
 		values, ok := commandSliceValues(request)
 		if !ok {
 			return commandError("value or values is required")
 		}
-		if ht.HasCuckooFilter(key, values[0]) {
+		hit, err := ht.HasCuckooFilterChecked(key, values[0])
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if hit {
 			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
@@ -342,7 +349,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		deleted := ht.DeleteCuckooFilter(key, values[0], values[1:]...)
+		deleted, err := ht.DeleteCuckooFilterChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "removed cuckoo filter values", Value: strconv.Itoa(deleted)}
 	case "INFOCF", "CFINFO":
 		info, ok := ht.CuckooFilterInfo(key)

@@ -404,6 +404,66 @@ func TestExecuteCommandCuckooFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandCuckooFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDCF", Key: "seen", Value: "alpha"}); !got.OK {
+		t.Fatalf("ADDCF alpha response = %#v, want ok", got)
+	}
+
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDCF",
+		Key:     "seen",
+		Values:  Slice{"beta", func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDCF unsupported response = %#v, want error", got)
+	}
+	info, ok := ht.CuckooFilterInfo("seen")
+	if !ok || info.Count != 1 {
+		t.Fatalf("CuckooFilterInfo(after rejected add command) = %#v/%v, want one item", info, ok)
+	}
+	if !ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("rejected ADDCF batch removed existing value")
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "DELCF",
+		Key:     "seen",
+		Values:  Slice{"alpha", func() {}},
+	})
+	if got.OK {
+		t.Fatalf("DELCF unsupported response = %#v, want error", got)
+	}
+	info, ok = ht.CuckooFilterInfo("seen")
+	if !ok || info.Count != 1 {
+		t.Fatalf("CuckooFilterInfo(after rejected delete command) = %#v/%v, want one item", info, ok)
+	}
+	if !ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("rejected DELCF batch removed existing value")
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDCF",
+		Key:     "missing",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDCF missing unsupported response = %#v, want error", got)
+	}
+	if value := ht.Get("missing"); !value.Empty() {
+		t.Fatalf("rejected missing-key Cuckoo filter command left value %+v", value)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "HASCF",
+		Key:     "seen",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("HASCF unsupported response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandXorFilterOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

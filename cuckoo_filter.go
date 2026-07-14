@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/bits"
 )
@@ -160,10 +161,38 @@ func newCuckooFilterDataFromSnapshot(snapshot cuckooFilterSnapshot) (cuckooFilte
 }
 
 func (filter *cuckooFilterData) Add(value interface{}) bool {
+	added, _ := filter.AddChecked(value)
+	return added
+}
+
+func (filter *cuckooFilterData) AddChecked(value interface{}) (bool, error) {
+	added, err := filter.AddOneChecked(value)
+	return added > 0, err
+}
+
+func (filter *cuckooFilterData) AddOne(value interface{}, values ...interface{}) int {
+	added, _ := filter.AddOneChecked(value, values...)
+	return added
+}
+
+func (filter *cuckooFilterData) AddOneChecked(value interface{}, values ...interface{}) (int, error) {
 	if filter == nil || filter.bucketCount == 0 || filter.fingerprintBits == 0 {
-		return false
+		return 0, nil
 	}
-	key := mustCuckooFilterItemKey(value)
+	keys, err := cuckooFilterItemKeys(value, values...)
+	if err != nil {
+		return 0, err
+	}
+	added := 0
+	for _, key := range keys {
+		if filter.addKey(key) {
+			added++
+		}
+	}
+	return added, nil
+}
+
+func (filter *cuckooFilterData) addKey(key []byte) bool {
 	hash := bloomFilterFNV64a(key)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)
@@ -182,24 +211,23 @@ func (filter *cuckooFilterData) Add(value interface{}) bool {
 	return false
 }
 
-func (filter *cuckooFilterData) AddOne(value interface{}, values ...interface{}) int {
-	added := 0
-	if filter.Add(value) {
-		added++
-	}
-	for _, value := range values {
-		if filter.Add(value) {
-			added++
-		}
-	}
-	return added
+func (filter *cuckooFilterData) Contains(value interface{}) bool {
+	contains, _ := filter.ContainsChecked(value)
+	return contains
 }
 
-func (filter *cuckooFilterData) Contains(value interface{}) bool {
+func (filter *cuckooFilterData) ContainsChecked(value interface{}) (bool, error) {
 	if filter == nil || filter.bucketCount == 0 || filter.fingerprintBits == 0 {
-		return false
+		return false, nil
 	}
-	key := mustCuckooFilterItemKey(value)
+	key, err := cuckooFilterItemKey(value)
+	if err != nil {
+		return false, err
+	}
+	return filter.containsKey(key), nil
+}
+
+func (filter *cuckooFilterData) containsKey(key []byte) bool {
 	hash := bloomFilterFNV64a(key)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)
@@ -207,10 +235,38 @@ func (filter *cuckooFilterData) Contains(value interface{}) bool {
 }
 
 func (filter *cuckooFilterData) Delete(value interface{}) bool {
+	deleted, _ := filter.DeleteChecked(value)
+	return deleted
+}
+
+func (filter *cuckooFilterData) DeleteChecked(value interface{}) (bool, error) {
+	deleted, err := filter.DeleteOneChecked(value)
+	return deleted > 0, err
+}
+
+func (filter *cuckooFilterData) DeleteOne(value interface{}, values ...interface{}) int {
+	deleted, _ := filter.DeleteOneChecked(value, values...)
+	return deleted
+}
+
+func (filter *cuckooFilterData) DeleteOneChecked(value interface{}, values ...interface{}) (int, error) {
 	if filter == nil || filter.bucketCount == 0 || filter.fingerprintBits == 0 {
-		return false
+		return 0, nil
 	}
-	key := mustCuckooFilterItemKey(value)
+	keys, err := cuckooFilterItemKeys(value, values...)
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	for _, key := range keys {
+		if filter.deleteKey(key) {
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+func (filter *cuckooFilterData) deleteKey(key []byte) bool {
 	hash := bloomFilterFNV64a(key)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)
@@ -219,19 +275,6 @@ func (filter *cuckooFilterData) Delete(value interface{}) bool {
 		return true
 	}
 	return false
-}
-
-func (filter *cuckooFilterData) DeleteOne(value interface{}, values ...interface{}) int {
-	deleted := 0
-	if filter.Delete(value) {
-		deleted++
-	}
-	for _, value := range values {
-		if filter.Delete(value) {
-			deleted++
-		}
-	}
-	return deleted
 }
 
 func (filter cuckooFilterData) Info() CuckooFilterInfo {
@@ -378,16 +421,29 @@ func cuckooFilterEstimatedFalsePositiveRate(fingerprintBits uint8) float64 {
 	return 1 - math.Pow(1-math.Pow(2, -float64(fingerprintBits)), float64(2*cuckooFilterBucketSize))
 }
 
-func mustCuckooFilterItemKey(value interface{}) []byte {
+func cuckooFilterItemKeys(value interface{}, values ...interface{}) ([][]byte, error) {
+	keys := make([][]byte, 0, 1+len(values))
 	key, err := cuckooFilterItemKey(value)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return key
+	keys = append(keys, key)
+	for _, value := range values {
+		key, err := cuckooFilterItemKey(value)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 func cuckooFilterItemKey(value interface{}) ([]byte, error) {
-	return json.Marshal(value)
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("hatriecache: unsupported cuckoo filter value: %w", err)
+	}
+	return data, nil
 }
 
 func nextPowerOfTwoUint64(value uint64) uint64 {
@@ -481,57 +537,108 @@ func (ht *HatTrie) UpsertCuckooFilter(key string, capacity uint64, falsePositive
 }
 
 func (ht *HatTrie) AddCuckooFilter(key string, val interface{}, vals ...interface{}) int {
+	added, _ := ht.AddCuckooFilterChecked(key, val, vals...)
+	return added
+}
+
+func (ht *HatTrie) AddCuckooFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr != nil {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
+	} else {
+		ht.clearExpirationLocked(key)
+	}
 	if hval.IsCuckooFilter() {
-		added := ht.cuckooFilters.array[hval.Index].AddOne(val, vals...)
+		added, err := ht.cuckooFilters.array[hval.Index].AddOneChecked(val, vals...)
+		if err != nil {
+			return 0, err
+		}
 		*rawPtr = hval.toValue()
 		if added > 0 {
 			ht.recordWriteLocked(key)
 		}
-		return added
+		return added, nil
 	}
 
+	data := newDefaultCuckooFilterData()
+	added, err := data.AddOneChecked(val, vals...)
+	if err != nil {
+		return 0, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.cuckooFilters.AddData(newDefaultCuckooFilterData())
-	added := ht.cuckooFilters.array[idx].AddOne(val, vals...)
+	idx := ht.cuckooFilters.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_CUCKOO_FILTER}.toValue()
 	ht.recordWriteLocked(key)
-	return added
+	return added, nil
 }
 
 func (ht *HatTrie) HasCuckooFilter(key string, val interface{}) bool {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.getLocked(key)
-	if !hval.IsCuckooFilter() {
-		ht.recordReadLocked(false, key)
-		return false
-	}
-	hit := ht.cuckooFilters.array[hval.Index].Contains(val)
-	ht.recordReadLocked(hit, key)
+	hit, _ := ht.HasCuckooFilterChecked(key, val)
 	return hit
 }
 
-func (ht *HatTrie) DeleteCuckooFilter(key string, val interface{}, vals ...interface{}) int {
+func (ht *HatTrie) HasCuckooFilterChecked(key string, val interface{}) (bool, error) {
+	valueKey, err := cuckooFilterItemKey(val)
+	if err != nil {
+		return false, err
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
 	if !hval.IsCuckooFilter() {
 		ht.recordReadLocked(false, key)
-		return 0
+		return false, nil
 	}
-	deleted := ht.cuckooFilters.array[hval.Index].DeleteOne(val, vals...)
+	hit := ht.cuckooFilters.array[hval.Index].containsKey(valueKey)
+	ht.recordReadLocked(hit, key)
+	return hit, nil
+}
+
+func (ht *HatTrie) DeleteCuckooFilter(key string, val interface{}, vals ...interface{}) int {
+	deleted, _ := ht.DeleteCuckooFilterChecked(key, val, vals...)
+	return deleted
+}
+
+func (ht *HatTrie) DeleteCuckooFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	valueKeys, err := cuckooFilterItemKeys(val, vals...)
+	if err != nil {
+		return 0, err
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.getLocked(key)
+	if !hval.IsCuckooFilter() {
+		ht.recordReadLocked(false, key)
+		return 0, nil
+	}
+	deleted := 0
+	filter := &ht.cuckooFilters.array[hval.Index]
+	for _, valueKey := range valueKeys {
+		if filter.deleteKey(valueKey) {
+			deleted++
+		}
+	}
 	ht.recordReadLocked(deleted > 0, key)
 	if deleted > 0 {
 		ht.recordWriteLocked(key)
 	}
-	return deleted
+	return deleted, nil
 }
 
 func (ht *HatTrie) CuckooFilterInfo(key string) (CuckooFilterInfo, bool) {
