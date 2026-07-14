@@ -309,11 +309,11 @@ func (top topKData) Info() TopKInfo {
 }
 
 func (top topKData) EncodedSize() int64 {
-	data, err := json.Marshal(top.Snapshot())
+	size, err := jsonEncodedSize(top.Snapshot())
 	if err != nil {
 		return 0
 	}
-	return int64(len(data))
+	return size
 }
 
 func (top topKData) sortedItems() []topKItem {

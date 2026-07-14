@@ -1,7 +1,6 @@
 package hatriecache
 
 import (
-	"encoding/json"
 	"errors"
 	"math"
 	"sort"
@@ -221,11 +220,11 @@ func (sketch quantileSketchData) Info() QuantileSketchInfo {
 }
 
 func (sketch quantileSketchData) EncodedSize() int64 {
-	data, err := json.Marshal(sketch.Snapshot())
+	size, err := jsonEncodedSize(sketch.Snapshot())
 	if err != nil {
 		return 0
 	}
-	return int64(len(data))
+	return size
 }
 
 func (sketch *quantileSketchData) compress() {

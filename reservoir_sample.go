@@ -278,11 +278,11 @@ func (sample reservoirSampleData) Info() ReservoirSampleInfo {
 }
 
 func (sample reservoirSampleData) EncodedSize() int64 {
-	data, err := json.Marshal(sample.Snapshot())
+	size, err := jsonEncodedSize(sample.Snapshot())
 	if err != nil {
 		return 0
 	}
-	return int64(len(data))
+	return size
 }
 
 func (sample reservoirSampleData) sortedItems() []reservoirSampleItem {

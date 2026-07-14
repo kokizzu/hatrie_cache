@@ -1,7 +1,6 @@
 package hatriecache
 
 import (
-	"encoding/json"
 	"errors"
 	"strconv"
 )
@@ -225,11 +224,11 @@ func (tree fenwickTreeData) Info() FenwickTreeInfo {
 }
 
 func (tree fenwickTreeData) EncodedSize() int64 {
-	data, err := json.Marshal(tree.Snapshot())
+	size, err := jsonEncodedSize(tree.Snapshot())
 	if err != nil {
 		return 0
 	}
-	return int64(len(data))
+	return size
 }
 
 func (tree fenwickTreeData) canAdd(index uint64, delta int64) bool {
