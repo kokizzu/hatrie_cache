@@ -352,6 +352,109 @@ func TestLevelDBBinaryCollectionStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryPriorityQueueUsesBinaryValuePayload(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "jobs",
+		Type: "priority_queue",
+		PriorityQueue: []priorityQueueItem{
+			{Priority: 5, Sequence: 2, Value: json.Number("7")},
+			{Priority: 1, Sequence: 1, Value: Map{"job": "urgent"}},
+			{Priority: 3, Sequence: 3, Value: []byte("payload")},
+		},
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary priority queue) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("priority queue payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary priority queue) error = %v", err)
+	}
+	want := []priorityQueueItem{
+		{Priority: 5, Sequence: 2, Value: json.Number("7")},
+		{Priority: 1, Sequence: 1, Value: Map{"job": "urgent"}},
+		{Priority: 3, Sequence: 3, Value: base64.StdEncoding.EncodeToString([]byte("payload"))},
+	}
+	if !reflect.DeepEqual(decoded.PriorityQueue, want) {
+		t.Fatalf("decoded priority queue = %#v, want %#v", decoded.PriorityQueue, want)
+	}
+}
+
+func TestLevelDBBinaryPriorityQueueFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "jobs",
+		Type: "priority_queue",
+		PriorityQueue: []priorityQueueItem{
+			{Priority: 1, Sequence: 1, Value: PriorityQueue{{Priority: 9, Value: "nested"}}},
+		},
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(priority queue fallback) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if snapshotValueDataIsBinary(payload) {
+		t.Fatalf("priority queue fallback payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	}
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(priority queue fallback) error = %v", err)
+	}
+	if len(decoded.PriorityQueue) != 1 || decoded.PriorityQueue[0].Priority != 1 || decoded.PriorityQueue[0].Sequence != 1 {
+		t.Fatalf("decoded fallback priority queue metadata = %#v, want one item priority 1 sequence 1", decoded.PriorityQueue)
+	}
+	nested, ok := decoded.PriorityQueue[0].Value.([]interface{})
+	if !ok || len(nested) != 1 {
+		t.Fatalf("decoded fallback priority queue value = %#v, want JSON array", decoded.PriorityQueue[0].Value)
+	}
+	nestedItem, ok := nested[0].(map[string]interface{})
+	if !ok || nestedItem["priority"] != json.Number("9") || nestedItem["value"] != "nested" {
+		t.Fatalf("decoded fallback nested item = %#v, want JSON priority item", nested[0])
+	}
+}
+
+func TestLevelDBBinaryPriorityQueueStillReadsLegacyJSONPayload(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "legacy-jobs",
+		Type: "priority_queue",
+		PriorityQueue: []priorityQueueItem{
+			{Priority: 2, Sequence: 7, Value: "legacy"},
+			{Priority: 2, Sequence: 8, Value: json.Number("42")},
+		},
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(priority queue) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON priority queue) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.PriorityQueue, entry.PriorityQueue) {
+		t.Fatalf("decoded legacy inner JSON priority queue = %#v, want %#v", decoded.PriorityQueue, entry.PriorityQueue)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {

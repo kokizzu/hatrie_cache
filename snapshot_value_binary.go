@@ -21,6 +21,7 @@ const (
 	snapshotValueBinaryNumber
 	snapshotValueBinaryArray
 	snapshotValueBinaryObject
+	snapshotValueBinaryPriorityQueue
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -36,6 +37,18 @@ func marshalSnapshotCollectionValueBinary(value interface{}) ([]byte, bool, erro
 	}
 	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
 	if ok := writeSnapshotValueBinary(&writer, value); !ok {
+		return nil, false, nil
+	}
+	return writer.bytes(), true, nil
+}
+
+func marshalSnapshotPriorityQueueValueBinary(items []priorityQueueItem) ([]byte, bool, error) {
+	size, ok, err := snapshotValueBinaryPriorityQueueSize(items)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	if ok := writeSnapshotValueBinaryPriorityQueue(&writer, items); !ok {
 		return nil, false, nil
 	}
 	return writer.bytes(), true, nil
@@ -135,6 +148,29 @@ func snapshotValueBinaryMapSize(values map[string]interface{}) (int, bool, error
 	return total, true, nil
 }
 
+func snapshotValueBinaryPriorityQueueSize(items []priorityQueueItem) (int, bool, error) {
+	total, err := snapshotValueBinaryAdd(1, binaryUvarintSize(uint64(len(items))))
+	if err != nil {
+		return 0, true, err
+	}
+	for _, item := range items {
+		itemSize := binaryVarintSize(item.Priority) + binaryUvarintSize(item.Sequence)
+		valueSize, ok, err := snapshotValueBinarySize(item.Value)
+		if err != nil || !ok {
+			return 0, ok, err
+		}
+		itemSize, err = snapshotValueBinaryAdd(itemSize, valueSize)
+		if err != nil {
+			return 0, true, err
+		}
+		total, err = snapshotValueBinaryAdd(total, itemSize)
+		if err != nil {
+			return 0, true, err
+		}
+	}
+	return total, true, nil
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -209,6 +245,19 @@ func writeSnapshotValueBinaryMap(writer *binaryFieldWriter, values map[string]in
 	for _, key := range keys {
 		writer.writeString(key)
 		if ok := writeSnapshotValueBinary(writer, values[key]); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func writeSnapshotValueBinaryPriorityQueue(writer *binaryFieldWriter, items []priorityQueueItem) bool {
+	writer.buf = append(writer.buf, snapshotValueBinaryPriorityQueue)
+	writer.writeUvarint(uint64(len(items)))
+	for _, item := range items {
+		writer.writeVarint(item.Priority)
+		writer.writeUvarint(item.Sequence)
+		if ok := writeSnapshotValueBinary(writer, item.Value); !ok {
 			return false
 		}
 	}
@@ -292,6 +341,35 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			values[key] = value
 		}
 		return values, nil
+	case snapshotValueBinaryPriorityQueue:
+		count, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if count > uint64(int(^uint(0)>>1)) {
+			return nil, errSnapshotValueBinaryTooLarge
+		}
+		items := make([]priorityQueueItem, 0, int(count))
+		for idx := 0; idx < int(count); idx++ {
+			priority, err := reader.readVarint()
+			if err != nil {
+				return nil, err
+			}
+			sequence, err := reader.readUvarint()
+			if err != nil {
+				return nil, err
+			}
+			value, err := readSnapshotValueBinary(reader)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, priorityQueueItem{
+				Priority: priority,
+				Sequence: sequence,
+				Value:    value,
+			})
+		}
+		return items, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)
 	}

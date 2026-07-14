@@ -259,6 +259,8 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 		return prepareLevelDBBinaryCollectionValue(entry.Slice)
 	case "set":
 		return prepareLevelDBBinaryCollectionValue(entry.Set)
+	case "priority_queue":
+		return prepareLevelDBBinaryPriorityQueueValue(entry.PriorityQueue)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -284,6 +286,29 @@ func prepareLevelDBBinaryCollectionValue(value interface{}) (levelDBBinaryPrepar
 	if !ok {
 		var marshalErr error
 		payload, marshalErr = json.Marshal(value)
+		if marshalErr != nil {
+			return levelDBBinaryPreparedValue{}, marshalErr
+		}
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryPriorityQueueValue(items []priorityQueueItem) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotPriorityQueueValueBinary(items)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	if !ok {
+		var marshalErr error
+		payload, marshalErr = json.Marshal(items)
 		if marshalErr != nil {
 			return levelDBBinaryPreparedValue{}, marshalErr
 		}
@@ -570,6 +595,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 		}
 		return decodeLevelDBStorageJSON(data, &entry.Set)
 	case "priority_queue":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			items, ok := value.([]priorityQueueItem)
+			if !ok {
+				return errors.New("hatriecache: binary priority queue value is not a priority queue")
+			}
+			entry.PriorityQueue = items
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.PriorityQueue)
 	case "bloom_filter":
 		return decodeLevelDBStorageJSON(data, &entry.BloomFilter)
