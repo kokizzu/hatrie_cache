@@ -212,9 +212,67 @@ void test_ahtable_sorted_iteration()
     fprintf(stderr, "done.\n");
 }
 
+void fill_repeated(char* x, size_t len, char c)
+{
+    memset(x, c, len);
+    x[len] = '\0';
+}
+
+
+void test_ahtable_key_length_limit()
+{
+    fprintf(stderr, "checking key length limit... \n");
+
+    ahtable_t* T = ahtable_create();
+    char* max_key = malloc(ahtable_max_key_length + 1);
+    char* too_long = malloc(ahtable_max_key_length + 2);
+    fill_repeated(max_key, ahtable_max_key_length, 'm');
+    fill_repeated(too_long, ahtable_max_key_length + 1, 'x');
+
+    value_t* v = ahtable_get(T, max_key, ahtable_max_key_length);
+    if (v == NULL) {
+        fprintf(stderr, "[error] max length key was rejected\n");
+        have_error = 1;
+    }
+    else {
+        *v = 42;
+        v = ahtable_tryget(T, max_key, ahtable_max_key_length);
+        if (v == NULL || *v != 42) {
+            fprintf(stderr, "[error] max length key was not retrieved\n");
+            have_error = 1;
+        }
+    }
+
+    v = ahtable_get(T, too_long, ahtable_max_key_length + 1);
+    if (v != NULL) {
+        fprintf(stderr, "[error] oversized key was inserted\n");
+        have_error = 1;
+    }
+    if (ahtable_tryget(T, too_long, ahtable_max_key_length + 1) != NULL) {
+        fprintf(stderr, "[error] oversized key was found\n");
+        have_error = 1;
+    }
+    if (ahtable_del(T, too_long, ahtable_max_key_length + 1) == 0) {
+        fprintf(stderr, "[error] oversized key was deleted\n");
+        have_error = 1;
+    }
+    if (ahtable_size(T) != 1) {
+        fprintf(stderr, "[error] oversized key changed table size to %zu\n", ahtable_size(T));
+        have_error = 1;
+    }
+
+    free(max_key);
+    free(too_long);
+    ahtable_free(T);
+
+    fprintf(stderr, "done.\n");
+}
+
 
 int main()
 {
+    test_ahtable_key_length_limit();
+
     setup();
     test_ahtable_insert();
     test_ahtable_iteration();

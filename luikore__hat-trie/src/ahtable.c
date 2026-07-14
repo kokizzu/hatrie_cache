@@ -15,6 +15,7 @@
 
 const double ahtable_max_load_factor = 100000.0; /* arbitrary large number => don't resize */
 const size_t ahtable_initial_size = 4096;
+const size_t ahtable_max_key_length = ((size_t) 1 << 15) - 1;
 
 static size_t keylen(slot_t s) {
     if (0x1 & *s) {
@@ -83,6 +84,8 @@ void ahtable_clear(ahtable_t* T)
 
 static slot_t ins_key(slot_t s, const char* key, size_t len, value_t** val)
 {
+    assert(len <= ahtable_max_key_length);
+
     // key length
     if (len < 128) {
         s[0] = (unsigned char) (len << 1);
@@ -188,6 +191,10 @@ static void ahtable_expand(ahtable_t* T)
 
 static value_t* get_key(ahtable_t* T, const char* key, size_t len, bool insert_missing)
 {
+    if (len > ahtable_max_key_length) {
+        return NULL;
+    }
+
     /* if we are at capacity, preemptively resize */
     if (insert_missing && T->m >= T->max_m) {
         ahtable_expand(T);
@@ -257,6 +264,10 @@ value_t* ahtable_tryget(ahtable_t* T, const char* key, size_t len )
 
 int ahtable_del(ahtable_t* T, const char* key, size_t len)
 {
+    if (len > ahtable_max_key_length) {
+        return -1;
+    }
+
     uint32_t i = hash(key, len) % T->n;
     size_t k;
     slot_t s;
@@ -547,4 +558,3 @@ value_t* ahtable_iter_val(ahtable_iter_t* i)
     if (i->sorted) return ahtable_sorted_iter_val(i->i.sorted);
     else           return ahtable_unsorted_iter_val(i->i.unsorted);
 }
-

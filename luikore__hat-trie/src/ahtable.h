@@ -47,6 +47,7 @@ typedef struct ahtable_t_
 
 extern const double ahtable_max_load_factor;
 extern const size_t ahtable_initial_size;
+extern const size_t ahtable_max_key_length;
 
 ahtable_t* ahtable_create   (void);         // Create an empty hash table.
 ahtable_t* ahtable_create_n (size_t n);     // Create an empty hash table, with
@@ -60,6 +61,8 @@ size_t     ahtable_size   (const ahtable_t*); // Number of stored keys.
 /** Find the given key in the table, inserting it if it does not exist, and
  * returning a pointer to it's key.
  *
+ * Keys longer than ahtable_max_key_length are rejected with NULL.
+ *
  * This pointer is not guaranteed to be valid after additional calls to
  * ahtable_get, ahtable_del, ahtable_clear, or other functions that modifies the
  * table.
@@ -68,7 +71,7 @@ value_t* ahtable_get (ahtable_t*, const char* key, size_t len);
 
 
 /** Find a given key in the table, returning a NULL pointer if it does not
- * exist. */
+ * exist or exceeds ahtable_max_key_length. */
 value_t* ahtable_tryget (ahtable_t*, const char* key, size_t len);
 
 
@@ -90,4 +93,3 @@ value_t*        ahtable_iter_val       (ahtable_iter_t*);
 #endif
 
 #endif
-

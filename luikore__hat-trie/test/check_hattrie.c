@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "str_map.h"
+#include "../src/ahtable.h"
 #include "../src/hat-trie.h"
 
 /* Simple random string generation. */
@@ -312,12 +313,70 @@ void test_trie_walk()
     hattrie_free(T);
 }
 
+void fill_repeated(char* x, size_t len, char c)
+{
+    memset(x, c, len);
+    x[len] = '\0';
+}
+
+
+void test_hattrie_key_length_limit()
+{
+    fprintf(stderr, "checking trie key length limit... \n");
+
+    hattrie_t* T = hattrie_create();
+    size_t max_trie_key_length = ahtable_max_key_length;
+    char* max_key = malloc(max_trie_key_length + 1);
+    char* too_long = malloc(max_trie_key_length + 2);
+    fill_repeated(max_key, max_trie_key_length, 'm');
+    fill_repeated(too_long, max_trie_key_length + 1, 'x');
+
+    value_t* v = hattrie_get(T, max_key, max_trie_key_length);
+    if (v == NULL) {
+        fprintf(stderr, "[error] max length trie key was rejected\n");
+        have_error = 1;
+    }
+    else {
+        *v = 24;
+        v = hattrie_tryget(T, max_key, max_trie_key_length);
+        if (v == NULL || *v != 24) {
+            fprintf(stderr, "[error] max length trie key was not retrieved\n");
+            have_error = 1;
+        }
+    }
+
+    v = hattrie_get(T, too_long, max_trie_key_length + 1);
+    if (v != NULL) {
+        fprintf(stderr, "[error] oversized trie key was inserted\n");
+        have_error = 1;
+    }
+    if (hattrie_tryget(T, too_long, max_trie_key_length + 1) != NULL) {
+        fprintf(stderr, "[error] oversized trie key was found\n");
+        have_error = 1;
+    }
+    if (hattrie_del(T, too_long, max_trie_key_length + 1) == 0) {
+        fprintf(stderr, "[error] oversized trie key was deleted\n");
+        have_error = 1;
+    }
+    if (hattrie_size(T) != 1) {
+        fprintf(stderr, "[error] oversized trie key changed size to %zu\n", hattrie_size(T));
+        have_error = 1;
+    }
+
+    free(max_key);
+    free(too_long);
+    hattrie_free(T);
+
+    fprintf(stderr, "done.\n");
+}
+
 
 
 int main()
 {
     test_trie_non_ascii();
     test_trie_walk();
+    test_hattrie_key_length_limit();
 
     setup();
     test_hattrie_insert();
