@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
@@ -85,12 +87,20 @@ func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecache
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	entries := server.trie.monitoringEntries(request.GetPrefix())
-	out := make([]*hatriecachev1.Entry, 0, len(entries))
-	for _, entry := range entries {
+	limit := request.GetLimit()
+	if limit > maxMonitoringEntriesLimit {
+		return nil, status.Errorf(codes.InvalidArgument, "limit must be <= %d", maxMonitoringEntriesLimit)
+	}
+	entries := server.trie.monitoringEntriesLimited(request.GetPrefix(), int(limit))
+	out := make([]*hatriecachev1.Entry, 0, len(entries.Entries))
+	for _, entry := range entries.Entries {
 		out = append(out, grpcEntry(entry))
 	}
-	return &hatriecachev1.EntriesResponse{Entries: out}, nil
+	return &hatriecachev1.EntriesResponse{
+		Entries: out,
+		Limit:   entries.Limit,
+		HasMore: entries.HasMore,
+	}, nil
 }
 
 func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecachev1.CommandRequest) (*hatriecachev1.CommandResponse, error) {

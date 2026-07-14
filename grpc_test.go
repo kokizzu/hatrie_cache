@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
@@ -796,6 +798,57 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerLimitsEntries(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("session:1", "one")
+	ht.UpsertString("session:2", "two")
+	ht.UpsertString("session:3", "three")
+	ht.UpsertString("other:1", "ignored")
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+
+	limited, err := client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
+		Prefix: "session:",
+		Limit:  2,
+	})
+	if err != nil {
+		t.Fatalf("Entries(limit=2) error = %v", err)
+	}
+	if limited.GetLimit() != 2 || !limited.GetHasMore() {
+		t.Fatalf("limited entries metadata = limit %d has_more %v, want 2/true", limited.GetLimit(), limited.GetHasMore())
+	}
+	if got := grpcEntryKeys(limited.GetEntries()); !reflect.DeepEqual(got, []string{"session:1", "session:2"}) {
+		t.Fatalf("limited entries keys = %#v, want first two sorted session keys", got)
+	}
+
+	exact, err := client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
+		Prefix: "session:",
+		Limit:  3,
+	})
+	if err != nil {
+		t.Fatalf("Entries(limit=3) error = %v", err)
+	}
+	if exact.GetLimit() != 3 || exact.GetHasMore() {
+		t.Fatalf("exact entries metadata = limit %d has_more %v, want 3/false", exact.GetLimit(), exact.GetHasMore())
+	}
+	if got := grpcEntryKeys(exact.GetEntries()); !reflect.DeepEqual(got, []string{"session:1", "session:2", "session:3"}) {
+		t.Fatalf("exact entries keys = %#v, want all sorted session keys", got)
+	}
+}
+
+func TestCacheGRPCServerRejectsOversizedEntriesLimit(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+
+	_, err := client.Entries(context.Background(), &hatriecachev1.EntriesRequest{
+		Limit: maxMonitoringEntriesLimit + 1,
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Entries(oversized limit) error = %v, want InvalidArgument", err)
+	}
+}
+
 func TestCacheGRPCServerAcceptsGzipCompressedCalls(t *testing.T) {
 	ht := newTestTrie(t)
 	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{
@@ -1403,6 +1456,14 @@ func TestCacheGRPCServerHonorsCanceledContexts(t *testing.T) {
 	if _, err := server.UpdateElection(ctx, &hatriecachev1.UpdateElectionRequest{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("UpdateElection(canceled) error = %v, want context.Canceled", err)
 	}
+}
+
+func grpcEntryKeys(entries []*hatriecachev1.Entry) []string {
+	keys := make([]string, len(entries))
+	for idx, entry := range entries {
+		keys[idx] = entry.GetKey()
+	}
+	return keys
 }
 
 func newTestGRPCClient(t *testing.T, ht *HatTrie, options CacheGRPCOptions) (hatriecachev1.CacheServiceClient, func()) {

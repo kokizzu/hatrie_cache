@@ -455,7 +455,9 @@ service in another Go process, or use the generated client in
 `internal/gen/hatriecache/v1`. gRPC command handling can use the same journal,
 leader-write enforcement, and HTTP replication options as the monitoring
 command API. Clients may request gRPC transfer compression with the standard
-`gzip` compressor; the server registers it at the fastest compression level. The
+`gzip` compressor; the server registers it at the fastest compression level.
+`EntriesRequest.limit` bounds large key listings and returns `has_more` when
+another matching entry exists after the returned page. The
 `Replication` RPC returns the same last result and async queue stats as
 `GET /api/replication`; set `sync=true` with an optional `prefix` to run the
 same anti-entropy sync exposed by `POST /api/replication`. The `Topology`,
