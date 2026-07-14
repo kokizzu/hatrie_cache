@@ -453,6 +453,38 @@ func TestFetchCommandJournalTailDrainsErrorResponseBody(t *testing.T) {
 	}
 }
 
+func TestFetchCommandJournalTailMarksTruncatedErrorResponseBody(t *testing.T) {
+	body := newTrackingReadCloser(strings.Repeat("x", maxCommandJournalErrorResponseBytes+128) + "tail-marker")
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Status:     "502 Bad Gateway",
+				Header:     make(http.Header),
+				Body:       body,
+				Request:    request,
+			}, nil
+		}),
+	}
+
+	_, status, err := fetchCommandJournalTail(context.Background(), client, "http://source.example/api/journal")
+	if err == nil || status != http.StatusBadGateway || !strings.Contains(err.Error(), "journal source returned 502 Bad Gateway") {
+		t.Fatalf("fetchCommandJournalTail() status/error = %d/%v, want 502 source error", status, err)
+	}
+	if strings.Contains(err.Error(), "tail-marker") {
+		t.Fatal("error included body beyond limit")
+	}
+	if !strings.Contains(err.Error(), truncatedCommandJournalErrorResponseSuffix) {
+		t.Fatalf("error = %q, want truncation suffix", err)
+	}
+	if len(err.Error()) > maxCommandJournalErrorResponseBytes+256 {
+		t.Fatalf("error length = %d, want bounded body", len(err.Error()))
+	}
+	if !body.drained || !body.closed {
+		t.Fatalf("response body drained=%v closed=%v, want both true", body.drained, body.closed)
+	}
+}
+
 func TestFetchCommandJournalTailRejectsOversizedResponseBody(t *testing.T) {
 	body := `{"entries":[],"padding":"` + strings.Repeat("x", maxCommandJournalTailResponseBytes) + `"}`
 	client := &http.Client{

@@ -17,9 +17,13 @@ import (
 	"hatrie_cache/internal/jsonwire"
 )
 
-const maxCommandJournalTailResponseBytes = 1 << 20
-const maxMonitoringJSONRequestBytes = 1 << 20
-const maxMonitoringEntriesLimit = 100000
+const (
+	maxCommandJournalTailResponseBytes         = 1 << 20
+	maxCommandJournalErrorResponseBytes        = 1 << 20
+	maxMonitoringJSONRequestBytes              = 1 << 20
+	maxMonitoringEntriesLimit                  = 100000
+	truncatedCommandJournalErrorResponseSuffix = "\n... journal source error body truncated"
+)
 
 var errCommandJournalTailResponseTooLarge = errors.New("hatriecache: journal source response is too large")
 var errMonitoringEntriesLimitReached = errors.New("hatriecache: monitoring entries limit reached")
@@ -577,7 +581,7 @@ func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint 
 	defer drainAndClose(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body, readErr := readCommandJournalErrorResponseBody(resp.Body)
 		if readErr != nil {
 			return CommandJournalTail{}, resp.StatusCode, readErr
 		}
@@ -618,6 +622,19 @@ func decodeCommandJournalTailResponse(body io.Reader) (CommandJournalTail, error
 		tail.Entries = []CommandJournalRecord{}
 	}
 	return tail, nil
+}
+
+func readCommandJournalErrorResponseBody(body io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, maxCommandJournalErrorResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) <= maxCommandJournalErrorResponseBytes {
+		return data, nil
+	}
+	data = data[:maxCommandJournalErrorResponseBytes]
+	data = append(data, truncatedCommandJournalErrorResponseSuffix...)
+	return data, nil
 }
 
 func commandJournalEndpoint(source string, afterSequence uint64, limit int) (string, error) {
