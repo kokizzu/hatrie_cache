@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
@@ -23,6 +24,7 @@ type clientConfig struct {
 }
 
 const maxErrorBodyBytes = 1 << 20
+const minCompressedJSONRequestBytes = 16 << 10
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, http.DefaultClient); err != nil {
@@ -318,13 +320,40 @@ func getJSON(ctx context.Context, client *http.Client, addr string, path string,
 }
 
 func postJSON(ctx context.Context, client *http.Client, addr string, path string, body []byte, stdout io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, path), bytes.NewReader(body))
+	reader, contentEncoding, err := jsonRequestBody(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, path), reader)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
+	if contentEncoding != "" {
+		req.Header.Set("Content-Encoding", contentEncoding)
+	}
 	return doAndCopy(client, req, stdout)
+}
+
+func jsonRequestBody(data []byte) (io.Reader, string, error) {
+	if len(data) < minCompressedJSONRequestBytes {
+		return bytes.NewReader(data), "", nil
+	}
+	var compressed bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&compressed, gzip.BestSpeed)
+	if err != nil {
+		return nil, "", err
+	}
+	_, writeErr := writer.Write(data)
+	closeErr := writer.Close()
+	if writeErr != nil {
+		return nil, "", writeErr
+	}
+	if closeErr != nil {
+		return nil, "", closeErr
+	}
+	return bytes.NewReader(compressed.Bytes()), "gzip", nil
 }
 
 func putJSONReader(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, stdout io.Writer) error {

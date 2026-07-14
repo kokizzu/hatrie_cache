@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -394,6 +395,9 @@ func TestRunCommandPostsJSON(t *testing.T) {
 		if got := r.Header.Get("Content-Type"); got != "application/json" {
 			t.Fatalf("Content-Type = %q, want application/json", got)
 		}
+		if got := r.Header.Get("Content-Encoding"); got != "" {
+			t.Fatalf("Content-Encoding = %q, want empty for small command", got)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
 			t.Fatalf("Decode() error = %v", err)
 		}
@@ -420,6 +424,39 @@ func TestRunCommandPostsJSON(t *testing.T) {
 	}
 	if got := stdout.String(); got != "{\"ok\":true,\"message\":\"stored\"}\n" {
 		t.Fatalf("stdout = %q, want command response", got)
+	}
+}
+
+func TestRunCommandCompressesLargeJSONPost(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Content-Encoding"); got != "gzip" {
+			t.Fatalf("Content-Encoding = %q, want gzip", got)
+		}
+		reader, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("NewReader() error = %v", err)
+		}
+		defer reader.Close()
+		if err := json.NewDecoder(reader).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"stored"}`))
+	}))
+	defer server.Close()
+
+	large := strings.Repeat("x", minCompressedJSONRequestBytes)
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "SETSTR",
+		"-key", "large",
+		"-value", large,
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command large) error = %v", err)
+	}
+	if gotRequest.Command != "SETSTR" || gotRequest.Key != "large" || gotRequest.Value != large {
+		t.Fatalf("request = %#v, want large SETSTR", gotRequest)
 	}
 }
 
