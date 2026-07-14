@@ -297,6 +297,52 @@ func TestMonitoringHandlerPreviewsCoreValueFamilies(t *testing.T) {
 	}
 }
 
+func TestMonitoringEntriesUseSingleExpirationClockRead(t *testing.T) {
+	ht := newTestTrie(t)
+	base := time.Unix(9100, 0)
+	ht.now = func() time.Time { return base }
+
+	ht.UpsertString("clock:a", "one")
+	ht.UpsertString("clock:b", "two")
+	if !ht.Expire("clock:a", time.Minute) {
+		t.Fatal("Expire(clock:a) = false, want true")
+	}
+	if !ht.Expire("clock:b", time.Minute) {
+		t.Fatal("Expire(clock:b) = false, want true")
+	}
+
+	clockReads := 0
+	ht.now = func() time.Time {
+		clockReads++
+		return base.Add(30 * time.Second)
+	}
+	entries := ht.monitoringEntries("clock:")
+	if len(entries) != 2 {
+		t.Fatalf("monitoring entries len = %d, want 2: %#v", len(entries), entries)
+	}
+	for _, entry := range entries {
+		if entry.TTLMillis == nil || *entry.TTLMillis <= 0 {
+			t.Fatalf("entry TTL = %#v, want positive ttl", entry)
+		}
+	}
+	if clockReads != 1 {
+		t.Fatalf("monitoringEntries clock reads = %d, want 1", clockReads)
+	}
+}
+
+func TestMonitoringEntriesRejectInvalidPrefixWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("keep", "value")
+
+	entries := ht.monitoringEntries(strings.Repeat("k", maxHATTrieKeyLength+1))
+	if len(entries) != 0 {
+		t.Fatalf("monitoringEntries(too-long prefix) = %#v, want empty", entries)
+	}
+	if got := ht.GetString("keep"); got != "value" {
+		t.Fatalf("keep after rejected prefix = %q, want value", got)
+	}
+}
+
 func TestMonitoringPreviewHandlesInvalidDiskByteIndex(t *testing.T) {
 	ht := newTestTrie(t)
 	for _, idx := range []int32{-1, 99} {

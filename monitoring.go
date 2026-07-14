@@ -643,10 +643,12 @@ func (ht *HatTrie) monitoringEntries(prefix string) []MonitoringEntry {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	entries := ht.entriesWithPrefixLocked(prefix, true)
-	out := make([]MonitoringEntry, 0, len(entries))
-	now := ht.currentTime()
-	for _, entry := range entries {
+	now := time.Time{}
+	if len(ht.expires) > 0 {
+		now = ht.currentTime()
+	}
+	out := []MonitoringEntry{}
+	err := ht.scanEntriesWithPrefixAtLockedChecked(prefix, true, now, func(entry Entry) error {
 		ttl := ttlMillis(ht.expires[entry.Key], now)
 		size, preview := ht.monitoringPreviewLocked(entry.Value)
 		out = append(out, MonitoringEntry{
@@ -657,6 +659,10 @@ func (ht *HatTrie) monitoringEntries(prefix string) []MonitoringEntry {
 			SizeBytes:    size,
 			ValuePreview: preview,
 		})
+		return nil
+	})
+	if err != nil {
+		return []MonitoringEntry{}
 	}
 	return out
 }
