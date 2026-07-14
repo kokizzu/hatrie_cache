@@ -57,7 +57,8 @@ func (writer *binaryFieldWriter) writeBytes(value []byte) {
 }
 
 func (writer *binaryFieldWriter) writeString(value string) {
-	writer.writeBytes([]byte(value))
+	writer.writeUvarint(uint64(len(value)))
+	writer.buf = append(writer.buf, value...)
 }
 
 func (writer *binaryFieldWriter) writeFloat64(value float64) {

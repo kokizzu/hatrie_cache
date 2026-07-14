@@ -55,12 +55,18 @@ func levelDBEntryDataIsBinary(data []byte) bool {
 }
 
 func marshalLevelDBEntryBinary(entry snapshotEntry) ([]byte, error) {
-	writer := newLevelDBBinaryWriter()
-	writer.writeString(entry.Key)
-	writer.writeString(entry.Type)
-	if err := writer.writeSnapshotEntryValue(entry); err != nil {
+	value, err := prepareLevelDBBinaryEntryValue(entry)
+	if err != nil {
 		return nil, err
 	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, value.encodedSize, entry.ExpiresAt, entry.Stats)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writePreparedSnapshotEntryValue(value)
 	writer.writeTimePtr(entry.ExpiresAt)
 	writer.writeKeyStatsPtr(entry.Stats)
 	return writer.bytes(), nil
@@ -111,16 +117,23 @@ type levelDBBinaryWriter struct {
 	binaryFieldWriter
 }
 
-func newLevelDBBinaryWriter() levelDBBinaryWriter {
-	return levelDBBinaryWriter{binaryFieldWriter: newBinaryFieldWriter(levelDBBinaryMagic, 128)}
-}
-
 func newLevelDBBinaryWriterWithCapacity(capacity int) levelDBBinaryWriter {
 	return levelDBBinaryWriter{binaryFieldWriter: newBinaryFieldWriter(levelDBBinaryMagic, capacity)}
 }
 
 func levelDBBinaryRecordCapacity(key string, entryType string, valueBytes int64, expiresAt *time.Time, stats *KeyStats) (int, error) {
 	if valueBytes < 0 {
+		return 0, errLevelDBBinaryRecordTooLarge
+	}
+	valueSize, err := binaryLengthPrefixedSize(valueBytes)
+	if err != nil {
+		return 0, err
+	}
+	return levelDBBinaryRecordCapacityForValue(key, entryType, valueSize, expiresAt, stats)
+}
+
+func levelDBBinaryRecordCapacityForValue(key string, entryType string, encodedValueBytes int64, expiresAt *time.Time, stats *KeyStats) (int, error) {
+	if encodedValueBytes < 0 {
 		return 0, errLevelDBBinaryRecordTooLarge
 	}
 	keySize, err := binaryLengthPrefixedSize(int64(len(key)))
@@ -131,15 +144,11 @@ func levelDBBinaryRecordCapacity(key string, entryType string, valueBytes int64,
 	if err != nil {
 		return 0, err
 	}
-	valueSize, err := binaryLengthPrefixedSize(valueBytes)
-	if err != nil {
-		return 0, err
-	}
 	total := int64(len(levelDBBinaryMagic))
 	for _, size := range []int64{
 		keySize,
 		typeSize,
-		valueSize,
+		encodedValueBytes,
 		int64(levelDBBinaryTimePtrSize(expiresAt)),
 		int64(levelDBBinaryKeyStatsPtrSize(stats)),
 	} {
@@ -196,6 +205,82 @@ func levelDBBinaryKeyStatsPtrSize(stats *KeyStats) int {
 		16
 }
 
+type levelDBBinaryPreparedValueKind uint8
+
+const (
+	levelDBBinaryPreparedCounter levelDBBinaryPreparedValueKind = iota + 1
+	levelDBBinaryPreparedString
+	levelDBBinaryPreparedBytes
+)
+
+type levelDBBinaryPreparedValue struct {
+	kind        levelDBBinaryPreparedValueKind
+	counter     int64
+	stringValue string
+	bytes       []byte
+	encodedSize int64
+}
+
+func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedValue, error) {
+	switch entry.Type {
+	case "counter":
+		return levelDBBinaryPreparedValue{
+			kind:        levelDBBinaryPreparedCounter,
+			counter:     int64(entry.Counter),
+			encodedSize: int64(binaryVarintSize(int64(entry.Counter))),
+		}, nil
+	case "string":
+		size, err := binaryLengthPrefixedSize(int64(len(entry.String)))
+		if err != nil {
+			return levelDBBinaryPreparedValue{}, err
+		}
+		return levelDBBinaryPreparedValue{
+			kind:        levelDBBinaryPreparedString,
+			stringValue: entry.String,
+			encodedSize: size,
+		}, nil
+	case "bytes":
+		raw, err := snapshotEntryBytesValue(entry)
+		if err != nil {
+			return levelDBBinaryPreparedValue{}, err
+		}
+		size, err := binaryLengthPrefixedSize(int64(len(raw)))
+		if err != nil {
+			return levelDBBinaryPreparedValue{}, err
+		}
+		return levelDBBinaryPreparedValue{
+			kind:        levelDBBinaryPreparedBytes,
+			bytes:       raw,
+			encodedSize: size,
+		}, nil
+	default:
+		payload, err := marshalSnapshotEntryValueJSON(entry)
+		if err != nil {
+			return levelDBBinaryPreparedValue{}, err
+		}
+		size, err := binaryLengthPrefixedSize(int64(len(payload)))
+		if err != nil {
+			return levelDBBinaryPreparedValue{}, err
+		}
+		return levelDBBinaryPreparedValue{
+			kind:        levelDBBinaryPreparedBytes,
+			bytes:       payload,
+			encodedSize: size,
+		}, nil
+	}
+}
+
+func (writer *levelDBBinaryWriter) writePreparedSnapshotEntryValue(value levelDBBinaryPreparedValue) {
+	switch value.kind {
+	case levelDBBinaryPreparedCounter:
+		writer.writeVarint(value.counter)
+	case levelDBBinaryPreparedString:
+		writer.writeString(value.stringValue)
+	case levelDBBinaryPreparedBytes:
+		writer.writeBytes(value.bytes)
+	}
+}
+
 func (writer *levelDBBinaryWriter) writeTime(value time.Time) {
 	if value.IsZero() {
 		writer.writeBool(false)
@@ -229,28 +314,6 @@ func (writer *levelDBBinaryWriter) writeKeyStatsPtr(stats *KeyStats) {
 	writer.writeTime(stats.LastWrite)
 	writer.writeFloat64(stats.HitRate)
 	writer.writeFloat64(stats.CumulativeHitRate)
-}
-
-func (writer *levelDBBinaryWriter) writeSnapshotEntryValue(entry snapshotEntry) error {
-	switch entry.Type {
-	case "counter":
-		writer.writeVarint(int64(entry.Counter))
-	case "string":
-		writer.writeString(entry.String)
-	case "bytes":
-		raw, err := snapshotEntryBytesValue(entry)
-		if err != nil {
-			return err
-		}
-		writer.writeBytes(raw)
-	default:
-		payload, err := marshalSnapshotEntryValueJSON(entry)
-		if err != nil {
-			return err
-		}
-		writer.writeBytes(payload)
-	}
-	return nil
 }
 
 func marshalSnapshotEntryValueJSON(entry snapshotEntry) ([]byte, error) {

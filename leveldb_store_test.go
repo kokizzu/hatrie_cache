@@ -113,6 +113,62 @@ func TestLevelDBStoreJSONFormatWritesPreviousLayout(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryRecordsPreallocateStringAndComplexValues(t *testing.T) {
+	expiresAt := time.Unix(1234, 0)
+	stats := &KeyStats{
+		Reads:             9,
+		Hits:              7,
+		Misses:            2,
+		Writes:            3,
+		LastHit:           time.Unix(1235, 0),
+		LastMiss:          time.Unix(1236, 0),
+		LastWrite:         time.Unix(1237, 0),
+		HitRate:           0.75,
+		CumulativeHitRate: 0.625,
+	}
+	stringEntry := snapshotEntry{
+		Key:       "large:string",
+		Type:      "string",
+		String:    strings.Repeat("active-user-", 4096),
+		ExpiresAt: &expiresAt,
+		Stats:     stats,
+	}
+	mapEntry := snapshotEntry{
+		Key:  "profile",
+		Type: "map",
+		Map: Map{
+			"name": "ivi",
+			"tags": Slice{"alpha", json.Number("7"), Map{"nested": "value"}},
+		},
+		Stats: stats,
+	}
+	for _, entry := range []snapshotEntry{stringEntry, mapEntry} {
+		data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+		if err != nil {
+			t.Fatalf("marshalLevelDBEntry(%s) error = %v", entry.Type, err)
+		}
+		if cap(data) != len(data) {
+			t.Fatalf("binary %s record cap = %d, want exact len %d", entry.Type, cap(data), len(data))
+		}
+		decoded, err := decodeLevelDBEntry(data)
+		if err != nil {
+			t.Fatalf("decodeLevelDBEntry(%s) error = %v", entry.Type, err)
+		}
+		if decoded.Key != entry.Key || decoded.Type != entry.Type {
+			t.Fatalf("decoded %s metadata = %#v, want key/type preserved", entry.Type, decoded)
+		}
+		if entry.Type == "string" && decoded.String != entry.String {
+			t.Fatalf("decoded string length = %d, want %d", len(decoded.String), len(entry.String))
+		}
+		if entry.Type == "map" && !reflect.DeepEqual(decoded.Map, entry.Map) {
+			t.Fatalf("decoded map = %#v, want %#v", decoded.Map, entry.Map)
+		}
+		if !keyStatsPtrEqual(decoded.Stats, entry.Stats) {
+			t.Fatalf("decoded %s stats = %#v, want %#v", entry.Type, decoded.Stats, entry.Stats)
+		}
+	}
+}
+
 func TestLevelDBBinaryBytesRecordAvoidsBase64StorageExpansion(t *testing.T) {
 	raw := testPayload(256)
 	entry := snapshotEntry{
@@ -127,6 +183,9 @@ func TestLevelDBBinaryBytesRecordAvoidsBase64StorageExpansion(t *testing.T) {
 	binaryData, err := marshalLevelDBEntry(entry, StorageFormatBinary)
 	if err != nil {
 		t.Fatalf("marshalLevelDBEntry(binary) error = %v", err)
+	}
+	if cap(binaryData) != len(binaryData) {
+		t.Fatalf("binary bytes record cap = %d, want exact len %d", cap(binaryData), len(binaryData))
 	}
 	if !levelDBEntryDataIsBinary(binaryData) {
 		t.Fatalf("binary record header = % x, want binary", binaryData[:shortHeaderLen(binaryData)])
