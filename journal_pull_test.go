@@ -2,8 +2,10 @@ package hatriecache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,6 +93,46 @@ func TestApplyCommandJournalTailRejectsCompactedGap(t *testing.T) {
 	}
 	if got := ht.GetString("name"); got != "" {
 		t.Fatalf("compacted gap applied value = %q, want empty", got)
+	}
+}
+
+func TestPullCommandJournalReportsCompactedTailAsConflict(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := CommandJournalTail{
+			LastSequence:     3,
+			CompactedThrough: 2,
+			Entries: []CommandJournalRecord{
+				{Sequence: 3, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := PullCommandJournal(context.Background(), ht, journal, CommandJournalPullOptions{
+		Source:        source.URL,
+		AfterSequence: 1,
+		Limit:         10,
+	})
+	var pullErr *CommandJournalPullError
+	if !errors.As(err, &pullErr) || pullErr.Status != http.StatusConflict || !errors.Is(err, ErrCommandJournalCompacted) {
+		t.Fatalf("PullCommandJournal(compacted tail) error = %v/%#v, want 409 compacted error", err, pullErr)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 1 || result.CompactedThrough != 2 {
+		t.Fatalf("compacted pull result = %#v, want no progress with compacted boundary", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("compacted pull applied value = %q, want empty", got)
 	}
 }
 
