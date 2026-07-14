@@ -22,6 +22,8 @@ Top-K values use a bounded Space-Saving min-heap to track heavy hitters with
 fixed memory and O(log k) updates.
 Quantile sketch values use a compact Greenwald-Khanna summary for approximate
 p50/p95/p99-style numeric queries with bounded rank error and low memory use.
+Fenwick tree values use a compact int64 array for point updates, point reads,
+prefix sums, and range sums in O(log n) time without storing individual events.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack
 and trim freed tail slots, avoiding per-index hash-map overhead while keeping
 reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
@@ -211,7 +213,9 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `ADDCF`, `HASCF`, `DELCF`, `INFOCF`, `CREATERB`, `ADDRB`, `REMRB`, `HASRB`,
 `COUNTRB`, `GETRB`, `INFORB`, `CREATECMS`, `INCRCMS`, `ESTCMS`, `INFOCMS`,
 `CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`, `ADDTOPK`,
-`ESTTOPK`, `GETTOPK`, `INFOTOPK`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`.
+`ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`,
+`CREATEFW`, `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW`, `DUMP`,
+`INTERNALSET`, and `INTERNALDEL`.
 `DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
@@ -247,6 +251,13 @@ make cli ARGS='command -cmd COUNTHLL -key card:visitors'
 make cli ARGS='command -cmd CREATETOPK -key top:paths -value 100'
 make cli ARGS='command -cmd ADDTOPK -key top:paths -value /api/users -subkey 7'
 make cli ARGS='command -cmd GETTOPK -key top:paths'
+make cli ARGS='command -cmd CREATEQ -key latency:p95 -value 0.01'
+make cli ARGS="command -cmd ADDQ -key latency:p95 -values '[10,20,30]'"
+make cli ARGS='command -cmd ESTQ -key latency:p95 -value 0.95'
+make cli ARGS='command -cmd CREATEFW -key scores:hourly -value 1024'
+make cli ARGS='command -cmd ADDFW -key scores:hourly -value 13 -subkey 7'
+make cli ARGS='command -cmd SUMFW -key scores:hourly -value 13'
+make cli ARGS='command -cmd RANGEFW -key scores:hourly -value 8 -subkey 13'
 make cli ARGS='command -cmd DUMP -key tags'
 make cli ARGS='topology'
 make cli ARGS='topology -key session:1'
@@ -404,6 +415,12 @@ quantile sketch type:
   ADDQ key number...
   ESTQ key quantile
   INFOQ key
+fenwick tree type:
+  CREATEFW key [size]
+  ADDFW key index delta
+  GETFW/SUMFW key index
+  RANGEFW key start end
+  INFOFW key
 ```
 - [x] add client CLI support for cluster/server topology management and replication internals:
 ```
