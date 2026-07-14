@@ -469,55 +469,29 @@ func readCommandJournalTail(path string, afterSequence uint64, limit int) (Comma
 		tail.Entries = make([]CommandJournalRecord, 0, limit)
 	}
 
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return tail, nil
-	}
-	if err != nil {
+	if _, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
+		if entry.Sequence > tail.LastSequence {
+			tail.LastSequence = entry.Sequence
+		}
+		if entry.Checkpoint && entry.Sequence > tail.CompactedThrough {
+			tail.CompactedThrough = entry.Sequence
+		}
+		if entry.Checkpoint || entry.Sequence <= afterSequence {
+			return nil
+		}
+		if limit > 0 && len(tail.Entries) >= limit {
+			tail.HasMore = true
+			return nil
+		}
+		tail.Entries = append(tail.Entries, CommandJournalRecord{
+			Sequence: entry.Sequence,
+			Request:  entry.Request,
+		})
+		return nil
+	}); err != nil {
 		return CommandJournalTail{}, err
 	}
-	defer file.Close()
-
-	var previousSequence uint64
-	var hasPreviousSequence bool
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 && line[len(line)-1] == '\n' {
-			entry, decodeErr := decodeCommandJournalEntry(line)
-			if decodeErr != nil {
-				return CommandJournalTail{}, decodeErr
-			}
-			if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {
-				return CommandJournalTail{}, err
-			}
-			previousSequence = entry.Sequence
-			hasPreviousSequence = true
-			if entry.Sequence > tail.LastSequence {
-				tail.LastSequence = entry.Sequence
-			}
-			if entry.Checkpoint && entry.Sequence > tail.CompactedThrough {
-				tail.CompactedThrough = entry.Sequence
-			}
-			if !entry.Checkpoint && entry.Sequence > afterSequence {
-				if limit > 0 && len(tail.Entries) >= limit {
-					tail.HasMore = true
-				} else {
-					tail.Entries = append(tail.Entries, CommandJournalRecord{
-						Sequence: entry.Sequence,
-						Request:  entry.Request,
-					})
-				}
-			}
-		}
-
-		if errors.Is(err, io.EOF) {
-			return tail, nil
-		}
-		if err != nil {
-			return CommandJournalTail{}, err
-		}
-	}
+	return tail, nil
 }
 
 func decodeCommandJournalEntry(data []byte) (commandJournalEntry, error) {

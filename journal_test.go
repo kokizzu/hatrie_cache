@@ -305,6 +305,63 @@ func TestCommandJournalTailLimitReportsMoreEntries(t *testing.T) {
 	}
 }
 
+func TestCommandJournalTailScansLargeHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	largeValue := strings.Repeat("x", 70*1024)
+	writeCommandJournalTestEntries(t, path,
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 1,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "large", Value: largeValue},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 2,
+			Request:  CacheCommandRequest{Command: "INC", Key: "count"},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 3,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "three", Value: "3"},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 4,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "four", Value: "4"},
+		},
+		commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: 5,
+			Request:  CacheCommandRequest{Command: "SETSTR", Key: "five", Value: "5"},
+		},
+	)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("OpenFile() error = %v", err)
+	}
+	if _, err := file.WriteString(`{"version":1`); err != nil {
+		file.Close()
+		t.Fatalf("WriteString(partial tail) error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	tail, err := readCommandJournalTail(path, 1, 2)
+	if err != nil {
+		t.Fatalf("readCommandJournalTail() error = %v", err)
+	}
+	if tail.LastSequence != 5 || tail.Limit != 2 || !tail.HasMore || len(tail.Entries) != 2 {
+		t.Fatalf("large tail = %#v, want limited tail through sequence 5", tail)
+	}
+	if tail.Entries[0].Sequence != 2 || tail.Entries[0].Request.Key != "count" {
+		t.Fatalf("first large tail entry = %#v, want sequence 2 count", tail.Entries[0])
+	}
+	if tail.Entries[1].Sequence != 3 || tail.Entries[1].Request.Key != "three" {
+		t.Fatalf("second large tail entry = %#v, want sequence 3 three", tail.Entries[1])
+	}
+}
+
 func TestCommandJournalReplaysSetAndInternalReplicationCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)
