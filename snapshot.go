@@ -43,6 +43,7 @@ type snapshotEntry struct {
 	FenwickTree     *fenwickTreeSnapshot     `json:"fenwick_tree,omitempty"`
 	SparseBitset    *sparseBitsetSnapshot    `json:"sparse_bitset,omitempty"`
 	ReservoirSample *reservoirSampleSnapshot `json:"reservoir_sample,omitempty"`
+	XorFilter       *xorFilterSnapshot       `json:"xor_filter,omitempty"`
 	ExpiresAt       *time.Time               `json:"expires_at,omitempty"`
 	Stats           *KeyStats                `json:"stats,omitempty"`
 }
@@ -191,6 +192,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
 		snapshot := ht.reservoirSamples.array[entry.Value.Index].Snapshot()
 		out.ReservoirSample = &snapshot
+	case DATAVALUE_TYPE_XOR_FILTER:
+		snapshot := ht.xorFilters.array[entry.Value.Index].Snapshot()
+		out.XorFilter = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -293,6 +297,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: reservoir sample snapshot is required")
 		}
 		if err := validateReservoirSampleSnapshot(*entry.ReservoirSample); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "xor_filter":
+		if entry.XorFilter == nil {
+			return snapshotOperation{}, errors.New("hatriecache: xor filter snapshot is required")
+		}
+		if err := validateXorFilterSnapshot(*entry.XorFilter); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -504,6 +516,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.reservoirSamples.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RESERVOIR_SAMPLE}
+	case "xor_filter":
+		data, err := newXorFilterDataFromSnapshot(*entry.XorFilter)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.xorFilters.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_XOR_FILTER}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

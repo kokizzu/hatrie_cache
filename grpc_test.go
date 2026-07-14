@@ -193,6 +193,50 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOBF response = %#v, want JSON info", infoBloomResp)
 	}
 
+	createXorResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATEXF",
+		Key:     "xor:seen",
+		Value:   "8",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATEXF) error = %v", err)
+	}
+	if !createXorResp.GetOk() {
+		t.Fatalf("CREATEXF response = %#v, want ok", createXorResp)
+	}
+	addXorResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDXF",
+		Key:     "xor:seen",
+		Values:  []string{"alpha", "beta"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDXF) error = %v", err)
+	}
+	if !addXorResp.GetOk() || addXorResp.GetValue() != "2" {
+		t.Fatalf("ADDXF response = %#v, want staged 2", addXorResp)
+	}
+	buildXorResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "BUILDXF",
+		Key:     "xor:seen",
+	})
+	if err != nil {
+		t.Fatalf("Command(BUILDXF) error = %v", err)
+	}
+	if !buildXorResp.GetOk() || buildXorResp.GetValue() == "" {
+		t.Fatalf("BUILDXF response = %#v, want JSON info", buildXorResp)
+	}
+	hasXorResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "HASXF",
+		Key:     "xor:seen",
+		Value:   "alpha",
+	})
+	if err != nil {
+		t.Fatalf("Command(HASXF) error = %v", err)
+	}
+	if !hasXorResp.GetOk() || hasXorResp.GetValue() != "1" {
+		t.Fatalf("HASXF response = %#v, want hit", hasXorResp)
+	}
+
 	createCuckooResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
 		Command: "CREATECF",
 		Key:     "active",

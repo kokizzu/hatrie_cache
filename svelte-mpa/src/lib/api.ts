@@ -32,6 +32,7 @@ export type CacheEntry = {
     | 'set'
     | 'priority_queue'
     | 'bloom_filter'
+    | 'xor_filter'
     | 'cuckoo_filter'
     | 'roaring_bitmap'
     | 'sparse_bitset'
@@ -137,6 +138,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 11984,
     value_preview: '95851 bits, 7 hashes'
+  },
+  {
+    key: 'seen:domains:xor',
+    type: 'xor_filter',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 12384,
+    value_preview: '10000 items, 12384 fingerprint bytes'
   },
   {
     key: 'freq:paths',

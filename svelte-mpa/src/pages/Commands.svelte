@@ -12,13 +12,13 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'CREATESB', 'COUNTSB', 'GETSB', 'INFOSB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'GETRS', 'INFORS', 'INFOQ', 'INFOFW'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'BUILDXF', 'INFOXF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'CREATESB', 'COUNTSB', 'GETSB', 'INFOSB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'GETRS', 'INFORS', 'INFOQ', 'INFOFW'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
   $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK', 'ADDFW', 'RANGEFW'].includes(command);
   $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : command === 'CREATECF' ? 'False positive rate' : command === 'ADDFW' ? 'Delta' : command === 'RANGEFW' ? 'End index' : 'Count';
-  $: valueLabel = command === 'CREATEFW' ? 'Size' : command === 'CREATERS' ? 'Capacity' : ['ADDFW', 'GETFW', 'SUMFW'].includes(command) ? 'Index' : command === 'RANGEFW' ? 'Start index' : 'Value';
-  $: valuePlaceholder = command === 'CREATEFW' ? '1024' : command === 'CREATERS' ? '128' : ['ADDFW', 'GETFW', 'SUMFW', 'RANGEFW'].includes(command) ? '0' : 'value';
+  $: valueLabel = command === 'CREATEFW' ? 'Size' : command === 'CREATERS' || command === 'CREATEXF' ? 'Capacity' : ['ADDFW', 'GETFW', 'SUMFW'].includes(command) ? 'Index' : command === 'RANGEFW' ? 'Start index' : 'Value';
+  $: valuePlaceholder = command === 'CREATEFW' ? '1024' : command === 'CREATERS' ? '128' : command === 'CREATEXF' ? '10000' : ['ADDFW', 'GETFW', 'SUMFW', 'RANGEFW'].includes(command) ? '0' : 'value';
   $: subkeyPlaceholder = command === 'CREATECMS' ? '4' : command === 'CREATECF' ? '0.01' : command === 'RANGEFW' ? '10' : '1';
 
   async function submit() {
@@ -73,6 +73,11 @@
           <option>HASCF</option>
           <option>DELCF</option>
           <option>INFOCF</option>
+          <option>CREATEXF</option>
+          <option>ADDXF</option>
+          <option>BUILDXF</option>
+          <option>HASXF</option>
+          <option>INFOXF</option>
           <option>CREATERB</option>
           <option>ADDRB</option>
           <option>REMRB</option>

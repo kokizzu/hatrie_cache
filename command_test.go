@@ -360,6 +360,73 @@ func TestExecuteCommandCuckooFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandXorFilterOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEXF", Key: "seen", Value: "8"}); !got.OK {
+		t.Fatalf("CREATEXF response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDXF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDXF value response = %#v, want staged 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDXF", Key: "seen", Values: Slice{"beta", "alpha"}}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDXF values response = %#v, want staged 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASXF", Key: "seen", Value: "alpha"}); got.OK {
+		t.Fatalf("HASXF before build response = %#v, want error", got)
+	}
+	buildResp := ht.ExecuteCommand(CacheCommandRequest{Command: "BUILDXF", Key: "seen"})
+	if !buildResp.OK || buildResp.Value == "" {
+		t.Fatalf("BUILDXF response = %#v, want JSON info", buildResp)
+	}
+	var buildInfo XorFilterInfo
+	if err := json.Unmarshal([]byte(buildResp.Value), &buildInfo); err != nil {
+		t.Fatalf("BUILDXF JSON error = %v", err)
+	}
+	if !buildInfo.Built || buildInfo.Items != 2 || buildInfo.FingerprintBytes == 0 {
+		t.Fatalf("BUILDXF info = %#v, want compact built XOR filter", buildInfo)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASXF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASXF alpha response = %#v, want hit", got)
+	}
+	missing := xorFilterMissingValue(t, ht.xorFilters.array[ht.Get("seen").Index])
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASXF", Key: "seen", Value: missing}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASXF missing response = %#v, want miss", got)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOXF", Key: "seen"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOXF response = %#v, want JSON info", infoResp)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "seen"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET XOR filter response = %#v, want JSON info", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDXF", Key: "seen", Value: "late"}); got.OK {
+		t.Fatalf("ADDXF after build response = %#v, want error", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDXF", Key: "auto", Value: "value"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDXF auto response = %#v, want staged 1", got)
+	}
+	if !ht.Get("auto").IsXorFilter() {
+		t.Fatal("ADDXF on missing key did not create an XOR filter")
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATEXF",
+		Key:     "paired",
+		Pairs:   Map{"expected_items": json.Number("16")},
+	}); !got.OK {
+		t.Fatalf("CREATEXF pairs response = %#v, want ok", got)
+	}
+	pairedInfo, ok := ht.XorFilterInfo("paired")
+	if !ok || pairedInfo.ExpectedItems != 16 || pairedInfo.Built {
+		t.Fatalf("paired XorFilterInfo = %#v/%v, want pending configured filter", pairedInfo, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEXF", Key: "bad", Value: "0"}); got.OK {
+		t.Fatalf("CREATEXF invalid response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandRoaringBitmapOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -1038,6 +1105,9 @@ func TestExecuteCommandValidation(t *testing.T) {
 		{Command: "CREATEBF", Key: "key", Pairs: Map{"false_positive_rate": "not-number"}},
 		{Command: "ADDBF", Key: "key"},
 		{Command: "HASBF", Key: "key"},
+		{Command: "CREATEXF", Key: "key", Value: "0"},
+		{Command: "ADDXF", Key: "key"},
+		{Command: "HASXF", Key: "key"},
 		{Command: "INTERNALSET", Key: "key"},
 		{Command: "UNKNOWN", Key: "key"},
 	} {

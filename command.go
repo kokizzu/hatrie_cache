@@ -343,6 +343,60 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATEXF", "RESERVEXF", "XFRESERVE", "CREATEXOR":
+		expectedItems, err := commandXorFilterExpectedItems(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertXorFilter(key, expectedItems); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created xor filter"}
+	case "ADDXF", "XFADD":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		added, err := ht.AddXorFilter(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "staged xor filter values", Value: strconv.Itoa(added)}
+	case "BUILDXF", "XFBUILD":
+		info, ok, err := ht.BuildXorFilter(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("built xor filter", info)
+	case "HASXF", "XFHAS", "XFEXISTS":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		info, ok := ht.XorFilterInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		if !info.Built {
+			return commandError("xor filter is not built")
+		}
+		hit, queryable := ht.HasXorFilter(key, values[0])
+		if !queryable {
+			return commandError("xor filter is not built")
+		}
+		if hit {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	case "INFOXF", "XFINFO":
+		info, ok := ht.XorFilterInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	case "CREATERB", "CREATEROARING", "RBRESERVE":
 		ht.UpsertRoaringBitmap(key)
 		return CacheCommandResponse{OK: true, Message: "created roaring bitmap"}
@@ -910,6 +964,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_XOR_FILTER:
+		data, err := json.Marshal(ht.xorFilters.array[hval.Index].Info())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		data, err := json.Marshal(ht.quantileSketches.array[hval.Index].Info())
 		if err != nil {
@@ -1077,6 +1137,27 @@ func commandCuckooFilterConfig(request CacheCommandRequest) (uint64, float64, er
 		}
 	}
 	return capacity, falsePositiveRate, nil
+}
+
+func commandXorFilterExpectedItems(request CacheCommandRequest) (uint64, error) {
+	expectedItems := DefaultXorFilterExpectedItems
+	var err error
+	if strings.TrimSpace(request.Value) != "" {
+		expectedItems, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return 0, errors.New("xor filter expected items must be an unsigned integer")
+		}
+	}
+	for _, key := range []string{"expected_items", "capacity", "expected", "items"} {
+		if value, ok := request.Pairs[key]; ok {
+			expectedItems, err = commandUint64Value(value)
+			if err != nil {
+				return 0, errors.New("xor filter expected items must be an unsigned integer")
+			}
+			break
+		}
+	}
+	return expectedItems, validateXorFilterExpectedItems(expectedItems)
 }
 
 func commandCountMinSketchConfig(request CacheCommandRequest) (uint64, uint8, error) {

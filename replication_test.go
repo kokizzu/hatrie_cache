@@ -665,6 +665,67 @@ func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesXorFilterMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	if response := trie.ExecuteCommand(CacheCommandRequest{Command: "CREATEXF", Key: "seen", Value: "8"}); !response.OK {
+		t.Fatalf("CREATEXF response = %#v, want ok", response)
+	}
+	if response := trie.ExecuteCommand(CacheCommandRequest{Command: "ADDXF", Key: "seen", Values: Slice{"alpha", "beta"}}); !response.OK {
+		t.Fatalf("ADDXF response = %#v, want ok", response)
+	}
+	build := CacheCommandRequest{Command: "BUILDXF", Key: "seen"}
+	response := trie.ExecuteCommand(build)
+	if !response.OK {
+		t.Fatalf("BUILDXF response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, build, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("XOR filter replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "seen" || request.Value == "" {
+			t.Fatalf("replicated XOR request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated XOR snapshot JSON error = %v", err)
+		}
+		if entry.Type != "xor_filter" || entry.XorFilter == nil || !entry.XorFilter.Built {
+			t.Fatalf("replicated XOR snapshot = %#v, want built xor_filter payload", entry)
+		}
+	default:
+		t.Fatal("XOR filter mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "HASXF", Key: "seen", Value: "alpha"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "HASXF", Key: "seen", Value: "alpha"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("XOR filter read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestHTTPReplicatorReplicatesCuckooFilterMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

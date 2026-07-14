@@ -61,6 +61,7 @@
         <option value="set">Set</option>
         <option value="priority_queue">Priority Queue</option>
         <option value="bloom_filter">Bloom Filter</option>
+        <option value="xor_filter">XOR Filter</option>
         <option value="count_min_sketch">Count-Min Sketch</option>
         <option value="hyperloglog">HyperLogLog</option>
         <option value="top_k">Top-K</option>

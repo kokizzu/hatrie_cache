@@ -264,6 +264,51 @@ func TestCommandJournalReplaysCuckooFilterMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysXorFilterMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATEXF", Key: "seen", Value: "8"}); !got.OK {
+		t.Fatalf("journaled CREATEXF response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDXF", Key: "seen", Values: Slice{"alpha", "beta"}}); !got.OK {
+		t.Fatalf("journaled ADDXF response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "BUILDXF", Key: "seen"}); !got.OK {
+		t.Fatalf("journaled BUILDXF response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "HASXF", Key: "seen", Value: "beta"}); !got.OK || got.Value != "1" {
+		t.Fatalf("journaled HASXF response = %#v, want local read hit", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("journal entries = %d, want CREATEXF, ADDXF, and BUILDXF only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if hit, queryable := replayed.HasXorFilter("seen", "alpha"); !queryable || !hit {
+		t.Fatalf("replayed XOR filter alpha = %v/%v, want hit", hit, queryable)
+	}
+	if info, ok := replayed.XorFilterInfo("seen"); !ok || !info.Built || info.Items != 2 {
+		t.Fatalf("replayed XorFilterInfo = %#v/%v, want built two-item filter", info, ok)
+	}
+}
+
 func TestCommandJournalReplaysRoaringBitmapMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

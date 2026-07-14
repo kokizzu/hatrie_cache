@@ -12,6 +12,9 @@ Bloom filter values use packed bitsets plus double hashing for fast,
 low-memory membership checks without storing inserted items.
 Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
 low-memory membership checks with approximate delete support.
+XOR filter values stage unique items once, then compile them into static 8-bit
+fingerprint arrays for faster low-memory membership checks than Bloom filters
+on read-heavy immutable sets.
 Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
 exact uint32 sets with fast membership, remove, count, and sorted iteration.
 Sparse bitset values use sorted 16-bit containers keyed by the upper 48 bits,
@@ -230,7 +233,8 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
 `POPPQ`, `GETPQ`, `CREATEBF`, `ADDBF`, `HASBF`, `INFOBF`, `CREATECF`,
-`ADDCF`, `HASCF`, `DELCF`, `INFOCF`, `CREATERB`, `ADDRB`, `REMRB`, `HASRB`,
+`ADDCF`, `HASCF`, `DELCF`, `INFOCF`, `CREATEXF`, `ADDXF`, `BUILDXF`,
+`HASXF`, `INFOXF`, `CREATERB`, `ADDRB`, `REMRB`, `HASRB`,
 `COUNTRB`, `GETRB`, `INFORB`, `CREATESB`, `ADDSB`, `REMSB`, `HASSB`,
 `COUNTSB`, `GETSB`, `INFOSB`, `CREATECMS`, `INCRCMS`, `ESTCMS`, `INFOCMS`,
 `CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`, `ADDTOPK`,
@@ -260,6 +264,10 @@ make cli ARGS='command -cmd HASBF -key seen:emails -value user@example.com'
 make cli ARGS='command -cmd CREATECF -key active:users -value 10000 -subkey 0.01'
 make cli ARGS='command -cmd ADDCF -key active:users -value user-123'
 make cli ARGS='command -cmd DELCF -key active:users -value user-123'
+make cli ARGS='command -cmd CREATEXF -key allow:domains -value 10000'
+make cli ARGS="command -cmd ADDXF -key allow:domains -values '[\"example.com\",\"openai.com\"]'"
+make cli ARGS='command -cmd BUILDXF -key allow:domains'
+make cli ARGS='command -cmd HASXF -key allow:domains -value openai.com'
 make cli ARGS='command -cmd CREATERB -key cohort:ids'
 make cli ARGS='command -cmd ADDRB -key cohort:ids -value 65543'
 make cli ARGS='command -cmd COUNTRB -key cohort:ids'
@@ -423,6 +431,11 @@ cuckoo filter type:
   CREATECF key capacity [false_positive_rate]
   ADDCF,DELCF key val...
   HASCF/INFOCF key
+xor filter type:
+  CREATEXF key [expected_items]
+  ADDXF key val...
+  BUILDXF key
+  HASXF/INFOXF key
 roaring bitmap type:
   CREATERB key
   ADDRB,REMRB key uint32...

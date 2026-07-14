@@ -769,6 +769,15 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		info := ht.reservoirSamples.array[hval.Index].Info()
 		return info.EncodedBytes, strconv.FormatUint(info.Tracked, 10) + "/" + strconv.FormatUint(info.Capacity, 10) + " sampled, " + strconv.FormatUint(info.Seen, 10) + " seen"
+	case DATAVALUE_TYPE_XOR_FILTER:
+		if int(hval.Index) >= len(ht.xorFilters.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.xorFilters.array[hval.Index].Info()
+		if info.Built {
+			return int64(info.FingerprintBytes), strconv.FormatUint(info.Items, 10) + " items, " + strconv.FormatUint(info.FingerprintBytes, 10) + " fingerprint bytes"
+		}
+		return ht.xorFilters.array[hval.Index].EncodedSize(), strconv.FormatUint(info.Staged, 10) + " staged items"
 	default:
 		return 0, ""
 	}
@@ -812,6 +821,8 @@ func monitoringType(hval HatValue) string {
 		return "sparse_bitset"
 	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
 		return "reservoir_sample"
+	case DATAVALUE_TYPE_XOR_FILTER:
+		return "xor_filter"
 	default:
 		return "unknown"
 	}

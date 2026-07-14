@@ -15,6 +15,11 @@ func TestREADMEListsCompactStructureCommands(t *testing.T) {
 	for _, token := range []string{
 		"CREATEBF",
 		"CREATECF",
+		"CREATEXF",
+		"ADDXF",
+		"BUILDXF",
+		"HASXF",
+		"INFOXF",
 		"CREATERB",
 		"CREATESB",
 		"ADDSB",

@@ -64,6 +64,7 @@ const (
 	DATAVALUE_TYPE_FENWICK_TREE
 	DATAVALUE_TYPE_SPARSE_BITSET
 	DATAVALUE_TYPE_RESERVOIR_SAMPLE
+	DATAVALUE_TYPE_XOR_FILTER
 )
 
 type Map = map[string]interface{}
@@ -632,6 +633,10 @@ func (hval HatValue) IsReservoirSample() bool {
 	return hval.Is(DATAVALUE_TYPE_RESERVOIR_SAMPLE)
 }
 
+func (hval HatValue) IsXorFilter() bool {
+	return hval.Is(DATAVALUE_TYPE_XOR_FILTER)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -680,6 +685,8 @@ func (hval HatValue) String() string {
 		return "sparse bitset at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
 		return "reservoir sample at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_XOR_FILTER:
+		return "xor filter at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -1310,6 +1317,7 @@ type HatTrie struct {
 	fenwickTrees     *FenwickTreeStorage
 	sparseBitsets    *SparseBitsetStorage
 	reservoirSamples *ReservoirSampleStorage
+	xorFilters       *XorFilterStorage
 	dbrefs           *LevelDBReferenceStorage
 	expires          map[string]time.Time
 	expirations      expirationHeap
@@ -1354,6 +1362,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		fenwickTrees:     CreateFenwickTreeStorage(),
 		sparseBitsets:    CreateSparseBitsetStorage(),
 		reservoirSamples: CreateReservoirSampleStorage(),
+		xorFilters:       CreateXorFilterStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
 		keyStats:         map[string]KeyStats{},
@@ -1395,6 +1404,7 @@ func (ht *HatTrie) Destroy() {
 	ht.fenwickTrees = nil
 	ht.sparseBitsets = nil
 	ht.reservoirSamples = nil
+	ht.xorFilters = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
@@ -1881,6 +1891,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.sparseBitsets.Del(hval.Index)
 	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
 		ht.reservoirSamples.Del(hval.Index)
+	case DATAVALUE_TYPE_XOR_FILTER:
+		ht.xorFilters.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)

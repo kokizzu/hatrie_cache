@@ -52,6 +52,15 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertCuckooFilter() error = %v", err)
 	}
 	ht.AddCuckooFilter("cuckoo", "alpha", "beta")
+	if err := ht.UpsertXorFilter("xor", 8); err != nil {
+		t.Fatalf("UpsertXorFilter() error = %v", err)
+	}
+	if _, err := ht.AddXorFilter("xor", "alpha", "beta"); err != nil {
+		t.Fatalf("AddXorFilter() error = %v", err)
+	}
+	if _, ok, err := ht.BuildXorFilter("xor"); err != nil || !ok {
+		t.Fatalf("BuildXorFilter() = %v/%v, want ok", err, ok)
+	}
 	ht.UpsertRoaringBitmap("bitmap")
 	ht.AddRoaringBitmap("bitmap", 1, 1<<16+7)
 	ht.UpsertSparseBitset("bitset")
@@ -140,6 +149,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.CuckooFilterInfo("cuckoo"); !ok || info.Count != 2 || info.Capacity < 128 {
 		t.Fatalf("loaded CuckooFilterInfo = %#v/%v, want restored Cuckoo filter", info, ok)
+	}
+	if hit, queryable := loaded.HasXorFilter("xor", "alpha"); !queryable || !hit {
+		t.Fatalf("loaded XOR filter alpha = %v/%v, want hit", hit, queryable)
+	}
+	if info, ok := loaded.XorFilterInfo("xor"); !ok || !info.Built || info.Items != 2 {
+		t.Fatalf("loaded XorFilterInfo = %#v/%v, want restored XOR filter", info, ok)
 	}
 	if got := loaded.GetRoaringBitmap("bitmap"); !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7}) {
 		t.Fatalf("loaded Roaring bitmap = %#v, want restored integer set", got)

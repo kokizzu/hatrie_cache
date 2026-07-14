@@ -31,6 +31,15 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertCuckooFilter() error = %v", err)
 	}
 	source.AddCuckooFilter("cuckoo", "alpha", "beta")
+	if err := source.UpsertXorFilter("xor", 8); err != nil {
+		t.Fatalf("UpsertXorFilter() error = %v", err)
+	}
+	if _, err := source.AddXorFilter("xor", "alpha", "beta"); err != nil {
+		t.Fatalf("AddXorFilter() error = %v", err)
+	}
+	if _, ok, err := source.BuildXorFilter("xor"); err != nil || !ok {
+		t.Fatalf("BuildXorFilter() = %v/%v, want ok", err, ok)
+	}
 	source.UpsertRoaringBitmap("bitmap")
 	source.AddRoaringBitmap("bitmap", 1, 1<<16+7)
 	source.UpsertSparseBitset("bitset")
@@ -50,8 +59,8 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
 	}
-	if count != 12 {
-		t.Fatalf("loaded count = %d, want 12", count)
+	if count != 13 {
+		t.Fatalf("loaded count = %d, want 13", count)
 	}
 
 	if got := loaded.GetCounter("counter"); got != -7 {
@@ -80,6 +89,9 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if !loaded.HasCuckooFilter("cuckoo", "alpha") || !loaded.HasCuckooFilter("cuckoo", "beta") {
 		t.Fatal("loaded Cuckoo filter does not contain inserted values")
+	}
+	if hit, queryable := loaded.HasXorFilter("xor", "alpha"); !queryable || !hit {
+		t.Fatalf("loaded XOR filter alpha = %v/%v, want hit", hit, queryable)
 	}
 	if got := loaded.GetRoaringBitmap("bitmap"); !reflect.DeepEqual(got, []uint32{1, 1<<16 + 7}) {
 		t.Fatalf("loaded Roaring bitmap = %#v, want restored integer set", got)
@@ -338,6 +350,32 @@ func TestSnapshotOperationValueSizeSupportsReservoirSample(t *testing.T) {
 	}
 	if size != sample.EncodedSize() {
 		t.Fatalf("snapshotOperationValueSize(reservoir_sample) = %d, want %d", size, sample.EncodedSize())
+	}
+}
+
+func TestSnapshotOperationValueSizeSupportsXorFilter(t *testing.T) {
+	filter, err := newXorFilterData(8)
+	if err != nil {
+		t.Fatalf("newXorFilterData() error = %v", err)
+	}
+	if _, err := filter.AddOne("alpha", "beta"); err != nil {
+		t.Fatalf("AddOne() error = %v", err)
+	}
+	if err := filter.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	snapshot := filter.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:      "xor_filter",
+			XorFilter: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(xor_filter) error = %v", err)
+	}
+	if size != filter.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(xor_filter) = %d, want %d", size, filter.EncodedSize())
 	}
 }
 

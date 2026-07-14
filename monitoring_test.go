@@ -32,6 +32,15 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 		t.Fatalf("UpsertCuckooFilter() error = %v", err)
 	}
 	ht.AddCuckooFilter("session:cf", "email:1")
+	if err := ht.UpsertXorFilter("session:xor", 8); err != nil {
+		t.Fatalf("UpsertXorFilter() error = %v", err)
+	}
+	if _, err := ht.AddXorFilter("session:xor", "email:1", "email:2"); err != nil {
+		t.Fatalf("AddXorFilter() error = %v", err)
+	}
+	if _, ok, err := ht.BuildXorFilter("session:xor"); err != nil || !ok {
+		t.Fatalf("BuildXorFilter() = %v/%v, want ok", err, ok)
+	}
 	if err := ht.UpsertCountMinSketch("session:freq", 128, 4); err != nil {
 		t.Fatalf("UpsertCountMinSketch() error = %v", err)
 	}
@@ -105,6 +114,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if !ok {
 		t.Fatal("ReservoirSampleInfo(session:zzsample) = false, want true")
 	}
+	xorInfo, ok := ht.XorFilterInfo("session:xor")
+	if !ok {
+		t.Fatal("XorFilterInfo(session:xor) = false, want true")
+	}
 
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
 		NodeName: "test-node",
@@ -146,8 +159,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 13 {
-		t.Fatalf("entries len = %d, want 13: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 14 {
+		t.Fatalf("entries len = %d, want 14: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -204,12 +217,17 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if topKEntry.Key != "session:top" || topKEntry.Type != "top_k" || topKEntry.ValuePreview != wantTopKPreview || topKEntry.SizeBytes <= 0 {
 		t.Fatalf("top-k entry = %#v, want compact heavy-hitter preview", topKEntry)
 	}
-	quantileEntry := entries.Entries[11]
+	xorEntry := entries.Entries[11]
+	wantXorPreview := strconv.FormatUint(xorInfo.Items, 10) + " items, " + strconv.FormatUint(xorInfo.FingerprintBytes, 10) + " fingerprint bytes"
+	if xorEntry.Key != "session:xor" || xorEntry.Type != "xor_filter" || xorEntry.SizeBytes != int64(xorInfo.FingerprintBytes) || xorEntry.ValuePreview != wantXorPreview {
+		t.Fatalf("xor filter entry = %#v, want compact static-membership preview", xorEntry)
+	}
+	quantileEntry := entries.Entries[12]
 	wantQuantilePreview := strconv.FormatUint(quantileInfo.Count, 10) + " samples, " + strconv.FormatUint(quantileInfo.SummarySize, 10) + " summary points"
 	if quantileEntry.Key != "session:zquantiles" || quantileEntry.Type != "quantile_sketch" || quantileEntry.SizeBytes != quantileInfo.EncodedBytes || quantileEntry.ValuePreview != wantQuantilePreview {
 		t.Fatalf("quantile sketch entry = %#v, want compact quantile preview", quantileEntry)
 	}
-	reservoirEntry := entries.Entries[12]
+	reservoirEntry := entries.Entries[13]
 	wantReservoirPreview := strconv.FormatUint(reservoirInfo.Tracked, 10) + "/" + strconv.FormatUint(reservoirInfo.Capacity, 10) + " sampled, " + strconv.FormatUint(reservoirInfo.Seen, 10) + " seen"
 	if reservoirEntry.Key != "session:zzsample" || reservoirEntry.Type != "reservoir_sample" || reservoirEntry.SizeBytes != reservoirInfo.EncodedBytes || reservoirEntry.ValuePreview != wantReservoirPreview {
 		t.Fatalf("reservoir sample entry = %#v, want compact bounded-sample preview", reservoirEntry)

@@ -492,6 +492,14 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	case "ADDCF", "CFADD", "DELCF", "REMCF", "CFDEL":
 		_, ok := commandSliceValues(request)
 		return ok
+	case "CREATEXF", "RESERVEXF", "XFRESERVE", "CREATEXOR":
+		_, err := commandXorFilterExpectedItems(request)
+		return err == nil
+	case "ADDXF", "XFADD":
+		_, ok := commandSliceValues(request)
+		return ok
+	case "BUILDXF", "XFBUILD":
+		return true
 	case "CREATERB", "CREATEROARING", "RBRESERVE":
 		return true
 	case "ADDRB", "RBADD", "REMRB", "DELRB", "RBREM", "RBDEL":

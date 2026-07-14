@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -348,9 +349,26 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		}
 		data, err := json.Marshal(entry.ReservoirSample)
 		return int64(len(data)), err
+	case "xor_filter":
+		if entry.XorFilter == nil {
+			return 0, errors.New("hatriecache: xor filter snapshot is required")
+		}
+		return newXorFilterSizeFromSnapshot(*entry.XorFilter)
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}
+}
+
+func newXorFilterSizeFromSnapshot(snapshot xorFilterSnapshot) (int64, error) {
+	if snapshot.Built {
+		raw, err := base64.StdEncoding.DecodeString(snapshot.Fingerprints)
+		if err != nil {
+			return 0, err
+		}
+		return int64(len(raw)), nil
+	}
+	data, err := json.Marshal(snapshot.Staged)
+	return int64(len(data)), err
 }
 
 func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snapshotEntry) (HatValue, error) {
