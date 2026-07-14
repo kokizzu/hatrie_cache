@@ -298,7 +298,8 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.BloomFilter == nil {
 			return 0, errors.New("hatriecache: bloom filter snapshot is required")
 		}
-		return int64(bloomFilterWordCount(entry.BloomFilter.BitCount) * 8), nil
+		raw, err := base64.StdEncoding.DecodeString(entry.BloomFilter.Bits)
+		return int64(len(raw)), err
 	case "count_min_sketch":
 		if entry.CountMinSketch == nil {
 			return 0, errors.New("hatriecache: count-min sketch snapshot is required")

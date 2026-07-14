@@ -63,9 +63,7 @@ func newDefaultBloomFilterData() bloomFilterData {
 }
 
 func newBloomFilterDataWithShape(bitCount uint64, hashCount uint8) bloomFilterData {
-	wordCount := bloomFilterWordCount(bitCount)
 	return bloomFilterData{
-		words:     make([]uint64, int(wordCount)),
 		bitCount:  bitCount,
 		hashCount: hashCount,
 	}
@@ -109,16 +107,32 @@ func validateBloomFilterSnapshot(snapshot bloomFilterSnapshot) error {
 	if err != nil {
 		return err
 	}
+	if len(data) == 0 {
+		if snapshot.Insertions != 0 {
+			return errors.New("hatriecache: empty bloom filter bitset has insertions")
+		}
+		return nil
+	}
 	if uint64(len(data)) != bloomFilterWordCount(snapshot.BitCount)*8 {
 		return errors.New("hatriecache: invalid bloom filter bitset length")
 	}
 	if err := validateBloomFilterUnusedBits(snapshot.BitCount, data); err != nil {
 		return err
 	}
+	setBits := bloomFilterRawSetBits(data)
+	if snapshot.Insertions == 0 && setBits != 0 {
+		return errors.New("hatriecache: empty bloom filter snapshot has set bits")
+	}
+	if snapshot.Insertions > 0 && setBits == 0 {
+		return errors.New("hatriecache: populated bloom filter snapshot has no set bits")
+	}
 	return nil
 }
 
 func validateBloomFilterUnusedBits(bitCount uint64, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
 	usedBits := bitCount % 64
 	if usedBits == 0 {
 		return nil
@@ -131,6 +145,14 @@ func validateBloomFilterUnusedBits(bitCount uint64, data []byte) error {
 	return nil
 }
 
+func bloomFilterRawSetBits(data []byte) uint64 {
+	var total uint64
+	for idx := 0; idx < len(data)/8; idx++ {
+		total += uint64(mathbits.OnesCount64(binary.LittleEndian.Uint64(data[idx*8 : idx*8+8])))
+	}
+	return total
+}
+
 func newBloomFilterDataFromSnapshot(snapshot bloomFilterSnapshot) (bloomFilterData, error) {
 	if err := validateBloomFilterSnapshot(snapshot); err != nil {
 		return bloomFilterData{}, err
@@ -139,15 +161,17 @@ func newBloomFilterDataFromSnapshot(snapshot bloomFilterSnapshot) (bloomFilterDa
 	if err != nil {
 		return bloomFilterData{}, err
 	}
-	words := make([]uint64, len(raw)/8)
-	for idx := range words {
-		words[idx] = binary.LittleEndian.Uint64(raw[idx*8 : idx*8+8])
-	}
 	out := bloomFilterData{
-		words:      words,
 		bitCount:   snapshot.BitCount,
 		hashCount:  snapshot.HashCount,
 		insertions: snapshot.Insertions,
+	}
+	if len(raw) == 0 || (snapshot.Insertions == 0 && bloomFilterRawSetBits(raw) == 0) {
+		return out, nil
+	}
+	out.words = make([]uint64, len(raw)/8)
+	for idx := range out.words {
+		out.words[idx] = binary.LittleEndian.Uint64(raw[idx*8 : idx*8+8])
 	}
 	out.maskUnusedBits()
 	return out, nil
@@ -186,6 +210,7 @@ func (filter *bloomFilterData) AddOneChecked(value interface{}, values ...interf
 }
 
 func (filter *bloomFilterData) addKey(key []byte) bool {
+	filter.ensureWords()
 	changed := false
 	filter.visitIndexes(key, func(index uint64) {
 		word := index / 64
@@ -218,6 +243,9 @@ func (filter *bloomFilterData) ContainsChecked(value interface{}) (bool, error) 
 }
 
 func (filter *bloomFilterData) containsKey(key []byte) bool {
+	if len(filter.words) == 0 {
+		return false
+	}
 	contains := true
 	filter.visitIndexes(key, func(index uint64) {
 		word := index / 64
@@ -237,7 +265,7 @@ func (filter bloomFilterData) Info() BloomFilterInfo {
 	}
 	return BloomFilterInfo{
 		BitCount:                   filter.bitCount,
-		BitBytes:                   bloomFilterWordCount(filter.bitCount) * 8,
+		BitBytes:                   uint64(len(filter.words)) * 8,
 		HashCount:                  filter.hashCount,
 		Insertions:                 filter.insertions,
 		SetBits:                    setBits,
@@ -255,9 +283,12 @@ func (filter bloomFilterData) SetBits() uint64 {
 }
 
 func (filter bloomFilterData) Snapshot() bloomFilterSnapshot {
-	data := make([]byte, len(filter.words)*8)
-	for idx, word := range filter.words {
-		binary.LittleEndian.PutUint64(data[idx*8:idx*8+8], word)
+	var data []byte
+	if len(filter.words) > 0 {
+		data = make([]byte, len(filter.words)*8)
+		for idx, word := range filter.words {
+			binary.LittleEndian.PutUint64(data[idx*8:idx*8+8], word)
+		}
 	}
 	return bloomFilterSnapshot{
 		BitCount:   filter.bitCount,
@@ -281,6 +312,13 @@ func (filter *bloomFilterData) visitIndexes(key []byte, visit func(uint64)) {
 	for idx := uint8(0); idx < filter.hashCount; idx++ {
 		visit((first + uint64(idx)*step) % filter.bitCount)
 	}
+}
+
+func (filter *bloomFilterData) ensureWords() {
+	if filter == nil || len(filter.words) > 0 || filter.bitCount == 0 {
+		return
+	}
+	filter.words = make([]uint64, int(bloomFilterWordCount(filter.bitCount)))
 }
 
 func (filter *bloomFilterData) maskUnusedBits() {

@@ -2274,6 +2274,64 @@ func TestBloomFilterRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestBloomFilterEmptyBitsetAllocatesLazily(t *testing.T) {
+	filter := newBloomFilterDataWithShape(maxBloomFilterBits, 1)
+	if len(filter.words) != 0 || filter.EncodedSize() != 0 {
+		t.Fatalf("empty max Bloom filter allocated %d words/%d bytes, want lazy empty backing", len(filter.words), filter.EncodedSize())
+	}
+	if filter.Contains("alpha") {
+		t.Fatal("empty lazy Bloom filter contains alpha, want miss")
+	}
+	if info := filter.Info(); info.BitCount != maxBloomFilterBits || info.BitBytes != 0 || info.SetBits != 0 || info.Insertions != 0 {
+		t.Fatalf("Info(empty max) = %#v, want logical bit count without allocated words", info)
+	}
+	snapshot := filter.Snapshot()
+	if snapshot.Bits != "" {
+		t.Fatalf("empty Bloom snapshot bits length = %d, want compact empty bitset", len(snapshot.Bits))
+	}
+	if size, err := snapshotOperationValueSize(snapshotOperation{entry: snapshotEntry{Type: "bloom_filter", BloomFilter: &snapshot}}); err != nil || size != 0 {
+		t.Fatalf("snapshotOperationValueSize(empty bloom) = %d/%v, want 0/nil", size, err)
+	}
+
+	oldData := make([]byte, bloomFilterWordCount(minBloomFilterBits)*8)
+	restored, err := newBloomFilterDataFromSnapshot(bloomFilterSnapshot{
+		BitCount:   minBloomFilterBits,
+		HashCount:  1,
+		Insertions: 0,
+		Bits:       base64.StdEncoding.EncodeToString(oldData),
+	})
+	if err != nil {
+		t.Fatalf("newBloomFilterDataFromSnapshot(full zero bitset) error = %v", err)
+	}
+	if len(restored.words) != 0 || restored.EncodedSize() != 0 {
+		t.Fatalf("restored empty Bloom filter allocated %d words/%d bytes, want lazy empty backing", len(restored.words), restored.EncodedSize())
+	}
+
+	ht := newTestTrie(t)
+	if err := ht.UpsertBloomFilter("seen", 1000, 0.001); err != nil {
+		t.Fatalf("UpsertBloomFilter() error = %v", err)
+	}
+	hval := ht.Get("seen")
+	if len(ht.bloomFilters.array[hval.Index].words) != 0 {
+		t.Fatalf("empty trie Bloom filter allocated %d words, want lazy empty backing", len(ht.bloomFilters.array[hval.Index].words))
+	}
+	if info, ok := ht.BloomFilterInfo("seen"); !ok || info.BitBytes != 0 || info.Insertions != 0 {
+		t.Fatalf("BloomFilterInfo(empty) = %#v/%v, want no allocated bit bytes", info, ok)
+	}
+	if ht.HasBloomFilter("seen", "alpha") {
+		t.Fatal("empty trie Bloom filter contains alpha, want miss")
+	}
+	if added, err := ht.AddBloomFilterChecked("seen", "alpha"); err != nil || added != 1 {
+		t.Fatalf("AddBloomFilterChecked(first) = %d/%v, want first insertion", added, err)
+	}
+	if info, ok := ht.BloomFilterInfo("seen"); !ok || info.BitBytes == 0 || info.Insertions != 1 || info.SetBits == 0 {
+		t.Fatalf("BloomFilterInfo(after first add) = %#v/%v, want allocated populated bitset", info, ok)
+	}
+	if !ht.HasBloomFilter("seen", "alpha") {
+		t.Fatal("Bloom filter missed inserted alpha after lazy allocation")
+	}
+}
+
 func TestBloomFilterSnapshotValidationRejectsUnusedBits(t *testing.T) {
 	data := make([]byte, bloomFilterWordCount(65)*8)
 	binary.LittleEndian.PutUint64(data[len(data)-8:], uint64(1)<<1)
@@ -2291,6 +2349,28 @@ func TestBloomFilterSnapshotValidationRejectsUnusedBits(t *testing.T) {
 	snapshot.Bits = base64.StdEncoding.EncodeToString(data)
 	if err := validateBloomFilterSnapshot(snapshot); err != nil {
 		t.Fatalf("validateBloomFilterSnapshot(used last bit) error = %v, want nil", err)
+	}
+}
+
+func TestBloomFilterSnapshotValidationRejectsInconsistentEmptyState(t *testing.T) {
+	if err := validateBloomFilterSnapshot(bloomFilterSnapshot{
+		BitCount:   minBloomFilterBits,
+		HashCount:  1,
+		Insertions: 1,
+		Bits:       "",
+	}); err == nil {
+		t.Fatal("validateBloomFilterSnapshot(empty bits with insertions) error = nil, want error")
+	}
+
+	data := make([]byte, bloomFilterWordCount(minBloomFilterBits)*8)
+	data[0] = 1
+	if err := validateBloomFilterSnapshot(bloomFilterSnapshot{
+		BitCount:   minBloomFilterBits,
+		HashCount:  1,
+		Insertions: 0,
+		Bits:       base64.StdEncoding.EncodeToString(data),
+	}); err == nil {
+		t.Fatal("validateBloomFilterSnapshot(zero insertions with set bits) error = nil, want error")
 	}
 }
 
