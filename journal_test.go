@@ -259,6 +259,28 @@ func TestCommandJournalRejectsOversizedBinaryRecordBeforeAllocation(t *testing.T
 	}
 }
 
+func TestCommandJournalRejectsOversizedJSONRecordBeforeAllocation(t *testing.T) {
+	reader := bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", 33)+"\n"), 8)
+	_, bytesRead, complete, err := readCommandJournalJSONRecordLimited(reader, 32)
+	if !errors.Is(err, errCommandJournalJSONRecordTooLarge) {
+		t.Fatalf("readCommandJournalJSONRecordLimited(oversized) error = %v, want record too large", err)
+	}
+	if complete {
+		t.Fatal("readCommandJournalJSONRecordLimited(oversized) complete = true, want false")
+	}
+	if bytesRead <= 32 {
+		t.Fatalf("readCommandJournalJSONRecordLimited(oversized) bytesRead = %d, want over limit", bytesRead)
+	}
+}
+
+func TestCommandJournalJSONRecordReaderIgnoresPartialTail(t *testing.T) {
+	reader := bufio.NewReaderSize(strings.NewReader(`{"version":1`), 4)
+	record, bytesRead, complete, err := readCommandJournalJSONRecordLimited(reader, 32)
+	if err != nil || complete || bytesRead != 0 || record != nil {
+		t.Fatalf("readCommandJournalJSONRecordLimited(partial) = %q/%d/%v/%v, want incomplete nil record", record, bytesRead, complete, err)
+	}
+}
+
 func TestCommandJournalReplaysMutatingCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

@@ -17,6 +17,7 @@ import (
 const commandJournalVersion = 1
 
 const maxCommandJournalBinaryRecordBytes = 1 << 30
+const maxCommandJournalJSONRecordBytes = 1 << 30
 
 const (
 	DefaultCommandJournalTailLimit   = 1000
@@ -29,6 +30,7 @@ var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed
 var ErrCommandJournalCompacted = errors.New("hatriecache: command journal entries are compacted")
 var ErrCommandJournalSequenceExhausted = errors.New("hatriecache: command journal sequence is exhausted")
 var errCommandJournalBinaryRecordTooLarge = errors.New("hatriecache: command journal binary record is too large")
+var errCommandJournalJSONRecordTooLarge = errors.New("hatriecache: command journal JSON record is too large")
 
 type CommandJournalRecord struct {
 	Sequence uint64              `json:"sequence"`
@@ -492,17 +494,37 @@ func readCommandJournalJSONEntry(reader *bufio.Reader) (commandJournalEntry, int
 }
 
 func readCommandJournalJSONRecord(reader *bufio.Reader) ([]byte, int, bool, error) {
-	line, err := reader.ReadBytes('\n')
-	if len(line) > 0 && line[len(line)-1] == '\n' {
-		return line, len(line), true, nil
+	return readCommandJournalJSONRecordLimited(reader, maxCommandJournalJSONRecordBytes)
+}
+
+func readCommandJournalJSONRecordLimited(reader *bufio.Reader, limit int) ([]byte, int, bool, error) {
+	if limit <= 0 {
+		return nil, 0, false, errCommandJournalJSONRecordTooLarge
 	}
-	if errors.Is(err, io.EOF) {
-		return nil, 0, false, nil
-	}
-	if err != nil {
+	var record []byte
+	bytesRead := 0
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		bytesRead += len(fragment)
+		if bytesRead > limit {
+			return nil, bytesRead, false, errCommandJournalJSONRecordTooLarge
+		}
+		if err == nil {
+			if record == nil {
+				return fragment, bytesRead, true, nil
+			}
+			record = append(record, fragment...)
+			return record, bytesRead, true, nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			record = append(record, fragment...)
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			return nil, 0, false, nil
+		}
 		return nil, 0, false, err
 	}
-	return nil, 0, false, nil
 }
 
 func readCommandJournalBinaryEntry(reader *bufio.Reader) (commandJournalEntry, int, bool, error) {
