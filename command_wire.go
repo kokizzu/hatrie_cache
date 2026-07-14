@@ -236,7 +236,10 @@ func DecodeCommandResponseWire(reader io.Reader, contentType string, limit int64
 }
 
 func decodeCommandResponseJSON(reader io.Reader, limit int64) (CacheCommandResponse, error) {
-	limited := &io.LimitedReader{R: reader, N: limit + 1}
+	limited, err := newCommandWireLimitedReader(reader, limit)
+	if err != nil {
+		return CacheCommandResponse{}, err
+	}
 	decoder := jsonwire.NewDecoder(limited)
 	var response CacheCommandResponse
 	if err := decoder.Decode(&response); err != nil {
@@ -264,11 +267,18 @@ func decodeCommandResponseJSON(reader io.Reader, limit int64) (CacheCommandRespo
 	return response, nil
 }
 
-func readLimitedCommandWire(reader io.Reader, limit int64) ([]byte, error) {
+func newCommandWireLimitedReader(reader io.Reader, limit int64) (*io.LimitedReader, error) {
 	if limit < 0 || limit > maxCommandWireReadLimit {
 		return nil, errCommandWireInvalidLimit
 	}
-	limited := &io.LimitedReader{R: reader, N: limit + 1}
+	return &io.LimitedReader{R: reader, N: limit + 1}, nil
+}
+
+func readLimitedCommandWire(reader io.Reader, limit int64) ([]byte, error) {
+	limited, err := newCommandWireLimitedReader(reader, limit)
+	if err != nil {
+		return nil, err
+	}
 	data, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err

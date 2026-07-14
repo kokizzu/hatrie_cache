@@ -235,6 +235,18 @@ func TestReadLimitedCommandWireRejectsInvalidLimitWithoutRead(t *testing.T) {
 	}
 }
 
+func TestDecodeCommandResponseWireRejectsInvalidJSONLimitWithoutRead(t *testing.T) {
+	for _, limit := range []int64{-1, maxCommandWireReadLimit + 1} {
+		body := &commandWireTrackingBody{reader: strings.NewReader(`{"ok":true}`)}
+		if _, err := decodeCommandResponseWire(body, commandWireContentTypeJSON, limit); !errors.Is(err, errCommandWireInvalidLimit) {
+			t.Fatalf("decodeCommandResponseWire(JSON limit %d) error = %v, want errCommandWireInvalidLimit", limit, err)
+		}
+		if body.read {
+			t.Fatalf("decodeCommandResponseWire(JSON limit %d) read from body", limit)
+		}
+	}
+}
+
 func TestCacheCommandRequestToProtoConvertsScalarValuesAndPairs(t *testing.T) {
 	priority := int64(7)
 	ttl := int64(30)
