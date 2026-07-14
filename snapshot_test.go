@@ -969,6 +969,18 @@ func TestPrepareSnapshotBytesOperationStreamsLargePayload(t *testing.T) {
 	if !shouldStreamSnapshotBytes(large) {
 		t.Fatal("shouldStreamSnapshotBytes(large) = false, want true")
 	}
+
+	commandPayload := `{"type":"bytes","bytes":"` + base64.StdEncoding.EncodeToString(largePayload) + `"}`
+	commandOperation, err := commandSnapshotOperation("large-command", commandPayload)
+	if err != nil {
+		t.Fatalf("commandSnapshotOperation(large bytes) error = %v", err)
+	}
+	if commandOperation.bytes != nil {
+		t.Fatalf("command snapshot operation decoded %d bytes, want streaming encoded payload", len(commandOperation.bytes))
+	}
+	if !shouldStreamSnapshotBytes(commandOperation) {
+		t.Fatal("shouldStreamSnapshotBytes(command large) = false, want true")
+	}
 }
 
 func TestLoadSnapshotSkipsExpiredEntries(t *testing.T) {

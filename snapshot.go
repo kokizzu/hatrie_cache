@@ -335,6 +335,13 @@ func prepareSnapshotBytesOperation(entry snapshotEntry) (snapshotOperation, erro
 	return operation, nil
 }
 
+func snapshotOperationForEntry(entry snapshotEntry) (snapshotOperation, error) {
+	if entry.Type == "bytes" {
+		return prepareSnapshotBytesOperation(entry)
+	}
+	return validateSnapshotEntry(entry)
+}
+
 func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()

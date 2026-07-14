@@ -1057,7 +1057,7 @@ func commandSnapshotOperation(key string, payload string) (snapshotOperation, er
 	} else if entry.Key != key {
 		return snapshotOperation{}, errors.New("snapshot entry key does not match request key")
 	}
-	return validateSnapshotEntry(entry)
+	return snapshotOperationForEntry(entry)
 }
 
 func (ht *HatTrie) applyCommandExpiration(key string, ttlSeconds *int64, unixSeconds *int64) (CacheCommandResponse, bool) {

@@ -2758,7 +2758,7 @@ func (ht *HatTrie) hydrateLevelDBReferenceLocked(key string, hval HatValue) (Hat
 		}
 		return HatValue{}, nil
 	}
-	operation, err := validateSnapshotEntry(entry)
+	operation, err := snapshotOperationForEntry(entry)
 	if err != nil {
 		return HatValue{}, err
 	}
