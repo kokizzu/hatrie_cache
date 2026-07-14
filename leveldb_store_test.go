@@ -1837,6 +1837,9 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	if _, _, err := loaded.HasXorFilterChecked("xor", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("HasXorFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
+	if _, err := loaded.AddXorFilterChecked("xor", "beta"); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("AddXorFilterChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
 	if _, _, err := loaded.BuildXorFilter("xor"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("BuildXorFilter(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}

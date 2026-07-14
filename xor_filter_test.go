@@ -161,6 +161,32 @@ func TestHatTrieXorFilterOperations(t *testing.T) {
 	}
 }
 
+func TestHatTrieAddXorFilterChecked(t *testing.T) {
+	ht := newTestTrie(t)
+	if added, err := ht.AddXorFilterChecked("seen", "alpha", "beta", "alpha"); err != nil || added != 2 {
+		t.Fatalf("AddXorFilterChecked(seen) = %d/%v, want 2/nil", added, err)
+	}
+	info, ok, err := ht.XorFilterInfoChecked("seen")
+	if err != nil || !ok || info.Staged != 2 || info.Items != 2 {
+		t.Fatalf("XorFilterInfoChecked(seen) = %#v/%v/%v, want two staged items", info, ok, err)
+	}
+
+	if added, err := ht.AddXorFilterChecked("seen", "gamma", func() {}); err == nil || added != 0 {
+		t.Fatalf("AddXorFilterChecked(unsupported batch) = %d/%v, want 0/error", added, err)
+	}
+	info, ok, err = ht.XorFilterInfoChecked("seen")
+	if err != nil || !ok || info.Staged != 2 || info.Items != 2 {
+		t.Fatalf("XorFilterInfoChecked(after rejected batch) = %#v/%v/%v, want unchanged two staged items", info, ok, err)
+	}
+
+	if added, err := ht.AddXorFilterChecked("missing", func() {}); err == nil || added != 0 {
+		t.Fatalf("AddXorFilterChecked(missing unsupported) = %d/%v, want 0/error", added, err)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected AddXorFilterChecked created value %+v", got)
+	}
+}
+
 func TestHatTrieXorFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	added, err := ht.AddXorFilter("seen", "alpha")

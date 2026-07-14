@@ -566,6 +566,10 @@ func (ht *HatTrie) UpsertXorFilter(key string, expectedItems uint64) error {
 }
 
 func (ht *HatTrie) AddXorFilter(key string, val interface{}, vals ...interface{}) (int, error) {
+	return ht.AddXorFilterChecked(key, val, vals...)
+}
+
+func (ht *HatTrie) AddXorFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

@@ -441,7 +441,7 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		added, err := ht.AddXorFilter(key, values[0], values[1:]...)
+		added, err := ht.AddXorFilterChecked(key, values[0], values[1:]...)
 		if err != nil {
 			return commandError(err.Error())
 		}
