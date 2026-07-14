@@ -507,7 +507,7 @@ func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint 
 	if err != nil {
 		return CommandJournalTail{}, 0, err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

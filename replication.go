@@ -15,7 +15,7 @@ import (
 )
 
 const DefaultReplicationTimeout = 2 * time.Second
-const maxReplicationResponseDrainBytes = 1 << 20
+const maxHTTPResponseDrainBytes = 1 << 20
 
 type HTTPReplicatorOptions struct {
 	Self     string
@@ -353,7 +353,7 @@ func drainAndClose(body io.ReadCloser) {
 	if body == nil {
 		return
 	}
-	_, _ = io.CopyN(io.Discard, body, maxReplicationResponseDrainBytes)
+	_, _ = io.CopyN(io.Discard, body, maxHTTPResponseDrainBytes)
 	_ = body.Close()
 }
 

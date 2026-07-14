@@ -41,3 +41,26 @@ func TestPullCommandJournalValidationErrorsCarryHTTPStatus(t *testing.T) {
 		t.Fatalf("PullCommandJournal(nil journal) error = %v/%#v, want 409 pull error", err, pullErr)
 	}
 }
+
+func TestFetchCommandJournalTailDrainsErrorResponseBody(t *testing.T) {
+	body := newTrackingReadCloser(strings.Repeat("journal source error ", 32))
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Status:     "502 Bad Gateway",
+				Header:     make(http.Header),
+				Body:       body,
+				Request:    request,
+			}, nil
+		}),
+	}
+
+	_, status, err := fetchCommandJournalTail(context.Background(), client, "http://source.example/api/journal")
+	if err == nil || status != http.StatusBadGateway || !strings.Contains(err.Error(), "journal source returned 502 Bad Gateway") {
+		t.Fatalf("fetchCommandJournalTail() status/error = %d/%v, want 502 source error", status, err)
+	}
+	if !body.drained || !body.closed {
+		t.Fatalf("response body drained=%v closed=%v, want both true", body.drained, body.closed)
+	}
+}
