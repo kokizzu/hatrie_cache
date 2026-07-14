@@ -1625,8 +1625,17 @@ func (ht *HatTrie) LoadStats(path string) error {
 	if err != nil {
 		return err
 	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
 	var stats CacheStats
-	if err := json.Unmarshal(data, &stats); err != nil {
+	if err := decoder.Decode(&stats); err != nil {
+		return err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("hatriecache: invalid stats JSON")
+		}
 		return err
 	}
 	if err := validateCacheStatsSnapshot(stats); err != nil {

@@ -1454,6 +1454,24 @@ func TestLoadStatsRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestLoadStatsRejectsUnknownFieldsWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+	_ = ht.GetString("key")
+	before := ht.Stats()
+
+	path := filepath.Join(t.TempDir(), "stats.json")
+	if err := os.WriteFile(path, []byte(`{"reads":1,"hits":1,"misses":0,"unexpected":true}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := ht.LoadStats(path); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("LoadStats(unknown field) error = %v, want unknown field error", err)
+	}
+	if got := ht.Stats(); !cacheStatsEqual(got, before) {
+		t.Fatalf("stats after rejected unknown field LoadStats = %#v, want %#v", got, before)
+	}
+}
+
 func TestLoadStatsRejectsInconsistentReadCountsWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("key", "value")
