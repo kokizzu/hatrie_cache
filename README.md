@@ -242,6 +242,7 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/journal`, and `/api/commands`.
 Use `GET /api/entries?prefix=...&limit=N` to bound large key listings; limited
 responses include `has_more` when another matching entry exists.
+The Svelte MPA dashboard and key browser use bounded entry requests by default.
 `/api/commands` accepts JSON and protobuf command request bodies based on
 `Content-Type`; regular browser/API clients can continue to use JSON.
 Responses are gzip-compressed when clients send `Accept-Encoding: gzip`.

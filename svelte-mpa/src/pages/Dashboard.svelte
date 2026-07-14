@@ -5,20 +5,22 @@
   import StatTile from '../components/StatTile.svelte';
   import StatusBadge from '../components/StatusBadge.svelte';
   import MiniBarChart from '../components/MiniBarChart.svelte';
-  import { loadEntries, loadHealth, loadStats, type CacheEntry, type CacheHealth, type CacheStats } from '../lib/api';
+  import { DEFAULT_ENTRIES_LIMIT, loadEntries, loadHealth, loadStats, type CacheEntry, type CacheHealth, type CacheStats } from '../lib/api';
   import { formatBytes, formatRate, formatRelativeTime, formatTTL } from '../lib/format';
 
   let health: CacheHealth | null = null;
   let stats: CacheStats | null = null;
   let entries: CacheEntry[] = [];
+  let entriesHasMore = false;
   let loading = true;
 
   async function refresh() {
     loading = true;
-    const [nextHealth, nextStats, nextEntries] = await Promise.all([loadHealth(), loadStats(), loadEntries()]);
+    const [nextHealth, nextStats, nextEntries] = await Promise.all([loadHealth(), loadStats(), loadEntries('', DEFAULT_ENTRIES_LIMIT)]);
     health = nextHealth;
     stats = nextStats;
     entries = nextEntries.entries;
+    entriesHasMore = Boolean(nextEntries.has_more);
     loading = false;
   }
 
@@ -79,8 +81,8 @@
     <section class="panel">
       <div class="panel-heading">
         <div>
-          <h2>Largest Keys</h2>
-          <p>By stored value size</p>
+          <h2>Largest Loaded Keys</h2>
+          <p>{entriesHasMore ? `${entries.length.toLocaleString()} loaded, more available` : 'By stored value size'}</p>
         </div>
         <a class="text-link" href="/keys.html">View keys</a>
       </div>

@@ -55,6 +55,8 @@ export type EntriesResponse = {
   has_more?: boolean;
 };
 
+export const DEFAULT_ENTRIES_LIMIT = 1000;
+
 export type CommandRequest = {
   command: string;
   key: string;

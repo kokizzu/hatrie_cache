@@ -1,11 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadEntries, runCommand, sampleCommandResponse } from './api';
+import { DEFAULT_ENTRIES_LIMIT, loadEntries, runCommand, sampleCommandResponse } from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('command fallback', () => {
+  it('uses the shared bounded entries limit in requests', async () => {
+    const fetchMock = vi.fn(async (path: string | URL | Request) => {
+      expect(path).toBe(`/api/entries?limit=${DEFAULT_ENTRIES_LIMIT}`);
+      return new Response(
+        JSON.stringify({
+          entries: [],
+          limit: DEFAULT_ENTRIES_LIMIT,
+          has_more: false
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadEntries('', DEFAULT_ENTRIES_LIMIT)).resolves.toEqual({
+      entries: [],
+      limit: DEFAULT_ENTRIES_LIMIT,
+      has_more: false
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('loads entries with prefix and limit query params', async () => {
     const fetchMock = vi.fn(async (path: string | URL | Request) => {
       expect(path).toBe('/api/entries?prefix=session%3A&limit=2');

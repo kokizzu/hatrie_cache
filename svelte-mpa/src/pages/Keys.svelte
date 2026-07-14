@@ -2,11 +2,14 @@
   import { onMount } from 'svelte';
   import { HardDrive, RefreshCw, Search, Trash2 } from '@lucide/svelte';
   import Shell from '../components/Shell.svelte';
-  import { loadEntries, runCommand, type CacheEntry } from '../lib/api';
+  import { DEFAULT_ENTRIES_LIMIT, loadEntries, runCommand, type CacheEntry } from '../lib/api';
   import { filterEntries, formatBytes, formatTTL } from '../lib/format';
 
   let entries: CacheEntry[] = [];
   let prefix = '';
+  let entriesLimit = DEFAULT_ENTRIES_LIMIT;
+  let loadedLimit = DEFAULT_ENTRIES_LIMIT;
+  let hasMore = false;
   let query = '';
   let type = 'all';
   let message = '';
@@ -14,7 +17,12 @@
 
   async function refresh() {
     loading = true;
-    entries = (await loadEntries(prefix)).entries;
+    const requestedLimit = Math.max(1, Math.floor(Number(entriesLimit) || DEFAULT_ENTRIES_LIMIT));
+    entriesLimit = requestedLimit;
+    const response = await loadEntries(prefix, requestedLimit);
+    entries = response.entries;
+    loadedLimit = response.limit ?? requestedLimit;
+    hasMore = Boolean(response.has_more);
     loading = false;
   }
 
@@ -72,6 +80,10 @@
         <option value="sparse_bitset">Sparse Bitset</option>
       </select>
     </label>
+    <label>
+      <span>Limit</span>
+      <input type="number" min="1" max="100000" step="100" bind:value={entriesLimit} on:change={refresh} />
+    </label>
   </section>
 
   {#if message}
@@ -82,7 +94,11 @@
     <div class="panel-heading">
       <div>
         <h2>{filtered.length.toLocaleString()} keys</h2>
-        <p>Filtered from {entries.length.toLocaleString()} loaded entries</p>
+        <p>
+          Filtered from {entries.length.toLocaleString()} loaded entries{hasMore
+            ? `, limited to ${loadedLimit.toLocaleString()} with more available`
+            : ''}
+        </p>
       </div>
       <HardDrive size={18} aria-hidden="true" />
     </div>

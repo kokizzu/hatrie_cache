@@ -340,7 +340,7 @@ th {
   align-items: end;
   display: grid;
   gap: 14px;
-  grid-template-columns: 220px minmax(220px, 1fr) 180px;
+  grid-template-columns: 220px minmax(220px, 1fr) 180px 140px;
   margin-bottom: 16px;
   padding: 14px;
 }
