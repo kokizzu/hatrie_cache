@@ -42,6 +42,15 @@ func BenchmarkAcceptEncodingGzipNegotiation(b *testing.B) {
 	}
 }
 
+func BenchmarkAddVaryHeaderDeduplicated(b *testing.B) {
+	header := http.Header{}
+	header.Add("Vary", "Accept, Accept-Encoding, Origin")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		addVaryHeader(header, "Accept-Encoding")
+	}
+}
+
 func BenchmarkCommandJournalEncodeJSON(b *testing.B) {
 	benchmarkCommandJournalEncodeFormat(b, CommandJournalFormatJSON)
 }

@@ -33,13 +33,26 @@ func gzipHTTPHandler(next http.Handler) http.Handler {
 
 func addVaryHeader(header http.Header, value string) {
 	for _, existing := range header.Values("Vary") {
-		for _, token := range strings.Split(existing, ",") {
-			if strings.EqualFold(strings.TrimSpace(token), value) || strings.TrimSpace(token) == "*" {
-				return
-			}
+		if varyHeaderContains(existing, value) {
+			return
 		}
 	}
 	header.Add("Vary", value)
+}
+
+func varyHeaderContains(headerValue string, value string) bool {
+	for headerValue != "" {
+		token, rest, ok := strings.Cut(headerValue, ",")
+		token = strings.TrimSpace(token)
+		if strings.EqualFold(token, value) || token == "*" {
+			return true
+		}
+		if !ok {
+			break
+		}
+		headerValue = rest
+	}
+	return false
 }
 
 func requestAcceptsGzip(r *http.Request) bool {

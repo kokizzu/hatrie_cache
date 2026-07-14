@@ -157,6 +157,25 @@ func TestAddVaryHeaderDeduplicatesCommaSeparatedValues(t *testing.T) {
 	}
 }
 
+func TestAddVaryHeaderRespectsWildcard(t *testing.T) {
+	header := http.Header{}
+	header.Add("Vary", "Accept, *")
+	addVaryHeader(header, "Accept-Encoding")
+
+	if got := header.Values("Vary"); len(got) != 1 || got[0] != "Accept, *" {
+		t.Fatalf("Vary values = %#v, want original wildcard only", got)
+	}
+}
+
+func TestVaryHeaderContainsTrimsTokens(t *testing.T) {
+	if !varyHeaderContains(" Accept ,  Accept-Encoding ", "accept-encoding") {
+		t.Fatal("varyHeaderContains() = false, want true for trimmed case-insensitive token")
+	}
+	if varyHeaderContains("Accept-Language", "Accept") {
+		t.Fatal("varyHeaderContains() = true for partial token, want false")
+	}
+}
+
 func TestLimitedEncodedRequestBodyClosesIdentityBody(t *testing.T) {
 	body := newCloseTrackingBody([]byte(`{"ok":true}`))
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
