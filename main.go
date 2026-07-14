@@ -2468,79 +2468,108 @@ func (ht *HatTrie) GetString(key string) string {
 
 // UpsertBytes sets key to a byte slice.
 func (ht *HatTrie) UpsertBytes(key string, val []byte) {
+	_ = ht.UpsertBytesChecked(key, val)
+}
+
+func (ht *HatTrie) UpsertBytesChecked(key string, val []byte) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsBytesAtRaws() {
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr == nil {
 		ht.clearExpirationLocked(key)
-		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
-		ht.storeBytesLocked(rawPtr, hval, val)
-		ht.recordWriteLocked(key)
-		return
+	} else {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
 	}
 
-	ht.returnStorage(hval)
+	next, err := ht.storeBytesValueLocked(hval, val)
+	if err != nil {
+		return err
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	if !hval.Empty() && !hval.IsBytesAtRaws() {
+		ht.returnStorage(hval)
+	}
 	ht.clearExpirationLocked(key)
-	ht.storeBytesLocked(rawPtr, HatValue{}, val)
+	*rawPtr = next.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 // GetBytes returns nil if key is missing or not a string/bytes value.
 func (ht *HatTrie) GetBytes(key string) []byte {
+	value, _ := ht.GetBytesChecked(key)
+	return value
+}
+
+func (ht *HatTrie) GetBytesChecked(key string) ([]byte, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	hval := ht.getLocked(key)
-	ht.recordReadLocked(hval.IsStringAtRaws() || hval.IsBytesAtRaws(), key)
 	if hval.IsStringAtRaws() {
-		return cloneBytes(ht.raws.array[hval.Index])
+		ht.recordReadLocked(true, key)
+		return cloneBytes(ht.raws.array[hval.Index]), nil
 	}
 	if hval.IsBytesAtRaws() {
 		if hval.OnDisk() {
 			value, err := ht.disks.Get(hval.Index)
 			if err != nil {
-				panic(err)
+				ht.recordReadLocked(false, key)
+				return nil, err
 			}
-			return value
+			ht.recordReadLocked(true, key)
+			return value, nil
 		}
-		return cloneBytes(ht.raws.array[hval.Index])
+		ht.recordReadLocked(true, key)
+		return cloneBytes(ht.raws.array[hval.Index]), nil
 	}
-	return nil
+	ht.recordReadLocked(false, key)
+	return nil, nil
 }
 
-func (ht *HatTrie) storeBytesLocked(rawPtr *C.value_t, old HatValue, val []byte) {
+func (ht *HatTrie) storeBytesValueLocked(old HatValue, val []byte) (HatValue, error) {
 	if len(val) > DiskBytesThreshold {
 		if old.IsBytesAtRaws() && old.OnDisk() {
 			if err := ht.disks.Put(old.Index, val); err != nil {
-				panic(err)
+				return HatValue{}, err
 			}
-			*rawPtr = old.toValue()
-			return
+			return HatValue{
+				Index: old.Index,
+				Flags: DATAVALUE_TYPE_RAW_BYTES | (1 << DATAVALUE_DISK_BIT_SHIFT),
+			}, nil
+		}
+		idx, err := ht.disks.Add(val)
+		if err != nil {
+			return HatValue{}, err
 		}
 		if old.IsBytesAtRaws() && !old.OnDisk() {
 			ht.raws.Del(old.Index)
 		}
-		idx, err := ht.disks.Add(val)
-		if err != nil {
-			panic(err)
-		}
-		*rawPtr = HatValue{
+		return HatValue{
 			Index: idx,
 			Flags: DATAVALUE_TYPE_RAW_BYTES | (1 << DATAVALUE_DISK_BIT_SHIFT),
-		}.toValue()
-		return
+		}, nil
 	}
 
 	if old.IsBytesAtRaws() && old.OnDisk() {
+		idx := ht.raws.Add(val)
 		ht.disks.Del(old.Index)
+		return HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}, nil
 	} else if old.IsBytesAtRaws() {
 		ht.raws.Put(old.Index, val)
-		*rawPtr = old.toValue()
-		return
+		return HatValue{Index: old.Index, Flags: DATAVALUE_TYPE_RAW_BYTES}, nil
 	}
 	idx := ht.raws.Add(val)
-	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}.toValue()
+	return HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}, nil
 }
 
 func (ht *HatTrie) UpsertMap(key string, val Map) {

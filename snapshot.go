@@ -428,15 +428,14 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		return HatValue{}, nil
 	}
 
-	rawPtr := ht.upsertLocation(entry.Key)
+	rawPtr := ht.tryLocation(entry.Key)
 	old := HatValue{}
-	old.fromValue(*rawPtr)
-	if !old.Empty() {
-		ht.returnStorage(old)
+	if rawPtr != nil {
+		old.fromValue(*rawPtr)
 	}
-	ht.clearExpirationLocked(entry.Key)
 
 	hval := HatValue{}
+	oldBytesStorageHandled := false
 	switch entry.Type {
 	case "counter":
 		hval = HatValue{Index: entry.Counter, Flags: DATAVALUE_TYPE_COUNTER}
@@ -444,8 +443,12 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		idx := ht.raws.Add([]byte(entry.String))
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}
 	case "bytes":
-		ht.storeBytesLocked(rawPtr, HatValue{}, operation.bytes)
-		hval.fromValue(*rawPtr)
+		next, err := ht.storeBytesValueLocked(old, operation.bytes)
+		if err != nil {
+			return HatValue{}, err
+		}
+		hval = next
+		oldBytesStorageHandled = old.IsBytesAtRaws()
 	case "map":
 		idx := ht.maps.Add(entry.Map)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}
@@ -545,9 +548,14 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
-	if entry.Type != "bytes" {
-		*rawPtr = hval.toValue()
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(entry.Key)
 	}
+	if !old.Empty() && !oldBytesStorageHandled {
+		ht.returnStorage(old)
+	}
+	ht.clearExpirationLocked(entry.Key)
+	*rawPtr = hval.toValue()
 	if entry.ExpiresAt != nil {
 		hval = ht.setExpirationLocked(entry.Key, *entry.ExpiresAt, rawPtr, hval)
 	}

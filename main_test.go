@@ -386,6 +386,112 @@ func TestBytesDiskThresholdAndReplacement(t *testing.T) {
 	}
 }
 
+func TestBytesCheckedDiskWriteFailureDoesNotMutate(t *testing.T) {
+	ht := newTestTrie(t)
+	largeValue := testPayload(DiskBytesThreshold + 1)
+	blockedPath := ht.disks.pathFor(0)
+
+	if err := os.Mkdir(blockedPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(blocked path) error = %v", err)
+	}
+	if err := ht.UpsertBytesChecked("large", largeValue); err == nil {
+		t.Fatal("UpsertBytesChecked(missing large) error = nil, want write error")
+	}
+	if got := ht.Get("large"); !got.Empty() {
+		t.Fatalf("failed UpsertBytesChecked created value %+v", got)
+	}
+	if got := len(ht.disks.paths); got != 0 {
+		t.Fatalf("disk paths after failed insert = %d, want 0", got)
+	}
+	if err := os.Remove(blockedPath); err != nil {
+		t.Fatalf("Remove(blocked path) error = %v", err)
+	}
+
+	ht.UpsertString("string", "keep")
+	if err := os.Mkdir(blockedPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(blocked replacement path) error = %v", err)
+	}
+	if err := ht.UpsertBytesChecked("string", largeValue); err == nil {
+		t.Fatal("UpsertBytesChecked(replace string) error = nil, want write error")
+	}
+	if got := ht.GetString("string"); got != "keep" {
+		t.Fatalf("failed UpsertBytesChecked replaced string with %q, want keep", got)
+	}
+	if err := os.Remove(blockedPath); err != nil {
+		t.Fatalf("Remove(blocked replacement path) error = %v", err)
+	}
+
+	smallValue := []byte("small")
+	if err := ht.UpsertBytesChecked("bytes", smallValue); err != nil {
+		t.Fatalf("UpsertBytesChecked(small) error = %v", err)
+	}
+	rawValue := ht.Get("bytes")
+	if err := os.Mkdir(blockedPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(blocked raw replacement path) error = %v", err)
+	}
+	if err := ht.UpsertBytesChecked("bytes", largeValue); err == nil {
+		t.Fatal("UpsertBytesChecked(replace raw bytes) error = nil, want write error")
+	}
+	if got := ht.Get("bytes"); got != rawValue {
+		t.Fatalf("failed UpsertBytesChecked changed metadata %+v, want %+v", got, rawValue)
+	}
+	if got := ht.GetBytes("bytes"); !bytes.Equal(got, smallValue) {
+		t.Fatalf("failed UpsertBytesChecked changed bytes %q, want %q", got, smallValue)
+	}
+}
+
+func TestGetBytesCheckedReturnsDiskReadError(t *testing.T) {
+	ht := newTestTrie(t)
+	payload := testPayload(DiskBytesThreshold + 1)
+
+	if err := ht.UpsertBytesChecked("large", payload); err != nil {
+		t.Fatalf("UpsertBytesChecked(large) error = %v", err)
+	}
+	hval := ht.Get("large")
+	path := ht.disks.paths[hval.Index]
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove(disk value) error = %v", err)
+	}
+
+	if got, err := ht.GetBytesChecked("large"); err == nil || got != nil {
+		t.Fatalf("GetBytesChecked(missing disk file) = %q/%v, want nil/error", got, err)
+	}
+	if got := ht.GetBytes("large"); got != nil {
+		t.Fatalf("legacy GetBytes(missing disk file) = %q, want nil", got)
+	}
+}
+
+func TestApplySnapshotBytesWriteFailureKeepsExistingValue(t *testing.T) {
+	ht := newTestTrie(t)
+	original := []byte("small")
+	largeValue := testPayload(DiskBytesThreshold + 1)
+
+	if err := ht.UpsertBytesChecked("key", original); err != nil {
+		t.Fatalf("UpsertBytesChecked(original) error = %v", err)
+	}
+	originalValue := ht.Get("key")
+	blockedPath := ht.disks.pathFor(0)
+	if err := os.Mkdir(blockedPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(blocked path) error = %v", err)
+	}
+
+	ht.mu.Lock()
+	_, err := ht.applySnapshotOperationLocked(snapshotOperation{
+		entry: snapshotEntry{Key: "key", Type: "bytes"},
+		bytes: largeValue,
+	})
+	ht.mu.Unlock()
+	if err == nil {
+		t.Fatal("applySnapshotOperationLocked(bytes write failure) error = nil, want error")
+	}
+	if got := ht.Get("key"); got != originalValue {
+		t.Fatalf("failed snapshot apply changed metadata %+v, want %+v", got, originalValue)
+	}
+	if got := ht.GetBytes("key"); !bytes.Equal(got, original) {
+		t.Fatalf("failed snapshot apply changed bytes %q, want %q", got, original)
+	}
+}
+
 func TestOnDiskBytesExpireAndDestroyCleanFiles(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(50, 0)
