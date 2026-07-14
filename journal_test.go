@@ -191,6 +191,52 @@ func TestCommandJournalBinaryPreservesDynamicValues(t *testing.T) {
 	}
 }
 
+func TestCommandJournalBinaryPreallocatesLargeRecord(t *testing.T) {
+	priority := int64(42)
+	ttl := int64(60)
+	unix := time.Unix(5000, 0).Unix()
+	entry := commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 9,
+		Request: CacheCommandRequest{
+			Command:     "INTERNALSET",
+			Key:         "session:large",
+			Value:       `{"type":"string","string":"` + strings.Repeat("active-user-", 4096) + `"}`,
+			Subkey:      "metadata",
+			Priority:    &priority,
+			TTLSeconds:  &ttl,
+			UnixSeconds: &unix,
+			Values:      Slice{"alpha", json.Number("7"), Map{"nested": "value"}},
+			Pairs:       Map{"name": "ivi", "role": "admin"},
+		},
+	}
+
+	payload, err := marshalCommandJournalEntryBinaryPayload(entry)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntryBinaryPayload() error = %v", err)
+	}
+	if cap(payload) != len(payload) {
+		t.Fatalf("binary journal payload cap = %d, want exact len %d", cap(payload), len(payload))
+	}
+	record, err := marshalCommandJournalEntryBinary(entry)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntryBinary() error = %v", err)
+	}
+	if cap(record) != len(record) {
+		t.Fatalf("binary journal record cap = %d, want exact len %d", cap(record), len(record))
+	}
+	decoded, err := decodeCommandJournalEntry(record)
+	if err != nil {
+		t.Fatalf("decodeCommandJournalEntry(preallocated binary) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, entry) {
+		t.Fatalf("decoded preallocated entry = %#v, want %#v", decoded, entry)
+	}
+	if _, err := commandJournalEntryBinaryPayloadCapacity(entry, maxCommandJournalBinaryRecordBytes, 0); !errors.Is(err, errCommandJournalBinaryRecordTooLarge) {
+		t.Fatalf("commandJournalEntryBinaryPayloadCapacity(oversized) error = %v, want record too large", err)
+	}
+}
+
 func TestCommandJournalBinaryEntryReaderDecodesPayloadAndCountsBytes(t *testing.T) {
 	want := commandJournalEntry{
 		Version:  commandJournalVersion,

@@ -78,20 +78,95 @@ func marshalCommandJournalEntryBinary(entry commandJournalEntry) ([]byte, error)
 	if err := validateCommandJournalBinaryRecordSize(uint64(len(payload))); err != nil {
 		return nil, err
 	}
-	writer := newBinaryFieldWriter(commandJournalBinaryMagic, len(commandJournalBinaryMagic)+binaryFieldMaxVarintLen64+len(payload))
+	writer := newBinaryFieldWriter(commandJournalBinaryMagic, commandJournalBinaryRecordCapacity(len(payload)))
 	writer.writeBytes(payload)
 	return writer.bytes(), nil
 }
 
 func marshalCommandJournalEntryBinaryPayload(entry commandJournalEntry) ([]byte, error) {
-	writer := newBinaryFieldWriter(nil, 64)
+	values, pairs, err := marshalCommandJournalRequestDynamicFields(entry.Request)
+	if err != nil {
+		return nil, err
+	}
+	capacity, err := commandJournalEntryBinaryPayloadCapacity(entry, len(values), len(pairs))
+	if err != nil {
+		return nil, err
+	}
+	writer := newBinaryFieldWriter(nil, capacity)
 	writer.writeUvarint(uint64(entry.Version))
 	writer.writeUvarint(entry.Sequence)
 	writer.writeBool(entry.Checkpoint)
-	if err := writeCommandJournalRequestBinary(&writer, entry.Request); err != nil {
+	if err := writeCommandJournalRequestBinaryFields(&writer, entry.Request, values, pairs); err != nil {
 		return nil, err
 	}
 	return writer.bytes(), nil
+}
+
+func commandJournalBinaryRecordCapacity(payloadBytes int) int {
+	return len(commandJournalBinaryMagic) + binaryUvarintSize(uint64(payloadBytes)) + payloadBytes
+}
+
+func commandJournalEntryBinaryPayloadCapacity(entry commandJournalEntry, valuesBytes int, pairsBytes int) (int, error) {
+	total := int64(binaryUvarintSize(uint64(entry.Version)))
+	var err error
+	requestSize, err := commandJournalRequestBinarySize(entry.Request, valuesBytes, pairsBytes)
+	if err != nil {
+		return 0, err
+	}
+	for _, size := range []int64{int64(binaryUvarintSize(entry.Sequence)), 1, requestSize} {
+		total, err = addCommandJournalBinaryPayloadSize(total, size)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if err := validateCommandJournalBinaryRecordSize(uint64(total)); err != nil {
+		return 0, err
+	}
+	return int(total), nil
+}
+
+func commandJournalRequestBinarySize(request CacheCommandRequest, valuesBytes int, pairsBytes int) (int64, error) {
+	total := int64(0)
+	for _, size := range []int64{
+		commandJournalBinaryStringSize(request.Command),
+		commandJournalBinaryStringSize(request.Key),
+		commandJournalBinaryStringSize(request.Value),
+		commandJournalBinaryStringSize(request.Subkey),
+		int64(commandJournalOptionalInt64BinarySize(request.Priority)),
+		int64(commandJournalOptionalInt64BinarySize(request.TTLSeconds)),
+		int64(commandJournalOptionalInt64BinarySize(request.UnixSeconds)),
+		commandJournalBinaryBytesSize(valuesBytes),
+		commandJournalBinaryBytesSize(pairsBytes),
+	} {
+		next, err := addCommandJournalBinaryPayloadSize(total, size)
+		if err != nil {
+			return 0, err
+		}
+		total = next
+	}
+	return total, nil
+}
+
+func commandJournalBinaryStringSize(value string) int64 {
+	return commandJournalBinaryBytesSize(len(value))
+}
+
+func commandJournalBinaryBytesSize(size int) int64 {
+	return int64(binaryUvarintSize(uint64(size)) + size)
+}
+
+func commandJournalOptionalInt64BinarySize(value *int64) int {
+	if value == nil {
+		return 1
+	}
+	return 1 + binaryVarintSize(*value)
+}
+
+func addCommandJournalBinaryPayloadSize(left int64, right int64) (int64, error) {
+	if right < 0 || left > int64(maxCommandJournalBinaryRecordBytes)-right {
+		return 0, errCommandJournalBinaryRecordTooLarge
+	}
+	return left + right, nil
 }
 
 func writeCommandJournalOptionalInt64Binary(writer *binaryFieldWriter, value *int64) {
@@ -104,6 +179,26 @@ func writeCommandJournalOptionalInt64Binary(writer *binaryFieldWriter, value *in
 }
 
 func writeCommandJournalRequestBinary(writer *binaryFieldWriter, request CacheCommandRequest) error {
+	values, pairs, err := marshalCommandJournalRequestDynamicFields(request)
+	if err != nil {
+		return err
+	}
+	return writeCommandJournalRequestBinaryFields(writer, request, values, pairs)
+}
+
+func marshalCommandJournalRequestDynamicFields(request CacheCommandRequest) ([]byte, []byte, error) {
+	values, err := marshalJournalDynamicJSON(request.Values)
+	if err != nil {
+		return nil, nil, err
+	}
+	pairs, err := marshalJournalDynamicJSON(request.Pairs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return values, pairs, nil
+}
+
+func writeCommandJournalRequestBinaryFields(writer *binaryFieldWriter, request CacheCommandRequest, values []byte, pairs []byte) error {
 	writer.writeString(request.Command)
 	writer.writeString(request.Key)
 	writer.writeString(request.Value)
@@ -111,14 +206,6 @@ func writeCommandJournalRequestBinary(writer *binaryFieldWriter, request CacheCo
 	writeCommandJournalOptionalInt64Binary(writer, request.Priority)
 	writeCommandJournalOptionalInt64Binary(writer, request.TTLSeconds)
 	writeCommandJournalOptionalInt64Binary(writer, request.UnixSeconds)
-	values, err := marshalJournalDynamicJSON(request.Values)
-	if err != nil {
-		return err
-	}
-	pairs, err := marshalJournalDynamicJSON(request.Pairs)
-	if err != nil {
-		return err
-	}
 	writer.writeBytes(values)
 	writer.writeBytes(pairs)
 	return nil
