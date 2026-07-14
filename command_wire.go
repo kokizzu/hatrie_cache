@@ -42,13 +42,6 @@ func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
 	}
 }
 
-func commandWireContentType(format CommandWireFormat) string {
-	if format == CommandWireFormatProtobuf {
-		return commandWireContentTypeProtobuf
-	}
-	return commandWireContentTypeJSON
-}
-
 func commandWireFormatFromContentType(value string) (CommandWireFormat, bool) {
 	mediaType := strings.TrimSpace(value)
 	if mediaType == "" {
