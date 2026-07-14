@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"hatrie_cache/internal/jsonwire"
@@ -27,15 +28,28 @@ var errDeleteKeysNotInPageFull = errors.New("hatriecache: delete missing keys pa
 type SnapshotFormat string
 
 const (
-	SnapshotFormatJSON     SnapshotFormat = "json"
-	SnapshotFormatGzipJSON SnapshotFormat = "gzip-json"
+	SnapshotFormatJSON         SnapshotFormat = "json"
+	SnapshotFormatGzipJSON     SnapshotFormat = "gzip-json"
+	SnapshotFormatGzipBestJSON SnapshotFormat = "gzip-best-json"
 )
 
-const DefaultSnapshotFormat = SnapshotFormatGzipJSON
+const DefaultSnapshotFormat = SnapshotFormatGzipBestJSON
+
+var snapshotBestGzipWriterPool = sync.Pool{
+	New: func() interface{} {
+		writer, err := gzip.NewWriterLevel(io.Discard, gzip.BestCompression)
+		if err != nil {
+			panic(err)
+		}
+		return writer
+	},
+}
 
 func ParseSnapshotFormat(value string) (SnapshotFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", string(SnapshotFormatGzipJSON), "gzip", "json.gz", "gzjson":
+	case "", string(SnapshotFormatGzipBestJSON), "gzip-best", "best-gzip-json", "gzip-small-json", "small-gzip-json":
+		return SnapshotFormatGzipBestJSON, nil
+	case string(SnapshotFormatGzipJSON), "gzip", "json.gz", "gzjson":
 		return SnapshotFormatGzipJSON, nil
 	case string(SnapshotFormatJSON):
 		return SnapshotFormatJSON, nil
@@ -229,18 +243,35 @@ func (ht *HatTrie) writeSnapshot(writer io.Writer, journalSequence uint64, forma
 	switch format {
 	case SnapshotFormatJSON:
 		return ht.writeSnapshotJSON(writer, journalSequence)
+	case SnapshotFormatGzipBestJSON:
+		return ht.writeSnapshotGzipJSON(writer, journalSequence, acquireSnapshotBestGzipWriter, releaseSnapshotBestGzipWriter)
 	case SnapshotFormatGzipJSON:
-		gzipWriter := jsonwire.AcquireGzipWriter(writer)
-		err := ht.writeSnapshotJSON(gzipWriter, journalSequence)
-		closeErr := gzipWriter.Close()
-		jsonwire.ReleaseGzipWriter(gzipWriter)
-		if err != nil {
-			return err
-		}
-		return closeErr
+		return ht.writeSnapshotGzipJSON(writer, journalSequence, jsonwire.AcquireGzipWriter, jsonwire.ReleaseGzipWriter)
 	default:
 		return fmt.Errorf("hatriecache: unsupported snapshot format %q", format)
 	}
+}
+
+func (ht *HatTrie) writeSnapshotGzipJSON(writer io.Writer, journalSequence uint64, acquire func(io.Writer) *gzip.Writer, release func(*gzip.Writer)) error {
+	gzipWriter := acquire(writer)
+	err := ht.writeSnapshotJSON(gzipWriter, journalSequence)
+	closeErr := gzipWriter.Close()
+	release(gzipWriter)
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
+func acquireSnapshotBestGzipWriter(writer io.Writer) *gzip.Writer {
+	gzipWriter := snapshotBestGzipWriterPool.Get().(*gzip.Writer)
+	gzipWriter.Reset(writer)
+	return gzipWriter
+}
+
+func releaseSnapshotBestGzipWriter(writer *gzip.Writer) {
+	writer.Reset(io.Discard)
+	snapshotBestGzipWriterPool.Put(writer)
 }
 
 func prepareSnapshotBytesOperation(entry snapshotEntry) (snapshotOperation, error) {

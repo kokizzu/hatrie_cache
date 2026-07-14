@@ -196,25 +196,66 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
-func TestSnapshotFormatDefaultsToGzipJSONAndLoadsPlainJSON(t *testing.T) {
+func TestParseSnapshotFormat(t *testing.T) {
+	for _, tt := range []struct {
+		value string
+		want  SnapshotFormat
+	}{
+		{value: "", want: SnapshotFormatGzipBestJSON},
+		{value: " gzip-best-json ", want: SnapshotFormatGzipBestJSON},
+		{value: "gzip-small-json", want: SnapshotFormatGzipBestJSON},
+		{value: "gzip-json", want: SnapshotFormatGzipJSON},
+		{value: "gzip", want: SnapshotFormatGzipJSON},
+		{value: "json", want: SnapshotFormatJSON},
+	} {
+		got, err := ParseSnapshotFormat(tt.value)
+		if err != nil {
+			t.Fatalf("ParseSnapshotFormat(%q) error = %v", tt.value, err)
+		}
+		if got != tt.want {
+			t.Fatalf("ParseSnapshotFormat(%q) = %q, want %q", tt.value, got, tt.want)
+		}
+	}
+	if _, err := ParseSnapshotFormat("msgpack"); err == nil {
+		t.Fatal("ParseSnapshotFormat(msgpack) error = nil, want unsupported format error")
+	}
+}
+
+func TestSnapshotFormatDefaultsToGzipBestJSONAndLoadsOlderFormats(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("key", "value")
 
 	dir := t.TempDir()
-	gzipPath := filepath.Join(dir, "snapshot-default.json")
-	if err := ht.SaveSnapshot(gzipPath); err != nil {
+	defaultPath := filepath.Join(dir, "snapshot-default.json")
+	if err := ht.SaveSnapshot(defaultPath); err != nil {
 		t.Fatalf("SaveSnapshot(default) error = %v", err)
+	}
+	defaultData, err := os.ReadFile(defaultPath)
+	if err != nil {
+		t.Fatalf("ReadFile(default) error = %v", err)
+	}
+	if len(defaultData) < 2 || defaultData[0] != 0x1f || defaultData[1] != 0x8b {
+		header := defaultData
+		if len(header) > 2 {
+			header = header[:2]
+		}
+		t.Fatalf("default snapshot header = % x, want gzip header", header)
+	}
+
+	gzipPath := filepath.Join(dir, "snapshot-fast-gzip.json")
+	if err := ht.SaveSnapshotWithFormat(gzipPath, SnapshotFormatGzipJSON); err != nil {
+		t.Fatalf("SaveSnapshotWithFormat(gzip-json) error = %v", err)
 	}
 	gzipData, err := os.ReadFile(gzipPath)
 	if err != nil {
-		t.Fatalf("ReadFile(default) error = %v", err)
+		t.Fatalf("ReadFile(gzip-json) error = %v", err)
 	}
 	if len(gzipData) < 2 || gzipData[0] != 0x1f || gzipData[1] != 0x8b {
 		header := gzipData
 		if len(header) > 2 {
 			header = header[:2]
 		}
-		t.Fatalf("default snapshot header = % x, want gzip header", header)
+		t.Fatalf("gzip-json snapshot header = % x, want gzip header", header)
 	}
 
 	jsonPath := filepath.Join(dir, "snapshot-plain.json")
@@ -233,7 +274,7 @@ func TestSnapshotFormatDefaultsToGzipJSONAndLoadsPlainJSON(t *testing.T) {
 		t.Fatalf("json snapshot first byte = %q, want object", first)
 	}
 
-	for _, path := range []string{gzipPath, jsonPath} {
+	for _, path := range []string{defaultPath, gzipPath, jsonPath} {
 		loaded := newTestTrie(t)
 		if err := loaded.LoadSnapshot(path); err != nil {
 			t.Fatalf("LoadSnapshot(%s) error = %v", filepath.Base(path), err)

@@ -138,14 +138,16 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
 ```
 
 Set `SNAPSHOT_PATH` to load a snapshot at startup and save it on shutdown.
-Snapshots save as gzip-compressed JSON by default (`SNAPSHOT_FORMAT=gzip-json`)
-and still load older plain JSON snapshots automatically. Set
-`SNAPSHOT_FORMAT=json` to keep writing the previous plain JSON file format. Set
-`SNAPSHOT_INTERVAL` to periodically write the same snapshot while the server
-runs:
+Snapshots save as storage-optimized gzip JSON by default
+(`SNAPSHOT_FORMAT=gzip-best-json`) and still load older gzip JSON and plain JSON
+snapshots automatically. Set `SNAPSHOT_FORMAT=gzip-json` to write the previous
+faster gzip JSON format, or `SNAPSHOT_FORMAT=json` to keep writing the previous
+plain JSON file format. Set `SNAPSHOT_INTERVAL` to periodically write the same
+snapshot while the server runs:
 
 ```
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_INTERVAL=30s
+make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=gzip-json
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=json
 ```
 
@@ -261,8 +263,9 @@ on an AMD Ryzen 9 5950X:
 | --- | --- | ---: | ---: | ---: | ---: |
 | HTTP command wire | JSON | 5,280 ns/op | 3,250 wire_B/op | 3,642 B/op | 3 |
 | HTTP command wire | protobuf (default) | 2,434 ns/op | 3,203 wire_B/op | 3,664 B/op | 3 |
-| Snapshot save | JSON | 3,664,822 ns/op | 511,483 disk_B/op | 836,557 B/op | 24,070 |
-| Snapshot save | gzip JSON (default) | 5,279,050 ns/op | 8,923 disk_B/op | 959,903 B/op | 39,433 |
+| Snapshot save | JSON | 2,358,498 ns/op | 511,540 disk_B/op | 836,498 B/op | 24,070 |
+| Snapshot save | gzip JSON (fast fallback) | 3,759,892 ns/op | 8,280 disk_B/op | 959,576 B/op | 39,432 |
+| Snapshot save | gzip best JSON (default) | 6,953,684 ns/op | 5,423 disk_B/op | 960,567 B/op | 39,434 |
 | LevelDB save | materialized values | 2,281,266 ns/op | 423,379 record_B/op | 1,043,484 B/op | 5,650 |
 | LevelDB save | unchanged cold refs | 1,533,919 ns/op | 423,411 record_B/op | 1,009,290 B/op | 5,137 |
 | LevelDB save | stats-changed cold refs | 6,275,614 ns/op | 423,401 record_B/op | 3,039,021 B/op | 16,407 |
@@ -270,14 +273,15 @@ on an AMD Ryzen 9 5950X:
 | LevelDB load | cold refs | 7,092,625 ns/op | 423,353 record_B/op | 3,845,866 B/op | 16,501 |
 
 For the benchmark payload, protobuf command wire is about 2.2x faster with a
-small byte reduction and equivalent allocation count. Gzip snapshots trade about
-44% more save CPU and 15% more heap bytes for about 98% less snapshot storage on
-the repetitive snapshot dataset. LevelDB saves stream the sorted trie against
-the sorted LevelDB keyspace, skip unchanged records, delete stale records, and
-avoid the synced write entirely when the diff batch is empty. Unchanged
-cold-reference saves reuse stored record bytes; read-stat changes force a
-validated rewrite and cost more CPU and heap. Cold-reference loads avoid
-materializing values, saving some heap at the cost of similar startup CPU.
+small byte reduction and equivalent allocation count. The storage-optimized gzip
+snapshot default uses about 34% fewer snapshot bytes than the previous fast gzip
+format, with similar heap use and about 1.85x its save CPU; it uses about 99%
+less storage than plain JSON. LevelDB saves stream the sorted trie against the
+sorted LevelDB keyspace, skip unchanged records, delete stale records, and avoid
+the synced write entirely when the diff batch is empty. Unchanged cold-reference
+saves reuse stored record bytes; read-stat changes force a validated rewrite and
+cost more CPU and heap. Cold-reference loads avoid materializing values, saving
+some heap at the cost of similar startup CPU.
 JSON request bodies may also be sent with `Content-Encoding: gzip`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader

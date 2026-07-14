@@ -63,6 +63,10 @@ func BenchmarkSnapshotFormatGzipJSON(b *testing.B) {
 	benchmarkSnapshotFormat(b, SnapshotFormatGzipJSON)
 }
 
+func BenchmarkSnapshotFormatGzipBestJSON(b *testing.B) {
+	benchmarkSnapshotFormat(b, SnapshotFormatGzipBestJSON)
+}
+
 func BenchmarkLevelDBSaveMaterialized(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "cache.leveldb")
 	store, err := OpenLevelDBStore(path)
