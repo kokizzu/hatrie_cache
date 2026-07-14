@@ -320,7 +320,8 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 		if entry.CuckooFilter == nil {
 			return 0, errors.New("hatriecache: cuckoo filter snapshot is required")
 		}
-		return int64(entry.CuckooFilter.BucketCount * uint64(entry.CuckooFilter.BucketSize) * 2), nil
+		raw, err := base64.StdEncoding.DecodeString(entry.CuckooFilter.Fingerprints)
+		return int64(len(raw)), err
 	case "roaring_bitmap":
 		if entry.RoaringBitmap == nil {
 			return 0, errors.New("hatriecache: roaring bitmap snapshot is required")

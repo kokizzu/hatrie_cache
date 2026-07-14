@@ -2552,6 +2552,7 @@ func TestCuckooFilterRelocatesIntoReachableEmptyBucket(t *testing.T) {
 
 func TestCuckooFilterRelocationFailureRollsBack(t *testing.T) {
 	filter := newCuckooFilterDataWithShape(2, minCuckooFilterFingerprintBits)
+	filter.ensureFingerprints()
 	mask := cuckooFilterFingerprintMask(filter.fingerprintBits)
 	for idx := range filter.fingerprints {
 		filter.fingerprints[idx] = uint16(idx%int(mask)) + 1
@@ -2594,6 +2595,7 @@ func cuckooFilterPlacement(t *testing.T, filter *cuckooFilterData, value interfa
 
 func fillCuckooBucketExcluding(t *testing.T, filter *cuckooFilterData, index uint64, excluded ...uint16) {
 	t.Helper()
+	filter.ensureFingerprints()
 	next := uint16(1)
 	for slot := 0; slot < int(cuckooFilterBucketSize); slot++ {
 		for cuckooFingerprintExcluded(next, excluded) {
@@ -2650,6 +2652,71 @@ func TestCuckooFilterRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestCuckooFilterEmptyFingerprintsAllocatesLazily(t *testing.T) {
+	filter := newCuckooFilterDataWithShape(maxCuckooFilterBuckets, minCuckooFilterFingerprintBits)
+	if len(filter.fingerprints) != 0 || filter.EncodedSize() != 0 {
+		t.Fatalf("empty max Cuckoo filter allocated %d fingerprints/%d bytes, want lazy empty backing", len(filter.fingerprints), filter.EncodedSize())
+	}
+	if filter.Contains("alpha") {
+		t.Fatal("empty lazy Cuckoo filter contains alpha, want miss")
+	}
+	if filter.Delete("alpha") {
+		t.Fatal("empty lazy Cuckoo filter deleted alpha, want miss")
+	}
+	if info := filter.Info(); info.BucketCount != maxCuckooFilterBuckets || info.FingerprintBytes != 0 || info.Count != 0 {
+		t.Fatalf("Info(empty max) = %#v, want logical buckets without allocated fingerprints", info)
+	}
+	snapshot := filter.Snapshot()
+	if snapshot.Fingerprints != "" {
+		t.Fatalf("empty Cuckoo snapshot fingerprints length = %d, want compact empty fingerprints", len(snapshot.Fingerprints))
+	}
+	if size, err := snapshotOperationValueSize(snapshotOperation{entry: snapshotEntry{Type: "cuckoo_filter", CuckooFilter: &snapshot}}); err != nil || size != 0 {
+		t.Fatalf("snapshotOperationValueSize(empty cuckoo) = %d/%v, want 0/nil", size, err)
+	}
+
+	oldRaw := make([]byte, minCuckooFilterBuckets*uint64(cuckooFilterBucketSize)*2)
+	restored, err := newCuckooFilterDataFromSnapshot(cuckooFilterSnapshot{
+		BucketCount:     minCuckooFilterBuckets,
+		BucketSize:      cuckooFilterBucketSize,
+		FingerprintBits: minCuckooFilterFingerprintBits,
+		Count:           0,
+		Fingerprints:    base64.StdEncoding.EncodeToString(oldRaw),
+	})
+	if err != nil {
+		t.Fatalf("newCuckooFilterDataFromSnapshot(full zero fingerprints) error = %v", err)
+	}
+	if len(restored.fingerprints) != 0 || restored.EncodedSize() != 0 {
+		t.Fatalf("restored empty Cuckoo filter allocated %d fingerprints/%d bytes, want lazy empty backing", len(restored.fingerprints), restored.EncodedSize())
+	}
+
+	ht := newTestTrie(t)
+	if err := ht.UpsertCuckooFilter("seen", 128, 0.001); err != nil {
+		t.Fatalf("UpsertCuckooFilter() error = %v", err)
+	}
+	hval := ht.Get("seen")
+	if len(ht.cuckooFilters.array[hval.Index].fingerprints) != 0 {
+		t.Fatalf("empty trie Cuckoo filter allocated %d fingerprints, want lazy empty backing", len(ht.cuckooFilters.array[hval.Index].fingerprints))
+	}
+	if info, ok := ht.CuckooFilterInfo("seen"); !ok || info.FingerprintBytes != 0 || info.Count != 0 {
+		t.Fatalf("CuckooFilterInfo(empty) = %#v/%v, want no allocated fingerprint bytes", info, ok)
+	}
+	if ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("empty trie Cuckoo filter contains alpha, want miss")
+	}
+	if deleted, err := ht.DeleteCuckooFilterChecked("seen", "alpha"); err != nil || deleted != 0 {
+		t.Fatalf("DeleteCuckooFilterChecked(empty) = %d/%v, want 0/nil", deleted, err)
+	}
+	if added, err := ht.AddCuckooFilterChecked("seen", "alpha"); err != nil || added != 1 {
+		t.Fatalf("AddCuckooFilterChecked(first) = %d/%v, want first insertion", added, err)
+	}
+	if info, ok := ht.CuckooFilterInfo("seen"); !ok || info.FingerprintBytes == 0 || info.Count != 1 {
+		t.Fatalf("CuckooFilterInfo(after first add) = %#v/%v, want allocated populated fingerprints", info, ok)
+	}
+	if !ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("Cuckoo filter missed inserted alpha after lazy allocation")
+	}
+}
+
 func TestCuckooFilterSnapshotValidationRejectsCorruptPayload(t *testing.T) {
 	filter, err := newCuckooFilterData(32, 0.01)
 	if err != nil {
@@ -2671,6 +2738,30 @@ func TestCuckooFilterSnapshotValidationRejectsCorruptPayload(t *testing.T) {
 	snapshot.Fingerprints = base64.StdEncoding.EncodeToString(raw)
 	if err := validateCuckooFilterSnapshot(snapshot); err == nil {
 		t.Fatal("validateCuckooFilterSnapshot(invalid fingerprint) error = nil, want error")
+	}
+}
+
+func TestCuckooFilterSnapshotValidationRejectsInconsistentEmptyState(t *testing.T) {
+	if err := validateCuckooFilterSnapshot(cuckooFilterSnapshot{
+		BucketCount:     minCuckooFilterBuckets,
+		BucketSize:      cuckooFilterBucketSize,
+		FingerprintBits: minCuckooFilterFingerprintBits,
+		Count:           1,
+		Fingerprints:    "",
+	}); err == nil {
+		t.Fatal("validateCuckooFilterSnapshot(empty fingerprints with count) error = nil, want error")
+	}
+
+	raw := make([]byte, minCuckooFilterBuckets*uint64(cuckooFilterBucketSize)*2)
+	raw[0] = 1
+	if err := validateCuckooFilterSnapshot(cuckooFilterSnapshot{
+		BucketCount:     minCuckooFilterBuckets,
+		BucketSize:      cuckooFilterBucketSize,
+		FingerprintBits: minCuckooFilterFingerprintBits,
+		Count:           0,
+		Fingerprints:    base64.StdEncoding.EncodeToString(raw),
+	}); err == nil {
+		t.Fatal("validateCuckooFilterSnapshot(zero count with fingerprint) error = nil, want error")
 	}
 }
 

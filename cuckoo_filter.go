@@ -68,7 +68,6 @@ func newDefaultCuckooFilterData() cuckooFilterData {
 
 func newCuckooFilterDataWithShape(bucketCount uint64, fingerprintBits uint8) cuckooFilterData {
 	return cuckooFilterData{
-		fingerprints:    make([]uint16, int(bucketCount)*int(cuckooFilterBucketSize)),
 		bucketCount:     bucketCount,
 		fingerprintBits: fingerprintBits,
 	}
@@ -119,25 +118,39 @@ func validateCuckooFilterSnapshot(snapshot cuckooFilterSnapshot) error {
 	if err != nil {
 		return err
 	}
+	if len(raw) == 0 {
+		if snapshot.Count != 0 {
+			return errors.New("hatriecache: empty cuckoo filter fingerprints have count")
+		}
+		return nil
+	}
 	if uint64(len(raw)) != snapshot.BucketCount*uint64(cuckooFilterBucketSize)*2 {
 		return errors.New("hatriecache: invalid cuckoo filter fingerprint length")
 	}
+	occupied, err := cuckooFilterRawOccupied(raw, snapshot.FingerprintBits)
+	if err != nil {
+		return err
+	}
+	if occupied != snapshot.Count {
+		return errors.New("hatriecache: cuckoo filter count does not match fingerprints")
+	}
+	return nil
+}
+
+func cuckooFilterRawOccupied(raw []byte, fingerprintBits uint8) (uint64, error) {
 	var occupied uint64
-	mask := cuckooFilterFingerprintMask(snapshot.FingerprintBits)
+	mask := cuckooFilterFingerprintMask(fingerprintBits)
 	for idx := 0; idx < len(raw)/2; idx++ {
 		fp := binary.LittleEndian.Uint16(raw[idx*2 : idx*2+2])
 		if fp == 0 {
 			continue
 		}
 		if fp&^mask != 0 {
-			return errors.New("hatriecache: invalid cuckoo filter fingerprint")
+			return 0, errors.New("hatriecache: invalid cuckoo filter fingerprint")
 		}
 		occupied++
 	}
-	if occupied != snapshot.Count {
-		return errors.New("hatriecache: cuckoo filter count does not match fingerprints")
-	}
-	return nil
+	return occupied, nil
 }
 
 func newCuckooFilterDataFromSnapshot(snapshot cuckooFilterSnapshot) (cuckooFilterData, error) {
@@ -148,16 +161,19 @@ func newCuckooFilterDataFromSnapshot(snapshot cuckooFilterSnapshot) (cuckooFilte
 	if err != nil {
 		return cuckooFilterData{}, err
 	}
-	fingerprints := make([]uint16, len(raw)/2)
-	for idx := range fingerprints {
-		fingerprints[idx] = binary.LittleEndian.Uint16(raw[idx*2 : idx*2+2])
-	}
-	return cuckooFilterData{
-		fingerprints:    fingerprints,
+	out := cuckooFilterData{
 		bucketCount:     snapshot.BucketCount,
 		fingerprintBits: snapshot.FingerprintBits,
 		count:           snapshot.Count,
-	}, nil
+	}
+	if len(raw) == 0 || snapshot.Count == 0 {
+		return out, nil
+	}
+	out.fingerprints = make([]uint16, len(raw)/2)
+	for idx := range out.fingerprints {
+		out.fingerprints[idx] = binary.LittleEndian.Uint16(raw[idx*2 : idx*2+2])
+	}
+	return out, nil
 }
 
 func (filter *cuckooFilterData) Add(value interface{}) bool {
@@ -193,6 +209,7 @@ func (filter *cuckooFilterData) AddOneChecked(value interface{}, values ...inter
 }
 
 func (filter *cuckooFilterData) addKey(key []byte) bool {
+	filter.ensureFingerprints()
 	hash := bloomFilterFNV64a(key)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)
@@ -228,6 +245,9 @@ func (filter *cuckooFilterData) ContainsChecked(value interface{}) (bool, error)
 }
 
 func (filter *cuckooFilterData) containsKey(key []byte) bool {
+	if len(filter.fingerprints) == 0 {
+		return false
+	}
 	hash := bloomFilterFNV64a(key)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)
@@ -267,6 +287,9 @@ func (filter *cuckooFilterData) DeleteOneChecked(value interface{}, values ...in
 }
 
 func (filter *cuckooFilterData) deleteKey(key []byte) bool {
+	if len(filter.fingerprints) == 0 {
+		return false
+	}
 	hash := bloomFilterFNV64a(key)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)
@@ -296,9 +319,12 @@ func (filter cuckooFilterData) Info() CuckooFilterInfo {
 }
 
 func (filter cuckooFilterData) Snapshot() cuckooFilterSnapshot {
-	raw := make([]byte, len(filter.fingerprints)*2)
-	for idx, fingerprint := range filter.fingerprints {
-		binary.LittleEndian.PutUint16(raw[idx*2:idx*2+2], fingerprint)
+	var raw []byte
+	if len(filter.fingerprints) > 0 {
+		raw = make([]byte, len(filter.fingerprints)*2)
+		for idx, fingerprint := range filter.fingerprints {
+			binary.LittleEndian.PutUint16(raw[idx*2:idx*2+2], fingerprint)
+		}
 	}
 	return cuckooFilterSnapshot{
 		BucketCount:     filter.bucketCount,
@@ -311,6 +337,13 @@ func (filter cuckooFilterData) Snapshot() cuckooFilterSnapshot {
 
 func (filter cuckooFilterData) EncodedSize() int64 {
 	return int64(len(filter.fingerprints) * 2)
+}
+
+func (filter *cuckooFilterData) ensureFingerprints() {
+	if filter == nil || len(filter.fingerprints) > 0 || filter.bucketCount == 0 {
+		return
+	}
+	filter.fingerprints = make([]uint16, int(filter.bucketCount)*int(cuckooFilterBucketSize))
 }
 
 func (filter *cuckooFilterData) relocateAndInsert(index uint64, alternate uint64, fp uint16, hash uint64) bool {
