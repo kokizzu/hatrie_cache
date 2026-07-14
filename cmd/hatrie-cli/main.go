@@ -21,6 +21,8 @@ type clientConfig struct {
 	addr string
 }
 
+const maxErrorBodyBytes = 1 << 20
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, http.DefaultClient); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -340,27 +342,47 @@ func doAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, err := readErrorBody(resp.Body)
+		if err != nil {
+			return err
+		}
 		return fmt.Errorf("server returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
-	_, err = stdout.Write(ensureTrailingNewline(body))
-	return err
+	return copyAndEnsureTrailingNewline(stdout, resp.Body)
 }
 
 func endpoint(addr string, path string) string {
 	return strings.TrimRight(addr, "/") + path
 }
 
-func ensureTrailingNewline(value []byte) []byte {
-	if len(value) == 0 || value[len(value)-1] == '\n' {
-		return value
+func readErrorBody(body io.Reader) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(body, maxErrorBodyBytes))
+}
+
+type trailingNewlineWriter struct {
+	writer io.Writer
+	wrote  bool
+	last   byte
+}
+
+func (writer *trailingNewlineWriter) Write(data []byte) (int, error) {
+	n, err := writer.writer.Write(data)
+	if n > 0 {
+		writer.wrote = true
+		writer.last = data[n-1]
 	}
-	out := make([]byte, 0, len(value)+1)
-	out = append(out, value...)
-	out = append(out, '\n')
-	return out
+	return n, err
+}
+
+func copyAndEnsureTrailingNewline(stdout io.Writer, body io.Reader) error {
+	writer := &trailingNewlineWriter{writer: stdout}
+	if _, err := io.Copy(writer, body); err != nil {
+		return err
+	}
+	if writer.wrote && writer.last != '\n' {
+		_, err := stdout.Write([]byte{'\n'})
+		return err
+	}
+	return nil
 }

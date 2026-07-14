@@ -47,6 +47,45 @@ func TestRunFetchesStats(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotDuplicateTrailingNewline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{\"reads\":7}\n"))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "stats"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(stats) error = %v", err)
+	}
+	if got := stdout.String(); got != "{\"reads\":7}\n" {
+		t.Fatalf("stdout = %q, want exactly one trailing newline", got)
+	}
+}
+
+func TestRunBoundsErrorResponseBody(t *testing.T) {
+	payload := strings.Repeat("x", maxErrorBodyBytes+128) + "tail-marker"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(payload))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	err := run(context.Background(), []string{"-addr", server.URL, "stats"}, stdout, &bytes.Buffer{}, server.Client())
+	if err == nil || !strings.Contains(err.Error(), "server returned 500 Internal Server Error") {
+		t.Fatalf("run(stats) error = %v, want server error", err)
+	}
+	if strings.Contains(err.Error(), "tail-marker") {
+		t.Fatalf("error included body beyond limit")
+	}
+	if len(err.Error()) > maxErrorBodyBytes+128 {
+		t.Fatalf("error length = %d, want bounded body", len(err.Error()))
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout len = %d, want empty on server error", stdout.Len())
+	}
+}
+
 func TestRunEntriesPassesPrefix(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
