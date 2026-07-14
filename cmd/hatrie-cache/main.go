@@ -146,11 +146,11 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 	election := hatriecache.NewElectionStore(topology, hatriecache.ElectionOptions{Timeout: cfg.electionTimeout})
-	if err := election.Heartbeat(defaultNodeID(cfg.nodeID)); err != nil {
-		if cfg.nodeID != "" {
-			return err
-		}
+	stopElectionHeartbeat, err := startElectionHeartbeat(ctx, election, defaultNodeID(cfg.nodeID), cfg.electionTimeout, cfg.nodeID != "", stderr)
+	if err != nil {
+		return err
 	}
+	defer stopElectionHeartbeat()
 	var replicator *hatriecache.HTTPReplicator
 	if cfg.replication {
 		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
@@ -556,6 +556,69 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 		}
 	}()
 	return periodicStopper(done, stopped)
+}
+
+func startElectionHeartbeat(ctx context.Context, election *hatriecache.ElectionStore, nodeID string, timeout time.Duration, required bool, stderr io.Writer) (func(), error) {
+	if election == nil {
+		return func() {}, nil
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return func() {}, nil
+	}
+	heartbeat := func() error {
+		return election.Heartbeat(nodeID)
+	}
+	if err := heartbeat(); err != nil {
+		if required {
+			return nil, err
+		}
+		fmt.Fprintf(stderr, "election heartbeat: %v\n", err)
+		return func() {}, nil
+	}
+
+	interval := electionHeartbeatInterval(timeout)
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := heartbeat(); err != nil {
+					fmt.Fprintf(stderr, "election heartbeat: %v\n", err)
+				}
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
+	return periodicStopper(done, stopped), nil
+}
+
+func electionHeartbeatInterval(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		timeout = hatriecache.DefaultElectionTimeout
+	}
+	interval := timeout / 3
+	if interval <= 0 {
+		interval = time.Millisecond
+	}
+	minimum := 10 * time.Millisecond
+	if timeout < 30*time.Millisecond {
+		minimum = time.Millisecond
+	}
+	if interval < minimum {
+		interval = minimum
+	}
+	if interval > 5*time.Second {
+		interval = 5 * time.Second
+	}
+	return interval
 }
 
 type journalPullerConfig struct {

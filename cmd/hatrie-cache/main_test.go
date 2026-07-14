@@ -459,6 +459,69 @@ func TestRunStartsHTTPAndGRPCAndStopsOnContextCancel(t *testing.T) {
 	waitForAddrReusable(t, grpcAddr)
 }
 
+func TestRunRefreshesLocalElectionHeartbeat(t *testing.T) {
+	monitoringAddr := freeTCPAddr(t)
+	topologyPath := filepath.Join(t.TempDir(), "topology.json")
+	if err := hatriecache.SaveTopology(topologyPath, hatriecache.ClusterTopology{
+		Self: "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://" + monitoringAddr},
+			{ID: "node-b", Address: "http://127.0.0.1:1"},
+		},
+		Shards: []hatriecache.TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	}); err != nil {
+		t.Fatalf("SaveTopology() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, []string{
+			"-monitoring-server",
+			"-monitoring-addr", monitoringAddr,
+			"-monitoring-web-dir", "",
+			"-node-id", "node-a",
+			"-topology-path", topologyPath,
+			"-election-timeout", "80ms",
+			"-enforce-leader-writes",
+		}, &bytes.Buffer{}, &bytes.Buffer{})
+	}()
+
+	waitForHTTPHealth(t, "http://"+monitoringAddr+"/api/health")
+	time.Sleep(240 * time.Millisecond)
+	resp, err := http.Post("http://"+monitoringAddr+"/api/commands", "application/json", strings.NewReader(`{"command":"SETSTR","key":"session:1","value":"value"}`))
+	if err != nil {
+		t.Fatalf("POST /api/commands error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var body bytes.Buffer
+		_, _ = body.ReadFrom(resp.Body)
+		t.Fatalf("leader write status = %d body %q, want 200", resp.StatusCode, body.String())
+	}
+	var response hatriecache.CacheCommandResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		t.Fatalf("command response JSON error = %v", err)
+	}
+	if !response.OK {
+		t.Fatalf("command response = %#v, want ok after local heartbeat refresh", response)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run() after cancel error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run() did not return after context cancellation")
+	}
+	waitForAddrReusable(t, monitoringAddr)
+}
+
 func TestReportServerErrorDoesNotBlockWhenChannelIsFull(t *testing.T) {
 	errCh := make(chan error, 1)
 	errCh <- errors.New("first")

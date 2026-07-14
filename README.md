@@ -169,7 +169,8 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json
 
 Set `ELECTION_TIMEOUT` to control deterministic topology-based leader failover.
 The current shard primary stays leader while healthy; when it is marked offline
-or its heartbeat times out, the first healthy replica becomes leader:
+or its heartbeat times out, the first healthy replica becomes leader. A running
+monitoring server refreshes its own node heartbeat periodically while it is up:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_TIMEOUT=15s
