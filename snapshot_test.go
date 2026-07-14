@@ -328,6 +328,64 @@ func TestSnapshotSavePreservesUnchangedColdLevelDBReferenceRecord(t *testing.T) 
 	}
 }
 
+func TestSnapshotSaveConvertsBinaryColdLevelDBReferenceToJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("cold", "value")
+	if err := store.Save(source); err != nil {
+		t.Fatalf("Save(binary store) error = %v", err)
+	}
+	data, ok, err := store.entryData("cold")
+	if err != nil || !ok {
+		t.Fatalf("entryData(cold) = %v/%v, want binary record", err, ok)
+	}
+	if !levelDBEntryDataIsBinary(data) {
+		t.Fatalf("stored cold record = %q, want binary LevelDB record", data)
+	}
+
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 1 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 1 cold key and 0 values", result)
+	}
+	entries := loaded.Entries(true)
+	if len(entries) != 1 || entries[0].Key != "cold" || !entries[0].Value.IsLevelDBReference() {
+		t.Fatalf("entries after hot-load = %#v, want cold leveldb reference", entries)
+	}
+
+	var snapshot bytes.Buffer
+	if err := loaded.writeSnapshot(&snapshot, 0, SnapshotFormatJSON); err != nil {
+		t.Fatalf("writeSnapshot(binary cold ref) error = %v", err)
+	}
+	if bytes.Contains(snapshot.Bytes(), levelDBBinaryMagic) {
+		t.Fatalf("snapshot leaked binary LevelDB record bytes:\n%s", snapshot.String())
+	}
+	if got := snapshot.String(); !strings.Contains(got, `"key": "cold"`) || !strings.Contains(got, `"string": "value"`) {
+		t.Fatalf("snapshot did not write portable JSON entry:\n%s", got)
+	}
+
+	roundTrip := newTestTrie(t)
+	snapshotPath := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(snapshotPath, snapshot.Bytes(), 0o600); err != nil {
+		t.Fatalf("WriteFile(snapshot) error = %v", err)
+	}
+	if err := roundTrip.LoadSnapshot(snapshotPath); err != nil {
+		t.Fatalf("LoadSnapshot(binary cold ref snapshot) error = %v", err)
+	}
+	if got := roundTrip.GetString("cold"); got != "value" {
+		t.Fatalf("round-trip cold value = %q, want value", got)
+	}
+}
+
 func TestSnapshotSaveRewritesColdLevelDBReferenceWhenStatsChange(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	store, err := OpenLevelDBStore(path)
