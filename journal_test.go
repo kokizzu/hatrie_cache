@@ -435,6 +435,48 @@ func TestCommandJournalReplaysTopKMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysQuantileSketchMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATEQ", Key: "latency", Value: "0.01"}); !got.OK {
+		t.Fatalf("journaled CREATEQ response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDQ", Key: "latency", Values: Slice{json.Number("10"), json.Number("20"), json.Number("30")}}); !got.OK {
+		t.Fatalf("journaled ADDQ response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ESTQ", Key: "latency", Value: "0.5"}); !got.OK || got.Value == "" {
+		t.Fatalf("journaled ESTQ response = %#v, want local estimate", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want CREATEQ and ADDQ only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got, ok := replayed.EstimateQuantileSketch("latency", 0.5); !ok || got.Count != 3 || got.Value < 10 || got.Value > 30 {
+		t.Fatalf("replayed quantile estimate = %#v/%v, want restored sketch", got, ok)
+	}
+	if info, ok := replayed.QuantileSketchInfo("latency"); !ok || info.Count != 3 || info.SummarySize == 0 {
+		t.Fatalf("replayed QuantileSketchInfo = %#v/%v, want count 3", info, ok)
+	}
+}
+
 func TestCommandJournalReplaysRelativeTTLsAsAbsoluteExpirations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

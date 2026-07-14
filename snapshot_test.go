@@ -39,6 +39,10 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 		t.Fatalf("UpsertTopK() error = %v", err)
 	}
 	ht.AddTopK("top", "alpha", 5)
+	if err := ht.UpsertQuantileSketch("latency", 0.01); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	ht.AddQuantileSketch("latency", 10, 20, 30)
 	if err := ht.UpsertCuckooFilter("cuckoo", 128, 0.001); err != nil {
 		t.Fatalf("UpsertCuckooFilter() error = %v", err)
 	}
@@ -104,6 +108,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.TopKInfo("top"); !ok || info.Capacity != 3 || info.Total != 5 {
 		t.Fatalf("loaded TopKInfo = %#v/%v, want restored Top-K", info, ok)
+	}
+	if got, ok := loaded.EstimateQuantileSketch("latency", 0.5); !ok || got.Count != 3 || got.Value < 10 || got.Value > 30 {
+		t.Fatalf("loaded quantile estimate = %#v/%v, want restored sketch", got, ok)
+	}
+	if info, ok := loaded.QuantileSketchInfo("latency"); !ok || info.Epsilon != 0.01 || info.Count != 3 {
+		t.Fatalf("loaded QuantileSketchInfo = %#v/%v, want restored quantile sketch", info, ok)
 	}
 	if !loaded.HasCuckooFilter("cuckoo", "alpha") || !loaded.HasCuckooFilter("cuckoo", "beta") {
 		t.Fatal("loaded Cuckoo filter does not contain inserted values")

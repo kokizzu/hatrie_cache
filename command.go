@@ -501,6 +501,38 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATEQ", "CREATEQS", "CREATEQUANTILE", "RESERVEQ", "QSRESERVE":
+		epsilon, err := commandQuantileSketchEpsilon(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertQuantileSketch(key, epsilon); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created quantile sketch"}
+	case "ADDQ", "ADDQS", "QADD", "QSADD":
+		values, err := quantileSketchValuesFromCommand(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		estimate := ht.AddQuantileSketch(key, values[0], values[1:]...)
+		return commandValueResponse("added quantile sketch values", estimate)
+	case "ESTQ", "QUERYQ", "QQUERY", "QSQUERY", "QUANTILE":
+		quantile, err := commandQuantileValue(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		estimate, ok := ht.EstimateQuantileSketch(key, quantile)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", estimate)
+	case "INFOQ", "QINFO", "INFOQS", "QSINFO":
+		info, ok := ht.QuantileSketchInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	default:
 		return commandError("unsupported command")
 	}
@@ -735,6 +767,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		return string(data), nil
 	case DATAVALUE_TYPE_TOP_K:
 		data, err := json.Marshal(ht.topKs.array[hval.Index].Items())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	case DATAVALUE_TYPE_QUANTILE_SKETCH:
+		data, err := json.Marshal(ht.quantileSketches.array[hval.Index].Info())
 		if err != nil {
 			return "", err
 		}
@@ -1032,6 +1070,71 @@ func commandTopKCount(request CacheCommandRequest) (uint64, error) {
 		return 0, errors.New("top-k count must be positive")
 	}
 	return count, nil
+}
+
+func commandQuantileSketchEpsilon(request CacheCommandRequest) (float64, error) {
+	epsilon := DefaultQuantileSketchEpsilon
+	var err error
+	if strings.TrimSpace(request.Value) != "" {
+		epsilon, err = strconv.ParseFloat(strings.TrimSpace(request.Value), 64)
+		if err != nil {
+			return 0, errors.New("quantile sketch epsilon must be a number")
+		}
+	}
+	for _, key := range []string{"epsilon", "error"} {
+		if value, ok := request.Pairs[key]; ok {
+			epsilon, err = commandFloat64Value(value)
+			if err != nil {
+				return 0, errors.New("quantile sketch epsilon must be a number")
+			}
+			break
+		}
+	}
+	return quantileSketchEpsilonValue(epsilon)
+}
+
+func quantileSketchValuesFromCommand(request CacheCommandRequest) ([]float64, error) {
+	values, ok := commandSliceValues(request)
+	if !ok {
+		return nil, errors.New("value or values is required")
+	}
+	out := make([]float64, len(values))
+	for idx, value := range values {
+		parsed, err := commandFloat64Value(value)
+		if err != nil || !validQuantileSketchValue(parsed) {
+			return nil, errors.New("quantile sketch value must be a finite number")
+		}
+		out[idx] = parsed
+	}
+	return out, nil
+}
+
+func commandQuantileValue(request CacheCommandRequest) (float64, error) {
+	value := strings.TrimSpace(request.Value)
+	if strings.TrimSpace(request.Subkey) != "" {
+		value = strings.TrimSpace(request.Subkey)
+	}
+	quantile := math.NaN()
+	var err error
+	if value != "" {
+		quantile, err = strconv.ParseFloat(value, 64)
+		if err != nil {
+			return 0, errors.New("quantile must be a number")
+		}
+	}
+	for _, key := range []string{"quantile", "q"} {
+		if pairValue, ok := request.Pairs[key]; ok {
+			quantile, err = commandFloat64Value(pairValue)
+			if err != nil {
+				return 0, errors.New("quantile must be a number")
+			}
+			break
+		}
+	}
+	if math.IsNaN(quantile) || math.IsInf(quantile, 0) || quantile < 0 || quantile > 1 {
+		return 0, errors.New("quantile must be between 0 and 1")
+	}
+	return quantile, nil
 }
 
 func commandUint64Value(value interface{}) (uint64, error) {

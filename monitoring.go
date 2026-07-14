@@ -745,6 +745,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		info := ht.roaringBitmaps.array[hval.Index].Info()
 		return int64(info.EncodedBytes), strconv.FormatUint(info.Cardinality, 10) + " integers, " + strconv.FormatUint(info.Containers, 10) + " containers"
+	case DATAVALUE_TYPE_QUANTILE_SKETCH:
+		if int(hval.Index) >= len(ht.quantileSketches.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.quantileSketches.array[hval.Index].Info()
+		return info.EncodedBytes, strconv.FormatUint(info.Count, 10) + " samples, " + strconv.FormatUint(info.SummarySize, 10) + " summary points"
 	default:
 		return 0, ""
 	}
@@ -780,6 +786,8 @@ func monitoringType(hval HatValue) string {
 		return "cuckoo_filter"
 	case DATAVALUE_TYPE_ROARING_BITMAP:
 		return "roaring_bitmap"
+	case DATAVALUE_TYPE_QUANTILE_SKETCH:
+		return "quantile_sketch"
 	default:
 		return "unknown"
 	}

@@ -20,6 +20,8 @@ HyperLogLog values use compact register arrays for approximate distinct counts
 without retaining the observed items.
 Top-K values use a bounded Space-Saving min-heap to track heavy hitters with
 fixed memory and O(log k) updates.
+Quantile sketch values use a compact Greenwald-Khanna summary for approximate
+p50/p95/p99-style numeric queries with bounded rank error and low memory use.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack
 and trim freed tail slots, avoiding per-index hash-map overhead while keeping
 reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
@@ -397,6 +399,11 @@ top-k heavy hitter type:
   CREATETOPK key [capacity]
   ADDTOPK key val [count]
   ESTTOPK/GETTOPK/INFOTOPK key
+quantile sketch type:
+  CREATEQ key [epsilon]
+  ADDQ key number...
+  ESTQ key quantile
+  INFOQ key
 ```
 - [x] add client CLI support for cluster/server topology management and replication internals:
 ```

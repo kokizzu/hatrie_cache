@@ -295,6 +295,27 @@ func TestSnapshotOperationValueSizeSupportsTopK(t *testing.T) {
 	}
 }
 
+func TestSnapshotOperationValueSizeSupportsQuantileSketch(t *testing.T) {
+	sketch, err := newQuantileSketchData(0.01)
+	if err != nil {
+		t.Fatalf("newQuantileSketchData() error = %v", err)
+	}
+	sketch.Add(10, 20, 30)
+	snapshot := sketch.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:           "quantile_sketch",
+			QuantileSketch: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(quantile_sketch) error = %v", err)
+	}
+	if size != sketch.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(quantile_sketch) = %d, want %d", size, sketch.EncodedSize())
+	}
+}
+
 func TestLevelDBShouldHotLoadRejectsNegativeLimits(t *testing.T) {
 	now := time.Unix(4600, 0)
 	operation := snapshotOperation{

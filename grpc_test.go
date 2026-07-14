@@ -470,6 +470,50 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOTOPK response = %#v, want JSON info", infoTopKResp)
 	}
 
+	createQuantileResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATEQ",
+		Key:     "latency",
+		Value:   "0.01",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATEQ) error = %v", err)
+	}
+	if !createQuantileResp.GetOk() {
+		t.Fatalf("CREATEQ response = %#v, want ok", createQuantileResp)
+	}
+	addQuantileResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDQ",
+		Key:     "latency",
+		Values:  []string{"10", "20", "30"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDQ) error = %v", err)
+	}
+	if !addQuantileResp.GetOk() || addQuantileResp.GetValue() == "" {
+		t.Fatalf("ADDQ response = %#v, want JSON estimate", addQuantileResp)
+	}
+	estimateQuantileResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ESTQ",
+		Key:     "latency",
+		Value:   "0.5",
+	})
+	if err != nil {
+		t.Fatalf("Command(ESTQ) error = %v", err)
+	}
+	if !estimateQuantileResp.GetOk() || estimateQuantileResp.GetValue() == "" {
+		t.Fatalf("ESTQ response = %#v, want JSON estimate", estimateQuantileResp)
+	}
+	infoQuantileResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFOQ",
+		Key:     "latency",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFOQ) error = %v", err)
+	}
+	if !infoQuantileResp.GetOk() || infoQuantileResp.GetValue() == "" {
+		t.Fatalf("INFOQ response = %#v, want JSON info", infoQuantileResp)
+	}
+
 	stats, err := client.Stats(context.Background(), &hatriecachev1.StatsRequest{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)

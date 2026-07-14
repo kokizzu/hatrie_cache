@@ -46,6 +46,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	ht.AddTopK("session:top", "/api/users", 7)
 	ht.UpsertRoaringBitmap("session:bitmap")
 	ht.AddRoaringBitmap("session:bitmap", 1, 1<<16+7)
+	if err := ht.UpsertQuantileSketch("session:zquantiles", 0.01); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	ht.AddQuantileSketch("session:zquantiles", 10, 20, 30)
 	ht.UpsertCounter("counter:views", 42)
 	if !ht.Expire("session:1", time.Minute) {
 		t.Fatal("Expire(session:1) = false, want true")
@@ -73,6 +77,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	roaringInfo, ok := ht.RoaringBitmapInfo("session:bitmap")
 	if !ok {
 		t.Fatal("RoaringBitmapInfo(session:bitmap) = false, want true")
+	}
+	quantileInfo, ok := ht.QuantileSketchInfo("session:zquantiles")
+	if !ok {
+		t.Fatal("QuantileSketchInfo(session:zquantiles) = false, want true")
 	}
 
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
@@ -115,8 +123,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 9 {
-		t.Fatalf("entries len = %d, want 9: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 10 {
+		t.Fatalf("entries len = %d, want 10: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -162,6 +170,11 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	wantTopKPreview := strconv.FormatUint(topKInfo.Tracked, 10) + "/" + strconv.FormatUint(topKInfo.Capacity, 10) + " tracked, " + strconv.FormatUint(topKInfo.Total, 10) + " total"
 	if topKEntry.Key != "session:top" || topKEntry.Type != "top_k" || topKEntry.ValuePreview != wantTopKPreview || topKEntry.SizeBytes <= 0 {
 		t.Fatalf("top-k entry = %#v, want compact heavy-hitter preview", topKEntry)
+	}
+	quantileEntry := entries.Entries[9]
+	wantQuantilePreview := strconv.FormatUint(quantileInfo.Count, 10) + " samples, " + strconv.FormatUint(quantileInfo.SummarySize, 10) + " summary points"
+	if quantileEntry.Key != "session:zquantiles" || quantileEntry.Type != "quantile_sketch" || quantileEntry.SizeBytes != quantileInfo.EncodedBytes || quantileEntry.ValuePreview != wantQuantilePreview {
+		t.Fatalf("quantile sketch entry = %#v, want compact quantile preview", quantileEntry)
 	}
 }
 

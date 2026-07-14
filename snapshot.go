@@ -39,6 +39,7 @@ type snapshotEntry struct {
 	TopK           *topKSnapshot           `json:"top_k,omitempty"`
 	CuckooFilter   *cuckooFilterSnapshot   `json:"cuckoo_filter,omitempty"`
 	RoaringBitmap  *roaringBitmapSnapshot  `json:"roaring_bitmap,omitempty"`
+	QuantileSketch *quantileSketchSnapshot `json:"quantile_sketch,omitempty"`
 	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
 	Stats          *KeyStats               `json:"stats,omitempty"`
 }
@@ -175,6 +176,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_ROARING_BITMAP:
 		snapshot := ht.roaringBitmaps.array[entry.Value.Index].Snapshot()
 		out.RoaringBitmap = &snapshot
+	case DATAVALUE_TYPE_QUANTILE_SKETCH:
+		snapshot := ht.quantileSketches.array[entry.Value.Index].Snapshot()
+		out.QuantileSketch = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -245,6 +249,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: roaring bitmap snapshot is required")
 		}
 		if err := validateRoaringBitmapSnapshot(*entry.RoaringBitmap); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "quantile_sketch":
+		if entry.QuantileSketch == nil {
+			return snapshotOperation{}, errors.New("hatriecache: quantile sketch snapshot is required")
+		}
+		if err := validateQuantileSketchSnapshot(*entry.QuantileSketch); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -428,6 +440,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.roaringBitmaps.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_ROARING_BITMAP}
+	case "quantile_sketch":
+		data, err := newQuantileSketchDataFromSnapshot(*entry.QuantileSketch)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.quantileSketches.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

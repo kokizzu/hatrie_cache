@@ -315,6 +315,12 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 			}
 		}
 		return total, nil
+	case "quantile_sketch":
+		if entry.QuantileSketch == nil {
+			return 0, errors.New("hatriecache: quantile sketch snapshot is required")
+		}
+		data, err := json.Marshal(entry.QuantileSketch)
+		return int64(len(data)), err
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

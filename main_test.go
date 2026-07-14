@@ -63,6 +63,10 @@ func roaringBitmapIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.roaringBitmaps.array) || ht.roaringBitmaps.reusables.Has(idx)
 }
 
+func quantileSketchIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.quantileSketches.array) || ht.quantileSketches.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
@@ -138,6 +142,7 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "hyperloglog", value: HatValue{Index: 10, Flags: DATAVALUE_TYPE_HYPERLOGLOG}, want: "hyperloglog at index: 10"},
 		{name: "top-k", value: HatValue{Index: 11, Flags: DATAVALUE_TYPE_TOP_K}, want: "top-k at index: 11"},
 		{name: "roaring bitmap", value: HatValue{Index: 12, Flags: DATAVALUE_TYPE_ROARING_BITMAP}, want: "roaring bitmap at index: 12"},
+		{name: "quantile sketch", value: HatValue{Index: 13, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}, want: "quantile sketch at index: 13"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -2012,6 +2017,124 @@ func TestTopKStorageReleasedOnOverwrite(t *testing.T) {
 	}
 	if got := ht.Get("new").Index; got != idx {
 		t.Fatalf("Top-K storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
+func TestQuantileSketchOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertQuantileSketch("latency", 0.01); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	if hval := ht.Get("latency"); !hval.IsQuantileSketch() {
+		t.Fatalf("UpsertQuantileSketch stored type %+v, want quantile sketch", hval)
+	}
+	values := make([]float64, 0, 100)
+	for idx := 1; idx <= 100; idx++ {
+		values = append(values, float64(idx))
+	}
+	if estimate := ht.AddQuantileSketch("latency", values[0], values[1:]...); estimate.Count != 100 {
+		t.Fatalf("AddQuantileSketch() estimate = %#v, want count 100", estimate)
+	}
+	p50, ok := ht.EstimateQuantileSketch("latency", 0.5)
+	if !ok || p50.Value < 45 || p50.Value > 55 {
+		t.Fatalf("EstimateQuantileSketch(p50) = %#v/%v, want around median", p50, ok)
+	}
+	p95, ok := ht.EstimateQuantileSketch("latency", 0.95)
+	if !ok || p95.Value < 90 || p95.Value > 100 {
+		t.Fatalf("EstimateQuantileSketch(p95) = %#v/%v, want upper tail", p95, ok)
+	}
+	info, ok := ht.QuantileSketchInfo("latency")
+	if !ok {
+		t.Fatal("QuantileSketchInfo(latency) = false, want true")
+	}
+	if info.Epsilon != 0.01 || info.Count != 100 || info.SummarySize == 0 || info.SummarySize >= info.Count || info.Min != 1 || info.Max != 100 || info.EncodedBytes <= 0 {
+		t.Fatalf("QuantileSketchInfo(latency) = %#v, want compact populated sketch", info)
+	}
+
+	if err := ht.UpsertQuantileSketch("latency", 0.02); err != nil {
+		t.Fatalf("UpsertQuantileSketch(replace) error = %v", err)
+	}
+	if info, ok := ht.QuantileSketchInfo("latency"); !ok || info.Count != 0 || info.Epsilon != 0.02 {
+		t.Fatalf("QuantileSketchInfo(after replace) = %#v/%v, want empty replacement", info, ok)
+	}
+	if got := ht.AddQuantileSketch("auto", 42); got.Count != 1 || got.Value != 42 {
+		t.Fatalf("AddQuantileSketch(auto) = %#v, want one observed value", got)
+	}
+	if hval := ht.Get("auto"); !hval.IsQuantileSketch() {
+		t.Fatalf("AddQuantileSketch(auto) stored type %+v, want quantile sketch", hval)
+	}
+	if estimate, ok := ht.EstimateQuantileSketch("latency", 1.1); ok || estimate.Count != 0 {
+		t.Fatalf("EstimateQuantileSketch(invalid quantile) = %#v/%v, want false", estimate, ok)
+	}
+	if got := ht.AddQuantileSketch("bad-value", math.NaN()); got.Count != 0 {
+		t.Fatalf("AddQuantileSketch(NaN) = %#v, want empty estimate", got)
+	}
+	if hval := ht.Get("bad-value"); !hval.Empty() {
+		t.Fatalf("invalid quantile sketch value created key %+v", hval)
+	}
+}
+
+func TestQuantileSketchRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	for _, epsilon := range []float64{0, minQuantileSketchEpsilon / 2, maxQuantileSketchEpsilon + 0.01, math.NaN(), math.Inf(1)} {
+		if err := ht.UpsertQuantileSketch("bad", epsilon); err == nil {
+			t.Fatalf("UpsertQuantileSketch(%v) error = nil, want error", epsilon)
+		}
+		if got := ht.Get("bad"); !got.Empty() {
+			t.Fatalf("invalid quantile sketch config stored value %+v", got)
+		}
+	}
+}
+
+func TestQuantileSketchSnapshotValidationRejectsCorruptPayload(t *testing.T) {
+	sketch, err := newQuantileSketchData(0.01)
+	if err != nil {
+		t.Fatalf("newQuantileSketchData() error = %v", err)
+	}
+	sketch.Add(1, 2, 3)
+	snapshot := sketch.Snapshot()
+
+	unsorted := snapshot
+	unsorted.Summary = append([]quantileSketchSample(nil), snapshot.Summary...)
+	unsorted.Summary[1].Value = unsorted.Summary[0].Value - 1
+	if err := validateQuantileSketchSnapshot(unsorted); err == nil {
+		t.Fatal("validateQuantileSketchSnapshot(unsorted) error = nil, want error")
+	}
+
+	badGap := snapshot
+	badGap.Summary = append([]quantileSketchSample(nil), snapshot.Summary...)
+	badGap.Summary[0].Gap = 0
+	if err := validateQuantileSketchSnapshot(badGap); err == nil {
+		t.Fatal("validateQuantileSketchSnapshot(zero gap) error = nil, want error")
+	}
+
+	nonFinite := snapshot
+	nonFinite.Summary = append([]quantileSketchSample(nil), snapshot.Summary...)
+	nonFinite.Summary[0].Value = math.Inf(1)
+	if err := validateQuantileSketchSnapshot(nonFinite); err == nil {
+		t.Fatal("validateQuantileSketchSnapshot(non-finite value) error = nil, want error")
+	}
+}
+
+func TestQuantileSketchStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertQuantileSketch("latency", 0.01); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	idx := ht.Get("latency").Index
+	ht.UpsertString("latency", "value")
+	if !quantileSketchIndexReleased(ht, idx) {
+		t.Fatalf("overwritten quantile sketch index %d was not released", idx)
+	}
+
+	if err := ht.UpsertQuantileSketch("new", 0.01); err != nil {
+		t.Fatalf("UpsertQuantileSketch(new) error = %v", err)
+	}
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("quantile sketch storage was not reused: got index %d, want %d", got, idx)
 	}
 }
 

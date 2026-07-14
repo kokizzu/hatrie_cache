@@ -606,6 +606,80 @@ func TestExecuteCommandTopKOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandQuantileSketchOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEQ", Key: "latency", Value: "0.02"}); !got.OK {
+		t.Fatalf("CREATEQ response = %#v, want ok", got)
+	}
+	addResp := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDQ",
+		Key:     "latency",
+		Values:  Slice{json.Number("1"), "50", float64(100)},
+	})
+	if !addResp.OK || addResp.Value == "" {
+		t.Fatalf("ADDQ response = %#v, want JSON estimate", addResp)
+	}
+	var estimate QuantileEstimate
+	if err := json.Unmarshal([]byte(addResp.Value), &estimate); err != nil {
+		t.Fatalf("ADDQ estimate JSON error = %v", err)
+	}
+	if estimate.Count != 3 || estimate.Value < 1 || estimate.Value > 100 {
+		t.Fatalf("ADDQ estimate = %#v, want populated quantile estimate", estimate)
+	}
+	estResp := ht.ExecuteCommand(CacheCommandRequest{Command: "ESTQ", Key: "latency", Value: "0.5"})
+	if !estResp.OK || estResp.Value == "" {
+		t.Fatalf("ESTQ response = %#v, want JSON estimate", estResp)
+	}
+	estimate = QuantileEstimate{}
+	if err := json.Unmarshal([]byte(estResp.Value), &estimate); err != nil {
+		t.Fatalf("ESTQ estimate JSON error = %v", err)
+	}
+	if estimate.Quantile != 0.5 || estimate.Count != 3 || estimate.Value < 1 || estimate.Value > 100 {
+		t.Fatalf("ESTQ estimate = %#v, want median estimate", estimate)
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOQ", Key: "latency"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFOQ response = %#v, want JSON info", infoResp)
+	}
+	var info QuantileSketchInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFOQ JSON error = %v", err)
+	}
+	if info.Epsilon != 0.02 || info.Count != 3 || info.SummarySize == 0 {
+		t.Fatalf("INFOQ = %#v, want populated quantile sketch info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "latency"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET quantile sketch response = %#v, want JSON info", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDQ", Key: "auto", Value: "42"}); !got.OK || got.Value == "" {
+		t.Fatalf("ADDQ auto response = %#v, want JSON estimate", got)
+	}
+	if !ht.Get("auto").IsQuantileSketch() {
+		t.Fatal("ADDQ on missing key did not create a quantile sketch")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATEQ",
+		Key:     "paired",
+		Pairs:   Map{"epsilon": json.Number("0.05")},
+	}); !got.OK {
+		t.Fatalf("CREATEQ pairs response = %#v, want ok", got)
+	}
+	if info, ok := ht.QuantileSketchInfo("paired"); !ok || info.Epsilon != 0.05 {
+		t.Fatalf("paired QuantileSketchInfo = %#v/%v, want epsilon 0.05", info, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATEQ", Key: "bad", Value: "0"}); got.OK {
+		t.Fatalf("CREATEQ invalid response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDQ", Key: "latency", Value: "NaN"}); got.OK {
+		t.Fatalf("ADDQ NaN response = %#v, want error", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ESTQ", Key: "latency", Value: "1.5"}); got.OK {
+		t.Fatalf("ESTQ invalid quantile response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
 	source := newTestTrie(t)
 	now := time.Unix(1400, 0)

@@ -521,6 +521,12 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 		}
 		_, err := commandTopKCount(request)
 		return err == nil
+	case "CREATEQ", "CREATEQS", "CREATEQUANTILE", "RESERVEQ", "QSRESERVE":
+		_, err := commandQuantileSketchEpsilon(request)
+		return err == nil
+	case "ADDQ", "ADDQS", "QADD", "QSADD":
+		_, err := quantileSketchValuesFromCommand(request)
+		return err == nil
 	default:
 		return false
 	}

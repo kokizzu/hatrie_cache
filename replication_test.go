@@ -633,6 +633,65 @@ func TestHTTPReplicatorReplicatesTopKMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesQuantileSketchMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATEQ", Key: "latency", Value: "0.01"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATEQ response = %#v, want ok", response)
+	}
+	add := CacheCommandRequest{Command: "ADDQ", Key: "latency", Values: Slice{json.Number("10"), json.Number("20"), json.Number("30")}}
+	response := trie.ExecuteCommand(add)
+	if !response.OK {
+		t.Fatalf("ADDQ response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, add, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("quantile sketch replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "latency" || request.Value == "" {
+			t.Fatalf("replicated quantile sketch request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated quantile sketch snapshot JSON error = %v", err)
+		}
+		if entry.Type != "quantile_sketch" || entry.QuantileSketch == nil {
+			t.Fatalf("replicated quantile sketch snapshot = %#v, want quantile_sketch payload", entry)
+		}
+	default:
+		t.Fatal("quantile sketch mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "ESTQ", Key: "latency", Value: "0.5"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "ESTQ", Key: "latency", Value: "0.5"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("quantile sketch read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestReplicationEndpointNormalizesAddresses(t *testing.T) {
 	got, err := replicationEndpoint("127.0.0.1:8080/base/")
 	if err != nil {
