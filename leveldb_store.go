@@ -91,7 +91,7 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 	}
 	defer unlock()
 
-	batch, err := levelDBDiffBatch(db, trie)
+	batch, err := levelDBDiffBatch(store, db, trie)
 	if err != nil {
 		return err
 	}
@@ -101,13 +101,13 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 	return db.Write(batch, &opt.WriteOptions{Sync: true})
 }
 
-func levelDBDiffBatch(db *leveldb.DB, trie *HatTrie) (*leveldb.Batch, error) {
+func levelDBDiffBatch(store *LevelDBStore, db *leveldb.DB, trie *HatTrie) (*leveldb.Batch, error) {
 	batch := new(leveldb.Batch)
 	iterator := db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
 	defer iterator.Release()
 
 	hasExisting := iterator.Next()
-	err := trie.scanLevelDBEntryData(func(key string, data []byte) error {
+	err := trie.scanLevelDBEntryDataForStore(store, db, func(key string, data []byte) error {
 		dbKey := levelDBKey(key)
 		for hasExisting && bytes.Compare(iterator.Key(), dbKey) < 0 {
 			batch.Delete(cloneBytes(iterator.Key()))
@@ -327,6 +327,10 @@ func (store *LevelDBStore) entryData(key string) ([]byte, bool, error) {
 	}
 	defer unlock()
 
+	return store.entryDataFromDB(db, key)
+}
+
+func (store *LevelDBStore) entryDataFromDB(db *leveldb.DB, key string) ([]byte, bool, error) {
 	data, err := db.Get(levelDBKey(key), nil)
 	if errors.Is(err, leveldb.ErrNotFound) {
 		return nil, false, nil
@@ -624,6 +628,10 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snap
 }
 
 func (trie *HatTrie) levelDBReferenceEntryDataLocked(key string, hval HatValue) ([]byte, bool, error) {
+	return trie.levelDBReferenceEntryDataForStoreLocked(key, hval, nil, nil)
+}
+
+func (trie *HatTrie) levelDBReferenceEntryDataForStoreLocked(key string, hval HatValue, currentStore *LevelDBStore, currentDB *leveldb.DB) ([]byte, bool, error) {
 	ref, ok := trie.dbrefs.Get(hval.Index)
 	if !ok || ref.Store == nil || ref.Key != key || ref.RecordBytes <= 0 {
 		return nil, false, nil
@@ -631,7 +639,15 @@ func (trie *HatTrie) levelDBReferenceEntryDataLocked(key string, hval HatValue) 
 	if !trie.levelDBReferenceMetadataMatchesLocked(key, ref) {
 		return nil, false, nil
 	}
-	data, ok, err := ref.Store.entryData(ref.Key)
+	var (
+		data []byte
+		err  error
+	)
+	if currentStore != nil && currentDB != nil && ref.Store == currentStore {
+		data, ok, err = currentStore.entryDataFromDB(currentDB, ref.Key)
+	} else {
+		data, ok, err = ref.Store.entryData(ref.Key)
+	}
 	if err != nil || !ok {
 		return nil, false, err
 	}
@@ -654,11 +670,27 @@ func (trie *HatTrie) levelDBReferenceMetadataMatchesLocked(key string, ref Level
 }
 
 func (trie *HatTrie) levelDBReferenceSnapshotEntryLocked(key string, hval HatValue) (snapshotEntry, error) {
+	return trie.levelDBReferenceSnapshotEntryForStoreLocked(key, hval, nil, nil)
+}
+
+func (trie *HatTrie) levelDBReferenceSnapshotEntryForStoreLocked(key string, hval HatValue, currentStore *LevelDBStore, currentDB *leveldb.DB) (snapshotEntry, error) {
 	ref, ok := trie.dbrefs.Get(hval.Index)
 	if !ok || ref.Store == nil {
 		return snapshotEntry{}, errors.New("hatriecache: missing leveldb reference")
 	}
-	entry, ok, err := ref.Store.Entry(ref.Key)
+	var (
+		entry snapshotEntry
+		err   error
+	)
+	if currentStore != nil && currentDB != nil && ref.Store == currentStore {
+		var data []byte
+		data, ok, err = currentStore.entryDataFromDB(currentDB, ref.Key)
+		if err == nil && ok {
+			entry, err = decodeLevelDBEntryForKey(ref.Key, data)
+		}
+	} else {
+		entry, ok, err = ref.Store.Entry(ref.Key)
+	}
 	if err != nil {
 		return snapshotEntry{}, err
 	}
@@ -677,6 +709,10 @@ func (trie *HatTrie) levelDBReferenceSnapshotEntryLocked(key string, hval HatVal
 }
 
 func (trie *HatTrie) scanLevelDBEntryData(visit func(string, []byte) error) error {
+	return trie.scanLevelDBEntryDataForStore(nil, nil, visit)
+}
+
+func (trie *HatTrie) scanLevelDBEntryDataForStore(currentStore *LevelDBStore, currentDB *leveldb.DB, visit func(string, []byte) error) error {
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
 
@@ -686,7 +722,7 @@ func (trie *HatTrie) scanLevelDBEntryData(visit func(string, []byte) error) erro
 		now = trie.currentTime()
 	}
 	return trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		data, err := trie.levelDBEntryDataLocked(entry)
+		data, err := trie.levelDBEntryDataForStoreLocked(entry, currentStore, currentDB)
 		if err != nil {
 			return err
 		}
@@ -698,8 +734,12 @@ func (trie *HatTrie) scanLevelDBEntryData(visit func(string, []byte) error) erro
 }
 
 func (trie *HatTrie) levelDBEntryDataLocked(entry Entry) ([]byte, error) {
+	return trie.levelDBEntryDataForStoreLocked(entry, nil, nil)
+}
+
+func (trie *HatTrie) levelDBEntryDataForStoreLocked(entry Entry, currentStore *LevelDBStore, currentDB *leveldb.DB) ([]byte, error) {
 	if entry.Value.Type() == DATAVALUE_TYPE_LEVELDB_REF {
-		if data, ok, err := trie.levelDBReferenceEntryDataLocked(entry.Key, entry.Value); err != nil || ok {
+		if data, ok, err := trie.levelDBReferenceEntryDataForStoreLocked(entry.Key, entry.Value, currentStore, currentDB); err != nil || ok {
 			return data, err
 		}
 	}
@@ -710,7 +750,7 @@ func (trie *HatTrie) levelDBEntryDataLocked(entry Entry) ([]byte, error) {
 		}
 		return buffer.Bytes(), nil
 	}
-	snapshotEntry, err := trie.snapshotEntryLocked(entry)
+	snapshotEntry, err := trie.snapshotEntryForStoreLocked(entry, currentStore, currentDB)
 	if err != nil {
 		return nil, err
 	}

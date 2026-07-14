@@ -16,6 +16,7 @@ import (
 	"hatrie_cache/internal/jsonwire"
 
 	json "github.com/goccy/go-json"
+	"github.com/syndtr/goleveldb/leveldb"
 )
 
 const snapshotVersion = 1
@@ -605,6 +606,10 @@ func (writer *prefixedJSONLineWriter) Write(data []byte) (int, error) {
 }
 
 func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
+	return ht.snapshotEntryForStoreLocked(entry, nil, nil)
+}
+
+func (ht *HatTrie) snapshotEntryForStoreLocked(entry Entry, currentStore *LevelDBStore, currentDB *leveldb.DB) (snapshotEntry, error) {
 	out := snapshotEntry{
 		Key:       entry.Key,
 		Type:      monitoringType(entry.Value),
@@ -630,7 +635,7 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_SLICE:
 		out.Slice = ht.slices.array[entry.Value.Index].Slice()
 	case DATAVALUE_TYPE_LEVELDB_REF:
-		return ht.levelDBReferenceSnapshotEntryLocked(entry.Key, entry.Value)
+		return ht.levelDBReferenceSnapshotEntryForStoreLocked(entry.Key, entry.Value, currentStore, currentDB)
 	case DATAVALUE_TYPE_SET:
 		out.Set = ht.sets.array[entry.Value.Index].Values()
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:

@@ -2145,7 +2145,7 @@ func TestLevelDBDiffBatchSkipsUnchangedEntries(t *testing.T) {
 		t.Fatalf("Save(initial) error = %v", err)
 	}
 
-	batch, err := levelDBDiffBatch(store.db, trie)
+	batch, err := levelDBDiffBatch(store, store.db, trie)
 	if err != nil {
 		t.Fatalf("levelDBDiffBatch(unchanged) error = %v", err)
 	}
@@ -2179,7 +2179,7 @@ func TestLevelDBDiffBatchTracksAddsUpdatesAndDeletes(t *testing.T) {
 		t.Fatal("Delete(stale) = false, want true")
 	}
 
-	batch, err := levelDBDiffBatch(store.db, trie)
+	batch, err := levelDBDiffBatch(store, store.db, trie)
 	if err != nil {
 		t.Fatalf("levelDBDiffBatch(changed) error = %v", err)
 	}
@@ -2210,6 +2210,60 @@ func TestLevelDBDiffBatchTracksAddsUpdatesAndDeletes(t *testing.T) {
 	if got := loaded.GetString("added-later"); got != "" {
 		t.Fatalf("added-later = %q, want empty", got)
 	}
+}
+
+func TestLevelDBDiffBatchReusesSameStoreColdReferenceWithoutNestedLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	raw := []byte(`{"key":"cold","type":"string","string":"value"}`)
+	if err := store.db.Put(levelDBKey("cold"), raw, nil); err != nil {
+		t.Fatalf("Put(raw) error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 1 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want cold reference", result)
+	}
+	entries := loaded.Entries(true)
+	if len(entries) != 1 || !entries[0].Value.IsLevelDBReference() {
+		t.Fatalf("entries after hot-load = %#v, want cold reference", entries)
+	}
+
+	assertDiffCompletesWithStoreLocked := func(name string) {
+		t.Helper()
+		store.mu.Lock()
+		defer store.mu.Unlock()
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := levelDBDiffBatch(store, store.db, loaded)
+			done <- err
+		}()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("levelDBDiffBatch(%s) error = %v", name, err)
+			}
+		case <-time.After(200 * time.Millisecond):
+			t.Fatalf("levelDBDiffBatch(%s) blocked on nested store lock", name)
+		}
+	}
+
+	assertDiffCompletesWithStoreLocked("unchanged cold reference")
+	if !loaded.Exists("cold") {
+		t.Fatal("Exists(cold) = false, want true")
+	}
+	assertDiffCompletesWithStoreLocked("stats-changed cold reference")
 }
 
 func TestLevelDBStoreSaveRewritesColdReferenceWhenStatsChange(t *testing.T) {
