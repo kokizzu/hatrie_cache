@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	hatriecache "hatrie_cache"
@@ -393,6 +394,90 @@ func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 	}
 	if len(gotRequest.Values) != 2 || gotRequest.Values[0] != "queued" || gotRequest.Values[1] != json.Number("7") {
 		t.Fatalf("values = %#v, want queued and json.Number(7)", gotRequest.Values)
+	}
+}
+
+func TestRunCommandRejectsInvalidStructuredFlagsBeforePost(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name: "priority",
+			args: []string{
+				"-addr", server.URL,
+				"command",
+				"-cmd", "PUSHPQ",
+				"-key", "jobs",
+				"-value", "job",
+				"-priority", "not-int",
+			},
+			wantErr: "priority:",
+		},
+		{
+			name: "values json",
+			args: []string{
+				"-addr", server.URL,
+				"command",
+				"-cmd", "PUSHSLICE",
+				"-key", "jobs",
+				"-values", `["build"`,
+			},
+			wantErr: "values:",
+		},
+		{
+			name: "values trailing json",
+			args: []string{
+				"-addr", server.URL,
+				"command",
+				"-cmd", "PUSHSLICE",
+				"-key", "jobs",
+				"-values", `["build"] []`,
+			},
+			wantErr: "values: invalid trailing JSON",
+		},
+		{
+			name: "pairs json",
+			args: []string{
+				"-addr", server.URL,
+				"command",
+				"-cmd", "PUTMAP",
+				"-key", "profile",
+				"-pairs", `{"age":`,
+			},
+			wantErr: "pairs:",
+		},
+		{
+			name: "pairs trailing json",
+			args: []string{
+				"-addr", server.URL,
+				"command",
+				"-cmd", "PUTMAP",
+				"-key", "profile",
+				"-pairs", `{"age":32} {}`,
+			},
+			wantErr: "pairs: invalid trailing JSON",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := atomic.LoadInt32(&requests)
+			err := run(context.Background(), tt.args, &bytes.Buffer{}, &bytes.Buffer{}, server.Client())
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("run(command) error = %v, want %q", err, tt.wantErr)
+			}
+			if got := atomic.LoadInt32(&requests); got != before {
+				t.Fatalf("requests = %d, want %d; invalid local flags should not post", got, before)
+			}
+		})
 	}
 }
 
