@@ -135,7 +135,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	activeKeys := map[string]bool{}
 	result := LevelDBLoadResult{}
 	if err := scanLevelDBSnapshotEntries(snapshot, func(entry snapshotEntry) error {
-		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy)
+		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy, false)
 		if err != nil {
 			return err
 		}
@@ -155,7 +155,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	rollbackOperations := make([]snapshotOperation, 0)
 	applied := false
 	if err := scanLevelDBSnapshotEntries(snapshot, func(entry snapshotEntry) error {
-		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy)
+		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy, true)
 		if err != nil {
 			return err
 		}
@@ -205,7 +205,7 @@ type levelDBLoadEntry struct {
 	reference bool
 }
 
-func prepareLevelDBLoadEntry(entry snapshotEntry, now time.Time, policy LevelDBLoadPolicy) (levelDBLoadEntry, bool, error) {
+func prepareLevelDBLoadEntry(entry snapshotEntry, now time.Time, policy LevelDBLoadPolicy, prepareOperation bool) (levelDBLoadEntry, bool, error) {
 	if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
 		return levelDBLoadEntry{}, false, nil
 	}
@@ -214,6 +214,12 @@ func prepareLevelDBLoadEntry(entry snapshotEntry, now time.Time, policy LevelDBL
 			return levelDBLoadEntry{}, false, err
 		}
 		return levelDBLoadEntry{entry: entry, reference: true}, true, nil
+	}
+	if !prepareOperation {
+		if err := validateSnapshotEntryFields(entry, true); err != nil {
+			return levelDBLoadEntry{}, false, err
+		}
+		return levelDBLoadEntry{entry: entry}, true, nil
 	}
 	operation, err := validateSnapshotEntry(entry)
 	if err != nil {

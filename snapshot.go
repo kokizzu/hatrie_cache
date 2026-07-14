@@ -86,7 +86,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	now := ht.currentTime()
 	activeKeys := make(map[string]bool)
 	metadata, err := scanSnapshotFileJSONReader(file, func(entry snapshotEntry) error {
-		operation, active, err := validateSnapshotLoadEntry(entry, now)
+		operation, active, err := validateSnapshotLoadEntry(entry, now, false)
 		if err != nil {
 			return err
 		}
@@ -115,7 +115,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	rollbackOperations := make([]snapshotOperation, 0, len(activeKeys))
 	applied := 0
 	applyMetadata, err := scanSnapshotFileJSONReader(file, func(entry snapshotEntry) error {
-		operation, active, err := validateSnapshotLoadEntry(entry, now)
+		operation, active, err := validateSnapshotLoadEntry(entry, now, true)
 		if err != nil {
 			return err
 		}
@@ -160,9 +160,15 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	return SnapshotMetadata{JournalSequence: metadata.JournalSequence}, nil
 }
 
-func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time) (snapshotOperation, bool, error) {
+func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time, prepareOperation bool) (snapshotOperation, bool, error) {
 	if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
 		return snapshotOperation{}, false, nil
+	}
+	if !prepareOperation {
+		if err := validateSnapshotEntryFields(entry, true); err != nil {
+			return snapshotOperation{}, false, err
+		}
+		return snapshotOperation{entry: entry}, true, nil
 	}
 	operation, err := validateSnapshotEntry(entry)
 	if err != nil {
@@ -355,154 +361,167 @@ func (ht *HatTrie) bytesValueLocked(hval HatValue) ([]byte, error) {
 }
 
 func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
-	if err := validateKey(entry.Key); err != nil {
-		return snapshotOperation{}, err
-	}
-	if err := validateKeyStatsSnapshot(entry.Stats); err != nil {
+	if err := validateSnapshotEntryFields(entry, false); err != nil {
 		return snapshotOperation{}, err
 	}
 
 	operation := snapshotOperation{entry: entry}
-	switch entry.Type {
-	case "counter", "string":
-		return operation, nil
-	case "map":
-		if entry.Map == nil {
-			return snapshotOperation{}, errors.New("hatriecache: map snapshot is required")
-		}
-		if err := validateMapValue(entry.Map); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "slice":
-		if entry.Slice == nil {
-			return snapshotOperation{}, errors.New("hatriecache: slice snapshot is required")
-		}
-		if err := validateSliceValue(entry.Slice); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "set":
-		if entry.Set == nil {
-			return snapshotOperation{}, errors.New("hatriecache: set snapshot is required")
-		}
-		if _, err := newSetDataChecked(entry.Set); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "priority_queue":
-		if entry.PriorityQueue == nil {
-			return snapshotOperation{}, errors.New("hatriecache: priority queue snapshot is required")
-		}
-		if err := validatePriorityQueueSnapshotItems(entry.PriorityQueue); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "bloom_filter":
-		if entry.BloomFilter == nil {
-			return snapshotOperation{}, errors.New("hatriecache: bloom filter snapshot is required")
-		}
-		if err := validateBloomFilterSnapshot(*entry.BloomFilter); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "count_min_sketch":
-		if entry.CountMinSketch == nil {
-			return snapshotOperation{}, errors.New("hatriecache: count-min sketch snapshot is required")
-		}
-		if err := validateCountMinSketchSnapshot(*entry.CountMinSketch); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "hyperloglog":
-		if entry.HyperLogLog == nil {
-			return snapshotOperation{}, errors.New("hatriecache: hyperloglog snapshot is required")
-		}
-		if err := validateHyperLogLogSnapshot(*entry.HyperLogLog); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "top_k":
-		if entry.TopK == nil {
-			return snapshotOperation{}, errors.New("hatriecache: top-k snapshot is required")
-		}
-		if err := validateTopKSnapshot(*entry.TopK); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "cuckoo_filter":
-		if entry.CuckooFilter == nil {
-			return snapshotOperation{}, errors.New("hatriecache: cuckoo filter snapshot is required")
-		}
-		if err := validateCuckooFilterSnapshot(*entry.CuckooFilter); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "roaring_bitmap":
-		if entry.RoaringBitmap == nil {
-			return snapshotOperation{}, errors.New("hatriecache: roaring bitmap snapshot is required")
-		}
-		if err := validateRoaringBitmapSnapshot(*entry.RoaringBitmap); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "quantile_sketch":
-		if entry.QuantileSketch == nil {
-			return snapshotOperation{}, errors.New("hatriecache: quantile sketch snapshot is required")
-		}
-		if err := validateQuantileSketchSnapshot(*entry.QuantileSketch); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "fenwick_tree":
-		if entry.FenwickTree == nil {
-			return snapshotOperation{}, errors.New("hatriecache: fenwick tree snapshot is required")
-		}
-		if err := validateFenwickTreeSnapshot(*entry.FenwickTree); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "sparse_bitset":
-		if entry.SparseBitset == nil {
-			return snapshotOperation{}, errors.New("hatriecache: sparse bitset snapshot is required")
-		}
-		if err := validateSparseBitsetSnapshot(*entry.SparseBitset); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "reservoir_sample":
-		if entry.ReservoirSample == nil {
-			return snapshotOperation{}, errors.New("hatriecache: reservoir sample snapshot is required")
-		}
-		if err := validateReservoirSampleSnapshot(*entry.ReservoirSample); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "xor_filter":
-		if entry.XorFilter == nil {
-			return snapshotOperation{}, errors.New("hatriecache: xor filter snapshot is required")
-		}
-		if err := validateXorFilterSnapshot(*entry.XorFilter); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "radix_tree":
-		if entry.RadixTree == nil {
-			return snapshotOperation{}, errors.New("hatriecache: radix tree snapshot is required")
-		}
-		if err := validateRadixTreeSnapshot(*entry.RadixTree); err != nil {
-			return snapshotOperation{}, err
-		}
-		return operation, nil
-	case "bytes":
+	if entry.Type == "bytes" {
 		value, err := base64.StdEncoding.DecodeString(entry.Bytes)
 		if err != nil {
 			return snapshotOperation{}, err
 		}
 		operation.bytes = value
-		return operation, nil
+	}
+	return operation, nil
+}
+
+func validateSnapshotEntryFields(entry snapshotEntry, validateBytesEncoding bool) error {
+	if err := validateKey(entry.Key); err != nil {
+		return err
+	}
+	if err := validateKeyStatsSnapshot(entry.Stats); err != nil {
+		return err
+	}
+
+	switch entry.Type {
+	case "counter", "string":
+		return nil
+	case "map":
+		if entry.Map == nil {
+			return errors.New("hatriecache: map snapshot is required")
+		}
+		if err := validateMapValue(entry.Map); err != nil {
+			return err
+		}
+		return nil
+	case "slice":
+		if entry.Slice == nil {
+			return errors.New("hatriecache: slice snapshot is required")
+		}
+		if err := validateSliceValue(entry.Slice); err != nil {
+			return err
+		}
+		return nil
+	case "set":
+		if entry.Set == nil {
+			return errors.New("hatriecache: set snapshot is required")
+		}
+		if _, err := newSetDataChecked(entry.Set); err != nil {
+			return err
+		}
+		return nil
+	case "priority_queue":
+		if entry.PriorityQueue == nil {
+			return errors.New("hatriecache: priority queue snapshot is required")
+		}
+		if err := validatePriorityQueueSnapshotItems(entry.PriorityQueue); err != nil {
+			return err
+		}
+		return nil
+	case "bloom_filter":
+		if entry.BloomFilter == nil {
+			return errors.New("hatriecache: bloom filter snapshot is required")
+		}
+		if err := validateBloomFilterSnapshot(*entry.BloomFilter); err != nil {
+			return err
+		}
+		return nil
+	case "count_min_sketch":
+		if entry.CountMinSketch == nil {
+			return errors.New("hatriecache: count-min sketch snapshot is required")
+		}
+		if err := validateCountMinSketchSnapshot(*entry.CountMinSketch); err != nil {
+			return err
+		}
+		return nil
+	case "hyperloglog":
+		if entry.HyperLogLog == nil {
+			return errors.New("hatriecache: hyperloglog snapshot is required")
+		}
+		if err := validateHyperLogLogSnapshot(*entry.HyperLogLog); err != nil {
+			return err
+		}
+		return nil
+	case "top_k":
+		if entry.TopK == nil {
+			return errors.New("hatriecache: top-k snapshot is required")
+		}
+		if err := validateTopKSnapshot(*entry.TopK); err != nil {
+			return err
+		}
+		return nil
+	case "cuckoo_filter":
+		if entry.CuckooFilter == nil {
+			return errors.New("hatriecache: cuckoo filter snapshot is required")
+		}
+		if err := validateCuckooFilterSnapshot(*entry.CuckooFilter); err != nil {
+			return err
+		}
+		return nil
+	case "roaring_bitmap":
+		if entry.RoaringBitmap == nil {
+			return errors.New("hatriecache: roaring bitmap snapshot is required")
+		}
+		if err := validateRoaringBitmapSnapshot(*entry.RoaringBitmap); err != nil {
+			return err
+		}
+		return nil
+	case "quantile_sketch":
+		if entry.QuantileSketch == nil {
+			return errors.New("hatriecache: quantile sketch snapshot is required")
+		}
+		if err := validateQuantileSketchSnapshot(*entry.QuantileSketch); err != nil {
+			return err
+		}
+		return nil
+	case "fenwick_tree":
+		if entry.FenwickTree == nil {
+			return errors.New("hatriecache: fenwick tree snapshot is required")
+		}
+		if err := validateFenwickTreeSnapshot(*entry.FenwickTree); err != nil {
+			return err
+		}
+		return nil
+	case "sparse_bitset":
+		if entry.SparseBitset == nil {
+			return errors.New("hatriecache: sparse bitset snapshot is required")
+		}
+		if err := validateSparseBitsetSnapshot(*entry.SparseBitset); err != nil {
+			return err
+		}
+		return nil
+	case "reservoir_sample":
+		if entry.ReservoirSample == nil {
+			return errors.New("hatriecache: reservoir sample snapshot is required")
+		}
+		if err := validateReservoirSampleSnapshot(*entry.ReservoirSample); err != nil {
+			return err
+		}
+		return nil
+	case "xor_filter":
+		if entry.XorFilter == nil {
+			return errors.New("hatriecache: xor filter snapshot is required")
+		}
+		if err := validateXorFilterSnapshot(*entry.XorFilter); err != nil {
+			return err
+		}
+		return nil
+	case "radix_tree":
+		if entry.RadixTree == nil {
+			return errors.New("hatriecache: radix tree snapshot is required")
+		}
+		if err := validateRadixTreeSnapshot(*entry.RadixTree); err != nil {
+			return err
+		}
+		return nil
+	case "bytes":
+		if validateBytesEncoding {
+			return validateBase64String(entry.Bytes)
+		}
+		return nil
 	default:
-		return snapshotOperation{}, errors.New("hatriecache: unsupported snapshot value type")
+		return errors.New("hatriecache: unsupported snapshot value type")
 	}
 }
 
