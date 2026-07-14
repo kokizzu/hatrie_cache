@@ -226,16 +226,19 @@ func TestExecuteCommandPriorityQueueOperations(t *testing.T) {
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHPQ", Key: "jobs", Values: Slice{"urgent", json.Number("2")}, Priority: &highPriority}); !got.OK || got.Value != "2" {
 		t.Fatalf("PUSHPQ values response = %#v, want added 2", got)
 	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHPQ", Key: "jobs", Value: "medium", Subkey: "5"}); !got.OK || got.Value != "1" {
+		t.Fatalf("PUSHPQ subkey priority response = %#v, want added 1", got)
+	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PEEKPQ", Key: "jobs"}); !got.OK || got.Value != `{"priority":1,"value":"urgent"}` {
 		t.Fatalf("PEEKPQ response = %#v, want urgent priority item", got)
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPPQ", Key: "jobs"}); !got.OK || got.Value != `{"priority":1,"value":"urgent"}` {
 		t.Fatalf("POPPQ response = %#v, want urgent priority item", got)
 	}
-	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETPQ", Key: "jobs"}); !got.OK || got.Value != `[{"priority":1,"value":2},{"priority":10,"value":"slow"}]` {
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETPQ", Key: "jobs"}); !got.OK || got.Value != `[{"priority":1,"value":2},{"priority":5,"value":"medium"},{"priority":10,"value":"slow"}]` {
 		t.Fatalf("GETPQ response = %#v, want ordered JSON array", got)
 	}
-	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "jobs"}); !got.OK || got.Value != `[{"priority":1,"value":2},{"priority":10,"value":"slow"}]` {
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "jobs"}); !got.OK || got.Value != `[{"priority":1,"value":2},{"priority":5,"value":"medium"},{"priority":10,"value":"slow"}]` {
 		t.Fatalf("GET priority queue response = %#v, want ordered JSON array", got)
 	}
 }
@@ -729,6 +732,7 @@ func TestExecuteCommandValidation(t *testing.T) {
 		{Command: "HASSET", Key: "key"},
 		{Command: "PUSHPQ", Key: "key"},
 		{Command: "PUSHPQ", Key: "key", Value: "job"},
+		{Command: "PUSHPQ", Key: "key", Value: "job", Subkey: "bad"},
 		{Command: "CREATEBF", Key: "key", Value: "0"},
 		{Command: "CREATEBF", Key: "key", Pairs: Map{"expected_items": 1.5}},
 		{Command: "CREATEBF", Key: "key", Pairs: Map{"false_positive_rate": "not-number"}},
