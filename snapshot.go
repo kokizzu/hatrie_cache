@@ -202,26 +202,6 @@ func prepareSnapshotBytesOperation(entry snapshotEntry) (snapshotOperation, erro
 	return operation, nil
 }
 
-func (ht *HatTrie) snapshot() (snapshotFile, error) {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	ht.ensureOpen()
-	entries := ht.entriesWithPrefixLocked("", true)
-	snapshot := snapshotFile{
-		Version: snapshotVersion,
-		Entries: make([]snapshotEntry, 0, len(entries)),
-	}
-	for _, entry := range entries {
-		snapshotEntry, err := ht.snapshotEntryLocked(entry)
-		if err != nil {
-			return snapshotFile{}, err
-		}
-		snapshot.Entries = append(snapshot.Entries, snapshotEntry)
-	}
-	return snapshot, nil
-}
-
 func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -687,10 +667,6 @@ func decodeSnapshotEntryJSON(data []byte) (snapshotEntry, error) {
 	return decodeSnapshotEntryJSONRequiredKey(data, false)
 }
 
-func decodeSnapshotFileJSON(data []byte) (snapshotFile, error) {
-	return decodeSnapshotFileJSONReader(bytes.NewReader(data))
-}
-
 func decodeSnapshotFileJSONReader(reader io.Reader) (snapshotFile, error) {
 	var snapshot snapshotFile
 	metadata, err := scanSnapshotFileJSONReader(reader, func(entry snapshotEntry) error {
@@ -772,17 +748,6 @@ func scanSnapshotFileJSONReader(reader io.Reader, visit func(snapshotEntry) erro
 	return metadata, nil
 }
 
-func decodeSnapshotEntriesJSON(decoder *json.Decoder) ([]snapshotEntry, error) {
-	entries := make([]snapshotEntry, 0)
-	if err := scanSnapshotEntriesJSON(decoder, func(entry snapshotEntry) error {
-		entries = append(entries, entry)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return entries, nil
-}
-
 func scanSnapshotEntriesJSON(decoder *json.Decoder, visit func(snapshotEntry) error) error {
 	token, err := decoder.Token()
 	if err != nil {
@@ -859,14 +824,6 @@ func snapshotEntryHasKey(data []byte) (bool, error) {
 		return false, errors.New("hatriecache: snapshot entry key must be a string")
 	}
 	return true, nil
-}
-
-func (ht *HatTrie) applySnapshotOperation(operation snapshotOperation) error {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	_, err := ht.applySnapshotOperationLocked(operation)
-	return err
 }
 
 func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (HatValue, error) {

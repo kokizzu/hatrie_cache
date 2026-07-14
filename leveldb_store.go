@@ -598,18 +598,6 @@ func (trie *HatTrie) levelDBReferenceSnapshotEntryLocked(key string, hval HatVal
 	return entry, nil
 }
 
-func (trie *HatTrie) levelDBEntries() ([]snapshotEntry, error) {
-	out := []snapshotEntry{}
-	err := trie.scanLevelDBEntries(func(entry snapshotEntry) error {
-		out = append(out, entry)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (trie *HatTrie) levelDBPutBatch() (*leveldb.Batch, error) {
 	batch := new(leveldb.Batch)
 	err := trie.scanLevelDBEntryData(func(key string, data []byte) error {
@@ -656,27 +644,6 @@ func (trie *HatTrie) levelDBEntryDataLocked(entry Entry) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(snapshotEntry)
-}
-
-func (trie *HatTrie) scanLevelDBEntries(visit func(snapshotEntry) error) error {
-	trie.mu.Lock()
-	defer trie.mu.Unlock()
-
-	trie.ensureOpen()
-	now := time.Time{}
-	if len(trie.expires) > 0 {
-		now = trie.currentTime()
-	}
-	return trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		snapshotEntry, err := trie.snapshotEntryLocked(entry)
-		if err != nil {
-			return err
-		}
-		if visit != nil {
-			return visit(snapshotEntry)
-		}
-		return nil
-	})
 }
 
 func decodeLevelDBEntry(data []byte) (snapshotEntry, error) {
