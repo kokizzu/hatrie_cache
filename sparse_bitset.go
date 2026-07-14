@@ -540,12 +540,16 @@ func (store *SparseBitsetStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertSparseBitset(key string) {
+	_ = ht.UpsertSparseBitsetChecked(key)
+}
+
+func (ht *HatTrie) UpsertSparseBitsetChecked(key string) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	rawPtr, hval, err := ht.upsertReplacementLocation(key)
 	if err != nil {
-		return
+		return err
 	}
 	if hval.IsSparseBitset() {
 		ht.sparseBitsets.PutData(hval.Index, newSparseBitsetData())
@@ -553,7 +557,7 @@ func (ht *HatTrie) UpsertSparseBitset(key string) {
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
 	ht.returnStorage(hval)
@@ -561,6 +565,7 @@ func (ht *HatTrie) UpsertSparseBitset(key string) {
 	idx := ht.sparseBitsets.AddData(newSparseBitsetData())
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SPARSE_BITSET}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 func (ht *HatTrie) AddSparseBitset(key string, value uint64, values ...uint64) int {

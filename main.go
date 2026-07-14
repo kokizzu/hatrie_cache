@@ -2440,12 +2440,18 @@ func (ht *HatTrie) Del(key string) {
 
 // UpsertCounter sets key to an int32 counter.
 func (ht *HatTrie) UpsertCounter(key string, val int32) {
+	_ = ht.UpsertCounterChecked(key, val)
+}
+
+// UpsertCounterChecked sets key to an int32 counter and reports validation
+// errors.
+func (ht *HatTrie) UpsertCounterChecked(key string, val int32) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	rawPtr, hval, err := ht.upsertReplacementLocation(key)
 	if err != nil {
-		return
+		return err
 	}
 	if !hval.IsCounter() {
 		ht.returnStorage(hval)
@@ -2453,6 +2459,7 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 	ht.clearExpirationLocked(key)
 	*rawPtr = HatValue{Index: val, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 // IncrementCounter increments key by by. If key is not a counter, it is reset
@@ -2522,12 +2529,17 @@ func (ht *HatTrie) GetCounterChecked(key string) (int32, bool, error) {
 
 // UpsertString sets key to a string.
 func (ht *HatTrie) UpsertString(key string, val string) {
+	_ = ht.UpsertStringChecked(key, val)
+}
+
+// UpsertStringChecked sets key to a string and reports validation errors.
+func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	rawPtr, hval, err := ht.upsertReplacementLocation(key)
 	if err != nil {
-		return
+		return err
 	}
 	if hval.IsStringAtRaws() {
 		ht.raws.putOwned(hval.Index, []byte(val))
@@ -2535,7 +2547,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
 	ht.returnStorage(hval)
@@ -2543,6 +2555,7 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 	idx := ht.raws.addOwned([]byte(val))
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 // AppendString appends str to key. If key is not a string, it is reset to str.

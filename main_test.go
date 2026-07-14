@@ -259,6 +259,78 @@ func TestKeysRespectEmbeddedTrieLengthLimit(t *testing.T) {
 	}
 }
 
+func TestCheckedUpsertAPIsRespectEmbeddedTrieLengthLimit(t *testing.T) {
+	ht := newTestTrie(t)
+
+	valid := []struct {
+		name string
+		key  string
+		fn   func(string) error
+		want func(string) bool
+	}{
+		{
+			name: "counter",
+			key:  strings.Repeat("c", maxHATTrieKeyLength),
+			fn:   func(key string) error { return ht.UpsertCounterChecked(key, 7) },
+			want: func(key string) bool {
+				value, ok, err := ht.GetCounterChecked(key)
+				return err == nil && ok && value == 7
+			},
+		},
+		{
+			name: "string",
+			key:  strings.Repeat("s", maxHATTrieKeyLength),
+			fn:   func(key string) error { return ht.UpsertStringChecked(key, "value") },
+			want: func(key string) bool {
+				value, ok, err := ht.GetStringChecked(key)
+				return err == nil && ok && value == "value"
+			},
+		},
+		{
+			name: "roaring bitmap",
+			key:  strings.Repeat("r", maxHATTrieKeyLength),
+			fn:   ht.UpsertRoaringBitmapChecked,
+			want: func(key string) bool { _, ok, err := ht.RoaringBitmapInfoChecked(key); return err == nil && ok },
+		},
+		{
+			name: "sparse bitset",
+			key:  strings.Repeat("b", maxHATTrieKeyLength),
+			fn:   ht.UpsertSparseBitsetChecked,
+			want: func(key string) bool { _, ok, err := ht.SparseBitsetInfoChecked(key); return err == nil && ok },
+		},
+		{
+			name: "radix tree",
+			key:  strings.Repeat("x", maxHATTrieKeyLength),
+			fn:   ht.UpsertRadixTreeChecked,
+			want: func(key string) bool { _, ok, err := ht.RadixTreeInfoChecked(key); return err == nil && ok },
+		},
+	}
+	for _, test := range valid {
+		t.Run(test.name+" max key", func(t *testing.T) {
+			if err := test.fn(test.key); err != nil {
+				t.Fatalf("checked upsert error = %v, want nil", err)
+			}
+			if !test.want(test.key) {
+				t.Fatalf("checked upsert did not store %s value", test.name)
+			}
+		})
+	}
+
+	tooLong := strings.Repeat("k", maxHATTrieKeyLength+1)
+	for _, test := range valid {
+		t.Run(test.name+" oversized key", func(t *testing.T) {
+			before := ht.Size()
+			err := test.fn(tooLong)
+			if err == nil || !strings.Contains(err.Error(), "key length") {
+				t.Fatalf("checked upsert error = %v, want key length error", err)
+			}
+			if got := ht.Size(); got != before {
+				t.Fatalf("checked upsert changed size to %d, want %d", got, before)
+			}
+		})
+	}
+}
+
 func TestEmptyKeyIsCountedIterableAndDeletable(t *testing.T) {
 	ht := newTestTrie(t)
 

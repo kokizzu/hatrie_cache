@@ -536,12 +536,16 @@ func (store *RoaringBitmapStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertRoaringBitmap(key string) {
+	_ = ht.UpsertRoaringBitmapChecked(key)
+}
+
+func (ht *HatTrie) UpsertRoaringBitmapChecked(key string) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	rawPtr, hval, err := ht.upsertReplacementLocation(key)
 	if err != nil {
-		return
+		return err
 	}
 	if hval.IsRoaringBitmap() {
 		ht.roaringBitmaps.PutData(hval.Index, newRoaringBitmapData())
@@ -549,7 +553,7 @@ func (ht *HatTrie) UpsertRoaringBitmap(key string) {
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return
+		return nil
 	}
 
 	ht.returnStorage(hval)
@@ -557,6 +561,7 @@ func (ht *HatTrie) UpsertRoaringBitmap(key string) {
 	idx := ht.roaringBitmaps.AddData(newRoaringBitmapData())
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_ROARING_BITMAP}.toValue()
 	ht.recordWriteLocked(key)
+	return nil
 }
 
 func (ht *HatTrie) AddRoaringBitmap(key string, value uint32, values ...uint32) int {

@@ -42,18 +42,21 @@ func TestExecuteCommandStringCounterTTLAndDelete(t *testing.T) {
 }
 
 func TestExecuteCommandRejectsTooLongKey(t *testing.T) {
-	ht := newTestTrie(t)
-
-	got := ht.ExecuteCommand(CacheCommandRequest{
-		Command: "SETSTR",
-		Key:     strings.Repeat("k", maxHATTrieKeyLength+1),
-		Value:   "value",
-	})
-	if got.OK {
-		t.Fatalf("SETSTR with too-long key response = %#v, want error", got)
-	}
-	if ht.Size() != 0 {
-		t.Fatalf("trie size after too-long command = %d, want 0", ht.Size())
+	for _, command := range []string{"SETSTR", "SETINT", "CREATERB", "CREATESB", "CREATERT"} {
+		t.Run(command, func(t *testing.T) {
+			ht := newTestTrie(t)
+			got := ht.ExecuteCommand(CacheCommandRequest{
+				Command: command,
+				Key:     strings.Repeat("k", maxHATTrieKeyLength+1),
+				Value:   "1",
+			})
+			if got.OK {
+				t.Fatalf("%s with too-long key response = %#v, want error", command, got)
+			}
+			if ht.Size() != 0 {
+				t.Fatalf("trie size after too-long command = %d, want 0", ht.Size())
+			}
+		})
 	}
 }
 

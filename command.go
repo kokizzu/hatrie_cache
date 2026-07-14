@@ -70,7 +70,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds); ok && !response.OK {
 			return response
 		}
-		ht.UpsertString(key, request.Value)
+		if err := ht.UpsertStringChecked(key, request.Value); err != nil {
+			return commandError(err.Error())
+		}
 		if response, ok := ht.applyCommandExpiration(key, request.TTLSeconds, request.UnixSeconds); ok {
 			return response
 		}
@@ -80,7 +82,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("positive ttl_seconds is required")
 		}
-		ht.UpsertString(key, request.Value)
+		if err := ht.UpsertStringChecked(key, request.Value); err != nil {
+			return commandError(err.Error())
+		}
 		if !ht.Expire(key, ttl) {
 			return commandError("failed to set ttl")
 		}
@@ -93,7 +97,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds); ok && !response.OK {
 			return response
 		}
-		ht.UpsertCounter(key, value)
+		if err := ht.UpsertCounterChecked(key, value); err != nil {
+			return commandError(err.Error())
+		}
 		if response, ok := ht.applyCommandExpiration(key, request.TTLSeconds, request.UnixSeconds); ok {
 			return response
 		}
@@ -107,7 +113,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("positive ttl_seconds is required")
 		}
-		ht.UpsertCounter(key, value)
+		if err := ht.UpsertCounterChecked(key, value); err != nil {
+			return commandError(err.Error())
+		}
 		if !ht.Expire(key, ttl) {
 			return commandError("failed to set ttl")
 		}
@@ -483,7 +491,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return commandValueResponse("ok", info)
 	case "CREATERB", "CREATEROARING", "RBRESERVE":
-		ht.UpsertRoaringBitmap(key)
+		if err := ht.UpsertRoaringBitmapChecked(key); err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "created roaring bitmap"}
 	case "ADDRB", "RBADD":
 		values, err := roaringBitmapValuesFromCommand(request)
@@ -546,7 +556,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return commandValueResponse("ok", info)
 	case "CREATESB", "CREATESPARSEBITSET", "SBRESERVE":
-		ht.UpsertSparseBitset(key)
+		if err := ht.UpsertSparseBitsetChecked(key); err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "created sparse bitset"}
 	case "ADDSB", "SBADD":
 		values, err := sparseBitsetValuesFromCommand(request)
@@ -609,7 +621,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return commandValueResponse("ok", info)
 	case "CREATERT", "CREATERADIX", "RTCREATE":
-		ht.UpsertRadixTree(key)
+		if err := ht.UpsertRadixTreeChecked(key); err != nil {
+			return commandError(err.Error())
+		}
 		return CacheCommandResponse{OK: true, Message: "created radix tree"}
 	case "PUTRT", "RTPUT":
 		fields, ok := commandRadixTreeFields(request)
