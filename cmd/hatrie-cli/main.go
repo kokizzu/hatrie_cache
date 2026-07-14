@@ -326,10 +326,6 @@ func postJSON(ctx context.Context, client *http.Client, addr string, path string
 	return doAndCopy(client, req, stdout)
 }
 
-func putJSON(ctx context.Context, client *http.Client, addr string, path string, body []byte, stdout io.Writer) error {
-	return putJSONReader(ctx, client, addr, path, bytes.NewReader(body), stdout)
-}
-
 func putJSONReader(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, stdout io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint(addr, path), body)
 	if err != nil {

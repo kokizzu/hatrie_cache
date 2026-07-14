@@ -1,7 +1,6 @@
 package hatriecache
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"hash/fnv"
@@ -224,10 +223,6 @@ func (topology ClusterTopology) RouteForKey(key string) (TopologyRoute, bool) {
 	idx := hashKeyToShardIndex(key, len(shards))
 	shard := shards[idx]
 	return TopologyRoute{Key: key, Mode: mode, Shard: shard, Owners: routeOwners(shard)}, true
-}
-
-func decodeTopologyJSON(data []byte) (ClusterTopology, error) {
-	return decodeTopologyJSONReader(bytes.NewReader(data))
 }
 
 func decodeTopologyJSONReader(reader io.Reader) (ClusterTopology, error) {
