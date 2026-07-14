@@ -3065,8 +3065,15 @@ func TestConcurrentOperationsAreSynchronized(t *testing.T) {
 func TestDestroyIsIdempotentAndPreventsUse(t *testing.T) {
 	ht := CreateHatTrie()
 	ht.UpsertString("key", "value")
+	if err := ht.UpsertQuantileSketch("latency", 0.01); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	ht.AddQuantileSketch("latency", 10, 20, 30)
 	ht.Destroy()
 	ht.Destroy()
+	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
+		t.Fatalf("Destroy retained backing state: %+v", ht)
+	}
 
 	defer func() {
 		if recover() == nil {

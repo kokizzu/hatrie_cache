@@ -1364,6 +1364,7 @@ func (ht *HatTrie) Destroy() {
 	ht.topKs = nil
 	ht.cuckooFilters = nil
 	ht.roaringBitmaps = nil
+	ht.quantileSketches = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
