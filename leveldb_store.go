@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -611,18 +612,50 @@ func (trie *HatTrie) levelDBEntries() ([]snapshotEntry, error) {
 
 func (trie *HatTrie) levelDBPutBatch() (*leveldb.Batch, error) {
 	batch := new(leveldb.Batch)
-	err := trie.scanLevelDBEntries(func(entry snapshotEntry) error {
-		data, err := json.Marshal(entry)
-		if err != nil {
-			return err
-		}
-		batch.Put(levelDBKey(entry.Key), data)
+	err := trie.scanLevelDBEntryData(func(key string, data []byte) error {
+		batch.Put(levelDBKey(key), data)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return batch, nil
+}
+
+func (trie *HatTrie) scanLevelDBEntryData(visit func(string, []byte) error) error {
+	trie.mu.Lock()
+	defer trie.mu.Unlock()
+
+	trie.ensureOpen()
+	now := time.Time{}
+	if len(trie.expires) > 0 {
+		now = trie.currentTime()
+	}
+	return trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
+		data, err := trie.levelDBEntryDataLocked(entry)
+		if err != nil {
+			return err
+		}
+		if visit != nil {
+			return visit(entry.Key, data)
+		}
+		return nil
+	})
+}
+
+func (trie *HatTrie) levelDBEntryDataLocked(entry Entry) ([]byte, error) {
+	if entry.Value.Type() == DATAVALUE_TYPE_RAW_BYTES && entry.Value.OnDisk() {
+		var buffer bytes.Buffer
+		if err := trie.writeSnapshotEntryJSONLocked(&buffer, entry, ""); err != nil {
+			return nil, err
+		}
+		return buffer.Bytes(), nil
+	}
+	snapshotEntry, err := trie.snapshotEntryLocked(entry)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(snapshotEntry)
 }
 
 func (trie *HatTrie) scanLevelDBEntries(visit func(snapshotEntry) error) error {

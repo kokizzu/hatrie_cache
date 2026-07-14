@@ -117,6 +117,64 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreSaveStreamsOnDiskBytesWithMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	now := time.Unix(4010, 0)
+	expiresAt := now.Add(time.Hour)
+	source.now = func() time.Time { return now }
+	payload := testPayload(DiskBytesThreshold + 1)
+
+	source.UpsertBytes("large", payload)
+	if got := source.GetBytes("large"); !bytes.Equal(got, payload) {
+		t.Fatalf("GetBytes(large) changed before save")
+	}
+	if !source.ExpireAt("large", expiresAt) {
+		t.Fatal("ExpireAt(large) = false, want true")
+	}
+	if hval := source.Get("large"); !hval.OnDisk() {
+		t.Fatalf("large before save = %+v, want on-disk bytes", hval)
+	}
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	entry, ok, err := store.Entry("large")
+	if err != nil || !ok {
+		t.Fatalf("Entry(large) = %#v/%v/%v, want saved entry", entry, ok, err)
+	}
+	if entry.Type != "bytes" || entry.ExpiresAt == nil || !entry.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("saved entry metadata = %#v, want bytes with TTL", entry)
+	}
+	if entry.Stats == nil || entry.Stats.Reads == 0 || entry.Stats.Writes == 0 {
+		t.Fatalf("saved entry stats = %#v, want persisted read/write stats", entry.Stats)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(entry.Bytes)
+	if err != nil {
+		t.Fatalf("DecodeString(saved bytes) error = %v", err)
+	}
+	if !bytes.Equal(decoded, payload) {
+		t.Fatalf("saved bytes changed")
+	}
+
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now }
+	if count, err := store.Load(loaded); err != nil || count != 1 {
+		t.Fatalf("Load() = %d/%v, want one loaded value", count, err)
+	}
+	if hval := loaded.Get("large"); !hval.OnDisk() || !hval.HasTtl() {
+		t.Fatalf("loaded large = %+v, want on-disk bytes with TTL", hval)
+	}
+	if got := loaded.GetBytes("large"); !bytes.Equal(got, payload) {
+		t.Fatalf("loaded large bytes changed")
+	}
+}
+
 func TestLevelDBStoreSaveScansLargeHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
