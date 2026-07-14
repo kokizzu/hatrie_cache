@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,10 @@ import (
 	"time"
 	"unicode/utf8"
 )
+
+const maxCommandJournalTailResponseBytes = 1 << 20
+
+var errCommandJournalTailResponseTooLarge = errors.New("hatriecache: journal source response is too large")
 
 type MonitoringOptions struct {
 	NodeName            string
@@ -516,20 +521,35 @@ func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint 
 		}
 		return CommandJournalTail{}, resp.StatusCode, fmt.Errorf("journal source returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+	tail, err := decodeCommandJournalTailResponse(resp.Body)
+	if err != nil {
+		return CommandJournalTail{}, resp.StatusCode, err
+	}
+	return tail, resp.StatusCode, nil
+}
+
+func decodeCommandJournalTailResponse(body io.Reader) (CommandJournalTail, error) {
+	data, err := io.ReadAll(io.LimitReader(body, maxCommandJournalTailResponseBytes+1))
+	if err != nil {
+		return CommandJournalTail{}, err
+	}
+	if len(data) > maxCommandJournalTailResponseBytes {
+		return CommandJournalTail{}, errCommandJournalTailResponseTooLarge
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var tail CommandJournalTail
 	if err := decoder.Decode(&tail); err != nil {
-		return CommandJournalTail{}, resp.StatusCode, err
+		return CommandJournalTail{}, err
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return CommandJournalTail{}, resp.StatusCode, errors.New("journal source returned invalid trailing JSON")
+		return CommandJournalTail{}, errors.New("journal source returned invalid trailing JSON")
 	}
 	if tail.Entries == nil {
 		tail.Entries = []CommandJournalRecord{}
 	}
-	return tail, resp.StatusCode, nil
+	return tail, nil
 }
 
 func commandJournalEndpoint(source string, afterSequence uint64, limit int) (string, error) {

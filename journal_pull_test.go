@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -417,5 +418,44 @@ func TestFetchCommandJournalTailDrainsErrorResponseBody(t *testing.T) {
 	}
 	if !body.drained || !body.closed {
 		t.Fatalf("response body drained=%v closed=%v, want both true", body.drained, body.closed)
+	}
+}
+
+func TestFetchCommandJournalTailRejectsOversizedResponseBody(t *testing.T) {
+	body := `{"entries":[],"padding":"` + strings.Repeat("x", maxCommandJournalTailResponseBytes) + `"}`
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    request,
+			}, nil
+		}),
+	}
+
+	_, status, err := fetchCommandJournalTail(context.Background(), client, "http://source.example/api/journal")
+	if err == nil || status != http.StatusOK || !strings.Contains(err.Error(), "journal source response is too large") {
+		t.Fatalf("fetchCommandJournalTail() status/error = %d/%v, want oversized response error", status, err)
+	}
+}
+
+func TestFetchCommandJournalTailRejectsTrailingResponseJSON(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"entries":[]}{"entries":[]}`)),
+				Request:    request,
+			}, nil
+		}),
+	}
+
+	_, status, err := fetchCommandJournalTail(context.Background(), client, "http://source.example/api/journal")
+	if err == nil || status != http.StatusOK || !strings.Contains(err.Error(), "invalid trailing JSON") {
+		t.Fatalf("fetchCommandJournalTail() status/error = %d/%v, want trailing JSON error", status, err)
 	}
 }
