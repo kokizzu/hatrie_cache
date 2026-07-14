@@ -27,6 +27,17 @@ func writeCommandJournalTestEntries(t *testing.T, path string, entries ...comman
 	}
 }
 
+func readCommandJournalEntries(path string) ([]commandJournalEntry, error) {
+	var entries []commandJournalEntry
+	if _, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
+		entries = append(entries, entry)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 func TestCommandJournalReplaysMutatingCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

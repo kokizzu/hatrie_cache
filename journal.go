@@ -413,23 +413,6 @@ func (journal *CommandJournal) markAppendedLocked(sequence uint64) {
 	journal.nextSequence = sequence + 1
 }
 
-func readCommandJournalEntries(path string) ([]commandJournalEntry, error) {
-	entries, _, err := readCommandJournalEntriesWithEnd(path)
-	return entries, err
-}
-
-func readCommandJournalEntriesWithEnd(path string) ([]commandJournalEntry, int64, error) {
-	var entries []commandJournalEntry
-	validBytes, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
-		entries = append(entries, entry)
-		return nil
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	return entries, validBytes, nil
-}
-
 func scanCommandJournalEntries(path string, visit func(commandJournalEntry) error) (int64, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
