@@ -1976,6 +1976,26 @@ func TestBloomFilterRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestBloomFilterSnapshotValidationRejectsUnusedBits(t *testing.T) {
+	data := make([]byte, bloomFilterWordCount(65)*8)
+	binary.LittleEndian.PutUint64(data[len(data)-8:], uint64(1)<<1)
+	snapshot := bloomFilterSnapshot{
+		BitCount:   65,
+		HashCount:  1,
+		Insertions: 1,
+		Bits:       base64.StdEncoding.EncodeToString(data),
+	}
+	if err := validateBloomFilterSnapshot(snapshot); err == nil {
+		t.Fatal("validateBloomFilterSnapshot(unused bits) error = nil, want error")
+	}
+
+	binary.LittleEndian.PutUint64(data[len(data)-8:], 1)
+	snapshot.Bits = base64.StdEncoding.EncodeToString(data)
+	if err := validateBloomFilterSnapshot(snapshot); err != nil {
+		t.Fatalf("validateBloomFilterSnapshot(used last bit) error = %v, want nil", err)
+	}
+}
+
 func TestBloomFilterStorageReleasedOnOverwrite(t *testing.T) {
 	ht := newTestTrie(t)
 

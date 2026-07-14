@@ -112,6 +112,22 @@ func validateBloomFilterSnapshot(snapshot bloomFilterSnapshot) error {
 	if uint64(len(data)) != bloomFilterWordCount(snapshot.BitCount)*8 {
 		return errors.New("hatriecache: invalid bloom filter bitset length")
 	}
+	if err := validateBloomFilterUnusedBits(snapshot.BitCount, data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateBloomFilterUnusedBits(bitCount uint64, data []byte) error {
+	usedBits := bitCount % 64
+	if usedBits == 0 {
+		return nil
+	}
+	lastWord := binary.LittleEndian.Uint64(data[len(data)-8:])
+	usedMask := (uint64(1) << uint(usedBits)) - 1
+	if lastWord&^usedMask != 0 {
+		return errors.New("hatriecache: bloom filter bitset has unused bits set")
+	}
 	return nil
 }
 
