@@ -247,6 +247,9 @@ func TestMonitoringHandlerAcceptsProtobufCommandWire(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("protobuf command status = %d, want 200; body=%s", resp.Code, resp.Body.String())
 	}
+	if got := resp.Header().Values("Vary"); !headerValuesContain(got, "Accept") {
+		t.Fatalf("Vary = %#v, want Accept", got)
+	}
 	response, err := decodeCommandResponseWire(bytes.NewReader(resp.Body.Bytes()), resp.Header().Get("Content-Type"), maxMonitoringJSONRequestBytes)
 	if err != nil {
 		t.Fatalf("decodeCommandResponseWire() error = %v", err)
@@ -283,6 +286,9 @@ func TestMonitoringHandlerCommandResponseRespectsAcceptQuality(t *testing.T) {
 	}
 	if got := resp.Header().Get("Content-Type"); got != commandWireContentTypeJSON {
 		t.Fatalf("Content-Type = %q, want json", got)
+	}
+	if got := resp.Header().Values("Vary"); !headerValuesContain(got, "Accept") {
+		t.Fatalf("Vary = %#v, want Accept", got)
 	}
 	var response CacheCommandResponse
 	if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
