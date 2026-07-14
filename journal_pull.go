@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
+
+const DefaultCommandJournalPullTimeout = 30 * time.Second
 
 type CommandJournalPullOptions struct {
 	Source        string
@@ -13,6 +16,7 @@ type CommandJournalPullOptions struct {
 	Limit         uint64
 	UntilCurrent  bool
 	MaxBatches    uint64
+	Timeout       time.Duration
 	Client        *http.Client
 }
 
@@ -50,11 +54,28 @@ func PullCommandJournal(ctx context.Context, trie *HatTrie, journal *CommandJour
 	if err != nil {
 		return CommandJournalPullResult{}, commandJournalPullError(http.StatusBadRequest, err)
 	}
-	return pullCommandJournalTail(ctx, trie, journal, options.Source, options.AfterSequence, limit, options.UntilCurrent, maxBatches, options.Client)
+	client, err := commandJournalPullHTTPClient(options.Client, options.Timeout)
+	if err != nil {
+		return CommandJournalPullResult{}, commandJournalPullError(http.StatusBadRequest, err)
+	}
+	return pullCommandJournalTail(ctx, trie, journal, options.Source, options.AfterSequence, limit, options.UntilCurrent, maxBatches, client)
 }
 
 func commandJournalPullError(status int, err error) error {
 	return &CommandJournalPullError{Status: status, Err: err}
+}
+
+func commandJournalPullHTTPClient(client *http.Client, timeout time.Duration) (*http.Client, error) {
+	if timeout < 0 {
+		return nil, errors.New("journal pull timeout must be non-negative")
+	}
+	if client != nil {
+		return client, nil
+	}
+	if timeout == 0 {
+		return http.DefaultClient, nil
+	}
+	return &http.Client{Timeout: timeout}, nil
 }
 
 func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int, client *http.Client) (CommandJournalPullResult, error) {

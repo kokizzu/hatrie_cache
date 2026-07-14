@@ -56,6 +56,7 @@ type config struct {
 	journalPullSource     string
 	journalPullStatePath  string
 	journalPullInterval   time.Duration
+	journalPullTimeout    time.Duration
 	journalPullLimit      uint64
 	journalPullMaxBatches uint64
 }
@@ -139,6 +140,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Source:     cfg.journalPullSource,
 		StatePath:  cfg.journalPullStatePath,
 		Interval:   cfg.journalPullInterval,
+		Timeout:    cfg.journalPullTimeout,
 		Limit:      cfg.journalPullLimit,
 		MaxBatches: cfg.journalPullMaxBatches,
 	}, stderr)
@@ -234,9 +236,10 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 
 func parseConfig(args []string, output io.Writer) (config, error) {
 	cfg := config{
-		monitoringAddr:   "127.0.0.1:8080",
-		monitoringWebDir: "svelte-mpa/dist",
-		electionTimeout:  hatriecache.DefaultElectionTimeout,
+		monitoringAddr:     "127.0.0.1:8080",
+		monitoringWebDir:   "svelte-mpa/dist",
+		electionTimeout:    hatriecache.DefaultElectionTimeout,
+		journalPullTimeout: hatriecache.DefaultCommandJournalPullTimeout,
 	}
 	flags := flag.NewFlagSet("hatrie-cache", flag.ContinueOnError)
 	flags.SetOutput(output)
@@ -269,6 +272,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.journalPullSource, "journal-pull-source", "", "optional source monitoring URL to pull journal catch-up batches from")
 	flags.StringVar(&cfg.journalPullStatePath, "journal-pull-state-path", "", "optional JSON path for persisted journal pull source sequence")
 	flags.DurationVar(&cfg.journalPullInterval, "journal-pull-interval", 0, "optional interval for repeated journal pull catch-up")
+	flags.DurationVar(&cfg.journalPullTimeout, "journal-pull-timeout", cfg.journalPullTimeout, "HTTP timeout for each journal pull request; use 0 to disable")
 	flags.Uint64Var(&cfg.journalPullLimit, "journal-pull-limit", 0, "maximum entries per journal pull batch")
 	flags.Uint64Var(&cfg.journalPullMaxBatches, "journal-pull-max-batches", 0, "maximum batches per journal pull attempt")
 	if err := flags.Parse(args); err != nil {
@@ -294,6 +298,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.replicationRetry < 0 {
 		return config{}, errors.New("replication retry interval must be non-negative")
+	}
+	if cfg.journalPullTimeout < 0 {
+		return config{}, errors.New("journal pull timeout must be non-negative")
 	}
 	if _, err := hatriecache.ParseCommandWireFormat(cfg.replicationWireFormat); err != nil {
 		return config{}, err
@@ -655,6 +662,7 @@ type journalPullerConfig struct {
 	Source     string
 	StatePath  string
 	Interval   time.Duration
+	Timeout    time.Duration
 	Limit      uint64
 	MaxBatches uint64
 }
@@ -724,6 +732,7 @@ func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *ha
 		Limit:         cfg.Limit,
 		UntilCurrent:  true,
 		MaxBatches:    cfg.MaxBatches,
+		Timeout:       cfg.Timeout,
 	})
 	if err != nil {
 		if result.AppliedThrough > afterSequence {

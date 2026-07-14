@@ -173,10 +173,13 @@ has no more entries or the batch cap is reached.
 Set `JOURNAL_PULL_SOURCE` with `JOURNAL_PATH` to automatically pull bounded
 catch-up batches from another node at startup; `JOURNAL_PULL_STATE_PATH`
 persists the source sequence so non-idempotent commands are not replayed after
-restart. Add `JOURNAL_PULL_INTERVAL` to repeat catch-up periodically:
+restart. Journal pull HTTP requests use a 30 second timeout by default; set
+`JOURNAL_PULL_TIMEOUT=0` to disable that bound for a deliberate long-running
+source. Add `JOURNAL_PULL_INTERVAL` to repeat catch-up periodically:
 
 ```
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_INTERVAL=5s
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_TIMEOUT=5s
 ```
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.

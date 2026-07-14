@@ -93,6 +93,7 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 		"-journal-pull-source", "http://leader:8080",
 		"-journal-pull-state-path", "/tmp/cache.pull.json",
 		"-journal-pull-interval", "5s",
+		"-journal-pull-timeout", "750ms",
 		"-journal-pull-limit", "250",
 		"-journal-pull-max-batches", "8",
 	}, &bytes.Buffer{})
@@ -102,8 +103,21 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 	if cfg.journalPullSource != "http://leader:8080" || cfg.journalPullStatePath != "/tmp/cache.pull.json" || cfg.journalPullInterval != 5*time.Second {
 		t.Fatalf("cfg journal pull basics = %#v, want explicit source/state/interval", cfg)
 	}
+	if cfg.journalPullTimeout != 750*time.Millisecond {
+		t.Fatalf("cfg journal pull timeout = %s, want 750ms", cfg.journalPullTimeout)
+	}
 	if cfg.journalPullLimit != 250 || cfg.journalPullMaxBatches != 8 {
 		t.Fatalf("cfg journal pull limits = %d/%d, want 250/8", cfg.journalPullLimit, cfg.journalPullMaxBatches)
+	}
+}
+
+func TestParseConfigRejectsNegativeJournalPullTimeout(t *testing.T) {
+	_, err := parseConfig([]string{
+		"-monitoring-server",
+		"-journal-pull-timeout", "-1s",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "journal pull timeout must be non-negative") {
+		t.Fatalf("parseConfig(negative journal pull timeout) error = %v, want non-negative timeout error", err)
 	}
 }
 

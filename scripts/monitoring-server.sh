@@ -29,6 +29,7 @@ journal_path=${JOURNAL_PATH:-}
 journal_pull_source=${JOURNAL_PULL_SOURCE:-}
 journal_pull_state_path=${JOURNAL_PULL_STATE_PATH:-}
 journal_pull_interval=${JOURNAL_PULL_INTERVAL:-0}
+journal_pull_timeout=${JOURNAL_PULL_TIMEOUT:-30s}
 journal_pull_limit=${JOURNAL_PULL_LIMIT:-0}
 journal_pull_max_batches=${JOURNAL_PULL_MAX_BATCHES:-0}
 
@@ -62,5 +63,6 @@ exec go run ./cmd/hatrie-cache \
 	-journal-pull-source "$journal_pull_source" \
 	-journal-pull-state-path "$journal_pull_state_path" \
 	-journal-pull-interval "$journal_pull_interval" \
+	-journal-pull-timeout "$journal_pull_timeout" \
 	-journal-pull-limit "$journal_pull_limit" \
 	-journal-pull-max-batches "$journal_pull_max_batches"

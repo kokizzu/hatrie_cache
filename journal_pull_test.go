@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCommandJournalPullErrorWrapsUnderlyingError(t *testing.T) {
@@ -43,6 +44,37 @@ func TestPullCommandJournalValidationErrorsCarryHTTPStatus(t *testing.T) {
 	pullErr = nil
 	if !errors.As(err, &pullErr) || pullErr.Status != http.StatusConflict || !strings.Contains(err.Error(), "journal is not configured") {
 		t.Fatalf("PullCommandJournal(nil journal) error = %v/%#v, want 409 pull error", err, pullErr)
+	}
+}
+
+func TestCommandJournalPullHTTPClientTimeouts(t *testing.T) {
+	client, err := commandJournalPullHTTPClient(nil, 250*time.Millisecond)
+	if err != nil {
+		t.Fatalf("commandJournalPullHTTPClient(timeout) error = %v", err)
+	}
+	if client == nil || client.Timeout != 250*time.Millisecond {
+		t.Fatalf("client timeout = %v, want 250ms", client)
+	}
+
+	client, err = commandJournalPullHTTPClient(nil, 0)
+	if err != nil {
+		t.Fatalf("commandJournalPullHTTPClient(no timeout) error = %v", err)
+	}
+	if client != http.DefaultClient {
+		t.Fatalf("client = %p, want http.DefaultClient %p", client, http.DefaultClient)
+	}
+
+	custom := &http.Client{Timeout: time.Second}
+	client, err = commandJournalPullHTTPClient(custom, 250*time.Millisecond)
+	if err != nil {
+		t.Fatalf("commandJournalPullHTTPClient(custom) error = %v", err)
+	}
+	if client != custom || client.Timeout != time.Second {
+		t.Fatalf("custom client = %#v, want original custom timeout", client)
+	}
+
+	if _, err := commandJournalPullHTTPClient(nil, -time.Second); err == nil {
+		t.Fatal("commandJournalPullHTTPClient(negative) error = nil, want rejection")
 	}
 }
 

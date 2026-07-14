@@ -547,6 +547,7 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		Limit:         request.Limit,
 		UntilCurrent:  request.UntilCurrent,
 		MaxBatches:    request.MaxBatches,
+		Timeout:       DefaultCommandJournalPullTimeout,
 	})
 	if err != nil {
 		var pullErr *CommandJournalPullError
