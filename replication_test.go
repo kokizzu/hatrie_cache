@@ -619,6 +619,55 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSyncAllSkipsExpiredEntries(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 2)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	base := time.Unix(800, 0)
+	trie.now = func() time.Time { return base }
+	trie.UpsertString("session:expired", "old")
+	trie.UpsertString("session:live", "new")
+	if !trie.Expire("session:expired", time.Second) {
+		t.Fatal("Expire(session:expired) = false, want true")
+	}
+	if !trie.Expire("session:live", 10*time.Second) {
+		t.Fatal("Expire(session:live) = false, want true")
+	}
+	trie.now = func() time.Time { return base.Add(2 * time.Second) }
+
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	result := replicator.SyncAll(context.Background(), trie, "session:")
+	if result.Skipped || result.Entries != 1 || len(result.Targets) != 1 || result.Targets[0].Key != "session:live" {
+		t.Fatalf("sync result = %#v, want only live session entry", result)
+	}
+	request := <-requests
+	if request.Command != "INTERNALSET" || request.Key != "session:live" {
+		t.Fatalf("sync request = %#v, want live INTERNALSET", request)
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("unexpected sync request = %#v", request)
+	default:
+	}
+}
+
 func TestHTTPReplicatorSyncAllSkipsNoEntries(t *testing.T) {
 	trie := newTestTrie(t)
 	topology := replicationTestTopology(t, "127.0.0.1:1")

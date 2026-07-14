@@ -491,14 +491,14 @@ func (replicator *HTTPReplicator) syncAll(ctx context.Context, trie *HatTrie, pr
 		return result
 	}
 
-	entries := trie.EntriesWithPrefix(prefix, true)
-	if len(entries) == 0 {
+	keys := trie.KeysWithPrefix(prefix, true)
+	if len(keys) == 0 {
 		result.Skipped = true
 		result.Reason = "no entries to sync"
 		return result
 	}
 
-	for _, entry := range entries {
+	for _, key := range keys {
 		if err := ctx.Err(); err != nil {
 			if len(result.Targets) == 0 {
 				result.Skipped = true
@@ -506,7 +506,6 @@ func (replicator *HTTPReplicator) syncAll(ctx context.Context, trie *HatTrie, pr
 			}
 			return result
 		}
-		key := entry.Key
 		route, ok := replicator.routeForKey(key)
 		if !ok {
 			continue

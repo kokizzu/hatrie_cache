@@ -2028,13 +2028,17 @@ func (ht *HatTrie) KeysWithPrefixChecked(prefix string, sorted bool) ([]string, 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	entries, err := ht.entriesWithPrefixLockedChecked(prefix, sorted)
+	now := time.Time{}
+	if len(ht.expires) > 0 {
+		now = ht.currentTime()
+	}
+	keys := []string{}
+	err := ht.scanEntriesWithPrefixAtLockedChecked(prefix, sorted, now, func(entry Entry) error {
+		keys = append(keys, entry.Key)
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	keys := make([]string, len(entries))
-	for i, entry := range entries {
-		keys[i] = entry.Key
 	}
 	return keys, nil
 }

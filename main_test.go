@@ -5398,6 +5398,27 @@ func TestKeysWithPrefixReturnsFullKeys(t *testing.T) {
 	}
 }
 
+func TestKeysWithPrefixFiltersExpiredEntries(t *testing.T) {
+	ht := newTestTrie(t)
+	base := time.Unix(700, 0)
+	ht.now = func() time.Time { return base }
+
+	ht.UpsertString("session:expired", "old")
+	ht.UpsertString("session:live", "new")
+	ht.UpsertString("other", "ignored")
+	if !ht.Expire("session:expired", time.Second) {
+		t.Fatal("Expire(session:expired) = false, want true")
+	}
+	if !ht.Expire("session:live", 10*time.Second) {
+		t.Fatal("Expire(session:live) = false, want true")
+	}
+
+	ht.now = func() time.Time { return base.Add(2 * time.Second) }
+	if got, want := ht.KeysWithPrefix("session:", true), []string{"session:live"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("KeysWithPrefix(session:) = %#v, want %#v", got, want)
+	}
+}
+
 func TestEntriesWithPrefixPreservesTTLMetadata(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(500, 0)
