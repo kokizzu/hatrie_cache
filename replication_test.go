@@ -411,6 +411,65 @@ func TestHTTPReplicatorReplicatesRoaringBitmapMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesCountMinSketchMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATECMS", Key: "freq", Value: "128", Subkey: "4"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATECMS response = %#v, want ok", response)
+	}
+	increment := CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "3"}
+	response := trie.ExecuteCommand(increment)
+	if !response.OK {
+		t.Fatalf("INCRCMS response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, increment, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("Count-Min Sketch replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "freq" || request.Value == "" {
+			t.Fatalf("replicated Count-Min Sketch request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated Count-Min Sketch snapshot JSON error = %v", err)
+		}
+		if entry.Type != "count_min_sketch" || entry.CountMinSketch == nil {
+			t.Fatalf("replicated Count-Min Sketch snapshot = %#v, want count_min_sketch payload", entry)
+		}
+	default:
+		t.Fatal("Count-Min Sketch mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "ESTCMS", Key: "freq", Value: "alpha"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "ESTCMS", Key: "freq", Value: "alpha"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("Count-Min Sketch read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestHTTPReplicatorReplicatesHyperLogLogMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
