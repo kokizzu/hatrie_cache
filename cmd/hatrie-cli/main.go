@@ -101,11 +101,12 @@ func runTopology(ctx context.Context, client *http.Client, addr string, args []s
 		return errors.New("topology -file and -key are mutually exclusive")
 	}
 	if *filePath != "" {
-		data, err := os.ReadFile(*filePath)
+		file, err := os.Open(*filePath)
 		if err != nil {
 			return err
 		}
-		return putJSON(ctx, client, addr, "/api/topology", data, stdout)
+		defer file.Close()
+		return putJSONReader(ctx, client, addr, "/api/topology", file, stdout)
 	}
 	path := "/api/topology"
 	if *key != "" {
@@ -326,7 +327,11 @@ func postJSON(ctx context.Context, client *http.Client, addr string, path string
 }
 
 func putJSON(ctx context.Context, client *http.Client, addr string, path string, body []byte, stdout io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint(addr, path), bytes.NewReader(body))
+	return putJSONReader(ctx, client, addr, path, bytes.NewReader(body), stdout)
+}
+
+func putJSONReader(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, stdout io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint(addr, path), body)
 	if err != nil {
 		return err
 	}

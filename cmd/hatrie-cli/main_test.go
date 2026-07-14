@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 
 	hatriecache "hatrie_cache"
 )
@@ -148,6 +149,37 @@ func TestRunTopologyUploadsFile(t *testing.T) {
 	}
 	if gotMethod != http.MethodPut || gotTopology.Self != "node-a" {
 		t.Fatalf("request = %s %#v, want PUT node-a topology", gotMethod, gotTopology)
+	}
+}
+
+func TestPutJSONReaderSendsStreamingBody(t *testing.T) {
+	var gotBody struct {
+		Version int `json:"version"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	body := iotest.OneByteReader(strings.NewReader(`{"version":1}`))
+	if err := putJSONReader(context.Background(), server.Client(), server.URL, "/api/topology", body, stdout); err != nil {
+		t.Fatalf("putJSONReader() error = %v", err)
+	}
+	if gotBody.Version != 1 {
+		t.Fatalf("body = %#v, want version 1", gotBody)
+	}
+	if got := stdout.String(); got != "{\"ok\":true}\n" {
+		t.Fatalf("stdout = %q, want response JSON", got)
 	}
 }
 
