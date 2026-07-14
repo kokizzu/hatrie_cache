@@ -4142,6 +4142,35 @@ func TestKeysAndEntries(t *testing.T) {
 	}
 }
 
+func TestEntriesUseSingleExpirationClockRead(t *testing.T) {
+	ht := newTestTrie(t)
+	base := time.Unix(4400, 0)
+	now := base
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("a", "one")
+	ht.UpsertString("b", "two")
+	if !ht.Expire("a", 10*time.Second) {
+		t.Fatal("Expire(a) = false, want true")
+	}
+	if !ht.Expire("b", 10*time.Second) {
+		t.Fatal("Expire(b) = false, want true")
+	}
+
+	clockReads := 0
+	ht.now = func() time.Time {
+		clockReads++
+		return base.Add(9 * time.Second)
+	}
+	entries := ht.Entries(true)
+	if got := entryKeys(entries); !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Fatalf("Entries(sorted) keys = %#v, want both unexpired keys", got)
+	}
+	if clockReads != 1 {
+		t.Fatalf("Entries clock reads = %d, want 1", clockReads)
+	}
+}
+
 func TestKeysWithPrefixReturnsFullKeys(t *testing.T) {
 	ht := newTestTrie(t)
 

@@ -2210,6 +2210,10 @@ func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
 	}
 	entries := []Entry{}
 	expired := []expiredEntry{}
+	now := time.Time{}
+	if len(ht.expires) > 0 {
+		now = ht.currentTime()
+	}
 
 	for !bool(C.hattrie_iter_finished(iter)) {
 		var keyLen C.size_t
@@ -2225,7 +2229,7 @@ func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
 			hval.fromValue(*valPtr)
 		}
 
-		if expiresAt, ok := ht.expires[key]; ok && !ht.currentTime().Before(expiresAt) {
+		if expiresAt, ok := ht.expires[key]; ok && !now.Before(expiresAt) {
 			expired = append(expired, expiredEntry{key: key, value: hval})
 		} else {
 			entries = append(entries, Entry{Key: key, Value: hval})
