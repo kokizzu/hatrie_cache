@@ -28,8 +28,8 @@ type QuantileSketchInfo struct {
 	Epsilon      float64 `json:"epsilon"`
 	Count        uint64  `json:"count"`
 	SummarySize  uint64  `json:"summary_size"`
-	Min          float64 `json:"min,omitempty"`
-	Max          float64 `json:"max,omitempty"`
+	Min          float64 `json:"min"`
+	Max          float64 `json:"max"`
 	RankError    uint64  `json:"rank_error"`
 	EncodedBytes int64   `json:"encoded_bytes"`
 }

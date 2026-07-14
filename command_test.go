@@ -678,6 +678,21 @@ func TestExecuteCommandQuantileSketchOperations(t *testing.T) {
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ESTQ", Key: "latency", Value: "1.5"}); got.OK {
 		t.Fatalf("ESTQ invalid quantile response = %#v, want error", got)
 	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDQ", Key: "zero", Value: "0"}); !got.OK {
+		t.Fatalf("ADDQ zero response = %#v, want ok", got)
+	}
+	zeroInfoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFOQ", Key: "zero"})
+	if !zeroInfoResp.OK || zeroInfoResp.Value == "" {
+		t.Fatalf("INFOQ zero response = %#v, want JSON info", zeroInfoResp)
+	}
+	var zeroInfoFields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(zeroInfoResp.Value), &zeroInfoFields); err != nil {
+		t.Fatalf("INFOQ zero JSON error = %v", err)
+	}
+	if string(zeroInfoFields["min"]) != "0" || string(zeroInfoFields["max"]) != "0" {
+		t.Fatalf("INFOQ zero fields = %s, want explicit zero min and max in %s", zeroInfoResp.Value, zeroInfoResp.Value)
+	}
 }
 
 func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
