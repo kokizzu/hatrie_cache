@@ -132,7 +132,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	defer snapshot.Release()
 
 	now := trie.currentTime()
-	activeKeys := map[string]struct{}{}
+	activeKeys := map[string]bool{}
 	result := LevelDBLoadResult{}
 	if err := scanLevelDBSnapshotEntries(snapshot, func(entry snapshotEntry) error {
 		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy)
@@ -142,7 +142,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		if !active {
 			return nil
 		}
-		activeKeys[loadEntry.entry.Key] = struct{}{}
+		activeKeys[loadEntry.entry.Key] = true
 		result.KeysLoaded++
 		return nil
 	}); err != nil {

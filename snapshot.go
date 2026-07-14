@@ -84,21 +84,19 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	defer file.Close()
 
 	now := ht.currentTime()
-	operations := make([]snapshotOperation, 0)
-	seenKeys := make(map[string]struct{})
+	activeKeys := make(map[string]bool)
 	metadata, err := scanSnapshotFileJSONReader(file, func(entry snapshotEntry) error {
-		if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
-			return nil
-		}
-		operation, err := validateSnapshotEntry(entry)
+		operation, active, err := validateSnapshotLoadEntry(entry, now)
 		if err != nil {
 			return err
 		}
-		if _, exists := seenKeys[entry.Key]; exists {
+		if !active {
+			return nil
+		}
+		if _, exists := activeKeys[operation.entry.Key]; exists {
 			return errors.New("hatriecache: snapshot contains duplicate active key")
 		}
-		seenKeys[entry.Key] = struct{}{}
-		operations = append(operations, operation)
+		activeKeys[operation.entry.Key] = false
 		return nil
 	})
 	if err != nil {
@@ -107,30 +105,70 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	if metadata.Version != snapshotVersion {
 		return SnapshotMetadata{}, errors.New("hatriecache: unsupported snapshot version")
 	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return SnapshotMetadata{}, err
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
-	createdKeys := make(map[string]struct{}, len(operations))
-	rollbackOperations := make([]snapshotOperation, 0, len(operations))
-	for _, operation := range operations {
+	createdKeys := make(map[string]struct{}, len(activeKeys))
+	rollbackOperations := make([]snapshotOperation, 0, len(activeKeys))
+	applied := 0
+	applyMetadata, err := scanSnapshotFileJSONReader(file, func(entry snapshotEntry) error {
+		operation, active, err := validateSnapshotLoadEntry(entry, now)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return nil
+		}
+		seen, exists := activeKeys[operation.entry.Key]
+		if !exists {
+			return errors.New("hatriecache: snapshot changed during load")
+		}
+		if seen {
+			return errors.New("hatriecache: snapshot contains duplicate active key")
+		}
+		activeKeys[operation.entry.Key] = true
+
 		rollbackOperation, existed, err := ht.restoreRollbackOperationLocked(operation.entry.Key)
 		if err != nil {
-			return SnapshotMetadata{}, err
+			return err
 		}
 		if _, err := ht.applySnapshotOperationAtLocked(operation, now); err != nil {
 			if existed {
 				rollbackOperations = append(rollbackOperations, rollbackOperation)
 			}
-			return SnapshotMetadata{}, ht.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
+			return err
 		}
 		if existed {
 			rollbackOperations = append(rollbackOperations, rollbackOperation)
 		} else {
 			createdKeys[operation.entry.Key] = struct{}{}
 		}
+		applied++
+		return nil
+	})
+	if err != nil {
+		return SnapshotMetadata{}, ht.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
 	}
-	ht.deleteKeysNotInLocked(seenKeys, now)
+	if applyMetadata.Version != snapshotVersion || applyMetadata.JournalSequence != metadata.JournalSequence || applied != len(activeKeys) {
+		err := errors.New("hatriecache: snapshot changed during load")
+		return SnapshotMetadata{}, ht.restoreApplyErrorLocked(err, createdKeys, rollbackOperations, now)
+	}
+	ht.deleteKeysNotInLocked(activeKeys, now)
 	return SnapshotMetadata{JournalSequence: metadata.JournalSequence}, nil
+}
+
+func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time) (snapshotOperation, bool, error) {
+	if entry.ExpiresAt != nil && !now.Before(*entry.ExpiresAt) {
+		return snapshotOperation{}, false, nil
+	}
+	operation, err := validateSnapshotEntry(entry)
+	if err != nil {
+		return snapshotOperation{}, false, err
+	}
+	return operation, true, nil
 }
 
 func (ht *HatTrie) snapshot() (snapshotFile, error) {
@@ -822,7 +860,7 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 	return hval, nil
 }
 
-func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]struct{}, now time.Time) {
+func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]bool, now time.Time) {
 	entries := ht.entriesWithPrefixAtLocked("", false, now)
 	for _, entry := range entries {
 		if _, ok := keep[entry.Key]; ok {
