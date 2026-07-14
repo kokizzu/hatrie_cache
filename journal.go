@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -11,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	json "github.com/goccy/go-json"
 )
 
 const commandJournalVersion = 1
@@ -62,6 +61,7 @@ type commandJournalEntry struct {
 type CommandJournal struct {
 	mu                sync.Mutex
 	path              string
+	format            CommandJournalFormat
 	file              *os.File
 	closed            bool
 	nextSequence      uint64
@@ -75,8 +75,16 @@ type commandJournalAppendState struct {
 }
 
 func OpenCommandJournal(path string) (*CommandJournal, error) {
+	return OpenCommandJournalWithFormat(path, DefaultCommandJournalFormat)
+}
+
+func OpenCommandJournalWithFormat(path string, format CommandJournalFormat) (*CommandJournal, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("hatriecache: journal path is required")
+	}
+	format, err := ParseCommandJournalFormat(string(format))
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -104,7 +112,7 @@ func OpenCommandJournal(path string) (*CommandJournal, error) {
 	if err != nil {
 		return nil, err
 	}
-	journal := &CommandJournal{path: path, file: file}
+	journal := &CommandJournal{path: path, format: format, file: file}
 	journal.advanceSequenceLocked(maxSequence)
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {
 		journal.nextSequence = 1
@@ -261,11 +269,10 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (comman
 		Sequence: sequence,
 		Request:  request,
 	}
-	data, err := json.Marshal(entry)
+	data, err := marshalCommandJournalEntry(entry, journal.format)
 	if err != nil {
 		return commandJournalAppendState{}, err
 	}
-	data = append(data, '\n')
 
 	n, err := journal.file.Write(data)
 	if err != nil {
@@ -311,7 +318,7 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 		return err
 	}
 
-	if err := writeCommandJournalCompacted(journal.path, throughSequence); err != nil {
+	if err := writeCommandJournalCompactedWithFormat(journal.path, throughSequence, journal.format); err != nil {
 		if reopenErr := journal.ensureAppendFileLocked(); reopenErr != nil {
 			return errors.Join(err, reopenErr)
 		}
@@ -321,13 +328,17 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 }
 
 func writeCommandJournalCompacted(path string, throughSequence uint64) error {
+	return writeCommandJournalCompactedWithFormat(path, throughSequence, DefaultCommandJournalFormat)
+}
+
+func writeCommandJournalCompactedWithFormat(path string, throughSequence uint64, format CommandJournalFormat) error {
 	return writeFileAtomicStream(path, func(writer io.Writer) error {
 		if throughSequence > 0 {
 			if err := writeCommandJournalEntry(writer, commandJournalEntry{
 				Version:    commandJournalVersion,
 				Sequence:   throughSequence,
 				Checkpoint: true,
-			}); err != nil {
+			}, format); err != nil {
 				return err
 			}
 		}
@@ -335,21 +346,18 @@ func writeCommandJournalCompacted(path string, throughSequence uint64) error {
 			if entry.Checkpoint || entry.Sequence <= throughSequence {
 				return nil
 			}
-			return writeCommandJournalEntry(writer, entry)
+			return writeCommandJournalEntry(writer, entry, format)
 		})
 		return err
 	})
 }
 
-func writeCommandJournalEntry(writer io.Writer, entry commandJournalEntry) error {
-	payload, err := json.Marshal(entry)
+func writeCommandJournalEntry(writer io.Writer, entry commandJournalEntry, format CommandJournalFormat) error {
+	payload, err := marshalCommandJournalEntry(entry, format)
 	if err != nil {
 		return err
 	}
-	if _, err := writer.Write(payload); err != nil {
-		return err
-	}
-	_, err = io.WriteString(writer, "\n")
+	_, err = writer.Write(payload)
 	return err
 }
 
@@ -433,32 +441,106 @@ func scanCommandJournalEntries(path string, visit func(commandJournalEntry) erro
 	var hasPreviousSequence bool
 	reader := bufio.NewReader(file)
 	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 && line[len(line)-1] == '\n' {
-			entry, err := decodeCommandJournalEntry(line)
-			if err != nil {
-				return 0, err
-			}
-			if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {
-				return 0, err
-			}
-			if visit != nil {
-				if err := visit(entry); err != nil {
-					return validBytes, err
-				}
-			}
-			validBytes += int64(len(line))
-			previousSequence = entry.Sequence
-			hasPreviousSequence = true
-		}
-
-		if errors.Is(err, io.EOF) {
-			return validBytes, nil
-		}
+		record, bytesRead, complete, err := readCommandJournalRecord(reader)
 		if err != nil {
 			return 0, err
 		}
+		if !complete {
+			return validBytes, nil
+		}
+		entry, err := decodeCommandJournalEntry(record)
+		if err != nil {
+			return 0, err
+		}
+		if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {
+			return 0, err
+		}
+		if visit != nil {
+			if err := visit(entry); err != nil {
+				return validBytes, err
+			}
+		}
+		validBytes += int64(bytesRead)
+		previousSequence = entry.Sequence
+		hasPreviousSequence = true
 	}
+}
+
+func readCommandJournalRecord(reader *bufio.Reader) ([]byte, int, bool, error) {
+	header, err := reader.Peek(len(commandJournalBinaryMagic))
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return readCommandJournalJSONRecord(reader)
+		}
+		return nil, 0, false, err
+	}
+	if bytes.Equal(header, commandJournalBinaryMagic) {
+		return readCommandJournalBinaryRecord(reader)
+	}
+	return readCommandJournalJSONRecord(reader)
+}
+
+func readCommandJournalJSONRecord(reader *bufio.Reader) ([]byte, int, bool, error) {
+	line, err := reader.ReadBytes('\n')
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		return line, len(line), true, nil
+	}
+	if errors.Is(err, io.EOF) {
+		return nil, 0, false, nil
+	}
+	if err != nil {
+		return nil, 0, false, err
+	}
+	return nil, 0, false, nil
+}
+
+func readCommandJournalBinaryRecord(reader *bufio.Reader) ([]byte, int, bool, error) {
+	record := make([]byte, len(commandJournalBinaryMagic))
+	if _, err := io.ReadFull(reader, record); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, 0, false, nil
+		}
+		return nil, 0, false, err
+	}
+	size, sizeBytes, complete, err := readCommandJournalRecordSize(reader)
+	if err != nil || !complete {
+		return nil, 0, complete, err
+	}
+	record = append(record, sizeBytes...)
+	if size > uint64(int(^uint(0)>>1)) {
+		return nil, 0, false, errors.New("hatriecache: command journal binary record is too large")
+	}
+	payload := make([]byte, int(size))
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, 0, false, nil
+		}
+		return nil, 0, false, err
+	}
+	record = append(record, payload...)
+	return record, len(record), true, nil
+}
+
+func readCommandJournalRecordSize(reader *bufio.Reader) (uint64, []byte, bool, error) {
+	var raw []byte
+	for shift := uint(0); shift < 64; shift += 7 {
+		value, err := reader.ReadByte()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return 0, nil, false, nil
+			}
+			return 0, nil, false, err
+		}
+		raw = append(raw, value)
+		if value < 0x80 {
+			size, n := binary.Uvarint(raw)
+			if n <= 0 {
+				return 0, nil, false, errors.New("hatriecache: invalid binary command journal record size")
+			}
+			return size, raw, true, nil
+		}
+	}
+	return 0, nil, false, errors.New("hatriecache: invalid binary command journal record size")
 }
 
 func readCommandJournalTail(path string, afterSequence uint64, limit int) (CommandJournalTail, error) {
@@ -491,34 +573,6 @@ func readCommandJournalTail(path string, afterSequence uint64, limit int) (Comma
 		return CommandJournalTail{}, err
 	}
 	return tail, nil
-}
-
-func decodeCommandJournalEntry(data []byte) (commandJournalEntry, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	decoder.DisallowUnknownFields()
-
-	var entry commandJournalEntry
-	if err := decoder.Decode(&entry); err != nil {
-		return commandJournalEntry{}, err
-	}
-	var extra struct{}
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return commandJournalEntry{}, errors.New("hatriecache: invalid journal JSON")
-		}
-		return commandJournalEntry{}, err
-	}
-	if entry.Version != commandJournalVersion {
-		return commandJournalEntry{}, errors.New("hatriecache: unsupported journal version")
-	}
-	if entry.Sequence == 0 {
-		return commandJournalEntry{}, errors.New("hatriecache: invalid journal sequence")
-	}
-	if err := validateCommandJournalEntryRequest(entry); err != nil {
-		return commandJournalEntry{}, err
-	}
-	return entry, nil
 }
 
 func validateCommandJournalEntryRequest(entry commandJournalEntry) error {

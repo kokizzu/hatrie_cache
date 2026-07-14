@@ -16,6 +16,22 @@ func BenchmarkCommandWireProtobuf(b *testing.B) {
 	benchmarkCommandWireFormat(b, CommandWireFormatProtobuf)
 }
 
+func BenchmarkCommandJournalEncodeJSON(b *testing.B) {
+	benchmarkCommandJournalEncodeFormat(b, CommandJournalFormatJSON)
+}
+
+func BenchmarkCommandJournalEncodeBinary(b *testing.B) {
+	benchmarkCommandJournalEncodeFormat(b, CommandJournalFormatBinary)
+}
+
+func BenchmarkCommandJournalDecodeJSON(b *testing.B) {
+	benchmarkCommandJournalDecodeFormat(b, CommandJournalFormatJSON)
+}
+
+func BenchmarkCommandJournalDecodeBinary(b *testing.B) {
+	benchmarkCommandJournalDecodeFormat(b, CommandJournalFormatBinary)
+}
+
 func benchmarkCommandWireFormat(b *testing.B, format CommandWireFormat) {
 	payload := benchmarkCommandWirePayload()
 	wireBytes := benchmarkCommandWireBytes(b, payload, format)
@@ -28,6 +44,35 @@ func benchmarkCommandWireFormat(b *testing.B, format CommandWireFormat) {
 			b.Fatal(err)
 		}
 		if _, err := io.Copy(io.Discard, body); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func benchmarkCommandJournalEncodeFormat(b *testing.B, format CommandJournalFormat) {
+	entry := benchmarkCommandJournalEntry()
+	journalBytes := benchmarkCommandJournalBytes(b, entry, format)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(journalBytes), "journal_B/op")
+	for i := 0; i < b.N; i++ {
+		if _, err := marshalCommandJournalEntry(entry, format); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func benchmarkCommandJournalDecodeFormat(b *testing.B, format CommandJournalFormat) {
+	entry := benchmarkCommandJournalEntry()
+	data, err := marshalCommandJournalEntry(entry, format)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(data)), "journal_B/op")
+	for i := 0; i < b.N; i++ {
+		if _, err := decodeCommandJournalEntry(data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -46,12 +91,29 @@ func benchmarkCommandWireBytes(b *testing.B, payload CacheCommandRequest, format
 	return len(data)
 }
 
+func benchmarkCommandJournalBytes(b *testing.B, entry commandJournalEntry, format CommandJournalFormat) int {
+	b.Helper()
+	data, err := marshalCommandJournalEntry(entry, format)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return len(data)
+}
+
 func benchmarkCommandWirePayload() CacheCommandRequest {
 	entry := `{"key":"session:1","type":"string","string":"` + strings.Repeat("active-user-", 256) + `"}`
 	return CacheCommandRequest{
 		Command: "INTERNALSET",
 		Key:     "session:1",
 		Value:   entry,
+	}
+}
+
+func benchmarkCommandJournalEntry() commandJournalEntry {
+	return commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 42,
+		Request:  benchmarkCommandWirePayload(),
 	}
 }
 

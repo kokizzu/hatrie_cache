@@ -174,10 +174,14 @@ make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=json
 Set `JOURNAL_PATH` to replay an append-only command journal at startup and fsync
 mutating cache commands before applying them. When `SNAPSHOT_PATH` is also set,
 snapshots store the journal checkpoint and compact older journal entries after a
-successful snapshot:
+successful snapshot. Journal records write in the binary format by default
+(`JOURNAL_FORMAT=binary`) and still read existing line-delimited JSON journals,
+including files that contain both old JSON records and new binary records. Set
+`JOURNAL_FORMAT=json` to keep writing the previous JSON journal layout:
 
 ```
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json JOURNAL_PATH=data/commands.journal
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_FORMAT=json
 ```
 
 When journaling is enabled, `GET /api/journal?after_sequence=N&limit=1000`
@@ -277,6 +281,8 @@ Responses are gzip-compressed when clients send `Accept-Encoding: gzip`.
 Serialization tradeoffs measured with
 `make run CMD='go test -run __nomatch__ -bench BenchmarkCommandWire -benchmem .'`
 and
+`make run CMD='go test -run __nomatch__ -bench BenchmarkCommandJournal -benchmem -benchtime=20000x .'`
+and
 `make run CMD='go test -run __nomatch__ -bench BenchmarkSnapshotFormat -benchmem .'`
 and
 `make run CMD='go test -run __nomatch__ -bench BenchmarkLevelDB -benchmem .'`
@@ -286,6 +292,10 @@ on an AMD Ryzen 9 5950X:
 | --- | --- | ---: | ---: | ---: | ---: |
 | HTTP command wire | JSON | 4,968 ns/op | 3,185 wire_B/op | 3,385 B/op | 3 |
 | HTTP command wire | protobuf (default) | 2,226 ns/op | 3,146 wire_B/op | 3,408 B/op | 3 |
+| Journal encode | JSON fallback | 7,209 ns/op | 3,224 journal_B/op | 8,498 B/op | 3 |
+| Journal encode | binary (default) | 4,537 ns/op | 3,159 journal_B/op | 6,456 B/op | 5 |
+| Journal decode | JSON fallback | 23,286 ns/op | 3,224 journal_B/op | 22,729 B/op | 29 |
+| Journal decode | binary (default) | 18,103 ns/op | 3,159 journal_B/op | 18,070 B/op | 25 |
 | Snapshot save | JSON | 2,782,644 ns/op | 465,944 disk_B/op | 655,312 B/op | 15,877 |
 | Snapshot save | gzip JSON (fast fallback) | 4,338,040 ns/op | 7,520 disk_B/op | 761,890 B/op | 29,192 |
 | Snapshot save | gzip best JSON (default) | 5,978,653 ns/op | 5,357 disk_B/op | 762,619 B/op | 29,193 |
@@ -296,7 +306,9 @@ on an AMD Ryzen 9 5950X:
 | LevelDB load | cold refs | 3,452,032 ns/op | 394,192 record_B/op | 1,775,911 B/op | 12,386 |
 
 For the benchmark payload, protobuf command wire is about 2.2x faster with a
-small byte reduction and equivalent allocation count. Snapshot and LevelDB
+small byte reduction and equivalent allocation count. Binary journal records are
+about 1.6x faster to encode, about 1.3x faster to decode, about 2% smaller, and
+use less heap; JSON remains easier to inspect manually. Snapshot and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
 carry empty collection fields. The storage-optimized gzip snapshot default uses
 about 29% fewer snapshot bytes than the previous fast gzip format, with similar

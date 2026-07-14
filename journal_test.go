@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -36,6 +37,188 @@ func readCommandJournalEntries(path string) ([]commandJournalEntry, error) {
 		return nil, err
 	}
 	return entries, nil
+}
+
+func TestParseCommandJournalFormat(t *testing.T) {
+	tests := []struct {
+		value string
+		want  CommandJournalFormat
+	}{
+		{value: "", want: CommandJournalFormatBinary},
+		{value: "binary", want: CommandJournalFormatBinary},
+		{value: "bin", want: CommandJournalFormatBinary},
+		{value: " json ", want: CommandJournalFormatJSON},
+	}
+	for _, tt := range tests {
+		got, err := ParseCommandJournalFormat(tt.value)
+		if err != nil {
+			t.Fatalf("ParseCommandJournalFormat(%q) error = %v", tt.value, err)
+		}
+		if got != tt.want {
+			t.Fatalf("ParseCommandJournalFormat(%q) = %q, want %q", tt.value, got, tt.want)
+		}
+	}
+
+	if _, err := ParseCommandJournalFormat("msgpack"); err == nil {
+		t.Fatal("ParseCommandJournalFormat(msgpack) error = nil, want error")
+	}
+}
+
+func TestCommandJournalDefaultWritesBinaryAndReadsLegacyJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	writeCommandJournalTestEntries(t, path, commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 1,
+		Request:  CacheCommandRequest{Command: "SETSTR", Key: "legacy", Value: "json"},
+	})
+
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "fresh", Value: "binary"}); !got.OK {
+		t.Fatalf("journaled SETSTR response = %#v, want ok", got)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !bytes.HasPrefix(raw, []byte("{")) {
+		t.Fatalf("journal prefix = %q, want legacy JSON first record", raw[:1])
+	}
+	if !bytes.Contains(raw, commandJournalBinaryMagic) {
+		t.Fatalf("journal does not contain binary record magic")
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want 2", len(entries))
+	}
+	if entries[1].Sequence != 2 || entries[1].Request.Key != "fresh" {
+		t.Fatalf("second journal entry = %#v, want fresh sequence 2", entries[1])
+	}
+}
+
+func TestCommandJournalJSONFormatWritesPreviousLayout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournalWithFormat(path, CommandJournalFormatJSON)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat(json) error = %v", err)
+	}
+	defer journal.Close()
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !got.OK {
+		t.Fatalf("journaled SETSTR response = %#v, want ok", got)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !bytes.HasPrefix(raw, []byte("{")) || !bytes.HasSuffix(raw, []byte("\n")) {
+		t.Fatalf("journal raw record = %q, want JSON line", raw)
+	}
+	if commandJournalRecordIsBinary(raw) {
+		t.Fatal("JSON journal record detected as binary")
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Request.Key != "name" {
+		t.Fatalf("journal entries = %#v, want name entry", entries)
+	}
+}
+
+func TestCommandJournalBinaryPreservesDynamicValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	request := CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs: Map{
+			"nested": Map{
+				"age":  json.Number("32"),
+				"tags": Slice{"alpha", "beta"},
+			},
+		},
+	}
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, request); !got.OK {
+		t.Fatalf("journaled PUTMAP response = %#v, want ok", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("journal entries = %d, want 1", len(entries))
+	}
+	want := Map{"age": json.Number("32"), "tags": Slice{"alpha", "beta"}}
+	if got := entries[0].Request.Pairs["nested"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("decoded nested value = %#v, want %#v", got, want)
+	}
+}
+
+func TestCommandJournalIgnoresPartialBinaryTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !got.OK {
+		t.Fatalf("journaled SETSTR response = %#v, want ok", got)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(before) error = %v", err)
+	}
+	partial, err := marshalCommandJournalEntry(commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 2,
+		Request:  CacheCommandRequest{Command: "SETSTR", Key: "partial", Value: strings.Repeat("x", 32)},
+	}, CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntry(binary) error = %v", err)
+	}
+	if err := os.WriteFile(path, append(before, partial[:len(partial)-2]...), 0o600); err != nil {
+		t.Fatalf("WriteFile(partial) error = %v", err)
+	}
+
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(partial) error = %v", err)
+	}
+	defer replayJournal.Close()
+	if got := replayJournal.Sequence(); got != 1 {
+		t.Fatalf("Sequence() after partial tail = %d, want 1", got)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(after) error = %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("journal after partial tail truncate length = %d, want %d", len(after), len(before))
+	}
 }
 
 func TestCommandJournalReplaysMutatingCommands(t *testing.T) {

@@ -60,6 +60,7 @@ type config struct {
 	snapshotInterval            time.Duration
 	snapshotFormat              string
 	journalPath                 string
+	journalFormat               string
 	journalPullSource           string
 	journalPullStatePath        string
 	journalPullInterval         time.Duration
@@ -100,7 +101,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 
-	journal, err := openJournalIfConfigured(cfg.journalPath)
+	journal, err := openJournalIfConfigured(cfg.journalPath, journalFormat(cfg))
 	if err != nil {
 		return err
 	}
@@ -277,6 +278,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
 	flags.StringVar(&cfg.snapshotFormat, "snapshot-format", string(hatriecache.DefaultSnapshotFormat), "snapshot save format: gzip-best-json, gzip-json, or json")
 	flags.StringVar(&cfg.journalPath, "journal-path", "", "optional command journal path to replay on startup and append mutating commands")
+	flags.StringVar(&cfg.journalFormat, "journal-format", string(hatriecache.DefaultCommandJournalFormat), "command journal write format: binary or json")
 	flags.StringVar(&cfg.journalPullSource, "journal-pull-source", "", "optional source monitoring URL to pull journal catch-up batches from")
 	flags.StringVar(&cfg.journalPullStatePath, "journal-pull-state-path", "", "optional JSON path for persisted journal pull source sequence")
 	flags.DurationVar(&cfg.journalPullInterval, "journal-pull-interval", 0, "optional interval for repeated journal pull catch-up")
@@ -325,6 +327,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if _, err := hatriecache.ParseSnapshotFormat(cfg.snapshotFormat); err != nil {
 		return config{}, err
 	}
+	if _, err := hatriecache.ParseCommandJournalFormat(cfg.journalFormat); err != nil {
+		return config{}, err
+	}
 	return cfg, nil
 }
 
@@ -355,6 +360,14 @@ func storageFormat(cfg config) hatriecache.StorageFormat {
 	format, err := hatriecache.ParseStorageFormat(cfg.dbFormat)
 	if err != nil {
 		return hatriecache.DefaultStorageFormat
+	}
+	return format
+}
+
+func journalFormat(cfg config) hatriecache.CommandJournalFormat {
+	format, err := hatriecache.ParseCommandJournalFormat(cfg.journalFormat)
+	if err != nil {
+		return hatriecache.DefaultCommandJournalFormat
 	}
 	return format
 }
@@ -555,11 +568,11 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 	return periodicStopper(done, stopped)
 }
 
-func openJournalIfConfigured(path string) (*hatriecache.CommandJournal, error) {
+func openJournalIfConfigured(path string, format hatriecache.CommandJournalFormat) (*hatriecache.CommandJournal, error) {
 	if path == "" {
 		return nil, nil
 	}
-	return hatriecache.OpenCommandJournal(path)
+	return hatriecache.OpenCommandJournalWithFormat(path, format)
 }
 
 func closeJournal(journal *hatriecache.CommandJournal, stderr io.Writer) {

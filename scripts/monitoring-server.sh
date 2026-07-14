@@ -29,6 +29,7 @@ snapshot_path=${SNAPSHOT_PATH:-}
 snapshot_interval=${SNAPSHOT_INTERVAL:-0}
 snapshot_format=${SNAPSHOT_FORMAT:-gzip-best-json}
 journal_path=${JOURNAL_PATH:-}
+journal_format=${JOURNAL_FORMAT:-binary}
 journal_pull_source=${JOURNAL_PULL_SOURCE:-}
 journal_pull_state_path=${JOURNAL_PULL_STATE_PATH:-}
 journal_pull_interval=${JOURNAL_PULL_INTERVAL:-0}
@@ -66,6 +67,7 @@ exec go run ./cmd/hatrie-cache \
 	-snapshot-interval "$snapshot_interval" \
 	-snapshot-format "$snapshot_format" \
 	-journal-path "$journal_path" \
+	-journal-format "$journal_format" \
 	-journal-pull-source "$journal_pull_source" \
 	-journal-pull-state-path "$journal_pull_state_path" \
 	-journal-pull-interval "$journal_pull_interval" \

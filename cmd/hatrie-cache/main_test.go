@@ -48,6 +48,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if cfg.snapshotFormat != string(hatriecache.DefaultSnapshotFormat) {
 		t.Fatalf("snapshotFormat = %q, want default", cfg.snapshotFormat)
 	}
+	if cfg.journalFormat != string(hatriecache.DefaultCommandJournalFormat) {
+		t.Fatalf("journalFormat = %q, want default", cfg.journalFormat)
+	}
 	if cfg.monitoringReadHeaderTimeout != defaultMonitoringReadHeaderTimeout {
 		t.Fatalf("monitoring read header timeout = %s, want %s", cfg.monitoringReadHeaderTimeout, defaultMonitoringReadHeaderTimeout)
 	}
@@ -134,6 +137,7 @@ func TestParseConfigSnapshotFlags(t *testing.T) {
 		"-snapshot-interval", "5s",
 		"-snapshot-format", "json",
 		"-journal-path", "/tmp/cache.journal",
+		"-journal-format", "json",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
@@ -146,6 +150,9 @@ func TestParseConfigSnapshotFlags(t *testing.T) {
 	}
 	if cfg.journalPath != "/tmp/cache.journal" {
 		t.Fatalf("journalPath = %q, want explicit path", cfg.journalPath)
+	}
+	if cfg.journalFormat != "json" || journalFormat(cfg) != hatriecache.CommandJournalFormatJSON {
+		t.Fatalf("journal format = %q, want json", cfg.journalFormat)
 	}
 }
 
@@ -341,6 +348,16 @@ func TestParseConfigRejectsInvalidDBFormat(t *testing.T) {
 	}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "unsupported storage format") {
 		t.Fatalf("parseConfig(invalid db format) error = %v, want unsupported storage format", err)
+	}
+}
+
+func TestParseConfigRejectsInvalidJournalFormat(t *testing.T) {
+	_, err := parseConfig([]string{
+		"-monitoring-server",
+		"-journal-format", "msgpack",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "unsupported command journal format") {
+		t.Fatalf("parseConfig(invalid journal format) error = %v, want unsupported command journal format", err)
 	}
 }
 
@@ -1356,7 +1373,7 @@ func TestJournaledSnapshotHelpersCheckpointAndCompact(t *testing.T) {
 
 	ht := hatriecache.CreateHatTrie()
 	defer ht.Destroy()
-	journal, err := openJournalIfConfigured(journalPath)
+	journal, err := openJournalIfConfigured(journalPath, hatriecache.DefaultCommandJournalFormat)
 	if err != nil {
 		t.Fatalf("openJournalIfConfigured() error = %v", err)
 	}
