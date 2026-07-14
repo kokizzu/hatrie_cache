@@ -1722,27 +1722,16 @@ func (ht *HatTrie) SaveStats(path string) error {
 }
 
 func (ht *HatTrie) LoadStats(path string) error {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var stats CacheStats
-	if err := decoder.Decode(&stats); err != nil {
+	defer file.Close()
+
+	stats, err := decodeCacheStatsJSONReader(file)
+	if err != nil {
 		return err
 	}
-	var extra struct{}
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("hatriecache: invalid stats JSON")
-		}
-		return err
-	}
-	if err := validateCacheStatsSnapshot(stats); err != nil {
-		return err
-	}
-	stats.updateRates()
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -1750,6 +1739,27 @@ func (ht *HatTrie) LoadStats(path string) error {
 	ht.ensureOpen()
 	ht.stats = stats
 	return nil
+}
+
+func decodeCacheStatsJSONReader(reader io.Reader) (CacheStats, error) {
+	decoder := json.NewDecoder(reader)
+	decoder.DisallowUnknownFields()
+	var stats CacheStats
+	if err := decoder.Decode(&stats); err != nil {
+		return CacheStats{}, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return CacheStats{}, errors.New("hatriecache: invalid stats JSON")
+		}
+		return CacheStats{}, err
+	}
+	if err := validateCacheStatsSnapshot(stats); err != nil {
+		return CacheStats{}, err
+	}
+	stats.updateRates()
+	return stats, nil
 }
 
 // Expire sets a relative TTL for an existing key. A non-positive TTL deletes

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -1534,6 +1535,32 @@ func TestLoadStatsRejectsInconsistentReadCountsWithoutMutation(t *testing.T) {
 	}
 	if got := ht.Stats(); !cacheStatsEqual(got, before) {
 		t.Fatalf("stats after rejected LoadStats = %#v, want %#v", got, before)
+	}
+}
+
+func TestDecodeCacheStatsJSONReaderStreamsStats(t *testing.T) {
+	stats, err := decodeCacheStatsJSONReader(iotest.OneByteReader(strings.NewReader(`{"reads":4,"hits":3,"misses":1,"writes":2}`)))
+	if err != nil {
+		t.Fatalf("decodeCacheStatsJSONReader() error = %v", err)
+	}
+	if stats.Reads != 4 || stats.Hits != 3 || stats.Misses != 1 || stats.Writes != 2 {
+		t.Fatalf("decoded stats = %#v, want read/write counts", stats)
+	}
+	if stats.HitRate != 0.75 || stats.CumulativeHitRate != 0.75 {
+		t.Fatalf("decoded rates = hit %.2f cumulative %.2f, want 0.75/0.75", stats.HitRate, stats.CumulativeHitRate)
+	}
+}
+
+func TestDecodeCacheStatsJSONReaderRejectsInvalidEnvelope(t *testing.T) {
+	for name, payload := range map[string]string{
+		"unknown":  `{"reads":1,"hits":1,"misses":0,"unexpected":true}`,
+		"trailing": `{"reads":1,"hits":1,"misses":0} trailing`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeCacheStatsJSONReader(strings.NewReader(payload)); err == nil {
+				t.Fatal("decodeCacheStatsJSONReader() error = nil, want rejection")
+			}
+		})
 	}
 }
 
