@@ -406,6 +406,56 @@ func TestLoadSnapshotSkipsExpiredEntries(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotScansLargeExpiredHistory(t *testing.T) {
+	now := time.Unix(3010, 0)
+	expiredAt := now.Add(-time.Second)
+	activeUntil := now.Add(time.Minute)
+	largeExpiredValue := strings.Repeat("x", 70*1024)
+	data := snapshotFile{
+		Version:         snapshotVersion,
+		JournalSequence: 88,
+		Entries: []snapshotEntry{
+			{Key: "active", Type: "string", String: "live", ExpiresAt: &activeUntil},
+		},
+	}
+	for idx := 0; idx < 128; idx++ {
+		data.Entries = append(data.Entries, snapshotEntry{
+			Key:       "expired",
+			Type:      "string",
+			String:    largeExpiredValue,
+			ExpiresAt: &expiredAt,
+		})
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	ht.now = func() time.Time { return now }
+	metadata, err := ht.LoadSnapshotWithMetadata(path)
+	if err != nil {
+		t.Fatalf("LoadSnapshotWithMetadata() error = %v", err)
+	}
+	if metadata.JournalSequence != 88 {
+		t.Fatalf("journal sequence = %d, want 88", metadata.JournalSequence)
+	}
+	if got := ht.GetString("active"); got != "live" {
+		t.Fatalf("active snapshot entry = %q, want live", got)
+	}
+	if ht.Exists("expired") {
+		t.Fatal("expired snapshot history left expired key present")
+	}
+	if got := ht.Size(); got != 1 {
+		t.Fatalf("snapshot size after load = %d, want active key only", got)
+	}
+}
+
 func TestLoadSnapshotUsesSingleExpirationClock(t *testing.T) {
 	base := time.Unix(3025, 0)
 	expiresAt := base.Add(time.Second)
@@ -682,6 +732,24 @@ func TestDecodeSnapshotFileJSONReaderStreamsEntries(t *testing.T) {
 	}
 	if snapshot.Entries[1].Key != "views" || snapshot.Entries[1].Counter != 42 {
 		t.Fatalf("second entry = %#v, want restored counter entry", snapshot.Entries[1])
+	}
+}
+
+func TestScanSnapshotFileJSONReaderVisitsEntries(t *testing.T) {
+	payload := `{"version":1,"journal_sequence":9,"entries":[{"key":"name","type":"string","string":"ivi"},{"key":"views","type":"counter","counter":42}]}`
+	keys := []string{}
+	metadata, err := scanSnapshotFileJSONReader(iotest.OneByteReader(strings.NewReader(payload)), func(entry snapshotEntry) error {
+		keys = append(keys, entry.Key)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scanSnapshotFileJSONReader() error = %v", err)
+	}
+	if metadata.Version != snapshotVersion || metadata.JournalSequence != 9 {
+		t.Fatalf("snapshot metadata = version %d sequence %d, want %d/9", metadata.Version, metadata.JournalSequence, snapshotVersion)
+	}
+	if !reflect.DeepEqual(keys, []string{"name", "views"}) {
+		t.Fatalf("visited keys = %#v, want name/views", keys)
 	}
 }
 
