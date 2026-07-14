@@ -161,6 +161,37 @@ func TestHatTrieXorFilterOperations(t *testing.T) {
 	}
 }
 
+func TestHatTrieXorFilterDeleteReleasesBackingIndex(t *testing.T) {
+	ht := newTestTrie(t)
+	if err := ht.UpsertXorFilter("seen", 8); err != nil {
+		t.Fatalf("UpsertXorFilter() error = %v", err)
+	}
+	if _, err := ht.AddXorFilter("seen", "alpha", "beta"); err != nil {
+		t.Fatalf("AddXorFilter() error = %v", err)
+	}
+	if _, ok, err := ht.BuildXorFilter("seen"); err != nil || !ok {
+		t.Fatalf("BuildXorFilter() ok/error = %v/%v, want ok", ok, err)
+	}
+	idx := ht.Get("seen").Index
+
+	if !ht.Delete("seen") {
+		t.Fatal("Delete(seen) = false, want true")
+	}
+	if got := ht.Get("seen"); !got.Empty() {
+		t.Fatalf("Delete(seen) left value %+v", got)
+	}
+	if !xorFilterIndexReleased(ht, idx) {
+		t.Fatalf("deleted XOR filter index %d was not released", idx)
+	}
+
+	if err := ht.UpsertXorFilter("again", 8); err != nil {
+		t.Fatalf("UpsertXorFilter(again) error = %v", err)
+	}
+	if got := ht.Get("again"); !got.IsXorFilter() || got.Index != idx {
+		t.Fatalf("reused XOR filter value = %+v, want released slot %d", got, idx)
+	}
+}
+
 func TestHatTrieAddXorFilterChecked(t *testing.T) {
 	ht := newTestTrie(t)
 	if added, err := ht.AddXorFilterChecked("seen", "alpha", "beta", "alpha"); err != nil || added != 2 {

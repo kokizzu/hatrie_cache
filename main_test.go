@@ -83,6 +83,10 @@ func reservoirSampleIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.reservoirSamples.array) || ht.reservoirSamples.reusables.Has(idx)
 }
 
+func xorFilterIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.xorFilters.array) || ht.xorFilters.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
