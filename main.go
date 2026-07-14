@@ -2018,6 +2018,13 @@ func (ht *HatTrie) upsertFreshLocation(key string) (*C.value_t, HatValue) {
 		rawPtr = ht.upsertLocation(key)
 		hval = HatValue{}
 	}
+	if hval.IsLevelDBReference() {
+		hydrated, err := ht.hydrateLevelDBReferenceLocked(key, hval)
+		if err == nil {
+			rawPtr = ht.upsertLocation(key)
+			hval = hydrated
+		}
+	}
 	return rawPtr, hval
 }
 

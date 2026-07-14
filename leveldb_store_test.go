@@ -641,6 +641,63 @@ func TestHydrateLevelDBReferencesAllowsClosingStore(t *testing.T) {
 	}
 }
 
+func TestLevelDBColdReferencesHydrateBeforeIncrementalMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertCounter("counter", 5)
+	source.UpsertString("suffix", "old")
+	source.UpsertString("prefix", "old")
+	source.UpsertMap("map", Map{"old": "value"})
+	source.PushSlice("slice", "old")
+	source.PushPriorityQueue("queue", 5, "old")
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 6 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 6 cold keys", result)
+	}
+
+	loaded.IncrementCounter("counter", 2)
+	loaded.AppendString("suffix", "-new")
+	loaded.PrependString("prefix", "new-")
+	loaded.PutMap("map", "new", "value")
+	loaded.PushSlice("slice", "new")
+	loaded.PushPriorityQueue("queue", 1, "new")
+
+	if got := loaded.GetCounter("counter"); got != 7 {
+		t.Fatalf("IncrementCounter(cold ref) = %d, want 7", got)
+	}
+	if got := loaded.GetString("suffix"); got != "old-new" {
+		t.Fatalf("AppendString(cold ref) = %q, want old-new", got)
+	}
+	if got := loaded.GetString("prefix"); got != "new-old" {
+		t.Fatalf("PrependString(cold ref) = %q, want new-old", got)
+	}
+	if got := loaded.GetMap("map"); !reflect.DeepEqual(got, Map{"new": "value", "old": "value"}) {
+		t.Fatalf("PutMap(cold ref) = %#v, want old and new fields", got)
+	}
+	if got := loaded.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"old", "new"}) {
+		t.Fatalf("PushSlice(cold ref) = %#v, want old then new", got)
+	}
+	if got, ok := loaded.PopPriorityQueue("queue"); !ok || got.Value != "new" {
+		t.Fatalf("first PopPriorityQueue(cold ref) = %#v/%v, want new", got, ok)
+	}
+	if got, ok := loaded.PopPriorityQueue("queue"); !ok || got.Value != "old" {
+		t.Fatalf("second PopPriorityQueue(cold ref) = %#v/%v, want old", got, ok)
+	}
+}
+
 func TestHydrateLevelDBReferencesReportsClosedStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
