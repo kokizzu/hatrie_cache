@@ -763,6 +763,64 @@ func TestCommandJournalSkipsInvalidAndReadOnlyCommands(t *testing.T) {
 	}
 }
 
+func TestCommandJournalRemovesRejectedRuntimeCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	ht := newTestTrie(t)
+
+	ht.UpsertCounter("first_max", maxCommandInt32)
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "first_max", Value: "1"}); response.OK {
+		t.Fatalf("ExecuteCommand(first INC overflow) = %#v, want rejection", response)
+	}
+	if journal.Sequence() != 0 {
+		t.Fatalf("Sequence() after rejected first command = %d, want 0", journal.Sequence())
+	}
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries(first rejection) error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries after rejected first command = %#v, want none", entries)
+	}
+	if got := ht.GetCounter("first_max"); got != maxCommandInt32 {
+		t.Fatalf("first counter after overflow = %d, want max int32", got)
+	}
+
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETINT", Key: "max", Value: "2147483647"}); !response.OK {
+		t.Fatalf("ExecuteCommand(SETINT max) = %#v, want ok", response)
+	}
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "INC", Key: "max", Value: "1"}); response.OK {
+		t.Fatalf("ExecuteCommand(INC overflow) = %#v, want rejection", response)
+	}
+	if got := ht.GetCounter("max"); got != maxCommandInt32 {
+		t.Fatalf("counter after overflow = %d, want max int32", got)
+	}
+	if journal.Sequence() != 1 {
+		t.Fatalf("Sequence() after overflow rollback = %d, want 1", journal.Sequence())
+	}
+	entries, err = readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries(overflow rollback) error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Sequence != 1 || entries[0].Request.Command != "SETINT" {
+		t.Fatalf("entries after overflow rollback = %#v, want only SETINT sequence 1", entries)
+	}
+
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !response.OK {
+		t.Fatalf("ExecuteCommand(after rollback) = %#v, want ok", response)
+	}
+	entries, err = readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries(after valid command) error = %v", err)
+	}
+	if len(entries) != 2 || entries[1].Sequence != 2 || entries[1].Request.Command != "SETSTR" {
+		t.Fatalf("entries after valid command = %#v, want SETSTR sequence 2", entries)
+	}
+}
+
 func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 	dir := t.TempDir()
 	journalPath := filepath.Join(dir, "commands.journal")

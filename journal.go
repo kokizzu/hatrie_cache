@@ -67,6 +67,12 @@ type CommandJournal struct {
 	sequenceExhausted bool
 }
 
+type commandJournalAppendState struct {
+	offset            int64
+	nextSequence      uint64
+	sequenceExhausted bool
+}
+
 func OpenCommandJournal(path string) (*CommandJournal, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("hatriecache: journal path is required")
@@ -127,10 +133,17 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
-	if err := journal.appendLocked(normalizeJournalRequest(request, trie.currentTime())); err != nil {
+	appendState, err := journal.appendLocked(normalizeJournalRequest(request, trie.currentTime()))
+	if err != nil {
 		return commandError(err.Error())
 	}
-	return trie.ExecuteCommand(request)
+	response := trie.ExecuteCommand(request)
+	if !response.OK {
+		if err := journal.rollbackAppendLocked(appendState); err != nil {
+			return commandError(response.Message + "; failed to remove rejected journal entry: " + err.Error())
+		}
+	}
+	return response
 }
 
 func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint64, error) {
@@ -207,13 +220,22 @@ func (journal *CommandJournal) Sequence() uint64 {
 	return journal.lastSequenceLocked()
 }
 
-func (journal *CommandJournal) appendLocked(request CacheCommandRequest) error {
+func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (commandJournalAppendState, error) {
 	if err := journal.ensureAppendFileLocked(); err != nil {
-		return err
+		return commandJournalAppendState{}, err
+	}
+	info, err := journal.file.Stat()
+	if err != nil {
+		return commandJournalAppendState{}, err
+	}
+	appendState := commandJournalAppendState{
+		offset:            info.Size(),
+		nextSequence:      journal.nextSequence,
+		sequenceExhausted: journal.sequenceExhausted,
 	}
 	sequence, err := journal.nextAppendSequenceLocked()
 	if err != nil {
-		return err
+		return commandJournalAppendState{}, err
 	}
 	entry := commandJournalEntry{
 		Version:  commandJournalVersion,
@@ -222,17 +244,35 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) error {
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return err
+		return commandJournalAppendState{}, err
 	}
 	data = append(data, '\n')
 
 	if _, err := journal.file.Write(data); err != nil {
+		return commandJournalAppendState{}, err
+	}
+	if err := journal.file.Sync(); err != nil {
+		return commandJournalAppendState{}, err
+	}
+	journal.markAppendedLocked(sequence)
+	return appendState, nil
+}
+
+func (journal *CommandJournal) rollbackAppendLocked(state commandJournalAppendState) error {
+	if journal.file == nil {
+		return ErrCommandJournalClosed
+	}
+	if err := journal.file.Truncate(state.offset); err != nil {
+		return err
+	}
+	if _, err := journal.file.Seek(state.offset, io.SeekStart); err != nil {
 		return err
 	}
 	if err := journal.file.Sync(); err != nil {
 		return err
 	}
-	journal.markAppendedLocked(sequence)
+	journal.nextSequence = state.nextSequence
+	journal.sequenceExhausted = state.sequenceExhausted
 	return nil
 }
 
