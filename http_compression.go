@@ -45,14 +45,24 @@ func addVaryHeader(header http.Header, value string) {
 func requestAcceptsGzip(r *http.Request) bool {
 	gzipQuality := -1.0
 	wildcardQuality := -1.0
-	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+	acceptEncoding := r.Header.Get("Accept-Encoding")
+	for acceptEncoding != "" {
+		part, rest, ok := strings.Cut(acceptEncoding, ",")
 		token, quality := parseAcceptEncoding(part)
 		switch {
 		case strings.EqualFold(token, "gzip"):
-			gzipQuality = quality
+			if quality > gzipQuality {
+				gzipQuality = quality
+			}
 		case token == "*":
-			wildcardQuality = quality
+			if quality > wildcardQuality {
+				wildcardQuality = quality
+			}
 		}
+		if !ok {
+			break
+		}
+		acceptEncoding = rest
 	}
 	if gzipQuality >= 0 {
 		return gzipQuality > 0
@@ -61,15 +71,17 @@ func requestAcceptsGzip(r *http.Request) bool {
 }
 
 func parseAcceptEncoding(value string) (string, float64) {
-	parts := strings.Split(value, ";")
-	token := strings.TrimSpace(parts[0])
+	token, params, _ := strings.Cut(value, ";")
+	token = strings.TrimSpace(token)
 	if token == "" {
 		return "", 0
 	}
 	quality := 1.0
-	for _, part := range parts[1:] {
-		key, raw, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(key), "q") {
+	for params != "" {
+		var part string
+		part, params, _ = strings.Cut(params, ";")
+		key, raw, hasValue := strings.Cut(strings.TrimSpace(part), "=")
+		if !hasValue || !strings.EqualFold(strings.TrimSpace(key), "q") {
 			continue
 		}
 		parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)

@@ -89,6 +89,59 @@ func TestGzipHTTPHandlerAddsVaryWhenResponseIsPlain(t *testing.T) {
 	}
 }
 
+func TestRequestAcceptsGzipRespectsQuality(t *testing.T) {
+	tests := []struct {
+		name           string
+		acceptEncoding string
+		want           bool
+	}{
+		{
+			name:           "explicit gzip",
+			acceptEncoding: "br, gzip",
+			want:           true,
+		},
+		{
+			name:           "explicit gzip zero overrides wildcard",
+			acceptEncoding: "gzip;q=0, *;q=1",
+			want:           false,
+		},
+		{
+			name:           "wildcard allows gzip",
+			acceptEncoding: "br;q=1, *;q=0.5",
+			want:           true,
+		},
+		{
+			name:           "repeated gzip keeps highest quality",
+			acceptEncoding: "gzip;q=0, br;q=1, gzip;q=0.8",
+			want:           true,
+		},
+		{
+			name:           "invalid q disables token",
+			acceptEncoding: "gzip;q=bogus",
+			want:           false,
+		},
+		{
+			name:           "valueless params before q are ignored",
+			acceptEncoding: "gzip; foo; q=0.7",
+			want:           true,
+		},
+		{
+			name:           "unsupported encoding only",
+			acceptEncoding: "br",
+			want:           false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/", nil)
+			request.Header.Set("Accept-Encoding", tt.acceptEncoding)
+			if got := requestAcceptsGzip(request); got != tt.want {
+				t.Fatalf("requestAcceptsGzip(%q) = %v, want %v", tt.acceptEncoding, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAddVaryHeaderDeduplicatesCommaSeparatedValues(t *testing.T) {
 	header := http.Header{}
 	header.Add("Vary", "Accept, Accept-Encoding")

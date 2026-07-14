@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +24,20 @@ func BenchmarkCommandWireAcceptNegotiation(b *testing.B) {
 		format, ok := commandWireFormatFromAccept(accept, CommandWireFormatProtobuf)
 		if !ok || format != CommandWireFormatProtobuf {
 			b.Fatalf("commandWireFormatFromAccept() = %q/%v, want protobuf/true", format, ok)
+		}
+	}
+}
+
+func BenchmarkAcceptEncodingGzipNegotiation(b *testing.B) {
+	request, err := http.NewRequest(http.MethodGet, "/", nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	request.Header.Set("Accept-Encoding", "br;q=1, gzip; foo; q=0.8, *;q=0.1")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if !requestAcceptsGzip(request) {
+			b.Fatal("requestAcceptsGzip() = false, want true")
 		}
 	}
 }
