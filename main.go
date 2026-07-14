@@ -2353,11 +2353,27 @@ func (ht *HatTrie) vacuumExpiredLocked() int {
 }
 
 func (ht *HatTrie) entriesWithPrefixLocked(prefix string, sorted bool) []Entry {
-	entries, _ := ht.entriesWithPrefixLockedChecked(prefix, sorted)
+	now := time.Time{}
+	if len(ht.expires) > 0 {
+		now = ht.currentTime()
+	}
+	return ht.entriesWithPrefixAtLocked(prefix, sorted, now)
+}
+
+func (ht *HatTrie) entriesWithPrefixAtLocked(prefix string, sorted bool, now time.Time) []Entry {
+	entries, _ := ht.entriesWithPrefixAtLockedChecked(prefix, sorted, now)
 	return entries
 }
 
 func (ht *HatTrie) entriesWithPrefixLockedChecked(prefix string, sorted bool) ([]Entry, error) {
+	now := time.Time{}
+	if len(ht.expires) > 0 {
+		now = ht.currentTime()
+	}
+	return ht.entriesWithPrefixAtLockedChecked(prefix, sorted, now)
+}
+
+func (ht *HatTrie) entriesWithPrefixAtLockedChecked(prefix string, sorted bool, now time.Time) ([]Entry, error) {
 	ht.ensureOpen()
 	if err := validateKey(prefix); err != nil {
 		return nil, err
@@ -2378,10 +2394,6 @@ func (ht *HatTrie) entriesWithPrefixLockedChecked(prefix string, sorted bool) ([
 	}
 	entries := []Entry{}
 	expired := []expiredEntry{}
-	now := time.Time{}
-	if len(ht.expires) > 0 {
-		now = ht.currentTime()
-	}
 
 	for !bool(C.hattrie_iter_finished(iter)) {
 		var keyLen C.size_t

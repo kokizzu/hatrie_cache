@@ -116,6 +116,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 			return SnapshotMetadata{}, err
 		}
 	}
+	ht.deleteKeysNotInLocked(seenKeys, now)
 	return SnapshotMetadata{JournalSequence: snapshot.JournalSequence}, nil
 }
 
@@ -631,6 +632,16 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 	}
 	ht.restoreKeyStatsLocked(entry.Key, entry.Stats)
 	return hval, nil
+}
+
+func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]struct{}, now time.Time) {
+	entries := ht.entriesWithPrefixAtLocked("", false, now)
+	for _, entry := range entries {
+		if _, ok := keep[entry.Key]; ok {
+			continue
+		}
+		ht.deleteKnownLocked(entry.Key, entry.Value)
+	}
 }
 
 func writeFileAtomic(path string, data []byte) error {

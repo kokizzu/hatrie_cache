@@ -378,13 +378,15 @@ unknown-key misses. `SaveStats` writes the global statistics snapshot as JSON,
 and `LoadStats` restores a saved snapshot.
 
 Use `SaveSnapshot` and `LoadSnapshot` for portable JSON data snapshots. Snapshot
-loads skip expired entries, restore per-key access metadata when present, and
-re-apply the normal disk spill threshold for large byte values.
+loads replace the current in-memory key set, skip expired entries, restore
+per-key access metadata when present, and re-apply the normal disk spill
+threshold for large byte values.
 
 Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
-disk persistence. The LevelDB writer uses Snappy compression and clears stale
-keys on each save while preserving per-key access metadata. `LevelDBStore.Close`
-is idempotent; operations after close return `ErrLevelDBStoreClosed`.
+disk persistence. LevelDB loads replace the current in-memory key set. The
+LevelDB writer uses Snappy compression and clears stale keys on each save while
+preserving per-key access metadata. `LevelDBStore.Close` is idempotent;
+operations after close return `ErrLevelDBStoreClosed`.
 
 Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
 service in another Go process, or use the generated client in

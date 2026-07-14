@@ -136,6 +136,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		reference bool
 	}
 	operations := []levelDBLoadOperation{}
+	activeKeys := map[string]struct{}{}
 	for iterator.Next() {
 		key := string(iterator.Key()[len(levelDBEntryPrefix):])
 		entry, err := decodeLevelDBEntryForKey(key, iterator.Value())
@@ -149,6 +150,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		if err != nil {
 			return LevelDBLoadResult{}, err
 		}
+		activeKeys[entry.Key] = struct{}{}
 		operations = append(operations, levelDBLoadOperation{
 			operation: operation,
 			reference: policy.HotValuesOnly && !levelDBShouldHotLoad(operation, now, policy),
@@ -173,6 +175,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		}
 		result.ValuesLoaded++
 	}
+	trie.deleteKeysNotInLocked(activeKeys, now)
 	return result, nil
 }
 

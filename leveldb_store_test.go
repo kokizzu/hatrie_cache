@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -149,6 +150,40 @@ func TestLevelDBLoadUsesSingleExpirationClock(t *testing.T) {
 	loaded.now = func() time.Time { return base }
 	if got := loaded.GetString("soon"); got != "value" {
 		t.Fatalf("soon after LevelDB load = %q, want value", got)
+	}
+}
+
+func TestLoadLevelDBRemovesKeysMissingFromStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertString("keep", "value")
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	loaded.UpsertString("stale", "old")
+	loaded.UpsertBytes("stale-large", testPayload(DiskBytesThreshold+1))
+	staleValue := loaded.Get("stale-large")
+	stalePath := loaded.disks.paths[staleValue.Index]
+	count, err := loaded.LoadLevelDB(path)
+	if err != nil {
+		t.Fatalf("LoadLevelDB() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("LoadLevelDB() count = %d, want 1", count)
+	}
+	if got := loaded.GetString("keep"); got != "value" {
+		t.Fatalf("keep after LevelDB load = %q, want value", got)
+	}
+	if got := loaded.GetString("stale"); got != "" {
+		t.Fatalf("stale after LevelDB load = %q, want empty", got)
+	}
+	if got := loaded.GetBytes("stale-large"); got != nil {
+		t.Fatalf("stale-large after LevelDB load = %q, want nil", got)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("stale disk file Stat() error = %v, want not exist", err)
 	}
 }
 

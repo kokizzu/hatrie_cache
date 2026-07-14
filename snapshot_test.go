@@ -445,6 +445,44 @@ func TestLoadSnapshotUsesSingleExpirationClock(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotRemovesKeysMissingFromSnapshot(t *testing.T) {
+	data := snapshotFile{
+		Version: snapshotVersion,
+		Entries: []snapshotEntry{
+			{Key: "keep", Type: "string", String: "value"},
+		},
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	ht.UpsertString("stale", "old")
+	ht.UpsertBytes("stale-large", testPayload(DiskBytesThreshold+1))
+	staleValue := ht.Get("stale-large")
+	stalePath := ht.disks.paths[staleValue.Index]
+	if err := ht.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if got := ht.GetString("keep"); got != "value" {
+		t.Fatalf("keep after snapshot load = %q, want value", got)
+	}
+	if got := ht.GetString("stale"); got != "" {
+		t.Fatalf("stale after snapshot load = %q, want empty", got)
+	}
+	if got := ht.GetBytes("stale-large"); got != nil {
+		t.Fatalf("stale-large after snapshot load = %q, want nil", got)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("stale disk file Stat() error = %v, want not exist", err)
+	}
+}
+
 func TestLoadSnapshotSchedulesExpirationForVacuum(t *testing.T) {
 	now := time.Unix(3050, 0)
 	expiresAt := now.Add(time.Minute)
