@@ -183,6 +183,11 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if requestContextDone(w, r) {
 		return
 	}
+	if _, ok := commandWireFormatFromAccept(r.Header.Get("Accept"), requestFormat); !ok {
+		w.Header().Add("Vary", "Accept")
+		http.Error(w, "no acceptable command response content type", http.StatusNotAcceptable)
+		return
+	}
 	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
 		NodeName:            handler.options.NodeName,
 		Journal:             handler.options.Journal,

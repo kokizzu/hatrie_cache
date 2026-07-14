@@ -60,9 +60,9 @@ func commandWireFormatFromContentType(value string) (CommandWireFormat, bool) {
 	}
 }
 
-func commandWireFormatFromAccept(value string, fallback CommandWireFormat) CommandWireFormat {
+func commandWireFormatFromAccept(value string, fallback CommandWireFormat) (CommandWireFormat, bool) {
 	if strings.TrimSpace(value) == "" {
-		return fallback
+		return fallback, true
 	}
 	specific := map[CommandWireFormat]float64{}
 	wildcardQuality := -1.0
@@ -87,15 +87,20 @@ func commandWireFormatFromAccept(value string, fallback CommandWireFormat) Comma
 	bestQuality := -1.0
 	for _, format := range commandWireAcceptPreference(fallback) {
 		quality, ok := specific[format]
-		if !ok {
+		if !ok && wildcardQuality >= 0 {
 			quality = wildcardQuality
+		} else if !ok {
+			continue
 		}
 		if quality > bestQuality && quality > 0 {
 			bestFormat = format
 			bestQuality = quality
 		}
 	}
-	return bestFormat
+	if bestQuality <= 0 {
+		return "", false
+	}
+	return bestFormat, true
 }
 
 func parseCommandWireAccept(value string) (string, float64) {
@@ -234,7 +239,11 @@ func decodeCommandRequestProto(reader io.Reader, limit int64) (CacheCommandReque
 
 func writeCommandResponseWire(w http.ResponseWriter, r *http.Request, status int, response CacheCommandResponse, fallback CommandWireFormat) {
 	w.Header().Add("Vary", "Accept")
-	format := commandWireFormatFromAccept(r.Header.Get("Accept"), fallback)
+	format, ok := commandWireFormatFromAccept(r.Header.Get("Accept"), fallback)
+	if !ok {
+		http.Error(w, "no acceptable command response content type", http.StatusNotAcceptable)
+		return
+	}
 	if format != CommandWireFormatProtobuf {
 		writeJSONStatus(w, status, response)
 		return

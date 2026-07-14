@@ -74,52 +74,76 @@ func TestCommandWireFormatFromAcceptRespectsQuality(t *testing.T) {
 		accept   string
 		fallback CommandWireFormat
 		want     CommandWireFormat
+		wantOK   bool
 	}{
 		{
 			name:     "empty uses fallback",
 			fallback: CommandWireFormatProtobuf,
 			want:     CommandWireFormatProtobuf,
+			wantOK:   true,
 		},
 		{
 			name:     "higher quality json beats protobuf",
 			accept:   "application/x-protobuf;q=0.1, application/json;q=0.9",
 			fallback: CommandWireFormatProtobuf,
 			want:     CommandWireFormatJSON,
+			wantOK:   true,
 		},
 		{
 			name:     "higher quality protobuf beats json",
 			accept:   "application/json;q=0.1, application/x-protobuf;q=0.9",
 			fallback: CommandWireFormatJSON,
 			want:     CommandWireFormatProtobuf,
+			wantOK:   true,
 		},
 		{
 			name:     "explicit q zero excludes fallback under wildcard",
 			accept:   "application/x-protobuf;q=0, */*;q=1",
 			fallback: CommandWireFormatProtobuf,
 			want:     CommandWireFormatJSON,
+			wantOK:   true,
 		},
 		{
 			name:     "wildcard keeps fallback when not excluded",
 			accept:   "application/json;q=0, */*;q=1",
 			fallback: CommandWireFormatProtobuf,
 			want:     CommandWireFormatProtobuf,
+			wantOK:   true,
 		},
 		{
 			name:     "invalid q disables that media range",
 			accept:   "application/json;q=bogus, application/x-protobuf;q=0.5",
 			fallback: CommandWireFormatJSON,
 			want:     CommandWireFormatProtobuf,
+			wantOK:   true,
 		},
 		{
 			name:     "equal quality keeps fallback preference",
 			accept:   "application/json;q=0.5, application/x-protobuf;q=0.5",
 			fallback: CommandWireFormatJSON,
 			want:     CommandWireFormatJSON,
+			wantOK:   true,
+		},
+		{
+			name:     "unsupported media range is not acceptable",
+			accept:   "application/xml",
+			fallback: CommandWireFormatJSON,
+			wantOK:   false,
+		},
+		{
+			name:     "q zero only accepted type is not acceptable",
+			accept:   "application/x-protobuf;q=0",
+			fallback: CommandWireFormatProtobuf,
+			wantOK:   false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := commandWireFormatFromAccept(tt.accept, tt.fallback); got != tt.want {
+			got, ok := commandWireFormatFromAccept(tt.accept, tt.fallback)
+			if ok != tt.wantOK {
+				t.Fatalf("commandWireFormatFromAccept(%q, %q) ok = %v, want %v", tt.accept, tt.fallback, ok, tt.wantOK)
+			}
+			if got != tt.want {
 				t.Fatalf("commandWireFormatFromAccept(%q, %q) = %q, want %q", tt.accept, tt.fallback, got, tt.want)
 			}
 		})
@@ -296,5 +320,25 @@ func TestMonitoringHandlerCommandResponseRespectsAcceptQuality(t *testing.T) {
 	}
 	if !response.OK {
 		t.Fatalf("response = %#v, want ok", response)
+	}
+}
+
+func TestMonitoringHandlerRejectsUnacceptableCommandResponseBeforeExecute(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	req := httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"session:1","value":"value"}`))
+	req.Header.Set("Accept", "application/xml")
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotAcceptable {
+		t.Fatalf("command status = %d, want 406; body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Values("Vary"); !headerValuesContain(got, "Accept") {
+		t.Fatalf("Vary = %#v, want Accept", got)
+	}
+	if ht.Exists("session:1") {
+		t.Fatal("unacceptable command response executed mutation")
 	}
 }
