@@ -81,6 +81,15 @@ expect_low_commit_allows() {
 	fi
 }
 
+expect_asan_reservation_bytes() {
+	SANITIZE_C_ASAN_MIN_COMMIT_HEADROOM_KB=$1
+	export SANITIZE_C_ASAN_MIN_COMMIT_HEADROOM_KB
+	got=$(asan_min_commit_headroom_bytes)
+	if [ "$got" != "$2" ]; then
+		fail "expected ASan reservation $2 bytes, got $got"
+	fi
+}
+
 expect_strict_enabled 2
 expect_strict_disabled 0
 expect_strict_disabled 1
@@ -88,6 +97,8 @@ expect_strict_disabled 1
 expect_blocks 2
 expect_allows 0
 expect_allows 1
+
+expect_asan_reservation_bytes 1024 1048576
 
 expect_low_commit_blocks 2048 1536
 expect_low_commit_allows 4096 1024

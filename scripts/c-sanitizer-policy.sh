@@ -24,6 +24,22 @@ asan_min_commit_headroom_kb() {
 	printf '%s\n' "${SANITIZE_C_ASAN_MIN_COMMIT_HEADROOM_KB:-15032123396}"
 }
 
+asan_min_commit_headroom_bytes() {
+	required=$(asan_min_commit_headroom_kb) || return 1
+	case "$required" in
+		''|*[!0-9]*)
+			return 1
+			;;
+	esac
+	printf '%s\n' "$((required * 1024))"
+}
+
+asan_min_commit_headroom_label() {
+	required=$(asan_min_commit_headroom_kb) || return 1
+	bytes=$(asan_min_commit_headroom_bytes) || return 1
+	printf '%s bytes (%s KiB)' "$bytes" "$required"
+}
+
 commit_headroom_kb() {
 	meminfo_path=${SANITIZE_C_MEMINFO_PATH:-/proc/meminfo}
 	if [ ! -r "$meminfo_path" ]; then

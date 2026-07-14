@@ -18,11 +18,11 @@ esac
 case "$SANITIZE_C" in
 	1|true|yes)
 		if strict_overcommit_blocks_sanitizers; then
-			echo "SANITIZE_C=1 requested but vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations; set SANITIZE_C=0 or SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=1 to override" >&2
+			echo "SANITIZE_C=1 requested but vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations around $(asan_min_commit_headroom_label); set SANITIZE_C=0 or SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=1 to override" >&2
 			exit 2
 		fi
 		if low_commit_headroom_blocks_sanitizers; then
-			echo "SANITIZE_C=1 requested but available commit headroom $(commit_headroom_kb) KiB is below AddressSanitizer's expected shadow-memory reservation $(asan_min_commit_headroom_kb) KiB; set SANITIZE_C=0 or SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM=1 to override" >&2
+			echo "SANITIZE_C=1 requested but available commit headroom $(commit_headroom_kb) KiB is below AddressSanitizer's expected shadow-memory reservation $(asan_min_commit_headroom_label); set SANITIZE_C=0 or SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM=1 to override" >&2
 			exit 2
 		fi
 		;;
@@ -82,10 +82,10 @@ compiler_supports_sanitizers() {
 
 if [ "$SANITIZE_C" = "auto" ]; then
 	if strict_overcommit_enabled; then
-		echo "skipping C sanitizer pass: vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations" >&2
+		echo "skipping C sanitizer pass: vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations around $(asan_min_commit_headroom_label)" >&2
 		SANITIZE_C=0
 	elif low_commit_headroom_blocks_sanitizers; then
-		echo "skipping C sanitizer pass: available commit headroom $(commit_headroom_kb) KiB is below AddressSanitizer's expected shadow-memory reservation $(asan_min_commit_headroom_kb) KiB" >&2
+		echo "skipping C sanitizer pass: available commit headroom $(commit_headroom_kb) KiB is below AddressSanitizer's expected shadow-memory reservation $(asan_min_commit_headroom_label)" >&2
 		SANITIZE_C=0
 	elif compiler_supports_sanitizers; then
 		SANITIZE_C=1
