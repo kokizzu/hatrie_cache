@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,8 +17,11 @@ import (
 	"syscall"
 	"time"
 
-	"google.golang.org/grpc"
+	json "github.com/goccy/go-json"
+
 	hatriecache "hatrie_cache"
+
+	"google.golang.org/grpc"
 )
 
 const serverShutdownTimeout = 5 * time.Second

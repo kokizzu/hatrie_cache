@@ -2,7 +2,6 @@ package hatriecache
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	json "github.com/goccy/go-json"
 )
 
 const maxCommandJournalTailResponseBytes = 1 << 20
@@ -533,7 +534,7 @@ func decodeCommandJournalTailResponse(body io.Reader) (CommandJournalTail, error
 	decoder.DisallowUnknownFields()
 	var tail CommandJournalTail
 	if err := decoder.Decode(&tail); err != nil {
-		if limited.N <= 0 {
+		if limitedReaderExceeded(limited) {
 			return CommandJournalTail{}, errCommandJournalTailResponseTooLarge
 		}
 		return CommandJournalTail{}, err
@@ -543,12 +544,12 @@ func decodeCommandJournalTailResponse(body io.Reader) (CommandJournalTail, error
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if limited.N <= 0 {
+		if limitedReaderExceeded(limited) {
 			return CommandJournalTail{}, errCommandJournalTailResponseTooLarge
 		}
 		return CommandJournalTail{}, errors.New("journal source returned invalid trailing JSON")
 	}
-	if limited.N <= 0 {
+	if limitedReaderExceeded(limited) {
 		return CommandJournalTail{}, errCommandJournalTailResponseTooLarge
 	}
 	if tail.Entries == nil {

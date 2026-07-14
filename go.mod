@@ -3,6 +3,7 @@ module hatrie_cache
 go 1.20
 
 require (
+	github.com/goccy/go-json v0.10.6
 	github.com/syndtr/goleveldb v1.0.0
 	google.golang.org/grpc v1.64.1
 	google.golang.org/protobuf v1.34.2

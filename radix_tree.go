@@ -1,10 +1,11 @@
 package hatriecache
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+
+	json "github.com/goccy/go-json"
 )
 
 // RadixTreeItem is one exact string key/value pair stored inside a compressed

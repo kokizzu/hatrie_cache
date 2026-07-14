@@ -1,7 +1,6 @@
 package hatriecache
 
 import (
-	"encoding/json"
 	"errors"
 	"hash/fnv"
 	"io"
@@ -9,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	json "github.com/goccy/go-json"
 )
 
 const clusterTopologyVersion = 1

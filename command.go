@@ -1,12 +1,13 @@
 package hatriecache
 
 import (
-	"encoding/json"
 	"errors"
 	"math"
 	"strconv"
 	"strings"
 	"time"
+
+	json "github.com/goccy/go-json"
 )
 
 const maxCommandTTLSeconds = int64(1<<63-1) / int64(time.Second)
@@ -1016,13 +1017,13 @@ func (ht *HatTrie) commandDumpEntry(key string) (string, bool, error) {
 		ht.recordReadLocked(false, key)
 		return "", false, err
 	}
-	data, err := json.Marshal(entry)
+	data, err := jsonEncodedString(entry)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return "", false, err
 	}
 	ht.recordReadLocked(true, key)
-	return string(data), true, nil
+	return data, true, nil
 }
 
 func (ht *HatTrie) commandInternalSet(key string, payload string) error {
@@ -1140,101 +1141,37 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		}
 		return string(value), nil
 	case DATAVALUE_TYPE_MAP:
-		data, err := json.Marshal(ht.maps.array[hval.Index])
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.maps.array[hval.Index])
 	case DATAVALUE_TYPE_SLICE:
-		data, err := json.Marshal(ht.slices.array[hval.Index].Slice())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.slices.array[hval.Index].Slice())
 	case DATAVALUE_TYPE_SET:
-		data, err := json.Marshal(ht.sets.array[hval.Index].Values())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.sets.array[hval.Index].Values())
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
-		data, err := json.Marshal(ht.priorityQueues.array[hval.Index].Items())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.priorityQueues.array[hval.Index].Items())
 	case DATAVALUE_TYPE_BLOOM_FILTER:
-		data, err := json.Marshal(ht.bloomFilters.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.bloomFilters.array[hval.Index].Info())
 	case DATAVALUE_TYPE_CUCKOO_FILTER:
-		data, err := json.Marshal(ht.cuckooFilters.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.cuckooFilters.array[hval.Index].Info())
 	case DATAVALUE_TYPE_ROARING_BITMAP:
-		data, err := json.Marshal(ht.roaringBitmaps.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.roaringBitmaps.array[hval.Index].Info())
 	case DATAVALUE_TYPE_SPARSE_BITSET:
-		data, err := json.Marshal(ht.sparseBitsets.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.sparseBitsets.array[hval.Index].Info())
 	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
-		data, err := json.Marshal(ht.countMinSketches.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.countMinSketches.array[hval.Index].Info())
 	case DATAVALUE_TYPE_HYPERLOGLOG:
-		data, err := json.Marshal(ht.hyperLogLogs.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.hyperLogLogs.array[hval.Index].Info())
 	case DATAVALUE_TYPE_TOP_K:
-		data, err := json.Marshal(ht.topKs.array[hval.Index].Items())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.topKs.array[hval.Index].Items())
 	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
-		data, err := json.Marshal(ht.reservoirSamples.array[hval.Index].Items())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.reservoirSamples.array[hval.Index].Items())
 	case DATAVALUE_TYPE_XOR_FILTER:
-		data, err := json.Marshal(ht.xorFilters.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.xorFilters.array[hval.Index].Info())
 	case DATAVALUE_TYPE_RADIX_TREE:
-		data, err := json.Marshal(ht.radixTrees.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.radixTrees.array[hval.Index].Info())
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
-		data, err := json.Marshal(ht.quantileSketches.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.quantileSketches.array[hval.Index].Info())
 	case DATAVALUE_TYPE_FENWICK_TREE:
-		data, err := json.Marshal(ht.fenwickTrees.array[hval.Index].Info())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(ht.fenwickTrees.array[hval.Index].Info())
 	default:
 		return "", nil
 	}
@@ -1902,11 +1839,7 @@ func commandScalarString(value interface{}) (string, error) {
 	case json.Number:
 		return v.String(), nil
 	default:
-		data, err := json.Marshal(v)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+		return jsonEncodedString(v)
 	}
 }
 

@@ -1,9 +1,10 @@
 package hatriecache
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+
+	json "github.com/goccy/go-json"
 )
 
 // PriorityItem is one value stored in a priority queue. Lower priority values

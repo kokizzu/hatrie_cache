@@ -48,10 +48,60 @@ func TestJSONEncodedSizeMatchesMarshal(t *testing.T) {
 	}
 }
 
+func TestJSONEncodedStringMatchesMarshal(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+	}{
+		{
+			name: "map",
+			value: map[string]interface{}{
+				"b": "<tag>",
+				"a": json.Number("42"),
+			},
+		},
+		{
+			name: "slice",
+			value: []interface{}{
+				"alpha",
+				json.Number("3.5"),
+				map[string]interface{}{"ok": true},
+			},
+		},
+		{
+			name:  "snapshot entry",
+			value: snapshotEntry{Key: "tag", Type: "string", String: "<value>"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data, err := json.Marshal(test.value)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			out, err := jsonEncodedString(test.value)
+			if err != nil {
+				t.Fatalf("jsonEncodedString() error = %v", err)
+			}
+			if out != string(data) {
+				t.Fatalf("jsonEncodedString() = %q, want %q", out, string(data))
+			}
+		})
+	}
+}
+
 func TestJSONEncodedSizeReportsMarshalError(t *testing.T) {
 	_, err := jsonEncodedSize(map[string]interface{}{"bad": func() {}})
 	if err == nil {
 		t.Fatal("jsonEncodedSize(unsupported value) error = nil, want error")
+	}
+}
+
+func TestJSONEncodedStringReportsMarshalError(t *testing.T) {
+	_, err := jsonEncodedString(map[string]interface{}{"bad": func() {}})
+	if err == nil {
+		t.Fatal("jsonEncodedString(unsupported value) error = nil, want error")
 	}
 }
 

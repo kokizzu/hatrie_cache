@@ -9,7 +9,6 @@ import "C"
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +21,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	json "github.com/goccy/go-json"
 )
 
 // HatValue is the compact value stored in the underlying HAT-trie.

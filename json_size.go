@@ -1,8 +1,10 @@
 package hatriecache
 
 import (
-	"encoding/json"
 	"errors"
+	"strings"
+
+	json "github.com/goccy/go-json"
 )
 
 const maxInt64 = int64(^uint64(0) >> 1)
@@ -30,4 +32,12 @@ func jsonEncodedSize(value interface{}) (int64, error) {
 		return 0, nil
 	}
 	return writer.size - 1, nil
+}
+
+func jsonEncodedString(value interface{}) (string, error) {
+	var builder strings.Builder
+	if err := json.NewEncoder(&builder).Encode(value); err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(builder.String(), "\n"), nil
 }

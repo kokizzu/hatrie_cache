@@ -3,7 +3,6 @@ package hatriecache
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	json "github.com/goccy/go-json"
 )
 
 const DefaultReplicationTimeout = 2 * time.Second
@@ -667,7 +668,7 @@ func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, err
 	decoder := json.NewDecoder(limited)
 	var response CacheCommandResponse
 	if err := decoder.Decode(&response); err != nil {
-		if limited.N <= 0 {
+		if limitedReaderExceeded(limited) {
 			return CacheCommandResponse{}, errReplicationResponseTooLarge
 		}
 		return CacheCommandResponse{}, err
@@ -677,7 +678,7 @@ func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, err
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if limited.N <= 0 {
+		if limitedReaderExceeded(limited) {
 			return CacheCommandResponse{}, errReplicationResponseTooLarge
 		}
 		if err == nil {
@@ -685,7 +686,7 @@ func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, err
 		}
 		return CacheCommandResponse{}, err
 	}
-	if limited.N <= 0 {
+	if limitedReaderExceeded(limited) {
 		return CacheCommandResponse{}, errReplicationResponseTooLarge
 	}
 	return response, nil

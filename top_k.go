@@ -1,11 +1,12 @@
 package hatriecache
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strconv"
+
+	json "github.com/goccy/go-json"
 )
 
 const (

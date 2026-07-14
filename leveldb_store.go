@@ -3,7 +3,6 @@ package hatriecache
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	json "github.com/goccy/go-json"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
