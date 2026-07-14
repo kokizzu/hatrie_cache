@@ -1172,9 +1172,7 @@ func TestMonitoringHandlerReplicatesCommands(t *testing.T) {
 		if r.URL.Path != "/api/commands" {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		gotRequest = mustDecodeReplicationTestCommand(t, w, r)
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
 	}))
 	defer target.Close()
@@ -1272,10 +1270,7 @@ func TestMonitoringHandlerSyncsReplication(t *testing.T) {
 		if r.URL.Path != "/api/commands" {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
 	}))

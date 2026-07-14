@@ -942,10 +942,7 @@ func TestCacheGRPCServerReplicatesCommands(t *testing.T) {
 		if r.URL.Path != "/api/commands" {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1033,10 +1030,7 @@ func TestCacheGRPCServerSyncsReplication(t *testing.T) {
 		if r.URL.Path != "/api/commands" {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
 	}))
@@ -1084,10 +1078,7 @@ func TestCacheGRPCServerReportsAsyncReplicationQueue(t *testing.T) {
 	release := make(chan struct{})
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		<-release
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})

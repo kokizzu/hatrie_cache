@@ -137,12 +137,16 @@ closing it to materialize all references into the trie:
 make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
 ```
 
-Set `SNAPSHOT_PATH` to load a JSON snapshot at startup and save it on shutdown.
-Set `SNAPSHOT_INTERVAL` to periodically write the same snapshot while the server
+Set `SNAPSHOT_PATH` to load a snapshot at startup and save it on shutdown.
+Snapshots save as gzip-compressed JSON by default (`SNAPSHOT_FORMAT=gzip-json`)
+and still load older plain JSON snapshots automatically. Set
+`SNAPSHOT_FORMAT=json` to keep writing the previous plain JSON file format. Set
+`SNAPSHOT_INTERVAL` to periodically write the same snapshot while the server
 runs:
 
 ```
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_INTERVAL=30s
+make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=json
 ```
 
 Set `JOURNAL_PATH` to replay an append-only command journal at startup and fsync
@@ -196,13 +200,17 @@ Set `REPLICATION=true` to let an elected leader broadcast successful local
 mutations to the current key's topology owners over HTTP. Replication uses the
 internal `DUMP`/`INTERNALSET` and `INTERNALDEL` commands, skips internal
 replication commands to avoid loops, and records the last replication attempt at
-`/api/replication`. Large HTTP replication request bodies are gzip-compressed.
+`/api/replication`. HTTP replication command bodies use protobuf by default
+(`REPLICATION_WIRE_FORMAT=protobuf`) and fall back to the previous JSON wire
+format with `REPLICATION_WIRE_FORMAT=json`. Large HTTP replication request
+bodies are gzip-compressed.
 `POST /api/replication` runs an explicit anti-entropy sync
 that pushes the local leader-owned keys, optionally filtered by prefix, to their
 current topology replicas:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_WIRE_FORMAT=json
 ```
 
 Set `REPLICATION_ASYNC=true` to enqueue replication in a bounded in-process
@@ -232,7 +240,27 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
 `/api/journal`, and `/api/commands`.
+`/api/commands` accepts JSON and protobuf command request bodies based on
+`Content-Type`; regular browser/API clients can continue to use JSON.
 Responses are gzip-compressed when clients send `Accept-Encoding: gzip`.
+
+Serialization tradeoffs measured with
+`make run CMD='go test -run __nomatch__ -bench BenchmarkCommandWire -benchmem .'`
+and
+`make run CMD='go test -run __nomatch__ -bench BenchmarkSnapshotFormat -benchmem .'`
+on an AMD Ryzen 9 5950X:
+
+| Path | Format | CPU | Wire/disk bytes | Heap bytes | Allocs |
+| --- | --- | ---: | ---: | ---: | ---: |
+| HTTP command wire | JSON | 5,280 ns/op | 3,250 wire_B/op | 3,642 B/op | 3 |
+| HTTP command wire | protobuf (default) | 2,434 ns/op | 3,203 wire_B/op | 3,664 B/op | 3 |
+| Snapshot save | JSON | 3,664,822 ns/op | 511,483 disk_B/op | 836,557 B/op | 24,070 |
+| Snapshot save | gzip JSON (default) | 5,279,050 ns/op | 8,923 disk_B/op | 959,903 B/op | 39,433 |
+
+For the benchmark payload, protobuf command wire is about 2.2x faster with a
+small byte reduction and equivalent allocation count. Gzip snapshots trade about
+44% more save CPU and 15% more heap bytes for about 98% less snapshot storage on
+the repetitive snapshot dataset.
 JSON request bodies may also be sent with `Content-Encoding: gzip`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader
@@ -386,10 +414,12 @@ per-key read/write counters and last access times without creating stats for
 unknown-key misses. `SaveStats` writes the global statistics snapshot as JSON,
 and `LoadStats` restores a saved snapshot.
 
-Use `SaveSnapshot` and `LoadSnapshot` for portable JSON data snapshots. Snapshot
-loads replace the current in-memory key set, skip expired entries, restore
-per-key access metadata when present, and re-apply the normal disk spill
-threshold for large byte values.
+Use `SaveSnapshot` and `LoadSnapshot` for portable JSON data snapshots.
+`SaveSnapshot` writes gzip-compressed JSON by default; use
+`SaveSnapshotWithFormat(path, SnapshotFormatJSON)` for plain JSON. Snapshot
+loads auto-detect gzip or plain JSON, replace the current in-memory key set,
+skip expired entries, restore per-key access metadata when present, and re-apply
+the normal disk spill threshold for large byte values.
 
 Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
 disk persistence. LevelDB loads replace the current in-memory key set. The

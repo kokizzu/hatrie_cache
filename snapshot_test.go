@@ -196,6 +196,54 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestSnapshotFormatDefaultsToGzipJSONAndLoadsPlainJSON(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+
+	dir := t.TempDir()
+	gzipPath := filepath.Join(dir, "snapshot-default.json")
+	if err := ht.SaveSnapshot(gzipPath); err != nil {
+		t.Fatalf("SaveSnapshot(default) error = %v", err)
+	}
+	gzipData, err := os.ReadFile(gzipPath)
+	if err != nil {
+		t.Fatalf("ReadFile(default) error = %v", err)
+	}
+	if len(gzipData) < 2 || gzipData[0] != 0x1f || gzipData[1] != 0x8b {
+		header := gzipData
+		if len(header) > 2 {
+			header = header[:2]
+		}
+		t.Fatalf("default snapshot header = % x, want gzip header", header)
+	}
+
+	jsonPath := filepath.Join(dir, "snapshot-plain.json")
+	if err := ht.SaveSnapshotWithFormat(jsonPath, SnapshotFormatJSON); err != nil {
+		t.Fatalf("SaveSnapshotWithFormat(json) error = %v", err)
+	}
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("ReadFile(json) error = %v", err)
+	}
+	if len(jsonData) == 0 || jsonData[0] != '{' {
+		first := jsonData
+		if len(first) > 1 {
+			first = first[:1]
+		}
+		t.Fatalf("json snapshot first byte = %q, want object", first)
+	}
+
+	for _, path := range []string{gzipPath, jsonPath} {
+		loaded := newTestTrie(t)
+		if err := loaded.LoadSnapshot(path); err != nil {
+			t.Fatalf("LoadSnapshot(%s) error = %v", filepath.Base(path), err)
+		}
+		if got := loaded.GetString("key"); got != "value" {
+			t.Fatalf("LoadSnapshot(%s) key = %q, want value", filepath.Base(path), got)
+		}
+	}
+}
+
 func TestSnapshotRoundTripPreservesBlankKeys(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("", "empty")

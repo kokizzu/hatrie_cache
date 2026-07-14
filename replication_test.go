@@ -23,6 +23,20 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 	return fn(request)
 }
 
+func mustDecodeReplicationTestCommand(t *testing.T, w http.ResponseWriter, r *http.Request) CacheCommandRequest {
+	t.Helper()
+	request, _, closeBody, ok := monitoringCommandRequest(w, r)
+	if !ok {
+		t.Fatal("decode replication command request failed")
+	}
+	defer closeBody()
+	return request
+}
+
+func writeReplicationTestCommandResponse(w http.ResponseWriter, r *http.Request, response CacheCommandResponse) {
+	writeCommandResponseWire(w, r, http.StatusOK, response, CommandWireFormatJSON)
+}
+
 type trackingReadCloser struct {
 	reader  *strings.Reader
 	closed  bool
@@ -52,10 +66,7 @@ func TestHTTPReplicatorReplicatesSetAndDeleteToOwners(t *testing.T) {
 		if r.URL.Path != "/api/commands" {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests = append(requests, request)
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -94,6 +105,68 @@ func TestHTTPReplicatorReplicatesSetAndDeleteToOwners(t *testing.T) {
 	}
 	if got := replicator.LastResult(); !reflect.DeepEqual(got, result) {
 		t.Fatalf("LastResult() = %#v, want last result %#v", got, result)
+	}
+}
+
+func TestHTTPReplicatorUsesProtobufWireByDefault(t *testing.T) {
+	var gotRequest CacheCommandRequest
+	var gotContentType string
+	var gotAccept string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		gotAccept = r.Header.Get("Accept")
+		gotRequest = mustDecodeReplicationTestCommand(t, w, r)
+		writeReplicationTestCommandResponse(w, r, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Client: target.Client(),
+	})
+	result := replicator.postReplicationCommand(context.Background(), TopologyNode{
+		ID:      "node-b",
+		Address: target.URL,
+	}, CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: `{"type":"string","string":"value"}`})
+
+	if !result.OK || result.Error != "" {
+		t.Fatalf("postReplicationCommand() = %#v, want protobuf ok", result)
+	}
+	if gotContentType != commandWireContentTypeProtobuf || gotAccept != commandWireContentTypeProtobuf {
+		t.Fatalf("wire headers content-type/accept = %q/%q, want protobuf", gotContentType, gotAccept)
+	}
+	if gotRequest.Command != "INTERNALSET" || gotRequest.Key != "session:1" || gotRequest.Value == "" {
+		t.Fatalf("protobuf replicated request = %#v, want INTERNALSET snapshot", gotRequest)
+	}
+}
+
+func TestHTTPReplicatorUsesJSONWireFallback(t *testing.T) {
+	var gotContentType string
+	var gotAccept string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		gotAccept = r.Header.Get("Accept")
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if request.Command != "INTERNALDEL" || request.Key != "session:1" {
+			t.Fatalf("json fallback request = %#v, want INTERNALDEL", request)
+		}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Client:     target.Client(),
+		WireFormat: CommandWireFormatJSON,
+	})
+	result := replicator.postReplicationCommand(context.Background(), TopologyNode{
+		ID:      "node-b",
+		Address: target.URL,
+	}, CacheCommandRequest{Command: "INTERNALDEL", Key: "session:1"})
+
+	if !result.OK || result.Error != "" {
+		t.Fatalf("postReplicationCommand() = %#v, want json fallback ok", result)
+	}
+	if gotContentType != commandWireContentTypeJSON || gotAccept != commandWireContentTypeJSON {
+		t.Fatalf("wire headers content-type/accept = %q/%q, want json", gotContentType, gotAccept)
 	}
 }
 
@@ -254,10 +327,7 @@ func TestHTTPReplicatorSkipsCanceledContextBeforeNetwork(t *testing.T) {
 func TestHTTPReplicatorAcceptsNilContext(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -293,10 +363,7 @@ func TestHTTPReplicatorAsyncQueuesMaterializedPayload(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-release
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -560,10 +627,7 @@ func TestHTTPReplicatorAsyncCloseCancelsInFlightDelivery(t *testing.T) {
 func TestHTTPReplicatorUsesTopologyWhenElectionUnconfigured(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -608,10 +672,7 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 		if r.URL.Path != "/api/commands" {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -663,10 +724,7 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 func TestHTTPReplicatorSyncAllSkipsExpiredEntries(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 2)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -805,7 +863,7 @@ func TestPostReplicationCommandRejectsTrailingResponseJSON(t *testing.T) {
 		ID:      "node-b",
 		Address: "127.0.0.1:8080",
 	}, CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: "{}"})
-	if result.OK || result.Status != http.StatusOK || !strings.Contains(result.Error, "invalid replication response JSON") {
+	if result.OK || result.Status != http.StatusOK || !strings.Contains(result.Error, "invalid command response JSON") {
 		t.Fatalf("postReplicationCommand() = %#v, want trailing JSON error", result)
 	}
 }
@@ -1014,10 +1072,7 @@ func waitForReplicationLastResult(t *testing.T, replicator *HTTPReplicator, acce
 func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1073,10 +1128,7 @@ func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesXorFilterMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1134,10 +1186,7 @@ func TestHTTPReplicatorReplicatesXorFilterMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesRadixTreeMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1192,10 +1241,7 @@ func TestHTTPReplicatorReplicatesRadixTreeMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesCuckooFilterMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1251,10 +1297,7 @@ func TestHTTPReplicatorReplicatesCuckooFilterMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesRoaringBitmapMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1310,10 +1353,7 @@ func TestHTTPReplicatorReplicatesRoaringBitmapMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesCountMinSketchMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1369,10 +1409,7 @@ func TestHTTPReplicatorReplicatesCountMinSketchMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesHyperLogLogMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1428,10 +1465,7 @@ func TestHTTPReplicatorReplicatesHyperLogLogMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesTopKMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1487,10 +1521,7 @@ func TestHTTPReplicatorReplicatesTopKMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesReservoirSampleMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1546,10 +1577,7 @@ func TestHTTPReplicatorReplicatesReservoirSampleMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesQuantileSketchMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -1605,10 +1633,7 @@ func TestHTTPReplicatorReplicatesQuantileSketchMutations(t *testing.T) {
 func TestHTTPReplicatorReplicatesFenwickTreeMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request CacheCommandRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))

@@ -215,6 +215,10 @@ func (journal *CommandJournal) Tail(afterSequence uint64, limit int) (CommandJou
 }
 
 func (journal *CommandJournal) SaveSnapshot(trie *HatTrie, path string) error {
+	return journal.SaveSnapshotWithFormat(trie, path, DefaultSnapshotFormat)
+}
+
+func (journal *CommandJournal) SaveSnapshotWithFormat(trie *HatTrie, path string, format SnapshotFormat) error {
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
@@ -222,7 +226,7 @@ func (journal *CommandJournal) SaveSnapshot(trie *HatTrie, path string) error {
 		return ErrCommandJournalClosed
 	}
 	sequence := journal.lastSequenceLocked()
-	if err := trie.SaveSnapshotWithJournalSequence(path, sequence); err != nil {
+	if err := trie.SaveSnapshotWithJournalSequenceAndFormat(path, sequence, format); err != nil {
 		return err
 	}
 	return journal.compactLocked(sequence)

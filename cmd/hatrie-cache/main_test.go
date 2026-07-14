@@ -39,6 +39,12 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if cfg.monitoringAddr != "127.0.0.1:8080" {
 		t.Fatalf("monitoringAddr = %q, want default", cfg.monitoringAddr)
 	}
+	if cfg.replicationWireFormat != string(hatriecache.DefaultCommandWireFormat) {
+		t.Fatalf("replicationWireFormat = %q, want default", cfg.replicationWireFormat)
+	}
+	if cfg.snapshotFormat != string(hatriecache.DefaultSnapshotFormat) {
+		t.Fatalf("snapshotFormat = %q, want default", cfg.snapshotFormat)
+	}
 }
 
 func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
@@ -63,6 +69,7 @@ func TestParseConfigSnapshotFlags(t *testing.T) {
 		"-monitoring-server",
 		"-snapshot-path", "/tmp/cache.json",
 		"-snapshot-interval", "5s",
+		"-snapshot-format", "json",
 		"-journal-path", "/tmp/cache.journal",
 	}, &bytes.Buffer{})
 	if err != nil {
@@ -70,6 +77,9 @@ func TestParseConfigSnapshotFlags(t *testing.T) {
 	}
 	if cfg.snapshotPath != "/tmp/cache.json" || cfg.snapshotInterval != 5*time.Second {
 		t.Fatalf("cfg snapshot = %q/%s, want explicit values", cfg.snapshotPath, cfg.snapshotInterval)
+	}
+	if cfg.snapshotFormat != "json" || snapshotFormat(cfg) != hatriecache.SnapshotFormatJSON {
+		t.Fatalf("snapshot format = %q, want json", cfg.snapshotFormat)
 	}
 	if cfg.journalPath != "/tmp/cache.journal" {
 		t.Fatalf("journalPath = %q, want explicit path", cfg.journalPath)
@@ -125,6 +135,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-queue-size", "16",
 		"-replication-retry-interval", "50ms",
 		"-replication-max-attempts", "5",
+		"-replication-wire-format", "json",
 		"-enforce-leader-writes",
 	}, &bytes.Buffer{})
 	if err != nil {
@@ -135,6 +146,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 50*time.Millisecond || cfg.replicationAttempts != 5 {
 		t.Fatalf("cfg replication async = %#v, want explicit async queue settings", cfg)
+	}
+	if cfg.replicationWireFormat != "json" || replicationWireFormat(cfg) != hatriecache.CommandWireFormatJSON {
+		t.Fatalf("replication wire format = %q, want json", cfg.replicationWireFormat)
 	}
 	if got := replicationQueueSize(cfg); got != 16 {
 		t.Fatalf("replicationQueueSize(async cfg) = %d, want 16", got)
@@ -839,7 +853,7 @@ func TestStartSnapshotSaverWritesPeriodically(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	path := filepath.Join(t.TempDir(), "snapshot.json")
-	stop := startSnapshotSaver(ctx, ht, nil, path, time.Millisecond, &bytes.Buffer{})
+	stop := startSnapshotSaver(ctx, ht, nil, path, time.Millisecond, hatriecache.SnapshotFormatJSON, &bytes.Buffer{})
 	defer stop()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -860,7 +874,7 @@ func TestStartSnapshotSaverWritesImmediately(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	path := filepath.Join(t.TempDir(), "snapshot.json")
-	stop := startSnapshotSaver(ctx, ht, nil, path, time.Hour, &bytes.Buffer{})
+	stop := startSnapshotSaver(ctx, ht, nil, path, time.Hour, hatriecache.SnapshotFormatJSON, &bytes.Buffer{})
 	defer stop()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -879,7 +893,7 @@ func TestStartSnapshotSaverStopIsIdempotent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	path := filepath.Join(t.TempDir(), "snapshot.json")
-	stop := startSnapshotSaver(ctx, ht, nil, path, time.Hour, &bytes.Buffer{})
+	stop := startSnapshotSaver(ctx, ht, nil, path, time.Hour, hatriecache.SnapshotFormatJSON, &bytes.Buffer{})
 	cancel()
 
 	stopped := make(chan struct{})
@@ -980,12 +994,12 @@ func TestSnapshotCallbackRequiresPath(t *testing.T) {
 	ht := hatriecache.CreateHatTrie()
 	defer ht.Destroy()
 
-	if got := snapshotCallback(ht, nil, ""); got != nil {
+	if got := snapshotCallback(ht, nil, "", hatriecache.SnapshotFormatJSON); got != nil {
 		t.Fatal("snapshotCallback(empty) returned callback, want nil")
 	}
 
 	path := filepath.Join(t.TempDir(), "snapshot.json")
-	callback := snapshotCallback(ht, nil, path)
+	callback := snapshotCallback(ht, nil, path, hatriecache.SnapshotFormatJSON)
 	if callback == nil {
 		t.Fatal("snapshotCallback(path) = nil, want callback")
 	}
@@ -1262,7 +1276,7 @@ func TestJournaledSnapshotHelpersCheckpointAndCompact(t *testing.T) {
 		t.Fatalf("journaled INC response = %#v, want ok", got)
 	}
 
-	if err := saveSnapshotIfConfigured(ht, journal, snapshotPath); err != nil {
+	if err := saveSnapshotIfConfigured(ht, journal, snapshotPath, hatriecache.SnapshotFormatJSON); err != nil {
 		t.Fatalf("saveSnapshotIfConfigured() error = %v", err)
 	}
 	if info, err := os.Stat(journalPath); err != nil || info.Size() == 0 {

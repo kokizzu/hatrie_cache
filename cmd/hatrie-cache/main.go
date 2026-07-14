@@ -40,6 +40,7 @@ type config struct {
 	replicationQueueSize  int
 	replicationRetry      time.Duration
 	replicationAttempts   uint
+	replicationWireFormat string
 	enforceLeaderWrites   bool
 	grpcAddr              string
 	dbPath                string
@@ -50,6 +51,7 @@ type config struct {
 	dbHotLoadMinHits      uint64
 	snapshotPath          string
 	snapshotInterval      time.Duration
+	snapshotFormat        string
 	journalPath           string
 	journalPullSource     string
 	journalPullStatePath  string
@@ -104,14 +106,14 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			return err
 		}
 		if cfg.snapshotPath != "" {
-			if err := saveSnapshotIfConfigured(trie, journal, cfg.snapshotPath); err != nil {
+			if err := saveSnapshotIfConfigured(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)); err != nil {
 				return err
 			}
 		}
 	}
 	if cfg.snapshotPath != "" {
 		defer func() {
-			if err := saveSnapshotIfConfigured(trie, journal, cfg.snapshotPath); err != nil {
+			if err := saveSnapshotIfConfigured(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)); err != nil {
 				fmt.Fprintf(stderr, "save snapshot: %v\n", err)
 			}
 		}()
@@ -125,7 +127,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, cfg.dbSyncInterval, stderr)
 	defer stopDBSync()
-	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, stderr)
+	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, snapshotFormat(cfg), stderr)
 	defer stopSnapshots()
 	if cfg.journalPullSource != "" && journal == nil {
 		return errors.New("journal pull requires -journal-path")
@@ -162,6 +164,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			AsyncQueueSize:     replicationQueueSize(cfg),
 			AsyncRetryInterval: cfg.replicationRetry,
 			AsyncMaxAttempts:   cfg.replicationAttempts,
+			WireFormat:         replicationWireFormat(cfg),
 		})
 		defer replicator.Close()
 	}
@@ -169,7 +172,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
 		NodeName:            defaultNodeID(cfg.nodeID),
 		WebDir:              cfg.monitoringWebDir,
-		Snapshot:            snapshotCallback(trie, journal, cfg.snapshotPath),
+		Snapshot:            snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
 		Journal:             journal,
 		Topology:            topology,
 		Election:            election,
@@ -182,7 +185,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		TLSConfig: monitoringTLSConfig(nil),
 	}
 
-	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath), topology, election, replicator)
+	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator)
 	if err != nil {
 		return err
 	}
@@ -250,6 +253,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.replicationQueueSize, "replication-queue-size", 1024, "maximum queued async replication jobs")
 	flags.DurationVar(&cfg.replicationRetry, "replication-retry-interval", hatriecache.DefaultReplicationRetryInterval, "delay between async replication retry attempts")
 	flags.UintVar(&cfg.replicationAttempts, "replication-max-attempts", 3, "maximum async replication delivery attempts")
+	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", string(hatriecache.DefaultCommandWireFormat), "HTTP replication command wire format: protobuf or json")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
@@ -258,8 +262,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for LevelDB hot-load")
 	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for LevelDB hot-load")
 	flags.Uint64Var(&cfg.dbHotLoadMinHits, "db-hot-load-min-hits", 1000, "minimum hits required for LevelDB hot-load")
-	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional JSON snapshot path to load on startup and save on shutdown")
+	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
+	flags.StringVar(&cfg.snapshotFormat, "snapshot-format", string(hatriecache.DefaultSnapshotFormat), "snapshot save format: gzip-json or json")
 	flags.StringVar(&cfg.journalPath, "journal-path", "", "optional command journal path to replay on startup and append mutating commands")
 	flags.StringVar(&cfg.journalPullSource, "journal-pull-source", "", "optional source monitoring URL to pull journal catch-up batches from")
 	flags.StringVar(&cfg.journalPullStatePath, "journal-pull-state-path", "", "optional JSON path for persisted journal pull source sequence")
@@ -290,6 +295,12 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.replicationRetry < 0 {
 		return config{}, errors.New("replication retry interval must be non-negative")
 	}
+	if _, err := hatriecache.ParseCommandWireFormat(cfg.replicationWireFormat); err != nil {
+		return config{}, err
+	}
+	if _, err := hatriecache.ParseSnapshotFormat(cfg.snapshotFormat); err != nil {
+		return config{}, err
+	}
 	return cfg, nil
 }
 
@@ -298,6 +309,22 @@ func replicationQueueSize(cfg config) int {
 		return 0
 	}
 	return cfg.replicationQueueSize
+}
+
+func replicationWireFormat(cfg config) hatriecache.CommandWireFormat {
+	format, err := hatriecache.ParseCommandWireFormat(cfg.replicationWireFormat)
+	if err != nil {
+		return hatriecache.DefaultCommandWireFormat
+	}
+	return format
+}
+
+func snapshotFormat(cfg config) hatriecache.SnapshotFormat {
+	format, err := hatriecache.ParseSnapshotFormat(cfg.snapshotFormat)
+	if err != nil {
+		return hatriecache.DefaultSnapshotFormat
+	}
+	return format
 }
 
 func newMonitoringListener(cfg config) (net.Listener, error) {
@@ -513,17 +540,17 @@ func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) (hatriecac
 	return metadata, nil
 }
 
-func saveSnapshotIfConfigured(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string) error {
+func saveSnapshotIfConfigured(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, format hatriecache.SnapshotFormat) error {
 	if path == "" {
 		return nil
 	}
 	if journal != nil {
-		return journal.SaveSnapshot(trie, path)
+		return journal.SaveSnapshotWithFormat(trie, path, format)
 	}
-	return trie.SaveSnapshot(path)
+	return trie.SaveSnapshotWithFormat(path, format)
 }
 
-func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, interval time.Duration, stderr io.Writer) func() {
+func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, interval time.Duration, format hatriecache.SnapshotFormat, stderr io.Writer) func() {
 	if path == "" || interval <= 0 {
 		return func() {}
 	}
@@ -532,7 +559,7 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	save := func() {
-		if err := saveSnapshotIfConfigured(trie, journal, path); err != nil {
+		if err := saveSnapshotIfConfigured(trie, journal, path, format); err != nil {
 			fmt.Fprintf(stderr, "save snapshot: %v\n", err)
 		}
 	}
@@ -810,12 +837,12 @@ func syncJSONDirectory(dir string) error {
 	return file.Close()
 }
 
-func snapshotCallback(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string) func() error {
+func snapshotCallback(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, format hatriecache.SnapshotFormat) func() error {
 	if path == "" {
 		return nil
 	}
 	return func() error {
-		return saveSnapshotIfConfigured(trie, journal, path)
+		return saveSnapshotIfConfigured(trie, journal, path, format)
 	}
 }
 

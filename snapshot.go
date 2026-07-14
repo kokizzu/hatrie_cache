@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -12,10 +13,32 @@ import (
 	"strings"
 	"time"
 
+	"hatrie_cache/internal/jsonwire"
+
 	json "github.com/goccy/go-json"
 )
 
 const snapshotVersion = 1
+
+type SnapshotFormat string
+
+const (
+	SnapshotFormatJSON     SnapshotFormat = "json"
+	SnapshotFormatGzipJSON SnapshotFormat = "gzip-json"
+)
+
+const DefaultSnapshotFormat = SnapshotFormatGzipJSON
+
+func ParseSnapshotFormat(value string) (SnapshotFormat, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(SnapshotFormatGzipJSON), "gzip", "json.gz", "gzjson":
+		return SnapshotFormatGzipJSON, nil
+	case string(SnapshotFormatJSON):
+		return SnapshotFormatJSON, nil
+	default:
+		return "", fmt.Errorf("hatriecache: unsupported snapshot format %q", value)
+	}
+}
 
 type snapshotFile struct {
 	Version         int             `json:"version"`
@@ -64,12 +87,24 @@ type snapshotOperation struct {
 }
 
 func (ht *HatTrie) SaveSnapshot(path string) error {
-	return ht.SaveSnapshotWithJournalSequence(path, 0)
+	return ht.SaveSnapshotWithFormat(path, DefaultSnapshotFormat)
+}
+
+func (ht *HatTrie) SaveSnapshotWithFormat(path string, format SnapshotFormat) error {
+	return ht.SaveSnapshotWithJournalSequenceAndFormat(path, 0, format)
 }
 
 func (ht *HatTrie) SaveSnapshotWithJournalSequence(path string, journalSequence uint64) error {
+	return ht.SaveSnapshotWithJournalSequenceAndFormat(path, journalSequence, DefaultSnapshotFormat)
+}
+
+func (ht *HatTrie) SaveSnapshotWithJournalSequenceAndFormat(path string, journalSequence uint64, format SnapshotFormat) error {
+	format, err := ParseSnapshotFormat(string(format))
+	if err != nil {
+		return err
+	}
 	return writeFileAtomicStream(path, func(writer io.Writer) error {
-		return ht.writeSnapshotJSON(writer, journalSequence)
+		return ht.writeSnapshot(writer, journalSequence, format)
 	})
 }
 
@@ -87,7 +122,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 
 	now := ht.currentTime()
 	activeKeys := make(map[string]bool)
-	metadata, err := scanSnapshotFileJSONReader(file, func(entry snapshotEntry) error {
+	metadata, err := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
 		operation, active, err := validateSnapshotLoadEntry(entry, now, false)
 		if err != nil {
 			return err
@@ -116,7 +151,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	createdKeys := make(map[string]struct{}, len(activeKeys))
 	rollbackOperations := make([]snapshotOperation, 0, len(activeKeys))
 	applied := 0
-	applyMetadata, err := scanSnapshotFileJSONReader(file, func(entry snapshotEntry) error {
+	applyMetadata, err := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
 		operation, active, err := validateSnapshotLoadEntry(entry, now, true)
 		if err != nil {
 			return err
@@ -184,6 +219,24 @@ func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time, prepareOperat
 		return snapshotOperation{}, false, err
 	}
 	return operation, true, nil
+}
+
+func (ht *HatTrie) writeSnapshot(writer io.Writer, journalSequence uint64, format SnapshotFormat) error {
+	switch format {
+	case SnapshotFormatJSON:
+		return ht.writeSnapshotJSON(writer, journalSequence)
+	case SnapshotFormatGzipJSON:
+		gzipWriter := jsonwire.AcquireGzipWriter(writer)
+		err := ht.writeSnapshotJSON(gzipWriter, journalSequence)
+		closeErr := gzipWriter.Close()
+		jsonwire.ReleaseGzipWriter(gzipWriter)
+		if err != nil {
+			return err
+		}
+		return closeErr
+	default:
+		return fmt.Errorf("hatriecache: unsupported snapshot format %q", format)
+	}
 }
 
 func prepareSnapshotBytesOperation(entry snapshotEntry) (snapshotOperation, error) {
@@ -817,6 +870,31 @@ func decodeSnapshotFileJSONReader(reader io.Reader) (snapshotFile, error) {
 	snapshot.Version = metadata.Version
 	snapshot.JournalSequence = metadata.JournalSequence
 	return snapshot, nil
+}
+
+func scanSnapshotFileReader(reader io.Reader, visit func(snapshotEntry) error) (snapshotFileMetadata, error) {
+	jsonReader, closeReader, err := snapshotJSONReader(reader)
+	if err != nil {
+		return snapshotFileMetadata{}, err
+	}
+	defer closeReader()
+	return scanSnapshotFileJSONReader(jsonReader, visit)
+}
+
+func snapshotJSONReader(reader io.Reader) (io.Reader, func() error, error) {
+	buffered := bufio.NewReader(reader)
+	header, err := buffered.Peek(2)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, nil, err
+	}
+	if len(header) == 2 && header[0] == 0x1f && header[1] == 0x8b {
+		gzipReader, err := gzip.NewReader(buffered)
+		if err != nil {
+			return nil, nil, err
+		}
+		return gzipReader, gzipReader.Close, nil
+	}
+	return buffered, func() error { return nil }, nil
 }
 
 func scanSnapshotFileJSONReader(reader io.Reader, visit func(snapshotEntry) error) (snapshotFileMetadata, error) {

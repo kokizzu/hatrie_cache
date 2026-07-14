@@ -32,6 +32,7 @@ type HTTPReplicatorOptions struct {
 	AsyncQueueSize     int
 	AsyncRetryInterval time.Duration
 	AsyncMaxAttempts   uint
+	WireFormat         CommandWireFormat
 }
 
 type HTTPReplicator struct {
@@ -44,6 +45,7 @@ type HTTPReplicator struct {
 	queue      chan replicationJob
 	retry      time.Duration
 	attempts   uint
+	wireFormat CommandWireFormat
 	done       chan struct{}
 	stopped    chan struct{}
 	asyncCtx   context.Context
@@ -115,12 +117,21 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 	if timeout == 0 {
 		timeout = DefaultReplicationTimeout
 	}
+	wireFormat := options.WireFormat
+	if wireFormat == "" {
+		wireFormat = DefaultCommandWireFormat
+	} else if parsed, err := ParseCommandWireFormat(string(wireFormat)); err == nil {
+		wireFormat = parsed
+	} else {
+		wireFormat = DefaultCommandWireFormat
+	}
 	replicator := &HTTPReplicator{
-		self:     strings.TrimSpace(options.Self),
-		topology: options.Topology,
-		election: options.Election,
-		client:   client,
-		timeout:  timeout,
+		self:       strings.TrimSpace(options.Self),
+		topology:   options.Topology,
+		election:   options.Election,
+		client:     client,
+		timeout:    timeout,
+		wireFormat: wireFormat,
 	}
 	if options.AsyncQueueSize > 0 {
 		retry := options.AsyncRetryInterval
@@ -644,7 +655,7 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	defer cancel()
 
-	body, contentEncoding, err := replicationRequestBody(payload)
+	body, contentType, contentEncoding, err := replicationRequestBodyForFormat(payload, replicator.wireFormat)
 	if err != nil {
 		result.Error = err.Error()
 		return result
@@ -654,8 +665,8 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 		result.Error = err.Error()
 		return result
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", contentType)
+	req.Header.Set("Content-Type", contentType)
 	if contentEncoding != "" {
 		req.Header.Set("Content-Encoding", contentEncoding)
 	}
@@ -671,7 +682,7 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 		result.Error = resp.Status
 		return result
 	}
-	commandResponse, err := decodeReplicationCommandResponse(resp.Body)
+	commandResponse, err := decodeReplicationCommandResponseWire(resp.Body, resp.Header.Get("Content-Type"))
 	if err != nil {
 		result.Error = err.Error()
 		return result
@@ -685,36 +696,20 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 }
 
 func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, error) {
-	limited := &io.LimitedReader{R: body, N: maxHTTPReplicationResponseBytes + 1}
-	decoder := jsonwire.NewDecoder(limited)
-	var response CacheCommandResponse
-	if err := decoder.Decode(&response); err != nil {
-		if limitedReaderExceeded(limited) {
-			return CacheCommandResponse{}, errReplicationResponseTooLarge
-		}
-		return CacheCommandResponse{}, err
-	}
-	if limited.N <= 0 {
-		return CacheCommandResponse{}, errReplicationResponseTooLarge
-	}
-	var extra struct{}
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if limitedReaderExceeded(limited) {
-			return CacheCommandResponse{}, errReplicationResponseTooLarge
-		}
-		if err == nil {
-			return CacheCommandResponse{}, errors.New("hatriecache: invalid replication response JSON")
-		}
-		return CacheCommandResponse{}, err
-	}
-	if limitedReaderExceeded(limited) {
-		return CacheCommandResponse{}, errReplicationResponseTooLarge
-	}
-	return response, nil
+	return decodeReplicationCommandResponseWire(body, commandWireContentTypeJSON)
+}
+
+func decodeReplicationCommandResponseWire(body io.Reader, contentType string) (CacheCommandResponse, error) {
+	return decodeCommandResponseWire(body, contentType, maxHTTPReplicationResponseBytes)
 }
 
 func replicationRequestBody(payload CacheCommandRequest) (io.Reader, string, error) {
-	return jsonwire.RequestBody(payload, estimatedReplicationRequestBytes(payload), minCompressedReplicationRequestBytes)
+	body, _, contentEncoding, err := replicationRequestBodyForFormat(payload, CommandWireFormatJSON)
+	return body, contentEncoding, err
+}
+
+func replicationRequestBodyForFormat(payload CacheCommandRequest, format CommandWireFormat) (io.Reader, string, string, error) {
+	return commandRequestBody(payload, format, estimatedReplicationRequestBytes(payload), minCompressedReplicationRequestBytes)
 }
 
 func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {

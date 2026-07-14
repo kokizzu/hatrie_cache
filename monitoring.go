@@ -175,23 +175,11 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		return
 	}
 
-	var request CacheCommandRequest
-	decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+	request, requestFormat, closeBody, ok := monitoringCommandRequest(w, r)
 	if !ok {
 		return
 	}
 	defer closeBody()
-	decoder.DisallowUnknownFields()
-	decoder.UseNumber()
-	if err := decoder.Decode(&request); err != nil {
-		http.Error(w, "invalid command request", http.StatusBadRequest)
-		return
-	}
-	var extra struct{}
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		http.Error(w, "invalid command request", http.StatusBadRequest)
-		return
-	}
 	if requestContextDone(w, r) {
 		return
 	}
@@ -203,10 +191,10 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		EnforceLeaderWrites: handler.options.EnforceLeaderWrites,
 	})
 	if rejected {
-		writeJSONStatus(w, http.StatusConflict, response)
+		writeCommandResponseWire(w, r, http.StatusConflict, response, requestFormat)
 		return
 	}
-	writeJSON(w, response)
+	writeCommandResponseWire(w, r, http.StatusOK, response, requestFormat)
 }
 
 func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
@@ -919,6 +907,45 @@ func monitoringJSONDecoder(w http.ResponseWriter, r *http.Request) (*jsonwire.De
 		return nil, nil, false
 	}
 	return jsonwire.NewDecoder(body), closeBody, true
+}
+
+func monitoringCommandRequest(w http.ResponseWriter, r *http.Request) (CacheCommandRequest, CommandWireFormat, func(), bool) {
+	format, ok := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+	if !ok {
+		_ = r.Body.Close()
+		http.Error(w, "unsupported command request content type", http.StatusUnsupportedMediaType)
+		return CacheCommandRequest{}, "", nil, false
+	}
+	body, closeBody, ok := limitedEncodedRequestBody(w, r, maxMonitoringJSONRequestBytes)
+	if !ok {
+		return CacheCommandRequest{}, "", nil, false
+	}
+	if format == CommandWireFormatProtobuf {
+		request, err := decodeCommandRequestProto(body, maxMonitoringJSONRequestBytes)
+		if err != nil {
+			closeBody()
+			http.Error(w, "invalid command request", http.StatusBadRequest)
+			return CacheCommandRequest{}, "", nil, false
+		}
+		return request, format, closeBody, true
+	}
+
+	decoder := jsonwire.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	decoder.UseNumber()
+	var request CacheCommandRequest
+	if err := decoder.Decode(&request); err != nil {
+		closeBody()
+		http.Error(w, "invalid command request", http.StatusBadRequest)
+		return CacheCommandRequest{}, "", nil, false
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		closeBody()
+		http.Error(w, "invalid command request", http.StatusBadRequest)
+		return CacheCommandRequest{}, "", nil, false
+	}
+	return request, format, closeBody, true
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {
