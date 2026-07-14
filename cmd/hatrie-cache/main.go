@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -716,27 +715,37 @@ func loadJournalPullState(path string, source string) (uint64, error) {
 	if path == "" {
 		return 0, nil
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	var state journalPullState
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&state); err != nil {
+	defer file.Close()
+
+	state, err := decodeJournalPullStateJSONReader(file)
+	if err != nil {
 		return 0, err
-	}
-	var extra struct{}
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return 0, errors.New("invalid journal pull state JSON")
 	}
 	if state.Source != "" && state.Source != source {
 		return 0, fmt.Errorf("journal pull state source %q does not match %q", state.Source, source)
 	}
 	return state.AppliedThrough, nil
+}
+
+func decodeJournalPullStateJSONReader(reader io.Reader) (journalPullState, error) {
+	var state journalPullState
+	decoder := json.NewDecoder(reader)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&state); err != nil {
+		return journalPullState{}, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return journalPullState{}, errors.New("invalid journal pull state JSON")
+	}
+	return state, nil
 }
 
 func saveJournalPullState(path string, source string, appliedThrough uint64) error {

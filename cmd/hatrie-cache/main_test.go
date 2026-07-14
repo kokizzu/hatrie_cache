@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"google.golang.org/grpc"
@@ -1157,6 +1158,29 @@ func TestJournalPullStateRejectsSourceMismatch(t *testing.T) {
 	}
 	if _, err := loadJournalPullState(path, "http://leader-b"); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("loadJournalPullState(mismatch) error = %v, want source mismatch", err)
+	}
+}
+
+func TestDecodeJournalPullStateJSONReaderStreamsState(t *testing.T) {
+	state, err := decodeJournalPullStateJSONReader(iotest.OneByteReader(strings.NewReader(`{"source":"http://leader-a","applied_through":7}`)))
+	if err != nil {
+		t.Fatalf("decodeJournalPullStateJSONReader() error = %v", err)
+	}
+	if state.Source != "http://leader-a" || state.AppliedThrough != 7 {
+		t.Fatalf("decoded state = %#v, want leader-a through sequence 7", state)
+	}
+}
+
+func TestDecodeJournalPullStateJSONReaderRejectsInvalidEnvelope(t *testing.T) {
+	for name, payload := range map[string]string{
+		"unknown":  `{"source":"http://leader-a","applied_through":7,"unexpected":true}`,
+		"trailing": `{"source":"http://leader-a","applied_through":7} trailing`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeJournalPullStateJSONReader(strings.NewReader(payload)); err == nil {
+				t.Fatal("decodeJournalPullStateJSONReader() error = nil, want rejection")
+			}
+		})
 	}
 }
 
