@@ -12,6 +12,22 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+type commandWireTrackingBody struct {
+	reader *strings.Reader
+	read   bool
+	closed bool
+}
+
+func (body *commandWireTrackingBody) Read(data []byte) (int, error) {
+	body.read = true
+	return body.reader.Read(data)
+}
+
+func (body *commandWireTrackingBody) Close() error {
+	body.closed = true
+	return nil
+}
+
 func TestParseCommandWireFormatAliases(t *testing.T) {
 	tests := []struct {
 		value string
@@ -337,6 +353,36 @@ func TestMonitoringHandlerRejectsUnacceptableCommandResponseBeforeExecute(t *tes
 	}
 	if got := resp.Header().Values("Vary"); !headerValuesContain(got, "Accept") {
 		t.Fatalf("Vary = %#v, want Accept", got)
+	}
+	if ht.Exists("session:1") {
+		t.Fatal("unacceptable command response executed mutation")
+	}
+}
+
+func TestMonitoringHandlerRejectsUnacceptableCommandResponseWithoutReadingBody(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	body := &commandWireTrackingBody{reader: strings.NewReader(`{"command":"SETSTR","key":"session:1","value":"value"}`)}
+	req := httptest.NewRequest(http.MethodPost, "/api/commands", nil)
+	req.Body = body
+	req.ContentLength = int64(body.reader.Len())
+	req.Header.Set("Content-Type", commandWireContentTypeJSON)
+	req.Header.Set("Accept", "application/xml")
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotAcceptable {
+		t.Fatalf("command status = %d, want 406; body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Values("Vary"); !headerValuesContain(got, "Accept") {
+		t.Fatalf("Vary = %#v, want Accept", got)
+	}
+	if body.read {
+		t.Fatal("unacceptable command response read request body")
+	}
+	if !body.closed {
+		t.Fatal("unacceptable command response did not close request body")
 	}
 	if ht.Exists("session:1") {
 		t.Fatal("unacceptable command response executed mutation")
