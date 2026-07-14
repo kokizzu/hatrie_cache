@@ -84,19 +84,6 @@ func (pq *priorityQueueData) Len() int {
 	return len(pq.items)
 }
 
-func (pq *priorityQueueData) Push(priority int64, values ...interface{}) int {
-	if len(values) == 0 {
-		return 0
-	}
-	if len(values) > 1 {
-		pq.reserveCapacity(len(pq.items) + len(values))
-	}
-	for _, value := range values {
-		pq.pushValue(priority, value)
-	}
-	return len(values)
-}
-
 func (pq *priorityQueueData) PushOne(priority int64, value interface{}, values ...interface{}) int {
 	if len(values) > 0 {
 		pq.reserveCapacity(len(pq.items) + 1 + len(values))

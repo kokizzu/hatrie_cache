@@ -130,14 +130,6 @@ func (sketch *countMinSketchData) Add(value interface{}, count uint32) uint64 {
 	return estimate
 }
 
-func (sketch *countMinSketchData) AddOne(value interface{}, count uint32, values ...interface{}) uint64 {
-	estimate := sketch.Add(value, count)
-	for _, value := range values {
-		estimate = sketch.Add(value, count)
-	}
-	return estimate
-}
-
 func (sketch *countMinSketchData) Estimate(value interface{}) uint64 {
 	if sketch == nil || sketch.width == 0 || sketch.depth == 0 {
 		return 0

@@ -1476,6 +1476,14 @@ func TestRoaringBitmapOperations(t *testing.T) {
 	if info.Cardinality != 3 || info.Containers != 3 || info.ArrayContainers != 3 || info.EncodedBytes != 6 {
 		t.Fatalf("RoaringBitmapInfo(ids) = %#v, want sparse compact arrays", info)
 	}
+	idx := ht.Get("ids").Index
+	ht.UpsertRoaringBitmap("ids")
+	if got := ht.Get("ids"); !got.IsRoaringBitmap() || got.Index != idx {
+		t.Fatalf("UpsertRoaringBitmap replacement stored %+v, want same roaring bitmap slot %d", got, idx)
+	}
+	if count, ok := ht.CountRoaringBitmap("ids"); !ok || count != 0 {
+		t.Fatalf("CountRoaringBitmap(ids after replacement) = %d/%v, want empty bitmap", count, ok)
+	}
 
 	if added := ht.AddRoaringBitmap("auto", 42); added != 1 {
 		t.Fatalf("AddRoaringBitmap(auto) = %d, want 1", added)
