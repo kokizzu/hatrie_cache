@@ -436,6 +436,65 @@ func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsRadixTreeFields(t *testing.T) {
+	var gotRequests []hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/commands" {
+			t.Fatalf("path = %q, want /api/commands", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.UseNumber()
+		var request hatriecache.CacheCommandRequest
+		if err := decoder.Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		gotRequests = append(gotRequests, request)
+		w.Write([]byte(`{"ok":true,"message":"stored radix tree values"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "PUTRT",
+		"-key", "index",
+		"-subkey", "user:100/profile",
+		"-value", "active",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command PUTRT subkey) error = %v", err)
+	}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "PUTRT",
+		"-key", "index",
+		"-pairs", `{"user:101/profile":"idle","user:102/profile":42}`,
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command PUTRT pairs) error = %v", err)
+	}
+
+	if len(gotRequests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(gotRequests))
+	}
+	first := gotRequests[0]
+	if first.Command != "PUTRT" || first.Key != "index" || first.Subkey != "user:100/profile" || first.Value != "active" {
+		t.Fatalf("first request = %#v, want PUTRT index user:100/profile active", first)
+	}
+	second := gotRequests[1]
+	if second.Command != "PUTRT" || second.Key != "index" {
+		t.Fatalf("second request basics = %#v, want PUTRT index", second)
+	}
+	if got := second.Pairs["user:101/profile"]; got != "idle" {
+		t.Fatalf("pairs[user:101/profile] = %#v, want idle", got)
+	}
+	if got := second.Pairs["user:102/profile"]; got != json.Number("42") {
+		t.Fatalf("pairs[user:102/profile] = %#v, want json.Number(42)", got)
+	}
+}
+
 func TestRunCommandRejectsInvalidStructuredFlagsBeforePost(t *testing.T) {
 	var requests int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

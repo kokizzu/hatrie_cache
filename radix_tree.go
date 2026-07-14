@@ -50,6 +50,8 @@ type radixTreeStats struct {
 	maxDepth   uint64
 }
 
+const maxRadixTreePrefixScanCapacity = 64
+
 func newRadixTreeData() radixTreeData {
 	return radixTreeData{root: &radixTreeNode{}}
 }
@@ -134,16 +136,20 @@ func (tree radixTreeData) Contains(key string) bool {
 }
 
 func (tree radixTreeData) ItemsWithPrefix(prefix string) []RadixTreeItem {
+	return tree.itemsWithPrefixCapacity(prefix, radixTreePrefixScanCapacity(tree.items))
+}
+
+func (tree radixTreeData) itemsWithPrefixCapacity(prefix string, capacity int) []RadixTreeItem {
 	if tree.root == nil || tree.items == 0 {
 		return []RadixTreeItem{}
 	}
-	items := make([]RadixTreeItem, 0, tree.items)
+	items := make([]RadixTreeItem, 0, capacity)
 	tree.root.collectPrefix(prefix, "", &items)
 	return items
 }
 
 func (tree radixTreeData) Snapshot() radixTreeSnapshot {
-	items := tree.ItemsWithPrefix("")
+	items := tree.itemsWithPrefixCapacity("", radixTreeFullScanCapacity(tree.items))
 	return radixTreeSnapshot{
 		Count: uint64(len(items)),
 		Items: items,
@@ -165,6 +171,21 @@ func (tree radixTreeData) Info() RadixTreeInfo {
 
 func (tree radixTreeData) EncodedSize() int64 {
 	return int64(tree.Info().EncodedBytes)
+}
+
+func radixTreePrefixScanCapacity(items uint64) int {
+	if items < maxRadixTreePrefixScanCapacity {
+		return int(items)
+	}
+	return maxRadixTreePrefixScanCapacity
+}
+
+func radixTreeFullScanCapacity(items uint64) int {
+	maxInt := uint64(int(^uint(0) >> 1))
+	if items > maxInt {
+		return 0
+	}
+	return int(items)
 }
 
 func (tree *radixTreeData) ensureRoot() {

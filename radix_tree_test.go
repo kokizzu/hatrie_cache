@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -78,6 +79,30 @@ func TestRadixTreeSnapshotRoundTrip(t *testing.T) {
 	}
 	if value, ok := restored.Get("asset:js"); !ok || value != json.Number("42") {
 		t.Fatalf("restored Get(asset:js) = %#v/%v, want json.Number", value, ok)
+	}
+}
+
+func TestRadixTreePrefixScanUsesBoundedCapacity(t *testing.T) {
+	tree := newRadixTreeData()
+	for idx := 0; idx < 200; idx++ {
+		tree.Put(fmt.Sprintf("cold:%03d", idx), idx)
+	}
+	tree.Put("hot:one", "value")
+
+	items := tree.ItemsWithPrefix("hot:")
+	if got, want := radixTreeItemKeys(items), []string{"hot:one"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ItemsWithPrefix(hot:) keys = %#v, want %#v", got, want)
+	}
+	if cap(items) > maxRadixTreePrefixScanCapacity {
+		t.Fatalf("ItemsWithPrefix(hot:) capacity = %d, want at most %d", cap(items), maxRadixTreePrefixScanCapacity)
+	}
+
+	snapshot := tree.Snapshot()
+	if len(snapshot.Items) != 201 {
+		t.Fatalf("Snapshot() items = %d, want 201", len(snapshot.Items))
+	}
+	if cap(snapshot.Items) != len(snapshot.Items) {
+		t.Fatalf("Snapshot() capacity = %d, want exact full-scan capacity %d", cap(snapshot.Items), len(snapshot.Items))
 	}
 }
 
