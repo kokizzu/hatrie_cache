@@ -2131,6 +2131,36 @@ func TestLevelDBStoreSavePreservesUnchangedColdReferenceRecordBytes(t *testing.T
 	}
 }
 
+func TestLevelDBStoreSaveOmitsUnrelatedNullSnapshotFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+	ht.mu.Lock()
+	delete(ht.keyStats, "key")
+	ht.mu.Unlock()
+	if err := store.Save(ht); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, ok, err := store.entryData("key")
+	if err != nil || !ok {
+		t.Fatalf("entryData(key) = %v/%v, want record", ok, err)
+	}
+	if want := []byte(`{"key":"key","type":"string","string":"value"}`); !bytes.Equal(got, want) {
+		t.Fatalf("entryData(key) = %q, want compact string record %q", got, want)
+	}
+	for _, field := range [][]byte{[]byte(`"map":null`), []byte(`"slice":null`), []byte(`"set":null`), []byte(`"priority_queue":null`)} {
+		if bytes.Contains(got, field) {
+			t.Fatalf("entryData(key) = %q, want no unrelated null field %q", got, field)
+		}
+	}
+}
+
 func TestLevelDBDiffBatchSkipsUnchangedEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	store, err := OpenLevelDBStore(path)

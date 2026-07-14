@@ -405,19 +405,7 @@ func (ht *HatTrie) writeSnapshotBytesEntryJSONLocked(writer io.Writer, entry Ent
 	if err := writeSnapshotJSONField(writer, fieldPrefix, "type", "bytes", true); err != nil {
 		return err
 	}
-	if err := writeSnapshotBase64Field(writer, fieldPrefix, "bytes", reader, true); err != nil {
-		return err
-	}
-	if err := writeSnapshotJSONField(writer, fieldPrefix, "map", nil, true); err != nil {
-		return err
-	}
-	if err := writeSnapshotJSONField(writer, fieldPrefix, "slice", nil, true); err != nil {
-		return err
-	}
-	if err := writeSnapshotJSONField(writer, fieldPrefix, "set", nil, true); err != nil {
-		return err
-	}
-	if err := writeSnapshotJSONField(writer, fieldPrefix, "priority_queue", nil, expiresAt != nil || stats != nil); err != nil {
+	if err := writeSnapshotBase64Field(writer, fieldPrefix, "bytes", reader, expiresAt != nil || stats != nil); err != nil {
 		return err
 	}
 	if expiresAt != nil {
@@ -432,6 +420,11 @@ func (ht *HatTrie) writeSnapshotBytesEntryJSONLocked(writer io.Writer, entry Ent
 	}
 	_, err := io.WriteString(writer, prefix+"}")
 	return err
+}
+
+type snapshotEntryJSONField struct {
+	name  string
+	value interface{}
 }
 
 func writeSnapshotJSONField(writer io.Writer, prefix string, name string, value interface{}, comma bool) error {
@@ -482,103 +475,195 @@ func writeSnapshotEntryFieldsJSON(writer io.Writer, entry snapshotEntry, prefix 
 		return err
 	}
 	fieldPrefix := prefix + "  "
-	first := true
-	writeField := func(name string, value interface{}) error {
-		return writeSnapshotIndentedJSONField(writer, fieldPrefix, name, value, &first)
-	}
-	writeOptionalField := func(ok bool, name string, value interface{}) error {
-		if !ok {
-			return nil
+	fields := snapshotEntryJSONFields(entry)
+	for idx, field := range fields {
+		if idx > 0 {
+			if _, err := io.WriteString(writer, ",\n"); err != nil {
+				return err
+			}
 		}
-		return writeField(name, value)
-	}
-
-	if err := writeField("key", entry.Key); err != nil {
-		return err
-	}
-	if err := writeField("type", entry.Type); err != nil {
-		return err
-	}
-	if entry.Counter != 0 {
-		if err := writeField("counter", entry.Counter); err != nil {
+		if err := writeSnapshotIndentedJSONField(writer, fieldPrefix, field.name, field.value); err != nil {
 			return err
 		}
-	}
-	if entry.String != "" {
-		if err := writeField("string", entry.String); err != nil {
-			return err
-		}
-	}
-	if entry.Bytes != "" {
-		if err := writeField("bytes", entry.Bytes); err != nil {
-			return err
-		}
-	}
-	if err := writeField("map", entry.Map); err != nil {
-		return err
-	}
-	if err := writeField("slice", entry.Slice); err != nil {
-		return err
-	}
-	if err := writeField("set", entry.Set); err != nil {
-		return err
-	}
-	if err := writeField("priority_queue", entry.PriorityQueue); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.BloomFilter != nil, "bloom_filter", entry.BloomFilter); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.CountMinSketch != nil, "count_min_sketch", entry.CountMinSketch); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.HyperLogLog != nil, "hyperloglog", entry.HyperLogLog); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.TopK != nil, "top_k", entry.TopK); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.CuckooFilter != nil, "cuckoo_filter", entry.CuckooFilter); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.RoaringBitmap != nil, "roaring_bitmap", entry.RoaringBitmap); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.QuantileSketch != nil, "quantile_sketch", entry.QuantileSketch); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.FenwickTree != nil, "fenwick_tree", entry.FenwickTree); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.SparseBitset != nil, "sparse_bitset", entry.SparseBitset); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.ReservoirSample != nil, "reservoir_sample", entry.ReservoirSample); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.XorFilter != nil, "xor_filter", entry.XorFilter); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.RadixTree != nil, "radix_tree", entry.RadixTree); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.ExpiresAt != nil, "expires_at", entry.ExpiresAt); err != nil {
-		return err
-	}
-	if err := writeOptionalField(entry.Stats != nil, "stats", entry.Stats); err != nil {
-		return err
 	}
 	_, err := io.WriteString(writer, "\n"+prefix+"}")
 	return err
 }
 
-func writeSnapshotIndentedJSONField(writer io.Writer, prefix string, name string, value interface{}, first *bool) error {
-	if !*first {
-		if _, err := io.WriteString(writer, ",\n"); err != nil {
-			return err
+type snapshotEntryCompactJSON struct {
+	Key             string                   `json:"key"`
+	Type            string                   `json:"type"`
+	Counter         *int32                   `json:"counter,omitempty"`
+	String          *string                  `json:"string,omitempty"`
+	Bytes           *string                  `json:"bytes,omitempty"`
+	Map             *Map                     `json:"map,omitempty"`
+	Slice           *Slice                   `json:"slice,omitempty"`
+	Set             *Set                     `json:"set,omitempty"`
+	PriorityQueue   *[]priorityQueueItem     `json:"priority_queue,omitempty"`
+	BloomFilter     *bloomFilterSnapshot     `json:"bloom_filter,omitempty"`
+	CountMinSketch  *countMinSketchSnapshot  `json:"count_min_sketch,omitempty"`
+	HyperLogLog     *hyperLogLogSnapshot     `json:"hyperloglog,omitempty"`
+	TopK            *topKSnapshot            `json:"top_k,omitempty"`
+	CuckooFilter    *cuckooFilterSnapshot    `json:"cuckoo_filter,omitempty"`
+	RoaringBitmap   *roaringBitmapSnapshot   `json:"roaring_bitmap,omitempty"`
+	QuantileSketch  *quantileSketchSnapshot  `json:"quantile_sketch,omitempty"`
+	FenwickTree     *fenwickTreeSnapshot     `json:"fenwick_tree,omitempty"`
+	SparseBitset    *sparseBitsetSnapshot    `json:"sparse_bitset,omitempty"`
+	ReservoirSample *reservoirSampleSnapshot `json:"reservoir_sample,omitempty"`
+	XorFilter       *xorFilterSnapshot       `json:"xor_filter,omitempty"`
+	RadixTree       *radixTreeSnapshot       `json:"radix_tree,omitempty"`
+	ExpiresAt       *time.Time               `json:"expires_at,omitempty"`
+	Stats           *KeyStats                `json:"stats,omitempty"`
+}
+
+func compactSnapshotEntryJSON(entry snapshotEntry) snapshotEntryCompactJSON {
+	out := snapshotEntryCompactJSON{
+		Key:       entry.Key,
+		Type:      entry.Type,
+		ExpiresAt: entry.ExpiresAt,
+		Stats:     entry.Stats,
+	}
+	switch entry.Type {
+	case "counter":
+		if entry.Counter != 0 {
+			out.Counter = &entry.Counter
+		}
+	case "string":
+		if entry.String != "" {
+			out.String = &entry.String
+		}
+	case "bytes":
+		if entry.Bytes != "" {
+			out.Bytes = &entry.Bytes
+		}
+	case "map":
+		out.Map = &entry.Map
+	case "slice":
+		out.Slice = &entry.Slice
+	case "set":
+		out.Set = &entry.Set
+	case "priority_queue":
+		out.PriorityQueue = &entry.PriorityQueue
+	case "bloom_filter":
+		out.BloomFilter = entry.BloomFilter
+	case "count_min_sketch":
+		out.CountMinSketch = entry.CountMinSketch
+	case "hyperloglog":
+		out.HyperLogLog = entry.HyperLogLog
+	case "top_k":
+		out.TopK = entry.TopK
+	case "cuckoo_filter":
+		out.CuckooFilter = entry.CuckooFilter
+	case "roaring_bitmap":
+		out.RoaringBitmap = entry.RoaringBitmap
+	case "quantile_sketch":
+		out.QuantileSketch = entry.QuantileSketch
+	case "fenwick_tree":
+		out.FenwickTree = entry.FenwickTree
+	case "sparse_bitset":
+		out.SparseBitset = entry.SparseBitset
+	case "reservoir_sample":
+		out.ReservoirSample = entry.ReservoirSample
+	case "xor_filter":
+		out.XorFilter = entry.XorFilter
+	case "radix_tree":
+		out.RadixTree = entry.RadixTree
+	}
+	return out
+}
+
+func marshalSnapshotEntryJSON(entry snapshotEntry) ([]byte, error) {
+	return json.Marshal(compactSnapshotEntryJSON(entry))
+}
+
+func snapshotEntryJSONFields(entry snapshotEntry) []snapshotEntryJSONField {
+	fields := []snapshotEntryJSONField{
+		{name: "key", value: entry.Key},
+		{name: "type", value: entry.Type},
+	}
+	add := func(name string, value interface{}) {
+		fields = append(fields, snapshotEntryJSONField{name: name, value: value})
+	}
+	switch entry.Type {
+	case "counter":
+		if entry.Counter != 0 {
+			add("counter", entry.Counter)
+		}
+	case "string":
+		if entry.String != "" {
+			add("string", entry.String)
+		}
+	case "bytes":
+		if entry.Bytes != "" {
+			add("bytes", entry.Bytes)
+		}
+	case "map":
+		add("map", entry.Map)
+	case "slice":
+		add("slice", entry.Slice)
+	case "set":
+		add("set", entry.Set)
+	case "priority_queue":
+		add("priority_queue", entry.PriorityQueue)
+	case "bloom_filter":
+		if entry.BloomFilter != nil {
+			add("bloom_filter", entry.BloomFilter)
+		}
+	case "count_min_sketch":
+		if entry.CountMinSketch != nil {
+			add("count_min_sketch", entry.CountMinSketch)
+		}
+	case "hyperloglog":
+		if entry.HyperLogLog != nil {
+			add("hyperloglog", entry.HyperLogLog)
+		}
+	case "top_k":
+		if entry.TopK != nil {
+			add("top_k", entry.TopK)
+		}
+	case "cuckoo_filter":
+		if entry.CuckooFilter != nil {
+			add("cuckoo_filter", entry.CuckooFilter)
+		}
+	case "roaring_bitmap":
+		if entry.RoaringBitmap != nil {
+			add("roaring_bitmap", entry.RoaringBitmap)
+		}
+	case "quantile_sketch":
+		if entry.QuantileSketch != nil {
+			add("quantile_sketch", entry.QuantileSketch)
+		}
+	case "fenwick_tree":
+		if entry.FenwickTree != nil {
+			add("fenwick_tree", entry.FenwickTree)
+		}
+	case "sparse_bitset":
+		if entry.SparseBitset != nil {
+			add("sparse_bitset", entry.SparseBitset)
+		}
+	case "reservoir_sample":
+		if entry.ReservoirSample != nil {
+			add("reservoir_sample", entry.ReservoirSample)
+		}
+	case "xor_filter":
+		if entry.XorFilter != nil {
+			add("xor_filter", entry.XorFilter)
+		}
+	case "radix_tree":
+		if entry.RadixTree != nil {
+			add("radix_tree", entry.RadixTree)
 		}
 	}
-	*first = false
+	if entry.ExpiresAt != nil {
+		add("expires_at", entry.ExpiresAt)
+	}
+	if entry.Stats != nil {
+		add("stats", entry.Stats)
+	}
+	return fields
+}
+
+func writeSnapshotIndentedJSONField(writer io.Writer, prefix string, name string, value interface{}) error {
 	if _, err := fmt.Fprintf(writer, "%s%q: ", prefix, name); err != nil {
 		return err
 	}

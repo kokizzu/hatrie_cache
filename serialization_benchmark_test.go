@@ -47,7 +47,7 @@ func benchmarkCommandWireBytes(b *testing.B, payload CacheCommandRequest, format
 }
 
 func benchmarkCommandWirePayload() CacheCommandRequest {
-	entry := `{"key":"session:1","type":"string","string":"` + strings.Repeat("active-user-", 256) + `","map":null,"slice":null,"set":null,"priority_queue":null}`
+	entry := `{"key":"session:1","type":"string","string":"` + strings.Repeat("active-user-", 256) + `"}`
 	return CacheCommandRequest{
 		Command: "INTERNALSET",
 		Key:     "session:1",

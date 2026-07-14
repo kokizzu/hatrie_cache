@@ -524,27 +524,47 @@ func TestWriteJSONFileAtomicStreamsAndCleansTemporaryFileOnEncodeError(t *testin
 	assertNoAtomicTempFiles(t, dir, "data.json")
 }
 
-func TestWriteSnapshotEntryFieldsJSONPreservesPrefixedMarshalIndentLayout(t *testing.T) {
+func TestWriteSnapshotEntryFieldsJSONOmitsUnrelatedNullFields(t *testing.T) {
 	value := snapshotEntry{
-		Key:  "profile",
-		Type: "map",
-		Map:  Map{"name": "ivi", "age": json.Number("32")},
-	}
-	expected, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		t.Fatalf("MarshalIndent() error = %v", err)
+		Key:    "profile",
+		Type:   "string",
+		String: "ivi",
 	}
 
 	var buf bytes.Buffer
 	if err := writeSnapshotEntryFieldsJSON(&buf, value, "    "); err != nil {
 		t.Fatalf("writeSnapshotEntryFieldsJSON() error = %v", err)
 	}
-	want := "    " + strings.ReplaceAll(string(expected), "\n", "\n    ")
+	want := "    {\n      \"key\": \"profile\",\n      \"type\": \"string\",\n      \"string\": \"ivi\"\n    }"
 	if got := buf.String(); got != want {
 		t.Fatalf("writeSnapshotEntryFieldsJSON() = %q, want %q", got, want)
 	}
+	for _, field := range []string{"map", "slice", "set", "priority_queue"} {
+		if strings.Contains(buf.String(), field) {
+			t.Fatalf("writeSnapshotEntryFieldsJSON() = %q, want no unrelated %s field", buf.String(), field)
+		}
+	}
 	if strings.HasSuffix(buf.String(), "\n") {
 		t.Fatalf("writeSnapshotEntryFieldsJSON() added trailing newline: %q", buf.String())
+	}
+}
+
+func TestMarshalSnapshotEntryJSONOmitsUnrelatedNullFields(t *testing.T) {
+	data, err := marshalSnapshotEntryJSON(snapshotEntry{
+		Key:    "profile",
+		Type:   "string",
+		String: "ivi",
+	})
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryJSON() error = %v", err)
+	}
+	if got, want := string(data), `{"key":"profile","type":"string","string":"ivi"}`; got != want {
+		t.Fatalf("marshalSnapshotEntryJSON() = %q, want %q", got, want)
+	}
+	for _, field := range []string{"map", "slice", "set", "priority_queue"} {
+		if bytes.Contains(data, []byte(field)) {
+			t.Fatalf("marshalSnapshotEntryJSON() = %q, want no unrelated %s field", data, field)
+		}
 	}
 }
 

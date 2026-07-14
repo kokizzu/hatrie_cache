@@ -12,8 +12,6 @@ import (
 	"sync"
 	"time"
 
-	json "github.com/goccy/go-json"
-
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -754,7 +752,7 @@ func (trie *HatTrie) levelDBEntryDataForStoreLocked(entry Entry, currentStore *L
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(snapshotEntry)
+	return marshalSnapshotEntryJSON(snapshotEntry)
 }
 
 func decodeLevelDBEntry(data []byte) (snapshotEntry, error) {
