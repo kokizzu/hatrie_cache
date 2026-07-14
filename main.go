@@ -931,10 +931,31 @@ func (ds *DiskStorage) Put(idx int32, value []byte) error {
 	return nil
 }
 
+func (ds *DiskStorage) PutStream(idx int32, write func(io.Writer) error) error {
+	if idx < 0 || int(idx) >= len(ds.paths) {
+		return nil
+	}
+	if err := writeFileAtomicStream(ds.ensurePath(idx), write); err != nil {
+		return err
+	}
+	ds.reusables.Use(idx)
+	return nil
+}
+
 func (ds *DiskStorage) Append(value []byte) (int32, error) {
 	idx := int32(len(ds.paths))
 	path := ds.pathFor(idx)
 	if err := writeFileAtomic(path, value); err != nil {
+		return 0, err
+	}
+	ds.paths = append(ds.paths, path)
+	return idx, nil
+}
+
+func (ds *DiskStorage) AppendStream(write func(io.Writer) error) (int32, error) {
+	idx := int32(len(ds.paths))
+	path := ds.pathFor(idx)
+	if err := writeFileAtomicStream(path, write); err != nil {
 		return 0, err
 	}
 	ds.paths = append(ds.paths, path)
@@ -950,6 +971,17 @@ func (ds *DiskStorage) Add(value []byte) (int32, error) {
 		return idx, nil
 	}
 	return ds.Append(value)
+}
+
+func (ds *DiskStorage) AddStream(write func(io.Writer) error) (int32, error) {
+	if idx, ok := ds.reusables.Take(); ok {
+		if err := writeFileAtomicStream(ds.ensurePath(idx), write); err != nil {
+			ds.reusables.Mark(idx)
+			return 0, err
+		}
+		return idx, nil
+	}
+	return ds.AppendStream(write)
 }
 
 func (ds *DiskStorage) Get(idx int32) ([]byte, error) {

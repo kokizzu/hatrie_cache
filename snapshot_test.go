@@ -423,6 +423,37 @@ func TestSnapshotRoundTripRestoresLargeBytesToDisk(t *testing.T) {
 	}
 }
 
+func TestPrepareSnapshotBytesOperationStreamsLargePayload(t *testing.T) {
+	smallPayload := []byte("small")
+	small, err := prepareSnapshotBytesOperation(snapshotEntry{
+		Key:   "small",
+		Type:  "bytes",
+		Bytes: base64.StdEncoding.EncodeToString(smallPayload),
+	})
+	if err != nil {
+		t.Fatalf("prepareSnapshotBytesOperation(small) error = %v", err)
+	}
+	if !bytes.Equal(small.bytes, smallPayload) {
+		t.Fatalf("small operation bytes = %q, want %q", small.bytes, smallPayload)
+	}
+
+	largePayload := testPayload(DiskBytesThreshold + 1)
+	large, err := prepareSnapshotBytesOperation(snapshotEntry{
+		Key:   "large",
+		Type:  "bytes",
+		Bytes: base64.StdEncoding.EncodeToString(largePayload),
+	})
+	if err != nil {
+		t.Fatalf("prepareSnapshotBytesOperation(large) error = %v", err)
+	}
+	if large.bytes != nil {
+		t.Fatalf("large operation decoded %d bytes, want streaming encoded payload", len(large.bytes))
+	}
+	if !shouldStreamSnapshotBytes(large) {
+		t.Fatal("shouldStreamSnapshotBytes(large) = false, want true")
+	}
+}
+
 func TestLoadSnapshotSkipsExpiredEntries(t *testing.T) {
 	now := time.Unix(3000, 0)
 	expiredAt := now.Add(-time.Second)

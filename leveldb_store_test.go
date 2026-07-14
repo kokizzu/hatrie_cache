@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -371,6 +372,28 @@ func TestSnapshotOperationValueSizeSupportsPriorityQueue(t *testing.T) {
 	}
 	if size == 0 {
 		t.Fatal("snapshotOperationValueSize(priority_queue) = 0, want encoded size")
+	}
+}
+
+func TestSnapshotOperationValueSizeSupportsStreamingBytes(t *testing.T) {
+	payload := testPayload(DiskBytesThreshold + 1)
+	operation, err := prepareSnapshotBytesOperation(snapshotEntry{
+		Key:   "large",
+		Type:  "bytes",
+		Bytes: base64.StdEncoding.EncodeToString(payload),
+	})
+	if err != nil {
+		t.Fatalf("prepareSnapshotBytesOperation() error = %v", err)
+	}
+	if operation.bytes != nil {
+		t.Fatalf("operation decoded %d bytes, want streaming bytes", len(operation.bytes))
+	}
+	size, err := snapshotOperationValueSize(operation)
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(streaming bytes) error = %v", err)
+	}
+	if size != int64(len(payload)) {
+		t.Fatalf("snapshotOperationValueSize(streaming bytes) = %d, want %d", size, len(payload))
 	}
 }
 

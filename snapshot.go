@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -170,11 +171,35 @@ func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time, prepareOperat
 		}
 		return snapshotOperation{entry: entry}, true, nil
 	}
+	if entry.Type == "bytes" {
+		operation, err := prepareSnapshotBytesOperation(entry)
+		if err != nil {
+			return snapshotOperation{}, false, err
+		}
+		return operation, true, nil
+	}
 	operation, err := validateSnapshotEntry(entry)
 	if err != nil {
 		return snapshotOperation{}, false, err
 	}
 	return operation, true, nil
+}
+
+func prepareSnapshotBytesOperation(entry snapshotEntry) (snapshotOperation, error) {
+	if err := validateSnapshotEntryFields(entry, true); err != nil {
+		return snapshotOperation{}, err
+	}
+	operation := snapshotOperation{entry: entry}
+	size, ok := base64DecodedSize(entry.Bytes)
+	if ok && size > DiskBytesThreshold {
+		return operation, nil
+	}
+	value, err := base64.StdEncoding.DecodeString(entry.Bytes)
+	if err != nil {
+		return snapshotOperation{}, err
+	}
+	operation.bytes = value
+	return operation, nil
 }
 
 func (ht *HatTrie) snapshot() (snapshotFile, error) {
@@ -759,12 +784,12 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 		idx := ht.raws.Add([]byte(entry.String))
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}
 	case "bytes":
-		next, err := ht.storeBytesValueLocked(old, operation.bytes)
+		next, handled, err := ht.storeSnapshotBytesValueLocked(old, operation)
 		if err != nil {
 			return HatValue{}, err
 		}
 		hval = next
-		oldBytesStorageHandled = old.IsBytesAtRaws()
+		oldBytesStorageHandled = handled
 	case "map":
 		idx := ht.maps.Add(entry.Map)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}
@@ -877,6 +902,51 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 	}
 	ht.restoreKeyStatsLocked(entry.Key, entry.Stats)
 	return hval, nil
+}
+
+func (ht *HatTrie) storeSnapshotBytesValueLocked(old HatValue, operation snapshotOperation) (HatValue, bool, error) {
+	if shouldStreamSnapshotBytes(operation) {
+		hval, err := ht.storeBase64BytesValueLocked(old, operation.entry.Bytes)
+		return hval, old.IsBytesAtRaws(), err
+	}
+	hval, err := ht.storeBytesValueLocked(old, operation.bytes)
+	return hval, old.IsBytesAtRaws(), err
+}
+
+func shouldStreamSnapshotBytes(operation snapshotOperation) bool {
+	if operation.entry.Type != "bytes" || operation.entry.Bytes == "" || operation.bytes != nil {
+		return false
+	}
+	size, ok := base64DecodedSize(operation.entry.Bytes)
+	return ok && size > DiskBytesThreshold
+}
+
+func (ht *HatTrie) storeBase64BytesValueLocked(old HatValue, encoded string) (HatValue, error) {
+	writeDecoded := func(writer io.Writer) error {
+		_, err := io.Copy(writer, base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded)))
+		return err
+	}
+
+	if old.IsBytesAtRaws() && old.OnDisk() {
+		if err := ht.disks.PutStream(old.Index, writeDecoded); err != nil {
+			return HatValue{}, err
+		}
+		return HatValue{
+			Index: old.Index,
+			Flags: DATAVALUE_TYPE_RAW_BYTES | (1 << DATAVALUE_DISK_BIT_SHIFT),
+		}, nil
+	}
+	idx, err := ht.disks.AddStream(writeDecoded)
+	if err != nil {
+		return HatValue{}, err
+	}
+	if old.IsBytesAtRaws() && !old.OnDisk() {
+		ht.raws.Del(old.Index)
+	}
+	return HatValue{
+		Index: idx,
+		Flags: DATAVALUE_TYPE_RAW_BYTES | (1 << DATAVALUE_DISK_BIT_SHIFT),
+	}, nil
 }
 
 func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]bool, now time.Time) {

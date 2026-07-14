@@ -221,6 +221,17 @@ func prepareLevelDBLoadEntry(entry snapshotEntry, now time.Time, policy LevelDBL
 		}
 		return levelDBLoadEntry{entry: entry}, true, nil
 	}
+	if entry.Type == "bytes" {
+		operation, err := prepareSnapshotBytesOperation(entry)
+		if err != nil {
+			return levelDBLoadEntry{}, false, err
+		}
+		return levelDBLoadEntry{
+			operation: operation,
+			entry:     entry,
+			reference: policy.HotValuesOnly && !levelDBShouldHotLoad(operation, now, policy),
+		}, true, nil
+	}
 	operation, err := validateSnapshotEntry(entry)
 	if err != nil {
 		return levelDBLoadEntry{}, false, err
@@ -404,6 +415,15 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 	case "string":
 		return int64(len(entry.String)), nil
 	case "bytes":
+		if operation.bytes == nil && entry.Bytes != "" {
+			if size, ok := base64DecodedSize(entry.Bytes); ok {
+				return size, nil
+			}
+			if err := validateBase64String(entry.Bytes); err != nil {
+				return 0, err
+			}
+			return 0, nil
+		}
 		return int64(len(operation.bytes)), nil
 	case "map":
 		data, err := json.Marshal(entry.Map)
