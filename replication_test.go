@@ -465,6 +465,57 @@ func TestHTTPReplicatorAsyncCloseIsIdempotentAndRejectsEnqueue(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAsyncCloseCancelsInFlightDelivery(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+	defer close(release)
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 1,
+		Timeout:        time.Minute,
+	})
+
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}
+	response := trie.ExecuteCommand(write)
+	if result := replicator.ReplicateCommand(context.Background(), trie, write, response); !result.Queued || result.Skipped {
+		t.Fatalf("enqueue result = %#v, want queued", result)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("async replication target was not called")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		replicator.Close()
+		replicator.Close()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("async replicator Close did not cancel in-flight delivery")
+	}
+	last := replicator.LastResult()
+	if last.Queue == nil || !last.Queue.Closed {
+		t.Fatalf("queue stats after canceled close = %#v, want closed queue", last.Queue)
+	}
+}
+
 func TestHTTPReplicatorUsesTopologyWhenElectionUnconfigured(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
