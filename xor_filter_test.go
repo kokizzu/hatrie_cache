@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -86,6 +87,29 @@ func TestXorFilterSnapshotValidationRejectsInvalidStagedKey(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not match value") {
 		t.Fatalf("validateXorFilterSnapshot() error = %v, want key mismatch", err)
+	}
+}
+
+func TestXorFilterSnapshotValidationRejectsInvalidBuiltShape(t *testing.T) {
+	tests := map[string]xorFilterSnapshot{
+		"nonempty block without items": {
+			ExpectedItems: 4,
+			Built:         true,
+			BlockLength:   2,
+			Fingerprints:  base64.StdEncoding.EncodeToString(make([]byte, 6)),
+		},
+		"block length mismatch": {
+			ExpectedItems: 4,
+			Built:         true,
+			Items:         2,
+			BlockLength:   xorFilterBlockLength(2) + 1,
+			Fingerprints:  base64.StdEncoding.EncodeToString(make([]byte, int(xorFilterBlockLength(2)+1)*3)),
+		},
+	}
+	for name, snapshot := range tests {
+		if err := validateXorFilterSnapshot(snapshot); err == nil {
+			t.Fatalf("validateXorFilterSnapshot(%s) error = nil, want invalid built shape error", name)
+		}
 	}
 }
 

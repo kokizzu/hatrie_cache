@@ -122,6 +122,12 @@ func validateXorFilterSnapshot(snapshot xorFilterSnapshot) error {
 			}
 			return nil
 		}
+		if snapshot.Items == 0 {
+			return errors.New("hatriecache: non-empty xor filter snapshot has no items")
+		}
+		if snapshot.BlockLength != xorFilterBlockLength(snapshot.Items) {
+			return errors.New("hatriecache: xor filter snapshot block length does not match item count")
+		}
 		if len(raw) != int(snapshot.BlockLength)*3 {
 			return errors.New("hatriecache: invalid xor filter fingerprint length")
 		}
