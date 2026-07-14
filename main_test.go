@@ -386,6 +386,59 @@ func TestBytesDiskThresholdAndReplacement(t *testing.T) {
 	}
 }
 
+func TestCheckedTypedGettersReturnValuesAndCopies(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertCounter("counter", -3)
+	ht.UpsertString("string", "value")
+	ht.UpsertMap("map", Map{"field": "value"})
+	ht.UpsertSlice("slice", Slice{Map{"field": "value"}})
+	ht.UpsertSet("set", Set{Map{"field": "value"}})
+
+	if got, ok, err := ht.GetCounterChecked("counter"); err != nil || !ok || got != -3 {
+		t.Fatalf("GetCounterChecked(counter) = %d/%v/%v, want -3/true/nil", got, ok, err)
+	}
+	if got, ok, err := ht.GetStringChecked("string"); err != nil || !ok || got != "value" {
+		t.Fatalf("GetStringChecked(string) = %q/%v/%v, want value/true/nil", got, ok, err)
+	}
+	if got, ok, err := ht.GetStringChecked("counter"); err != nil || !ok || got != "-3" {
+		t.Fatalf("GetStringChecked(counter) = %q/%v/%v, want -3/true/nil", got, ok, err)
+	}
+
+	gotMap, ok, err := ht.GetMapChecked("map")
+	if err != nil || !ok || !reflect.DeepEqual(gotMap, Map{"field": "value"}) {
+		t.Fatalf("GetMapChecked(map) = %#v/%v/%v, want stored map", gotMap, ok, err)
+	}
+	gotMap["field"] = "changed"
+	if again, _, _ := ht.GetMapChecked("map"); again["field"] != "value" {
+		t.Fatalf("GetMapChecked exposed internal map: %#v", again)
+	}
+
+	gotSlice, ok, err := ht.GetSliceChecked("slice")
+	if err != nil || !ok || gotSlice[0].(Map)["field"] != "value" {
+		t.Fatalf("GetSliceChecked(slice) = %#v/%v/%v, want stored slice", gotSlice, ok, err)
+	}
+	gotSlice[0].(Map)["field"] = "changed"
+	if again, _, _ := ht.GetSliceChecked("slice"); again[0].(Map)["field"] != "value" {
+		t.Fatalf("GetSliceChecked exposed internal slice: %#v", again)
+	}
+
+	gotSet, ok, err := ht.GetSetChecked("set")
+	if err != nil || !ok || gotSet[0].(Map)["field"] != "value" {
+		t.Fatalf("GetSetChecked(set) = %#v/%v/%v, want stored set", gotSet, ok, err)
+	}
+	gotSet[0].(Map)["field"] = "changed"
+	if again, _, _ := ht.GetSetChecked("set"); again[0].(Map)["field"] != "value" {
+		t.Fatalf("GetSetChecked exposed internal set: %#v", again)
+	}
+
+	if _, ok, err := ht.GetCounterChecked("missing"); err != nil || ok {
+		t.Fatalf("GetCounterChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
+	}
+	if _, ok, err := ht.GetMapChecked("string"); err != nil || ok {
+		t.Fatalf("GetMapChecked(wrong type) ok/error = %v/%v, want false/nil", ok, err)
+	}
+}
+
 func TestBytesCheckedDiskWriteFailureDoesNotMutate(t *testing.T) {
 	ht := newTestTrie(t)
 	largeValue := testPayload(DiskBytesThreshold + 1)

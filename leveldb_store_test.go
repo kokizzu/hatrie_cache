@@ -672,8 +672,12 @@ func TestHydrateLevelDBReferencesReportsClosedStore(t *testing.T) {
 func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
+	source.UpsertCounter("counter", 7)
 	source.UpsertString("cold", "value")
 	source.UpsertBytes("bytes", []byte("payload"))
+	source.UpsertMap("map", Map{"field": "value"})
+	source.UpsertSlice("slice", Slice{"value"})
+	source.UpsertSet("set", Set{"value"})
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -693,6 +697,12 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if hval, err := loaded.GetChecked("cold"); !hval.Empty() || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("GetChecked(cold closed ref) = %+v/%v, want empty/ErrLevelDBStoreClosed", hval, err)
 	}
+	if got, ok, err := loaded.GetCounterChecked("counter"); got != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetCounterChecked(counter closed ref) = %d/%v/%v, want 0/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetStringChecked("cold"); got != "" || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetStringChecked(cold closed ref) = %q/%v/%v, want empty/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if hval := loaded.Get("cold"); !hval.Empty() {
 		t.Fatalf("legacy Get(cold closed ref) = %+v, want empty", hval)
 	}
@@ -702,13 +712,25 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if got, err := loaded.GetBytesChecked("bytes"); got != nil || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("GetBytesChecked(bytes closed ref) = %q/%v, want nil/ErrLevelDBStoreClosed", got, err)
 	}
+	if got, ok, err := loaded.GetMapChecked("map"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetMapChecked(map closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetMapJSON("map"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetMapJSON(map closed ref) = %q/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetSliceChecked(slice closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.GetSetChecked("set"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetSetChecked(set closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "cold"}); got.OK {
 		t.Fatalf("GET cold closed ref response = %#v, want error", got)
 	}
 
 	entries := loaded.Entries(true)
-	if len(entries) != 2 {
-		t.Fatalf("Entries(after closed ref reads) len = %d, want 2", len(entries))
+	if len(entries) != 6 {
+		t.Fatalf("Entries(after closed ref reads) len = %d, want 6", len(entries))
 	}
 	for _, entry := range entries {
 		if !entry.Value.IsLevelDBReference() {

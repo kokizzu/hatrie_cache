@@ -2383,15 +2383,24 @@ func (ht *HatTrie) IncrementCounter(key string, by int32) {
 
 // GetCounter returns 0 if key is missing or does not hold a counter.
 func (ht *HatTrie) GetCounter(key string) int32 {
+	value, _, _ := ht.GetCounterChecked(key)
+	return value
+}
+
+func (ht *HatTrie) GetCounterChecked(key string) (int32, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
 	ht.recordReadLocked(hval.IsCounter(), key)
 	if hval.IsCounter() {
-		return hval.Index
+		return hval.Index, true, nil
 	}
-	return 0
+	return 0, false, nil
 }
 
 // UpsertString sets key to a string.
@@ -2466,18 +2475,27 @@ func (ht *HatTrie) PrependString(key string, str string) {
 
 // GetString returns an empty string if key is missing or not a string/counter.
 func (ht *HatTrie) GetString(key string) string {
+	value, _, _ := ht.GetStringChecked(key)
+	return value
+}
+
+func (ht *HatTrie) GetStringChecked(key string) (string, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return "", false, err
+	}
 	ht.recordReadLocked(hval.IsStringAtRaws() || hval.IsCounter(), key)
 	if hval.IsStringAtRaws() {
-		return string(ht.raws.array[hval.Index])
+		return string(ht.raws.array[hval.Index]), true, nil
 	}
 	if hval.IsCounter() {
-		return strconv.FormatInt(int64(hval.Index), 10)
+		return strconv.FormatInt(int64(hval.Index), 10), true, nil
 	}
-	return ""
+	return "", false, nil
 }
 
 // UpsertBytes sets key to a byte slice.
@@ -2621,8 +2639,11 @@ func (ht *HatTrie) UpsertMapJSON(key string, data []byte) error {
 }
 
 func (ht *HatTrie) GetMapJSON(key string) ([]byte, bool, error) {
-	value := ht.GetMap(key)
-	if value == nil {
+	value, ok, err := ht.GetMapChecked(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
 		return nil, false, nil
 	}
 	data, err := MarshalMapJSON(value)
@@ -2683,23 +2704,40 @@ func (ht *HatTrie) TakeMap(key, subkey string) interface{} {
 }
 
 func (ht *HatTrie) GetMap(key string) Map {
+	value, _, _ := ht.GetMapChecked(key)
+	return value
+}
+
+func (ht *HatTrie) GetMapChecked(key string) (Map, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	m, ok := ht.mapRefLocked(key)
+	m, ok, err := ht.mapRefLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	ht.recordReadLocked(ok, key)
 	if !ok {
-		return nil
+		return nil, false, nil
 	}
-	return cloneMap(m)
+	return cloneMap(m), true, nil
 }
 
 func (ht *HatTrie) mapRefLocked(key string) (Map, bool) {
-	hval := ht.getLocked(key)
-	if hval.IsMap() {
-		return ht.maps.array[hval.Index], true
+	m, ok, _ := ht.mapRefLockedChecked(key)
+	return m, ok
+}
+
+func (ht *HatTrie) mapRefLockedChecked(key string) (Map, bool, error) {
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		return nil, false, err
 	}
-	return nil, false
+	if hval.IsMap() {
+		return ht.maps.array[hval.Index], true, nil
+	}
+	return nil, false, nil
 }
 
 func (ht *HatTrie) UpsertSlice(key string, val Slice) {
@@ -2811,15 +2849,25 @@ func (ht *HatTrie) TailSlice(key string) interface{} {
 }
 
 func (ht *HatTrie) GetSlice(key string) Slice {
+	value, _, _ := ht.GetSliceChecked(key)
+	return value
+}
+
+func (ht *HatTrie) GetSliceChecked(key string) (Slice, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	dq, ok := ht.sliceRefLocked(key)
-	ht.recordReadLocked(ok, key)
-	if !ok {
-		return nil
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
 	}
-	return dq.Slice()
+	if !hval.IsSlice() {
+		ht.recordReadLocked(false, key)
+		return nil, false, nil
+	}
+	ht.recordReadLocked(true, key)
+	return ht.slices.array[hval.Index].Slice(), true, nil
 }
 
 func (ht *HatTrie) sliceRefLocked(key string) (*deque, bool) {
@@ -2967,16 +3015,25 @@ func (ht *HatTrie) HasSetChecked(key string, val interface{}) (bool, error) {
 }
 
 func (ht *HatTrie) GetSet(key string) Set {
+	value, _, _ := ht.GetSetChecked(key)
+	return value
+}
+
+func (ht *HatTrie) GetSetChecked(key string) (Set, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsSet() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.sets.array[hval.Index].Values()
+	return ht.sets.array[hval.Index].Values(), true, nil
 }
 
 func cloneBytes(value []byte) []byte {
