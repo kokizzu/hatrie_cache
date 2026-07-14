@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -341,12 +342,12 @@ func postCommandValue(ctx context.Context, client *http.Client, addr string, req
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", contentType)
 	req.Header.Set("Content-Type", contentType)
 	if contentEncoding != "" {
 		req.Header.Set("Content-Encoding", contentEncoding)
 	}
-	return doAndCopy(client, req, stdout)
+	return doCommandAndCopy(client, req, stdout)
 }
 
 func postJSONReaderWithEncoding(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, contentEncoding string, stdout io.Writer) error {
@@ -442,6 +443,49 @@ func doAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
 		return fmt.Errorf("server returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 	return copyAndEnsureTrailingNewline(stdout, resp.Body)
+}
+
+func doCommandAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer drainAndCloseResponse(resp.Body)
+
+	contentType := resp.Header.Get("Content-Type")
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, err := readErrorBody(resp.Body)
+		if err != nil {
+			return err
+		}
+		message := strings.TrimSpace(string(body))
+		if decoded, decodeErr := hatriecache.DecodeCommandResponseWire(bytes.NewReader(body), contentType, maxErrorBodyBytes); decodeErr == nil {
+			if data, marshalErr := jsonwire.Marshal(decoded); marshalErr == nil {
+				message = string(data)
+			}
+		}
+		return fmt.Errorf("server returned %s: %s", resp.Status, message)
+	}
+	response, err := hatriecache.DecodeCommandResponseWire(resp.Body, contentType, maxErrorBodyBytes)
+	if err != nil {
+		if unsupportedCommandResponseContentType(err) {
+			return copyAndEnsureTrailingNewline(stdout, resp.Body)
+		}
+		return err
+	}
+	data, err := jsonwire.Marshal(response)
+	if err != nil {
+		return err
+	}
+	if _, err := stdout.Write(data); err != nil {
+		return err
+	}
+	_, err = stdout.Write([]byte{'\n'})
+	return err
+}
+
+func unsupportedCommandResponseContentType(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "unsupported command response content type")
 }
 
 func endpoint(addr string, path string) string {

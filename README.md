@@ -373,11 +373,11 @@ make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1
 make cli ARGS='snapshot'
 ```
 
-The CLI `command` subcommand uses `-wire-format auto` by default, which sends
-protobuf request bodies when the command payload can be represented as protobuf
-and falls back to JSON for complex values. Use `-wire-format json` to force the
-previous JSON request body format or `-wire-format protobuf` to require
-protobuf-only encoding.
+The CLI `command` subcommand uses `-wire-format auto` by default, which uses
+protobuf request/response bodies when the command payload can be represented as
+protobuf and falls back to JSON requests for complex values. CLI output remains
+JSON. Use `-wire-format json` to force the previous JSON request/response body
+format or `-wire-format protobuf` to require protobuf-only request encoding.
 
 Example sharded topology with 1024 virtual buckets:
 

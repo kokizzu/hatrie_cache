@@ -467,8 +467,8 @@ func TestRunCommandPostsProtobufByDefault(t *testing.T) {
 		if got := r.Header.Get("Content-Type"); got != "application/x-protobuf" {
 			t.Fatalf("Content-Type = %q, want application/x-protobuf", got)
 		}
-		if got := r.Header.Get("Accept"); got != "application/json" {
-			t.Fatalf("Accept = %q, want application/json", got)
+		if got := r.Header.Get("Accept"); got != "application/x-protobuf" {
+			t.Fatalf("Accept = %q, want application/x-protobuf", got)
 		}
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -477,7 +477,12 @@ func TestRunCommandPostsProtobufByDefault(t *testing.T) {
 		if err := proto.Unmarshal(data, &gotRequest); err != nil {
 			t.Fatalf("Unmarshal() error = %v", err)
 		}
-		w.Write([]byte(`{"ok":true,"message":"stored"}`))
+		response, err := proto.Marshal(&hatriecachev1.CommandResponse{Ok: true, Message: "stored"})
+		if err != nil {
+			t.Fatalf("Marshal(response) error = %v", err)
+		}
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.Write(response)
 	}))
 	defer server.Close()
 
@@ -503,6 +508,37 @@ func TestRunCommandPostsProtobufByDefault(t *testing.T) {
 	}
 }
 
+func TestRunCommandReportsProtobufErrorResponseAsJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "application/x-protobuf" {
+			t.Fatalf("Accept = %q, want application/x-protobuf", got)
+		}
+		response, err := proto.Marshal(&hatriecachev1.CommandResponse{Ok: false, Message: "not leader"})
+		if err != nil {
+			t.Fatalf("Marshal(response) error = %v", err)
+		}
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusConflict)
+		w.Write(response)
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "SETSTR",
+		"-key", "name",
+		"-value", "ivi",
+	}, stdout, &bytes.Buffer{}, server.Client())
+	if err == nil || !strings.Contains(err.Error(), `server returned 409 Conflict: {"ok":false,"message":"not leader"}`) {
+		t.Fatalf("run(command conflict) error = %v, want decoded protobuf command response", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout len = %d, want empty on command error", stdout.Len())
+	}
+}
+
 func TestRunCommandPostsJSONWhenRequested(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +547,9 @@ func TestRunCommandPostsJSONWhenRequested(t *testing.T) {
 		}
 		if got := r.Header.Get("Content-Type"); got != "application/json" {
 			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("Accept = %q, want application/json", got)
 		}
 		if got := r.Header.Get("Content-Encoding"); got != "" {
 			t.Fatalf("Content-Encoding = %q, want empty for small command", got)

@@ -189,6 +189,11 @@ func decodeCommandResponseWire(reader io.Reader, contentType string, limit int64
 	return decodeCommandResponseJSON(reader, limit)
 }
 
+// DecodeCommandResponseWire decodes an HTTP command API response body.
+func DecodeCommandResponseWire(reader io.Reader, contentType string, limit int64) (CacheCommandResponse, error) {
+	return decodeCommandResponseWire(reader, contentType, limit)
+}
+
 func decodeCommandResponseJSON(reader io.Reader, limit int64) (CacheCommandResponse, error) {
 	limited := &io.LimitedReader{R: reader, N: limit + 1}
 	decoder := jsonwire.NewDecoder(limited)
