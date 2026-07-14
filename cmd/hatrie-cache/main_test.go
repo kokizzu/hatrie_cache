@@ -866,6 +866,53 @@ func TestJournalPullerAppliesAndPersistsState(t *testing.T) {
 	}
 }
 
+func TestJournalPullerStopCancelsInFlightPull(t *testing.T) {
+	entered := make(chan struct{})
+	released := make(chan struct{})
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-r.Context().Done()
+		close(released)
+	}))
+	defer source.Close()
+
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	journal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	stop := startJournalPuller(context.Background(), ht, journal, journalPullerConfig{
+		Source:     source.URL,
+		Limit:      10,
+		MaxBatches: 1,
+	}, &bytes.Buffer{})
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("journal pull source was not called")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("journal puller stop did not cancel in-flight pull")
+	}
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("journal pull source did not observe request cancellation")
+	}
+}
+
 func TestJournalPullStateRejectsSourceMismatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pull-state.json")
 	if err := saveJournalPullState(path, "http://leader-a", 7); err != nil {

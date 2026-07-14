@@ -546,10 +546,11 @@ func startJournalPuller(ctx context.Context, trie *hatriecache.HatTrie, journal 
 		return func() {}
 	}
 
+	pullCtx, cancelPull := context.WithCancel(ctx)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	pull := func() {
-		result, err := pullJournalOnce(ctx, trie, journal, cfg)
+		result, err := pullJournalOnce(pullCtx, trie, journal, cfg)
 		if err != nil {
 			fmt.Fprintf(stderr, "pull journal: %v\n", err)
 			return
@@ -560,8 +561,9 @@ func startJournalPuller(ctx context.Context, trie *hatriecache.HatTrie, journal 
 	}
 	go func() {
 		defer close(stopped)
+		defer cancelPull()
 		select {
-		case <-ctx.Done():
+		case <-pullCtx.Done():
 			return
 		case <-done:
 			return
@@ -577,14 +579,21 @@ func startJournalPuller(ctx context.Context, trie *hatriecache.HatTrie, journal 
 			select {
 			case <-ticker.C:
 				pull()
-			case <-ctx.Done():
+			case <-pullCtx.Done():
 				return
 			case <-done:
 				return
 			}
 		}
 	}()
-	return periodicStopper(done, stopped)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancelPull()
+			close(done)
+			<-stopped
+		})
+	}
 }
 
 func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, cfg journalPullerConfig) (hatriecache.CommandJournalPullResult, error) {
