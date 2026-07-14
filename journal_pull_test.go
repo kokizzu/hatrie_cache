@@ -70,6 +70,66 @@ func TestApplyCommandJournalTailRejectsSequenceGap(t *testing.T) {
 	}
 }
 
+func TestApplyCommandJournalTailRejectsInternalSequenceGapWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := applyCommandJournalTail(ht, journal, "source", 0, CommandJournalTail{
+		LastSequence: 3,
+		Entries: []CommandJournalRecord{
+			{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			{Sequence: 3, Request: CacheCommandRequest{Command: "SETSTR", Key: "city", Value: "paris"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not continue after 1") {
+		t.Fatalf("applyCommandJournalTail(internal gap) error = %v, want sequence gap error", err)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 0 {
+		t.Fatalf("internal gap result = %#v, want no progress after sequence 0", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("internal gap applied first value = %q, want empty", got)
+	}
+	if got := ht.GetString("city"); got != "" {
+		t.Fatalf("internal gap applied second value = %q, want empty", got)
+	}
+	if entries, err := readCommandJournalEntries(journal.path); err != nil || len(entries) != 0 {
+		t.Fatalf("journal entries after internal gap = %#v/%v, want none", entries, err)
+	}
+}
+
+func TestApplyCommandJournalTailRejectsEntryPastLastSequenceWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := applyCommandJournalTail(ht, journal, "source", 0, CommandJournalTail{
+		LastSequence: 0,
+		Entries: []CommandJournalRecord{
+			{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds last sequence 0") {
+		t.Fatalf("applyCommandJournalTail(past last) error = %v, want last sequence error", err)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 0 || result.LastSequence != 0 {
+		t.Fatalf("past-last result = %#v, want no progress with last sequence 0", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("past-last tail applied value = %q, want empty", got)
+	}
+	if entries, err := readCommandJournalEntries(journal.path); err != nil || len(entries) != 0 {
+		t.Fatalf("journal entries after past-last tail = %#v/%v, want none", entries, err)
+	}
+}
+
 func TestApplyCommandJournalTailRejectsSequenceExhaustionWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
@@ -160,6 +220,45 @@ func TestPullCommandJournalReportsSequenceExhaustionAsBadGateway(t *testing.T) {
 	}
 	if got := ht.GetString("name"); got != "" {
 		t.Fatalf("exhausted pull applied value = %q, want empty", got)
+	}
+}
+
+func TestPullCommandJournalReportsEntryPastLastSequenceAsBadGateway(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := CommandJournalTail{
+			LastSequence: 0,
+			Entries: []CommandJournalRecord{
+				{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := PullCommandJournal(context.Background(), ht, journal, CommandJournalPullOptions{
+		Source:        source.URL,
+		AfterSequence: 0,
+		Limit:         10,
+	})
+	var pullErr *CommandJournalPullError
+	if !errors.As(err, &pullErr) || pullErr.Status != http.StatusBadGateway || !strings.Contains(err.Error(), "exceeds last sequence 0") {
+		t.Fatalf("PullCommandJournal(past-last tail) error = %v/%#v, want 502 last sequence error", err, pullErr)
+	}
+	if result.Applied != 0 || result.AppliedThrough != 0 || result.LastSequence != 0 {
+		t.Fatalf("past-last pull result = %#v, want no progress with last sequence 0", result)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("past-last pull applied value = %q, want empty", got)
 	}
 }
 

@@ -117,14 +117,10 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 	if afterSequence < tail.CompactedThrough {
 		return result, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, tail.CompactedThrough)
 	}
+	if err := validateCommandJournalTailSequences(afterSequence, tail); err != nil {
+		return result, err
+	}
 	for _, entry := range tail.Entries {
-		nextSequence, err := nextCommandJournalPullSequence(result.AppliedThrough)
-		if err != nil {
-			return result, err
-		}
-		if entry.Sequence != nextSequence {
-			return result, fmt.Errorf("journal tail sequence %d does not continue after %d", entry.Sequence, result.AppliedThrough)
-		}
 		response := journal.ExecuteCommand(trie, entry.Request)
 		if !response.OK {
 			return result, fmt.Errorf("journal entry %d failed: %s", entry.Sequence, response.Message)
@@ -133,6 +129,24 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 		result.AppliedThrough = entry.Sequence
 	}
 	return result, nil
+}
+
+func validateCommandJournalTailSequences(afterSequence uint64, tail CommandJournalTail) error {
+	appliedThrough := afterSequence
+	for _, entry := range tail.Entries {
+		nextSequence, err := nextCommandJournalPullSequence(appliedThrough)
+		if err != nil {
+			return err
+		}
+		if entry.Sequence != nextSequence {
+			return fmt.Errorf("journal tail sequence %d does not continue after %d", entry.Sequence, appliedThrough)
+		}
+		if entry.Sequence > tail.LastSequence {
+			return fmt.Errorf("journal tail sequence %d exceeds last sequence %d", entry.Sequence, tail.LastSequence)
+		}
+		appliedThrough = entry.Sequence
+	}
+	return nil
 }
 
 func nextCommandJournalPullSequence(appliedThrough uint64) (uint64, error) {
