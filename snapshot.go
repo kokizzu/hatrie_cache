@@ -20,6 +20,9 @@ import (
 )
 
 const snapshotVersion = 1
+const defaultDeleteKeysNotInBatchSize = 1024
+
+var errDeleteKeysNotInPageFull = errors.New("hatriecache: delete missing keys page full")
 
 type SnapshotFormat string
 
@@ -1348,17 +1351,59 @@ func (ht *HatTrie) storeBase64BytesValueLocked(old HatValue, encoded string) (Ha
 }
 
 func (ht *HatTrie) deleteKeysNotInLocked(keep map[string]bool, now time.Time) {
-	var stale []Entry
-	_ = ht.scanEntriesWithPrefixAtLockedChecked("", false, now, func(entry Entry) error {
+	ht.deleteKeysNotInBatchesLocked(keep, now, defaultDeleteKeysNotInBatchSize)
+}
+
+func (ht *HatTrie) deleteKeysNotInBatchesLocked(keep map[string]bool, now time.Time, limit int) {
+	if limit <= 0 {
+		limit = 1
+	}
+
+	afterKey := ""
+	hasAfterKey := false
+	for {
+		page := ht.staleKeysNotInPageLocked(keep, now, afterKey, hasAfterKey, limit)
+		for _, entry := range page.entries {
+			ht.deleteKnownLocked(entry.Key, entry.Value)
+		}
+		if !page.hasMore {
+			return
+		}
+		afterKey = page.nextAfterKey
+		hasAfterKey = true
+	}
+}
+
+type staleKeysNotInPage struct {
+	entries      []Entry
+	nextAfterKey string
+	hasMore      bool
+}
+
+func (ht *HatTrie) staleKeysNotInPageLocked(keep map[string]bool, now time.Time, afterKey string, hasAfterKey bool, limit int) staleKeysNotInPage {
+	if limit <= 0 {
+		limit = 1
+	}
+	page := staleKeysNotInPage{entries: make([]Entry, 0, limit)}
+	err := ht.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
+		if hasAfterKey && entry.Key <= afterKey {
+			return nil
+		}
 		if _, ok := keep[entry.Key]; ok {
 			return nil
 		}
-		stale = append(stale, entry)
+		page.entries = append(page.entries, entry)
+		page.nextAfterKey = entry.Key
+		if len(page.entries) >= limit {
+			page.hasMore = true
+			return errDeleteKeysNotInPageFull
+		}
 		return nil
 	})
-	for _, entry := range stale {
-		ht.deleteKnownLocked(entry.Key, entry.Value)
+	if !errors.Is(err, errDeleteKeysNotInPageFull) {
+		page.hasMore = false
 	}
+	return page
 }
 
 func (ht *HatTrie) restoreRollbackOperationLocked(key string) (snapshotOperation, bool, error) {

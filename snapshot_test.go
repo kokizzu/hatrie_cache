@@ -906,6 +906,22 @@ func TestLoadSnapshotStreamsMissingKeyCleanup(t *testing.T) {
 	}
 }
 
+func TestDeleteKeysNotInBatchesHandlesEmptyKeyCursor(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("", "stale-empty")
+	ht.UpsertString("keep", "value")
+	ht.UpsertString("stale:1", "old")
+	ht.UpsertString("stale:2", "old")
+
+	ht.mu.Lock()
+	ht.deleteKeysNotInBatchesLocked(map[string]bool{"keep": true}, time.Time{}, 1)
+	ht.mu.Unlock()
+
+	if got := ht.Keys(true); !reflect.DeepEqual(got, []string{"keep"}) {
+		t.Fatalf("keys after batched missing-key cleanup = %#v, want keep only", got)
+	}
+}
+
 func TestLoadSnapshotCleansCreatedKeysAfterApplyFailure(t *testing.T) {
 	payload := testPayload(DiskBytesThreshold + 1)
 	encoded := base64.StdEncoding.EncodeToString(payload)
