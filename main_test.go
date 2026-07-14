@@ -3510,6 +3510,13 @@ func TestQuantileSketchSnapshotValidationRejectsCorruptPayload(t *testing.T) {
 		t.Fatal("validateQuantileSketchSnapshot(zero gap) error = nil, want error")
 	}
 
+	badRankSpan := snapshot
+	badRankSpan.Summary = append([]quantileSketchSample(nil), snapshot.Summary...)
+	badRankSpan.Summary[1].Delta = snapshot.Count
+	if err := validateQuantileSketchSnapshot(badRankSpan); err == nil {
+		t.Fatal("validateQuantileSketchSnapshot(rank span) error = nil, want error")
+	}
+
 	nonFinite := snapshot
 	nonFinite.Summary = append([]quantileSketchSample(nil), snapshot.Summary...)
 	nonFinite.Summary[0].Value = math.Inf(1)

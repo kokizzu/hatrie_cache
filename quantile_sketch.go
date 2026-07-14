@@ -90,6 +90,7 @@ func validateQuantileSketchSnapshot(snapshot quantileSketchSnapshot) error {
 	if uint64(len(snapshot.Summary)) > snapshot.Count {
 		return errors.New("hatriecache: quantile sketch snapshot has too many samples")
 	}
+	rankAllowance := quantileSketchRankAllowance(snapshot.Epsilon, snapshot.Count)
 	var gapTotal uint64
 	for idx, sample := range snapshot.Summary {
 		if !validQuantileSketchValue(sample.Value) {
@@ -106,6 +107,9 @@ func validateQuantileSketchSnapshot(snapshot quantileSketchSnapshot) error {
 		}
 		if sample.Delta > snapshot.Count || sample.Gap > snapshot.Count-gapTotal {
 			return errors.New("hatriecache: quantile sketch sample rank metadata is invalid")
+		}
+		if sample.Delta > rankAllowance || sample.Gap > rankAllowance-sample.Delta {
+			return errors.New("hatriecache: quantile sketch sample rank span exceeds allowed error")
 		}
 		gapTotal += sample.Gap
 	}
@@ -254,10 +258,14 @@ func (sketch quantileSketchData) estimateFromValue(quantile float64, value float
 }
 
 func (sketch quantileSketchData) rankAllowance() uint64 {
-	if sketch.count == 0 {
+	return quantileSketchRankAllowance(sketch.epsilon, sketch.count)
+}
+
+func quantileSketchRankAllowance(epsilon float64, count uint64) uint64 {
+	if count == 0 {
 		return 0
 	}
-	allowance := uint64(math.Floor(2 * sketch.epsilon * float64(sketch.count)))
+	allowance := uint64(math.Floor(2 * epsilon * float64(count)))
 	if allowance < 1 {
 		return 1
 	}
