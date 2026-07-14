@@ -140,6 +140,21 @@ func TestCommandJournalJSONFormatWritesPreviousLayout(t *testing.T) {
 	}
 }
 
+func TestCommandJournalJSONFormatRejectsOversizedRecordBeforeWrite(t *testing.T) {
+	_, err := marshalCommandJournalEntryJSONLimited(commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 1,
+		Request: CacheCommandRequest{
+			Command: "SETSTR",
+			Key:     "large",
+			Value:   strings.Repeat("x", 64),
+		},
+	}, 32)
+	if !errors.Is(err, errCommandJournalJSONRecordTooLarge) {
+		t.Fatalf("marshalCommandJournalEntryJSONLimited(oversized) error = %v, want record too large", err)
+	}
+}
+
 func TestCommandJournalBinaryPreservesDynamicValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

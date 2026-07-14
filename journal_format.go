@@ -48,9 +48,19 @@ func marshalCommandJournalEntry(entry commandJournalEntry, format CommandJournal
 }
 
 func marshalCommandJournalEntryJSON(entry commandJournalEntry) ([]byte, error) {
+	return marshalCommandJournalEntryJSONLimited(entry, maxCommandJournalJSONRecordBytes)
+}
+
+func marshalCommandJournalEntryJSONLimited(entry commandJournalEntry, limit int) ([]byte, error) {
+	if limit <= 0 {
+		return nil, errCommandJournalJSONRecordTooLarge
+	}
 	payload, err := json.Marshal(entry)
 	if err != nil {
 		return nil, err
+	}
+	if len(payload)+1 > limit {
+		return nil, errCommandJournalJSONRecordTooLarge
 	}
 	payload = append(payload, '\n')
 	return payload, nil
