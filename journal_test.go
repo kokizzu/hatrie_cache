@@ -176,6 +176,33 @@ func TestCommandJournalBinaryPreservesDynamicValues(t *testing.T) {
 	}
 }
 
+func TestCommandJournalBinaryEntryReaderDecodesPayloadAndCountsBytes(t *testing.T) {
+	want := commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 7,
+		Request: CacheCommandRequest{
+			Command: "PUTMAP",
+			Key:     "profile",
+			Pairs:   Map{"name": "ivi"},
+		},
+	}
+	raw, err := marshalCommandJournalEntry(want, CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntry(binary) error = %v", err)
+	}
+
+	got, bytesRead, complete, err := readCommandJournalEntry(bufio.NewReader(bytes.NewReader(raw)))
+	if err != nil || !complete {
+		t.Fatalf("readCommandJournalEntry(binary) = %#v/%d/%v/%v, want complete entry", got, bytesRead, complete, err)
+	}
+	if bytesRead != len(raw) {
+		t.Fatalf("binary journal bytesRead = %d, want %d", bytesRead, len(raw))
+	}
+	if got.Version != want.Version || got.Sequence != want.Sequence || !reflect.DeepEqual(got.Request, want.Request) {
+		t.Fatalf("binary journal entry = %#v, want %#v", got, want)
+	}
+}
+
 func TestCommandJournalIgnoresPartialBinaryTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)
@@ -226,9 +253,9 @@ func TestCommandJournalRejectsOversizedBinaryRecordBeforeAllocation(t *testing.T
 	writer := newBinaryFieldWriter(commandJournalBinaryMagic, len(commandJournalBinaryMagic)+binaryFieldMaxVarintLen64)
 	writer.writeUvarint(maxCommandJournalBinaryRecordBytes + 1)
 
-	_, _, _, err := readCommandJournalRecord(bufio.NewReader(bytes.NewReader(writer.bytes())))
+	_, _, _, err := readCommandJournalEntry(bufio.NewReader(bytes.NewReader(writer.bytes())))
 	if !errors.Is(err, errCommandJournalBinaryRecordTooLarge) {
-		t.Fatalf("readCommandJournalRecord(oversized binary) error = %v, want record too large", err)
+		t.Fatalf("readCommandJournalEntry(oversized binary) error = %v, want record too large", err)
 	}
 }
 

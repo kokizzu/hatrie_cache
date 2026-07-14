@@ -122,6 +122,7 @@ func scanSnapshotFileBinaryReader(reader *bufio.Reader, visit func(snapshotEntry
 		JournalSequence: journalSequence,
 	}
 
+	var data []byte
 	for {
 		size, err := binary.ReadUvarint(reader)
 		if errors.Is(err, io.EOF) {
@@ -133,7 +134,11 @@ func scanSnapshotFileBinaryReader(reader *bufio.Reader, visit func(snapshotEntry
 		if err := validateSnapshotBinaryRecordSize(size); err != nil {
 			return snapshotFileMetadata{}, err
 		}
-		data := make([]byte, int(size))
+		if int(size) > cap(data) {
+			data = make([]byte, int(size))
+		} else {
+			data = data[:int(size)]
+		}
 		if _, err := io.ReadFull(reader, data); err != nil {
 			return snapshotFileMetadata{}, err
 		}

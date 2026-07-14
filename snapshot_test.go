@@ -311,6 +311,43 @@ func TestSnapshotBinaryReaderRejectsTruncatedRecord(t *testing.T) {
 	}
 }
 
+func TestSnapshotBinaryReaderPreservesEntriesWhenReusingRecordBuffer(t *testing.T) {
+	var snapshot bytes.Buffer
+	header := newBinaryFieldWriter(snapshotBinaryMagic, len(snapshotBinaryMagic)+(2*binaryFieldMaxVarintLen64))
+	header.writeUvarint(uint64(snapshotVersion))
+	header.writeUvarint(0)
+	if _, err := snapshot.Write(header.bytes()); err != nil {
+		t.Fatalf("Write(header) error = %v", err)
+	}
+
+	first, err := marshalLevelDBEntry(snapshotEntry{Key: "a", Type: "string", String: strings.Repeat("x", 128)}, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(first) error = %v", err)
+	}
+	if err := writeSnapshotBinaryRecord(&snapshot, first); err != nil {
+		t.Fatalf("writeSnapshotBinaryRecord(first) error = %v", err)
+	}
+	second, err := marshalLevelDBEntry(snapshotEntry{Key: "b", Type: "string", String: "y"}, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(second) error = %v", err)
+	}
+	if err := writeSnapshotBinaryRecord(&snapshot, second); err != nil {
+		t.Fatalf("writeSnapshotBinaryRecord(second) error = %v", err)
+	}
+
+	var entries []snapshotEntry
+	_, err = scanSnapshotFileReader(bytes.NewReader(snapshot.Bytes()), func(entry snapshotEntry) error {
+		entries = append(entries, entry)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scanSnapshotFileReader(binary) error = %v", err)
+	}
+	if len(entries) != 2 || entries[0].Key != "a" || entries[0].String != strings.Repeat("x", 128) || entries[1].Key != "b" || entries[1].String != "y" {
+		t.Fatalf("binary snapshot entries = %#v, want preserved decoded entries", entries)
+	}
+}
+
 func TestSnapshotBinaryReaderRejectsOversizedRecordBeforeAllocation(t *testing.T) {
 	writer := newBinaryFieldWriter(snapshotBinaryMagic, len(snapshotBinaryMagic)+(3*binaryFieldMaxVarintLen64))
 	writer.writeUvarint(uint64(snapshotVersion))
