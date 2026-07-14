@@ -361,62 +361,88 @@ func (ht *HatTrie) UpsertQuantileSketch(key string, epsilon float64) error {
 }
 
 func (ht *HatTrie) AddQuantileSketch(key string, val float64, vals ...float64) QuantileEstimate {
+	estimate, _ := ht.AddQuantileSketchChecked(key, val, vals...)
+	return estimate
+}
+
+func (ht *HatTrie) AddQuantileSketchChecked(key string, val float64, vals ...float64) (QuantileEstimate, error) {
 	if !validQuantileSketchValues(val, vals...) {
-		return QuantileEstimate{}
+		return QuantileEstimate{}, errors.New("hatriecache: quantile sketch values must be finite numbers")
 	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return QuantileEstimate{}
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return QuantileEstimate{}, err
 	}
 	if hval.IsQuantileSketch() {
 		estimate := ht.quantileSketches.array[hval.Index].Add(val, vals...)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return estimate
+		return estimate, nil
 	}
 
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.quantileSketches.AddData(newDefaultQuantileSketchData())
 	estimate := ht.quantileSketches.array[idx].Add(val, vals...)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}.toValue()
 	ht.recordWriteLocked(key)
-	return estimate
+	return estimate, nil
 }
 
 func (ht *HatTrie) EstimateQuantileSketch(key string, quantile float64) (QuantileEstimate, bool) {
-	if math.IsNaN(quantile) || math.IsInf(quantile, 0) || quantile < 0 || quantile > 1 {
-		return QuantileEstimate{}, false
-	}
-
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.getLocked(key)
-	if !hval.IsQuantileSketch() {
-		ht.recordReadLocked(false, key)
-		return QuantileEstimate{}, false
-	}
-	estimate, ok := ht.quantileSketches.array[hval.Index].Estimate(quantile)
-	ht.recordReadLocked(ok, key)
+	estimate, ok, _ := ht.EstimateQuantileSketchChecked(key, quantile)
 	return estimate, ok
 }
 
-func (ht *HatTrie) QuantileSketchInfo(key string) (QuantileSketchInfo, bool) {
+func (ht *HatTrie) EstimateQuantileSketchChecked(key string, quantile float64) (QuantileEstimate, bool, error) {
+	if math.IsNaN(quantile) || math.IsInf(quantile, 0) || quantile < 0 || quantile > 1 {
+		return QuantileEstimate{}, false, errors.New("hatriecache: quantile must be between 0 and 1")
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return QuantileEstimate{}, false, err
+	}
 	if !hval.IsQuantileSketch() {
 		ht.recordReadLocked(false, key)
-		return QuantileSketchInfo{}, false
+		return QuantileEstimate{}, false, nil
+	}
+	estimate, ok := ht.quantileSketches.array[hval.Index].Estimate(quantile)
+	ht.recordReadLocked(ok, key)
+	return estimate, ok, nil
+}
+
+func (ht *HatTrie) QuantileSketchInfo(key string) (QuantileSketchInfo, bool) {
+	info, ok, _ := ht.QuantileSketchInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) QuantileSketchInfoChecked(key string) (QuantileSketchInfo, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return QuantileSketchInfo{}, false, err
+	}
+	if !hval.IsQuantileSketch() {
+		ht.recordReadLocked(false, key)
+		return QuantileSketchInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.quantileSketches.array[hval.Index].Info(), true
+	return ht.quantileSketches.array[hval.Index].Info(), true, nil
 }
 
 func quantileSketchEpsilonValue(value float64) (float64, error) {

@@ -3041,6 +3041,46 @@ func TestQuantileSketchOperations(t *testing.T) {
 	}
 }
 
+func TestCheckedQuantileSketchOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	estimate, err := ht.AddQuantileSketchChecked("latency", 10, 20, 30)
+	if err != nil || estimate.Count != 3 {
+		t.Fatalf("AddQuantileSketchChecked(latency) = %#v/%v, want count 3", estimate, err)
+	}
+	got, ok, err := ht.EstimateQuantileSketchChecked("latency", 0.5)
+	if err != nil || !ok || got.Count != 3 || got.Value < 10 || got.Value > 30 {
+		t.Fatalf("EstimateQuantileSketchChecked(latency) = %#v/%v/%v, want median", got, ok, err)
+	}
+	info, ok, err := ht.QuantileSketchInfoChecked("latency")
+	if err != nil || !ok || info.Count != 3 || info.Epsilon != DefaultQuantileSketchEpsilon {
+		t.Fatalf("QuantileSketchInfoChecked(latency) = %#v/%v/%v, want default sketch info", info, ok, err)
+	}
+
+	ht.UpsertString("string", "value")
+	if estimate, err := ht.AddQuantileSketchChecked("string", 5); err != nil || estimate.Count != 1 {
+		t.Fatalf("AddQuantileSketchChecked(replace string) = %#v/%v, want one observation", estimate, err)
+	}
+	if hval := ht.Get("string"); !hval.IsQuantileSketch() {
+		t.Fatalf("AddQuantileSketchChecked(replace string) stored %+v, want quantile sketch", hval)
+	}
+	if _, ok, err := ht.EstimateQuantileSketchChecked("missing", 0.5); err != nil || ok {
+		t.Fatalf("EstimateQuantileSketchChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
+	}
+	if _, ok, err := ht.QuantileSketchInfoChecked("missing"); err != nil || ok {
+		t.Fatalf("QuantileSketchInfoChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
+	}
+	if estimate, err := ht.AddQuantileSketchChecked("bad", math.NaN()); err == nil || estimate.Count != 0 {
+		t.Fatalf("AddQuantileSketchChecked(NaN) = %#v/%v, want zero/error", estimate, err)
+	}
+	if hval := ht.Get("bad"); !hval.Empty() {
+		t.Fatalf("invalid checked quantile add created key %+v", hval)
+	}
+	if _, ok, err := ht.EstimateQuantileSketchChecked("latency", 1.1); err == nil || ok {
+		t.Fatalf("EstimateQuantileSketchChecked(invalid quantile) ok/error = %v/%v, want false/error", ok, err)
+	}
+}
+
 func TestQuantileSketchRejectsInvalidConfig(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -3156,6 +3196,50 @@ func TestFenwickTreeOperations(t *testing.T) {
 	}
 	if hval := ht.Get("noop"); !hval.Empty() {
 		t.Fatalf("zero-delta Fenwick update created key %+v", hval)
+	}
+}
+
+func TestCheckedFenwickTreeOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	update, ok, err := ht.AddFenwickTreeChecked("scores", 2, 5)
+	if err != nil || !ok || update.Value != 5 || update.PrefixSum != 5 || update.Total != 5 {
+		t.Fatalf("AddFenwickTreeChecked(scores) = %#v/%v/%v, want first update", update, ok, err)
+	}
+	if update, ok, err := ht.AddFenwickTreeChecked("scores", 4, 7); err != nil || !ok || update.Total != 12 {
+		t.Fatalf("AddFenwickTreeChecked(second) = %#v/%v/%v, want total 12", update, ok, err)
+	}
+	if got, ok, err := ht.GetFenwickTreeChecked("scores", 4); err != nil || !ok || got != 7 {
+		t.Fatalf("GetFenwickTreeChecked(scores,4) = %d/%v/%v, want 7/true/nil", got, ok, err)
+	}
+	if got, ok, err := ht.PrefixSumFenwickTreeChecked("scores", 4); err != nil || !ok || got != 12 {
+		t.Fatalf("PrefixSumFenwickTreeChecked(scores,4) = %d/%v/%v, want 12/true/nil", got, ok, err)
+	}
+	if got, ok, err := ht.RangeSumFenwickTreeChecked("scores", 3, 4); err != nil || !ok || got != 7 {
+		t.Fatalf("RangeSumFenwickTreeChecked(scores,3,4) = %d/%v/%v, want 7/true/nil", got, ok, err)
+	}
+	if info, ok, err := ht.FenwickTreeInfoChecked("scores"); err != nil || !ok || info.Updates != 2 || info.Total != 12 {
+		t.Fatalf("FenwickTreeInfoChecked(scores) = %#v/%v/%v, want populated info", info, ok, err)
+	}
+
+	ht.UpsertString("string", "value")
+	if update, ok, err := ht.AddFenwickTreeChecked("string", 1, 3); err != nil || !ok || update.Value != 3 {
+		t.Fatalf("AddFenwickTreeChecked(replace string) = %#v/%v/%v, want update", update, ok, err)
+	}
+	if hval := ht.Get("string"); !hval.IsFenwickTree() {
+		t.Fatalf("AddFenwickTreeChecked(replace string) stored %+v, want fenwick tree", hval)
+	}
+	if update, ok, err := ht.AddFenwickTreeChecked("noop", 0, 0); err != nil || ok || update.Total != 0 {
+		t.Fatalf("AddFenwickTreeChecked(zero delta) = %#v/%v/%v, want zero/false/nil", update, ok, err)
+	}
+	if hval := ht.Get("noop"); !hval.Empty() {
+		t.Fatalf("zero-delta checked Fenwick update created key %+v", hval)
+	}
+	if _, ok, err := ht.GetFenwickTreeChecked("missing", 0); err != nil || ok {
+		t.Fatalf("GetFenwickTreeChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
+	}
+	if _, ok, err := ht.FenwickTreeInfoChecked("missing"); err != nil || ok {
+		t.Fatalf("FenwickTreeInfoChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
 	}
 }
 

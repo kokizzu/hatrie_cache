@@ -328,91 +328,135 @@ func (ht *HatTrie) UpsertFenwickTree(key string, size uint64) error {
 }
 
 func (ht *HatTrie) AddFenwickTree(key string, index uint64, delta int64) (FenwickTreeUpdate, bool) {
+	update, ok, _ := ht.AddFenwickTreeChecked(key, index, delta)
+	return update, ok
+}
+
+func (ht *HatTrie) AddFenwickTreeChecked(key string, index uint64, delta int64) (FenwickTreeUpdate, bool, error) {
 	if delta == 0 || index >= maxFenwickTreeSize {
-		return FenwickTreeUpdate{}, false
+		return FenwickTreeUpdate{}, false, nil
 	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
-	if hval.IsLevelDBReference() {
-		return FenwickTreeUpdate{}, false
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return FenwickTreeUpdate{}, false, err
 	}
 	if hval.IsFenwickTree() {
 		update, ok := ht.fenwickTrees.array[hval.Index].Add(index, delta)
 		if !ok {
-			return FenwickTreeUpdate{}, false
+			return FenwickTreeUpdate{}, false, nil
 		}
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return update, true
+		return update, true, nil
 	}
 
 	data := newDefaultFenwickTreeData()
 	update, ok := data.Add(index, delta)
 	if !ok {
-		return FenwickTreeUpdate{}, false
+		return FenwickTreeUpdate{}, false, nil
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.fenwickTrees.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_FENWICK_TREE}.toValue()
 	ht.recordWriteLocked(key)
-	return update, true
+	return update, true, nil
 }
 
 func (ht *HatTrie) GetFenwickTree(key string, index uint64) (int64, bool) {
+	value, ok, _ := ht.GetFenwickTreeChecked(key, index)
+	return value, ok
+}
+
+func (ht *HatTrie) GetFenwickTreeChecked(key string, index uint64) (int64, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
 	if !hval.IsFenwickTree() {
 		ht.recordReadLocked(false, key)
-		return 0, false
+		return 0, false, nil
 	}
 	value, ok := ht.fenwickTrees.array[hval.Index].Value(index)
 	ht.recordReadLocked(ok, key)
-	return value, ok
+	return value, ok, nil
 }
 
 func (ht *HatTrie) PrefixSumFenwickTree(key string, index uint64) (int64, bool) {
+	value, ok, _ := ht.PrefixSumFenwickTreeChecked(key, index)
+	return value, ok
+}
+
+func (ht *HatTrie) PrefixSumFenwickTreeChecked(key string, index uint64) (int64, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
 	if !hval.IsFenwickTree() {
 		ht.recordReadLocked(false, key)
-		return 0, false
+		return 0, false, nil
 	}
 	value, ok := ht.fenwickTrees.array[hval.Index].PrefixSum(index)
 	ht.recordReadLocked(ok, key)
-	return value, ok
+	return value, ok, nil
 }
 
 func (ht *HatTrie) RangeSumFenwickTree(key string, start uint64, end uint64) (int64, bool) {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.getLocked(key)
-	if !hval.IsFenwickTree() {
-		ht.recordReadLocked(false, key)
-		return 0, false
-	}
-	value, ok := ht.fenwickTrees.array[hval.Index].RangeSum(start, end)
-	ht.recordReadLocked(ok, key)
+	value, ok, _ := ht.RangeSumFenwickTreeChecked(key, start, end)
 	return value, ok
 }
 
-func (ht *HatTrie) FenwickTreeInfo(key string) (FenwickTreeInfo, bool) {
+func (ht *HatTrie) RangeSumFenwickTreeChecked(key string, start uint64, end uint64) (int64, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
 	if !hval.IsFenwickTree() {
 		ht.recordReadLocked(false, key)
-		return FenwickTreeInfo{}, false
+		return 0, false, nil
+	}
+	value, ok := ht.fenwickTrees.array[hval.Index].RangeSum(start, end)
+	ht.recordReadLocked(ok, key)
+	return value, ok, nil
+}
+
+func (ht *HatTrie) FenwickTreeInfo(key string) (FenwickTreeInfo, bool) {
+	info, ok, _ := ht.FenwickTreeInfoChecked(key)
+	return info, ok
+}
+
+func (ht *HatTrie) FenwickTreeInfoChecked(key string) (FenwickTreeInfo, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return FenwickTreeInfo{}, false, err
+	}
+	if !hval.IsFenwickTree() {
+		ht.recordReadLocked(false, key)
+		return FenwickTreeInfo{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.fenwickTrees.array[hval.Index].Info(), true
+	return ht.fenwickTrees.array[hval.Index].Info(), true, nil
 }

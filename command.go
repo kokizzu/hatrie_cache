@@ -778,20 +778,29 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if err != nil {
 			return commandError(err.Error())
 		}
-		estimate := ht.AddQuantileSketch(key, values[0], values[1:]...)
+		estimate, err := ht.AddQuantileSketchChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return commandValueResponse("added quantile sketch values", estimate)
 	case "ESTQ", "QUERYQ", "QQUERY", "QSQUERY", "QUANTILE":
 		quantile, err := commandQuantileValue(request)
 		if err != nil {
 			return commandError(err.Error())
 		}
-		estimate, ok := ht.EstimateQuantileSketch(key, quantile)
+		estimate, ok, err := ht.EstimateQuantileSketchChecked(key, quantile)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", estimate)
 	case "INFOQ", "QINFO", "INFOQS", "QSINFO":
-		info, ok := ht.QuantileSketchInfo(key)
+		info, ok, err := ht.QuantileSketchInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -810,7 +819,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if err != nil {
 			return commandError(err.Error())
 		}
-		update, ok := ht.AddFenwickTree(key, index, delta)
+		update, ok, err := ht.AddFenwickTreeChecked(key, index, delta)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return commandError("fenwick tree update is out of range or overflows")
 		}
@@ -820,7 +832,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if err != nil {
 			return commandError(err.Error())
 		}
-		value, ok := ht.GetFenwickTree(key, index)
+		value, ok, err := ht.GetFenwickTreeChecked(key, index)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -830,7 +845,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if err != nil {
 			return commandError(err.Error())
 		}
-		value, ok := ht.PrefixSumFenwickTree(key, index)
+		value, ok, err := ht.PrefixSumFenwickTreeChecked(key, index)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
@@ -840,13 +858,19 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if err != nil {
 			return commandError(err.Error())
 		}
-		value, ok := ht.RangeSumFenwickTree(key, start, end)
+		value, ok, err := ht.RangeSumFenwickTreeChecked(key, start, end)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatInt(value, 10)}
 	case "INFOFW", "FWINFO":
-		info, ok := ht.FenwickTreeInfo(key)
+		info, ok, err := ht.FenwickTreeInfoChecked(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		if !ok {
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}

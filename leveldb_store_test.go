@@ -708,6 +708,16 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	source.AddRoaringBitmap("rb", 1)
 	source.UpsertSparseBitset("sb")
 	source.AddSparseBitset("sb", 1)
+	if err := source.UpsertFenwickTree("fw", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	if _, ok := source.AddFenwickTree("fw", 1, 5); !ok {
+		t.Fatal("AddFenwickTree(seed) = false, want true")
+	}
+	if err := source.UpsertQuantileSketch("quantile", DefaultQuantileSketchEpsilon); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	source.AddQuantileSketch("quantile", 10)
 	source.IncrementCountMinSketch("cms", "old", 2)
 	source.AddHyperLogLog("hll", "old")
 	source.AddTopK("top", "old", 2)
@@ -729,8 +739,8 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
 	}
-	if result.KeysLoaded != 10 || result.ValuesLoaded != 0 {
-		t.Fatalf("hot-load result = %#v, want 10 cold keys", result)
+	if result.KeysLoaded != 12 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 12 cold keys", result)
 	}
 
 	if added, err := loaded.AddSetChecked("set", "new"); err != nil || added != 1 {
@@ -774,6 +784,20 @@ func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
 	}
 	if got := loaded.GetSparseBitset("sb"); !reflect.DeepEqual(got, []uint64{1, 2}) {
 		t.Fatalf("GetSparseBitset(after cold add) = %#v, want old and new values", got)
+	}
+
+	if update, ok, err := loaded.AddFenwickTreeChecked("fw", 2, 3); err != nil || !ok || update.Total != 8 {
+		t.Fatalf("AddFenwickTreeChecked(cold ref) = %#v/%v/%v, want total 8", update, ok, err)
+	}
+	if got, ok := loaded.RangeSumFenwickTree("fw", 1, 2); !ok || got != 8 {
+		t.Fatalf("RangeSumFenwickTree(after cold add) = %d/%v, want 8/true", got, ok)
+	}
+
+	if estimate, err := loaded.AddQuantileSketchChecked("quantile", 20); err != nil || estimate.Count != 2 {
+		t.Fatalf("AddQuantileSketchChecked(cold ref) = %#v/%v, want count 2", estimate, err)
+	}
+	if estimate, ok := loaded.EstimateQuantileSketch("quantile", 0.5); !ok || estimate.Count != 2 || estimate.Value < 10 || estimate.Value > 20 {
+		t.Fatalf("EstimateQuantileSketch(after cold add) = %#v/%v, want retained values", estimate, ok)
 	}
 
 	if estimate, err := loaded.IncrementCountMinSketchChecked("cms", "new", 3); err != nil || estimate < 3 {
@@ -903,6 +927,12 @@ func TestLevelDBClosedColdReferencesBlockLegacyIncrementalMutations(t *testing.T
 	if estimate := loaded.AddQuantileSketch("quantile", 20); estimate.Count != 0 {
 		t.Fatalf("AddQuantileSketch(closed cold ref) = %#v, want zero estimate", estimate)
 	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "ADDFW", Key: "fw", Value: "2", Subkey: "3"}); got.OK {
+		t.Fatalf("ADDFW closed cold ref response = %#v, want error", got)
+	}
+	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "ESTQ", Key: "quantile", Value: "0.5"}); got.OK {
+		t.Fatalf("ESTQ closed cold ref response = %#v, want error", got)
+	}
 	if added := loaded.PutRadixTree("radix", "new", "value"); added {
 		t.Fatal("PutRadixTree(closed cold ref) = true, want false")
 	}
@@ -990,6 +1020,16 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	source.AddRoaringBitmap("rb", 1)
 	source.UpsertSparseBitset("sb")
 	source.AddSparseBitset("sb", 1)
+	if err := source.UpsertFenwickTree("fw", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	if _, ok := source.AddFenwickTree("fw", 1, 5); !ok {
+		t.Fatal("AddFenwickTree(seed) = false, want true")
+	}
+	if err := source.UpsertQuantileSketch("quantile", DefaultQuantileSketchEpsilon); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	source.AddQuantileSketch("quantile", 10)
 	if err := source.SaveLevelDB(path); err != nil {
 		t.Fatalf("SaveLevelDB() error = %v", err)
 	}
@@ -1087,13 +1127,31 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if got, ok, err := loaded.SparseBitsetInfoChecked("sb"); got.Cardinality != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("SparseBitsetInfoChecked(sb closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
+	if got, ok, err := loaded.GetFenwickTreeChecked("fw", 1); got != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetFenwickTreeChecked(fw closed ref) = %d/%v/%v, want 0/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.PrefixSumFenwickTreeChecked("fw", 1); got != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PrefixSumFenwickTreeChecked(fw closed ref) = %d/%v/%v, want 0/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.RangeSumFenwickTreeChecked("fw", 0, 1); got != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("RangeSumFenwickTreeChecked(fw closed ref) = %d/%v/%v, want 0/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.FenwickTreeInfoChecked("fw"); got.Size != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("FenwickTreeInfoChecked(fw closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.EstimateQuantileSketchChecked("quantile", 0.5); got.Count != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("EstimateQuantileSketchChecked(quantile closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.QuantileSketchInfoChecked("quantile"); got.Count != 0 || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("QuantileSketchInfoChecked(quantile closed ref) = %#v/%v/%v, want zero/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if got := loaded.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "cold"}); got.OK {
 		t.Fatalf("GET cold closed ref response = %#v, want error", got)
 	}
 
 	entries := loaded.Entries(true)
-	if len(entries) != 9 {
-		t.Fatalf("Entries(after closed ref reads) len = %d, want 9", len(entries))
+	if len(entries) != 11 {
+		t.Fatalf("Entries(after closed ref reads) len = %d, want 11", len(entries))
 	}
 	for _, entry := range entries {
 		if !entry.Value.IsLevelDBReference() {
@@ -1112,6 +1170,16 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	source.AddRoaringBitmap("rb", 1)
 	source.UpsertSparseBitset("sb")
 	source.AddSparseBitset("sb", 1)
+	if err := source.UpsertFenwickTree("fw", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	if _, ok := source.AddFenwickTree("fw", 1, 5); !ok {
+		t.Fatal("AddFenwickTree(seed) = false, want true")
+	}
+	if err := source.UpsertQuantileSketch("quantile", DefaultQuantileSketchEpsilon); err != nil {
+		t.Fatalf("UpsertQuantileSketch() error = %v", err)
+	}
+	source.AddQuantileSketch("quantile", 10)
 	source.IncrementCountMinSketch("cms", "alpha", 1)
 	source.AddTopK("top", "alpha", 1)
 	if _, err := source.AddXorFilter("xor", "alpha"); err != nil {
@@ -1162,6 +1230,18 @@ func TestLevelDBColdReferenceCheckedAPIsReturnHydrationErrors(t *testing.T) {
 	}
 	if _, err := loaded.RemoveSparseBitsetChecked("sb", 1); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("RemoveSparseBitsetChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.AddFenwickTreeChecked("fw", 2, 3); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("AddFenwickTreeChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.GetFenwickTreeChecked("fw", 1); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("GetFenwickTreeChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, err := loaded.AddQuantileSketchChecked("quantile", 20); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("AddQuantileSketchChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
+	}
+	if _, _, err := loaded.EstimateQuantileSketchChecked("quantile", 0.5); !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("EstimateQuantileSketchChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
 	}
 	if _, _, err := loaded.EstimateCountMinSketchChecked("cms", "alpha"); !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("EstimateCountMinSketchChecked(closed ref) error = %v, want ErrLevelDBStoreClosed", err)
