@@ -648,15 +648,19 @@ func decodeSnapshotEntryJSONRequiredKey(data []byte, requiredKey bool) (snapshot
 }
 
 func snapshotEntryHasKey(data []byte) (bool, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
+	var probe struct {
+		Key json.RawMessage `json:"key"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
 		return false, err
 	}
-	value, ok := fields["key"]
-	if ok && string(value) == "null" {
+	if probe.Key == nil {
+		return false, nil
+	}
+	if string(bytes.TrimSpace(probe.Key)) == "null" {
 		return false, errors.New("hatriecache: snapshot entry key must be a string")
 	}
-	return ok, nil
+	return true, nil
 }
 
 func (ht *HatTrie) applySnapshotOperation(operation snapshotOperation) error {

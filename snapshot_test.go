@@ -804,6 +804,33 @@ func TestScanSnapshotFileJSONReaderVisitsEntries(t *testing.T) {
 	}
 }
 
+func TestSnapshotEntryHasKeyHandlesLargeEntries(t *testing.T) {
+	payload := `{"type":"string","string":"` + strings.Repeat("x", 70*1024) + `","key":"name"}`
+	hasKey, err := snapshotEntryHasKey([]byte(payload))
+	if err != nil {
+		t.Fatalf("snapshotEntryHasKey(large) error = %v", err)
+	}
+	if !hasKey {
+		t.Fatal("snapshotEntryHasKey(large) = false, want true")
+	}
+
+	hasKey, err = snapshotEntryHasKey([]byte(`{"type":"string","string":"value"}`))
+	if err != nil {
+		t.Fatalf("snapshotEntryHasKey(missing) error = %v", err)
+	}
+	if hasKey {
+		t.Fatal("snapshotEntryHasKey(missing) = true, want false")
+	}
+
+	hasKey, err = snapshotEntryHasKey([]byte(`{"key":null,"type":"string","string":"value"}`))
+	if err == nil || !strings.Contains(err.Error(), "key must be a string") {
+		t.Fatalf("snapshotEntryHasKey(null) error = %v, want key string error", err)
+	}
+	if hasKey {
+		t.Fatal("snapshotEntryHasKey(null) = true, want false")
+	}
+}
+
 func TestDecodeSnapshotFileJSONReaderRejectsTopLevelAmbiguity(t *testing.T) {
 	for name, payload := range map[string]string{
 		"unknown":   `{"version":1,"entries":[],"extra":true}`,
