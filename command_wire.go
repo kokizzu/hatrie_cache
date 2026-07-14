@@ -71,18 +71,72 @@ func commandWireFormatFromAccept(value string, fallback CommandWireFormat) Comma
 	if strings.TrimSpace(value) == "" {
 		return fallback
 	}
+	specific := map[CommandWireFormat]float64{}
+	wildcardQuality := -1.0
 	for _, part := range strings.Split(value, ",") {
-		mediaType := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		mediaType, quality := parseCommandWireAccept(part)
 		switch strings.ToLower(mediaType) {
 		case commandWireContentTypeProtobuf, "application/protobuf", "application/octet-stream":
-			return CommandWireFormatProtobuf
+			if current, ok := specific[CommandWireFormatProtobuf]; !ok || quality > current {
+				specific[CommandWireFormatProtobuf] = quality
+			}
 		case commandWireContentTypeJSON, "text/json":
-			return CommandWireFormatJSON
+			if current, ok := specific[CommandWireFormatJSON]; !ok || quality > current {
+				specific[CommandWireFormatJSON] = quality
+			}
 		case "*/*", "application/*":
-			return fallback
+			if quality > wildcardQuality {
+				wildcardQuality = quality
+			}
 		}
 	}
-	return fallback
+	bestFormat := fallback
+	bestQuality := -1.0
+	for _, format := range commandWireAcceptPreference(fallback) {
+		quality, ok := specific[format]
+		if !ok {
+			quality = wildcardQuality
+		}
+		if quality > bestQuality && quality > 0 {
+			bestFormat = format
+			bestQuality = quality
+		}
+	}
+	return bestFormat
+}
+
+func parseCommandWireAccept(value string) (string, float64) {
+	parts := strings.Split(value, ";")
+	mediaType := strings.TrimSpace(parts[0])
+	if mediaType == "" {
+		return "", 0
+	}
+	quality := 1.0
+	for _, part := range parts[1:] {
+		key, raw, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "q") {
+			continue
+		}
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil {
+			return mediaType, 0
+		}
+		if parsed < 0 {
+			parsed = 0
+		}
+		if parsed > 1 {
+			parsed = 1
+		}
+		quality = parsed
+	}
+	return mediaType, quality
+}
+
+func commandWireAcceptPreference(fallback CommandWireFormat) []CommandWireFormat {
+	if fallback == CommandWireFormatJSON {
+		return []CommandWireFormat{CommandWireFormatJSON, CommandWireFormatProtobuf}
+	}
+	return []CommandWireFormat{CommandWireFormatProtobuf, CommandWireFormatJSON}
 }
 
 func commandRequestBody(request CacheCommandRequest, format CommandWireFormat, estimatedJSONSize int, compressionThreshold int) (io.Reader, string, string, error) {
