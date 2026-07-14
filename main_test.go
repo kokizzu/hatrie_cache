@@ -4358,8 +4358,12 @@ func TestFenwickTreeOperations(t *testing.T) {
 	if err := ht.UpsertFenwickTree("scores", 4); err != nil {
 		t.Fatalf("UpsertFenwickTree(replace) error = %v", err)
 	}
-	if info, ok := ht.FenwickTreeInfo("scores"); !ok || info.Size != 4 || info.Total != 0 || info.Updates != 0 {
+	info, ok = ht.FenwickTreeInfo("scores")
+	if !ok || info.Size != 4 || info.Total != 0 || info.Updates != 0 {
 		t.Fatalf("FenwickTreeInfo(after replace) = %#v/%v, want empty replacement", info, ok)
+	}
+	if info.TreeBytes != 0 {
+		t.Fatalf("FenwickTreeInfo(after replace) TreeBytes = %d, want lazy empty backing", info.TreeBytes)
 	}
 	if update, ok := ht.AddFenwickTree("auto", 2, 9); !ok || update.Value != 9 || update.PrefixSum != 9 {
 		t.Fatalf("AddFenwickTree(auto) = %#v/%v, want created default tree", update, ok)
@@ -4372,6 +4376,91 @@ func TestFenwickTreeOperations(t *testing.T) {
 	}
 	if hval := ht.Get("noop"); !hval.Empty() {
 		t.Fatalf("zero-delta Fenwick update created key %+v", hval)
+	}
+}
+
+func TestFenwickTreeEmptyTreeAllocatesLazily(t *testing.T) {
+	tree, err := newFenwickTreeData(maxFenwickTreeSize)
+	if err != nil {
+		t.Fatalf("newFenwickTreeData(max) error = %v", err)
+	}
+	if len(tree.tree) != 0 {
+		t.Fatalf("newFenwickTreeData(max) allocated %d counters, want lazy empty backing", len(tree.tree))
+	}
+	if got, ok := tree.Value(maxFenwickTreeSize - 1); !ok || got != 0 {
+		t.Fatalf("Value(empty max-1) = %d/%v, want 0/true", got, ok)
+	}
+	if got, ok := tree.PrefixSum(maxFenwickTreeSize - 1); !ok || got != 0 {
+		t.Fatalf("PrefixSum(empty max-1) = %d/%v, want 0/true", got, ok)
+	}
+	if got, ok := tree.RangeSum(1, maxFenwickTreeSize-1); !ok || got != 0 {
+		t.Fatalf("RangeSum(empty) = %d/%v, want 0/true", got, ok)
+	}
+	info := tree.Info()
+	if info.Size != maxFenwickTreeSize || info.TreeBytes != 0 || info.Total != 0 || info.Updates != 0 {
+		t.Fatalf("Info(empty max) = %#v, want logical size with no backing bytes", info)
+	}
+	snapshot := tree.Snapshot()
+	if snapshot.Size != maxFenwickTreeSize || len(snapshot.Tree) != 0 {
+		t.Fatalf("Snapshot(empty max) = %#v, want compact empty tree", snapshot)
+	}
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:        "fenwick_tree",
+			FenwickTree: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(empty fenwick_tree) error = %v", err)
+	}
+	if size != 0 {
+		t.Fatalf("snapshotOperationValueSize(empty fenwick_tree) = %d, want 0", size)
+	}
+
+	legacyZero := fenwickTreeSnapshot{
+		Size:    8,
+		Updates: 2,
+		Total:   0,
+		Tree:    make([]int64, 9),
+	}
+	restored, err := newFenwickTreeDataFromSnapshot(legacyZero)
+	if err != nil {
+		t.Fatalf("newFenwickTreeDataFromSnapshot(legacy zero) error = %v", err)
+	}
+	if len(restored.tree) != 0 || restored.updates != 2 {
+		t.Fatalf("restored legacy zero = %#v, want lazy tree preserving updates", restored)
+	}
+	if update, ok := restored.Add(7, 5); !ok || update.Value != 5 || update.PrefixSum != 5 || update.Total != 5 || update.Updates != 3 {
+		t.Fatalf("Add(restored legacy zero) = %#v/%v, want allocated third update", update, ok)
+	}
+	if len(restored.tree) != 9 {
+		t.Fatalf("Add(restored legacy zero) allocated %d counters, want 9", len(restored.tree))
+	}
+
+	ht := newTestTrie(t)
+	if err := ht.UpsertFenwickTree("scores", 8); err != nil {
+		t.Fatalf("UpsertFenwickTree() error = %v", err)
+	}
+	info, ok := ht.FenwickTreeInfo("scores")
+	if !ok || info.Size != 8 || info.TreeBytes != 0 || info.Total != 0 {
+		t.Fatalf("FenwickTreeInfo(empty upsert) = %#v/%v, want lazy empty tree", info, ok)
+	}
+	if got, ok := ht.RangeSumFenwickTree("scores", 0, 7); !ok || got != 0 {
+		t.Fatalf("RangeSumFenwickTree(empty) = %d/%v, want 0/true", got, ok)
+	}
+	if update, ok := ht.AddFenwickTree("scores", 2, 7); !ok || update.Value != 7 || update.PrefixSum != 7 {
+		t.Fatalf("AddFenwickTree(first update) = %#v/%v, want populated tree", update, ok)
+	}
+	info, ok = ht.FenwickTreeInfo("scores")
+	if !ok || info.TreeBytes != 72 || info.Total != 7 || info.Updates != 1 {
+		t.Fatalf("FenwickTreeInfo(after first update) = %#v/%v, want allocated tree", info, ok)
+	}
+	if update, ok := ht.AddFenwickTree("scores", 2, -7); !ok || update.Value != 0 || update.PrefixSum != 0 || update.Total != 0 {
+		t.Fatalf("AddFenwickTree(clear update) = %#v/%v, want zeroed tree", update, ok)
+	}
+	info, ok = ht.FenwickTreeInfo("scores")
+	if !ok || info.TreeBytes != 0 || info.Total != 0 || info.Updates != 2 {
+		t.Fatalf("FenwickTreeInfo(after clearing update) = %#v/%v, want released tree backing", info, ok)
 	}
 }
 
@@ -4488,6 +4577,11 @@ func TestFenwickTreeSnapshotValidationRejectsCorruptPayload(t *testing.T) {
 	badTotal.Total++
 	if err := validateFenwickTreeSnapshot(badTotal); err == nil {
 		t.Fatal("validateFenwickTreeSnapshot(bad total) error = nil, want error")
+	}
+
+	emptyNonzeroTotal := fenwickTreeSnapshot{Size: 4, Total: 1}
+	if err := validateFenwickTreeSnapshot(emptyNonzeroTotal); err == nil {
+		t.Fatal("validateFenwickTreeSnapshot(empty nonzero total) error = nil, want error")
 	}
 }
 

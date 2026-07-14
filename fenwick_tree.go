@@ -56,7 +56,6 @@ func newFenwickTreeData(size uint64) (fenwickTreeData, error) {
 	}
 	return fenwickTreeData{
 		size: size,
-		tree: make([]int64, int(size)+1),
 	}, nil
 }
 
@@ -78,6 +77,12 @@ func validateFenwickTreeSize(size uint64) error {
 func validateFenwickTreeSnapshot(snapshot fenwickTreeSnapshot) error {
 	if err := validateFenwickTreeSize(snapshot.Size); err != nil {
 		return err
+	}
+	if len(snapshot.Tree) == 0 {
+		if snapshot.Total != 0 {
+			return errors.New("hatriecache: empty fenwick tree snapshot has nonzero total")
+		}
+		return nil
 	}
 	if len(snapshot.Tree) != int(snapshot.Size)+1 {
 		return errors.New("hatriecache: fenwick tree snapshot size does not match tree length")
@@ -109,19 +114,23 @@ func newFenwickTreeDataFromSnapshot(snapshot fenwickTreeSnapshot) (fenwickTreeDa
 		size:    snapshot.Size,
 		updates: snapshot.Updates,
 		total:   snapshot.Total,
-		tree:    make([]int64, len(snapshot.Tree)),
 	}
+	if len(snapshot.Tree) == 0 || fenwickTreeRawIsZero(snapshot.Tree) {
+		return data, nil
+	}
+	data.tree = make([]int64, len(snapshot.Tree))
 	copy(data.tree, snapshot.Tree)
 	return data, nil
 }
 
 func (tree *fenwickTreeData) Add(index uint64, delta int64) (FenwickTreeUpdate, bool) {
-	if tree == nil || delta == 0 || index >= tree.size || len(tree.tree) != int(tree.size)+1 {
+	if tree == nil || delta == 0 || index >= tree.size || !tree.validShape() {
 		return FenwickTreeUpdate{}, false
 	}
 	if !tree.canAdd(index, delta) {
 		return FenwickTreeUpdate{}, false
 	}
+	tree.ensureTree()
 	for pos := index + 1; pos <= tree.size; pos += pos & -pos {
 		tree.tree[pos] += delta
 	}
@@ -135,14 +144,16 @@ func (tree *fenwickTreeData) Add(index uint64, delta int64) (FenwickTreeUpdate, 
 	if !ok {
 		return FenwickTreeUpdate{}, false
 	}
-	return FenwickTreeUpdate{
+	update := FenwickTreeUpdate{
 		Index:     index,
 		Delta:     delta,
 		Value:     value,
 		PrefixSum: prefix,
 		Total:     tree.total,
 		Updates:   tree.updates,
-	}, true
+	}
+	tree.compactIfZero()
+	return update, true
 }
 
 func (tree fenwickTreeData) Value(index uint64) (int64, bool) {
@@ -150,8 +161,11 @@ func (tree fenwickTreeData) Value(index uint64) (int64, bool) {
 }
 
 func (tree fenwickTreeData) PrefixSum(index uint64) (int64, bool) {
-	if index >= tree.size || len(tree.tree) != int(tree.size)+1 {
+	if index >= tree.size || !tree.validShape() {
 		return 0, false
+	}
+	if len(tree.tree) == 0 {
+		return 0, true
 	}
 	var sum int64
 	for pos := index + 1; pos > 0; pos -= pos & -pos {
@@ -165,8 +179,11 @@ func (tree fenwickTreeData) PrefixSum(index uint64) (int64, bool) {
 }
 
 func (tree fenwickTreeData) RangeSum(start uint64, end uint64) (int64, bool) {
-	if start > end || end >= tree.size || len(tree.tree) != int(tree.size)+1 {
+	if start > end || end >= tree.size || !tree.validShape() {
 		return 0, false
+	}
+	if len(tree.tree) == 0 {
+		return 0, true
 	}
 	right, ok := tree.PrefixSum(end)
 	if !ok {
@@ -183,8 +200,11 @@ func (tree fenwickTreeData) RangeSum(start uint64, end uint64) (int64, bool) {
 }
 
 func (tree fenwickTreeData) Snapshot() fenwickTreeSnapshot {
-	out := make([]int64, len(tree.tree))
-	copy(out, tree.tree)
+	out := make([]int64, 0)
+	if len(tree.tree) > 0 && !fenwickTreeRawIsZero(tree.tree) {
+		out = make([]int64, len(tree.tree))
+		copy(out, tree.tree)
+	}
 	return fenwickTreeSnapshot{
 		Size:    tree.size,
 		Updates: tree.updates,
@@ -230,8 +250,36 @@ func (tree fenwickTreeData) canAdd(index uint64, delta int64) bool {
 	if _, ok := checkedAddFenwickInt64(tree.total, delta); !ok {
 		return false
 	}
+	if len(tree.tree) == 0 {
+		return true
+	}
 	for pos := index + 1; pos <= tree.size; pos += pos & -pos {
 		if _, ok := checkedAddFenwickInt64(tree.tree[pos], delta); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (tree fenwickTreeData) validShape() bool {
+	return len(tree.tree) == 0 || len(tree.tree) == int(tree.size)+1
+}
+
+func (tree *fenwickTreeData) ensureTree() {
+	if tree != nil && len(tree.tree) == 0 && tree.size > 0 {
+		tree.tree = make([]int64, int(tree.size)+1)
+	}
+}
+
+func (tree *fenwickTreeData) compactIfZero() {
+	if tree != nil && tree.total == 0 && fenwickTreeRawIsZero(tree.tree) {
+		tree.tree = nil
+	}
+}
+
+func fenwickTreeRawIsZero(tree []int64) bool {
+	for _, value := range tree {
+		if value != 0 {
 			return false
 		}
 	}
