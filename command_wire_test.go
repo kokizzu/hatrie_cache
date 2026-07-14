@@ -3,12 +3,70 @@ package hatriecache
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 )
+
+func TestParseCommandWireFormatAliases(t *testing.T) {
+	tests := []struct {
+		value string
+		want  CommandWireFormat
+	}{
+		{value: "", want: CommandWireFormatProtobuf},
+		{value: " protobuf ", want: CommandWireFormatProtobuf},
+		{value: "proto", want: CommandWireFormatProtobuf},
+		{value: "pb", want: CommandWireFormatProtobuf},
+		{value: "json", want: CommandWireFormatJSON},
+		{value: "JSON", want: CommandWireFormatJSON},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			got, err := ParseCommandWireFormat(tt.value)
+			if err != nil {
+				t.Fatalf("ParseCommandWireFormat(%q) error = %v", tt.value, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseCommandWireFormat(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+	if _, err := ParseCommandWireFormat("msgpack"); err == nil {
+		t.Fatal("ParseCommandWireFormat(msgpack) error = nil, want error")
+	}
+}
+
+func TestCommandWireFormatFromContentTypeAliases(t *testing.T) {
+	tests := []struct {
+		value string
+		want  CommandWireFormat
+	}{
+		{value: "", want: CommandWireFormatJSON},
+		{value: "application/json; charset=utf-8", want: CommandWireFormatJSON},
+		{value: "text/json", want: CommandWireFormatJSON},
+		{value: "application/x-protobuf", want: CommandWireFormatProtobuf},
+		{value: "application/protobuf", want: CommandWireFormatProtobuf},
+		{value: "application/octet-stream", want: CommandWireFormatProtobuf},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			got, ok := commandWireFormatFromContentType(tt.value)
+			if !ok {
+				t.Fatalf("commandWireFormatFromContentType(%q) ok = false, want true", tt.value)
+			}
+			if got != tt.want {
+				t.Fatalf("commandWireFormatFromContentType(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+	if got, ok := commandWireFormatFromContentType("application/xml"); ok || got != "" {
+		t.Fatalf("commandWireFormatFromContentType(application/xml) = %q/%v, want unsupported", got, ok)
+	}
+}
 
 func TestCommandWireFormatFromAcceptRespectsQuality(t *testing.T) {
 	tests := []struct {
@@ -65,6 +123,19 @@ func TestCommandWireFormatFromAcceptRespectsQuality(t *testing.T) {
 				t.Fatalf("commandWireFormatFromAccept(%q, %q) = %q, want %q", tt.accept, tt.fallback, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDecodeCommandResponseWireRejectsUnsupportedAndOversized(t *testing.T) {
+	if _, err := decodeCommandResponseWire(strings.NewReader(`{"ok":true}`), "application/xml", 1<<20); err == nil {
+		t.Fatal("decodeCommandResponseWire(unsupported) error = nil, want error")
+	}
+
+	if _, err := decodeCommandResponseWire(strings.NewReader(`{"ok":true}`), commandWireContentTypeJSON, 4); !errors.Is(err, errReplicationResponseTooLarge) {
+		t.Fatalf("decodeCommandResponseWire(oversized JSON) error = %v, want errReplicationResponseTooLarge", err)
+	}
+	if _, err := decodeCommandResponseWire(bytes.NewReader([]byte{0, 1}), commandWireContentTypeProtobuf, 1); !errors.Is(err, errReplicationResponseTooLarge) {
+		t.Fatalf("decodeCommandResponseWire(oversized protobuf) error = %v, want errReplicationResponseTooLarge", err)
 	}
 }
 
