@@ -377,6 +377,14 @@ bloom filter type:
   CREATEBF key expected_items [false_positive_rate]
   ADDBF key val...
   HASBF/INFOBF key
+cuckoo filter type:
+  CREATECF key capacity [false_positive_rate]
+  ADDCF,DELCF key val...
+  HASCF/INFOCF key
+roaring bitmap type:
+  CREATERB key
+  ADDRB,REMRB key uint32...
+  HASRB/COUNTRB/GETRB/INFORB key
 count-min sketch type:
   CREATECMS key width [depth]
   INCRCMS key val [count]

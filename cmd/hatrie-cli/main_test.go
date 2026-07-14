@@ -422,6 +422,62 @@ func TestRunCommandPostsBloomFilterOptions(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsCuckooFilterOptions(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"created cuckoo filter"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "CREATECF",
+		"-key", "active",
+		"-value", "10000",
+		"-subkey", "0.001",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command CREATECF) error = %v", err)
+	}
+
+	if gotRequest.Command != "CREATECF" || gotRequest.Key != "active" || gotRequest.Value != "10000" || gotRequest.Subkey != "0.001" {
+		t.Fatalf("request = %#v, want CREATECF active value 10000 subkey 0.001", gotRequest)
+	}
+}
+
+func TestRunCommandPostsRoaringBitmapValues(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decoder := json.NewDecoder(r.Body)
+		decoder.UseNumber()
+		if err := decoder.Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"added 2 roaring bitmap values"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "ADDRB",
+		"-key", "ids",
+		"-values", `[1,65543]`,
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command ADDRB) error = %v", err)
+	}
+
+	if gotRequest.Command != "ADDRB" || gotRequest.Key != "ids" {
+		t.Fatalf("request = %#v, want ADDRB ids", gotRequest)
+	}
+	if len(gotRequest.Values) != 2 || gotRequest.Values[0] != json.Number("1") || gotRequest.Values[1] != json.Number("65543") {
+		t.Fatalf("values = %#v, want json.Number values 1 and 65543", gotRequest.Values)
+	}
+}
+
 func TestRunCommandPostsCountMinSketchOptions(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
