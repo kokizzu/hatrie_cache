@@ -355,16 +355,9 @@ func (ht *HatTrie) IncrementCountMinSketchChecked(key string, val interface{}, c
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr := ht.tryLocation(key)
-	hval := HatValue{}
-	if rawPtr != nil {
-		hval.fromValue(*rawPtr)
-		if ht.expireIfNeededLocked(key, hval) {
-			rawPtr = nil
-			hval = HatValue{}
-		}
-	} else {
-		ht.clearExpirationLocked(key)
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, err
 	}
 	if hval.IsCountMinSketch() {
 		estimate, err := ht.countMinSketches.array[hval.Index].AddOneChecked(val, count, vals...)

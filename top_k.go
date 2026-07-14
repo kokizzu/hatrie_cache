@@ -464,16 +464,9 @@ func (ht *HatTrie) AddTopKChecked(key string, val interface{}, count uint64, val
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr := ht.tryLocation(key)
-	hval := HatValue{}
-	if rawPtr != nil {
-		hval.fromValue(*rawPtr)
-		if ht.expireIfNeededLocked(key, hval) {
-			rawPtr = nil
-			hval = HatValue{}
-		}
-	} else {
-		ht.clearExpirationLocked(key)
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return TopKEstimate{}, err
 	}
 	if hval.IsTopK() {
 		estimate, err := ht.topKs.array[hval.Index].AddOneChecked(val, count, vals...)

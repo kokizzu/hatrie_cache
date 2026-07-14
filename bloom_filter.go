@@ -400,16 +400,9 @@ func (ht *HatTrie) AddBloomFilterChecked(key string, val interface{}, vals ...in
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr := ht.tryLocation(key)
-	hval := HatValue{}
-	if rawPtr != nil {
-		hval.fromValue(*rawPtr)
-		if ht.expireIfNeededLocked(key, hval) {
-			rawPtr = nil
-			hval = HatValue{}
-		}
-	} else {
-		ht.clearExpirationLocked(key)
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, err
 	}
 	if hval.IsBloomFilter() {
 		added, err := ht.bloomFilters.array[hval.Index].AddOneChecked(val, vals...)

@@ -698,6 +698,124 @@ func TestLevelDBColdReferencesHydrateBeforeIncrementalMutations(t *testing.T) {
 	}
 }
 
+func TestLevelDBColdReferencesHydrateBeforeCheckedMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	source := newTestTrie(t)
+	source.UpsertSet("set", Set{"old"})
+	source.AddBloomFilter("bloom", "old")
+	source.AddCuckooFilter("cuckoo", "old")
+	source.IncrementCountMinSketch("cms", "old", 2)
+	source.AddHyperLogLog("hll", "old")
+	source.AddTopK("top", "old", 2)
+	source.AddReservoirSample("sample", "old")
+	if _, err := source.AddXorFilter("xor", "old"); err != nil {
+		t.Fatalf("AddXorFilter(old) error = %v", err)
+	}
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 8 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 8 cold keys", result)
+	}
+
+	if added, err := loaded.AddSetChecked("set", "new"); err != nil || added != 1 {
+		t.Fatalf("AddSetChecked(cold ref) = %d/%v, want 1/nil", added, err)
+	}
+	if got := loaded.GetSet("set"); !reflect.DeepEqual(got, Set{"new", "old"}) {
+		t.Fatalf("GetSet(after cold add) = %#v, want old and new", got)
+	}
+
+	if added, err := loaded.AddBloomFilterChecked("bloom", "new"); err != nil || added != 1 {
+		t.Fatalf("AddBloomFilterChecked(cold ref) = %d/%v, want 1/nil", added, err)
+	}
+	bloomInfo, ok := loaded.BloomFilterInfo("bloom")
+	if !ok || bloomInfo.Insertions != 2 {
+		t.Fatalf("BloomFilterInfo(after cold add) = %#v/%v, want two insertions", bloomInfo, ok)
+	}
+	if !loaded.HasBloomFilter("bloom", "old") || !loaded.HasBloomFilter("bloom", "new") {
+		t.Fatal("Bloom filter cold add did not retain old and new values")
+	}
+
+	if added, err := loaded.AddCuckooFilterChecked("cuckoo", "new"); err != nil || added != 1 {
+		t.Fatalf("AddCuckooFilterChecked(cold ref) = %d/%v, want 1/nil", added, err)
+	}
+	cuckooInfo, ok := loaded.CuckooFilterInfo("cuckoo")
+	if !ok || cuckooInfo.Count != 2 {
+		t.Fatalf("CuckooFilterInfo(after cold add) = %#v/%v, want two items", cuckooInfo, ok)
+	}
+	if !loaded.HasCuckooFilter("cuckoo", "old") || !loaded.HasCuckooFilter("cuckoo", "new") {
+		t.Fatal("Cuckoo filter cold add did not retain old and new values")
+	}
+
+	if estimate, err := loaded.IncrementCountMinSketchChecked("cms", "new", 3); err != nil || estimate < 3 {
+		t.Fatalf("IncrementCountMinSketchChecked(cold ref) = %d/%v, want estimate at least 3", estimate, err)
+	}
+	oldCMS, ok := loaded.EstimateCountMinSketch("cms", "old")
+	newCMS, newOK := loaded.EstimateCountMinSketch("cms", "new")
+	if !ok || !newOK || oldCMS < 2 || newCMS < 3 {
+		t.Fatalf("Count-min estimates after cold increment old=%d/%v new=%d/%v, want retained counts", oldCMS, ok, newCMS, newOK)
+	}
+
+	if estimate, err := loaded.AddHyperLogLogChecked("hll", "new"); err != nil || estimate < 2 {
+		t.Fatalf("AddHyperLogLogChecked(cold ref) = %d/%v, want estimate at least 2", estimate, err)
+	}
+	hllInfo, ok := loaded.HyperLogLogInfo("hll")
+	if !ok || hllInfo.Observations != 2 {
+		t.Fatalf("HyperLogLogInfo(after cold add) = %#v/%v, want two observations", hllInfo, ok)
+	}
+
+	if estimate, err := loaded.AddTopKChecked("top", "new", 3); err != nil || !estimate.Tracked || estimate.Count != 3 {
+		t.Fatalf("AddTopKChecked(cold ref) = %#v/%v, want new count 3", estimate, err)
+	}
+	oldTop := loaded.EstimateTopK("top", "old")
+	if !oldTop.Tracked || oldTop.Count != 2 {
+		t.Fatalf("EstimateTopK(old after cold add) = %#v, want retained count 2", oldTop)
+	}
+	topInfo, ok := loaded.TopKInfo("top")
+	if !ok || topInfo.Total != 5 || topInfo.Tracked != 2 {
+		t.Fatalf("TopKInfo(after cold add) = %#v/%v, want two tracked values total 5", topInfo, ok)
+	}
+
+	if update, err := loaded.AddReservoirSampleChecked("sample", "new"); err != nil || update.Seen != 2 || update.Tracked != 2 {
+		t.Fatalf("AddReservoirSampleChecked(cold ref) = %#v/%v, want seen/tracked 2", update, err)
+	}
+	sampleValues := loaded.GetReservoirSample("sample")
+	if len(sampleValues) != 2 {
+		t.Fatalf("GetReservoirSample(after cold add) = %#v, want two items", sampleValues)
+	}
+	seenSample := map[interface{}]bool{}
+	for _, item := range sampleValues {
+		seenSample[item.Value] = true
+	}
+	if !seenSample["old"] || !seenSample["new"] {
+		t.Fatalf("reservoir sample after cold add = %#v, want old and new", sampleValues)
+	}
+
+	if added, err := loaded.AddXorFilter("xor", "new"); err != nil || added != 1 {
+		t.Fatalf("AddXorFilter(cold ref) = %d/%v, want 1/nil", added, err)
+	}
+	xorInfo, ok, err := loaded.BuildXorFilter("xor")
+	if err != nil || !ok || xorInfo.Items != 2 {
+		t.Fatalf("BuildXorFilter(after cold add) = %#v/%v/%v, want two items", xorInfo, ok, err)
+	}
+	oldXor, oldQueryable := loaded.HasXorFilter("xor", "old")
+	newXor, newQueryable := loaded.HasXorFilter("xor", "new")
+	if !oldQueryable || !newQueryable || !oldXor || !newXor {
+		t.Fatalf("xor filter after cold add old=%v/%v new=%v/%v, want both queryable hits", oldXor, oldQueryable, newXor, newQueryable)
+	}
+}
+
 func TestHydrateLevelDBReferencesReportsClosedStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

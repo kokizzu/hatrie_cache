@@ -2028,6 +2028,32 @@ func (ht *HatTrie) upsertFreshLocation(key string) (*C.value_t, HatValue) {
 	return rawPtr, hval
 }
 
+func (ht *HatTrie) freshLocationCheckedLocked(key string) (*C.value_t, HatValue, error) {
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr == nil {
+		ht.clearExpirationLocked(key)
+		return nil, hval, nil
+	}
+
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
+		return nil, HatValue{}, nil
+	}
+	if hval.IsLevelDBReference() {
+		hydrated, err := ht.hydrateLevelDBReferenceLocked(key, hval)
+		if err != nil {
+			return nil, HatValue{}, err
+		}
+		if hydrated.Empty() {
+			return nil, HatValue{}, nil
+		}
+		rawPtr = ht.upsertLocation(key)
+		hval = hydrated
+	}
+	return rawPtr, hval, nil
+}
+
 func (ht *HatTrie) expireAtLocked(key string, at time.Time) bool {
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
@@ -2930,16 +2956,9 @@ func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr := ht.tryLocation(key)
-	hval := HatValue{}
-	if rawPtr == nil {
-		ht.clearExpirationLocked(key)
-	} else {
-		hval.fromValue(*rawPtr)
-		if ht.expireIfNeededLocked(key, hval) {
-			rawPtr = nil
-			hval = HatValue{}
-		}
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, err
 	}
 	if hval.IsSet() {
 		added := ht.sets.array[hval.Index].addOneWithKeys(keys, val, vals...)
