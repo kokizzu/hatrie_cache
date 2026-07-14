@@ -347,19 +347,22 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 			return
 		}
 		var topology ClusterTopology
-		decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+		decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
 		if !ok {
 			return
 		}
 		defer closeBody()
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&topology); err != nil {
-			http.Error(w, "invalid topology request", http.StatusBadRequest)
+			writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid topology request")
 			return
 		}
 		var extra struct{}
 		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-			http.Error(w, "invalid topology request", http.StatusBadRequest)
+			writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid topology request")
+			return
+		}
+		if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
 			return
 		}
 		if requestContextDone(w, r) {
@@ -407,19 +410,22 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 			return
 		}
 		var request electionUpdateRequest
-		decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+		decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
 		if !ok {
 			return
 		}
 		defer closeBody()
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil {
-			http.Error(w, "invalid election request", http.StatusBadRequest)
+			writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid election request")
 			return
 		}
 		var extra struct{}
 		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-			http.Error(w, "invalid election request", http.StatusBadRequest)
+			writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid election request")
+			return
+		}
+		if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
 			return
 		}
 		if requestContextDone(w, r) {
@@ -459,21 +465,24 @@ func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *ht
 	}
 
 	var request replicationSyncRequest
-	decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
 	if !ok {
 		return
 	}
 	defer closeBody()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, "invalid replication request", http.StatusBadRequest)
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid replication request")
 		return
 	} else if err == nil {
 		var extra struct{}
 		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-			http.Error(w, "invalid replication request", http.StatusBadRequest)
+			writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid replication request")
 			return
 		}
+	}
+	if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
+		return
 	}
 	if requestContextDone(w, r) {
 		return
@@ -525,19 +534,22 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 
 func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *http.Request) {
 	var request journalPullRequest
-	decoder, closeBody, ok := monitoringJSONDecoder(w, r)
+	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
 	if !ok {
 		return
 	}
 	defer closeBody()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		http.Error(w, "invalid journal pull request", http.StatusBadRequest)
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid journal pull request")
 		return
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		http.Error(w, "invalid journal pull request", http.StatusBadRequest)
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid journal pull request")
+		return
+	}
+	if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
 		return
 	}
 	source := strings.TrimSpace(request.Source)
@@ -1032,12 +1044,14 @@ func writeJSONStatus(w http.ResponseWriter, status int, value interface{}) {
 	_, _ = w.Write(data)
 }
 
-func monitoringJSONDecoder(w http.ResponseWriter, r *http.Request) (*jsonwire.Decoder, func(), bool) {
+func monitoringJSONDecoder(w http.ResponseWriter, r *http.Request) (*jsonwire.Decoder, func(), func() bool, bool) {
 	body, closeBody, ok := limitedEncodedRequestBody(w, r, maxMonitoringJSONRequestBytes)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return jsonwire.NewDecoder(body), closeBody, true
+	return jsonwire.NewDecoder(body), closeBody, func() bool {
+		return trackedRequestBodyTooLarge(body)
+	}, true
 }
 
 func monitoringCommandRequestFormat(w http.ResponseWriter, r *http.Request) (CommandWireFormat, bool) {
@@ -1067,11 +1081,14 @@ func monitoringCommandRequestFromFormat(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return CacheCommandRequest{}, nil, false
 	}
+	bodyTooLarge := func() bool {
+		return trackedRequestBodyTooLarge(body)
+	}
 	if format == CommandWireFormatProtobuf {
 		request, err := decodeCommandRequestProto(body, maxMonitoringJSONRequestBytes)
 		if err != nil {
 			closeBody()
-			http.Error(w, "invalid command request", http.StatusBadRequest)
+			writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid command request")
 			return CacheCommandRequest{}, nil, false
 		}
 		return request, closeBody, true
@@ -1083,16 +1100,37 @@ func monitoringCommandRequestFromFormat(w http.ResponseWriter, r *http.Request, 
 	var request CacheCommandRequest
 	if err := decoder.Decode(&request); err != nil {
 		closeBody()
-		http.Error(w, "invalid command request", http.StatusBadRequest)
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid command request")
 		return CacheCommandRequest{}, nil, false
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		closeBody()
-		http.Error(w, "invalid command request", http.StatusBadRequest)
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid command request")
+		return CacheCommandRequest{}, nil, false
+	}
+	if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
+		closeBody()
 		return CacheCommandRequest{}, nil, false
 	}
 	return request, closeBody, true
+}
+
+func writeInvalidMonitoringRequest(w http.ResponseWriter, err error, requestTooLarge bool, message string) {
+	var maxBytesErr *http.MaxBytesError
+	if requestTooLarge || errors.As(err, &maxBytesErr) || errors.Is(err, errReplicationResponseTooLarge) {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, message, http.StatusBadRequest)
+}
+
+func writeMonitoringRequestTooLarge(w http.ResponseWriter, requestTooLarge bool) bool {
+	if !requestTooLarge {
+		return false
+	}
+	http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+	return true
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {

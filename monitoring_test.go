@@ -494,6 +494,47 @@ func TestMonitoringHandlerAcceptsGzipCommandRequest(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerRejectsOversizedGzipCommandRequest(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	body := gzipBytes(t, []byte(`{"command":"SETSTR","key":"compressed","value":"`+strings.Repeat("x", maxMonitoringJSONRequestBytes)+`"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewReader(body))
+	request.Header.Set("Content-Encoding", "gzip")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, request)
+	if resp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized compressed command status = %d, want 413: %s", resp.Code, resp.Body.String())
+	}
+	if got := ht.GetString("compressed"); got != "" {
+		t.Fatalf("oversized compressed command stored %q, want empty", got)
+	}
+}
+
+func TestMonitoringHandlerRejectsOneByteOversizedJSONCommandRequest(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+	prefix := `{"command":"SETSTR","key":"exact","value":"`
+	suffix := `"}`
+	valueLen := maxMonitoringJSONRequestBytes + 1 - len(prefix) - len(suffix)
+	if valueLen <= 0 {
+		t.Fatalf("test request framing length = %d, want room for value", valueLen)
+	}
+	body := prefix + strings.Repeat("x", valueLen) + suffix
+	if len(body) != maxMonitoringJSONRequestBytes+1 {
+		t.Fatalf("body length = %d, want %d", len(body), maxMonitoringJSONRequestBytes+1)
+	}
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(body)))
+	if resp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("one-byte oversized command status = %d, want 413: %s", resp.Code, resp.Body.String())
+	}
+	if got := ht.GetString("exact"); got != "" {
+		t.Fatalf("one-byte oversized command stored %q, want empty", got)
+	}
+}
+
 func TestMonitoringHandlerRejectsUnsupportedRequestEncoding(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
@@ -1474,6 +1515,13 @@ func TestMonitoringHandlerSyncsReplication(t *testing.T) {
 	handler.ServeHTTP(invalidResp, httptest.NewRequest(http.MethodPost, "/api/replication", bytes.NewBufferString(`{"unknown":true}`)))
 	if invalidResp.Code != http.StatusBadRequest {
 		t.Fatalf("invalid replication sync status = %d, want 400", invalidResp.Code)
+	}
+
+	oversizedResp := httptest.NewRecorder()
+	oversizedBody := `{"prefix":"` + strings.Repeat("x", maxMonitoringJSONRequestBytes) + `"}`
+	handler.ServeHTTP(oversizedResp, httptest.NewRequest(http.MethodPost, "/api/replication", strings.NewReader(oversizedBody)))
+	if oversizedResp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized replication sync status = %d, want 413", oversizedResp.Code)
 	}
 }
 

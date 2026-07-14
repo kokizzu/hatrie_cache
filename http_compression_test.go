@@ -213,6 +213,25 @@ func TestLimitedEncodedRequestBodyClosesGzipBody(t *testing.T) {
 	}
 }
 
+func TestLimitedEncodedRequestBodyTracksDecodedLimit(t *testing.T) {
+	body := newCloseTrackingBody(gzipHTTPTestBytes(t, []byte(strings.Repeat("x", 32))))
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Body = body
+	request.Header.Set("Content-Encoding", "gzip")
+
+	reader, closeBody, ok := limitedEncodedRequestBody(httptest.NewRecorder(), request, 8)
+	if !ok {
+		t.Fatal("limitedEncodedRequestBody(gzip) ok = false, want true")
+	}
+	defer closeBody()
+	if _, err := io.ReadAll(reader); err == nil {
+		t.Fatal("ReadAll(oversized gzip body) error = nil, want max bytes error")
+	}
+	if !trackedRequestBodyTooLarge(reader) {
+		t.Fatal("trackedRequestBodyTooLarge() = false, want true")
+	}
+}
+
 func TestLimitedEncodedRequestBodyClosesInvalidGzipBody(t *testing.T) {
 	body := newCloseTrackingBody([]byte("not gzip"))
 	request := httptest.NewRequest(http.MethodPost, "/", nil)

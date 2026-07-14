@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"compress/gzip"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -155,7 +156,7 @@ func responseAllowsBody(statusCode int) bool {
 func limitedEncodedRequestBody(w http.ResponseWriter, r *http.Request, limit int64) (io.Reader, func(), bool) {
 	encoding := strings.TrimSpace(r.Header.Get("Content-Encoding"))
 	if encoding == "" || strings.EqualFold(encoding, "identity") {
-		body := http.MaxBytesReader(w, r.Body, limit)
+		body := newTrackedRequestBody(http.MaxBytesReader(w, r.Body, limit+1), limit)
 		return body, func() { _ = body.Close() }, true
 	}
 	if !strings.EqualFold(encoding, "gzip") {
@@ -170,9 +171,48 @@ func limitedEncodedRequestBody(w http.ResponseWriter, r *http.Request, limit int
 		http.Error(w, "invalid gzip request", http.StatusBadRequest)
 		return nil, nil, false
 	}
-	body := http.MaxBytesReader(w, reader, limit)
+	body := newTrackedRequestBody(http.MaxBytesReader(w, reader, limit+1), limit)
 	return body, func() {
 		_ = body.Close()
 		_ = r.Body.Close()
 	}, true
+}
+
+type trackedRequestBody struct {
+	reader   io.ReadCloser
+	limit    int64
+	read     int64
+	tooLarge bool
+}
+
+func newTrackedRequestBody(reader io.ReadCloser, limit int64) *trackedRequestBody {
+	return &trackedRequestBody{reader: reader, limit: limit}
+}
+
+func (body *trackedRequestBody) Read(data []byte) (int, error) {
+	n, err := body.reader.Read(data)
+	if n > 0 {
+		if body.read > body.limit-int64(n) {
+			body.tooLarge = true
+		}
+		body.read += int64(n)
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		body.tooLarge = true
+	}
+	return n, err
+}
+
+func (body *trackedRequestBody) Close() error {
+	return body.reader.Close()
+}
+
+func (body *trackedRequestBody) TooLarge() bool {
+	return body.tooLarge
+}
+
+func trackedRequestBodyTooLarge(reader io.Reader) bool {
+	body, ok := reader.(*trackedRequestBody)
+	return ok && body.TooLarge()
 }
