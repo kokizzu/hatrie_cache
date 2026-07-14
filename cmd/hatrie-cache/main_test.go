@@ -522,6 +522,34 @@ func TestRunRefreshesLocalElectionHeartbeat(t *testing.T) {
 	waitForAddrReusable(t, monitoringAddr)
 }
 
+func TestStartElectionHeartbeatStopIsIdempotent(t *testing.T) {
+	topology, err := hatriecache.NewTopologyStore(hatriecache.SingleNodeTopology("node-a", "http://127.0.0.1"))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	election := hatriecache.NewElectionStore(topology, hatriecache.ElectionOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	stop, err := startElectionHeartbeat(ctx, election, "node-a", time.Hour, true, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("startElectionHeartbeat() error = %v", err)
+	}
+	cancel()
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("election heartbeat repeated stop did not return")
+	}
+}
+
 func TestReportServerErrorDoesNotBlockWhenChannelIsFull(t *testing.T) {
 	errCh := make(chan error, 1)
 	errCh <- errors.New("first")
@@ -1107,12 +1135,13 @@ func TestJournalPullerStopCancelsInFlightPull(t *testing.T) {
 	stopped := make(chan struct{})
 	go func() {
 		stop()
+		stop()
 		close(stopped)
 	}()
 	select {
 	case <-stopped:
 	case <-time.After(time.Second):
-		t.Fatal("journal puller stop did not cancel in-flight pull")
+		t.Fatal("journal puller repeated stop did not cancel in-flight pull")
 	}
 	select {
 	case <-released:

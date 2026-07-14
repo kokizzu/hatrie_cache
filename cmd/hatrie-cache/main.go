@@ -681,14 +681,7 @@ func startJournalPuller(ctx context.Context, trie *hatriecache.HatTrie, journal 
 			}
 		}
 	}()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			cancelPull()
-			close(done)
-			<-stopped
-		})
-	}
+	return cancelingPeriodicStopper(cancelPull, done, stopped)
 }
 
 func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, cfg journalPullerConfig) (hatriecache.CommandJournalPullResult, error) {
@@ -817,6 +810,17 @@ func periodicStopper(done chan struct{}, stopped chan struct{}) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			close(done)
+			<-stopped
+		})
+	}
+}
+
+func cancelingPeriodicStopper(cancel context.CancelFunc, done chan struct{}, stopped chan struct{}) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
 			close(done)
 			<-stopped
 		})
