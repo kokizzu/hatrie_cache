@@ -68,6 +68,92 @@ func TestCommandWireFormatFromAcceptRespectsQuality(t *testing.T) {
 	}
 }
 
+func TestCacheCommandRequestToProtoConvertsScalarValuesAndPairs(t *testing.T) {
+	priority := int64(7)
+	ttl := int64(30)
+	unix := int64(12345)
+	message, err := cacheCommandRequestToProto(CacheCommandRequest{
+		Command:     "PUTMAP",
+		Key:         "session:1",
+		Value:       "ignored",
+		Subkey:      "profile",
+		Priority:    &priority,
+		TTLSeconds:  &ttl,
+		UnixSeconds: &unix,
+		Values: Slice{
+			"alpha",
+			int(12),
+			int32(-3),
+			int64(9001),
+			uint(4),
+			uint32(5),
+			uint64(6),
+			float32(1.25),
+			float64(2.5),
+		},
+		Pairs: Map{
+			"name":  "ivi",
+			"score": uint64(42),
+			"ratio": float32(0.75),
+		},
+	})
+	if err != nil {
+		t.Fatalf("cacheCommandRequestToProto() error = %v", err)
+	}
+	if message.GetCommand() != "PUTMAP" || message.GetKey() != "session:1" || message.GetValue() != "ignored" || message.GetSubkey() != "profile" {
+		t.Fatalf("basic proto request fields = %#v, want copied command fields", message)
+	}
+	if message.GetPriority() != priority || message.GetTtlSeconds() != ttl || message.GetUnixSeconds() != unix {
+		t.Fatalf("proto numeric pointers = priority %d ttl %d unix %d, want copied values", message.GetPriority(), message.GetTtlSeconds(), message.GetUnixSeconds())
+	}
+	wantValues := []string{"alpha", "12", "-3", "9001", "4", "5", "6", "1.25", "2.5"}
+	if len(message.GetValues()) != len(wantValues) {
+		t.Fatalf("proto values len = %d, want %d: %#v", len(message.GetValues()), len(wantValues), message.GetValues())
+	}
+	for idx, want := range wantValues {
+		if got := message.GetValues()[idx]; got != want {
+			t.Fatalf("proto value[%d] = %q, want %q", idx, got, want)
+		}
+	}
+	wantPairs := map[string]string{"name": "ivi", "score": "42", "ratio": "0.75"}
+	for key, want := range wantPairs {
+		if got := message.GetPairs()[key]; got != want {
+			t.Fatalf("proto pair[%q] = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestCacheCommandRequestToProtoRejectsComplexValues(t *testing.T) {
+	if _, err := cacheCommandRequestToProto(CacheCommandRequest{
+		Command: "PUSH",
+		Key:     "list",
+		Values:  Slice{Map{"nested": "value"}},
+	}); err == nil {
+		t.Fatal("cacheCommandRequestToProto(complex value) error = nil, want error")
+	}
+	if _, err := cacheCommandRequestToProto(CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs:   Map{"nested": Slice{"value"}},
+	}); err == nil {
+		t.Fatal("cacheCommandRequestToProto(complex pair) error = nil, want error")
+	}
+}
+
+func TestCommandRequestBodyRejectsUnsupportedProtobufValues(t *testing.T) {
+	body, contentType, contentEncoding, err := commandRequestBody(CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs:   Map{"nested": Map{"value": "x"}},
+	}, CommandWireFormatProtobuf, 0, 0)
+	if err == nil {
+		t.Fatal("commandRequestBody(protobuf complex pair) error = nil, want error")
+	}
+	if body != nil || contentType != "" || contentEncoding != "" {
+		t.Fatalf("commandRequestBody(protobuf complex pair) = body %T contentType %q contentEncoding %q, want empty outputs", body, contentType, contentEncoding)
+	}
+}
+
 func TestMonitoringHandlerAcceptsProtobufCommandWire(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
