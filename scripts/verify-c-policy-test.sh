@@ -9,8 +9,11 @@ trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 mkdir -p "$tmp_dir"
 
 overcommit_file=$tmp_dir/overcommit_memory
+meminfo_file=$tmp_dir/meminfo
 SANITIZE_C_OVERCOMMIT_MEMORY_PATH=$overcommit_file
-export SANITIZE_C_OVERCOMMIT_MEMORY_PATH
+SANITIZE_C_MEMINFO_PATH=$meminfo_file
+SANITIZE_C_ASAN_MIN_COMMIT_HEADROOM_KB=1024
+export SANITIZE_C_OVERCOMMIT_MEMORY_PATH SANITIZE_C_MEMINFO_PATH SANITIZE_C_ASAN_MIN_COMMIT_HEADROOM_KB
 
 fail() {
 	echo "$1" >&2
@@ -53,6 +56,31 @@ expect_allows() {
 	fi
 }
 
+write_meminfo() {
+	cat > "$meminfo_file" <<EOF_MEMINFO
+CommitLimit:    $1 kB
+Committed_AS:   $2 kB
+EOF_MEMINFO
+}
+
+expect_low_commit_blocks() {
+	write_meminfo "$1" "$2"
+	SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM=0
+	export SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM
+	if ! low_commit_headroom_blocks_sanitizers; then
+		fail "expected low commit headroom to block C sanitizers"
+	fi
+}
+
+expect_low_commit_allows() {
+	write_meminfo "$1" "$2"
+	SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM=0
+	export SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM
+	if low_commit_headroom_blocks_sanitizers; then
+		fail "expected sufficient commit headroom to allow C sanitizers"
+	fi
+}
+
 expect_strict_enabled 2
 expect_strict_disabled 0
 expect_strict_disabled 1
@@ -60,6 +88,9 @@ expect_strict_disabled 1
 expect_blocks 2
 expect_allows 0
 expect_allows 1
+
+expect_low_commit_blocks 2048 1536
+expect_low_commit_allows 4096 1024
 
 printf '%s\n' 2 > "$overcommit_file"
 for allow_value in 1 true yes; do
@@ -73,12 +104,26 @@ for allow_value in 1 true yes; do
 	fi
 done
 
+write_meminfo 2048 1536
+for allow_value in 1 true yes; do
+	SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM=$allow_value
+	export SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM
+	if low_commit_headroom_blocks_sanitizers; then
+		fail "expected low-commit-headroom override $allow_value to allow C sanitizers"
+	fi
+done
+
 SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=0
 SANITIZE_C_OVERCOMMIT_MEMORY_PATH=$tmp_dir/missing
-export SANITIZE_C_ALLOW_STRICT_OVERCOMMIT SANITIZE_C_OVERCOMMIT_MEMORY_PATH
+SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM=0
+SANITIZE_C_MEMINFO_PATH=$tmp_dir/missing-meminfo
+export SANITIZE_C_ALLOW_STRICT_OVERCOMMIT SANITIZE_C_OVERCOMMIT_MEMORY_PATH SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM SANITIZE_C_MEMINFO_PATH
 if strict_overcommit_enabled; then
 	fail "expected missing overcommit setting to disable strict sanitizer guard"
 fi
 if strict_overcommit_blocks_sanitizers; then
 	fail "expected missing overcommit setting to allow C sanitizers"
+fi
+if low_commit_headroom_blocks_sanitizers; then
+	fail "expected missing meminfo to allow C sanitizers"
 fi
