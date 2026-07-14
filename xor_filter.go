@@ -199,8 +199,12 @@ func (filter *xorFilterData) AddOne(value interface{}, values ...interface{}) (i
 	if filter.built {
 		return 0, errors.New("hatriecache: xor filter is already built")
 	}
-	pending := make([]xorFilterPendingItem, 0, 1+len(values))
-	seen := make(map[string]struct{}, 1+len(values))
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return 0, errBatchSizeTooLarge
+	}
+	pending := make([]xorFilterPendingItem, 0, count)
+	seen := make(map[string]struct{}, count)
 	key, err := xorFilterItemKey(value)
 	if err != nil {
 		return 0, err
@@ -223,7 +227,8 @@ func (filter *xorFilterData) AddOne(value interface{}, values ...interface{}) (i
 		pending = append(pending, xorFilterPendingItem{key: key, value: value})
 		seen[key] = struct{}{}
 	}
-	if uint64(len(filter.staged)+len(pending)) > maxXorFilterItems {
+	staged, ok := checkedBatchSize(len(filter.staged), len(pending))
+	if !ok || uint64(staged) > maxXorFilterItems {
 		return 0, errors.New("hatriecache: xor filter staged item count is too large")
 	}
 	if filter.staged == nil && len(pending) > 0 {

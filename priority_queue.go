@@ -124,12 +124,19 @@ func (pq *priorityQueueData) PushOne(priority int64, value interface{}, values .
 }
 
 func (pq *priorityQueueData) PushOneChecked(priority int64, value interface{}, values ...interface{}) (int, error) {
-	count := 1 + len(values)
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return 0, errBatchSizeTooLarge
+	}
 	if err := pq.ensureSequenceCapacity(count); err != nil {
 		return 0, err
 	}
+	needed, ok := checkedBatchSize(len(pq.items), count)
+	if !ok {
+		return 0, errBatchSizeTooLarge
+	}
 	if len(values) > 0 {
-		pq.reserveCapacity(len(pq.items) + count)
+		pq.reserveCapacity(needed)
 	}
 	pq.pushValue(priority, value)
 	for _, value := range values {

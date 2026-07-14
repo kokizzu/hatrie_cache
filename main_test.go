@@ -617,6 +617,19 @@ func TestAppendPrependStringCheckedRejectsCapacityOverflowWithoutMutation(t *tes
 	}
 }
 
+func TestCheckedBatchSizeRejectsOverflow(t *testing.T) {
+	if got, ok := checkedBatchSize(2, 3); !ok || got != 5 {
+		t.Fatalf("checkedBatchSize(2, 3) = %d/%v, want 5/true", got, ok)
+	}
+	max := int(^uint(0) >> 1)
+	if _, ok := checkedBatchSize(max, 1); ok {
+		t.Fatal("checkedBatchSize(max, 1) ok = true, want overflow rejection")
+	}
+	if _, ok := checkedBatchSize(-1, 1); ok {
+		t.Fatal("checkedBatchSize(-1, 1) ok = true, want negative rejection")
+	}
+}
+
 func TestBytesOperationsCopyInputsAndOutputs(t *testing.T) {
 	ht := newTestTrie(t)
 

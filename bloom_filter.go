@@ -330,7 +330,11 @@ func (filter *bloomFilterData) maskUnusedBits() {
 }
 
 func bloomFilterItemKeys(value interface{}, values ...interface{}) ([][]byte, error) {
-	keys := make([][]byte, 0, 1+len(values))
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return nil, errBatchSizeTooLarge
+	}
+	keys := make([][]byte, 0, count)
 	key, err := bloomFilterItemKey(value)
 	if err != nil {
 		return nil, err

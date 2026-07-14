@@ -301,7 +301,11 @@ func saturatingAddUint64(value uint64, delta uint64) uint64 {
 }
 
 func countMinSketchItemKeys(value interface{}, values ...interface{}) ([][]byte, error) {
-	keys := make([][]byte, 0, 1+len(values))
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return nil, errBatchSizeTooLarge
+	}
+	keys := make([][]byte, 0, count)
 	key, err := countMinSketchItemKey(value)
 	if err != nil {
 		return nil, err

@@ -296,7 +296,15 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 		return err
 	}
 
-	remaining := make([]commandJournalEntry, 0, len(entries)+1)
+	capacity := len(entries)
+	if throughSequence > 0 {
+		nextCapacity, ok := checkedBatchSize(capacity, 1)
+		if !ok {
+			return errBatchSizeTooLarge
+		}
+		capacity = nextCapacity
+	}
+	remaining := make([]commandJournalEntry, 0, capacity)
 	if throughSequence > 0 {
 		remaining = append(remaining, commandJournalEntry{
 			Version:    commandJournalVersion,

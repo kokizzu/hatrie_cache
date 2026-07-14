@@ -165,10 +165,14 @@ func (sample *reservoirSampleData) AddOneChecked(value interface{}, values ...in
 	if sample == nil || sample.capacity == 0 {
 		return ReservoirSampleUpdate{}, nil
 	}
-	if err := sample.ensureSequenceCapacity(1 + len(values)); err != nil {
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return ReservoirSampleUpdate{}, errBatchSizeTooLarge
+	}
+	if err := sample.ensureSequenceCapacity(count); err != nil {
 		return ReservoirSampleUpdate{}, err
 	}
-	prepared := make([]reservoirSampleItem, 0, 1+len(values))
+	prepared := make([]reservoirSampleItem, 0, count)
 	nextSequence := sample.seen
 	item, err := prepareReservoirSampleItem(nextSequence+1, value)
 	if err != nil {

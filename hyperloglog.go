@@ -297,7 +297,11 @@ func hyperLogLogIndexAndRank(hash uint64, precision uint8) (int, uint8) {
 }
 
 func hyperLogLogItemKeys(value interface{}, values ...interface{}) ([][]byte, error) {
-	keys := make([][]byte, 0, 1+len(values))
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return nil, errBatchSizeTooLarge
+	}
+	keys := make([][]byte, 0, count)
 	key, err := hyperLogLogItemKey(value)
 	if err != nil {
 		return nil, err

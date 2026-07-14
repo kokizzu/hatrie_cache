@@ -182,7 +182,11 @@ func (top *topKData) AddOneChecked(value interface{}, count uint64, values ...in
 		return top.estimateKey(prepared[len(prepared)-1].Key), nil
 	}
 	if top.byKey == nil {
-		top.byKey = make(map[string]int, topKInitialIndexCapacity(top.capacity, len(top.items)+len(prepared)))
+		needed, ok := checkedBatchSize(len(top.items), len(prepared))
+		if !ok {
+			return TopKEstimate{}, errBatchSizeTooLarge
+		}
+		top.byKey = make(map[string]int, topKInitialIndexCapacity(top.capacity, needed))
 	}
 	estimate := TopKEstimate{}
 	for _, item := range prepared {
@@ -373,7 +377,11 @@ func topKHeapLess(a, b topKItem) bool {
 }
 
 func prepareTopKItems(value interface{}, values ...interface{}) ([]topKItem, error) {
-	items := make([]topKItem, 0, 1+len(values))
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return nil, errBatchSizeTooLarge
+	}
+	items := make([]topKItem, 0, count)
 	item, err := prepareTopKItem(value)
 	if err != nil {
 		return nil, err

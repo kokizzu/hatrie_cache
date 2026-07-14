@@ -81,6 +81,7 @@ type deque struct {
 
 var errDequeCapacityTooLarge = errors.New("hatriecache: slice capacity is too large")
 var errRawValueCapacityTooLarge = errors.New("hatriecache: raw value capacity is too large")
+var errBatchSizeTooLarge = errors.New("hatriecache: batch size is too large")
 var maxRawValueCapacity = int(^uint(0) >> 1)
 
 func newDeque(value Slice) deque {
@@ -283,14 +284,7 @@ func grownDequeCapacity(current int, needed int) (int, bool) {
 }
 
 func checkedDequeNeeded(size int, additional int) (int, bool) {
-	if size < 0 || additional < 0 {
-		return 0, false
-	}
-	max := int(^uint(0) >> 1)
-	if size > max-additional {
-		return 0, false
-	}
-	return size + additional, true
+	return checkedIntSum(size, additional)
 }
 
 func checkedByteCapacity(left int, right int) (int, bool) {
@@ -298,6 +292,21 @@ func checkedByteCapacity(left int, right int) (int, bool) {
 		return 0, false
 	}
 	if left > maxRawValueCapacity-right {
+		return 0, false
+	}
+	return left + right, true
+}
+
+func checkedBatchSize(first int, rest int) (int, bool) {
+	return checkedIntSum(first, rest)
+}
+
+func checkedIntSum(left int, right int) (int, bool) {
+	if left < 0 || right < 0 {
+		return 0, false
+	}
+	max := int(^uint(0) >> 1)
+	if left > max-right {
 		return 0, false
 	}
 	return left + right, true
@@ -617,7 +626,11 @@ func validateSliceValue(value Slice) error {
 }
 
 func validateSliceValues(value interface{}, values ...interface{}) error {
-	items := make(Slice, 0, 1+len(values))
+	capacity, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return errBatchSizeTooLarge
+	}
+	items := make(Slice, 0, capacity)
 	items = append(items, value)
 	items = append(items, values...)
 	return validateSliceValue(items)
@@ -1302,7 +1315,7 @@ func (set *setData) addValuesWithKeys(keys []string, values []interface{}) int {
 }
 
 func (set *setData) addOneWithKeys(keys []string, value interface{}, values ...interface{}) int {
-	set.ensureCapacity(1 + len(values))
+	set.ensureCapacity(len(keys))
 	added := set.addKeyValue(keys[0], value)
 	for idx, value := range values {
 		added += set.addKeyValue(keys[idx+1], value)
@@ -3660,7 +3673,11 @@ func setItemKeys(values ...interface{}) ([]string, error) {
 }
 
 func setItemKeysOne(value interface{}, values ...interface{}) ([]string, error) {
-	keys := make([]string, 1+len(values))
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return nil, errBatchSizeTooLarge
+	}
+	keys := make([]string, count)
 	key, err := setItemKey(value)
 	if err != nil {
 		return nil, err
