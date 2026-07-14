@@ -960,6 +960,65 @@ func TestHTTPReplicatorReplicatesTopKMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesReservoirSampleMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request CacheCommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATERS", Key: "sample", Value: "3"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATERS response = %#v, want ok", response)
+	}
+	add := CacheCommandRequest{Command: "ADDRS", Key: "sample", Values: Slice{"alpha", "beta", "gamma", "delta"}}
+	response := trie.ExecuteCommand(add)
+	if !response.OK {
+		t.Fatalf("ADDRS response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, add, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("reservoir sample replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "sample" || request.Value == "" {
+			t.Fatalf("replicated reservoir sample request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated reservoir sample snapshot JSON error = %v", err)
+		}
+		if entry.Type != "reservoir_sample" || entry.ReservoirSample == nil {
+			t.Fatalf("replicated reservoir sample snapshot = %#v, want reservoir_sample payload", entry)
+		}
+	default:
+		t.Fatal("reservoir sample mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "GETRS", Key: "sample"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "GETRS", Key: "sample"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("reservoir sample read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestHTTPReplicatorReplicatesQuantileSketchMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -342,6 +342,12 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 			return 0, errors.New("hatriecache: fenwick tree snapshot is required")
 		}
 		return int64(len(entry.FenwickTree.Tree) * 8), nil
+	case "reservoir_sample":
+		if entry.ReservoirSample == nil {
+			return 0, errors.New("hatriecache: reservoir sample snapshot is required")
+		}
+		data, err := json.Marshal(entry.ReservoirSample)
+		return int64(len(data)), err
 	default:
 		return 0, errors.New("hatriecache: unsupported snapshot value type")
 	}

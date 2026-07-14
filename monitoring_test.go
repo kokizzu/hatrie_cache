@@ -57,6 +57,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	}
 	ht.AddFenwickTree("session:fenwick", 2, 5)
 	ht.AddFenwickTree("session:fenwick", 6, 7)
+	if err := ht.UpsertReservoirSample("session:zzsample", 3); err != nil {
+		t.Fatalf("UpsertReservoirSample() error = %v", err)
+	}
+	ht.AddReservoirSample("session:zzsample", "/api/users", "/api/sessions", "/api/cache", "/api/health")
 	ht.UpsertCounter("counter:views", 42)
 	if !ht.Expire("session:1", time.Minute) {
 		t.Fatal("Expire(session:1) = false, want true")
@@ -96,6 +100,10 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	fenwickInfo, ok := ht.FenwickTreeInfo("session:fenwick")
 	if !ok {
 		t.Fatal("FenwickTreeInfo(session:fenwick) = false, want true")
+	}
+	reservoirInfo, ok := ht.ReservoirSampleInfo("session:zzsample")
+	if !ok {
+		t.Fatal("ReservoirSampleInfo(session:zzsample) = false, want true")
 	}
 
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
@@ -138,8 +146,8 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(entriesResp.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("entries JSON error = %v", err)
 	}
-	if len(entries.Entries) != 12 {
-		t.Fatalf("entries len = %d, want 12: %#v", len(entries.Entries), entries.Entries)
+	if len(entries.Entries) != 13 {
+		t.Fatalf("entries len = %d, want 13: %#v", len(entries.Entries), entries.Entries)
 	}
 	entry := entries.Entries[0]
 	if entry.Key != "session:1" || entry.Type != "string" || entry.ValuePreview != "active user" {
@@ -200,6 +208,11 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	wantQuantilePreview := strconv.FormatUint(quantileInfo.Count, 10) + " samples, " + strconv.FormatUint(quantileInfo.SummarySize, 10) + " summary points"
 	if quantileEntry.Key != "session:zquantiles" || quantileEntry.Type != "quantile_sketch" || quantileEntry.SizeBytes != quantileInfo.EncodedBytes || quantileEntry.ValuePreview != wantQuantilePreview {
 		t.Fatalf("quantile sketch entry = %#v, want compact quantile preview", quantileEntry)
+	}
+	reservoirEntry := entries.Entries[12]
+	wantReservoirPreview := strconv.FormatUint(reservoirInfo.Tracked, 10) + "/" + strconv.FormatUint(reservoirInfo.Capacity, 10) + " sampled, " + strconv.FormatUint(reservoirInfo.Seen, 10) + " seen"
+	if reservoirEntry.Key != "session:zzsample" || reservoirEntry.Type != "reservoir_sample" || reservoirEntry.SizeBytes != reservoirInfo.EncodedBytes || reservoirEntry.ValuePreview != wantReservoirPreview {
+		t.Fatalf("reservoir sample entry = %#v, want compact bounded-sample preview", reservoirEntry)
 	}
 }
 

@@ -678,6 +678,31 @@ func TestRunCommandPostsTopKOptions(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsReservoirSampleOptions(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true,"message":"created reservoir sample"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-cmd", "CREATERS",
+		"-key", "sample",
+		"-value", "128",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command CREATERS) error = %v", err)
+	}
+
+	if gotRequest.Command != "CREATERS" || gotRequest.Key != "sample" || gotRequest.Value != "128" {
+		t.Fatalf("request = %#v, want CREATERS sample value 128", gotRequest)
+	}
+}
+
 func TestRunCommandPostsQuantileSketchOptions(t *testing.T) {
 	var gotRequest hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

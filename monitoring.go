@@ -763,6 +763,12 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		info := ht.fenwickTrees.array[hval.Index].Info()
 		return int64(info.TreeBytes), strconv.FormatUint(info.Size, 10) + " counters, " + strconv.FormatInt(info.Total, 10) + " total"
+	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
+		if int(hval.Index) >= len(ht.reservoirSamples.array) || hval.Index < 0 {
+			return 0, ""
+		}
+		info := ht.reservoirSamples.array[hval.Index].Info()
+		return info.EncodedBytes, strconv.FormatUint(info.Tracked, 10) + "/" + strconv.FormatUint(info.Capacity, 10) + " sampled, " + strconv.FormatUint(info.Seen, 10) + " seen"
 	default:
 		return 0, ""
 	}
@@ -804,6 +810,8 @@ func monitoringType(hval HatValue) string {
 		return "fenwick_tree"
 	case DATAVALUE_TYPE_SPARSE_BITSET:
 		return "sparse_bitset"
+	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
+		return "reservoir_sample"
 	default:
 		return "unknown"
 	}

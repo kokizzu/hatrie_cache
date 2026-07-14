@@ -12,13 +12,13 @@
   let persist = false;
   let response = '';
 
-  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'CREATESB', 'COUNTSB', 'GETSB', 'INFOSB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'INFOQ', 'INFOFW'].includes(command);
+  $: needsValue = !['GET', 'DEL', 'EXPIRE', 'PEEKPQ', 'POPPQ', 'GETPQ', 'INFOBF', 'INFOCF', 'CREATERB', 'COUNTRB', 'GETRB', 'INFORB', 'CREATESB', 'COUNTSB', 'GETSB', 'INFOSB', 'INFOCMS', 'COUNTHLL', 'INFOHLL', 'GETTOPK', 'INFOTOPK', 'GETRS', 'INFORS', 'INFOQ', 'INFOFW'].includes(command);
   $: needsTTL = ['SETSTR', 'SETINT', 'EXPIRE'].includes(command);
   $: needsPriority = command === 'PUSHPQ';
   $: needsSubkey = ['CREATECF', 'CREATECMS', 'INCRCMS', 'ADDTOPK', 'ADDFW', 'RANGEFW'].includes(command);
   $: subkeyLabel = command === 'CREATECMS' ? 'Depth' : command === 'CREATECF' ? 'False positive rate' : command === 'ADDFW' ? 'Delta' : command === 'RANGEFW' ? 'End index' : 'Count';
-  $: valueLabel = command === 'CREATEFW' ? 'Size' : ['ADDFW', 'GETFW', 'SUMFW'].includes(command) ? 'Index' : command === 'RANGEFW' ? 'Start index' : 'Value';
-  $: valuePlaceholder = command === 'CREATEFW' ? '1024' : ['ADDFW', 'GETFW', 'SUMFW', 'RANGEFW'].includes(command) ? '0' : 'value';
+  $: valueLabel = command === 'CREATEFW' ? 'Size' : command === 'CREATERS' ? 'Capacity' : ['ADDFW', 'GETFW', 'SUMFW'].includes(command) ? 'Index' : command === 'RANGEFW' ? 'Start index' : 'Value';
+  $: valuePlaceholder = command === 'CREATEFW' ? '1024' : command === 'CREATERS' ? '128' : ['ADDFW', 'GETFW', 'SUMFW', 'RANGEFW'].includes(command) ? '0' : 'value';
   $: subkeyPlaceholder = command === 'CREATECMS' ? '4' : command === 'CREATECF' ? '0.01' : command === 'RANGEFW' ? '10' : '1';
 
   async function submit() {
@@ -100,6 +100,10 @@
           <option>ESTTOPK</option>
           <option>GETTOPK</option>
           <option>INFOTOPK</option>
+          <option>CREATERS</option>
+          <option>ADDRS</option>
+          <option>GETRS</option>
+          <option>INFORS</option>
           <option>CREATEQ</option>
           <option>ADDQ</option>
           <option>ESTQ</option>

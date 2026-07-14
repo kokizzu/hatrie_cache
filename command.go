@@ -545,6 +545,34 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return CacheCommandResponse{OK: true, Message: "value not found"}
 		}
 		return commandValueResponse("ok", info)
+	case "CREATERS", "CREATESAMPLE", "RESERVERS", "RSRESERVE":
+		capacity, err := commandReservoirSampleCapacity(request)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if err := ht.UpsertReservoirSample(key, capacity); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "created reservoir sample"}
+	case "ADDRS", "RSADD":
+		values, ok := commandSliceValues(request)
+		if !ok {
+			return commandError("value or values is required")
+		}
+		update := ht.AddReservoirSample(key, values[0], values[1:]...)
+		return commandValueResponse("added reservoir sample values", update)
+	case "GETRS", "RSGET", "SAMPLE":
+		value := ht.GetReservoirSample(key)
+		if value == nil {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", value)
+	case "INFORS", "RSINFO":
+		info, ok := ht.ReservoirSampleInfo(key)
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		return commandValueResponse("ok", info)
 	case "CREATEQ", "CREATEQS", "CREATEQUANTILE", "RESERVEQ", "QSRESERVE":
 		epsilon, err := commandQuantileSketchEpsilon(request)
 		if err != nil {
@@ -876,6 +904,12 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 			return "", err
 		}
 		return string(data), nil
+	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
+		data, err := json.Marshal(ht.reservoirSamples.array[hval.Index].Items())
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		data, err := json.Marshal(ht.quantileSketches.array[hval.Index].Info())
 		if err != nil {
@@ -1181,6 +1215,24 @@ func commandTopKCount(request CacheCommandRequest) (uint64, error) {
 		return 0, errors.New("top-k count must be positive")
 	}
 	return count, nil
+}
+
+func commandReservoirSampleCapacity(request CacheCommandRequest) (uint64, error) {
+	capacity := DefaultReservoirSampleCapacity
+	var err error
+	if strings.TrimSpace(request.Value) != "" {
+		capacity, err = strconv.ParseUint(strings.TrimSpace(request.Value), 10, 64)
+		if err != nil {
+			return 0, errors.New("reservoir sample capacity must be an unsigned integer")
+		}
+	}
+	if value, ok := request.Pairs["capacity"]; ok {
+		capacity, err = commandUint64Value(value)
+		if err != nil {
+			return 0, errors.New("reservoir sample capacity must be an unsigned integer")
+		}
+	}
+	return reservoirSampleCapacityValue(capacity)
 }
 
 func commandQuantileSketchEpsilon(request CacheCommandRequest) (float64, error) {

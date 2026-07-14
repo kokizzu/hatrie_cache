@@ -660,6 +660,74 @@ func TestExecuteCommandTopKOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandReservoirSampleOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATERS", Key: "sample", Value: "3"}); !got.OK {
+		t.Fatalf("CREATERS response = %#v, want ok", got)
+	}
+	addResp := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDRS",
+		Key:     "sample",
+		Values:  Slice{"alpha", "beta", "gamma", "delta"},
+	})
+	if !addResp.OK || addResp.Value == "" {
+		t.Fatalf("ADDRS response = %#v, want JSON update", addResp)
+	}
+	var update ReservoirSampleUpdate
+	if err := json.Unmarshal([]byte(addResp.Value), &update); err != nil {
+		t.Fatalf("ADDRS update JSON error = %v", err)
+	}
+	if update.Seen != 4 || update.Tracked != 3 || update.Capacity != 3 {
+		t.Fatalf("ADDRS update = %#v, want bounded stream sample", update)
+	}
+	getResp := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRS", Key: "sample"})
+	if !getResp.OK || getResp.Value == "" {
+		t.Fatalf("GETRS response = %#v, want JSON sample items", getResp)
+	}
+	var items []ReservoirSampleItem
+	if err := json.Unmarshal([]byte(getResp.Value), &items); err != nil {
+		t.Fatalf("GETRS JSON error = %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("GETRS len = %d, want bounded sample capacity 3", len(items))
+	}
+	infoResp := ht.ExecuteCommand(CacheCommandRequest{Command: "INFORS", Key: "sample"})
+	if !infoResp.OK || infoResp.Value == "" {
+		t.Fatalf("INFORS response = %#v, want JSON info", infoResp)
+	}
+	var info ReservoirSampleInfo
+	if err := json.Unmarshal([]byte(infoResp.Value), &info); err != nil {
+		t.Fatalf("INFORS JSON error = %v", err)
+	}
+	if info.Capacity != 3 || info.Tracked != 3 || info.Seen != 4 {
+		t.Fatalf("INFORS = %#v, want populated reservoir sample info", info)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "sample"}); !got.OK || got.Value == "" {
+		t.Fatalf("GET reservoir sample response = %#v, want JSON items", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRS", Key: "auto", Value: "value"}); !got.OK || got.Value == "" {
+		t.Fatalf("ADDRS auto response = %#v, want JSON update", got)
+	}
+	if !ht.Get("auto").IsReservoirSample() {
+		t.Fatal("ADDRS on missing key did not create a reservoir sample")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "CREATERS",
+		Key:     "paired",
+		Pairs:   Map{"capacity": json.Number("4")},
+	}); !got.OK {
+		t.Fatalf("CREATERS pairs response = %#v, want ok", got)
+	}
+	if info, ok := ht.ReservoirSampleInfo("paired"); !ok || info.Capacity != 4 {
+		t.Fatalf("paired ReservoirSampleInfo = %#v/%v, want capacity 4", info, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "CREATERS", Key: "bad", Value: "0"}); got.OK {
+		t.Fatalf("CREATERS invalid response = %#v, want error", got)
+	}
+}
+
 func TestExecuteCommandQuantileSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

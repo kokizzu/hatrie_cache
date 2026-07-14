@@ -63,6 +63,7 @@ const (
 	DATAVALUE_TYPE_QUANTILE_SKETCH
 	DATAVALUE_TYPE_FENWICK_TREE
 	DATAVALUE_TYPE_SPARSE_BITSET
+	DATAVALUE_TYPE_RESERVOIR_SAMPLE
 )
 
 type Map = map[string]interface{}
@@ -627,6 +628,10 @@ func (hval HatValue) IsSparseBitset() bool {
 	return hval.Is(DATAVALUE_TYPE_SPARSE_BITSET)
 }
 
+func (hval HatValue) IsReservoirSample() bool {
+	return hval.Is(DATAVALUE_TYPE_RESERVOIR_SAMPLE)
+}
+
 func (hval HatValue) HasTtl() bool {
 	return hval.Flags&(1<<DATAVALUE_TTL_BIT_SHIFT) != 0
 }
@@ -673,6 +678,8 @@ func (hval HatValue) String() string {
 		return "fenwick tree at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_SPARSE_BITSET:
 		return "sparse bitset at index: " + strconv.FormatInt(int64(hval.Index), 10)
+	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
+		return "reservoir sample at index: " + strconv.FormatInt(int64(hval.Index), 10)
 	}
 	return "unknown type"
 }
@@ -1302,6 +1309,7 @@ type HatTrie struct {
 	quantileSketches *QuantileSketchStorage
 	fenwickTrees     *FenwickTreeStorage
 	sparseBitsets    *SparseBitsetStorage
+	reservoirSamples *ReservoirSampleStorage
 	dbrefs           *LevelDBReferenceStorage
 	expires          map[string]time.Time
 	expirations      expirationHeap
@@ -1345,6 +1353,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		quantileSketches: CreateQuantileSketchStorage(),
 		fenwickTrees:     CreateFenwickTreeStorage(),
 		sparseBitsets:    CreateSparseBitsetStorage(),
+		reservoirSamples: CreateReservoirSampleStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
 		keyStats:         map[string]KeyStats{},
@@ -1385,6 +1394,7 @@ func (ht *HatTrie) Destroy() {
 	ht.quantileSketches = nil
 	ht.fenwickTrees = nil
 	ht.sparseBitsets = nil
+	ht.reservoirSamples = nil
 	ht.dbrefs = nil
 	ht.expires = nil
 	ht.expirations.Clear()
@@ -1869,6 +1879,8 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 		ht.fenwickTrees.Del(hval.Index)
 	case DATAVALUE_TYPE_SPARSE_BITSET:
 		ht.sparseBitsets.Del(hval.Index)
+	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
+		ht.reservoirSamples.Del(hval.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {
 			ht.disks.Del(hval.Index)

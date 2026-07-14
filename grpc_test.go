@@ -530,6 +530,49 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 		t.Fatalf("INFOTOPK response = %#v, want JSON info", infoTopKResp)
 	}
 
+	createReservoirResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "CREATERS",
+		Key:     "sample",
+		Value:   "3",
+	})
+	if err != nil {
+		t.Fatalf("Command(CREATERS) error = %v", err)
+	}
+	if !createReservoirResp.GetOk() {
+		t.Fatalf("CREATERS response = %#v, want ok", createReservoirResp)
+	}
+	addReservoirResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "ADDRS",
+		Key:     "sample",
+		Values:  []string{"alpha", "beta", "gamma", "delta"},
+	})
+	if err != nil {
+		t.Fatalf("Command(ADDRS) error = %v", err)
+	}
+	if !addReservoirResp.GetOk() || addReservoirResp.GetValue() == "" {
+		t.Fatalf("ADDRS response = %#v, want JSON update", addReservoirResp)
+	}
+	getReservoirResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "GETRS",
+		Key:     "sample",
+	})
+	if err != nil {
+		t.Fatalf("Command(GETRS) error = %v", err)
+	}
+	if !getReservoirResp.GetOk() || getReservoirResp.GetValue() == "" {
+		t.Fatalf("GETRS response = %#v, want JSON items", getReservoirResp)
+	}
+	infoReservoirResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "INFORS",
+		Key:     "sample",
+	})
+	if err != nil {
+		t.Fatalf("Command(INFORS) error = %v", err)
+	}
+	if !infoReservoirResp.GetOk() || infoReservoirResp.GetValue() == "" {
+		t.Fatalf("INFORS response = %#v, want JSON info", infoReservoirResp)
+	}
+
 	createQuantileResp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
 		Command: "CREATEQ",
 		Key:     "latency",

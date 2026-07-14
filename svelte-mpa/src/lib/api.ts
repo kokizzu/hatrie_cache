@@ -39,7 +39,8 @@ export type CacheEntry = {
     | 'hyperloglog'
     | 'top_k'
     | 'quantile_sketch'
-    | 'fenwick_tree';
+    | 'fenwick_tree'
+    | 'reservoir_sample';
   ttl_ms: number | null;
   on_disk: boolean;
   size_bytes: number;
@@ -176,6 +177,14 @@ const sampleEntries: CacheEntry[] = [
     on_disk: false,
     size_bytes: 8200,
     value_preview: '1024 counters, 128440 total'
+  },
+  {
+    key: 'sample:requests',
+    type: 'reservoir_sample',
+    ttl_ms: null,
+    on_disk: false,
+    size_bytes: 4096,
+    value_preview: '128/128 sampled, 918240 seen'
   },
   {
     key: 'ids:active64',

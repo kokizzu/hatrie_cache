@@ -435,6 +435,48 @@ func TestCommandJournalReplaysTopKMutations(t *testing.T) {
 	}
 }
 
+func TestCommandJournalReplaysReservoirSampleMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+
+	ht := newTestTrie(t)
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "CREATERS", Key: "sample", Value: "3"}); !got.OK {
+		t.Fatalf("journaled CREATERS response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "ADDRS", Key: "sample", Values: Slice{"alpha", "beta", "gamma", "delta"}}); !got.OK {
+		t.Fatalf("journaled ADDRS response = %#v, want ok", got)
+	}
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "GETRS", Key: "sample"}); !got.OK || got.Value == "" {
+		t.Fatalf("journaled GETRS response = %#v, want local sample", got)
+	}
+
+	entries, err := readCommandJournalEntries(path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("journal entries = %d, want CREATERS and ADDRS only", len(entries))
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	if _, err := replayJournal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got := replayed.GetReservoirSample("sample"); len(got) != 3 {
+		t.Fatalf("replayed reservoir sample len = %d, want capacity 3: %#v", len(got), got)
+	}
+	if info, ok := replayed.ReservoirSampleInfo("sample"); !ok || info.Seen != 4 || info.Tracked != 3 || info.Capacity != 3 {
+		t.Fatalf("replayed ReservoirSampleInfo = %#v/%v, want seen 4 tracked 3", info, ok)
+	}
+}
+
 func TestCommandJournalReplaysQuantileSketchMutations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	journal, err := OpenCommandJournal(path)

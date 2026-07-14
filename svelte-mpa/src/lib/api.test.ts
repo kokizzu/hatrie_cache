@@ -63,4 +63,42 @@ describe('command fallback', () => {
     });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it('posts reservoir sample command payloads', async () => {
+    const fetchMock = vi.fn(async (_path: string | URL | Request, init?: RequestInit) => {
+      expect(_path).toBe('/api/commands');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toMatchObject({ 'content-type': 'application/json' });
+      expect(JSON.parse(String(init?.body))).toEqual({
+        command: 'ADDRS',
+        key: 'sample:requests',
+        value: '/api/users'
+      });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          message: 'added reservoir sample values',
+          value: '{"accepted":true,"seen":1,"tracked":1,"capacity":128}'
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      runCommand({
+        command: 'ADDRS',
+        key: 'sample:requests',
+        value: '/api/users'
+      })
+    ).resolves.toEqual({
+      ok: true,
+      message: 'added reservoir sample values',
+      value: '{"accepted":true,"seen":1,"tracked":1,"capacity":128}'
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });

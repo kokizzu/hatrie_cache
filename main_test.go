@@ -75,6 +75,10 @@ func sparseBitsetIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.sparseBitsets.array) || ht.sparseBitsets.reusables.Has(idx)
 }
 
+func reservoirSampleIndexReleased(ht *HatTrie, idx int32) bool {
+	return int(idx) >= len(ht.reservoirSamples.array) || ht.reservoirSamples.reusables.Has(idx)
+}
+
 func bloomFilterMissingValue(t *testing.T, ht *HatTrie, key string) string {
 	t.Helper()
 	for idx := 0; idx < 1000; idx++ {
@@ -153,6 +157,7 @@ func TestHatValueStringReportsKnownTypes(t *testing.T) {
 		{name: "quantile sketch", value: HatValue{Index: 13, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}, want: "quantile sketch at index: 13"},
 		{name: "fenwick tree", value: HatValue{Index: 14, Flags: DATAVALUE_TYPE_FENWICK_TREE}, want: "fenwick tree at index: 14"},
 		{name: "sparse bitset", value: HatValue{Index: 15, Flags: DATAVALUE_TYPE_SPARSE_BITSET}, want: "sparse bitset at index: 15"},
+		{name: "reservoir sample", value: HatValue{Index: 16, Flags: DATAVALUE_TYPE_RESERVOIR_SAMPLE}, want: "reservoir sample at index: 16"},
 		{name: "unknown", value: HatValue{Index: 9, Flags: DATAVALUE_TTL_TYPE_BITS}, want: "unknown type"},
 	}
 
@@ -2161,6 +2166,133 @@ func TestTopKStorageReleasedOnOverwrite(t *testing.T) {
 	}
 }
 
+func TestReservoirSampleOperations(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertReservoirSample("sample", 3); err != nil {
+		t.Fatalf("UpsertReservoirSample() error = %v", err)
+	}
+	if hval := ht.Get("sample"); !hval.IsReservoirSample() {
+		t.Fatalf("UpsertReservoirSample stored type %+v, want reservoir sample", hval)
+	}
+	if got := ht.AddReservoirSample("sample", "alpha"); !got.Accepted || got.Seen != 1 || got.Tracked != 1 || got.Capacity != 3 {
+		t.Fatalf("AddReservoirSample(alpha) = %#v, want first accepted sample", got)
+	}
+	update := ht.AddReservoirSample("sample", "beta", "gamma", "delta", "epsilon")
+	if update.Seen != 5 || update.Tracked != 3 || update.Capacity != 3 {
+		t.Fatalf("AddReservoirSample(batch) = %#v, want bounded sample after five values", update)
+	}
+	items := ht.GetReservoirSample("sample")
+	if len(items) != 3 {
+		t.Fatalf("GetReservoirSample len = %d, want capacity 3", len(items))
+	}
+	for idx := 1; idx < len(items); idx++ {
+		if items[idx-1].Priority > items[idx].Priority {
+			t.Fatalf("GetReservoirSample items are not priority sorted: %#v", items)
+		}
+	}
+	info, ok := ht.ReservoirSampleInfo("sample")
+	if !ok {
+		t.Fatal("ReservoirSampleInfo(sample) = false, want true")
+	}
+	if info.Capacity != 3 || info.Tracked != 3 || info.Seen != 5 || info.EncodedBytes == 0 {
+		t.Fatalf("ReservoirSampleInfo(sample) = %#v, want populated bounded sample", info)
+	}
+
+	idx := ht.Get("sample").Index
+	if err := ht.UpsertReservoirSample("sample", 2); err != nil {
+		t.Fatalf("UpsertReservoirSample(replace) error = %v", err)
+	}
+	if got := ht.Get("sample"); !got.IsReservoirSample() || got.Index != idx {
+		t.Fatalf("UpsertReservoirSample replacement stored %+v, want same reservoir slot %d", got, idx)
+	}
+	if got := ht.GetReservoirSample("sample"); len(got) != 0 {
+		t.Fatalf("GetReservoirSample(after replace) = %#v, want empty sample", got)
+	}
+
+	if got := ht.AddReservoirSample("auto", "value"); !got.Accepted || got.Seen != 1 || got.Capacity != DefaultReservoirSampleCapacity {
+		t.Fatalf("AddReservoirSample(auto) = %#v, want default accepted sample", got)
+	}
+	if hval := ht.Get("auto"); !hval.IsReservoirSample() {
+		t.Fatalf("AddReservoirSample(auto) stored type %+v, want reservoir sample", hval)
+	}
+}
+
+func TestReservoirSampleClonesNestedValues(t *testing.T) {
+	ht := newTestTrie(t)
+	value := Map{"path": "/api/users"}
+	if got := ht.AddReservoirSample("sample", value); !got.Accepted {
+		t.Fatalf("AddReservoirSample() = %#v, want accepted", got)
+	}
+	value["path"] = "/caller"
+	items := ht.GetReservoirSample("sample")
+	if got := items[0].Value.(Map)["path"]; got != "/api/users" {
+		t.Fatalf("stored reservoir sample value = %v, want cloned /api/users", got)
+	}
+	items[0].Value.(Map)["path"] = "/mutated"
+	if got := ht.GetReservoirSample("sample")[0].Value.(Map)["path"]; got != "/api/users" {
+		t.Fatalf("GetReservoirSample exposed nested value: %v", got)
+	}
+}
+
+func TestReservoirSampleRejectsInvalidConfig(t *testing.T) {
+	ht := newTestTrie(t)
+
+	for _, capacity := range []uint64{0, maxReservoirSampleCapacity + 1} {
+		if err := ht.UpsertReservoirSample("bad", capacity); err == nil {
+			t.Fatalf("UpsertReservoirSample(%d) error = nil, want error", capacity)
+		}
+		if got := ht.Get("bad"); !got.Empty() {
+			t.Fatalf("invalid reservoir sample config stored value %+v", got)
+		}
+	}
+}
+
+func TestReservoirSampleSnapshotValidationRejectsCorruptPayload(t *testing.T) {
+	sample, err := newReservoirSampleData(2)
+	if err != nil {
+		t.Fatalf("newReservoirSampleData() error = %v", err)
+	}
+	sample.AddOne("alpha", "beta")
+	snapshot := sample.Snapshot()
+	snapshot.Items[0].Priority++
+	if err := validateReservoirSampleSnapshot(snapshot); err == nil {
+		t.Fatal("validateReservoirSampleSnapshot(mismatched priority) error = nil, want error")
+	}
+
+	snapshot = sample.Snapshot()
+	snapshot.Items[1].Sequence = snapshot.Items[0].Sequence
+	if err := validateReservoirSampleSnapshot(snapshot); err == nil {
+		t.Fatal("validateReservoirSampleSnapshot(duplicate sequence) error = nil, want error")
+	}
+
+	snapshot = sample.Snapshot()
+	snapshot.Seen = 1
+	if err := validateReservoirSampleSnapshot(snapshot); err == nil {
+		t.Fatal("validateReservoirSampleSnapshot(seen below tracked) error = nil, want error")
+	}
+}
+
+func TestReservoirSampleStorageReleasedOnOverwrite(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if err := ht.UpsertReservoirSample("sample", 10); err != nil {
+		t.Fatalf("UpsertReservoirSample() error = %v", err)
+	}
+	idx := ht.Get("sample").Index
+	ht.UpsertString("sample", "value")
+	if !reservoirSampleIndexReleased(ht, idx) {
+		t.Fatalf("overwritten reservoir sample index %d was not released", idx)
+	}
+
+	if err := ht.UpsertReservoirSample("new", 10); err != nil {
+		t.Fatalf("UpsertReservoirSample(new) error = %v", err)
+	}
+	if got := ht.Get("new").Index; got != idx {
+		t.Fatalf("reservoir sample storage was not reused: got index %d, want %d", got, idx)
+	}
+}
+
 func TestQuantileSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -3363,9 +3495,13 @@ func TestDestroyIsIdempotentAndPreventsUse(t *testing.T) {
 	ht.AddFenwickTree("scores", 2, 7)
 	ht.UpsertSparseBitset("ids")
 	ht.AddSparseBitset("ids", 1, ^uint64(0))
+	if err := ht.UpsertReservoirSample("sample", 8); err != nil {
+		t.Fatalf("UpsertReservoirSample() error = %v", err)
+	}
+	ht.AddReservoirSample("sample", "alpha", "beta")
 	ht.Destroy()
 	ht.Destroy()
-	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.fenwickTrees != nil || ht.sparseBitsets != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
+	if ht.root != nil || ht.raws != nil || ht.disks != nil || ht.maps != nil || ht.slices != nil || ht.sets != nil || ht.priorityQueues != nil || ht.bloomFilters != nil || ht.countMinSketches != nil || ht.hyperLogLogs != nil || ht.topKs != nil || ht.cuckooFilters != nil || ht.roaringBitmaps != nil || ht.quantileSketches != nil || ht.fenwickTrees != nil || ht.sparseBitsets != nil || ht.reservoirSamples != nil || ht.dbrefs != nil || ht.expires != nil || ht.expirations != nil || ht.keyStats != nil || ht.now != nil {
 		t.Fatalf("Destroy retained backing state: %+v", ht)
 	}
 

@@ -66,6 +66,7 @@
         <option value="top_k">Top-K</option>
         <option value="quantile_sketch">Quantile Sketch</option>
         <option value="fenwick_tree">Fenwick Tree</option>
+        <option value="reservoir_sample">Reservoir Sample</option>
         <option value="sparse_bitset">Sparse Bitset</option>
       </select>
     </label>

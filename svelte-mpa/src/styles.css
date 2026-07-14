@@ -469,6 +469,11 @@ textarea {
   color: #146454;
 }
 
+.type-pill.reservoir_sample {
+  background: #fff0e6;
+  color: #8a4214;
+}
+
 .preview {
   color: #62707d;
   max-width: 280px;

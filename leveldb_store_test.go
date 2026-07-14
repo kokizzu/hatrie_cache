@@ -320,6 +320,27 @@ func TestSnapshotOperationValueSizeSupportsTopK(t *testing.T) {
 	}
 }
 
+func TestSnapshotOperationValueSizeSupportsReservoirSample(t *testing.T) {
+	sample, err := newReservoirSampleData(3)
+	if err != nil {
+		t.Fatalf("newReservoirSampleData() error = %v", err)
+	}
+	sample.AddOne("alpha", "beta", "gamma", "delta")
+	snapshot := sample.Snapshot()
+	size, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:            "reservoir_sample",
+			ReservoirSample: &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("snapshotOperationValueSize(reservoir_sample) error = %v", err)
+	}
+	if size != sample.EncodedSize() {
+		t.Fatalf("snapshotOperationValueSize(reservoir_sample) = %d, want %d", size, sample.EncodedSize())
+	}
+}
+
 func TestSnapshotOperationValueSizeSupportsQuantileSketch(t *testing.T) {
 	sketch, err := newQuantileSketchData(0.01)
 	if err != nil {

@@ -10,6 +10,7 @@ const entries: CacheEntry[] = [
   { key: 'top:paths', type: 'top_k', ttl_ms: null, on_disk: false, size_bytes: 4096, value_preview: '8/100 tracked' },
   { key: 'latency:p95', type: 'quantile_sketch', ttl_ms: null, on_disk: false, size_bytes: 3072, value_preview: '100 samples' },
   { key: 'scores:hourly', type: 'fenwick_tree', ttl_ms: null, on_disk: false, size_bytes: 8200, value_preview: '1024 counters' },
+  { key: 'sample:requests', type: 'reservoir_sample', ttl_ms: null, on_disk: false, size_bytes: 4096, value_preview: '128/128 sampled' },
   { key: 'ids:active64', type: 'sparse_bitset', ttl_ms: null, on_disk: false, size_bytes: 24, value_preview: '12 integers' }
 ];
 
@@ -35,7 +36,8 @@ describe('format helpers', () => {
     expect(filterEntries(entries, '', 'top_k')).toEqual([entries[4]]);
     expect(filterEntries(entries, '', 'quantile_sketch')).toEqual([entries[5]]);
     expect(filterEntries(entries, '', 'fenwick_tree')).toEqual([entries[6]]);
-    expect(filterEntries(entries, '', 'sparse_bitset')).toEqual([entries[7]]);
+    expect(filterEntries(entries, '', 'reservoir_sample')).toEqual([entries[7]]);
+    expect(filterEntries(entries, '', 'sparse_bitset')).toEqual([entries[8]]);
     expect(filterEntries(entries, 'missing', 'all')).toHaveLength(0);
   });
 });

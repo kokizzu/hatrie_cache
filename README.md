@@ -23,6 +23,9 @@ HyperLogLog values use compact register arrays for approximate distinct counts
 without retaining the observed items.
 Top-K values use a bounded Space-Saving min-heap to track heavy hitters with
 fixed memory and O(log k) updates.
+Reservoir sample values keep a deterministic fixed-capacity stream sample using
+hashed priorities, so representative samples stay bounded in memory without
+retaining the full event history.
 Quantile sketch values use a compact Greenwald-Khanna summary for approximate
 p50/p95/p99-style numeric queries with bounded rank error and low memory use.
 Fenwick tree values use a compact int64 array for point updates, point reads,
@@ -230,9 +233,9 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `COUNTRB`, `GETRB`, `INFORB`, `CREATESB`, `ADDSB`, `REMSB`, `HASSB`,
 `COUNTSB`, `GETSB`, `INFOSB`, `CREATECMS`, `INCRCMS`, `ESTCMS`, `INFOCMS`,
 `CREATEHLL`, `ADDHLL`, `COUNTHLL`, `INFOHLL`, `CREATETOPK`, `ADDTOPK`,
-`ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`,
-`CREATEFW`, `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW`, `DUMP`,
-`INTERNALSET`, and `INTERNALDEL`.
+`ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATERS`, `ADDRS`, `GETRS`, `INFORS`,
+`CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`, `CREATEFW`, `ADDFW`, `GETFW`, `SUMFW`,
+`RANGEFW`, `INFOFW`, `DUMP`, `INTERNALSET`, and `INTERNALDEL`.
 `DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
@@ -271,6 +274,9 @@ make cli ARGS='command -cmd COUNTHLL -key card:visitors'
 make cli ARGS='command -cmd CREATETOPK -key top:paths -value 100'
 make cli ARGS='command -cmd ADDTOPK -key top:paths -value /api/users -subkey 7'
 make cli ARGS='command -cmd GETTOPK -key top:paths'
+make cli ARGS='command -cmd CREATERS -key sample:requests -value 128'
+make cli ARGS="command -cmd ADDRS -key sample:requests -values '[\"/api/users\",\"/api/cache\"]'"
+make cli ARGS='command -cmd GETRS -key sample:requests'
 make cli ARGS='command -cmd CREATEQ -key latency:p95 -value 0.01'
 make cli ARGS="command -cmd ADDQ -key latency:p95 -values '[10,20,30]'"
 make cli ARGS='command -cmd ESTQ -key latency:p95 -value 0.95'
@@ -436,6 +442,10 @@ top-k heavy hitter type:
   CREATETOPK key [capacity]
   ADDTOPK key val [count]
   ESTTOPK/GETTOPK/INFOTOPK key
+reservoir sample type:
+  CREATERS key [capacity]
+  ADDRS key val...
+  GETRS/INFORS key
 quantile sketch type:
   CREATEQ key [epsilon]
   ADDQ key number...

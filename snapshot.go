@@ -24,26 +24,27 @@ type SnapshotMetadata struct {
 }
 
 type snapshotEntry struct {
-	Key            string                  `json:"key"`
-	Type           string                  `json:"type"`
-	Counter        int32                   `json:"counter,omitempty"`
-	String         string                  `json:"string,omitempty"`
-	Bytes          string                  `json:"bytes,omitempty"`
-	Map            Map                     `json:"map"`
-	Slice          Slice                   `json:"slice"`
-	Set            Set                     `json:"set"`
-	PriorityQueue  []priorityQueueItem     `json:"priority_queue"`
-	BloomFilter    *bloomFilterSnapshot    `json:"bloom_filter,omitempty"`
-	CountMinSketch *countMinSketchSnapshot `json:"count_min_sketch,omitempty"`
-	HyperLogLog    *hyperLogLogSnapshot    `json:"hyperloglog,omitempty"`
-	TopK           *topKSnapshot           `json:"top_k,omitempty"`
-	CuckooFilter   *cuckooFilterSnapshot   `json:"cuckoo_filter,omitempty"`
-	RoaringBitmap  *roaringBitmapSnapshot  `json:"roaring_bitmap,omitempty"`
-	QuantileSketch *quantileSketchSnapshot `json:"quantile_sketch,omitempty"`
-	FenwickTree    *fenwickTreeSnapshot    `json:"fenwick_tree,omitempty"`
-	SparseBitset   *sparseBitsetSnapshot   `json:"sparse_bitset,omitempty"`
-	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
-	Stats          *KeyStats               `json:"stats,omitempty"`
+	Key             string                   `json:"key"`
+	Type            string                   `json:"type"`
+	Counter         int32                    `json:"counter,omitempty"`
+	String          string                   `json:"string,omitempty"`
+	Bytes           string                   `json:"bytes,omitempty"`
+	Map             Map                      `json:"map"`
+	Slice           Slice                    `json:"slice"`
+	Set             Set                      `json:"set"`
+	PriorityQueue   []priorityQueueItem      `json:"priority_queue"`
+	BloomFilter     *bloomFilterSnapshot     `json:"bloom_filter,omitempty"`
+	CountMinSketch  *countMinSketchSnapshot  `json:"count_min_sketch,omitempty"`
+	HyperLogLog     *hyperLogLogSnapshot     `json:"hyperloglog,omitempty"`
+	TopK            *topKSnapshot            `json:"top_k,omitempty"`
+	CuckooFilter    *cuckooFilterSnapshot    `json:"cuckoo_filter,omitempty"`
+	RoaringBitmap   *roaringBitmapSnapshot   `json:"roaring_bitmap,omitempty"`
+	QuantileSketch  *quantileSketchSnapshot  `json:"quantile_sketch,omitempty"`
+	FenwickTree     *fenwickTreeSnapshot     `json:"fenwick_tree,omitempty"`
+	SparseBitset    *sparseBitsetSnapshot    `json:"sparse_bitset,omitempty"`
+	ReservoirSample *reservoirSampleSnapshot `json:"reservoir_sample,omitempty"`
+	ExpiresAt       *time.Time               `json:"expires_at,omitempty"`
+	Stats           *KeyStats                `json:"stats,omitempty"`
 }
 
 type snapshotOperation struct {
@@ -187,6 +188,9 @@ func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	case DATAVALUE_TYPE_SPARSE_BITSET:
 		snapshot := ht.sparseBitsets.array[entry.Value.Index].Snapshot()
 		out.SparseBitset = &snapshot
+	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
+		snapshot := ht.reservoirSamples.array[entry.Value.Index].Snapshot()
+		out.ReservoirSample = &snapshot
 	default:
 		return snapshotEntry{}, errors.New("hatriecache: unsupported snapshot value type")
 	}
@@ -281,6 +285,14 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 			return snapshotOperation{}, errors.New("hatriecache: sparse bitset snapshot is required")
 		}
 		if err := validateSparseBitsetSnapshot(*entry.SparseBitset); err != nil {
+			return snapshotOperation{}, err
+		}
+		return operation, nil
+	case "reservoir_sample":
+		if entry.ReservoirSample == nil {
+			return snapshotOperation{}, errors.New("hatriecache: reservoir sample snapshot is required")
+		}
+		if err := validateReservoirSampleSnapshot(*entry.ReservoirSample); err != nil {
 			return snapshotOperation{}, err
 		}
 		return operation, nil
@@ -485,6 +497,13 @@ func (ht *HatTrie) applySnapshotOperationLocked(operation snapshotOperation) (Ha
 		}
 		idx := ht.sparseBitsets.AddData(data)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SPARSE_BITSET}
+	case "reservoir_sample":
+		data, err := newReservoirSampleDataFromSnapshot(*entry.ReservoirSample)
+		if err != nil {
+			return HatValue{}, err
+		}
+		idx := ht.reservoirSamples.AddData(data)
+		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RESERVOIR_SAMPLE}
 	default:
 		return HatValue{}, errors.New("hatriecache: unsupported snapshot value type")
 	}

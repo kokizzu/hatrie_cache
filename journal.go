@@ -526,6 +526,12 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 		}
 		_, err := commandTopKCount(request)
 		return err == nil
+	case "CREATERS", "CREATESAMPLE", "RESERVERS", "RSRESERVE":
+		_, err := commandReservoirSampleCapacity(request)
+		return err == nil
+	case "ADDRS", "RSADD":
+		_, ok := commandSliceValues(request)
+		return ok
 	case "CREATEQ", "CREATEQS", "CREATEQUANTILE", "RESERVEQ", "QSRESERVE":
 		_, err := commandQuantileSketchEpsilon(request)
 		return err == nil

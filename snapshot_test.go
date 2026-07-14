@@ -56,6 +56,10 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	ht.AddRoaringBitmap("bitmap", 1, 1<<16+7)
 	ht.UpsertSparseBitset("bitset")
 	ht.AddSparseBitset("bitset", 1, 1<<32+7, ^uint64(0))
+	if err := ht.UpsertReservoirSample("sample", 3); err != nil {
+		t.Fatalf("UpsertReservoirSample() error = %v", err)
+	}
+	ht.AddReservoirSample("sample", "alpha", "beta", "gamma", "delta")
 	if !ht.Expire("string", time.Minute) {
 		t.Fatal("Expire(string) = false, want true")
 	}
@@ -148,6 +152,12 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 	if info, ok := loaded.SparseBitsetInfo("bitset"); !ok || info.Cardinality != 3 || info.Containers != 3 {
 		t.Fatalf("loaded SparseBitsetInfo = %#v/%v, want restored sparse bitset", info, ok)
+	}
+	if got := loaded.GetReservoirSample("sample"); len(got) != 3 {
+		t.Fatalf("loaded reservoir sample len = %d, want bounded sample capacity 3: %#v", len(got), got)
+	}
+	if info, ok := loaded.ReservoirSampleInfo("sample"); !ok || info.Capacity != 3 || info.Tracked != 3 || info.Seen != 4 {
+		t.Fatalf("loaded ReservoirSampleInfo = %#v/%v, want restored reservoir sample", info, ok)
 	}
 	if got := loaded.TTL("string"); got != time.Minute {
 		t.Fatalf("TTL(string) = %s, want 1m", got)
