@@ -174,12 +174,16 @@ func (top *topKData) AddOneChecked(value interface{}, count uint64, values ...in
 	if top == nil || top.capacity == 0 {
 		return TopKEstimate{}, nil
 	}
+	if count == 0 {
+		key, err := topKLastItemKey(value, values...)
+		if err != nil {
+			return TopKEstimate{}, err
+		}
+		return top.estimateKey(key), nil
+	}
 	prepared, err := prepareTopKItems(value, values...)
 	if err != nil {
 		return TopKEstimate{}, err
-	}
-	if count == 0 {
-		return top.estimateKey(prepared[len(prepared)-1].Key), nil
 	}
 	if top.byKey == nil {
 		needed, ok := checkedBatchSize(len(top.items), len(prepared))
@@ -395,6 +399,20 @@ func prepareTopKItems(value interface{}, values ...interface{}) ([]topKItem, err
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func topKLastItemKey(value interface{}, values ...interface{}) (string, error) {
+	key, err := topKItemKey(value)
+	if err != nil {
+		return "", err
+	}
+	for _, value := range values {
+		key, err = topKItemKey(value)
+		if err != nil {
+			return "", err
+		}
+	}
+	return key, nil
 }
 
 func prepareTopKItem(value interface{}) (topKItem, error) {

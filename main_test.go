@@ -3826,6 +3826,52 @@ func TestTopKOperations(t *testing.T) {
 	}
 }
 
+func TestTopKDataZeroCountBatchEstimateDoesNotMutate(t *testing.T) {
+	top, err := newTopKData(2)
+	if err != nil {
+		t.Fatalf("newTopKData() error = %v", err)
+	}
+	if got := top.Add("alpha", 3); !got.Tracked || got.Count != 3 {
+		t.Fatalf("Add(alpha) = %#v, want tracked count 3", got)
+	}
+	if got, err := top.AddChecked("beta", 2); err != nil || !got.Tracked || got.Count != 2 {
+		t.Fatalf("AddChecked(beta) = %#v/%v, want tracked count 2", got, err)
+	}
+	before := top.Snapshot()
+
+	got, err := top.AddOneChecked("alpha", 0, "beta")
+	if err != nil {
+		t.Fatalf("AddOneChecked(zero count) error = %v", err)
+	}
+	if !got.Tracked || got.Count != 2 || got.Error != 0 {
+		t.Fatalf("AddOneChecked(zero count) = %#v, want beta estimate", got)
+	}
+	if after := top.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("zero-count Top-K add mutated sketch: before %#v after %#v", before, after)
+	}
+	if got := top.Estimate("alpha"); !got.Tracked || got.Count != 3 || got.Error != 0 {
+		t.Fatalf("Estimate(alpha) = %#v, want alpha estimate", got)
+	}
+
+	if _, err := top.AddOneChecked("alpha", 0, func() {}); err == nil {
+		t.Fatal("AddOneChecked(zero count unsupported tail) error = nil, want error")
+	}
+	if _, err := top.AddOneChecked(func() {}, 0, "beta"); err == nil {
+		t.Fatal("AddOneChecked(zero count unsupported head) error = nil, want error")
+	}
+	if _, err := top.EstimateChecked(func() {}); err == nil {
+		t.Fatal("EstimateChecked(unsupported) error = nil, want error")
+	}
+	if after := top.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("rejected zero-count Top-K add mutated sketch: before %#v after %#v", before, after)
+	}
+
+	var nilTop *topKData
+	if got, err := nilTop.AddOneChecked("missing", 0); err != nil || got != (TopKEstimate{}) {
+		t.Fatalf("nil AddOneChecked(zero count) = %#v/%v, want zero/nil", got, err)
+	}
+}
+
 func TestTopKClonesNestedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	value := Map{"path": "/api/users"}
