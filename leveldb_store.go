@@ -302,7 +302,7 @@ func (store *LevelDBStore) Entry(key string) (snapshotEntry, bool, error) {
 	if err != nil {
 		return snapshotEntry{}, false, err
 	}
-	return entry, true, nil
+	return materializeSnapshotEntryBytes(entry), true, nil
 }
 
 func (store *LevelDBStore) entryData(key string) ([]byte, bool, error) {
@@ -403,7 +403,7 @@ func levelDBEntryExceedsMaxValueBytes(entry snapshotEntry, policy LevelDBLoadPol
 	case "string":
 		return int64(len(entry.String)) > policy.MaxValueBytes
 	case "bytes":
-		size, ok := base64DecodedSize(entry.Bytes)
+		size, ok := snapshotEntryBytesDecodedSize(entry)
 		return ok && size > policy.MaxValueBytes
 	default:
 		return false
@@ -445,6 +445,9 @@ func validateLevelDBReferenceEntry(entry snapshotEntry) error {
 	case "counter", "string":
 		return nil
 	case "bytes":
+		if entry.rawBytes != nil {
+			return nil
+		}
 		return validateBase64String(entry.Bytes)
 	default:
 		_, err := validateSnapshotEntry(entry)
@@ -473,11 +476,11 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 	case "string":
 		return int64(len(entry.String)), nil
 	case "bytes":
-		if operation.bytes == nil && entry.Bytes != "" {
-			if size, ok := base64DecodedSize(entry.Bytes); ok {
+		if operation.bytes == nil && (entry.Bytes != "" || entry.rawBytes != nil) {
+			if size, ok := snapshotEntryBytesDecodedSize(entry); ok {
 				return size, nil
 			}
-			if err := validateBase64String(entry.Bytes); err != nil {
+			if err := validateSnapshotEntryFields(entry, true); err != nil {
 				return 0, err
 			}
 			return 0, nil

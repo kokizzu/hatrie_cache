@@ -109,11 +109,41 @@ type snapshotEntry struct {
 	RadixTree       *radixTreeSnapshot       `json:"radix_tree,omitempty"`
 	ExpiresAt       *time.Time               `json:"expires_at,omitempty"`
 	Stats           *KeyStats                `json:"stats,omitempty"`
+	rawBytes        []byte
 }
 
 type snapshotOperation struct {
 	entry snapshotEntry
 	bytes []byte
+}
+
+func snapshotEntryBytesBase64(entry snapshotEntry) string {
+	if entry.Bytes != "" || entry.rawBytes == nil {
+		return entry.Bytes
+	}
+	return base64.StdEncoding.EncodeToString(entry.rawBytes)
+}
+
+func snapshotEntryBytesDecodedSize(entry snapshotEntry) (int64, bool) {
+	if entry.rawBytes != nil {
+		return int64(len(entry.rawBytes)), true
+	}
+	return base64DecodedSize(entry.Bytes)
+}
+
+func snapshotEntryBytesValue(entry snapshotEntry) ([]byte, error) {
+	if entry.rawBytes != nil {
+		return entry.rawBytes, nil
+	}
+	return base64.StdEncoding.DecodeString(entry.Bytes)
+}
+
+func materializeSnapshotEntryBytes(entry snapshotEntry) snapshotEntry {
+	if entry.Type == "bytes" && entry.Bytes == "" && entry.rawBytes != nil {
+		entry.Bytes = base64.StdEncoding.EncodeToString(entry.rawBytes)
+	}
+	entry.rawBytes = nil
+	return entry
 }
 
 const (
@@ -323,11 +353,15 @@ func prepareSnapshotBytesOperation(entry snapshotEntry) (snapshotOperation, erro
 		return snapshotOperation{}, err
 	}
 	operation := snapshotOperation{entry: entry}
-	size, ok := base64DecodedSize(entry.Bytes)
+	if entry.rawBytes != nil {
+		operation.bytes = entry.rawBytes
+		return operation, nil
+	}
+	size, ok := snapshotEntryBytesDecodedSize(entry)
 	if ok && size > DiskBytesThreshold {
 		return operation, nil
 	}
-	value, err := base64.StdEncoding.DecodeString(entry.Bytes)
+	value, err := snapshotEntryBytesValue(entry)
 	if err != nil {
 		return snapshotOperation{}, err
 	}
@@ -576,8 +610,9 @@ func compactSnapshotEntryJSON(entry snapshotEntry) snapshotEntryCompactJSON {
 			out.String = &entry.String
 		}
 	case "bytes":
-		if entry.Bytes != "" {
-			out.Bytes = &entry.Bytes
+		encoded := snapshotEntryBytesBase64(entry)
+		if encoded != "" {
+			out.Bytes = &encoded
 		}
 	case "map":
 		out.Map = &entry.Map
@@ -643,8 +678,9 @@ func visitSnapshotEntryJSONFields(entry snapshotEntry, visit func(string, interf
 			}
 		}
 	case "bytes":
-		if entry.Bytes != "" {
-			if err := add("bytes", entry.Bytes); err != nil {
+		encoded := snapshotEntryBytesBase64(entry)
+		if encoded != "" {
+			if err := add("bytes", encoded); err != nil {
 				return err
 			}
 		}
@@ -909,7 +945,7 @@ func validateSnapshotEntry(entry snapshotEntry) (snapshotOperation, error) {
 
 	operation := snapshotOperation{entry: entry}
 	if entry.Type == "bytes" {
-		value, err := base64.StdEncoding.DecodeString(entry.Bytes)
+		value, err := snapshotEntryBytesValue(entry)
 		if err != nil {
 			return snapshotOperation{}, err
 		}
@@ -1059,6 +1095,9 @@ func validateSnapshotEntryFields(entry snapshotEntry, validateBytesEncoding bool
 		return nil
 	case "bytes":
 		if validateBytesEncoding {
+			if entry.rawBytes != nil {
+				return nil
+			}
 			return validateBase64String(entry.Bytes)
 		}
 		return nil
@@ -1593,10 +1632,10 @@ func (ht *HatTrie) storeSnapshotBytesValueLocked(old HatValue, operation snapsho
 }
 
 func shouldStreamSnapshotBytes(operation snapshotOperation) bool {
-	if operation.entry.Type != "bytes" || operation.entry.Bytes == "" || operation.bytes != nil {
+	if operation.entry.Type != "bytes" || operation.entry.Bytes == "" || operation.entry.rawBytes != nil || operation.bytes != nil {
 		return false
 	}
-	size, ok := base64DecodedSize(operation.entry.Bytes)
+	size, ok := snapshotEntryBytesDecodedSize(operation.entry)
 	return ok && size > DiskBytesThreshold
 }
 

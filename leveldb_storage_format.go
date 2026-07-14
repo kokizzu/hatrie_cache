@@ -2,7 +2,6 @@ package hatriecache
 
 import (
 	"bytes"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -239,7 +238,7 @@ func (writer *levelDBBinaryWriter) writeSnapshotEntryValue(entry snapshotEntry) 
 	case "string":
 		writer.writeString(entry.String)
 	case "bytes":
-		raw, err := base64.StdEncoding.DecodeString(entry.Bytes)
+		raw, err := snapshotEntryBytesValue(entry)
 		if err != nil {
 			return err
 		}
@@ -423,7 +422,7 @@ func (reader *levelDBBinaryReader) readSnapshotEntryValue(entry *snapshotEntry) 
 		if err != nil {
 			return err
 		}
-		entry.Bytes = base64.StdEncoding.EncodeToString(value)
+		entry.rawBytes = value
 	default:
 		payload, err := reader.readBytes()
 		if err != nil {

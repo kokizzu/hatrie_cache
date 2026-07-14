@@ -138,12 +138,46 @@ func TestLevelDBBinaryBytesRecordAvoidsBase64StorageExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeLevelDBEntry(binary) error = %v", err)
 	}
-	value, err := base64.StdEncoding.DecodeString(decoded.Bytes)
+	if decoded.Bytes != "" {
+		t.Fatalf("decoded binary bytes field length = %d, want lazy raw bytes", len(decoded.Bytes))
+	}
+	value, err := snapshotEntryBytesValue(decoded)
 	if err != nil {
-		t.Fatalf("DecodeString(decoded bytes) error = %v", err)
+		t.Fatalf("snapshotEntryBytesValue(decoded bytes) error = %v", err)
 	}
 	if decoded.Key != "blob" || decoded.Type != "bytes" || !bytes.Equal(value, raw) {
 		t.Fatalf("decoded binary entry = %#v bytes %v, want original", decoded, value)
+	}
+}
+
+func TestLevelDBBinaryRawBytesMaterializeAtJSONBoundary(t *testing.T) {
+	raw := testPayload(257)
+	entry := snapshotEntry{
+		Key:      "blob",
+		Type:     "bytes",
+		rawBytes: raw,
+	}
+
+	data, err := marshalSnapshotEntryJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryJSON(raw bytes) error = %v", err)
+	}
+	if !bytes.Contains(data, []byte(base64.StdEncoding.EncodeToString(raw))) {
+		t.Fatalf("raw bytes JSON = %s, want base64 bytes field", data)
+	}
+
+	operation, err := prepareSnapshotBytesOperation(entry)
+	if err != nil {
+		t.Fatalf("prepareSnapshotBytesOperation(raw bytes) error = %v", err)
+	}
+	if operation.entry.Bytes != "" {
+		t.Fatalf("operation entry Bytes length = %d, want raw-only binary bytes", len(operation.entry.Bytes))
+	}
+	if !bytes.Equal(operation.bytes, raw) {
+		t.Fatalf("operation bytes changed")
+	}
+	if shouldStreamSnapshotBytes(operation) {
+		t.Fatal("raw binary bytes should not use base64 streaming path")
 	}
 }
 
@@ -174,9 +208,12 @@ func TestMarshalLevelDBBytesEntryBinaryFromReaderPreallocatesRecord(t *testing.T
 	if err != nil {
 		t.Fatalf("decodeLevelDBEntry(reader binary) error = %v", err)
 	}
-	value, err := base64.StdEncoding.DecodeString(decoded.Bytes)
+	if decoded.Bytes != "" {
+		t.Fatalf("decoded reader binary bytes field length = %d, want lazy raw bytes", len(decoded.Bytes))
+	}
+	value, err := snapshotEntryBytesValue(decoded)
 	if err != nil {
-		t.Fatalf("DecodeString(reader binary bytes) error = %v", err)
+		t.Fatalf("snapshotEntryBytesValue(reader binary bytes) error = %v", err)
 	}
 	if decoded.Key != "blob" || decoded.Type != "bytes" || !bytes.Equal(value, raw) {
 		t.Fatalf("decoded reader binary entry = %#v bytes %v, want original", decoded, value)
@@ -186,6 +223,36 @@ func TestMarshalLevelDBBytesEntryBinaryFromReaderPreallocatesRecord(t *testing.T
 	}
 	if !keyStatsPtrEqual(decoded.Stats, stats) {
 		t.Fatalf("decoded stats = %#v, want %#v", decoded.Stats, stats)
+	}
+}
+
+func TestLevelDBStoreEntryMaterializesBinaryBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	raw := testPayload(256)
+	source := newTestTrie(t)
+	source.UpsertBytes("blob", raw)
+	if err := source.SaveLevelDB(path); err != nil {
+		t.Fatalf("SaveLevelDB() error = %v", err)
+	}
+
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	entry, ok, err := store.Entry("blob")
+	if err != nil || !ok {
+		t.Fatalf("Entry(blob) = %#v/%v/%v, want stored entry", entry, ok, err)
+	}
+	if entry.Bytes == "" || entry.rawBytes != nil {
+		t.Fatalf("Entry(blob) bytes = %d raw=%d, want materialized base64 only", len(entry.Bytes), len(entry.rawBytes))
+	}
+	decoded, err := base64.StdEncoding.DecodeString(entry.Bytes)
+	if err != nil {
+		t.Fatalf("DecodeString(Entry bytes) error = %v", err)
+	}
+	if !bytes.Equal(decoded, raw) {
+		t.Fatalf("Entry(blob) bytes changed")
 	}
 }
 
