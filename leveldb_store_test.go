@@ -2093,6 +2093,116 @@ func TestLevelDBStoreHotLoadCanDeleteColdReference(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreSavePreservesUnchangedColdReferenceRecordBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	raw := []byte("{\n  \"key\": \"cold\",\n  \"type\": \"string\",\n  \"string\": \"value\"\n}")
+	if err := store.db.Put(levelDBKey("cold"), raw, nil); err != nil {
+		t.Fatalf("Put(raw) error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())
+	if err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if result.KeysLoaded != 1 || result.ValuesLoaded != 0 {
+		t.Fatalf("hot-load result = %#v, want 1 key and 0 values", result)
+	}
+	entries := loaded.Entries(true)
+	if len(entries) != 1 || entries[0].Key != "cold" || !entries[0].Value.IsLevelDBReference() {
+		t.Fatalf("entries after hot-load = %#v, want cold leveldb reference", entries)
+	}
+
+	if err := store.Save(loaded); err != nil {
+		t.Fatalf("Save(unchanged cold ref) error = %v", err)
+	}
+	got, ok, err := store.entryData("cold")
+	if err != nil || !ok {
+		t.Fatalf("entryData(cold) = %v/%v, want record", ok, err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Fatalf("raw cold record changed:\ngot  %q\nwant %q", got, raw)
+	}
+}
+
+func TestLevelDBStoreSaveRewritesColdReferenceWhenStatsChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	raw := []byte(`{"key":"cold","type":"string","string":"value"}`)
+	if err := store.db.Put(levelDBKey("cold"), raw, nil); err != nil {
+		t.Fatalf("Put(raw) error = %v", err)
+	}
+
+	now := time.Unix(4800, 0)
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now }
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if !loaded.Exists("cold") {
+		t.Fatal("Exists(cold) = false, want true")
+	}
+	if err := store.Save(loaded); err != nil {
+		t.Fatalf("Save(stats-changed cold ref) error = %v", err)
+	}
+
+	got, ok, err := store.entryData("cold")
+	if err != nil || !ok {
+		t.Fatalf("entryData(cold) = %v/%v, want record", ok, err)
+	}
+	if bytes.Equal(got, raw) {
+		t.Fatal("stats-changed cold record was raw-copied without rewrite")
+	}
+	entry, err := decodeLevelDBEntryForKey("cold", got)
+	if err != nil {
+		t.Fatalf("decode rewritten cold record error = %v", err)
+	}
+	if entry.Stats == nil || entry.Stats.Reads != 1 || entry.Stats.Hits != 1 || entry.Stats.LastHit != now {
+		t.Fatalf("rewritten stats = %#v, want one hit at %s", entry.Stats, now)
+	}
+	if entry.String != "value" {
+		t.Fatalf("rewritten value = %q, want value", entry.String)
+	}
+}
+
+func TestLevelDBStoreSaveValidatesChangedColdReferenceRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	raw := []byte(`{"key":"cold","type":"string","string":"value"}`)
+	if err := store.db.Put(levelDBKey("cold"), raw, nil); err != nil {
+		t.Fatalf("Put(raw) error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	changed := []byte(`{"key":"cold","type":"string","string":"value","unknown":true}`)
+	if err := store.db.Put(levelDBKey("cold"), changed, nil); err != nil {
+		t.Fatalf("Put(changed raw) error = %v", err)
+	}
+
+	if err := store.Save(loaded); err == nil {
+		t.Fatal("Save(changed invalid cold ref) error = nil, want validation error")
+	}
+}
+
 func TestLevelDBStoreHotLoadSchedulesColdReferenceExpiration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

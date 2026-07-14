@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"hash/crc64"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 )
 
 var levelDBEntryPrefix = []byte("entry:")
+var levelDBRecordChecksumTable = crc64.MakeTable(crc64.ISO)
 
 var ErrLevelDBStoreClosed = errors.New("hatriecache: leveldb store is closed")
 
@@ -156,7 +158,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	createdKeys := make(map[string]struct{})
 	rollbackOperations := make([]snapshotOperation, 0)
 	applied := false
-	if err := scanLevelDBSnapshotEntries(snapshot, func(entry snapshotEntry) error {
+	if err := scanLevelDBSnapshotEntryData(snapshot, func(entry snapshotEntry, data []byte) error {
 		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy, true)
 		if err != nil {
 			return err
@@ -169,7 +171,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 			return err
 		}
 		if loadEntry.reference {
-			if _, err := trie.applyLevelDBReferenceLocked(store, loadEntry.entry); err != nil {
+			if _, err := trie.applyLevelDBReferenceLocked(store, loadEntry.entry, data); err != nil {
 				if existed {
 					rollbackOperations = append(rollbackOperations, rollbackOperation)
 				}
@@ -246,17 +248,27 @@ func prepareLevelDBLoadEntry(entry snapshotEntry, now time.Time, policy LevelDBL
 }
 
 func scanLevelDBSnapshotEntries(snapshot *leveldb.Snapshot, visit func(snapshotEntry) error) error {
+	return scanLevelDBSnapshotEntryData(snapshot, func(entry snapshotEntry, _ []byte) error {
+		if visit == nil {
+			return nil
+		}
+		return visit(entry)
+	})
+}
+
+func scanLevelDBSnapshotEntryData(snapshot *leveldb.Snapshot, visit func(snapshotEntry, []byte) error) error {
 	iterator := snapshot.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
 	defer iterator.Release()
 
 	for iterator.Next() {
 		key := string(iterator.Key()[len(levelDBEntryPrefix):])
-		entry, err := decodeLevelDBEntryForKey(key, iterator.Value())
+		data := iterator.Value()
+		entry, err := decodeLevelDBEntryForKey(key, data)
 		if err != nil {
 			return err
 		}
 		if visit != nil {
-			if err := visit(entry); err != nil {
+			if err := visit(entry, data); err != nil {
 				return err
 			}
 		}
@@ -283,6 +295,23 @@ func (store *LevelDBStore) Entry(key string) (snapshotEntry, bool, error) {
 		return snapshotEntry{}, false, err
 	}
 	return entry, true, nil
+}
+
+func (store *LevelDBStore) entryData(key string) ([]byte, bool, error) {
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return nil, false, err
+	}
+	defer unlock()
+
+	data, err := db.Get(levelDBKey(key), nil)
+	if errors.Is(err, leveldb.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return cloneBytes(data), true, nil
 }
 
 func (store *LevelDBStore) lockDB() (*leveldb.DB, func(), error) {
@@ -541,7 +570,7 @@ func newRadixTreeSizeFromSnapshot(snapshot radixTreeSnapshot) (int64, error) {
 	return jsonEncodedSize(snapshot.Items)
 }
 
-func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snapshotEntry) (HatValue, error) {
+func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snapshotEntry, data []byte) (HatValue, error) {
 	if store == nil {
 		return HatValue{}, errors.New("hatriecache: leveldb reference store is required")
 	}
@@ -554,9 +583,13 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snap
 	trie.clearExpirationLocked(entry.Key)
 
 	idx := trie.dbrefs.Add(LevelDBReference{
-		Key:   entry.Key,
-		Type:  entry.Type,
-		Store: store,
+		Key:            entry.Key,
+		Type:           entry.Type,
+		Store:          store,
+		ExpiresAt:      cloneTimePtr(entry.ExpiresAt),
+		Stats:          cloneKeyStatsPtr(entry.Stats),
+		RecordBytes:    len(data),
+		RecordChecksum: levelDBRecordChecksum(data),
 	})
 	hval := HatValue{Index: idx, Flags: DATAVALUE_TYPE_LEVELDB_REF}
 	if entry.ExpiresAt != nil {
@@ -565,6 +598,36 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snap
 	*rawPtr = hval.toValue()
 	trie.restoreKeyStatsLocked(entry.Key, entry.Stats)
 	return hval, nil
+}
+
+func (trie *HatTrie) levelDBReferenceEntryDataLocked(key string, hval HatValue) ([]byte, bool, error) {
+	ref, ok := trie.dbrefs.Get(hval.Index)
+	if !ok || ref.Store == nil || ref.Key != key || ref.RecordBytes <= 0 {
+		return nil, false, nil
+	}
+	if !trie.levelDBReferenceMetadataMatchesLocked(key, ref) {
+		return nil, false, nil
+	}
+	data, ok, err := ref.Store.entryData(ref.Key)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	if len(data) != ref.RecordBytes || levelDBRecordChecksum(data) != ref.RecordChecksum {
+		return nil, false, nil
+	}
+	return data, true, nil
+}
+
+func (trie *HatTrie) levelDBReferenceMetadataMatchesLocked(key string, ref LevelDBReference) bool {
+	if !timePtrEqual(ref.ExpiresAt, snapshotExpiresAt(trie.expires[key])) {
+		return false
+	}
+	var currentStats *KeyStats
+	if stats, ok := trie.keyStats[key]; ok {
+		stats.updateRates()
+		currentStats = &stats
+	}
+	return keyStatsPtrEqual(ref.Stats, currentStats)
 }
 
 func (trie *HatTrie) levelDBReferenceSnapshotEntryLocked(key string, hval HatValue) (snapshotEntry, error) {
@@ -624,6 +687,11 @@ func (trie *HatTrie) scanLevelDBEntryData(visit func(string, []byte) error) erro
 }
 
 func (trie *HatTrie) levelDBEntryDataLocked(entry Entry) ([]byte, error) {
+	if entry.Value.Type() == DATAVALUE_TYPE_LEVELDB_REF {
+		if data, ok, err := trie.levelDBReferenceEntryDataLocked(entry.Key, entry.Value); err != nil || ok {
+			return data, err
+		}
+	}
 	if entry.Value.Type() == DATAVALUE_TYPE_RAW_BYTES && entry.Value.OnDisk() {
 		var buffer bytes.Buffer
 		if err := trie.writeSnapshotEntryJSONLocked(&buffer, entry, ""); err != nil {
@@ -658,4 +726,46 @@ func levelDBKey(key string) []byte {
 	out = append(out, levelDBEntryPrefix...)
 	out = append(out, key...)
 	return out
+}
+
+func levelDBRecordChecksum(data []byte) uint64 {
+	return crc64.Checksum(data, levelDBRecordChecksumTable)
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneKeyStatsPtr(value *KeyStats) *KeyStats {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func timePtrEqual(left *time.Time, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
+}
+
+func keyStatsPtrEqual(left *KeyStats, right *KeyStats) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Reads == right.Reads &&
+		left.Hits == right.Hits &&
+		left.Misses == right.Misses &&
+		left.Writes == right.Writes &&
+		left.LastHit.Equal(right.LastHit) &&
+		left.LastMiss.Equal(right.LastMiss) &&
+		left.LastWrite.Equal(right.LastWrite) &&
+		left.HitRate == right.HitRate &&
+		left.CumulativeHitRate == right.CumulativeHitRate
 }
