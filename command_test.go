@@ -869,6 +869,41 @@ func TestExecuteCommandReservoirSampleOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandReservoirSampleRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDRS", Key: "sample", Value: "alpha"}); !got.OK {
+		t.Fatalf("ADDRS alpha response = %#v, want ok", got)
+	}
+	got := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDRS",
+		Key:     "sample",
+		Values:  Slice{"beta", func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDRS unsupported response = %#v, want error", got)
+	}
+	info, ok := ht.ReservoirSampleInfo("sample")
+	if !ok || info.Seen != 1 || info.Tracked != 1 {
+		t.Fatalf("ReservoirSampleInfo(after rejected command) = %#v/%v, want unchanged sample", info, ok)
+	}
+	items := ht.GetReservoirSample("sample")
+	if len(items) != 1 || items[0].Value != "alpha" {
+		t.Fatalf("GetReservoirSample(after rejected command) = %#v, want alpha only", items)
+	}
+
+	got = ht.ExecuteCommand(CacheCommandRequest{
+		Command: "ADDRS",
+		Key:     "missing",
+		Values:  Slice{func() {}},
+	})
+	if got.OK {
+		t.Fatalf("ADDRS missing unsupported response = %#v, want error", got)
+	}
+	if value := ht.Get("missing"); !value.Empty() {
+		t.Fatalf("rejected missing-key command left value %+v", value)
+	}
+}
+
 func TestExecuteCommandQuantileSketchOperations(t *testing.T) {
 	ht := newTestTrie(t)
 

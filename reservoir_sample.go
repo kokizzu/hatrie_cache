@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"sort"
 	"strconv"
@@ -111,7 +112,11 @@ func validateReservoirSampleSnapshot(snapshot reservoirSampleSnapshot) error {
 		if _, ok := seenSequences[item.Sequence]; ok {
 			return errors.New("hatriecache: duplicate reservoir sample sequence")
 		}
-		if item.Priority != reservoirSamplePriority(item.Sequence, item.Value) {
+		priority, err := reservoirSamplePriority(item.Sequence, item.Value)
+		if err != nil {
+			return err
+		}
+		if item.Priority != priority {
 			return errors.New("hatriecache: reservoir sample priority does not match value")
 		}
 		seenSequences[item.Sequence] = struct{}{}
@@ -142,15 +147,49 @@ func newReservoirSampleDataFromSnapshot(snapshot reservoirSampleSnapshot) (reser
 }
 
 func (sample *reservoirSampleData) Add(value interface{}) ReservoirSampleUpdate {
+	update, _ := sample.AddChecked(value)
+	return update
+}
+
+func (sample *reservoirSampleData) AddChecked(value interface{}) (ReservoirSampleUpdate, error) {
+	return sample.AddOneChecked(value)
+}
+
+func (sample *reservoirSampleData) AddOne(value interface{}, values ...interface{}) ReservoirSampleUpdate {
+	update, _ := sample.AddOneChecked(value, values...)
+	return update
+}
+
+func (sample *reservoirSampleData) AddOneChecked(value interface{}, values ...interface{}) (ReservoirSampleUpdate, error) {
 	if sample == nil || sample.capacity == 0 {
-		return ReservoirSampleUpdate{}
+		return ReservoirSampleUpdate{}, nil
 	}
-	sample.seen = saturatingAddUint64(sample.seen, 1)
-	item := reservoirSampleItem{
-		Value:    cloneValue(value),
-		Priority: reservoirSamplePriority(sample.seen, value),
-		Sequence: sample.seen,
+	prepared := make([]reservoirSampleItem, 0, 1+len(values))
+	nextSequence := sample.seen
+	item, err := prepareReservoirSampleItem(saturatingAddUint64(nextSequence, 1), value)
+	if err != nil {
+		return ReservoirSampleUpdate{}, err
 	}
+	prepared = append(prepared, item)
+	nextSequence = item.Sequence
+	for _, value := range values {
+		item, err := prepareReservoirSampleItem(saturatingAddUint64(nextSequence, 1), value)
+		if err != nil {
+			return ReservoirSampleUpdate{}, err
+		}
+		prepared = append(prepared, item)
+		nextSequence = item.Sequence
+	}
+
+	update := ReservoirSampleUpdate{}
+	for _, item := range prepared {
+		update = sample.addPrepared(item)
+	}
+	return update, nil
+}
+
+func (sample *reservoirSampleData) addPrepared(item reservoirSampleItem) ReservoirSampleUpdate {
+	sample.seen = item.Sequence
 	accepted := false
 	if uint64(len(sample.items)) < sample.capacity {
 		sample.items = append(sample.items, item)
@@ -167,14 +206,6 @@ func (sample *reservoirSampleData) Add(value interface{}) ReservoirSampleUpdate 
 		Tracked:  uint64(len(sample.items)),
 		Capacity: sample.capacity,
 	}
-}
-
-func (sample *reservoirSampleData) AddOne(value interface{}, values ...interface{}) ReservoirSampleUpdate {
-	update := sample.Add(value)
-	for _, value := range values {
-		update = sample.Add(value)
-	}
-	return update
 }
 
 func (sample reservoirSampleData) Items() []ReservoirSampleItem {
@@ -292,17 +323,29 @@ func reservoirSampleWorse(a reservoirSampleItem, b reservoirSampleItem) bool {
 	return a.Sequence > b.Sequence
 }
 
-func reservoirSamplePriority(sequence uint64, value interface{}) uint64 {
+func prepareReservoirSampleItem(sequence uint64, value interface{}) (reservoirSampleItem, error) {
+	priority, err := reservoirSamplePriority(sequence, value)
+	if err != nil {
+		return reservoirSampleItem{}, err
+	}
+	return reservoirSampleItem{
+		Value:    cloneValue(value),
+		Priority: priority,
+		Sequence: sequence,
+	}, nil
+}
+
+func reservoirSamplePriority(sequence uint64, value interface{}) (uint64, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		panic(err)
+		return 0, fmt.Errorf("hatriecache: unsupported reservoir sample value: %w", err)
 	}
 	hash := fnv.New64a()
 	var sequenceBytes [8]byte
 	binary.LittleEndian.PutUint64(sequenceBytes[:], sequence)
 	_, _ = hash.Write(sequenceBytes[:])
 	_, _ = hash.Write(data)
-	return hash.Sum64()
+	return hash.Sum64(), nil
 }
 
 // ReservoirSampleStorage stores fixed-memory stream samples outside the trie.
@@ -375,24 +418,49 @@ func (ht *HatTrie) UpsertReservoirSample(key string, capacity uint64) error {
 }
 
 func (ht *HatTrie) AddReservoirSample(key string, val interface{}, vals ...interface{}) ReservoirSampleUpdate {
+	update, _ := ht.AddReservoirSampleChecked(key, val, vals...)
+	return update
+}
+
+func (ht *HatTrie) AddReservoirSampleChecked(key string, val interface{}, vals ...interface{}) (ReservoirSampleUpdate, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	rawPtr, hval := ht.upsertFreshLocation(key)
+	rawPtr := ht.tryLocation(key)
+	hval := HatValue{}
+	if rawPtr != nil {
+		hval.fromValue(*rawPtr)
+		if ht.expireIfNeededLocked(key, hval) {
+			rawPtr = nil
+			hval = HatValue{}
+		}
+	} else {
+		ht.clearExpirationLocked(key)
+	}
 	if hval.IsReservoirSample() {
-		update := ht.reservoirSamples.array[hval.Index].AddOne(val, vals...)
+		update, err := ht.reservoirSamples.array[hval.Index].AddOneChecked(val, vals...)
+		if err != nil {
+			return ReservoirSampleUpdate{}, err
+		}
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return update
+		return update, nil
 	}
 
+	data := newDefaultReservoirSampleData()
+	update, err := data.AddOneChecked(val, vals...)
+	if err != nil {
+		return ReservoirSampleUpdate{}, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.reservoirSamples.AddData(newDefaultReservoirSampleData())
-	update := ht.reservoirSamples.array[idx].AddOne(val, vals...)
+	idx := ht.reservoirSamples.AddData(data)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RESERVOIR_SAMPLE}.toValue()
 	ht.recordWriteLocked(key)
-	return update
+	return update, nil
 }
 
 func (ht *HatTrie) GetReservoirSample(key string) []ReservoirSampleItem {

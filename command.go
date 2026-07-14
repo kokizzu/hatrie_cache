@@ -663,7 +663,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if !ok {
 			return commandError("value or values is required")
 		}
-		update := ht.AddReservoirSample(key, values[0], values[1:]...)
+		update, err := ht.AddReservoirSampleChecked(key, values[0], values[1:]...)
+		if err != nil {
+			return commandError(err.Error())
+		}
 		return commandValueResponse("added reservoir sample values", update)
 	case "GETRS", "RSGET", "SAMPLE":
 		value := ht.GetReservoirSample(key)

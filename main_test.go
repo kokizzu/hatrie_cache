@@ -2237,6 +2237,38 @@ func TestReservoirSampleClonesNestedValues(t *testing.T) {
 	}
 }
 
+func TestReservoirSampleRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	if update, err := ht.AddReservoirSampleChecked("sample", "alpha"); err != nil || !update.Accepted {
+		t.Fatalf("AddReservoirSampleChecked(alpha) = %#v/%v, want accepted nil error", update, err)
+	}
+
+	if update, err := ht.AddReservoirSampleChecked("sample", "beta", func() {}); err == nil {
+		t.Fatalf("AddReservoirSampleChecked(unsupported) = %#v/nil, want error", update)
+	}
+	info, ok := ht.ReservoirSampleInfo("sample")
+	if !ok || info.Seen != 1 || info.Tracked != 1 {
+		t.Fatalf("ReservoirSampleInfo(after rejected batch) = %#v/%v, want one retained item", info, ok)
+	}
+	items := ht.GetReservoirSample("sample")
+	if len(items) != 1 || items[0].Value != "alpha" {
+		t.Fatalf("GetReservoirSample(after rejected batch) = %#v, want alpha only", items)
+	}
+
+	if update, err := ht.AddReservoirSampleChecked("missing", func() {}); err == nil {
+		t.Fatalf("AddReservoirSampleChecked(missing unsupported) = %#v/nil, want error", update)
+	}
+	if got := ht.Get("missing"); !got.Empty() {
+		t.Fatalf("rejected missing-key sample left value %+v", got)
+	}
+	if got := ht.AddReservoirSample("legacy", func() {}); got != (ReservoirSampleUpdate{}) {
+		t.Fatalf("AddReservoirSample(unsupported) = %#v, want zero update", got)
+	}
+	if got := ht.Get("legacy"); !got.Empty() {
+		t.Fatalf("legacy rejected sample left value %+v", got)
+	}
+}
+
 func TestReservoirSampleRejectsInvalidConfig(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -2272,6 +2304,17 @@ func TestReservoirSampleSnapshotValidationRejectsCorruptPayload(t *testing.T) {
 	snapshot.Seen = 1
 	if err := validateReservoirSampleSnapshot(snapshot); err == nil {
 		t.Fatal("validateReservoirSampleSnapshot(seen below tracked) error = nil, want error")
+	}
+
+	snapshot = reservoirSampleSnapshot{
+		Capacity: 1,
+		Seen:     1,
+		Items: []reservoirSampleItem{
+			{Value: func() {}, Priority: 1, Sequence: 1},
+		},
+	}
+	if err := validateReservoirSampleSnapshot(snapshot); err == nil {
+		t.Fatal("validateReservoirSampleSnapshot(unsupported value) error = nil, want error")
 	}
 }
 
