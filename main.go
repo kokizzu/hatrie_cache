@@ -2718,34 +2718,55 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 }
 
 func (ht *HatTrie) PeekMap(key, subkey string) interface{} {
+	value, _, _ := ht.PeekMapChecked(key, subkey)
+	return value
+}
+
+func (ht *HatTrie) PeekMapChecked(key, subkey string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	m, ok := ht.mapRefLocked(key)
+	m, ok, err := ht.mapRefLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !ok {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	val, exists := m[subkey]
 	ht.recordReadLocked(exists, key)
-	return cloneValue(val)
+	if !exists {
+		return nil, false, nil
+	}
+	return cloneValue(val), true, nil
 }
 
 func (ht *HatTrie) TakeMap(key, subkey string) interface{} {
+	value, _, _ := ht.TakeMapChecked(key, subkey)
+	return value
+}
+
+func (ht *HatTrie) TakeMapChecked(key, subkey string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsMap() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	val, exists := ht.maps.TakeEntry(hval.Index, subkey)
 	ht.recordReadLocked(exists, key)
 	if exists {
 		ht.recordWriteLocked(key)
 	}
-	return val
+	return val, exists, nil
 }
 
 func (ht *HatTrie) GetMap(key string) Map {
@@ -2829,71 +2850,107 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 }
 
 func (ht *HatTrie) PopSlice(key string) interface{} {
+	value, _, _ := ht.PopSliceChecked(key)
+	return value
+}
+
+func (ht *HatTrie) PopSliceChecked(key string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsSlice() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 
 	val, ok := ht.slices.array[hval.Index].Pop()
 	if !ok {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
 	ht.recordWriteLocked(key)
-	return val
+	return val, true, nil
 }
 
 func (ht *HatTrie) ShiftSlice(key string) interface{} {
+	value, _, _ := ht.ShiftSliceChecked(key)
+	return value
+}
+
+func (ht *HatTrie) ShiftSliceChecked(key string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.getLocked(key)
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	if !hval.IsSlice() {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 
 	val, ok := ht.slices.array[hval.Index].Shift()
 	if !ok {
 		ht.recordReadLocked(false, key)
-		return nil
+		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
 	ht.recordWriteLocked(key)
-	return val
+	return val, true, nil
 }
 
 func (ht *HatTrie) HeadSlice(key string) interface{} {
+	value, _, _ := ht.HeadSliceChecked(key)
+	return value
+}
+
+func (ht *HatTrie) HeadSliceChecked(key string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	dq, ok := ht.sliceRefLocked(key)
+	dq, ok, err := ht.sliceRefLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	val, hit := dq.Head()
 	hit = ok && hit
 	ht.recordReadLocked(hit, key)
 	if hit {
-		return cloneValue(val)
+		return cloneValue(val), true, nil
 	}
-	return nil
+	return nil, false, nil
 }
 
 func (ht *HatTrie) TailSlice(key string) interface{} {
+	value, _, _ := ht.TailSliceChecked(key)
+	return value
+}
+
+func (ht *HatTrie) TailSliceChecked(key string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	dq, ok := ht.sliceRefLocked(key)
+	dq, ok, err := ht.sliceRefLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
 	val, hit := dq.Tail()
 	hit = ok && hit
 	ht.recordReadLocked(hit, key)
 	if hit {
-		return cloneValue(val)
+		return cloneValue(val), true, nil
 	}
-	return nil
+	return nil, false, nil
 }
 
 func (ht *HatTrie) GetSlice(key string) Slice {
@@ -2919,11 +2976,19 @@ func (ht *HatTrie) GetSliceChecked(key string) (Slice, bool, error) {
 }
 
 func (ht *HatTrie) sliceRefLocked(key string) (*deque, bool) {
-	hval := ht.getLocked(key)
-	if hval.IsSlice() {
-		return &ht.slices.array[hval.Index], true
+	dq, ok, _ := ht.sliceRefLockedChecked(key)
+	return dq, ok
+}
+
+func (ht *HatTrie) sliceRefLockedChecked(key string) (*deque, bool, error) {
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		return nil, false, err
 	}
-	return nil, false
+	if hval.IsSlice() {
+		return &ht.slices.array[hval.Index], true, nil
+	}
+	return nil, false, nil
 }
 
 func (ht *HatTrie) UpsertSet(key string, val Set) {

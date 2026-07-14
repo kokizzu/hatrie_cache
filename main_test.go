@@ -439,6 +439,59 @@ func TestCheckedTypedGettersReturnValuesAndCopies(t *testing.T) {
 	}
 }
 
+func TestCheckedMapAndSliceOperationsReturnValuesAndCopies(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertMap("map", Map{
+		"nested": Map{"field": "value"},
+		"remove": "value",
+	})
+	ht.UpsertSlice("slice", Slice{Map{"field": "first"}, "second", "third"})
+
+	peeked, ok, err := ht.PeekMapChecked("map", "nested")
+	if err != nil || !ok || peeked.(Map)["field"] != "value" {
+		t.Fatalf("PeekMapChecked(nested) = %#v/%v/%v, want stored map", peeked, ok, err)
+	}
+	peeked.(Map)["field"] = "changed"
+	if again, _, _ := ht.PeekMapChecked("map", "nested"); again.(Map)["field"] != "value" {
+		t.Fatalf("PeekMapChecked exposed internal map: %#v", again)
+	}
+
+	taken, ok, err := ht.TakeMapChecked("map", "remove")
+	if err != nil || !ok || taken != "value" {
+		t.Fatalf("TakeMapChecked(remove) = %#v/%v/%v, want value/true/nil", taken, ok, err)
+	}
+	if _, ok, err := ht.PeekMapChecked("map", "remove"); err != nil || ok {
+		t.Fatalf("PeekMapChecked(after take) ok/error = %v/%v, want false/nil", ok, err)
+	}
+	if _, ok, err := ht.PeekMapChecked("missing", "field"); err != nil || ok {
+		t.Fatalf("PeekMapChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
+	}
+
+	head, ok, err := ht.HeadSliceChecked("slice")
+	if err != nil || !ok || head.(Map)["field"] != "first" {
+		t.Fatalf("HeadSliceChecked(slice) = %#v/%v/%v, want first map", head, ok, err)
+	}
+	head.(Map)["field"] = "changed"
+	if again, _, _ := ht.HeadSliceChecked("slice"); again.(Map)["field"] != "first" {
+		t.Fatalf("HeadSliceChecked exposed internal slice value: %#v", again)
+	}
+	if tail, ok, err := ht.TailSliceChecked("slice"); err != nil || !ok || tail != "third" {
+		t.Fatalf("TailSliceChecked(slice) = %#v/%v/%v, want third/true/nil", tail, ok, err)
+	}
+	if popped, ok, err := ht.PopSliceChecked("slice"); err != nil || !ok || popped != "third" {
+		t.Fatalf("PopSliceChecked(slice) = %#v/%v/%v, want third/true/nil", popped, ok, err)
+	}
+	if shifted, ok, err := ht.ShiftSliceChecked("slice"); err != nil || !ok || shifted.(Map)["field"] != "first" {
+		t.Fatalf("ShiftSliceChecked(slice) = %#v/%v/%v, want first map", shifted, ok, err)
+	}
+	if got := ht.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"second"}) {
+		t.Fatalf("GetSlice(after pop/shift) = %#v, want second only", got)
+	}
+	if _, ok, err := ht.PopSliceChecked("missing"); err != nil || ok {
+		t.Fatalf("PopSliceChecked(missing) ok/error = %v/%v, want false/nil", ok, err)
+	}
+}
+
 func TestBytesCheckedDiskWriteFailureDoesNotMutate(t *testing.T) {
 	ht := newTestTrie(t)
 	largeValue := testPayload(DiskBytesThreshold + 1)

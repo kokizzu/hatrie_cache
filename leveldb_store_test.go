@@ -1001,8 +1001,26 @@ func TestLevelDBColdReferenceReadErrorsDoNotPanic(t *testing.T) {
 	if got, ok, err := loaded.GetMapJSON("map"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("GetMapJSON(map closed ref) = %q/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
+	if got, ok, err := loaded.PeekMapChecked("map", "field"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PeekMapChecked(map closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.TakeMapChecked("map", "field"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("TakeMapChecked(map closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
 	if got, ok, err := loaded.GetSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("GetSliceChecked(slice closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.HeadSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("HeadSliceChecked(slice closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.TailSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("TailSliceChecked(slice closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.PopSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("PopSliceChecked(slice closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
+	}
+	if got, ok, err := loaded.ShiftSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
+		t.Fatalf("ShiftSliceChecked(slice closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
 	}
 	if got, ok, err := loaded.GetSetChecked("set"); got != nil || ok || !errors.Is(err, ErrLevelDBStoreClosed) {
 		t.Fatalf("GetSetChecked(set closed ref) = %#v/%v/%v, want nil/false/ErrLevelDBStoreClosed", got, ok, err)
