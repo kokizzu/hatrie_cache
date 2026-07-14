@@ -17,6 +17,24 @@ fail() {
 	exit 1
 }
 
+expect_strict_enabled() {
+	printf '%s\n' "$1" > "$overcommit_file"
+	SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=0
+	export SANITIZE_C_ALLOW_STRICT_OVERCOMMIT
+	if ! strict_overcommit_enabled; then
+		fail "expected overcommit mode $1 to enable strict sanitizer guard"
+	fi
+}
+
+expect_strict_disabled() {
+	printf '%s\n' "$1" > "$overcommit_file"
+	SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=0
+	export SANITIZE_C_ALLOW_STRICT_OVERCOMMIT
+	if strict_overcommit_enabled; then
+		fail "expected overcommit mode $1 to disable strict sanitizer guard"
+	fi
+}
+
 expect_blocks() {
 	printf '%s\n' "$1" > "$overcommit_file"
 	SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=0
@@ -35,6 +53,10 @@ expect_allows() {
 	fi
 }
 
+expect_strict_enabled 2
+expect_strict_disabled 0
+expect_strict_disabled 1
+
 expect_blocks 2
 expect_allows 0
 expect_allows 1
@@ -43,6 +65,9 @@ printf '%s\n' 2 > "$overcommit_file"
 for allow_value in 1 true yes; do
 	SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=$allow_value
 	export SANITIZE_C_ALLOW_STRICT_OVERCOMMIT
+	if ! strict_overcommit_enabled; then
+		fail "expected strict-overcommit override $allow_value to keep auto-mode guard enabled"
+	fi
 	if strict_overcommit_blocks_sanitizers; then
 		fail "expected strict-overcommit override $allow_value to allow C sanitizers"
 	fi
@@ -51,6 +76,9 @@ done
 SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=0
 SANITIZE_C_OVERCOMMIT_MEMORY_PATH=$tmp_dir/missing
 export SANITIZE_C_ALLOW_STRICT_OVERCOMMIT SANITIZE_C_OVERCOMMIT_MEMORY_PATH
+if strict_overcommit_enabled; then
+	fail "expected missing overcommit setting to disable strict sanitizer guard"
+fi
 if strict_overcommit_blocks_sanitizers; then
 	fail "expected missing overcommit setting to allow C sanitizers"
 fi

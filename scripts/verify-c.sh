@@ -62,8 +62,8 @@ build_c_ahtable_check /tmp/hatrie_cache_check_ahtable
 /tmp/hatrie_cache_check_ahtable
 
 compiler_supports_sanitizers() {
-	tmp_c=${TMPDIR:-/tmp}/hatrie_cache_sanitize_probe.c
-	tmp_bin=${TMPDIR:-/tmp}/hatrie_cache_sanitize_probe
+	tmp_bin=${TMPDIR:-/tmp}/c_asan_probe.$$
+	tmp_c=$tmp_bin.c
 	printf 'int main(void) { return 0; }\n' > "$tmp_c"
 	if gcc -std=c99 -fsanitize=address,undefined -fno-omit-frame-pointer "$tmp_c" -o "$tmp_bin" >/dev/null 2>&1 &&
 		ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=1:abort_on_error=1} \
@@ -77,7 +77,7 @@ compiler_supports_sanitizers() {
 }
 
 if [ "$SANITIZE_C" = "auto" ]; then
-	if strict_overcommit_blocks_sanitizers; then
+	if strict_overcommit_enabled; then
 		echo "skipping C sanitizer pass: vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations" >&2
 		SANITIZE_C=0
 	elif compiler_supports_sanitizers; then

@@ -74,8 +74,8 @@ behavior checks when the local compiler supports them; use
 `make verify-c SANITIZE_C=0` to skip that pass or `SANITIZE_C=1` to require it.
 On hosts with `vm.overcommit_memory=2`, auto mode skips that sanitizer pass
 because AddressSanitizer can reserve a large shadow-memory range that strict
-commit accounting rejects. Use `SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=1` only to
-force that pass anyway.
+commit accounting rejects. To force that pass anyway, use
+`make verify-c SANITIZE_C=1 SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=1`.
 
 Run one-off commands through the Makefile/script wrapper:
 
