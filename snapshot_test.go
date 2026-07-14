@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -201,7 +202,13 @@ func TestParseSnapshotFormat(t *testing.T) {
 		value string
 		want  SnapshotFormat
 	}{
-		{value: "", want: SnapshotFormatGzipBestJSON},
+		{value: "", want: SnapshotFormatGzipBestBinary},
+		{value: "binary", want: SnapshotFormatBinary},
+		{value: "bin", want: SnapshotFormatBinary},
+		{value: "gzip-binary", want: SnapshotFormatGzipBinary},
+		{value: "gzip-bin", want: SnapshotFormatGzipBinary},
+		{value: "gzip-best-binary", want: SnapshotFormatGzipBestBinary},
+		{value: "gzip-small-binary", want: SnapshotFormatGzipBestBinary},
 		{value: " gzip-best-json ", want: SnapshotFormatGzipBestJSON},
 		{value: "gzip-small-json", want: SnapshotFormatGzipBestJSON},
 		{value: "gzip-json", want: SnapshotFormatGzipJSON},
@@ -221,7 +228,90 @@ func TestParseSnapshotFormat(t *testing.T) {
 	}
 }
 
-func TestSnapshotFormatDefaultsToGzipBestJSONAndLoadsOlderFormats(t *testing.T) {
+func TestSnapshotBinaryFormatsWriteBinaryPayloadAndLoad(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+	ht.UpsertBytes("blob", []byte{0, 1, 2, 3})
+
+	for _, tt := range []struct {
+		format SnapshotFormat
+		gzip   bool
+	}{
+		{format: SnapshotFormatBinary},
+		{format: SnapshotFormatGzipBinary, gzip: true},
+		{format: SnapshotFormatGzipBestBinary, gzip: true},
+	} {
+		t.Run(string(tt.format), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "snapshot.bin")
+			if err := ht.SaveSnapshotWithJournalSequenceAndFormat(path, 77, tt.format); err != nil {
+				t.Fatalf("SaveSnapshotWithJournalSequenceAndFormat(%s) error = %v", tt.format, err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile(%s) error = %v", tt.format, err)
+			}
+			payload := data
+			if tt.gzip {
+				if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
+					t.Fatalf("%s header = % x, want gzip", tt.format, data[:shortTestHeaderLen(data, 2)])
+				}
+				reader, err := gzip.NewReader(bytes.NewReader(data))
+				if err != nil {
+					t.Fatalf("NewReader(%s) error = %v", tt.format, err)
+				}
+				payload, err = io.ReadAll(reader)
+				closeErr := reader.Close()
+				if err != nil {
+					t.Fatalf("ReadAll(%s gzip) error = %v", tt.format, err)
+				}
+				if closeErr != nil {
+					t.Fatalf("Close(%s gzip) error = %v", tt.format, closeErr)
+				}
+			}
+			if !bytes.HasPrefix(payload, snapshotBinaryMagic) {
+				t.Fatalf("%s payload header = % x, want binary snapshot magic", tt.format, payload[:shortTestHeaderLen(payload, len(snapshotBinaryMagic))])
+			}
+
+			loaded := newTestTrie(t)
+			metadata, err := loaded.LoadSnapshotWithMetadata(path)
+			if err != nil {
+				t.Fatalf("LoadSnapshotWithMetadata(%s) error = %v", tt.format, err)
+			}
+			if metadata.JournalSequence != 77 {
+				t.Fatalf("%s journal sequence = %d, want 77", tt.format, metadata.JournalSequence)
+			}
+			if got := loaded.GetString("key"); got != "value" {
+				t.Fatalf("%s loaded key = %q, want value", tt.format, got)
+			}
+			if got := loaded.GetBytes("blob"); !bytes.Equal(got, []byte{0, 1, 2, 3}) {
+				t.Fatalf("%s loaded blob = %v, want [0 1 2 3]", tt.format, got)
+			}
+		})
+	}
+}
+
+func shortTestHeaderLen(data []byte, limit int) int {
+	if len(data) < limit {
+		return len(data)
+	}
+	return limit
+}
+
+func TestSnapshotBinaryReaderRejectsTruncatedRecord(t *testing.T) {
+	writer := newBinaryFieldWriter(snapshotBinaryMagic, len(snapshotBinaryMagic)+(2*binaryFieldMaxVarintLen64))
+	writer.writeUvarint(uint64(snapshotVersion))
+	writer.writeUvarint(0)
+	writer.writeUvarint(32)
+	data := append([]byte(nil), writer.bytes()...)
+	data = append(data, 0)
+
+	_, err := scanSnapshotFileReader(bytes.NewReader(data), nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("scanSnapshotFileReader(truncated binary) error = %v, want unexpected EOF", err)
+	}
+}
+
+func TestSnapshotFormatDefaultsToGzipBestBinaryAndLoadsOlderFormats(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("key", "value")
 
@@ -240,6 +330,26 @@ func TestSnapshotFormatDefaultsToGzipBestJSONAndLoadsOlderFormats(t *testing.T) 
 			header = header[:2]
 		}
 		t.Fatalf("default snapshot header = % x, want gzip header", header)
+	}
+	defaultReader, err := gzip.NewReader(bytes.NewReader(defaultData))
+	if err != nil {
+		t.Fatalf("NewReader(default snapshot) error = %v", err)
+	}
+	defaultPayload, err := io.ReadAll(defaultReader)
+	defaultCloseErr := defaultReader.Close()
+	if err != nil {
+		t.Fatalf("ReadAll(default gzip snapshot) error = %v", err)
+	}
+	if defaultCloseErr != nil {
+		t.Fatalf("Close(default gzip snapshot) error = %v", defaultCloseErr)
+	}
+	if !bytes.HasPrefix(defaultPayload, snapshotBinaryMagic) {
+		t.Fatalf("default snapshot payload header = % x, want binary snapshot magic", defaultPayload[:shortTestHeaderLen(defaultPayload, len(snapshotBinaryMagic))])
+	}
+
+	gzipBestJSONPath := filepath.Join(dir, "snapshot-best-gzip-json.json")
+	if err := ht.SaveSnapshotWithFormat(gzipBestJSONPath, SnapshotFormatGzipBestJSON); err != nil {
+		t.Fatalf("SaveSnapshotWithFormat(gzip-best-json) error = %v", err)
 	}
 
 	gzipPath := filepath.Join(dir, "snapshot-fast-gzip.json")
@@ -274,7 +384,7 @@ func TestSnapshotFormatDefaultsToGzipBestJSONAndLoadsOlderFormats(t *testing.T) 
 		t.Fatalf("json snapshot first byte = %q, want object", first)
 	}
 
-	for _, path := range []string{defaultPath, gzipPath, jsonPath} {
+	for _, path := range []string{defaultPath, gzipBestJSONPath, gzipPath, jsonPath} {
 		loaded := newTestTrie(t)
 		if err := loaded.LoadSnapshot(path); err != nil {
 			t.Fatalf("LoadSnapshot(%s) error = %v", filepath.Base(path), err)

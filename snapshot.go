@@ -29,12 +29,15 @@ var errDeleteKeysNotInPageFull = errors.New("hatriecache: delete missing keys pa
 type SnapshotFormat string
 
 const (
-	SnapshotFormatJSON         SnapshotFormat = "json"
-	SnapshotFormatGzipJSON     SnapshotFormat = "gzip-json"
-	SnapshotFormatGzipBestJSON SnapshotFormat = "gzip-best-json"
+	SnapshotFormatBinary         SnapshotFormat = "binary"
+	SnapshotFormatGzipBinary     SnapshotFormat = "gzip-binary"
+	SnapshotFormatGzipBestBinary SnapshotFormat = "gzip-best-binary"
+	SnapshotFormatJSON           SnapshotFormat = "json"
+	SnapshotFormatGzipJSON       SnapshotFormat = "gzip-json"
+	SnapshotFormatGzipBestJSON   SnapshotFormat = "gzip-best-json"
 )
 
-const DefaultSnapshotFormat = SnapshotFormatGzipBestJSON
+const DefaultSnapshotFormat = SnapshotFormatGzipBestBinary
 
 var snapshotBestGzipWriterPool = sync.Pool{
 	New: func() interface{} {
@@ -48,7 +51,15 @@ var snapshotBestGzipWriterPool = sync.Pool{
 
 func ParseSnapshotFormat(value string) (SnapshotFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", string(SnapshotFormatGzipBestJSON), "gzip-best", "best-gzip-json", "gzip-small-json", "small-gzip-json":
+	case "":
+		return DefaultSnapshotFormat, nil
+	case string(SnapshotFormatGzipBestBinary), "best-gzip-binary", "gzip-small-binary", "small-gzip-binary":
+		return SnapshotFormatGzipBestBinary, nil
+	case string(SnapshotFormatGzipBinary), "gzip-bin", "binary.gz", "gzbin":
+		return SnapshotFormatGzipBinary, nil
+	case string(SnapshotFormatBinary), "bin":
+		return SnapshotFormatBinary, nil
+	case string(SnapshotFormatGzipBestJSON), "gzip-best", "best-gzip-json", "gzip-small-json", "small-gzip-json":
 		return SnapshotFormatGzipBestJSON, nil
 	case string(SnapshotFormatGzipJSON), "gzip", "json.gz", "gzjson":
 		return SnapshotFormatGzipJSON, nil
@@ -268,6 +279,12 @@ func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time, prepareOperat
 
 func (ht *HatTrie) writeSnapshot(writer io.Writer, journalSequence uint64, format SnapshotFormat) error {
 	switch format {
+	case SnapshotFormatBinary:
+		return ht.writeSnapshotBinary(writer, journalSequence)
+	case SnapshotFormatGzipBestBinary:
+		return ht.writeSnapshotGzipBinary(writer, journalSequence, acquireSnapshotBestGzipWriter, releaseSnapshotBestGzipWriter)
+	case SnapshotFormatGzipBinary:
+		return ht.writeSnapshotGzipBinary(writer, journalSequence, jsonwire.AcquireGzipWriter, jsonwire.ReleaseGzipWriter)
 	case SnapshotFormatJSON:
 		return ht.writeSnapshotJSON(writer, journalSequence)
 	case SnapshotFormatGzipBestJSON:
@@ -1083,15 +1100,23 @@ func decodeSnapshotFileJSONReader(reader io.Reader) (snapshotFile, error) {
 }
 
 func scanSnapshotFileReader(reader io.Reader, visit func(snapshotEntry) error) (snapshotFileMetadata, error) {
-	jsonReader, closeReader, err := snapshotJSONReader(reader)
+	payloadReader, closeReader, err := snapshotPayloadReader(reader)
 	if err != nil {
 		return snapshotFileMetadata{}, err
 	}
 	defer closeReader()
-	return scanSnapshotFileJSONReader(jsonReader, visit)
+	buffered := bufio.NewReader(payloadReader)
+	isBinary, err := snapshotReaderIsBinary(buffered)
+	if err != nil {
+		return snapshotFileMetadata{}, err
+	}
+	if isBinary {
+		return scanSnapshotFileBinaryReader(buffered, visit)
+	}
+	return scanSnapshotFileJSONReader(buffered, visit)
 }
 
-func snapshotJSONReader(reader io.Reader) (io.Reader, func() error, error) {
+func snapshotPayloadReader(reader io.Reader) (io.Reader, func() error, error) {
 	buffered := bufio.NewReader(reader)
 	header, err := buffered.Peek(2)
 	if err != nil && !errors.Is(err, io.EOF) {

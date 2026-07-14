@@ -167,12 +167,24 @@ func BenchmarkSnapshotFormatJSON(b *testing.B) {
 	benchmarkSnapshotFormat(b, SnapshotFormatJSON)
 }
 
+func BenchmarkSnapshotFormatBinary(b *testing.B) {
+	benchmarkSnapshotFormat(b, SnapshotFormatBinary)
+}
+
 func BenchmarkSnapshotFormatGzipJSON(b *testing.B) {
 	benchmarkSnapshotFormat(b, SnapshotFormatGzipJSON)
 }
 
 func BenchmarkSnapshotFormatGzipBestJSON(b *testing.B) {
 	benchmarkSnapshotFormat(b, SnapshotFormatGzipBestJSON)
+}
+
+func BenchmarkSnapshotFormatGzipBinary(b *testing.B) {
+	benchmarkSnapshotFormat(b, SnapshotFormatGzipBinary)
+}
+
+func BenchmarkSnapshotFormatGzipBestBinary(b *testing.B) {
+	benchmarkSnapshotFormat(b, SnapshotFormatGzipBestBinary)
 }
 
 func BenchmarkLevelDBSaveMaterialized(b *testing.B) {

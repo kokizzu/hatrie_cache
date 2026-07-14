@@ -158,15 +158,20 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
 ```
 
 Set `SNAPSHOT_PATH` to load a snapshot at startup and save it on shutdown.
-Snapshots save as storage-optimized gzip JSON by default
-(`SNAPSHOT_FORMAT=gzip-best-json`) and still load older gzip JSON and plain JSON
-snapshots automatically. Set `SNAPSHOT_FORMAT=gzip-json` to write the previous
-faster gzip JSON format, or `SNAPSHOT_FORMAT=json` to keep writing the previous
-plain JSON file format. Set `SNAPSHOT_INTERVAL` to periodically write the same
-snapshot while the server runs:
+Snapshots save as storage-optimized gzip binary by default
+(`SNAPSHOT_FORMAT=gzip-best-binary`) and still load binary, gzip binary, older
+gzip JSON, and plain JSON snapshots automatically. Set
+`SNAPSHOT_FORMAT=gzip-binary` for a faster compact binary snapshot, or set
+`SNAPSHOT_FORMAT=gzip-best-json` to keep writing the previous storage-optimized
+JSON layout. Set `SNAPSHOT_FORMAT=gzip-json` for the previous faster gzip JSON
+format, or `SNAPSHOT_FORMAT=json` for the previous plain JSON file format. Set
+`SNAPSHOT_INTERVAL` to periodically write the same snapshot while the server
+runs:
 
 ```
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_INTERVAL=30s
+make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=gzip-binary
+make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=gzip-best-json
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=gzip-json
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=json
 ```
@@ -296,9 +301,12 @@ on an AMD Ryzen 9 5950X:
 | Journal encode | binary (default) | 4,537 ns/op | 3,159 journal_B/op | 6,456 B/op | 5 |
 | Journal decode | JSON fallback | 23,286 ns/op | 3,224 journal_B/op | 22,729 B/op | 29 |
 | Journal decode | binary (default) | 18,103 ns/op | 3,159 journal_B/op | 18,070 B/op | 25 |
-| Snapshot save | JSON | 2,782,644 ns/op | 465,944 disk_B/op | 655,312 B/op | 15,877 |
-| Snapshot save | gzip JSON (fast fallback) | 4,338,040 ns/op | 7,520 disk_B/op | 761,890 B/op | 29,192 |
-| Snapshot save | gzip best JSON (default) | 5,978,653 ns/op | 5,357 disk_B/op | 762,619 B/op | 29,193 |
+| Snapshot save | JSON fallback | 4,073,152 ns/op | 465,926 disk_B/op | 656,479 B/op | 15,879 |
+| Snapshot save | binary | 2,008,688 ns/op | 294,407 disk_B/op | 729,149 B/op | 4,609 |
+| Snapshot save | gzip JSON (fast JSON fallback) | 4,553,651 ns/op | 7,725 disk_B/op | 763,854 B/op | 29,195 |
+| Snapshot save | gzip best JSON (previous default) | 7,328,558 ns/op | 5,424 disk_B/op | 762,324 B/op | 29,193 |
+| Snapshot save | gzip binary (fast binary fallback) | 1,562,438 ns/op | 6,059 disk_B/op | 730,099 B/op | 4,609 |
+| Snapshot save | gzip best binary (default) | 9,845,516 ns/op | 4,434 disk_B/op | 730,350 B/op | 4,609 |
 | LevelDB save | materialized values | 2,529,545 ns/op | 394,157 record_B/op | 1,148,954 B/op | 6,162 |
 | LevelDB save | unchanged cold refs | 1,710,595 ns/op | 394,235 record_B/op | 1,000,845 B/op | 4,625 |
 | LevelDB save | stats-changed cold refs | 6,163,872 ns/op | 394,177 record_B/op | 3,165,016 B/op | 19,990 |
@@ -310,9 +318,14 @@ small byte reduction and equivalent allocation count. Binary journal records are
 about 1.6x faster to encode, about 1.3x faster to decode, about 2% smaller, and
 use less heap; JSON remains easier to inspect manually. Snapshot and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
-carry empty collection fields. The storage-optimized gzip snapshot default uses
-about 29% fewer snapshot bytes than the previous fast gzip format, with similar
-heap use and about 1.4x its save CPU; it uses about 99% less storage than plain
+carry empty collection fields. Binary snapshots reuse the compact LevelDB record
+codec and avoid base64 for byte values. The gzip-best-binary snapshot default
+uses about 18% fewer snapshot bytes than the previous gzip-best JSON default,
+about 27% fewer bytes than the fast gzip-binary format, and about 99% less
+storage than plain JSON. It also uses far fewer allocations and lower heap than
+gzip-best JSON, but about 1.3x the save CPU in this benchmark. Use
+`SNAPSHOT_FORMAT=gzip-binary` when lower snapshot CPU matters more than maximum
+compression; it is smaller than fast gzip JSON here but larger than gzip-best
 JSON. LevelDB saves stream the sorted trie against the sorted LevelDB keyspace,
 skip unchanged records, delete stale records, and avoid the synced write
 entirely when the diff batch is empty. Unchanged cold-reference saves reuse
@@ -488,10 +501,11 @@ per-key read/write counters and last access times without creating stats for
 unknown-key misses. `SaveStats` writes the global statistics snapshot as JSON,
 and `LoadStats` restores a saved snapshot.
 
-Use `SaveSnapshot` and `LoadSnapshot` for portable JSON data snapshots.
-`SaveSnapshot` writes gzip-compressed JSON by default; use
-`SaveSnapshotWithFormat(path, SnapshotFormatJSON)` for plain JSON. Snapshot
-loads auto-detect gzip or plain JSON, replace the current in-memory key set,
+Use `SaveSnapshot` and `LoadSnapshot` for portable data snapshots.
+`SaveSnapshot` writes gzip-best binary by default; use
+`SaveSnapshotWithFormat(path, SnapshotFormatGzipBestJSON)` for the previous
+storage-optimized JSON layout or `SnapshotFormatJSON` for plain JSON. Snapshot
+loads auto-detect gzip, binary, and JSON, replace the current in-memory key set,
 skip expired entries, restore per-key access metadata when present, and re-apply
 the normal disk spill threshold for large byte values.
 
