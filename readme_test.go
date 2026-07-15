@@ -84,10 +84,13 @@ func TestCommandSupportMarkdownTracksExecuteCommand(t *testing.T) {
 		"make command-support",
 		"make bench-command-features BENCHTIME=100x",
 		"make bench-redis-command-features REDIS_START_DOCKER=1",
+		"make bench-tarantool-command-features TARANTOOL_REQUESTS=10000",
 		"BenchmarkCommandFeature/StringSet",
 		"BenchmarkCommandFeature/FenwickTreeRange",
 		"Redis 7.0.4",
 		"Redis seconds / 10k",
+		"Tarantool 2.6.0",
+		"Tarantool/HAT speedup",
 		"`SET`",
 	} {
 		if !strings.Contains(doc, token) {
@@ -133,6 +136,26 @@ func TestRedisCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T) {
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("Redis command benchmark script missing token %q", token)
+		}
+	}
+}
+
+func TestTarantoolCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T) {
+	data, err := os.ReadFile("scripts/tarantool-command-features.lua")
+	if err != nil {
+		t.Fatalf("ReadFile(tarantool-command-features.lua) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		"TARANTOOL_REQUESTS",
+		"clock.monotonic",
+		"Seconds / 10k feature cycles",
+		"space:replace() + space:delete()",
+		"msgpack.encode(tuple)",
+		"index:pairs(prefix",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("Tarantool command benchmark script missing token %q", token)
 		}
 	}
 }

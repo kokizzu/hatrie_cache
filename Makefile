@@ -52,8 +52,12 @@ REDIS_CLIENTS ?= 1
 REDIS_KEYSPACE ?= 10000
 REDIS_START_DOCKER ?= 0
 REDIS_DOCKER_IMAGE ?= redis:7.0.4
+TARANTOOL_REQUESTS ?= 10000
+TARANTOOL_KEYSPACE ?= 10000
+TARANTOOL_BIN ?= tarantool
+TARANTOOL_WORK_DIR ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend bench bench-serialization bench-command-features bench-redis-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend bench bench-serialization bench-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -83,6 +87,9 @@ bench-command-features:
 
 bench-redis-command-features:
 	REDIS_HOST='$(REDIS_HOST)' REDIS_PORT='$(REDIS_PORT)' REDIS_REQUESTS='$(REDIS_REQUESTS)' REDIS_CLIENTS='$(REDIS_CLIENTS)' REDIS_KEYSPACE='$(REDIS_KEYSPACE)' REDIS_START_DOCKER='$(REDIS_START_DOCKER)' REDIS_DOCKER_IMAGE='$(REDIS_DOCKER_IMAGE)' ./scripts/benchmark-redis-command-features.sh
+
+bench-tarantool-command-features:
+	TARANTOOL_REQUESTS='$(TARANTOOL_REQUESTS)' TARANTOOL_KEYSPACE='$(TARANTOOL_KEYSPACE)' TARANTOOL_BIN='$(TARANTOOL_BIN)' TARANTOOL_WORK_DIR='$(TARANTOOL_WORK_DIR)' ./scripts/benchmark-tarantool-command-features.sh
 
 command-support:
 	./scripts/command-support.sh
