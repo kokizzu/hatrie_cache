@@ -46,7 +46,7 @@ BENCHTIME ?=
 COUNT ?= 1
 SERIALIZATION_BENCH ?=
 
-.PHONY: test verify verify-go verify-c verify-frontend bench bench-serialization run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend bench bench-serialization run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -54,6 +54,9 @@ verify: verify-go verify-c verify-frontend
 
 verify-go:
 	./scripts/verify-go.sh
+
+verify-race:
+	./scripts/verify-race.sh
 
 verify-c:
 	./scripts/verify-c-policy-test.sh

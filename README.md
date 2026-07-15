@@ -54,6 +54,12 @@ Run the Go wrapper tests:
 make test
 ```
 
+Run just the Go race detector suite:
+
+```
+make verify-race
+```
+
 Run the backing-store and compact-structure benchmarks:
 
 ```
