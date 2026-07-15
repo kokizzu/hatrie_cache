@@ -266,6 +266,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: radix tree snapshot is required")
 		}
 		return prepareLevelDBBinaryRadixTreeValue(*entry.RadixTree)
+	case "bloom_filter":
+		if entry.BloomFilter == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: bloom filter snapshot is required")
+		}
+		return prepareLevelDBBinaryBloomFilterValue(*entry.BloomFilter)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -340,6 +345,22 @@ func prepareLevelDBBinaryRadixTreeValue(snapshot radixTreeSnapshot) (levelDBBina
 		if marshalErr != nil {
 			return levelDBBinaryPreparedValue{}, marshalErr
 		}
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryBloomFilterValue(snapshot bloomFilterSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotBloomFilterValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
 	}
 	size, err := binaryLengthPrefixedSize(int64(len(payload)))
 	if err != nil {
@@ -637,6 +658,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 		}
 		return decodeLevelDBStorageJSON(data, &entry.PriorityQueue)
 	case "bloom_filter":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(bloomFilterSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary bloom filter value is not a bloom filter")
+			}
+			entry.BloomFilter = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.BloomFilter)
 	case "count_min_sketch":
 		return decodeLevelDBStorageJSON(data, &entry.CountMinSketch)

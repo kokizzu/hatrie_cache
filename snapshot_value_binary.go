@@ -23,6 +23,7 @@ const (
 	snapshotValueBinaryObject
 	snapshotValueBinaryPriorityQueue
 	snapshotValueBinaryRadixTree
+	snapshotValueBinaryBloomFilter
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -67,6 +68,27 @@ func marshalSnapshotRadixTreeValueBinary(snapshot radixTreeSnapshot) ([]byte, bo
 		return nil, false, nil
 	}
 	return writer.bytes(), true, nil
+}
+
+func marshalSnapshotBloomFilterValueBinary(snapshot bloomFilterSnapshot) ([]byte, error) {
+	bits, err := snapshotBloomFilterRawBits(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryBloomFilterSize(snapshot, len(bits))
+	if err != nil {
+		return nil, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	writeSnapshotValueBinaryBloomFilter(&writer, snapshot, bits)
+	return writer.bytes(), nil
+}
+
+func snapshotBloomFilterRawBits(snapshot bloomFilterSnapshot) ([]byte, error) {
+	if snapshot.Bits == "" {
+		return nil, nil
+	}
+	return base64.StdEncoding.DecodeString(snapshot.Bits)
 }
 
 func snapshotValueBinarySize(value interface{}) (int, bool, error) {
@@ -215,6 +237,18 @@ func snapshotValueBinaryRadixTreeSize(snapshot radixTreeSnapshot) (int, bool, er
 	return total, true, nil
 }
 
+func snapshotValueBinaryBloomFilterSize(snapshot bloomFilterSnapshot, bitBytes int) (int, error) {
+	total := 1 +
+		binaryUvarintSize(snapshot.BitCount) +
+		binaryUvarintSize(uint64(snapshot.HashCount)) +
+		binaryUvarintSize(snapshot.Insertions)
+	bitsSize, err := snapshotValueBinaryBytesSize(bitBytes)
+	if err != nil {
+		return 0, err
+	}
+	return snapshotValueBinaryAdd(total, bitsSize)
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -332,6 +366,14 @@ func writeSnapshotValueBinaryRadixTree(writer *binaryFieldWriter, snapshot radix
 		}
 	}
 	return true
+}
+
+func writeSnapshotValueBinaryBloomFilter(writer *binaryFieldWriter, snapshot bloomFilterSnapshot, bits []byte) {
+	writer.buf = append(writer.buf, snapshotValueBinaryBloomFilter)
+	writer.writeUvarint(snapshot.BitCount)
+	writer.writeUvarint(uint64(snapshot.HashCount))
+	writer.writeUvarint(snapshot.Insertions)
+	writer.writeBytes(bits)
 }
 
 func unmarshalSnapshotValueBinary(data []byte) (interface{}, error) {
@@ -482,6 +524,32 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 		return radixTreeSnapshot{
 			Count: uint64(len(items)),
 			Items: items,
+		}, nil
+	case snapshotValueBinaryBloomFilter:
+		bitCount, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		hashCount, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if hashCount > uint64(^uint8(0)) {
+			return nil, errors.New("hatriecache: binary bloom filter hash count is too large")
+		}
+		insertions, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		bits, err := reader.readBytes()
+		if err != nil {
+			return nil, err
+		}
+		return bloomFilterSnapshot{
+			BitCount:   bitCount,
+			HashCount:  uint8(hashCount),
+			Insertions: insertions,
+			Bits:       base64.StdEncoding.EncodeToString(bits),
 		}, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)
