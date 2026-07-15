@@ -552,6 +552,10 @@ func (store *CuckooFilterStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertCuckooFilter(key string, capacity uint64, falsePositiveRate float64) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	data, err := newCuckooFilterData(capacity, falsePositiveRate)
 	if err != nil {
 		return err
@@ -587,6 +591,10 @@ func (ht *HatTrie) AddCuckooFilter(key string, val interface{}, vals ...interfac
 }
 
 func (ht *HatTrie) AddCuckooFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -628,6 +636,10 @@ func (ht *HatTrie) HasCuckooFilter(key string, val interface{}) bool {
 }
 
 func (ht *HatTrie) HasCuckooFilterChecked(key string, val interface{}) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+
 	valueKey, err := cuckooFilterItemKey(val)
 	if err != nil {
 		return false, err
@@ -656,6 +668,10 @@ func (ht *HatTrie) DeleteCuckooFilter(key string, val interface{}, vals ...inter
 }
 
 func (ht *HatTrie) DeleteCuckooFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+
 	valueKeys, err := cuckooFilterItemKeys(val, vals...)
 	if err != nil {
 		return 0, err
@@ -693,6 +709,10 @@ func (ht *HatTrie) CuckooFilterInfo(key string) (CuckooFilterInfo, bool) {
 }
 
 func (ht *HatTrie) CuckooFilterInfoChecked(key string) (CuckooFilterInfo, bool, error) {
+	if ht == nil {
+		return CuckooFilterInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

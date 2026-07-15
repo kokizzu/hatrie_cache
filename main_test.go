@@ -439,6 +439,38 @@ func TestTopKAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestCuckooFilterAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertCuckooFilter("cuckoo", 100, 0.01); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertCuckooFilter(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddCuckooFilter("cuckoo", "value"); got != 0 {
+		t.Fatalf("AddCuckooFilter(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.AddCuckooFilterChecked("cuckoo", "value"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddCuckooFilterChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.HasCuckooFilter("cuckoo", "value"); got {
+		t.Fatal("HasCuckooFilter(nil trie) = true, want false")
+	}
+	if got, err := ht.HasCuckooFilterChecked("cuckoo", "value"); got || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HasCuckooFilterChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", got, err)
+	}
+	if got := ht.DeleteCuckooFilter("cuckoo", "value"); got != 0 {
+		t.Fatalf("DeleteCuckooFilter(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.DeleteCuckooFilterChecked("cuckoo", "value"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("DeleteCuckooFilterChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.CuckooFilterInfo("cuckoo"); got != (CuckooFilterInfo{}) || ok {
+		t.Fatalf("CuckooFilterInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.CuckooFilterInfoChecked("cuckoo"); got != (CuckooFilterInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("CuckooFilterInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
