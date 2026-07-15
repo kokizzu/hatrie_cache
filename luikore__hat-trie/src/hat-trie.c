@@ -205,6 +205,7 @@ void hattrie_clear(hattrie_t* T)
 
 size_t hattrie_size(hattrie_t* T)
 {
+    if (T == NULL) return 0;
     return T->m;
 }
 
@@ -361,6 +362,7 @@ static void hattrie_split(hattrie_t* T, node_ptr parent, node_ptr node)
 
 value_t* hattrie_get(hattrie_t* T, const char* key, size_t len)
 {
+    if (T == NULL || (key == NULL && len > 0)) return NULL;
     node_ptr parent = T->root;
     assert(*parent.flag & NODE_TYPE_TRIE);
 
@@ -419,6 +421,8 @@ value_t* hattrie_get(hattrie_t* T, const char* key, size_t len)
 
 value_t* hattrie_tryget(hattrie_t* T, const char* key, size_t len)
 {
+    if (T == NULL || (key == NULL && len > 0)) return NULL;
+
     /* find node for given key */
     int found;
     node_ptr node = hattrie_find(T, &key, &len, &found);
@@ -436,6 +440,8 @@ value_t* hattrie_tryget(hattrie_t* T, const char* key, size_t len)
 
 
 void hattrie_walk (hattrie_t* T, const char* key, size_t len, void* user_data, hattrie_walk_cb cb) {
+    if (T == NULL || cb == NULL || (key == NULL && len > 0)) return;
+
     unsigned char* k = (unsigned char*)key;
     node_ptr node = T->root;
     size_t i, j;
@@ -491,6 +497,8 @@ void hattrie_walk (hattrie_t* T, const char* key, size_t len, void* user_data, h
 
 int hattrie_del(hattrie_t* T, const char* key, size_t len)
 {
+    if (T == NULL || (key == NULL && len > 0)) return -1;
+
     node_ptr parent = T->root;
     assert(*parent.flag & NODE_TYPE_TRIE);
 
@@ -555,6 +563,24 @@ struct hattrie_iter_t_
     char* prefix;
     size_t prefix_len;
 };
+
+
+static hattrie_iter_t* hattrie_iter_empty(const hattrie_t* T, bool sorted)
+{
+    hattrie_iter_t* i = malloc_or_die(sizeof(hattrie_iter_t));
+    i->key = NULL;
+    i->keysize = 0;
+    i->level = 0;
+    i->has_nil_key = false;
+    i->nil_val = 0;
+    i->T = T;
+    i->sorted = sorted;
+    i->i = NULL;
+    i->stack = NULL;
+    i->prefix = NULL;
+    i->prefix_len = 0;
+    return i;
+}
 
 
 static void hattrie_iter_reserve_key(hattrie_iter_t* i, size_t needed)
@@ -692,6 +718,10 @@ hattrie_iter_t* hattrie_iter_begin(const hattrie_t* T, bool sorted)
 
 hattrie_iter_t* hattrie_iter_with_prefix(const hattrie_t* T, bool sorted, const char* prefix, size_t prefix_len)
 {
+    if (T == NULL || (prefix == NULL && prefix_len > 0)) {
+        return hattrie_iter_empty(T, sorted);
+    }
+
     int found;
     node_ptr node = hattrie_find((hattrie_t*)T, &prefix, &prefix_len, &found);
 
@@ -730,6 +760,8 @@ hattrie_iter_t* hattrie_iter_with_prefix(const hattrie_t* T, bool sorted, const 
 
 void hattrie_iter_next(hattrie_iter_t* i)
 {
+    if (i == NULL) return;
+
     do {
         if (hattrie_iter_finished(i)) return;
 
@@ -749,6 +781,7 @@ void hattrie_iter_next(hattrie_iter_t* i)
 
 bool hattrie_iter_finished(hattrie_iter_t* i)
 {
+    if (i == NULL) return true;
     return i->stack == NULL && i->i == NULL && !i->has_nil_key;
 }
 
@@ -776,7 +809,10 @@ void hattrie_iter_free(hattrie_iter_t* i)
 
 const char* hattrie_iter_key(hattrie_iter_t* i, size_t* len)
 {
-    if (hattrie_iter_finished(i)) return NULL;
+    if (hattrie_iter_finished(i)) {
+        if (len != NULL) *len = 0;
+        return NULL;
+    }
 
     size_t sublen;
     const char* subkey;
@@ -802,6 +838,7 @@ const char* hattrie_iter_key(hattrie_iter_t* i, size_t* len)
 
 value_t* hattrie_iter_val(hattrie_iter_t* i)
 {
+    if (i == NULL) return NULL;
     if (i->has_nil_key) return &i->nil_val;
 
     if (hattrie_iter_finished(i)) return NULL;

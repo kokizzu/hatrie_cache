@@ -440,7 +440,103 @@ void test_hattrie_clear_resets_root()
 
 void test_hattrie_null_cleanup()
 {
-    fprintf(stderr, "checking trie null cleanup... \n");
+    fprintf(stderr, "checking trie null api... \n");
+
+    if (hattrie_size(NULL) != 0) {
+        fprintf(stderr, "[error] null trie size was not zero\n");
+        have_error = 1;
+    }
+    if (hattrie_get(NULL, "missing", 7) != NULL) {
+        fprintf(stderr, "[error] null trie get returned a value\n");
+        have_error = 1;
+    }
+    if (hattrie_tryget(NULL, "missing", 7) != NULL) {
+        fprintf(stderr, "[error] null trie tryget returned a value\n");
+        have_error = 1;
+    }
+    if (hattrie_del(NULL, "missing", 7) == 0) {
+        fprintf(stderr, "[error] null trie delete reported success\n");
+        have_error = 1;
+    }
+
+    trie_walk_data_t data = { .size = 0 };
+    hattrie_walk(NULL, "missing", 7, &data, trie_walk_cb);
+    if (data.size != 0) {
+        fprintf(stderr, "[error] null trie walk invoked callback\n");
+        have_error = 1;
+    }
+
+    hattrie_iter_t* iter = hattrie_iter_begin(NULL, false);
+    if (!hattrie_iter_finished(iter)) {
+        fprintf(stderr, "[error] null trie iterator was not finished\n");
+        have_error = 1;
+    }
+    size_t len = 123;
+    if (hattrie_iter_key(iter, &len) != NULL || len != 0) {
+        fprintf(stderr, "[error] null trie iterator returned a key\n");
+        have_error = 1;
+    }
+    if (hattrie_iter_val(iter) != NULL) {
+        fprintf(stderr, "[error] null trie iterator returned a value\n");
+        have_error = 1;
+    }
+    hattrie_iter_next(iter);
+    if (!hattrie_iter_finished(iter)) {
+        fprintf(stderr, "[error] null trie iterator advanced to a value\n");
+        have_error = 1;
+    }
+    hattrie_iter_free(iter);
+
+    iter = hattrie_iter_with_prefix(NULL, true, "prefix", 6);
+    if (!hattrie_iter_finished(iter)) {
+        fprintf(stderr, "[error] null trie prefixed iterator was not finished\n");
+        have_error = 1;
+    }
+    hattrie_iter_free(iter);
+
+    hattrie_iter_next(NULL);
+    if (!hattrie_iter_finished(NULL)) {
+        fprintf(stderr, "[error] null iterator was not finished\n");
+        have_error = 1;
+    }
+    len = 123;
+    if (hattrie_iter_key(NULL, &len) != NULL || len != 0) {
+        fprintf(stderr, "[error] null iterator returned a key\n");
+        have_error = 1;
+    }
+    if (hattrie_iter_val(NULL) != NULL) {
+        fprintf(stderr, "[error] null iterator returned a value\n");
+        have_error = 1;
+    }
+    hattrie_iter_free(NULL);
+
+    hattrie_t* T = hattrie_create();
+    if (hattrie_get(T, NULL, 1) != NULL) {
+        fprintf(stderr, "[error] invalid trie key get returned a value\n");
+        have_error = 1;
+    }
+    if (hattrie_tryget(T, NULL, 1) != NULL) {
+        fprintf(stderr, "[error] invalid trie key tryget returned a value\n");
+        have_error = 1;
+    }
+    if (hattrie_del(T, NULL, 1) == 0) {
+        fprintf(stderr, "[error] invalid trie key delete reported success\n");
+        have_error = 1;
+    }
+    data.size = 0;
+    hattrie_walk(T, NULL, 1, &data, trie_walk_cb);
+    if (data.size != 0) {
+        fprintf(stderr, "[error] invalid trie key walk invoked callback\n");
+        have_error = 1;
+    }
+    hattrie_walk(T, "", 0, &data, NULL);
+    iter = hattrie_iter_with_prefix(T, true, NULL, 1);
+    if (!hattrie_iter_finished(iter)) {
+        fprintf(stderr, "[error] invalid prefix trie iterator was not finished\n");
+        have_error = 1;
+    }
+    hattrie_iter_free(iter);
+    hattrie_free(T);
 
     hattrie_clear(NULL);
     hattrie_free(NULL);
