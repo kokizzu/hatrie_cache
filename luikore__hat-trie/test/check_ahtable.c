@@ -298,6 +298,33 @@ void test_ahtable_zero_slot_create()
 }
 
 
+void test_ahtable_null_api()
+{
+    fprintf(stderr, "checking null table api... \n");
+
+    if (ahtable_size(NULL) != 0) {
+        fprintf(stderr, "[error] null table size was not zero\n");
+        have_error = 1;
+    }
+    if (ahtable_get(NULL, "missing", 7) != NULL) {
+        fprintf(stderr, "[error] null table get returned a value\n");
+        have_error = 1;
+    }
+    if (ahtable_tryget(NULL, "missing", 7) != NULL) {
+        fprintf(stderr, "[error] null table tryget returned a value\n");
+        have_error = 1;
+    }
+    if (ahtable_del(NULL, "missing", 7) == 0) {
+        fprintf(stderr, "[error] null table delete reported success\n");
+        have_error = 1;
+    }
+    ahtable_clear(NULL);
+    ahtable_free(NULL);
+
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_ahtable_empty_slot_operations()
 {
     fprintf(stderr, "checking empty slot operations... \n");
@@ -532,6 +559,7 @@ int main()
 {
     test_checked_array_size();
     test_ahtable_zero_slot_create();
+    test_ahtable_null_api();
     test_ahtable_empty_slot_operations();
     test_ahtable_delete_releases_empty_slot();
     test_ahtable_delete_compacts_nonempty_slot();

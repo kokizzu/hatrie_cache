@@ -71,12 +71,14 @@ void ahtable_free(ahtable_t* T)
 
 size_t ahtable_size(const ahtable_t* T)
 {
+    if (T == NULL) return 0;
     return T->m;
 }
 
 
 void ahtable_clear(ahtable_t* T)
 {
+    if (T == NULL) return;
     size_t i;
     for (i = 0; i < T->n; ++i) free(T->slots[i]);
     T->n = ahtable_initial_size;
@@ -279,18 +281,23 @@ static value_t* get_key(ahtable_t* T, const char* key, size_t len, bool insert_m
 
 value_t* ahtable_get(ahtable_t* T, const char* key, size_t len)
 {
+    if (T == NULL) return NULL;
     return get_key(T, key, len, true);
 }
 
 
 value_t* ahtable_tryget(ahtable_t* T, const char* key, size_t len )
 {
+    if (T == NULL) return NULL;
     return get_key(T, key, len, false);
 }
 
 
 int ahtable_del(ahtable_t* T, const char* key, size_t len)
 {
+    if (T == NULL) {
+        return -1;
+    }
     if (len > ahtable_max_key_length) {
         return -1;
     }
