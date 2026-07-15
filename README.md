@@ -447,9 +447,9 @@ and `INTERNALDEL`.
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence.
-See [`BENCHMARK_SUPPORTED_COMMANDS.md`](BENCHMARK_SUPPORTED_COMMANDS.md) for
-benchmarked supported commands, seconds per 10k operations, and Redis/Tarantool
-speedup comparisons.
+See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
+per 10k operations, raw Tarantool output, and Redis/Tarantool speedup
+comparisons.
 
 Use the HTTP client CLI against a running monitoring server:
 

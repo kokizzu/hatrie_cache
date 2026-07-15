@@ -1,4 +1,4 @@
-# Benchmarked Supported Commands
+# Benchmark
 
 This compares the cache command surface exposed by `POST /api/commands` and
 `make cli ARGS='command ...'` with comparable Redis and Tarantool feature
@@ -34,6 +34,39 @@ Headline local results:
 | Set add+has | 0.030300 s | 81.29x | 0.50x |
 | Priority queue push+pop | 0.042600 s | 56.29x | 1.27x |
 | Replication dump | 0.071580 s | 16.51x | 0.18x |
+
+## Raw Tarantool Result
+
+Command:
+
+```
+make bench-tarantool-command-features TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
+```
+
+Output from the local Tarantool 2.6.0 run:
+
+```text
+Tarantool benchmark: version=2.6.0-0-g47aa4e01e requests=10000 keyspace=10000
+
+| Feature family | Tarantool operation | Seconds / 10k feature cycles |
+| --- | --- | ---: |
+| String write | `space:replace()` | 0.010646 s |
+| String read | `space.index.primary:get()` | 0.003145 s |
+| Integer counter | `space:update({{"+", 2, 1}})` | 0.016595 s |
+| TTL update | `space:update({{"=", 3, expires_at}})` | 0.020773 s |
+| Map/hash write | `space:replace({key, field, value})` | 0.013571 s |
+| Map/hash read | `space.index.primary:get({key, field})` | 0.002829 s |
+| List/deque push+pop | `space:replace()` + `space:delete()` | 0.016045 s |
+| Set add+has | `space:replace()` + `space.index.primary:get()` | 0.015154 s |
+| Priority queue push+pop | tree index insert + `index:min()` + delete | 0.035529 s |
+| Roaring bitmap add approximation | `space:replace()` membership index | 0.008983 s |
+| Roaring bitmap lookup approximation | `space.index.primary:get()` membership index | 0.002267 s |
+| Sparse bitset add approximation | `space:replace()` membership index | 0.008953 s |
+| Sparse bitset lookup approximation | `space.index.primary:get()` membership index | 0.002635 s |
+| Radix-tree put approximation | `space:replace()` tree string key | 0.008879 s |
+| Radix-tree prefix scan approximation | `index:pairs(prefix, {iterator = "GE"})` | 0.078651 s |
+| Replication dump | `msgpack.encode(tuple)` | 0.006181 s |
+```
 
 ## Summary
 

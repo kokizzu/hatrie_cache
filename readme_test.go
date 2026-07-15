@@ -61,20 +61,20 @@ func TestREADMEListsCompactStructureCommands(t *testing.T) {
 	}
 }
 
-func TestBenchmarkSupportedCommandsMarkdownTracksExecuteCommand(t *testing.T) {
+func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 	commandGroups := executeCommandCases(t)
-	data, err := os.ReadFile("BENCHMARK_SUPPORTED_COMMANDS.md")
+	data, err := os.ReadFile("BENCHMARK.md")
 	if err != nil {
-		t.Fatalf("ReadFile(BENCHMARK_SUPPORTED_COMMANDS.md) error = %v", err)
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
 	}
 	doc := string(data)
 	if want := fmt.Sprintf("%d canonical command groups", len(commandGroups)); !strings.Contains(doc, want) {
-		t.Fatalf("BENCHMARK_SUPPORTED_COMMANDS.md does not document command group count %q", want)
+		t.Fatalf("BENCHMARK.md does not document command group count %q", want)
 	}
 	for _, group := range commandGroups {
 		canonical := group[0]
 		if !strings.Contains(doc, "`"+canonical+"`") {
-			t.Fatalf("BENCHMARK_SUPPORTED_COMMANDS.md does not document canonical command %s", canonical)
+			t.Fatalf("BENCHMARK.md does not document canonical command %s", canonical)
 		}
 	}
 	for _, token := range []string{
@@ -94,10 +94,12 @@ func TestBenchmarkSupportedCommandsMarkdownTracksExecuteCommand(t *testing.T) {
 		"Tarantool/HAT speedup",
 		"Benchmark Results",
 		"Headline local results",
+		"Raw Tarantool Result",
+		"Tarantool benchmark: version=2.6.0-0-g47aa4e01e requests=10000 keyspace=10000",
 		"`SET`",
 	} {
 		if !strings.Contains(doc, token) {
-			t.Fatalf("BENCHMARK_SUPPORTED_COMMANDS.md missing comparison/source token %q", token)
+			t.Fatalf("BENCHMARK.md missing comparison/source token %q", token)
 		}
 	}
 }
