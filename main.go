@@ -2067,7 +2067,9 @@ func (ht *HatTrie) StartExpirationCleanerContext(ctx context.Context, interval t
 		for {
 			select {
 			case <-ticker.C:
-				ht.VacuumExpired()
+				if !ht.vacuumExpiredIfOpen() {
+					return
+				}
 			case <-ctx.Done():
 				return
 			case <-done:
@@ -2082,6 +2084,17 @@ func (ht *HatTrie) StartExpirationCleanerContext(ctx context.Context, interval t
 			<-stopped
 		})
 	}
+}
+
+func (ht *HatTrie) vacuumExpiredIfOpen() bool {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if ht.root == nil {
+		return false
+	}
+	ht.vacuumExpiredLocked()
+	return true
 }
 
 // VacuumExpiredOnMemoryPressure removes expired keys when current heap
@@ -2140,7 +2153,9 @@ func (ht *HatTrie) StartMemoryPressureVacuumContext(ctx context.Context, interva
 		for {
 			select {
 			case <-ticker.C:
-				ht.VacuumExpiredOnMemoryPressure(maxAllocBytes)
+				if !ht.vacuumExpiredOnMemoryPressureIfOpen(maxAllocBytes) {
+					return
+				}
 			case <-ctx.Done():
 				return
 			case <-done:
@@ -2155,6 +2170,23 @@ func (ht *HatTrie) StartMemoryPressureVacuumContext(ctx context.Context, interva
 			<-stopped
 		})
 	}
+}
+
+func (ht *HatTrie) vacuumExpiredOnMemoryPressureIfOpen(maxAllocBytes uint64) bool {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if ht.root == nil {
+		return false
+	}
+	if mem.Alloc < maxAllocBytes {
+		return true
+	}
+	ht.vacuumExpiredLocked()
+	return true
 }
 
 // Keys returns all non-expired keys. When sorted is true, keys are returned in

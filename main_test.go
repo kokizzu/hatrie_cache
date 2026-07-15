@@ -7056,6 +7056,16 @@ func TestStartExpirationCleanerContextStopsOnCancel(t *testing.T) {
 	}
 }
 
+func TestStartExpirationCleanerExitsAfterDestroy(t *testing.T) {
+	ht := CreateHatTrie()
+	t.Cleanup(ht.Destroy)
+	stop := ht.StartExpirationCleaner(time.Millisecond)
+
+	ht.Destroy()
+	time.Sleep(20 * time.Millisecond)
+	assertStopReturns(t, stop, "expiration cleaner stop after destroy")
+}
+
 func TestStartExpirationCleanerRejectsInvalidInterval(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -7138,6 +7148,16 @@ func TestStartMemoryPressureVacuumContextStopsOnCancel(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("memory pressure vacuum stop after context cancel did not return")
 	}
+}
+
+func TestStartMemoryPressureVacuumExitsAfterDestroy(t *testing.T) {
+	ht := CreateHatTrie()
+	t.Cleanup(ht.Destroy)
+	stop := ht.StartMemoryPressureVacuum(time.Millisecond, 1)
+
+	ht.Destroy()
+	time.Sleep(20 * time.Millisecond)
+	assertStopReturns(t, stop, "memory pressure vacuum stop after destroy")
 }
 
 func TestMemoryPressureVacuumRejectsInvalidConfig(t *testing.T) {
@@ -7329,6 +7349,22 @@ func waitUntil(t *testing.T, timeout time.Duration, ready func() bool) {
 		return
 	}
 	t.Fatal("condition was not met before timeout")
+}
+
+func assertStopReturns(t *testing.T, stop func(), label string) {
+	t.Helper()
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal(label + " did not return")
+	}
 }
 
 func cacheStatsEqual(a, b CacheStats) bool {

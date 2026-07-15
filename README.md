@@ -554,7 +554,8 @@ background cleanup. Use `StartExpirationCleanerContext` when cleaner lifetime
 should follow a parent service context. Use `VacuumExpiredOnMemoryPressure` or
 `StartMemoryPressureVacuum` to remove expired keys only when heap allocation is
 above a configured threshold; `StartMemoryPressureVacuumContext` also stops on
-context cancellation.
+context cancellation. Background cleaners exit cleanly if `Destroy` is called
+before their returned stop function.
 
 Use `Keys`, `KeysWithPrefix`, `Entries`, and `EntriesWithPrefix` to iterate
 over non-expired keys and value metadata. Prefix iteration returns full keys and
