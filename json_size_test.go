@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -95,6 +96,57 @@ func TestJSONEncodedSizeReportsMarshalError(t *testing.T) {
 	_, err := jsonEncodedSize(map[string]interface{}{"bad": func() {}})
 	if err == nil {
 		t.Fatal("jsonEncodedSize(unsupported value) error = nil, want error")
+	}
+}
+
+func TestJSONEncodedSizeWithin(t *testing.T) {
+	value := map[string]interface{}{
+		"b": strings.Repeat("quoted\nvalue", 4),
+		"a": json.Number("42"),
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	size, within, err := jsonEncodedSizeWithin(value, int64(len(data)))
+	if err != nil {
+		t.Fatalf("jsonEncodedSizeWithin(exact) error = %v", err)
+	}
+	if !within {
+		t.Fatal("jsonEncodedSizeWithin(exact) within = false, want true")
+	}
+	if size != int64(len(data)) {
+		t.Fatalf("jsonEncodedSizeWithin(exact) size = %d, want %d", size, len(data))
+	}
+
+	size, within, err = jsonEncodedSizeWithin(value, int64(len(data)-1))
+	if err != nil {
+		t.Fatalf("jsonEncodedSizeWithin(short) error = %v", err)
+	}
+	if within {
+		t.Fatal("jsonEncodedSizeWithin(short) within = true, want false")
+	}
+	if size != 0 {
+		t.Fatalf("jsonEncodedSizeWithin(short) size = %d, want 0", size)
+	}
+
+	size, within, err = jsonEncodedSizeWithin(value, -1)
+	if err != nil {
+		t.Fatalf("jsonEncodedSizeWithin(negative) error = %v", err)
+	}
+	if within {
+		t.Fatal("jsonEncodedSizeWithin(negative) within = true, want false")
+	}
+	if size != 0 {
+		t.Fatalf("jsonEncodedSizeWithin(negative) size = %d, want 0", size)
+	}
+}
+
+func TestJSONEncodedSizeWithinReportsMarshalError(t *testing.T) {
+	_, _, err := jsonEncodedSizeWithin(map[string]interface{}{"bad": func() {}}, 1024)
+	if err == nil {
+		t.Fatal("jsonEncodedSizeWithin(unsupported value) error = nil, want error")
 	}
 }
 

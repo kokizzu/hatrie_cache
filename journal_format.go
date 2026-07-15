@@ -233,11 +233,11 @@ func marshalJournalDynamicBinary(value interface{}) ([]byte, error) {
 		return nil, err
 	}
 	if ok {
-		jsonSize, err := jsonEncodedSize(value)
+		jsonSize, within, err := jsonEncodedSizeWithin(value, int64(len(binaryPayload)))
 		if err != nil {
 			return binaryPayload, nil
 		}
-		if int64(len(binaryPayload)) < jsonSize {
+		if !within || int64(len(binaryPayload)) < jsonSize {
 			return binaryPayload, nil
 		}
 	}
