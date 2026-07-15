@@ -296,6 +296,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: roaring bitmap snapshot is required")
 		}
 		return prepareLevelDBBinaryRoaringBitmapValue(*entry.RoaringBitmap)
+	case "sparse_bitset":
+		if entry.SparseBitset == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: sparse bitset snapshot is required")
+		}
+		return prepareLevelDBBinarySparseBitsetValue(*entry.SparseBitset)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -471,6 +476,22 @@ func prepareLevelDBBinaryXorFilterValue(snapshot xorFilterSnapshot) (levelDBBina
 
 func prepareLevelDBBinaryRoaringBitmapValue(snapshot roaringBitmapSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, err := marshalSnapshotRoaringBitmapValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinarySparseBitsetValue(snapshot sparseBitsetSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotSparseBitsetValueBinary(snapshot)
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err
 	}
@@ -846,6 +867,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 	case "fenwick_tree":
 		return decodeLevelDBStorageJSON(data, &entry.FenwickTree)
 	case "sparse_bitset":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(sparseBitsetSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary sparse bitset value is not a sparse bitset")
+			}
+			entry.SparseBitset = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.SparseBitset)
 	case "reservoir_sample":
 		return decodeLevelDBStorageJSON(data, &entry.ReservoirSample)

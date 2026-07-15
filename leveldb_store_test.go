@@ -1106,6 +1106,86 @@ func TestLevelDBBinaryRoaringBitmapStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinarySparseBitsetUsesBinaryValuePayload(t *testing.T) {
+	bitset := newSparseBitsetData()
+	bitset.AddOne(1, 2)
+	for idx := 0; idx <= sparseBitsetArrayMaxSize; idx++ {
+		bitset.Add(uint64(1<<16) + uint64(idx))
+	}
+	snapshot := bitset.Snapshot()
+	if len(snapshot.Containers) != 2 ||
+		snapshot.Containers[0].Kind != sparseBitsetContainerKindArray ||
+		snapshot.Containers[1].Kind != sparseBitsetContainerKindBits {
+		t.Fatalf("sparse bitset snapshot containers = %#v, want array and bitmap containers", snapshot.Containers)
+	}
+	entry := snapshotEntry{
+		Key:          "bitset",
+		Type:         "sparse_bitset",
+		SparseBitset: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary sparse bitset) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("sparse bitset payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(sparse bitset) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary sparse bitset payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary sparse bitset) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.SparseBitset, &snapshot) {
+		t.Fatalf("decoded sparse bitset = %#v, want %#v", decoded.SparseBitset, &snapshot)
+	}
+}
+
+func TestLevelDBBinarySparseBitsetStillReadsLegacyJSONPayload(t *testing.T) {
+	bitset := newSparseBitsetData()
+	bitset.AddOne(1, 1<<32+7)
+	snapshot := bitset.Snapshot()
+	entry := snapshotEntry{
+		Key:          "legacy-bitset",
+		Type:         "sparse_bitset",
+		SparseBitset: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(sparse bitset) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON sparse bitset) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.SparseBitset, entry.SparseBitset) {
+		t.Fatalf("decoded legacy inner JSON sparse bitset = %#v, want %#v", decoded.SparseBitset, entry.SparseBitset)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {
