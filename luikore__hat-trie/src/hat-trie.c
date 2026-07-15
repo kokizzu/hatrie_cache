@@ -612,7 +612,7 @@ static void hattrie_iter_nextnode(hattrie_iter_t* i)
             i->stack = malloc_or_die(sizeof(hattrie_node_stack_t));
             i->stack->node  = node.t->xs[j];
             i->stack->next  = next;
-            i->stack->level = level + 1;
+            i->stack->level = size_add_or_die(level, 1);
             i->stack->c     = (unsigned char) j;
         }
     }
@@ -686,7 +686,7 @@ hattrie_iter_t* hattrie_iter_with_prefix(const hattrie_t* T, bool sorted, const 
     i->sorted = sorted;
     i->i = NULL;
     i->keysize = 16;
-    i->key = malloc_or_die(i->keysize * sizeof(char));
+    i->key = malloc_array_or_die(i->keysize, sizeof(char));
     i->level   = 0;
     i->has_nil_key = false;
     i->nil_val     = 0;

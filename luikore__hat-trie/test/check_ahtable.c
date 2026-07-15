@@ -169,7 +169,7 @@ void test_ahtable_sorted_iteration()
     value_t* u;
     value_t  v;
 
-    char* prev_key = malloc(m_high + 1);
+    char* prev_key = malloc_or_die(m_high + 1);
     size_t prev_len = 0;
 
     const char *key = NULL;
@@ -225,8 +225,8 @@ void test_ahtable_key_length_limit()
     fprintf(stderr, "checking key length limit... \n");
 
     ahtable_t* T = ahtable_create();
-    char* max_key = malloc(ahtable_max_key_length + 1);
-    char* too_long = malloc(ahtable_max_key_length + 2);
+    char* max_key = malloc_or_die(ahtable_max_key_length + 1);
+    char* too_long = malloc_or_die(ahtable_max_key_length + 2);
     fill_repeated(max_key, ahtable_max_key_length, 'm');
     fill_repeated(too_long, ahtable_max_key_length + 1, 'x');
 

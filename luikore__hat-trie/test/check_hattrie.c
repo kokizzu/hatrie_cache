@@ -179,8 +179,8 @@ void test_hattrie_sorted_iteration()
     value_t* u;
     value_t  v;
 
-    char* key_copy = malloc(m_high + 1);
-    char* prev_key = malloc(m_high + 1);
+    char* key_copy = malloc_or_die(m_high + 1);
+    char* prev_key = malloc_or_die(m_high + 1);
     memset(prev_key, 0, m_high + 1);
     size_t prev_len = 0;
 
