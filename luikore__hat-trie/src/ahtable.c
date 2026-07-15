@@ -425,9 +425,10 @@ static const char* ahtable_sorted_iter_key(ahtable_sorted_iter_t* i, size_t* len
     if (ahtable_sorted_iter_finished(i)) return NULL;
 
     slot_t s = i->xs[i->i];
-    *len = keylen(s);
+    size_t k = keylen(s);
+    if (len != NULL) *len = k;
 
-    return (const char*) (s + (*len < 128 ? 1 : 2));
+    return (const char*) (s + (k < 128 ? 1 : 2));
 }
 
 
@@ -519,7 +520,7 @@ static const char* ahtable_unsorted_iter_key(ahtable_unsorted_iter_t* i, size_t*
         s += 1;
     }
 
-    *len = k;
+    if (len != NULL) *len = k;
     return (const char*) s;
 }
 
@@ -555,7 +556,18 @@ struct ahtable_iter_t_
 };
 
 
+static ahtable_iter_t* ahtable_iter_empty(bool sorted)
+{
+    ahtable_iter_t* i = malloc_or_die(sizeof(ahtable_iter_t));
+    i->sorted = sorted;
+    i->i.sorted = NULL;
+    return i;
+}
+
+
 ahtable_iter_t* ahtable_iter_begin(const ahtable_t* T, bool sorted) {
+    if (T == NULL) return ahtable_iter_empty(sorted);
+
     ahtable_iter_t* i = malloc_or_die(sizeof(ahtable_iter_t));
     i->sorted = sorted;
     if (sorted) i->i.sorted   = ahtable_sorted_iter_begin(T);
@@ -566,6 +578,9 @@ ahtable_iter_t* ahtable_iter_begin(const ahtable_t* T, bool sorted) {
 
 void ahtable_iter_next(ahtable_iter_t* i)
 {
+    if (i == NULL) return;
+    if (i->sorted && i->i.sorted == NULL) return;
+    if (!i->sorted && i->i.unsorted == NULL) return;
     if (i->sorted) ahtable_sorted_iter_next(i->i.sorted);
     else           ahtable_unsorted_iter_next(i->i.unsorted);
 }
@@ -573,6 +588,9 @@ void ahtable_iter_next(ahtable_iter_t* i)
 
 bool ahtable_iter_finished(ahtable_iter_t* i)
 {
+    if (i == NULL) return true;
+    if (i->sorted && i->i.sorted == NULL) return true;
+    if (!i->sorted && i->i.unsorted == NULL) return true;
     if (i->sorted) return ahtable_sorted_iter_finished(i->i.sorted);
     else           return ahtable_unsorted_iter_finished(i->i.unsorted);
 }
@@ -589,6 +607,10 @@ void ahtable_iter_free(ahtable_iter_t* i)
 
 const char* ahtable_iter_key(ahtable_iter_t* i, size_t* len)
 {
+    if (ahtable_iter_finished(i)) {
+        if (len != NULL) *len = 0;
+        return NULL;
+    }
     if (i->sorted) return ahtable_sorted_iter_key(i->i.sorted, len);
     else           return ahtable_unsorted_iter_key(i->i.unsorted, len);
 }
@@ -596,6 +618,7 @@ const char* ahtable_iter_key(ahtable_iter_t* i, size_t* len)
 
 value_t* ahtable_iter_val(ahtable_iter_t* i)
 {
+    if (ahtable_iter_finished(i)) return NULL;
     if (i->sorted) return ahtable_sorted_iter_val(i->i.sorted);
     else           return ahtable_unsorted_iter_val(i->i.unsorted);
 }

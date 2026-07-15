@@ -318,6 +318,62 @@ void test_ahtable_null_api()
         fprintf(stderr, "[error] null table delete reported success\n");
         have_error = 1;
     }
+    ahtable_iter_t* it = ahtable_iter_begin(NULL, false);
+    if (!ahtable_iter_finished(it)) {
+        fprintf(stderr, "[error] null table unsorted iterator was not finished\n");
+        have_error = 1;
+    }
+    size_t len = 123;
+    if (ahtable_iter_key(it, &len) != NULL || len != 0) {
+        fprintf(stderr, "[error] null table unsorted iterator returned a key\n");
+        have_error = 1;
+    }
+    if (ahtable_iter_val(it) != NULL) {
+        fprintf(stderr, "[error] null table unsorted iterator returned a value\n");
+        have_error = 1;
+    }
+    ahtable_iter_next(it);
+    if (!ahtable_iter_finished(it)) {
+        fprintf(stderr, "[error] null table unsorted iterator advanced to a value\n");
+        have_error = 1;
+    }
+    ahtable_iter_free(it);
+
+    it = ahtable_iter_begin(NULL, true);
+    if (!ahtable_iter_finished(it)) {
+        fprintf(stderr, "[error] null table sorted iterator was not finished\n");
+        have_error = 1;
+    }
+    len = 123;
+    if (ahtable_iter_key(it, &len) != NULL || len != 0) {
+        fprintf(stderr, "[error] null table sorted iterator returned a key\n");
+        have_error = 1;
+    }
+    if (ahtable_iter_val(it) != NULL) {
+        fprintf(stderr, "[error] null table sorted iterator returned a value\n");
+        have_error = 1;
+    }
+    ahtable_iter_free(it);
+
+    ahtable_iter_next(NULL);
+    if (!ahtable_iter_finished(NULL)) {
+        fprintf(stderr, "[error] null iterator was not finished\n");
+        have_error = 1;
+    }
+    len = 123;
+    if (ahtable_iter_key(NULL, &len) != NULL || len != 0) {
+        fprintf(stderr, "[error] null iterator returned a key\n");
+        have_error = 1;
+    }
+    if (ahtable_iter_key(NULL, NULL) != NULL) {
+        fprintf(stderr, "[error] null iterator returned a key without length output\n");
+        have_error = 1;
+    }
+    if (ahtable_iter_val(NULL) != NULL) {
+        fprintf(stderr, "[error] null iterator returned a value\n");
+        have_error = 1;
+    }
+    ahtable_iter_free(NULL);
     ahtable_clear(NULL);
     ahtable_free(NULL);
 
