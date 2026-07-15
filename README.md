@@ -61,6 +61,14 @@ make bench
 make bench BENCH=RoaringBitmap
 ```
 
+Run the serialization, snapshot, and LevelDB storage tradeoff benchmarks:
+
+```
+make bench-serialization
+make bench-serialization BENCHTIME=20x
+make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
+```
+
 The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
 
 ```
@@ -144,16 +152,21 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
 make monitoring-server DB_PATH=data/cache.leveldb DB_FORMAT=json
 ```
 
-Local storage benchmark (`go test -run=^$ -bench=BenchmarkLevelDB.*Materialized
--benchmem -benchtime=20x`, AMD Ryzen 9 5950X, 512 materialized string entries):
+Local storage benchmark on an AMD Ryzen 9 5950X with 512 materialized string
+entries:
+
+```
+make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load)Materialized' BENCHTIME=20x
+```
 
 | Format | Save CPU | Load CPU | Record bytes | Save heap | Load heap |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| binary | 0.78 ms/op | 1.29 ms/op | 293,376 B/op | 722,542 B/op | 1,205,033 B/op |
-| json | 1.52 ms/op | 2.62 ms/op | 394,221 B/op | 1,150,754 B/op | 1,912,316 B/op |
+| binary | 1.56 ms/op | 2.79 ms/op | 293,376 B/op | 657,016 B/op | 1,205,047 B/op |
+| json | 3.34 ms/op | 4.25 ms/op | 394,194 B/op | 1,149,580 B/op | 1,912,317 B/op |
 
-The tradeoff is readability: binary is faster and about 26% smaller for this
-workload, while JSON remains easier to inspect with standard text tools.
+The tradeoff is readability: binary saves are about 2.1x faster, loads are
+about 1.5x faster, and records are about 26% smaller for this workload, while
+JSON remains easier to inspect with standard text tools.
 
 Set `DB_HOT_LOAD=true` to load all non-expired LevelDB keys as compact
 references while only materializing hot values in memory. By default a hot value
@@ -304,41 +317,45 @@ The Svelte MPA dashboard and key browser use bounded entry requests by default.
 `Content-Type`; regular browser/API clients can continue to use JSON.
 Responses are gzip-compressed when clients send `Accept-Encoding: gzip`.
 
-Serialization tradeoffs measured with
-`make run CMD='go test -run __nomatch__ -bench BenchmarkCommandWire -benchmem .'`
-and
-`make run CMD='go test -run __nomatch__ -bench BenchmarkCommandJournal -benchmem -benchtime=20000x .'`
-and
-`make run CMD='go test -run __nomatch__ -bench BenchmarkSnapshotFormat -benchmem .'`
-and
-`make run CMD='go test -run __nomatch__ -bench BenchmarkLevelDB -benchmem .'`
-on an AMD Ryzen 9 5950X. The snapshot and LevelDB benchmark sets also include
-`Structured` variants that exercise maps, queues, filters, sketches, bitmaps,
-Fenwick trees, reservoir samples, XOR filters, and radix trees.
+Serialization tradeoffs are measured with `make bench-serialization` on an AMD
+Ryzen 9 5950X. The storage and snapshot rows below use `BENCHTIME=20x` to keep
+the slower compression and LevelDB cases bounded. The `Structured` variants
+exercise maps, queues, filters, sketches, bitmaps, Fenwick trees, reservoir
+samples, XOR filters, and radix trees.
 
 | Path | Format | CPU | Wire/disk bytes | Heap bytes | Allocs |
 | --- | --- | ---: | ---: | ---: | ---: |
-| HTTP command wire | JSON | 4,968 ns/op | 3,185 wire_B/op | 3,385 B/op | 3 |
-| HTTP command wire | protobuf (default) | 2,226 ns/op | 3,146 wire_B/op | 3,408 B/op | 3 |
-| Journal encode | JSON fallback | 7,209 ns/op | 3,224 journal_B/op | 8,498 B/op | 3 |
-| Journal encode | binary (default) | 4,537 ns/op | 3,159 journal_B/op | 6,456 B/op | 5 |
-| Journal decode | JSON fallback | 23,286 ns/op | 3,224 journal_B/op | 22,729 B/op | 29 |
-| Journal decode | binary (default) | 18,103 ns/op | 3,159 journal_B/op | 18,070 B/op | 25 |
-| Snapshot save | JSON fallback | 4,073,152 ns/op | 465,926 disk_B/op | 656,479 B/op | 15,879 |
-| Snapshot save | binary | 2,008,688 ns/op | 294,407 disk_B/op | 729,149 B/op | 4,609 |
-| Snapshot save | gzip JSON (fast JSON fallback) | 4,553,651 ns/op | 7,725 disk_B/op | 763,854 B/op | 29,195 |
-| Snapshot save | gzip best JSON (previous default) | 7,328,558 ns/op | 5,424 disk_B/op | 762,324 B/op | 29,193 |
-| Snapshot save | gzip binary (fast binary fallback) | 1,562,438 ns/op | 6,059 disk_B/op | 730,099 B/op | 4,609 |
-| Snapshot save | gzip best binary (default) | 9,845,516 ns/op | 4,434 disk_B/op | 730,350 B/op | 4,609 |
-| LevelDB save | materialized values | 2,529,545 ns/op | 394,157 record_B/op | 1,148,954 B/op | 6,162 |
-| LevelDB save | unchanged cold refs | 1,710,595 ns/op | 394,235 record_B/op | 1,000,845 B/op | 4,625 |
-| LevelDB save | stats-changed cold refs | 6,163,872 ns/op | 394,177 record_B/op | 3,165,016 B/op | 19,990 |
-| LevelDB load | materialized values | 3,384,252 ns/op | 394,192 record_B/op | 1,912,318 B/op | 12,386 |
-| LevelDB load | cold refs | 3,452,032 ns/op | 394,192 record_B/op | 1,775,911 B/op | 12,386 |
+| HTTP command wire | JSON | 15,012 ns/op | 3,185 wire_B/op | 3,387 B/op | 3 |
+| HTTP command wire | protobuf (default) | 12,637 ns/op | 3,146 wire_B/op | 3,408 B/op | 3 |
+| Journal encode | JSON fallback | 7,800 ns/op | 3,224 journal_B/op | 8,496 B/op | 3 |
+| Journal encode | binary (default) | 3,362 ns/op | 3,159 journal_B/op | 6,400 B/op | 2 |
+| Journal decode | JSON fallback | 30,034 ns/op | 3,224 journal_B/op | 22,728 B/op | 29 |
+| Journal decode | binary (default) | 20,035 ns/op | 3,159 journal_B/op | 18,071 B/op | 25 |
+| Snapshot save | JSON fallback | 1,791,394 ns/op | 465,912 disk_B/op | 654,791 B/op | 15,877 |
+| Snapshot save | binary | 866,052 ns/op | 294,407 disk_B/op | 663,589 B/op | 4,097 |
+| Snapshot save | gzip JSON (fast JSON fallback) | 5,122,924 ns/op | 7,757 disk_B/op | 761,425 B/op | 29,192 |
+| Snapshot save | gzip best JSON (previous default) | 6,451,204 ns/op | 5,469 disk_B/op | 762,164 B/op | 29,192 |
+| Snapshot save | gzip binary (fast binary fallback) | 1,754,702 ns/op | 5,109 disk_B/op | 664,319 B/op | 4,097 |
+| Snapshot save | gzip best binary (default) | 9,592,754 ns/op | 4,549 disk_B/op | 664,564 B/op | 4,097 |
+| Structured snapshot save | JSON fallback | 1,904,499 ns/op | 254,274 disk_B/op | 478,893 B/op | 10,114 |
+| Structured snapshot save | binary | 1,182,100 ns/op | 79,891 disk_B/op | 510,680 B/op | 4,114 |
+| Structured snapshot save | gzip best JSON fallback | 18,866,057 ns/op | 6,956 disk_B/op | 595,135 B/op | 24,454 |
+| Structured snapshot save | gzip best binary (default) | 9,847,768 ns/op | 5,787 disk_B/op | 511,394 B/op | 4,114 |
+| LevelDB save | binary materialized values | 1,558,684 ns/op | 293,376 record_B/op | 657,016 B/op | 3,602 |
+| LevelDB save | JSON materialized values | 3,341,825 ns/op | 394,194 record_B/op | 1,149,580 B/op | 6,163 |
+| LevelDB save | binary structured values | 1,751,318 ns/op | 79,404 record_B/op | 507,664 B/op | 3,827 |
+| LevelDB save | JSON structured values | 2,179,589 ns/op | 175,315 record_B/op | 690,626 B/op | 4,597 |
+| LevelDB save | unchanged binary cold refs | 1,175,011 ns/op | 293,376 record_B/op | 673,107 B/op | 4,625 |
+| LevelDB save | stats-changed binary cold refs | 3,137,600 ns/op | 293,376 record_B/op | 1,775,687 B/op | 9,746 |
+| LevelDB load | binary materialized values | 2,786,401 ns/op | 293,376 record_B/op | 1,205,047 B/op | 4,706 |
+| LevelDB load | JSON materialized values | 4,250,143 ns/op | 394,223 record_B/op | 1,912,317 B/op | 12,386 |
+| LevelDB load | binary structured values | 2,933,838 ns/op | 79,404 record_B/op | 983,042 B/op | 6,771 |
+| LevelDB load | JSON structured values | 4,685,072 ns/op | 175,336 record_B/op | 1,235,988 B/op | 11,012 |
+| LevelDB load | binary cold refs | 2,377,551 ns/op | 293,376 record_B/op | 1,068,327 B/op | 4,706 |
 
-For the benchmark payload, protobuf command wire is about 2.2x faster with a
+For the benchmark payload, protobuf command wire is about 1.2x faster with a
 small byte reduction and equivalent allocation count. Binary journal records are
-about 1.6x faster to encode, about 1.3x faster to decode, about 2% smaller, and
+about 2.3x faster to encode, about 1.5x faster to decode, about 2% smaller, and
 use less heap; JSON remains easier to inspect manually. Snapshot and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
 carry empty collection fields. Binary snapshots reuse the compact LevelDB record
@@ -348,21 +365,23 @@ payload codecs when possible, plus direct binary cuckoo-filter fingerprints.
 Built XOR filters also store fingerprints directly and keep staged snapshots on
 JSON fallback; roaring bitmaps and sparse bitsets store container payloads
 directly, and Fenwick trees store numeric vectors as varints. Quantile-sketch
-summaries and reservoir-sample retained items also use compact binary tuples. The
-gzip-best-binary snapshot default uses about 18% fewer snapshot bytes than the
-previous gzip-best JSON default, about 27% fewer bytes than the fast
-gzip-binary format, and about 99%
-less storage than plain JSON. It also uses far fewer allocations and lower heap
-than gzip-best JSON, but about 1.3x the save CPU in this benchmark. Use
-`SNAPSHOT_FORMAT=gzip-binary` when lower snapshot CPU matters more than maximum
-compression; it is smaller than fast gzip JSON here but larger than gzip-best
-JSON. LevelDB saves stream the sorted trie against the sorted LevelDB keyspace,
-skip unchanged records, delete stale records, and avoid the synced write
-entirely when the diff batch is empty. Unchanged cold-reference saves reuse
-stored record bytes; read-stat changes force a validated rewrite and cost more
-CPU and heap. LevelDB loads apply records once and use a sorted active-key
-merge for stale deletion instead of an active-key hash map; cold-reference loads
-avoid materializing values, saving some heap at similar startup CPU.
+summaries and reservoir-sample retained items also use compact binary tuples.
+The gzip-best-binary snapshot default uses about 17% fewer bytes than the
+previous gzip-best JSON default for scalar entries and about 17% fewer bytes for
+the structured payload; the structured binary path is also about 1.9x faster
+than gzip-best JSON in this benchmark. Plain binary snapshots are the lowest CPU
+choice and are 37% smaller than plain JSON for scalar entries and 69% smaller
+for structured entries. Use `SNAPSHOT_FORMAT=gzip-binary` when lower snapshot
+CPU matters more than maximum compression. LevelDB saves stream the sorted trie
+against the sorted LevelDB keyspace, skip unchanged records, delete stale
+records, and avoid the synced write entirely when the diff batch is empty. The
+binary LevelDB format is 26% smaller for scalar records and 55% smaller for the
+structured payload, with lower save/load CPU and heap than JSON. Unchanged
+cold-reference saves reuse stored record bytes; read-stat changes force a
+validated rewrite and cost more CPU and heap. LevelDB loads apply records once
+and use a sorted active-key merge for stale deletion instead of an active-key
+hash map; cold-reference loads avoid materializing values, saving heap and CPU
+when startup can hydrate cold values lazily.
 JSON request bodies may also be sent with `Content-Encoding: gzip`.
 `GET /api/election` returns node liveness and elected shard leaders.
 `GET /api/election?key=...` returns the topology route plus the elected leader

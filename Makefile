@@ -42,8 +42,11 @@ SANITIZE_C_OVERCOMMIT_MEMORY_PATH ?=
 SANITIZE_C_MEMINFO_PATH ?=
 SANITIZE_C_ASAN_MIN_COMMIT_HEADROOM_KB ?=
 BENCH ?= .
+BENCHTIME ?=
+COUNT ?= 1
+SERIALIZATION_BENCH ?=
 
-.PHONY: test verify verify-go verify-c verify-frontend bench run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-c verify-frontend bench bench-serialization run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -61,6 +64,9 @@ verify-frontend:
 
 bench:
 	go test -run '^$$' -bench='$(BENCH)' -benchmem
+
+bench-serialization:
+	SERIALIZATION_BENCH='$(SERIALIZATION_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-serialization.sh
 
 run:
 	@CMD='$(CMD)' ./scripts/run.sh
