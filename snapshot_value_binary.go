@@ -25,6 +25,7 @@ const (
 	snapshotValueBinaryRadixTree
 	snapshotValueBinaryBloomFilter
 	snapshotValueBinaryCountMinSketch
+	snapshotValueBinaryHyperLogLog
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -111,6 +112,27 @@ func snapshotCountMinSketchRawCounters(snapshot countMinSketchSnapshot) ([]byte,
 		return nil, nil
 	}
 	return base64.StdEncoding.DecodeString(snapshot.Counters)
+}
+
+func marshalSnapshotHyperLogLogValueBinary(snapshot hyperLogLogSnapshot) ([]byte, error) {
+	registers, err := snapshotHyperLogLogRawRegisters(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryHyperLogLogSize(snapshot, len(registers))
+	if err != nil {
+		return nil, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	writeSnapshotValueBinaryHyperLogLog(&writer, snapshot, registers)
+	return writer.bytes(), nil
+}
+
+func snapshotHyperLogLogRawRegisters(snapshot hyperLogLogSnapshot) ([]byte, error) {
+	if snapshot.Registers == "" {
+		return nil, nil
+	}
+	return base64.StdEncoding.DecodeString(snapshot.Registers)
 }
 
 func snapshotValueBinarySize(value interface{}) (int, bool, error) {
@@ -283,6 +305,17 @@ func snapshotValueBinaryCountMinSketchSize(snapshot countMinSketchSnapshot, coun
 	return snapshotValueBinaryAdd(total, counterSize)
 }
 
+func snapshotValueBinaryHyperLogLogSize(snapshot hyperLogLogSnapshot, registerBytes int) (int, error) {
+	total := 1 +
+		binaryUvarintSize(uint64(snapshot.Precision)) +
+		binaryUvarintSize(snapshot.Observations)
+	registerSize, err := snapshotValueBinaryBytesSize(registerBytes)
+	if err != nil {
+		return 0, err
+	}
+	return snapshotValueBinaryAdd(total, registerSize)
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -416,6 +449,13 @@ func writeSnapshotValueBinaryCountMinSketch(writer *binaryFieldWriter, snapshot 
 	writer.writeUvarint(uint64(snapshot.Depth))
 	writer.writeUvarint(snapshot.TotalCount)
 	writer.writeBytes(counters)
+}
+
+func writeSnapshotValueBinaryHyperLogLog(writer *binaryFieldWriter, snapshot hyperLogLogSnapshot, registers []byte) {
+	writer.buf = append(writer.buf, snapshotValueBinaryHyperLogLog)
+	writer.writeUvarint(uint64(snapshot.Precision))
+	writer.writeUvarint(snapshot.Observations)
+	writer.writeBytes(registers)
 }
 
 func unmarshalSnapshotValueBinary(data []byte) (interface{}, error) {
@@ -618,6 +658,27 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			Depth:      uint8(depth),
 			TotalCount: total,
 			Counters:   base64.StdEncoding.EncodeToString(counters),
+		}, nil
+	case snapshotValueBinaryHyperLogLog:
+		precision, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if precision > uint64(^uint8(0)) {
+			return nil, errors.New("hatriecache: binary hyperloglog precision is too large")
+		}
+		observations, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		registers, err := reader.readBytes()
+		if err != nil {
+			return nil, err
+		}
+		return hyperLogLogSnapshot{
+			Precision:    uint8(precision),
+			Observations: observations,
+			Registers:    base64.StdEncoding.EncodeToString(registers),
 		}, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)

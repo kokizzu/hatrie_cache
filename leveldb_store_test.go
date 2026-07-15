@@ -743,6 +743,88 @@ func TestLevelDBBinaryCountMinSketchStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryHyperLogLogUsesBinaryValuePayload(t *testing.T) {
+	hll, err := newHyperLogLogData(10)
+	if err != nil {
+		t.Fatalf("newHyperLogLogData() error = %v", err)
+	}
+	if changed := hll.AddOne("alpha", "beta", "gamma"); changed == 0 {
+		t.Fatal("AddOne(alpha,beta,gamma) = 0, want populated registers")
+	}
+	snapshot := hll.Snapshot()
+	entry := snapshotEntry{
+		Key:         "hll",
+		Type:        "hyperloglog",
+		HyperLogLog: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary hyperloglog) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("hyperloglog payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(hyperloglog) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary hyperloglog payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary hyperloglog) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.HyperLogLog, &snapshot) {
+		t.Fatalf("decoded hyperloglog = %#v, want %#v", decoded.HyperLogLog, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryHyperLogLogStillReadsLegacyJSONPayload(t *testing.T) {
+	hll, err := newHyperLogLogData(8)
+	if err != nil {
+		t.Fatalf("newHyperLogLogData() error = %v", err)
+	}
+	if changed := hll.AddOne("legacy", "value"); changed == 0 {
+		t.Fatal("AddOne(legacy,value) = 0, want populated registers")
+	}
+	snapshot := hll.Snapshot()
+	entry := snapshotEntry{
+		Key:         "legacy-hll",
+		Type:        "hyperloglog",
+		HyperLogLog: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(hyperloglog) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON hyperloglog) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.HyperLogLog, entry.HyperLogLog) {
+		t.Fatalf("decoded legacy inner JSON hyperloglog = %#v, want %#v", decoded.HyperLogLog, entry.HyperLogLog)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {

@@ -276,6 +276,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: count-min sketch snapshot is required")
 		}
 		return prepareLevelDBBinaryCountMinSketchValue(*entry.CountMinSketch)
+	case "hyperloglog":
+		if entry.HyperLogLog == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: hyperloglog snapshot is required")
+		}
+		return prepareLevelDBBinaryHyperLogLogValue(*entry.HyperLogLog)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -380,6 +385,22 @@ func prepareLevelDBBinaryBloomFilterValue(snapshot bloomFilterSnapshot) (levelDB
 
 func prepareLevelDBBinaryCountMinSketchValue(snapshot countMinSketchSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, err := marshalSnapshotCountMinSketchValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryHyperLogLogValue(snapshot hyperLogLogSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotHyperLogLogValueBinary(snapshot)
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err
 	}
@@ -707,6 +728,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 		}
 		return decodeLevelDBStorageJSON(data, &entry.CountMinSketch)
 	case "hyperloglog":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(hyperLogLogSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary hyperloglog value is not a hyperloglog")
+			}
+			entry.HyperLogLog = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.HyperLogLog)
 	case "top_k":
 		return decodeLevelDBStorageJSON(data, &entry.TopK)
