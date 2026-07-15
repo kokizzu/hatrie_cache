@@ -84,27 +84,66 @@ func StreamingGzipJSONReader(value interface{}) io.Reader {
 		reader: reader,
 		writer: writer,
 		value:  value,
+		done:   make(chan struct{}),
 	}
 }
 
 type StreamingGzipJSONBody struct {
-	start  sync.Once
-	reader *io.PipeReader
-	writer *io.PipeWriter
-	value  interface{}
+	mu       sync.Mutex
+	reader   *io.PipeReader
+	writer   *io.PipeWriter
+	value    interface{}
+	started  bool
+	closed   bool
+	closeErr error
+	done     chan struct{}
 }
 
 func (body *StreamingGzipJSONBody) Read(data []byte) (int, error) {
-	body.start.Do(body.write)
+	body.mu.Lock()
+	if body.closed {
+		body.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
+	if !body.started {
+		body.started = true
+		body.write()
+	}
+	body.mu.Unlock()
 	return body.reader.Read(data)
 }
 
 func (body *StreamingGzipJSONBody) Close() error {
-	return body.reader.Close()
+	body.mu.Lock()
+	if body.closed {
+		err := body.closeErr
+		started := body.started
+		done := body.done
+		body.mu.Unlock()
+		if started {
+			<-done
+		}
+		return err
+	}
+	body.closed = true
+	started := body.started
+	done := body.done
+	body.mu.Unlock()
+
+	err := body.reader.Close()
+
+	body.mu.Lock()
+	body.closeErr = err
+	body.mu.Unlock()
+	if started {
+		<-done
+	}
+	return err
 }
 
 func (body *StreamingGzipJSONBody) write() {
 	go func() {
+		defer close(body.done)
 		gzipWriter := AcquireGzipWriter(body.writer)
 		encodeErr := NewEncoder(gzipWriter).Encode(body.value)
 		closeErr := gzipWriter.Close()

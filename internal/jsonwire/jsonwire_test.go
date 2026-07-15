@@ -156,17 +156,43 @@ func TestStreamingGzipJSONReaderEncodesValue(t *testing.T) {
 }
 
 func TestStreamingGzipJSONReaderCloseClosesPipe(t *testing.T) {
-	body := StreamingGzipJSONReader(map[string]interface{}{"ok": true})
-	closer, ok := body.(io.Closer)
+	body, ok := StreamingGzipJSONReader(map[string]interface{}{"ok": true}).(*StreamingGzipJSONBody)
 	if !ok {
-		t.Fatalf("StreamingGzipJSONReader() body = %T, want io.Closer", body)
+		t.Fatal("StreamingGzipJSONReader() did not return streaming body")
 	}
-	if err := closer.Close(); err != nil {
+	if err := body.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 	buffer := make([]byte, 1)
 	if _, err := body.Read(buffer); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("Read(closed body) error = %v, want io.ErrClosedPipe", err)
+	}
+	body.mu.Lock()
+	started := body.started
+	body.mu.Unlock()
+	if started {
+		t.Fatal("Read(closed body) started gzip writer")
+	}
+}
+
+func TestStreamingGzipJSONReaderCloseWaitsForStartedWriter(t *testing.T) {
+	body := StreamingGzipJSONReader(map[string]interface{}{
+		"value": strings.Repeat("x", 4096),
+	}).(*StreamingGzipJSONBody)
+	buffer := make([]byte, 1)
+	if _, err := body.Read(buffer); err != nil {
+		t.Fatalf("Read(streaming body) error = %v", err)
+	}
+	if err := body.Close(); err != nil {
+		t.Fatalf("Close(started body) error = %v", err)
+	}
+	select {
+	case <-body.done:
+	default:
+		t.Fatal("Close(started body) returned before gzip writer finished")
+	}
+	if err := body.Close(); err != nil {
+		t.Fatalf("second Close(started body) error = %v", err)
 	}
 }
 
