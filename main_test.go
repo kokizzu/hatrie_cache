@@ -290,6 +290,39 @@ func TestCollectionAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestPriorityQueueAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	ht.UpsertPriorityQueue("queue", PriorityQueue{{Priority: 1, Value: "job"}})
+	if err := ht.UpsertPriorityQueueChecked("queue", PriorityQueue{{Priority: 1, Value: "job"}}); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertPriorityQueueChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.PushPriorityQueue("queue", 1, "job"); got != 0 {
+		t.Fatalf("PushPriorityQueue(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.PushPriorityQueueChecked("queue", 1, "job"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PushPriorityQueueChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.PeekPriorityQueue("queue"); got.Priority != 0 || got.Value != nil || ok {
+		t.Fatalf("PeekPriorityQueue(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.PeekPriorityQueueChecked("queue"); got.Priority != 0 || got.Value != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PeekPriorityQueueChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.PopPriorityQueue("queue"); got.Priority != 0 || got.Value != nil || ok {
+		t.Fatalf("PopPriorityQueue(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.PopPriorityQueueChecked("queue"); got.Priority != 0 || got.Value != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PopPriorityQueueChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.GetPriorityQueue("queue"); got != nil {
+		t.Fatalf("GetPriorityQueue(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.GetPriorityQueueChecked("queue"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetPriorityQueueChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }

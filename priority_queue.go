@@ -381,6 +381,9 @@ func (store *PriorityQueueStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {
+	if ht == nil {
+		return
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -388,6 +391,9 @@ func (ht *HatTrie) UpsertPriorityQueue(key string, val PriorityQueue) {
 }
 
 func (ht *HatTrie) UpsertPriorityQueueChecked(key string, val PriorityQueue) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	if err := validatePriorityQueueValue(val); err != nil {
 		return err
 	}
@@ -426,6 +432,9 @@ func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}
 }
 
 func (ht *HatTrie) PushPriorityQueueChecked(key string, priority int64, val interface{}, vals ...interface{}) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	if err := validatePriorityQueuePayload(val, vals...); err != nil {
 		return 0, err
 	}
@@ -433,6 +442,9 @@ func (ht *HatTrie) PushPriorityQueueChecked(key string, priority int64, val inte
 }
 
 func (ht *HatTrie) pushPriorityQueue(key string, priority int64, val interface{}, vals ...interface{}) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -458,6 +470,7 @@ func (ht *HatTrie) pushPriorityQueue(key string, priority int64, val interface{}
 	idx := ht.priorityQueues.Add(nil)
 	added, err := ht.priorityQueues.array[idx].PushOneChecked(priority, val, vals...)
 	if err != nil {
+		ht.priorityQueues.Del(idx)
 		return 0, err
 	}
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}.toValue()
@@ -471,6 +484,9 @@ func (ht *HatTrie) PeekPriorityQueue(key string) (PriorityItem, bool) {
 }
 
 func (ht *HatTrie) PeekPriorityQueueChecked(key string) (PriorityItem, bool, error) {
+	if ht == nil {
+		return PriorityItem{}, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -494,6 +510,9 @@ func (ht *HatTrie) PopPriorityQueue(key string) (PriorityItem, bool) {
 }
 
 func (ht *HatTrie) PopPriorityQueueChecked(key string) (PriorityItem, bool, error) {
+	if ht == nil {
+		return PriorityItem{}, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -522,6 +541,9 @@ func (ht *HatTrie) GetPriorityQueue(key string) PriorityQueue {
 }
 
 func (ht *HatTrie) GetPriorityQueueChecked(key string) (PriorityQueue, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
