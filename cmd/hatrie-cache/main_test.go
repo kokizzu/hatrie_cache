@@ -59,6 +59,12 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	}
 }
 
+func TestRunMonitoringDisabledAcceptsNilWriters(t *testing.T) {
+	if err := run(context.Background(), nil, nil, nil); err != nil {
+		t.Fatalf("run(disabled, nil writers) error = %v", err)
+	}
+}
+
 func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"-monitoring-server",
@@ -373,6 +379,75 @@ func TestStartReplicationSyncerRunsImmediatePrefixSync(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("replication syncer repeated stop did not return")
 	}
+}
+
+func TestReplicationSyncResultLogFiltering(t *testing.T) {
+	tests := []struct {
+		name    string
+		result  hatriecache.ReplicationResult
+		wantLog bool
+		wantMsg string
+	}{
+		{
+			name:    "skipped empty reason",
+			result:  hatriecache.ReplicationResult{Skipped: true},
+			wantLog: false,
+		},
+		{
+			name:    "skipped no entries",
+			result:  hatriecache.ReplicationResult{Skipped: true, Reason: "no entries to sync"},
+			wantLog: false,
+		},
+		{
+			name:    "skipped topology",
+			result:  hatriecache.ReplicationResult{Skipped: true, Reason: "topology is not configured"},
+			wantLog: true,
+			wantMsg: "topology is not configured",
+		},
+		{
+			name: "all targets ok",
+			result: hatriecache.ReplicationResult{Targets: []hatriecache.ReplicationTargetResult{
+				{Node: "node-b", OK: true},
+				{Node: "node-c", OK: true},
+			}},
+			wantLog: false,
+		},
+		{
+			name: "one target failed",
+			result: hatriecache.ReplicationResult{Targets: []hatriecache.ReplicationTargetResult{
+				{Node: "node-b", OK: true},
+				{Node: "node-c", OK: false},
+			}},
+			wantLog: true,
+			wantMsg: "1/2 target deliveries failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := replicationSyncResultNeedsLog(tt.result); got != tt.wantLog {
+				t.Fatalf("replicationSyncResultNeedsLog() = %v, want %v", got, tt.wantLog)
+			}
+			if tt.wantLog {
+				if got := replicationSyncResultLogMessage(tt.result); got != tt.wantMsg {
+					t.Fatalf("replicationSyncResultLogMessage() = %q, want %q", got, tt.wantMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestStartReplicationSyncerAcceptsNilStderr(t *testing.T) {
+	replicator := hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{})
+	defer replicator.Close()
+
+	stop := startReplicationSyncer(context.Background(), nil, replicator, time.Hour, "", nil)
+	defer stop()
+
+	waitUntil(t, 2*time.Second, func() bool {
+		result := replicator.LastResult()
+		return result.Command == "SYNC" && result.Skipped && result.Reason == "trie is not configured"
+	})
 }
 
 func TestParseConfigGRPCFlag(t *testing.T) {

@@ -88,8 +88,17 @@ func serverContext(ctx context.Context) context.Context {
 	return ctx
 }
 
+func diagnosticWriter(writer io.Writer) io.Writer {
+	if writer == nil {
+		return io.Discard
+	}
+	return writer
+}
+
 func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	ctx = serverContext(ctx)
+	stdout = diagnosticWriter(stdout)
+	stderr = diagnosticWriter(stderr)
 	cfg, err := parseConfig(args, stderr)
 	if err != nil {
 		return err
@@ -507,6 +516,7 @@ func closeLevelDB(store *hatriecache.LevelDBStore, stderr io.Writer) {
 	if store == nil {
 		return
 	}
+	stderr = diagnosticWriter(stderr)
 	if err := store.Close(); err != nil {
 		fmt.Fprintf(stderr, "close leveldb: %v\n", err)
 	}
@@ -555,6 +565,7 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 	if store == nil || interval <= 0 {
 		return func() {}
 	}
+	stderr = diagnosticWriter(stderr)
 
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
@@ -600,6 +611,7 @@ func closeJournal(journal *hatriecache.CommandJournal, stderr io.Writer) {
 	if journal == nil {
 		return
 	}
+	stderr = diagnosticWriter(stderr)
 	if err := journal.Close(); err != nil {
 		fmt.Fprintf(stderr, "close journal: %v\n", err)
 	}
@@ -631,6 +643,7 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 	if path == "" || interval <= 0 {
 		return func() {}
 	}
+	stderr = diagnosticWriter(stderr)
 
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
@@ -670,6 +683,7 @@ func startElectionHeartbeat(ctx context.Context, election *hatriecache.ElectionS
 	if election == nil {
 		return func() {}, nil
 	}
+	stderr = diagnosticWriter(stderr)
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
 		return func() {}, nil
@@ -734,6 +748,7 @@ func startReplicationSyncer(ctx context.Context, trie *hatriecache.HatTrie, repl
 	if replicator == nil || interval <= 0 {
 		return func() {}
 	}
+	stderr = diagnosticWriter(stderr)
 
 	syncCtx, cancelSync := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -816,6 +831,7 @@ func startJournalPuller(ctx context.Context, trie *hatriecache.HatTrie, journal 
 	if cfg.Source == "" || journal == nil {
 		return func() {}
 	}
+	stderr = diagnosticWriter(stderr)
 
 	pullCtx, cancelPull := context.WithCancel(ctx)
 	done := make(chan struct{})
