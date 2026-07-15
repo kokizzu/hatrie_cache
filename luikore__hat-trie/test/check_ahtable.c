@@ -5,6 +5,7 @@
 
 #include "str_map.h"
 #include "../src/ahtable.h"
+#include "../src/misc.h"
 
 /* Simple random string generation. */
 void randstr(char* x, size_t len)
@@ -269,8 +270,34 @@ void test_ahtable_key_length_limit()
 }
 
 
+void test_checked_array_size()
+{
+    fprintf(stderr, "checking allocation size guards... \n");
+
+    size_t bytes = 0;
+    if (checked_array_size(3, sizeof(char*), &bytes) != 0 ||
+        bytes != 3 * sizeof(char*)) {
+        fprintf(stderr, "[error] checked_array_size rejected valid multiplication\n");
+        have_error = 1;
+    }
+
+    if (checked_array_size(((size_t) -1) / 2 + 1, 2, &bytes) == 0) {
+        fprintf(stderr, "[error] checked_array_size accepted overflowing multiplication\n");
+        have_error = 1;
+    }
+
+    if (checked_array_size(0, (size_t) -1, &bytes) != 0 || bytes != 0) {
+        fprintf(stderr, "[error] checked_array_size rejected zero-sized allocation\n");
+        have_error = 1;
+    }
+
+    fprintf(stderr, "done.\n");
+}
+
+
 int main()
 {
+    test_checked_array_size();
     test_ahtable_key_length_limit();
 
     setup();
