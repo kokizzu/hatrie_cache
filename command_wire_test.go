@@ -329,6 +329,9 @@ func TestCommandRequestBodyRejectsUnsupportedProtobufValues(t *testing.T) {
 	if err == nil {
 		t.Fatal("commandRequestBody(protobuf complex pair) error = nil, want error")
 	}
+	if !errors.Is(err, ErrUnsupportedCommandWireProtobufValue) {
+		t.Fatalf("commandRequestBody(protobuf complex pair) error = %v, want unsupported protobuf value", err)
+	}
 	if body != nil || contentType != "" || contentEncoding != "" {
 		t.Fatalf("commandRequestBody(protobuf complex pair) = body %T contentType %q contentEncoding %q, want empty outputs", body, contentType, contentEncoding)
 	}

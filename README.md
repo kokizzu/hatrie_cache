@@ -269,9 +269,10 @@ mutations to the current key's topology owners over HTTP. Replication uses the
 internal `DUMP`/`INTERNALSET` and `INTERNALDEL` commands, skips internal
 replication commands to avoid loops, and records the last replication attempt at
 `/api/replication`. HTTP replication command bodies use protobuf by default
-(`REPLICATION_WIRE_FORMAT=protobuf`) and fall back to the previous JSON wire
-format with `REPLICATION_WIRE_FORMAT=json`. Large HTTP replication request
-bodies are gzip-compressed.
+(`REPLICATION_WIRE_FORMAT=protobuf`), then automatically use the previous JSON
+wire format for structured `values` or `pairs` payloads that protobuf cannot
+represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON. Large HTTP
+replication request bodies are gzip-compressed.
 `POST /api/replication` runs an explicit anti-entropy sync
 that pushes the local leader-owned keys, optionally filtered by prefix, to their
 current topology replicas:

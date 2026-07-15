@@ -35,6 +35,10 @@ const DefaultCommandWireFormat = CommandWireFormatProtobuf
 // response advertises a content type that the command wire decoder cannot read.
 var ErrUnsupportedCommandResponseContentType = errors.New("hatriecache: unsupported command response content type")
 
+// ErrUnsupportedCommandWireProtobufValue is returned when a command request
+// contains structured Values or Pairs that cannot fit the scalar protobuf API.
+var ErrUnsupportedCommandWireProtobufValue = errors.New("hatriecache: command request cannot be encoded as protobuf")
+
 var errCommandWireInvalidLimit = errors.New("hatriecache: command wire read limit is invalid")
 
 func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
@@ -340,7 +344,7 @@ func cacheCommandRequestToProto(request CacheCommandRequest) (*hatriecachev1.Com
 		for idx, value := range request.Values {
 			text, ok := commandWireScalar(value)
 			if !ok {
-				return nil, fmt.Errorf("hatriecache: command value %d cannot be encoded as protobuf", idx)
+				return nil, fmt.Errorf("%w: command value %d", ErrUnsupportedCommandWireProtobufValue, idx)
 			}
 			out.Values[idx] = text
 		}
@@ -350,7 +354,7 @@ func cacheCommandRequestToProto(request CacheCommandRequest) (*hatriecachev1.Com
 		for key, value := range request.Pairs {
 			text, ok := commandWireScalar(value)
 			if !ok {
-				return nil, fmt.Errorf("hatriecache: command pair %q cannot be encoded as protobuf", key)
+				return nil, fmt.Errorf("%w: command pair %q", ErrUnsupportedCommandWireProtobufValue, key)
 			}
 			out.Pairs[key] = text
 		}

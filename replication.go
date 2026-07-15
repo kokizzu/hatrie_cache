@@ -804,7 +804,12 @@ func replicationRequestBody(payload CacheCommandRequest) (io.Reader, string, err
 }
 
 func replicationRequestBodyForFormat(payload CacheCommandRequest, format CommandWireFormat) (io.Reader, string, string, error) {
-	return commandRequestBody(payload, format, estimatedReplicationRequestBytes(payload), minCompressedReplicationRequestBytes)
+	estimatedBytes := estimatedReplicationRequestBytes(payload)
+	body, contentType, contentEncoding, err := commandRequestBody(payload, format, estimatedBytes, minCompressedReplicationRequestBytes)
+	if err == nil || format != CommandWireFormatProtobuf || !errors.Is(err, ErrUnsupportedCommandWireProtobufValue) {
+		return body, contentType, contentEncoding, err
+	}
+	return commandRequestBody(payload, CommandWireFormatJSON, estimatedBytes, minCompressedReplicationRequestBytes)
 }
 
 func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {

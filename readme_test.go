@@ -92,6 +92,9 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 		"`UpdateElection`",
 		"`GET /api/replication`",
 		"`POST /api/replication`",
+		"`REPLICATION_WIRE_FORMAT=protobuf`",
+		"automatically use the previous JSON",
+		"`REPLICATION_WIRE_FORMAT=json`",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md does not document %s", token)

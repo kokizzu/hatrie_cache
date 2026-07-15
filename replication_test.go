@@ -152,7 +152,48 @@ func TestHTTPReplicatorUsesProtobufWireByDefault(t *testing.T) {
 	}
 }
 
-func TestHTTPReplicatorUsesJSONWireFallback(t *testing.T) {
+func TestHTTPReplicatorFallsBackToJSONForStructuredPayload(t *testing.T) {
+	var gotContentType string
+	var gotAccept string
+	var gotRequest CacheCommandRequest
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		gotAccept = r.Header.Get("Accept")
+		gotRequest = mustDecodeReplicationTestCommand(t, w, r)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Client: target.Client(),
+	})
+	request := CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:structured",
+		Pairs: Map{
+			"profile": Map{
+				"name": "ivi",
+				"tags": Slice{"alpha", "beta"},
+			},
+		},
+	}
+	result := replicator.postReplicationCommand(context.Background(), TopologyNode{
+		ID:      "node-b",
+		Address: target.URL,
+	}, request)
+
+	if !result.OK || result.Error != "" {
+		t.Fatalf("postReplicationCommand() = %#v, want JSON fallback ok", result)
+	}
+	if gotContentType != commandWireContentTypeJSON || gotAccept != commandWireContentTypeJSON {
+		t.Fatalf("wire headers content-type/accept = %q/%q, want JSON fallback", gotContentType, gotAccept)
+	}
+	if !reflect.DeepEqual(gotRequest, request) {
+		t.Fatalf("replicated structured request = %#v, want %#v", gotRequest, request)
+	}
+}
+
+func TestHTTPReplicatorUsesConfiguredJSONWire(t *testing.T) {
 	var gotContentType string
 	var gotAccept string
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +217,7 @@ func TestHTTPReplicatorUsesJSONWireFallback(t *testing.T) {
 	}, CacheCommandRequest{Command: "INTERNALDEL", Key: "session:1"})
 
 	if !result.OK || result.Error != "" {
-		t.Fatalf("postReplicationCommand() = %#v, want json fallback ok", result)
+		t.Fatalf("postReplicationCommand() = %#v, want configured JSON ok", result)
 	}
 	if gotContentType != commandWireContentTypeJSON || gotAccept != commandWireContentTypeJSON {
 		t.Fatalf("wire headers content-type/accept = %q/%q, want json", gotContentType, gotAccept)
