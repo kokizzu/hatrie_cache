@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"regexp"
@@ -168,6 +169,16 @@ func executeCommandCases(t *testing.T) [][]string {
 	if err != nil {
 		t.Fatalf("ReadFile(command.go) error = %v", err)
 	}
+	start := bytes.Index(data, []byte("func (ht *HatTrie) ExecuteCommand"))
+	if start < 0 {
+		t.Fatal("ExecuteCommand function not found")
+	}
+	data = data[start:]
+	end := bytes.Index(data, []byte("\nfunc (ht *HatTrie) executeExactFastCommand"))
+	if end < 0 {
+		t.Fatal("ExecuteCommand end marker not found")
+	}
+	data = data[:end]
 	casePattern := regexp.MustCompile(`(?m)^\s*case\s+([^:\n]+):`)
 	commandPattern := regexp.MustCompile(`"([^"]+)"`)
 	var groups [][]string

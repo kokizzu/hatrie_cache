@@ -9,7 +9,13 @@ if [ ! -f "$source_file" ]; then
 fi
 
 awk '
-	/^[[:space:]]*case "/ {
+	/^func \(ht \*HatTrie\) ExecuteCommand/ {
+		in_execute = 1
+	}
+	/^func \(ht \*HatTrie\) executeExactFastCommand/ {
+		in_execute = 0
+	}
+	in_execute && /^[[:space:]]*case "/ {
 		line = $0
 		sub(/^[[:space:]]*case[[:space:]]*/, "", line)
 		sub(/:[[:space:]]*$/, "", line)

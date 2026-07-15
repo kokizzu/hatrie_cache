@@ -34,6 +34,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	if ht == nil {
 		return commandError(ErrNilHatTrie.Error())
 	}
+	if response, ok := ht.executeExactFastCommand(request); ok {
+		return response
+	}
 	command := strings.ToUpper(strings.TrimSpace(request.Command))
 	key := strings.TrimSpace(request.Key)
 	if command == "" {
@@ -992,6 +995,145 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	default:
 		return commandError("unsupported command")
 	}
+}
+
+func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCommandResponse, bool) {
+	key := request.Key
+	if !commandFastPathField(key) || !validKey(key) {
+		return CacheCommandResponse{}, false
+	}
+	switch request.Command {
+	case "GET", "GETSTR":
+		return ht.executeFastGetCommand(key)
+	case "PEEKMAP":
+		if !commandFastPathField(request.Subkey) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastPeekMapCommand(key, request.Subkey)
+	case "HASRB":
+		if !commandFastPathField(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		value, err := strconv.ParseUint(request.Value, 10, 32)
+		if err != nil {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastHasRoaringBitmapCommand(key, uint32(value)), true
+	case "HASSB":
+		if !commandFastPathField(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		value, err := strconv.ParseUint(request.Value, 10, 64)
+		if err != nil {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastHasSparseBitsetCommand(key, value), true
+	default:
+		return CacheCommandResponse{}, false
+	}
+}
+
+func commandFastPathField(value string) bool {
+	return value != "" && strings.TrimSpace(value) == value
+}
+
+func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return commandError(err.Error()), true
+	}
+	if hval.Empty() {
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "key not found"}, true
+	}
+	switch {
+	case hval.IsStringAtRaws():
+		ht.recordReadLocked(true, key)
+		return CacheCommandResponse{OK: true, Message: "ok", Value: ht.raws.stringValue(hval.Index)}, true
+	case hval.IsCounter():
+		ht.recordReadLocked(true, key)
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatInt(int64(hval.Index), 10)}, true
+	case hval.IsBytesAtRaws() && !hval.OnDisk():
+		ht.recordReadLocked(true, key)
+		return CacheCommandResponse{OK: true, Message: "ok", Value: string(ht.raws.array[hval.Index])}, true
+	default:
+		return CacheCommandResponse{}, false
+	}
+}
+
+func (ht *HatTrie) executeFastPeekMapCommand(key string, subkey string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return commandError(err.Error()), true
+	}
+	if !hval.IsMap() {
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	value, ok := ht.maps.array[hval.Index][subkey]
+	ht.recordReadLocked(ok, key)
+	if !ok {
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	if text, ok := value.(string); ok {
+		return CacheCommandResponse{OK: true, Message: "ok", Value: text}, true
+	}
+	payload, err := commandScalarString(value)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+}
+
+func (ht *HatTrie) executeFastHasRoaringBitmapCommand(key string, value uint32) CacheCommandResponse {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return commandError(err.Error())
+	}
+	if !hval.IsRoaringBitmap() {
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	}
+	hit := ht.roaringBitmaps.array[hval.Index].Contains(value)
+	ht.recordReadLocked(hit, key)
+	return commandBool01Response(hit)
+}
+
+func (ht *HatTrie) executeFastHasSparseBitsetCommand(key string, value uint64) CacheCommandResponse {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return commandError(err.Error())
+	}
+	if !hval.IsSparseBitset() {
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	}
+	hit := ht.sparseBitsets.array[hval.Index].Contains(value)
+	ht.recordReadLocked(hit, key)
+	return commandBool01Response(hit)
+}
+
+func commandBool01Response(hit bool) CacheCommandResponse {
+	if hit {
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+	}
+	return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 }
 
 func (ht *HatTrie) commandIncrementCounter(key string, by int32) (int32, bool, error) {
