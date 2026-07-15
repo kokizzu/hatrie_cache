@@ -60,20 +60,20 @@ func TestREADMEListsCompactStructureCommands(t *testing.T) {
 	}
 }
 
-func TestCommandSupportMarkdownTracksExecuteCommand(t *testing.T) {
+func TestBenchmarkSupportedCommandsMarkdownTracksExecuteCommand(t *testing.T) {
 	commandGroups := executeCommandCases(t)
-	data, err := os.ReadFile("COMMAND_SUPPORT.md")
+	data, err := os.ReadFile("BENCHMARK_SUPPORTED_COMMANDS.md")
 	if err != nil {
-		t.Fatalf("ReadFile(COMMAND_SUPPORT.md) error = %v", err)
+		t.Fatalf("ReadFile(BENCHMARK_SUPPORTED_COMMANDS.md) error = %v", err)
 	}
 	doc := string(data)
 	if want := fmt.Sprintf("%d canonical command groups", len(commandGroups)); !strings.Contains(doc, want) {
-		t.Fatalf("COMMAND_SUPPORT.md does not document command group count %q", want)
+		t.Fatalf("BENCHMARK_SUPPORTED_COMMANDS.md does not document command group count %q", want)
 	}
 	for _, group := range commandGroups {
 		canonical := group[0]
 		if !strings.Contains(doc, "`"+canonical+"`") {
-			t.Fatalf("COMMAND_SUPPORT.md does not document canonical command %s", canonical)
+			t.Fatalf("BENCHMARK_SUPPORTED_COMMANDS.md does not document canonical command %s", canonical)
 		}
 	}
 	for _, token := range []string{
@@ -91,10 +91,12 @@ func TestCommandSupportMarkdownTracksExecuteCommand(t *testing.T) {
 		"Redis seconds / 10k",
 		"Tarantool 2.6.0",
 		"Tarantool/HAT speedup",
+		"Benchmark Results",
+		"Headline local results",
 		"`SET`",
 	} {
 		if !strings.Contains(doc, token) {
-			t.Fatalf("COMMAND_SUPPORT.md missing comparison/source token %q", token)
+			t.Fatalf("BENCHMARK_SUPPORTED_COMMANDS.md missing comparison/source token %q", token)
 		}
 	}
 }

@@ -1,4 +1,4 @@
-# Command Support Comparison
+# Benchmarked Supported Commands
 
 This compares the cache command surface exposed by `POST /api/commands` and
 `make cli ARGS='command ...'` with comparable Redis and Tarantool feature
@@ -16,6 +16,24 @@ Sources:
   <https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_space/>
   and
   <https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_index/>.
+
+## Benchmark Results
+
+The full benchmark result is in [Benchmark Matrix](#benchmark-matrix). It lists
+each supported feature benchmarked, seconds per 10k operations, Redis and
+Tarantool measured equivalents where available, and the `Redis/HAT speedup` and
+`Tarantool/HAT speedup` improvement columns.
+
+Headline local results:
+
+| Feature family | HAT-trie seconds / 10k | Redis/HAT speedup | Tarantool/HAT speedup |
+| --- | ---: | ---: | ---: |
+| String write | 0.017410 s | 53.42x | 1.74x |
+| String read | 0.019810 s | 48.61x | 0.25x |
+| List/deque push+pop | 0.034470 s | 131.33x | 0.41x |
+| Set add+has | 0.030300 s | 81.29x | 0.50x |
+| Priority queue push+pop | 0.042600 s | 56.29x | 1.27x |
+| Replication dump | 0.071580 s | 16.51x | 0.18x |
 
 ## Summary
 
