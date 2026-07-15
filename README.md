@@ -312,7 +312,9 @@ and
 `make run CMD='go test -run __nomatch__ -bench BenchmarkSnapshotFormat -benchmem .'`
 and
 `make run CMD='go test -run __nomatch__ -bench BenchmarkLevelDB -benchmem .'`
-on an AMD Ryzen 9 5950X:
+on an AMD Ryzen 9 5950X. The snapshot and LevelDB benchmark sets also include
+`Structured` variants that exercise maps, queues, filters, sketches, bitmaps,
+Fenwick trees, reservoir samples, XOR filters, and radix trees.
 
 | Path | Format | CPU | Wire/disk bytes | Heap bytes | Allocs |
 | --- | --- | ---: | ---: | ---: | ---: |
