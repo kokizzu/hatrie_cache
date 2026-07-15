@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+func TestExecuteCommandRejectsNilTrie(t *testing.T) {
+	var ht *HatTrie
+	for _, request := range []CacheCommandRequest{
+		{Command: "GET", Key: "name"},
+		{Command: "SETSTR", Key: "name", Value: "ivi"},
+	} {
+		got := ht.ExecuteCommand(request)
+		if got.OK || got.Message != ErrNilHatTrie.Error() {
+			t.Fatalf("ExecuteCommand(nil trie, %s) = %#v, want ErrNilHatTrie", request.Command, got)
+		}
+	}
+}
+
 func TestExecuteCommandStringCounterTTLAndDelete(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(1200, 0)

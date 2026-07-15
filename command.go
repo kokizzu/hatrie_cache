@@ -31,6 +31,9 @@ type CacheCommandResponse struct {
 }
 
 func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandResponse {
+	if ht == nil {
+		return commandError(ErrNilHatTrie.Error())
+	}
 	command := strings.ToUpper(strings.TrimSpace(request.Command))
 	key := strings.TrimSpace(request.Key)
 	if command == "" {
