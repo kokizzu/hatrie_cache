@@ -189,6 +189,7 @@ static void hattrie_free_node(node_ptr node)
 
 void hattrie_free(hattrie_t* T)
 {
+    if (T == NULL) return;
     hattrie_free_node(T->root);
     free(T);
 }
@@ -196,6 +197,7 @@ void hattrie_free(hattrie_t* T)
 
 void hattrie_clear(hattrie_t* T)
 {
+    if (T == NULL) return;
     hattrie_free_node(T->root);
     hattrie_init_root(T);
 }

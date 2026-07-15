@@ -438,11 +438,23 @@ void test_hattrie_clear_resets_root()
 }
 
 
+void test_hattrie_null_cleanup()
+{
+    fprintf(stderr, "checking trie null cleanup... \n");
+
+    hattrie_clear(NULL);
+    hattrie_free(NULL);
+
+    fprintf(stderr, "done.\n");
+}
+
+
 
 int main()
 {
     test_trie_non_ascii();
     test_trie_walk();
+    test_hattrie_null_cleanup();
     test_hattrie_clear_resets_root();
     test_hattrie_key_length_limit();
 
