@@ -298,6 +298,52 @@ void test_ahtable_zero_slot_create()
 }
 
 
+void test_ahtable_clear_resets_size()
+{
+    fprintf(stderr, "checking clear reset... \n");
+
+    ahtable_t* T = ahtable_create_n(2);
+    value_t* v = ahtable_get(T, "alpha", 5);
+    if (v == NULL) {
+        fprintf(stderr, "[error] clear test insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 11;
+    }
+    if (ahtable_size(T) != 1) {
+        fprintf(stderr, "[error] table size before clear is %zu, expected 1\n", ahtable_size(T));
+        have_error = 1;
+    }
+
+    ahtable_clear(T);
+    if (ahtable_size(T) != 0) {
+        fprintf(stderr, "[error] table size after clear is %zu, expected 0\n", ahtable_size(T));
+        have_error = 1;
+    }
+    if (ahtable_tryget(T, "alpha", 5) != NULL) {
+        fprintf(stderr, "[error] cleared key was still found\n");
+        have_error = 1;
+    }
+    v = ahtable_get(T, "beta", 4);
+    if (v == NULL) {
+        fprintf(stderr, "[error] clear test insert after clear failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 22;
+        v = ahtable_tryget(T, "beta", 4);
+        if (v == NULL || *v != 22) {
+            fprintf(stderr, "[error] clear test could not retrieve post-clear value\n");
+            have_error = 1;
+        }
+    }
+
+    ahtable_free(T);
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_checked_array_size()
 {
     fprintf(stderr, "checking allocation size guards... \n");
@@ -327,6 +373,7 @@ int main()
 {
     test_checked_array_size();
     test_ahtable_zero_slot_create();
+    test_ahtable_clear_resets_size();
     test_ahtable_key_length_limit();
 
     setup();

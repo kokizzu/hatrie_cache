@@ -147,9 +147,8 @@ static node_ptr hattrie_find(hattrie_t* T, const char **key, size_t *len, int* f
     return node;
 }
 
-hattrie_t* hattrie_create()
+static void hattrie_init_root(hattrie_t* T)
 {
-    hattrie_t* T = malloc_or_die(sizeof(hattrie_t));
     T->m = 0;
 
     node_ptr node;
@@ -158,6 +157,12 @@ hattrie_t* hattrie_create()
     node.b->c0 = 0x00;
     node.b->c1 = NODE_MAXCHAR;
     T->root.t = alloc_trie_node(T, node);
+}
+
+hattrie_t* hattrie_create()
+{
+    hattrie_t* T = malloc_or_die(sizeof(hattrie_t));
+    hattrie_init_root(T);
 
     return T;
 }
@@ -186,6 +191,13 @@ void hattrie_free(hattrie_t* T)
 {
     hattrie_free_node(T->root);
     free(T);
+}
+
+
+void hattrie_clear(hattrie_t* T)
+{
+    hattrie_free_node(T->root);
+    hattrie_init_root(T);
 }
 
 

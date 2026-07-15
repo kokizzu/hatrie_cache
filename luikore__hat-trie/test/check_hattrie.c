@@ -392,11 +392,58 @@ void test_hattrie_key_length_limit()
 }
 
 
+void test_hattrie_clear_resets_root()
+{
+    fprintf(stderr, "checking trie clear reset... \n");
+
+    hattrie_t* T = hattrie_create();
+    value_t* v = hattrie_get(T, "alpha", 5);
+    if (v == NULL) {
+        fprintf(stderr, "[error] trie clear test insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 31;
+    }
+    if (hattrie_size(T) != 1) {
+        fprintf(stderr, "[error] trie size before clear is %zu, expected 1\n", hattrie_size(T));
+        have_error = 1;
+    }
+
+    hattrie_clear(T);
+    if (hattrie_size(T) != 0) {
+        fprintf(stderr, "[error] trie size after clear is %zu, expected 0\n", hattrie_size(T));
+        have_error = 1;
+    }
+    if (hattrie_tryget(T, "alpha", 5) != NULL) {
+        fprintf(stderr, "[error] cleared trie key was still found\n");
+        have_error = 1;
+    }
+    v = hattrie_get(T, "beta", 4);
+    if (v == NULL) {
+        fprintf(stderr, "[error] trie clear test insert after clear failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 41;
+        v = hattrie_tryget(T, "beta", 4);
+        if (v == NULL || *v != 41) {
+            fprintf(stderr, "[error] trie clear test could not retrieve post-clear value\n");
+            have_error = 1;
+        }
+    }
+
+    hattrie_free(T);
+    fprintf(stderr, "done.\n");
+}
+
+
 
 int main()
 {
     test_trie_non_ascii();
     test_trie_walk();
+    test_hattrie_clear_resets_root();
     test_hattrie_key_length_limit();
 
     setup();

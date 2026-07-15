@@ -80,6 +80,8 @@ void ahtable_clear(ahtable_t* T)
     size_t i;
     for (i = 0; i < T->n; ++i) free(T->slots[i]);
     T->n = ahtable_initial_size;
+    T->m = 0;
+    T->max_m = (size_t) (ahtable_max_load_factor * (double) T->n);
     size_t slots_bytes = array_bytes_or_die(T->n, sizeof(slot_t));
     T->slots = realloc_or_die(T->slots, slots_bytes);
     memset(T->slots, 0, slots_bytes);
