@@ -472,6 +472,12 @@ void hattrie_walk (hattrie_t* T, const char* key, size_t len, void* user_data, h
     size_t i, j;
     ahtable_iter_t* it;
 
+    if (*node.flag & NODE_HAS_VAL) {
+        if (hattrie_walk_stop == cb(key, 0, &node.t->val, user_data)) {
+            return;
+        }
+    }
+
     /* go down until a bucket is reached */
     for (i = 0; i < len; i++, k++) {
         if (!(*node.flag & NODE_TYPE_TRIE))

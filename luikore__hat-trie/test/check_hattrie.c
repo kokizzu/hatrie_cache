@@ -286,6 +286,8 @@ void test_trie_walk()
     char* txt3 = "hello";
     value_t* val;
 
+    val = hattrie_get(T, "", 0);
+    *val = 4;
     val = hattrie_get(T, txt1, strlen(txt1));
     *val = 1;
     val = hattrie_get(T, txt2, strlen(txt2));
@@ -304,11 +306,19 @@ void test_trie_walk()
     };
     char* txt = "hello world20";
     hattrie_walk(T, txt, strlen(txt), &data, trie_walk_cb);
-    EXPECT(data.size == 2);
-    EXPECT(data.lens[0] == strlen(txt3));
-    EXPECT(data.vals[0] == 3);
-    EXPECT(data.lens[1] == strlen(txt2));
-    EXPECT(data.vals[1] == 2);
+    EXPECT(data.size == 3);
+    EXPECT(data.lens[0] == 0);
+    EXPECT(data.vals[0] == 4);
+    EXPECT(data.lens[1] == strlen(txt3));
+    EXPECT(data.vals[1] == 3);
+    EXPECT(data.lens[2] == strlen(txt2));
+    EXPECT(data.vals[2] == 2);
+
+    data.size = 0;
+    hattrie_walk(T, "", 0, &data, trie_walk_cb);
+    EXPECT(data.size == 1);
+    EXPECT(data.lens[0] == 0);
+    EXPECT(data.vals[0] == 4);
 #undef EXPECT
 
     hattrie_free(T);
