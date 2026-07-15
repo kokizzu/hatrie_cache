@@ -2316,6 +2316,18 @@ func TestSnapshotOperationValueSizeSupportsStreamingBytes(t *testing.T) {
 	}
 }
 
+func TestSnapshotOperationValueSizeRejectsInvalidBytesBase64(t *testing.T) {
+	_, err := snapshotOperationValueSize(snapshotOperation{
+		entry: snapshotEntry{
+			Type:  "bytes",
+			Bytes: "!!!!",
+		},
+	})
+	if err == nil {
+		t.Fatal("snapshotOperationValueSize(invalid bytes base64) error = nil, want invalid base64")
+	}
+}
+
 func TestValidatedBase64DecodedSize(t *testing.T) {
 	for _, tt := range []struct {
 		name    string

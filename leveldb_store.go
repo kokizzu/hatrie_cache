@@ -435,7 +435,8 @@ func base64DecodedSize(encoded string) (int64, bool) {
 	} else if strings.HasSuffix(encoded, "=") {
 		padding = 1
 	}
-	return int64(len(encoded)/4*3 - padding), true
+	size := int64(len(encoded)/4) * 3
+	return size - int64(padding), true
 }
 
 func validatedBase64DecodedSize(encoded string) (int64, error) {
@@ -491,16 +492,19 @@ func snapshotOperationValueSize(operation snapshotOperation) (int64, error) {
 	case "string":
 		return int64(len(entry.String)), nil
 	case "bytes":
-		if operation.bytes == nil && (entry.Bytes != "" || entry.rawBytes != nil) {
-			if size, ok := snapshotEntryBytesDecodedSize(entry); ok {
-				return size, nil
-			}
-			if err := validateSnapshotEntryFields(entry, true); err != nil {
-				return 0, err
-			}
-			return 0, nil
+		if operation.bytes != nil {
+			return int64(len(operation.bytes)), nil
 		}
-		return int64(len(operation.bytes)), nil
+		if entry.rawBytes != nil {
+			return int64(len(entry.rawBytes)), nil
+		}
+		if entry.Bytes != "" {
+			return validatedBase64DecodedSize(entry.Bytes)
+		}
+		if err := validateSnapshotEntryFields(entry, true); err != nil {
+			return 0, err
+		}
+		return 0, nil
 	case "map":
 		return jsonEncodedSize(entry.Map)
 	case "slice":
