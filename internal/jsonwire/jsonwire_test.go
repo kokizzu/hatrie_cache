@@ -6,6 +6,7 @@ import (
 	stdjson "encoding/json"
 	"errors"
 	"io"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -214,10 +215,12 @@ func TestEstimateJSONValueBytesScalars(t *testing.T) {
 		{name: "number", value: gojson.Number("123.5"), want: 5},
 		{name: "true", value: true, want: 4},
 		{name: "false", value: false, want: 5},
-		{name: "int", value: int64(-7), want: 20},
-		{name: "uint", value: uint64(7), want: 20},
-		{name: "float32", value: float32(1.25), want: 15},
-		{name: "float64", value: float64(1.25), want: 24},
+		{name: "int", value: int64(-7), want: 2},
+		{name: "uint", value: uint64(7), want: 1},
+		{name: "float32", value: float32(1.25), want: 4},
+		{name: "float64", value: float64(1.25), want: 4},
+		{name: "nan", value: math.NaN(), want: 0},
+		{name: "inf", value: math.Inf(1), want: 0},
 		{name: "unsupported", value: struct{}{}, want: 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -225,6 +228,33 @@ func TestEstimateJSONValueBytesScalars(t *testing.T) {
 				t.Fatalf("EstimateJSONValueBytes(%s) = %d, want %d", tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEstimateJSONValueBytesNumericsMatchMarshal(t *testing.T) {
+	for _, value := range []interface{}{
+		int(0),
+		int8(-8),
+		int16(-1024),
+		int32(-65536),
+		int64(-1 << 63),
+		uint(0),
+		uint8(8),
+		uint16(1024),
+		uint32(65536),
+		uint64(^uint64(0)),
+		float32(1.25),
+		float32(-0.125),
+		float64(1.25),
+		float64(1.2e100),
+	} {
+		data, err := Marshal(value)
+		if err != nil {
+			t.Fatalf("Marshal(%T(%v)) error = %v", value, value, err)
+		}
+		if got := EstimateJSONValueBytes(value, 0); got != len(data) {
+			t.Fatalf("EstimateJSONValueBytes(%T(%v)) = %d, want marshaled len %d (%q)", value, value, got, len(data), data)
+		}
 	}
 }
 

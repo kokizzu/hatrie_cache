@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"math"
+	"strconv"
 	"sync"
 	"unicode/utf8"
 
@@ -128,12 +130,30 @@ func EstimateJSONValueBytes(value interface{}, threshold int) int {
 			return 4
 		}
 		return 5
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return 20
+	case int:
+		return estimateJSONIntBytes(int64(value))
+	case int8:
+		return estimateJSONIntBytes(int64(value))
+	case int16:
+		return estimateJSONIntBytes(int64(value))
+	case int32:
+		return estimateJSONIntBytes(int64(value))
+	case int64:
+		return estimateJSONIntBytes(value)
+	case uint:
+		return estimateJSONUintBytes(uint64(value))
+	case uint8:
+		return estimateJSONUintBytes(uint64(value))
+	case uint16:
+		return estimateJSONUintBytes(uint64(value))
+	case uint32:
+		return estimateJSONUintBytes(uint64(value))
+	case uint64:
+		return estimateJSONUintBytes(value)
 	case float32:
-		return 15
+		return estimateJSONFloatBytes(float64(value), 32)
 	case float64:
-		return 24
+		return estimateJSONFloatBytes(value, 64)
 	case []interface{}:
 		estimate := 2
 		for idx, item := range value {
@@ -209,6 +229,24 @@ func EstimateJSONValueBytes(value interface{}, threshold int) int {
 	default:
 		return 0
 	}
+}
+
+func estimateJSONIntBytes(value int64) int {
+	var scratch [20]byte
+	return len(strconv.AppendInt(scratch[:0], value, 10))
+}
+
+func estimateJSONUintBytes(value uint64) int {
+	var scratch [20]byte
+	return len(strconv.AppendUint(scratch[:0], value, 10))
+}
+
+func estimateJSONFloatBytes(value float64, bitSize int) int {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	var scratch [32]byte
+	return len(strconv.AppendFloat(scratch[:0], value, 'g', -1, bitSize))
 }
 
 func EstimateJSONStringBytes(value string) int {
