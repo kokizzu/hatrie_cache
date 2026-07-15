@@ -28,6 +28,62 @@ func newTestTrie(t *testing.T) *HatTrie {
 	return ht
 }
 
+func TestCoreAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if got := ht.Size(); got != 0 {
+		t.Fatalf("Size(nil trie) = %d, want 0", got)
+	}
+	if got := ht.Stats(); got != (CacheStats{}) {
+		t.Fatalf("Stats(nil trie) = %#v, want zero", got)
+	}
+	if got, ok := ht.StatsForKey("key"); ok || got != (KeyStats{}) {
+		t.Fatalf("StatsForKey(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if _, _, err := ht.StatsForKeyChecked("key"); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("StatsForKeyChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.Keys(true); got == nil || len(got) != 0 {
+		t.Fatalf("Keys(nil trie) = %#v, want empty slice", got)
+	}
+	if got := ht.KeysWithPrefix("key", true); got == nil || len(got) != 0 {
+		t.Fatalf("KeysWithPrefix(nil trie) = %#v, want empty slice", got)
+	}
+	if keys, err := ht.KeysWithPrefixChecked("key", true); keys != nil || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("KeysWithPrefixChecked(nil trie) = %#v/%v, want nil/ErrNilHatTrie", keys, err)
+	}
+	if got := ht.Entries(true); got == nil || len(got) != 0 {
+		t.Fatalf("Entries(nil trie) = %#v, want empty slice", got)
+	}
+	if got := ht.EntriesWithPrefix("key", true); got == nil || len(got) != 0 {
+		t.Fatalf("EntriesWithPrefix(nil trie) = %#v, want empty slice", got)
+	}
+	if entries, err := ht.EntriesWithPrefixChecked("key", true); entries != nil || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("EntriesWithPrefixChecked(nil trie) = %#v/%v, want nil/ErrNilHatTrie", entries, err)
+	}
+	if got := ht.Exists("key"); got {
+		t.Fatal("Exists(nil trie) = true, want false")
+	}
+	if ok, err := ht.ExistsChecked("key"); ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("ExistsChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", ok, err)
+	}
+	if got := ht.Get("key"); !got.Empty() {
+		t.Fatalf("Get(nil trie) = %+v, want empty", got)
+	}
+	if got, err := ht.GetChecked("key"); !got.Empty() || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetChecked(nil trie) = %+v/%v, want empty/ErrNilHatTrie", got, err)
+	}
+	if count, err := ht.HydrateLevelDBReferences(); count != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HydrateLevelDBReferences(nil trie) = %d/%v, want 0/ErrNilHatTrie", count, err)
+	}
+	if got := ht.Delete("key"); got {
+		t.Fatal("Delete(nil trie) = true, want false")
+	}
+	if deleted, err := ht.DeleteChecked("key"); deleted || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("DeleteChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", deleted, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }

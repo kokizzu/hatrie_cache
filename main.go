@@ -1741,6 +1741,9 @@ func (ht *HatTrie) Destroy() {
 }
 
 func (ht *HatTrie) Size() int {
+	if ht == nil {
+		return 0
+	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
 
@@ -1749,6 +1752,9 @@ func (ht *HatTrie) Size() int {
 }
 
 func (ht *HatTrie) Stats() CacheStats {
+	if ht == nil {
+		return CacheStats{}
+	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
 
@@ -1765,6 +1771,9 @@ func (ht *HatTrie) StatsForKey(key string) (KeyStats, bool) {
 // StatsForKeyChecked returns access metadata for an existing key and reports
 // key validation errors.
 func (ht *HatTrie) StatsForKeyChecked(key string) (KeyStats, bool, error) {
+	if ht == nil {
+		return KeyStats{}, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2143,6 +2152,9 @@ func (ht *HatTrie) KeysWithPrefix(prefix string, sorted bool) []string {
 // KeysWithPrefixChecked returns all non-expired keys that start with prefix and
 // reports prefix validation errors.
 func (ht *HatTrie) KeysWithPrefixChecked(prefix string, sorted bool) ([]string, error) {
+	if ht == nil {
+		return nil, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2180,6 +2192,9 @@ func (ht *HatTrie) EntriesWithPrefix(prefix string, sorted bool) []Entry {
 // EntriesWithPrefixChecked returns all non-expired key/value metadata pairs
 // whose keys start with prefix and reports prefix validation errors.
 func (ht *HatTrie) EntriesWithPrefixChecked(prefix string, sorted bool) ([]Entry, error) {
+	if ht == nil {
+		return nil, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2195,6 +2210,9 @@ func (ht *HatTrie) Exists(key string) bool {
 // ExistsChecked reports whether key exists without hydrating a cold LevelDB
 // value and reports key validation errors.
 func (ht *HatTrie) ExistsChecked(key string) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2692,6 +2710,9 @@ func (ht *HatTrie) Get(key string) HatValue {
 }
 
 func (ht *HatTrie) GetChecked(key string) (HatValue, error) {
+	if ht == nil {
+		return HatValue{}, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2754,6 +2775,9 @@ func (ht *HatTrie) getLockedChecked(key string) (HatValue, error) {
 // trie. Use it before closing a LevelDBStore when a hot-loaded trie must keep
 // serving cold values without the store handle.
 func (ht *HatTrie) HydrateLevelDBReferences() (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2814,6 +2838,9 @@ func (ht *HatTrie) Delete(key string) bool {
 
 // DeleteChecked removes key and reports key validation errors.
 func (ht *HatTrie) DeleteChecked(key string) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
