@@ -271,6 +271,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: bloom filter snapshot is required")
 		}
 		return prepareLevelDBBinaryBloomFilterValue(*entry.BloomFilter)
+	case "count_min_sketch":
+		if entry.CountMinSketch == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: count-min sketch snapshot is required")
+		}
+		return prepareLevelDBBinaryCountMinSketchValue(*entry.CountMinSketch)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -359,6 +364,22 @@ func prepareLevelDBBinaryRadixTreeValue(snapshot radixTreeSnapshot) (levelDBBina
 
 func prepareLevelDBBinaryBloomFilterValue(snapshot bloomFilterSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, err := marshalSnapshotBloomFilterValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryCountMinSketchValue(snapshot countMinSketchSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotCountMinSketchValueBinary(snapshot)
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err
 	}
@@ -672,6 +693,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 		}
 		return decodeLevelDBStorageJSON(data, &entry.BloomFilter)
 	case "count_min_sketch":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(countMinSketchSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary count-min sketch value is not a count-min sketch")
+			}
+			entry.CountMinSketch = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.CountMinSketch)
 	case "hyperloglog":
 		return decodeLevelDBStorageJSON(data, &entry.HyperLogLog)

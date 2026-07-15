@@ -24,6 +24,7 @@ const (
 	snapshotValueBinaryPriorityQueue
 	snapshotValueBinaryRadixTree
 	snapshotValueBinaryBloomFilter
+	snapshotValueBinaryCountMinSketch
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -89,6 +90,27 @@ func snapshotBloomFilterRawBits(snapshot bloomFilterSnapshot) ([]byte, error) {
 		return nil, nil
 	}
 	return base64.StdEncoding.DecodeString(snapshot.Bits)
+}
+
+func marshalSnapshotCountMinSketchValueBinary(snapshot countMinSketchSnapshot) ([]byte, error) {
+	counters, err := snapshotCountMinSketchRawCounters(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryCountMinSketchSize(snapshot, len(counters))
+	if err != nil {
+		return nil, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	writeSnapshotValueBinaryCountMinSketch(&writer, snapshot, counters)
+	return writer.bytes(), nil
+}
+
+func snapshotCountMinSketchRawCounters(snapshot countMinSketchSnapshot) ([]byte, error) {
+	if snapshot.Counters == "" {
+		return nil, nil
+	}
+	return base64.StdEncoding.DecodeString(snapshot.Counters)
 }
 
 func snapshotValueBinarySize(value interface{}) (int, bool, error) {
@@ -249,6 +271,18 @@ func snapshotValueBinaryBloomFilterSize(snapshot bloomFilterSnapshot, bitBytes i
 	return snapshotValueBinaryAdd(total, bitsSize)
 }
 
+func snapshotValueBinaryCountMinSketchSize(snapshot countMinSketchSnapshot, counterBytes int) (int, error) {
+	total := 1 +
+		binaryUvarintSize(snapshot.Width) +
+		binaryUvarintSize(uint64(snapshot.Depth)) +
+		binaryUvarintSize(snapshot.TotalCount)
+	counterSize, err := snapshotValueBinaryBytesSize(counterBytes)
+	if err != nil {
+		return 0, err
+	}
+	return snapshotValueBinaryAdd(total, counterSize)
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -374,6 +408,14 @@ func writeSnapshotValueBinaryBloomFilter(writer *binaryFieldWriter, snapshot blo
 	writer.writeUvarint(uint64(snapshot.HashCount))
 	writer.writeUvarint(snapshot.Insertions)
 	writer.writeBytes(bits)
+}
+
+func writeSnapshotValueBinaryCountMinSketch(writer *binaryFieldWriter, snapshot countMinSketchSnapshot, counters []byte) {
+	writer.buf = append(writer.buf, snapshotValueBinaryCountMinSketch)
+	writer.writeUvarint(snapshot.Width)
+	writer.writeUvarint(uint64(snapshot.Depth))
+	writer.writeUvarint(snapshot.TotalCount)
+	writer.writeBytes(counters)
 }
 
 func unmarshalSnapshotValueBinary(data []byte) (interface{}, error) {
@@ -550,6 +592,32 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			HashCount:  uint8(hashCount),
 			Insertions: insertions,
 			Bits:       base64.StdEncoding.EncodeToString(bits),
+		}, nil
+	case snapshotValueBinaryCountMinSketch:
+		width, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		depth, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if depth > uint64(^uint8(0)) {
+			return nil, errors.New("hatriecache: binary count-min sketch depth is too large")
+		}
+		total, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		counters, err := reader.readBytes()
+		if err != nil {
+			return nil, err
+		}
+		return countMinSketchSnapshot{
+			Width:      width,
+			Depth:      uint8(depth),
+			TotalCount: total,
+			Counters:   base64.StdEncoding.EncodeToString(counters),
 		}, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)

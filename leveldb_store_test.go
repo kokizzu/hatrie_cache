@@ -663,6 +663,86 @@ func TestLevelDBBinaryBloomFilterStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryCountMinSketchUsesBinaryValuePayload(t *testing.T) {
+	sketch, err := newCountMinSketchData(128, 4)
+	if err != nil {
+		t.Fatalf("newCountMinSketchData() error = %v", err)
+	}
+	sketch.AddOne("alpha", 3)
+	sketch.AddOne("beta", 2)
+	snapshot := sketch.Snapshot()
+	entry := snapshotEntry{
+		Key:            "cms",
+		Type:           "count_min_sketch",
+		CountMinSketch: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary count-min sketch) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("count-min sketch payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(count-min sketch) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary count-min sketch payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary count-min sketch) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.CountMinSketch, &snapshot) {
+		t.Fatalf("decoded count-min sketch = %#v, want %#v", decoded.CountMinSketch, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryCountMinSketchStillReadsLegacyJSONPayload(t *testing.T) {
+	sketch, err := newCountMinSketchData(64, 3)
+	if err != nil {
+		t.Fatalf("newCountMinSketchData() error = %v", err)
+	}
+	sketch.AddOne("legacy", 7)
+	sketch.AddOne("value", 5)
+	snapshot := sketch.Snapshot()
+	entry := snapshotEntry{
+		Key:            "legacy-cms",
+		Type:           "count_min_sketch",
+		CountMinSketch: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(count-min sketch) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON count-min sketch) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.CountMinSketch, entry.CountMinSketch) {
+		t.Fatalf("decoded legacy inner JSON count-min sketch = %#v, want %#v", decoded.CountMinSketch, entry.CountMinSketch)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {
