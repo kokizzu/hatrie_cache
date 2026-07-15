@@ -413,6 +413,10 @@ func (store *ReservoirSampleStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertReservoirSample(key string, capacity uint64) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	data, err := newReservoirSampleData(capacity)
 	if err != nil {
 		return err
@@ -448,6 +452,10 @@ func (ht *HatTrie) AddReservoirSample(key string, val interface{}, vals ...inter
 }
 
 func (ht *HatTrie) AddReservoirSampleChecked(key string, val interface{}, vals ...interface{}) (ReservoirSampleUpdate, error) {
+	if ht == nil {
+		return ReservoirSampleUpdate{}, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -490,6 +498,10 @@ func (ht *HatTrie) GetReservoirSample(key string) []ReservoirSampleItem {
 }
 
 func (ht *HatTrie) GetReservoirSampleChecked(key string) ([]ReservoirSampleItem, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -512,6 +524,10 @@ func (ht *HatTrie) ReservoirSampleInfo(key string) (ReservoirSampleInfo, bool) {
 }
 
 func (ht *HatTrie) ReservoirSampleInfoChecked(key string) (ReservoirSampleInfo, bool, error) {
+	if ht == nil {
+		return ReservoirSampleInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

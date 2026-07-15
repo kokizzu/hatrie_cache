@@ -644,6 +644,32 @@ func TestRadixTreeAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestReservoirSampleAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertReservoirSample("sample", 3); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertReservoirSample(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddReservoirSample("sample", "value"); got != (ReservoirSampleUpdate{}) {
+		t.Fatalf("AddReservoirSample(nil trie) = %#v, want zero", got)
+	}
+	if got, err := ht.AddReservoirSampleChecked("sample", "value"); got != (ReservoirSampleUpdate{}) || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddReservoirSampleChecked(nil trie) = %#v/%v, want zero/ErrNilHatTrie", got, err)
+	}
+	if got := ht.GetReservoirSample("sample"); got != nil {
+		t.Fatalf("GetReservoirSample(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.GetReservoirSampleChecked("sample"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetReservoirSampleChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.ReservoirSampleInfo("sample"); got != (ReservoirSampleInfo{}) || ok {
+		t.Fatalf("ReservoirSampleInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.ReservoirSampleInfoChecked("sample"); got != (ReservoirSampleInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("ReservoirSampleInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
