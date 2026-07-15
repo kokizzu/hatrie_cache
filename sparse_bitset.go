@@ -552,6 +552,10 @@ func (ht *HatTrie) UpsertSparseBitset(key string) {
 }
 
 func (ht *HatTrie) UpsertSparseBitsetChecked(key string) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -582,6 +586,10 @@ func (ht *HatTrie) AddSparseBitset(key string, value uint64, values ...uint64) i
 }
 
 func (ht *HatTrie) AddSparseBitsetChecked(key string, value uint64, values ...uint64) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -616,6 +624,10 @@ func (ht *HatTrie) RemoveSparseBitset(key string, value uint64, values ...uint64
 }
 
 func (ht *HatTrie) RemoveSparseBitsetChecked(key string, value uint64, values ...uint64) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -642,6 +654,10 @@ func (ht *HatTrie) HasSparseBitset(key string, value uint64) bool {
 }
 
 func (ht *HatTrie) HasSparseBitsetChecked(key string, value uint64) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -665,6 +681,10 @@ func (ht *HatTrie) CountSparseBitset(key string) (uint64, bool) {
 }
 
 func (ht *HatTrie) CountSparseBitsetChecked(key string) (uint64, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -687,6 +707,10 @@ func (ht *HatTrie) GetSparseBitset(key string) []uint64 {
 }
 
 func (ht *HatTrie) GetSparseBitsetChecked(key string) ([]uint64, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -709,6 +733,10 @@ func (ht *HatTrie) SparseBitsetInfo(key string) (SparseBitsetInfo, bool) {
 }
 
 func (ht *HatTrie) SparseBitsetInfoChecked(key string) (SparseBitsetInfo, bool, error) {
+	if ht == nil {
+		return SparseBitsetInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

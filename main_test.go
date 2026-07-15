@@ -545,6 +545,51 @@ func TestRoaringBitmapAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestSparseBitsetAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	ht.UpsertSparseBitset("sparse")
+	if err := ht.UpsertSparseBitsetChecked("sparse"); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertSparseBitsetChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddSparseBitset("sparse", 1); got != 0 {
+		t.Fatalf("AddSparseBitset(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.AddSparseBitsetChecked("sparse", 1); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddSparseBitsetChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.RemoveSparseBitset("sparse", 1); got != 0 {
+		t.Fatalf("RemoveSparseBitset(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.RemoveSparseBitsetChecked("sparse", 1); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("RemoveSparseBitsetChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.HasSparseBitset("sparse", 1); got {
+		t.Fatal("HasSparseBitset(nil trie) = true, want false")
+	}
+	if got, err := ht.HasSparseBitsetChecked("sparse", 1); got || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HasSparseBitsetChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.CountSparseBitset("sparse"); got != 0 || ok {
+		t.Fatalf("CountSparseBitset(nil trie) = %d/%v, want 0/false", got, ok)
+	}
+	if got, ok, err := ht.CountSparseBitsetChecked("sparse"); got != 0 || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("CountSparseBitsetChecked(nil trie) = %d/%v/%v, want 0/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.GetSparseBitset("sparse"); got != nil {
+		t.Fatalf("GetSparseBitset(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.GetSparseBitsetChecked("sparse"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetSparseBitsetChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.SparseBitsetInfo("sparse"); got != (SparseBitsetInfo{}) || ok {
+		t.Fatalf("SparseBitsetInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.SparseBitsetInfoChecked("sparse"); got != (SparseBitsetInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("SparseBitsetInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
