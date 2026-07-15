@@ -6,6 +6,9 @@ SANITIZE_C=${SANITIZE_C:-auto}
 
 . "$ROOT/scripts/c-sanitizer-policy.sh"
 
+tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/hatrie_cache_c_verify.XXXXXX")
+trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+
 case "$SANITIZE_C" in
 	auto|1|true|yes|0|false|no)
 		;;
@@ -57,16 +60,16 @@ build_c_ahtable_check() {
 }
 
 build_c_check \
-	/tmp/hatrie_cache_check_hattrie \
+	"$tmp_dir/check_hattrie" \
 	"$ROOT/luikore__hat-trie/test/check_hattrie.c"
 
-build_c_ahtable_check /tmp/hatrie_cache_check_ahtable
+build_c_ahtable_check "$tmp_dir/check_ahtable"
 
-/tmp/hatrie_cache_check_hattrie
-/tmp/hatrie_cache_check_ahtable
+"$tmp_dir/check_hattrie"
+"$tmp_dir/check_ahtable"
 
 compiler_supports_sanitizers() {
-	tmp_bin=${TMPDIR:-/tmp}/c_asan_probe.$$
+	tmp_bin=$tmp_dir/c_asan_probe
 	tmp_c=$tmp_bin.c
 	printf 'int main(void) { return 0; }\n' > "$tmp_c"
 	if gcc -std=c99 -fsanitize=address,undefined -fno-omit-frame-pointer "$tmp_c" -o "$tmp_bin" >/dev/null 2>&1 &&
@@ -99,18 +102,18 @@ case "$SANITIZE_C" in
 	1|true|yes)
 		SAN_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 		build_c_check \
-			/tmp/hatrie_cache_check_hattrie_sanitize \
+			"$tmp_dir/check_hattrie_sanitize" \
 			"$ROOT/luikore__hat-trie/test/check_hattrie.c" \
 			$SAN_FLAGS
 		build_c_ahtable_check \
-			/tmp/hatrie_cache_check_ahtable_sanitize \
+			"$tmp_dir/check_ahtable_sanitize" \
 			$SAN_FLAGS
 		ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=1:abort_on_error=1} \
 			UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1} \
-			/tmp/hatrie_cache_check_hattrie_sanitize
+			"$tmp_dir/check_hattrie_sanitize"
 		ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=1:abort_on_error=1} \
 			UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1} \
-			/tmp/hatrie_cache_check_ahtable_sanitize
+			"$tmp_dir/check_ahtable_sanitize"
 		;;
 	0|false|no)
 		;;

@@ -54,3 +54,34 @@ func TestMonitoringWrapperDefersFormatDefaultsToGoConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyCScriptUsesRunScopedTemporaryDirectory(t *testing.T) {
+	data, err := os.ReadFile("scripts/verify-c.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/verify-c.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		`mktemp -d "${TMPDIR:-/tmp}/hatrie_cache_c_verify.XXXXXX"`,
+		`trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM`,
+		`"$tmp_dir/check_hattrie"`,
+		`"$tmp_dir/check_ahtable"`,
+		`"$tmp_dir/check_hattrie_sanitize"`,
+		`"$tmp_dir/check_ahtable_sanitize"`,
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("verify-c script should use run-scoped temporary paths; missing %q", token)
+		}
+	}
+	for _, stalePath := range []string{
+		"/tmp/hatrie_cache_check_hattrie",
+		"/tmp/hatrie_cache_check_ahtable",
+		"/tmp/hatrie_cache_check_hattrie_sanitize",
+		"/tmp/hatrie_cache_check_ahtable_sanitize",
+		"/tmp/c_asan_probe.",
+	} {
+		if strings.Contains(script, stalePath) {
+			t.Fatalf("verify-c script still uses fixed temporary path %q", stalePath)
+		}
+	}
+}
