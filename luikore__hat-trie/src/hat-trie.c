@@ -168,6 +168,31 @@ hattrie_t* hattrie_create()
 }
 
 
+hattrie_t* hattrie_dup(const hattrie_t* T)
+{
+    if (T == NULL) return NULL;
+
+    hattrie_t* out = hattrie_create();
+    hattrie_iter_t* it = hattrie_iter_begin(T, false);
+    while (!hattrie_iter_finished(it)) {
+        size_t len = 0;
+        const char* key = hattrie_iter_key(it, &len);
+        value_t* src = hattrie_iter_val(it);
+        value_t* dst = hattrie_get(out, key, len);
+        if (dst == NULL) {
+            hattrie_iter_free(it);
+            hattrie_free(out);
+            return NULL;
+        }
+        *dst = *src;
+        hattrie_iter_next(it);
+    }
+    hattrie_iter_free(it);
+
+    return out;
+}
+
+
 static void hattrie_free_node(node_ptr node)
 {
     if (*node.flag & NODE_TYPE_TRIE) {

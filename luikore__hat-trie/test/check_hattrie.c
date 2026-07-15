@@ -438,6 +438,122 @@ void test_hattrie_clear_resets_root()
 }
 
 
+void test_hattrie_dup_copies_values()
+{
+    fprintf(stderr, "checking trie duplication... \n");
+
+    if (hattrie_dup(NULL) != NULL) {
+        fprintf(stderr, "[error] null trie duplicate returned a trie\n");
+        have_error = 1;
+    }
+
+    hattrie_t* empty = hattrie_create();
+    hattrie_t* empty_copy = hattrie_dup(empty);
+    if (empty_copy == NULL) {
+        fprintf(stderr, "[error] empty trie duplicate returned NULL\n");
+        have_error = 1;
+    }
+    else if (hattrie_size(empty_copy) != 0) {
+        fprintf(stderr, "[error] empty trie duplicate size is %zu, expected 0\n", hattrie_size(empty_copy));
+        have_error = 1;
+    }
+    hattrie_free(empty);
+    hattrie_free(empty_copy);
+
+    hattrie_t* T = hattrie_create();
+    value_t* v = hattrie_get(T, "", 0);
+    if (v == NULL) {
+        fprintf(stderr, "[error] duplicate test root insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 7;
+    }
+    v = hattrie_get(T, "alpha", 5);
+    if (v == NULL) {
+        fprintf(stderr, "[error] duplicate test alpha insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 11;
+    }
+    v = hattrie_get(T, "prefix:beta", 11);
+    if (v == NULL) {
+        fprintf(stderr, "[error] duplicate test beta insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 13;
+    }
+
+    hattrie_t* copy = hattrie_dup(T);
+    if (copy == NULL) {
+        fprintf(stderr, "[error] populated trie duplicate returned NULL\n");
+        have_error = 1;
+    }
+    else {
+        if (hattrie_size(copy) != hattrie_size(T)) {
+            fprintf(stderr, "[error] duplicate trie size is %zu, expected %zu\n", hattrie_size(copy), hattrie_size(T));
+            have_error = 1;
+        }
+        v = hattrie_tryget(copy, "", 0);
+        if (v == NULL || *v != 7) {
+            fprintf(stderr, "[error] duplicate trie root value = %lu, expected 7\n", v == NULL ? 0 : *v);
+            have_error = 1;
+        }
+        v = hattrie_tryget(copy, "alpha", 5);
+        if (v == NULL || *v != 11) {
+            fprintf(stderr, "[error] duplicate trie alpha value = %lu, expected 11\n", v == NULL ? 0 : *v);
+            have_error = 1;
+        }
+        v = hattrie_tryget(copy, "prefix:beta", 11);
+        if (v == NULL || *v != 13) {
+            fprintf(stderr, "[error] duplicate trie beta value = %lu, expected 13\n", v == NULL ? 0 : *v);
+            have_error = 1;
+        }
+
+        hattrie_del(T, "alpha", 5);
+        v = hattrie_get(T, "", 0);
+        if (v != NULL) *v = 99;
+        v = hattrie_get(T, "original-only", 13);
+        if (v != NULL) *v = 17;
+
+        v = hattrie_tryget(copy, "", 0);
+        if (v == NULL || *v != 7) {
+            fprintf(stderr, "[error] duplicate root changed after original mutation\n");
+            have_error = 1;
+        }
+        v = hattrie_tryget(copy, "alpha", 5);
+        if (v == NULL || *v != 11) {
+            fprintf(stderr, "[error] duplicate alpha changed after original delete\n");
+            have_error = 1;
+        }
+        if (hattrie_tryget(copy, "original-only", 13) != NULL) {
+            fprintf(stderr, "[error] duplicate saw key inserted only in original\n");
+            have_error = 1;
+        }
+
+        hattrie_del(copy, "prefix:beta", 11);
+        v = hattrie_get(copy, "copy-only", 9);
+        if (v != NULL) *v = 19;
+
+        v = hattrie_tryget(T, "prefix:beta", 11);
+        if (v == NULL || *v != 13) {
+            fprintf(stderr, "[error] original beta changed after duplicate delete\n");
+            have_error = 1;
+        }
+        if (hattrie_tryget(T, "copy-only", 9) != NULL) {
+            fprintf(stderr, "[error] original saw key inserted only in duplicate\n");
+            have_error = 1;
+        }
+    }
+
+    hattrie_free(copy);
+    hattrie_free(T);
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_hattrie_null_cleanup()
 {
     fprintf(stderr, "checking trie null api... \n");
@@ -551,6 +667,7 @@ int main()
     test_trie_non_ascii();
     test_trie_walk();
     test_hattrie_null_cleanup();
+    test_hattrie_dup_copies_values();
     test_hattrie_clear_resets_root();
     test_hattrie_key_length_limit();
 
