@@ -15,13 +15,13 @@ replication_async=${REPLICATION_ASYNC:-false}
 replication_queue_size=${REPLICATION_QUEUE_SIZE:-1024}
 replication_retry_interval=${REPLICATION_RETRY_INTERVAL:-250ms}
 replication_max_attempts=${REPLICATION_MAX_ATTEMPTS:-3}
-replication_wire_format=${REPLICATION_WIRE_FORMAT:-protobuf}
+replication_wire_format=${REPLICATION_WIRE_FORMAT:-}
 replication_sync_interval=${REPLICATION_SYNC_INTERVAL:-0}
 replication_sync_prefix=${REPLICATION_SYNC_PREFIX:-}
 enforce_leader_writes=${ENFORCE_LEADER_WRITES:-false}
 grpc_addr=${GRPC_ADDR:-}
 db_path=${DB_PATH:-}
-db_format=${DB_FORMAT:-binary}
+db_format=${DB_FORMAT:-}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
 db_hot_load=${DB_HOT_LOAD:-false}
 db_hot_load_max_bytes=${DB_HOT_LOAD_MAX_BYTES:-1024}
@@ -29,9 +29,9 @@ db_hot_load_max_age=${DB_HOT_LOAD_MAX_AGE:-1h}
 db_hot_load_min_hits=${DB_HOT_LOAD_MIN_HITS:-1000}
 snapshot_path=${SNAPSHOT_PATH:-}
 snapshot_interval=${SNAPSHOT_INTERVAL:-0}
-snapshot_format=${SNAPSHOT_FORMAT:-gzip-best-binary}
+snapshot_format=${SNAPSHOT_FORMAT:-}
 journal_path=${JOURNAL_PATH:-}
-journal_format=${JOURNAL_FORMAT:-binary}
+journal_format=${JOURNAL_FORMAT:-}
 journal_pull_source=${JOURNAL_PULL_SOURCE:-}
 journal_pull_state_path=${JOURNAL_PULL_STATE_PATH:-}
 journal_pull_interval=${JOURNAL_PULL_INTERVAL:-0}
@@ -39,7 +39,7 @@ journal_pull_timeout=${JOURNAL_PULL_TIMEOUT:-30s}
 journal_pull_limit=${JOURNAL_PULL_LIMIT:-0}
 journal_pull_max_batches=${JOURNAL_PULL_MAX_BATCHES:-0}
 
-exec go run ./cmd/hatrie-cache \
+set -- \
 	-monitoring-server \
 	-monitoring-addr "$addr" \
 	-monitoring-web-dir "$web_dir" \
@@ -55,13 +55,11 @@ exec go run ./cmd/hatrie-cache \
 	-replication-queue-size "$replication_queue_size" \
 	-replication-retry-interval "$replication_retry_interval" \
 	-replication-max-attempts "$replication_max_attempts" \
-	-replication-wire-format "$replication_wire_format" \
 	-replication-sync-interval "$replication_sync_interval" \
 	-replication-sync-prefix "$replication_sync_prefix" \
 	-enforce-leader-writes="$enforce_leader_writes" \
 	-grpc-addr "$grpc_addr" \
 	-db-path "$db_path" \
-	-db-format "$db_format" \
 	-db-sync-interval "$db_sync_interval" \
 	-db-hot-load="$db_hot_load" \
 	-db-hot-load-max-bytes "$db_hot_load_max_bytes" \
@@ -69,12 +67,25 @@ exec go run ./cmd/hatrie-cache \
 	-db-hot-load-min-hits "$db_hot_load_min_hits" \
 	-snapshot-path "$snapshot_path" \
 	-snapshot-interval "$snapshot_interval" \
-	-snapshot-format "$snapshot_format" \
 	-journal-path "$journal_path" \
-	-journal-format "$journal_format" \
 	-journal-pull-source "$journal_pull_source" \
 	-journal-pull-state-path "$journal_pull_state_path" \
 	-journal-pull-interval "$journal_pull_interval" \
 	-journal-pull-timeout "$journal_pull_timeout" \
 	-journal-pull-limit "$journal_pull_limit" \
 	-journal-pull-max-batches "$journal_pull_max_batches"
+
+if [ -n "$replication_wire_format" ]; then
+	set -- "$@" -replication-wire-format "$replication_wire_format"
+fi
+if [ -n "$db_format" ]; then
+	set -- "$@" -db-format "$db_format"
+fi
+if [ -n "$snapshot_format" ]; then
+	set -- "$@" -snapshot-format "$snapshot_format"
+fi
+if [ -n "$journal_format" ]; then
+	set -- "$@" -journal-format "$journal_format"
+fi
+
+exec go run ./cmd/hatrie-cache "$@"

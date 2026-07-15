@@ -149,6 +149,8 @@ Fenwick tree snapshots store their numeric tree vector as binary varints.
 Quantile sketches store summary samples as binary float/varint tuples, and
 reservoir samples store retained stream items as binary priority/sequence/value
 tuples. Existing JSON records still load automatically.
+Leaving format variables unset in the Makefile wrapper uses the compiled Go
+defaults; set them only when you want to override the default format.
 Set `DB_FORMAT=json` to keep writing the previous JSON record layout.
 `DB_SYNC_INTERVAL` periodically syncs changed LevelDB records while the server
 is running:
