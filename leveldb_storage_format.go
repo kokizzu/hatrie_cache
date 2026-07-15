@@ -286,6 +286,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: cuckoo filter snapshot is required")
 		}
 		return prepareLevelDBBinaryCuckooFilterValue(*entry.CuckooFilter)
+	case "xor_filter":
+		if entry.XorFilter == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: xor filter snapshot is required")
+		}
+		return prepareLevelDBBinaryXorFilterValue(*entry.XorFilter)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -424,6 +429,29 @@ func prepareLevelDBBinaryCuckooFilterValue(snapshot cuckooFilterSnapshot) (level
 	payload, err := marshalSnapshotCuckooFilterValueBinary(snapshot)
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryXorFilterValue(snapshot xorFilterSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotXorFilterValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	if !ok {
+		var marshalErr error
+		payload, marshalErr = json.Marshal(snapshot)
+		if marshalErr != nil {
+			return levelDBBinaryPreparedValue{}, marshalErr
+		}
 	}
 	size, err := binaryLengthPrefixedSize(int64(len(payload)))
 	if err != nil {
@@ -789,6 +817,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 	case "reservoir_sample":
 		return decodeLevelDBStorageJSON(data, &entry.ReservoirSample)
 	case "xor_filter":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(xorFilterSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary xor filter value is not an xor filter")
+			}
+			entry.XorFilter = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.XorFilter)
 	case "radix_tree":
 		if snapshotValueDataIsBinary(data) {

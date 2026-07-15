@@ -27,6 +27,7 @@ const (
 	snapshotValueBinaryCountMinSketch
 	snapshotValueBinaryHyperLogLog
 	snapshotValueBinaryCuckooFilter
+	snapshotValueBinaryXorFilter
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -151,6 +152,30 @@ func marshalSnapshotCuckooFilterValueBinary(snapshot cuckooFilterSnapshot) ([]by
 }
 
 func snapshotCuckooFilterRawFingerprints(snapshot cuckooFilterSnapshot) ([]byte, error) {
+	if snapshot.Fingerprints == "" {
+		return nil, nil
+	}
+	return base64.StdEncoding.DecodeString(snapshot.Fingerprints)
+}
+
+func marshalSnapshotXorFilterValueBinary(snapshot xorFilterSnapshot) ([]byte, bool, error) {
+	if !snapshot.Built {
+		return nil, false, nil
+	}
+	fingerprints, err := snapshotXorFilterRawFingerprints(snapshot)
+	if err != nil {
+		return nil, true, err
+	}
+	size, err := snapshotValueBinaryXorFilterSize(snapshot, len(fingerprints))
+	if err != nil {
+		return nil, true, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	writeSnapshotValueBinaryXorFilter(&writer, snapshot, fingerprints)
+	return writer.bytes(), true, nil
+}
+
+func snapshotXorFilterRawFingerprints(snapshot xorFilterSnapshot) ([]byte, error) {
 	if snapshot.Fingerprints == "" {
 		return nil, nil
 	}
@@ -351,6 +376,19 @@ func snapshotValueBinaryCuckooFilterSize(snapshot cuckooFilterSnapshot, fingerpr
 	return snapshotValueBinaryAdd(total, fingerprintSize)
 }
 
+func snapshotValueBinaryXorFilterSize(snapshot xorFilterSnapshot, fingerprintBytes int) (int, error) {
+	total := 1 +
+		binaryUvarintSize(snapshot.ExpectedItems) +
+		binaryUvarintSize(snapshot.Items) +
+		binaryUvarintSize(snapshot.Seed) +
+		binaryUvarintSize(uint64(snapshot.BlockLength))
+	fingerprintSize, err := snapshotValueBinaryBytesSize(fingerprintBytes)
+	if err != nil {
+		return 0, err
+	}
+	return snapshotValueBinaryAdd(total, fingerprintSize)
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -499,6 +537,15 @@ func writeSnapshotValueBinaryCuckooFilter(writer *binaryFieldWriter, snapshot cu
 	writer.writeUvarint(uint64(snapshot.BucketSize))
 	writer.writeUvarint(uint64(snapshot.FingerprintBits))
 	writer.writeUvarint(snapshot.Count)
+	writer.writeBytes(fingerprints)
+}
+
+func writeSnapshotValueBinaryXorFilter(writer *binaryFieldWriter, snapshot xorFilterSnapshot, fingerprints []byte) {
+	writer.buf = append(writer.buf, snapshotValueBinaryXorFilter)
+	writer.writeUvarint(snapshot.ExpectedItems)
+	writer.writeUvarint(snapshot.Items)
+	writer.writeUvarint(snapshot.Seed)
+	writer.writeUvarint(uint64(snapshot.BlockLength))
 	writer.writeBytes(fingerprints)
 }
 
@@ -757,6 +804,38 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			FingerprintBits: uint8(fingerprintBits),
 			Count:           count,
 			Fingerprints:    base64.StdEncoding.EncodeToString(fingerprints),
+		}, nil
+	case snapshotValueBinaryXorFilter:
+		expectedItems, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		items, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		seed, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		blockLength, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if blockLength > uint64(^uint32(0)) {
+			return nil, errors.New("hatriecache: binary xor filter block length is too large")
+		}
+		fingerprints, err := reader.readBytes()
+		if err != nil {
+			return nil, err
+		}
+		return xorFilterSnapshot{
+			ExpectedItems: expectedItems,
+			Built:         true,
+			Items:         items,
+			Seed:          seed,
+			BlockLength:   uint32(blockLength),
+			Fingerprints:  base64.StdEncoding.EncodeToString(fingerprints),
 		}, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)

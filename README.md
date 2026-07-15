@@ -128,8 +128,9 @@ values as raw bytes instead of base64. Map, slice, set, priority queue, radix
 tree, Bloom filter, Count-Min Sketch, and HyperLogLog values use compact binary
 payload codecs when possible, with automatic JSON fallback for values outside
 the recursive JSON-compatible codec. Cuckoo filter values also store packed
-fingerprints directly in binary records. Existing JSON records still load
-automatically.
+fingerprints directly in binary records; built XOR filter values do the same,
+while staged XOR filters keep JSON fallback for pending values. Existing JSON
+records still load automatically.
 Set `DB_FORMAT=json` to keep writing the previous JSON record layout.
 `DB_SYNC_INTERVAL` periodically syncs changed LevelDB records while the server
 is running:
@@ -338,9 +339,10 @@ carry empty collection fields. Binary snapshots reuse the compact LevelDB record
 codec, avoid base64 for byte values, and use the same compact collection,
 priority-queue, radix-tree, Bloom filter, Count-Min Sketch, and HyperLogLog
 payload codecs when possible, plus direct binary cuckoo-filter fingerprints.
-The gzip-best-binary snapshot default uses about 18% fewer snapshot bytes than
-the previous gzip-best JSON default, about 27% fewer bytes than the fast
-gzip-binary format, and about 99%
+Built XOR filters also store fingerprints directly and keep staged snapshots on
+JSON fallback. The gzip-best-binary snapshot default uses about 18% fewer
+snapshot bytes than the previous gzip-best JSON default, about 27% fewer bytes
+than the fast gzip-binary format, and about 99%
 less storage than plain JSON. It also uses far fewer allocations and lower heap
 than gzip-best JSON, but about 1.3x the save CPU in this benchmark. Use
 `SNAPSHOT_FORMAT=gzip-binary` when lower snapshot CPU matters more than maximum

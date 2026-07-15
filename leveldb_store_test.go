@@ -907,6 +907,125 @@ func TestLevelDBBinaryCuckooFilterStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryXorFilterUsesBinaryValuePayload(t *testing.T) {
+	filter, err := newXorFilterData(8)
+	if err != nil {
+		t.Fatalf("newXorFilterData() error = %v", err)
+	}
+	if added, err := filter.AddOne("alpha", "beta", "gamma"); err != nil || added != 3 {
+		t.Fatalf("AddOne(alpha,beta,gamma) = %d/%v, want 3/nil", added, err)
+	}
+	if err := filter.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	snapshot := filter.Snapshot()
+	entry := snapshotEntry{
+		Key:       "xor",
+		Type:      "xor_filter",
+		XorFilter: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary xor filter) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("xor filter payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(xor filter) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary xor filter payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary xor filter) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.XorFilter, &snapshot) {
+		t.Fatalf("decoded xor filter = %#v, want %#v", decoded.XorFilter, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryXorFilterFallsBackToJSONForStagedValues(t *testing.T) {
+	filter, err := newXorFilterData(8)
+	if err != nil {
+		t.Fatalf("newXorFilterData() error = %v", err)
+	}
+	if added, err := filter.AddOne("staged"); err != nil || added != 1 {
+		t.Fatalf("AddOne(staged) = %d/%v, want 1/nil", added, err)
+	}
+	snapshot := filter.Snapshot()
+	entry := snapshotEntry{
+		Key:       "xor",
+		Type:      "xor_filter",
+		XorFilter: &snapshot,
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(staged xor filter) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if snapshotValueDataIsBinary(payload) {
+		t.Fatalf("staged xor filter payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	}
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(staged xor filter) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.XorFilter, &snapshot) {
+		t.Fatalf("decoded staged xor filter = %#v, want %#v", decoded.XorFilter, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryXorFilterStillReadsLegacyJSONPayload(t *testing.T) {
+	filter, err := newXorFilterData(8)
+	if err != nil {
+		t.Fatalf("newXorFilterData() error = %v", err)
+	}
+	if added, err := filter.AddOne("legacy", "value"); err != nil || added != 2 {
+		t.Fatalf("AddOne(legacy,value) = %d/%v, want 2/nil", added, err)
+	}
+	if err := filter.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	snapshot := filter.Snapshot()
+	entry := snapshotEntry{
+		Key:       "legacy-xor",
+		Type:      "xor_filter",
+		XorFilter: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(xor filter) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON xor filter) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.XorFilter, entry.XorFilter) {
+		t.Fatalf("decoded legacy inner JSON xor filter = %#v, want %#v", decoded.XorFilter, entry.XorFilter)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {
