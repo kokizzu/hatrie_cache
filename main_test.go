@@ -6172,6 +6172,117 @@ func TestStoragePoolsTrimReusableTailSlots(t *testing.T) {
 	}
 }
 
+func TestCompactStoragePoolsTrimReusableTailSlots(t *testing.T) {
+	bloomFilters := CreateBloomFilterStorage()
+	assertStoragePoolTailTrim(t, "bloom filter", func() int32 {
+		return bloomFilters.AddData(bloomFilterData{})
+	}, bloomFilters.Del, func() int {
+		return len(bloomFilters.array)
+	})
+
+	countMinSketches := CreateCountMinSketchStorage()
+	assertStoragePoolTailTrim(t, "count-min sketch", func() int32 {
+		return countMinSketches.AddData(countMinSketchData{})
+	}, countMinSketches.Del, func() int {
+		return len(countMinSketches.array)
+	})
+
+	hyperLogLogs := CreateHyperLogLogStorage()
+	assertStoragePoolTailTrim(t, "hyperloglog", func() int32 {
+		return hyperLogLogs.AddData(hyperLogLogData{})
+	}, hyperLogLogs.Del, func() int {
+		return len(hyperLogLogs.array)
+	})
+
+	topKs := CreateTopKStorage()
+	assertStoragePoolTailTrim(t, "top-k", func() int32 {
+		return topKs.AddData(topKData{})
+	}, topKs.Del, func() int {
+		return len(topKs.array)
+	})
+
+	cuckooFilters := CreateCuckooFilterStorage()
+	assertStoragePoolTailTrim(t, "cuckoo filter", func() int32 {
+		return cuckooFilters.AddData(cuckooFilterData{})
+	}, cuckooFilters.Del, func() int {
+		return len(cuckooFilters.array)
+	})
+
+	roaringBitmaps := CreateRoaringBitmapStorage()
+	assertStoragePoolTailTrim(t, "roaring bitmap", func() int32 {
+		return roaringBitmaps.AddData(roaringBitmapData{})
+	}, roaringBitmaps.Del, func() int {
+		return len(roaringBitmaps.array)
+	})
+
+	quantileSketches := CreateQuantileSketchStorage()
+	assertStoragePoolTailTrim(t, "quantile sketch", func() int32 {
+		return quantileSketches.AddData(quantileSketchData{})
+	}, quantileSketches.Del, func() int {
+		return len(quantileSketches.array)
+	})
+
+	fenwickTrees := CreateFenwickTreeStorage()
+	assertStoragePoolTailTrim(t, "fenwick tree", func() int32 {
+		return fenwickTrees.AddData(fenwickTreeData{})
+	}, fenwickTrees.Del, func() int {
+		return len(fenwickTrees.array)
+	})
+
+	sparseBitsets := CreateSparseBitsetStorage()
+	assertStoragePoolTailTrim(t, "sparse bitset", func() int32 {
+		return sparseBitsets.AddData(sparseBitsetData{})
+	}, sparseBitsets.Del, func() int {
+		return len(sparseBitsets.array)
+	})
+
+	reservoirSamples := CreateReservoirSampleStorage()
+	assertStoragePoolTailTrim(t, "reservoir sample", func() int32 {
+		return reservoirSamples.AddData(reservoirSampleData{})
+	}, reservoirSamples.Del, func() int {
+		return len(reservoirSamples.array)
+	})
+
+	xorFilters := CreateXorFilterStorage()
+	assertStoragePoolTailTrim(t, "xor filter", func() int32 {
+		return xorFilters.AddData(xorFilterData{})
+	}, xorFilters.Del, func() int {
+		return len(xorFilters.array)
+	})
+
+	radixTrees := CreateRadixTreeStorage()
+	assertStoragePoolTailTrim(t, "radix tree", func() int32 {
+		return radixTrees.AddData(radixTreeData{})
+	}, radixTrees.Del, func() int {
+		return len(radixTrees.array)
+	})
+}
+
+func assertStoragePoolTailTrim(t *testing.T, name string, add func() int32, del func(int32), length func() int) {
+	t.Helper()
+
+	if got := add(); got != 0 {
+		t.Fatalf("%s first AddData() = %d, want 0", name, got)
+	}
+	middle := add()
+	tail := add()
+	if middle != 1 || tail != 2 {
+		t.Fatalf("%s AddData() indexes = %d/%d, want 1/2", name, middle, tail)
+	}
+
+	del(middle)
+	if got := length(); got != 3 {
+		t.Fatalf("%s len after middle delete = %d, want 3", name, got)
+	}
+	del(tail)
+	if got := length(); got != 1 {
+		t.Fatalf("%s len after tail trim = %d, want 1", name, got)
+	}
+	if got := add(); got != 1 {
+		t.Fatalf("%s AddData() after trim = %d, want appended index 1", name, got)
+	}
+}
+
 func TestDiskStorageWritesReplaceAndReuseAtomically(t *testing.T) {
 	disks, err := CreateDiskStorage(t.TempDir(), false)
 	if err != nil {
