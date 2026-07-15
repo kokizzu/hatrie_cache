@@ -1472,6 +1472,122 @@ func TestLevelDBBinaryQuantileSketchStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryReservoirSampleUsesBinaryValuePayload(t *testing.T) {
+	sample, err := newReservoirSampleData(5)
+	if err != nil {
+		t.Fatalf("newReservoirSampleData() error = %v", err)
+	}
+	sample.AddOne("alpha", "beta", "gamma", "delta", "epsilon", "zeta")
+	snapshot := sample.Snapshot()
+	entry := snapshotEntry{
+		Key:             "sample",
+		Type:            "reservoir_sample",
+		ReservoirSample: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary reservoir sample) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("reservoir sample payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(reservoir sample) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary reservoir sample payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary reservoir sample) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.ReservoirSample, &snapshot) {
+		t.Fatalf("decoded reservoir sample = %#v, want %#v", decoded.ReservoirSample, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryReservoirSampleFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+	sample, err := newReservoirSampleData(1)
+	if err != nil {
+		t.Fatalf("newReservoirSampleData() error = %v", err)
+	}
+	sample.Add(PriorityQueue{{Priority: 9, Value: "nested"}})
+	snapshot := sample.Snapshot()
+	entry := snapshotEntry{
+		Key:             "sample",
+		Type:            "reservoir_sample",
+		ReservoirSample: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(reservoir sample fallback) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if snapshotValueDataIsBinary(payload) {
+		t.Fatalf("reservoir sample fallback payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	}
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(reservoir sample fallback) error = %v", err)
+	}
+	if decoded.ReservoirSample == nil || decoded.ReservoirSample.Capacity != 1 || decoded.ReservoirSample.Seen != 1 || len(decoded.ReservoirSample.Items) != 1 {
+		t.Fatalf("decoded fallback reservoir sample = %#v, want one retained item", decoded.ReservoirSample)
+	}
+	nested, ok := decoded.ReservoirSample.Items[0].Value.([]interface{})
+	if !ok || len(nested) != 1 {
+		t.Fatalf("decoded fallback reservoir sample value = %#v, want JSON array", decoded.ReservoirSample.Items[0].Value)
+	}
+	nestedItem, ok := nested[0].(map[string]interface{})
+	if !ok || nestedItem["priority"] != json.Number("9") || nestedItem["value"] != "nested" {
+		t.Fatalf("decoded fallback reservoir sample nested item = %#v, want JSON priority item", nested[0])
+	}
+}
+
+func TestLevelDBBinaryReservoirSampleStillReadsLegacyJSONPayload(t *testing.T) {
+	sample, err := newReservoirSampleData(3)
+	if err != nil {
+		t.Fatalf("newReservoirSampleData() error = %v", err)
+	}
+	sample.AddOne("alpha", "beta", "gamma", "delta")
+	snapshot := sample.Snapshot()
+	entry := snapshotEntry{
+		Key:             "legacy-sample",
+		Type:            "reservoir_sample",
+		ReservoirSample: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(reservoir sample) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON reservoir sample) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.ReservoirSample, entry.ReservoirSample) {
+		t.Fatalf("decoded legacy inner JSON reservoir sample = %#v, want %#v", decoded.ReservoirSample, entry.ReservoirSample)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {

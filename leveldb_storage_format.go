@@ -316,6 +316,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: quantile sketch snapshot is required")
 		}
 		return prepareLevelDBBinaryQuantileSketchValue(*entry.QuantileSketch)
+	case "reservoir_sample":
+		if entry.ReservoirSample == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: reservoir sample snapshot is required")
+		}
+		return prepareLevelDBBinaryReservoirSampleValue(*entry.ReservoirSample)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -564,6 +569,29 @@ func prepareLevelDBBinaryQuantileSketchValue(snapshot quantileSketchSnapshot) (l
 	payload, err := marshalSnapshotQuantileSketchValueBinary(snapshot)
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryReservoirSampleValue(snapshot reservoirSampleSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotReservoirSampleValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	if !ok {
+		var marshalErr error
+		payload, marshalErr = json.Marshal(snapshot)
+		if marshalErr != nil {
+			return levelDBBinaryPreparedValue{}, marshalErr
+		}
 	}
 	size, err := binaryLengthPrefixedSize(int64(len(payload)))
 	if err != nil {
@@ -987,6 +1015,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 		}
 		return decodeLevelDBStorageJSON(data, &entry.SparseBitset)
 	case "reservoir_sample":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(reservoirSampleSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary reservoir sample value is not a reservoir sample")
+			}
+			entry.ReservoirSample = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.ReservoirSample)
 	case "xor_filter":
 		if snapshotValueDataIsBinary(data) {

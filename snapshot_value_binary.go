@@ -80,6 +80,18 @@ func marshalSnapshotTopKValueBinary(snapshot topKSnapshot) ([]byte, bool, error)
 	return writer.bytes(), true, nil
 }
 
+func marshalSnapshotReservoirSampleValueBinary(snapshot reservoirSampleSnapshot) ([]byte, bool, error) {
+	size, ok, err := snapshotValueBinaryReservoirSampleSize(snapshot)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	if ok := writeSnapshotValueBinaryReservoirSample(&writer, snapshot); !ok {
+		return nil, false, nil
+	}
+	return writer.bytes(), true, nil
+}
+
 func marshalSnapshotRadixTreeValueBinary(snapshot radixTreeSnapshot) ([]byte, bool, error) {
 	size, ok, err := snapshotValueBinaryRadixTreeSize(snapshot)
 	if err != nil || !ok {
@@ -364,6 +376,29 @@ func snapshotValueBinaryTopKSize(snapshot topKSnapshot) (int, bool, error) {
 	return total, true, nil
 }
 
+func snapshotValueBinaryReservoirSampleSize(snapshot reservoirSampleSnapshot) (int, bool, error) {
+	total := 1 +
+		binaryUvarintSize(snapshot.Capacity) +
+		binaryUvarintSize(snapshot.Seen) +
+		binaryUvarintSize(uint64(len(snapshot.Items)))
+	for _, item := range snapshot.Items {
+		itemSize := binaryUvarintSize(item.Priority) + binaryUvarintSize(item.Sequence)
+		valueSize, ok, err := snapshotValueBinarySize(item.Value)
+		if err != nil || !ok {
+			return 0, ok, err
+		}
+		itemSize, err = snapshotValueBinaryAdd(itemSize, valueSize)
+		if err != nil {
+			return 0, true, err
+		}
+		total, err = snapshotValueBinaryAdd(total, itemSize)
+		if err != nil {
+			return 0, true, err
+		}
+	}
+	return total, true, nil
+}
+
 func snapshotValueBinaryRadixTreeSize(snapshot radixTreeSnapshot) (int, bool, error) {
 	if snapshot.Count != uint64(len(snapshot.Items)) {
 		return 0, true, errors.New("hatriecache: radix tree count does not match items")
@@ -599,6 +634,21 @@ func writeSnapshotValueBinaryTopK(writer *binaryFieldWriter, snapshot topKSnapsh
 		writer.writeString(item.Key)
 		writer.writeUvarint(item.Count)
 		writer.writeUvarint(item.Error)
+		if ok := writeSnapshotValueBinary(writer, item.Value); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func writeSnapshotValueBinaryReservoirSample(writer *binaryFieldWriter, snapshot reservoirSampleSnapshot) bool {
+	writer.buf = append(writer.buf, snapshotValueBinaryReservoirSample)
+	writer.writeUvarint(snapshot.Capacity)
+	writer.writeUvarint(snapshot.Seen)
+	writer.writeUvarint(uint64(len(snapshot.Items)))
+	for _, item := range snapshot.Items {
+		writer.writeUvarint(item.Priority)
+		writer.writeUvarint(item.Sequence)
 		if ok := writeSnapshotValueBinary(writer, item.Value); !ok {
 			return false
 		}
@@ -845,6 +895,48 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 		return topKSnapshot{
 			Capacity: capacity,
 			Total:    total,
+			Items:    items,
+		}, nil
+	case snapshotValueBinaryReservoirSample:
+		capacity, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		seen, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		count, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		capacityHint, err := snapshotValueBinaryInitialCapacity(count, len(reader.data)-reader.off, 3)
+		if err != nil {
+			return nil, err
+		}
+		items := make([]reservoirSampleItem, 0, capacityHint)
+		for idx := 0; idx < int(count); idx++ {
+			priority, err := reader.readUvarint()
+			if err != nil {
+				return nil, err
+			}
+			sequence, err := reader.readUvarint()
+			if err != nil {
+				return nil, err
+			}
+			value, err := readSnapshotValueBinary(reader)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, reservoirSampleItem{
+				Value:    value,
+				Priority: priority,
+				Sequence: sequence,
+			})
+		}
+		return reservoirSampleSnapshot{
+			Capacity: capacity,
+			Seen:     seen,
 			Items:    items,
 		}, nil
 	case snapshotValueBinaryRadixTree:

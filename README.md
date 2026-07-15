@@ -132,8 +132,9 @@ fingerprints directly in binary records; built XOR filter values do the same,
 while staged XOR filters keep JSON fallback for pending values. Roaring bitmap
 and sparse-bitset containers store their array or bitset payloads directly too.
 Fenwick tree snapshots store their numeric tree vector as binary varints.
-Quantile sketches store summary samples as binary float/varint tuples. Existing
-JSON records still load automatically.
+Quantile sketches store summary samples as binary float/varint tuples, and
+reservoir samples store retained stream items as binary priority/sequence/value
+tuples. Existing JSON records still load automatically.
 Set `DB_FORMAT=json` to keep writing the previous JSON record layout.
 `DB_SYNC_INTERVAL` periodically syncs changed LevelDB records while the server
 is running:
@@ -344,8 +345,8 @@ priority-queue, Top-K, radix-tree, Bloom filter, Count-Min Sketch, and HyperLogL
 payload codecs when possible, plus direct binary cuckoo-filter fingerprints.
 Built XOR filters also store fingerprints directly and keep staged snapshots on
 JSON fallback; roaring bitmaps and sparse bitsets store container payloads
-directly, and Fenwick trees store numeric vectors as varints. The
-quantile-sketch summary also uses binary float/varint tuples. The
+directly, and Fenwick trees store numeric vectors as varints. Quantile-sketch
+summaries and reservoir-sample retained items also use compact binary tuples. The
 gzip-best-binary snapshot default uses about 18% fewer snapshot bytes than the
 previous gzip-best JSON default, about 27% fewer bytes than the fast
 gzip-binary format, and about 99%
