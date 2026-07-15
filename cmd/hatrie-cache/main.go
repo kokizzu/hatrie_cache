@@ -81,7 +81,15 @@ func main() {
 	}
 }
 
+func serverContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
 func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
+	ctx = serverContext(ctx)
 	cfg, err := parseConfig(args, stderr)
 	if err != nil {
 		return err
@@ -543,6 +551,7 @@ func stopGRPCServer(server *grpc.Server) {
 }
 
 func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, interval time.Duration, stderr io.Writer) func() {
+	ctx = serverContext(ctx)
 	if store == nil || interval <= 0 {
 		return func() {}
 	}
@@ -618,6 +627,7 @@ func saveSnapshotIfConfigured(trie *hatriecache.HatTrie, journal *hatriecache.Co
 }
 
 func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, interval time.Duration, format hatriecache.SnapshotFormat, stderr io.Writer) func() {
+	ctx = serverContext(ctx)
 	if path == "" || interval <= 0 {
 		return func() {}
 	}
@@ -656,6 +666,7 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 }
 
 func startElectionHeartbeat(ctx context.Context, election *hatriecache.ElectionStore, nodeID string, timeout time.Duration, required bool, stderr io.Writer) (func(), error) {
+	ctx = serverContext(ctx)
 	if election == nil {
 		return func() {}, nil
 	}
@@ -719,6 +730,7 @@ func electionHeartbeatInterval(timeout time.Duration) time.Duration {
 }
 
 func startReplicationSyncer(ctx context.Context, trie *hatriecache.HatTrie, replicator *hatriecache.HTTPReplicator, interval time.Duration, prefix string, stderr io.Writer) func() {
+	ctx = serverContext(ctx)
 	if replicator == nil || interval <= 0 {
 		return func() {}
 	}
@@ -800,6 +812,7 @@ type journalPullState struct {
 }
 
 func startJournalPuller(ctx context.Context, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, cfg journalPullerConfig, stderr io.Writer) func() {
+	ctx = serverContext(ctx)
 	if cfg.Source == "" || journal == nil {
 		return func() {}
 	}

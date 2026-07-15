@@ -552,7 +552,7 @@ func TestMonitoringServerServesHTTP2OverTLS(t *testing.T) {
 
 func TestRunDoesNotStartServerByDefault(t *testing.T) {
 	stdout := &bytes.Buffer{}
-	if err := run(context.Background(), nil, stdout, &bytes.Buffer{}); err != nil {
+	if err := run(nil, nil, stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 	if !strings.Contains(stdout.String(), "monitoring server disabled") {
@@ -1196,6 +1196,76 @@ func TestStartLevelDBSaverStopIsIdempotent(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("LevelDB saver repeated stop did not return")
 	}
+}
+
+func TestPeriodicHelpersAcceptNilContext(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("key", "value")
+
+	snapshotPath := filepath.Join(t.TempDir(), "snapshot.json")
+	stopSnapshot := startSnapshotSaver(nil, ht, nil, snapshotPath, time.Hour, hatriecache.SnapshotFormatJSON, &bytes.Buffer{})
+	waitUntil(t, 2*time.Second, func() bool {
+		info, err := os.Stat(snapshotPath)
+		return err == nil && info.Size() > 0
+	})
+	stopSnapshot()
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+	stopLevelDB := startLevelDBSaver(nil, ht, store, time.Hour, &bytes.Buffer{})
+	waitUntil(t, 2*time.Second, func() bool {
+		entry, ok, err := store.Entry("key")
+		return err == nil && ok && entry.Type == "string" && entry.String == "value"
+	})
+	stopLevelDB()
+
+	topology, err := hatriecache.NewTopologyStore(hatriecache.SingleNodeTopology("node-a", "http://127.0.0.1:1"))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	election := hatriecache.NewElectionStore(topology, hatriecache.ElectionOptions{})
+	stopElection, err := startElectionHeartbeat(nil, election, "node-a", time.Hour, true, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("startElectionHeartbeat(nil context) error = %v", err)
+	}
+	stopElection()
+
+	replicator := hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{})
+	stopReplication := startReplicationSyncer(nil, ht, replicator, time.Hour, "", &bytes.Buffer{})
+	stopReplication()
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := hatriecache.CommandJournalTail{
+			LastSequence: 1,
+			Entries: []hatriecache.CommandJournalRecord{
+				{Sequence: 1, Request: hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "pulled", Value: "ok"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+	journal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+	stopJournal := startJournalPuller(nil, ht, journal, journalPullerConfig{
+		Source:     source.URL,
+		StatePath:  filepath.Join(t.TempDir(), "pull-state.json"),
+		Limit:      10,
+		MaxBatches: 1,
+	}, &bytes.Buffer{})
+	waitUntil(t, 2*time.Second, func() bool {
+		return ht.GetString("pulled") == "ok"
+	})
+	stopJournal()
 }
 
 func TestSnapshotCallbackRequiresPath(t *testing.T) {
