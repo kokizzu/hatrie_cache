@@ -22,9 +22,12 @@ const (
 	snapshotValueBinaryArray
 	snapshotValueBinaryObject
 	snapshotValueBinaryPriorityQueue
+	snapshotValueBinaryRadixTree
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
+
+const snapshotValueBinaryMaxInitialCapacity = 4096
 
 func snapshotValueDataIsBinary(data []byte) bool {
 	return bytes.HasPrefix(data, snapshotValueBinaryMagic)
@@ -49,6 +52,18 @@ func marshalSnapshotPriorityQueueValueBinary(items []priorityQueueItem) ([]byte,
 	}
 	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
 	if ok := writeSnapshotValueBinaryPriorityQueue(&writer, items); !ok {
+		return nil, false, nil
+	}
+	return writer.bytes(), true, nil
+}
+
+func marshalSnapshotRadixTreeValueBinary(snapshot radixTreeSnapshot) ([]byte, bool, error) {
+	size, ok, err := snapshotValueBinaryRadixTreeSize(snapshot)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	if ok := writeSnapshotValueBinaryRadixTree(&writer, snapshot); !ok {
 		return nil, false, nil
 	}
 	return writer.bytes(), true, nil
@@ -171,6 +186,35 @@ func snapshotValueBinaryPriorityQueueSize(items []priorityQueueItem) (int, bool,
 	return total, true, nil
 }
 
+func snapshotValueBinaryRadixTreeSize(snapshot radixTreeSnapshot) (int, bool, error) {
+	if snapshot.Count != uint64(len(snapshot.Items)) {
+		return 0, true, errors.New("hatriecache: radix tree count does not match items")
+	}
+	total, err := snapshotValueBinaryAdd(1, binaryUvarintSize(uint64(len(snapshot.Items))))
+	if err != nil {
+		return 0, true, err
+	}
+	for _, item := range snapshot.Items {
+		keySize, err := snapshotValueBinaryBytesSize(len(item.Key))
+		if err != nil {
+			return 0, true, err
+		}
+		total, err = snapshotValueBinaryAdd(total, keySize)
+		if err != nil {
+			return 0, true, err
+		}
+		valueSize, ok, err := snapshotValueBinarySize(item.Value)
+		if err != nil || !ok {
+			return 0, ok, err
+		}
+		total, err = snapshotValueBinaryAdd(total, valueSize)
+		if err != nil {
+			return 0, true, err
+		}
+	}
+	return total, true, nil
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -184,6 +228,20 @@ func snapshotValueBinaryAdd(left int, right int) (int, error) {
 		return 0, errSnapshotValueBinaryTooLarge
 	}
 	return left + right, nil
+}
+
+func snapshotValueBinaryInitialCapacity(count uint64, remaining int, minEncodedItemSize int) (int, error) {
+	if count > uint64(int(^uint(0)>>1)) {
+		return 0, errSnapshotValueBinaryTooLarge
+	}
+	if minEncodedItemSize > 0 && count > uint64(remaining/minEncodedItemSize) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	capacity := int(count)
+	if capacity > snapshotValueBinaryMaxInitialCapacity {
+		return snapshotValueBinaryMaxInitialCapacity, nil
+	}
+	return capacity, nil
 }
 
 func writeSnapshotValueBinary(writer *binaryFieldWriter, value interface{}) bool {
@@ -264,6 +322,18 @@ func writeSnapshotValueBinaryPriorityQueue(writer *binaryFieldWriter, items []pr
 	return true
 }
 
+func writeSnapshotValueBinaryRadixTree(writer *binaryFieldWriter, snapshot radixTreeSnapshot) bool {
+	writer.buf = append(writer.buf, snapshotValueBinaryRadixTree)
+	writer.writeUvarint(uint64(len(snapshot.Items)))
+	for _, item := range snapshot.Items {
+		writer.writeString(item.Key)
+		if ok := writeSnapshotValueBinary(writer, item.Value); !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func unmarshalSnapshotValueBinary(data []byte) (interface{}, error) {
 	if !snapshotValueDataIsBinary(data) {
 		return nil, errors.New("hatriecache: invalid binary snapshot value")
@@ -308,7 +378,11 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 		if count > uint64(int(^uint(0)>>1)) {
 			return nil, errSnapshotValueBinaryTooLarge
 		}
-		values := make(Slice, 0, int(count))
+		capacity, err := snapshotValueBinaryInitialCapacity(count, len(reader.data)-reader.off, 1)
+		if err != nil {
+			return nil, err
+		}
+		values := make(Slice, 0, capacity)
 		for idx := 0; idx < int(count); idx++ {
 			value, err := readSnapshotValueBinary(reader)
 			if err != nil {
@@ -325,7 +399,11 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 		if count > uint64(int(^uint(0)>>1)) {
 			return nil, errSnapshotValueBinaryTooLarge
 		}
-		values := make(Map, int(count))
+		capacity, err := snapshotValueBinaryInitialCapacity(count, len(reader.data)-reader.off, 2)
+		if err != nil {
+			return nil, err
+		}
+		values := make(Map, capacity)
 		for idx := 0; idx < int(count); idx++ {
 			key, err := reader.readString()
 			if err != nil {
@@ -349,7 +427,11 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 		if count > uint64(int(^uint(0)>>1)) {
 			return nil, errSnapshotValueBinaryTooLarge
 		}
-		items := make([]priorityQueueItem, 0, int(count))
+		capacity, err := snapshotValueBinaryInitialCapacity(count, len(reader.data)-reader.off, 3)
+		if err != nil {
+			return nil, err
+		}
+		items := make([]priorityQueueItem, 0, capacity)
 		for idx := 0; idx < int(count); idx++ {
 			priority, err := reader.readVarint()
 			if err != nil {
@@ -370,6 +452,37 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			})
 		}
 		return items, nil
+	case snapshotValueBinaryRadixTree:
+		count, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if count > uint64(int(^uint(0)>>1)) {
+			return nil, errSnapshotValueBinaryTooLarge
+		}
+		capacity, err := snapshotValueBinaryInitialCapacity(count, len(reader.data)-reader.off, 2)
+		if err != nil {
+			return nil, err
+		}
+		items := make([]RadixTreeItem, 0, capacity)
+		for idx := 0; idx < int(count); idx++ {
+			key, err := reader.readString()
+			if err != nil {
+				return nil, err
+			}
+			value, err := readSnapshotValueBinary(reader)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, RadixTreeItem{
+				Key:   key,
+				Value: value,
+			})
+		}
+		return radixTreeSnapshot{
+			Count: uint64(len(items)),
+			Items: items,
+		}, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)
 	}

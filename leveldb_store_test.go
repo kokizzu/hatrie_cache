@@ -455,6 +455,132 @@ func TestLevelDBBinaryPriorityQueueStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryRadixTreeUsesBinaryValuePayload(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "radix",
+		Type: "radix_tree",
+		RadixTree: &radixTreeSnapshot{
+			Count: 3,
+			Items: []RadixTreeItem{
+				{Key: "asset:logo", Value: []byte("payload")},
+				{Key: "user:100/profile", Value: Map{"status": "active"}},
+				{Key: "user:101/score", Value: json.Number("42")},
+			},
+		},
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary radix tree) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("radix tree payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary radix tree) error = %v", err)
+	}
+	want := &radixTreeSnapshot{
+		Count: 3,
+		Items: []RadixTreeItem{
+			{Key: "asset:logo", Value: base64.StdEncoding.EncodeToString([]byte("payload"))},
+			{Key: "user:100/profile", Value: Map{"status": "active"}},
+			{Key: "user:101/score", Value: json.Number("42")},
+		},
+	}
+	if !reflect.DeepEqual(decoded.RadixTree, want) {
+		t.Fatalf("decoded radix tree = %#v, want %#v", decoded.RadixTree, want)
+	}
+}
+
+func TestLevelDBBinaryRadixTreeFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "radix",
+		Type: "radix_tree",
+		RadixTree: &radixTreeSnapshot{
+			Count: 1,
+			Items: []RadixTreeItem{
+				{Key: "queue", Value: PriorityQueue{{Priority: 9, Value: "nested"}}},
+			},
+		},
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(radix tree fallback) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if snapshotValueDataIsBinary(payload) {
+		t.Fatalf("radix tree fallback payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	}
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(radix tree fallback) error = %v", err)
+	}
+	if decoded.RadixTree == nil || decoded.RadixTree.Count != 1 || len(decoded.RadixTree.Items) != 1 {
+		t.Fatalf("decoded fallback radix tree = %#v, want one item", decoded.RadixTree)
+	}
+	nested, ok := decoded.RadixTree.Items[0].Value.([]interface{})
+	if !ok || len(nested) != 1 {
+		t.Fatalf("decoded fallback radix tree value = %#v, want JSON array", decoded.RadixTree.Items[0].Value)
+	}
+	nestedItem, ok := nested[0].(map[string]interface{})
+	if !ok || nestedItem["priority"] != json.Number("9") || nestedItem["value"] != "nested" {
+		t.Fatalf("decoded fallback nested item = %#v, want JSON priority item", nested[0])
+	}
+}
+
+func TestLevelDBBinaryRadixTreeStillReadsLegacyJSONPayload(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "legacy-radix",
+		Type: "radix_tree",
+		RadixTree: &radixTreeSnapshot{
+			Count: 2,
+			Items: []RadixTreeItem{
+				{Key: "user:100", Value: "active"},
+				{Key: "user:101", Value: json.Number("42")},
+			},
+		},
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(radix tree) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON radix tree) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.RadixTree, entry.RadixTree) {
+		t.Fatalf("decoded legacy inner JSON radix tree = %#v, want %#v", decoded.RadixTree, entry.RadixTree)
+	}
+}
+
+func TestSnapshotValueBinaryRejectsImpossibleCollectionCountsBeforeAllocation(t *testing.T) {
+	data := append([]byte{}, snapshotValueBinaryMagic...)
+	writer := newBinaryFieldWriter(data, len(data)+binaryFieldMaxVarintLen64+1)
+	writer.buf = append(writer.buf, snapshotValueBinaryArray)
+	writer.writeUvarint(1 << 40)
+
+	if _, err := unmarshalSnapshotValueBinary(writer.bytes()); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("unmarshalSnapshotValueBinary(huge short array) error = %v, want unexpected EOF", err)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {

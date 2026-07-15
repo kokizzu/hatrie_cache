@@ -261,6 +261,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 		return prepareLevelDBBinaryCollectionValue(entry.Set)
 	case "priority_queue":
 		return prepareLevelDBBinaryPriorityQueueValue(entry.PriorityQueue)
+	case "radix_tree":
+		if entry.RadixTree == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: radix tree snapshot is required")
+		}
+		return prepareLevelDBBinaryRadixTreeValue(*entry.RadixTree)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -309,6 +314,29 @@ func prepareLevelDBBinaryPriorityQueueValue(items []priorityQueueItem) (levelDBB
 	if !ok {
 		var marshalErr error
 		payload, marshalErr = json.Marshal(items)
+		if marshalErr != nil {
+			return levelDBBinaryPreparedValue{}, marshalErr
+		}
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryRadixTreeValue(snapshot radixTreeSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotRadixTreeValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	if !ok {
+		var marshalErr error
+		payload, marshalErr = json.Marshal(snapshot)
 		if marshalErr != nil {
 			return levelDBBinaryPreparedValue{}, marshalErr
 		}
@@ -631,6 +659,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 	case "xor_filter":
 		return decodeLevelDBStorageJSON(data, &entry.XorFilter)
 	case "radix_tree":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(radixTreeSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary radix tree value is not a radix tree")
+			}
+			entry.RadixTree = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.RadixTree)
 	default:
 		return errors.New("hatriecache: unsupported snapshot value type")
