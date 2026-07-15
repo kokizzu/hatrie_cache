@@ -99,6 +99,32 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 	}
 }
 
+func TestREADMEListsStorageFormatTradeoffs(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"`DB_FORMAT=binary`",
+		"`DB_FORMAT=json`",
+		"`DefaultStorageFormat` (`StorageFormatBinary`)",
+		"`SaveLevelDBWithFormat(path, StorageFormatJSON)`",
+		"`OpenLevelDBStoreWithFormat(path, StorageFormatJSON)`",
+		"make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load)Materialized' BENCHTIME=20x",
+		"| LevelDB save | binary materialized values |",
+		"| LevelDB save | JSON materialized values |",
+		"| LevelDB load | binary materialized values |",
+		"| LevelDB load | JSON materialized values |",
+		"binary LevelDB format is 26% smaller",
+		"structured payload, with lower save/load CPU and heap than JSON",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md does not document storage format tradeoff token %q", token)
+		}
+	}
+}
+
 func TestREADMETracksImplementedDistributedTransport(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {

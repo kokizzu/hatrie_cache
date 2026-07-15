@@ -568,8 +568,13 @@ the normal disk spill threshold for large byte values.
 Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
 disk persistence. LevelDB loads replace the current in-memory key set. The
 LevelDB writer uses Snappy compression, skips unchanged records, clears stale
-keys on each save, and preserves per-key access metadata. `LevelDBStore.Close`
-is idempotent; operations after close return `ErrLevelDBStoreClosed`.
+keys on each save, and preserves per-key access metadata. LevelDB writes use
+`DefaultStorageFormat` (`StorageFormatBinary`) by default; use
+`SaveLevelDBWithFormat(path, StorageFormatJSON)` or
+`OpenLevelDBStoreWithFormat(path, StorageFormatJSON)` to keep writing the
+previous JSON record layout. Loads auto-detect both binary and JSON records.
+`LevelDBStore.Close` is idempotent; operations after close return
+`ErrLevelDBStoreClosed`.
 
 Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
 service in another Go process, or use the generated client in
