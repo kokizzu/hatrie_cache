@@ -1,8 +1,6 @@
 # hatrie_cache
 Experimental distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Askitis)
 
-_**warning**: this project obviously not ready for production_
-
 Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with
