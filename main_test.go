@@ -349,6 +349,35 @@ func TestBloomFilterAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestCountMinSketchAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertCountMinSketch("cms", 64, 4); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertCountMinSketch(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.IncrementCountMinSketch("cms", "value", 2); got != 0 {
+		t.Fatalf("IncrementCountMinSketch(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.IncrementCountMinSketchChecked("cms", "value", 2); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("IncrementCountMinSketchChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, err := ht.IncrementCountMinSketchChecked("cms", "value", 0); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("IncrementCountMinSketchChecked(nil trie, zero count) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.EstimateCountMinSketch("cms", "value"); got != 0 || ok {
+		t.Fatalf("EstimateCountMinSketch(nil trie) = %d/%v, want 0/false", got, ok)
+	}
+	if got, ok, err := ht.EstimateCountMinSketchChecked("cms", "value"); got != 0 || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("EstimateCountMinSketchChecked(nil trie) = %d/%v/%v, want 0/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.CountMinSketchInfo("cms"); got != (CountMinSketchInfo{}) || ok {
+		t.Fatalf("CountMinSketchInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.CountMinSketchInfoChecked("cms"); got != (CountMinSketchInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("CountMinSketchInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }

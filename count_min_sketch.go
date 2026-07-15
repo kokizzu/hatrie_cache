@@ -377,6 +377,9 @@ func (store *CountMinSketchStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertCountMinSketch(key string, width uint64, depth uint8) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	data, err := newCountMinSketchData(width, depth)
 	if err != nil {
 		return err
@@ -412,6 +415,9 @@ func (ht *HatTrie) IncrementCountMinSketch(key string, val interface{}, count ui
 }
 
 func (ht *HatTrie) IncrementCountMinSketchChecked(key string, val interface{}, count uint32, vals ...interface{}) (uint64, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	if count == 0 {
 		estimate, _, err := ht.EstimateCountMinSketchChecked(key, val)
 		return estimate, err
@@ -456,6 +462,9 @@ func (ht *HatTrie) EstimateCountMinSketch(key string, val interface{}) (uint64, 
 }
 
 func (ht *HatTrie) EstimateCountMinSketchChecked(key string, val interface{}) (uint64, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
 	valueKey, err := countMinSketchItemKey(val)
 	if err != nil {
 		return 0, false, err
@@ -484,6 +493,9 @@ func (ht *HatTrie) CountMinSketchInfo(key string) (CountMinSketchInfo, bool) {
 }
 
 func (ht *HatTrie) CountMinSketchInfoChecked(key string) (CountMinSketchInfo, bool, error) {
+	if ht == nil {
+		return CountMinSketchInfo{}, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
