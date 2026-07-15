@@ -119,6 +119,33 @@ func TestRequestBodyStreamsEstimatedLargePayload(t *testing.T) {
 	}
 }
 
+func TestEncodedRequestBodyStreamsLargePayload(t *testing.T) {
+	payload := []byte(`{"value":"` + strings.Repeat("x", 64) + `"}`)
+	body, contentEncoding, err := EncodedRequestBody(payload, 16)
+	if err != nil {
+		t.Fatalf("EncodedRequestBody() error = %v", err)
+	}
+	if contentEncoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", contentEncoding)
+	}
+	if _, ok := body.(*StreamingGzipBytesBody); !ok {
+		t.Fatalf("EncodedRequestBody() body = %T, want streaming gzip bytes body", body)
+	}
+
+	reader, err := gzip.NewReader(body)
+	if err != nil {
+		t.Fatalf("NewReader(compressed body) error = %v", err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll(compressed body) error = %v", err)
+	}
+	if !bytes.Equal(data, payload) {
+		t.Fatalf("decompressed body = %q, want %q", data, payload)
+	}
+}
+
 func TestRequestBodyReportsMarshalErrors(t *testing.T) {
 	body, contentEncoding, err := RequestBody(map[string]interface{}{"bad": func() {}}, 0, 1024)
 	if err == nil {
@@ -175,10 +202,49 @@ func TestStreamingGzipJSONReaderCloseClosesPipe(t *testing.T) {
 	}
 }
 
+func TestStreamingGzipBytesReaderCloseClosesPipe(t *testing.T) {
+	body, ok := StreamingGzipBytesReader([]byte("payload")).(*StreamingGzipBytesBody)
+	if !ok {
+		t.Fatal("StreamingGzipBytesReader() did not return streaming body")
+	}
+	if err := body.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	buffer := make([]byte, 1)
+	if _, err := body.Read(buffer); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("Read(closed body) error = %v, want io.ErrClosedPipe", err)
+	}
+	body.mu.Lock()
+	started := body.started
+	body.mu.Unlock()
+	if started {
+		t.Fatal("Read(closed body) started gzip writer")
+	}
+}
+
 func TestStreamingGzipJSONReaderCloseWaitsForStartedWriter(t *testing.T) {
 	body := StreamingGzipJSONReader(map[string]interface{}{
 		"value": strings.Repeat("x", 4096),
 	}).(*StreamingGzipJSONBody)
+	buffer := make([]byte, 1)
+	if _, err := body.Read(buffer); err != nil {
+		t.Fatalf("Read(streaming body) error = %v", err)
+	}
+	if err := body.Close(); err != nil {
+		t.Fatalf("Close(started body) error = %v", err)
+	}
+	select {
+	case <-body.done:
+	default:
+		t.Fatal("Close(started body) returned before gzip writer finished")
+	}
+	if err := body.Close(); err != nil {
+		t.Fatalf("second Close(started body) error = %v", err)
+	}
+}
+
+func TestStreamingGzipBytesReaderCloseWaitsForStartedWriter(t *testing.T) {
+	body := StreamingGzipBytesReader([]byte(strings.Repeat("x", 4096))).(*StreamingGzipBytesBody)
 	buffer := make([]byte, 1)
 	if _, err := body.Read(buffer); err != nil {
 		t.Fatalf("Read(streaming body) error = %v", err)

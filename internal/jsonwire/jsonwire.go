@@ -64,18 +64,7 @@ func EncodedRequestBody(data []byte, compressionThreshold int) (io.Reader, strin
 	if compressionThreshold <= 0 || len(data) < compressionThreshold {
 		return bytes.NewReader(data), "", nil
 	}
-	var compressed bytes.Buffer
-	writer := AcquireGzipWriter(&compressed)
-	_, writeErr := writer.Write(data)
-	closeErr := writer.Close()
-	ReleaseGzipWriter(writer)
-	if writeErr != nil {
-		return nil, "", writeErr
-	}
-	if closeErr != nil {
-		return nil, "", closeErr
-	}
-	return bytes.NewReader(compressed.Bytes()), "gzip", nil
+	return StreamingGzipBytesReader(data), "gzip", nil
 }
 
 func StreamingGzipJSONReader(value interface{}) io.Reader {
@@ -86,6 +75,84 @@ func StreamingGzipJSONReader(value interface{}) io.Reader {
 		value:  value,
 		done:   make(chan struct{}),
 	}
+}
+
+func StreamingGzipBytesReader(data []byte) io.Reader {
+	reader, writer := io.Pipe()
+	return &StreamingGzipBytesBody{
+		reader: reader,
+		writer: writer,
+		data:   data,
+		done:   make(chan struct{}),
+	}
+}
+
+type StreamingGzipBytesBody struct {
+	mu       sync.Mutex
+	reader   *io.PipeReader
+	writer   *io.PipeWriter
+	data     []byte
+	started  bool
+	closed   bool
+	closeErr error
+	done     chan struct{}
+}
+
+func (body *StreamingGzipBytesBody) Read(data []byte) (int, error) {
+	body.mu.Lock()
+	if body.closed {
+		body.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
+	if !body.started {
+		body.started = true
+		body.write()
+	}
+	body.mu.Unlock()
+	return body.reader.Read(data)
+}
+
+func (body *StreamingGzipBytesBody) Close() error {
+	body.mu.Lock()
+	if body.closed {
+		err := body.closeErr
+		started := body.started
+		done := body.done
+		body.mu.Unlock()
+		if started {
+			<-done
+		}
+		return err
+	}
+	body.closed = true
+	started := body.started
+	done := body.done
+	body.mu.Unlock()
+
+	err := body.reader.Close()
+
+	body.mu.Lock()
+	body.closeErr = err
+	body.mu.Unlock()
+	if started {
+		<-done
+	}
+	return err
+}
+
+func (body *StreamingGzipBytesBody) write() {
+	go func() {
+		defer close(body.done)
+		gzipWriter := AcquireGzipWriter(body.writer)
+		_, writeErr := gzipWriter.Write(body.data)
+		closeErr := gzipWriter.Close()
+		ReleaseGzipWriter(gzipWriter)
+		if writeErr != nil {
+			_ = body.writer.CloseWithError(writeErr)
+			return
+		}
+		_ = body.writer.CloseWithError(closeErr)
+	}()
 }
 
 type StreamingGzipJSONBody struct {
