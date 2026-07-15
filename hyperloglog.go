@@ -373,6 +373,9 @@ func (store *HyperLogLogStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertHyperLogLog(key string, precision uint8) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	data, err := newHyperLogLogData(precision)
 	if err != nil {
 		return err
@@ -408,6 +411,9 @@ func (ht *HatTrie) AddHyperLogLog(key string, val interface{}, vals ...interface
 }
 
 func (ht *HatTrie) AddHyperLogLogChecked(key string, val interface{}, vals ...interface{}) (uint64, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -445,6 +451,9 @@ func (ht *HatTrie) CountHyperLogLog(key string) (uint64, bool) {
 }
 
 func (ht *HatTrie) CountHyperLogLogChecked(key string) (uint64, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -468,6 +477,9 @@ func (ht *HatTrie) HyperLogLogInfo(key string) (HyperLogLogInfo, bool) {
 }
 
 func (ht *HatTrie) HyperLogLogInfoChecked(key string) (HyperLogLogInfo, bool, error) {
+	if ht == nil {
+		return HyperLogLogInfo{}, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

@@ -378,6 +378,32 @@ func TestCountMinSketchAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestHyperLogLogAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertHyperLogLog("hll", 10); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertHyperLogLog(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddHyperLogLog("hll", "value"); got != 0 {
+		t.Fatalf("AddHyperLogLog(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.AddHyperLogLogChecked("hll", "value"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddHyperLogLogChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.CountHyperLogLog("hll"); got != 0 || ok {
+		t.Fatalf("CountHyperLogLog(nil trie) = %d/%v, want 0/false", got, ok)
+	}
+	if got, ok, err := ht.CountHyperLogLogChecked("hll"); got != 0 || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("CountHyperLogLogChecked(nil trie) = %d/%v/%v, want 0/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.HyperLogLogInfo("hll"); got != (HyperLogLogInfo{}) || ok {
+		t.Fatalf("HyperLogLogInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.HyperLogLogInfoChecked("hll"); got != (HyperLogLogInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HyperLogLogInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
