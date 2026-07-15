@@ -348,6 +348,10 @@ func (store *FenwickTreeStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertFenwickTree(key string, size uint64) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	data, err := newFenwickTreeData(size)
 	if err != nil {
 		return err
@@ -383,6 +387,9 @@ func (ht *HatTrie) AddFenwickTree(key string, index uint64, delta int64) (Fenwic
 }
 
 func (ht *HatTrie) AddFenwickTreeChecked(key string, index uint64, delta int64) (FenwickTreeUpdate, bool, error) {
+	if ht == nil {
+		return FenwickTreeUpdate{}, false, ErrNilHatTrie
+	}
 	if delta == 0 || index >= maxFenwickTreeSize {
 		return FenwickTreeUpdate{}, false, nil
 	}
@@ -426,6 +433,10 @@ func (ht *HatTrie) GetFenwickTree(key string, index uint64) (int64, bool) {
 }
 
 func (ht *HatTrie) GetFenwickTreeChecked(key string, index uint64) (int64, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -449,6 +460,10 @@ func (ht *HatTrie) PrefixSumFenwickTree(key string, index uint64) (int64, bool) 
 }
 
 func (ht *HatTrie) PrefixSumFenwickTreeChecked(key string, index uint64) (int64, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -472,6 +487,10 @@ func (ht *HatTrie) RangeSumFenwickTree(key string, start uint64, end uint64) (in
 }
 
 func (ht *HatTrie) RangeSumFenwickTreeChecked(key string, start uint64, end uint64) (int64, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -495,6 +514,10 @@ func (ht *HatTrie) FenwickTreeInfo(key string) (FenwickTreeInfo, bool) {
 }
 
 func (ht *HatTrie) FenwickTreeInfoChecked(key string) (FenwickTreeInfo, bool, error) {
+	if ht == nil {
+		return FenwickTreeInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

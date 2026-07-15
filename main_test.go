@@ -696,6 +696,47 @@ func TestQuantileSketchAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestFenwickTreeAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertFenwickTree("fenwick", 8); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertFenwickTree(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got, ok := ht.AddFenwickTree("fenwick", 2, 5); got != (FenwickTreeUpdate{}) || ok {
+		t.Fatalf("AddFenwickTree(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.AddFenwickTreeChecked("fenwick", 2, 5); got != (FenwickTreeUpdate{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddFenwickTreeChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok, err := ht.AddFenwickTreeChecked("fenwick", 2, 0); got != (FenwickTreeUpdate{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddFenwickTreeChecked(nil trie, zero delta) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.GetFenwickTree("fenwick", 2); got != 0 || ok {
+		t.Fatalf("GetFenwickTree(nil trie) = %d/%v, want 0/false", got, ok)
+	}
+	if got, ok, err := ht.GetFenwickTreeChecked("fenwick", 2); got != 0 || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetFenwickTreeChecked(nil trie) = %d/%v/%v, want 0/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.PrefixSumFenwickTree("fenwick", 2); got != 0 || ok {
+		t.Fatalf("PrefixSumFenwickTree(nil trie) = %d/%v, want 0/false", got, ok)
+	}
+	if got, ok, err := ht.PrefixSumFenwickTreeChecked("fenwick", 2); got != 0 || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PrefixSumFenwickTreeChecked(nil trie) = %d/%v/%v, want 0/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.RangeSumFenwickTree("fenwick", 1, 2); got != 0 || ok {
+		t.Fatalf("RangeSumFenwickTree(nil trie) = %d/%v, want 0/false", got, ok)
+	}
+	if got, ok, err := ht.RangeSumFenwickTreeChecked("fenwick", 1, 2); got != 0 || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("RangeSumFenwickTreeChecked(nil trie) = %d/%v/%v, want 0/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.FenwickTreeInfo("fenwick"); got != (FenwickTreeInfo{}) || ok {
+		t.Fatalf("FenwickTreeInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.FenwickTreeInfoChecked("fenwick"); got != (FenwickTreeInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("FenwickTreeInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
