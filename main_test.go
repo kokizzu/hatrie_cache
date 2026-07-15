@@ -5423,7 +5423,16 @@ func TestStoragePoolsTrimReusableTailSlots(t *testing.T) {
 	refs.Add(LevelDBReference{Key: "zero"})
 	refMiddle := refs.Add(LevelDBReference{Key: "middle"})
 	refTail := refs.Add(LevelDBReference{Key: "tail"})
+	if !refs.Set(refMiddle, LevelDBReference{Key: "updated"}) {
+		t.Fatal("leveldb ref Set(middle) = false, want true")
+	}
+	if got, ok := refs.Get(refMiddle); !ok || got.Key != "updated" {
+		t.Fatalf("leveldb ref after Set = %#v/%v, want updated/true", got, ok)
+	}
 	refs.Del(refMiddle)
+	if refs.Set(refMiddle, LevelDBReference{Key: "deleted"}) {
+		t.Fatal("leveldb ref Set(deleted middle) = true, want false")
+	}
 	refs.Del(refTail)
 	if got := len(refs.array); got != 1 {
 		t.Fatalf("leveldb ref len after tail trim = %d, want 1", got)

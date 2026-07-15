@@ -54,6 +54,59 @@ func levelDBEntryDataIsBinary(data []byte) bool {
 	return bytes.HasPrefix(data, levelDBBinaryMagic)
 }
 
+func rewriteLevelDBBinaryEntryMetadata(data []byte, key string, expiresAt *time.Time, stats *KeyStats) ([]byte, bool, error) {
+	valueEnd, ok, err := levelDBBinaryValueEndOffsetForKey(data, key)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	capacity, err := addLevelDBBinaryRecordSize(int64(valueEnd), int64(levelDBBinaryTimePtrSize(expiresAt)))
+	if err != nil {
+		return nil, true, err
+	}
+	capacity, err = addLevelDBBinaryRecordSize(capacity, int64(levelDBBinaryKeyStatsPtrSize(stats)))
+	if err != nil {
+		return nil, true, err
+	}
+	buf := make([]byte, 0, int(capacity))
+	buf = append(buf, data[:valueEnd]...)
+	writer := levelDBBinaryWriter{binaryFieldWriter: binaryFieldWriter{buf: buf}}
+	writer.writeTimePtr(expiresAt)
+	writer.writeKeyStatsPtr(stats)
+	return writer.bytes(), true, nil
+}
+
+func levelDBBinaryValueEndOffsetForKey(data []byte, key string) (int, bool, error) {
+	if !levelDBEntryDataIsBinary(data) {
+		return 0, false, nil
+	}
+	reader := levelDBBinaryReader{binaryFieldReader: newBinaryFieldReader(data[len(levelDBBinaryMagic):])}
+	entryKey, err := reader.readString()
+	if err != nil {
+		return 0, true, err
+	}
+	if entryKey != key {
+		return 0, true, fmt.Errorf("hatriecache: leveldb entry key mismatch: record has %q, want %q", entryKey, key)
+	}
+	entryType, err := reader.readString()
+	if err != nil {
+		return 0, true, err
+	}
+	if err := reader.skipSnapshotEntryValue(entryType); err != nil {
+		return 0, true, err
+	}
+	valueEnd := len(levelDBBinaryMagic) + reader.off
+	if _, err := reader.readTimePtr(); err != nil {
+		return 0, true, err
+	}
+	if _, err := reader.readKeyStatsPtr(); err != nil {
+		return 0, true, err
+	}
+	if !reader.done() {
+		return 0, true, errors.New("hatriecache: invalid trailing binary leveldb entry data")
+	}
+	return valueEnd, true, nil
+}
+
 func marshalLevelDBEntryBinary(entry snapshotEntry) ([]byte, error) {
 	value, err := prepareLevelDBBinaryEntryValue(entry)
 	if err != nil {
@@ -828,6 +881,17 @@ func (reader *levelDBBinaryReader) readSnapshotEntryValue(entry *snapshotEntry) 
 		return unmarshalSnapshotEntryValueJSON(payload, entry)
 	}
 	return nil
+}
+
+func (reader *levelDBBinaryReader) skipSnapshotEntryValue(entryType string) error {
+	switch entryType {
+	case "counter":
+		_, err := reader.readVarint()
+		return err
+	default:
+		_, err := reader.readBytes()
+		return err
+	}
 }
 
 func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {

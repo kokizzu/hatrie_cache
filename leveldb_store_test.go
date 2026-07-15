@@ -4205,6 +4205,66 @@ func TestLevelDBStoreSaveRewritesColdReferenceWhenStatsChange(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreSavePatchesBinaryColdReferenceMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("cold", "value")
+	if err := store.Save(source); err != nil {
+		t.Fatalf("Save(source) error = %v", err)
+	}
+	raw, ok, err := store.entryData("cold")
+	if err != nil || !ok {
+		t.Fatalf("entryData(cold) = %v/%v, want binary record", ok, err)
+	}
+	if !levelDBEntryDataIsBinary(raw) {
+		t.Fatalf("entryData(cold) = %q, want binary record", raw)
+	}
+	valueEnd, ok, err := levelDBBinaryValueEndOffsetForKey(raw, "cold")
+	if err != nil || !ok {
+		t.Fatalf("levelDBBinaryValueEndOffsetForKey() = %d/%v/%v, want binary offset", valueEnd, ok, err)
+	}
+
+	now := time.Unix(5100, 0)
+	loaded := newTestTrie(t)
+	loaded.now = func() time.Time { return now }
+	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
+		t.Fatalf("LoadWithPolicy() error = %v", err)
+	}
+	if !loaded.Exists("cold") {
+		t.Fatal("Exists(cold) = false, want true")
+	}
+	if err := store.Save(loaded); err != nil {
+		t.Fatalf("Save(stats-changed binary cold ref) error = %v", err)
+	}
+
+	got, ok, err := store.entryData("cold")
+	if err != nil || !ok {
+		t.Fatalf("entryData(cold) after save = %v/%v, want record", ok, err)
+	}
+	if bytes.Equal(got, raw) {
+		t.Fatal("stats-changed binary cold record was raw-copied without metadata patch")
+	}
+	if len(got) < valueEnd || !bytes.Equal(got[:valueEnd], raw[:valueEnd]) {
+		t.Fatalf("binary cold record value prefix changed:\ngot  % x\nwant % x", got[:shortHeaderLen(got)], raw[:shortHeaderLen(raw)])
+	}
+	entry, err := decodeLevelDBEntryForKey("cold", got)
+	if err != nil {
+		t.Fatalf("decode patched binary cold record error = %v", err)
+	}
+	if entry.String != "value" {
+		t.Fatalf("patched value = %q, want value", entry.String)
+	}
+	if entry.Stats == nil || entry.Stats.Reads != 1 || entry.Stats.Hits != 1 || !entry.Stats.LastHit.Equal(now) {
+		t.Fatalf("patched stats = %#v, want one hit at %s", entry.Stats, now)
+	}
+}
+
 func TestLevelDBStoreSaveValidatesChangedColdReferenceRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	store, err := OpenLevelDBStore(path)

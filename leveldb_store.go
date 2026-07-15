@@ -631,9 +631,7 @@ func (trie *HatTrie) levelDBReferenceEntryDataForStoreLocked(key string, hval Ha
 	if !ok || ref.Store == nil || ref.Key != key || ref.RecordBytes <= 0 {
 		return nil, false, nil
 	}
-	if !trie.levelDBReferenceMetadataMatchesLocked(key, ref) {
-		return nil, false, nil
-	}
+	metadataMatches := trie.levelDBReferenceMetadataMatchesLocked(key, ref)
 	var (
 		data []byte
 		err  error
@@ -649,7 +647,20 @@ func (trie *HatTrie) levelDBReferenceEntryDataForStoreLocked(key string, hval Ha
 	if len(data) != ref.RecordBytes || levelDBRecordChecksum(data) != ref.RecordChecksum {
 		return nil, false, nil
 	}
-	return data, true, nil
+	if metadataMatches {
+		return data, true, nil
+	}
+	expiresAt, stats := trie.levelDBReferenceMetadataLocked(key)
+	patched, ok, err := rewriteLevelDBBinaryEntryMetadata(data, key, expiresAt, stats)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	ref.ExpiresAt = cloneTimePtr(expiresAt)
+	ref.Stats = cloneKeyStatsPtr(stats)
+	ref.RecordBytes = len(patched)
+	ref.RecordChecksum = levelDBRecordChecksum(patched)
+	trie.dbrefs.Set(hval.Index, ref)
+	return patched, true, nil
 }
 
 func (trie *HatTrie) levelDBReferenceMetadataMatchesLocked(key string, ref LevelDBReference) bool {
@@ -662,6 +673,16 @@ func (trie *HatTrie) levelDBReferenceMetadataMatchesLocked(key string, ref Level
 		currentStats = &stats
 	}
 	return keyStatsPtrEqual(ref.Stats, currentStats)
+}
+
+func (trie *HatTrie) levelDBReferenceMetadataLocked(key string) (*time.Time, *KeyStats) {
+	expiresAt := snapshotExpiresAt(trie.expires[key])
+	var stats *KeyStats
+	if keyStats, ok := trie.keyStats[key]; ok {
+		keyStats.updateRates()
+		stats = &keyStats
+	}
+	return expiresAt, stats
 }
 
 func (trie *HatTrie) levelDBReferenceSnapshotEntryLocked(key string, hval HatValue) (snapshotEntry, error) {

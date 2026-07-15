@@ -345,8 +345,8 @@ samples, XOR filters, and radix trees.
 | LevelDB save | JSON materialized values | 3,341,825 ns/op | 394,194 record_B/op | 1,149,580 B/op | 6,163 |
 | LevelDB save | binary structured values | 1,751,318 ns/op | 79,404 record_B/op | 507,664 B/op | 3,827 |
 | LevelDB save | JSON structured values | 2,179,589 ns/op | 175,315 record_B/op | 690,626 B/op | 4,597 |
-| LevelDB save | unchanged binary cold refs | 1,175,011 ns/op | 293,376 record_B/op | 673,107 B/op | 4,625 |
-| LevelDB save | stats-changed binary cold refs | 3,137,600 ns/op | 293,376 record_B/op | 1,775,687 B/op | 9,746 |
+| LevelDB save | unchanged binary cold refs | 1,353,682 ns/op | 293,376 record_B/op | 673,102 B/op | 4,625 |
+| LevelDB save | stats-changed binary cold refs | 1,736,767 ns/op | 293,376 record_B/op | 832,172 B/op | 4,780 |
 | LevelDB load | binary materialized values | 2,786,401 ns/op | 293,376 record_B/op | 1,205,047 B/op | 4,706 |
 | LevelDB load | JSON materialized values | 4,250,143 ns/op | 394,223 record_B/op | 1,912,317 B/op | 12,386 |
 | LevelDB load | binary structured values | 2,933,838 ns/op | 79,404 record_B/op | 983,042 B/op | 6,771 |

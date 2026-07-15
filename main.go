@@ -1600,6 +1600,14 @@ func (rs *LevelDBReferenceStorage) Get(idx int32) (LevelDBReference, bool) {
 	return rs.array[idx], !rs.reusables.Has(idx)
 }
 
+func (rs *LevelDBReferenceStorage) Set(idx int32, value LevelDBReference) bool {
+	if rs == nil || idx < 0 || int(idx) >= len(rs.array) || rs.reusables.Has(idx) {
+		return false
+	}
+	rs.array[idx] = value
+	return true
+}
+
 func (rs *LevelDBReferenceStorage) Del(idx int32) {
 	if rs == nil || idx < 0 || int(idx) >= len(rs.array) {
 		return
