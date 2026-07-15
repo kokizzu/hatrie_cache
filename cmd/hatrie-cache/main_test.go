@@ -625,6 +625,97 @@ func TestMonitoringServerServesHTTP2OverTLS(t *testing.T) {
 	}
 }
 
+func TestStopGRPCServerWithTimeoutHandlesNilAndFastStop(t *testing.T) {
+	stopGRPCServerWithTimeout(nil, time.Millisecond)
+
+	server := grpc.NewServer()
+	stopped := make(chan struct{})
+	go func() {
+		stopGRPCServerWithTimeout(server, time.Hour)
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("stopGRPCServerWithTimeout(fast) did not return")
+	}
+}
+
+func TestStopGRPCServerWithTimeoutForcesBlockedRPC(t *testing.T) {
+	entered := make(chan struct{})
+	released := make(chan struct{})
+	interceptor := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if info.FullMethod != "/hatriecache.v1.CacheService/Health" {
+			return handler(ctx, req)
+		}
+		close(entered)
+		<-ctx.Done()
+		close(released)
+		return nil, ctx.Err()
+	}
+
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor))
+	hatriecache.RegisterCacheGRPCServer(server, hatriecache.NewCacheGRPCServer(ht, hatriecache.CacheGRPCOptions{}))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	conn, err := grpc.DialContext(ctx, listener.Addr().String(),
+		grpc.WithBlock(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	cancel()
+	if err != nil {
+		server.Stop()
+		t.Fatalf("DialContext() error = %v", err)
+	}
+	defer conn.Close()
+
+	client := hatriecachev1.NewCacheServiceClient(conn)
+	rpcErr := make(chan error, 1)
+	go func() {
+		_, err := client.Health(context.Background(), &hatriecachev1.HealthRequest{})
+		rpcErr <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		server.Stop()
+		t.Fatal("blocked health RPC did not enter interceptor")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		stopGRPCServerWithTimeout(server, 10*time.Millisecond)
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		server.Stop()
+		t.Fatal("stopGRPCServerWithTimeout(timeout) did not force stop")
+	}
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("blocked health RPC was not released")
+	}
+	if err := <-rpcErr; err == nil {
+		t.Fatal("blocked health RPC error = nil, want cancellation error")
+	}
+	if err := <-serveErr; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+		t.Fatalf("Serve() error = %v, want nil or ErrServerStopped", err)
+	}
+}
+
 func TestRunDoesNotStartServerByDefault(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	if err := run(nil, nil, stdout, &bytes.Buffer{}); err != nil {

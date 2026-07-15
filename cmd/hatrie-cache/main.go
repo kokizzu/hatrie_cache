@@ -544,6 +544,10 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 }
 
 func stopGRPCServer(server *grpc.Server) {
+	stopGRPCServerWithTimeout(server, serverShutdownTimeout)
+}
+
+func stopGRPCServerWithTimeout(server *grpc.Server, timeout time.Duration) {
 	if server == nil {
 		return
 	}
@@ -552,9 +556,16 @@ func stopGRPCServer(server *grpc.Server) {
 		server.GracefulStop()
 		close(done)
 	}()
+	if timeout <= 0 {
+		server.Stop()
+		<-done
+		return
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-done:
-	case <-time.After(serverShutdownTimeout):
+	case <-timer.C:
 		server.Stop()
 		<-done
 	}
