@@ -478,6 +478,10 @@ func (store *TopKStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertTopK(key string, capacity uint64) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	data, err := newTopKData(capacity)
 	if err != nil {
 		return err
@@ -513,6 +517,9 @@ func (ht *HatTrie) AddTopK(key string, val interface{}, count uint64, vals ...in
 }
 
 func (ht *HatTrie) AddTopKChecked(key string, val interface{}, count uint64, vals ...interface{}) (TopKEstimate, error) {
+	if ht == nil {
+		return TopKEstimate{}, ErrNilHatTrie
+	}
 	if count == 0 {
 		return ht.EstimateTopKChecked(key, val)
 	}
@@ -556,6 +563,10 @@ func (ht *HatTrie) EstimateTopK(key string, val interface{}) TopKEstimate {
 }
 
 func (ht *HatTrie) EstimateTopKChecked(key string, val interface{}) (TopKEstimate, error) {
+	if ht == nil {
+		return TopKEstimate{}, ErrNilHatTrie
+	}
+
 	valueKey, err := topKItemKey(val)
 	if err != nil {
 		return TopKEstimate{}, err
@@ -587,6 +598,10 @@ func (ht *HatTrie) GetTopK(key string) []TopKItem {
 }
 
 func (ht *HatTrie) GetTopKChecked(key string) ([]TopKItem, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -609,6 +624,10 @@ func (ht *HatTrie) TopKInfo(key string) (TopKInfo, bool) {
 }
 
 func (ht *HatTrie) TopKInfoChecked(key string) (TopKInfo, bool, error) {
+	if ht == nil {
+		return TopKInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

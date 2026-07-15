@@ -404,6 +404,41 @@ func TestHyperLogLogAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestTopKAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertTopK("top", 3); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertTopK(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddTopK("top", "value", 2); got != (TopKEstimate{}) {
+		t.Fatalf("AddTopK(nil trie) = %#v, want zero", got)
+	}
+	if got, err := ht.AddTopKChecked("top", "value", 2); got != (TopKEstimate{}) || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddTopKChecked(nil trie) = %#v/%v, want zero/ErrNilHatTrie", got, err)
+	}
+	if got, err := ht.AddTopKChecked("top", "value", 0); got != (TopKEstimate{}) || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddTopKChecked(nil trie, zero count) = %#v/%v, want zero/ErrNilHatTrie", got, err)
+	}
+	if got := ht.EstimateTopK("top", "value"); got != (TopKEstimate{}) {
+		t.Fatalf("EstimateTopK(nil trie) = %#v, want zero", got)
+	}
+	if got, err := ht.EstimateTopKChecked("top", "value"); got != (TopKEstimate{}) || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("EstimateTopKChecked(nil trie) = %#v/%v, want zero/ErrNilHatTrie", got, err)
+	}
+	if got := ht.GetTopK("top"); got != nil {
+		t.Fatalf("GetTopK(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.GetTopKChecked("top"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetTopKChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.TopKInfo("top"); got != (TopKInfo{}) || ok {
+		t.Fatalf("TopKInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.TopKInfoChecked("top"); got != (TopKInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("TopKInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
