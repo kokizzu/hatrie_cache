@@ -62,6 +62,23 @@ func TestRunRequiresSubcommand(t *testing.T) {
 	}
 }
 
+func TestRunAcceptsNilWriters(t *testing.T) {
+	err := run(context.Background(), nil, nil, nil, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "subcommand is required") {
+		t.Fatalf("run(nil writers) error = %v, want subcommand error", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"online"}`))
+	}))
+	defer server.Close()
+
+	if err := run(nil, []string{"-addr", server.URL, "health"}, nil, nil, nil); err != nil {
+		t.Fatalf("run(health, nil writers) error = %v", err)
+	}
+}
+
 func TestRunDefaultsNilContextAndClient(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +97,28 @@ func TestRunDefaultsNilContextAndClient(t *testing.T) {
 	}
 	if got := stdout.String(); got != "{\"status\":\"online\"}\n" {
 		t.Fatalf("stdout = %q, want health JSON with trailing newline", got)
+	}
+}
+
+func TestHTTPHelpersAcceptNilStdout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			w.Write([]byte(`{"status":"online"}`))
+		case "/api/commands":
+			w.Write([]byte(`{"ok":true,"message":"ok"}`))
+		default:
+			t.Fatalf("unexpected path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	if err := getJSON(nil, nil, server.URL, "/api/health", nil); err != nil {
+		t.Fatalf("getJSON(nil stdout) error = %v", err)
+	}
+	if err := postCommandValue(nil, nil, server.URL, hatriecache.CacheCommandRequest{Command: "GET", Key: "name"}, "json", nil); err != nil {
+		t.Fatalf("postCommandValue(nil stdout) error = %v", err)
 	}
 }
 

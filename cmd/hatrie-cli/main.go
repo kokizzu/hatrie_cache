@@ -52,8 +52,17 @@ func cliHTTPClient(client *http.Client) *http.Client {
 	return client
 }
 
+func cliWriter(writer io.Writer) io.Writer {
+	if writer == nil {
+		return io.Discard
+	}
+	return writer
+}
+
 func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, client *http.Client) error {
 	ctx = cliContext(ctx)
+	stdout = cliWriter(stdout)
+	stderr = cliWriter(stderr)
 	cfg, remaining, err := parseGlobalFlags(args, stderr)
 	if err != nil {
 		return err
@@ -100,7 +109,7 @@ func parseGlobalFlags(args []string, output io.Writer) (clientConfig, []string, 
 		timeout: defaultRequestTimeout,
 	}
 	flags := flag.NewFlagSet("hatrie-cli", flag.ContinueOnError)
-	flags.SetOutput(output)
+	flags.SetOutput(cliWriter(output))
 	flags.StringVar(&cfg.addr, "addr", cfg.addr, "monitoring server base URL")
 	flags.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "request timeout; use 0 to disable")
 	if err := flags.Parse(args); err != nil {
@@ -111,7 +120,7 @@ func parseGlobalFlags(args []string, output io.Writer) (clientConfig, []string, 
 
 func runEntries(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("entries", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(cliWriter(stderr))
 	prefix := flags.String("prefix", "", "key prefix filter")
 	limit := flags.Uint64("limit", 0, "maximum entries to fetch")
 	afterKey := flags.String("after-key", "", "only return entries after this key")
@@ -138,7 +147,7 @@ func runEntries(ctx context.Context, client *http.Client, addr string, args []st
 
 func runTopology(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("topology", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(cliWriter(stderr))
 	filePath := flags.String("file", "", "topology JSON file to upload")
 	key := flags.String("key", "", "cache key to route through the current topology")
 	if err := flags.Parse(args); err != nil {
@@ -164,7 +173,7 @@ func runTopology(ctx context.Context, client *http.Client, addr string, args []s
 
 func runElection(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("election", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(cliWriter(stderr))
 	key := flags.String("key", "", "cache key to route through election")
 	heartbeat := flags.String("heartbeat", "", "node id to mark online")
 	offline := flags.String("offline", "", "node id to mark offline")
@@ -209,7 +218,7 @@ func postElectionUpdate(ctx context.Context, client *http.Client, addr string, n
 
 func runReplication(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("replication", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(cliWriter(stderr))
 	sync := flags.Bool("sync", false, "push local entries to topology replicas")
 	prefix := flags.String("prefix", "", "key prefix to sync")
 	if err := flags.Parse(args); err != nil {
@@ -234,7 +243,7 @@ func runReplication(ctx context.Context, client *http.Client, addr string, args 
 
 func runJournal(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("journal", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(cliWriter(stderr))
 	afterSequence := flags.Uint64("after-sequence", 0, "only return journal entries after this sequence")
 	limit := flags.Uint64("limit", 0, "maximum journal entries to fetch or pull")
 	pullFrom := flags.String("pull-from", "", "source monitoring server base URL to pull and apply journal entries from")
@@ -286,7 +295,7 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 
 func runCommand(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("command", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(cliWriter(stderr))
 	command := flags.String("cmd", "", "cache command")
 	key := flags.String("key", "", "cache key")
 	value := flags.String("value", "", "cache value")
@@ -509,6 +518,7 @@ func putJSONReader(ctx context.Context, client *http.Client, addr string, path s
 }
 
 func doAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
+	stdout = cliWriter(stdout)
 	client = cliHTTPClient(client)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -527,6 +537,7 @@ func doAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
 }
 
 func doCommandAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
+	stdout = cliWriter(stdout)
 	client = cliHTTPClient(client)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -617,6 +628,7 @@ func (writer *trailingNewlineWriter) Write(data []byte) (int, error) {
 }
 
 func copyAndEnsureTrailingNewline(stdout io.Writer, body io.Reader) error {
+	stdout = cliWriter(stdout)
 	writer := &trailingNewlineWriter{writer: stdout}
 	if _, err := io.Copy(writer, body); err != nil {
 		return err
