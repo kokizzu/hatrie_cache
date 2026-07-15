@@ -119,6 +119,8 @@ func TestREADMEListsStorageFormatTradeoffs(t *testing.T) {
 		"| LevelDB save | JSON materialized values |",
 		"| LevelDB load | binary materialized values |",
 		"| LevelDB load | JSON materialized values |",
+		"| Structured journal encode | binary (default) |",
+		"| Structured journal decode | binary (default) |",
 		"binary LevelDB format is 26% smaller",
 		"structured payload, with lower save/load CPU and heap than JSON",
 	} {
