@@ -6,6 +6,7 @@
 #include "str_map.h"
 #include "../src/ahtable.h"
 #include "../src/hat-trie.h"
+#include "../src/misc.h"
 
 /* Simple random string generation. */
 void randstr(char* x, size_t len)
@@ -32,13 +33,13 @@ int have_error = 0;
 void setup()
 {
     fprintf(stderr, "generating %zu keys ... ", n);
-    xs = malloc(n * sizeof(char*));
-    ds = malloc(d * sizeof(char*));
+    xs = malloc_array_or_die(n, sizeof(char*));
+    ds = malloc_array_or_die(d, sizeof(char*));
     size_t i;
     size_t m;
     for (i = 0; i < n; ++i) {
         m = m_low + rand() % (m_high - m_low);
-        xs[i] = malloc(m + 1);
+        xs[i] = malloc_or_die(m + 1);
         randstr(xs[i], m);
     }
     for (i = 0; i < d; ++i) {

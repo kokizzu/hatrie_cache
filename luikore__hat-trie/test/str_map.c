@@ -90,8 +90,9 @@ static void clear(str_map*);
 str_map* str_map_create()
 {
     str_map* T = malloc_or_die(sizeof(str_map));
-    T->A = malloc_or_die(INITIAL_TABLE_SIZE * sizeof(str_map_pair*));
-    memset(T->A, 0, INITIAL_TABLE_SIZE * sizeof(str_map_pair*));
+    size_t table_bytes = array_bytes_or_die(INITIAL_TABLE_SIZE, sizeof(str_map_pair*));
+    T->A = malloc_or_die(table_bytes);
+    memset(T->A, 0, table_bytes);
     T->n = INITIAL_TABLE_SIZE;
     T->m = 0;
     T->max_m = T->n * MAX_LOAD;
@@ -144,8 +145,9 @@ static void rehash(str_map* T, size_t new_n)
     U.n = new_n;
     U.m = 0;
     U.max_m = U.n * MAX_LOAD;
-    U.A = malloc_or_die(U.n * sizeof(str_map_pair*));
-    memset(U.A, 0, U.n * sizeof(str_map_pair*));
+    size_t table_bytes = array_bytes_or_die(U.n, sizeof(str_map_pair*));
+    U.A = malloc_or_die(table_bytes);
+    memset(U.A, 0, table_bytes);
 
     str_map_pair *j, *k;
     size_t i;
@@ -168,7 +170,7 @@ static void rehash(str_map* T, size_t new_n)
 
 void str_map_set(str_map* T, const char* key, size_t keylen, value_t value)
 {
-    if (T->m >= T->max_m) rehash(T, T->n * 2);
+    if (T->m >= T->max_m) rehash(T, array_bytes_or_die(T->n, 2));
 
     uint32_t h = hash(key, keylen) % T->n;
 
@@ -238,4 +240,3 @@ void str_map_del(str_map* T, const char* key, size_t keylen)
     }
 
 }
-
