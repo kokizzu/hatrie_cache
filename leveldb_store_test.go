@@ -690,14 +690,53 @@ func TestLevelDBBinaryRadixTreeStillReadsLegacyJSONPayload(t *testing.T) {
 }
 
 func TestSnapshotValueBinaryRejectsImpossibleCollectionCountsBeforeAllocation(t *testing.T) {
-	data := append([]byte{}, snapshotValueBinaryMagic...)
-	writer := newBinaryFieldWriter(data, len(data)+binaryFieldMaxVarintLen64+1)
-	writer.buf = append(writer.buf, snapshotValueBinaryArray)
-	writer.writeUvarint(1 << 40)
-
-	if _, err := unmarshalSnapshotValueBinary(writer.bytes()); !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("unmarshalSnapshotValueBinary(huge short array) error = %v, want unexpected EOF", err)
+	for _, test := range []struct {
+		name  string
+		build func() []byte
+	}{
+		{
+			name: "array",
+			build: func() []byte {
+				writer := newSnapshotValueBinaryTestWriter()
+				writer.buf = append(writer.buf, snapshotValueBinaryArray)
+				writer.writeUvarint(1 << 40)
+				return writer.bytes()
+			},
+		},
+		{
+			name: "top_k",
+			build: func() []byte {
+				writer := newSnapshotValueBinaryTestWriter()
+				writer.buf = append(writer.buf, snapshotValueBinaryTopK)
+				writer.writeUvarint(100)
+				writer.writeUvarint(100)
+				writer.writeUvarint(1 << 40)
+				return writer.bytes()
+			},
+		},
+		{
+			name: "reservoir_sample",
+			build: func() []byte {
+				writer := newSnapshotValueBinaryTestWriter()
+				writer.buf = append(writer.buf, snapshotValueBinaryReservoirSample)
+				writer.writeUvarint(100)
+				writer.writeUvarint(100)
+				writer.writeUvarint(1 << 40)
+				return writer.bytes()
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := unmarshalSnapshotValueBinary(test.build()); !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("unmarshalSnapshotValueBinary(huge short %s) error = %v, want unexpected EOF", test.name, err)
+			}
+		})
 	}
+}
+
+func newSnapshotValueBinaryTestWriter() binaryFieldWriter {
+	data := append([]byte{}, snapshotValueBinaryMagic...)
+	return newBinaryFieldWriter(data, len(data)+binaryFieldMaxVarintLen64+3)
 }
 
 func TestLevelDBBinaryBloomFilterUsesBinaryValuePayload(t *testing.T) {
