@@ -670,6 +670,32 @@ func TestReservoirSampleAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestQuantileSketchAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertQuantileSketch("quantile", 0.01); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertQuantileSketch(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddQuantileSketch("quantile", 10); got != (QuantileEstimate{}) {
+		t.Fatalf("AddQuantileSketch(nil trie) = %#v, want zero", got)
+	}
+	if got, err := ht.AddQuantileSketchChecked("quantile", 10); got != (QuantileEstimate{}) || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddQuantileSketchChecked(nil trie) = %#v/%v, want zero/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.EstimateQuantileSketch("quantile", 0.5); got != (QuantileEstimate{}) || ok {
+		t.Fatalf("EstimateQuantileSketch(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.EstimateQuantileSketchChecked("quantile", 0.5); got != (QuantileEstimate{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("EstimateQuantileSketchChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.QuantileSketchInfo("quantile"); got != (QuantileSketchInfo{}) || ok {
+		t.Fatalf("QuantileSketchInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.QuantileSketchInfoChecked("quantile"); got != (QuantileSketchInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("QuantileSketchInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }

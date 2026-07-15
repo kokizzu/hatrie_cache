@@ -341,6 +341,10 @@ func (store *QuantileSketchStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertQuantileSketch(key string, epsilon float64) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	data, err := newQuantileSketchData(epsilon)
 	if err != nil {
 		return err
@@ -376,6 +380,9 @@ func (ht *HatTrie) AddQuantileSketch(key string, val float64, vals ...float64) Q
 }
 
 func (ht *HatTrie) AddQuantileSketchChecked(key string, val float64, vals ...float64) (QuantileEstimate, error) {
+	if ht == nil {
+		return QuantileEstimate{}, ErrNilHatTrie
+	}
 	if !validQuantileSketchValues(val, vals...) {
 		return QuantileEstimate{}, errors.New("hatriecache: quantile sketch values must be finite numbers")
 	}
@@ -412,6 +419,9 @@ func (ht *HatTrie) EstimateQuantileSketch(key string, quantile float64) (Quantil
 }
 
 func (ht *HatTrie) EstimateQuantileSketchChecked(key string, quantile float64) (QuantileEstimate, bool, error) {
+	if ht == nil {
+		return QuantileEstimate{}, false, ErrNilHatTrie
+	}
 	if math.IsNaN(quantile) || math.IsInf(quantile, 0) || quantile < 0 || quantile > 1 {
 		return QuantileEstimate{}, false, errors.New("hatriecache: quantile must be between 0 and 1")
 	}
@@ -439,6 +449,10 @@ func (ht *HatTrie) QuantileSketchInfo(key string) (QuantileSketchInfo, bool) {
 }
 
 func (ht *HatTrie) QuantileSketchInfoChecked(key string) (QuantileSketchInfo, bool, error) {
+	if ht == nil {
+		return QuantileSketchInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
