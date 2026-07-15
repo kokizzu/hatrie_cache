@@ -2815,6 +2815,37 @@ func TestLevelDBStoreCloseIsIdempotentAndRejectsOperations(t *testing.T) {
 	}
 }
 
+func TestLevelDBPersistenceRejectsNilTrie(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	if err := store.Save(nil); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("Save(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if _, err := store.Load(nil); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("Load(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if _, err := store.LoadWithPolicy(nil, DefaultLevelDBHotLoadPolicy()); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("LoadWithPolicy(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+
+	var trie *HatTrie
+	nilSavePath := filepath.Join(t.TempDir(), "nil-save.leveldb")
+	if err := trie.SaveLevelDB(nilSavePath); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("SaveLevelDB(nil receiver) error = %v, want ErrNilHatTrie", err)
+	}
+	if _, err := os.Stat(nilSavePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("SaveLevelDB(nil receiver) created path/stat error = %v, want not exist", err)
+	}
+	if _, err := trie.LoadLevelDB(filepath.Join(t.TempDir(), "nil-load.leveldb")); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("LoadLevelDB(nil receiver) error = %v, want ErrNilHatTrie", err)
+	}
+}
+
 func TestHydrateLevelDBReferencesAllowsClosingStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

@@ -1497,6 +1497,20 @@ func TestStatsTrackExpirationsAndPersistToDisk(t *testing.T) {
 	}
 }
 
+func TestStatsPersistenceRejectsNilTrie(t *testing.T) {
+	var ht *HatTrie
+	savePath := filepath.Join(t.TempDir(), "stats.json")
+	if err := ht.SaveStats(savePath); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("SaveStats(nil receiver) error = %v, want ErrNilHatTrie", err)
+	}
+	if _, err := os.Stat(savePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("SaveStats(nil receiver) created path/stat error = %v, want not exist", err)
+	}
+	if err := ht.LoadStats(filepath.Join(t.TempDir(), "missing.json")); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("LoadStats(nil receiver) error = %v, want ErrNilHatTrie", err)
+	}
+}
+
 func TestLoadStatsRejectsInvalidJSON(t *testing.T) {
 	ht := newTestTrie(t)
 	path := filepath.Join(t.TempDir(), "stats.json")

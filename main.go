@@ -84,6 +84,9 @@ type deque struct {
 var errDequeCapacityTooLarge = errors.New("hatriecache: slice capacity is too large")
 var errRawValueCapacityTooLarge = errors.New("hatriecache: raw value capacity is too large")
 var errBatchSizeTooLarge = errors.New("hatriecache: batch size is too large")
+
+// ErrNilHatTrie reports a nil trie passed to a persistence API.
+var ErrNilHatTrie = errors.New("hatriecache: trie is nil")
 var maxRawValueCapacity = int(^uint(0) >> 1)
 
 func newDeque(value Slice) deque {
@@ -1802,10 +1805,16 @@ func (ht *HatTrie) restoreKeyStatsLocked(key string, stats *KeyStats) {
 }
 
 func (ht *HatTrie) SaveStats(path string) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	return writeJSONFileAtomic(path, ht.Stats())
 }
 
 func (ht *HatTrie) LoadStats(path string) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return err

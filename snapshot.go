@@ -189,6 +189,9 @@ func (ht *HatTrie) SaveSnapshotWithJournalSequence(path string, journalSequence 
 }
 
 func (ht *HatTrie) SaveSnapshotWithJournalSequenceAndFormat(path string, journalSequence uint64, format SnapshotFormat) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	format, err := ParseSnapshotFormat(string(format))
 	if err != nil {
 		return err
@@ -204,6 +207,9 @@ func (ht *HatTrie) LoadSnapshot(path string) error {
 }
 
 func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, error) {
+	if ht == nil {
+		return SnapshotMetadata{}, ErrNilHatTrie
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return SnapshotMetadata{}, err

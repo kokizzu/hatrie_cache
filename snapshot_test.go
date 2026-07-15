@@ -197,6 +197,24 @@ func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	}
 }
 
+func TestSnapshotPersistenceRejectsNilTrie(t *testing.T) {
+	var ht *HatTrie
+	savePath := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := ht.SaveSnapshot(savePath); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("SaveSnapshot(nil receiver) error = %v, want ErrNilHatTrie", err)
+	}
+	if _, err := os.Stat(savePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("SaveSnapshot(nil receiver) created path/stat error = %v, want not exist", err)
+	}
+	loadPath := filepath.Join(t.TempDir(), "missing.json")
+	if err := ht.LoadSnapshot(loadPath); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("LoadSnapshot(nil receiver) error = %v, want ErrNilHatTrie", err)
+	}
+	if _, err := ht.LoadSnapshotWithMetadata(loadPath); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("LoadSnapshotWithMetadata(nil receiver) error = %v, want ErrNilHatTrie", err)
+	}
+}
+
 func TestParseSnapshotFormat(t *testing.T) {
 	for _, tt := range []struct {
 		value string

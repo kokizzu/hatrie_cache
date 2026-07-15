@@ -97,6 +97,9 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 		return err
 	}
 	defer unlock()
+	if trie == nil {
+		return ErrNilHatTrie
+	}
 
 	batch, err := levelDBDiffBatch(store, db, trie)
 	if err != nil {
@@ -109,6 +112,9 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 }
 
 func levelDBDiffBatch(store *LevelDBStore, db *leveldb.DB, trie *HatTrie) (*leveldb.Batch, error) {
+	if trie == nil {
+		return nil, ErrNilHatTrie
+	}
 	batch := new(leveldb.Batch)
 	iterator := db.NewIterator(util.BytesPrefix(levelDBEntryPrefix), nil)
 	defer iterator.Release()
@@ -158,6 +164,9 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		return LevelDBLoadResult{}, err
 	}
 	defer unlock()
+	if trie == nil {
+		return LevelDBLoadResult{}, ErrNilHatTrie
+	}
 
 	snapshot, err := db.GetSnapshot()
 	if err != nil {
@@ -343,6 +352,9 @@ func (trie *HatTrie) SaveLevelDB(path string) error {
 }
 
 func (trie *HatTrie) SaveLevelDBWithFormat(path string, format StorageFormat) error {
+	if trie == nil {
+		return ErrNilHatTrie
+	}
 	store, err := OpenLevelDBStoreWithFormat(path, format)
 	if err != nil {
 		return err
@@ -352,6 +364,9 @@ func (trie *HatTrie) SaveLevelDBWithFormat(path string, format StorageFormat) er
 }
 
 func (trie *HatTrie) LoadLevelDB(path string) (int, error) {
+	if trie == nil {
+		return 0, ErrNilHatTrie
+	}
 	store, err := OpenLevelDBStore(path)
 	if err != nil {
 		return 0, err
