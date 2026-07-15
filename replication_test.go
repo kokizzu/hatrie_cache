@@ -735,6 +735,82 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSyncAllFullReplicaReplicatesToRemoteOwners(t *testing.T) {
+	type targetRequest struct {
+		node    string
+		request CacheCommandRequest
+	}
+	requests := make(chan targetRequest, 2)
+	newTarget := func(node string) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/commands" {
+				t.Fatalf("path = %s, want /api/commands", r.URL.Path)
+			}
+			requests <- targetRequest{
+				node:    node,
+				request: mustDecodeReplicationTestCommand(t, w, r),
+			}
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		}))
+	}
+	targetB := newTarget("node-b")
+	defer targetB.Close()
+	targetC := newTarget("node-c")
+	defer targetC.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "value-1")
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://127.0.0.1:1"},
+			{ID: "node-b", Address: targetB.URL},
+			{ID: "node-c", Address: targetC.URL},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore(full replica) error = %v", err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Client:   targetB.Client(),
+	})
+
+	result := replicator.SyncAll(context.Background(), trie, "session:")
+	if result.Skipped || result.Command != "SYNC" || result.Key != "session:" || result.Entries != 1 || len(result.Targets) != 2 {
+		t.Fatalf("full-replica sync result = %#v, want one entry replicated to two owners", result)
+	}
+	if result.Targets[0].Node != "node-b" || result.Targets[1].Node != "node-c" {
+		t.Fatalf("full-replica sync targets = %#v, want node-b then node-c", result.Targets)
+	}
+	for _, target := range result.Targets {
+		if !target.OK || target.Key != "session:1" || target.Node == "node-a" {
+			t.Fatalf("full-replica sync target = %#v, want ok remote owner for session:1", target)
+		}
+	}
+
+	seen := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		targetRequest := <-requests
+		if targetRequest.request.Command != "INTERNALSET" || targetRequest.request.Key != "session:1" || targetRequest.request.Value == "" {
+			t.Fatalf("full-replica sync request = %#v, want INTERNALSET session snapshot", targetRequest.request)
+		}
+		seen[targetRequest.node] = true
+	}
+	if !seen["node-b"] || !seen["node-c"] || seen["node-a"] {
+		t.Fatalf("full-replica sync request nodes = %#v, want only remote owners", seen)
+	}
+	select {
+	case targetRequest := <-requests:
+		t.Fatalf("unexpected full-replica sync request = %#v", targetRequest)
+	default:
+	}
+}
+
 func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 3)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
