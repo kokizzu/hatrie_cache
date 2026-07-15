@@ -179,7 +179,8 @@ func commandWireAcceptPreference(fallback CommandWireFormat) []CommandWireFormat
 }
 
 func commandRequestBody(request CacheCommandRequest, format CommandWireFormat, estimatedJSONSize int, compressionThreshold int) (io.Reader, string, string, error) {
-	if format == CommandWireFormatProtobuf {
+	switch format {
+	case CommandWireFormatProtobuf:
 		message, err := cacheCommandRequestToProto(request)
 		if err != nil {
 			return nil, "", "", err
@@ -193,13 +194,15 @@ func commandRequestBody(request CacheCommandRequest, format CommandWireFormat, e
 			return nil, "", "", err
 		}
 		return body, commandWireContentTypeProtobuf, contentEncoding, nil
+	case CommandWireFormatJSON:
+		body, contentEncoding, err := jsonwire.RequestBody(request, estimatedJSONSize, compressionThreshold)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return body, commandWireContentTypeJSON, contentEncoding, nil
+	default:
+		return nil, "", "", fmt.Errorf("hatriecache: unsupported command wire format %q", format)
 	}
-
-	body, contentEncoding, err := jsonwire.RequestBody(request, estimatedJSONSize, compressionThreshold)
-	if err != nil {
-		return nil, "", "", err
-	}
-	return body, commandWireContentTypeJSON, contentEncoding, nil
 }
 
 // CommandRequestBody serializes a cache command request for the HTTP command API.

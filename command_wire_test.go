@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -330,6 +331,105 @@ func TestCommandRequestBodyRejectsUnsupportedProtobufValues(t *testing.T) {
 	}
 	if body != nil || contentType != "" || contentEncoding != "" {
 		t.Fatalf("commandRequestBody(protobuf complex pair) = body %T contentType %q contentEncoding %q, want empty outputs", body, contentType, contentEncoding)
+	}
+}
+
+func TestCommandRequestBodyExportedEncodesProtobufDefault(t *testing.T) {
+	request := CacheCommandRequest{
+		Command: "SETSTR",
+		Key:     "session:1",
+		Value:   "value",
+		Values:  Slice{"alpha", int64(42)},
+		Pairs:   Map{"score": uint64(9)},
+	}
+
+	body, contentType, contentEncoding, err := CommandRequestBody(request, DefaultCommandWireFormat, 0, 0)
+	if err != nil {
+		t.Fatalf("CommandRequestBody(protobuf) error = %v", err)
+	}
+	if contentType != commandWireContentTypeProtobuf || contentEncoding != "" {
+		t.Fatalf("CommandRequestBody(protobuf) content type/encoding = %q/%q, want protobuf/empty", contentType, contentEncoding)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll(protobuf body) error = %v", err)
+	}
+	decoded, err := decodeCommandRequestProto(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("decodeCommandRequestProto(exported body) error = %v", err)
+	}
+	if decoded.Command != request.Command || decoded.Key != request.Key || decoded.Value != request.Value {
+		t.Fatalf("decoded protobuf basics = %#v, want %#v", decoded, request)
+	}
+	if len(decoded.Values) != 2 || decoded.Values[0] != "alpha" || decoded.Values[1] != "42" {
+		t.Fatalf("decoded protobuf values = %#v, want alpha/42", decoded.Values)
+	}
+	if decoded.Pairs["score"] != "9" {
+		t.Fatalf("decoded protobuf pairs = %#v, want score=9", decoded.Pairs)
+	}
+}
+
+func TestCommandRequestBodyExportedEncodesJSONFallback(t *testing.T) {
+	request := CacheCommandRequest{
+		Command: "PUTMAP",
+		Key:     "profile",
+		Pairs:   Map{"nested": Map{"city": "Singapore"}},
+	}
+
+	body, contentType, contentEncoding, err := CommandRequestBody(request, CommandWireFormatJSON, 0, 0)
+	if err != nil {
+		t.Fatalf("CommandRequestBody(json) error = %v", err)
+	}
+	if contentType != commandWireContentTypeJSON || contentEncoding != "" {
+		t.Fatalf("CommandRequestBody(json) content type/encoding = %q/%q, want JSON/empty", contentType, contentEncoding)
+	}
+	var decoded CacheCommandRequest
+	if err := json.NewDecoder(body).Decode(&decoded); err != nil {
+		t.Fatalf("Decode(JSON body) error = %v", err)
+	}
+	if decoded.Command != request.Command || decoded.Key != request.Key {
+		t.Fatalf("decoded JSON basics = %#v, want %#v", decoded, request)
+	}
+	nested, ok := decoded.Pairs["nested"].(map[string]interface{})
+	if !ok || nested["city"] != "Singapore" {
+		t.Fatalf("decoded JSON nested pair = %#v, want city Singapore", decoded.Pairs["nested"])
+	}
+}
+
+func TestCommandRequestBodyExportedRejectsUnsupportedFormat(t *testing.T) {
+	body, contentType, contentEncoding, err := CommandRequestBody(CacheCommandRequest{Command: "GET", Key: "key"}, CommandWireFormat("msgpack"), 0, 0)
+	if err == nil || !strings.Contains(err.Error(), "unsupported command wire format") {
+		t.Fatalf("CommandRequestBody(msgpack) error = %v, want unsupported format", err)
+	}
+	if body != nil || contentType != "" || contentEncoding != "" {
+		t.Fatalf("CommandRequestBody(msgpack) = %T/%q/%q, want nil/empty/empty", body, contentType, contentEncoding)
+	}
+}
+
+func TestDecodeCommandResponseWireExportedDecodesProtobufAndJSON(t *testing.T) {
+	want := CacheCommandResponse{OK: true, Message: "stored", Value: "value"}
+	protobufPayload, err := proto.Marshal(grpcCommandResponse(want))
+	if err != nil {
+		t.Fatalf("Marshal(protobuf response) error = %v", err)
+	}
+	got, err := DecodeCommandResponseWire(bytes.NewReader(protobufPayload), commandWireContentTypeProtobuf, int64(len(protobufPayload)))
+	if err != nil {
+		t.Fatalf("DecodeCommandResponseWire(protobuf) error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("DecodeCommandResponseWire(protobuf) = %#v, want %#v", got, want)
+	}
+
+	jsonPayload, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("Marshal(JSON response) error = %v", err)
+	}
+	got, err = DecodeCommandResponseWire(bytes.NewReader(jsonPayload), "application/json; charset=utf-8", int64(len(jsonPayload)))
+	if err != nil {
+		t.Fatalf("DecodeCommandResponseWire(JSON) error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("DecodeCommandResponseWire(JSON) = %#v, want %#v", got, want)
 	}
 }
 
