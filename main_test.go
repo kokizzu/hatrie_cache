@@ -500,6 +500,51 @@ func TestXorFilterAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestRoaringBitmapAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	ht.UpsertRoaringBitmap("roaring")
+	if err := ht.UpsertRoaringBitmapChecked("roaring"); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertRoaringBitmapChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddRoaringBitmap("roaring", 1); got != 0 {
+		t.Fatalf("AddRoaringBitmap(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.AddRoaringBitmapChecked("roaring", 1); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddRoaringBitmapChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.RemoveRoaringBitmap("roaring", 1); got != 0 {
+		t.Fatalf("RemoveRoaringBitmap(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.RemoveRoaringBitmapChecked("roaring", 1); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("RemoveRoaringBitmapChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.HasRoaringBitmap("roaring", 1); got {
+		t.Fatal("HasRoaringBitmap(nil trie) = true, want false")
+	}
+	if got, err := ht.HasRoaringBitmapChecked("roaring", 1); got || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HasRoaringBitmapChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.CountRoaringBitmap("roaring"); got != 0 || ok {
+		t.Fatalf("CountRoaringBitmap(nil trie) = %d/%v, want 0/false", got, ok)
+	}
+	if got, ok, err := ht.CountRoaringBitmapChecked("roaring"); got != 0 || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("CountRoaringBitmapChecked(nil trie) = %d/%v/%v, want 0/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.GetRoaringBitmap("roaring"); got != nil {
+		t.Fatalf("GetRoaringBitmap(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.GetRoaringBitmapChecked("roaring"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetRoaringBitmapChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.RoaringBitmapInfo("roaring"); got != (RoaringBitmapInfo{}) || ok {
+		t.Fatalf("RoaringBitmapInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.RoaringBitmapInfoChecked("roaring"); got != (RoaringBitmapInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("RoaringBitmapInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }

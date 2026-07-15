@@ -548,6 +548,10 @@ func (ht *HatTrie) UpsertRoaringBitmap(key string) {
 }
 
 func (ht *HatTrie) UpsertRoaringBitmapChecked(key string) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -578,6 +582,10 @@ func (ht *HatTrie) AddRoaringBitmap(key string, value uint32, values ...uint32) 
 }
 
 func (ht *HatTrie) AddRoaringBitmapChecked(key string, value uint32, values ...uint32) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -612,6 +620,10 @@ func (ht *HatTrie) RemoveRoaringBitmap(key string, value uint32, values ...uint3
 }
 
 func (ht *HatTrie) RemoveRoaringBitmapChecked(key string, value uint32, values ...uint32) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -638,6 +650,10 @@ func (ht *HatTrie) HasRoaringBitmap(key string, value uint32) bool {
 }
 
 func (ht *HatTrie) HasRoaringBitmapChecked(key string, value uint32) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -661,6 +677,10 @@ func (ht *HatTrie) CountRoaringBitmap(key string) (uint64, bool) {
 }
 
 func (ht *HatTrie) CountRoaringBitmapChecked(key string) (uint64, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -683,6 +703,10 @@ func (ht *HatTrie) GetRoaringBitmap(key string) []uint32 {
 }
 
 func (ht *HatTrie) GetRoaringBitmapChecked(key string) ([]uint32, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -705,6 +729,10 @@ func (ht *HatTrie) RoaringBitmapInfo(key string) (RoaringBitmapInfo, bool) {
 }
 
 func (ht *HatTrie) RoaringBitmapInfoChecked(key string) (RoaringBitmapInfo, bool, error) {
+	if ht == nil {
+		return RoaringBitmapInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
