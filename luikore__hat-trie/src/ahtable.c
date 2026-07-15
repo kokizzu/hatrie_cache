@@ -220,26 +220,29 @@ static value_t* get_key(ahtable_t* T, const char* key, size_t len, bool insert_m
     value_t* val;
 
     /* search the array for our key */
-    s = T->slots[i];
-    while ((size_t) (s - T->slots[i]) < T->slot_sizes[i]) {
-        /* get the key length */
-        k = keylen(s);
-        s += k < 128 ? 1 : 2;
+    if (T->slot_sizes[i] > 0) {
+        s = T->slots[i];
+        slot_t end = s + T->slot_sizes[i];
+        while (s < end) {
+            /* get the key length */
+            k = keylen(s);
+            s += k < 128 ? 1 : 2;
 
-        /* skip keys that are longer than ours */
-        if (k != len) {
-            s += k + sizeof(value_t);
-            continue;
-        }
+            /* skip keys that are longer than ours */
+            if (k != len) {
+                s += k + sizeof(value_t);
+                continue;
+            }
 
-        /* key found. */
-        if (memcmp(s, key, len) == 0) {
-            return (value_t*) (s + len);
-        }
-        /* key not found. */
-        else {
-            s += k + sizeof(value_t);
-            continue;
+            /* key found. */
+            if (memcmp(s, key, len) == 0) {
+                return (value_t*) (s + len);
+            }
+            /* key not found. */
+            else {
+                s += k + sizeof(value_t);
+                continue;
+            }
         }
     }
 
@@ -286,32 +289,39 @@ int ahtable_del(ahtable_t* T, const char* key, size_t len)
     slot_t s;
 
     /* search the array for our key */
-    s = T->slots[i];
-    while ((size_t) (s - T->slots[i]) < T->slot_sizes[i]) {
-        /* get the key length */
-        k = keylen(s);
-        s += k < 128 ? 1 : 2;
+    if (T->slot_sizes[i] > 0) {
+        s = T->slots[i];
+        slot_t end = s + T->slot_sizes[i];
+        while (s < end) {
+            /* get the key length */
+            k = keylen(s);
+            s += k < 128 ? 1 : 2;
 
-        /* skip keys that are longer than ours */
-        if (k != len) {
-            s += k + sizeof(value_t);
-            continue;
-        }
+            /* skip keys that are longer than ours */
+            if (k != len) {
+                s += k + sizeof(value_t);
+                continue;
+            }
 
-        /* key found. */
-        if (memcmp(s, key, len) == 0) {
-            /* move everything over, resize the array */
-            unsigned char* t = s + len + sizeof(value_t);
-            s -= k < 128 ? 1 : 2;
-            memmove(s, t, T->slot_sizes[i] - (size_t) (t - T->slots[i]));
-            T->slot_sizes[i] -= (size_t) (t - s);
-            --T->m;
-            return 0;
-        }
-        /* key not found. */
-        else {
-            s += k + sizeof(value_t);
-            continue;
+            /* key found. */
+            if (memcmp(s, key, len) == 0) {
+                /* move everything over, resize the array */
+                unsigned char* t = s + len + sizeof(value_t);
+                s -= k < 128 ? 1 : 2;
+                memmove(s, t, T->slot_sizes[i] - (size_t) (t - T->slots[i]));
+                T->slot_sizes[i] -= (size_t) (t - s);
+                if (T->slot_sizes[i] == 0) {
+                    free(T->slots[i]);
+                    T->slots[i] = NULL;
+                }
+                --T->m;
+                return 0;
+            }
+            /* key not found. */
+            else {
+                s += k + sizeof(value_t);
+                continue;
+            }
         }
     }
 
@@ -357,8 +367,10 @@ static ahtable_sorted_iter_t* ahtable_sorted_iter_begin(const ahtable_t* T)
     slot_t s;
     size_t j, k, u;
     for (j = 0, u = 0; j < T->n; ++j) {
+        if (T->slot_sizes[j] == 0) continue;
         s = T->slots[j];
-        while (s < T->slots[j] + T->slot_sizes[j]) {
+        slot_t end = s + T->slot_sizes[j];
+        while (s < end) {
             i->xs[u++] = s;
             k = keylen(s);
             s += k < 128 ? 1 : 2;
@@ -432,10 +444,11 @@ static ahtable_unsorted_iter_t* ahtable_unsorted_iter_begin(const ahtable_t* T)
     i->T = T;
 
     for (i->i = 0; i->i < i->T->n; ++i->i) {
+        if (T->slot_sizes[i->i] == 0) continue;
         i->s = T->slots[i->i];
-        if ((size_t) (i->s - T->slots[i->i]) >= T->slot_sizes[i->i]) continue;
         break;
     }
+    if (i->i >= i->T->n) i->s = NULL;
 
     return i;
 }

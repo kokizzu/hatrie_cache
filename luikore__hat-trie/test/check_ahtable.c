@@ -298,6 +298,86 @@ void test_ahtable_zero_slot_create()
 }
 
 
+void test_ahtable_empty_slot_operations()
+{
+    fprintf(stderr, "checking empty slot operations... \n");
+
+    ahtable_t* T = ahtable_create_n(1);
+    if (ahtable_tryget(T, "missing", 7) != NULL) {
+        fprintf(stderr, "[error] missing key was found in empty table\n");
+        have_error = 1;
+    }
+    if (ahtable_del(T, "missing", 7) == 0) {
+        fprintf(stderr, "[error] missing key was deleted from empty table\n");
+        have_error = 1;
+    }
+
+    ahtable_iter_t* it = ahtable_iter_begin(T, false);
+    if (!ahtable_iter_finished(it)) {
+        fprintf(stderr, "[error] unsorted iterator over empty table was not finished\n");
+        have_error = 1;
+    }
+    ahtable_iter_free(it);
+
+    it = ahtable_iter_begin(T, true);
+    if (!ahtable_iter_finished(it)) {
+        fprintf(stderr, "[error] sorted iterator over empty table was not finished\n");
+        have_error = 1;
+    }
+    ahtable_iter_free(it);
+
+    ahtable_free(T);
+    fprintf(stderr, "done.\n");
+}
+
+
+void test_ahtable_delete_releases_empty_slot()
+{
+    fprintf(stderr, "checking delete empty slot release... \n");
+
+    ahtable_t* T = ahtable_create_n(1);
+    value_t* v = ahtable_get(T, "alpha", 5);
+    if (v == NULL) {
+        fprintf(stderr, "[error] delete release test insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 17;
+    }
+    if (T->slots[0] == NULL || T->slot_sizes[0] == 0) {
+        fprintf(stderr, "[error] inserted key did not allocate slot storage\n");
+        have_error = 1;
+    }
+    if (ahtable_del(T, "alpha", 5) != 0) {
+        fprintf(stderr, "[error] delete release test delete failed\n");
+        have_error = 1;
+    }
+    if (ahtable_size(T) != 0) {
+        fprintf(stderr, "[error] table size after final delete is %zu, expected 0\n", ahtable_size(T));
+        have_error = 1;
+    }
+    if (T->slots[0] != NULL || T->slot_sizes[0] != 0) {
+        fprintf(stderr, "[error] final delete retained empty slot storage\n");
+        have_error = 1;
+    }
+    if (ahtable_tryget(T, "alpha", 5) != NULL) {
+        fprintf(stderr, "[error] deleted key was still found after empty slot release\n");
+        have_error = 1;
+    }
+    v = ahtable_get(T, "beta", 4);
+    if (v == NULL) {
+        fprintf(stderr, "[error] insert after empty slot release failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 23;
+    }
+
+    ahtable_free(T);
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_ahtable_clear_resets_size()
 {
     fprintf(stderr, "checking clear reset... \n");
@@ -373,6 +453,8 @@ int main()
 {
     test_checked_array_size();
     test_ahtable_zero_slot_create();
+    test_ahtable_empty_slot_operations();
+    test_ahtable_delete_releases_empty_slot();
     test_ahtable_clear_resets_size();
     test_ahtable_key_length_limit();
 
