@@ -28,7 +28,10 @@ const (
 	serverShutdownTimeout              = 5 * time.Second
 	defaultMonitoringReadHeaderTimeout = 5 * time.Second
 	defaultMonitoringIdleTimeout       = 2 * time.Minute
+	destroyedHatTriePanic              = "hatriecache: use of destroyed HatTrie"
 )
+
+var errHatTrieDestroyed = errors.New("hatrie-cache: trie is destroyed")
 
 type config struct {
 	monitoringServer            bool
@@ -581,10 +584,13 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
-	save := func() {
-		if err := store.Save(trie); err != nil {
+	save := func() bool {
+		if err := saveLevelDBIfOpen(trie, store); errors.Is(err, errHatTrieDestroyed) {
+			return false
+		} else if err != nil {
 			fmt.Fprintf(stderr, "save leveldb: %v\n", err)
 		}
+		return true
 	}
 	go func() {
 		defer close(stopped)
@@ -596,11 +602,15 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 			return
 		default:
 		}
-		save()
+		if !save() {
+			return
+		}
 		for {
 			select {
 			case <-ticker.C:
-				save()
+				if !save() {
+					return
+				}
 			case <-ctx.Done():
 				return
 			case <-done:
@@ -609,6 +619,11 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 		}
 	}()
 	return periodicStopper(done, stopped)
+}
+
+func saveLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore) (err error) {
+	defer recoverDestroyedHatTrie(&err)
+	return store.Save(trie)
 }
 
 func openJournalIfConfigured(path string, format hatriecache.CommandJournalFormat) (*hatriecache.CommandJournal, error) {
@@ -639,7 +654,8 @@ func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) (hatriecac
 	return metadata, nil
 }
 
-func saveSnapshotIfConfigured(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, format hatriecache.SnapshotFormat) error {
+func saveSnapshotIfConfigured(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, format hatriecache.SnapshotFormat) (err error) {
+	defer recoverDestroyedHatTrie(&err)
 	if path == "" {
 		return nil
 	}
@@ -659,10 +675,13 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
-	save := func() {
-		if err := saveSnapshotIfConfigured(trie, journal, path, format); err != nil {
+	save := func() bool {
+		if err := saveSnapshotIfConfigured(trie, journal, path, format); errors.Is(err, errHatTrieDestroyed) {
+			return false
+		} else if err != nil {
 			fmt.Fprintf(stderr, "save snapshot: %v\n", err)
 		}
+		return true
 	}
 	go func() {
 		defer close(stopped)
@@ -674,11 +693,15 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 			return
 		default:
 		}
-		save()
+		if !save() {
+			return
+		}
 		for {
 			select {
 			case <-ticker.C:
-				save()
+				if !save() {
+					return
+				}
 			case <-ctx.Done():
 				return
 			case <-done:
@@ -687,6 +710,18 @@ func startSnapshotSaver(ctx context.Context, trie *hatriecache.HatTrie, journal 
 		}
 	}()
 	return periodicStopper(done, stopped)
+}
+
+func recoverDestroyedHatTrie(err *error) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	if message, ok := recovered.(string); ok && message == destroyedHatTriePanic {
+		*err = errHatTrieDestroyed
+		return
+	}
+	panic(recovered)
 }
 
 func startElectionHeartbeat(ctx context.Context, election *hatriecache.ElectionStore, nodeID string, timeout time.Duration, required bool, stderr io.Writer) (func(), error) {

@@ -1270,17 +1270,29 @@ func TestStartSnapshotSaverStopIsIdempotent(t *testing.T) {
 	stop := startSnapshotSaver(ctx, ht, nil, path, time.Hour, hatriecache.SnapshotFormatJSON, &bytes.Buffer{})
 	cancel()
 
-	stopped := make(chan struct{})
-	go func() {
-		stop()
-		stop()
-		close(stopped)
-	}()
-	select {
-	case <-stopped:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("snapshot saver repeated stop did not return")
+	assertStopReturns(t, stop, "snapshot saver repeated stop")
+}
+
+func TestSaveSnapshotIfConfiguredReturnsDestroyedTrieError(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	ht.Destroy()
+
+	err := saveSnapshotIfConfigured(ht, nil, filepath.Join(t.TempDir(), "snapshot.json"), hatriecache.SnapshotFormatJSON)
+	if !errors.Is(err, errHatTrieDestroyed) {
+		t.Fatalf("saveSnapshotIfConfigured() error = %v, want destroyed trie error", err)
 	}
+}
+
+func TestStartSnapshotSaverStopsAfterDestroy(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("key", "value")
+
+	stop := startSnapshotSaver(context.Background(), ht, nil, filepath.Join(t.TempDir(), "snapshot.json"), time.Millisecond, hatriecache.SnapshotFormatJSON, &bytes.Buffer{})
+	ht.Destroy()
+	time.Sleep(20 * time.Millisecond)
+
+	assertStopReturns(t, stop, "snapshot saver stop after destroy")
 }
 
 func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
@@ -1351,17 +1363,40 @@ func TestStartLevelDBSaverStopIsIdempotent(t *testing.T) {
 	stop := startLevelDBSaver(ctx, ht, store, time.Hour, &bytes.Buffer{})
 	cancel()
 
-	stopped := make(chan struct{})
-	go func() {
-		stop()
-		stop()
-		close(stopped)
-	}()
-	select {
-	case <-stopped:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("LevelDB saver repeated stop did not return")
+	assertStopReturns(t, stop, "LevelDB saver repeated stop")
+}
+
+func TestSaveLevelDBIfOpenReturnsDestroyedTrieError(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
 	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+
+	ht.Destroy()
+	err = saveLevelDBIfOpen(ht, store)
+	if !errors.Is(err, errHatTrieDestroyed) {
+		t.Fatalf("saveLevelDBIfOpen() error = %v, want destroyed trie error", err)
+	}
+}
+
+func TestStartLevelDBSaverStopsAfterDestroy(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("key", "value")
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+
+	stop := startLevelDBSaver(context.Background(), ht, store, time.Millisecond, &bytes.Buffer{})
+	ht.Destroy()
+	time.Sleep(20 * time.Millisecond)
+
+	assertStopReturns(t, stop, "LevelDB saver stop after destroy")
 }
 
 func TestPeriodicHelpersAcceptNilContext(t *testing.T) {
@@ -1751,6 +1786,21 @@ func waitUntil(t *testing.T, timeout time.Duration, ready func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("condition did not become true before timeout")
+}
+
+func assertStopReturns(t *testing.T, stop func(), label string) {
+	t.Helper()
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal(label + " did not return")
+	}
 }
 
 func assertNoJSONAtomicTempFiles(t *testing.T, dir string, base string) {
