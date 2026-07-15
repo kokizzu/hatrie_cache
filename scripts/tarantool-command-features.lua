@@ -4,6 +4,7 @@ local msgpack = require('msgpack')
 local requests = tonumber(os.getenv('TARANTOOL_REQUESTS') or '10000')
 local keyspace = tonumber(os.getenv('TARANTOOL_KEYSPACE') or '10000')
 local work_dir = os.getenv('TARANTOOL_WORK_DIR') or '.'
+local memtx_memory = tonumber(os.getenv('TARANTOOL_MEMTX_MEMORY') or '268435456')
 
 box.cfg({
 	work_dir = work_dir,
@@ -13,7 +14,7 @@ box.cfg({
 	wal_mode = 'none',
 	log = work_dir .. '/tarantool.log',
 	log_level = 1,
-	memtx_memory = 268435456,
+	memtx_memory = memtx_memory,
 })
 
 local function create_space(name, parts)
@@ -184,5 +185,41 @@ print_row('Replication dump', 'msgpack.encode(tuple)', seconds_for(function()
 		msgpack.encode(kv.index.primary:get(key_for(i)))
 	end
 end))
+
+local function proc_status_kib(name)
+	local file = io.open('/proc/self/status', 'r')
+	if file == nil then
+		return nil
+	end
+	for line in file:lines() do
+		local key, value = string.match(line, '^([^:]+):%s+(%d+)%s+kB$')
+		if key == name then
+			file:close()
+			return tonumber(value)
+		end
+	end
+	file:close()
+	return nil
+end
+
+local function kib(value)
+	value = tonumber(value) or 0
+	return math.floor(value / 1024)
+end
+
+local slab = box.slab.info()
+print('')
+print('Memory summary:')
+print('')
+print('| Metric | Value |')
+print('| --- | ---: |')
+print(string.format('| Process RSS | %s KiB |', tostring(proc_status_kib('VmRSS') or 'unknown')))
+print(string.format('| memtx_memory configured | %d KiB |', kib(memtx_memory)))
+print(string.format('| slab quota used | %d KiB |', kib(slab.quota_used)))
+print(string.format('| slab quota size | %d KiB |', kib(slab.quota_size)))
+print(string.format('| slab arena used | %d KiB |', kib(slab.arena_used)))
+print(string.format('| slab arena size | %d KiB |', kib(slab.arena_size)))
+print(string.format('| slab items used | %d KiB |', kib(slab.items_used)))
+print(string.format('| slab items size | %d KiB |', kib(slab.items_size)))
 
 os.exit(0)

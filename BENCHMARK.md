@@ -2,8 +2,8 @@
 
 This compares the cache command surface exposed by `POST /api/commands` and
 `make cli ARGS='command ...'` with comparable Redis and Tarantool feature
-families. It is a feature/command coverage matrix, not a wire-protocol
-compatibility statement.
+families. It is a benchmarked feature/command coverage report, not a
+wire-protocol compatibility statement.
 
 Sources:
 
@@ -19,106 +19,143 @@ Sources:
 
 ## Benchmark Results
 
-The full benchmark result is in [Benchmark Matrix](#benchmark-matrix). It lists
-each supported feature benchmarked, seconds per 10k operations, Redis and
-Tarantool measured equivalents where available, and the `Redis/HAT speedup` and
-`Tarantool/HAT speedup` improvement columns.
+The comparison tables are split by baseline because the workloads are not the
+same kind of process:
 
-Headline local results:
+- [HAT-trie vs Tarantool](#hat-trie-vs-tarantool) uses embedded Tarantool engine
+  calls and 1,000,000 feature cycles, which is 100x the earlier 10,000-cycle
+  Tarantool run.
+- [HAT-trie vs Redis](#hat-trie-vs-redis) uses Redis' local TCP command path,
+  one client, and 10,000 requests per Redis command.
+- [Memory Summary](#memory-summary) reports process/server memory from the same
+  local runs.
 
-| Feature family | HAT-trie seconds / 10k | Redis/HAT speedup | Tarantool/HAT speedup |
-| --- | ---: | ---: | ---: |
-| String write | 0.017410 s | 53.42x | 1.74x |
-| String read | 0.019810 s | 48.61x | 0.25x |
-| List/deque push+pop | 0.034470 s | 131.33x | 0.41x |
-| Set add+has | 0.030300 s | 81.29x | 0.50x |
-| Priority queue push+pop | 0.042600 s | 56.29x | 1.27x |
-| Replication dump | 0.071580 s | 16.51x | 0.18x |
+The speedup columns are `baseline seconds / HAT-trie seconds`. Values above
+`1.00x` mean HAT-trie was faster; values below `1.00x` mean the baseline was
+faster. HAT-trie command benchmarks are in-process Go calls, Redis includes
+loopback TCP/protocol/server dispatch, and Tarantool is embedded Lua calling
+the engine directly, so the numbers are useful local comparisons rather than
+perfect apples-to-apples microbenchmarks.
 
-## Raw Tarantool Result
+Local runs were measured on an AMD Ryzen 9 5950X.
 
-Command:
+## Run Commands
+
+Large HAT-trie comparable command rows:
 
 ```
-make bench-tarantool-command-features TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
+make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/(StringSet|StringGet|CounterInc|TTLExpire|MapPut|MapPeek|SlicePushPop|SetAddHas|PriorityQueuePushPop|RoaringAdd|RoaringHas|SparseBitsetAdd|SparseBitsetHas|RadixPut|RadixPrefix|ReplicationDump)$' BENCHTIME=1000000x
 ```
 
-Output from the local Tarantool 2.6.0 run:
+HAT-trie HyperLogLog rows used by the Redis comparison:
 
-```text
-Tarantool benchmark: version=2.6.0-0-g47aa4e01e requests=10000 keyspace=10000
-
-| Feature family | Tarantool operation | Seconds / 10k feature cycles |
-| --- | --- | ---: |
-| String write | `space:replace()` | 0.010646 s |
-| String read | `space.index.primary:get()` | 0.003145 s |
-| Integer counter | `space:update({{"+", 2, 1}})` | 0.016595 s |
-| TTL update | `space:update({{"=", 3, expires_at}})` | 0.020773 s |
-| Map/hash write | `space:replace({key, field, value})` | 0.013571 s |
-| Map/hash read | `space.index.primary:get({key, field})` | 0.002829 s |
-| List/deque push+pop | `space:replace()` + `space:delete()` | 0.016045 s |
-| Set add+has | `space:replace()` + `space.index.primary:get()` | 0.015154 s |
-| Priority queue push+pop | tree index insert + `index:min()` + delete | 0.035529 s |
-| Roaring bitmap add approximation | `space:replace()` membership index | 0.008983 s |
-| Roaring bitmap lookup approximation | `space.index.primary:get()` membership index | 0.002267 s |
-| Sparse bitset add approximation | `space:replace()` membership index | 0.008953 s |
-| Sparse bitset lookup approximation | `space.index.primary:get()` membership index | 0.002635 s |
-| Radix-tree put approximation | `space:replace()` tree string key | 0.008879 s |
-| Radix-tree prefix scan approximation | `index:pairs(prefix, {iterator = "GE"})` | 0.078651 s |
-| Replication dump | `msgpack.encode(tuple)` | 0.006181 s |
+```
+make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/(HyperLogLogAdd|HyperLogLogCount)$' BENCHTIME=1000000x
 ```
 
-## Summary
+Tarantool 100x larger run:
+
+```
+make bench-tarantool-command-features TARANTOOL_REQUESTS=1000000 TARANTOOL_KEYSPACE=10000 TARANTOOL_MEMTX_MEMORY=1073741824
+```
+
+Redis 10,000-request network run:
+
+```
+make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000 REDIS_CLIENTS=1 REDIS_KEYSPACE=10000
+```
+
+Full HAT-trie command benchmark and command support extraction:
+
+```
+make bench-command-features BENCHTIME=100x
+make command-support
+```
+
+The full HAT-trie benchmark includes rows beyond the Redis/Tarantool comparable
+tables, such as `BenchmarkCommandFeature/FenwickTreeRange`.
+
+## Memory Summary
+
+| System | Run | Memory metric | Value |
+| --- | --- | --- | ---: |
+| HAT-trie cache | comparable command benchmark, Go test binary | max resident set size | 35,808 KiB |
+| HAT-trie cache | HyperLogLog command benchmark, Go test binary | max resident set size | 27,692 KiB |
+| Tarantool 2.6.0 | 1,000,000 feature cycles, 10,000 keyspace | process RSS | 35,708 KiB |
+| Tarantool 2.6.0 | 1,000,000 feature cycles, 10,000 keyspace | slab quota used | 32,768 KiB |
+| Tarantool 2.6.0 | 1,000,000 feature cycles, 10,000 keyspace | slab items used | 1,519 KiB |
+| Redis 7.0.4 | 10,000 requests, 10,000 keyspace | used_memory | 2,494,304 B |
+| Redis 7.0.4 | 10,000 requests, 10,000 keyspace | used_memory_rss | 8,716,288 B |
+| Redis 7.0.4 | 10,000 requests, 10,000 keyspace | used_memory_peak | 3,171,296 B |
+
+HAT-trie memory is the benchmark test process RSS, so it includes the Go runtime
+and test harness. Redis memory is server-reported memory from `INFO memory`.
+Tarantool memory is `/proc/self/status` RSS plus `box.slab.info()` values.
+
+## HAT-trie vs Tarantool
+
+Tarantool was measured with `requests=1000000` and `keyspace=10000`.
+HAT-trie was measured with the matching `BenchmarkCommandFeature/*` rows at
+`BENCHTIME=1000000x`.
+
+| Feature family | HAT-trie benchmark | HAT-trie seconds / 10k | HAT alloc/op | Tarantool measured operation | Tarantool seconds / 10k | Tarantool/HAT speedup |
+| --- | --- | ---: | ---: | --- | ---: | ---: |
+| String write | `BenchmarkCommandFeature/StringSet` | 0.004865 s | 8 B/op | `space:replace()` | 0.008629 s | 1.77x |
+| String read | `BenchmarkCommandFeature/StringGet` | 0.002133 s | 0 B/op | `space.index.primary:get()` | 0.005363 s | 2.51x |
+| Integer counter | `BenchmarkCommandFeature/CounterInc` | 0.003922 s | 7 B/op | `space:update({{"+", 2, 1}})` | 0.013611 s | 3.47x |
+| TTL update | `BenchmarkCommandFeature/TTLExpire` | 0.006242 s | 99 B/op | `space:update({{"=", 3, expires_at}})` | 0.018005 s | 2.88x |
+| Map/hash write | `BenchmarkCommandFeature/MapPut` | 0.012240 s | 474 B/op | `space:replace({key, field, value})` | 0.010979 s | 0.90x |
+| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 0.003068 s | 0 B/op | `space.index.primary:get({key, field})` | 0.005224 s | 1.70x |
+| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 0.014660 s | 152 B/op | `space:replace() + space:delete()` | 0.018650 s | 1.27x |
+| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 0.011850 s | 112 B/op | `space:replace() + space.index.primary:get()` | 0.017228 s | 1.45x |
+| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 0.016440 s | 168 B/op | `tree index insert + index:min() + delete` | 0.026943 s | 1.64x |
+| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 0.004351 s | 4 B/op | `space:replace() membership index` | 0.009881 s | 2.27x |
+| Roaring bitmap lookup | `BenchmarkCommandFeature/RoaringHas` | 0.003011 s | 0 B/op | `space.index.primary:get() membership index` | 0.014427 s | 4.79x |
+| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 0.004773 s | 8 B/op | `space:replace() membership index` | 0.011004 s | 2.31x |
+| Sparse uint64 bitset lookup | `BenchmarkCommandFeature/SparseBitsetHas` | 0.003227 s | 0 B/op | `space.index.primary:get() membership index` | 0.019058 s | 5.91x |
+| Radix-tree put | `BenchmarkCommandFeature/RadixPut` | 0.015020 s | 482 B/op | `space:replace() tree string key` | 0.022540 s | 1.50x |
+| Radix-tree prefix scan | `BenchmarkCommandFeature/RadixPrefix` | 0.032590 s | 1,468 B/op | `index:pairs(prefix, {iterator = "GE"})` | 0.262052 s | 8.04x |
+| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.004086 s | 64 B/op | `msgpack.encode(tuple)` | 0.036781 s | 9.00x |
+
+In this run HAT-trie is faster on 15 of the 16 measured Tarantool-comparable
+rows. `MapPut` remains the current Tarantool-winning row.
+
+## HAT-trie vs Redis
+
+Redis was measured with Redis 7.0.4 in a temporary Docker container, one
+client, no pipeline, and 10,000 requests per command. Rows with two Redis
+commands add the two Redis seconds-per-10k values before computing speedup.
+
+| Feature family | HAT-trie benchmark | HAT-trie seconds / 10k | Redis measured command | Redis seconds / 10k | Redis/HAT speedup |
+| --- | --- | ---: | --- | ---: | ---: |
+| String write | `BenchmarkCommandFeature/StringSet` | 0.004865 s | `SET` | 1.203000 s | 247.28x |
+| String read | `BenchmarkCommandFeature/StringGet` | 0.002133 s | `GET` | 0.998000 s | 467.89x |
+| Integer counter | `BenchmarkCommandFeature/CounterInc` | 0.003922 s | `INCR` | 0.966000 s | 246.30x |
+| TTL update | `BenchmarkCommandFeature/TTLExpire` | 0.006242 s | `EXPIRE` | 1.006000 s | 161.17x |
+| Map/hash write | `BenchmarkCommandFeature/MapPut` | 0.012240 s | `HSET` | 1.296000 s | 105.88x |
+| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 0.003068 s | `HGET` | 1.396999 s | 455.35x |
+| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 0.014660 s | `LPUSH` + `RPOP` | 2.082000 s | 142.02x |
+| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 0.011850 s | `SADD` + `SISMEMBER` | 1.835000 s | 154.85x |
+| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 0.016440 s | `ZADD` + `ZPOPMIN` | 2.216999 s | 134.85x |
+| Roaring bitmap add approximation | `BenchmarkCommandFeature/RoaringAdd` | 0.004351 s | `SETBIT` bitmap, not roaring | 1.020000 s | 234.43x |
+| Roaring bitmap lookup approximation | `BenchmarkCommandFeature/RoaringHas` | 0.003011 s | `GETBIT` bitmap, not roaring | 1.090000 s | 362.01x |
+| Sparse uint64 bitset add approximation | `BenchmarkCommandFeature/SparseBitsetAdd` | 0.004773 s | `SETBIT` dense bitmap approximation | 1.020000 s | 213.70x |
+| Sparse uint64 bitset lookup approximation | `BenchmarkCommandFeature/SparseBitsetHas` | 0.003227 s | `GETBIT` dense bitmap approximation | 1.090000 s | 337.78x |
+| HyperLogLog add | `BenchmarkCommandFeature/HyperLogLogAdd` | 0.062230 s | `PFADD` | 1.043000 s | 16.76x |
+| HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 0.054010 s | `PFCOUNT` | 1.186000 s | 21.96x |
+| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.004086 s | `DUMP` | 1.088000 s | 266.28x |
+
+## HAT-trie Command Families
 
 HAT-trie cache currently has 92 canonical command groups in `ExecuteCommand`,
 plus Redis-style aliases for several probabilistic and compact structures. The
-benchmark table below is organized by feature family and lists the benchmark
-that exercises that feature. The command set is strongest where Redis is also
-strong as a data-structure server:
+command set is strongest where Redis is also strong as a data-structure server:
 strings, counters, TTLs, lists/queues, sets, priority queues/sorted-set-like
 workloads, HyperLogLog, Bloom filters, Cuckoo filters, Count-Min Sketch, Top-K,
 and quantile estimation. It also includes HAT-trie-specific exact and compact
 structures that Redis/Tarantool do not expose as a core command family, such as
 XOR filters, roaring bitmaps, sparse uint64 bitsets, radix-tree prefix indexes,
 reservoir samples, and Fenwick trees.
-
-Tarantool is a database/application server rather than a data-structure command
-server. Its closest built-in equivalents are spaces, tuples, primary and
-secondary indexes, tuple update operations, Lua procedures, SQL, WAL/snapshot
-persistence, and replication. Many HAT-trie or Redis data-structure commands
-can be modeled in Tarantool with schema design plus Lua code, but they are not
-single built-in data-type commands.
-
-Local HAT-trie numbers were measured on an AMD Ryzen 9 5950X with:
-
-```
-make bench-command-features BENCHTIME=100x
-```
-
-Redis numbers were measured with Redis 7.0.4 in a temporary Docker container,
-single client, no pipeline, and 10,000 requests per measured command:
-
-```
-make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000 REDIS_CLIENTS=1 REDIS_KEYSPACE=10000
-```
-
-Tarantool numbers were measured with the locally installed Tarantool 2.6.0
-(`2.6.0-0-g47aa4e01e`), embedded in a temporary directory with WAL disabled,
-and 10,000 feature cycles per measured operation:
-
-```
-make bench-tarantool-command-features TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
-```
-
-HAT-trie command benchmarks are in-process Go calls. Redis command benchmarks
-include local loopback TCP, Redis protocol parsing, and server dispatch.
-Tarantool command benchmarks are embedded Tarantool engine calls. The speedup
-columns are `baseline seconds / HAT-trie seconds`, so values above `1.00x`
-mean HAT-trie was faster and values below `1.00x` mean the baseline was faster.
-The numbers are useful as practical local comparisons but not apples-to-apples
-microbenchmarks.
-
-## HAT-trie Command Families
 
 | Family | Canonical HAT-trie commands |
 | --- | --- |
@@ -140,50 +177,131 @@ microbenchmarks.
 | Quantile sketch | `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ` |
 | Fenwick tree | `CREATEFW`, `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW` |
 
-Run the extracted alias table from the code with:
+## Raw Results
 
+### Raw HAT-trie Comparable Result
+
+```text
+HAT-trie benchmark: bench=^BenchmarkCommandFeature/(StringSet|StringGet|CounterInc|TTLExpire|MapPut|MapPeek|SlicePushPop|SetAddHas|PriorityQueuePushPop|RoaringAdd|RoaringHas|SparseBitsetAdd|SparseBitsetHas|RadixPut|RadixPrefix|ReplicationDump)$ benchtime=1000000x count=1
+
+goos: linux
+goarch: amd64
+pkg: hatrie_cache
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkCommandFeature/StringSet-32                    1000000       486.5 ns/op        8 B/op       1 allocs/op
+BenchmarkCommandFeature/StringGet-32                    1000000       213.3 ns/op        0 B/op       0 allocs/op
+BenchmarkCommandFeature/CounterInc-32                   1000000       392.2 ns/op        7 B/op       0 allocs/op
+BenchmarkCommandFeature/TTLExpire-32                    1000000       624.2 ns/op       99 B/op       1 allocs/op
+BenchmarkCommandFeature/MapPut-32                       1000000      1224 ns/op        474 B/op       5 allocs/op
+BenchmarkCommandFeature/MapPeek-32                      1000000       306.8 ns/op        0 B/op       0 allocs/op
+BenchmarkCommandFeature/SlicePushPop-32                 1000000      1466 ns/op        152 B/op       6 allocs/op
+BenchmarkCommandFeature/SetAddHas-32                    1000000      1185 ns/op        112 B/op       9 allocs/op
+BenchmarkCommandFeature/PriorityQueuePushPop-32         1000000      1644 ns/op        168 B/op       8 allocs/op
+BenchmarkCommandFeature/RoaringAdd-32                   1000000       435.1 ns/op        4 B/op       1 allocs/op
+BenchmarkCommandFeature/RoaringHas-32                   1000000       301.1 ns/op        0 B/op       0 allocs/op
+BenchmarkCommandFeature/SparseBitsetAdd-32              1000000       477.3 ns/op        8 B/op       1 allocs/op
+BenchmarkCommandFeature/SparseBitsetHas-32              1000000       322.7 ns/op        0 B/op       0 allocs/op
+BenchmarkCommandFeature/RadixPut-32                     1000000      1502 ns/op        482 B/op       5 allocs/op
+BenchmarkCommandFeature/RadixPrefix-32                  1000000      3259 ns/op       1468 B/op      20 allocs/op
+BenchmarkCommandFeature/ReplicationDump-32              1000000       408.6 ns/op       64 B/op       1 allocs/op
+PASS
+
+Memory summary:
+
+| Metric | Value |
+| --- | ---: |
+| Max resident set size | 35808 KiB |
+| Benchmark process wall time | 0:14.30 |
 ```
-make command-support
+
+### Raw HAT-trie HyperLogLog Result
+
+```text
+HAT-trie benchmark: bench=^BenchmarkCommandFeature/(HyperLogLogAdd|HyperLogLogCount)$ benchtime=1000000x count=1
+
+BenchmarkCommandFeature/HyperLogLogAdd-32       1000000      6223 ns/op      64 B/op       4 allocs/op
+BenchmarkCommandFeature/HyperLogLogCount-32     1000000      5401 ns/op       0 B/op       0 allocs/op
+PASS
+
+Memory summary:
+
+| Metric | Value |
+| --- | ---: |
+| Max resident set size | 27692 KiB |
+| Benchmark process wall time | 0:11.64 |
 ```
 
-## Benchmark Matrix
+### Raw Tarantool Result
 
-| Feature family | HAT-trie benchmark | HAT-trie seconds / 10k | Redis measured command | Redis seconds / 10k | Redis/HAT speedup | Tarantool measured operation | Tarantool seconds / 10k | Tarantool/HAT speedup |
-| --- | --- | ---: | --- | ---: | ---: | --- | ---: | ---: |
-| String write | `BenchmarkCommandFeature/StringSet` | 0.017410 s | `SET` | 0.930000 s | 53.42x | `space:replace()` | 0.030214 s | 1.74x |
-| String read | `BenchmarkCommandFeature/StringGet` | 0.019810 s | `GET` | 0.963000 s | 48.61x | `space.index.primary:get()` | 0.004856 s | 0.25x |
-| Integer counter | `BenchmarkCommandFeature/CounterInc` | 0.017600 s | `INCR` | 0.939000 s | 53.35x | `space:update({{"+", 2, 1}})` | 0.033353 s | 1.90x |
-| TTL update | `BenchmarkCommandFeature/TTLExpire` | 0.020030 s | `EXPIRE` | 1.039000 s | 51.87x | `space:update({{"=", 3, expires_at}})` | 0.033555 s | 1.68x |
-| Map/hash write | `BenchmarkCommandFeature/MapPut` | 0.046450 s | `HSET` | 1.068000 s | 22.99x | `space:replace({key, field, value})` | 0.009241 s | 0.20x |
-| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 0.014080 s | `HGET` | 1.194000 s | 84.80x | `space.index.primary:get({key, field})` | 0.003407 s | 0.24x |
-| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 0.034470 s | `LPUSH` + `RPOP` | 4.527003 s | 131.33x | `space:replace()` + `space:delete()` | 0.014234 s | 0.41x |
-| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 0.030300 s | `SADD` + `SISMEMBER` | 2.462999 s | 81.29x | `space:replace()` + `space.index.primary:get()` | 0.015085 s | 0.50x |
-| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 0.042600 s | `ZADD` + `ZPOPMIN` | 2.398000 s | 56.29x | tree index insert + `index:min()` + delete | 0.053955 s | 1.27x |
-| Bloom add | `BenchmarkCommandFeature/BloomAdd` | 0.030620 s | not measured: RedisBloom/Redis 8 module unavailable | - | - | no native built-in command | - | - |
-| Bloom lookup | `BenchmarkCommandFeature/BloomHas` | 0.024230 s | not measured: RedisBloom/Redis 8 module unavailable | - | - | no native built-in command | - | - |
-| Cuckoo delete+add | `BenchmarkCommandFeature/CuckooDeleteAdd` | 0.030880 s | not measured: RedisBloom/Redis 8 module unavailable | - | - | no native built-in command | - | - |
-| Cuckoo lookup | `BenchmarkCommandFeature/CuckooHas` | 0.019840 s | not measured: RedisBloom/Redis 8 module unavailable | - | - | no native built-in command | - | - |
-| XOR filter build | `BenchmarkCommandFeature/XorBuild64Items` | 2.492080 s | no native core command | - | - | no native built-in command | - | - |
-| XOR filter lookup | `BenchmarkCommandFeature/XorHas` | 0.014240 s | no native core command | - | - | no native built-in command | - | - |
-| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 0.016130 s | `SETBIT` bitmap, not roaring | 1.389001 s | 86.11x | `space:replace()` membership-index approximation | 0.013979 s | 0.87x |
-| Roaring bitmap lookup | `BenchmarkCommandFeature/RoaringHas` | 0.016400 s | `GETBIT` bitmap, not roaring | 1.265000 s | 77.13x | `space.index.primary:get()` membership-index approximation | 0.002475 s | 0.15x |
-| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 0.018220 s | `SETBIT` dense bitmap approximation | 1.389001 s | 76.23x | `space:replace()` membership-index approximation | 0.014560 s | 0.80x |
-| Sparse uint64 bitset lookup | `BenchmarkCommandFeature/SparseBitsetHas` | 0.023190 s | `GETBIT` dense bitmap approximation | 1.265000 s | 54.55x | `space.index.primary:get()` membership-index approximation | 0.003436 s | 0.15x |
-| Radix-tree put | `BenchmarkCommandFeature/RadixPut` | 0.038630 s | sorted-set lex/search approximation not measured | - | - | `space:replace()` tree string-key approximation | 0.011437 s | 0.30x |
-| Radix-tree prefix scan | `BenchmarkCommandFeature/RadixPrefix` | 0.068760 s | sorted-set lex/search approximation not measured | - | - | `index:pairs(prefix, {iterator = "GE"})` approximation | 0.203635 s | 2.96x |
-| Count-Min Sketch increment | `BenchmarkCommandFeature/CountMinSketchIncrement` | 0.023540 s | not measured: RedisBloom/Redis 8 module unavailable | - | - | no native built-in command | - | - |
-| Count-Min Sketch estimate | `BenchmarkCommandFeature/CountMinSketchEstimate` | 0.017250 s | not measured: RedisBloom/Redis 8 module unavailable | - | - | no native built-in command | - | - |
-| HyperLogLog add | `BenchmarkCommandFeature/HyperLogLogAdd` | 0.115600 s | `PFADD` | 1.047000 s | 9.06x | no native built-in command | - | - |
-| HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 0.058980 s | `PFCOUNT` | 1.169000 s | 19.82x | no native built-in command | - | - |
-| Top-K add | `BenchmarkCommandFeature/TopKAdd` | 0.036320 s | not measured: RedisBloom/Redis 8 module unavailable | - | - | no native built-in command | - | - |
-| Top-K read | `BenchmarkCommandFeature/TopKGet` | 0.027220 s | not measured: RedisBloom/Redis 8 module unavailable | - | - | no native built-in command | - | - |
-| Reservoir sample add | `BenchmarkCommandFeature/ReservoirSampleAdd` | 0.027010 s | no native core command | - | - | no native built-in command | - | - |
-| Reservoir sample read | `BenchmarkCommandFeature/ReservoirSampleGet` | 0.080820 s | no native core command | - | - | no native built-in command | - | - |
-| Quantile sketch add | `BenchmarkCommandFeature/QuantileSketchAdd` | 0.023790 s | not measured: `TDIGEST.*` unavailable in Redis 7.0.4 image | - | - | no native built-in command | - | - |
-| Quantile sketch estimate | `BenchmarkCommandFeature/QuantileSketchEstimate` | 0.043960 s | not measured: `TDIGEST.*` unavailable in Redis 7.0.4 image | - | - | no native built-in command | - | - |
-| Fenwick tree add | `BenchmarkCommandFeature/FenwickTreeAdd` | 0.022100 s | no native core command | - | - | no native built-in command | - | - |
-| Fenwick tree range sum | `BenchmarkCommandFeature/FenwickTreeRange` | 0.012250 s | no native core command | - | - | no native built-in command | - | - |
-| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.071580 s | `DUMP` | 1.182000 s | 16.51x | `msgpack.encode(tuple)` | 0.013092 s | 0.18x |
+```text
+Tarantool benchmark: version=2.6.0-0-g47aa4e01e requests=1000000 keyspace=10000
+
+| Feature family | Tarantool operation | Seconds / 10k feature cycles |
+| --- | --- | ---: |
+| String write | `space:replace()` | 0.008629 s |
+| String read | `space.index.primary:get()` | 0.005363 s |
+| Integer counter | `space:update({{"+", 2, 1}})` | 0.013611 s |
+| TTL update | `space:update({{"=", 3, expires_at}})` | 0.018005 s |
+| Map/hash write | `space:replace({key, field, value})` | 0.010979 s |
+| Map/hash read | `space.index.primary:get({key, field})` | 0.005224 s |
+| List/deque push+pop | `space:replace() + space:delete()` | 0.018650 s |
+| Set add+has | `space:replace() + space.index.primary:get()` | 0.017228 s |
+| Priority queue push+pop | `tree index insert + index:min() + delete` | 0.026943 s |
+| Roaring bitmap add approximation | `space:replace() membership index` | 0.009881 s |
+| Roaring bitmap lookup approximation | `space.index.primary:get() membership index` | 0.014427 s |
+| Sparse bitset add approximation | `space:replace() membership index` | 0.011004 s |
+| Sparse bitset lookup approximation | `space.index.primary:get() membership index` | 0.019058 s |
+| Radix-tree put approximation | `space:replace() tree string key` | 0.022540 s |
+| Radix-tree prefix scan approximation | `index:pairs(prefix, {iterator = "GE"})` | 0.262052 s |
+| Replication dump | `msgpack.encode(tuple)` | 0.036781 s |
+
+Memory summary:
+
+| Metric | Value |
+| --- | ---: |
+| Process RSS | 35708 KiB |
+| memtx_memory configured | 1048576 KiB |
+| slab quota used | 32768 KiB |
+| slab quota size | 1048576 KiB |
+| slab arena used | 4463 KiB |
+| slab arena size | 32768 KiB |
+| slab items used | 1519 KiB |
+| slab items size | 2131 KiB |
+```
+
+### Raw Redis Result
+
+```text
+Redis benchmark: host=127.0.0.1 port=6380 requests=10000 clients=1 keyspace=10000
+
+| Feature family | Redis command | Throughput | Seconds / 10k ops |
+| --- | --- | ---: | ---: |
+| String write | `SET hatriebench:639144:string value` | 8312.55 req/s | 1.203000 s |
+| String read | `GET hatriebench:639144:string:__rand_int__` | 10020.04 req/s | 0.998000 s |
+| Integer counter | `INCR hatriebench:639144:counter` | 10351.97 req/s | 0.966000 s |
+| TTL update | `EXPIRE hatriebench:639144:ttl 3600` | 9940.36 req/s | 1.006000 s |
+| Hash/map write | `HSET hatriebench:639144:hash field value` | 7716.05 req/s | 1.296000 s |
+| Hash/map read | `HGET hatriebench:639144:hash field` | 7158.20 req/s | 1.396999 s |
+| List push | `LPUSH hatriebench:639144:list value` | 10183.30 req/s | 0.982000 s |
+| List pop | `RPOP hatriebench:639144:list:pop` | 9090.91 req/s | 1.100000 s |
+| Set add | `SADD hatriebench:639144:set value` | 11148.27 req/s | 0.897000 s |
+| Set membership | `SISMEMBER hatriebench:639144:set value` | 10660.98 req/s | 0.938000 s |
+| Sorted-set add | `ZADD hatriebench:639144:zset 10 value` | 9302.33 req/s | 1.074999 s |
+| Sorted-set pop | `ZPOPMIN hatriebench:639144:zset:pop` | 8756.57 req/s | 1.142000 s |
+| HyperLogLog add | `PFADD hatriebench:639144:hll value` | 9587.73 req/s | 1.043000 s |
+| HyperLogLog count | `PFCOUNT hatriebench:639144:hll` | 8431.70 req/s | 1.186000 s |
+| Bitmap add | `SETBIT hatriebench:639144:bitmap 65543 1` | 9803.92 req/s | 1.020000 s |
+| Bitmap lookup | `GETBIT hatriebench:639144:bitmap 65543` | 9174.31 req/s | 1.090000 s |
+| Replication dump | `DUMP hatriebench:639144:string` | 9191.18 req/s | 1.088000 s |
+
+Memory summary:
+
+| Metric | Value |
+| --- | ---: |
+| used_memory | 2494304 B |
+| used_memory_rss | 8716288 B |
+| used_memory_peak | 3171296 B |
+```
 
 ## Gaps Versus Redis
 

@@ -4,6 +4,7 @@ set -eu
 tarantool_bin=${TARANTOOL_BIN:-tarantool}
 requests=${TARANTOOL_REQUESTS:-10000}
 keyspace=${TARANTOOL_KEYSPACE:-10000}
+memtx_memory=${TARANTOOL_MEMTX_MEMORY:-268435456}
 work_dir=${TARANTOOL_WORK_DIR:-}
 created_work_dir=
 
@@ -23,5 +24,6 @@ trap cleanup EXIT HUP INT TERM
 
 TARANTOOL_REQUESTS="$requests" \
 TARANTOOL_KEYSPACE="$keyspace" \
+TARANTOOL_MEMTX_MEMORY="$memtx_memory" \
 TARANTOOL_WORK_DIR="$work_dir" \
 "$tarantool_bin" scripts/tarantool-command-features.lua

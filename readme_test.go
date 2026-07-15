@@ -84,8 +84,9 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 		"https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_index/",
 		"make command-support",
 		"make bench-command-features BENCHTIME=100x",
+		"make bench-hatrie-command-features",
 		"make bench-redis-command-features REDIS_START_DOCKER=1",
-		"make bench-tarantool-command-features TARANTOOL_REQUESTS=10000",
+		"make bench-tarantool-command-features TARANTOOL_REQUESTS=1000000",
 		"BenchmarkCommandFeature/StringSet",
 		"BenchmarkCommandFeature/FenwickTreeRange",
 		"Redis 7.0.4",
@@ -93,9 +94,11 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 		"Tarantool 2.6.0",
 		"Tarantool/HAT speedup",
 		"Benchmark Results",
-		"Headline local results",
+		"Memory Summary",
+		"HAT-trie vs Tarantool",
+		"HAT-trie vs Redis",
 		"Raw Tarantool Result",
-		"Tarantool benchmark: version=2.6.0-0-g47aa4e01e requests=10000 keyspace=10000",
+		"Tarantool benchmark: version=2.6.0-0-g47aa4e01e requests=1000000 keyspace=10000",
 		"`SET`",
 	} {
 		if !strings.Contains(doc, token) {
@@ -136,6 +139,8 @@ func TestRedisCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T) {
 		"redis-benchmark",
 		"10000 / qps",
 		"Seconds / 10k ops",
+		"Memory summary",
+		"used_memory_rss",
 		"SETBIT",
 		"PFCOUNT",
 	} {
@@ -153,14 +158,36 @@ func TestTarantoolCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T
 	script := string(data)
 	for _, token := range []string{
 		"TARANTOOL_REQUESTS",
+		"TARANTOOL_MEMTX_MEMORY",
 		"clock.monotonic",
 		"Seconds / 10k feature cycles",
+		"Memory summary",
+		"box.slab.info",
 		"space:replace() + space:delete()",
 		"msgpack.encode(tuple)",
 		"index:pairs(prefix",
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("Tarantool command benchmark script missing token %q", token)
+		}
+	}
+}
+
+func TestHatTrieCommandFeatureBenchmarkScriptReportsRSS(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-hatrie-command-features.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-hatrie-command-features.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		"HATRIE_BENCH",
+		"go test -c",
+		"-test.benchmem",
+		"/usr/bin/time",
+		"Max resident set size",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("HAT-trie command benchmark script missing token %q", token)
 		}
 	}
 }

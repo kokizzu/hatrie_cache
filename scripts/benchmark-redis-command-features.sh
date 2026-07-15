@@ -85,3 +85,18 @@ run_redis_benchmark 'HyperLogLog count' PFCOUNT "$prefix:hll"
 run_redis_benchmark 'Bitmap add' SETBIT "$prefix:bitmap" 65543 1
 run_redis_benchmark 'Bitmap lookup' GETBIT "$prefix:bitmap" 65543
 run_redis_benchmark 'Replication dump' DUMP "$prefix:string"
+
+memory_field() {
+	redis-cli -h "$host" -p "$port" INFO memory | tr -d '\r' | awk -F: -v key="$1" '$1 == key { print $2 }'
+}
+
+used_memory=$(memory_field used_memory)
+used_memory_rss=$(memory_field used_memory_rss)
+used_memory_peak=$(memory_field used_memory_peak)
+
+printf '\nMemory summary:\n\n'
+printf '| Metric | Value |\n'
+printf '| --- | ---: |\n'
+printf '| used_memory | %s B |\n' "${used_memory:-unknown}"
+printf '| used_memory_rss | %s B |\n' "${used_memory_rss:-unknown}"
+printf '| used_memory_peak | %s B |\n' "${used_memory_peak:-unknown}"

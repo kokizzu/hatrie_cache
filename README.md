@@ -448,8 +448,8 @@ and `INTERNALDEL`.
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence.
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
-per 10k operations, raw Tarantool output, and Redis/Tarantool speedup
-comparisons.
+per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
+Redis/Tarantool speedup comparisons.
 
 Use the HTTP client CLI against a running monitoring server:
 
