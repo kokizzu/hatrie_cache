@@ -468,6 +468,10 @@ func (ht *HatTrie) UpsertRadixTree(key string) {
 }
 
 func (ht *HatTrie) UpsertRadixTreeChecked(key string) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -498,6 +502,9 @@ func (ht *HatTrie) PutRadixTree(key string, subkey string, val interface{}) bool
 }
 
 func (ht *HatTrie) PutRadixTreeChecked(key string, subkey string, val interface{}) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
 	if err := validateRadixTreeValue(val); err != nil {
 		return false, err
 	}
@@ -505,6 +512,10 @@ func (ht *HatTrie) PutRadixTreeChecked(key string, subkey string, val interface{
 }
 
 func (ht *HatTrie) putRadixTree(key string, subkey string, val interface{}) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -538,6 +549,9 @@ func (ht *HatTrie) PutRadixTreeEntries(key string, entries Map) int {
 }
 
 func (ht *HatTrie) PutRadixTreeEntriesChecked(key string, entries Map) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	if len(entries) == 0 {
 		return 0, nil
 	}
@@ -548,6 +562,9 @@ func (ht *HatTrie) PutRadixTreeEntriesChecked(key string, entries Map) (int, err
 }
 
 func (ht *HatTrie) putRadixTreeEntries(key string, entries Map) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	if len(entries) == 0 {
 		return 0, nil
 	}
@@ -585,6 +602,10 @@ func (ht *HatTrie) GetRadixTree(key string, subkey string) (interface{}, bool) {
 }
 
 func (ht *HatTrie) GetRadixTreeChecked(key string, subkey string) (interface{}, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -608,6 +629,10 @@ func (ht *HatTrie) DeleteRadixTree(key string, subkey string) bool {
 }
 
 func (ht *HatTrie) DeleteRadixTreeChecked(key string, subkey string) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -634,6 +659,10 @@ func (ht *HatTrie) HasRadixTree(key string, subkey string) bool {
 }
 
 func (ht *HatTrie) HasRadixTreeChecked(key string, subkey string) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -657,6 +686,10 @@ func (ht *HatTrie) ScanRadixTree(key string, prefix string) ([]RadixTreeItem, bo
 }
 
 func (ht *HatTrie) ScanRadixTreeChecked(key string, prefix string) ([]RadixTreeItem, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -679,6 +712,10 @@ func (ht *HatTrie) RadixTreeInfo(key string) (RadixTreeInfo, bool) {
 }
 
 func (ht *HatTrie) RadixTreeInfoChecked(key string) (RadixTreeInfo, bool, error) {
+	if ht == nil {
+		return RadixTreeInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

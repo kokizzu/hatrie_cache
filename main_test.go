@@ -590,6 +590,60 @@ func TestSparseBitsetAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestRadixTreeAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	ht.UpsertRadixTree("radix")
+	if err := ht.UpsertRadixTreeChecked("radix"); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertRadixTreeChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.PutRadixTree("radix", "user:100", "active"); got {
+		t.Fatal("PutRadixTree(nil trie) = true, want false")
+	}
+	if got, err := ht.PutRadixTreeChecked("radix", "user:100", "active"); got || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PutRadixTreeChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", got, err)
+	}
+	if got := ht.PutRadixTreeEntries("radix", Map{"user:100": "active"}); got != 0 {
+		t.Fatalf("PutRadixTreeEntries(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.PutRadixTreeEntriesChecked("radix", Map{"user:100": "active"}); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PutRadixTreeEntriesChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, err := ht.PutRadixTreeEntriesChecked("radix", nil); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PutRadixTreeEntriesChecked(nil trie, empty) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.GetRadixTree("radix", "user:100"); got != nil || ok {
+		t.Fatalf("GetRadixTree(nil trie) = %#v/%v, want nil/false", got, ok)
+	}
+	if got, ok, err := ht.GetRadixTreeChecked("radix", "user:100"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetRadixTreeChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.DeleteRadixTree("radix", "user:100"); got {
+		t.Fatal("DeleteRadixTree(nil trie) = true, want false")
+	}
+	if got, err := ht.DeleteRadixTreeChecked("radix", "user:100"); got || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("DeleteRadixTreeChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", got, err)
+	}
+	if got := ht.HasRadixTree("radix", "user:100"); got {
+		t.Fatal("HasRadixTree(nil trie) = true, want false")
+	}
+	if got, err := ht.HasRadixTreeChecked("radix", "user:100"); got || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HasRadixTreeChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.ScanRadixTree("radix", "user:"); got != nil || ok {
+		t.Fatalf("ScanRadixTree(nil trie) = %#v/%v, want nil/false", got, ok)
+	}
+	if got, ok, err := ht.ScanRadixTreeChecked("radix", "user:"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("ScanRadixTreeChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got, ok := ht.RadixTreeInfo("radix"); got != (RadixTreeInfo{}) || ok {
+		t.Fatalf("RadixTreeInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.RadixTreeInfoChecked("radix"); got != (RadixTreeInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("RadixTreeInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
