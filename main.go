@@ -3254,6 +3254,9 @@ func (ht *HatTrie) storeBytesValueLocked(old HatValue, val []byte) (HatValue, er
 }
 
 func (ht *HatTrie) UpsertMap(key string, val Map) {
+	if ht == nil {
+		return
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3261,6 +3264,9 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 }
 
 func (ht *HatTrie) UpsertMapChecked(key string, val Map) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	if err := validateMapValue(val); err != nil {
 		return err
 	}
@@ -3294,6 +3300,9 @@ func (ht *HatTrie) upsertMapLocked(key string, val Map) error {
 }
 
 func (ht *HatTrie) UpsertMapJSON(key string, data []byte) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	value, err := UnmarshalMapJSON(data)
 	if err != nil {
 		return err
@@ -3325,6 +3334,9 @@ func (ht *HatTrie) PutMapChecked(key string, subkey string, val interface{}) err
 }
 
 func (ht *HatTrie) PutMapEntriesChecked(key string, fields Map) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	if len(fields) == 0 {
 		return nil
 	}
@@ -3335,6 +3347,9 @@ func (ht *HatTrie) PutMapEntriesChecked(key string, fields Map) error {
 }
 
 func (ht *HatTrie) putMapEntries(key string, fields Map) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	if len(fields) == 0 {
 		return nil
 	}
@@ -3370,6 +3385,9 @@ func (ht *HatTrie) PeekMap(key, subkey string) interface{} {
 }
 
 func (ht *HatTrie) PeekMapChecked(key, subkey string) (interface{}, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3396,6 +3414,9 @@ func (ht *HatTrie) TakeMap(key, subkey string) interface{} {
 }
 
 func (ht *HatTrie) TakeMapChecked(key, subkey string) (interface{}, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3422,6 +3443,9 @@ func (ht *HatTrie) GetMap(key string) Map {
 }
 
 func (ht *HatTrie) GetMapChecked(key string) (Map, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3454,6 +3478,9 @@ func (ht *HatTrie) mapRefLockedChecked(key string) (Map, bool, error) {
 }
 
 func (ht *HatTrie) UpsertSlice(key string, val Slice) {
+	if ht == nil {
+		return
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3461,6 +3488,9 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 }
 
 func (ht *HatTrie) UpsertSliceChecked(key string, val Slice) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	if err := validateSliceValue(val); err != nil {
 		return err
 	}
@@ -3498,6 +3528,9 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 }
 
 func (ht *HatTrie) PushSliceChecked(key string, val interface{}, vals ...interface{}) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	if err := validateSliceValues(val, vals...); err != nil {
 		return err
 	}
@@ -3505,6 +3538,9 @@ func (ht *HatTrie) PushSliceChecked(key string, val interface{}, vals ...interfa
 }
 
 func (ht *HatTrie) pushSlice(key string, val interface{}, vals ...interface{}) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3541,6 +3577,9 @@ func (ht *HatTrie) PopSlice(key string) interface{} {
 }
 
 func (ht *HatTrie) PopSliceChecked(key string) (interface{}, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3570,6 +3609,9 @@ func (ht *HatTrie) ShiftSlice(key string) interface{} {
 }
 
 func (ht *HatTrie) ShiftSliceChecked(key string) (interface{}, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3599,6 +3641,9 @@ func (ht *HatTrie) HeadSlice(key string) interface{} {
 }
 
 func (ht *HatTrie) HeadSliceChecked(key string) (interface{}, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3622,6 +3667,9 @@ func (ht *HatTrie) TailSlice(key string) interface{} {
 }
 
 func (ht *HatTrie) TailSliceChecked(key string) (interface{}, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3645,6 +3693,9 @@ func (ht *HatTrie) GetSlice(key string) Slice {
 }
 
 func (ht *HatTrie) GetSliceChecked(key string) (Slice, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3682,6 +3733,9 @@ func (ht *HatTrie) UpsertSet(key string, val Set) {
 }
 
 func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	data, err := newSetDataChecked(val)
 	if err != nil {
 		return err
@@ -3717,6 +3771,9 @@ func (ht *HatTrie) AddSet(key string, val interface{}, vals ...interface{}) int 
 }
 
 func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	keys, err := setItemKeysOne(val, vals...)
 	if err != nil {
 		return 0, err
@@ -3757,6 +3814,9 @@ func (ht *HatTrie) RemoveSet(key string, val interface{}, vals ...interface{}) i
 }
 
 func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	keys, err := setItemKeysOne(val, vals...)
 	if err != nil {
 		return 0, err
@@ -3789,6 +3849,9 @@ func (ht *HatTrie) HasSet(key string, val interface{}) bool {
 }
 
 func (ht *HatTrie) HasSetChecked(key string, val interface{}) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
 	valueKey, err := setItemKey(val)
 	if err != nil {
 		return false, err
@@ -3817,6 +3880,9 @@ func (ht *HatTrie) GetSet(key string) Set {
 }
 
 func (ht *HatTrie) GetSetChecked(key string) (Set, bool, error) {
+	if ht == nil {
+		return nil, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

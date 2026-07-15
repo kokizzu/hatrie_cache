@@ -182,6 +182,114 @@ func TestScalarAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestCollectionAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	ht.UpsertMap("map", Map{"field": "value"})
+	if err := ht.UpsertMapChecked("map", Map{"field": "value"}); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertMapChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if err := ht.UpsertMapJSON("map", []byte(`{"field":"value"}`)); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertMapJSON(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if data, ok, err := ht.GetMapJSON("map"); data != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetMapJSON(nil trie) = %q/%v/%v, want nil/false/ErrNilHatTrie", data, ok, err)
+	}
+	ht.PutMap("map", "field", "value")
+	if err := ht.PutMapChecked("map", "field", "value"); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PutMapChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if err := ht.PutMapEntriesChecked("map", Map{"field": "value"}); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PutMapEntriesChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.PeekMap("map", "field"); got != nil {
+		t.Fatalf("PeekMap(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.PeekMapChecked("map", "field"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PeekMapChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.TakeMap("map", "field"); got != nil {
+		t.Fatalf("TakeMap(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.TakeMapChecked("map", "field"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("TakeMapChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.GetMap("map"); got != nil {
+		t.Fatalf("GetMap(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.GetMapChecked("map"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetMapChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+
+	ht.UpsertSlice("slice", Slice{"value"})
+	if err := ht.UpsertSliceChecked("slice", Slice{"value"}); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertSliceChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	ht.PushSlice("slice", "value")
+	if err := ht.PushSliceChecked("slice", "value"); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PushSliceChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.PopSlice("slice"); got != nil {
+		t.Fatalf("PopSlice(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.PopSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PopSliceChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.ShiftSlice("slice"); got != nil {
+		t.Fatalf("ShiftSlice(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.ShiftSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("ShiftSliceChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.HeadSlice("slice"); got != nil {
+		t.Fatalf("HeadSlice(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.HeadSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HeadSliceChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.TailSlice("slice"); got != nil {
+		t.Fatalf("TailSlice(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.TailSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("TailSliceChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+	if got := ht.GetSlice("slice"); got != nil {
+		t.Fatalf("GetSlice(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.GetSliceChecked("slice"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetSliceChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+
+	ht.UpsertSet("set", Set{"value"})
+	if err := ht.UpsertSetChecked("set", Set{"value"}); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertSetChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddSet("set", "value"); got != 0 {
+		t.Fatalf("AddSet(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.AddSetChecked("set", "value"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddSetChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.RemoveSet("set", "value"); got != 0 {
+		t.Fatalf("RemoveSet(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.RemoveSetChecked("set", "value"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("RemoveSetChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.HasSet("set", "value"); got {
+		t.Fatal("HasSet(nil trie) = true, want false")
+	}
+	if got, err := ht.HasSetChecked("set", "value"); got || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HasSetChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", got, err)
+	}
+	if got := ht.GetSet("set"); got != nil {
+		t.Fatalf("GetSet(nil trie) = %#v, want nil", got)
+	}
+	if got, ok, err := ht.GetSetChecked("set"); got != nil || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetSetChecked(nil trie) = %#v/%v/%v, want nil/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
