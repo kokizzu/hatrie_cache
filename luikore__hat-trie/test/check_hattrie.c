@@ -327,8 +327,8 @@ void test_hattrie_key_length_limit()
 
     hattrie_t* T = hattrie_create();
     size_t max_trie_key_length = ahtable_max_key_length;
-    char* max_key = malloc(max_trie_key_length + 1);
-    char* too_long = malloc(max_trie_key_length + 2);
+    char* max_key = malloc_or_die(max_trie_key_length + 1);
+    char* too_long = malloc_or_die(max_trie_key_length + 2);
     fill_repeated(max_key, max_trie_key_length, 'm');
     fill_repeated(too_long, max_trie_key_length + 1, 'x');
 
@@ -345,6 +345,26 @@ void test_hattrie_key_length_limit()
             have_error = 1;
         }
     }
+    hattrie_iter_t* iter = hattrie_iter_begin(T, true);
+    if (hattrie_iter_finished(iter)) {
+        fprintf(stderr, "[error] iterator missed max length trie key\n");
+        have_error = 1;
+    }
+    else {
+        size_t iter_len = 0;
+        const char* iter_key = hattrie_iter_key(iter, &iter_len);
+        if (iter_len != max_trie_key_length || memcmp(iter_key, max_key, max_trie_key_length) != 0) {
+            fprintf(stderr, "[error] iterator returned max key length %zu, expected %zu\n",
+                            iter_len, max_trie_key_length);
+            have_error = 1;
+        }
+        hattrie_iter_next(iter);
+        if (!hattrie_iter_finished(iter)) {
+            fprintf(stderr, "[error] iterator returned extra key after max length trie key\n");
+            have_error = 1;
+        }
+    }
+    hattrie_iter_free(iter);
 
     v = hattrie_get(T, too_long, max_trie_key_length + 1);
     if (v != NULL) {

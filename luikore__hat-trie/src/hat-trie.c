@@ -543,12 +543,28 @@ struct hattrie_iter_t_
 };
 
 
+static void hattrie_iter_reserve_key(hattrie_iter_t* i, size_t needed)
+{
+    if (i->keysize >= needed) return;
+
+    size_t next = i->keysize;
+    if (next == 0) next = 1;
+    while (next < needed) {
+        if (next > ((size_t) -1) / 2) {
+            next = needed;
+            break;
+        }
+        next = size_add_or_die(next, next);
+    }
+
+    i->key = realloc_array_or_die(i->key, next, sizeof(char));
+    i->keysize = next;
+}
+
+
 static void hattrie_iter_pushchar(hattrie_iter_t* i, size_t level, char c)
 {
-    if (i->keysize < level) {
-        i->keysize *= 2;
-        i->key = realloc_or_die(i->key, i->keysize * sizeof(char));
-    }
+    hattrie_iter_reserve_key(i, level);
 
     if (level > 0) {
         i->key[level - 1] = c;
@@ -646,7 +662,7 @@ static bool hattrie_iter_prefix_not_match(hattrie_iter_t* i)
     size_t sublen;
     const char* subkey;
     subkey = ahtable_iter_key(i->i, &sublen);
-    if (i->level + sublen < i->prefix_len) {
+    if (sublen < i->prefix_len - i->level) {
         return true; // subkey too short
     }
     return memcmp(i->key, i->prefix, i->level) ||
@@ -757,17 +773,15 @@ const char* hattrie_iter_key(hattrie_iter_t* i, size_t* len)
     }
     else subkey = ahtable_iter_key(i->i, &sublen);
 
-    if (i->keysize < i->level + sublen + 1) {
-        while (i->keysize < i->level + sublen + 1) i->keysize *= 2;
-        i->key = realloc_or_die(i->key, i->keysize * sizeof(char));
-    }
+    size_t key_len = size_add_or_die(i->level, sublen);
+    hattrie_iter_reserve_key(i, size_add_or_die(key_len, 1));
 
     if (sublen) {
         memcpy(i->key + i->level, subkey, sublen);
     }
-    i->key[i->level + sublen] = '\0';
+    i->key[key_len] = '\0';
 
-    *len = i->level + sublen - i->prefix_len;
+    *len = key_len - i->prefix_len;
     return i->key + i->prefix_len;
 }
 
