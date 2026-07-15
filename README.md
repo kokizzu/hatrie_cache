@@ -124,8 +124,8 @@ make monitoring-server GRPC_ADDR=127.0.0.1:9090
 Set `DB_PATH` to load and save cache data through LevelDB with Snappy
 compression. LevelDB records use the binary storage format by default
 (`DB_FORMAT=binary`), which avoids JSON object-field overhead and stores byte
-values as raw bytes instead of base64. Map, slice, set, priority queue, radix
-tree, Bloom filter, Count-Min Sketch, and HyperLogLog values use compact binary
+values as raw bytes instead of base64. Map, slice, set, priority queue, Top-K,
+radix tree, Bloom filter, Count-Min Sketch, and HyperLogLog values use compact binary
 payload codecs when possible, with automatic JSON fallback for values outside
 the recursive JSON-compatible codec. Cuckoo filter values also store packed
 fingerprints directly in binary records; built XOR filter values do the same,
@@ -340,7 +340,7 @@ use less heap; JSON remains easier to inspect manually. Snapshot and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
 carry empty collection fields. Binary snapshots reuse the compact LevelDB record
 codec, avoid base64 for byte values, and use the same compact collection,
-priority-queue, radix-tree, Bloom filter, Count-Min Sketch, and HyperLogLog
+priority-queue, Top-K, radix-tree, Bloom filter, Count-Min Sketch, and HyperLogLog
 payload codecs when possible, plus direct binary cuckoo-filter fingerprints.
 Built XOR filters also store fingerprints directly and keep staged snapshots on
 JSON fallback; roaring bitmaps and sparse bitsets store container payloads

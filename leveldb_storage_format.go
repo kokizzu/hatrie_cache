@@ -261,6 +261,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 		return prepareLevelDBBinaryCollectionValue(entry.Set)
 	case "priority_queue":
 		return prepareLevelDBBinaryPriorityQueueValue(entry.PriorityQueue)
+	case "top_k":
+		if entry.TopK == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: top-k snapshot is required")
+		}
+		return prepareLevelDBBinaryTopKValue(*entry.TopK)
 	case "radix_tree":
 		if entry.RadixTree == nil {
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: radix tree snapshot is required")
@@ -359,6 +364,29 @@ func prepareLevelDBBinaryPriorityQueueValue(items []priorityQueueItem) (levelDBB
 	if !ok {
 		var marshalErr error
 		payload, marshalErr = json.Marshal(items)
+		if marshalErr != nil {
+			return levelDBBinaryPreparedValue{}, marshalErr
+		}
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryTopKValue(snapshot topKSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, ok, err := marshalSnapshotTopKValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	if !ok {
+		var marshalErr error
+		payload, marshalErr = json.Marshal(snapshot)
 		if marshalErr != nil {
 			return levelDBBinaryPreparedValue{}, marshalErr
 		}
@@ -875,6 +903,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 		}
 		return decodeLevelDBStorageJSON(data, &entry.HyperLogLog)
 	case "top_k":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(topKSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary top-k value is not a top-k snapshot")
+			}
+			entry.TopK = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.TopK)
 	case "cuckoo_filter":
 		if snapshotValueDataIsBinary(data) {

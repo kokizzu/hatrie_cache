@@ -32,6 +32,8 @@ const (
 	snapshotValueBinarySparseBitset
 	snapshotValueBinaryFenwickTree
 	snapshotValueBinaryQuantileSketch
+	snapshotValueBinaryTopK
+	snapshotValueBinaryReservoirSample
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -61,6 +63,18 @@ func marshalSnapshotPriorityQueueValueBinary(items []priorityQueueItem) ([]byte,
 	}
 	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
 	if ok := writeSnapshotValueBinaryPriorityQueue(&writer, items); !ok {
+		return nil, false, nil
+	}
+	return writer.bytes(), true, nil
+}
+
+func marshalSnapshotTopKValueBinary(snapshot topKSnapshot) ([]byte, bool, error) {
+	size, ok, err := snapshotValueBinaryTopKSize(snapshot)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	if ok := writeSnapshotValueBinaryTopK(&writer, snapshot); !ok {
 		return nil, false, nil
 	}
 	return writer.bytes(), true, nil
@@ -323,6 +337,33 @@ func snapshotValueBinaryPriorityQueueSize(items []priorityQueueItem) (int, bool,
 	return total, true, nil
 }
 
+func snapshotValueBinaryTopKSize(snapshot topKSnapshot) (int, bool, error) {
+	total := 1 +
+		binaryUvarintSize(snapshot.Capacity) +
+		binaryUvarintSize(snapshot.Total) +
+		binaryUvarintSize(uint64(len(snapshot.Items)))
+	for _, item := range snapshot.Items {
+		keySize, err := snapshotValueBinaryBytesSize(len(item.Key))
+		if err != nil {
+			return 0, true, err
+		}
+		itemSize := keySize + binaryUvarintSize(item.Count) + binaryUvarintSize(item.Error)
+		valueSize, ok, err := snapshotValueBinarySize(item.Value)
+		if err != nil || !ok {
+			return 0, ok, err
+		}
+		itemSize, err = snapshotValueBinaryAdd(itemSize, valueSize)
+		if err != nil {
+			return 0, true, err
+		}
+		total, err = snapshotValueBinaryAdd(total, itemSize)
+		if err != nil {
+			return 0, true, err
+		}
+	}
+	return total, true, nil
+}
+
 func snapshotValueBinaryRadixTreeSize(snapshot radixTreeSnapshot) (int, bool, error) {
 	if snapshot.Count != uint64(len(snapshot.Items)) {
 		return 0, true, errors.New("hatriecache: radix tree count does not match items")
@@ -549,6 +590,22 @@ func writeSnapshotValueBinaryPriorityQueue(writer *binaryFieldWriter, items []pr
 	return true
 }
 
+func writeSnapshotValueBinaryTopK(writer *binaryFieldWriter, snapshot topKSnapshot) bool {
+	writer.buf = append(writer.buf, snapshotValueBinaryTopK)
+	writer.writeUvarint(snapshot.Capacity)
+	writer.writeUvarint(snapshot.Total)
+	writer.writeUvarint(uint64(len(snapshot.Items)))
+	for _, item := range snapshot.Items {
+		writer.writeString(item.Key)
+		writer.writeUvarint(item.Count)
+		writer.writeUvarint(item.Error)
+		if ok := writeSnapshotValueBinary(writer, item.Value); !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func writeSnapshotValueBinaryRadixTree(writer *binaryFieldWriter, snapshot radixTreeSnapshot) bool {
 	writer.buf = append(writer.buf, snapshotValueBinaryRadixTree)
 	writer.writeUvarint(uint64(len(snapshot.Items)))
@@ -743,6 +800,53 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			})
 		}
 		return items, nil
+	case snapshotValueBinaryTopK:
+		capacity, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		total, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		count, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		capacityHint, err := snapshotValueBinaryInitialCapacity(count, len(reader.data)-reader.off, 4)
+		if err != nil {
+			return nil, err
+		}
+		items := make([]topKItem, 0, capacityHint)
+		for idx := 0; idx < int(count); idx++ {
+			key, err := reader.readString()
+			if err != nil {
+				return nil, err
+			}
+			itemCount, err := reader.readUvarint()
+			if err != nil {
+				return nil, err
+			}
+			itemError, err := reader.readUvarint()
+			if err != nil {
+				return nil, err
+			}
+			value, err := readSnapshotValueBinary(reader)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, topKItem{
+				Key:   key,
+				Value: value,
+				Count: itemCount,
+				Error: itemError,
+			})
+		}
+		return topKSnapshot{
+			Capacity: capacity,
+			Total:    total,
+			Items:    items,
+		}, nil
 	case snapshotValueBinaryRadixTree:
 		count, err := reader.readUvarint()
 		if err != nil {

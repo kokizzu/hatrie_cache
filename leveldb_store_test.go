@@ -455,6 +455,125 @@ func TestLevelDBBinaryPriorityQueueStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryTopKUsesBinaryValuePayload(t *testing.T) {
+	top, err := newTopKData(4)
+	if err != nil {
+		t.Fatalf("newTopKData() error = %v", err)
+	}
+	top.Add("alpha", 5)
+	top.Add(Map{"route": "/api/users", "method": "GET"}, 3)
+	top.Add(Slice{"beta", "gamma"}, 2)
+	snapshot := top.Snapshot()
+	entry := snapshotEntry{
+		Key:  "heavy-hitters",
+		Type: "top_k",
+		TopK: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary top-k) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("top-k payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(top-k) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary top-k payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary top-k) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.TopK, &snapshot) {
+		t.Fatalf("decoded top-k = %#v, want %#v", decoded.TopK, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryTopKFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+	top, err := newTopKData(2)
+	if err != nil {
+		t.Fatalf("newTopKData() error = %v", err)
+	}
+	top.Add(PriorityQueue{{Priority: 9, Value: "nested"}}, 1)
+	snapshot := top.Snapshot()
+	entry := snapshotEntry{
+		Key:  "heavy-hitters",
+		Type: "top_k",
+		TopK: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(top-k fallback) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if snapshotValueDataIsBinary(payload) {
+		t.Fatalf("top-k fallback payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	}
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(top-k fallback) error = %v", err)
+	}
+	if decoded.TopK == nil || decoded.TopK.Capacity != 2 || decoded.TopK.Total != 1 || len(decoded.TopK.Items) != 1 {
+		t.Fatalf("decoded fallback top-k = %#v, want one tracked item", decoded.TopK)
+	}
+	nested, ok := decoded.TopK.Items[0].Value.([]interface{})
+	if !ok || len(nested) != 1 {
+		t.Fatalf("decoded fallback top-k value = %#v, want JSON array", decoded.TopK.Items[0].Value)
+	}
+	nestedItem, ok := nested[0].(map[string]interface{})
+	if !ok || nestedItem["priority"] != json.Number("9") || nestedItem["value"] != "nested" {
+		t.Fatalf("decoded fallback top-k nested item = %#v, want JSON priority item", nested[0])
+	}
+}
+
+func TestLevelDBBinaryTopKStillReadsLegacyJSONPayload(t *testing.T) {
+	top, err := newTopKData(3)
+	if err != nil {
+		t.Fatalf("newTopKData() error = %v", err)
+	}
+	top.Add("alpha", 5)
+	top.Add("beta", 2)
+	snapshot := top.Snapshot()
+	entry := snapshotEntry{
+		Key:  "legacy-heavy-hitters",
+		Type: "top_k",
+		TopK: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(top-k) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON top-k) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.TopK, entry.TopK) {
+		t.Fatalf("decoded legacy inner JSON top-k = %#v, want %#v", decoded.TopK, entry.TopK)
+	}
+}
+
 func TestLevelDBBinaryRadixTreeUsesBinaryValuePayload(t *testing.T) {
 	entry := snapshotEntry{
 		Key:  "radix",
