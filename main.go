@@ -2891,6 +2891,9 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 // UpsertCounterChecked sets key to an int32 counter and reports validation
 // errors.
 func (ht *HatTrie) UpsertCounterChecked(key string, val int32) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2919,6 +2922,9 @@ func (ht *HatTrie) IncrementCounterChecked(key string, by int32) (int32, error) 
 }
 
 func (ht *HatTrie) incrementCounterChecked(key string, by int32, checkOverflow bool) (int32, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2957,6 +2963,9 @@ func (ht *HatTrie) GetCounter(key string) int32 {
 }
 
 func (ht *HatTrie) GetCounterChecked(key string) (int32, bool, error) {
+	if ht == nil {
+		return 0, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2979,6 +2988,9 @@ func (ht *HatTrie) UpsertString(key string, val string) {
 
 // UpsertStringChecked sets key to a string and reports validation errors.
 func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3009,6 +3021,9 @@ func (ht *HatTrie) AppendString(key string, str string) {
 }
 
 func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
+	if ht == nil {
+		return "", ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3051,6 +3066,9 @@ func (ht *HatTrie) PrependString(key string, str string) {
 }
 
 func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) {
+	if ht == nil {
+		return "", ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3094,6 +3112,9 @@ func (ht *HatTrie) GetString(key string) string {
 }
 
 func (ht *HatTrie) GetStringChecked(key string) (string, bool, error) {
+	if ht == nil {
+		return "", false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3118,6 +3139,9 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 }
 
 func (ht *HatTrie) UpsertBytesChecked(key string, val []byte) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	if err := validateKey(key); err != nil {
 		return err
 	}
@@ -3161,6 +3185,9 @@ func (ht *HatTrie) GetBytes(key string) []byte {
 }
 
 func (ht *HatTrie) GetBytesChecked(key string) ([]byte, error) {
+	if ht == nil {
+		return nil, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

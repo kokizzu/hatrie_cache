@@ -133,6 +133,55 @@ func TestExpirationAPIsRejectNilTrie(t *testing.T) {
 	stop()
 }
 
+func TestScalarAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	ht.UpsertCounter("counter", 7)
+	if err := ht.UpsertCounterChecked("counter", 7); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertCounterChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	ht.IncrementCounter("counter", 3)
+	if got, err := ht.IncrementCounterChecked("counter", 3); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("IncrementCounterChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.GetCounter("counter"); got != 0 {
+		t.Fatalf("GetCounter(nil trie) = %d, want 0", got)
+	}
+	if got, ok, err := ht.GetCounterChecked("counter"); got != 0 || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetCounterChecked(nil trie) = %d/%v/%v, want 0/false/ErrNilHatTrie", got, ok, err)
+	}
+
+	ht.UpsertString("string", "value")
+	if err := ht.UpsertStringChecked("string", "value"); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertStringChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	ht.AppendString("string", "-tail")
+	if got, err := ht.AppendStringChecked("string", "-tail"); got != "" || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AppendStringChecked(nil trie) = %q/%v, want empty/ErrNilHatTrie", got, err)
+	}
+	ht.PrependString("string", "head-")
+	if got, err := ht.PrependStringChecked("string", "head-"); got != "" || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PrependStringChecked(nil trie) = %q/%v, want empty/ErrNilHatTrie", got, err)
+	}
+	if got := ht.GetString("string"); got != "" {
+		t.Fatalf("GetString(nil trie) = %q, want empty", got)
+	}
+	if got, ok, err := ht.GetStringChecked("string"); got != "" || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetStringChecked(nil trie) = %q/%v/%v, want empty/false/ErrNilHatTrie", got, ok, err)
+	}
+
+	ht.UpsertBytes("bytes", []byte("value"))
+	if err := ht.UpsertBytesChecked("bytes", []byte("value")); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertBytesChecked(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.GetBytes("bytes"); got != nil {
+		t.Fatalf("GetBytes(nil trie) = %q, want nil", got)
+	}
+	if got, err := ht.GetBytesChecked("bytes"); got != nil || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("GetBytesChecked(nil trie) = %q/%v, want nil/ErrNilHatTrie", got, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
