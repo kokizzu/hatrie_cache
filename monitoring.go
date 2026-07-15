@@ -275,6 +275,9 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 }
 
 func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
+	if trie == nil {
+		return commandError("trie is not configured"), false
+	}
 	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
 		return response, true
 	}

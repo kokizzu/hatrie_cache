@@ -1590,6 +1590,51 @@ func TestCacheGRPCServerHandlesNilContextAndRequests(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerRejectsNilTrie(t *testing.T) {
+	server := NewCacheGRPCServer(nil, CacheGRPCOptions{})
+	for _, tt := range []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "health",
+			call: func() error {
+				_, err := server.Health(context.Background(), &hatriecachev1.HealthRequest{})
+				return err
+			},
+		},
+		{
+			name: "stats",
+			call: func() error {
+				_, err := server.Stats(context.Background(), &hatriecachev1.StatsRequest{})
+				return err
+			},
+		},
+		{
+			name: "entries",
+			call: func() error {
+				_, err := server.Entries(context.Background(), &hatriecachev1.EntriesRequest{})
+				return err
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call()
+			if status.Code(err) != codes.Unavailable || !strings.Contains(err.Error(), "trie is not configured") {
+				t.Fatalf("%s error = %v, want Unavailable trie error", tt.name, err)
+			}
+		})
+	}
+
+	command, err := server.Command(context.Background(), &hatriecachev1.CommandRequest{Command: "GET", Key: "name"})
+	if err != nil {
+		t.Fatalf("Command(nil trie) error = %v", err)
+	}
+	if command.GetOk() || command.GetMessage() != "trie is not configured" {
+		t.Fatalf("Command(nil trie) = %#v, want command error response", command)
+	}
+}
+
 func grpcEntryKeys(entries []*hatriecachev1.Entry) []string {
 	keys := make([]string, len(entries))
 	for idx, entry := range entries {

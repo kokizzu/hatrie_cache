@@ -54,9 +54,19 @@ func grpcContext(ctx context.Context) context.Context {
 	return ctx
 }
 
+func (server *CacheGRPCServer) requireTrie() error {
+	if server.trie != nil {
+		return nil
+	}
+	return status.Error(codes.Unavailable, "trie is not configured")
+}
+
 func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
 	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := server.requireTrie(); err != nil {
 		return nil, err
 	}
 	var mem runtime.MemStats
@@ -74,6 +84,9 @@ func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.Heal
 func (server *CacheGRPCServer) Stats(ctx context.Context, _ *hatriecachev1.StatsRequest) (*hatriecachev1.StatsResponse, error) {
 	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := server.requireTrie(); err != nil {
 		return nil, err
 	}
 	stats := server.trie.Stats()
@@ -95,6 +108,9 @@ func (server *CacheGRPCServer) Stats(ctx context.Context, _ *hatriecachev1.Stats
 func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecachev1.EntriesRequest) (*hatriecachev1.EntriesResponse, error) {
 	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := server.requireTrie(); err != nil {
 		return nil, err
 	}
 	limit := request.GetLimit()
