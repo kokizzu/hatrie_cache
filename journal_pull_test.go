@@ -78,6 +78,40 @@ func TestCommandJournalPullHTTPClientTimeouts(t *testing.T) {
 	}
 }
 
+func TestPullCommandJournalAcceptsNilContext(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := CommandJournalTail{
+			LastSequence: 1,
+			Entries: []CommandJournalRecord{
+				{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("Encode() error = %v", err)
+		}
+	}))
+	defer source.Close()
+
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	result, err := PullCommandJournal(nil, ht, journal, CommandJournalPullOptions{Source: source.URL})
+	if err != nil {
+		t.Fatalf("PullCommandJournal(nil context) error = %v", err)
+	}
+	if result.Applied != 1 || result.AppliedThrough != 1 || result.LastSequence != 1 {
+		t.Fatalf("pull result = %#v, want one applied entry through sequence 1", result)
+	}
+	if got := ht.GetString("name"); got != "ivi" {
+		t.Fatalf("GetString(name) = %q, want replicated value", got)
+	}
+}
+
 func TestApplyCommandJournalTailRejectsSequenceGap(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))

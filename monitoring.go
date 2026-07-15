@@ -578,6 +578,9 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 }
 
 func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint string) (CommandJournalTail, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if client == nil {
 		client = http.DefaultClient
 	}

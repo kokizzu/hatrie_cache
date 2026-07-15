@@ -40,6 +40,9 @@ func (err *CommandJournalPullError) Unwrap() error {
 }
 
 func PullCommandJournal(ctx context.Context, trie *HatTrie, journal *CommandJournal, options CommandJournalPullOptions) (CommandJournalPullResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if trie == nil {
 		return CommandJournalPullResult{}, commandJournalPullError(http.StatusBadRequest, errors.New("trie is not configured"))
 	}
