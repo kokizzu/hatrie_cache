@@ -1,5 +1,5 @@
 # hatrie_cache
-Experimental **TO BE** distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Askitis)
+Experimental distributed memcache using HAT-Trie (a data structure designed by Dr Nikolas Askitis)
 
 _**warning**: this project obviously not ready for production_
 
@@ -712,17 +712,11 @@ deleted index saved on another map
 - [x] create timer vacuum goroutine to clean expired data
 - [x] add OOM-triggered vacuum policy
 - [x] when master/leader disconnected from all slave, new master/leader elected by remaining slave
-- [ ] the distributed part using emitter.io, 
-      or offloaded to another MQ, 
-      or [dynomite](https://github.com/Netflix/dynomite) (eventually consistent), 
-      or [bcache](https://github.com/iwanbk/bcache) 
-      or [consul](https://medium.com/@didil/building-a-simple-distributed-system-with-go-consul-39b08ffc5d2c) 
-      or learn from [rqlite](https://github.com/rqlite/rqlite) (master-slave), 
-      or learn from [etcd](https://github.com/etcd-io/etcd/tree/master/raft) 
-      or learn from [projects using Badger](https://github.com/dgraph-io/badger#other-projects-using-badger)
-      or learn from [autocache](https://github.com/pomerium/autocache)
-      or use [finn](https://github.com/tidwall/finn) and learn from [summitdb](https://github.com/tidwall/summitdb)
-      or use [dragonboat](https://github.com/lni/dragonboat) (multi-master)
+- [x] distributed operation via persisted topology, deterministic shard leader
+      election, bounded HTTP/protobuf replication, explicit anti-entropy sync,
+      and journal pull catch-up; external MQ/raft transports such as emitter.io,
+      consul, etcd/raft, or dragonboat can still be evaluated later as alternate
+      transports if the built-in topology/replication layer is not enough
 
 ## Use cases:
 

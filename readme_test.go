@@ -98,3 +98,28 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 		}
 	}
 }
+
+func TestREADMETracksImplementedDistributedTransport(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	if strings.Contains(readme, "TO BE** distributed") || strings.Contains(readme, "TO BE distributed") {
+		t.Fatal("README.md still describes distributed operation as future work")
+	}
+	if strings.Contains(readme, "- [ ] the distributed part") {
+		t.Fatal("README.md still has stale unchecked distributed TODO")
+	}
+	for _, token := range []string{
+		"persisted topology",
+		"deterministic shard leader",
+		"HTTP/protobuf replication",
+		"anti-entropy sync",
+		"journal pull catch-up",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md distributed TODO does not mention %q", token)
+		}
+	}
+}
