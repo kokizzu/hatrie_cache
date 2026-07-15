@@ -73,6 +73,12 @@ make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
 ```
 
+Run command-feature benchmarks for the Redis/Tarantool comparison matrix:
+
+```
+make bench-command-features BENCHTIME=100x
+```
+
 The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
 
 ```
@@ -439,6 +445,8 @@ and `INTERNALDEL`.
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence.
+See [`COMMAND_SUPPORT.md`](COMMAND_SUPPORT.md) for a feature/command coverage
+comparison with Redis and Tarantool.
 
 Use the HTTP client CLI against a running monitoring server:
 

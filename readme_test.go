@@ -1,7 +1,9 @@
 package hatriecache
 
 import (
+	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -56,6 +58,82 @@ func TestREADMEListsCompactStructureCommands(t *testing.T) {
 			t.Fatalf("README.md does not document %s", token)
 		}
 	}
+}
+
+func TestCommandSupportMarkdownTracksExecuteCommand(t *testing.T) {
+	commandGroups := executeCommandCases(t)
+	data, err := os.ReadFile("COMMAND_SUPPORT.md")
+	if err != nil {
+		t.Fatalf("ReadFile(COMMAND_SUPPORT.md) error = %v", err)
+	}
+	doc := string(data)
+	if want := fmt.Sprintf("%d canonical command groups", len(commandGroups)); !strings.Contains(doc, want) {
+		t.Fatalf("COMMAND_SUPPORT.md does not document command group count %q", want)
+	}
+	for _, group := range commandGroups {
+		canonical := group[0]
+		if !strings.Contains(doc, "`"+canonical+"`") {
+			t.Fatalf("COMMAND_SUPPORT.md does not document canonical command %s", canonical)
+		}
+	}
+	for _, token := range []string{
+		"https://redis.io/docs/latest/commands/",
+		"https://redis.io/docs/latest/develop/data-types/",
+		"https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_space/",
+		"https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_index/",
+		"make command-support",
+		"make bench-command-features BENCHTIME=100x",
+		"BenchmarkCommandFeature/StringSet",
+		"BenchmarkCommandFeature/FenwickTreeRange",
+	} {
+		if !strings.Contains(doc, token) {
+			t.Fatalf("COMMAND_SUPPORT.md missing comparison/source token %q", token)
+		}
+	}
+}
+
+func TestCommandSupportScriptListsExecuteCommandAliases(t *testing.T) {
+	commandGroups := executeCommandCases(t)
+	data, err := os.ReadFile("scripts/command-support.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/command-support.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		`/^[[:space:]]*case "/`,
+		"`\" commands[i] \"`",
+		"| Canonical command | Accepted aliases |",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("command-support.sh missing parser token %q", token)
+		}
+	}
+	if len(commandGroups) == 0 {
+		t.Fatal("ExecuteCommand case parser found no command groups")
+	}
+}
+
+func executeCommandCases(t *testing.T) [][]string {
+	t.Helper()
+	data, err := os.ReadFile("command.go")
+	if err != nil {
+		t.Fatalf("ReadFile(command.go) error = %v", err)
+	}
+	casePattern := regexp.MustCompile(`(?m)^\s*case\s+([^:\n]+):`)
+	commandPattern := regexp.MustCompile(`"([^"]+)"`)
+	var groups [][]string
+	for _, match := range casePattern.FindAllSubmatch(data, -1) {
+		commandMatches := commandPattern.FindAllSubmatch(match[1], -1)
+		if len(commandMatches) == 0 {
+			continue
+		}
+		group := make([]string, 0, len(commandMatches))
+		for _, commandMatch := range commandMatches {
+			group = append(group, string(commandMatch[1]))
+		}
+		groups = append(groups, group)
+	}
+	return groups
 }
 
 func TestREADMEListsAsyncReplicationOptions(t *testing.T) {

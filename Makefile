@@ -46,7 +46,7 @@ BENCHTIME ?=
 COUNT ?= 1
 SERIALIZATION_BENCH ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend bench bench-serialization run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend bench bench-serialization bench-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -70,6 +70,12 @@ bench:
 
 bench-serialization:
 	SERIALIZATION_BENCH='$(SERIALIZATION_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-serialization.sh
+
+bench-command-features:
+	go test -run '^$$' -bench='^BenchmarkCommandFeature$$' -benchmem -count='$(COUNT)' $(if $(BENCHTIME),-benchtime='$(BENCHTIME)')
+
+command-support:
+	./scripts/command-support.sh
 
 run:
 	@CMD='$(CMD)' ./scripts/run.sh
