@@ -546,6 +546,10 @@ func (store *XorFilterStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertXorFilter(key string, expectedItems uint64) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
 	data, err := newXorFilterData(expectedItems)
 	if err != nil {
 		return err
@@ -580,6 +584,10 @@ func (ht *HatTrie) AddXorFilter(key string, val interface{}, vals ...interface{}
 }
 
 func (ht *HatTrie) AddXorFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -616,6 +624,10 @@ func (ht *HatTrie) AddXorFilterChecked(key string, val interface{}, vals ...inte
 }
 
 func (ht *HatTrie) BuildXorFilter(key string) (XorFilterInfo, bool, error) {
+	if ht == nil {
+		return XorFilterInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -642,6 +654,10 @@ func (ht *HatTrie) HasXorFilter(key string, val interface{}) (bool, bool) {
 }
 
 func (ht *HatTrie) HasXorFilterChecked(key string, val interface{}) (bool, bool, error) {
+	if ht == nil {
+		return false, false, ErrNilHatTrie
+	}
+
 	valueKey, err := xorFilterItemKey(val)
 	if err != nil {
 		return false, false, err
@@ -670,6 +686,10 @@ func (ht *HatTrie) XorFilterInfo(key string) (XorFilterInfo, bool) {
 }
 
 func (ht *HatTrie) XorFilterInfoChecked(key string) (XorFilterInfo, bool, error) {
+	if ht == nil {
+		return XorFilterInfo{}, false, ErrNilHatTrie
+	}
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

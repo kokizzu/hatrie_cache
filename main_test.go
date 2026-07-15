@@ -471,6 +471,35 @@ func TestCuckooFilterAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestXorFilterAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertXorFilter("xor", 8); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertXorFilter(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got, err := ht.AddXorFilter("xor", "value"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddXorFilter(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, err := ht.AddXorFilterChecked("xor", "value"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddXorFilterChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got, ok, err := ht.BuildXorFilter("xor"); got != (XorFilterInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("BuildXorFilter(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+	if hit, queryable := ht.HasXorFilter("xor", "value"); hit || queryable {
+		t.Fatalf("HasXorFilter(nil trie) = %v/%v, want false/false", hit, queryable)
+	}
+	if hit, queryable, err := ht.HasXorFilterChecked("xor", "value"); hit || queryable || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HasXorFilterChecked(nil trie) = %v/%v/%v, want false/false/ErrNilHatTrie", hit, queryable, err)
+	}
+	if got, ok := ht.XorFilterInfo("xor"); got != (XorFilterInfo{}) || ok {
+		t.Fatalf("XorFilterInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.XorFilterInfoChecked("xor"); got != (XorFilterInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("XorFilterInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
