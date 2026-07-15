@@ -49,6 +49,41 @@ func TestWriteJSONStatusRejectsEncodeErrorBeforeHeader(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerRejectsNilTrieRoutes(t *testing.T) {
+	handler := NewMonitoringHandler(nil, MonitoringOptions{}).Handler()
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "health", method: http.MethodGet, path: "/api/health"},
+		{name: "stats", method: http.MethodGet, path: "/api/stats"},
+		{name: "entries", method: http.MethodGet, path: "/api/entries"},
+		{name: "commands", method: http.MethodPost, path: "/api/commands", body: `{"command":"GET","key":"name"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := httptest.NewRecorder()
+			request := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.body != "" {
+				request.Header.Set("Content-Type", "application/json")
+			}
+			handler.ServeHTTP(resp, request)
+			if resp.Code != http.StatusServiceUnavailable {
+				t.Fatalf("%s status = %d, want 503", tt.name, resp.Code)
+			}
+			var got CacheCommandResponse
+			if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+				t.Fatalf("%s response JSON error = %v", tt.name, err)
+			}
+			if got.OK || got.Message != "trie is not configured" {
+				t.Fatalf("%s response = %#v, want trie not configured error", tt.name, got)
+			}
+		})
+	}
+}
+
 func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(1000, 0)

@@ -157,12 +157,23 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	return gzipHTTPHandler(mux)
 }
 
+func (handler *MonitoringHandler) requireTrie(w http.ResponseWriter) bool {
+	if handler.trie != nil {
+		return true
+	}
+	writeJSONStatus(w, http.StatusServiceUnavailable, commandError("trie is not configured"))
+	return false
+}
+
 func (handler *MonitoringHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
 		return
 	}
 	if requestContextDone(w, r) {
+		return
+	}
+	if !handler.requireTrie(w) {
 		return
 	}
 
@@ -186,6 +197,9 @@ func (handler *MonitoringHandler) handleStats(w http.ResponseWriter, r *http.Req
 	if requestContextDone(w, r) {
 		return
 	}
+	if !handler.requireTrie(w) {
+		return
+	}
 	writeJSON(w, handler.trie.Stats())
 }
 
@@ -195,6 +209,9 @@ func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.R
 		return
 	}
 	if requestContextDone(w, r) {
+		return
+	}
+	if !handler.requireTrie(w) {
 		return
 	}
 	values := r.URL.Query()
@@ -218,6 +235,10 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		return
 	}
 	if requestContextDone(w, r) {
+		return
+	}
+	if !handler.requireTrie(w) {
+		_ = r.Body.Close()
 		return
 	}
 

@@ -615,7 +615,7 @@ func TestRunJournalPullDefaultsStatePath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run() error = %v, want clean shutdown", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(serverShutdownTimeout + time.Second):
 		t.Fatal("run() did not stop after context cancel")
 	}
 }
