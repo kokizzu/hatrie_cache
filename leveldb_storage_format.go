@@ -393,94 +393,22 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 
 func prepareLevelDBBinaryCollectionValue(value interface{}) (levelDBBinaryPreparedValue, error) {
 	payload, ok, err := marshalSnapshotCollectionValueBinary(value)
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	if !ok {
-		var marshalErr error
-		payload, marshalErr = json.Marshal(value)
-		if marshalErr != nil {
-			return levelDBBinaryPreparedValue{}, marshalErr
-		}
-	}
-	size, err := binaryLengthPrefixedSize(int64(len(payload)))
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	return levelDBBinaryPreparedValue{
-		kind:        levelDBBinaryPreparedBytes,
-		bytes:       payload,
-		encodedSize: size,
-	}, nil
+	return prepareLevelDBBinaryPayloadValue(value, payload, ok, err)
 }
 
 func prepareLevelDBBinaryPriorityQueueValue(items []priorityQueueItem) (levelDBBinaryPreparedValue, error) {
 	payload, ok, err := marshalSnapshotPriorityQueueValueBinary(items)
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	if !ok {
-		var marshalErr error
-		payload, marshalErr = json.Marshal(items)
-		if marshalErr != nil {
-			return levelDBBinaryPreparedValue{}, marshalErr
-		}
-	}
-	size, err := binaryLengthPrefixedSize(int64(len(payload)))
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	return levelDBBinaryPreparedValue{
-		kind:        levelDBBinaryPreparedBytes,
-		bytes:       payload,
-		encodedSize: size,
-	}, nil
+	return prepareLevelDBBinaryPayloadValue(items, payload, ok, err)
 }
 
 func prepareLevelDBBinaryTopKValue(snapshot topKSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, ok, err := marshalSnapshotTopKValueBinary(snapshot)
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	if !ok {
-		var marshalErr error
-		payload, marshalErr = json.Marshal(snapshot)
-		if marshalErr != nil {
-			return levelDBBinaryPreparedValue{}, marshalErr
-		}
-	}
-	size, err := binaryLengthPrefixedSize(int64(len(payload)))
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	return levelDBBinaryPreparedValue{
-		kind:        levelDBBinaryPreparedBytes,
-		bytes:       payload,
-		encodedSize: size,
-	}, nil
+	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
 }
 
 func prepareLevelDBBinaryRadixTreeValue(snapshot radixTreeSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, ok, err := marshalSnapshotRadixTreeValueBinary(snapshot)
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	if !ok {
-		var marshalErr error
-		payload, marshalErr = json.Marshal(snapshot)
-		if marshalErr != nil {
-			return levelDBBinaryPreparedValue{}, marshalErr
-		}
-	}
-	size, err := binaryLengthPrefixedSize(int64(len(payload)))
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	return levelDBBinaryPreparedValue{
-		kind:        levelDBBinaryPreparedBytes,
-		bytes:       payload,
-		encodedSize: size,
-	}, nil
+	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
 }
 
 func prepareLevelDBBinaryBloomFilterValue(snapshot bloomFilterSnapshot) (levelDBBinaryPreparedValue, error) {
@@ -549,25 +477,7 @@ func prepareLevelDBBinaryCuckooFilterValue(snapshot cuckooFilterSnapshot) (level
 
 func prepareLevelDBBinaryXorFilterValue(snapshot xorFilterSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, ok, err := marshalSnapshotXorFilterValueBinary(snapshot)
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	if !ok {
-		var marshalErr error
-		payload, marshalErr = json.Marshal(snapshot)
-		if marshalErr != nil {
-			return levelDBBinaryPreparedValue{}, marshalErr
-		}
-	}
-	size, err := binaryLengthPrefixedSize(int64(len(payload)))
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	return levelDBBinaryPreparedValue{
-		kind:        levelDBBinaryPreparedBytes,
-		bytes:       payload,
-		encodedSize: size,
-	}, nil
+	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
 }
 
 func prepareLevelDBBinaryRoaringBitmapValue(snapshot roaringBitmapSnapshot) (levelDBBinaryPreparedValue, error) {
@@ -636,16 +546,39 @@ func prepareLevelDBBinaryQuantileSketchValue(snapshot quantileSketchSnapshot) (l
 
 func prepareLevelDBBinaryReservoirSampleValue(snapshot reservoirSampleSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, ok, err := marshalSnapshotReservoirSampleValueBinary(snapshot)
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
+	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
+}
+
+func prepareLevelDBBinaryPayloadValue(value interface{}, binaryPayload []byte, binaryOK bool, binaryErr error) (levelDBBinaryPreparedValue, error) {
+	if binaryErr != nil {
+		return levelDBBinaryPreparedValue{}, binaryErr
 	}
-	if !ok {
-		var marshalErr error
-		payload, marshalErr = json.Marshal(snapshot)
+	if !binaryOK {
+		return prepareLevelDBJSONPayloadValue(value)
+	}
+	payload := binaryPayload
+	_, within, err := jsonEncodedSizeWithin(value, int64(len(binaryPayload)))
+	if err == nil && within {
+		jsonPayload, marshalErr := json.Marshal(value)
 		if marshalErr != nil {
 			return levelDBBinaryPreparedValue{}, marshalErr
 		}
+		if len(jsonPayload) <= len(binaryPayload) {
+			payload = jsonPayload
+		}
 	}
+	return prepareLevelDBBytesPayload(payload)
+}
+
+func prepareLevelDBJSONPayloadValue(value interface{}) (levelDBBinaryPreparedValue, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return prepareLevelDBBytesPayload(payload)
+}
+
+func prepareLevelDBBytesPayload(payload []byte) (levelDBBinaryPreparedValue, error) {
 	size, err := binaryLengthPrefixedSize(int64(len(payload)))
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err

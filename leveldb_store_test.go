@@ -267,6 +267,36 @@ func TestLevelDBBinaryCollectionPayloadCanBeSmallerThanJSON(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryCollectionUsesJSONPayloadWhenSmaller(t *testing.T) {
+	entry := snapshotEntry{
+		Key:  "profile",
+		Type: "map",
+		Map:  Map{"a": "b"},
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary map) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if snapshotValueDataIsBinary(payload) {
+		t.Fatalf("small map payload header = % x, want JSON payload", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(map) error = %v", err)
+	}
+	if !bytes.Equal(payload, jsonPayload) {
+		t.Fatalf("small map payload = %q, want JSON payload %q", payload, jsonPayload)
+	}
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(small JSON payload map) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.Map, entry.Map) {
+		t.Fatalf("decoded small map = %#v, want %#v", decoded.Map, entry.Map)
+	}
+}
+
 func TestLevelDBBinaryCollectionEncodesBytesAsBase64String(t *testing.T) {
 	entry := snapshotEntry{
 		Key:  "payload",
@@ -276,10 +306,6 @@ func TestLevelDBBinaryCollectionEncodesBytesAsBase64String(t *testing.T) {
 	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
 	if err != nil {
 		t.Fatalf("marshalLevelDBEntry(binary map with bytes) error = %v", err)
-	}
-	_, payload := levelDBBinaryValuePayloadForTest(t, data)
-	if !snapshotValueDataIsBinary(payload) {
-		t.Fatalf("map with bytes payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {

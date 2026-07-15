@@ -139,11 +139,13 @@ Set `DB_PATH` to load and save cache data through LevelDB with Snappy
 compression. LevelDB records use the binary storage format by default
 (`DB_FORMAT=binary`), which avoids JSON object-field overhead and stores byte
 values as raw bytes instead of base64. Map, slice, set, priority queue, Top-K,
-radix tree, Bloom filter, Count-Min Sketch, and HyperLogLog values use compact binary
-payload codecs when possible, with automatic JSON fallback for values outside
-the recursive JSON-compatible codec. Cuckoo filter values also store packed
-fingerprints directly in binary records; built XOR filter values do the same,
-while staged XOR filters keep JSON fallback for pending values. Roaring bitmap
+radix tree, and reservoir sample payloads use the smaller of the compact binary
+codec and JSON when both are supported, with automatic JSON fallback for values
+outside the recursive JSON-compatible codec. Bloom filter, Count-Min Sketch, and
+HyperLogLog values use compact binary payload codecs. Cuckoo filter values also
+store packed fingerprints directly in binary records; built XOR filter values do
+the same when that is smaller than JSON, while staged XOR filters keep JSON
+fallback for pending values. Roaring bitmap
 and sparse-bitset containers store their array or bitset payloads directly too.
 Fenwick tree snapshots store their numeric tree vector as binary varints.
 Quantile sketches store summary samples as binary float/varint tuples, and
@@ -378,14 +380,15 @@ payload above that is 17% smaller and about 1.6x faster to decode, while encode
 is about 1.6x slower because the writer compares JSON and binary payload sizes.
 JSON remains easier to inspect manually. Snapshot and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
-carry empty collection fields. Binary snapshots reuse the compact LevelDB record
-codec, avoid base64 for byte values, and use the same compact collection,
-priority-queue, Top-K, radix-tree, Bloom filter, Count-Min Sketch, and HyperLogLog
-payload codecs when possible, plus direct binary cuckoo-filter fingerprints.
-Built XOR filters also store fingerprints directly and keep staged snapshots on
-JSON fallback; roaring bitmaps and sparse bitsets store container payloads
-directly, and Fenwick trees store numeric vectors as varints. Quantile-sketch
-summaries and reservoir-sample retained items also use compact binary tuples.
+carry empty collection fields. Binary snapshots reuse the compact LevelDB
+record codec, avoid base64 for byte values, and use the same size-aware
+collection, priority-queue, Top-K, radix-tree, built XOR filter, and
+reservoir-sample payload choices. Bloom filter, Count-Min Sketch, and
+HyperLogLog snapshots use direct compact binary codecs; staged XOR filters keep
+JSON fallback for pending values. Cuckoo filter fingerprints, roaring bitmap
+containers, and sparse-bitset containers store their raw payloads directly, and
+Fenwick trees store numeric vectors as varints. Quantile-sketch summaries use
+compact binary float/varint tuples.
 The gzip-best-binary snapshot default uses about 17% fewer bytes than the
 previous gzip-best JSON default for scalar entries and about 17% fewer bytes for
 the structured payload; the structured binary path is also about 1.9x faster
