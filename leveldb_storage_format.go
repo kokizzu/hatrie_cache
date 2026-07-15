@@ -281,6 +281,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: hyperloglog snapshot is required")
 		}
 		return prepareLevelDBBinaryHyperLogLogValue(*entry.HyperLogLog)
+	case "cuckoo_filter":
+		if entry.CuckooFilter == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: cuckoo filter snapshot is required")
+		}
+		return prepareLevelDBBinaryCuckooFilterValue(*entry.CuckooFilter)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -401,6 +406,22 @@ func prepareLevelDBBinaryCountMinSketchValue(snapshot countMinSketchSnapshot) (l
 
 func prepareLevelDBBinaryHyperLogLogValue(snapshot hyperLogLogSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, err := marshalSnapshotHyperLogLogValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryCuckooFilterValue(snapshot cuckooFilterSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotCuckooFilterValueBinary(snapshot)
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err
 	}
@@ -744,6 +765,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 	case "top_k":
 		return decodeLevelDBStorageJSON(data, &entry.TopK)
 	case "cuckoo_filter":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(cuckooFilterSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary cuckoo filter value is not a cuckoo filter")
+			}
+			entry.CuckooFilter = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.CuckooFilter)
 	case "roaring_bitmap":
 		return decodeLevelDBStorageJSON(data, &entry.RoaringBitmap)

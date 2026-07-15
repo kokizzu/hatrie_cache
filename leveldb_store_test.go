@@ -825,6 +825,88 @@ func TestLevelDBBinaryHyperLogLogStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryCuckooFilterUsesBinaryValuePayload(t *testing.T) {
+	filter, err := newCuckooFilterData(128, 0.001)
+	if err != nil {
+		t.Fatalf("newCuckooFilterData() error = %v", err)
+	}
+	if added := filter.AddOne("alpha", "beta", "gamma"); added != 3 {
+		t.Fatalf("AddOne(alpha,beta,gamma) = %d, want 3", added)
+	}
+	snapshot := filter.Snapshot()
+	entry := snapshotEntry{
+		Key:          "cuckoo",
+		Type:         "cuckoo_filter",
+		CuckooFilter: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary cuckoo filter) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("cuckoo filter payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(cuckoo filter) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary cuckoo filter payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary cuckoo filter) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.CuckooFilter, &snapshot) {
+		t.Fatalf("decoded cuckoo filter = %#v, want %#v", decoded.CuckooFilter, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryCuckooFilterStillReadsLegacyJSONPayload(t *testing.T) {
+	filter, err := newCuckooFilterData(64, 0.01)
+	if err != nil {
+		t.Fatalf("newCuckooFilterData() error = %v", err)
+	}
+	if added := filter.AddOne("legacy", "value"); added != 2 {
+		t.Fatalf("AddOne(legacy,value) = %d, want 2", added)
+	}
+	snapshot := filter.Snapshot()
+	entry := snapshotEntry{
+		Key:          "legacy-cuckoo",
+		Type:         "cuckoo_filter",
+		CuckooFilter: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(cuckoo filter) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON cuckoo filter) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.CuckooFilter, entry.CuckooFilter) {
+		t.Fatalf("decoded legacy inner JSON cuckoo filter = %#v, want %#v", decoded.CuckooFilter, entry.CuckooFilter)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {

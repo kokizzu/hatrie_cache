@@ -26,6 +26,7 @@ const (
 	snapshotValueBinaryBloomFilter
 	snapshotValueBinaryCountMinSketch
 	snapshotValueBinaryHyperLogLog
+	snapshotValueBinaryCuckooFilter
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -133,6 +134,27 @@ func snapshotHyperLogLogRawRegisters(snapshot hyperLogLogSnapshot) ([]byte, erro
 		return nil, nil
 	}
 	return base64.StdEncoding.DecodeString(snapshot.Registers)
+}
+
+func marshalSnapshotCuckooFilterValueBinary(snapshot cuckooFilterSnapshot) ([]byte, error) {
+	fingerprints, err := snapshotCuckooFilterRawFingerprints(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryCuckooFilterSize(snapshot, len(fingerprints))
+	if err != nil {
+		return nil, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	writeSnapshotValueBinaryCuckooFilter(&writer, snapshot, fingerprints)
+	return writer.bytes(), nil
+}
+
+func snapshotCuckooFilterRawFingerprints(snapshot cuckooFilterSnapshot) ([]byte, error) {
+	if snapshot.Fingerprints == "" {
+		return nil, nil
+	}
+	return base64.StdEncoding.DecodeString(snapshot.Fingerprints)
 }
 
 func snapshotValueBinarySize(value interface{}) (int, bool, error) {
@@ -316,6 +338,19 @@ func snapshotValueBinaryHyperLogLogSize(snapshot hyperLogLogSnapshot, registerBy
 	return snapshotValueBinaryAdd(total, registerSize)
 }
 
+func snapshotValueBinaryCuckooFilterSize(snapshot cuckooFilterSnapshot, fingerprintBytes int) (int, error) {
+	total := 1 +
+		binaryUvarintSize(snapshot.BucketCount) +
+		binaryUvarintSize(uint64(snapshot.BucketSize)) +
+		binaryUvarintSize(uint64(snapshot.FingerprintBits)) +
+		binaryUvarintSize(snapshot.Count)
+	fingerprintSize, err := snapshotValueBinaryBytesSize(fingerprintBytes)
+	if err != nil {
+		return 0, err
+	}
+	return snapshotValueBinaryAdd(total, fingerprintSize)
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -456,6 +491,15 @@ func writeSnapshotValueBinaryHyperLogLog(writer *binaryFieldWriter, snapshot hyp
 	writer.writeUvarint(uint64(snapshot.Precision))
 	writer.writeUvarint(snapshot.Observations)
 	writer.writeBytes(registers)
+}
+
+func writeSnapshotValueBinaryCuckooFilter(writer *binaryFieldWriter, snapshot cuckooFilterSnapshot, fingerprints []byte) {
+	writer.buf = append(writer.buf, snapshotValueBinaryCuckooFilter)
+	writer.writeUvarint(snapshot.BucketCount)
+	writer.writeUvarint(uint64(snapshot.BucketSize))
+	writer.writeUvarint(uint64(snapshot.FingerprintBits))
+	writer.writeUvarint(snapshot.Count)
+	writer.writeBytes(fingerprints)
 }
 
 func unmarshalSnapshotValueBinary(data []byte) (interface{}, error) {
@@ -679,6 +723,40 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			Precision:    uint8(precision),
 			Observations: observations,
 			Registers:    base64.StdEncoding.EncodeToString(registers),
+		}, nil
+	case snapshotValueBinaryCuckooFilter:
+		bucketCount, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		bucketSize, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if bucketSize > uint64(^uint8(0)) {
+			return nil, errors.New("hatriecache: binary cuckoo filter bucket size is too large")
+		}
+		fingerprintBits, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if fingerprintBits > uint64(^uint8(0)) {
+			return nil, errors.New("hatriecache: binary cuckoo filter fingerprint bits is too large")
+		}
+		count, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		fingerprints, err := reader.readBytes()
+		if err != nil {
+			return nil, err
+		}
+		return cuckooFilterSnapshot{
+			BucketCount:     bucketCount,
+			BucketSize:      uint8(bucketSize),
+			FingerprintBits: uint8(fingerprintBits),
+			Count:           count,
+			Fingerprints:    base64.StdEncoding.EncodeToString(fingerprints),
 		}, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)
