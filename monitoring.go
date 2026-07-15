@@ -867,7 +867,7 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		if int(hval.Index) >= len(ht.raws.array) || hval.Index < 0 {
 			return 0, ""
 		}
-		value := string(ht.raws.array[hval.Index])
+		value := ht.raws.stringValue(hval.Index)
 		return int64(len(value)), truncatePreview(value)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {

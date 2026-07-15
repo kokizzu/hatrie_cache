@@ -845,8 +845,10 @@ func (hval *HatValue) fromValue(value C.value_t) {
 
 // BytesStorage stores byte and string values outside the trie.
 type BytesStorage struct {
-	array     [][]byte
-	reusables reusableIndexes
+	array       [][]byte
+	strings     []string
+	stringValid []bool
+	reusables   reusableIndexes
 }
 
 func CreateBytesStorage() *BytesStorage {
@@ -860,6 +862,8 @@ func (bs *BytesStorage) Put(idx int32, value []byte) {
 		return
 	}
 	bs.array[idx] = cloneBytes(value)
+	bs.strings[idx] = ""
+	bs.stringValid[idx] = false
 	bs.reusables.Use(idx)
 }
 
@@ -868,22 +872,47 @@ func (bs *BytesStorage) putOwned(idx int32, value []byte) {
 		return
 	}
 	bs.array[idx] = value
+	bs.strings[idx] = ""
+	bs.stringValid[idx] = false
+	bs.reusables.Use(idx)
+}
+
+func (bs *BytesStorage) putStringOwned(idx int32, value string) {
+	if idx < 0 || int(idx) >= len(bs.array) {
+		return
+	}
+	bs.array[idx] = []byte(value)
+	bs.strings[idx] = value
+	bs.stringValid[idx] = true
 	bs.reusables.Use(idx)
 }
 
 func (bs *BytesStorage) Append(value []byte) int32 {
 	bs.array = append(bs.array, cloneBytes(value))
+	bs.strings = append(bs.strings, "")
+	bs.stringValid = append(bs.stringValid, false)
 	return int32(len(bs.array) - 1)
 }
 
 func (bs *BytesStorage) appendOwned(value []byte) int32 {
 	bs.array = append(bs.array, value)
+	bs.strings = append(bs.strings, "")
+	bs.stringValid = append(bs.stringValid, false)
+	return int32(len(bs.array) - 1)
+}
+
+func (bs *BytesStorage) appendStringOwned(value string) int32 {
+	bs.array = append(bs.array, []byte(value))
+	bs.strings = append(bs.strings, value)
+	bs.stringValid = append(bs.stringValid, true)
 	return int32(len(bs.array) - 1)
 }
 
 func (bs *BytesStorage) Add(value []byte) int32 {
 	if idx, ok := bs.reusables.Take(); ok {
 		bs.array[idx] = cloneBytes(value)
+		bs.strings[idx] = ""
+		bs.stringValid[idx] = false
 		return idx
 	}
 	return bs.Append(value)
@@ -892,9 +921,21 @@ func (bs *BytesStorage) Add(value []byte) int32 {
 func (bs *BytesStorage) addOwned(value []byte) int32 {
 	if idx, ok := bs.reusables.Take(); ok {
 		bs.array[idx] = value
+		bs.strings[idx] = ""
+		bs.stringValid[idx] = false
 		return idx
 	}
 	return bs.appendOwned(value)
+}
+
+func (bs *BytesStorage) addStringOwned(value string) int32 {
+	if idx, ok := bs.reusables.Take(); ok {
+		bs.array[idx] = []byte(value)
+		bs.strings[idx] = value
+		bs.stringValid[idx] = true
+		return idx
+	}
+	return bs.appendStringOwned(value)
 }
 
 func (bs *BytesStorage) Del(idx int32) {
@@ -902,8 +943,25 @@ func (bs *BytesStorage) Del(idx int32) {
 		return
 	}
 	bs.array[idx] = nil
+	bs.strings[idx] = ""
+	bs.stringValid[idx] = false
 	bs.reusables.Mark(idx)
 	bs.array = trimReusableTail(bs.array, &bs.reusables)
+	bs.strings = bs.strings[:len(bs.array)]
+	bs.stringValid = bs.stringValid[:len(bs.array)]
+}
+
+func (bs *BytesStorage) stringValue(idx int32) string {
+	if idx < 0 || int(idx) >= len(bs.array) {
+		return ""
+	}
+	if bs.stringValid[idx] {
+		return bs.strings[idx]
+	}
+	value := string(bs.array[idx])
+	bs.strings[idx] = value
+	bs.stringValid[idx] = true
+	return value
 }
 
 // DiskStorage stores large byte values outside the Go heap.
@@ -1646,6 +1704,9 @@ type HatTrie struct {
 	dbrefs           *LevelDBReferenceStorage
 	expires          map[string]time.Time
 	expirations      expirationHeap
+	hotKey           string
+	hotValue         HatValue
+	hotValid         bool
 	stats            CacheStats
 	keyStats         map[string]KeyStats
 	now              func() time.Time
@@ -1736,6 +1797,9 @@ func (ht *HatTrie) Destroy() {
 	ht.expires = nil
 	ht.expirations.Clear()
 	ht.expirations = nil
+	ht.hotKey = ""
+	ht.hotValue = HatValue{}
+	ht.hotValid = false
 	ht.keyStats = nil
 	ht.now = nil
 }
@@ -1759,7 +1823,9 @@ func (ht *HatTrie) Stats() CacheStats {
 	defer ht.mu.RUnlock()
 
 	ht.ensureOpen()
-	return ht.stats
+	stats := ht.stats
+	stats.updateRates()
+	return stats
 }
 
 // StatsForKey returns access metadata for an existing key.
@@ -1792,6 +1858,9 @@ func (ht *HatTrie) StatsForKeyChecked(key string) (KeyStats, bool, error) {
 		return KeyStats{}, false, nil
 	}
 	stats, ok := ht.keyStats[key]
+	if ok {
+		stats.updateRates()
+	}
 	return stats, ok, nil
 }
 
@@ -2304,7 +2373,6 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 		ht.stats.Misses++
 		ht.stats.LastMiss = now
 	}
-	ht.stats.updateRates()
 
 	for _, key := range keys {
 		stats, tracked := ht.keyStats[key]
@@ -2319,7 +2387,6 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 			stats.Misses++
 			stats.LastMiss = now
 		}
-		stats.updateRates()
 		ht.keyStats[key] = stats
 	}
 }
@@ -2330,10 +2397,10 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	ht.stats.LastWrite = now
 
 	for _, key := range keys {
+		ht.clearHotKeyLocked(key)
 		stats := ht.keyStats[key]
 		stats.Writes++
 		stats.LastWrite = now
-		stats.updateRates()
 		ht.keyStats[key] = stats
 	}
 }
@@ -2349,6 +2416,43 @@ func (ht *HatTrie) recordExpirationLocked(keys ...string) {
 	ht.recordWriteLocked()
 	for _, key := range keys {
 		delete(ht.keyStats, key)
+	}
+}
+
+func (ht *HatTrie) cachedValueLocked(key string) (HatValue, bool) {
+	if ht.hotValid && ht.hotKey == key {
+		return ht.hotValue, true
+	}
+	return HatValue{}, false
+}
+
+func (ht *HatTrie) cacheValueLocked(key string, hval HatValue) {
+	if hval.Empty() {
+		ht.clearHotKeyLocked(key)
+		return
+	}
+	ht.hotKey = key
+	ht.hotValue = hval
+	ht.hotValid = true
+}
+
+func (ht *HatTrie) clearHotKeyLocked(keys ...string) {
+	if !ht.hotValid {
+		return
+	}
+	if len(keys) == 0 {
+		ht.hotKey = ""
+		ht.hotValue = HatValue{}
+		ht.hotValid = false
+		return
+	}
+	for _, key := range keys {
+		if ht.hotKey == key {
+			ht.hotKey = ""
+			ht.hotValue = HatValue{}
+			ht.hotValid = false
+			return
+		}
 	}
 }
 
@@ -2607,6 +2711,7 @@ func (ht *HatTrie) deleteLocked(key string) bool {
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
 		ht.clearExpirationLocked(key)
+		ht.clearHotKeyLocked(key)
 		return false
 	}
 
@@ -2626,6 +2731,7 @@ func (ht *HatTrie) deleteKnownLocked(key string, hval HatValue) bool {
 	if deleted != 0 {
 		return false
 	}
+	ht.clearHotKeyLocked(key)
 	ht.clearExpirationLocked(key)
 	delete(ht.keyStats, key)
 	ht.returnStorage(hval)
@@ -2807,11 +2913,9 @@ func (ht *HatTrie) getLockedChecked(key string) (HatValue, error) {
 	if err := validateKey(key); err != nil {
 		return HatValue{}, err
 	}
-	iter := ht.tryLocation(key)
-	hval := HatValue{}
-	if iter != nil {
-		hval.fromValue(*iter)
+	if hval, ok := ht.cachedValueLocked(key); ok {
 		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
 			return HatValue{}, nil
 		}
 		if hval.IsLevelDBReference() {
@@ -2819,10 +2923,31 @@ func (ht *HatTrie) getLockedChecked(key string) (HatValue, error) {
 			if err != nil {
 				return HatValue{}, err
 			}
+			ht.cacheValueLocked(key, hydrated)
 			return hydrated, nil
 		}
+		return hval, nil
+	}
+	iter := ht.tryLocation(key)
+	hval := HatValue{}
+	if iter != nil {
+		hval.fromValue(*iter)
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+			return HatValue{}, nil
+		}
+		if hval.IsLevelDBReference() {
+			hydrated, err := ht.hydrateLevelDBReferenceLocked(key, hval)
+			if err != nil {
+				return HatValue{}, err
+			}
+			ht.cacheValueLocked(key, hydrated)
+			return hydrated, nil
+		}
+		ht.cacheValueLocked(key, hval)
 	} else {
 		ht.clearExpirationLocked(key)
+		ht.clearHotKeyLocked(key)
 	}
 	return hval, nil
 }
@@ -3031,7 +3156,7 @@ func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
 		return err
 	}
 	if hval.IsStringAtRaws() {
-		ht.raws.putOwned(hval.Index, []byte(val))
+		ht.raws.putStringOwned(hval.Index, val)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
@@ -3041,7 +3166,7 @@ func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.addOwned([]byte(val))
+	idx := ht.raws.addStringOwned(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 	return nil
@@ -3064,21 +3189,22 @@ func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 		return "", err
 	}
 	if hval.IsStringAtRaws() {
-		old := ht.raws.array[hval.Index]
+		old := ht.raws.stringValue(hval.Index)
 		if str == "" {
-			return string(old), nil
+			return old, nil
 		}
 		capacity, ok := checkedByteCapacity(len(old), len(str))
 		if !ok {
 			return "", errRawValueCapacityTooLarge
 		}
-		next := make([]byte, 0, capacity)
-		next = append(next, old...)
-		next = append(next, str...)
-		ht.raws.putOwned(hval.Index, next)
+		next := old + str
+		if len(next) != capacity {
+			return "", errRawValueCapacityTooLarge
+		}
+		ht.raws.putStringOwned(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return string(next), nil
+		return next, nil
 	}
 
 	if rawPtr == nil {
@@ -3086,7 +3212,7 @@ func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.addOwned([]byte(str))
+	idx := ht.raws.addStringOwned(str)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 	return str, nil
@@ -3109,21 +3235,22 @@ func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) 
 		return "", err
 	}
 	if hval.IsStringAtRaws() {
-		old := ht.raws.array[hval.Index]
+		old := ht.raws.stringValue(hval.Index)
 		if str == "" {
-			return string(old), nil
+			return old, nil
 		}
 		capacity, ok := checkedByteCapacity(len(str), len(old))
 		if !ok {
 			return "", errRawValueCapacityTooLarge
 		}
-		next := make([]byte, 0, capacity)
-		next = append(next, str...)
-		next = append(next, old...)
-		ht.raws.putOwned(hval.Index, next)
+		next := str + old
+		if len(next) != capacity {
+			return "", errRawValueCapacityTooLarge
+		}
+		ht.raws.putStringOwned(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
-		return string(next), nil
+		return next, nil
 	}
 
 	if rawPtr == nil {
@@ -3131,7 +3258,7 @@ func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) 
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.addOwned([]byte(str))
+	idx := ht.raws.addStringOwned(str)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 	return str, nil
@@ -3157,7 +3284,7 @@ func (ht *HatTrie) GetStringChecked(key string) (string, bool, error) {
 	}
 	ht.recordReadLocked(hval.IsStringAtRaws() || hval.IsCounter(), key)
 	if hval.IsStringAtRaws() {
-		return string(ht.raws.array[hval.Index]), true, nil
+		return ht.raws.stringValue(hval.Index), true, nil
 	}
 	if hval.IsCounter() {
 		return strconv.FormatInt(int64(hval.Index), 10), true, nil

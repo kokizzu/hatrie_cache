@@ -902,7 +902,7 @@ func (ht *HatTrie) snapshotEntryForStoreLocked(entry Entry, currentStore *LevelD
 	case DATAVALUE_TYPE_COUNTER:
 		out.Counter = entry.Value.Index
 	case DATAVALUE_TYPE_RAW_STRING:
-		out.String = string(ht.raws.array[entry.Value.Index])
+		out.String = ht.raws.stringValue(entry.Value.Index)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		value, err := ht.bytesValueLocked(entry.Value)
 		if err != nil {
@@ -1536,7 +1536,7 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 	case "counter":
 		hval = HatValue{Index: entry.Counter, Flags: DATAVALUE_TYPE_COUNTER}
 	case "string":
-		idx := ht.raws.Add([]byte(entry.String))
+		idx := ht.raws.addStringOwned(entry.String)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}
 	case "bytes":
 		next, handled, err := ht.storeSnapshotBytesValueLocked(old, operation)

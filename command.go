@@ -1130,7 +1130,7 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 	case DATAVALUE_TYPE_COUNTER:
 		return strconv.FormatInt(int64(hval.Index), 10), nil
 	case DATAVALUE_TYPE_RAW_STRING:
-		return string(ht.raws.array[hval.Index]), nil
+		return ht.raws.stringValue(hval.Index), nil
 	case DATAVALUE_TYPE_RAW_BYTES:
 		var value []byte
 		if hval.OnDisk() {
