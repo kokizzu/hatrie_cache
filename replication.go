@@ -479,7 +479,7 @@ func (replicator *HTTPReplicator) waitForRetry(ctx context.Context) bool {
 		return true
 	}
 	timer := time.NewTimer(retry)
-	defer timer.Stop()
+	defer stopReplicationRetryTimer(timer)
 	select {
 	case <-ctx.Done():
 		return false
@@ -487,6 +487,15 @@ func (replicator *HTTPReplicator) waitForRetry(ctx context.Context) bool {
 		return false
 	case <-timer.C:
 		return true
+	}
+}
+
+func stopReplicationRetryTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
 	}
 }
 

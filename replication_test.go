@@ -678,6 +678,61 @@ func TestHTTPReplicatorAsyncCloseCancelsInFlightDelivery(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAsyncCloseCancelsRetryWait(t *testing.T) {
+	requests := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case requests <- struct{}{}:
+		default:
+		}
+		http.Error(w, "retry me", http.StatusBadGateway)
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:               "node-a",
+		Topology:           topology,
+		Election:           election,
+		Client:             target.Client(),
+		AsyncQueueSize:     1,
+		AsyncMaxAttempts:   2,
+		AsyncRetryInterval: time.Hour,
+	})
+
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}
+	response := trie.ExecuteCommand(write)
+	if result := replicator.ReplicateCommand(context.Background(), trie, write, response); !result.Queued || result.Skipped {
+		t.Fatalf("enqueue result = %#v, want queued", result)
+	}
+	select {
+	case <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("async replication target was not called")
+	}
+	waitUntil(t, time.Second, func() bool {
+		last := replicator.LastResult()
+		return last.Queue != nil && last.Queue.Retried == 1
+	})
+
+	stopped := make(chan struct{})
+	go func() {
+		replicator.Close()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("async replicator Close did not cancel retry wait")
+	}
+	last := replicator.LastResult()
+	if last.Queue == nil || !last.Queue.Closed || last.Queue.Retried != 1 || last.Queue.Attempts != 1 {
+		t.Fatalf("queue stats after canceled retry wait = %#v, want one retry wait canceled", last.Queue)
+	}
+}
+
 func TestHTTPReplicatorUsesTopologyWhenElectionUnconfigured(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
