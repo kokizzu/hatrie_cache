@@ -28,6 +28,7 @@ const (
 	snapshotValueBinaryHyperLogLog
 	snapshotValueBinaryCuckooFilter
 	snapshotValueBinaryXorFilter
+	snapshotValueBinaryRoaringBitmap
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -837,6 +838,8 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			BlockLength:   uint32(blockLength),
 			Fingerprints:  base64.StdEncoding.EncodeToString(fingerprints),
 		}, nil
+	case snapshotValueBinaryRoaringBitmap:
+		return readSnapshotValueBinaryRoaringBitmap(reader)
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)
 	}

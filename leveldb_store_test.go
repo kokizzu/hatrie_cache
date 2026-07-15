@@ -1026,6 +1026,86 @@ func TestLevelDBBinaryXorFilterStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryRoaringBitmapUsesBinaryValuePayload(t *testing.T) {
+	bitmap := newRoaringBitmapData()
+	bitmap.AddOne(1, 2)
+	for idx := 0; idx <= roaringBitmapArrayMaxSize; idx++ {
+		bitmap.Add(uint32(1<<16) + uint32(idx))
+	}
+	snapshot := bitmap.Snapshot()
+	if len(snapshot.Containers) != 2 ||
+		snapshot.Containers[0].Kind != roaringBitmapContainerKindArray ||
+		snapshot.Containers[1].Kind != roaringBitmapContainerKindBits {
+		t.Fatalf("roaring snapshot containers = %#v, want array and bitmap containers", snapshot.Containers)
+	}
+	entry := snapshotEntry{
+		Key:           "bitmap",
+		Type:          "roaring_bitmap",
+		RoaringBitmap: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary roaring bitmap) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("roaring bitmap payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(roaring bitmap) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary roaring bitmap payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary roaring bitmap) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.RoaringBitmap, &snapshot) {
+		t.Fatalf("decoded roaring bitmap = %#v, want %#v", decoded.RoaringBitmap, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryRoaringBitmapStillReadsLegacyJSONPayload(t *testing.T) {
+	bitmap := newRoaringBitmapData()
+	bitmap.AddOne(1, 1<<16+7)
+	snapshot := bitmap.Snapshot()
+	entry := snapshotEntry{
+		Key:           "legacy-bitmap",
+		Type:          "roaring_bitmap",
+		RoaringBitmap: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(roaring bitmap) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON roaring bitmap) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.RoaringBitmap, entry.RoaringBitmap) {
+		t.Fatalf("decoded legacy inner JSON roaring bitmap = %#v, want %#v", decoded.RoaringBitmap, entry.RoaringBitmap)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {

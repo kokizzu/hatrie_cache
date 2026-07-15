@@ -291,6 +291,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: xor filter snapshot is required")
 		}
 		return prepareLevelDBBinaryXorFilterValue(*entry.XorFilter)
+	case "roaring_bitmap":
+		if entry.RoaringBitmap == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: roaring bitmap snapshot is required")
+		}
+		return prepareLevelDBBinaryRoaringBitmapValue(*entry.RoaringBitmap)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -452,6 +457,22 @@ func prepareLevelDBBinaryXorFilterValue(snapshot xorFilterSnapshot) (levelDBBina
 		if marshalErr != nil {
 			return levelDBBinaryPreparedValue{}, marshalErr
 		}
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryRoaringBitmapValue(snapshot roaringBitmapSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotRoaringBitmapValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
 	}
 	size, err := binaryLengthPrefixedSize(int64(len(payload)))
 	if err != nil {
@@ -807,6 +828,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 		}
 		return decodeLevelDBStorageJSON(data, &entry.CuckooFilter)
 	case "roaring_bitmap":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(roaringBitmapSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary roaring bitmap value is not a roaring bitmap")
+			}
+			entry.RoaringBitmap = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.RoaringBitmap)
 	case "quantile_sketch":
 		return decodeLevelDBStorageJSON(data, &entry.QuantileSketch)
