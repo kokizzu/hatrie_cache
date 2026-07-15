@@ -270,6 +270,34 @@ void test_ahtable_key_length_limit()
 }
 
 
+void test_ahtable_zero_slot_create()
+{
+    fprintf(stderr, "checking zero-slot create... \n");
+
+    ahtable_t* T = ahtable_create_n(0);
+    value_t* v = ahtable_get(T, "zero", 4);
+    if (v == NULL) {
+        fprintf(stderr, "[error] zero-slot table rejected insert\n");
+        have_error = 1;
+    }
+    else {
+        *v = 7;
+        v = ahtable_tryget(T, "zero", 4);
+        if (v == NULL || *v != 7) {
+            fprintf(stderr, "[error] zero-slot table did not retrieve inserted value\n");
+            have_error = 1;
+        }
+    }
+    if (ahtable_size(T) != 1) {
+        fprintf(stderr, "[error] zero-slot table size is %zu, expected 1\n", ahtable_size(T));
+        have_error = 1;
+    }
+    ahtable_free(T);
+
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_checked_array_size()
 {
     fprintf(stderr, "checking allocation size guards... \n");
@@ -298,6 +326,7 @@ void test_checked_array_size()
 int main()
 {
     test_checked_array_size();
+    test_ahtable_zero_slot_create();
     test_ahtable_key_length_limit();
 
     setup();

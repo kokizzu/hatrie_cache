@@ -35,6 +35,10 @@ ahtable_t* ahtable_create()
 
 ahtable_t* ahtable_create_n(size_t n)
 {
+    if (n == 0) {
+        n = 1;
+    }
+
     ahtable_t* T = malloc_or_die(sizeof(ahtable_t));
     T->flag = 0;
     T->c0 = T->c1 = '\0';
