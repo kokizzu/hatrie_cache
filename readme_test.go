@@ -83,8 +83,12 @@ func TestCommandSupportMarkdownTracksExecuteCommand(t *testing.T) {
 		"https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_index/",
 		"make command-support",
 		"make bench-command-features BENCHTIME=100x",
+		"make bench-redis-command-features REDIS_START_DOCKER=1",
 		"BenchmarkCommandFeature/StringSet",
 		"BenchmarkCommandFeature/FenwickTreeRange",
+		"Redis 7.0.4",
+		"Redis seconds / 10k",
+		"`SET`",
 	} {
 		if !strings.Contains(doc, token) {
 			t.Fatalf("COMMAND_SUPPORT.md missing comparison/source token %q", token)
@@ -110,6 +114,26 @@ func TestCommandSupportScriptListsExecuteCommandAliases(t *testing.T) {
 	}
 	if len(commandGroups) == 0 {
 		t.Fatal("ExecuteCommand case parser found no command groups")
+	}
+}
+
+func TestRedisCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-redis-command-features.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-redis-command-features.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		"REDIS_START_DOCKER",
+		"redis-benchmark",
+		"10000 / qps",
+		"Seconds / 10k ops",
+		"SETBIT",
+		"PFCOUNT",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("Redis command benchmark script missing token %q", token)
+		}
 	}
 }
 

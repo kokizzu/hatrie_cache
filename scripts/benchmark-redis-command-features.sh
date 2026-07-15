@@ -1,0 +1,87 @@
+#!/usr/bin/env sh
+set -eu
+
+host=${REDIS_HOST:-127.0.0.1}
+port=${REDIS_PORT:-6379}
+requests=${REDIS_REQUESTS:-100000}
+clients=${REDIS_CLIENTS:-1}
+keyspace=${REDIS_KEYSPACE:-10000}
+start_docker=${REDIS_START_DOCKER:-0}
+docker_image=${REDIS_DOCKER_IMAGE:-redis:7.0.4}
+prefix=${REDIS_KEY_PREFIX:-hatriebench:$$}
+container=
+
+cleanup() {
+	if [ -n "$container" ]; then
+		docker rm -f "$container" >/dev/null 2>&1 || true
+	fi
+}
+trap cleanup EXIT HUP INT TERM
+
+redis_ready() {
+	redis-cli -h "$host" -p "$port" ping >/dev/null 2>&1
+}
+
+if ! redis_ready; then
+	case "$start_docker" in
+		1|true|yes)
+			container=$(docker run -d --rm -p "$port:6379" "$docker_image" redis-server --save "" --appendonly no)
+			attempt=0
+			while ! redis_ready; do
+				attempt=$((attempt + 1))
+				if [ "$attempt" -gt 100 ]; then
+					echo "Redis did not become ready on $host:$port" >&2
+					exit 1
+				fi
+				sleep 0.05
+			done
+			;;
+		*)
+			echo "Redis is not reachable at $host:$port. Set REDIS_START_DOCKER=1 to start a temporary container." >&2
+			exit 2
+			;;
+	esac
+fi
+
+run_redis_benchmark() {
+	feature=$1
+	shift
+	output=$(redis-benchmark -h "$host" -p "$port" -n "$requests" -c "$clients" -r "$keyspace" --csv "$@" | tail -n 1)
+	qps=$(printf '%s\n' "$output" | awk -F, '{ value = $2; gsub(/"/, "", value); print value }')
+	seconds_10k=$(awk -v qps="$qps" 'BEGIN { if (qps <= 0) { print "0.000000"; } else { printf "%.6f", 10000 / qps } }')
+	printf '| %s | `%s` | %.2f req/s | %s s |\n' "$feature" "$*" "$qps" "$seconds_10k"
+}
+
+prime() {
+	redis-benchmark -h "$host" -p "$port" -n "$1" -c "$clients" -r "$keyspace" "$2" "$3" "$4" >/dev/null
+}
+
+prime "$keyspace" SET "$prefix:string:__rand_int__" value
+prime "$keyspace" LPUSH "$prefix:list:pop" __rand_int__
+prime "$keyspace" SADD "$prefix:set" __rand_int__
+redis-benchmark -h "$host" -p "$port" -n "$keyspace" -c "$clients" -r "$keyspace" ZADD "$prefix:zset:pop" __rand_int__ "member:__rand_int__" >/dev/null
+redis-cli -h "$host" -p "$port" HSET "$prefix:hash" field value >/dev/null
+redis-cli -h "$host" -p "$port" PFADD "$prefix:hll" value >/dev/null
+redis-cli -h "$host" -p "$port" SETBIT "$prefix:bitmap" 65543 1 >/dev/null
+redis-cli -h "$host" -p "$port" SET "$prefix:ttl" value >/dev/null
+
+printf 'Redis benchmark: host=%s port=%s requests=%s clients=%s keyspace=%s\n\n' "$host" "$port" "$requests" "$clients" "$keyspace"
+printf '| Feature family | Redis command | Throughput | Seconds / 10k ops |\n'
+printf '| --- | --- | ---: | ---: |\n'
+run_redis_benchmark 'String write' SET "$prefix:string" value
+run_redis_benchmark 'String read' GET "$prefix:string:__rand_int__"
+run_redis_benchmark 'Integer counter' INCR "$prefix:counter"
+run_redis_benchmark 'TTL update' EXPIRE "$prefix:ttl" 3600
+run_redis_benchmark 'Hash/map write' HSET "$prefix:hash" field value
+run_redis_benchmark 'Hash/map read' HGET "$prefix:hash" field
+run_redis_benchmark 'List push' LPUSH "$prefix:list" value
+run_redis_benchmark 'List pop' RPOP "$prefix:list:pop"
+run_redis_benchmark 'Set add' SADD "$prefix:set" value
+run_redis_benchmark 'Set membership' SISMEMBER "$prefix:set" value
+run_redis_benchmark 'Sorted-set add' ZADD "$prefix:zset" 10 value
+run_redis_benchmark 'Sorted-set pop' ZPOPMIN "$prefix:zset:pop"
+run_redis_benchmark 'HyperLogLog add' PFADD "$prefix:hll" value
+run_redis_benchmark 'HyperLogLog count' PFCOUNT "$prefix:hll"
+run_redis_benchmark 'Bitmap add' SETBIT "$prefix:bitmap" 65543 1
+run_redis_benchmark 'Bitmap lookup' GETBIT "$prefix:bitmap" 65543
+run_redis_benchmark 'Replication dump' DUMP "$prefix:string"

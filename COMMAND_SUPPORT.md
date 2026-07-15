@@ -44,9 +44,17 @@ Local HAT-trie numbers were measured on an AMD Ryzen 9 5950X with:
 make bench-command-features BENCHTIME=100x
 ```
 
-The Redis and Tarantool columns name the closest native operation family to
-benchmark. They are not local throughput results in this table; this workspace
-had Redis client tools but no Redis server listening on `127.0.0.1:6379`.
+Redis numbers were measured with Redis 7.0.4 in a temporary Docker container,
+single client, no pipeline, and 10,000 requests per measured command:
+
+```
+make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000 REDIS_CLIENTS=1 REDIS_KEYSPACE=10000
+```
+
+HAT-trie command benchmarks are in-process Go calls. Redis command benchmarks
+include local loopback TCP, Redis protocol parsing, and server dispatch, so the
+numbers are useful as a practical local comparison but not an apples-to-apples
+microbenchmark.
 
 ## HAT-trie Command Families
 
@@ -78,42 +86,42 @@ make command-support
 
 ## Benchmark Matrix
 
-| Feature family | HAT-trie benchmark | Local HAT-trie result | Redis benchmark target | Tarantool benchmark target |
-| --- | --- | ---: | --- | --- |
-| String write | `BenchmarkCommandFeature/StringSet` | 1,741 ns/op, 20 B/op, 1 alloc | `redis-benchmark SET` | `space:replace()` / `space:put()` |
-| String read | `BenchmarkCommandFeature/StringGet` | 1,981 ns/op, 6 B/op, 1 alloc | `redis-benchmark GET` | `space.index.primary:get()` |
-| Integer counter | `BenchmarkCommandFeature/CounterInc` | 1,760 ns/op, 0 B/op, 0 alloc | `redis-benchmark INCR` / `INCRBY` | `space:update()` arithmetic |
-| TTL update | `BenchmarkCommandFeature/TTLExpire` | 2,003 ns/op, 128 B/op, 1 alloc | `redis-benchmark EXPIRE` | Lua/custom expiration index |
-| Map/hash write | `BenchmarkCommandFeature/MapPut` | 4,645 ns/op, 585 B/op, 5 alloc | `redis-benchmark HSET` | tuple update / Lua map field |
-| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 1,408 ns/op, 0 B/op, 0 alloc | `redis-benchmark HGET` | tuple field read |
-| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 3,447 ns/op, 237 B/op, 6 alloc | `redis-benchmark LPUSH` + `RPOP` | queue module or space procedure |
-| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 3,030 ns/op, 176 B/op, 9 alloc | `redis-benchmark SADD` + `SISMEMBER` | membership space/index |
-| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 4,260 ns/op, 229 B/op, 8 alloc | `ZADD` + `ZPOPMIN`/`ZPOPMAX` | B-tree index + Lua pop |
-| Bloom add | `BenchmarkCommandFeature/BloomAdd` | 3,062 ns/op, 792 B/op, 4 alloc | `BF.ADD` / `BF.MADD` | Lua/module |
-| Bloom lookup | `BenchmarkCommandFeature/BloomHas` | 2,423 ns/op, 40 B/op, 3 alloc | `BF.EXISTS` | Lua/module |
-| Cuckoo delete+add | `BenchmarkCommandFeature/CuckooDeleteAdd` | 3,088 ns/op, 128 B/op, 8 alloc | `CF.DEL` + `CF.ADD` | Lua/module |
-| Cuckoo lookup | `BenchmarkCommandFeature/CuckooHas` | 1,984 ns/op, 40 B/op, 3 alloc | `CF.EXISTS` | Lua/module |
-| XOR filter build | `BenchmarkCommandFeature/XorBuild64Items` | 249,208 ns/op, 22,761 B/op, 370 alloc | no native core command | Lua/module |
-| XOR filter lookup | `BenchmarkCommandFeature/XorHas` | 1,424 ns/op, 64 B/op, 4 alloc | no native core command | Lua/module |
-| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 1,613 ns/op, 5 B/op, 1 alloc | bitmap `SETBIT` is not roaring | bitmap index is not roaring value |
-| Roaring bitmap lookup | `BenchmarkCommandFeature/RoaringHas` | 1,640 ns/op, 4 B/op, 1 alloc | bitmap `GETBIT` is not roaring | bitmap index is not roaring value |
-| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 1,822 ns/op, 9 B/op, 1 alloc | bitmap/bitfield with encoded offsets | Lua/module |
-| Sparse uint64 bitset lookup | `BenchmarkCommandFeature/SparseBitsetHas` | 2,319 ns/op, 8 B/op, 1 alloc | bitmap/bitfield with encoded offsets | Lua/module |
-| Radix-tree put | `BenchmarkCommandFeature/RadixPut` | 3,863 ns/op, 605 B/op, 5 alloc | sorted-set lex or search index approximation | tree index over tuple key |
-| Radix-tree prefix scan | `BenchmarkCommandFeature/RadixPrefix` | 6,876 ns/op, 1,468 B/op, 20 alloc | `ZRANGEBYLEX` / search prefix query | index range select |
-| Count-Min Sketch increment | `BenchmarkCommandFeature/CountMinSketchIncrement` | 2,354 ns/op, 277 B/op, 4 alloc | `CMS.INCRBY` | Lua/module |
-| Count-Min Sketch estimate | `BenchmarkCommandFeature/CountMinSketchEstimate` | 1,725 ns/op, 40 B/op, 3 alloc | `CMS.QUERY` | Lua/module |
-| HyperLogLog add | `BenchmarkCommandFeature/HyperLogLogAdd` | 11,560 ns/op, 147 B/op, 4 alloc | `PFADD` | Lua/module |
-| HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 5,898 ns/op, 0 B/op, 0 alloc | `PFCOUNT` | Lua/module |
-| Top-K add | `BenchmarkCommandFeature/TopKAdd` | 3,632 ns/op, 276 B/op, 8 alloc | `TOPK.ADD` | Lua/module |
-| Top-K read | `BenchmarkCommandFeature/TopKGet` | 2,722 ns/op, 208 B/op, 6 alloc | `TOPK.LIST` / `TOPK.COUNT` | Lua/module |
-| Reservoir sample add | `BenchmarkCommandFeature/ReservoirSampleAdd` | 2,701 ns/op, 251 B/op, 6 alloc | no native core command | Lua/module |
-| Reservoir sample read | `BenchmarkCommandFeature/ReservoirSampleGet` | 8,082 ns/op, 2,356 B/op, 8 alloc | no native core command | Lua/module |
-| Quantile sketch add | `BenchmarkCommandFeature/QuantileSketchAdd` | 2,379 ns/op, 270 B/op, 4 alloc | `TDIGEST.ADD` | Lua/module |
-| Quantile sketch estimate | `BenchmarkCommandFeature/QuantileSketchEstimate` | 4,396 ns/op, 128 B/op, 3 alloc | `TDIGEST.QUANTILE` | Lua/module |
-| Fenwick tree add | `BenchmarkCommandFeature/FenwickTreeAdd` | 2,210 ns/op, 244 B/op, 3 alloc | Lua/custom prefix-sum structure | Lua/custom prefix-sum structure |
-| Fenwick tree range sum | `BenchmarkCommandFeature/FenwickTreeRange` | 1,225 ns/op, 0 B/op, 0 alloc | Lua/custom prefix-sum structure | Lua/custom prefix-sum structure |
-| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 7,158 ns/op, 1,061 B/op, 9 alloc | `DUMP` / `RESTORE` | snapshot/WAL tuple transfer |
+| Feature family | HAT-trie benchmark | HAT-trie seconds / 10k | Redis measured command | Redis seconds / 10k | Tarantool benchmark target |
+| --- | --- | ---: | --- | ---: | --- |
+| String write | `BenchmarkCommandFeature/StringSet` | 0.017410 s | `SET` | 0.930000 s | `space:replace()` / `space:put()` |
+| String read | `BenchmarkCommandFeature/StringGet` | 0.019810 s | `GET` | 0.963000 s | `space.index.primary:get()` |
+| Integer counter | `BenchmarkCommandFeature/CounterInc` | 0.017600 s | `INCR` | 0.939000 s | `space:update()` arithmetic |
+| TTL update | `BenchmarkCommandFeature/TTLExpire` | 0.020030 s | `EXPIRE` | 1.039000 s | Lua/custom expiration index |
+| Map/hash write | `BenchmarkCommandFeature/MapPut` | 0.046450 s | `HSET` | 1.068000 s | tuple update / Lua map field |
+| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 0.014080 s | `HGET` | 1.194000 s | tuple field read |
+| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 0.034470 s | `LPUSH` + `RPOP` | 4.527003 s | queue module or space procedure |
+| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 0.030300 s | `SADD` + `SISMEMBER` | 2.462999 s | membership space/index |
+| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 0.042600 s | `ZADD` + `ZPOPMIN` | 2.398000 s | B-tree index + Lua pop |
+| Bloom add | `BenchmarkCommandFeature/BloomAdd` | 0.030620 s | not measured: RedisBloom/Redis 8 module unavailable | - | Lua/module |
+| Bloom lookup | `BenchmarkCommandFeature/BloomHas` | 0.024230 s | not measured: RedisBloom/Redis 8 module unavailable | - | Lua/module |
+| Cuckoo delete+add | `BenchmarkCommandFeature/CuckooDeleteAdd` | 0.030880 s | not measured: RedisBloom/Redis 8 module unavailable | - | Lua/module |
+| Cuckoo lookup | `BenchmarkCommandFeature/CuckooHas` | 0.019840 s | not measured: RedisBloom/Redis 8 module unavailable | - | Lua/module |
+| XOR filter build | `BenchmarkCommandFeature/XorBuild64Items` | 2.492080 s | no native core command | - | Lua/module |
+| XOR filter lookup | `BenchmarkCommandFeature/XorHas` | 0.014240 s | no native core command | - | Lua/module |
+| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 0.016130 s | `SETBIT` bitmap, not roaring | 1.389001 s | bitmap index is not roaring value |
+| Roaring bitmap lookup | `BenchmarkCommandFeature/RoaringHas` | 0.016400 s | `GETBIT` bitmap, not roaring | 1.265000 s | bitmap index is not roaring value |
+| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 0.018220 s | `SETBIT` dense bitmap approximation | 1.389001 s | Lua/module |
+| Sparse uint64 bitset lookup | `BenchmarkCommandFeature/SparseBitsetHas` | 0.023190 s | `GETBIT` dense bitmap approximation | 1.265000 s | Lua/module |
+| Radix-tree put | `BenchmarkCommandFeature/RadixPut` | 0.038630 s | sorted-set lex/search approximation not measured | - | tree index over tuple key |
+| Radix-tree prefix scan | `BenchmarkCommandFeature/RadixPrefix` | 0.068760 s | sorted-set lex/search approximation not measured | - | index range select |
+| Count-Min Sketch increment | `BenchmarkCommandFeature/CountMinSketchIncrement` | 0.023540 s | not measured: RedisBloom/Redis 8 module unavailable | - | Lua/module |
+| Count-Min Sketch estimate | `BenchmarkCommandFeature/CountMinSketchEstimate` | 0.017250 s | not measured: RedisBloom/Redis 8 module unavailable | - | Lua/module |
+| HyperLogLog add | `BenchmarkCommandFeature/HyperLogLogAdd` | 0.115600 s | `PFADD` | 1.047000 s | Lua/module |
+| HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 0.058980 s | `PFCOUNT` | 1.169000 s | Lua/module |
+| Top-K add | `BenchmarkCommandFeature/TopKAdd` | 0.036320 s | not measured: RedisBloom/Redis 8 module unavailable | - | Lua/module |
+| Top-K read | `BenchmarkCommandFeature/TopKGet` | 0.027220 s | not measured: RedisBloom/Redis 8 module unavailable | - | Lua/module |
+| Reservoir sample add | `BenchmarkCommandFeature/ReservoirSampleAdd` | 0.027010 s | no native core command | - | Lua/module |
+| Reservoir sample read | `BenchmarkCommandFeature/ReservoirSampleGet` | 0.080820 s | no native core command | - | Lua/module |
+| Quantile sketch add | `BenchmarkCommandFeature/QuantileSketchAdd` | 0.023790 s | not measured: `TDIGEST.*` unavailable in Redis 7.0.4 image | - | Lua/module |
+| Quantile sketch estimate | `BenchmarkCommandFeature/QuantileSketchEstimate` | 0.043960 s | not measured: `TDIGEST.*` unavailable in Redis 7.0.4 image | - | Lua/module |
+| Fenwick tree add | `BenchmarkCommandFeature/FenwickTreeAdd` | 0.022100 s | no native core command | - | Lua/custom prefix-sum structure |
+| Fenwick tree range sum | `BenchmarkCommandFeature/FenwickTreeRange` | 0.012250 s | no native core command | - | Lua/custom prefix-sum structure |
+| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.071580 s | `DUMP` | 1.182000 s | snapshot/WAL tuple transfer |
 
 ## Gaps Versus Redis
 

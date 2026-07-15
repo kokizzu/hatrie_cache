@@ -45,8 +45,15 @@ BENCH ?= .
 BENCHTIME ?=
 COUNT ?= 1
 SERIALIZATION_BENCH ?=
+REDIS_HOST ?= 127.0.0.1
+REDIS_PORT ?= 6379
+REDIS_REQUESTS ?= 100000
+REDIS_CLIENTS ?= 1
+REDIS_KEYSPACE ?= 10000
+REDIS_START_DOCKER ?= 0
+REDIS_DOCKER_IMAGE ?= redis:7.0.4
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend bench bench-serialization bench-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend bench bench-serialization bench-command-features bench-redis-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -73,6 +80,9 @@ bench-serialization:
 
 bench-command-features:
 	go test -run '^$$' -bench='^BenchmarkCommandFeature$$' -benchmem -count='$(COUNT)' $(if $(BENCHTIME),-benchtime='$(BENCHTIME)')
+
+bench-redis-command-features:
+	REDIS_HOST='$(REDIS_HOST)' REDIS_PORT='$(REDIS_PORT)' REDIS_REQUESTS='$(REDIS_REQUESTS)' REDIS_CLIENTS='$(REDIS_CLIENTS)' REDIS_KEYSPACE='$(REDIS_KEYSPACE)' REDIS_START_DOCKER='$(REDIS_START_DOCKER)' REDIS_DOCKER_IMAGE='$(REDIS_DOCKER_IMAGE)' ./scripts/benchmark-redis-command-features.sh
 
 command-support:
 	./scripts/command-support.sh
