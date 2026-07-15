@@ -92,6 +92,17 @@ void ahtable_clear(ahtable_t* T)
 }
 
 
+static void compact_slot_after_delete(ahtable_t* T, size_t i)
+{
+    if (T->slot_sizes[i] == 0) {
+        free(T->slots[i]);
+        T->slots[i] = NULL;
+        return;
+    }
+    T->slots[i] = realloc_or_die(T->slots[i], T->slot_sizes[i]);
+}
+
+
 static slot_t ins_key(slot_t s, const char* key, size_t len, value_t** val)
 {
     assert(len <= ahtable_max_key_length);
@@ -310,10 +321,7 @@ int ahtable_del(ahtable_t* T, const char* key, size_t len)
                 s -= k < 128 ? 1 : 2;
                 memmove(s, t, T->slot_sizes[i] - (size_t) (t - T->slots[i]));
                 T->slot_sizes[i] -= (size_t) (t - s);
-                if (T->slot_sizes[i] == 0) {
-                    free(T->slots[i]);
-                    T->slots[i] = NULL;
-                }
+                compact_slot_after_delete(T, i);
                 --T->m;
                 return 0;
             }

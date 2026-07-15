@@ -378,6 +378,85 @@ void test_ahtable_delete_releases_empty_slot()
 }
 
 
+void test_ahtable_delete_compacts_nonempty_slot()
+{
+    fprintf(stderr, "checking delete nonempty slot compaction... \n");
+
+    ahtable_t* T = ahtable_create_n(1);
+    value_t* v = ahtable_get(T, "alpha", 5);
+    if (v == NULL) {
+        fprintf(stderr, "[error] nonempty compaction alpha insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 11;
+    }
+    v = ahtable_get(T, "beta", 4);
+    if (v == NULL) {
+        fprintf(stderr, "[error] nonempty compaction beta insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 22;
+    }
+    v = ahtable_get(T, "gamma", 5);
+    if (v == NULL) {
+        fprintf(stderr, "[error] nonempty compaction gamma insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 33;
+    }
+
+    if (ahtable_del(T, "beta", 4) != 0) {
+        fprintf(stderr, "[error] nonempty compaction delete failed\n");
+        have_error = 1;
+    }
+    if (ahtable_size(T) != 2) {
+        fprintf(stderr, "[error] table size after middle delete is %zu, expected 2\n", ahtable_size(T));
+        have_error = 1;
+    }
+    if (ahtable_tryget(T, "beta", 4) != NULL) {
+        fprintf(stderr, "[error] deleted middle key was still found\n");
+        have_error = 1;
+    }
+    v = ahtable_tryget(T, "alpha", 5);
+    if (v == NULL || *v != 11) {
+        fprintf(stderr, "[error] alpha missing after nonempty slot compaction\n");
+        have_error = 1;
+    }
+    v = ahtable_tryget(T, "gamma", 5);
+    if (v == NULL || *v != 33) {
+        fprintf(stderr, "[error] gamma missing after nonempty slot compaction\n");
+        have_error = 1;
+    }
+
+    ahtable_iter_t* it = ahtable_iter_begin(T, false);
+    size_t count = 0;
+    while (!ahtable_iter_finished(it)) {
+        count++;
+        ahtable_iter_next(it);
+    }
+    ahtable_iter_free(it);
+    if (count != 2) {
+        fprintf(stderr, "[error] unsorted iteration after nonempty compaction returned %zu entries, expected 2\n", count);
+        have_error = 1;
+    }
+
+    v = ahtable_get(T, "delta", 5);
+    if (v == NULL) {
+        fprintf(stderr, "[error] insert after nonempty slot compaction failed\n");
+        have_error = 1;
+    }
+    else {
+        *v = 44;
+    }
+
+    ahtable_free(T);
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_ahtable_clear_resets_size()
 {
     fprintf(stderr, "checking clear reset... \n");
@@ -455,6 +534,7 @@ int main()
     test_ahtable_zero_slot_create();
     test_ahtable_empty_slot_operations();
     test_ahtable_delete_releases_empty_slot();
+    test_ahtable_delete_compacts_nonempty_slot();
     test_ahtable_clear_resets_size();
     test_ahtable_key_length_limit();
 
