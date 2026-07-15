@@ -1470,6 +1470,62 @@ func TestHTTPReplicatorReplicatesRoaringBitmapMutations(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorReplicatesSparseBitsetMutations(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	create := CacheCommandRequest{Command: "CREATESB", Key: "ids"}
+	if response := trie.ExecuteCommand(create); !response.OK {
+		t.Fatalf("CREATESB response = %#v, want ok", response)
+	}
+	add := CacheCommandRequest{Command: "ADDSB", Key: "ids", Values: Slice{json.Number("1"), json.Number("65543"), json.Number("18446744073709551615")}}
+	response := trie.ExecuteCommand(add)
+	if !response.OK {
+		t.Fatalf("ADDSB response = %#v, want ok", response)
+	}
+	result := replicator.ReplicateCommand(context.Background(), trie, add, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("sparse bitset replication result = %#v, want one ok target", result)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != "INTERNALSET" || request.Key != "ids" || request.Value == "" {
+			t.Fatalf("replicated sparse bitset request = %#v, want INTERNALSET snapshot", request)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
+			t.Fatalf("replicated sparse bitset snapshot JSON error = %v", err)
+		}
+		if entry.Type != "sparse_bitset" || entry.SparseBitset == nil {
+			t.Fatalf("replicated sparse bitset snapshot = %#v, want sparse_bitset payload", entry)
+		}
+	default:
+		t.Fatal("sparse bitset mutation did not reach remote target")
+	}
+
+	read := trie.ExecuteCommand(CacheCommandRequest{Command: "HASSB", Key: "ids", Value: "1"})
+	result = replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "HASSB", Key: "ids", Value: "1"}, read)
+	if !result.Skipped || result.Reason != "command is not replicated" {
+		t.Fatalf("sparse bitset read replication result = %#v, want skipped read command", result)
+	}
+}
+
 func TestHTTPReplicatorReplicatesCountMinSketchMutations(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
