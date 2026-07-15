@@ -217,6 +217,9 @@ static void ahtable_expand(ahtable_t* T)
 
 static value_t* get_key(ahtable_t* T, const char* key, size_t len, bool insert_missing)
 {
+    if (key == NULL && len > 0) {
+        return NULL;
+    }
     if (len > ahtable_max_key_length) {
         return NULL;
     }
@@ -295,7 +298,7 @@ value_t* ahtable_tryget(ahtable_t* T, const char* key, size_t len )
 
 int ahtable_del(ahtable_t* T, const char* key, size_t len)
 {
-    if (T == NULL) {
+    if (T == NULL || (key == NULL && len > 0)) {
         return -1;
     }
     if (len > ahtable_max_key_length) {

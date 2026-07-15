@@ -318,6 +318,34 @@ void test_ahtable_null_api()
         fprintf(stderr, "[error] null table delete reported success\n");
         have_error = 1;
     }
+    ahtable_t* T = ahtable_create();
+    if (ahtable_get(T, NULL, 1) != NULL) {
+        fprintf(stderr, "[error] invalid table key get returned a value\n");
+        have_error = 1;
+    }
+    if (ahtable_tryget(T, NULL, 1) != NULL) {
+        fprintf(stderr, "[error] invalid table key tryget returned a value\n");
+        have_error = 1;
+    }
+    if (ahtable_del(T, NULL, 1) == 0) {
+        fprintf(stderr, "[error] invalid table key delete reported success\n");
+        have_error = 1;
+    }
+    value_t* v = ahtable_get(T, NULL, 0);
+    if (v == NULL) {
+        fprintf(stderr, "[error] zero-length null table key was rejected\n");
+        have_error = 1;
+    }
+    else {
+        *v = 5;
+        v = ahtable_tryget(T, "", 0);
+        if (v == NULL || *v != 5) {
+            fprintf(stderr, "[error] zero-length null table key was not retrievable as empty key\n");
+            have_error = 1;
+        }
+    }
+    ahtable_free(T);
+
     ahtable_iter_t* it = ahtable_iter_begin(NULL, false);
     if (!ahtable_iter_finished(it)) {
         fprintf(stderr, "[error] null table unsorted iterator was not finished\n");
