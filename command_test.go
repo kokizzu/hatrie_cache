@@ -173,6 +173,22 @@ func TestExecuteCommandMapOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandPutMapExactPathReplacesNonMap(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "profile", Value: "old"}); !got.OK {
+		t.Fatalf("SETSTR profile response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTMAP", Key: "profile", Subkey: "city", Value: "Singapore"}); !got.OK {
+		t.Fatalf("PUTMAP exact response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PEEKMAP", Key: "profile", Subkey: "city"}); !got.OK || got.Value != "Singapore" {
+		t.Fatalf("PEEKMAP city response = %#v, want Singapore", got)
+	}
+	if got := ht.GetString("profile"); got != "" {
+		t.Fatalf("profile string after PUTMAP = %q, want replaced", got)
+	}
+}
+
 func TestExecuteCommandPutMapClonesNestedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	nested := Map{"field": "stored"}
@@ -247,6 +263,21 @@ func TestExecuteCommandSliceOperations(t *testing.T) {
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HEADSLICE", Key: "queue"}); !got.OK || got.Value != "second" {
 		t.Fatalf("HEADSLICE remaining response = %#v, want second", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "replace-slice", Value: "old"}); !got.OK {
+		t.Fatalf("SETSTR replace-slice response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHSLICE", Key: "replace-slice", Value: "new"}); !got.OK {
+		t.Fatalf("PUSHSLICE replace-slice response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPSLICE", Key: "replace-slice"}); !got.OK || got.Value != "new" {
+		t.Fatalf("POPSLICE replace-slice response = %#v, want new", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHSLICE", Key: "replace-slice", Value: "again"}); !got.OK {
+		t.Fatalf("PUSHSLICE replace-slice again response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPSLICE", Key: "replace-slice"}); !got.OK || got.Value != "again" {
+		t.Fatalf("POPSLICE replace-slice again response = %#v, want again", got)
 	}
 }
 
@@ -969,8 +1000,23 @@ func TestExecuteCommandRadixTreeOperations(t *testing.T) {
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTRT", Key: "auto", Subkey: "key", Value: "value"}); !got.OK || got.Value != "1" {
 		t.Fatalf("PUTRT auto response = %#v, want added 1", got)
 	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTRT", Key: "auto", Subkey: "key", Value: "updated"}); !got.OK || got.Value != "0" {
+		t.Fatalf("PUTRT auto update response = %#v, want added 0", got)
+	}
 	if !ht.Get("auto").IsRadixTree() {
 		t.Fatal("PUTRT on missing key did not create a radix tree")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRT", Key: "auto", Subkey: "key"}); !got.OK || got.Value != "updated" {
+		t.Fatalf("GETRT auto updated response = %#v, want updated", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "replace-rt", Value: "old"}); !got.OK {
+		t.Fatalf("SETSTR replace-rt response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTRT", Key: "replace-rt", Subkey: "key", Value: "value"}); !got.OK || got.Value != "1" {
+		t.Fatalf("PUTRT replace-rt response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRT", Key: "replace-rt", Subkey: "key"}); !got.OK || got.Value != "value" {
+		t.Fatalf("GETRT replace-rt response = %#v, want value", got)
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETRT", Key: "index"}); got.OK {
 		t.Fatalf("GETRT missing subkey response = %#v, want error", got)

@@ -196,6 +196,22 @@ func (dq *deque) Pop() (interface{}, bool) {
 	return value, true
 }
 
+func (dq *deque) popRetain() (interface{}, bool) {
+	if dq == nil || dq.size == 0 {
+		return nil, false
+	}
+	idx := (dq.head + dq.size - 1) % len(dq.values)
+	value := dq.values[idx]
+	dq.values[idx] = nil
+	dq.size--
+	if dq.size == 0 {
+		dq.head = 0
+		return value, true
+	}
+	dq.compactIfSparse()
+	return value, true
+}
+
 func (dq *deque) Shift() (interface{}, bool) {
 	if dq == nil || dq.size == 0 {
 		return nil, false

@@ -1008,6 +1008,23 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		return ht.executeFastGetCommand(key)
 	case "DUMP":
 		return ht.executeFastDumpCommand(key), true
+	case "PUTMAP":
+		if len(request.Pairs) != 0 || !commandFastPathField(request.Subkey) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastPutMapCommand(key, request.Subkey, request.Value)
+	case "PUTRT", "RTPUT":
+		if len(request.Pairs) != 0 || !commandFastPathField(request.Subkey) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastPutRadixTreeCommand(key, request.Subkey, request.Value)
+	case "PUSHSLICE":
+		if len(request.Values) != 0 || request.Value == "" {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastPushSliceCommand(key, request.Value)
+	case "POPSLICE":
+		return ht.executeFastPopSliceCommand(key)
 	case "PEEKMAP":
 		if !commandFastPathField(request.Subkey) {
 			return CacheCommandResponse{}, false
@@ -1039,6 +1056,175 @@ func (ht *HatTrie) executeFastDumpCommand(key string) CacheCommandResponse {
 		return CacheCommandResponse{OK: true, Message: "key not found"}
 	}
 	return CacheCommandResponse{OK: true, Message: "ok", Value: value}
+}
+
+func (ht *HatTrie) executeFastPutMapCommand(key string, subkey string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsMap() {
+			ht.maps.PutEntry(hval.Index, subkey, value)
+			ht.recordWriteLocked(key)
+			ht.cacheValueLocked(key, hval)
+			return CacheCommandResponse{OK: true, Message: "stored map fields"}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsMap() {
+		ht.maps.PutEntry(hval.Index, subkey, value)
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "stored map fields"}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.maps.AddEntry(subkey, value)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "stored map fields"}, true
+}
+
+func (ht *HatTrie) executeFastPutRadixTreeCommand(key string, subkey string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsRadixTree() {
+			added := ht.radixTrees.array[hval.Index].Put(subkey, value)
+			ht.recordWriteLocked(key)
+			ht.cacheValueLocked(key, hval)
+			return CacheCommandResponse{OK: true, Message: "stored radix tree values", Value: strconv.Itoa(boolInt(added))}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsRadixTree() {
+		added := ht.radixTrees.array[hval.Index].Put(subkey, value)
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "stored radix tree values", Value: strconv.Itoa(boolInt(added))}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	data := newRadixTreeData()
+	added := data.Put(subkey, value)
+	idx := ht.radixTrees.AddData(data)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RADIX_TREE}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "stored radix tree values", Value: strconv.Itoa(boolInt(added))}, true
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func (ht *HatTrie) executeFastPushSliceCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsSlice() {
+			if err := ht.slices.array[hval.Index].PushOneChecked(value); err != nil {
+				return commandError(err.Error()), true
+			}
+			ht.recordWriteLocked(key)
+			ht.cacheValueLocked(key, hval)
+			return CacheCommandResponse{OK: true, Message: "pushed slice values"}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsSlice() {
+		if err := ht.slices.array[hval.Index].PushOneChecked(value); err != nil {
+			return commandError(err.Error()), true
+		}
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "pushed slice values"}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx, err := ht.slices.AddValuesChecked(value)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "pushed slice values"}, true
+}
+
+func (ht *HatTrie) executeFastPopSliceCommand(key string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsSlice() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	value, ok := ht.slices.array[hval.Index].popRetain()
+	if !ok {
+		ht.recordReadLocked(false, key)
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	ht.recordReadLocked(true, key)
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	if text, ok := value.(string); ok {
+		return CacheCommandResponse{OK: true, Message: "removed", Value: text}, true
+	}
+	return commandValueResponse("removed", value), true
 }
 
 func commandFastPathField(value string) bool {
