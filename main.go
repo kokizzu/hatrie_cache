@@ -1875,6 +1875,9 @@ func (ht *HatTrie) Expire(key string, ttl time.Duration) bool {
 // ExpireChecked sets a relative TTL for an existing key and reports key
 // validation errors.
 func (ht *HatTrie) ExpireChecked(key string, ttl time.Duration) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -1909,6 +1912,9 @@ func (ht *HatTrie) ExpireAt(key string, at time.Time) bool {
 // ExpireAtChecked sets an absolute expiration time for an existing key and
 // reports key validation errors.
 func (ht *HatTrie) ExpireAtChecked(key string, at time.Time) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -1935,6 +1941,9 @@ func (ht *HatTrie) Persist(key string) bool {
 // PersistChecked removes an existing key's expiration and reports key
 // validation errors.
 func (ht *HatTrie) PersistChecked(key string) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -1973,6 +1982,9 @@ func (ht *HatTrie) TTL(key string) time.Duration {
 // TTLChecked returns the remaining TTL for key and reports key validation
 // errors.
 func (ht *HatTrie) TTLChecked(key string) (time.Duration, error) {
+	if ht == nil {
+		return NoTTL, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2013,6 +2025,9 @@ func (ht *HatTrie) TTLChecked(key string) (time.Duration, error) {
 // VacuumExpired removes expired keys immediately and returns the number of
 // trie entries removed. It is safe to call concurrently with other operations.
 func (ht *HatTrie) VacuumExpired() int {
+	if ht == nil {
+		return 0
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2032,6 +2047,9 @@ func (ht *HatTrie) StartExpirationCleaner(interval time.Duration) func() {
 func (ht *HatTrie) StartExpirationCleanerContext(ctx context.Context, interval time.Duration) func() {
 	if interval <= 0 {
 		panic("hatriecache: expiration cleaner interval must be positive")
+	}
+	if ht == nil {
+		return func() {}
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -2073,6 +2091,9 @@ func (ht *HatTrie) VacuumExpiredOnMemoryPressure(maxAllocBytes uint64) int {
 	if maxAllocBytes == 0 {
 		panic("hatriecache: memory pressure threshold must be positive")
 	}
+	if ht == nil {
+		return 0
+	}
 
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -2099,6 +2120,9 @@ func (ht *HatTrie) StartMemoryPressureVacuumContext(ctx context.Context, interva
 	}
 	if maxAllocBytes == 0 {
 		panic("hatriecache: memory pressure threshold must be positive")
+	}
+	if ht == nil {
+		return func() {}
 	}
 	if ctx == nil {
 		ctx = context.Background()

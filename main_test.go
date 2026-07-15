@@ -84,6 +84,55 @@ func TestCoreAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestExpirationAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+	deadline := time.Unix(1000, 0)
+
+	if ok := ht.Expire("key", time.Second); ok {
+		t.Fatal("Expire(nil trie) = true, want false")
+	}
+	if ok, err := ht.ExpireChecked("key", time.Second); ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("ExpireChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", ok, err)
+	}
+	if ok := ht.ExpireAt("key", deadline); ok {
+		t.Fatal("ExpireAt(nil trie) = true, want false")
+	}
+	if ok, err := ht.ExpireAtChecked("key", deadline); ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("ExpireAtChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", ok, err)
+	}
+	if ok := ht.Persist("key"); ok {
+		t.Fatal("Persist(nil trie) = true, want false")
+	}
+	if ok, err := ht.PersistChecked("key"); ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("PersistChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", ok, err)
+	}
+	if ttl := ht.TTL("key"); ttl != NoTTL {
+		t.Fatalf("TTL(nil trie) = %s, want NoTTL", ttl)
+	}
+	if ttl, err := ht.TTLChecked("key"); ttl != NoTTL || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("TTLChecked(nil trie) = %s/%v, want NoTTL/ErrNilHatTrie", ttl, err)
+	}
+	if got := ht.VacuumExpired(); got != 0 {
+		t.Fatalf("VacuumExpired(nil trie) = %d, want 0", got)
+	}
+	if got := ht.VacuumExpiredOnMemoryPressure(1); got != 0 {
+		t.Fatalf("VacuumExpiredOnMemoryPressure(nil trie) = %d, want 0", got)
+	}
+
+	stop := ht.StartExpirationCleaner(time.Hour)
+	stop()
+	stop()
+	stop = ht.StartExpirationCleanerContext(nil, time.Hour)
+	stop()
+	stop()
+	stop = ht.StartMemoryPressureVacuum(time.Hour, 1)
+	stop()
+	stop()
+	stop = ht.StartMemoryPressureVacuumContext(nil, time.Hour, 1)
+	stop()
+	stop()
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
