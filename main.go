@@ -1708,7 +1708,7 @@ type HatTrie struct {
 	hotValue         HatValue
 	hotValid         bool
 	stats            CacheStats
-	keyStats         map[string]KeyStats
+	keyStats         map[string]*KeyStats
 	now              func() time.Time
 }
 
@@ -1752,7 +1752,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		radixTrees:       CreateRadixTreeStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
-		keyStats:         map[string]KeyStats{},
+		keyStats:         map[string]*KeyStats{},
 		now:              time.Now,
 	}
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
@@ -1858,10 +1858,12 @@ func (ht *HatTrie) StatsForKeyChecked(key string) (KeyStats, bool, error) {
 		return KeyStats{}, false, nil
 	}
 	stats, ok := ht.keyStats[key]
-	if ok {
-		stats.updateRates()
+	if ok && stats != nil {
+		out := *stats
+		out.updateRates()
+		return out, true, nil
 	}
-	return stats, ok, nil
+	return KeyStats{}, false, nil
 }
 
 func (ht *HatTrie) restoreKeyStats(key string, stats *KeyStats) {
@@ -1879,7 +1881,7 @@ func (ht *HatTrie) restoreKeyStatsLocked(key string, stats *KeyStats) {
 	}
 	restored := *stats
 	restored.updateRates()
-	ht.keyStats[key] = restored
+	ht.keyStats[key] = &restored
 }
 
 func (ht *HatTrie) SaveStats(path string) error {
@@ -2379,6 +2381,10 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 		if !hit && !tracked {
 			continue
 		}
+		if stats == nil {
+			stats = &KeyStats{}
+			ht.keyStats[key] = stats
+		}
 		stats.Reads++
 		if hit {
 			stats.Hits++
@@ -2387,7 +2393,6 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 			stats.Misses++
 			stats.LastMiss = now
 		}
-		ht.keyStats[key] = stats
 	}
 }
 
@@ -2399,9 +2404,12 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	for _, key := range keys {
 		ht.clearHotKeyLocked(key)
 		stats := ht.keyStats[key]
+		if stats == nil {
+			stats = &KeyStats{}
+			ht.keyStats[key] = stats
+		}
 		stats.Writes++
 		stats.LastWrite = now
-		ht.keyStats[key] = stats
 	}
 }
 
@@ -2476,6 +2484,15 @@ func (stats *KeyStats) updateRates() {
 	rate := float64(stats.Hits) / float64(stats.Reads)
 	stats.HitRate = rate
 	stats.CumulativeHitRate = rate
+}
+
+func clonedUpdatedKeyStats(stats *KeyStats) *KeyStats {
+	if stats == nil {
+		return nil
+	}
+	cloned := *stats
+	cloned.updateRates()
+	return &cloned
 }
 
 func validateCacheStatsSnapshot(stats CacheStats) error {
@@ -2900,6 +2917,21 @@ func (ht *HatTrie) peekLocked(key string) HatValue {
 	hval.fromValue(*rawPtr)
 	if ht.expireIfNeededLocked(key, hval) {
 		return HatValue{}
+	}
+	return hval
+}
+
+func (ht *HatTrie) peekCachedLocked(key string) HatValue {
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+			return HatValue{}
+		}
+		return hval
+	}
+	hval := ht.peekLocked(key)
+	if !hval.Empty() {
+		ht.cacheValueLocked(key, hval)
 	}
 	return hval
 }

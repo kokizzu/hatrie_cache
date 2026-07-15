@@ -1740,6 +1740,34 @@ func TestExecuteCommandInternalReplicationCommands(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandDumpStringEscapesJSON(t *testing.T) {
+	source := newTestTrie(t)
+	value := "quote \" slash \\ newline \n cafe \u00e9"
+	if got := source.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "escaped", Value: value}); !got.OK {
+		t.Fatalf("SETSTR escaped response = %#v, want ok", got)
+	}
+
+	dump := source.ExecuteCommand(CacheCommandRequest{Command: "DUMP", Key: "escaped"})
+	if !dump.OK || dump.Value == "" {
+		t.Fatalf("DUMP escaped response = %#v, want snapshot entry JSON", dump)
+	}
+	var dumped snapshotEntry
+	if err := json.Unmarshal([]byte(dump.Value), &dumped); err != nil {
+		t.Fatalf("DUMP escaped value JSON error = %v; payload %q", err, dump.Value)
+	}
+	if dumped.Key != "escaped" || dumped.Type != "string" || dumped.String != value {
+		t.Fatalf("dumped escaped entry = %#v, want original string", dumped)
+	}
+
+	target := newTestTrie(t)
+	if got := target.ExecuteCommand(CacheCommandRequest{Command: "INTERNALSET", Key: "escaped", Value: dump.Value}); !got.OK {
+		t.Fatalf("INTERNALSET escaped response = %#v, want ok", got)
+	}
+	if got, ok, err := target.GetStringChecked("escaped"); err != nil || !ok || got != value {
+		t.Fatalf("escaped INTERNALSET value = %q/%v, want original", got, ok)
+	}
+}
+
 func TestExecuteCommandInternalSetValidation(t *testing.T) {
 	ht := newTestTrie(t)
 

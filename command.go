@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	json "github.com/goccy/go-json"
 )
@@ -1005,47 +1006,85 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 	switch request.Command {
 	case "GET", "GETSTR":
 		return ht.executeFastGetCommand(key)
+	case "DUMP":
+		return ht.executeFastDumpCommand(key), true
 	case "PEEKMAP":
 		if !commandFastPathField(request.Subkey) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastPeekMapCommand(key, request.Subkey)
 	case "HASRB":
-		if !commandFastPathField(request.Value) {
+		value, ok := commandFastUint32Field(request.Value)
+		if !ok {
 			return CacheCommandResponse{}, false
 		}
-		value, err := strconv.ParseUint(request.Value, 10, 32)
-		if err != nil {
-			return CacheCommandResponse{}, false
-		}
-		return ht.executeFastHasRoaringBitmapCommand(key, uint32(value)), true
+		return ht.executeFastHasRoaringBitmapCommand(key, value)
 	case "HASSB":
-		if !commandFastPathField(request.Value) {
+		value, ok := commandFastUint64Field(request.Value)
+		if !ok {
 			return CacheCommandResponse{}, false
 		}
-		value, err := strconv.ParseUint(request.Value, 10, 64)
-		if err != nil {
-			return CacheCommandResponse{}, false
-		}
-		return ht.executeFastHasSparseBitsetCommand(key, value), true
+		return ht.executeFastHasSparseBitsetCommand(key, value)
 	default:
 		return CacheCommandResponse{}, false
 	}
 }
 
+func (ht *HatTrie) executeFastDumpCommand(key string) CacheCommandResponse {
+	value, ok, err := ht.commandDumpEntry(key)
+	if err != nil {
+		return commandError(err.Error())
+	}
+	if !ok {
+		return CacheCommandResponse{OK: true, Message: "key not found"}
+	}
+	return CacheCommandResponse{OK: true, Message: "ok", Value: value}
+}
+
 func commandFastPathField(value string) bool {
-	return value != "" && strings.TrimSpace(value) == value
+	if value == "" {
+		return false
+	}
+	first := value[0]
+	last := value[len(value)-1]
+	if first > ' ' && first < utf8.RuneSelf && last > ' ' && last < utf8.RuneSelf {
+		return true
+	}
+	return strings.TrimSpace(value) == value
+}
+
+func commandFastUint32Field(value string) (uint32, bool) {
+	parsed, ok := commandFastUint64Field(value)
+	if !ok || parsed > math.MaxUint32 {
+		return 0, false
+	}
+	return uint32(parsed), true
+}
+
+func commandFastUint64Field(value string) (uint64, bool) {
+	if value == "" {
+		return 0, false
+	}
+	var parsed uint64
+	for idx := 0; idx < len(value); idx++ {
+		c := value[idx]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		digit := uint64(c - '0')
+		if parsed > (math.MaxUint64-digit)/10 {
+			return 0, false
+		}
+		parsed = parsed*10 + digit
+	}
+	return parsed, true
 }
 
 func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval, err := ht.getLockedChecked(key)
-	if err != nil {
-		ht.recordReadLocked(false, key)
-		return commandError(err.Error()), true
-	}
+	hval := ht.peekCachedLocked(key)
 	if hval.Empty() {
 		ht.recordReadLocked(false, key)
 		return CacheCommandResponse{OK: true, Message: "key not found"}, true
@@ -1069,12 +1108,11 @@ func (ht *HatTrie) executeFastPeekMapCommand(key string, subkey string) (CacheCo
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval, err := ht.getLockedChecked(key)
-	if err != nil {
-		ht.recordReadLocked(false, key)
-		return commandError(err.Error()), true
-	}
+	hval := ht.peekCachedLocked(key)
 	if !hval.IsMap() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
 		ht.recordReadLocked(false, key)
 		return CacheCommandResponse{OK: true, Message: "value not found"}, true
 	}
@@ -1093,40 +1131,38 @@ func (ht *HatTrie) executeFastPeekMapCommand(key string, subkey string) (CacheCo
 	return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 }
 
-func (ht *HatTrie) executeFastHasRoaringBitmapCommand(key string, value uint32) CacheCommandResponse {
+func (ht *HatTrie) executeFastHasRoaringBitmapCommand(key string, value uint32) (CacheCommandResponse, bool) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval, err := ht.getLockedChecked(key)
-	if err != nil {
-		ht.recordReadLocked(false, key)
-		return commandError(err.Error())
-	}
+	hval := ht.peekCachedLocked(key)
 	if !hval.IsRoaringBitmap() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
 		ht.recordReadLocked(false, key)
-		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}, true
 	}
 	hit := ht.roaringBitmaps.array[hval.Index].Contains(value)
 	ht.recordReadLocked(hit, key)
-	return commandBool01Response(hit)
+	return commandBool01Response(hit), true
 }
 
-func (ht *HatTrie) executeFastHasSparseBitsetCommand(key string, value uint64) CacheCommandResponse {
+func (ht *HatTrie) executeFastHasSparseBitsetCommand(key string, value uint64) (CacheCommandResponse, bool) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval, err := ht.getLockedChecked(key)
-	if err != nil {
-		ht.recordReadLocked(false, key)
-		return commandError(err.Error())
-	}
+	hval := ht.peekCachedLocked(key)
 	if !hval.IsSparseBitset() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
 		ht.recordReadLocked(false, key)
-		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}, true
 	}
 	hit := ht.sparseBitsets.array[hval.Index].Contains(value)
 	ht.recordReadLocked(hit, key)
-	return commandBool01Response(hit)
+	return commandBool01Response(hit), true
 }
 
 func commandBool01Response(hit bool) CacheCommandResponse {
@@ -1152,23 +1188,59 @@ func (ht *HatTrie) commandDumpEntry(key string) (string, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval := ht.peekLocked(key)
+	hval := ht.peekCachedLocked(key)
 	if hval.Empty() {
 		ht.recordReadLocked(false, key)
 		return "", false, nil
 	}
-	entry, err := ht.snapshotEntryLocked(Entry{Key: key, Value: hval})
+	if hval.IsStringAtRaws() && ht.expires[key].IsZero() {
+		data := commandDumpStringJSON(key, ht.raws.stringValue(hval.Index))
+		ht.recordReadLocked(true, key)
+		return data, true, nil
+	}
+	entry, err := ht.snapshotEntryWithoutStatsLocked(Entry{Key: key, Value: hval})
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return "", false, err
 	}
-	data, err := jsonEncodedString(entry)
+	data, err := marshalSnapshotEntryJSON(entry)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return "", false, err
 	}
 	ht.recordReadLocked(true, key)
-	return data, true, nil
+	return string(data), true, nil
+}
+
+func commandDumpStringJSON(key string, value string) string {
+	var builder strings.Builder
+	builder.Grow(len(key) + len(value) + 36)
+	builder.WriteString(`{"key":`)
+	writeCommandJSONString(&builder, key)
+	builder.WriteString(`,"type":"string","string":`)
+	writeCommandJSONString(&builder, value)
+	builder.WriteByte('}')
+	return builder.String()
+}
+
+func writeCommandJSONString(builder *strings.Builder, value string) {
+	if commandStringNeedsJSONEscape(value) {
+		builder.WriteString(strconv.Quote(value))
+		return
+	}
+	builder.WriteByte('"')
+	builder.WriteString(value)
+	builder.WriteByte('"')
+}
+
+func commandStringNeedsJSONEscape(value string) bool {
+	for idx := 0; idx < len(value); idx++ {
+		c := value[idx]
+		if c < 0x20 || c == '\\' || c == '"' || c >= utf8.RuneSelf {
+			return true
+		}
+	}
+	return false
 }
 
 func (ht *HatTrie) commandInternalSet(key string, payload string) error {

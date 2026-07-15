@@ -507,11 +507,7 @@ func (ht *HatTrie) writeSnapshotDiskBytesEntryJSONLocked(writer io.Writer, entry
 
 func (ht *HatTrie) writeSnapshotBytesEntryJSONLocked(writer io.Writer, entry Entry, prefix string, reader io.Reader) error {
 	expiresAt := snapshotExpiresAt(ht.expires[entry.Key])
-	var stats *KeyStats
-	if keyStats, ok := ht.keyStats[entry.Key]; ok {
-		keyStats.updateRates()
-		stats = &keyStats
-	}
+	stats := clonedUpdatedKeyStats(ht.keyStats[entry.Key])
 
 	if _, err := io.WriteString(writer, prefix+"{\n"); err != nil {
 		return err
@@ -885,18 +881,25 @@ func (writer *prefixedJSONLineWriter) Write(data []byte) (int, error) {
 }
 
 func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
-	return ht.snapshotEntryForStoreLocked(entry, nil, nil)
+	return ht.snapshotEntryForStoreLockedWithStats(entry, nil, nil, true)
+}
+
+func (ht *HatTrie) snapshotEntryWithoutStatsLocked(entry Entry) (snapshotEntry, error) {
+	return ht.snapshotEntryForStoreLockedWithStats(entry, nil, nil, false)
 }
 
 func (ht *HatTrie) snapshotEntryForStoreLocked(entry Entry, currentStore *LevelDBStore, currentDB *leveldb.DB) (snapshotEntry, error) {
+	return ht.snapshotEntryForStoreLockedWithStats(entry, currentStore, currentDB, true)
+}
+
+func (ht *HatTrie) snapshotEntryForStoreLockedWithStats(entry Entry, currentStore *LevelDBStore, currentDB *leveldb.DB, includeStats bool) (snapshotEntry, error) {
 	out := snapshotEntry{
 		Key:       entry.Key,
 		Type:      monitoringType(entry.Value),
 		ExpiresAt: snapshotExpiresAt(ht.expires[entry.Key]),
 	}
-	if stats, ok := ht.keyStats[entry.Key]; ok {
-		stats.updateRates()
-		out.Stats = &stats
+	if includeStats {
+		out.Stats = clonedUpdatedKeyStats(ht.keyStats[entry.Key])
 	}
 	switch entry.Value.Type() {
 	case DATAVALUE_TYPE_COUNTER:

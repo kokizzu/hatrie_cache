@@ -686,22 +686,13 @@ func (trie *HatTrie) levelDBReferenceMetadataMatchesLocked(key string, ref Level
 	if !timePtrEqual(ref.ExpiresAt, snapshotExpiresAt(trie.expires[key])) {
 		return false
 	}
-	var currentStats *KeyStats
-	if stats, ok := trie.keyStats[key]; ok {
-		stats.updateRates()
-		currentStats = &stats
-	}
+	currentStats := clonedUpdatedKeyStats(trie.keyStats[key])
 	return keyStatsPtrEqual(ref.Stats, currentStats)
 }
 
 func (trie *HatTrie) levelDBReferenceMetadataLocked(key string) (*time.Time, *KeyStats) {
 	expiresAt := snapshotExpiresAt(trie.expires[key])
-	var stats *KeyStats
-	if keyStats, ok := trie.keyStats[key]; ok {
-		keyStats.updateRates()
-		stats = &keyStats
-	}
-	return expiresAt, stats
+	return expiresAt, clonedUpdatedKeyStats(trie.keyStats[key])
 }
 
 func (trie *HatTrie) levelDBReferenceSnapshotEntryLocked(key string, hval HatValue) (snapshotEntry, error) {
@@ -734,12 +725,7 @@ func (trie *HatTrie) levelDBReferenceSnapshotEntryForStoreLocked(key string, hva
 	}
 	entry.Key = key
 	entry.ExpiresAt = snapshotExpiresAt(trie.expires[key])
-	if stats, ok := trie.keyStats[key]; ok {
-		stats.updateRates()
-		entry.Stats = &stats
-	} else {
-		entry.Stats = nil
-	}
+	entry.Stats = clonedUpdatedKeyStats(trie.keyStats[key])
 	return entry, nil
 }
 
@@ -801,11 +787,7 @@ func (trie *HatTrie) levelDBEntryDataForStoreLocked(entry Entry, currentStore *L
 
 func (trie *HatTrie) levelDBDiskBytesEntryDataBinaryLocked(entry Entry) ([]byte, error) {
 	expiresAt := snapshotExpiresAt(trie.expires[entry.Key])
-	var stats *KeyStats
-	if keyStats, ok := trie.keyStats[entry.Key]; ok {
-		keyStats.updateRates()
-		stats = &keyStats
-	}
+	stats := clonedUpdatedKeyStats(trie.keyStats[entry.Key])
 	file, size, err := trie.disks.open(entry.Value.Index)
 	if err != nil {
 		return nil, err
