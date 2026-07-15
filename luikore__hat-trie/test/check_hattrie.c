@@ -652,6 +652,20 @@ void test_hattrie_null_cleanup()
         have_error = 1;
     }
     hattrie_iter_free(iter);
+
+    value_t* v = hattrie_get(T, "", 0);
+    if (v != NULL) *v = 5;
+    v = hattrie_get(T, "alpha", 5);
+    if (v != NULL) *v = 7;
+    iter = hattrie_iter_begin(T, true);
+    while (!hattrie_iter_finished(iter)) {
+        if (hattrie_iter_key(iter, NULL) == NULL) {
+            fprintf(stderr, "[error] live trie iterator returned NULL key without length output\n");
+            have_error = 1;
+        }
+        hattrie_iter_next(iter);
+    }
+    hattrie_iter_free(iter);
     hattrie_free(T);
 
     hattrie_clear(NULL);

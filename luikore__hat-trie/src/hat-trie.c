@@ -856,7 +856,7 @@ const char* hattrie_iter_key(hattrie_iter_t* i, size_t* len)
     }
     i->key[key_len] = '\0';
 
-    *len = key_len - i->prefix_len;
+    if (len != NULL) *len = key_len - i->prefix_len;
     return i->key + i->prefix_len;
 }
 
