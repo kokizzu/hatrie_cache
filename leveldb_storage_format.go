@@ -301,6 +301,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: sparse bitset snapshot is required")
 		}
 		return prepareLevelDBBinarySparseBitsetValue(*entry.SparseBitset)
+	case "fenwick_tree":
+		if entry.FenwickTree == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: fenwick tree snapshot is required")
+		}
+		return prepareLevelDBBinaryFenwickTreeValue(*entry.FenwickTree)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -492,6 +497,22 @@ func prepareLevelDBBinaryRoaringBitmapValue(snapshot roaringBitmapSnapshot) (lev
 
 func prepareLevelDBBinarySparseBitsetValue(snapshot sparseBitsetSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, err := marshalSnapshotSparseBitsetValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryFenwickTreeValue(snapshot fenwickTreeSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotFenwickTreeValueBinary(snapshot)
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err
 	}
@@ -865,6 +886,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 	case "quantile_sketch":
 		return decodeLevelDBStorageJSON(data, &entry.QuantileSketch)
 	case "fenwick_tree":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(fenwickTreeSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary fenwick tree value is not a fenwick tree")
+			}
+			entry.FenwickTree = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.FenwickTree)
 	case "sparse_bitset":
 		if snapshotValueDataIsBinary(data) {

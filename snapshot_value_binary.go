@@ -30,6 +30,7 @@ const (
 	snapshotValueBinaryXorFilter
 	snapshotValueBinaryRoaringBitmap
 	snapshotValueBinarySparseBitset
+	snapshotValueBinaryFenwickTree
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -182,6 +183,16 @@ func snapshotXorFilterRawFingerprints(snapshot xorFilterSnapshot) ([]byte, error
 		return nil, nil
 	}
 	return base64.StdEncoding.DecodeString(snapshot.Fingerprints)
+}
+
+func marshalSnapshotFenwickTreeValueBinary(snapshot fenwickTreeSnapshot) ([]byte, error) {
+	size, err := snapshotValueBinaryFenwickTreeSize(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	writeSnapshotValueBinaryFenwickTree(&writer, snapshot)
+	return writer.bytes(), nil
 }
 
 func snapshotValueBinarySize(value interface{}) (int, bool, error) {
@@ -391,6 +402,22 @@ func snapshotValueBinaryXorFilterSize(snapshot xorFilterSnapshot, fingerprintByt
 	return snapshotValueBinaryAdd(total, fingerprintSize)
 }
 
+func snapshotValueBinaryFenwickTreeSize(snapshot fenwickTreeSnapshot) (int, error) {
+	total := 1 +
+		binaryUvarintSize(snapshot.Size) +
+		binaryUvarintSize(snapshot.Updates) +
+		binaryVarintSize(snapshot.Total) +
+		binaryUvarintSize(uint64(len(snapshot.Tree)))
+	for _, value := range snapshot.Tree {
+		var err error
+		total, err = snapshotValueBinaryAdd(total, binaryVarintSize(value))
+		if err != nil {
+			return 0, err
+		}
+	}
+	return total, nil
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -549,6 +576,17 @@ func writeSnapshotValueBinaryXorFilter(writer *binaryFieldWriter, snapshot xorFi
 	writer.writeUvarint(snapshot.Seed)
 	writer.writeUvarint(uint64(snapshot.BlockLength))
 	writer.writeBytes(fingerprints)
+}
+
+func writeSnapshotValueBinaryFenwickTree(writer *binaryFieldWriter, snapshot fenwickTreeSnapshot) {
+	writer.buf = append(writer.buf, snapshotValueBinaryFenwickTree)
+	writer.writeUvarint(snapshot.Size)
+	writer.writeUvarint(snapshot.Updates)
+	writer.writeVarint(snapshot.Total)
+	writer.writeUvarint(uint64(len(snapshot.Tree)))
+	for _, value := range snapshot.Tree {
+		writer.writeVarint(value)
+	}
 }
 
 func unmarshalSnapshotValueBinary(data []byte) (interface{}, error) {
@@ -843,6 +881,41 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 		return readSnapshotValueBinaryRoaringBitmap(reader)
 	case snapshotValueBinarySparseBitset:
 		return readSnapshotValueBinarySparseBitset(reader)
+	case snapshotValueBinaryFenwickTree:
+		size, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		updates, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		total, err := reader.readVarint()
+		if err != nil {
+			return nil, err
+		}
+		count, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		capacity, err := snapshotValueBinaryInitialCapacity(count, len(reader.data)-reader.off, 1)
+		if err != nil {
+			return nil, err
+		}
+		values := make([]int64, 0, capacity)
+		for idx := 0; idx < int(count); idx++ {
+			value, err := reader.readVarint()
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return fenwickTreeSnapshot{
+			Size:    size,
+			Updates: updates,
+			Total:   total,
+			Tree:    values,
+		}, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)
 	}

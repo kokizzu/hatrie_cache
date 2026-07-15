@@ -1186,6 +1186,91 @@ func TestLevelDBBinarySparseBitsetStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryFenwickTreeUsesBinaryValuePayload(t *testing.T) {
+	tree, err := newFenwickTreeData(64)
+	if err != nil {
+		t.Fatalf("newFenwickTreeData() error = %v", err)
+	}
+	if _, ok := tree.Add(2, 5); !ok {
+		t.Fatal("Add(2, 5) = false, want true")
+	}
+	if _, ok := tree.Add(17, -3); !ok {
+		t.Fatal("Add(17, -3) = false, want true")
+	}
+	snapshot := tree.Snapshot()
+	entry := snapshotEntry{
+		Key:         "fenwick",
+		Type:        "fenwick_tree",
+		FenwickTree: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary fenwick tree) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("fenwick tree payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(fenwick tree) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary fenwick tree payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary fenwick tree) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.FenwickTree, &snapshot) {
+		t.Fatalf("decoded fenwick tree = %#v, want %#v", decoded.FenwickTree, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryFenwickTreeStillReadsLegacyJSONPayload(t *testing.T) {
+	tree, err := newFenwickTreeData(8)
+	if err != nil {
+		t.Fatalf("newFenwickTreeData() error = %v", err)
+	}
+	if _, ok := tree.Add(1, 5); !ok {
+		t.Fatal("Add(1, 5) = false, want true")
+	}
+	snapshot := tree.Snapshot()
+	entry := snapshotEntry{
+		Key:         "legacy-fenwick",
+		Type:        "fenwick_tree",
+		FenwickTree: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(fenwick tree) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON fenwick tree) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.FenwickTree, entry.FenwickTree) {
+		t.Fatalf("decoded legacy inner JSON fenwick tree = %#v, want %#v", decoded.FenwickTree, entry.FenwickTree)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {
