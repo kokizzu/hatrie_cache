@@ -68,6 +68,8 @@ func TestVerifyCScriptUsesRunScopedTemporaryDirectory(t *testing.T) {
 		`"$tmp_dir/check_ahtable"`,
 		`"$tmp_dir/check_hattrie_sanitize"`,
 		`"$tmp_dir/check_ahtable_sanitize"`,
+		`"$tmp_dir/check_hattrie_leak"`,
+		`"$tmp_dir/check_ahtable_leak"`,
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("verify-c script should use run-scoped temporary paths; missing %q", token)
@@ -78,10 +80,32 @@ func TestVerifyCScriptUsesRunScopedTemporaryDirectory(t *testing.T) {
 		"/tmp/hatrie_cache_check_ahtable",
 		"/tmp/hatrie_cache_check_hattrie_sanitize",
 		"/tmp/hatrie_cache_check_ahtable_sanitize",
+		"/tmp/hatrie_cache_check_hattrie_leak",
+		"/tmp/hatrie_cache_check_ahtable_leak",
 		"/tmp/c_asan_probe.",
+		"/tmp/c_lsan_probe.",
 	} {
 		if strings.Contains(script, stalePath) {
 			t.Fatalf("verify-c script still uses fixed temporary path %q", stalePath)
+		}
+	}
+}
+
+func TestVerifyCScriptRunsLeakSanitizerFallbackWhenAddressSanitizerIsSkipped(t *testing.T) {
+	data, err := os.ReadFile("scripts/verify-c.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/verify-c.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		"compiler_supports_leak_sanitizer()",
+		"run_leak_sanitizer=1",
+		`LEAK_FLAGS="-fsanitize=leak -fno-omit-frame-pointer"`,
+		`LSAN_OPTIONS=${LSAN_OPTIONS:-detect_leaks=1:halt_on_error=1:exitcode=23}`,
+		"running C leak sanitizer fallback",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("verify-c script should include LeakSanitizer fallback; missing %q", token)
 		}
 	}
 }

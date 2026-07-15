@@ -83,17 +83,45 @@ compiler_supports_sanitizers() {
 	return 1
 }
 
+compiler_supports_leak_sanitizer() {
+	tmp_bin=$tmp_dir/c_lsan_probe
+	tmp_c=$tmp_bin.c
+	printf 'int main(void) { return 0; }\n' > "$tmp_c"
+	if gcc -std=c99 -fsanitize=leak -fno-omit-frame-pointer "$tmp_c" -o "$tmp_bin" >/dev/null 2>&1 &&
+		LSAN_OPTIONS=${LSAN_OPTIONS:-detect_leaks=1:halt_on_error=1:exitcode=23} \
+			"$tmp_bin" >/dev/null 2>&1; then
+		rm -f "$tmp_c" "$tmp_bin"
+		return 0
+	fi
+	rm -f "$tmp_c" "$tmp_bin"
+	return 1
+}
+
+run_leak_sanitizer=0
 if [ "$SANITIZE_C" = "auto" ]; then
 	if strict_overcommit_enabled; then
-		echo "skipping C sanitizer pass: vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations around $(asan_min_commit_headroom_label)" >&2
+		echo "skipping C AddressSanitizer/UBSan pass: vm.overcommit_memory=2 uses strict overcommit and can reject AddressSanitizer shadow memory reservations around $(asan_min_commit_headroom_label)" >&2
+		if compiler_supports_leak_sanitizer; then
+			echo "running C leak sanitizer fallback" >&2
+			run_leak_sanitizer=1
+		fi
 		SANITIZE_C=0
 	elif low_commit_headroom_blocks_sanitizers; then
-		echo "skipping C sanitizer pass: available commit headroom $(commit_headroom_kb) KiB is below AddressSanitizer's expected shadow-memory reservation $(asan_min_commit_headroom_label)" >&2
+		echo "skipping C AddressSanitizer/UBSan pass: available commit headroom $(commit_headroom_kb) KiB is below AddressSanitizer's expected shadow-memory reservation $(asan_min_commit_headroom_label)" >&2
+		if compiler_supports_leak_sanitizer; then
+			echo "running C leak sanitizer fallback" >&2
+			run_leak_sanitizer=1
+		fi
 		SANITIZE_C=0
 	elif compiler_supports_sanitizers; then
 		SANITIZE_C=1
+	elif compiler_supports_leak_sanitizer; then
+		echo "skipping C AddressSanitizer/UBSan pass: compiler/runtime does not support AddressSanitizer and UBSan" >&2
+		echo "running C leak sanitizer fallback" >&2
+		run_leak_sanitizer=1
+		SANITIZE_C=0
 	else
-		echo "skipping C sanitizer pass: compiler/runtime does not support AddressSanitizer and UBSan" >&2
+		echo "skipping C sanitizer pass: compiler/runtime does not support AddressSanitizer, UBSan, or LeakSanitizer" >&2
 		SANITIZE_C=0
 	fi
 fi
@@ -122,3 +150,18 @@ case "$SANITIZE_C" in
 		exit 2
 		;;
 esac
+
+if [ "$run_leak_sanitizer" = "1" ]; then
+	LEAK_FLAGS="-fsanitize=leak -fno-omit-frame-pointer"
+	build_c_check \
+		"$tmp_dir/check_hattrie_leak" \
+		"$ROOT/luikore__hat-trie/test/check_hattrie.c" \
+		$LEAK_FLAGS
+	build_c_ahtable_check \
+		"$tmp_dir/check_ahtable_leak" \
+		$LEAK_FLAGS
+	LSAN_OPTIONS=${LSAN_OPTIONS:-detect_leaks=1:halt_on_error=1:exitcode=23} \
+		"$tmp_dir/check_hattrie_leak"
+	LSAN_OPTIONS=${LSAN_OPTIONS:-detect_leaks=1:halt_on_error=1:exitcode=23} \
+		"$tmp_dir/check_ahtable_leak"
+fi

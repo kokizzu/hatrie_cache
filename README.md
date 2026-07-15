@@ -88,9 +88,12 @@ On hosts with `vm.overcommit_memory=2`, auto mode skips that sanitizer pass
 because AddressSanitizer can reserve a large shadow-memory range that strict
 commit accounting rejects. On this toolchain that reservation is expected around
 `15392894357504` bytes, which can appear in repeated kernel
-`__vm_enough_memory` messages. Auto mode also skips the pass when
-`/proc/meminfo` shows available commit headroom below AddressSanitizer's
-expected reservation. To force that pass anyway, use
+`__vm_enough_memory` messages. In those cases, auto mode still runs a
+LeakSanitizer-only fallback when the compiler/runtime supports it, so leak
+coverage remains available without the full AddressSanitizer reservation. Auto
+mode also skips the AddressSanitizer/UBSan pass when `/proc/meminfo` shows
+available commit headroom below AddressSanitizer's expected reservation. To
+force that pass anyway, use
 `make verify-c SANITIZE_C=1 SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=1` and, when
 needed, `SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM=1`.
 
