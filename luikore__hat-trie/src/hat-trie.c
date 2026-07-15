@@ -484,7 +484,7 @@ void hattrie_walk (hattrie_t* T, const char* key, size_t len, void* user_data, h
             break;
         node = node.t->xs[*k];
         if (*node.flag & NODE_HAS_VAL) {
-            if (hattrie_walk_stop == cb(key, i, &node.t->val, user_data))
+            if (hattrie_walk_stop == cb(key, i + 1, &node.t->val, user_data))
                 return;
         }
     }

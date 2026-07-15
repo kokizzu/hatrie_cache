@@ -324,6 +324,52 @@ void test_trie_walk()
     hattrie_free(T);
 }
 
+void test_trie_walk_split_node_value()
+{
+    fprintf(stderr, "checking trie walk split node value... \n");
+
+    hattrie_t* T = hattrie_create();
+    value_t* val = hattrie_get(T, "a", 1);
+    if (val == NULL) {
+        fprintf(stderr, "[error] split node walk prefix insert failed\n");
+        have_error = 1;
+    }
+    else {
+        *val = 9;
+    }
+
+    char key[32];
+    size_t i;
+    for (i = 0; i < 17000; ++i) {
+        snprintf(key, sizeof(key), "a%05zu", i);
+        val = hattrie_get(T, key, strlen(key));
+        if (val == NULL) {
+            fprintf(stderr, "[error] split node walk filler insert failed\n");
+            have_error = 1;
+            break;
+        }
+        *val = 100 + i;
+    }
+
+    trie_walk_data_t data = {
+        .size = 0
+    };
+    char* query = "a/not-present";
+    hattrie_walk(T, query, strlen(query), &data, trie_walk_cb);
+
+#define EXPECT(check) \
+    if (!(check)) {\
+        fprintf(stderr, "[error] %s:%d: expect failure\n", __FILE__, __LINE__);\
+        have_error = 1;\
+    }
+    EXPECT(data.size == 1);
+    EXPECT(data.lens[0] == 1);
+    EXPECT(data.vals[0] == 9);
+#undef EXPECT
+
+    hattrie_free(T);
+}
+
 void fill_repeated(char* x, size_t len, char c)
 {
     memset(x, c, len);
@@ -690,6 +736,7 @@ int main()
 {
     test_trie_non_ascii();
     test_trie_walk();
+    test_trie_walk_split_node_value();
     test_hattrie_null_cleanup();
     test_hattrie_dup_copies_values();
     test_hattrie_clear_resets_root();
