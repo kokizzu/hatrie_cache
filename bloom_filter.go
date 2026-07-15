@@ -428,6 +428,9 @@ func (store *BloomFilterStorage) Del(idx int32) {
 }
 
 func (ht *HatTrie) UpsertBloomFilter(key string, expectedItems uint64, falsePositiveRate float64) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
 	data, err := newBloomFilterData(expectedItems, falsePositiveRate)
 	if err != nil {
 		return err
@@ -463,6 +466,9 @@ func (ht *HatTrie) AddBloomFilter(key string, val interface{}, vals ...interface
 }
 
 func (ht *HatTrie) AddBloomFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -504,6 +510,9 @@ func (ht *HatTrie) HasBloomFilter(key string, val interface{}) bool {
 }
 
 func (ht *HatTrie) HasBloomFilterChecked(key string, val interface{}) (bool, error) {
+	if ht == nil {
+		return false, ErrNilHatTrie
+	}
 	valueKey, err := bloomFilterItemKey(val)
 	if err != nil {
 		return false, err
@@ -532,6 +541,9 @@ func (ht *HatTrie) BloomFilterInfo(key string) (BloomFilterInfo, bool) {
 }
 
 func (ht *HatTrie) BloomFilterInfoChecked(key string) (BloomFilterInfo, bool, error) {
+	if ht == nil {
+		return BloomFilterInfo{}, false, ErrNilHatTrie
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

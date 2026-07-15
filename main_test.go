@@ -323,6 +323,32 @@ func TestPriorityQueueAPIsRejectNilTrie(t *testing.T) {
 	}
 }
 
+func TestBloomFilterAPIsRejectNilTrie(t *testing.T) {
+	var ht *HatTrie
+
+	if err := ht.UpsertBloomFilter("bloom", 100, 0.01); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("UpsertBloomFilter(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if got := ht.AddBloomFilter("bloom", "value"); got != 0 {
+		t.Fatalf("AddBloomFilter(nil trie) = %d, want 0", got)
+	}
+	if got, err := ht.AddBloomFilterChecked("bloom", "value"); got != 0 || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("AddBloomFilterChecked(nil trie) = %d/%v, want 0/ErrNilHatTrie", got, err)
+	}
+	if got := ht.HasBloomFilter("bloom", "value"); got {
+		t.Fatal("HasBloomFilter(nil trie) = true, want false")
+	}
+	if got, err := ht.HasBloomFilterChecked("bloom", "value"); got || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("HasBloomFilterChecked(nil trie) = %v/%v, want false/ErrNilHatTrie", got, err)
+	}
+	if got, ok := ht.BloomFilterInfo("bloom"); got != (BloomFilterInfo{}) || ok {
+		t.Fatalf("BloomFilterInfo(nil trie) = %#v/%v, want zero/false", got, ok)
+	}
+	if got, ok, err := ht.BloomFilterInfoChecked("bloom"); got != (BloomFilterInfo{}) || ok || !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("BloomFilterInfoChecked(nil trie) = %#v/%v/%v, want zero/false/ErrNilHatTrie", got, ok, err)
+	}
+}
+
 func rawIndexReleased(ht *HatTrie, idx int32) bool {
 	return int(idx) >= len(ht.raws.array) || ht.raws.reusables.Has(idx)
 }
