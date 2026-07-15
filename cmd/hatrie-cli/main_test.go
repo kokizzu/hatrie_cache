@@ -62,6 +62,83 @@ func TestRunRequiresSubcommand(t *testing.T) {
 	}
 }
 
+func TestRunDefaultsNilContextAndClient(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"online"}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(nil, []string{"-addr", server.URL, "health"}, stdout, &bytes.Buffer{}, nil); err != nil {
+		t.Fatalf("run(nil context/client) error = %v", err)
+	}
+	if gotPath != "/api/health" {
+		t.Fatalf("path = %q, want /api/health", gotPath)
+	}
+	if got := stdout.String(); got != "{\"status\":\"online\"}\n" {
+		t.Fatalf("stdout = %q, want health JSON with trailing newline", got)
+	}
+}
+
+func TestHTTPHelpersDefaultNilContextAndClient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			if r.Method != http.MethodGet {
+				t.Fatalf("health method = %s, want GET", r.Method)
+			}
+			w.Write([]byte(`{"status":"online"}`))
+		case "/api/replication":
+			if r.Method != http.MethodPost {
+				t.Fatalf("replication method = %s, want POST", r.Method)
+			}
+			w.Write([]byte(`{"ok":true,"message":"replicated"}`))
+		case "/api/commands":
+			if r.Method != http.MethodPost {
+				t.Fatalf("command method = %s, want POST", r.Method)
+			}
+			w.Write([]byte(`{"ok":true,"message":"ok"}`))
+		case "/api/topology":
+			if r.Method != http.MethodPut {
+				t.Fatalf("topology method = %s, want PUT", r.Method)
+			}
+			w.Write([]byte(`{"ok":true,"message":"updated"}`))
+		default:
+			t.Fatalf("unexpected path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	for name, call := range map[string]func(*bytes.Buffer) error{
+		"get": func(stdout *bytes.Buffer) error {
+			return getJSON(nil, nil, server.URL, "/api/health", stdout)
+		},
+		"post-json": func(stdout *bytes.Buffer) error {
+			return postJSON(nil, nil, server.URL, "/api/replication", []byte(`{"prefix":"session:"}`), stdout)
+		},
+		"post-command": func(stdout *bytes.Buffer) error {
+			return postCommandValue(nil, nil, server.URL, hatriecache.CacheCommandRequest{Command: "GET", Key: "name"}, "json", stdout)
+		},
+		"put-json": func(stdout *bytes.Buffer) error {
+			return putJSONReader(nil, nil, server.URL, "/api/topology", strings.NewReader(`{"nodes":[]}`), stdout)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stdout := &bytes.Buffer{}
+			if err := call(stdout); err != nil {
+				t.Fatalf("%s helper error = %v", name, err)
+			}
+			if !strings.HasSuffix(stdout.String(), "\n") {
+				t.Fatalf("%s stdout = %q, want trailing newline", name, stdout.String())
+			}
+		})
+	}
+}
+
 func TestParseGlobalFlagsConfiguresTimeout(t *testing.T) {
 	cfg, remaining, err := parseGlobalFlags([]string{"-addr", "http://cache", "-timeout", "250ms", "stats"}, &bytes.Buffer{})
 	if err != nil {

@@ -38,7 +38,22 @@ func main() {
 	}
 }
 
+func cliContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func cliHTTPClient(client *http.Client) *http.Client {
+	if client == nil {
+		return http.DefaultClient
+	}
+	return client
+}
+
 func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, client *http.Client) error {
+	ctx = cliContext(ctx)
 	cfg, remaining, err := parseGlobalFlags(args, stderr)
 	if err != nil {
 		return err
@@ -337,7 +352,7 @@ func decodeJSONFlag[T any](value string) (T, error) {
 }
 
 func getJSON(ctx context.Context, client *http.Client, addr string, path string, stdout io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint(addr, path), nil)
+	req, err := http.NewRequestWithContext(cliContext(ctx), http.MethodGet, endpoint(addr, path), nil)
 	if err != nil {
 		return err
 	}
@@ -378,7 +393,7 @@ func postCommandValue(ctx context.Context, client *http.Client, addr string, req
 }
 
 func postCommandReader(ctx context.Context, client *http.Client, addr string, body io.Reader, contentType string, contentEncoding string, stdout io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, "/api/commands"), body)
+	req, err := http.NewRequestWithContext(cliContext(ctx), http.MethodPost, endpoint(addr, "/api/commands"), body)
 	if err != nil {
 		return err
 	}
@@ -408,7 +423,7 @@ func commandWireFormatAuto(value string) bool {
 }
 
 func postJSONReaderWithEncoding(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, contentEncoding string, stdout io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(addr, path), body)
+	req, err := http.NewRequestWithContext(cliContext(ctx), http.MethodPost, endpoint(addr, path), body)
 	if err != nil {
 		return err
 	}
@@ -484,7 +499,7 @@ func estimatedCommandRequestBytes(request hatriecache.CacheCommandRequest) int {
 }
 
 func putJSONReader(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, stdout io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint(addr, path), body)
+	req, err := http.NewRequestWithContext(cliContext(ctx), http.MethodPut, endpoint(addr, path), body)
 	if err != nil {
 		return err
 	}
@@ -494,6 +509,7 @@ func putJSONReader(ctx context.Context, client *http.Client, addr string, path s
 }
 
 func doAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
+	client = cliHTTPClient(client)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -511,6 +527,7 @@ func doAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
 }
 
 func doCommandAndCopy(client *http.Client, req *http.Request, stdout io.Writer) error {
+	client = cliHTTPClient(client)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
