@@ -1522,6 +1522,74 @@ func TestCacheGRPCServerHonorsCanceledContexts(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerHandlesNilContextAndRequests(t *testing.T) {
+	ht := newTestTrie(t)
+	server := NewCacheGRPCServer(ht, CacheGRPCOptions{})
+
+	if _, err := server.Health(nil, nil); err != nil {
+		t.Fatalf("Health(nil) error = %v", err)
+	}
+	if _, err := server.Stats(nil, nil); err != nil {
+		t.Fatalf("Stats(nil) error = %v", err)
+	}
+	entries, err := server.Entries(nil, nil)
+	if err != nil {
+		t.Fatalf("Entries(nil) error = %v", err)
+	}
+	if len(entries.GetEntries()) != 0 {
+		t.Fatalf("Entries(nil) = %#v, want empty response", entries)
+	}
+	command, err := server.Command(nil, nil)
+	if err != nil {
+		t.Fatalf("Command(nil) error = %v", err)
+	}
+	if command.GetOk() || !strings.Contains(command.GetMessage(), "command is required") {
+		t.Fatalf("Command(nil) = %#v, want validation response", command)
+	}
+	snapshot, err := server.Snapshot(nil, nil)
+	if err != nil {
+		t.Fatalf("Snapshot(nil) error = %v", err)
+	}
+	if snapshot.GetOk() || !strings.Contains(snapshot.GetMessage(), "snapshot path is not configured") {
+		t.Fatalf("Snapshot(nil) = %#v, want missing snapshot response", snapshot)
+	}
+	replication, err := server.Replication(nil, nil)
+	if err != nil {
+		t.Fatalf("Replication(nil) error = %v", err)
+	}
+	if !replication.GetSkipped() || !strings.Contains(replication.GetReason(), "replication is not configured") {
+		t.Fatalf("Replication(nil) = %#v, want not configured response", replication)
+	}
+	topology, err := server.Topology(nil, nil)
+	if err != nil {
+		t.Fatalf("Topology(nil) error = %v", err)
+	}
+	if topology.GetOk() || !strings.Contains(topology.GetMessage(), "topology store is not configured") {
+		t.Fatalf("Topology(nil) = %#v, want missing topology response", topology)
+	}
+	updateTopology, err := server.UpdateTopology(nil, nil)
+	if err != nil {
+		t.Fatalf("UpdateTopology(nil) error = %v", err)
+	}
+	if updateTopology.GetOk() || !strings.Contains(updateTopology.GetMessage(), "topology store is not configured") {
+		t.Fatalf("UpdateTopology(nil) = %#v, want missing topology response", updateTopology)
+	}
+	election, err := server.Election(nil, nil)
+	if err != nil {
+		t.Fatalf("Election(nil) error = %v", err)
+	}
+	if election.GetOk() || !strings.Contains(election.GetMessage(), "election store is not configured") {
+		t.Fatalf("Election(nil) = %#v, want missing election response", election)
+	}
+	updateElection, err := server.UpdateElection(nil, nil)
+	if err != nil {
+		t.Fatalf("UpdateElection(nil) error = %v", err)
+	}
+	if updateElection.GetOk() || !strings.Contains(updateElection.GetMessage(), "election store is not configured") {
+		t.Fatalf("UpdateElection(nil) = %#v, want missing election response", updateElection)
+	}
+}
+
 func grpcEntryKeys(entries []*hatriecachev1.Entry) []string {
 	keys := make([]string, len(entries))
 	for idx, entry := range entries {

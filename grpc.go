@@ -47,7 +47,15 @@ func RegisterCacheGRPCServer(registrar grpc.ServiceRegistrar, server *CacheGRPCS
 	hatriecachev1.RegisterCacheServiceServer(registrar, server)
 }
 
+func grpcContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
 func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -64,6 +72,7 @@ func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.Heal
 }
 
 func (server *CacheGRPCServer) Stats(ctx context.Context, _ *hatriecachev1.StatsRequest) (*hatriecachev1.StatsResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -84,6 +93,7 @@ func (server *CacheGRPCServer) Stats(ctx context.Context, _ *hatriecachev1.Stats
 }
 
 func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecachev1.EntriesRequest) (*hatriecachev1.EntriesResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -110,6 +120,7 @@ func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecache
 }
 
 func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecachev1.CommandRequest) (*hatriecachev1.CommandResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -125,6 +136,7 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 }
 
 func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.SnapshotRequest) (*hatriecachev1.CommandResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -138,6 +150,7 @@ func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.Sn
 }
 
 func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriecachev1.ReplicationRequest) (*hatriecachev1.ReplicationResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -151,6 +164,7 @@ func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriec
 }
 
 func (server *CacheGRPCServer) Topology(ctx context.Context, request *hatriecachev1.TopologyRequest) (*hatriecachev1.TopologyResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -177,6 +191,7 @@ func (server *CacheGRPCServer) Topology(ctx context.Context, request *hatriecach
 }
 
 func (server *CacheGRPCServer) UpdateTopology(ctx context.Context, request *hatriecachev1.UpdateTopologyRequest) (*hatriecachev1.TopologyResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -194,6 +209,7 @@ func (server *CacheGRPCServer) UpdateTopology(ctx context.Context, request *hatr
 }
 
 func (server *CacheGRPCServer) Election(ctx context.Context, request *hatriecachev1.ElectionRequest) (*hatriecachev1.ElectionResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -220,6 +236,7 @@ func (server *CacheGRPCServer) Election(ctx context.Context, request *hatriecach
 }
 
 func (server *CacheGRPCServer) UpdateElection(ctx context.Context, request *hatriecachev1.UpdateElectionRequest) (*hatriecachev1.ElectionResponse, error) {
+	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -474,6 +491,9 @@ func grpcElectionKeyRoute(route ElectionKeyRoute) *hatriecachev1.ElectionKeyRout
 }
 
 func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) CacheCommandRequest {
+	if request == nil {
+		return CacheCommandRequest{}
+	}
 	out := CacheCommandRequest{
 		Command: request.GetCommand(),
 		Key:     request.GetKey(),
