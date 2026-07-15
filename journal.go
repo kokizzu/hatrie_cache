@@ -30,6 +30,9 @@ const (
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
 var ErrCommandJournalCompacted = errors.New("hatriecache: command journal entries are compacted")
 var ErrCommandJournalSequenceExhausted = errors.New("hatriecache: command journal sequence is exhausted")
+
+// ErrNilCommandJournal reports a nil journal passed to a command journal API.
+var ErrNilCommandJournal = errors.New("hatriecache: command journal is nil")
 var errCommandJournalBinaryRecordTooLarge = errors.New("hatriecache: command journal binary record is too large")
 var errCommandJournalJSONRecordTooLarge = errors.New("hatriecache: command journal JSON record is too large")
 
@@ -141,6 +144,12 @@ func (journal *CommandJournal) Close() error {
 }
 
 func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheCommandRequest) CacheCommandResponse {
+	if journal == nil {
+		return commandError(ErrNilCommandJournal.Error())
+	}
+	if trie == nil {
+		return commandError(ErrNilHatTrie.Error())
+	}
 	if !commandShouldJournal(request) {
 		return trie.ExecuteCommand(request)
 	}
@@ -162,6 +171,12 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 }
 
 func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint64, error) {
+	if journal == nil {
+		return 0, ErrNilCommandJournal
+	}
+	if trie == nil {
+		return 0, ErrNilHatTrie
+	}
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
@@ -204,6 +219,9 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 }
 
 func (journal *CommandJournal) Tail(afterSequence uint64, limit int) (CommandJournalTail, error) {
+	if journal == nil {
+		return CommandJournalTail{}, ErrNilCommandJournal
+	}
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
@@ -233,6 +251,12 @@ func (journal *CommandJournal) SaveSnapshot(trie *HatTrie, path string) error {
 }
 
 func (journal *CommandJournal) SaveSnapshotWithFormat(trie *HatTrie, path string, format SnapshotFormat) error {
+	if journal == nil {
+		return ErrNilCommandJournal
+	}
+	if trie == nil {
+		return ErrNilHatTrie
+	}
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
@@ -247,6 +271,9 @@ func (journal *CommandJournal) SaveSnapshotWithFormat(trie *HatTrie, path string
 }
 
 func (journal *CommandJournal) Sequence() uint64 {
+	if journal == nil {
+		return 0
+	}
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 

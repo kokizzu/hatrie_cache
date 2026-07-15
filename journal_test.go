@@ -1707,6 +1707,56 @@ func TestCommandJournalCloseIsIdempotentAndRejectsWork(t *testing.T) {
 	}
 }
 
+func TestCommandJournalRejectsNilReceiverAndTrie(t *testing.T) {
+	ht := newTestTrie(t)
+	var nilJournal *CommandJournal
+	response := nilJournal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"})
+	if response.OK || response.Message != ErrNilCommandJournal.Error() {
+		t.Fatalf("ExecuteCommand(nil journal) = %#v, want nil journal error", response)
+	}
+	if ht.Exists("name") {
+		t.Fatal("ExecuteCommand(nil journal) mutated trie")
+	}
+	if got := nilJournal.Sequence(); got != 0 {
+		t.Fatalf("Sequence(nil journal) = %d, want 0", got)
+	}
+	if _, err := nilJournal.Replay(ht, 0); !errors.Is(err, ErrNilCommandJournal) {
+		t.Fatalf("Replay(nil journal) error = %v, want ErrNilCommandJournal", err)
+	}
+	if _, err := nilJournal.Tail(0, 0); !errors.Is(err, ErrNilCommandJournal) {
+		t.Fatalf("Tail(nil journal) error = %v, want ErrNilCommandJournal", err)
+	}
+	nilSnapshotPath := filepath.Join(t.TempDir(), "nil-journal-snapshot.json")
+	if err := nilJournal.SaveSnapshot(ht, nilSnapshotPath); !errors.Is(err, ErrNilCommandJournal) {
+		t.Fatalf("SaveSnapshot(nil journal) error = %v, want ErrNilCommandJournal", err)
+	}
+	if _, err := os.Stat(nilSnapshotPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("SaveSnapshot(nil journal) created path/stat error = %v, want not exist", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	response = journal.ExecuteCommand(nil, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"})
+	if response.OK || response.Message != ErrNilHatTrie.Error() {
+		t.Fatalf("ExecuteCommand(nil trie) = %#v, want nil trie error", response)
+	}
+	if _, err := journal.Replay(nil, 0); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("Replay(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	nilTrieSnapshotPath := filepath.Join(t.TempDir(), "nil-trie-snapshot.json")
+	if err := journal.SaveSnapshot(nil, nilTrieSnapshotPath); !errors.Is(err, ErrNilHatTrie) {
+		t.Fatalf("SaveSnapshot(nil trie) error = %v, want ErrNilHatTrie", err)
+	}
+	if _, err := os.Stat(nilTrieSnapshotPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("SaveSnapshot(nil trie) created path/stat error = %v, want not exist", err)
+	}
+}
+
 func TestCommandJournalRejectsAppendAfterSequenceExhaustionWithoutMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	writeCommandJournalTestEntries(t, path, commandJournalEntry{
