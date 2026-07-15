@@ -127,6 +127,9 @@ func TestCommandJournalJSONFormatWritesPreviousLayout(t *testing.T) {
 	if !bytes.HasPrefix(raw, []byte("{")) || !bytes.HasSuffix(raw, []byte("\n")) {
 		t.Fatalf("journal raw record = %q, want JSON line", raw)
 	}
+	if !bytes.Contains(raw, []byte(`"version":1`)) {
+		t.Fatalf("journal raw record = %q, want previous JSON version 1 layout", raw)
+	}
 	if commandJournalRecordIsBinary(raw) {
 		t.Fatal("JSON journal record detected as binary")
 	}
@@ -188,6 +191,91 @@ func TestCommandJournalBinaryPreservesDynamicValues(t *testing.T) {
 	want := Map{"age": json.Number("32"), "tags": Slice{"alpha", "beta"}}
 	if got := entries[0].Request.Pairs["nested"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("decoded nested value = %#v, want %#v", got, want)
+	}
+}
+
+func TestCommandJournalBinaryUsesCompactDynamicPayloadWhenSmaller(t *testing.T) {
+	entry := commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 1,
+		Request: CacheCommandRequest{
+			Command: "PUTMAP",
+			Key:     "profile",
+			Pairs: Map{
+				"notes": Slice{
+					strings.Repeat("line\nquoted\"value", 8),
+					strings.Repeat("tab\tvalue\\path", 8),
+				},
+			},
+		},
+	}
+	jsonValues, jsonPairs, err := marshalCommandJournalRequestDynamicFields(entry.Request)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalRequestDynamicFields() error = %v", err)
+	}
+	values, pairs, err := marshalCommandJournalRequestBinaryDynamicFields(entry.Request)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalRequestBinaryDynamicFields() error = %v", err)
+	}
+	if len(values) != len(jsonValues) {
+		t.Fatalf("binary values len = %d, want unchanged empty JSON values len %d", len(values), len(jsonValues))
+	}
+	if !snapshotValueDataIsBinary(pairs) {
+		t.Fatalf("pairs payload header = % x, want compact binary value payload", pairs[:shortHeaderLen(pairs)])
+	}
+	if len(pairs) >= len(jsonPairs) {
+		t.Fatalf("compact pairs payload len = %d, want smaller than JSON len %d", len(pairs), len(jsonPairs))
+	}
+
+	raw, err := marshalCommandJournalEntry(entry, CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntry(binary) error = %v", err)
+	}
+	decoded, err := decodeCommandJournalEntry(raw)
+	if err != nil {
+		t.Fatalf("decodeCommandJournalEntry(binary compact dynamic) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, entry) {
+		t.Fatalf("decoded compact dynamic entry = %#v, want %#v", decoded, entry)
+	}
+}
+
+func TestCommandJournalBinaryReadsLegacyJSONDynamicPayload(t *testing.T) {
+	entry := commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 1,
+		Request: CacheCommandRequest{
+			Command: "PUTMAP",
+			Key:     "profile",
+			Pairs: Map{
+				"nested": Map{"age": json.Number("32"), "tags": Slice{"alpha", "beta"}},
+			},
+		},
+	}
+	values, pairs, err := marshalCommandJournalRequestDynamicFields(entry.Request)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalRequestDynamicFields() error = %v", err)
+	}
+	capacity, err := commandJournalEntryBinaryPayloadCapacity(entry, len(values), len(pairs))
+	if err != nil {
+		t.Fatalf("commandJournalEntryBinaryPayloadCapacity() error = %v", err)
+	}
+	payload := newBinaryFieldWriter(nil, capacity)
+	payload.writeUvarint(commandJournalVersion)
+	payload.writeUvarint(entry.Sequence)
+	payload.writeBool(entry.Checkpoint)
+	if err := writeCommandJournalRequestBinaryFields(&payload, entry.Request, values, pairs); err != nil {
+		t.Fatalf("writeCommandJournalRequestBinaryFields() error = %v", err)
+	}
+	record := newBinaryFieldWriter(commandJournalBinaryMagic, commandJournalBinaryRecordCapacity(len(payload.bytes())))
+	record.writeBytes(payload.bytes())
+
+	decoded, err := decodeCommandJournalEntry(record.bytes())
+	if err != nil {
+		t.Fatalf("decodeCommandJournalEntry(legacy binary dynamic JSON) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded, entry) {
+		t.Fatalf("decoded legacy binary dynamic entry = %#v, want %#v", decoded, entry)
 	}
 }
 

@@ -212,8 +212,11 @@ mutating cache commands before applying them. When `SNAPSHOT_PATH` is also set,
 snapshots store the journal checkpoint and compact older journal entries after a
 successful snapshot. Journal records write in the binary format by default
 (`JOURNAL_FORMAT=binary`) and still read existing line-delimited JSON journals,
-including files that contain both old JSON records and new binary records. Set
-`JOURNAL_FORMAT=json` to keep writing the previous JSON journal layout:
+including files that contain both old JSON records and new binary records.
+Binary journal records store structured `values` and `pairs` payloads with the
+compact binary value codec when that is smaller than their JSON representation,
+and otherwise keep the JSON inner payload. Set `JOURNAL_FORMAT=json` to keep
+writing the previous JSON journal layout:
 
 ```
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json JOURNAL_PATH=data/commands.journal
@@ -339,6 +342,10 @@ samples, XOR filters, and radix trees.
 | Journal encode | binary (default) | 3,362 ns/op | 3,159 journal_B/op | 6,400 B/op | 2 |
 | Journal decode | JSON fallback | 30,034 ns/op | 3,224 journal_B/op | 22,728 B/op | 29 |
 | Journal decode | binary (default) | 20,035 ns/op | 3,159 journal_B/op | 18,071 B/op | 25 |
+| Structured journal encode | JSON fallback | 2,848 ns/op | 668 journal_B/op | 2,443 B/op | 7 |
+| Structured journal encode | binary (default) | 4,434 ns/op | 553 journal_B/op | 2,388 B/op | 20 |
+| Structured journal decode | JSON fallback | 5,528 ns/op | 668 journal_B/op | 4,428 B/op | 65 |
+| Structured journal decode | binary (default) | 3,539 ns/op | 553 journal_B/op | 3,856 B/op | 62 |
 | Snapshot save | JSON fallback | 1,791,394 ns/op | 465,912 disk_B/op | 654,791 B/op | 15,877 |
 | Snapshot save | binary | 866,052 ns/op | 294,407 disk_B/op | 663,589 B/op | 4,097 |
 | Snapshot save | gzip JSON (fast JSON fallback) | 5,122,924 ns/op | 7,757 disk_B/op | 761,425 B/op | 29,192 |
@@ -364,7 +371,11 @@ samples, XOR filters, and radix trees.
 For the benchmark payload, protobuf command wire is about 1.2x faster with a
 small byte reduction and equivalent allocation count. Binary journal records are
 about 2.3x faster to encode, about 1.5x faster to decode, about 2% smaller, and
-use less heap; JSON remains easier to inspect manually. Snapshot and LevelDB
+use less heap; structured journal `values` and `pairs` also use the compact
+binary value codec when it is smaller than JSON. In the structured journal
+payload above that is 17% smaller and about 1.6x faster to decode, while encode
+is about 1.6x slower because the writer compares JSON and binary payload sizes.
+JSON remains easier to inspect manually. Snapshot and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
 carry empty collection fields. Binary snapshots reuse the compact LevelDB record
 codec, avoid base64 for byte values, and use the same compact collection,

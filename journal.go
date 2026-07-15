@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const commandJournalVersion = 1
+const (
+	commandJournalVersion              = 1
+	commandJournalBinaryPayloadVersion = 2
+)
 
 const maxCommandJournalBinaryRecordBytes = 1 << 30
 const maxCommandJournalJSONRecordBytes = 1 << 30

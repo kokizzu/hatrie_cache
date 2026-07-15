@@ -78,6 +78,22 @@ func BenchmarkCommandJournalDecodeBinary(b *testing.B) {
 	benchmarkCommandJournalDecodeFormat(b, CommandJournalFormatBinary)
 }
 
+func BenchmarkCommandJournalEncodeStructuredJSON(b *testing.B) {
+	benchmarkCommandJournalEncodeEntryFormat(b, benchmarkCommandJournalStructuredEntry(), CommandJournalFormatJSON)
+}
+
+func BenchmarkCommandJournalEncodeStructuredBinary(b *testing.B) {
+	benchmarkCommandJournalEncodeEntryFormat(b, benchmarkCommandJournalStructuredEntry(), CommandJournalFormatBinary)
+}
+
+func BenchmarkCommandJournalDecodeStructuredJSON(b *testing.B) {
+	benchmarkCommandJournalDecodeEntryFormat(b, benchmarkCommandJournalStructuredEntry(), CommandJournalFormatJSON)
+}
+
+func BenchmarkCommandJournalDecodeStructuredBinary(b *testing.B) {
+	benchmarkCommandJournalDecodeEntryFormat(b, benchmarkCommandJournalStructuredEntry(), CommandJournalFormatBinary)
+}
+
 func benchmarkCommandWireFormat(b *testing.B, format CommandWireFormat) {
 	payload := benchmarkCommandWirePayload()
 	wireBytes := benchmarkCommandWireBytes(b, payload, format)
@@ -96,7 +112,10 @@ func benchmarkCommandWireFormat(b *testing.B, format CommandWireFormat) {
 }
 
 func benchmarkCommandJournalEncodeFormat(b *testing.B, format CommandJournalFormat) {
-	entry := benchmarkCommandJournalEntry()
+	benchmarkCommandJournalEncodeEntryFormat(b, benchmarkCommandJournalEntry(), format)
+}
+
+func benchmarkCommandJournalEncodeEntryFormat(b *testing.B, entry commandJournalEntry, format CommandJournalFormat) {
 	journalBytes := benchmarkCommandJournalBytes(b, entry, format)
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -109,7 +128,10 @@ func benchmarkCommandJournalEncodeFormat(b *testing.B, format CommandJournalForm
 }
 
 func benchmarkCommandJournalDecodeFormat(b *testing.B, format CommandJournalFormat) {
-	entry := benchmarkCommandJournalEntry()
+	benchmarkCommandJournalDecodeEntryFormat(b, benchmarkCommandJournalEntry(), format)
+}
+
+func benchmarkCommandJournalDecodeEntryFormat(b *testing.B, entry commandJournalEntry, format CommandJournalFormat) {
 	data, err := marshalCommandJournalEntry(entry, format)
 	if err != nil {
 		b.Fatal(err)
@@ -160,6 +182,33 @@ func benchmarkCommandJournalEntry() commandJournalEntry {
 		Version:  commandJournalVersion,
 		Sequence: 42,
 		Request:  benchmarkCommandWirePayload(),
+	}
+}
+
+func benchmarkCommandJournalStructuredEntry() commandJournalEntry {
+	return commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 43,
+		Request: CacheCommandRequest{
+			Command: "PUTMAP",
+			Key:     "profile:structured",
+			Values: Slice{
+				strings.Repeat("line\nquoted\"value", 8),
+				42,
+				Map{"route": "/api/cache", "status": "active"},
+			},
+			Pairs: Map{
+				"notes": Slice{
+					strings.Repeat("line\nquoted\"value", 8),
+					strings.Repeat("tab\tvalue\\path", 8),
+				},
+				"profile": Map{
+					"name": "ivi",
+					"age":  32,
+					"tags": Slice{"alpha", "beta", "gamma"},
+				},
+			},
+		},
 	}
 }
 
