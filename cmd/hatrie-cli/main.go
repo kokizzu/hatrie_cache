@@ -496,15 +496,22 @@ func estimatedCommandRequestBytes(request hatriecache.CacheCommandRequest) int {
 		}
 	}
 	if request.Priority != nil {
-		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedJSONRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, request.Priority, minCompressedJSONRequestBytes)
 	}
 	if request.TTLSeconds != nil {
-		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedJSONRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, request.TTLSeconds, minCompressedJSONRequestBytes)
 	}
 	if request.UnixSeconds != nil {
-		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedJSONRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, request.UnixSeconds, minCompressedJSONRequestBytes)
 	}
 	return estimate
+}
+
+func addEstimatedOptionalCommandInt64(estimate int, value *int64, threshold int) int {
+	if value == nil {
+		return estimate
+	}
+	return jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(*value, threshold), threshold)
 }
 
 func putJSONReader(ctx context.Context, client *http.Client, addr string, path string, body io.Reader, stdout io.Writer) error {

@@ -838,15 +838,22 @@ func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {
 		}
 	}
 	if payload.Priority != nil {
-		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedReplicationRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, payload.Priority, minCompressedReplicationRequestBytes)
 	}
 	if payload.TTLSeconds != nil {
-		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedReplicationRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, payload.TTLSeconds, minCompressedReplicationRequestBytes)
 	}
 	if payload.UnixSeconds != nil {
-		estimate = jsonwire.AddEstimate(estimate, 20, minCompressedReplicationRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, payload.UnixSeconds, minCompressedReplicationRequestBytes)
 	}
 	return estimate
+}
+
+func addEstimatedOptionalCommandInt64(estimate int, value *int64, threshold int) int {
+	if value == nil {
+		return estimate
+	}
+	return jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(*value, threshold), threshold)
 }
 
 func drainAndClose(body io.ReadCloser) {

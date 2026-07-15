@@ -1087,6 +1087,28 @@ func TestJSONValueRequestBodyStreamsLargeStructuredCommandPayload(t *testing.T) 
 	}
 }
 
+func TestEstimatedCommandRequestBytesUsesExactOptionalIntSize(t *testing.T) {
+	priority := int64(3)
+	ttl := int64(60)
+	unix := int64(-7)
+	base := hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "session:ttl", Value: "value"}
+	withOptionals := base
+	withOptionals.Priority = &priority
+	withOptionals.TTLSeconds = &ttl
+	withOptionals.UnixSeconds = &unix
+
+	wantExtra := jsonwire.EstimateJSONValueBytes(priority, minCompressedJSONRequestBytes) +
+		jsonwire.EstimateJSONValueBytes(ttl, minCompressedJSONRequestBytes) +
+		jsonwire.EstimateJSONValueBytes(unix, minCompressedJSONRequestBytes)
+	gotExtra := estimatedCommandRequestBytes(withOptionals) - estimatedCommandRequestBytes(base)
+	if gotExtra != wantExtra {
+		t.Fatalf("estimated optional int bytes = %d, want exact numeric bytes %d", gotExtra, wantExtra)
+	}
+	if got := addEstimatedOptionalCommandInt64(minCompressedJSONRequestBytes-1, &priority, minCompressedJSONRequestBytes); got != minCompressedJSONRequestBytes {
+		t.Fatalf("addEstimatedOptionalCommandInt64(capped) = %d, want threshold", got)
+	}
+}
+
 func TestCommandRequestBodyAutoFallsBackToJSONForComplexPayload(t *testing.T) {
 	payload := hatriecache.CacheCommandRequest{
 		Command: "PUTMAP",

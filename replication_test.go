@@ -1147,6 +1147,28 @@ func TestReplicationRequestBodyStreamsLargeStringPayload(t *testing.T) {
 	}
 }
 
+func TestEstimatedReplicationRequestBytesUsesExactOptionalIntSize(t *testing.T) {
+	priority := int64(3)
+	ttl := int64(60)
+	unix := int64(-7)
+	base := CacheCommandRequest{Command: "INTERNALSET", Key: "session:ttl", Value: "value"}
+	withOptionals := base
+	withOptionals.Priority = &priority
+	withOptionals.TTLSeconds = &ttl
+	withOptionals.UnixSeconds = &unix
+
+	wantExtra := jsonwire.EstimateJSONValueBytes(priority, minCompressedReplicationRequestBytes) +
+		jsonwire.EstimateJSONValueBytes(ttl, minCompressedReplicationRequestBytes) +
+		jsonwire.EstimateJSONValueBytes(unix, minCompressedReplicationRequestBytes)
+	gotExtra := estimatedReplicationRequestBytes(withOptionals) - estimatedReplicationRequestBytes(base)
+	if gotExtra != wantExtra {
+		t.Fatalf("estimated optional int bytes = %d, want exact numeric bytes %d", gotExtra, wantExtra)
+	}
+	if got := addEstimatedOptionalCommandInt64(minCompressedReplicationRequestBytes-1, &priority, minCompressedReplicationRequestBytes); got != minCompressedReplicationRequestBytes {
+		t.Fatalf("addEstimatedOptionalCommandInt64(capped) = %d, want threshold", got)
+	}
+}
+
 func TestReplicationRequestBodyStreamsEscapedLargeStringPayload(t *testing.T) {
 	payload := CacheCommandRequest{
 		Command: "INTERNALSET",
