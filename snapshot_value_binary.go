@@ -31,6 +31,7 @@ const (
 	snapshotValueBinaryRoaringBitmap
 	snapshotValueBinarySparseBitset
 	snapshotValueBinaryFenwickTree
+	snapshotValueBinaryQuantileSketch
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -192,6 +193,16 @@ func marshalSnapshotFenwickTreeValueBinary(snapshot fenwickTreeSnapshot) ([]byte
 	}
 	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
 	writeSnapshotValueBinaryFenwickTree(&writer, snapshot)
+	return writer.bytes(), nil
+}
+
+func marshalSnapshotQuantileSketchValueBinary(snapshot quantileSketchSnapshot) ([]byte, error) {
+	size, err := snapshotValueBinaryQuantileSketchSize(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+	writeSnapshotValueBinaryQuantileSketch(&writer, snapshot)
 	return writer.bytes(), nil
 }
 
@@ -418,6 +429,19 @@ func snapshotValueBinaryFenwickTreeSize(snapshot fenwickTreeSnapshot) (int, erro
 	return total, nil
 }
 
+func snapshotValueBinaryQuantileSketchSize(snapshot quantileSketchSnapshot) (int, error) {
+	total := 1 + 8 + binaryUvarintSize(snapshot.Count) + binaryUvarintSize(uint64(len(snapshot.Summary)))
+	for _, sample := range snapshot.Summary {
+		itemSize := 8 + binaryUvarintSize(sample.Gap) + binaryUvarintSize(sample.Delta)
+		var err error
+		total, err = snapshotValueBinaryAdd(total, itemSize)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return total, nil
+}
+
 func snapshotValueBinaryBytesSize(size int) (int, error) {
 	if size < 0 {
 		return 0, errSnapshotValueBinaryTooLarge
@@ -586,6 +610,18 @@ func writeSnapshotValueBinaryFenwickTree(writer *binaryFieldWriter, snapshot fen
 	writer.writeUvarint(uint64(len(snapshot.Tree)))
 	for _, value := range snapshot.Tree {
 		writer.writeVarint(value)
+	}
+}
+
+func writeSnapshotValueBinaryQuantileSketch(writer *binaryFieldWriter, snapshot quantileSketchSnapshot) {
+	writer.buf = append(writer.buf, snapshotValueBinaryQuantileSketch)
+	writer.writeFloat64(snapshot.Epsilon)
+	writer.writeUvarint(snapshot.Count)
+	writer.writeUvarint(uint64(len(snapshot.Summary)))
+	for _, sample := range snapshot.Summary {
+		writer.writeFloat64(sample.Value)
+		writer.writeUvarint(sample.Gap)
+		writer.writeUvarint(sample.Delta)
 	}
 }
 
@@ -915,6 +951,48 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			Updates: updates,
 			Total:   total,
 			Tree:    values,
+		}, nil
+	case snapshotValueBinaryQuantileSketch:
+		epsilon, err := reader.readFloat64()
+		if err != nil {
+			return nil, err
+		}
+		count, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		sampleCount, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		capacity, err := snapshotValueBinaryInitialCapacity(sampleCount, len(reader.data)-reader.off, 10)
+		if err != nil {
+			return nil, err
+		}
+		summary := make([]quantileSketchSample, 0, capacity)
+		for idx := 0; idx < int(sampleCount); idx++ {
+			value, err := reader.readFloat64()
+			if err != nil {
+				return nil, err
+			}
+			gap, err := reader.readUvarint()
+			if err != nil {
+				return nil, err
+			}
+			delta, err := reader.readUvarint()
+			if err != nil {
+				return nil, err
+			}
+			summary = append(summary, quantileSketchSample{
+				Value: value,
+				Gap:   gap,
+				Delta: delta,
+			})
+		}
+		return quantileSketchSnapshot{
+			Epsilon: epsilon,
+			Count:   count,
+			Summary: summary,
 		}, nil
 	default:
 		return nil, fmt.Errorf("hatriecache: unknown binary snapshot value tag %d", tag)

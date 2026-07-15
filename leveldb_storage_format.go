@@ -306,6 +306,11 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: fenwick tree snapshot is required")
 		}
 		return prepareLevelDBBinaryFenwickTreeValue(*entry.FenwickTree)
+	case "quantile_sketch":
+		if entry.QuantileSketch == nil {
+			return levelDBBinaryPreparedValue{}, errors.New("hatriecache: quantile sketch snapshot is required")
+		}
+		return prepareLevelDBBinaryQuantileSketchValue(*entry.QuantileSketch)
 	default:
 		payload, err := marshalSnapshotEntryValueJSON(entry)
 		if err != nil {
@@ -513,6 +518,22 @@ func prepareLevelDBBinarySparseBitsetValue(snapshot sparseBitsetSnapshot) (level
 
 func prepareLevelDBBinaryFenwickTreeValue(snapshot fenwickTreeSnapshot) (levelDBBinaryPreparedValue, error) {
 	payload, err := marshalSnapshotFenwickTreeValueBinary(snapshot)
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return levelDBBinaryPreparedValue{}, err
+	}
+	return levelDBBinaryPreparedValue{
+		kind:        levelDBBinaryPreparedBytes,
+		bytes:       payload,
+		encodedSize: size,
+	}, nil
+}
+
+func prepareLevelDBBinaryQuantileSketchValue(snapshot quantileSketchSnapshot) (levelDBBinaryPreparedValue, error) {
+	payload, err := marshalSnapshotQuantileSketchValueBinary(snapshot)
 	if err != nil {
 		return levelDBBinaryPreparedValue{}, err
 	}
@@ -884,6 +905,18 @@ func unmarshalSnapshotEntryValueJSON(data []byte, entry *snapshotEntry) error {
 		}
 		return decodeLevelDBStorageJSON(data, &entry.RoaringBitmap)
 	case "quantile_sketch":
+		if snapshotValueDataIsBinary(data) {
+			value, err := unmarshalSnapshotValueBinary(data)
+			if err != nil {
+				return err
+			}
+			snapshot, ok := value.(quantileSketchSnapshot)
+			if !ok {
+				return errors.New("hatriecache: binary quantile sketch value is not a quantile sketch")
+			}
+			entry.QuantileSketch = &snapshot
+			return nil
+		}
 		return decodeLevelDBStorageJSON(data, &entry.QuantileSketch)
 	case "fenwick_tree":
 		if snapshotValueDataIsBinary(data) {

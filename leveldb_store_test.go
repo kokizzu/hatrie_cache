@@ -1271,6 +1271,88 @@ func TestLevelDBBinaryFenwickTreeStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryQuantileSketchUsesBinaryValuePayload(t *testing.T) {
+	sketch, err := newQuantileSketchData(0.01)
+	if err != nil {
+		t.Fatalf("newQuantileSketchData() error = %v", err)
+	}
+	values := make([]float64, 100)
+	for idx := range values {
+		values[idx] = float64(idx) + 0.5
+	}
+	sketch.Add(values[0], values[1:]...)
+	snapshot := sketch.Snapshot()
+	entry := snapshotEntry{
+		Key:            "quantile",
+		Type:           "quantile_sketch",
+		QuantileSketch: &snapshot,
+	}
+
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(binary quantile sketch) error = %v", err)
+	}
+	_, payload := levelDBBinaryValuePayloadForTest(t, data)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("quantile sketch payload header = % x, want binary snapshot value", payload[:shortHeaderLen(payload)])
+	}
+	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(quantile sketch) error = %v", err)
+	}
+	if len(payload) >= len(jsonPayload) {
+		t.Fatalf("binary quantile sketch payload size = %d, want smaller than JSON payload %d", len(payload), len(jsonPayload))
+	}
+
+	decoded, err := decodeLevelDBEntry(data)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(binary quantile sketch) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.QuantileSketch, &snapshot) {
+		t.Fatalf("decoded quantile sketch = %#v, want %#v", decoded.QuantileSketch, &snapshot)
+	}
+}
+
+func TestLevelDBBinaryQuantileSketchStillReadsLegacyJSONPayload(t *testing.T) {
+	sketch, err := newQuantileSketchData(0.01)
+	if err != nil {
+		t.Fatalf("newQuantileSketchData() error = %v", err)
+	}
+	sketch.Add(10, 20, 30)
+	snapshot := sketch.Snapshot()
+	entry := snapshotEntry{
+		Key:            "legacy-quantile",
+		Type:           "quantile_sketch",
+		QuantileSketch: &snapshot,
+	}
+	payload, err := marshalSnapshotEntryValueJSON(entry)
+	if err != nil {
+		t.Fatalf("marshalSnapshotEntryValueJSON(quantile sketch) error = %v", err)
+	}
+	size, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		t.Fatalf("binaryLengthPrefixedSize() error = %v", err)
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, size, nil, nil)
+	if err != nil {
+		t.Fatalf("levelDBBinaryRecordCapacityForValue() error = %v", err)
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+
+	decoded, err := decodeLevelDBEntry(writer.bytes())
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntry(legacy inner JSON quantile sketch) error = %v", err)
+	}
+	if !reflect.DeepEqual(decoded.QuantileSketch, entry.QuantileSketch) {
+		t.Fatalf("decoded legacy inner JSON quantile sketch = %#v, want %#v", decoded.QuantileSketch, entry.QuantileSketch)
+	}
+}
+
 func levelDBBinaryValuePayloadForTest(t *testing.T, data []byte) (string, []byte) {
 	t.Helper()
 	if !levelDBEntryDataIsBinary(data) {
