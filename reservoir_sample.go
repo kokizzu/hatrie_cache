@@ -63,6 +63,11 @@ type reservoirSampleData struct {
 
 var errReservoirSampleSequenceExhausted = errors.New("hatriecache: reservoir sample sequence is exhausted")
 
+const (
+	fnv64aOffset = 14695981039346656037
+	fnv64aPrime  = 1099511628211
+)
+
 func newReservoirSampleData(capacity uint64) (reservoirSampleData, error) {
 	if err := validateReservoirSampleCapacity(capacity); err != nil {
 		return reservoirSampleData{}, err
@@ -195,6 +200,45 @@ func (sample *reservoirSampleData) AddOneChecked(value interface{}, values ...in
 		update = sample.addPrepared(item)
 	}
 	return update, nil
+}
+
+func (sample *reservoirSampleData) AddPlainJSONStringChecked(value string) (ReservoirSampleUpdate, error) {
+	if sample == nil || sample.capacity == 0 {
+		return ReservoirSampleUpdate{}, nil
+	}
+	if err := sample.ensureSequenceCapacity(1); err != nil {
+		return ReservoirSampleUpdate{}, err
+	}
+	sequence := sample.seen + 1
+	priority := reservoirSamplePlainStringPriority(sequence, value)
+	sample.seen = sequence
+	accepted := false
+	if uint64(len(sample.items)) < sample.capacity {
+		sample.items = append(sample.items, reservoirSampleItem{
+			Value:    value,
+			Priority: priority,
+			Sequence: sequence,
+		})
+		sample.siftUp(len(sample.items) - 1)
+		accepted = true
+	} else {
+		worst := sample.items[0]
+		if priority < worst.Priority || priority == worst.Priority && sequence < worst.Sequence {
+			sample.items[0] = reservoirSampleItem{
+				Value:    value,
+				Priority: priority,
+				Sequence: sequence,
+			}
+			sample.siftDown(0)
+			accepted = true
+		}
+	}
+	return ReservoirSampleUpdate{
+		Accepted: accepted,
+		Seen:     sample.seen,
+		Tracked:  uint64(len(sample.items)),
+		Capacity: sample.capacity,
+	}, nil
 }
 
 func (sample *reservoirSampleData) ensureSequenceCapacity(count int) error {
@@ -368,6 +412,25 @@ func reservoirSamplePriority(sequence uint64, value interface{}) (uint64, error)
 	_, _ = hash.Write(sequenceBytes[:])
 	_, _ = hash.Write(data)
 	return hash.Sum64(), nil
+}
+
+func reservoirSamplePlainStringPriority(sequence uint64, value string) uint64 {
+	hash := uint64(fnv64aOffset)
+	for shift := 0; shift < 64; shift += 8 {
+		hash = fnv64aByte(hash, byte(sequence>>shift))
+	}
+	hash = fnv64aByte(hash, '"')
+	for idx := 0; idx < len(value); idx++ {
+		hash = fnv64aByte(hash, value[idx])
+	}
+	hash = fnv64aByte(hash, '"')
+	return hash
+}
+
+func fnv64aByte(hash uint64, value byte) uint64 {
+	hash ^= uint64(value)
+	hash *= fnv64aPrime
+	return hash
 }
 
 // ReservoirSampleStorage stores fixed-memory stream samples outside the trie.

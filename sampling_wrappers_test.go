@@ -1,6 +1,9 @@
 package hatriecache
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestTopKDataConvenienceWrappers(t *testing.T) {
 	top, err := newTopKData(2)
@@ -56,5 +59,34 @@ func TestReservoirSampleDataConvenienceWrappers(t *testing.T) {
 	}
 	if got := nilSample.AddOne("missing"); got != (ReservoirSampleUpdate{}) {
 		t.Fatalf("nil AddOne() = %#v, want zero update", got)
+	}
+}
+
+func TestReservoirSamplePlainJSONStringFastAddMatchesGeneric(t *testing.T) {
+	generic, err := newReservoirSampleData(3)
+	if err != nil {
+		t.Fatalf("newReservoirSampleData(generic) error = %v", err)
+	}
+	fast, err := newReservoirSampleData(3)
+	if err != nil {
+		t.Fatalf("newReservoirSampleData(fast) error = %v", err)
+	}
+
+	for _, value := range []string{"alpha", "beta-2", "path:/api/cache", "delta"} {
+		want, err := generic.AddOneChecked(value)
+		if err != nil {
+			t.Fatalf("generic AddOneChecked(%q) error = %v", value, err)
+		}
+		got, err := fast.AddPlainJSONStringChecked(value)
+		if err != nil {
+			t.Fatalf("fast AddPlainJSONStringChecked(%q) error = %v", value, err)
+		}
+		if got != want {
+			t.Fatalf("fast AddPlainJSONStringChecked(%q) = %#v, generic = %#v", value, got, want)
+		}
+	}
+
+	if got, want := fast.Snapshot(), generic.Snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("fast reservoir sample snapshot = %#v, generic = %#v", got, want)
 	}
 }

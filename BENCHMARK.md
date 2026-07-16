@@ -139,6 +139,18 @@ make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeatur
 | Fenwick tree add | `BenchmarkCommandFeature/FenwickTreeAdd` | 783.2 ns | 95 B | 1 |
 | Fenwick tree range | `BenchmarkCommandFeature/FenwickTreeRange` | 320.5 ns | 0 B | 0 |
 
+The reservoir sample add path now has a plain-string fast path that hashes the
+JSON string representation directly and only boxes retained values. The focused
+1,000,000-iteration row was:
+
+```
+make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/ReservoirSampleAdd$' BENCHTIME=1000000x
+```
+
+| Feature | Benchmark row | Before | After | Improvement |
+| --- | --- | ---: | ---: | ---: |
+| Reservoir sample add | `BenchmarkCommandFeature/ReservoirSampleAdd` | 956.7 ns, 168 B, 6 allocs | 465.3 ns, 64 B, 1 alloc | 2.06x faster, 2.63x less memory, 6.00x fewer allocs |
+
 ## Memory Summary
 
 | System | Run | Memory metric | Value |
@@ -326,6 +338,26 @@ Memory summary:
 | --- | ---: |
 | Max resident set size | 27692 KiB |
 | Benchmark process wall time | 0:11.64 |
+```
+
+### Raw HAT-trie Reservoir Fast Path Result
+
+```text
+HAT-trie benchmark: bench=^BenchmarkCommandFeature/ReservoirSampleAdd$ benchtime=1000000x count=1
+
+goos: linux
+goarch: amd64
+pkg: hatrie_cache
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkCommandFeature/ReservoirSampleAdd-32          1000000       465.3 ns/op       64 B/op       1 allocs/op
+PASS
+
+Memory summary:
+
+| Metric | Value |
+| --- | ---: |
+| Max resident set size | 28612 KiB |
+| Benchmark process wall time | 0:00.47 |
 ```
 
 ### Raw Tarantool Result

@@ -1144,6 +1144,11 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		return ht.executeFastAddTopKCommand(key, request.Value, count)
 	case "GETTOPK", "TOPK":
 		return ht.executeFastGetTopKCommand(key)
+	case "ADDRS", "RSADD":
+		if len(request.Values) != 0 || len(request.Pairs) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddReservoirSampleCommand(key, request.Value)
 	case "ADDQ", "ADDQS", "QADD", "QSADD":
 		if len(request.Values) != 0 || len(request.Pairs) != 0 {
 			return CacheCommandResponse{}, false
@@ -1878,6 +1883,59 @@ func (ht *HatTrie) executeFastGetTopKCommand(key string) (CacheCommandResponse, 
 	return commandValueResponse("ok", top.Items()), true
 }
 
+func (ht *HatTrie) executeFastAddReservoirSampleCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsReservoirSample() {
+			update, err := ht.reservoirSamples.array[hval.Index].AddPlainJSONStringChecked(value)
+			if err != nil {
+				return commandError(err.Error()), true
+			}
+			ht.recordWriteLocked(key)
+			ht.cacheValueLocked(key, hval)
+			return commandFastReservoirSampleUpdateResponse("added reservoir sample values", update), true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsReservoirSample() {
+		update, err := ht.reservoirSamples.array[hval.Index].AddPlainJSONStringChecked(value)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+		return commandFastReservoirSampleUpdateResponse("added reservoir sample values", update), true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	data := newDefaultReservoirSampleData()
+	update, err := data.AddPlainJSONStringChecked(value)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	idx := ht.reservoirSamples.AddData(data)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RESERVOIR_SAMPLE}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return commandFastReservoirSampleUpdateResponse("added reservoir sample values", update), true
+}
+
 func (ht *HatTrie) executeFastAddQuantileSketchCommand(key string, value float64) (CacheCommandResponse, bool) {
 	estimate, err := ht.AddQuantileSketchChecked(key, value)
 	if err != nil {
@@ -1969,6 +2027,21 @@ func commandFastTopKEstimateResponse(message string, estimate TopKEstimate) Cach
 	out = strconv.AppendUint(out, estimate.Count, 10)
 	out = append(out, `,"error":`...)
 	out = strconv.AppendUint(out, estimate.Error, 10)
+	out = append(out, '}')
+	return CacheCommandResponse{OK: true, Message: message, Value: string(out)}
+}
+
+func commandFastReservoirSampleUpdateResponse(message string, update ReservoirSampleUpdate) CacheCommandResponse {
+	var buffer [96]byte
+	out := buffer[:0]
+	out = append(out, `{"accepted":`...)
+	out = strconv.AppendBool(out, update.Accepted)
+	out = append(out, `,"seen":`...)
+	out = strconv.AppendUint(out, update.Seen, 10)
+	out = append(out, `,"tracked":`...)
+	out = strconv.AppendUint(out, update.Tracked, 10)
+	out = append(out, `,"capacity":`...)
+	out = strconv.AppendUint(out, update.Capacity, 10)
 	out = append(out, '}')
 	return CacheCommandResponse{OK: true, Message: message, Value: string(out)}
 }

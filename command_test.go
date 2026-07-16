@@ -2392,6 +2392,13 @@ func TestExecuteExactFastCommandCoversCompactNumericRows(t *testing.T) {
 			},
 			request: CacheCommandRequest{Command: "RANGEFW", Key: "fenwick:key", Value: "1", Subkey: "64"},
 		},
+		{
+			name: "reservoir add",
+			setup: []CacheCommandRequest{
+				{Command: "CREATERS", Key: "sample:key", Value: "16"},
+			},
+			request: CacheCommandRequest{Command: "ADDRS", Key: "sample:key", Value: "value"},
+		},
 	}
 
 	for _, tt := range tests {
