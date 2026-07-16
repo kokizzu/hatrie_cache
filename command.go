@@ -1025,6 +1025,24 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		return ht.executeFastPushSliceCommand(key, request.Value)
 	case "POPSLICE":
 		return ht.executeFastPopSliceCommand(key)
+	case "ADDSET":
+		if len(request.Values) != 0 {
+			return CacheCommandResponse{}, false
+		}
+		valueKey, ok := commandFastJSONStringKey(request.Value)
+		if !ok {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddSetCommand(key, request.Value, valueKey)
+	case "HASSET":
+		if len(request.Values) != 0 {
+			return CacheCommandResponse{}, false
+		}
+		valueKey, ok := commandFastJSONStringKey(request.Value)
+		if !ok {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastHasSetCommand(key, valueKey)
 	case "PEEKMAP":
 		if !commandFastPathField(request.Subkey) {
 			return CacheCommandResponse{}, false
@@ -1227,6 +1245,76 @@ func (ht *HatTrie) executeFastPopSliceCommand(key string) (CacheCommandResponse,
 	return commandValueResponse("removed", value), true
 }
 
+func (ht *HatTrie) executeFastAddSetCommand(key string, value string, valueKey string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsSet() {
+			data := &ht.sets.array[hval.Index]
+			data.ensureCapacity(1)
+			added := data.addKeyValue(valueKey, value)
+			if added > 0 {
+				ht.recordWriteLocked(key)
+				ht.cacheValueLocked(key, hval)
+			}
+			return CacheCommandResponse{OK: true, Message: "added set values", Value: strconv.Itoa(added)}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsSet() {
+		data := &ht.sets.array[hval.Index]
+		data.ensureCapacity(1)
+		added := data.addKeyValue(valueKey, value)
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		if added > 0 {
+			ht.recordWriteLocked(key)
+		}
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "added set values", Value: strconv.Itoa(added)}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	data := setData{}
+	data.ensureCapacity(1)
+	added := data.addKeyValue(valueKey, value)
+	idx := ht.sets.AddData(data)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "added set values", Value: strconv.Itoa(added)}, true
+}
+
+func (ht *HatTrie) executeFastHasSetCommand(key string, valueKey string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsSet() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}, true
+	}
+	_, hit := ht.sets.array[hval.Index].items[valueKey]
+	ht.recordReadLocked(hit, key)
+	return commandBool01Response(hit), true
+}
+
 func commandFastPathField(value string) bool {
 	if value == "" {
 		return false
@@ -1237,6 +1325,19 @@ func commandFastPathField(value string) bool {
 		return true
 	}
 	return strings.TrimSpace(value) == value
+}
+
+func commandFastJSONStringKey(value string) (string, bool) {
+	if value == "" {
+		return "", false
+	}
+	for idx := 0; idx < len(value); idx++ {
+		c := value[idx]
+		if c < 0x20 || c == '"' || c == '\\' || c >= utf8.RuneSelf {
+			return "", false
+		}
+	}
+	return `"` + value + `"`, true
 }
 
 func commandFastUint32Field(value string) (uint32, bool) {

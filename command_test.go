@@ -335,6 +335,60 @@ func TestExecuteCommandSetOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandSetExactPathPreservesSemantics(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "tags", Value: "go"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDSET exact create response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "tags", Value: "go"}); !got.OK || got.Value != "0" {
+		t.Fatalf("ADDSET exact duplicate response = %#v, want added 0", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSET", Key: "tags", Value: "go"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASSET exact hit response = %#v, want 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSET", Key: "tags", Value: "missing"}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASSET exact miss response = %#v, want 0", got)
+	}
+	if got := ht.GetSet("tags"); !reflect.DeepEqual(got, Set{"go"}) {
+		t.Fatalf("GetSet(tags) = %#v, want go", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "replace", Value: "old"}); !got.OK {
+		t.Fatalf("SETSTR replace response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "replace", Value: "new"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDSET exact replace response = %#v, want added 1", got)
+	}
+	if got := ht.GetString("replace"); got != "" {
+		t.Fatalf("GetString(replace) = %q, want replaced by set", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSET", Key: "replace", Value: "new"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASSET exact replaced set response = %#v, want 1", got)
+	}
+}
+
+func TestExecuteCommandSetExactPathAllocationBudget(t *testing.T) {
+	ht := newTestTrie(t)
+	add := CacheCommandRequest{Command: "ADDSET", Key: "tags", Value: "go"}
+	has := CacheCommandRequest{Command: "HASSET", Key: "tags", Value: "go"}
+	if got := ht.ExecuteCommand(add); !got.OK {
+		t.Fatalf("warm ADDSET response = %#v, want ok", got)
+	}
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		if got := ht.ExecuteCommand(add); !got.OK {
+			t.Fatalf("ADDSET response = %#v, want ok", got)
+		}
+		if got := ht.ExecuteCommand(has); !got.OK || got.Value != "1" {
+			t.Fatalf("HASSET response = %#v, want hit", got)
+		}
+	})
+	if allocs > 5 {
+		t.Fatalf("ADDSET+HASSET exact path allocations = %.2f, want <= 5", allocs)
+	}
+}
+
 func TestExecuteCommandSetRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	unsupported := func() {}
