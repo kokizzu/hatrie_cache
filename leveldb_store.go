@@ -54,6 +54,15 @@ type LevelDBCompactionResult struct {
 	DurationMillis int64     `json:"duration_millis"`
 }
 
+// LevelDBFlushResult reports a completed manual LevelDB save/flush.
+type LevelDBFlushResult struct {
+	Store          string    `json:"store"`
+	Keys           int       `json:"keys"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at"`
+	DurationMillis int64     `json:"duration_millis"`
+}
+
 // DefaultLevelDBHotLoadPolicy loads all non-expired keys and only small, recent,
 // frequently-hit values.
 func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
@@ -127,6 +136,22 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 		return nil
 	}
 	return db.Write(batch, &opt.WriteOptions{Sync: true})
+}
+
+func (store *LevelDBStore) Flush(trie *HatTrie) (LevelDBFlushResult, error) {
+	startedAt := time.Now().UTC()
+	result := LevelDBFlushResult{
+		Store:     "leveldb",
+		StartedAt: startedAt,
+	}
+	err := store.Save(trie)
+	result.FinishedAt = time.Now().UTC()
+	result.DurationMillis = result.FinishedAt.Sub(startedAt).Milliseconds()
+	if err != nil {
+		return result, err
+	}
+	result.Keys = trie.Size()
+	return result, nil
 }
 
 func (store *LevelDBStore) Compact(options LevelDBCompactionOptions) (LevelDBCompactionResult, error) {

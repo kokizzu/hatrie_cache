@@ -579,14 +579,18 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
 make monitoring-server DB_PATH=data/cache.leveldb DB_FORMAT=json
 ```
 
-Run manual LevelDB compaction after large delete or rewrite batches to reclaim
-storage-file space and reduce read amplification. Empty bounds compact all
-cache-entry records; `start-key` is inclusive and `limit-key` is exclusive:
+Run a manual LevelDB flush before planned maintenance when `DB_SYNC_INTERVAL=0`
+or when you want the current in-memory state written immediately. Run manual
+LevelDB compaction after large delete or rewrite batches to reclaim storage-file
+space and reduce read amplification. Empty bounds compact all cache-entry
+records; `start-key` is inclusive and `limit-key` is exclusive:
 
 ```
 make storage-status STORAGE_PEER=http://127.0.0.1:8080
+make storage-flush STORAGE_PEER=http://127.0.0.1:8080
 make storage-compact STORAGE_PEER=http://127.0.0.1:8080
 make storage-compact STORAGE_PEER=http://127.0.0.1:8080 STORAGE_COMPACT_START_KEY=session: STORAGE_COMPACT_LIMIT_KEY='session;'
+make cli ARGS='storage flush'
 make cli ARGS='storage compact -start-key session: -limit-key session;'
 ```
 
@@ -756,8 +760,8 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 ```
 
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
-`/api/entries`, `/api/storage`, `/api/storage/compact`, `/api/topology`,
-`/api/election`, `/api/replication`, `/api/journal`, and `/api/commands`, plus
+`/api/entries`, `/api/storage`, `/api/storage/flush`, `/api/storage/compact`,
+`/api/topology`, `/api/election`, `/api/replication`, `/api/journal`, and `/api/commands`, plus
 Prometheus metrics at `/metrics`.
 Prometheus output includes cache counters plus audit and protection counters:
 `hatrie_cache_audit_events_total`, `hatrie_cache_audit_errors_total`,
@@ -951,6 +955,7 @@ make cli ARGS='replication'
 make cli ARGS='replication -sync'
 make cli ARGS='replication -sync -prefix session:'
 make cli ARGS='storage status'
+make cli ARGS='storage flush'
 make cli ARGS='storage compact'
 make cli ARGS='storage compact -start-key session: -limit-key session;'
 make cli ARGS='journal -after-sequence 42 -limit 1000'

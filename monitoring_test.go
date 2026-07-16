@@ -1244,6 +1244,38 @@ func TestMonitoringHandlerCompactsLevelDBStorage(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerFlushesLevelDBStorage(t *testing.T) {
+	ht := newTestTrie(t)
+	store, err := OpenLevelDBStore(filepath.Join(t.TempDir(), "cache.leveldb"))
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	handler := NewMonitoringHandler(ht, MonitoringOptions{LevelDBStore: store}).Handler()
+	ht.UpsertString("session:flush", "saved")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/storage/flush", strings.NewReader(`{}`)))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("storage flush status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	var result LevelDBFlushResult
+	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("storage flush JSON error = %v", err)
+	}
+	if result.Store != "leveldb" || result.Keys != 1 || result.DurationMillis < 0 || result.FinishedAt.Before(result.StartedAt) {
+		t.Fatalf("storage flush result = %#v, want leveldb key count and timing", result)
+	}
+
+	loaded := newTestTrie(t)
+	if count, err := store.Load(loaded); err != nil || count != 1 {
+		t.Fatalf("Load() after storage flush = %d/%v, want 1 nil", count, err)
+	}
+	if got := loaded.GetString("session:flush"); got != "saved" {
+		t.Fatalf("flushed value = %q, want saved", got)
+	}
+}
+
 func TestMonitoringHandlerRejectsLevelDBCompactionWhenUnconfigured(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
@@ -1258,6 +1290,18 @@ func TestMonitoringHandlerRejectsLevelDBCompactionWhenUnconfigured(t *testing.T)
 	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/storage/compact", nil))
 	if resp.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("storage compact GET status = %d, want 405", resp.Code)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/storage/flush", strings.NewReader(`{}`)))
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("storage flush status = %d, want 409", resp.Code)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/storage/flush", nil))
+	if resp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("storage flush GET status = %d, want 405", resp.Code)
 	}
 }
 

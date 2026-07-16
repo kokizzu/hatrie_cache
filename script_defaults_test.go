@@ -137,6 +137,42 @@ func TestMonitoringWrapperPassesWriteProtectionAndRateLimit(t *testing.T) {
 	}
 }
 
+func TestStorageWrappersUseCLI(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"STORAGE_PEER ?= http://127.0.0.1:8080",
+		"storage-status:",
+		"storage-flush:",
+		"storage-compact:",
+		"STORAGE_PEER='$(STORAGE_PEER)' ./scripts/storage-flush.sh",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile missing storage wrapper token %q", token)
+		}
+	}
+
+	for path, tokens := range map[string][]string{
+		"scripts/storage-status.sh":  {"storage status"},
+		"scripts/storage-flush.sh":   {"storage flush"},
+		"scripts/storage-compact.sh": {"storage compact", "STORAGE_COMPACT_START_KEY", "STORAGE_COMPACT_LIMIT_KEY"},
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		text := string(data)
+		for _, token := range tokens {
+			if !strings.Contains(text, token) {
+				t.Fatalf("%s missing token %q", path, token)
+			}
+		}
+	}
+}
+
 func TestServerWrapperPassesConfigFile(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {

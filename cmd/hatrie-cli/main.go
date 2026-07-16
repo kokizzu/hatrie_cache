@@ -343,11 +343,13 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 
 func runStorage(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("storage subcommand is required: status, compact")
+		return errors.New("storage subcommand is required: status, flush, compact")
 	}
 	switch args[0] {
 	case "status":
 		return getJSON(ctx, client, addr, "/api/storage", stdout)
+	case "flush":
+		return postJSON(ctx, client, addr, "/api/storage/flush", []byte("{}"), stdout)
 	case "compact":
 		return runStorageCompact(ctx, client, addr, args[1:], stdout, stderr)
 	default:

@@ -454,6 +454,29 @@ func TestRunStorageCompactPostsRange(t *testing.T) {
 	}
 }
 
+func TestRunStorageFlushPosts(t *testing.T) {
+	var gotPath string
+	var gotMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		gotMethod = r.Method
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"store":"leveldb","keys":1}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "storage", "flush"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(storage flush) error = %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/storage/flush" {
+		t.Fatalf("storage flush method/path = %s %s, want POST /api/storage/flush", gotMethod, gotPath)
+	}
+	if !strings.Contains(stdout.String(), `"keys":1`) {
+		t.Fatalf("stdout = %q, want flush response", stdout.String())
+	}
+}
+
 func TestRunTopologyGetsAndRoutes(t *testing.T) {
 	var gotPaths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

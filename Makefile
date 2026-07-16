@@ -94,7 +94,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-compact server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -139,6 +139,9 @@ cluster-status:
 
 storage-status:
 	STORAGE_PEER='$(STORAGE_PEER)' ./scripts/storage-status.sh
+
+storage-flush:
+	STORAGE_PEER='$(STORAGE_PEER)' ./scripts/storage-flush.sh
 
 storage-compact:
 	STORAGE_PEER='$(STORAGE_PEER)' STORAGE_COMPACT_START_KEY='$(STORAGE_COMPACT_START_KEY)' STORAGE_COMPACT_LIMIT_KEY='$(STORAGE_COMPACT_LIMIT_KEY)' ./scripts/storage-compact.sh
