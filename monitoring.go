@@ -2,7 +2,6 @@ package hatriecache
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -187,17 +186,14 @@ func monitoringPathRequiresAuth(path string) bool {
 }
 
 func monitoringRequestAuthorized(r *http.Request, token string) bool {
+	token = normalizeAuthToken(token)
 	if token == "" {
 		return true
 	}
-	candidate := strings.TrimSpace(r.Header.Get("X-Hatrie-Auth-Token"))
-	if candidate == "" {
-		auth := strings.TrimSpace(r.Header.Get("Authorization"))
-		if len(auth) >= len("Bearer ") && strings.EqualFold(auth[:len("Bearer ")], "Bearer ") {
-			candidate = strings.TrimSpace(auth[len("Bearer "):])
-		}
+	if authTokenMatches(r.Header.Get("X-Hatrie-Auth-Token"), token) {
+		return true
 	}
-	return subtle.ConstantTimeCompare([]byte(candidate), []byte(token)) == 1
+	return authTokenMatches(authBearerToken(r.Header.Get("Authorization")), token)
 }
 
 func (handler *MonitoringHandler) requireTrie(w http.ResponseWriter) bool {

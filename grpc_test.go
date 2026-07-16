@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
@@ -939,6 +940,41 @@ func TestCacheGRPCServerAcceptsGzipCompressedCalls(t *testing.T) {
 	}
 	if health.GetStatus() != "online" || health.GetNode() != "test-node" {
 		t.Fatalf("Health(gzip) = %#v, want online test-node", health)
+	}
+}
+
+func TestCacheGRPCServerAuthTokenProtectsRPCs(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{AuthToken: "secret"})
+	defer stop()
+
+	_, err := client.Health(context.Background(), &hatriecachev1.HealthRequest{})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("Health(unauthenticated) error = %v, want Unauthenticated", err)
+	}
+
+	wrongToken := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer wrong")
+	_, err = client.Stats(wrongToken, &hatriecachev1.StatsRequest{})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("Stats(wrong token) error = %v, want Unauthenticated", err)
+	}
+
+	bearerToken := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer secret")
+	health, err := client.Health(bearerToken, &hatriecachev1.HealthRequest{})
+	if err != nil {
+		t.Fatalf("Health(bearer token) error = %v", err)
+	}
+	if health.GetStatus() != "online" {
+		t.Fatalf("Health(bearer token) status = %q, want online", health.GetStatus())
+	}
+
+	headerToken := metadata.AppendToOutgoingContext(context.Background(), "x-hatrie-auth-token", "secret")
+	stats, err := client.Stats(headerToken, &hatriecachev1.StatsRequest{})
+	if err != nil {
+		t.Fatalf("Stats(header token) error = %v", err)
+	}
+	if stats.GetReads() != 0 {
+		t.Fatalf("Stats(header token) reads = %d, want 0", stats.GetReads())
 	}
 }
 

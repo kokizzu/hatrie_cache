@@ -199,9 +199,10 @@ WantedBy=multi-user.target
 
 Bind to localhost or a private network unless the API is protected by another
 network layer. For direct TLS/HTTP2, set `MONITORING_TLS_CERT` and
-`MONITORING_TLS_KEY`; for bearer-token API protection, set
-`MONITORING_AUTH_TOKEN` on the server and pass `-token` to `make cli`; for
-native protobuf clients, set `GRPC_ADDR`.
+`MONITORING_TLS_KEY`; for bearer-token API protection across HTTP and native
+gRPC APIs, set `MONITORING_AUTH_TOKEN` on the server and pass `-token` to
+`make cli` for HTTP CLI calls; for native protobuf clients, set `GRPC_ADDR` and
+send the same token as gRPC metadata.
 
 ### Persistence Model
 
@@ -419,6 +420,9 @@ Set `GRPC_ADDR` to expose the native protobuf API from
 ```
 make monitoring-server GRPC_ADDR=127.0.0.1:9090
 ```
+
+Use `MONITORING_AUTH_TOKEN` with `GRPC_ADDR` when the native protobuf API is
+reachable outside a trusted localhost-only environment.
 
 Set `DB_PATH` to load and save cache data through LevelDB with Snappy
 compression. LevelDB records use the binary storage format by default
@@ -884,10 +888,14 @@ previous JSON record layout. Loads auto-detect both binary and JSON records.
 
 Use `NewCacheGRPCServer` and `RegisterCacheGRPCServer` to mount the native gRPC
 service in another Go process, or use the generated client in
-`internal/gen/hatriecache/v1`. gRPC command handling can use the same journal,
-leader-write enforcement, and HTTP replication options as the monitoring
-command API. Clients may request gRPC transfer compression with the standard
-`gzip` compressor; the server registers it at the fastest compression level.
+`internal/gen/hatriecache/v1`. Set `CacheGRPCOptions.AuthToken` or run the
+daemon with `MONITORING_AUTH_TOKEN`/`-monitoring-auth-token` to require the same
+token used by the HTTP monitoring API; gRPC clients can send either
+`authorization: Bearer <token>` or `x-hatrie-auth-token: <token>` metadata.
+gRPC command handling can use the same journal, leader-write enforcement, and
+HTTP replication options as the monitoring command API. Clients may request
+gRPC transfer compression with the standard `gzip` compressor; the server
+registers it at the fastest compression level.
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with
 `next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
 page. Empty keys are valid, so Go clients should set the optional `AfterKey`

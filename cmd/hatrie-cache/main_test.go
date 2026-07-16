@@ -23,7 +23,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	hatriecache "hatrie_cache"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
@@ -847,6 +850,53 @@ func TestRunStartsHTTPAndGRPCAndStopsOnContextCancel(t *testing.T) {
 	}
 	waitForAddrReusable(t, monitoringAddr)
 	waitForAddrReusable(t, grpcAddr)
+}
+
+func TestNewGRPCServerPassesMonitoringAuthToken(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+
+	server, listener, err := newGRPCServer(config{
+		grpcAddr:            "127.0.0.1:0",
+		monitoringAuthToken: "secret",
+	}, ht, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newGRPCServer() error = %v", err)
+	}
+	defer listener.Close()
+	defer server.Stop()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	conn, err := grpc.DialContext(ctx, listener.Addr().String(),
+		grpc.WithBlock(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	cancel()
+	if err != nil {
+		t.Fatalf("DialContext() error = %v", err)
+	}
+	defer conn.Close()
+
+	client := hatriecachev1.NewCacheServiceClient(conn)
+	_, err = client.Health(context.Background(), &hatriecachev1.HealthRequest{})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("Health(unauthenticated) error = %v, want Unauthenticated", err)
+	}
+
+	authCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer secret")
+	if _, err := client.Health(authCtx, &hatriecachev1.HealthRequest{}); err != nil {
+		t.Fatalf("Health(authenticated) error = %v", err)
+	}
+
+	server.Stop()
+	if err := <-serveErr; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+		t.Fatalf("gRPC Serve() error = %v", err)
+	}
 }
 
 func TestRunRefreshesLocalElectionHeartbeat(t *testing.T) {

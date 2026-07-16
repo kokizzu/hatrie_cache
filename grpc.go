@@ -8,12 +8,14 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
 type CacheGRPCOptions struct {
 	NodeName            string
+	AuthToken           string
 	StartAt             time.Time
 	Snapshot            func() error
 	Journal             *CommandJournal
@@ -30,6 +32,7 @@ type CacheGRPCServer struct {
 }
 
 func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServer {
+	options.AuthToken = normalizeAuthToken(options.AuthToken)
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
 	}
@@ -61,9 +64,41 @@ func (server *CacheGRPCServer) requireTrie() error {
 	return status.Error(codes.Unavailable, "trie is not configured")
 }
 
-func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
+func (server *CacheGRPCServer) requestContext(ctx context.Context) (context.Context, error) {
 	ctx = grpcContext(ctx)
 	if err := ctx.Err(); err != nil {
+		return ctx, err
+	}
+	if err := server.requireAuthorized(ctx); err != nil {
+		return ctx, err
+	}
+	return ctx, nil
+}
+
+func (server *CacheGRPCServer) requireAuthorized(ctx context.Context) error {
+	if server.options.AuthToken == "" {
+		return nil
+	}
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "unauthorized")
+	}
+	for _, candidate := range md.Get("x-hatrie-auth-token") {
+		if authTokenMatches(candidate, server.options.AuthToken) {
+			return nil
+		}
+	}
+	for _, candidate := range md.Get("authorization") {
+		if authTokenMatches(authBearerToken(candidate), server.options.AuthToken) {
+			return nil
+		}
+	}
+	return status.Error(codes.Unauthenticated, "unauthorized")
+}
+
+func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if err := server.requireTrie(); err != nil {
@@ -82,8 +117,8 @@ func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.Heal
 }
 
 func (server *CacheGRPCServer) Stats(ctx context.Context, _ *hatriecachev1.StatsRequest) (*hatriecachev1.StatsResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if err := server.requireTrie(); err != nil {
@@ -106,8 +141,8 @@ func (server *CacheGRPCServer) Stats(ctx context.Context, _ *hatriecachev1.Stats
 }
 
 func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecachev1.EntriesRequest) (*hatriecachev1.EntriesResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if err := server.requireTrie(); err != nil {
@@ -136,8 +171,8 @@ func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecache
 }
 
 func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecachev1.CommandRequest) (*hatriecachev1.CommandResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	command := cacheCommandRequestFromProto(request)
@@ -152,8 +187,8 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 }
 
 func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.SnapshotRequest) (*hatriecachev1.CommandResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if server.options.Snapshot == nil {
@@ -166,8 +201,8 @@ func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.Sn
 }
 
 func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriecachev1.ReplicationRequest) (*hatriecachev1.ReplicationResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if request == nil {
@@ -180,8 +215,8 @@ func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriec
 }
 
 func (server *CacheGRPCServer) Topology(ctx context.Context, request *hatriecachev1.TopologyRequest) (*hatriecachev1.TopologyResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if server.options.Topology == nil {
@@ -207,8 +242,8 @@ func (server *CacheGRPCServer) Topology(ctx context.Context, request *hatriecach
 }
 
 func (server *CacheGRPCServer) UpdateTopology(ctx context.Context, request *hatriecachev1.UpdateTopologyRequest) (*hatriecachev1.TopologyResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if server.options.Topology == nil {
@@ -225,8 +260,8 @@ func (server *CacheGRPCServer) UpdateTopology(ctx context.Context, request *hatr
 }
 
 func (server *CacheGRPCServer) Election(ctx context.Context, request *hatriecachev1.ElectionRequest) (*hatriecachev1.ElectionResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if server.options.Election == nil {
@@ -252,8 +287,8 @@ func (server *CacheGRPCServer) Election(ctx context.Context, request *hatriecach
 }
 
 func (server *CacheGRPCServer) UpdateElection(ctx context.Context, request *hatriecachev1.UpdateElectionRequest) (*hatriecachev1.ElectionResponse, error) {
-	ctx = grpcContext(ctx)
-	if err := ctx.Err(); err != nil {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if server.options.Election == nil {
@@ -262,7 +297,6 @@ func (server *CacheGRPCServer) UpdateElection(ctx context.Context, request *hatr
 	if request == nil {
 		request = &hatriecachev1.UpdateElectionRequest{}
 	}
-	var err error
 	if request.Online == nil || request.GetOnline() {
 		err = server.options.Election.Heartbeat(request.GetNode())
 	} else {

@@ -540,6 +540,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 	server := grpc.NewServer()
 	hatriecache.RegisterCacheGRPCServer(server, hatriecache.NewCacheGRPCServer(trie, hatriecache.CacheGRPCOptions{
 		NodeName:            defaultNodeID(cfg.nodeID),
+		AuthToken:           cfg.monitoringAuthToken,
 		Snapshot:            snapshot,
 		Journal:             journal,
 		Topology:            topology,
