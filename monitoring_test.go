@@ -1309,6 +1309,44 @@ func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
 	}
 }
 
+func TestMonitoringAuditLogRecordsDangerousActions(t *testing.T) {
+	ht := newTestTrie(t)
+	var audit bytes.Buffer
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		AuditLog: NewAuditLogger(&audit),
+		Snapshot: func() error {
+			return nil
+		},
+	}).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"name","value":"ivi"}`))
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("command status = %d, want 200", resp.Code)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/snapshot", strings.NewReader(`{}`)))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d, want 200", resp.Code)
+	}
+
+	events := auditEventsFromJSONL(t, audit.String())
+	if len(events) != 2 {
+		t.Fatalf("audit events = %#v, want command and snapshot", events)
+	}
+	if events[0].Protocol != "http" || events[0].Action != "command" || events[0].Command != "SETSTR" || events[0].Key != "name" || !events[0].OK {
+		t.Fatalf("command audit event = %#v, want safe command event", events[0])
+	}
+	if events[1].Action != "snapshot" || !events[1].OK {
+		t.Fatalf("snapshot audit event = %#v, want successful snapshot", events[1])
+	}
+	if strings.Contains(audit.String(), "ivi") {
+		t.Fatalf("audit log leaked command value: %s", audit.String())
+	}
+}
+
 func TestMonitoringHandlerExposesPrometheusMetrics(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))

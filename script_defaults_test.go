@@ -79,6 +79,30 @@ func TestMonitoringWrapperPassesAuthToken(t *testing.T) {
 	}
 }
 
+func TestMonitoringWrapperPassesAuditLogPath(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	if !strings.Contains(string(makefile), "AUDIT_LOG_PATH ?=\n") || !strings.Contains(string(makefile), "AUDIT_LOG_PATH='$(AUDIT_LOG_PATH)'") {
+		t.Fatal("Makefile should expose AUDIT_LOG_PATH to the monitoring wrapper")
+	}
+
+	script, err := os.ReadFile("scripts/monitoring-server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/monitoring-server.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"audit_log_path=${AUDIT_LOG_PATH:-}",
+		`-audit-log-path "$audit_log_path"`,
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("monitoring wrapper missing audit log plumbing %q", token)
+		}
+	}
+}
+
 func TestServerWrapperPassesConfigFile(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {

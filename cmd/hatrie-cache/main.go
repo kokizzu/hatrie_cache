@@ -43,6 +43,7 @@ type config struct {
 	monitoringTLSCert           string
 	monitoringTLSKey            string
 	monitoringAuthToken         string
+	auditLogPath                string
 	monitoringWebDir            string
 	monitoringReadHeaderTimeout time.Duration
 	monitoringIdleTimeout       time.Duration
@@ -115,6 +116,11 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintln(stdout, "monitoring server disabled; pass -monitoring-server to start it")
 		return nil
 	}
+	auditLog, err := openAuditLogIfConfigured(cfg.auditLogPath)
+	if err != nil {
+		return err
+	}
+	defer closeAuditLog(auditLog, stderr)
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
@@ -212,6 +218,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		NodeName:             defaultNodeID(cfg.nodeID),
 		WebDir:               cfg.monitoringWebDir,
 		AuthToken:            cfg.monitoringAuthToken,
+		AuditLog:             auditLog,
 		Snapshot:             snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
 		BackupSnapshotFormat: snapshotFormat(cfg),
 		Journal:              journal,
@@ -222,7 +229,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}).Handler()
 	server := newMonitoringServer(cfg, handler)
 
-	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator)
+	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator, auditLog)
 	if err != nil {
 		return err
 	}
@@ -292,6 +299,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
+	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
@@ -633,7 +641,29 @@ func closeLevelDB(store *hatriecache.LevelDBStore, stderr io.Writer) {
 	}
 }
 
-func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator) (*grpc.Server, net.Listener, error) {
+func openAuditLogIfConfigured(path string) (*hatriecache.AuditLogger, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	logger, err := hatriecache.OpenAuditLogger(path)
+	if err != nil {
+		return nil, fmt.Errorf("open audit log: %w", err)
+	}
+	return logger, nil
+}
+
+func closeAuditLog(logger *hatriecache.AuditLogger, stderr io.Writer) {
+	if logger == nil {
+		return
+	}
+	stderr = diagnosticWriter(stderr)
+	if err := logger.Close(); err != nil {
+		fmt.Fprintf(stderr, "close audit log: %v\n", err)
+	}
+}
+
+func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator, auditLog *hatriecache.AuditLogger) (*grpc.Server, net.Listener, error) {
 	if cfg.grpcAddr == "" {
 		return nil, nil, nil
 	}
@@ -645,6 +675,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 	hatriecache.RegisterCacheGRPCServer(server, hatriecache.NewCacheGRPCServer(trie, hatriecache.CacheGRPCOptions{
 		NodeName:            defaultNodeID(cfg.nodeID),
 		AuthToken:           cfg.monitoringAuthToken,
+		AuditLog:            auditLog,
 		Snapshot:            snapshot,
 		Journal:             journal,
 		Topology:            topology,

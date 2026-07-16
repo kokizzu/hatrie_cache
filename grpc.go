@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -16,6 +17,7 @@ import (
 type CacheGRPCOptions struct {
 	NodeName            string
 	AuthToken           string
+	AuditLog            *AuditLogger
 	StartAt             time.Time
 	Snapshot            func() error
 	Journal             *CommandJournal
@@ -94,6 +96,15 @@ func (server *CacheGRPCServer) requireAuthorized(ctx context.Context) error {
 		}
 	}
 	return status.Error(codes.Unauthenticated, "unauthorized")
+}
+
+func (server *CacheGRPCServer) auditGRPC(event AuditEvent) {
+	if server.options.AuditLog == nil {
+		return
+	}
+	event.Node = server.options.NodeName
+	event.Protocol = "grpc"
+	_ = server.options.AuditLog.Log(event)
 }
 
 func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
@@ -183,6 +194,16 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 		Replicator:          server.options.Replicator,
 		EnforceLeaderWrites: server.options.EnforceLeaderWrites,
 	})
+	if commandShouldJournal(command) {
+		server.auditGRPC(AuditEvent{
+			Action:  "command",
+			Command: normalizedCommand(command.Command),
+			Key:     strings.TrimSpace(command.Key),
+			OK:      response.OK,
+			Method:  "/hatriecache.v1.CacheService/Command",
+			Message: response.Message,
+		})
+	}
 	return grpcCommandResponse(response), nil
 }
 
@@ -192,11 +213,14 @@ func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.Sn
 		return nil, err
 	}
 	if server.options.Snapshot == nil {
+		server.auditGRPC(AuditEvent{Action: "snapshot", OK: false, Method: "/hatriecache.v1.CacheService/Snapshot", Message: "snapshot path is not configured"})
 		return grpcCommandResponse(commandError("snapshot path is not configured")), nil
 	}
 	if err := server.options.Snapshot(); err != nil {
+		server.auditGRPC(AuditEvent{Action: "snapshot", OK: false, Method: "/hatriecache.v1.CacheService/Snapshot", Message: err.Error()})
 		return grpcCommandResponse(commandError(err.Error())), nil
 	}
+	server.auditGRPC(AuditEvent{Action: "snapshot", OK: true, Method: "/hatriecache.v1.CacheService/Snapshot", Message: "snapshot saved"})
 	return grpcCommandResponse(CacheCommandResponse{OK: true, Message: "snapshot saved"}), nil
 }
 
@@ -209,7 +233,9 @@ func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriec
 		request = &hatriecachev1.ReplicationRequest{}
 	}
 	if request.GetSync() {
-		return grpcReplicationResponse(server.options.Replicator.SyncAll(ctx, server.trie, request.GetPrefix())), nil
+		result := server.options.Replicator.SyncAll(ctx, server.trie, request.GetPrefix())
+		server.auditGRPC(AuditEvent{Action: "replication.sync", OK: !result.Skipped, Method: "/hatriecache.v1.CacheService/Replication", Message: result.Reason, Details: map[string]interface{}{"prefix": request.GetPrefix(), "entries": result.Entries}})
+		return grpcReplicationResponse(result), nil
 	}
 	return grpcReplicationResponse(server.options.Replicator.LastResult()), nil
 }
@@ -250,12 +276,15 @@ func (server *CacheGRPCServer) UpdateTopology(ctx context.Context, request *hatr
 		return grpcTopologyError("topology store is not configured"), nil
 	}
 	if err := server.options.Topology.Set(clusterTopologyFromProto(request.GetTopology())); err != nil {
+		server.auditGRPC(AuditEvent{Action: "topology.update", OK: false, Method: "/hatriecache.v1.CacheService/UpdateTopology", Message: err.Error()})
 		return grpcTopologyError(err.Error()), nil
 	}
+	topology := server.options.Topology.Get()
+	server.auditGRPC(AuditEvent{Action: "topology.update", OK: true, Method: "/hatriecache.v1.CacheService/UpdateTopology", Details: map[string]interface{}{"mode": topology.Mode, "version": topology.Version, "nodes": len(topology.Nodes), "shards": len(topology.Shards)}})
 	return &hatriecachev1.TopologyResponse{
 		Ok:       true,
 		Message:  "ok",
-		Topology: grpcClusterTopology(server.options.Topology.Get()),
+		Topology: grpcClusterTopology(topology),
 	}, nil
 }
 
@@ -303,8 +332,10 @@ func (server *CacheGRPCServer) UpdateElection(ctx context.Context, request *hatr
 		err = server.options.Election.MarkOffline(request.GetNode())
 	}
 	if err != nil {
+		server.auditGRPC(AuditEvent{Action: "election.update", OK: false, Method: "/hatriecache.v1.CacheService/UpdateElection", Message: err.Error(), Details: map[string]interface{}{"node": request.GetNode(), "online": request.Online == nil || request.GetOnline()}})
 		return grpcElectionError(err.Error()), nil
 	}
+	server.auditGRPC(AuditEvent{Action: "election.update", OK: true, Method: "/hatriecache.v1.CacheService/UpdateElection", Details: map[string]interface{}{"node": request.GetNode(), "online": request.Online == nil || request.GetOnline()}})
 	return &hatriecachev1.ElectionResponse{
 		Ok:      true,
 		Message: "ok",

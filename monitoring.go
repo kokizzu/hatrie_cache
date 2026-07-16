@@ -32,6 +32,7 @@ type MonitoringOptions struct {
 	NodeName             string
 	WebDir               string
 	AuthToken            string
+	AuditLog             *AuditLogger
 	StartAt              time.Time
 	Snapshot             func() error
 	BackupSnapshotFormat SnapshotFormat
@@ -194,6 +195,20 @@ func monitoringRequestAuthorized(r *http.Request, token string) bool {
 		return true
 	}
 	return authTokenMatches(authBearerToken(r.Header.Get("Authorization")), token)
+}
+
+func (handler *MonitoringHandler) auditHTTP(r *http.Request, event AuditEvent) {
+	if handler.options.AuditLog == nil {
+		return
+	}
+	event.Node = handler.options.NodeName
+	event.Protocol = "http"
+	event.RemoteAddr = r.RemoteAddr
+	event.Method = r.Method
+	if r.URL != nil {
+		event.Path = r.URL.Path
+	}
+	_ = handler.options.AuditLog.Log(event)
 }
 
 func (handler *MonitoringHandler) requireTrie(w http.ResponseWriter) bool {
@@ -399,10 +414,26 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		EnforceLeaderWrites: handler.options.EnforceLeaderWrites,
 	})
 	if rejected {
+		handler.auditCommandHTTP(r, request, response, false, http.StatusConflict)
 		writeCommandResponseWire(w, r, http.StatusConflict, response, requestFormat)
 		return
 	}
+	handler.auditCommandHTTP(r, request, response, response.OK, http.StatusOK)
 	writeCommandResponseWire(w, r, http.StatusOK, response, requestFormat)
+}
+
+func (handler *MonitoringHandler) auditCommandHTTP(r *http.Request, request CacheCommandRequest, response CacheCommandResponse, ok bool, status int) {
+	if !commandShouldJournal(request) {
+		return
+	}
+	handler.auditHTTP(r, AuditEvent{
+		Action:  "command",
+		Command: normalizedCommand(request.Command),
+		Key:     strings.TrimSpace(request.Key),
+		OK:      ok,
+		Status:  status,
+		Message: response.Message,
+	})
 }
 
 func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
@@ -465,13 +496,16 @@ func (handler *MonitoringHandler) handleSnapshot(w http.ResponseWriter, r *http.
 		return
 	}
 	if handler.options.Snapshot == nil {
+		handler.auditHTTP(r, AuditEvent{Action: "snapshot", OK: false, Status: http.StatusConflict, Message: "snapshot path is not configured"})
 		writeJSONStatus(w, http.StatusConflict, commandError("snapshot path is not configured"))
 		return
 	}
 	if err := handler.options.Snapshot(); err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "snapshot", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
 	}
+	handler.auditHTTP(r, AuditEvent{Action: "snapshot", OK: true, Status: http.StatusOK, Message: "snapshot saved"})
 	writeJSON(w, CacheCommandResponse{OK: true, Message: "snapshot saved"})
 }
 
@@ -521,9 +555,11 @@ func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Re
 	}
 	manifest, err := CreateBackupBundle(request.Path, handler.trie, handler.options.Journal, BackupBundleOptions{SnapshotFormat: format})
 	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "backup", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"path": request.Path}})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
 	}
+	handler.auditHTTP(r, AuditEvent{Action: "backup", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"path": request.Path, "snapshot_format": manifest.SnapshotFormat, "journal_sequence": manifest.JournalSequence}})
 	writeJSON(w, manifest)
 }
 
@@ -576,9 +612,11 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 			return
 		}
 		if err := handler.options.Topology.Set(topology); err != nil {
+			handler.auditHTTP(r, AuditEvent{Action: "topology.update", OK: false, Status: http.StatusBadRequest, Message: err.Error(), Details: map[string]interface{}{"mode": topology.Mode, "version": topology.Version}})
 			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 			return
 		}
+		handler.auditHTTP(r, AuditEvent{Action: "topology.update", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"mode": topology.Mode, "version": topology.Version, "nodes": len(topology.Nodes), "shards": len(topology.Shards)}})
 		writeJSON(w, handler.options.Topology.Get())
 	default:
 		writeMethodNotAllowed(w)
@@ -645,9 +683,11 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 			err = handler.options.Election.MarkOffline(request.Node)
 		}
 		if err != nil {
+			handler.auditHTTP(r, AuditEvent{Action: "election.update", OK: false, Status: http.StatusBadRequest, Message: err.Error(), Details: map[string]interface{}{"node": request.Node, "online": request.Online == nil || *request.Online}})
 			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 			return
 		}
+		handler.auditHTTP(r, AuditEvent{Action: "election.update", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"node": request.Node, "online": request.Online == nil || *request.Online}})
 		writeJSON(w, handler.options.Election.Status())
 	default:
 		writeMethodNotAllowed(w)
@@ -694,7 +734,9 @@ func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *ht
 	if requestContextDone(w, r) {
 		return
 	}
-	writeJSON(w, handler.options.Replicator.SyncAll(r.Context(), handler.trie, request.Prefix))
+	result := handler.options.Replicator.SyncAll(r.Context(), handler.trie, request.Prefix)
+	handler.auditHTTP(r, AuditEvent{Action: "replication.sync", OK: !result.Skipped, Status: http.StatusOK, Message: result.Reason, Details: map[string]interface{}{"prefix": request.Prefix, "entries": result.Entries}})
+	writeJSON(w, result)
 }
 
 func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.Request) {
@@ -773,6 +815,7 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		Timeout:       DefaultCommandJournalPullTimeout,
 	})
 	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "journal.pull", OK: false, Status: http.StatusBadGateway, Message: err.Error(), Details: map[string]interface{}{"source": source, "after_sequence": request.AfterSequence}})
 		var pullErr *CommandJournalPullError
 		if errors.As(err, &pullErr) && pullErr.Status > 0 {
 			writeJSONStatus(w, pullErr.Status, commandError(pullErr.Error()))
@@ -781,6 +824,7 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		writeJSONStatus(w, http.StatusBadGateway, commandError(err.Error()))
 		return
 	}
+	handler.auditHTTP(r, AuditEvent{Action: "journal.pull", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"source": source, "after_sequence": request.AfterSequence, "applied": result.Applied, "applied_through": result.AppliedThrough}})
 	writeJSON(w, result)
 }
 

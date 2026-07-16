@@ -74,6 +74,7 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 		"-monitoring-addr", "127.0.0.1:9090",
 		"-monitoring-web-dir", "/tmp/web",
 		"-monitoring-auth-token", "secret",
+		"-audit-log-path", "/tmp/audit.jsonl",
 		"-monitoring-read-header-timeout", "750ms",
 		"-monitoring-idle-timeout", "15s",
 	}, &bytes.Buffer{})
@@ -83,7 +84,7 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	if !cfg.monitoringServer {
 		t.Fatal("monitoringServer = false, want true")
 	}
-	if cfg.monitoringAddr != "127.0.0.1:9090" || cfg.monitoringWebDir != "/tmp/web" || cfg.monitoringAuthToken != "secret" {
+	if cfg.monitoringAddr != "127.0.0.1:9090" || cfg.monitoringWebDir != "/tmp/web" || cfg.monitoringAuthToken != "secret" || cfg.auditLogPath != "/tmp/audit.jsonl" {
 		t.Fatalf("cfg = %#v, want explicit address and web dir", cfg)
 	}
 	if cfg.monitoringReadHeaderTimeout != 750*time.Millisecond || cfg.monitoringIdleTimeout != 15*time.Second {
@@ -973,6 +974,54 @@ func TestRunStartsHTTPAndGRPCAndStopsOnContextCancel(t *testing.T) {
 	waitForAddrReusable(t, grpcAddr)
 }
 
+func TestRunWritesAuditLog(t *testing.T) {
+	monitoringAddr := freeTCPAddr(t)
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, []string{
+			"-monitoring-server",
+			"-monitoring-addr", monitoringAddr,
+			"-monitoring-web-dir", "",
+			"-audit-log-path", auditPath,
+		}, &bytes.Buffer{}, &bytes.Buffer{})
+	}()
+
+	waitForHTTPHealth(t, "http://"+monitoringAddr+"/api/health")
+	resp, err := http.Post("http://"+monitoringAddr+"/api/commands", "application/json", strings.NewReader(`{"command":"SETSTR","key":"name","value":"ivi"}`))
+	if err != nil {
+		t.Fatalf("POST /api/commands error = %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("command status = %d, want 200", resp.StatusCode)
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run() after cancel error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run() did not return after context cancellation")
+	}
+
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("ReadFile(audit log) error = %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"action":"command"`) || !strings.Contains(text, `"key":"name"`) {
+		t.Fatalf("audit log = %s, want command event", text)
+	}
+	if strings.Contains(text, "ivi") {
+		t.Fatalf("audit log leaked command value: %s", text)
+	}
+}
+
 func TestNewGRPCServerPassesMonitoringAuthToken(t *testing.T) {
 	ht := hatriecache.CreateHatTrie()
 	defer ht.Destroy()
@@ -980,7 +1029,7 @@ func TestNewGRPCServerPassesMonitoringAuthToken(t *testing.T) {
 	server, listener, err := newGRPCServer(config{
 		grpcAddr:            "127.0.0.1:0",
 		monitoringAuthToken: "secret",
-	}, ht, nil, nil, nil, nil, nil)
+	}, ht, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGRPCServer() error = %v", err)
 	}

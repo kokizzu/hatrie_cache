@@ -428,6 +428,15 @@ make monitoring-server MONITORING_READ_HEADER_TIMEOUT=10s MONITORING_IDLE_TIMEOU
 make run CMD='go run ./cmd/hatrie-cache'
 ```
 
+Set `AUDIT_LOG_PATH` to append JSONL audit events for dangerous HTTP/gRPC API
+actions such as mutating commands, snapshots, backups, topology/election
+updates, replication syncs, and journal pulls. Audit records include command
+names and keys but intentionally omit command values:
+
+```
+make monitoring-server AUDIT_LOG_PATH=data/audit.jsonl
+```
+
 Long-running daemon options can also live in a JSON config file. Config keys
 match flag names and may use hyphens or underscores; duration values use Go
 duration strings. Explicit CLI flags override file values:

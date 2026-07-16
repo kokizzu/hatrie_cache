@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -975,6 +976,38 @@ func TestCacheGRPCServerAuthTokenProtectsRPCs(t *testing.T) {
 	}
 	if stats.GetReads() != 0 {
 		t.Fatalf("Stats(header token) reads = %d, want 0", stats.GetReads())
+	}
+}
+
+func TestCacheGRPCServerAuditLogRecordsDangerousRPCs(t *testing.T) {
+	ht := newTestTrie(t)
+	var audit bytes.Buffer
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{
+		AuditLog: NewAuditLogger(&audit),
+	})
+	defer stop()
+
+	resp, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "SETSTR",
+		Key:     "name",
+		Value:   "ivi",
+	})
+	if err != nil {
+		t.Fatalf("Command(SETSTR) error = %v", err)
+	}
+	if !resp.GetOk() {
+		t.Fatalf("Command(SETSTR) response = %#v, want ok", resp)
+	}
+
+	events := auditEventsFromJSONL(t, audit.String())
+	if len(events) != 1 {
+		t.Fatalf("audit events = %#v, want one command event", events)
+	}
+	if events[0].Protocol != "grpc" || events[0].Action != "command" || events[0].Command != "SETSTR" || events[0].Key != "name" || !events[0].OK {
+		t.Fatalf("gRPC audit event = %#v, want safe command event", events[0])
+	}
+	if strings.Contains(audit.String(), "ivi") {
+		t.Fatalf("audit log leaked command value: %s", audit.String())
 	}
 }
 
