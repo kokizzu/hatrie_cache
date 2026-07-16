@@ -39,6 +39,7 @@ type MonitoringOptions struct {
 	Metrics              *APIMetrics
 	StartAt              time.Time
 	Snapshot             func() error
+	LevelDBStore         *LevelDBStore
 	BackupSnapshotFormat SnapshotFormat
 	Journal              *CommandJournal
 	Topology             *TopologyStore
@@ -132,6 +133,15 @@ type backupBundleRequest struct {
 	SnapshotFormat string `json:"snapshot_format,omitempty"`
 }
 
+type storageStatus struct {
+	LevelDBConfigured bool `json:"leveldb_configured"`
+}
+
+type storageCompactRequest struct {
+	StartKey string `json:"start_key,omitempty"`
+	LimitKey string `json:"limit_key,omitempty"`
+}
+
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
@@ -171,6 +181,8 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/commands", handler.handleCommands)
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	mux.HandleFunc("/api/backup", handler.handleBackup)
+	mux.HandleFunc("/api/storage", handler.handleStorage)
+	mux.HandleFunc("/api/storage/compact", handler.handleStorageCompact)
 	mux.HandleFunc("/api/topology", handler.handleTopology)
 	mux.HandleFunc("/api/election", handler.handleElection)
 	mux.HandleFunc("/api/replication", handler.handleReplication)
@@ -706,6 +718,69 @@ func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Re
 	}
 	handler.auditHTTP(r, AuditEvent{Action: "backup", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"path": request.Path, "snapshot_format": manifest.SnapshotFormat, "journal_sequence": manifest.JournalSequence}})
 	writeJSON(w, manifest)
+}
+
+func (handler *MonitoringHandler) handleStorage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	writeJSON(w, storageStatus{LevelDBConfigured: handler.options.LevelDBStore != nil})
+}
+
+func (handler *MonitoringHandler) handleStorageCompact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if handler.options.LevelDBStore == nil {
+		handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: false, Status: http.StatusConflict, Message: "leveldb store is not configured"})
+		writeJSONStatus(w, http.StatusConflict, commandError("leveldb store is not configured"))
+		return
+	}
+	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
+	if !ok {
+		return
+	}
+	defer closeBody()
+	decoder.DisallowUnknownFields()
+	var request storageCompactRequest
+	if err := decoder.Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid storage compact request")
+		return
+	} else if err == nil {
+		var extra struct{}
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid storage compact request")
+			return
+		}
+	}
+	if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
+		return
+	}
+	request.StartKey = strings.TrimSpace(request.StartKey)
+	request.LimitKey = strings.TrimSpace(request.LimitKey)
+	details := map[string]interface{}{"store": "leveldb", "start_key": request.StartKey, "limit_key": request.LimitKey}
+	if requestContextDone(w, r) {
+		return
+	}
+	if handler.rejectDangerousHTTP(w, r, "storage.compact", details) {
+		return
+	}
+	result, err := handler.options.LevelDBStore.Compact(LevelDBCompactionOptions{StartKey: request.StartKey, LimitKey: request.LimitKey})
+	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: details})
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"store": result.Store, "start_key": result.StartKey, "limit_key": result.LimitKey, "duration_millis": result.DurationMillis}})
+	writeJSON(w, result)
 }
 
 func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.Request) {

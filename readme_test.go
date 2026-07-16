@@ -294,6 +294,8 @@ func TestREADMEListsStorageFormatTradeoffs(t *testing.T) {
 		"use the smaller of the compact binary",
 		"binary LevelDB format is 26% smaller",
 		"structured payload, with lower save/load CPU and heap than JSON",
+		"`/api/storage/compact`",
+		"make storage-compact STORAGE_PEER=http://127.0.0.1:8080",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md does not document storage format tradeoff token %q", token)

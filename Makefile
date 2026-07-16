@@ -57,6 +57,9 @@ RESTORE_REHEARSAL_RUNTIME_GET ?=
 RESTORE_REHEARSAL_RUNTIME_SERVER_BIN ?=
 CLUSTER_PEER ?= http://127.0.0.1:8080
 CLUSTER_PROBE_NODES ?= true
+STORAGE_PEER ?= http://127.0.0.1:8080
+STORAGE_COMPACT_START_KEY ?=
+STORAGE_COMPACT_LIMIT_KEY ?=
 SANITIZE_C ?= auto
 SANITIZE_C_ALLOW_STRICT_OVERCOMMIT ?= 0
 SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM ?= 0
@@ -91,7 +94,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci backup restore restore-bundle restore-rehearsal doctor cluster-status server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-compact server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -133,6 +136,12 @@ doctor:
 
 cluster-status:
 	CLUSTER_PEER='$(CLUSTER_PEER)' CLUSTER_PROBE_NODES='$(CLUSTER_PROBE_NODES)' ./scripts/cluster-status.sh
+
+storage-status:
+	STORAGE_PEER='$(STORAGE_PEER)' ./scripts/storage-status.sh
+
+storage-compact:
+	STORAGE_PEER='$(STORAGE_PEER)' STORAGE_COMPACT_START_KEY='$(STORAGE_COMPACT_START_KEY)' STORAGE_COMPACT_LIMIT_KEY='$(STORAGE_COMPACT_LIMIT_KEY)' ./scripts/storage-compact.sh
 
 server:
 	CONFIG_PATH='$(CONFIG_PATH)' ./scripts/server.sh $(SERVER_ARGS)

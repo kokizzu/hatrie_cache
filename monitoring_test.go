@@ -1211,6 +1211,56 @@ func TestMonitoringHandlerRejectsForcedSnapshotWhenUnconfigured(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerCompactsLevelDBStorage(t *testing.T) {
+	ht := newTestTrie(t)
+	store, err := OpenLevelDBStore(filepath.Join(t.TempDir(), "cache.leveldb"))
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	ht.UpsertString("alpha", "one")
+	ht.UpsertString("omega", "two")
+	if err := store.Save(ht); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{LevelDBStore: store}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/storage/compact", strings.NewReader(`{"start_key":"alpha","limit_key":"omega\u0000"}`)))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("storage compact status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	var result LevelDBCompactionResult
+	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("storage compact JSON error = %v", err)
+	}
+	if result.Store != "leveldb" || result.StartKey != "alpha" || result.LimitKey != "omega\x00" {
+		t.Fatalf("storage compact result = %#v, want range metadata", result)
+	}
+
+	loaded := newTestTrie(t)
+	if count, err := store.Load(loaded); err != nil || count != 2 {
+		t.Fatalf("Load() after storage compact = %d/%v, want 2 nil", count, err)
+	}
+}
+
+func TestMonitoringHandlerRejectsLevelDBCompactionWhenUnconfigured(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/storage/compact", strings.NewReader(`{}`)))
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("storage compact status = %d, want 409", resp.Code)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/storage/compact", nil))
+	if resp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("storage compact GET status = %d, want 405", resp.Code)
+	}
+}
+
 func TestMonitoringHandlerWritesBackupBundle(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalFormatJSON)

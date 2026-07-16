@@ -4117,6 +4117,39 @@ func TestLevelDBDiffBatchSkipsUnchangedEntries(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreCompactPreservesEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("alpha", "one")
+	trie.UpsertString("omega", "two")
+	if err := store.Save(trie); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	result, err := store.Compact(LevelDBCompactionOptions{StartKey: "alpha", LimitKey: "omega\x00"})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if result.Store != "leveldb" || result.StartKey != "alpha" || result.LimitKey != "omega\x00" || result.DurationMillis < 0 || result.FinishedAt.Before(result.StartedAt) {
+		t.Fatalf("Compact() result = %#v, want leveldb range metadata", result)
+	}
+
+	loaded := newTestTrie(t)
+	count, err := store.Load(loaded)
+	if err != nil {
+		t.Fatalf("Load() after Compact error = %v", err)
+	}
+	if count != 2 || loaded.GetString("alpha") != "one" || loaded.GetString("omega") != "two" {
+		t.Fatalf("Load() after Compact count/value = %d/%q/%q, want preserved entries", count, loaded.GetString("alpha"), loaded.GetString("omega"))
+	}
+}
+
 func TestLevelDBDiffBatchTracksAddsUpdatesAndDeletes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	store, err := OpenLevelDBStore(path)

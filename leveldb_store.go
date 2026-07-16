@@ -36,6 +36,24 @@ type LevelDBLoadResult struct {
 	ValuesLoaded int
 }
 
+// LevelDBCompactionOptions controls a manual LevelDB compaction. StartKey and
+// LimitKey are cache keys, not raw LevelDB keys. Empty values compact all cache
+// entry records.
+type LevelDBCompactionOptions struct {
+	StartKey string `json:"start_key,omitempty"`
+	LimitKey string `json:"limit_key,omitempty"`
+}
+
+// LevelDBCompactionResult reports a completed manual LevelDB compaction.
+type LevelDBCompactionResult struct {
+	Store          string    `json:"store"`
+	StartKey       string    `json:"start_key,omitempty"`
+	LimitKey       string    `json:"limit_key,omitempty"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at"`
+	DurationMillis int64     `json:"duration_millis"`
+}
+
 // DefaultLevelDBHotLoadPolicy loads all non-expired keys and only small, recent,
 // frequently-hit values.
 func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
@@ -109,6 +127,53 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 		return nil
 	}
 	return db.Write(batch, &opt.WriteOptions{Sync: true})
+}
+
+func (store *LevelDBStore) Compact(options LevelDBCompactionOptions) (LevelDBCompactionResult, error) {
+	startedAt := time.Now().UTC()
+	result := LevelDBCompactionResult{
+		Store:     "leveldb",
+		StartKey:  options.StartKey,
+		LimitKey:  options.LimitKey,
+		StartedAt: startedAt,
+	}
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		result.FinishedAt = time.Now().UTC()
+		result.DurationMillis = result.FinishedAt.Sub(startedAt).Milliseconds()
+		return result, err
+	}
+	defer unlock()
+
+	err = db.CompactRange(levelDBCompactionRange(options))
+	result.FinishedAt = time.Now().UTC()
+	result.DurationMillis = result.FinishedAt.Sub(startedAt).Milliseconds()
+	return result, err
+}
+
+func levelDBCompactionRange(options LevelDBCompactionOptions) util.Range {
+	rng := util.Range{
+		Start: cloneBytes(levelDBEntryPrefix),
+		Limit: bytesPrefixLimit(levelDBEntryPrefix),
+	}
+	if options.StartKey != "" {
+		rng.Start = levelDBKey(options.StartKey)
+	}
+	if options.LimitKey != "" {
+		rng.Limit = levelDBKey(options.LimitKey)
+	}
+	return rng
+}
+
+func bytesPrefixLimit(prefix []byte) []byte {
+	limit := cloneBytes(prefix)
+	for idx := len(limit) - 1; idx >= 0; idx-- {
+		if limit[idx] < 0xff {
+			limit[idx]++
+			return limit[:idx+1]
+		}
+	}
+	return nil
 }
 
 func levelDBDiffBatch(store *LevelDBStore, db *leveldb.DB, trie *HatTrie) (*leveldb.Batch, error) {

@@ -82,7 +82,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot, backup, restore-bundle, restore-rehearsal, cluster, doctor")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, snapshot, backup, restore-bundle, restore-rehearsal, cluster, doctor")
 	}
 
 	switch remaining[0] {
@@ -100,6 +100,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runReplication(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "journal":
 		return runJournal(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "storage":
+		return runStorage(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "command":
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "snapshot":
@@ -337,6 +339,41 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 		path += "?" + encoded
 	}
 	return getJSON(ctx, client, addr, path, stdout)
+}
+
+func runStorage(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("storage subcommand is required: status, compact")
+	}
+	switch args[0] {
+	case "status":
+		return getJSON(ctx, client, addr, "/api/storage", stdout)
+	case "compact":
+		return runStorageCompact(ctx, client, addr, args[1:], stdout, stderr)
+	default:
+		return fmt.Errorf("unknown storage subcommand %q", args[0])
+	}
+}
+
+func runStorageCompact(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("storage compact", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	startKey := flags.String("start-key", "", "first cache key to include in the LevelDB compaction range")
+	limitKey := flags.String("limit-key", "", "first cache key after the LevelDB compaction range")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	body, err := jsonwire.Marshal(struct {
+		StartKey string `json:"start_key,omitempty"`
+		LimitKey string `json:"limit_key,omitempty"`
+	}{
+		StartKey: strings.TrimSpace(*startKey),
+		LimitKey: strings.TrimSpace(*limitKey),
+	})
+	if err != nil {
+		return err
+	}
+	return postJSON(ctx, client, addr, "/api/storage/compact", body, stdout)
 }
 
 func runBackup(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {

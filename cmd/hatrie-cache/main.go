@@ -248,6 +248,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		RateLimiter:          rateLimiter,
 		Metrics:              apiMetrics,
 		Snapshot:             snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
+		LevelDBStore:         dbStore,
 		BackupSnapshotFormat: snapshotFormat(cfg),
 		Journal:              journal,
 		Topology:             topology,

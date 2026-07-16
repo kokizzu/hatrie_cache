@@ -577,6 +577,17 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
 make monitoring-server DB_PATH=data/cache.leveldb DB_FORMAT=json
 ```
 
+Run manual LevelDB compaction after large delete or rewrite batches to reclaim
+storage-file space and reduce read amplification. Empty bounds compact all
+cache-entry records; `start-key` is inclusive and `limit-key` is exclusive:
+
+```
+make storage-status STORAGE_PEER=http://127.0.0.1:8080
+make storage-compact STORAGE_PEER=http://127.0.0.1:8080
+make storage-compact STORAGE_PEER=http://127.0.0.1:8080 STORAGE_COMPACT_START_KEY=session: STORAGE_COMPACT_LIMIT_KEY='session;'
+make cli ARGS='storage compact -start-key session: -limit-key session;'
+```
+
 Local storage benchmark on an AMD Ryzen 9 5950X with 512 materialized string
 entries:
 
@@ -743,8 +754,9 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 ```
 
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
-`/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
-`/api/journal`, and `/api/commands`, plus Prometheus metrics at `/metrics`.
+`/api/entries`, `/api/storage`, `/api/storage/compact`, `/api/topology`,
+`/api/election`, `/api/replication`, `/api/journal`, and `/api/commands`, plus
+Prometheus metrics at `/metrics`.
 Prometheus output includes cache counters plus audit and protection counters:
 `hatrie_cache_audit_events_total`, `hatrie_cache_audit_errors_total`,
 `hatrie_cache_write_protection_rejections_total`,
@@ -936,6 +948,9 @@ make cli ARGS='election -offline node-a'
 make cli ARGS='replication'
 make cli ARGS='replication -sync'
 make cli ARGS='replication -sync -prefix session:'
+make cli ARGS='storage status'
+make cli ARGS='storage compact'
+make cli ARGS='storage compact -start-key session: -limit-key session;'
 make cli ARGS='journal -after-sequence 42 -limit 1000'
 make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000'
 make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000 -until-current -max-batches 100'

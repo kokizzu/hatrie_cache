@@ -421,6 +421,39 @@ func TestRunEntriesPassesLimit(t *testing.T) {
 	}
 }
 
+func TestRunStorageCompactPostsRange(t *testing.T) {
+	var gotPath string
+	var gotMethod string
+	var gotRequest struct {
+		StartKey string `json:"start_key"`
+		LimitKey string `json:"limit_key"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		gotMethod = r.Method
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode(storage compact request) error = %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"store":"leveldb","start_key":"alpha","limit_key":"omega"}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "storage", "compact", "-start-key", "alpha", "-limit-key", "omega"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(storage compact) error = %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/storage/compact" {
+		t.Fatalf("storage compact method/path = %s %s, want POST /api/storage/compact", gotMethod, gotPath)
+	}
+	if gotRequest.StartKey != "alpha" || gotRequest.LimitKey != "omega" {
+		t.Fatalf("storage compact request = %#v, want range", gotRequest)
+	}
+	if !strings.Contains(stdout.String(), `"store":"leveldb"`) {
+		t.Fatalf("stdout = %q, want storage response", stdout.String())
+	}
+}
+
 func TestRunTopologyGetsAndRoutes(t *testing.T) {
 	var gotPaths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
