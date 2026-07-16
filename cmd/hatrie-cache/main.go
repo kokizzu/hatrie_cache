@@ -44,6 +44,8 @@ type config struct {
 	monitoringTLSKey            string
 	monitoringAuthToken         string
 	auditLogPath                string
+	writeProtection             bool
+	rateLimit                   int
 	monitoringWebDir            string
 	monitoringReadHeaderTimeout time.Duration
 	monitoringIdleTimeout       time.Duration
@@ -121,6 +123,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 	defer closeAuditLog(auditLog, stderr)
+	rateLimiter := hatriecache.NewRateLimiter(cfg.rateLimit, time.Second)
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
@@ -219,6 +222,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		WebDir:               cfg.monitoringWebDir,
 		AuthToken:            cfg.monitoringAuthToken,
 		AuditLog:             auditLog,
+		WriteProtected:       cfg.writeProtection,
+		RateLimiter:          rateLimiter,
 		Snapshot:             snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
 		BackupSnapshotFormat: snapshotFormat(cfg),
 		Journal:              journal,
@@ -229,7 +234,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}).Handler()
 	server := newMonitoringServer(cfg, handler)
 
-	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator, auditLog)
+	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator, auditLog, rateLimiter)
 	if err != nil {
 		return err
 	}
@@ -300,6 +305,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
+	flags.BoolVar(&cfg.writeProtection, "write-protection", false, "reject dangerous monitoring API writes")
+	flags.IntVar(&cfg.rateLimit, "rate-limit", 0, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
@@ -350,6 +357,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.monitoringIdleTimeout < 0 {
 		return config{}, errors.New("monitoring idle timeout must be non-negative")
+	}
+	if cfg.rateLimit < 0 {
+		return config{}, errors.New("rate limit must be non-negative")
 	}
 	if cfg.dbHotLoadMaxBytes < 0 {
 		return config{}, errors.New("db hot-load max bytes must be non-negative")
@@ -663,7 +673,7 @@ func closeAuditLog(logger *hatriecache.AuditLogger, stderr io.Writer) {
 	}
 }
 
-func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator, auditLog *hatriecache.AuditLogger) (*grpc.Server, net.Listener, error) {
+func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator, auditLog *hatriecache.AuditLogger, rateLimiter *hatriecache.RateLimiter) (*grpc.Server, net.Listener, error) {
 	if cfg.grpcAddr == "" {
 		return nil, nil, nil
 	}
@@ -676,6 +686,8 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		NodeName:            defaultNodeID(cfg.nodeID),
 		AuthToken:           cfg.monitoringAuthToken,
 		AuditLog:            auditLog,
+		WriteProtected:      cfg.writeProtection,
+		RateLimiter:         rateLimiter,
 		Snapshot:            snapshot,
 		Journal:             journal,
 		Topology:            topology,

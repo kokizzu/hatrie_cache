@@ -1011,6 +1011,38 @@ func TestCacheGRPCServerAuditLogRecordsDangerousRPCs(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerWriteProtectionRejectsDangerousRPCs(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{WriteProtected: true})
+	defer stop()
+
+	_, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
+		Command: "SETSTR",
+		Key:     "name",
+		Value:   "ivi",
+	})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("Command(write protected) error = %v, want PermissionDenied", err)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("write-protected gRPC command wrote value %q, want empty", got)
+	}
+}
+
+func TestCacheGRPCServerRateLimitRejectsDangerousRPCs(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{RateLimiter: NewRateLimiter(1, time.Second)})
+	defer stop()
+
+	if _, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{Command: "SETSTR", Key: "one", Value: "1"}); err != nil {
+		t.Fatalf("first Command() error = %v", err)
+	}
+	_, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{Command: "SETSTR", Key: "two", Value: "2"})
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("second Command() error = %v, want ResourceExhausted", err)
+	}
+}
+
 func TestCacheGRPCServerSnapshotAndJournal(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))

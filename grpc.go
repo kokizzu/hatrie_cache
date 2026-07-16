@@ -18,6 +18,8 @@ type CacheGRPCOptions struct {
 	NodeName            string
 	AuthToken           string
 	AuditLog            *AuditLogger
+	WriteProtected      bool
+	RateLimiter         *RateLimiter
 	StartAt             time.Time
 	Snapshot            func() error
 	Journal             *CommandJournal
@@ -107,6 +109,24 @@ func (server *CacheGRPCServer) auditGRPC(event AuditEvent) {
 	_ = server.options.AuditLog.Log(event)
 }
 
+func (server *CacheGRPCServer) rejectDangerousGRPC(action string, event AuditEvent) error {
+	if server.options.WriteProtected {
+		event.Action = action
+		event.OK = false
+		event.Message = "writes are disabled"
+		server.auditGRPC(event)
+		return status.Error(codes.PermissionDenied, "writes are disabled")
+	}
+	if server.options.RateLimiter != nil && !server.options.RateLimiter.Allow("grpc") {
+		event.Action = action
+		event.OK = false
+		event.Message = "rate limit exceeded"
+		server.auditGRPC(event)
+		return status.Error(codes.ResourceExhausted, "rate limit exceeded")
+	}
+	return nil
+}
+
 func (server *CacheGRPCServer) Health(ctx context.Context, _ *hatriecachev1.HealthRequest) (*hatriecachev1.HealthResponse, error) {
 	ctx, err := server.requestContext(ctx)
 	if err != nil {
@@ -187,6 +207,16 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 		return nil, err
 	}
 	command := cacheCommandRequestFromProto(request)
+	if commandShouldJournal(command) {
+		audit := AuditEvent{
+			Command: normalizedCommand(command.Command),
+			Key:     strings.TrimSpace(command.Key),
+			Method:  "/hatriecache.v1.CacheService/Command",
+		}
+		if err := server.rejectDangerousGRPC("command", audit); err != nil {
+			return nil, err
+		}
+	}
 	response, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
 		NodeName:            server.options.NodeName,
 		Journal:             server.options.Journal,
@@ -212,6 +242,9 @@ func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.Sn
 	if err != nil {
 		return nil, err
 	}
+	if err := server.rejectDangerousGRPC("snapshot", AuditEvent{Method: "/hatriecache.v1.CacheService/Snapshot"}); err != nil {
+		return nil, err
+	}
 	if server.options.Snapshot == nil {
 		server.auditGRPC(AuditEvent{Action: "snapshot", OK: false, Method: "/hatriecache.v1.CacheService/Snapshot", Message: "snapshot path is not configured"})
 		return grpcCommandResponse(commandError("snapshot path is not configured")), nil
@@ -233,6 +266,9 @@ func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriec
 		request = &hatriecachev1.ReplicationRequest{}
 	}
 	if request.GetSync() {
+		if err := server.rejectDangerousGRPC("replication.sync", AuditEvent{Method: "/hatriecache.v1.CacheService/Replication", Details: map[string]interface{}{"prefix": request.GetPrefix()}}); err != nil {
+			return nil, err
+		}
 		result := server.options.Replicator.SyncAll(ctx, server.trie, request.GetPrefix())
 		server.auditGRPC(AuditEvent{Action: "replication.sync", OK: !result.Skipped, Method: "/hatriecache.v1.CacheService/Replication", Message: result.Reason, Details: map[string]interface{}{"prefix": request.GetPrefix(), "entries": result.Entries}})
 		return grpcReplicationResponse(result), nil
@@ -274,6 +310,9 @@ func (server *CacheGRPCServer) UpdateTopology(ctx context.Context, request *hatr
 	}
 	if server.options.Topology == nil {
 		return grpcTopologyError("topology store is not configured"), nil
+	}
+	if err := server.rejectDangerousGRPC("topology.update", AuditEvent{Method: "/hatriecache.v1.CacheService/UpdateTopology"}); err != nil {
+		return nil, err
 	}
 	if err := server.options.Topology.Set(clusterTopologyFromProto(request.GetTopology())); err != nil {
 		server.auditGRPC(AuditEvent{Action: "topology.update", OK: false, Method: "/hatriecache.v1.CacheService/UpdateTopology", Message: err.Error()})
@@ -325,6 +364,9 @@ func (server *CacheGRPCServer) UpdateElection(ctx context.Context, request *hatr
 	}
 	if request == nil {
 		request = &hatriecachev1.UpdateElectionRequest{}
+	}
+	if err := server.rejectDangerousGRPC("election.update", AuditEvent{Method: "/hatriecache.v1.CacheService/UpdateElection", Details: map[string]interface{}{"node": request.GetNode(), "online": request.Online == nil || request.GetOnline()}}); err != nil {
+		return nil, err
 	}
 	if request.Online == nil || request.GetOnline() {
 		err = server.options.Election.Heartbeat(request.GetNode())

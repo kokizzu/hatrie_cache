@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,6 +34,8 @@ type MonitoringOptions struct {
 	WebDir               string
 	AuthToken            string
 	AuditLog             *AuditLogger
+	WriteProtected       bool
+	RateLimiter          *RateLimiter
 	StartAt              time.Time
 	Snapshot             func() error
 	BackupSnapshotFormat SnapshotFormat
@@ -209,6 +212,52 @@ func (handler *MonitoringHandler) auditHTTP(r *http.Request, event AuditEvent) {
 		event.Path = r.URL.Path
 	}
 	_ = handler.options.AuditLog.Log(event)
+}
+
+func (handler *MonitoringHandler) rejectDangerousHTTP(w http.ResponseWriter, r *http.Request, action string, details map[string]interface{}) bool {
+	if handler.options.WriteProtected {
+		handler.auditHTTP(r, AuditEvent{Action: action, OK: false, Status: http.StatusForbidden, Message: "writes are disabled", Details: details})
+		writeJSONStatus(w, http.StatusForbidden, commandError("writes are disabled"))
+		return true
+	}
+	if handler.options.RateLimiter != nil && !handler.options.RateLimiter.Allow(monitoringRateLimitKey(r)) {
+		handler.auditHTTP(r, AuditEvent{Action: action, OK: false, Status: http.StatusTooManyRequests, Message: "rate limit exceeded", Details: details})
+		writeJSONStatus(w, http.StatusTooManyRequests, commandError("rate limit exceeded"))
+		return true
+	}
+	return false
+}
+
+func (handler *MonitoringHandler) rejectDangerousCommandHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest, format CommandWireFormat) bool {
+	if !commandShouldJournal(request) {
+		return false
+	}
+	if handler.options.WriteProtected {
+		response := commandError("writes are disabled")
+		handler.auditCommandHTTP(r, request, response, false, http.StatusForbidden)
+		writeCommandResponseWire(w, r, http.StatusForbidden, response, format)
+		return true
+	}
+	if handler.options.RateLimiter != nil && !handler.options.RateLimiter.Allow(monitoringRateLimitKey(r)) {
+		response := commandError("rate limit exceeded")
+		handler.auditCommandHTTP(r, request, response, false, http.StatusTooManyRequests)
+		writeCommandResponseWire(w, r, http.StatusTooManyRequests, response, format)
+		return true
+	}
+	return false
+}
+
+func monitoringRateLimitKey(r *http.Request) string {
+	if r == nil {
+		return "http"
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
+		return host
+	}
+	if r.RemoteAddr != "" {
+		return r.RemoteAddr
+	}
+	return "http"
 }
 
 func (handler *MonitoringHandler) requireTrie(w http.ResponseWriter) bool {
@@ -406,6 +455,9 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if requestContextDone(w, r) {
 		return
 	}
+	if handler.rejectDangerousCommandHTTP(w, r, request, requestFormat) {
+		return
+	}
 	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
 		NodeName:            handler.options.NodeName,
 		Journal:             handler.options.Journal,
@@ -495,6 +547,9 @@ func (handler *MonitoringHandler) handleSnapshot(w http.ResponseWriter, r *http.
 	if requestContextDone(w, r) {
 		return
 	}
+	if handler.rejectDangerousHTTP(w, r, "snapshot", nil) {
+		return
+	}
 	if handler.options.Snapshot == nil {
 		handler.auditHTTP(r, AuditEvent{Action: "snapshot", OK: false, Status: http.StatusConflict, Message: "snapshot path is not configured"})
 		writeJSONStatus(w, http.StatusConflict, commandError("snapshot path is not configured"))
@@ -542,6 +597,9 @@ func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Re
 	request.Path = strings.TrimSpace(request.Path)
 	if request.Path == "" {
 		writeJSONStatus(w, http.StatusBadRequest, commandError("backup path is required"))
+		return
+	}
+	if handler.rejectDangerousHTTP(w, r, "backup", map[string]interface{}{"path": request.Path}) {
 		return
 	}
 	format := handler.options.BackupSnapshotFormat
@@ -611,6 +669,9 @@ func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.
 		if requestContextDone(w, r) {
 			return
 		}
+		if handler.rejectDangerousHTTP(w, r, "topology.update", map[string]interface{}{"mode": topology.Mode, "version": topology.Version}) {
+			return
+		}
 		if err := handler.options.Topology.Set(topology); err != nil {
 			handler.auditHTTP(r, AuditEvent{Action: "topology.update", OK: false, Status: http.StatusBadRequest, Message: err.Error(), Details: map[string]interface{}{"mode": topology.Mode, "version": topology.Version}})
 			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
@@ -676,6 +737,10 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 		if requestContextDone(w, r) {
 			return
 		}
+		details := map[string]interface{}{"node": request.Node, "online": request.Online == nil || *request.Online}
+		if handler.rejectDangerousHTTP(w, r, "election.update", details) {
+			return
+		}
 		var err error
 		if request.Online == nil || *request.Online {
 			err = handler.options.Election.Heartbeat(request.Node)
@@ -683,11 +748,11 @@ func (handler *MonitoringHandler) handleElection(w http.ResponseWriter, r *http.
 			err = handler.options.Election.MarkOffline(request.Node)
 		}
 		if err != nil {
-			handler.auditHTTP(r, AuditEvent{Action: "election.update", OK: false, Status: http.StatusBadRequest, Message: err.Error(), Details: map[string]interface{}{"node": request.Node, "online": request.Online == nil || *request.Online}})
+			handler.auditHTTP(r, AuditEvent{Action: "election.update", OK: false, Status: http.StatusBadRequest, Message: err.Error(), Details: details})
 			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
 			return
 		}
-		handler.auditHTTP(r, AuditEvent{Action: "election.update", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"node": request.Node, "online": request.Online == nil || *request.Online}})
+		handler.auditHTTP(r, AuditEvent{Action: "election.update", OK: true, Status: http.StatusOK, Details: details})
 		writeJSON(w, handler.options.Election.Status())
 	default:
 		writeMethodNotAllowed(w)
@@ -732,6 +797,9 @@ func (handler *MonitoringHandler) handleReplication(w http.ResponseWriter, r *ht
 		return
 	}
 	if requestContextDone(w, r) {
+		return
+	}
+	if handler.rejectDangerousHTTP(w, r, "replication.sync", map[string]interface{}{"prefix": request.Prefix}) {
 		return
 	}
 	result := handler.options.Replicator.SyncAll(r.Context(), handler.trie, request.Prefix)
@@ -803,6 +871,9 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 	}
 	source := strings.TrimSpace(request.Source)
 	if requestContextDone(w, r) {
+		return
+	}
+	if handler.rejectDangerousHTTP(w, r, "journal.pull", map[string]interface{}{"source": source, "after_sequence": request.AfterSequence}) {
 		return
 	}
 

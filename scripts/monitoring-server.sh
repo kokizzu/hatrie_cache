@@ -7,6 +7,8 @@ tls_cert=${MONITORING_TLS_CERT:-}
 tls_key=${MONITORING_TLS_KEY:-}
 auth_token=${MONITORING_AUTH_TOKEN:-}
 audit_log_path=${AUDIT_LOG_PATH:-}
+write_protection=${WRITE_PROTECTION:-false}
+rate_limit=${RATE_LIMIT:-0}
 read_header_timeout=${MONITORING_READ_HEADER_TIMEOUT:-5s}
 idle_timeout=${MONITORING_IDLE_TIMEOUT:-2m}
 node_id=${NODE_ID:-}
@@ -49,6 +51,8 @@ set -- \
 	-monitoring-tls-key "$tls_key" \
 	-monitoring-auth-token "$auth_token" \
 	-audit-log-path "$audit_log_path" \
+	-write-protection="$write_protection" \
+	-rate-limit "$rate_limit" \
 	-monitoring-read-header-timeout "$read_header_timeout" \
 	-monitoring-idle-timeout "$idle_timeout" \
 	-node-id "$node_id" \

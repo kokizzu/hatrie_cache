@@ -1347,6 +1347,42 @@ func TestMonitoringAuditLogRecordsDangerousActions(t *testing.T) {
 	}
 }
 
+func TestMonitoringWriteProtectionRejectsDangerousActions(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{WriteProtected: true}).Handler()
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"name","value":"ivi"}`))
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("write-protected command status = %d, want 403", resp.Code)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("write-protected command wrote value %q, want empty", got)
+	}
+}
+
+func TestMonitoringRateLimitRejectsDangerousActions(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{RateLimiter: NewRateLimiter(1, time.Second)}).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"one","value":"1"}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("first command status = %d, want 200", resp.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"two","value":"2"}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusTooManyRequests {
+		t.Fatalf("second command status = %d, want 429", resp.Code)
+	}
+}
+
 func TestMonitoringHandlerExposesPrometheusMetrics(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))

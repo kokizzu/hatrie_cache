@@ -103,6 +103,40 @@ func TestMonitoringWrapperPassesAuditLogPath(t *testing.T) {
 	}
 }
 
+func TestMonitoringWrapperPassesWriteProtectionAndRateLimit(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"WRITE_PROTECTION ?= false",
+		"RATE_LIMIT ?= 0",
+		"WRITE_PROTECTION='$(WRITE_PROTECTION)'",
+		"RATE_LIMIT='$(RATE_LIMIT)'",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile missing write protection/rate limit token %q", token)
+		}
+	}
+
+	script, err := os.ReadFile("scripts/monitoring-server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/monitoring-server.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"write_protection=${WRITE_PROTECTION:-false}",
+		"rate_limit=${RATE_LIMIT:-0}",
+		`-write-protection="$write_protection"`,
+		`-rate-limit "$rate_limit"`,
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("monitoring wrapper missing write protection/rate limit token %q", token)
+		}
+	}
+}
+
 func TestServerWrapperPassesConfigFile(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {

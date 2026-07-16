@@ -75,6 +75,8 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 		"-monitoring-web-dir", "/tmp/web",
 		"-monitoring-auth-token", "secret",
 		"-audit-log-path", "/tmp/audit.jsonl",
+		"-write-protection",
+		"-rate-limit", "7",
 		"-monitoring-read-header-timeout", "750ms",
 		"-monitoring-idle-timeout", "15s",
 	}, &bytes.Buffer{})
@@ -86,6 +88,9 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	}
 	if cfg.monitoringAddr != "127.0.0.1:9090" || cfg.monitoringWebDir != "/tmp/web" || cfg.monitoringAuthToken != "secret" || cfg.auditLogPath != "/tmp/audit.jsonl" {
 		t.Fatalf("cfg = %#v, want explicit address and web dir", cfg)
+	}
+	if !cfg.writeProtection || cfg.rateLimit != 7 {
+		t.Fatalf("write protection/rate limit = %v/%d, want true/7", cfg.writeProtection, cfg.rateLimit)
 	}
 	if cfg.monitoringReadHeaderTimeout != 750*time.Millisecond || cfg.monitoringIdleTimeout != 15*time.Second {
 		t.Fatalf("monitoring timeouts = %s/%s, want 750ms/15s", cfg.monitoringReadHeaderTimeout, cfg.monitoringIdleTimeout)
@@ -236,6 +241,13 @@ func TestParseConfigRejectsNegativeMonitoringTimeouts(t *testing.T) {
 				t.Fatalf("parseConfig(%s) error = %v, want %q", tt.name, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseConfigRejectsNegativeRateLimit(t *testing.T) {
+	_, err := parseConfig([]string{"-rate-limit", "-1"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "rate limit must be non-negative") {
+		t.Fatalf("parseConfig(negative rate limit) error = %v, want rate limit rejection", err)
 	}
 }
 
@@ -1029,7 +1041,7 @@ func TestNewGRPCServerPassesMonitoringAuthToken(t *testing.T) {
 	server, listener, err := newGRPCServer(config{
 		grpcAddr:            "127.0.0.1:0",
 		monitoringAuthToken: "secret",
-	}, ht, nil, nil, nil, nil, nil, nil)
+	}, ht, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGRPCServer() error = %v", err)
 	}

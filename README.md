@@ -437,6 +437,16 @@ names and keys but intentionally omit command values:
 make monitoring-server AUDIT_LOG_PATH=data/audit.jsonl
 ```
 
+Set `WRITE_PROTECTION=true` to reject dangerous write/admin actions while still
+allowing read-only health, stats, entry listing, metrics, and status endpoints.
+Set `RATE_LIMIT=N` to cap dangerous HTTP/gRPC API actions to `N` requests per
+caller per second; `0` disables rate limiting:
+
+```
+make monitoring-server WRITE_PROTECTION=true
+make monitoring-server RATE_LIMIT=50 AUDIT_LOG_PATH=data/audit.jsonl
+```
+
 Long-running daemon options can also live in a JSON config file. Config keys
 match flag names and may use hyphens or underscores; duration values use Go
 duration strings. Explicit CLI flags override file values:
