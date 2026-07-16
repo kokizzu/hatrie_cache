@@ -78,7 +78,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot, backup")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot, backup, cluster")
 	}
 
 	switch remaining[0] {
@@ -102,6 +102,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return postJSON(ctx, client, cfg.addr, "/api/snapshot", []byte("{}"), stdout)
 	case "backup":
 		return runBackup(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "cluster":
+		return runCluster(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown subcommand %q", remaining[0])
 	}
@@ -349,6 +351,226 @@ func runBackup(ctx context.Context, client *http.Client, addr string, args []str
 		return err
 	}
 	return postJSON(ctx, client, addr, "/api/backup", body, stdout)
+}
+
+type clusterJoinResult struct {
+	OK              bool   `json:"ok"`
+	Message         string `json:"message"`
+	Peer            string `json:"peer"`
+	Node            string `json:"node"`
+	Address         string `json:"address"`
+	TopologyUpdated bool   `json:"topology_updated"`
+	TargetUpdated   bool   `json:"target_updated"`
+	JournalPulled   bool   `json:"journal_pulled"`
+}
+
+func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("cluster subcommand is required: join")
+	}
+	switch args[0] {
+	case "join":
+		return runClusterJoin(ctx, client, addr, args[1:], stdout, stderr)
+	default:
+		return fmt.Errorf("unknown cluster subcommand %q", args[0])
+	}
+}
+
+func runClusterJoin(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cluster join", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	nodeID := flags.String("node", "", "node id to add to the cluster topology")
+	nodeAddress := flags.String("address", "", "joining node monitoring API base URL")
+	peer := flags.String("peer", addr, "existing cluster node monitoring API base URL")
+	role := flags.String("role", "replica", "topology role for the joining node: primary or replica")
+	updateTarget := flags.Bool("update-target", true, "upload the updated topology to the joining node")
+	pullJournal := flags.Bool("pull-journal", true, "pull the peer journal into the joining node after topology update")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*nodeID = strings.TrimSpace(*nodeID)
+	*nodeAddress = strings.TrimSpace(*nodeAddress)
+	*peer = strings.TrimSpace(*peer)
+	*role = strings.TrimSpace(*role)
+	if *nodeID == "" {
+		return errors.New("cluster join -node is required")
+	}
+	if *nodeAddress == "" {
+		return errors.New("cluster join -address is required")
+	}
+	if *peer == "" {
+		return errors.New("cluster join -peer is required")
+	}
+
+	if _, err := getJSONValue[map[string]interface{}](ctx, client, *peer, "/api/health"); err != nil {
+		return fmt.Errorf("peer health: %w", err)
+	}
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("peer topology: %w", err)
+	}
+	updated, topologyChanged, err := clusterJoinTopology(topology, *nodeID, *nodeAddress, *role)
+	if err != nil {
+		return err
+	}
+	if topologyChanged {
+		if err := putJSONValueDiscard(ctx, client, *peer, "/api/topology", updated); err != nil {
+			return fmt.Errorf("upload peer topology: %w", err)
+		}
+	}
+	targetUpdated := false
+	if *updateTarget {
+		if err := putJSONValueDiscard(ctx, client, *nodeAddress, "/api/topology", updated); err != nil {
+			return fmt.Errorf("upload joining node topology: %w", err)
+		}
+		targetUpdated = true
+	}
+	journalPulled := false
+	if *pullJournal {
+		body, err := jsonwire.Marshal(struct {
+			Source       string `json:"source"`
+			UntilCurrent bool   `json:"until_current"`
+		}{
+			Source:       *peer,
+			UntilCurrent: true,
+		})
+		if err != nil {
+			return err
+		}
+		if err := postJSON(ctx, client, *nodeAddress, "/api/journal", body, io.Discard); err != nil {
+			return fmt.Errorf("pull joining node journal: %w", err)
+		}
+		journalPulled = true
+	}
+
+	result := clusterJoinResult{
+		OK:              true,
+		Message:         "cluster join completed",
+		Peer:            *peer,
+		Node:            *nodeID,
+		Address:         *nodeAddress,
+		TopologyUpdated: topologyChanged,
+		TargetUpdated:   targetUpdated,
+		JournalPulled:   journalPulled,
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	if _, err := stdout.Write(append(data, '\n')); err != nil {
+		return err
+	}
+	return nil
+}
+
+func clusterJoinTopology(topology hatriecache.ClusterTopology, nodeID string, address string, role string) (hatriecache.ClusterTopology, bool, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	address = strings.TrimSpace(address)
+	role = strings.TrimSpace(role)
+	if nodeID == "" {
+		return hatriecache.ClusterTopology{}, false, errors.New("cluster join node id is required")
+	}
+	if address == "" {
+		return hatriecache.ClusterTopology{}, false, errors.New("cluster join node address is required")
+	}
+	if role == "" {
+		role = "replica"
+	}
+	if role != "primary" && role != "replica" {
+		return hatriecache.ClusterTopology{}, false, errors.New("cluster join role must be primary or replica")
+	}
+
+	changed := false
+	found := false
+	for idx := range topology.Nodes {
+		if strings.TrimSpace(topology.Nodes[idx].ID) != nodeID {
+			continue
+		}
+		found = true
+		if topology.Nodes[idx].Address != address {
+			topology.Nodes[idx].Address = address
+			changed = true
+		}
+		if topology.Nodes[idx].Role != role {
+			topology.Nodes[idx].Role = role
+			changed = true
+		}
+	}
+	if !found {
+		topology.Nodes = append(topology.Nodes, hatriecache.TopologyNode{ID: nodeID, Address: address, Role: role})
+		changed = true
+	}
+	if topology.Mode == "" || topology.Mode == hatriecache.TopologyModeSharded {
+		for idx := range topology.Shards {
+			shard := &topology.Shards[idx]
+			if shard.Primary == nodeID || stringInSlice(shard.Replicas, nodeID) {
+				continue
+			}
+			shard.Replicas = append(shard.Replicas, nodeID)
+			changed = true
+		}
+	}
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return hatriecache.ClusterTopology{}, false, err
+	}
+	return store.Get(), changed, nil
+}
+
+func stringInSlice(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func getJSONValue[T any](ctx context.Context, client *http.Client, addr string, path string) (T, error) {
+	var out T
+	req, err := http.NewRequestWithContext(cliContext(ctx), http.MethodGet, endpoint(addr, path), nil)
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if err := doAndDecodeJSON(client, req, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func putJSONValueDiscard(ctx context.Context, client *http.Client, addr string, path string, value interface{}) error {
+	data, err := jsonwire.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return putJSONReader(ctx, client, addr, path, bytes.NewReader(data), io.Discard)
+}
+
+func doAndDecodeJSON(client *http.Client, req *http.Request, out interface{}) error {
+	client = cliHTTPClient(client)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer drainAndCloseResponse(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, err := readErrorBody(resp.Body)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("server returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	decoder := jsonwire.NewDecoder(io.LimitReader(resp.Body, maxErrorBodyBytes))
+	decoder.UseNumber()
+	if err := decoder.Decode(out); err != nil {
+		return err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return errors.New("invalid trailing JSON")
+	}
+	return nil
 }
 
 func runCommand(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {

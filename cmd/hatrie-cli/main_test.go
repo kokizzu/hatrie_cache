@@ -1688,6 +1688,135 @@ func TestRunBackupRequiresPath(t *testing.T) {
 	}
 }
 
+func TestClusterJoinTopologyAddsReplica(t *testing.T) {
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeSharded,
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+		},
+		Shards: []hatriecache.TopologyShard{
+			{ID: 0, Primary: "node-a"},
+		},
+	}
+	updated, changed, err := clusterJoinTopology(topology, "node-b", "http://node-b:8080", "replica")
+	if err != nil {
+		t.Fatalf("clusterJoinTopology() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("clusterJoinTopology() changed = false, want true")
+	}
+	if len(updated.Nodes) != 2 || updated.Nodes[1].ID != "node-b" {
+		t.Fatalf("nodes = %#v, want node-b added", updated.Nodes)
+	}
+	if len(updated.Shards) != 1 || !reflect.DeepEqual(updated.Shards[0].Replicas, []string{"node-b"}) {
+		t.Fatalf("shards = %#v, want node-b replica", updated.Shards)
+	}
+
+	again, changed, err := clusterJoinTopology(updated, "node-b", "http://node-b:8080", "replica")
+	if err != nil {
+		t.Fatalf("clusterJoinTopology(existing) error = %v", err)
+	}
+	if changed || !reflect.DeepEqual(again, updated) {
+		t.Fatalf("existing join changed topology = %v %#v, want unchanged", changed, again)
+	}
+}
+
+func TestRunClusterJoinUpdatesPeerTargetAndPullsJournal(t *testing.T) {
+	initialTopology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeSharded,
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+		},
+		Shards: []hatriecache.TopologyShard{
+			{ID: 0, Primary: "node-a"},
+		},
+	}
+	var peerTopology hatriecache.ClusterTopology
+	var targetTopology hatriecache.ClusterTopology
+	var journalPull struct {
+		Source       string `json:"source"`
+		UntilCurrent bool   `json:"until_current"`
+	}
+
+	var peerURL string
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/health":
+			w.Write([]byte(`{"status":"online"}`))
+		case "GET /api/topology":
+			if err := json.NewEncoder(w).Encode(initialTopology); err != nil {
+				t.Fatalf("Encode(topology) error = %v", err)
+			}
+		case "PUT /api/topology":
+			if err := json.NewDecoder(r.Body).Decode(&peerTopology); err != nil {
+				t.Fatalf("Decode(peer topology) error = %v", err)
+			}
+			w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Fatalf("unexpected peer request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer peer.Close()
+	peerURL = peer.URL
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "PUT /api/topology":
+			if err := json.NewDecoder(r.Body).Decode(&targetTopology); err != nil {
+				t.Fatalf("Decode(target topology) error = %v", err)
+			}
+			w.Write([]byte(`{"ok":true}`))
+		case "POST /api/journal":
+			if err := json.NewDecoder(r.Body).Decode(&journalPull); err != nil {
+				t.Fatalf("Decode(journal pull) error = %v", err)
+			}
+			w.Write([]byte(`{"applied":1,"applied_through":1}`))
+		default:
+			t.Fatalf("unexpected target request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer target.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", peerURL,
+		"cluster", "join",
+		"-node", "node-b",
+		"-address", target.URL,
+	}, stdout, &bytes.Buffer{}, peer.Client()); err != nil {
+		t.Fatalf("run(cluster join) error = %v", err)
+	}
+	if len(peerTopology.Nodes) != 2 || len(peerTopology.Shards) != 1 || !reflect.DeepEqual(peerTopology.Shards[0].Replicas, []string{"node-b"}) {
+		t.Fatalf("peer topology = %#v, want node-b replica", peerTopology)
+	}
+	if !reflect.DeepEqual(targetTopology, peerTopology) {
+		t.Fatalf("target topology = %#v, want peer topology %#v", targetTopology, peerTopology)
+	}
+	if journalPull.Source != peerURL || !journalPull.UntilCurrent {
+		t.Fatalf("journal pull = %#v, want source peer until_current", journalPull)
+	}
+	var result clusterJoinResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster join result) error = %v", err)
+	}
+	if !result.OK || !result.TopologyUpdated || !result.TargetUpdated || !result.JournalPulled {
+		t.Fatalf("cluster join result = %#v, want all steps completed", result)
+	}
+}
+
+func TestRunClusterJoinRequiresNodeAndAddress(t *testing.T) {
+	err := run(context.Background(), []string{"cluster", "join", "-address", "http://node-b:8080"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "cluster join -node is required") {
+		t.Fatalf("run(cluster join without node) error = %v, want node requirement", err)
+	}
+	err = run(context.Background(), []string{"cluster", "join", "-node", "node-b"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "cluster join -address is required") {
+		t.Fatalf("run(cluster join without address) error = %v, want address requirement", err)
+	}
+}
+
 func TestRunReportsServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad", http.StatusBadRequest)

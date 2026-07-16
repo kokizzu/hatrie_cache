@@ -310,10 +310,18 @@ make cli ARGS='replication -sync -prefix session:'
 
 ### Joining A Cluster
 
-There is no separate auto-discovery join command. Joining a cluster means
-adding the node to the topology, starting it with a stable `NODE_ID`, catching
-it up from an existing node, and then allowing replication and leader routing to
-use it.
+Use the CLI join workflow to add a running node to a peer's topology, upload the
+same topology to the joining node, and pull the peer journal into the joining
+node:
+
+```
+make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080'
+make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080 -pull-journal=false'
+```
+
+Joining a cluster means adding the node to the topology, starting it with a
+stable `NODE_ID`, catching it up from an existing node, and then allowing
+replication and leader routing to use it.
 
 1. Add the new node to the topology JSON. For sharded mode, add it as a replica
    first; move primaries or bucket ranges only after it has caught up.
