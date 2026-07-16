@@ -48,5 +48,6 @@ WORKDIR /app
 EXPOSE 8080 9090
 VOLUME ["/var/lib/hatrie-cache", "/var/backups/hatrie-cache"]
 STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 CMD HATRIE_CACHE_AUTH_TOKEN="${MONITORING_AUTH_TOKEN:-}" /usr/local/bin/hatrie-cli -addr "${HATRIE_HEALTHCHECK_ADDR:-http://127.0.0.1:8080}" -timeout "${HATRIE_HEALTHCHECK_TIMEOUT:-2s}" health >/dev/null || exit 1
 ENTRYPOINT ["/usr/local/bin/hatrie-cache"]
 CMD ["-monitoring-server", "-monitoring-addr", "0.0.0.0:8080", "-monitoring-web-dir", "/app/svelte-mpa/dist", "-db-path", "/var/lib/hatrie-cache/cache.leveldb", "-snapshot-path", "/var/lib/hatrie-cache/snapshot.hc", "-journal-path", "/var/lib/hatrie-cache/commands.journal"]

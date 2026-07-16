@@ -274,7 +274,10 @@ The `Dockerfile` builds the Svelte MPA assets, compiles `hatrie-cache` and
 user on Debian slim. The default container command serves the monitoring UI/API
 on `0.0.0.0:8080` with LevelDB, snapshot, and journal files under
 `/var/lib/hatrie-cache`; pass your own args to enable gRPC with
-`-grpc-addr 0.0.0.0:9090` or to set `-monitoring-auth-token`.
+`-grpc-addr 0.0.0.0:9090` or to set `-monitoring-auth-token`. The image also
+includes a Docker healthcheck that runs `hatrie-cli health` against
+`HATRIE_HEALTHCHECK_ADDR` (default `http://127.0.0.1:8080`) and forwards
+`MONITORING_AUTH_TOKEN` to the probe when authentication is enabled.
 
 ### Restore And Recovery Runbook
 
