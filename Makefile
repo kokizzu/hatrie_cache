@@ -35,6 +35,10 @@ JOURNAL_PULL_INTERVAL ?= 0
 JOURNAL_PULL_TIMEOUT ?= 30s
 JOURNAL_PULL_LIMIT ?= 0
 JOURNAL_PULL_MAX_BATCHES ?= 0
+DATA_DIR ?= data
+BACKUP_DIR ?= backup/latest
+BACKUP_OVERWRITE ?= false
+RESTORE_OVERWRITE ?= false
 SANITIZE_C ?= auto
 SANITIZE_C_ALLOW_STRICT_OVERCOMMIT ?= 0
 SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM ?= 0
@@ -59,7 +63,7 @@ TARANTOOL_BIN ?= tarantool
 TARANTOOL_WORK_DIR ?=
 HATRIE_COMMAND_BENCH ?= ^BenchmarkCommandFeature$$
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -80,6 +84,12 @@ verify-frontend:
 
 verify-ops:
 	./scripts/verify-ops.sh
+
+backup:
+	DATA_DIR='$(DATA_DIR)' BACKUP_DIR='$(BACKUP_DIR)' BACKUP_OVERWRITE='$(BACKUP_OVERWRITE)' ./scripts/backup.sh
+
+restore:
+	DATA_DIR='$(DATA_DIR)' BACKUP_DIR='$(BACKUP_DIR)' RESTORE_OVERWRITE='$(RESTORE_OVERWRITE)' ./scripts/restore.sh
 
 bench:
 	go test -run '^$$' -bench='$(BENCH)' -benchmem

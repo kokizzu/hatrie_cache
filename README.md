@@ -229,22 +229,23 @@ Recommended durability profiles:
 For snapshot+journal deployments:
 
 1. Trigger an online snapshot.
-2. Copy the snapshot, journal, and journal pull state if present.
+2. Copy the data directory to a fresh backup directory.
 3. Keep file ownership and permissions when copying.
 
 ```
 make cli ARGS='snapshot'
-make run CMD='mkdir -p backup'
-make run CMD='cp -a data/snapshot.hc data/commands.journal backup/'
-make run CMD='test ! -f data/commands.journal.pull_state.json || cp -a data/commands.journal.pull_state.json backup/'
+make backup DATA_DIR=data BACKUP_DIR=backup/run-001
 ```
 
 For LevelDB deployments, prefer stopping the process or using filesystem-level
-snapshots before copying the LevelDB directory:
+snapshots before copying the data directory:
 
 ```
-make run CMD='cp -a data/cache.leveldb backup/cache.leveldb'
+make backup DATA_DIR=data BACKUP_DIR=backup/run-001
 ```
+
+Use a fresh `BACKUP_DIR` by default. Set `BACKUP_OVERWRITE=true` only when you
+intentionally want to copy into an existing backup directory.
 
 The safest operational pattern is to store cache data under one directory such
 as `/var/lib/hatrie-cache`, keep snapshots/journals/LevelDB on the same durable
@@ -256,9 +257,7 @@ Restore snapshot+journal data to a clean data directory, then start the node
 with the same paths:
 
 ```
-make run CMD='mkdir -p data'
-make run CMD='cp -a backup/snapshot.hc data/snapshot.hc'
-make run CMD='cp -a backup/commands.journal data/commands.journal'
+make restore DATA_DIR=data BACKUP_DIR=backup/run-001
 make monitoring-server SNAPSHOT_PATH=data/snapshot.hc JOURNAL_PATH=data/commands.journal
 ```
 
@@ -271,9 +270,12 @@ snapshot or an explicit replication sync.
 Restore LevelDB data by restoring the directory and starting with `DB_PATH`:
 
 ```
-make run CMD='cp -a backup/cache.leveldb data/cache.leveldb'
+make restore DATA_DIR=data BACKUP_DIR=backup/run-001
 make monitoring-server DB_PATH=data/cache.leveldb
 ```
+
+`make restore` refuses to copy into a non-empty `DATA_DIR` unless
+`RESTORE_OVERWRITE=true` is set.
 
 For crash recovery, restart with the same persistence flags first. If a node was
 offline while a leader continued accepting writes, also pull journal catch-up or
