@@ -1,6 +1,8 @@
 package hatriecache
 
 import (
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -57,9 +59,32 @@ func TestRateLimiterBoundsClientState(t *testing.T) {
 		}
 		now = now.Add(time.Millisecond)
 	}
-	if len(limiter.clients) > rateLimiterMaxClients {
-		t.Fatalf("client state len = %d, want <= %d", len(limiter.clients), rateLimiterMaxClients)
+	if got := rateLimiterClientCount(limiter); got > rateLimiterMaxClients {
+		t.Fatalf("client state len = %d, want <= %d", got, rateLimiterMaxClients)
 	}
+}
+
+func TestRateLimiterInitializesShards(t *testing.T) {
+	limiter := NewRateLimiter(1, time.Second)
+	if len(limiter.shards) != rateLimiterShardCount {
+		t.Fatalf("shards len = %d, want %d", len(limiter.shards), rateLimiterShardCount)
+	}
+	for idx := range limiter.shards {
+		if limiter.shards[idx].clients == nil {
+			t.Fatalf("shard %d clients map is nil", idx)
+		}
+	}
+}
+
+func rateLimiterClientCount(limiter *RateLimiter) int {
+	if limiter == nil {
+		return 0
+	}
+	total := 0
+	for idx := range limiter.shards {
+		total += len(limiter.shards[idx].clients)
+	}
+	return total
 }
 
 func BenchmarkRateLimiterAllowSameClient(b *testing.B) {
@@ -74,4 +99,25 @@ func BenchmarkRateLimiterAllowSameClient(b *testing.B) {
 			b.Fatal("Allow(client) = false, want true")
 		}
 	}
+}
+
+func BenchmarkRateLimiterAllowParallelClients(b *testing.B) {
+	keys := make([]string, 1024)
+	for idx := range keys {
+		keys[idx] = "client-" + strconv.Itoa(idx)
+	}
+	limiter := NewRateLimiter(b.N+1, time.Second)
+	limiter.now = func() time.Time { return time.Unix(100, 0) }
+	var next uint64
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			key := keys[int(atomic.AddUint64(&next, 1))&(len(keys)-1)]
+			if !limiter.Allow(key) {
+				b.Fatal("Allow(client) = false, want true")
+			}
+		}
+	})
 }

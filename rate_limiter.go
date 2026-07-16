@@ -5,13 +5,20 @@ import (
 	"time"
 )
 
-const rateLimiterMaxClients = 4096
+const (
+	rateLimiterMaxClients = 4096
+	rateLimiterShardCount = 64
+)
 
 type RateLimiter struct {
+	limit  int
+	window time.Duration
+	now    func() time.Time
+	shards [rateLimiterShardCount]rateLimiterShard
+}
+
+type rateLimiterShard struct {
 	mu      sync.Mutex
-	limit   int
-	window  time.Duration
-	now     func() time.Time
 	clients map[string]rateLimitClient
 }
 
@@ -24,12 +31,15 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	if limit <= 0 || window <= 0 {
 		return nil
 	}
-	return &RateLimiter{
-		limit:   limit,
-		window:  window,
-		now:     time.Now,
-		clients: make(map[string]rateLimitClient),
+	limiter := &RateLimiter{
+		limit:  limit,
+		window: window,
+		now:    time.Now,
 	}
+	for idx := range limiter.shards {
+		limiter.shards[idx].clients = make(map[string]rateLimitClient)
+	}
+	return limiter
 }
 
 func (limiter *RateLimiter) Limit() int {
@@ -47,9 +57,10 @@ func (limiter *RateLimiter) Allow(key string) bool {
 		key = "global"
 	}
 	now := limiter.now()
-	limiter.mu.Lock()
-	defer limiter.mu.Unlock()
-	client, ok := limiter.clients[key]
+	shard := limiter.shardFor(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	client, ok := shard.clients[key]
 	if !ok || client.lastSeen.IsZero() {
 		client = rateLimitClient{lastSeen: now, tokens: float64(limiter.limit)}
 	} else {
@@ -64,27 +75,42 @@ func (limiter *RateLimiter) Allow(key string) bool {
 		client.lastSeen = now
 	}
 	if client.tokens < 1 {
-		limiter.clients[key] = client
+		shard.clients[key] = client
 		return false
 	}
 	client.tokens--
-	limiter.clients[key] = client
-	if len(limiter.clients) > rateLimiterMaxClients {
-		limiter.pruneLocked(now)
+	shard.clients[key] = client
+	if len(shard.clients) > rateLimiterMaxClientsPerShard {
+		shard.pruneLocked(now, limiter.window)
 	}
 	return true
 }
 
-func (limiter *RateLimiter) pruneLocked(now time.Time) {
-	for key, client := range limiter.clients {
-		if now.Sub(client.lastSeen) >= limiter.window {
-			delete(limiter.clients, key)
+func (limiter *RateLimiter) shardFor(key string) *rateLimiterShard {
+	return &limiter.shards[rateLimiterShardIndex(key)]
+}
+
+const rateLimiterMaxClientsPerShard = rateLimiterMaxClients / rateLimiterShardCount
+
+func rateLimiterShardIndex(key string) int {
+	hash := uint64(1469598103934665603)
+	for idx := 0; idx < len(key); idx++ {
+		hash ^= uint64(key[idx])
+		hash *= 1099511628211
+	}
+	return int(hash & uint64(rateLimiterShardCount-1))
+}
+
+func (shard *rateLimiterShard) pruneLocked(now time.Time, window time.Duration) {
+	for key, client := range shard.clients {
+		if now.Sub(client.lastSeen) >= window {
+			delete(shard.clients, key)
 		}
 	}
-	for len(limiter.clients) > rateLimiterMaxClients {
+	for len(shard.clients) > rateLimiterMaxClientsPerShard {
 		oldestKey := ""
 		var oldest time.Time
-		for key, client := range limiter.clients {
+		for key, client := range shard.clients {
 			if oldestKey == "" || client.lastSeen.Before(oldest) {
 				oldestKey = key
 				oldest = client.lastSeen
@@ -93,6 +119,6 @@ func (limiter *RateLimiter) pruneLocked(now time.Time) {
 		if oldestKey == "" {
 			return
 		}
-		delete(limiter.clients, oldestKey)
+		delete(shard.clients, oldestKey)
 	}
 }
