@@ -277,6 +277,16 @@ make monitoring-server DB_PATH=data/cache.leveldb
 `make restore` refuses to copy into a non-empty `DATA_DIR` unless
 `RESTORE_OVERWRITE=true` is set.
 
+For a server-side atomic backup bundle, ask the monitoring API to write a
+tar.gz bundle containing `manifest.json`, `snapshot.hc`, and a compacted
+`commands.journal` checkpoint. The manifest records file sizes, SHA-256
+checksums, snapshot format, and journal sequence:
+
+```
+make cli ARGS='backup -path backup/run-001.tar.gz'
+make cli ARGS='backup -path backup/run-001.tar.gz -snapshot-format gzip-binary'
+```
+
 For crash recovery, restart with the same persistence flags first. If a node was
 offline while a leader continued accepting writes, also pull journal catch-up or
 run anti-entropy replication sync after the node is reachable:

@@ -135,6 +135,9 @@ run_snapshot_journal_restore_smoke() {
 	command "$restore_addr" SET ops:restore:before before
 	cli "$restore_addr" snapshot >/dev/null
 	command "$restore_addr" SET ops:restore:after after
+	bundle_path="$data_dir/backup.tar.gz"
+	cli "$restore_addr" backup -path "$bundle_path" >/dev/null
+	[ -s "$bundle_path" ] || fail "backup bundle was not written: $bundle_path"
 	stop_server "$pid"
 
 	start_server restore-replay "$restore_addr" \

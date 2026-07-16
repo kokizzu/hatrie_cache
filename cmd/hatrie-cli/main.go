@@ -76,7 +76,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot, backup")
 	}
 
 	switch remaining[0] {
@@ -98,6 +98,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runCommand(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "snapshot":
 		return postJSON(ctx, client, cfg.addr, "/api/snapshot", []byte("{}"), stdout)
+	case "backup":
+		return runBackup(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown subcommand %q", remaining[0])
 	}
@@ -291,6 +293,30 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 		path += "?" + encoded
 	}
 	return getJSON(ctx, client, addr, path, stdout)
+}
+
+func runBackup(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	path := flags.String("path", "", "server-side backup bundle output path")
+	snapshotFormat := flags.String("snapshot-format", "", "optional snapshot format override for the backup bundle")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*path) == "" {
+		return errors.New("backup -path is required")
+	}
+	body, err := jsonwire.Marshal(struct {
+		Path           string `json:"path"`
+		SnapshotFormat string `json:"snapshot_format,omitempty"`
+	}{
+		Path:           strings.TrimSpace(*path),
+		SnapshotFormat: strings.TrimSpace(*snapshotFormat),
+	})
+	if err != nil {
+		return err
+	}
+	return postJSON(ctx, client, addr, "/api/backup", body, stdout)
 }
 
 func runCommand(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {

@@ -1619,6 +1619,45 @@ func TestRunSnapshotPostsToSnapshotEndpoint(t *testing.T) {
 	}
 }
 
+func TestRunBackupPostsToBackupEndpoint(t *testing.T) {
+	var gotPath string
+	var gotMethod string
+	var gotRequest struct {
+		Path           string `json:"path"`
+		SnapshotFormat string `json:"snapshot_format"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		gotMethod = r.Method
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"version":1,"snapshot":"snapshot.hc"}`))
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "backup", "-path", "/tmp/backup.tar.gz", "-snapshot-format", "gzip-binary"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(backup) error = %v", err)
+	}
+	if gotPath != "/api/backup" || gotMethod != http.MethodPost {
+		t.Fatalf("request = %s %s, want POST /api/backup", gotMethod, gotPath)
+	}
+	if gotRequest.Path != "/tmp/backup.tar.gz" || gotRequest.SnapshotFormat != "gzip-binary" {
+		t.Fatalf("backup request = %#v, want path and snapshot format", gotRequest)
+	}
+	if got := stdout.String(); got != "{\"version\":1,\"snapshot\":\"snapshot.hc\"}\n" {
+		t.Fatalf("stdout = %q, want backup response", got)
+	}
+}
+
+func TestRunBackupRequiresPath(t *testing.T) {
+	err := run(context.Background(), []string{"backup"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "backup -path is required") {
+		t.Fatalf("run(backup without path) error = %v, want path requirement", err)
+	}
+}
+
 func TestRunReportsServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad", http.StatusBadRequest)

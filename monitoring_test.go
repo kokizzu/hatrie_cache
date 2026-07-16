@@ -1211,6 +1211,52 @@ func TestMonitoringHandlerRejectsForcedSnapshotWhenUnconfigured(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerWritesBackupBundle(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalFormatJSON)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
+	}
+	defer journal.Close()
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !got.OK {
+		t.Fatalf("journaled SETSTR response = %#v, want ok", got)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		Journal:              journal,
+		BackupSnapshotFormat: SnapshotFormatJSON,
+	}).Handler()
+
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	body := `{"path":` + strconv.Quote(bundlePath) + `}`
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/backup", strings.NewReader(body)))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("backup status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("backup bundle missing: %v", err)
+	}
+	var manifest BackupBundleManifest
+	if err := json.Unmarshal(resp.Body.Bytes(), &manifest); err != nil {
+		t.Fatalf("backup manifest JSON error = %v", err)
+	}
+	if manifest.JournalSequence != 1 || manifest.Snapshot != backupBundleSnapshotPath || manifest.Journal != backupBundleJournalPath {
+		t.Fatalf("backup manifest = %#v, want snapshot and journal checkpoint at sequence 1", manifest)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/backup", nil))
+	if resp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("backup GET status = %d, want 405", resp.Code)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/backup", strings.NewReader(`{"path":""}`)))
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("backup empty path status = %d, want 400", resp.Code)
+	}
+}
+
 func TestMonitoringHandlerManagesTopology(t *testing.T) {
 	ht := newTestTrie(t)
 	store, err := NewTopologyStore(SingleNodeTopology("node-a", "127.0.0.1:8080"))

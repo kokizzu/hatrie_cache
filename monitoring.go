@@ -29,15 +29,16 @@ var errCommandJournalTailResponseTooLarge = errors.New("hatriecache: journal sou
 var errMonitoringEntriesLimitReached = errors.New("hatriecache: monitoring entries limit reached")
 
 type MonitoringOptions struct {
-	NodeName            string
-	WebDir              string
-	StartAt             time.Time
-	Snapshot            func() error
-	Journal             *CommandJournal
-	Topology            *TopologyStore
-	Election            *ElectionStore
-	Replicator          *HTTPReplicator
-	EnforceLeaderWrites bool
+	NodeName             string
+	WebDir               string
+	StartAt              time.Time
+	Snapshot             func() error
+	BackupSnapshotFormat SnapshotFormat
+	Journal              *CommandJournal
+	Topology             *TopologyStore
+	Election             *ElectionStore
+	Replicator           *HTTPReplicator
+	EnforceLeaderWrites  bool
 }
 
 type MonitoringHandler struct {
@@ -116,6 +117,11 @@ type journalPullRequest struct {
 	MaxBatches    uint64 `json:"max_batches,omitempty"`
 }
 
+type backupBundleRequest struct {
+	Path           string `json:"path"`
+	SnapshotFormat string `json:"snapshot_format,omitempty"`
+}
+
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
@@ -147,6 +153,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/entries", handler.handleEntries)
 	mux.HandleFunc("/api/commands", handler.handleCommands)
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
+	mux.HandleFunc("/api/backup", handler.handleBackup)
 	mux.HandleFunc("/api/topology", handler.handleTopology)
 	mux.HandleFunc("/api/election", handler.handleElection)
 	mux.HandleFunc("/api/replication", handler.handleReplication)
@@ -342,6 +349,58 @@ func (handler *MonitoringHandler) handleSnapshot(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, CacheCommandResponse{OK: true, Message: "snapshot saved"})
+}
+
+func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if !handler.requireTrie(w) {
+		return
+	}
+	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
+	if !ok {
+		return
+	}
+	defer closeBody()
+	decoder.DisallowUnknownFields()
+	var request backupBundleRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid backup request")
+		return
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid backup request")
+		return
+	}
+	if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
+		return
+	}
+	request.Path = strings.TrimSpace(request.Path)
+	if request.Path == "" {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("backup path is required"))
+		return
+	}
+	format := handler.options.BackupSnapshotFormat
+	if request.SnapshotFormat != "" {
+		parsed, err := ParseSnapshotFormat(request.SnapshotFormat)
+		if err != nil {
+			writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+			return
+		}
+		format = parsed
+	}
+	manifest, err := CreateBackupBundle(request.Path, handler.trie, handler.options.Journal, BackupBundleOptions{SnapshotFormat: format})
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	writeJSON(w, manifest)
 }
 
 func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.Request) {

@@ -204,14 +204,15 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	defer stopReplicationSyncer()
 
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
-		NodeName:            defaultNodeID(cfg.nodeID),
-		WebDir:              cfg.monitoringWebDir,
-		Snapshot:            snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
-		Journal:             journal,
-		Topology:            topology,
-		Election:            election,
-		Replicator:          replicator,
-		EnforceLeaderWrites: cfg.enforceLeaderWrites,
+		NodeName:             defaultNodeID(cfg.nodeID),
+		WebDir:               cfg.monitoringWebDir,
+		Snapshot:             snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
+		BackupSnapshotFormat: snapshotFormat(cfg),
+		Journal:              journal,
+		Topology:             topology,
+		Election:             election,
+		Replicator:           replicator,
+		EnforceLeaderWrites:  cfg.enforceLeaderWrites,
 	}).Handler()
 	server := newMonitoringServer(cfg, handler)
 
