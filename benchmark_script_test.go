@@ -22,3 +22,23 @@ func TestBenchmarkSerializationScriptIncludesDocumentedStructuredJournalBenches(
 		}
 	}
 }
+
+func TestHatTrieTransportFeatureBenchmarkScriptReportsRSS(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-hatrie-transport-features.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-hatrie-transport-features.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		"HATRIE_TRANSPORT_BENCH",
+		"BenchmarkCommandTransportFeature",
+		"go test -c",
+		"-test.benchmem",
+		"/usr/bin/time",
+		"Max resident set size",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("HAT-trie transport benchmark script missing token %q", token)
+		}
+	}
+}

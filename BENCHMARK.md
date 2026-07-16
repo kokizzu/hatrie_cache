@@ -27,6 +27,10 @@ same kind of process:
   Tarantool run.
 - [HAT-trie vs Redis](#hat-trie-vs-redis) uses Redis' local TCP command path,
   one client, and 10,000 requests per Redis command.
+- [HAT-trie Transport Costs](#hat-trie-transport-costs) measures the same
+  HAT-trie command families through in-process calls, HTTP JSON, HTTP protobuf,
+  and native gRPC so local Redis/Tarantool comparisons can be read alongside
+  HAT-trie's own wire overhead.
 - [Memory Summary](#memory-summary) reports process/server memory from the same
   local runs.
 
@@ -74,6 +78,17 @@ make command-support
 
 The full HAT-trie benchmark includes rows beyond the Redis/Tarantool comparable
 tables, such as `BenchmarkCommandFeature/FenwickTreeRange`.
+
+HAT-trie end-to-end transport rows:
+
+```
+make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(InProcess|HTTPJSON|HTTPProtobuf|GRPC)/(StringSet|StringGet|CounterInc|MapPut|MapPeek)$' BENCHTIME=100x
+```
+
+The transport benchmark uses the same command execution semantics as the
+monitoring HTTP API and native gRPC API. HTTP protobuf uses
+`application/x-protobuf` on `/api/commands`; gRPC uses the generated
+`CacheService.Command` RPC over a local bufconn listener.
 
 ## Latest Optimization Spot Check
 
@@ -170,6 +185,40 @@ commands add the two Redis seconds-per-10k values before computing speedup.
 | HyperLogLog add | `BenchmarkCommandFeature/HyperLogLogAdd` | 0.062230 s | `PFADD` | 1.043000 s | 16.76x |
 | HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 0.054010 s | `PFCOUNT` | 1.186000 s | 21.96x |
 | Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.004782 s | `DUMP` | 1.088000 s | 227.52x |
+
+## HAT-trie Transport Costs
+
+Run this section locally when you need apples-to-apples HAT-trie protocol
+overhead before comparing against Redis TCP or a remote Tarantool service:
+
+```
+make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(InProcess|HTTPJSON|HTTPProtobuf|GRPC)/(StringSet|StringGet|CounterInc|MapPut|MapPeek)$' BENCHTIME=100x
+```
+
+The benchmark rows are named as
+`BenchmarkCommandTransportFeature/<transport>/<feature>`, for example
+`BenchmarkCommandTransportFeature/HTTPProtobuf/StringSet` and
+`BenchmarkCommandTransportFeature/GRPC/StringGet`. Use the transport rows to
+measure CPU, heap, and per-operation latency added by the API layer before
+making Redis/Tarantool conclusions from in-process HAT-trie rows.
+
+Local 100-iteration spot check:
+
+| Transport | Feature | Time/op | Bytes/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| In-process | String write | 1,536 ns | 12 B | 1 |
+| In-process | String read | 991.7 ns | 0 B | 0 |
+| HTTP JSON | String write | 292,585 ns | 80,808 B | 124 |
+| HTTP JSON | String read | 123,490 ns | 78,979 B | 121 |
+| HTTP protobuf | String write | 214,397 ns | 119,920 B | 125 |
+| HTTP protobuf | String read | 188,322 ns | 130,715 B | 123 |
+| gRPC protobuf | String write | 132,951 ns | 22,825 B | 195 |
+| gRPC protobuf | String read | 113,880 ns | 10,557 B | 191 |
+
+On this small payload, native gRPC is the lowest-latency wire path. HTTP
+protobuf reduces some response work but still pays HTTP request construction
+and protobuf allocation costs, so it should be measured against the actual
+payload shape before assuming it beats HTTP JSON.
 
 ## HAT-trie Command Families
 

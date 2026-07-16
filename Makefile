@@ -80,6 +80,7 @@ TARANTOOL_MEMTX_MEMORY ?= 268435456
 TARANTOOL_BIN ?= tarantool
 TARANTOOL_WORK_DIR ?=
 HATRIE_COMMAND_BENCH ?= ^BenchmarkCommandFeature$$
+HATRIE_TRANSPORT_BENCH ?= ^BenchmarkCommandTransportFeature$$
 CONFIG_PATH ?=
 SERVER_ARGS ?=
 CHECK_CONFIG_ARGS ?=
@@ -90,7 +91,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore restore-bundle restore-rehearsal doctor cluster-status server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore restore-bundle restore-rehearsal doctor cluster-status server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -150,6 +151,9 @@ bench-command-features:
 
 bench-hatrie-command-features:
 	HATRIE_BENCH='$(HATRIE_COMMAND_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-hatrie-command-features.sh
+
+bench-hatrie-transport-features:
+	HATRIE_TRANSPORT_BENCH='$(HATRIE_TRANSPORT_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-hatrie-transport-features.sh
 
 bench-redis-command-features:
 	REDIS_HOST='$(REDIS_HOST)' REDIS_PORT='$(REDIS_PORT)' REDIS_REQUESTS='$(REDIS_REQUESTS)' REDIS_CLIENTS='$(REDIS_CLIENTS)' REDIS_KEYSPACE='$(REDIS_KEYSPACE)' REDIS_START_DOCKER='$(REDIS_START_DOCKER)' REDIS_DOCKER_IMAGE='$(REDIS_DOCKER_IMAGE)' ./scripts/benchmark-redis-command-features.sh

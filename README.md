@@ -77,6 +77,7 @@ Run command-feature benchmarks for the Redis/Tarantool comparison matrix:
 
 ```
 make bench-command-features BENCHTIME=100x
+make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(HTTPJSON|HTTPProtobuf|GRPC)/(StringSet|StringGet)$' BENCHTIME=100x
 make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000
 make bench-tarantool-command-features TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
 ```
