@@ -119,9 +119,10 @@ recovering, and joining nodes to a cluster. The examples use the Makefile
 wrappers so the same flags and defaults are used in development, CI, and local
 operations.
 
-CI is defined in `.github/workflows/ci.yml` and runs Go verification, C checks,
-ops smoke tests, frontend verification, and a production Docker image build on
-pushes and pull requests.
+CI is defined in `.github/workflows/ci.yml` and runs config guardrails, Go
+verification, C checks, ops smoke tests, frontend verification, and a
+production Docker image build on pushes and pull requests. `make verify-ci`
+checks the workflow guardrails plus deploy config/topology examples locally.
 
 ### Install And Build
 

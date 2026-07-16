@@ -1,0 +1,16 @@
+{
+  "monitoring_server": true,
+  "monitoring_addr": "127.0.0.1:8080",
+  "monitoring_web_dir": "svelte-mpa/dist",
+  "node_id": "node-a",
+  "topology_path": "deploy/topology/full-replica.json",
+  "snapshot_path": "data/snapshot.hc",
+  "snapshot_interval": "30s",
+  "journal_path": "data/commands.journal",
+  "journal_pull_state_path": "data/commands.journal.pull_state.json",
+  "db_path": "data/cache.leveldb",
+  "db_sync_interval": "30s",
+  "replication": true,
+  "replication_async": true,
+  "rate_limit": 100
+}
