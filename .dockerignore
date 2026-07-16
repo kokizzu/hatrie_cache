@@ -1,0 +1,15 @@
+.agents
+.codex
+.git
+.gitignore
+
+backup
+data
+tmp
+
+*.out
+*.test
+*.tmp
+
+svelte-mpa/dist
+svelte-mpa/node_modules

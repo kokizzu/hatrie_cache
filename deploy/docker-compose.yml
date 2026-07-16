@@ -1,50 +1,59 @@
+x-hatrie-cache-image: &hatrie-cache-image
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: hatrie-cache:local
+
 services:
   node-a:
-    image: golang:1.23
-    working_dir: /src
+    <<: *hatrie-cache-image
     command:
-      - /bin/sh
-      - -lc
-      - >
-        go run ./cmd/hatrie-cache
-        -monitoring-server
-        -monitoring-addr 0.0.0.0:8080
-        -node-id node-a
-        -topology-path /etc/hatrie-cache/topology.json
-        -snapshot-path /var/lib/hatrie-cache/snapshot.hc
-        -snapshot-interval 30s
-        -journal-path /var/lib/hatrie-cache/commands.journal
-        -journal-pull-state-path /var/lib/hatrie-cache/commands.journal.pull_state.json
-        -replication=true
+      - -monitoring-server
+      - -monitoring-addr
+      - 0.0.0.0:8080
+      - -node-id
+      - node-a
+      - -topology-path
+      - /etc/hatrie-cache/topology.json
+      - -snapshot-path
+      - /var/lib/hatrie-cache/snapshot.hc
+      - -snapshot-interval
+      - 30s
+      - -journal-path
+      - /var/lib/hatrie-cache/commands.journal
+      - -journal-pull-state-path
+      - /var/lib/hatrie-cache/commands.journal.pull_state.json
+      - -replication=true
     ports:
       - "18080:8080"
     volumes:
-      - ..:/src:ro
       - ./topology/full-replica.json:/etc/hatrie-cache/topology.json:ro
       - node-a-data:/var/lib/hatrie-cache
 
   node-b:
-    image: golang:1.23
-    working_dir: /src
+    <<: *hatrie-cache-image
     command:
-      - /bin/sh
-      - -lc
-      - >
-        go run ./cmd/hatrie-cache
-        -monitoring-server
-        -monitoring-addr 0.0.0.0:8080
-        -node-id node-b
-        -topology-path /etc/hatrie-cache/topology.json
-        -snapshot-path /var/lib/hatrie-cache/snapshot.hc
-        -snapshot-interval 30s
-        -journal-path /var/lib/hatrie-cache/commands.journal
-        -journal-pull-source http://node-a:8080
-        -journal-pull-state-path /var/lib/hatrie-cache/commands.journal.pull_state.json
-        -replication=true
+      - -monitoring-server
+      - -monitoring-addr
+      - 0.0.0.0:8080
+      - -node-id
+      - node-b
+      - -topology-path
+      - /etc/hatrie-cache/topology.json
+      - -snapshot-path
+      - /var/lib/hatrie-cache/snapshot.hc
+      - -snapshot-interval
+      - 30s
+      - -journal-path
+      - /var/lib/hatrie-cache/commands.journal
+      - -journal-pull-source
+      - http://node-a:8080
+      - -journal-pull-state-path
+      - /var/lib/hatrie-cache/commands.journal.pull_state.json
+      - -replication=true
     ports:
       - "18081:8080"
     volumes:
-      - ..:/src:ro
       - ./topology/full-replica.json:/etc/hatrie-cache/topology.json:ro
       - node-b-data:/var/lib/hatrie-cache
 

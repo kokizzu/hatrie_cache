@@ -44,10 +44,13 @@ func TestDeployServiceAndComposeExamplesExposeDurableRuntime(t *testing.T) {
 
 	compose := readDeployExample(t, "deploy/docker-compose.yml")
 	for _, token := range []string{
+		"build:",
+		"dockerfile: Dockerfile",
 		"node-a:",
 		"node-b:",
 		"-monitoring-server",
-		"-journal-pull-source http://node-a:8080",
+		"-journal-pull-source",
+		"http://node-a:8080",
 		"./topology/full-replica.json:/etc/hatrie-cache/topology.json:ro",
 		"node-a-data:",
 		"node-b-data:",
@@ -58,9 +61,51 @@ func TestDeployServiceAndComposeExamplesExposeDurableRuntime(t *testing.T) {
 	}
 }
 
+func TestProductionDockerfileAndBuildScript(t *testing.T) {
+	dockerfile := readDeployExample(t, "Dockerfile")
+	for _, token := range []string{
+		"FROM node:",
+		"FROM golang:",
+		"FROM debian:",
+		"pnpm run build",
+		"CGO_ENABLED=1 go build",
+		"USER hatrie-cache",
+		"ENTRYPOINT [\"/usr/local/bin/hatrie-cache\"]",
+		"/var/lib/hatrie-cache",
+		"/app/svelte-mpa/dist",
+	} {
+		if !strings.Contains(dockerfile, token) {
+			t.Fatalf("Dockerfile missing %q", token)
+		}
+	}
+
+	script := readDeployExample(t, "scripts/docker-build.sh")
+	for _, token := range []string{
+		"DOCKER_IMAGE",
+		"DOCKER_PLATFORM",
+		"docker build",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("docker build script missing %q", token)
+		}
+	}
+
+	makefile := readDeployExample(t, "Makefile")
+	for _, token := range []string{
+		"docker-build:",
+		"./scripts/docker-build.sh",
+	} {
+		if !strings.Contains(makefile, token) {
+			t.Fatalf("Makefile missing docker build token %q", token)
+		}
+	}
+}
+
 func TestReadmeLinksDeployExamples(t *testing.T) {
 	readme := readDeployExample(t, "README.md")
 	for _, token := range []string{
+		"make docker-build",
+		"Dockerfile",
 		"deploy/systemd/hatrie-cache.service",
 		"deploy/topology/full-replica.json",
 		"deploy/topology/sharded.json",

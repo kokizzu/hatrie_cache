@@ -259,6 +259,19 @@ Deployable templates are available in `deploy/`: systemd at
 `deploy/topology/full-replica.json` and `deploy/topology/sharded.json`, and a
 two-node local compose example at `deploy/docker-compose.yml`.
 
+Build the production container image with the same Makefile+script convention:
+
+```
+make docker-build DOCKER_IMAGE=hatrie-cache:latest
+```
+
+The `Dockerfile` builds the Svelte MPA assets, compiles `hatrie-cache` and
+`hatrie-cli` in a CGO-enabled builder stage, and runs the daemon as a non-root
+user on Debian slim. The default container command serves the monitoring UI/API
+on `0.0.0.0:8080` with LevelDB, snapshot, and journal files under
+`/var/lib/hatrie-cache`; pass your own args to enable gRPC with
+`-grpc-addr 0.0.0.0:9090` or to set `-monitoring-auth-token`.
+
 ### Restore And Recovery Runbook
 
 Restore snapshot+journal data to a clean data directory, then start the node
