@@ -98,6 +98,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/backup.sh",
 		"restore:",
 		"./scripts/restore.sh",
+		"restore-bundle:",
+		"./scripts/restore-bundle.sh",
 		"doctor:",
 		"./scripts/doctor.sh",
 	} {
@@ -112,6 +114,20 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "go run ./cmd/hatrie-cli doctor -path") {
 		t.Fatal("doctor script should invoke hatrie-cli doctor")
+	}
+	data, err = os.ReadFile("scripts/restore-bundle.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/restore-bundle.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"RESTORE_BUNDLE_PATH",
+		"restore-bundle -bundle",
+		"-data-dir",
+		"-overwrite",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("restore-bundle script missing token %q", token)
+		}
 	}
 }
 

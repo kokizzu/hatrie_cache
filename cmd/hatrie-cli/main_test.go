@@ -1719,6 +1719,37 @@ func TestRunDoctorRequiresPath(t *testing.T) {
 	}
 }
 
+func TestRunRestoreBundleVerifiesAndRestores(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	if got := ht.ExecuteCommand(hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !got.OK {
+		t.Fatalf("SETSTR response = %#v, want ok", got)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if _, err := hatriecache.CreateBackupBundle(bundlePath, ht, nil, hatriecache.BackupBundleOptions{SnapshotFormat: hatriecache.SnapshotFormatJSON}); err != nil {
+		t.Fatalf("CreateBackupBundle() error = %v", err)
+	}
+	dataDir := filepath.Join(t.TempDir(), "data")
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"restore-bundle", "-bundle", bundlePath, "-data-dir", dataDir}, stdout, &bytes.Buffer{}, http.DefaultClient); err != nil {
+		t.Fatalf("run(restore-bundle) error = %v", err)
+	}
+	var report hatriecache.BackupBundleRestoreReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("Unmarshal(restore report) error = %v", err)
+	}
+	if !report.OK || report.RecoveredKeys != 1 || report.Snapshot == "" {
+		t.Fatalf("restore report = %#v, want ok with snapshot", report)
+	}
+}
+
+func TestRunRestoreBundleRequiresBundle(t *testing.T) {
+	err := run(context.Background(), []string{"restore-bundle"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "restore-bundle -bundle is required") {
+		t.Fatalf("run(restore-bundle without bundle) error = %v, want bundle requirement", err)
+	}
+}
+
 func TestClusterJoinTopologyAddsReplica(t *testing.T) {
 	topology := hatriecache.ClusterTopology{
 		Version: 1,

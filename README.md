@@ -291,6 +291,13 @@ make doctor DOCTOR_PATH=backup/run-001
 make cli ARGS='doctor -path backup/run-001.tar.gz'
 ```
 
+Restore an atomic backup bundle after verification:
+
+```
+make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data
+make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data RESTORE_BUNDLE_OVERWRITE=true
+```
+
 For a server-side atomic backup bundle, ask the monitoring API to write a
 tar.gz bundle containing `manifest.json`, `snapshot.hc`, and a compacted
 `commands.journal` checkpoint. The manifest records file sizes, SHA-256

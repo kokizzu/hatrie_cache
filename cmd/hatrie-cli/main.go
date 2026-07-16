@@ -78,7 +78,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot, backup, cluster, doctor")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot, backup, restore-bundle, cluster, doctor")
 	}
 
 	switch remaining[0] {
@@ -102,6 +102,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return postJSON(ctx, client, cfg.addr, "/api/snapshot", []byte("{}"), stdout)
 	case "backup":
 		return runBackup(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "restore-bundle":
+		return runRestoreBundle(remaining[1:], stdout, stderr)
 	case "cluster":
 		return runCluster(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "doctor":
@@ -366,6 +368,30 @@ func runDoctor(args []string, stdout io.Writer, stderr io.Writer) error {
 		return errors.New("doctor -path is required")
 	}
 	report, err := hatriecache.VerifyBackupPath(*path)
+	if err != nil {
+		return err
+	}
+	data, err := jsonwire.Marshal(report)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+func runRestoreBundle(args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("restore-bundle", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	bundlePath := flags.String("bundle", "", "atomic backup bundle path to verify and restore")
+	dataDir := flags.String("data-dir", "data", "restore target data directory")
+	overwrite := flags.Bool("overwrite", false, "allow restoring into a non-empty data directory")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*bundlePath) == "" {
+		return errors.New("restore-bundle -bundle is required")
+	}
+	report, err := hatriecache.RestoreBackupBundle(*bundlePath, *dataDir, hatriecache.BackupBundleRestoreOptions{Overwrite: *overwrite})
 	if err != nil {
 		return err
 	}

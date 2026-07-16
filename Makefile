@@ -41,6 +41,8 @@ BACKUP_DIR ?= backup/latest
 BACKUP_OVERWRITE ?= false
 RESTORE_OVERWRITE ?= false
 DOCTOR_PATH ?= $(BACKUP_DIR)
+RESTORE_BUNDLE_PATH ?= backup/latest.tar.gz
+RESTORE_BUNDLE_OVERWRITE ?= false
 SANITIZE_C ?= auto
 SANITIZE_C_ALLOW_STRICT_OVERCOMMIT ?= 0
 SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM ?= 0
@@ -65,7 +67,7 @@ TARANTOOL_BIN ?= tarantool
 TARANTOOL_WORK_DIR ?=
 HATRIE_COMMAND_BENCH ?= ^BenchmarkCommandFeature$$
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore doctor bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore restore-bundle doctor bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -92,6 +94,9 @@ backup:
 
 restore:
 	DATA_DIR='$(DATA_DIR)' BACKUP_DIR='$(BACKUP_DIR)' RESTORE_OVERWRITE='$(RESTORE_OVERWRITE)' ./scripts/restore.sh
+
+restore-bundle:
+	DATA_DIR='$(DATA_DIR)' RESTORE_BUNDLE_PATH='$(RESTORE_BUNDLE_PATH)' RESTORE_BUNDLE_OVERWRITE='$(RESTORE_BUNDLE_OVERWRITE)' ./scripts/restore-bundle.sh
 
 doctor:
 	DOCTOR_PATH='$(DOCTOR_PATH)' ./scripts/doctor.sh
