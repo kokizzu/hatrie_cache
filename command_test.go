@@ -753,6 +753,63 @@ func TestExecuteCommandCuckooFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandCuckooFilterExactPathPreservesSemantics(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDCF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDCF exact create response = %#v, want added 1", got)
+	}
+	if !ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("public HasCuckooFilter missed value added by exact ADDCF")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASCF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASCF exact hit response = %#v, want 1", got)
+	}
+	missing := cuckooFilterMissingValue(t, ht, "seen")
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASCF", Key: "seen", Value: missing}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASCF exact miss response = %#v, want 0", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "DELCF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("DELCF exact response = %#v, want removed 1", got)
+	}
+	if ht.HasCuckooFilter("seen", "alpha") {
+		t.Fatal("public HasCuckooFilter hit value removed by exact DELCF")
+	}
+
+	ht.UpsertCuckooFilter("generic", DefaultCuckooFilterCapacity, DefaultCuckooFilterFalsePositiveRate)
+	if added := ht.AddCuckooFilter("generic", "beta"); added != 1 {
+		t.Fatalf("public AddCuckooFilter(beta) = %d, want 1", added)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASCF", Key: "generic", Value: "beta"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASCF exact after public add response = %#v, want 1", got)
+	}
+}
+
+func TestExecuteCommandCuckooFilterExactPathAllocationBudget(t *testing.T) {
+	ht := newTestTrie(t)
+	add := CacheCommandRequest{Command: "ADDCF", Key: "seen", Value: "alpha"}
+	del := CacheCommandRequest{Command: "DELCF", Key: "seen", Value: "alpha"}
+	has := CacheCommandRequest{Command: "HASCF", Key: "seen", Value: "alpha"}
+	if got := ht.ExecuteCommand(add); !got.OK {
+		t.Fatalf("warm ADDCF response = %#v, want ok", got)
+	}
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		if got := ht.ExecuteCommand(del); !got.OK || got.Value != "1" {
+			t.Fatalf("DELCF response = %#v, want removed 1", got)
+		}
+		if got := ht.ExecuteCommand(add); !got.OK || got.Value != "1" {
+			t.Fatalf("ADDCF response = %#v, want added 1", got)
+		}
+		if got := ht.ExecuteCommand(has); !got.OK || got.Value != "1" {
+			t.Fatalf("HASCF response = %#v, want hit", got)
+		}
+	})
+	if allocs > 1 {
+		t.Fatalf("DELCF+ADDCF+HASCF exact path allocations = %.2f, want <= 1", allocs)
+	}
+}
+
 func TestExecuteCommandCuckooFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDCF", Key: "seen", Value: "alpha"}); !got.OK {

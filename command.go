@@ -1064,6 +1064,21 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastHasBloomFilterCommand(key, request.Value)
+	case "ADDCF", "CFADD":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddCuckooFilterCommand(key, request.Value)
+	case "HASCF", "CFHAS", "CFEXISTS":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastHasCuckooFilterCommand(key, request.Value)
+	case "DELCF", "REMCF", "CFDEL":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastDeleteCuckooFilterCommand(key, request.Value)
 	case "PEEKMAP":
 		if !commandFastPathField(request.Subkey) {
 			return CacheCommandResponse{}, false
@@ -1478,6 +1493,92 @@ func (ht *HatTrie) executeFastHasBloomFilterCommand(key string, value string) (C
 	hit := ht.bloomFilters.array[hval.Index].containsJSONString(value)
 	ht.recordReadLocked(hit, key)
 	return commandBool01Response(hit), true
+}
+
+func (ht *HatTrie) executeFastAddCuckooFilterCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsCuckooFilter() {
+			added := boolInt(ht.cuckooFilters.array[hval.Index].addJSONString(value))
+			if added > 0 {
+				ht.recordWriteLocked(key)
+				ht.cacheValueLocked(key, hval)
+			}
+			return CacheCommandResponse{OK: true, Message: "added cuckoo filter values", Value: strconv.Itoa(added)}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsCuckooFilter() {
+		added := boolInt(ht.cuckooFilters.array[hval.Index].addJSONString(value))
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		if added > 0 {
+			ht.recordWriteLocked(key)
+		}
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "added cuckoo filter values", Value: strconv.Itoa(added)}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	data := newDefaultCuckooFilterData()
+	added := boolInt(data.addJSONString(value))
+	idx := ht.cuckooFilters.AddData(data)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_CUCKOO_FILTER}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "added cuckoo filter values", Value: strconv.Itoa(added)}, true
+}
+
+func (ht *HatTrie) executeFastHasCuckooFilterCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsCuckooFilter() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}, true
+	}
+	hit := ht.cuckooFilters.array[hval.Index].containsJSONString(value)
+	ht.recordReadLocked(hit, key)
+	return commandBool01Response(hit), true
+}
+
+func (ht *HatTrie) executeFastDeleteCuckooFilterCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsCuckooFilter() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "removed cuckoo filter values", Value: "0"}, true
+	}
+	deleted := boolInt(ht.cuckooFilters.array[hval.Index].deleteJSONString(value))
+	ht.recordReadLocked(deleted > 0, key)
+	if deleted > 0 {
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+	}
+	return CacheCommandResponse{OK: true, Message: "removed cuckoo filter values", Value: strconv.Itoa(deleted)}, true
 }
 
 func commandFastPathField(value string) bool {

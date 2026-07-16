@@ -233,6 +233,29 @@ func (filter *cuckooFilterData) addKey(key []byte) bool {
 	return false
 }
 
+func (filter *cuckooFilterData) addJSONString(value string) bool {
+	if filter == nil || filter.bucketCount == 0 || filter.fingerprintBits == 0 {
+		return false
+	}
+	filter.ensureFingerprints()
+	hash := bloomFilterFNV64aJSONString(value)
+	fp := filter.fingerprint(hash)
+	index := filter.index(hash)
+	alternate := filter.alternateIndex(index, fp)
+	if filter.containsFingerprint(index, alternate, fp) {
+		return false
+	}
+	if filter.insertIntoBucket(index, fp) || filter.insertIntoBucket(alternate, fp) {
+		filter.count++
+		return true
+	}
+	if filter.relocateAndInsert(index, alternate, fp, hash) {
+		filter.count++
+		return true
+	}
+	return false
+}
+
 func (filter *cuckooFilterData) Contains(value interface{}) bool {
 	contains, _ := filter.ContainsChecked(value)
 	return contains
@@ -254,6 +277,16 @@ func (filter *cuckooFilterData) containsKey(key []byte) bool {
 		return false
 	}
 	hash := bloomFilterFNV64a(key)
+	fp := filter.fingerprint(hash)
+	index := filter.index(hash)
+	return filter.containsFingerprint(index, filter.alternateIndex(index, fp), fp)
+}
+
+func (filter *cuckooFilterData) containsJSONString(value string) bool {
+	if filter == nil || len(filter.fingerprints) == 0 {
+		return false
+	}
+	hash := bloomFilterFNV64aJSONString(value)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)
 	return filter.containsFingerprint(index, filter.alternateIndex(index, fp), fp)
@@ -296,6 +329,20 @@ func (filter *cuckooFilterData) deleteKey(key []byte) bool {
 		return false
 	}
 	hash := bloomFilterFNV64a(key)
+	fp := filter.fingerprint(hash)
+	index := filter.index(hash)
+	if filter.deleteFingerprint(index, fp) || filter.deleteFingerprint(filter.alternateIndex(index, fp), fp) {
+		filter.count--
+		return true
+	}
+	return false
+}
+
+func (filter *cuckooFilterData) deleteJSONString(value string) bool {
+	if filter == nil || len(filter.fingerprints) == 0 {
+		return false
+	}
+	hash := bloomFilterFNV64aJSONString(value)
 	fp := filter.fingerprint(hash)
 	index := filter.index(hash)
 	if filter.deleteFingerprint(index, fp) || filter.deleteFingerprint(filter.alternateIndex(index, fp), fp) {
