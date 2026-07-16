@@ -982,8 +982,10 @@ func TestCacheGRPCServerAuthTokenProtectsRPCs(t *testing.T) {
 func TestCacheGRPCServerAuditLogRecordsDangerousRPCs(t *testing.T) {
 	ht := newTestTrie(t)
 	var audit bytes.Buffer
+	metrics := NewAPIMetrics()
 	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{
 		AuditLog: NewAuditLogger(&audit),
+		Metrics:  metrics,
 	})
 	defer stop()
 
@@ -1009,11 +1011,15 @@ func TestCacheGRPCServerAuditLogRecordsDangerousRPCs(t *testing.T) {
 	if strings.Contains(audit.String(), "ivi") {
 		t.Fatalf("audit log leaked command value: %s", audit.String())
 	}
+	if got := metrics.Snapshot(); got.AuditEventsTotal != 1 || got.AuditErrorsTotal != 0 {
+		t.Fatalf("gRPC audit metrics = %#v, want one audit event and no errors", got)
+	}
 }
 
 func TestCacheGRPCServerWriteProtectionRejectsDangerousRPCs(t *testing.T) {
 	ht := newTestTrie(t)
-	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{WriteProtected: true})
+	metrics := NewAPIMetrics()
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{WriteProtected: true, Metrics: metrics})
 	defer stop()
 
 	_, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{
@@ -1027,11 +1033,15 @@ func TestCacheGRPCServerWriteProtectionRejectsDangerousRPCs(t *testing.T) {
 	if got := ht.GetString("name"); got != "" {
 		t.Fatalf("write-protected gRPC command wrote value %q, want empty", got)
 	}
+	if got := metrics.Snapshot(); got.WriteProtectionRejectionsTotal != 1 {
+		t.Fatalf("gRPC write protection metrics = %#v, want one rejection", got)
+	}
 }
 
 func TestCacheGRPCServerRateLimitRejectsDangerousRPCs(t *testing.T) {
 	ht := newTestTrie(t)
-	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{RateLimiter: NewRateLimiter(1, time.Second)})
+	metrics := NewAPIMetrics()
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{RateLimiter: NewRateLimiter(1, time.Second), Metrics: metrics})
 	defer stop()
 
 	if _, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{Command: "SETSTR", Key: "one", Value: "1"}); err != nil {
@@ -1040,6 +1050,9 @@ func TestCacheGRPCServerRateLimitRejectsDangerousRPCs(t *testing.T) {
 	_, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{Command: "SETSTR", Key: "two", Value: "2"})
 	if status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("second Command() error = %v, want ResourceExhausted", err)
+	}
+	if got := metrics.Snapshot(); got.RateLimitRejectionsTotal != 1 {
+		t.Fatalf("gRPC rate limit metrics = %#v, want one rejection", got)
 	}
 }
 

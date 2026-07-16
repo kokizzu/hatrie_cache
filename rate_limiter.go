@@ -30,6 +30,13 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	}
 }
 
+func (limiter *RateLimiter) Limit() int {
+	if limiter == nil {
+		return 0
+	}
+	return limiter.limit
+}
+
 func (limiter *RateLimiter) Allow(key string) bool {
 	if limiter == nil || limiter.limit <= 0 {
 		return true

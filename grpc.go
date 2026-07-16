@@ -20,6 +20,7 @@ type CacheGRPCOptions struct {
 	AuditLog            *AuditLogger
 	WriteProtected      bool
 	RateLimiter         *RateLimiter
+	Metrics             *APIMetrics
 	StartAt             time.Time
 	Snapshot            func() error
 	Journal             *CommandJournal
@@ -46,6 +47,9 @@ func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServe
 		} else {
 			options.NodeName = "local"
 		}
+	}
+	if options.Metrics == nil {
+		options.Metrics = NewAPIMetrics()
 	}
 	return &CacheGRPCServer{trie: trie, options: options}
 }
@@ -106,11 +110,12 @@ func (server *CacheGRPCServer) auditGRPC(event AuditEvent) {
 	}
 	event.Node = server.options.NodeName
 	event.Protocol = "grpc"
-	_ = server.options.AuditLog.Log(event)
+	server.options.Metrics.RecordAuditResult(server.options.AuditLog.Log(event))
 }
 
 func (server *CacheGRPCServer) rejectDangerousGRPC(action string, event AuditEvent) error {
 	if server.options.WriteProtected {
+		server.options.Metrics.RecordWriteProtectionRejection()
 		event.Action = action
 		event.OK = false
 		event.Message = "writes are disabled"
@@ -118,6 +123,7 @@ func (server *CacheGRPCServer) rejectDangerousGRPC(action string, event AuditEve
 		return status.Error(codes.PermissionDenied, "writes are disabled")
 	}
 	if server.options.RateLimiter != nil && !server.options.RateLimiter.Allow("grpc") {
+		server.options.Metrics.RecordRateLimitRejection()
 		event.Action = action
 		event.OK = false
 		event.Message = "rate limit exceeded"

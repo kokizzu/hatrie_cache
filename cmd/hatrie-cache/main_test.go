@@ -1259,7 +1259,7 @@ func TestNewGRPCServerPassesMonitoringAuthToken(t *testing.T) {
 	server, listener, err := newGRPCServer(config{
 		grpcAddr:            "127.0.0.1:0",
 		monitoringAuthToken: "secret",
-	}, ht, nil, nil, nil, nil, nil, nil, nil)
+	}, ht, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGRPCServer() error = %v", err)
 	}
@@ -1308,7 +1308,7 @@ func TestNewGRPCServerUsesTLS(t *testing.T) {
 		grpcAddr:    "127.0.0.1:0",
 		grpcTLSCert: certPath,
 		grpcTLSKey:  keyPath,
-	}, ht, nil, nil, nil, nil, nil, nil, nil)
+	}, ht, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGRPCServer(TLS) error = %v", err)
 	}
@@ -1353,7 +1353,7 @@ func TestNewGRPCServerRequiresClientCertificate(t *testing.T) {
 		grpcTLSCert:  serverCertPath,
 		grpcTLSKey:   serverKeyPath,
 		grpcClientCA: clientCertPath,
-	}, ht, nil, nil, nil, nil, nil, nil, nil)
+	}, ht, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGRPCServer(mTLS) error = %v", err)
 	}

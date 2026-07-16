@@ -1449,6 +1449,12 @@ func TestMonitoringHandlerExposesPrometheusMetrics(t *testing.T) {
 		"# TYPE hatrie_cache_reads_total counter",
 		`hatrie_cache_up{node="node-a"} 1`,
 		`hatrie_cache_keys{node="node-a"} 1`,
+		`hatrie_cache_audit_events_total{node="node-a"} 0`,
+		`hatrie_cache_audit_errors_total{node="node-a"} 0`,
+		`hatrie_cache_write_protection_rejections_total{node="node-a"} 0`,
+		`hatrie_cache_rate_limit_rejections_total{node="node-a"} 0`,
+		`hatrie_cache_write_protection_enabled{node="node-a"} 0`,
+		`hatrie_cache_rate_limit_per_second{node="node-a"} 0`,
 		`hatrie_cache_journal_sequence{node="node-a"} 1`,
 	} {
 		if !strings.Contains(body, token) {
@@ -1460,6 +1466,60 @@ func TestMonitoringHandlerExposesPrometheusMetrics(t *testing.T) {
 	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/metrics", nil))
 	if resp.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("metrics POST status = %d, want 405", resp.Code)
+	}
+}
+
+func TestMonitoringPrometheusMetricsCountAuditAndLimitRejections(t *testing.T) {
+	ht := newTestTrie(t)
+	metrics := NewAPIMetrics()
+	var audit bytes.Buffer
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:    "node-a",
+		AuditLog:    NewAuditLogger(&audit),
+		RateLimiter: NewRateLimiter(1, time.Second),
+		Metrics:     metrics,
+	}).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"one","value":"1"}`))
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("first command status = %d, want 200", resp.Code)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"two","value":"2"}`))
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusTooManyRequests {
+		t.Fatalf("second command status = %d, want 429", resp.Code)
+	}
+
+	protectedHandler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:       "node-a",
+		WriteProtected: true,
+		Metrics:        metrics,
+	}).Handler()
+	resp = httptest.NewRecorder()
+	protectedHandler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/snapshot", nil))
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("write-protected snapshot status = %d, want 403", resp.Code)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", resp.Code)
+	}
+	body := resp.Body.String()
+	for _, token := range []string{
+		`hatrie_cache_audit_events_total{node="node-a"} 2`,
+		`hatrie_cache_audit_errors_total{node="node-a"} 0`,
+		`hatrie_cache_rate_limit_rejections_total{node="node-a"} 1`,
+		`hatrie_cache_write_protection_rejections_total{node="node-a"} 1`,
+		`hatrie_cache_rate_limit_per_second{node="node-a"} 1`,
+	} {
+		if !strings.Contains(body, token) {
+			t.Fatalf("metrics body missing %q:\n%s", token, body)
+		}
 	}
 }
 

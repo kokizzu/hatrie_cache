@@ -36,6 +36,7 @@ type MonitoringOptions struct {
 	AuditLog             *AuditLogger
 	WriteProtected       bool
 	RateLimiter          *RateLimiter
+	Metrics              *APIMetrics
 	StartAt              time.Time
 	Snapshot             func() error
 	BackupSnapshotFormat SnapshotFormat
@@ -145,6 +146,9 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 			options.Topology = topology
 		}
 	}
+	if options.Metrics == nil {
+		options.Metrics = NewAPIMetrics()
+	}
 	if options.Election == nil && options.Topology != nil {
 		options.Election = NewElectionStore(options.Topology, ElectionOptions{})
 		_ = options.Election.Heartbeat(options.NodeName)
@@ -213,16 +217,18 @@ func (handler *MonitoringHandler) auditHTTP(r *http.Request, event AuditEvent) {
 	if r.URL != nil {
 		event.Path = r.URL.Path
 	}
-	_ = handler.options.AuditLog.Log(event)
+	handler.options.Metrics.RecordAuditResult(handler.options.AuditLog.Log(event))
 }
 
 func (handler *MonitoringHandler) rejectDangerousHTTP(w http.ResponseWriter, r *http.Request, action string, details map[string]interface{}) bool {
 	if handler.options.WriteProtected {
+		handler.options.Metrics.RecordWriteProtectionRejection()
 		handler.auditHTTP(r, AuditEvent{Action: action, OK: false, Status: http.StatusForbidden, Message: "writes are disabled", Details: details})
 		writeJSONStatus(w, http.StatusForbidden, commandError("writes are disabled"))
 		return true
 	}
 	if handler.options.RateLimiter != nil && !handler.options.RateLimiter.Allow(monitoringRateLimitKey(r)) {
+		handler.options.Metrics.RecordRateLimitRejection()
 		handler.auditHTTP(r, AuditEvent{Action: action, OK: false, Status: http.StatusTooManyRequests, Message: "rate limit exceeded", Details: details})
 		writeJSONStatus(w, http.StatusTooManyRequests, commandError("rate limit exceeded"))
 		return true
@@ -235,12 +241,14 @@ func (handler *MonitoringHandler) rejectDangerousCommandHTTP(w http.ResponseWrit
 		return false
 	}
 	if handler.options.WriteProtected {
+		handler.options.Metrics.RecordWriteProtectionRejection()
 		response := commandError("writes are disabled")
 		handler.auditCommandHTTP(r, request, response, false, http.StatusForbidden)
 		writeCommandResponseWire(w, r, http.StatusForbidden, response, format)
 		return true
 	}
 	if handler.options.RateLimiter != nil && !handler.options.RateLimiter.Allow(monitoringRateLimitKey(r)) {
+		handler.options.Metrics.RecordRateLimitRejection()
 		response := commandError("rate limit exceeded")
 		handler.auditCommandHTTP(r, request, response, false, http.StatusTooManyRequests)
 		writeCommandResponseWire(w, r, http.StatusTooManyRequests, response, format)
@@ -375,6 +383,13 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	writePrometheusCounter(&builder, "hatrie_cache_writes_total", "Total cache write operations.", node, stats.Writes)
 	writePrometheusCounter(&builder, "hatrie_cache_deletes_total", "Total cache delete operations.", node, stats.Deletes)
 	writePrometheusCounter(&builder, "hatrie_cache_expirations_total", "Total cache expiration operations.", node, stats.Expirations)
+	apiMetrics := handler.options.Metrics.Snapshot()
+	writePrometheusCounter(&builder, "hatrie_cache_audit_events_total", "Total dangerous API audit events written.", node, apiMetrics.AuditEventsTotal)
+	writePrometheusCounter(&builder, "hatrie_cache_audit_errors_total", "Total dangerous API audit log write errors.", node, apiMetrics.AuditErrorsTotal)
+	writePrometheusCounter(&builder, "hatrie_cache_write_protection_rejections_total", "Total dangerous API actions rejected by write protection.", node, apiMetrics.WriteProtectionRejectionsTotal)
+	writePrometheusCounter(&builder, "hatrie_cache_rate_limit_rejections_total", "Total dangerous API actions rejected by rate limiting.", node, apiMetrics.RateLimitRejectionsTotal)
+	writePrometheusGauge(&builder, "hatrie_cache_write_protection_enabled", "Whether dangerous API writes are currently blocked by write protection.", node, boolGauge(handler.options.WriteProtected))
+	writePrometheusGauge(&builder, "hatrie_cache_rate_limit_per_second", "Configured dangerous API action rate limit per caller per second; zero means disabled.", node, uint64(handler.options.RateLimiter.Limit()))
 
 	if handler.options.Journal != nil {
 		writePrometheusHelp(&builder, "hatrie_cache_journal_sequence", "Latest local command journal sequence.")
@@ -400,6 +415,19 @@ func writePrometheusCounter(builder *strings.Builder, name string, help string, 
 	writePrometheusHelp(builder, name, help)
 	writePrometheusType(builder, name, "counter")
 	fmt.Fprintf(builder, "%s{node=\"%s\"} %d\n", name, node, value)
+}
+
+func writePrometheusGauge(builder *strings.Builder, name string, help string, node string, value uint64) {
+	writePrometheusHelp(builder, name, help)
+	writePrometheusType(builder, name, "gauge")
+	fmt.Fprintf(builder, "%s{node=\"%s\"} %d\n", name, node, value)
+}
+
+func boolGauge(value bool) uint64 {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func writePrometheusHelp(builder *strings.Builder, name string, help string) {
