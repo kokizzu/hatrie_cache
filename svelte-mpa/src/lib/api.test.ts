@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_ENTRIES_LIMIT, loadEntries, runCommand, sampleCommandResponse } from './api';
+import {
+  compactStorage,
+  DEFAULT_ENTRIES_LIMIT,
+  flushStorage,
+  loadEntries,
+  loadReplicationStatus,
+  loadStorageStatus,
+  runCommand,
+  sampleCommandResponse,
+  syncReplication
+} from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -170,6 +180,96 @@ describe('command fallback', () => {
       ok: true,
       message: 'added reservoir sample values',
       value: '{"accepted":true,"seen":1,"tracked":1,"capacity":128}'
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('loads storage and replication admin status', async () => {
+    const fetchMock = vi.fn(async (path: string | URL | Request) => {
+      if (path === '/api/storage') {
+        return new Response(JSON.stringify({ leveldb_configured: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      expect(path).toBe('/api/replication');
+      return new Response(JSON.stringify({ skipped: false, queue: { enabled: true, depth: 1, capacity: 4, enqueued: 2, dropped: 0, attempts: 2, successes: 1, failures: 1, retried: 1, closed: false } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadStorageStatus()).resolves.toEqual({ leveldb_configured: true });
+    await expect(loadReplicationStatus()).resolves.toMatchObject({
+      skipped: false,
+      queue: { depth: 1, capacity: 4 }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('posts storage admin operations', async () => {
+    const fetchMock = vi.fn(async (path: string | URL | Request, init?: RequestInit) => {
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toMatchObject({ 'content-type': 'application/json' });
+      if (path === '/api/storage/flush') {
+        expect(JSON.parse(String(init?.body))).toEqual({});
+        return new Response(JSON.stringify({ store: 'leveldb', keys: 3, started_at: '2026-01-01T00:00:00Z', finished_at: '2026-01-01T00:00:01Z', duration_millis: 1000 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      expect(path).toBe('/api/storage/compact');
+      expect(JSON.parse(String(init?.body))).toEqual({ start_key: 'alpha', limit_key: 'omega' });
+      return new Response(
+        JSON.stringify({
+          store: 'leveldb',
+          start_key: 'alpha',
+          limit_key: 'omega',
+          size_bytes_before: 4096,
+          size_bytes_after: 2048,
+          size_bytes_delta: -2048,
+          properties_before: { stats: 'before' },
+          properties_after: { stats: 'after' },
+          started_at: '2026-01-01T00:00:00Z',
+          finished_at: '2026-01-01T00:00:01Z',
+          duration_millis: 1000
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(flushStorage()).resolves.toMatchObject({ store: 'leveldb', keys: 3 });
+    await expect(compactStorage(' alpha ', ' omega ')).resolves.toMatchObject({
+      start_key: 'alpha',
+      limit_key: 'omega',
+      size_bytes_delta: -2048
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('posts replication prefix sync operations', async () => {
+    const fetchMock = vi.fn(async (path: string | URL | Request, init?: RequestInit) => {
+      expect(path).toBe('/api/replication');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toMatchObject({ 'content-type': 'application/json' });
+      expect(JSON.parse(String(init?.body))).toEqual({ prefix: 'session:' });
+      return new Response(JSON.stringify({ command: 'SYNC', key: 'session:', entries: 8, skipped: false, duration_millis: 12, targets: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(syncReplication(' session: ')).resolves.toMatchObject({
+      command: 'SYNC',
+      key: 'session:',
+      entries: 8,
+      skipped: false
     });
     expect(fetchMock).toHaveBeenCalledOnce();
   });

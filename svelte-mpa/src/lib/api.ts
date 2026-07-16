@@ -74,6 +74,87 @@ export type CommandResponse = {
   value?: string;
 };
 
+export type StorageStatus = {
+  leveldb_configured: boolean;
+};
+
+export type LevelDBProperties = {
+  stats?: string;
+  sstables?: string;
+  write_delay?: string;
+  block_pool?: string;
+};
+
+export type StorageFlushResult = {
+  store: string;
+  keys: number;
+  started_at: string;
+  finished_at: string;
+  duration_millis: number;
+};
+
+export type StorageCompactResult = {
+  store: string;
+  start_key?: string;
+  limit_key?: string;
+  size_bytes_before: number;
+  size_bytes_after: number;
+  size_bytes_delta: number;
+  properties_before: LevelDBProperties;
+  properties_after: LevelDBProperties;
+  started_at: string;
+  finished_at: string;
+  duration_millis: number;
+};
+
+export type ReplicationQueueStats = {
+  enabled: boolean;
+  depth: number;
+  capacity: number;
+  enqueued: number;
+  dropped: number;
+  attempts: number;
+  successes: number;
+  failures: number;
+  retried: number;
+  oldest_queued_at?: string;
+  oldest_queued_age_millis?: number;
+  oldest_queued_key?: string;
+  oldest_queued_targets?: string[];
+  in_flight_started_at?: string;
+  in_flight_age_millis?: number;
+  in_flight_key?: string;
+  last_retry_at?: string;
+  last_retry_age_millis?: number;
+  last_retry_key?: string;
+  dropped_by_target?: Record<string, number>;
+  failures_by_target?: Record<string, number>;
+  closed: boolean;
+};
+
+export type ReplicationTargetResult = {
+  node: string;
+  key?: string;
+  address?: string;
+  ok: boolean;
+  status?: number;
+  error?: string;
+};
+
+export type ReplicationResult = {
+  command?: string;
+  key?: string;
+  entries?: number;
+  queued?: boolean;
+  skipped: boolean;
+  reason?: string;
+  started_at?: string;
+  finished_at?: string;
+  duration_millis?: number;
+  queue?: ReplicationQueueStats;
+  targets?: ReplicationTargetResult[];
+};
+
 const sampleHealth: CacheHealth = {
   status: 'online',
   node: 'local-dev',
@@ -236,6 +317,35 @@ const sampleEntries: CacheEntry[] = [
   }
 ];
 
+const sampleStorageStatus: StorageStatus = {
+  leveldb_configured: false
+};
+
+const sampleFlushResult: StorageFlushResult = {
+  store: 'leveldb',
+  keys: 0,
+  started_at: new Date(Date.now() - 120).toISOString(),
+  finished_at: new Date().toISOString(),
+  duration_millis: 120
+};
+
+const sampleCompactResult: StorageCompactResult = {
+  store: 'leveldb',
+  size_bytes_before: 0,
+  size_bytes_after: 0,
+  size_bytes_delta: 0,
+  properties_before: {},
+  properties_after: {},
+  started_at: new Date(Date.now() - 180).toISOString(),
+  finished_at: new Date().toISOString(),
+  duration_millis: 180
+};
+
+const sampleReplicationResult: ReplicationResult = {
+  skipped: true,
+  reason: 'replication is not configured'
+};
+
 async function readJSON<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
   try {
     const response = await fetch(path, {
@@ -304,4 +414,46 @@ export async function runCommand(request: CommandRequest): Promise<CommandRespon
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(request)
   });
+}
+
+export async function loadStorageStatus(): Promise<StorageStatus> {
+  return readJSON<StorageStatus>('/api/storage', sampleStorageStatus);
+}
+
+export async function flushStorage(): Promise<StorageFlushResult> {
+  return readJSON<StorageFlushResult>('/api/storage/flush', sampleFlushResult, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({})
+  });
+}
+
+export async function compactStorage(startKey = '', limitKey = ''): Promise<StorageCompactResult> {
+  const request: { start_key?: string; limit_key?: string } = {};
+  const start = startKey.trim();
+  const limit = limitKey.trim();
+  if (start) request.start_key = start;
+  if (limit) request.limit_key = limit;
+  return readJSON<StorageCompactResult>('/api/storage/compact', { ...sampleCompactResult, start_key: start, limit_key: limit }, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request)
+  });
+}
+
+export async function loadReplicationStatus(): Promise<ReplicationResult> {
+  return readJSON<ReplicationResult>('/api/replication', sampleReplicationResult);
+}
+
+export async function syncReplication(prefix = ''): Promise<ReplicationResult> {
+  const trimmedPrefix = prefix.trim();
+  return readJSON<ReplicationResult>(
+    '/api/replication',
+    { ...sampleReplicationResult, command: 'SYNC', key: trimmedPrefix },
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(trimmedPrefix ? { prefix: trimmedPrefix } : {})
+    }
+  );
 }

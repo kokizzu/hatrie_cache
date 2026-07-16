@@ -207,7 +207,8 @@ nav a:hover {
 }
 
 .dashboard-grid,
-.command-layout {
+.command-layout,
+.admin-layout {
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -536,12 +537,11 @@ textarea {
   width: auto;
 }
 
-.primary-button {
+.primary-button,
+.secondary-button {
   align-items: center;
-  background: #198754;
   border: 0;
   border-radius: 6px;
-  color: #ffffff;
   cursor: pointer;
   display: inline-flex;
   font-weight: 800;
@@ -551,8 +551,73 @@ textarea {
   padding: 10px 14px;
 }
 
+.primary-button {
+  background: #198754;
+  color: #ffffff;
+}
+
 .primary-button:hover {
   background: #146c43;
+}
+
+.secondary-button {
+  background: #ffffff;
+  border: 1px solid #cad3dc;
+  color: #263442;
+}
+
+.secondary-button:hover {
+  background: #f5f8fb;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.action-grid,
+.compact-form,
+.sync-form {
+  display: grid;
+  gap: 14px;
+}
+
+.compact-form {
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 132px;
+}
+
+.sync-form {
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  margin-bottom: 14px;
+}
+
+.meter {
+  background: #e6ebf0;
+  border-radius: 999px;
+  height: 10px;
+  margin-top: 14px;
+  overflow: hidden;
+}
+
+.meter span {
+  background: #2fbf71;
+  display: block;
+  height: 100%;
+}
+
+.property-box {
+  background: #f6f8fa;
+  border: 1px solid #d7dee6;
+  border-radius: 6px;
+  color: #263442;
+  margin: 14px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
 }
 
 .response-box {
@@ -580,7 +645,7 @@ textarea {
   }
 
   nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   nav a {
@@ -594,7 +659,13 @@ textarea {
   .stats-grid,
   .dashboard-grid,
   .command-layout,
+  .admin-layout,
   .toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-form,
+  .sync-form {
     grid-template-columns: 1fr;
   }
 }

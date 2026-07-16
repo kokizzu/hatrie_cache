@@ -29,9 +29,11 @@ require_frontend() {
 	test -f "$FRONTEND/index.html"
 	test -f "$FRONTEND/keys.html"
 	test -f "$FRONTEND/commands.html"
+	test -f "$FRONTEND/admin.html"
 	test -f "$FRONTEND/src/pages/Dashboard.svelte"
 	test -f "$FRONTEND/src/pages/Keys.svelte"
 	test -f "$FRONTEND/src/pages/Commands.svelte"
+	test -f "$FRONTEND/src/pages/Admin.svelte"
 }
 
 static_verify() {
@@ -40,9 +42,12 @@ static_verify() {
 	grep -q 'src/dashboard.ts' "$FRONTEND/index.html"
 	grep -q 'src/keys.ts' "$FRONTEND/keys.html"
 	grep -q 'src/commands.ts' "$FRONTEND/commands.html"
+	grep -q 'src/admin.ts' "$FRONTEND/admin.html"
 	grep -q 'loadStats' "$FRONTEND/src/pages/Dashboard.svelte"
 	grep -q 'loadEntries' "$FRONTEND/src/pages/Keys.svelte"
 	grep -q 'runCommand' "$FRONTEND/src/pages/Commands.svelte"
+	grep -q 'loadStorageStatus' "$FRONTEND/src/pages/Admin.svelte"
+	grep -q 'compactStorage' "$FRONTEND/src/pages/Admin.svelte"
 }
 
 cmd=${1:-verify}

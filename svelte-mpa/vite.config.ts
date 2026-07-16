@@ -12,7 +12,8 @@ export default defineConfig({
       input: {
         dashboard: resolve(root, 'index.html'),
         keys: resolve(root, 'keys.html'),
-        commands: resolve(root, 'commands.html')
+        commands: resolve(root, 'commands.html'),
+        admin: resolve(root, 'admin.html')
       }
     }
   },

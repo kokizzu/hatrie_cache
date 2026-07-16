@@ -95,6 +95,9 @@ make frontend-install
 make frontend-dev
 ```
 
+The Admin page at `/admin.html` exposes LevelDB flush/compact controls and
+replication queue/sync status.
+
 Run the full local verification suite with `make verify`.
 The C verifier automatically runs AddressSanitizer/UBSan leak and undefined
 behavior checks when the local compiler supports them; use
