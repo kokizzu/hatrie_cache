@@ -1029,20 +1029,18 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		if len(request.Values) != 0 {
 			return CacheCommandResponse{}, false
 		}
-		valueKey, ok := commandFastJSONStringKey(request.Value)
-		if !ok {
+		if !commandFastJSONPlainString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
-		return ht.executeFastAddSetCommand(key, request.Value, valueKey)
+		return ht.executeFastAddSetCommand(key, request.Value)
 	case "HASSET":
 		if len(request.Values) != 0 {
 			return CacheCommandResponse{}, false
 		}
-		valueKey, ok := commandFastJSONStringKey(request.Value)
-		if !ok {
+		if !commandFastJSONPlainString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
-		return ht.executeFastHasSetCommand(key, valueKey)
+		return ht.executeFastHasSetCommand(key, request.Value)
 	case "PUSHPQ", "PUSHPRIORITY":
 		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
 			return CacheCommandResponse{}, false
@@ -1295,7 +1293,7 @@ func (ht *HatTrie) executeFastPopSliceCommand(key string) (CacheCommandResponse,
 	return commandValueResponse("removed", value), true
 }
 
-func (ht *HatTrie) executeFastAddSetCommand(key string, value string, valueKey string) (CacheCommandResponse, bool) {
+func (ht *HatTrie) executeFastAddSetCommand(key string, value string) (CacheCommandResponse, bool) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -1304,8 +1302,7 @@ func (ht *HatTrie) executeFastAddSetCommand(key string, value string, valueKey s
 			ht.clearHotKeyLocked(key)
 		} else if hval.IsSet() {
 			data := &ht.sets.array[hval.Index]
-			data.ensureCapacity(1)
-			added := data.addKeyValue(valueKey, value)
+			added := data.addPlainString(value)
 			if added > 0 {
 				ht.recordWriteLocked(key)
 				ht.cacheValueLocked(key, hval)
@@ -1320,8 +1317,7 @@ func (ht *HatTrie) executeFastAddSetCommand(key string, value string, valueKey s
 	}
 	if hval.IsSet() {
 		data := &ht.sets.array[hval.Index]
-		data.ensureCapacity(1)
-		added := data.addKeyValue(valueKey, value)
+		added := data.addPlainString(value)
 		if rawPtr != nil {
 			*rawPtr = hval.toValue()
 		}
@@ -1338,8 +1334,7 @@ func (ht *HatTrie) executeFastAddSetCommand(key string, value string, valueKey s
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	data := setData{}
-	data.ensureCapacity(1)
-	added := data.addKeyValue(valueKey, value)
+	added := data.addPlainString(value)
 	idx := ht.sets.AddData(data)
 	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}
 	*rawPtr = hval.toValue()
@@ -1348,7 +1343,7 @@ func (ht *HatTrie) executeFastAddSetCommand(key string, value string, valueKey s
 	return CacheCommandResponse{OK: true, Message: "added set values", Value: strconv.Itoa(added)}, true
 }
 
-func (ht *HatTrie) executeFastHasSetCommand(key string, valueKey string) (CacheCommandResponse, bool) {
+func (ht *HatTrie) executeFastHasSetCommand(key string, value string) (CacheCommandResponse, bool) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -1360,7 +1355,7 @@ func (ht *HatTrie) executeFastHasSetCommand(key string, valueKey string) (CacheC
 		ht.recordReadLocked(false, key)
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}, true
 	}
-	_, hit := ht.sets.array[hval.Index].items[valueKey]
+	hit := ht.sets.array[hval.Index].hasPlainString(value)
 	ht.recordReadLocked(hit, key)
 	return commandBool01Response(hit), true
 }
@@ -1666,13 +1661,6 @@ func commandFastPathField(value string) bool {
 		return true
 	}
 	return strings.TrimSpace(value) == value
-}
-
-func commandFastJSONStringKey(value string) (string, bool) {
-	if !commandFastJSONPlainString(value) {
-		return "", false
-	}
-	return `"` + value + `"`, true
 }
 
 func commandFastJSONPlainString(value string) bool {

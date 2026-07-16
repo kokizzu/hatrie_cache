@@ -1351,9 +1351,17 @@ func (ss *SliceStorage) Del(idx int32) {
 	ss.array = trimReusableTail(ss.array, &ss.reusables)
 }
 
+const smallSetEntryLimit = 2
+
 type setData struct {
 	items   map[string]interface{}
+	small   []setSmallEntry
 	deleted int
+}
+
+type setSmallEntry struct {
+	key   string
+	value interface{}
 }
 
 func newSetData(values Set) setData {
@@ -1385,6 +1393,9 @@ func newSetDataValuesChecked(value interface{}, values ...interface{}) (setData,
 func (set *setData) Len() int {
 	if set == nil {
 		return 0
+	}
+	if set.items == nil {
+		return len(set.small)
 	}
 	return len(set.items)
 }
@@ -1431,7 +1442,7 @@ func (set *setData) RemoveChecked(values ...interface{}) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if set == nil || set.items == nil {
+	if set == nil || (set.items == nil && len(set.small) == 0) {
 		return 0, nil
 	}
 	return set.removeKeys(keys), nil
@@ -1447,21 +1458,27 @@ func (set *setData) RemoveOneChecked(value interface{}, values ...interface{}) (
 	if err != nil {
 		return 0, err
 	}
-	if set == nil || set.items == nil {
+	if set == nil || (set.items == nil && len(set.small) == 0) {
 		return 0, nil
 	}
 	return set.removeKeys(keys), nil
 }
 
 func (set *setData) ensureCapacity(capacity int) {
-	if set.items == nil {
-		set.items = make(map[string]interface{}, capacity)
-		set.deleted = 0
+	if set.items != nil {
+		return
+	}
+	if capacity > smallSetEntryLimit {
+		set.promoteSmall(capacity)
+		return
+	}
+	if set.small == nil && capacity > 0 {
+		set.small = make([]setSmallEntry, 0, capacity)
 	}
 }
 
 func (set *setData) addValuesWithKeys(keys []string, values []interface{}) int {
-	set.ensureCapacity(len(values))
+	set.ensureCapacity(len(set.small) + len(values))
 	added := 0
 	for idx, value := range values {
 		added += set.addKeyValue(keys[idx], value)
@@ -1470,7 +1487,7 @@ func (set *setData) addValuesWithKeys(keys []string, values []interface{}) int {
 }
 
 func (set *setData) addOneWithKeys(keys []string, value interface{}, values ...interface{}) int {
-	set.ensureCapacity(len(keys))
+	set.ensureCapacity(len(set.small) + len(keys))
 	added := set.addKeyValue(keys[0], value)
 	for idx, value := range values {
 		added += set.addKeyValue(keys[idx+1], value)
@@ -1479,10 +1496,39 @@ func (set *setData) addOneWithKeys(keys []string, value interface{}, values ...i
 }
 
 func (set *setData) addKeyValue(key string, value interface{}) int {
+	if set.items == nil {
+		if set.smallIndexByKey(key) >= 0 {
+			return 0
+		}
+		if len(set.small) < smallSetEntryLimit {
+			set.small = append(set.small, setSmallEntry{key: key, value: cloneValue(value)})
+			return 1
+		}
+		set.promoteSmall(len(set.small) + 1)
+	}
 	if _, exists := set.items[key]; exists {
 		return 0
 	}
 	set.items[key] = cloneValue(value)
+	return 1
+}
+
+func (set *setData) addPlainString(value string) int {
+	if set.items == nil {
+		if set.smallIndexByPlainString(value) >= 0 {
+			return 0
+		}
+		if len(set.small) < smallSetEntryLimit {
+			set.small = append(set.small, setSmallEntry{value: value})
+			return 1
+		}
+		set.promoteSmall(len(set.small) + 1)
+	}
+	key := jsonPlainStringKey(value)
+	if _, exists := set.items[key]; exists {
+		return 0
+	}
+	set.items[key] = value
 	return 1
 }
 
@@ -1495,6 +1541,17 @@ func (set *setData) removeKeys(keys []string) int {
 }
 
 func (set *setData) removeKey(key string) int {
+	if set.items == nil {
+		idx := set.smallIndexByKey(key)
+		if idx < 0 {
+			return 0
+		}
+		copy(set.small[idx:], set.small[idx+1:])
+		var zero setSmallEntry
+		set.small[len(set.small)-1] = zero
+		set.small = set.small[:len(set.small)-1]
+		return 1
+	}
 	if _, exists := set.items[key]; !exists {
 		return 0
 	}
@@ -1514,16 +1571,55 @@ func (set *setData) HasChecked(value interface{}) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if set == nil || set.items == nil {
+	if set == nil || (set.items == nil && len(set.small) == 0) {
 		return false, nil
 	}
+	return set.hasKey(key), nil
+}
+
+func (set *setData) hasPlainString(value string) bool {
+	if set == nil {
+		return false
+	}
+	if set.items == nil {
+		return set.smallIndexByPlainString(value) >= 0
+	}
+	_, ok := set.items[jsonPlainStringKey(value)]
+	return ok
+}
+
+func (set *setData) hasKey(key string) bool {
+	if set == nil {
+		return false
+	}
+	if set.items == nil {
+		return set.smallIndexByKey(key) >= 0
+	}
 	_, ok := set.items[key]
-	return ok, nil
+	return ok
 }
 
 func (set *setData) Values() Set {
 	if set == nil {
 		return nil
+	}
+	if set.items == nil {
+		if len(set.small) == 0 {
+			return make(Set, 0)
+		}
+		keys := make([]string, len(set.small))
+		for idx := range set.small {
+			keys[idx] = set.small[idx].jsonKey()
+		}
+		sort.Strings(keys)
+		out := make(Set, len(keys))
+		for idx, key := range keys {
+			entryIdx := set.smallIndexByKey(key)
+			if entryIdx >= 0 {
+				out[idx] = cloneValue(set.small[entryIdx].value)
+			}
+		}
+		return out
 	}
 	if len(set.items) == 0 {
 		return make(Set, 0)
@@ -1538,6 +1634,75 @@ func (set *setData) Values() Set {
 		out[idx] = cloneValue(set.items[key])
 	}
 	return out
+}
+
+func (set *setData) smallIndexByKey(key string) int {
+	if set == nil {
+		return -1
+	}
+	for idx := range set.small {
+		if set.small[idx].matchesKey(key) {
+			return idx
+		}
+	}
+	return -1
+}
+
+func (set *setData) smallIndexByPlainString(value string) int {
+	if set == nil {
+		return -1
+	}
+	for idx := range set.small {
+		if set.small[idx].matchesPlainString(value) {
+			return idx
+		}
+	}
+	return -1
+}
+
+func (set *setData) promoteSmall(capacity int) {
+	if set == nil || set.items != nil {
+		return
+	}
+	if capacity < len(set.small) {
+		capacity = len(set.small)
+	}
+	set.items = make(map[string]interface{}, capacity)
+	for _, entry := range set.small {
+		set.items[entry.jsonKey()] = entry.value
+	}
+	set.small = nil
+	set.deleted = 0
+}
+
+func (entry setSmallEntry) jsonKey() string {
+	if entry.key != "" {
+		return entry.key
+	}
+	if value, ok := entry.value.(string); ok {
+		return jsonPlainStringKey(value)
+	}
+	data, err := setItemKey(entry.value)
+	if err != nil {
+		return ""
+	}
+	return data
+}
+
+func (entry setSmallEntry) matchesKey(key string) bool {
+	if entry.key != "" {
+		return entry.key == key
+	}
+	value, ok := entry.value.(string)
+	return ok && jsonPlainStringMatchesKey(value, key)
+}
+
+func (entry setSmallEntry) matchesPlainString(value string) bool {
+	if entry.key != "" {
+		return jsonPlainStringMatchesKey(value, entry.key)
+	}
+	stored, ok := entry.value.(string)
+	return ok && stored == value
 }
 
 func (set *setData) compactIfSparse() {
@@ -4076,7 +4241,7 @@ func (ht *HatTrie) HasSetChecked(key string, val interface{}) (bool, error) {
 		ht.recordReadLocked(false, key)
 		return false, nil
 	}
-	_, hit := ht.sets.array[hval.Index].items[valueKey]
+	hit := ht.sets.array[hval.Index].hasKey(valueKey)
 	ht.recordReadLocked(hit, key)
 	return hit, nil
 }
@@ -4191,4 +4356,15 @@ func setItemKeysOne(value interface{}, values ...interface{}) ([]string, error) 
 		keys[idx+1] = key
 	}
 	return keys, nil
+}
+
+func jsonPlainStringKey(value string) string {
+	return `"` + value + `"`
+}
+
+func jsonPlainStringMatchesKey(value string, key string) bool {
+	if len(key) != len(value)+2 || key[0] != '"' || key[len(key)-1] != '"' {
+		return false
+	}
+	return key[1:len(key)-1] == value
 }

@@ -87,7 +87,7 @@ make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeatur
 
 | Feature | Benchmark row | Time/op | Bytes/op | Allocs/op |
 | --- | --- | ---: | ---: | ---: |
-| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 598.8 ns | 24 B | 2 |
+| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 666.1-859.6 ns | 0 B | 0 |
 | Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 702.4 ns | 56 B | 3 |
 | Bloom filter add | `BenchmarkCommandFeature/BloomAdd` | 205.1 ns | 0 B | 0 |
 | Bloom filter lookup | `BenchmarkCommandFeature/BloomHas` | 271.4 ns | 0 B | 0 |
@@ -95,6 +95,12 @@ make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeatur
 | Cuckoo filter lookup | `BenchmarkCommandFeature/CuckooHas` | 278.1 ns | 0 B | 0 |
 | Count-Min Sketch increment | `BenchmarkCommandFeature/CountMinSketchIncrement` | 303.8 ns | 5 B | 0 |
 | Count-Min Sketch estimate | `BenchmarkCommandFeature/CountMinSketchEstimate` | 267.6 ns | 0 B | 0 |
+
+The set row uses a slice-first representation for one- and two-entry sets,
+then promotes to a map. `BenchmarkSetRepresentationSmall*` measured slice
+lookup faster through two entries and map lookup faster from three entries
+upward; the command row became allocation-free but did not show a clear CPU
+win in repeated local runs.
 
 ## Memory Summary
 

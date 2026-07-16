@@ -368,6 +368,35 @@ func TestExecuteCommandSetExactPathPreservesSemantics(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandSetExactPathPromotesSmallSliceToMap(t *testing.T) {
+	ht := newTestTrie(t)
+	for _, value := range []string{"go", "cache", "trie"} {
+		if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDSET", Key: "tags", Value: value}); !got.OK || got.Value != "1" {
+			t.Fatalf("ADDSET %s response = %#v, want added 1", value, got)
+		}
+	}
+
+	hval := ht.Get("tags")
+	if !hval.IsSet() {
+		t.Fatalf("tags value = %+v, want set", hval)
+	}
+	data := ht.sets.array[hval.Index]
+	if data.items == nil || len(data.small) != 0 {
+		t.Fatalf("set representation after third add = map nil %v small len %d, want promoted map", data.items == nil, len(data.small))
+	}
+	for _, value := range []string{"go", "cache", "trie"} {
+		if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSET", Key: "tags", Value: value}); !got.OK || got.Value != "1" {
+			t.Fatalf("HASSET %s response = %#v, want hit", value, got)
+		}
+		if !ht.HasSet("tags", value) {
+			t.Fatalf("public HasSet(%s) = false, want true", value)
+		}
+	}
+	if got := ht.GetSet("tags"); !reflect.DeepEqual(got, Set{"cache", "go", "trie"}) {
+		t.Fatalf("GetSet(tags) = %#v, want sorted promoted set", got)
+	}
+}
+
 func TestExecuteCommandSetExactPathAllocationBudget(t *testing.T) {
 	ht := newTestTrie(t)
 	add := CacheCommandRequest{Command: "ADDSET", Key: "tags", Value: "go"}
@@ -384,8 +413,8 @@ func TestExecuteCommandSetExactPathAllocationBudget(t *testing.T) {
 			t.Fatalf("HASSET response = %#v, want hit", got)
 		}
 	})
-	if allocs > 5 {
-		t.Fatalf("ADDSET+HASSET exact path allocations = %.2f, want <= 5", allocs)
+	if allocs > 1 {
+		t.Fatalf("ADDSET+HASSET exact path allocations = %.2f, want <= 1", allocs)
 	}
 }
 
