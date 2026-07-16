@@ -261,6 +261,28 @@ func (top *topKData) addPrepared(item topKItem, count uint64) TopKEstimate {
 	return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
 }
 
+func (top *topKData) addPlainJSONString(value string, count uint64) TopKEstimate {
+	if top == nil || top.capacity == 0 {
+		return TopKEstimate{}
+	}
+	key := topKPlainJSONStringKey(value)
+	if count == 0 {
+		return top.estimateKey(key)
+	}
+	if top.byKey == nil {
+		needed, ok := checkedBatchSize(len(top.items), 1)
+		if !ok {
+			return TopKEstimate{}
+		}
+		top.byKey = make(map[string]int, topKInitialIndexCapacity(top.capacity, needed))
+	}
+	return top.addPrepared(topKItem{Key: key, Value: value}, count)
+}
+
+func topKPlainJSONStringKey(value string) string {
+	return `"` + value + `"`
+}
+
 func (top topKData) Items() []TopKItem {
 	items := top.sortedItems()
 	out := make([]TopKItem, len(items))

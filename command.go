@@ -1102,12 +1102,96 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastHasRoaringBitmapCommand(key, value)
+	case "ADDRB":
+		if len(request.Values) != 0 {
+			return CacheCommandResponse{}, false
+		}
+		value, ok := commandFastUint32Field(request.Value)
+		if !ok {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddRoaringBitmapCommand(key, value)
 	case "HASSB":
 		value, ok := commandFastUint64Field(request.Value)
 		if !ok {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastHasSparseBitsetCommand(key, value)
+	case "ADDSB":
+		if len(request.Values) != 0 {
+			return CacheCommandResponse{}, false
+		}
+		value, ok := commandFastUint64Field(request.Value)
+		if !ok {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddSparseBitsetCommand(key, value)
+	case "ADDHLL", "HLLADD":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddHyperLogLogCommand(key, request.Value)
+	case "COUNTHLL", "ESTHLL", "HLLCOUNT", "HLLCARD":
+		return ht.executeFastCountHyperLogLogCommand(key)
+	case "ADDTOPK", "TOPKADD":
+		if len(request.Values) != 0 || len(request.Pairs) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		count, ok := commandFastOptionalUint64Field(request.Subkey, 1)
+		if !ok || count == 0 {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddTopKCommand(key, request.Value, count)
+	case "GETTOPK", "TOPK":
+		return ht.executeFastGetTopKCommand(key)
+	case "ADDQ", "ADDQS", "QADD", "QSADD":
+		if len(request.Values) != 0 || len(request.Pairs) != 0 {
+			return CacheCommandResponse{}, false
+		}
+		value, ok := commandFastFloat64Field(request.Value)
+		if !ok || !validQuantileSketchValue(value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddQuantileSketchCommand(key, value)
+	case "ESTQ", "QUERYQ", "QQUERY", "QSQUERY", "QUANTILE":
+		if len(request.Values) != 0 || len(request.Pairs) != 0 {
+			return CacheCommandResponse{}, false
+		}
+		raw := request.Value
+		if request.Subkey != "" {
+			raw = request.Subkey
+		}
+		quantile, ok := commandFastFloat64Field(raw)
+		if !ok || quantile < 0 || quantile > 1 {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastEstimateQuantileSketchCommand(key, quantile)
+	case "ADDFW", "FWADD":
+		if len(request.Values) != 0 || len(request.Pairs) != 0 {
+			return CacheCommandResponse{}, false
+		}
+		index, ok := commandFastUint64Field(request.Value)
+		if !ok {
+			return CacheCommandResponse{}, false
+		}
+		delta, ok := commandFastInt64Field(request.Subkey)
+		if !ok || delta == 0 {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddFenwickTreeCommand(key, index, delta)
+	case "RANGEFW", "FWRANGE":
+		if len(request.Values) != 0 || len(request.Pairs) != 0 {
+			return CacheCommandResponse{}, false
+		}
+		start, ok := commandFastUint64Field(request.Value)
+		if !ok {
+			return CacheCommandResponse{}, false
+		}
+		end, ok := commandFastUint64Field(request.Subkey)
+		if !ok || start > end {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastRangeFenwickTreeCommand(key, start, end)
 	default:
 		return CacheCommandResponse{}, false
 	}
@@ -1651,6 +1735,190 @@ func (ht *HatTrie) executeFastEstimateCountMinSketchCommand(key string, value st
 	return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(estimate, 10)}, true
 }
 
+func (ht *HatTrie) executeFastAddRoaringBitmapCommand(key string, value uint32) (CacheCommandResponse, bool) {
+	added, err := ht.AddRoaringBitmapChecked(key, value)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	return CacheCommandResponse{OK: true, Message: "added roaring bitmap values", Value: strconv.Itoa(added)}, true
+}
+
+func (ht *HatTrie) executeFastAddSparseBitsetCommand(key string, value uint64) (CacheCommandResponse, bool) {
+	added, err := ht.AddSparseBitsetChecked(key, value)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	return CacheCommandResponse{OK: true, Message: "added sparse bitset values", Value: strconv.Itoa(added)}, true
+}
+
+func (ht *HatTrie) executeFastAddHyperLogLogCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsHyperLogLog() {
+			data := &ht.hyperLogLogs.array[hval.Index]
+			data.addJSONString(value)
+			ht.recordWriteLocked(key)
+			ht.cacheValueLocked(key, hval)
+			return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(data.Count(), 10)}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsHyperLogLog() {
+		data := &ht.hyperLogLogs.array[hval.Index]
+		data.addJSONString(value)
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(data.Count(), 10)}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	data := newDefaultHyperLogLogData()
+	data.addJSONString(value)
+	idx := ht.hyperLogLogs.AddData(data)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_HYPERLOGLOG}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(data.Count(), 10)}, true
+}
+
+func (ht *HatTrie) executeFastCountHyperLogLogCommand(key string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsHyperLogLog() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	count := ht.hyperLogLogs.array[hval.Index].Count()
+	ht.recordReadLocked(true, key)
+	return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(count, 10)}, true
+}
+
+func (ht *HatTrie) executeFastAddTopKCommand(key string, value string, count uint64) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsTopK() {
+			estimate := ht.topKs.array[hval.Index].addPlainJSONString(value, count)
+			ht.recordWriteLocked(key)
+			ht.cacheValueLocked(key, hval)
+			return commandFastTopKEstimateResponse("added top-k value", estimate), true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsTopK() {
+		estimate := ht.topKs.array[hval.Index].addPlainJSONString(value, count)
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+		return commandFastTopKEstimateResponse("added top-k value", estimate), true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	data := newDefaultTopKData()
+	estimate := data.addPlainJSONString(value, count)
+	idx := ht.topKs.AddData(data)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_TOP_K}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return commandFastTopKEstimateResponse("added top-k value", estimate), true
+}
+
+func (ht *HatTrie) executeFastGetTopKCommand(key string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsTopK() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	top := ht.topKs.array[hval.Index]
+	ht.recordReadLocked(true, key)
+	if payload, ok := commandFastTopKItemsJSON(top); ok {
+		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+	}
+	return commandValueResponse("ok", top.Items()), true
+}
+
+func (ht *HatTrie) executeFastAddQuantileSketchCommand(key string, value float64) (CacheCommandResponse, bool) {
+	estimate, err := ht.AddQuantileSketchChecked(key, value)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	return commandFastQuantileEstimateResponse("added quantile sketch values", estimate), true
+}
+
+func (ht *HatTrie) executeFastEstimateQuantileSketchCommand(key string, quantile float64) (CacheCommandResponse, bool) {
+	estimate, ok, err := ht.EstimateQuantileSketchChecked(key, quantile)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if !ok {
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	return commandFastQuantileEstimateResponse("ok", estimate), true
+}
+
+func (ht *HatTrie) executeFastAddFenwickTreeCommand(key string, index uint64, delta int64) (CacheCommandResponse, bool) {
+	update, ok, err := ht.AddFenwickTreeChecked(key, index, delta)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if !ok {
+		return commandError("fenwick tree update is out of range or overflows"), true
+	}
+	return commandFastFenwickTreeUpdateResponse(update), true
+}
+
+func (ht *HatTrie) executeFastRangeFenwickTreeCommand(key string, start uint64, end uint64) (CacheCommandResponse, bool) {
+	value, ok, err := ht.RangeSumFenwickTreeChecked(key, start, end)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if !ok {
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatInt(value, 10)}, true
+}
+
 func commandFastPathField(value string) bool {
 	if value == "" {
 		return false
@@ -1692,6 +1960,77 @@ func commandFastPriorityQueueItemJSON(priority int64, value string) (string, boo
 	return builder.String(), true
 }
 
+func commandFastTopKEstimateResponse(message string, estimate TopKEstimate) CacheCommandResponse {
+	var buffer [96]byte
+	out := buffer[:0]
+	out = append(out, `{"tracked":`...)
+	out = strconv.AppendBool(out, estimate.Tracked)
+	out = append(out, `,"count":`...)
+	out = strconv.AppendUint(out, estimate.Count, 10)
+	out = append(out, `,"error":`...)
+	out = strconv.AppendUint(out, estimate.Error, 10)
+	out = append(out, '}')
+	return CacheCommandResponse{OK: true, Message: message, Value: string(out)}
+}
+
+func commandFastTopKItemsJSON(top topKData) (string, bool) {
+	if len(top.items) == 0 {
+		return "[]", true
+	}
+	if len(top.items) != 1 {
+		return "", false
+	}
+	item := top.items[0]
+	value, ok := item.Value.(string)
+	if !ok || !commandFastJSONPlainString(value) {
+		return "", false
+	}
+	var builder strings.Builder
+	builder.Grow(len(`[{"value":"","count":18446744073709551615,"error":18446744073709551615}]`) + len(value))
+	builder.WriteString(`[{"value":"`)
+	builder.WriteString(value)
+	builder.WriteString(`","count":`)
+	builder.WriteString(strconv.FormatUint(item.Count, 10))
+	builder.WriteString(`,"error":`)
+	builder.WriteString(strconv.FormatUint(item.Error, 10))
+	builder.WriteString(`}]`)
+	return builder.String(), true
+}
+
+func commandFastQuantileEstimateResponse(message string, estimate QuantileEstimate) CacheCommandResponse {
+	var buffer [160]byte
+	out := buffer[:0]
+	out = append(out, `{"quantile":`...)
+	out = strconv.AppendFloat(out, estimate.Quantile, 'g', -1, 64)
+	out = append(out, `,"value":`...)
+	out = strconv.AppendFloat(out, estimate.Value, 'g', -1, 64)
+	out = append(out, `,"count":`...)
+	out = strconv.AppendUint(out, estimate.Count, 10)
+	out = append(out, `,"rank_error":`...)
+	out = strconv.AppendUint(out, estimate.RankError, 10)
+	out = append(out, '}')
+	return CacheCommandResponse{OK: true, Message: message, Value: string(out)}
+}
+
+func commandFastFenwickTreeUpdateResponse(update FenwickTreeUpdate) CacheCommandResponse {
+	var buffer [224]byte
+	out := buffer[:0]
+	out = append(out, `{"index":`...)
+	out = strconv.AppendUint(out, update.Index, 10)
+	out = append(out, `,"delta":`...)
+	out = strconv.AppendInt(out, update.Delta, 10)
+	out = append(out, `,"value":`...)
+	out = strconv.AppendInt(out, update.Value, 10)
+	out = append(out, `,"prefix_sum":`...)
+	out = strconv.AppendInt(out, update.PrefixSum, 10)
+	out = append(out, `,"total":`...)
+	out = strconv.AppendInt(out, update.Total, 10)
+	out = append(out, `,"updates":`...)
+	out = strconv.AppendUint(out, update.Updates, 10)
+	out = append(out, '}')
+	return CacheCommandResponse{OK: true, Message: "updated fenwick tree", Value: string(out)}
+}
+
 func commandFastUint32Field(value string) (uint32, bool) {
 	parsed, ok := commandFastUint64Field(value)
 	if !ok || parsed > math.MaxUint32 {
@@ -1717,6 +2056,29 @@ func commandFastUint64Field(value string) (uint64, bool) {
 		parsed = parsed*10 + digit
 	}
 	return parsed, true
+}
+
+func commandFastOptionalUint64Field(value string, defaultValue uint64) (uint64, bool) {
+	if value == "" {
+		return defaultValue, true
+	}
+	return commandFastUint64Field(value)
+}
+
+func commandFastInt64Field(value string) (int64, bool) {
+	if value == "" || strings.TrimSpace(value) != value {
+		return 0, false
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	return parsed, err == nil
+}
+
+func commandFastFloat64Field(value string) (float64, bool) {
+	if value == "" || strings.TrimSpace(value) != value {
+		return 0, false
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	return parsed, err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0)
 }
 
 func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool) {

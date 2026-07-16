@@ -167,6 +167,20 @@ func (hll *hyperLogLogData) addKey(key []byte) bool {
 	return true
 }
 
+func (hll *hyperLogLogData) addJSONString(value string) bool {
+	if hll == nil || hll.precision == 0 {
+		return false
+	}
+	hll.ensureRegisters()
+	index, rank := hyperLogLogIndexAndRank(bloomFilterFNV64aJSONString(value), hll.precision)
+	hll.observations = saturatingAddUint64(hll.observations, 1)
+	if rank <= hll.registers[index] {
+		return false
+	}
+	hll.registers[index] = rank
+	return true
+}
+
 func (hll hyperLogLogData) Count() uint64 {
 	return hyperLogLogEstimateUint64(hll.estimate())
 }

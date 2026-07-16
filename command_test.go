@@ -2312,6 +2312,120 @@ func TestCommandFloat64ValueRejectsUnsupportedValues(t *testing.T) {
 	}
 }
 
+func TestExecuteExactFastCommandCoversCompactNumericRows(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   []CacheCommandRequest
+		request CacheCommandRequest
+	}{
+		{
+			name: "roaring add",
+			setup: []CacheCommandRequest{
+				{Command: "CREATERB", Key: "roaring:key"},
+			},
+			request: CacheCommandRequest{Command: "ADDRB", Key: "roaring:key", Value: "65543"},
+		},
+		{
+			name: "sparse add",
+			setup: []CacheCommandRequest{
+				{Command: "CREATESB", Key: "sparse:key"},
+			},
+			request: CacheCommandRequest{Command: "ADDSB", Key: "sparse:key", Value: "18446744073709551615"},
+		},
+		{
+			name: "hyperloglog add",
+			setup: []CacheCommandRequest{
+				{Command: "CREATEHLL", Key: "hll:key", Value: "10"},
+			},
+			request: CacheCommandRequest{Command: "ADDHLL", Key: "hll:key", Value: "value"},
+		},
+		{
+			name: "hyperloglog count",
+			setup: []CacheCommandRequest{
+				{Command: "CREATEHLL", Key: "hll:key", Value: "10"},
+				{Command: "ADDHLL", Key: "hll:key", Value: "value"},
+			},
+			request: CacheCommandRequest{Command: "COUNTHLL", Key: "hll:key"},
+		},
+		{
+			name: "top-k add",
+			setup: []CacheCommandRequest{
+				{Command: "CREATETOPK", Key: "topk:key", Value: "8"},
+			},
+			request: CacheCommandRequest{Command: "ADDTOPK", Key: "topk:key", Value: "value", Subkey: "2"},
+		},
+		{
+			name: "top-k get",
+			setup: []CacheCommandRequest{
+				{Command: "CREATETOPK", Key: "topk:key", Value: "8"},
+				{Command: "ADDTOPK", Key: "topk:key", Value: "value", Subkey: "2"},
+			},
+			request: CacheCommandRequest{Command: "GETTOPK", Key: "topk:key"},
+		},
+		{
+			name: "quantile add",
+			setup: []CacheCommandRequest{
+				{Command: "CREATEQ", Key: "quantile:key", Value: "0.01"},
+			},
+			request: CacheCommandRequest{Command: "ADDQ", Key: "quantile:key", Value: "42.5"},
+		},
+		{
+			name: "quantile estimate",
+			setup: []CacheCommandRequest{
+				{Command: "CREATEQ", Key: "quantile:key", Value: "0.01"},
+				{Command: "ADDQ", Key: "quantile:key", Value: "42.5"},
+			},
+			request: CacheCommandRequest{Command: "ESTQ", Key: "quantile:key", Value: "0.5"},
+		},
+		{
+			name: "fenwick add",
+			setup: []CacheCommandRequest{
+				{Command: "CREATEFW", Key: "fenwick:key", Value: "64"},
+			},
+			request: CacheCommandRequest{Command: "ADDFW", Key: "fenwick:key", Value: "32", Subkey: "1"},
+		},
+		{
+			name: "fenwick range",
+			setup: []CacheCommandRequest{
+				{Command: "CREATEFW", Key: "fenwick:key", Value: "64"},
+				{Command: "ADDFW", Key: "fenwick:key", Value: "32", Subkey: "1"},
+			},
+			request: CacheCommandRequest{Command: "RANGEFW", Key: "fenwick:key", Value: "1", Subkey: "64"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fast := CreateHatTrie()
+			defer fast.Destroy()
+			generic := CreateHatTrie()
+			defer generic.Destroy()
+
+			for _, request := range tt.setup {
+				if response := fast.ExecuteCommand(request); !response.OK {
+					t.Fatalf("fast setup %s response = %#v, want ok", request.Command, response)
+				}
+				genericRequest := request
+				genericRequest.Command = strings.ToLower(genericRequest.Command)
+				if response := generic.ExecuteCommand(genericRequest); !response.OK {
+					t.Fatalf("generic setup %s response = %#v, want ok", request.Command, response)
+				}
+			}
+
+			got, ok := fast.executeExactFastCommand(tt.request)
+			if !ok {
+				t.Fatalf("executeExactFastCommand(%s) ok = false, want true", tt.request.Command)
+			}
+			genericRequest := tt.request
+			genericRequest.Command = strings.ToLower(genericRequest.Command)
+			want := generic.ExecuteCommand(genericRequest)
+			if got != want {
+				t.Fatalf("fast response = %#v, generic response = %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestExecuteCommandStructuredValues(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertMap("map", Map{"name": "ivi"})

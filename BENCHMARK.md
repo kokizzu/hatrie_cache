@@ -117,6 +117,28 @@ lookup faster through two entries and map lookup faster from three entries
 upward; the command row became allocation-free but did not show a clear CPU
 win in repeated local runs.
 
+A later fast-path pass added exact numeric and plain-string command routes for
+roaring/sparse adds, HyperLogLog add/count, Top-K add/get, quantile add/query,
+and Fenwick add/range. The test `TestExecuteExactFastCommandCoversCompactNumericRows`
+compares each new route against the generic command path before benchmarking.
+
+```
+make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/(RoaringAdd|SparseBitsetAdd|HyperLogLogAdd|HyperLogLogCount|TopKAdd|TopKGet|QuantileSketchAdd|QuantileSketchEstimate|FenwickTreeAdd|FenwickTreeRange)$' BENCHTIME=100000x
+```
+
+| Feature | Benchmark row | Time/op | Bytes/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 539.8 ns | 0 B | 0 |
+| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 436.6 ns | 0 B | 0 |
+| HyperLogLog add | `BenchmarkCommandFeature/HyperLogLogAdd` | 5,187 ns | 0 B | 0 |
+| HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 4,399 ns | 0 B | 0 |
+| Top-K add | `BenchmarkCommandFeature/TopKAdd` | 654.6 ns | 72 B | 3 |
+| Top-K get | `BenchmarkCommandFeature/TopKGet` | 403.9 ns | 80 B | 1 |
+| Quantile sketch add | `BenchmarkCommandFeature/QuantileSketchAdd` | 823.4 ns | 64 B | 1 |
+| Quantile sketch estimate | `BenchmarkCommandFeature/QuantileSketchEstimate` | 638.3 ns | 64 B | 1 |
+| Fenwick tree add | `BenchmarkCommandFeature/FenwickTreeAdd` | 783.2 ns | 95 B | 1 |
+| Fenwick tree range | `BenchmarkCommandFeature/FenwickTreeRange` | 320.5 ns | 0 B | 0 |
+
 ## Memory Summary
 
 | System | Run | Memory metric | Value |
