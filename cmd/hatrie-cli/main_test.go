@@ -1856,6 +1856,91 @@ func TestRunClusterStatusReportsPeerAndNodeHealth(t *testing.T) {
 	if !result.OK || result.Health == nil || result.Topology == nil || result.Election == nil || len(result.Nodes) != 1 || !result.Nodes[0].OK {
 		t.Fatalf("cluster status result = %#v, want healthy peer and node", result)
 	}
+	if !result.Nodes[0].TopologyConsistent || !result.Nodes[0].ElectionOK {
+		t.Fatalf("cluster node status = %#v, want topology and election probes healthy", result.Nodes[0])
+	}
+}
+
+func TestRunClusterStatusReportsTopologyDrift(t *testing.T) {
+	var nodeAURL string
+	var nodeBURL string
+	referenceTopology := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeFullReplica,
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: nodeAURL, Role: "primary"},
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+		}
+	}
+	driftedTopology := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeFullReplica,
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+		}
+	}
+	nodeB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-b"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(driftedTopology())
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{Nodes: []hatriecache.ElectionNodeStatus{{ID: "node-b", Online: true}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer nodeB.Close()
+	nodeBURL = nodeB.URL
+
+	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(referenceTopology())
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{Nodes: []hatriecache.ElectionNodeStatus{{ID: "node-a", Online: true}}})
+		case "/api/replication":
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer nodeA.Close()
+	nodeAURL = nodeA.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", nodeA.URL, "cluster", "doctor"}, stdout, &bytes.Buffer{}, nodeA.Client()); err != nil {
+		t.Fatalf("run(cluster doctor) error = %v", err)
+	}
+	var result clusterStatusResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster doctor) error = %v", err)
+	}
+	if result.OK {
+		t.Fatalf("cluster doctor result = %#v, want unhealthy due topology drift", result)
+	}
+	var nodeBStatus *clusterNodeStatus
+	for idx := range result.Nodes {
+		if result.Nodes[idx].ID == "node-b" {
+			nodeBStatus = &result.Nodes[idx]
+			break
+		}
+	}
+	if nodeBStatus == nil || nodeBStatus.OK || nodeBStatus.TopologyConsistent || !strings.Contains(nodeBStatus.TopologyError, "differs") {
+		t.Fatalf("node-b status = %#v, want topology drift", nodeBStatus)
+	}
+	if len(result.Errors) == 0 || !strings.Contains(strings.Join(result.Errors, "\n"), "topology differs") {
+		t.Fatalf("cluster doctor errors = %#v, want topology drift error", result.Errors)
+	}
 }
 
 func TestRunClusterDoctorAliasSkipsNodeProbe(t *testing.T) {

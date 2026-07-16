@@ -403,6 +403,11 @@ make cli ARGS='replication'
 make cli ARGS='entries -limit 10'
 ```
 
+`cluster status` and `cluster doctor` fetch the peer health, topology,
+election, and replication state. With node probes enabled, they also call each
+topology node's health, topology, and election endpoints and report topology
+drift when a node's normalized topology differs from the peer view.
+
 For sharded clusters, only enable `ENFORCE_LEADER_WRITES=true` after clients can
 write to the elected leader for each key or after the client/proxy layer handles
 leader errors. Internal replication commands are still accepted on followers.

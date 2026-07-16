@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -456,12 +457,17 @@ type clusterStatusResult struct {
 }
 
 type clusterNodeStatus struct {
-	ID      string                        `json:"id"`
-	Role    string                        `json:"role,omitempty"`
-	Address string                        `json:"address,omitempty"`
-	OK      bool                          `json:"ok"`
-	Health  *hatriecache.MonitoringHealth `json:"health,omitempty"`
-	Error   string                        `json:"error,omitempty"`
+	ID                 string                        `json:"id"`
+	Role               string                        `json:"role,omitempty"`
+	Address            string                        `json:"address,omitempty"`
+	OK                 bool                          `json:"ok"`
+	Health             *hatriecache.MonitoringHealth `json:"health,omitempty"`
+	TopologyConsistent bool                          `json:"topology_consistent,omitempty"`
+	TopologyVersion    uint64                        `json:"topology_version,omitempty"`
+	TopologyError      string                        `json:"topology_error,omitempty"`
+	ElectionOK         bool                          `json:"election_ok,omitempty"`
+	ElectionError      string                        `json:"election_error,omitempty"`
+	Error              string                        `json:"error,omitempty"`
 }
 
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
@@ -518,7 +524,7 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 		for _, node := range result.Nodes {
 			if !node.OK {
 				result.OK = false
-				result.Errors = append(result.Errors, "node "+node.ID+": "+node.Error)
+				result.Errors = append(result.Errors, clusterNodeErrors(node)...)
 			}
 		}
 	}
@@ -551,9 +557,67 @@ func probeClusterNodes(ctx context.Context, client *http.Client, topology hatrie
 		}
 		status.OK = true
 		status.Health = &health
+		nodeTopology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, status.Address, "/api/topology")
+		if err != nil {
+			status.OK = false
+			status.TopologyError = err.Error()
+		} else {
+			status.TopologyVersion = nodeTopology.Version
+			consistent, err := clusterTopologiesConsistent(topology, nodeTopology)
+			if err != nil {
+				status.OK = false
+				status.TopologyError = err.Error()
+			} else {
+				status.TopologyConsistent = consistent
+				if !consistent {
+					status.OK = false
+					status.TopologyError = "topology differs from peer"
+				}
+			}
+		}
+		if _, err := getJSONValue[hatriecache.ElectionStatus](ctx, client, status.Address, "/api/election"); err != nil {
+			status.OK = false
+			status.ElectionError = err.Error()
+		} else {
+			status.ElectionOK = true
+		}
 		nodes = append(nodes, status)
 	}
 	return nodes
+}
+
+func clusterTopologiesConsistent(peerTopology hatriecache.ClusterTopology, nodeTopology hatriecache.ClusterTopology) (bool, error) {
+	peerStore, err := hatriecache.NewTopologyStore(peerTopology)
+	if err != nil {
+		return false, fmt.Errorf("peer topology is invalid: %w", err)
+	}
+	nodeStore, err := hatriecache.NewTopologyStore(nodeTopology)
+	if err != nil {
+		return false, fmt.Errorf("node topology is invalid: %w", err)
+	}
+	peer := peerStore.Get()
+	node := nodeStore.Get()
+	peer.Self = ""
+	node.Self = ""
+	return reflect.DeepEqual(peer, node), nil
+}
+
+func clusterNodeErrors(node clusterNodeStatus) []string {
+	prefix := "node " + node.ID + ": "
+	var out []string
+	if node.Error != "" {
+		out = append(out, prefix+node.Error)
+	}
+	if node.TopologyError != "" {
+		out = append(out, prefix+"topology: "+node.TopologyError)
+	}
+	if node.ElectionError != "" {
+		out = append(out, prefix+"election: "+node.ElectionError)
+	}
+	if len(out) == 0 && !node.OK {
+		out = append(out, prefix+"unhealthy")
+	}
+	return out
 }
 
 func runClusterJoin(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
