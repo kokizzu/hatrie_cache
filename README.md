@@ -261,7 +261,9 @@ volume, and back up that directory with your normal host snapshot tooling.
 Deployable templates are available in `deploy/`: systemd at
 `deploy/systemd/hatrie-cache.service`, topology examples at
 `deploy/topology/full-replica.json` and `deploy/topology/sharded.json`, and a
-two-node local compose example at `deploy/docker-compose.yml`.
+two-node local compose example at `deploy/docker-compose.yml`. A hardened
+single-node container template is available at
+`deploy/docker-compose.production.yml`.
 
 Build the production container image with the same Makefile+script convention:
 
@@ -278,6 +280,12 @@ on `0.0.0.0:8080` with LevelDB, snapshot, and journal files under
 includes a Docker healthcheck that runs `hatrie-cli health` against
 `HATRIE_HEALTHCHECK_ADDR` (default `http://127.0.0.1:8080`) and forwards
 `MONITORING_AUTH_TOKEN` to the probe when authentication is enabled.
+The production compose template expects `MONITORING_AUTH_TOKEN` and can be
+rendered with:
+
+```
+MONITORING_AUTH_TOKEN=change-me docker compose -f deploy/docker-compose.production.yml config
+```
 
 ### Restore And Recovery Runbook
 

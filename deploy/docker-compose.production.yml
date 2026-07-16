@@ -1,0 +1,42 @@
+services:
+  hatrie-cache:
+    image: ${HATRIE_CACHE_IMAGE:-hatrie-cache:latest}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${HATRIE_CACHE_HTTP_PORT:-8080}:8080"
+    environment:
+      MONITORING_AUTH_TOKEN: ${MONITORING_AUTH_TOKEN:?set MONITORING_AUTH_TOKEN}
+      HATRIE_HEALTHCHECK_ADDR: http://127.0.0.1:8080
+    command:
+      - -monitoring-server
+      - -monitoring-addr
+      - 0.0.0.0:8080
+      - -monitoring-web-dir
+      - /app/svelte-mpa/dist
+      - -monitoring-auth-token
+      - ${MONITORING_AUTH_TOKEN:?set MONITORING_AUTH_TOKEN}
+      - -db-path
+      - /var/lib/hatrie-cache/cache.leveldb
+      - -snapshot-path
+      - /var/lib/hatrie-cache/snapshot.hc
+      - -snapshot-interval
+      - ${HATRIE_CACHE_SNAPSHOT_INTERVAL:-30s}
+      - -journal-path
+      - /var/lib/hatrie-cache/commands.journal
+      - -audit-log-path
+      - /var/lib/hatrie-cache/audit.jsonl
+    volumes:
+      - hatrie-cache-data:/var/lib/hatrie-cache
+      - hatrie-cache-backups:/var/backups/hatrie-cache
+    tmpfs:
+      - /tmp
+
+volumes:
+  hatrie-cache-data:
+  hatrie-cache-backups:

@@ -3,6 +3,9 @@
 ARG GO_VERSION=1.22
 ARG NODE_VERSION=22
 ARG DEBIAN_VERSION=bookworm
+ARG VCS_REF=unknown
+ARG VERSION=dev
+ARG BUILD_DATE=unknown
 
 FROM node:${NODE_VERSION}-${DEBIAN_VERSION}-slim AS frontend
 WORKDIR /src/svelte-mpa
@@ -30,6 +33,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 	CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/hatrie-cli ./cmd/hatrie-cli
 
 FROM debian:${DEBIAN_VERSION}-slim AS runtime
+ARG VCS_REF=unknown
+ARG VERSION=dev
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.title="hatrie_cache" \
+	org.opencontainers.image.description="Experimental distributed cache using HAT-trie indexes" \
+	org.opencontainers.image.source="https://github.com/kokizzu/hatrie_cache" \
+	org.opencontainers.image.revision="${VCS_REF}" \
+	org.opencontainers.image.version="${VERSION}" \
+	org.opencontainers.image.created="${BUILD_DATE}" \
+	org.opencontainers.image.vendor="kokizzu"
 RUN set -eux; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends ca-certificates; \

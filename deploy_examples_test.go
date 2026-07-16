@@ -67,6 +67,8 @@ func TestProductionDockerfileAndBuildScript(t *testing.T) {
 		"FROM node:",
 		"FROM golang:",
 		"FROM debian:",
+		"org.opencontainers.image.title",
+		"org.opencontainers.image.revision",
 		"pnpm run build",
 		"CGO_ENABLED=1 go build",
 		"USER hatrie-cache",
@@ -113,9 +115,27 @@ func TestReadmeLinksDeployExamples(t *testing.T) {
 		"deploy/topology/full-replica.json",
 		"deploy/topology/sharded.json",
 		"deploy/docker-compose.yml",
+		"deploy/docker-compose.production.yml",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README missing deploy example link %q", token)
+		}
+	}
+}
+
+func TestProductionComposeExampleHardensRuntime(t *testing.T) {
+	compose := readDeployExample(t, "deploy/docker-compose.production.yml")
+	for _, token := range []string{
+		"restart: unless-stopped",
+		"read_only: true",
+		"cap_drop:",
+		"no-new-privileges:true",
+		"MONITORING_AUTH_TOKEN",
+		"HATRIE_HEALTHCHECK_ADDR",
+		"/var/lib/hatrie-cache/cache.leveldb",
+	} {
+		if !strings.Contains(compose, token) {
+			t.Fatalf("production compose missing %q", token)
 		}
 	}
 }
