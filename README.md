@@ -592,7 +592,7 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/topology`, `/api/election`, `/api/replication`,
-`/api/journal`, and `/api/commands`.
+`/api/journal`, and `/api/commands`, plus Prometheus metrics at `/metrics`.
 Use `GET /api/entries?prefix=...&limit=N` to bound large key listings; limited
 responses include `has_more` and `next_after_key` for cursor paging with
 `after_key`. Empty keys are valid, so when `next_after_key` is empty and

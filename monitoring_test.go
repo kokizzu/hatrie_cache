@@ -1293,6 +1293,64 @@ func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("header token health status = %d, want 200", resp.Code)
 	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated metrics status = %d, want 401", resp.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("bearer token metrics status = %d, want 200", resp.Code)
+	}
+}
+
+func TestMonitoringHandlerExposesPrometheusMetrics(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !got.OK {
+		t.Fatalf("journaled SETSTR response = %#v, want ok", got)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName: "node-a",
+		StartAt:  time.Now().Add(-2 * time.Second),
+		Journal:  journal,
+	}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", resp.Code)
+	}
+	if contentType := resp.Header().Get("Content-Type"); !strings.Contains(contentType, "text/plain") {
+		t.Fatalf("metrics content type = %q, want text/plain", contentType)
+	}
+	body := resp.Body.String()
+	for _, token := range []string{
+		"# HELP hatrie_cache_up",
+		"# TYPE hatrie_cache_reads_total counter",
+		`hatrie_cache_up{node="node-a"} 1`,
+		`hatrie_cache_keys{node="node-a"} 1`,
+		`hatrie_cache_journal_sequence{node="node-a"} 1`,
+	} {
+		if !strings.Contains(body, token) {
+			t.Fatalf("metrics body missing %q:\n%s", token, body)
+		}
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/metrics", nil))
+	if resp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("metrics POST status = %d, want 405", resp.Code)
+	}
 }
 
 func TestMonitoringHandlerManagesTopology(t *testing.T) {

@@ -160,6 +160,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/election", handler.handleElection)
 	mux.HandleFunc("/api/replication", handler.handleReplication)
 	mux.HandleFunc("/api/journal", handler.handleJournal)
+	mux.HandleFunc("/metrics", handler.handleMetrics)
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
@@ -172,13 +173,17 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 
 func monitoringAuthHandler(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || monitoringRequestAuthorized(r, token) {
+		if !monitoringPathRequiresAuth(r.URL.Path) || monitoringRequestAuthorized(r, token) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		w.Header().Set("WWW-Authenticate", `Bearer realm="hatrie-cache"`)
 		writeJSONStatus(w, http.StatusUnauthorized, commandError("unauthorized"))
 	})
+}
+
+func monitoringPathRequiresAuth(path string) bool {
+	return strings.HasPrefix(path, "/api/") || path == "/metrics"
 }
 
 func monitoringRequestAuthorized(r *http.Request, token string) bool {
@@ -239,6 +244,98 @@ func (handler *MonitoringHandler) handleStats(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, handler.trie.Stats())
+}
+
+func (handler *MonitoringHandler) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if !handler.requireTrie(w) {
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	_, _ = io.WriteString(w, handler.prometheusMetrics())
+}
+
+func (handler *MonitoringHandler) prometheusMetrics() string {
+	var builder strings.Builder
+	node := prometheusLabelValue(handler.options.NodeName)
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	stats := handler.trie.Stats()
+
+	writePrometheusHelp(&builder, "hatrie_cache_up", "Whether this HAT-trie cache process is serving metrics.")
+	writePrometheusType(&builder, "hatrie_cache_up", "gauge")
+	fmt.Fprintf(&builder, "hatrie_cache_up{node=\"%s\"} 1\n", node)
+	writePrometheusHelp(&builder, "hatrie_cache_uptime_seconds", "Process uptime in seconds.")
+	writePrometheusType(&builder, "hatrie_cache_uptime_seconds", "gauge")
+	fmt.Fprintf(&builder, "hatrie_cache_uptime_seconds{node=\"%s\"} %d\n", node, int64(time.Since(handler.options.StartAt).Seconds()))
+	writePrometheusHelp(&builder, "hatrie_cache_keys", "Current number of keys in the cache.")
+	writePrometheusType(&builder, "hatrie_cache_keys", "gauge")
+	fmt.Fprintf(&builder, "hatrie_cache_keys{node=\"%s\"} %d\n", node, handler.trie.Size())
+	writePrometheusHelp(&builder, "hatrie_cache_memory_bytes", "Go heap bytes currently allocated.")
+	writePrometheusType(&builder, "hatrie_cache_memory_bytes", "gauge")
+	fmt.Fprintf(&builder, "hatrie_cache_memory_bytes{node=\"%s\"} %d\n", node, mem.Alloc)
+	writePrometheusHelp(&builder, "hatrie_cache_disk_spill_bytes", "Bytes currently spilled to disk by the cache.")
+	writePrometheusType(&builder, "hatrie_cache_disk_spill_bytes", "gauge")
+	fmt.Fprintf(&builder, "hatrie_cache_disk_spill_bytes{node=\"%s\"} %d\n", node, handler.trie.diskSpillBytes())
+
+	writePrometheusCounter(&builder, "hatrie_cache_reads_total", "Total cache read operations.", node, stats.Reads)
+	writePrometheusCounter(&builder, "hatrie_cache_hits_total", "Total cache hit operations.", node, stats.Hits)
+	writePrometheusCounter(&builder, "hatrie_cache_misses_total", "Total cache miss operations.", node, stats.Misses)
+	writePrometheusCounter(&builder, "hatrie_cache_writes_total", "Total cache write operations.", node, stats.Writes)
+	writePrometheusCounter(&builder, "hatrie_cache_deletes_total", "Total cache delete operations.", node, stats.Deletes)
+	writePrometheusCounter(&builder, "hatrie_cache_expirations_total", "Total cache expiration operations.", node, stats.Expirations)
+
+	if handler.options.Journal != nil {
+		writePrometheusHelp(&builder, "hatrie_cache_journal_sequence", "Latest local command journal sequence.")
+		writePrometheusType(&builder, "hatrie_cache_journal_sequence", "gauge")
+		fmt.Fprintf(&builder, "hatrie_cache_journal_sequence{node=\"%s\"} %d\n", node, handler.options.Journal.Sequence())
+	}
+	if handler.options.Replicator != nil {
+		result := handler.options.Replicator.LastResult()
+		if result.Queue != nil {
+			writePrometheusHelp(&builder, "hatrie_cache_replication_queue_depth", "Current async replication queue depth.")
+			writePrometheusType(&builder, "hatrie_cache_replication_queue_depth", "gauge")
+			fmt.Fprintf(&builder, "hatrie_cache_replication_queue_depth{node=\"%s\"} %d\n", node, result.Queue.Depth)
+			writePrometheusCounter(&builder, "hatrie_cache_replication_queue_dropped_total", "Total dropped async replication jobs.", node, result.Queue.Dropped)
+			writePrometheusCounter(&builder, "hatrie_cache_replication_attempts_total", "Total async replication target delivery attempts.", node, result.Queue.Attempts)
+			writePrometheusCounter(&builder, "hatrie_cache_replication_successes_total", "Total successful async replication target deliveries.", node, result.Queue.Successes)
+			writePrometheusCounter(&builder, "hatrie_cache_replication_failures_total", "Total failed async replication target deliveries.", node, result.Queue.Failures)
+		}
+	}
+	return builder.String()
+}
+
+func writePrometheusCounter(builder *strings.Builder, name string, help string, node string, value uint64) {
+	writePrometheusHelp(builder, name, help)
+	writePrometheusType(builder, name, "counter")
+	fmt.Fprintf(builder, "%s{node=\"%s\"} %d\n", name, node, value)
+}
+
+func writePrometheusHelp(builder *strings.Builder, name string, help string) {
+	fmt.Fprintf(builder, "# HELP %s %s\n", name, prometheusHelpText(help))
+}
+
+func writePrometheusType(builder *strings.Builder, name string, metricType string) {
+	fmt.Fprintf(builder, "# TYPE %s %s\n", name, metricType)
+}
+
+func prometheusLabelValue(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\n", "\\n")
+	value = strings.ReplaceAll(value, "\"", "\\\"")
+	return value
+}
+
+func prometheusHelpText(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\n", "\\n")
+	return value
 }
 
 func (handler *MonitoringHandler) handleEntries(w http.ResponseWriter, r *http.Request) {
