@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "mode": "full_replica",
+  "nodes": [
+    {
+      "id": "node-a",
+      "address": "http://node-a:8080",
+      "role": "primary"
+    },
+    {
+      "id": "node-b",
+      "address": "http://node-b:8080",
+      "role": "replica"
+    }
+  ]
+}

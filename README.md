@@ -251,6 +251,11 @@ The safest operational pattern is to store cache data under one directory such
 as `/var/lib/hatrie-cache`, keep snapshots/journals/LevelDB on the same durable
 volume, and back up that directory with your normal host snapshot tooling.
 
+Deployable templates are available in `deploy/`: systemd at
+`deploy/systemd/hatrie-cache.service`, topology examples at
+`deploy/topology/full-replica.json` and `deploy/topology/sharded.json`, and a
+two-node local compose example at `deploy/docker-compose.yml`.
+
 ### Restore And Recovery Runbook
 
 Restore snapshot+journal data to a clean data directory, then start the node

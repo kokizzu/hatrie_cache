@@ -1,0 +1,31 @@
+[Unit]
+Description=HAT-trie cache
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hatrie-cache
+Group=hatrie-cache
+WorkingDirectory=/var/lib/hatrie-cache
+ExecStart=/usr/local/bin/hatrie-cache \
+  -monitoring-server \
+  -monitoring-addr 0.0.0.0:8080 \
+  -monitoring-web-dir /usr/share/hatrie-cache/svelte-mpa/dist \
+  -node-id node-a \
+  -topology-path /etc/hatrie-cache/topology.json \
+  -snapshot-path /var/lib/hatrie-cache/snapshot.hc \
+  -snapshot-interval 30s \
+  -journal-path /var/lib/hatrie-cache/commands.journal \
+  -journal-pull-state-path /var/lib/hatrie-cache/commands.journal.pull_state.json \
+  -db-path /var/lib/hatrie-cache/cache.leveldb \
+  -db-sync-interval 30s
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=1048576
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/hatrie-cache
+
+[Install]
+WantedBy=multi-user.target

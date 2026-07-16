@@ -1,0 +1,13 @@
+# Deployment Examples
+
+These files are starting points for operators. Edit paths, addresses, users,
+resource limits, and network controls before using them outside a local test
+environment.
+
+- `systemd/hatrie-cache.service` runs one durable node from an installed binary.
+- `topology/full-replica.json` defines two nodes that both own every key.
+- `topology/sharded.json` defines two shards over 1024 virtual buckets.
+- `docker-compose.yml` runs two local nodes from the checked-out source tree.
+
+For production, prefer a compiled binary and a private network or explicit API
+authentication in front of the monitoring/API port.

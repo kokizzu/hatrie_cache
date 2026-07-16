@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "mode": "sharded",
+  "bucket_count": 1024,
+  "nodes": [
+    {
+      "id": "node-a",
+      "address": "http://node-a:8080",
+      "role": "primary"
+    },
+    {
+      "id": "node-b",
+      "address": "http://node-b:8080",
+      "role": "primary"
+    }
+  ],
+  "shards": [
+    {
+      "id": 0,
+      "primary": "node-a",
+      "replicas": [
+        "node-b"
+      ]
+    },
+    {
+      "id": 1,
+      "primary": "node-b",
+      "replicas": [
+        "node-a"
+      ]
+    }
+  ],
+  "bucket_ranges": [
+    {
+      "start": 0,
+      "end": 511,
+      "shard": 0
+    },
+    {
+      "start": 512,
+      "end": 1023,
+      "shard": 1
+    }
+  ]
+}
