@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -978,6 +979,55 @@ func TestRunCheckConfigRejectsInvalidReferences(t *testing.T) {
 	}
 }
 
+func TestRunPrintConfigRedactsSecretsAndDoesNotStartListeners(t *testing.T) {
+	monitoringAddr := freeTCPAddr(t)
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-print-config",
+		"-monitoring-server",
+		"-monitoring-addr", monitoringAddr,
+		"-monitoring-auth-token", "super-secret",
+		"-rate-limit", "4",
+	}, stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run(print-config) error = %v", err)
+	}
+	body := stdout.String()
+	if strings.Contains(body, "super-secret") {
+		t.Fatalf("print-config leaked auth token: %s", body)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("print-config JSON error = %v\n%s", err, body)
+	}
+	if got["monitoring_auth_token"] != "<redacted>" || got["monitoring_addr"] != monitoringAddr || got["rate_limit"] != float64(4) {
+		t.Fatalf("print-config = %#v, want redacted token, address, and rate limit", got)
+	}
+	assertAddrAvailable(t, monitoringAddr)
+}
+
+func TestRunCheckConfigCanPrintValidatedConfig(t *testing.T) {
+	certPath, keyPath := writeTestCertificate(t)
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-check-config",
+		"-print-config",
+		"-monitoring-tls-cert", certPath,
+		"-monitoring-tls-key", keyPath,
+	}, stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run(check-config print-config) error = %v", err)
+	}
+	if strings.Contains(stdout.String(), "configuration ok") {
+		t.Fatalf("stdout = %q, want JSON config only", stdout.String())
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("check-config print-config JSON error = %v\n%s", err, stdout.String())
+	}
+	if got["monitoring_tls_cert"] != certPath {
+		t.Fatalf("printed config monitoring_tls_cert = %v, want %s", got["monitoring_tls_cert"], certPath)
+	}
+}
+
 func TestRunRejectsJournalPullWithoutJournalPath(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	err := run(context.Background(), []string{
@@ -1098,6 +1148,60 @@ func TestRunStartsHTTPAndGRPCAndStopsOnContextCancel(t *testing.T) {
 	}
 	waitForAddrReusable(t, monitoringAddr)
 	waitForAddrReusable(t, grpcAddr)
+}
+
+func TestRunServesRedactedConfigEndpoint(t *testing.T) {
+	monitoringAddr := freeTCPAddr(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, []string{
+			"-monitoring-server",
+			"-monitoring-addr", monitoringAddr,
+			"-monitoring-web-dir", "",
+			"-monitoring-auth-token", "super-secret",
+			"-rate-limit", "9",
+		}, &bytes.Buffer{}, &bytes.Buffer{})
+	}()
+
+	baseURL := "http://" + monitoringAddr
+	waitForHTTPHealthWithToken(t, baseURL+"/api/health", "super-secret")
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/config", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(/api/config) error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer super-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/config error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/config status = %d, want 200", resp.StatusCode)
+	}
+	var got map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("/api/config JSON error = %v", err)
+	}
+	if got["monitoring_auth_token"] != "<redacted>" || got["rate_limit"] != float64(9) || got["monitoring_addr"] != monitoringAddr {
+		t.Fatalf("/api/config = %#v, want redacted token, rate limit, and address", got)
+	}
+	if text := fmt.Sprint(got); strings.Contains(text, "super-secret") {
+		t.Fatalf("/api/config leaked auth token: %s", text)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run() after cancel error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run() did not return after context cancellation")
+	}
+	waitForAddrReusable(t, monitoringAddr)
 }
 
 func TestRunWritesAuditLog(t *testing.T) {
@@ -1431,6 +1535,29 @@ func waitForHTTPHealth(t *testing.T, url string) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("HTTP health endpoint %s did not become ready", url)
+}
+
+func waitForHTTPHealthWithToken(t *testing.T, url string, token string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatalf("NewRequest(%s) error = %v", url, err)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {

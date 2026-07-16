@@ -1300,12 +1300,48 @@ func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
 		t.Fatalf("unauthenticated metrics status = %d, want 401", resp.Code)
 	}
 
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated config status = %d, want 401", resp.Code)
+	}
+
 	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	resp = httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("bearer token metrics status = %d, want 200", resp.Code)
+	}
+}
+
+func TestMonitoringHandlerExposesRuntimeConfig(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		RuntimeConfig: map[string]interface{}{
+			"monitoring_addr":       "127.0.0.1:8080",
+			"monitoring_auth_token": "<redacted>",
+			"rate_limit":            7,
+		},
+	}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("config status = %d, want 200", resp.Code)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("config JSON error = %v", err)
+	}
+	if got["monitoring_auth_token"] != "<redacted>" || got["monitoring_addr"] != "127.0.0.1:8080" || got["rate_limit"] != float64(7) {
+		t.Fatalf("config = %#v, want redacted payload", got)
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/config", nil))
+	if resp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("config POST status = %d, want 405", resp.Code)
 	}
 }
 

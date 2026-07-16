@@ -44,6 +44,7 @@ type MonitoringOptions struct {
 	Election             *ElectionStore
 	Replicator           *HTTPReplicator
 	EnforceLeaderWrites  bool
+	RuntimeConfig        map[string]interface{}
 }
 
 type MonitoringHandler struct {
@@ -154,6 +155,7 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 func (handler *MonitoringHandler) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", handler.handleHealth)
+	mux.HandleFunc("/api/config", handler.handleConfig)
 	mux.HandleFunc("/api/stats", handler.handleStats)
 	mux.HandleFunc("/api/entries", handler.handleEntries)
 	mux.HandleFunc("/api/commands", handler.handleCommands)
@@ -290,6 +292,29 @@ func (handler *MonitoringHandler) handleHealth(w http.ResponseWriter, r *http.Re
 		DiskSpillBytes:  handler.trie.diskSpillBytes(),
 		CleanersRunning: 0,
 	})
+}
+
+func (handler *MonitoringHandler) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if handler.options.RuntimeConfig == nil {
+		writeJSON(w, map[string]interface{}{})
+		return
+	}
+	writeJSON(w, cloneRuntimeConfig(handler.options.RuntimeConfig))
+}
+
+func cloneRuntimeConfig(config map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(config))
+	for key, value := range config {
+		out[key] = value
+	}
+	return out
 }
 
 func (handler *MonitoringHandler) handleStats(w http.ResponseWriter, r *http.Request) {

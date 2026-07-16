@@ -41,6 +41,7 @@ var errHatTrieDestroyed = errors.New("hatrie-cache: trie is destroyed")
 type config struct {
 	configPath                  string
 	checkConfig                 bool
+	printConfig                 bool
 	monitoringServer            bool
 	monitoringAddr              string
 	monitoringTLSCert           string
@@ -124,8 +125,14 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		if err := validateConfigReferences(cfg); err != nil {
 			return err
 		}
+		if cfg.printConfig {
+			return writeRedactedConfig(stdout, cfg)
+		}
 		fmt.Fprintln(stdout, "configuration ok")
 		return nil
+	}
+	if cfg.printConfig {
+		return writeRedactedConfig(stdout, cfg)
 	}
 	if !cfg.monitoringServer {
 		fmt.Fprintln(stdout, "monitoring server disabled; pass -monitoring-server to start it")
@@ -244,6 +251,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Election:             election,
 		Replicator:           replicator,
 		EnforceLeaderWrites:  cfg.enforceLeaderWrites,
+		RuntimeConfig:        redactedConfig(cfg),
 	}).Handler()
 	server := newMonitoringServer(cfg, handler)
 
@@ -313,6 +321,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.configPath, "config", cfg.configPath, "optional JSON config file path")
 	flags.StringVar(&cfg.configPath, "config-file", cfg.configPath, "optional JSON config file path")
 	flags.BoolVar(&cfg.checkConfig, "check-config", false, "validate configuration and exit without starting listeners")
+	flags.BoolVar(&cfg.printConfig, "print-config", false, "print effective redacted configuration and exit without starting listeners")
 	flags.BoolVar(&cfg.monitoringServer, "monitoring-server", false, "run the grpc/http2/web monitoring server")
 	flags.StringVar(&cfg.monitoringAddr, "monitoring-addr", cfg.monitoringAddr, "monitoring server listen address")
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
@@ -504,6 +513,76 @@ func validateConfigReferences(cfg config) error {
 		}
 	}
 	return nil
+}
+
+func writeRedactedConfig(writer io.Writer, cfg config) error {
+	data, err := stdjson.MarshalIndent(redactedConfig(cfg), "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	_, err = writer.Write(data)
+	return err
+}
+
+func redactedConfig(cfg config) map[string]interface{} {
+	return map[string]interface{}{
+		"config_path":                    cfg.configPath,
+		"check_config":                   cfg.checkConfig,
+		"print_config":                   cfg.printConfig,
+		"monitoring_server":              cfg.monitoringServer,
+		"monitoring_addr":                cfg.monitoringAddr,
+		"monitoring_tls_cert":            cfg.monitoringTLSCert,
+		"monitoring_tls_key":             cfg.monitoringTLSKey,
+		"monitoring_auth_token":          redactedSecret(cfg.monitoringAuthToken),
+		"audit_log_path":                 cfg.auditLogPath,
+		"write_protection":               cfg.writeProtection,
+		"rate_limit":                     cfg.rateLimit,
+		"monitoring_web_dir":             cfg.monitoringWebDir,
+		"monitoring_read_header_timeout": cfg.monitoringReadHeaderTimeout.String(),
+		"monitoring_idle_timeout":        cfg.monitoringIdleTimeout.String(),
+		"node_id":                        cfg.nodeID,
+		"topology_path":                  cfg.topologyPath,
+		"election_timeout":               cfg.electionTimeout.String(),
+		"replication":                    cfg.replication,
+		"replication_async":              cfg.replicationAsync,
+		"replication_queue_size":         cfg.replicationQueueSize,
+		"replication_retry_interval":     cfg.replicationRetry.String(),
+		"replication_max_attempts":       cfg.replicationAttempts,
+		"replication_wire_format":        cfg.replicationWireFormat,
+		"replication_sync_interval":      cfg.replicationSyncInterval.String(),
+		"replication_sync_prefix":        cfg.replicationSyncPrefix,
+		"enforce_leader_writes":          cfg.enforceLeaderWrites,
+		"grpc_addr":                      cfg.grpcAddr,
+		"grpc_tls_cert":                  cfg.grpcTLSCert,
+		"grpc_tls_key":                   cfg.grpcTLSKey,
+		"grpc_client_ca":                 cfg.grpcClientCA,
+		"db_path":                        cfg.dbPath,
+		"db_format":                      cfg.dbFormat,
+		"db_sync_interval":               cfg.dbSyncInterval.String(),
+		"db_hot_load":                    cfg.dbHotLoad,
+		"db_hot_load_max_bytes":          cfg.dbHotLoadMaxBytes,
+		"db_hot_load_max_age":            cfg.dbHotLoadMaxAge.String(),
+		"db_hot_load_min_hits":           cfg.dbHotLoadMinHits,
+		"snapshot_path":                  cfg.snapshotPath,
+		"snapshot_interval":              cfg.snapshotInterval.String(),
+		"snapshot_format":                cfg.snapshotFormat,
+		"journal_path":                   cfg.journalPath,
+		"journal_format":                 cfg.journalFormat,
+		"journal_pull_source":            cfg.journalPullSource,
+		"journal_pull_state_path":        cfg.journalPullStatePath,
+		"journal_pull_interval":          cfg.journalPullInterval.String(),
+		"journal_pull_timeout":           cfg.journalPullTimeout.String(),
+		"journal_pull_limit":             cfg.journalPullLimit,
+		"journal_pull_max_batches":       cfg.journalPullMaxBatches,
+	}
+}
+
+func redactedSecret(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return "<redacted>"
 }
 
 func configOptionName(key string) string {

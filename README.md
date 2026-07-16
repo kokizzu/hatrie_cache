@@ -485,11 +485,16 @@ Validate a config file without opening listeners or persistence handles:
 ```
 make check-config CONFIG_PATH=deploy/hatrie-cache.json
 make check-config CHECK_CONFIG_ARGS='-grpc-tls-cert server.pem -grpc-tls-key server-key.pem -grpc-client-ca clients-ca.pem'
+make check-config CONFIG_PATH=deploy/hatrie-cache.json CHECK_CONFIG_ARGS='-print-config'
 ```
 
 The validator parses the same flags/config file as the daemon and checks
 cross-field constraints, referenced TLS key pairs, gRPC client CA PEM files,
-and topology JSON when `TOPOLOGY_PATH`/`-topology-path` is set.
+and topology JSON when `TOPOLOGY_PATH`/`-topology-path` is set. Use
+`-print-config` through `make server SERVER_ARGS='-print-config'` or
+`make check-config CHECK_CONFIG_ARGS='-print-config'` to print the effective
+configuration as JSON with `monitoring_auth_token` redacted. Running servers
+also expose the same redacted view at `GET /api/config`.
 
 Provide a TLS certificate and key to serve the same monitoring API over HTTPS
 with HTTP/2 ALPN enabled:
