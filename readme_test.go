@@ -132,6 +132,24 @@ func TestREADMEListsBenchmarkRegressionGuard(t *testing.T) {
 	}
 }
 
+func TestREADMEListsFrontendSmoke(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"make frontend-smoke",
+		"Vite preview",
+		"dashboard/keys/commands/admin HTML",
+		"`FRONTEND_SMOKE_REQUIRE_BROWSER=true`",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md does not document frontend smoke token %q", token)
+		}
+	}
+}
+
 func TestCommandSupportScriptListsExecuteCommandAliases(t *testing.T) {
 	commandGroups := executeCommandCases(t)
 	data, err := os.ReadFile("scripts/command-support.sh")

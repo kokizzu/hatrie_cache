@@ -103,7 +103,14 @@ The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
 ```
 make frontend-install
 make frontend-dev
+make frontend-smoke
 ```
+
+`make frontend-smoke` builds the Svelte MPA, serves the production bundle with
+Vite preview on a loopback port, verifies dashboard/keys/commands/admin HTML
+entrypoints, and renders the Admin page with Chrome/Chromium when one is
+available. Set `FRONTEND_SMOKE_REQUIRE_BROWSER=true` to fail when a browser is
+not installed.
 
 The Admin page at `/admin.html` exposes LevelDB flush/compact controls and
 replication queue/sync status.

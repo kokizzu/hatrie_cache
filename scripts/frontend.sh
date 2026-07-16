@@ -62,6 +62,9 @@ case "$cmd" in
 		cd "$FRONTEND"
 		run_pm run "$cmd"
 		;;
+	smoke)
+		"$ROOT/scripts/frontend-smoke.sh"
+		;;
 	verify)
 		static_verify
 		if [ -d "$FRONTEND/node_modules" ]; then
@@ -69,13 +72,14 @@ case "$cmd" in
 			run_pm run check
 			run_pm run test
 			run_pm run build
+			FRONTEND_SMOKE_SKIP_BUILD=true "$ROOT/scripts/frontend-smoke.sh"
 		else
 			echo "frontend dependencies are not installed; package checks skipped"
 			echo "run 'make frontend-install' before full frontend verification"
 		fi
 		;;
 	*)
-		echo "usage: $0 {install|dev|check|test|build|preview|verify}" >&2
+		echo "usage: $0 {install|dev|check|test|build|preview|smoke|verify}" >&2
 		exit 2
 		;;
 esac

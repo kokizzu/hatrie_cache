@@ -189,6 +189,54 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 	}
 }
 
+func TestFrontendSmokeScriptIsWiredThroughMakefile(t *testing.T) {
+	data, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefile := string(data)
+	for _, token := range []string{
+		"frontend-smoke:",
+		"./scripts/frontend-smoke.sh",
+	} {
+		if !strings.Contains(makefile, token) {
+			t.Fatalf("Makefile missing frontend smoke token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("scripts/frontend.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/frontend.sh) error = %v", err)
+	}
+	frontendScript := string(data)
+	for _, token := range []string{
+		"smoke)",
+		"FRONTEND_SMOKE_SKIP_BUILD=true",
+		"frontend-smoke.sh",
+	} {
+		if !strings.Contains(frontendScript, token) {
+			t.Fatalf("frontend.sh missing smoke token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("scripts/frontend-smoke.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/frontend-smoke.sh) error = %v", err)
+	}
+	smokeScript := string(data)
+	for _, token := range []string{
+		"vite preview",
+		"/admin.html",
+		"Audit Trail",
+		"FRONTEND_SMOKE_REQUIRE_BROWSER",
+		"Chrome/Chromium not found",
+	} {
+		if !strings.Contains(smokeScript, token) {
+			t.Fatalf("frontend-smoke.sh missing token %q", token)
+		}
+	}
+}
+
 func writeTestFile(t *testing.T, path string, data string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
