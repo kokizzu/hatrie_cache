@@ -1341,6 +1341,47 @@ func TestExecuteCommandCountMinSketchOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandCountMinSketchExactPathPreservesSemantics(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "2"}); !got.OK || got.Value != "2" {
+		t.Fatalf("INCRCMS exact create response = %#v, want estimate 2", got)
+	}
+	if estimate, ok := ht.EstimateCountMinSketch("freq", "alpha"); !ok || estimate != 2 {
+		t.Fatalf("public EstimateCountMinSketch(alpha) = %d/%v, want 2/true", estimate, ok)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ESTCMS", Key: "freq", Value: "alpha"}); !got.OK || got.Value != "2" {
+		t.Fatalf("ESTCMS exact response = %#v, want 2", got)
+	}
+	if estimate := ht.IncrementCountMinSketch("freq", "alpha", 1); estimate != 3 {
+		t.Fatalf("public IncrementCountMinSketch(alpha) = %d, want 3", estimate)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ESTCMS", Key: "freq", Value: "alpha"}); !got.OK || got.Value != "3" {
+		t.Fatalf("ESTCMS exact after public increment response = %#v, want 3", got)
+	}
+}
+
+func TestExecuteCommandCountMinSketchExactPathAllocationBudget(t *testing.T) {
+	ht := newTestTrie(t)
+	increment := CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "1"}
+	estimate := CacheCommandRequest{Command: "ESTCMS", Key: "freq", Value: "alpha"}
+	if got := ht.ExecuteCommand(increment); !got.OK {
+		t.Fatalf("warm INCRCMS response = %#v, want ok", got)
+	}
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		if got := ht.ExecuteCommand(increment); !got.OK || got.Value == "" {
+			t.Fatalf("INCRCMS response = %#v, want estimate", got)
+		}
+		if got := ht.ExecuteCommand(estimate); !got.OK || got.Value == "" {
+			t.Fatalf("ESTCMS response = %#v, want estimate", got)
+		}
+	})
+	if allocs > 3 {
+		t.Fatalf("INCRCMS+ESTCMS exact path allocations = %.2f, want <= 3", allocs)
+	}
+}
+
 func TestExecuteCommandCountMinSketchRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "INCRCMS", Key: "freq", Value: "alpha", Subkey: "2"}); !got.OK {

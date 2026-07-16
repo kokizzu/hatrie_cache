@@ -201,6 +201,26 @@ func (sketch *countMinSketchData) addKey(key []byte, count uint32) uint64 {
 	return estimate
 }
 
+func (sketch *countMinSketchData) addJSONString(value string, count uint32) uint64 {
+	if sketch == nil || sketch.width == 0 || sketch.depth == 0 {
+		return 0
+	}
+	if count == 0 {
+		return sketch.estimateJSONString(value)
+	}
+	sketch.ensureCounters()
+	estimate := uint64(maxCountMinSketchCounter)
+	sketch.visitJSONStringIndexes(value, func(index uint64) {
+		next := saturatingAddUint32(sketch.counters[index], count)
+		sketch.counters[index] = next
+		if uint64(next) < estimate {
+			estimate = uint64(next)
+		}
+	})
+	sketch.total = saturatingAddUint64(sketch.total, uint64(count))
+	return estimate
+}
+
 func (sketch *countMinSketchData) Estimate(value interface{}) uint64 {
 	estimate, _ := sketch.EstimateChecked(value)
 	return estimate
@@ -223,6 +243,19 @@ func (sketch *countMinSketchData) estimateKey(key []byte) uint64 {
 	}
 	estimate := maxCountMinSketchCounter
 	sketch.visitIndexes(key, func(index uint64) {
+		if sketch.counters[index] < estimate {
+			estimate = sketch.counters[index]
+		}
+	})
+	return uint64(estimate)
+}
+
+func (sketch *countMinSketchData) estimateJSONString(value string) uint64 {
+	if sketch == nil || len(sketch.counters) == 0 {
+		return 0
+	}
+	estimate := maxCountMinSketchCounter
+	sketch.visitJSONStringIndexes(value, func(index uint64) {
 		if sketch.counters[index] < estimate {
 			estimate = sketch.counters[index]
 		}
@@ -274,6 +307,19 @@ func (sketch countMinSketchData) EncodedSize() int64 {
 func (sketch *countMinSketchData) visitIndexes(key []byte, visit func(uint64)) {
 	first := bloomFilterFNV64a(key)
 	step := bloomFilterFNV64(key)
+	if step == 0 {
+		step = bloomFilterFNVPrime64
+	}
+	step |= 1
+	for row := uint8(0); row < sketch.depth; row++ {
+		column := (first + uint64(row)*step) % sketch.width
+		visit(uint64(row)*sketch.width + column)
+	}
+}
+
+func (sketch *countMinSketchData) visitJSONStringIndexes(value string, visit func(uint64)) {
+	first := bloomFilterFNV64aJSONString(value)
+	step := bloomFilterFNV64JSONString(value)
 	if step == 0 {
 		step = bloomFilterFNVPrime64
 	}

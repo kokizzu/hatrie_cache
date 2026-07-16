@@ -1079,6 +1079,20 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastDeleteCuckooFilterCommand(key, request.Value)
+	case "INCRCMS", "ADDCMS", "CMSADD":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		count, err := commandCountMinSketchIncrement(request)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		return ht.executeFastIncrementCountMinSketchCommand(key, request.Value, count)
+	case "ESTCMS", "QUERYCMS", "CMSQUERY", "CMSCOUNT":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastEstimateCountMinSketchCommand(key, request.Value)
 	case "PEEKMAP":
 		if !commandFastPathField(request.Subkey) {
 			return CacheCommandResponse{}, false
@@ -1579,6 +1593,67 @@ func (ht *HatTrie) executeFastDeleteCuckooFilterCommand(key string, value string
 		ht.cacheValueLocked(key, hval)
 	}
 	return CacheCommandResponse{OK: true, Message: "removed cuckoo filter values", Value: strconv.Itoa(deleted)}, true
+}
+
+func (ht *HatTrie) executeFastIncrementCountMinSketchCommand(key string, value string, count uint32) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsCountMinSketch() {
+			estimate := ht.countMinSketches.array[hval.Index].addJSONString(value, count)
+			ht.recordWriteLocked(key)
+			ht.cacheValueLocked(key, hval)
+			return CacheCommandResponse{OK: true, Message: "incremented count-min sketch", Value: strconv.FormatUint(estimate, 10)}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsCountMinSketch() {
+		estimate := ht.countMinSketches.array[hval.Index].addJSONString(value, count)
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "incremented count-min sketch", Value: strconv.FormatUint(estimate, 10)}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	data := newDefaultCountMinSketchData()
+	estimate := data.addJSONString(value, count)
+	idx := ht.countMinSketches.AddData(data)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "incremented count-min sketch", Value: strconv.FormatUint(estimate, 10)}, true
+}
+
+func (ht *HatTrie) executeFastEstimateCountMinSketchCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsCountMinSketch() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	estimate := ht.countMinSketches.array[hval.Index].estimateJSONString(value)
+	ht.recordReadLocked(true, key)
+	return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatUint(estimate, 10)}, true
 }
 
 func commandFastPathField(value string) bool {
