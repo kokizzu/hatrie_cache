@@ -296,6 +296,8 @@ func TestREADMEListsStorageFormatTradeoffs(t *testing.T) {
 		"structured payload, with lower save/load CPU and heap than JSON",
 		"`/api/storage/flush`",
 		"`/api/storage/compact`",
+		"`size_bytes_before`",
+		"`size_bytes_after`",
 		"make storage-flush STORAGE_PEER=http://127.0.0.1:8080",
 		"make storage-compact STORAGE_PEER=http://127.0.0.1:8080",
 	} {

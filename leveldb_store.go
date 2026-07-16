@@ -46,12 +46,25 @@ type LevelDBCompactionOptions struct {
 
 // LevelDBCompactionResult reports a completed manual LevelDB compaction.
 type LevelDBCompactionResult struct {
-	Store          string    `json:"store"`
-	StartKey       string    `json:"start_key,omitempty"`
-	LimitKey       string    `json:"limit_key,omitempty"`
-	StartedAt      time.Time `json:"started_at"`
-	FinishedAt     time.Time `json:"finished_at"`
-	DurationMillis int64     `json:"duration_millis"`
+	Store            string            `json:"store"`
+	StartKey         string            `json:"start_key,omitempty"`
+	LimitKey         string            `json:"limit_key,omitempty"`
+	SizeBytesBefore  int64             `json:"size_bytes_before"`
+	SizeBytesAfter   int64             `json:"size_bytes_after"`
+	SizeBytesDelta   int64             `json:"size_bytes_delta"`
+	PropertiesBefore LevelDBProperties `json:"properties_before"`
+	PropertiesAfter  LevelDBProperties `json:"properties_after"`
+	StartedAt        time.Time         `json:"started_at"`
+	FinishedAt       time.Time         `json:"finished_at"`
+	DurationMillis   int64             `json:"duration_millis"`
+}
+
+// LevelDBProperties reports selected LevelDB engine property snapshots.
+type LevelDBProperties struct {
+	Stats      string `json:"stats,omitempty"`
+	SSTables   string `json:"sstables,omitempty"`
+	WriteDelay string `json:"write_delay,omitempty"`
+	BlockPool  string `json:"block_pool,omitempty"`
 }
 
 // LevelDBFlushResult reports a completed manual LevelDB save/flush.
@@ -76,6 +89,7 @@ func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
 
 type LevelDBStore struct {
 	mu     sync.RWMutex
+	path   string
 	db     *leveldb.DB
 	format StorageFormat
 }
@@ -101,7 +115,7 @@ func OpenLevelDBStoreWithFormat(path string, format StorageFormat) (*LevelDBStor
 	if err != nil {
 		return nil, err
 	}
-	return &LevelDBStore{db: db, format: format}, nil
+	return &LevelDBStore{path: path, db: db, format: format}, nil
 }
 
 func (store *LevelDBStore) Close() error {
@@ -170,10 +184,65 @@ func (store *LevelDBStore) Compact(options LevelDBCompactionOptions) (LevelDBCom
 	}
 	defer unlock()
 
-	err = db.CompactRange(levelDBCompactionRange(options))
+	result.SizeBytesBefore, err = directorySizeBytes(store.path)
+	if err != nil {
+		result.FinishedAt = time.Now().UTC()
+		result.DurationMillis = result.FinishedAt.Sub(startedAt).Milliseconds()
+		return result, err
+	}
+	result.PropertiesBefore = levelDBProperties(db)
+	compactErr := db.CompactRange(levelDBCompactionRange(options))
+	result.SizeBytesAfter, err = directorySizeBytes(store.path)
+	if err != nil {
+		result.FinishedAt = time.Now().UTC()
+		result.DurationMillis = result.FinishedAt.Sub(startedAt).Milliseconds()
+		return result, err
+	}
+	result.SizeBytesDelta = result.SizeBytesAfter - result.SizeBytesBefore
+	result.PropertiesAfter = levelDBProperties(db)
 	result.FinishedAt = time.Now().UTC()
 	result.DurationMillis = result.FinishedAt.Sub(startedAt).Milliseconds()
-	return result, err
+	return result, compactErr
+}
+
+func levelDBProperties(db *leveldb.DB) LevelDBProperties {
+	if db == nil {
+		return LevelDBProperties{}
+	}
+	property := func(name string) string {
+		value, err := db.GetProperty(name)
+		if err != nil {
+			return ""
+		}
+		return value
+	}
+	return LevelDBProperties{
+		Stats:      property("leveldb.stats"),
+		SSTables:   property("leveldb.sstables"),
+		WriteDelay: property("leveldb.writedelay"),
+		BlockPool:  property("leveldb.blockpool"),
+	}
+}
+
+func directorySizeBytes(path string) (int64, error) {
+	if strings.TrimSpace(path) == "" {
+		return 0, nil
+	}
+	var size int64
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info == nil || info.IsDir() {
+			return nil
+		}
+		size += info.Size()
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	return size, err
 }
 
 func levelDBCompactionRange(options LevelDBCompactionOptions) util.Range {

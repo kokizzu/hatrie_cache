@@ -4139,6 +4139,15 @@ func TestLevelDBStoreCompactPreservesEntries(t *testing.T) {
 	if result.Store != "leveldb" || result.StartKey != "alpha" || result.LimitKey != "omega\x00" || result.DurationMillis < 0 || result.FinishedAt.Before(result.StartedAt) {
 		t.Fatalf("Compact() result = %#v, want leveldb range metadata", result)
 	}
+	if result.SizeBytesBefore <= 0 || result.SizeBytesAfter <= 0 {
+		t.Fatalf("Compact() size stats = %d/%d, want non-zero before and after", result.SizeBytesBefore, result.SizeBytesAfter)
+	}
+	if result.SizeBytesDelta != result.SizeBytesAfter-result.SizeBytesBefore {
+		t.Fatalf("Compact() size delta = %d, want after-before %d", result.SizeBytesDelta, result.SizeBytesAfter-result.SizeBytesBefore)
+	}
+	if result.PropertiesBefore.Stats == "" || result.PropertiesAfter.Stats == "" {
+		t.Fatalf("Compact() property stats = %#v/%#v, want leveldb.stats snapshots", result.PropertiesBefore, result.PropertiesAfter)
+	}
 
 	loaded := newTestTrie(t)
 	count, err := store.Load(loaded)
