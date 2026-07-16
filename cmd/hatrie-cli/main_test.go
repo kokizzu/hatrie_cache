@@ -1750,6 +1750,38 @@ func TestRunRestoreBundleRequiresBundle(t *testing.T) {
 	}
 }
 
+func TestRunRestoreRehearsalVerifiesBackupPath(t *testing.T) {
+	dir := t.TempDir()
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	if got := ht.ExecuteCommand(hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !got.OK {
+		t.Fatalf("SETSTR response = %#v, want ok", got)
+	}
+	if err := ht.SaveSnapshotWithFormat(filepath.Join(dir, "snapshot.hc"), hatriecache.SnapshotFormatJSON); err != nil {
+		t.Fatalf("SaveSnapshotWithFormat() error = %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	workDir := filepath.Join(t.TempDir(), "rehearsal")
+	if err := run(context.Background(), []string{"restore-rehearsal", "-path", dir, "-work-dir", workDir}, stdout, &bytes.Buffer{}, http.DefaultClient); err != nil {
+		t.Fatalf("run(restore-rehearsal) error = %v", err)
+	}
+	var report hatriecache.RestoreRehearsalReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("Unmarshal(rehearsal report) error = %v", err)
+	}
+	if !report.OK || report.SourceKind != "directory" || report.RecoveredKeys != 1 || report.RestoredDir == "" {
+		t.Fatalf("rehearsal report = %#v, want ok directory with one key", report)
+	}
+}
+
+func TestRunRestoreRehearsalRequiresPath(t *testing.T) {
+	err := run(context.Background(), []string{"restore-rehearsal"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "restore-rehearsal -path is required") {
+		t.Fatalf("run(restore-rehearsal without path) error = %v, want path requirement", err)
+	}
+}
+
 func TestClusterJoinTopologyAddsReplica(t *testing.T) {
 	topology := hatriecache.ClusterTopology{
 		Version: 1,

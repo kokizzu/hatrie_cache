@@ -305,6 +305,16 @@ make doctor DOCTOR_PATH=backup/run-001
 make cli ARGS='doctor -path backup/run-001.tar.gz'
 ```
 
+Rehearse a restore into an isolated work directory before touching the real
+`DATA_DIR`. The rehearsal verifies the source, restores or copies it into a
+temporary `data` directory, then verifies the restored result:
+
+```
+make restore-rehearsal RESTORE_REHEARSAL_PATH=backup/run-001
+make restore-rehearsal RESTORE_REHEARSAL_PATH=backup/run-001.tar.gz
+make restore-rehearsal RESTORE_REHEARSAL_PATH=backup/run-001.tar.gz RESTORE_REHEARSAL_KEEP_WORK_DIR=true
+```
+
 Restore an atomic backup bundle after verification:
 
 ```

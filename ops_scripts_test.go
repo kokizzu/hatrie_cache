@@ -100,6 +100,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/restore.sh",
 		"restore-bundle:",
 		"./scripts/restore-bundle.sh",
+		"restore-rehearsal:",
+		"./scripts/restore-rehearsal.sh",
 		"doctor:",
 		"./scripts/doctor.sh",
 	} {
@@ -127,6 +129,20 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 	} {
 		if !strings.Contains(string(data), token) {
 			t.Fatalf("restore-bundle script missing token %q", token)
+		}
+	}
+	data, err = os.ReadFile("scripts/restore-rehearsal.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/restore-rehearsal.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"RESTORE_REHEARSAL_PATH",
+		"restore-rehearsal -path",
+		"RESTORE_REHEARSAL_WORK_DIR",
+		"-keep-work-dir",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("restore-rehearsal script missing token %q", token)
 		}
 	}
 }
