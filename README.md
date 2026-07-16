@@ -199,7 +199,9 @@ WantedBy=multi-user.target
 
 Bind to localhost or a private network unless the API is protected by another
 network layer. For direct TLS/HTTP2, set `MONITORING_TLS_CERT` and
-`MONITORING_TLS_KEY`; for native protobuf clients, set `GRPC_ADDR`.
+`MONITORING_TLS_KEY`; for bearer-token API protection, set
+`MONITORING_AUTH_TOKEN` on the server and pass `-token` to `make cli`; for
+native protobuf clients, set `GRPC_ADDR`.
 
 ### Persistence Model
 
@@ -385,6 +387,8 @@ with HTTP/2 ALPN enabled:
 
 ```
 make monitoring-server MONITORING_ADDR=127.0.0.1:8443 MONITORING_TLS_CERT=cert.pem MONITORING_TLS_KEY=key.pem
+make monitoring-server MONITORING_AUTH_TOKEN='change-me'
+make cli ARGS='-token change-me health'
 ```
 
 Set `GRPC_ADDR` to expose the native protobuf API from

@@ -38,6 +38,7 @@ type config struct {
 	monitoringAddr              string
 	monitoringTLSCert           string
 	monitoringTLSKey            string
+	monitoringAuthToken         string
 	monitoringWebDir            string
 	monitoringReadHeaderTimeout time.Duration
 	monitoringIdleTimeout       time.Duration
@@ -206,6 +207,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
 		NodeName:             defaultNodeID(cfg.nodeID),
 		WebDir:               cfg.monitoringWebDir,
+		AuthToken:            cfg.monitoringAuthToken,
 		Snapshot:             snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
 		BackupSnapshotFormat: snapshotFormat(cfg),
 		Journal:              journal,
@@ -278,6 +280,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringAddr, "monitoring-addr", cfg.monitoringAddr, "monitoring server listen address")
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
+	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")

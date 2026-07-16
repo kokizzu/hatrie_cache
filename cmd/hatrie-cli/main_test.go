@@ -179,7 +179,8 @@ func TestHTTPHelpersDefaultNilContextAndClient(t *testing.T) {
 }
 
 func TestParseGlobalFlagsConfiguresTimeout(t *testing.T) {
-	cfg, remaining, err := parseGlobalFlags([]string{"-addr", "http://cache", "-timeout", "250ms", "stats"}, &bytes.Buffer{})
+	t.Setenv("HATRIE_CACHE_AUTH_TOKEN", "")
+	cfg, remaining, err := parseGlobalFlags([]string{"-addr", "http://cache", "-timeout", "250ms", "-token", "secret", "stats"}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseGlobalFlags() error = %v", err)
 	}
@@ -188,6 +189,9 @@ func TestParseGlobalFlagsConfiguresTimeout(t *testing.T) {
 	}
 	if cfg.timeout != 250*time.Millisecond {
 		t.Fatalf("timeout = %s, want 250ms", cfg.timeout)
+	}
+	if cfg.token != "secret" {
+		t.Fatalf("token = %q, want secret", cfg.token)
 	}
 	if !reflect.DeepEqual(remaining, []string{"stats"}) {
 		t.Fatalf("remaining = %#v, want stats", remaining)
@@ -199,6 +203,15 @@ func TestParseGlobalFlagsConfiguresTimeout(t *testing.T) {
 	}
 	if cfg.timeout != 0 {
 		t.Fatalf("timeout disabled = %s, want 0", cfg.timeout)
+	}
+
+	t.Setenv("HATRIE_CACHE_AUTH_TOKEN", "env-secret")
+	cfg, _, err = parseGlobalFlags([]string{"stats"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseGlobalFlags(env token) error = %v", err)
+	}
+	if cfg.token != "env-secret" {
+		t.Fatalf("env token = %q, want env-secret", cfg.token)
 	}
 }
 
@@ -228,6 +241,23 @@ func TestRunAppliesRequestTimeout(t *testing.T) {
 	}
 	if !gotTimeout {
 		t.Fatal("test transport was not called")
+	}
+}
+
+func TestRunPassesAuthToken(t *testing.T) {
+	var gotAuthorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"online"}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{"-addr", server.URL, "-token", "secret", "health"}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(health -token) error = %v", err)
+	}
+	if gotAuthorization != "Bearer secret" {
+		t.Fatalf("Authorization = %q, want bearer token", gotAuthorization)
 	}
 }
 

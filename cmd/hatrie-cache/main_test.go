@@ -70,6 +70,7 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 		"-monitoring-server",
 		"-monitoring-addr", "127.0.0.1:9090",
 		"-monitoring-web-dir", "/tmp/web",
+		"-monitoring-auth-token", "secret",
 		"-monitoring-read-header-timeout", "750ms",
 		"-monitoring-idle-timeout", "15s",
 	}, &bytes.Buffer{})
@@ -79,7 +80,7 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	if !cfg.monitoringServer {
 		t.Fatal("monitoringServer = false, want true")
 	}
-	if cfg.monitoringAddr != "127.0.0.1:9090" || cfg.monitoringWebDir != "/tmp/web" {
+	if cfg.monitoringAddr != "127.0.0.1:9090" || cfg.monitoringWebDir != "/tmp/web" || cfg.monitoringAuthToken != "secret" {
 		t.Fatalf("cfg = %#v, want explicit address and web dir", cfg)
 	}
 	if cfg.monitoringReadHeaderTimeout != 750*time.Millisecond || cfg.monitoringIdleTimeout != 15*time.Second {

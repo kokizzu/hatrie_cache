@@ -1257,6 +1257,44 @@ func TestMonitoringHandlerWritesBackupBundle(t *testing.T) {
 	}
 }
 
+func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{AuthToken: "secret"}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated health status = %d, want 401", resp.Code)
+	}
+	if got := resp.Header().Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
+		t.Fatalf("WWW-Authenticate = %q, want Bearer challenge", got)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong token health status = %d, want 401", resp.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("bearer token health status = %d, want 200", resp.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("X-Hatrie-Auth-Token", "secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("header token health status = %d, want 200", resp.Code)
+	}
+}
+
 func TestMonitoringHandlerManagesTopology(t *testing.T) {
 	ht := newTestTrie(t)
 	store, err := NewTopologyStore(SingleNodeTopology("node-a", "127.0.0.1:8080"))

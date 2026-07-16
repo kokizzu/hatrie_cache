@@ -22,6 +22,7 @@ import (
 type clientConfig struct {
 	addr    string
 	timeout time.Duration
+	token   string
 }
 
 const maxErrorBodyBytes = 1 << 20
@@ -67,6 +68,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 	if err != nil {
 		return err
 	}
+	client = authenticatedHTTPClient(client, cfg.token)
 	if cfg.timeout < 0 {
 		return errors.New("timeout must be non-negative")
 	}
@@ -109,15 +111,45 @@ func parseGlobalFlags(args []string, output io.Writer) (clientConfig, []string, 
 	cfg := clientConfig{
 		addr:    "http://127.0.0.1:8080",
 		timeout: defaultRequestTimeout,
+		token:   os.Getenv("HATRIE_CACHE_AUTH_TOKEN"),
 	}
 	flags := flag.NewFlagSet("hatrie-cli", flag.ContinueOnError)
 	flags.SetOutput(cliWriter(output))
 	flags.StringVar(&cfg.addr, "addr", cfg.addr, "monitoring server base URL")
 	flags.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "request timeout; use 0 to disable")
+	flags.StringVar(&cfg.token, "token", cfg.token, "bearer token for authenticated monitoring API requests")
 	if err := flags.Parse(args); err != nil {
 		return clientConfig{}, nil, err
 	}
 	return cfg, flags.Args(), nil
+}
+
+func authenticatedHTTPClient(client *http.Client, token string) *http.Client {
+	client = cliHTTPClient(client)
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return client
+	}
+	clone := *client
+	transport := clone.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	clone.Transport = authTokenTransport{token: token, base: transport}
+	return &clone
+}
+
+type authTokenTransport struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (transport authTokenTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.Header.Get("Authorization") == "" {
+		request = request.Clone(request.Context())
+		request.Header.Set("Authorization", "Bearer "+transport.token)
+	}
+	return transport.base.RoundTrip(request)
 }
 
 func runEntries(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {

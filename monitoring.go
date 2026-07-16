@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ var errMonitoringEntriesLimitReached = errors.New("hatriecache: monitoring entri
 type MonitoringOptions struct {
 	NodeName             string
 	WebDir               string
+	AuthToken            string
 	StartAt              time.Time
 	Snapshot             func() error
 	BackupSnapshotFormat SnapshotFormat
@@ -161,7 +163,36 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	if handler.options.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
-	return gzipHTTPHandler(mux)
+	var out http.Handler = mux
+	if strings.TrimSpace(handler.options.AuthToken) != "" {
+		out = monitoringAuthHandler(strings.TrimSpace(handler.options.AuthToken), out)
+	}
+	return gzipHTTPHandler(out)
+}
+
+func monitoringAuthHandler(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || monitoringRequestAuthorized(r, token) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="hatrie-cache"`)
+		writeJSONStatus(w, http.StatusUnauthorized, commandError("unauthorized"))
+	})
+}
+
+func monitoringRequestAuthorized(r *http.Request, token string) bool {
+	if token == "" {
+		return true
+	}
+	candidate := strings.TrimSpace(r.Header.Get("X-Hatrie-Auth-Token"))
+	if candidate == "" {
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		if len(auth) >= len("Bearer ") && strings.EqualFold(auth[:len("Bearer ")], "Bearer ") {
+			candidate = strings.TrimSpace(auth[len("Bearer "):])
+		}
+	}
+	return subtle.ConstantTimeCompare([]byte(candidate), []byte(token)) == 1
 }
 
 func (handler *MonitoringHandler) requireTrie(w http.ResponseWriter) bool {

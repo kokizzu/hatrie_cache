@@ -5,6 +5,7 @@ addr=${MONITORING_ADDR:-127.0.0.1:8080}
 web_dir=${MONITORING_WEB_DIR:-svelte-mpa/dist}
 tls_cert=${MONITORING_TLS_CERT:-}
 tls_key=${MONITORING_TLS_KEY:-}
+auth_token=${MONITORING_AUTH_TOKEN:-}
 read_header_timeout=${MONITORING_READ_HEADER_TIMEOUT:-5s}
 idle_timeout=${MONITORING_IDLE_TIMEOUT:-2m}
 node_id=${NODE_ID:-}
@@ -45,6 +46,7 @@ set -- \
 	-monitoring-web-dir "$web_dir" \
 	-monitoring-tls-cert "$tls_cert" \
 	-monitoring-tls-key "$tls_key" \
+	-monitoring-auth-token "$auth_token" \
 	-monitoring-read-header-timeout "$read_header_timeout" \
 	-monitoring-idle-timeout "$idle_timeout" \
 	-node-id "$node_id" \

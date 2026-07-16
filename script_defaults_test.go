@@ -55,6 +55,30 @@ func TestMonitoringWrapperDefersFormatDefaultsToGoConfig(t *testing.T) {
 	}
 }
 
+func TestMonitoringWrapperPassesAuthToken(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	if !strings.Contains(string(makefile), "MONITORING_AUTH_TOKEN ?=\n") || !strings.Contains(string(makefile), "MONITORING_AUTH_TOKEN='$(MONITORING_AUTH_TOKEN)'") {
+		t.Fatal("Makefile should expose MONITORING_AUTH_TOKEN to the monitoring wrapper")
+	}
+
+	script, err := os.ReadFile("scripts/monitoring-server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/monitoring-server.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"auth_token=${MONITORING_AUTH_TOKEN:-}",
+		`-monitoring-auth-token "$auth_token"`,
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("monitoring wrapper missing auth token plumbing %q", token)
+		}
+	}
+}
+
 func TestVerifyCScriptUsesRunScopedTemporaryDirectory(t *testing.T) {
 	data, err := os.ReadFile("scripts/verify-c.sh")
 	if err != nil {
