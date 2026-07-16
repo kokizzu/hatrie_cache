@@ -136,6 +136,12 @@ type backupBundleRequest struct {
 	SnapshotFormat string `json:"snapshot_format,omitempty"`
 }
 
+type auditStatus struct {
+	Configured bool         `json:"configured"`
+	Events     []AuditEvent `json:"events"`
+	Limit      int          `json:"limit,omitempty"`
+}
+
 type storageStatus struct {
 	LevelDBConfigured bool                     `json:"leveldb_configured"`
 	Store             string                   `json:"store,omitempty"`
@@ -207,6 +213,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/commands", handler.handleCommands)
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	mux.HandleFunc("/api/backup", handler.handleBackup)
+	mux.HandleFunc("/api/audit", handler.handleAudit)
 	mux.HandleFunc("/api/storage", handler.handleStorage)
 	mux.HandleFunc("/api/storage/flush", handler.handleStorageFlush)
 	mux.HandleFunc("/api/storage/compact", handler.handleStorageCompact)
@@ -745,6 +752,38 @@ func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Re
 	}
 	handler.auditHTTP(r, AuditEvent{Action: "backup", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"path": request.Path, "snapshot_format": manifest.SnapshotFormat, "journal_sequence": manifest.JournalSequence}})
 	writeJSON(w, manifest)
+}
+
+func (handler *MonitoringHandler) handleAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	limit := 25
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 31)
+		if err != nil || parsed == 0 {
+			writeJSONStatus(w, http.StatusBadRequest, commandError("invalid audit limit"))
+			return
+		}
+		if parsed > maxRecentAuditEvents {
+			parsed = maxRecentAuditEvents
+		}
+		limit = int(parsed)
+	}
+	status := auditStatus{
+		Configured: handler.options.AuditLog != nil,
+		Limit:      limit,
+	}
+	if handler.options.AuditLog != nil {
+		status.Events = handler.options.AuditLog.Recent(limit)
+	} else {
+		status.Events = []AuditEvent{}
+	}
+	writeJSON(w, status)
 }
 
 func (handler *MonitoringHandler) handleStorage(w http.ResponseWriter, r *http.Request) {

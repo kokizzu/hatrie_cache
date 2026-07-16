@@ -248,6 +248,25 @@ func TestREADMEListsAsyncReplicationOptions(t *testing.T) {
 	}
 }
 
+func TestREADMEListsAdminAuditOperations(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"`AUDIT_LOG_PATH`",
+		"explicit confirmation before running flush",
+		"`GET /api/audit?limit=25`",
+		"`/api/audit`",
+		"intentionally omit command values",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md does not document admin audit operations token %q", token)
+		}
+	}
+}
+
 func TestREADMEListsGRPCReplication(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {

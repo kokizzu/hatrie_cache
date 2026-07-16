@@ -48,6 +48,7 @@ static_verify() {
 	grep -q 'runCommand' "$FRONTEND/src/pages/Commands.svelte"
 	grep -q 'loadStorageStatus' "$FRONTEND/src/pages/Admin.svelte"
 	grep -q 'compactStorage' "$FRONTEND/src/pages/Admin.svelte"
+	grep -q 'loadAuditEvents' "$FRONTEND/src/pages/Admin.svelte"
 }
 
 cmd=${1:-verify}

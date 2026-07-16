@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"io"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -30,7 +31,10 @@ type AuditLogger struct {
 	writer io.Writer
 	closer io.Closer
 	now    func() time.Time
+	recent []AuditEvent
 }
+
+const maxRecentAuditEvents = 128
 
 func NewAuditLogger(writer io.Writer) *AuditLogger {
 	return &AuditLogger{writer: writer, now: time.Now}
@@ -55,6 +59,11 @@ func (logger *AuditLogger) Log(event AuditEvent) error {
 	if event.Time == "" {
 		event.Time = logger.now().UTC().Format(time.RFC3339Nano)
 	}
+	logger.recent = append(logger.recent, event)
+	if len(logger.recent) > maxRecentAuditEvents {
+		copy(logger.recent, logger.recent[len(logger.recent)-maxRecentAuditEvents:])
+		logger.recent = logger.recent[:maxRecentAuditEvents]
+	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -63,6 +72,23 @@ func (logger *AuditLogger) Log(event AuditEvent) error {
 		return err
 	}
 	return nil
+}
+
+func (logger *AuditLogger) Recent(limit int) []AuditEvent {
+	if logger == nil {
+		return nil
+	}
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	if limit <= 0 || limit > len(logger.recent) {
+		limit = len(logger.recent)
+	}
+	out := make([]AuditEvent, limit)
+	copy(out, logger.recent[len(logger.recent)-limit:])
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Time > out[j].Time
+	})
+	return out
 }
 
 func (logger *AuditLogger) Close() error {

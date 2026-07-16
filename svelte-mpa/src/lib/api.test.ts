@@ -3,6 +3,7 @@ import {
   compactStorage,
   DEFAULT_ENTRIES_LIMIT,
   flushStorage,
+  loadAuditEvents,
   loadEntries,
   loadReplicationStatus,
   loadStorageStatus,
@@ -213,6 +214,48 @@ describe('command fallback', () => {
       queue: { depth: 1, capacity: 4 }
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('loads recent audit events with a bounded limit', async () => {
+    const fetchMock = vi.fn(async (path: string | URL | Request) => {
+      expect(path).toBe('/api/audit?limit=2');
+      return new Response(
+        JSON.stringify({
+          configured: true,
+          limit: 2,
+          events: [
+            {
+              time: '2026-07-17T00:00:00Z',
+              action: 'storage_compact',
+              method: 'POST',
+              path: '/api/storage/compact',
+              ok: true,
+              status: 200,
+              message: 'compacted'
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadAuditEvents(2)).resolves.toMatchObject({
+      configured: true,
+      limit: 2,
+      events: [
+        {
+          action: 'storage_compact',
+          method: 'POST',
+          path: '/api/storage/compact',
+          ok: true
+        }
+      ]
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('posts storage admin operations', async () => {

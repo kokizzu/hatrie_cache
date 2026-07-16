@@ -543,6 +543,14 @@ textarea {
   width: auto;
 }
 
+.confirm-row {
+  align-self: end;
+  background: #fff8e6;
+  border: 1px solid #f0d58d;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
 .primary-button,
 .secondary-button {
   align-items: center;
@@ -589,14 +597,21 @@ textarea {
   gap: 14px;
 }
 
+.danger-action {
+  align-items: end;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(170px, 1fr) 132px;
+}
+
 .compact-form {
   align-items: end;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 132px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(170px, 0.7fr) 132px;
 }
 
 .sync-form {
   align-items: end;
-  grid-template-columns: minmax(0, 1fr) 132px;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.7fr) 132px;
   margin-bottom: 14px;
 }
 
@@ -624,6 +639,21 @@ textarea {
   overflow: auto;
   padding: 12px;
   white-space: pre-wrap;
+}
+
+.result-pill {
+  background: #f8d7da;
+  border-radius: 999px;
+  color: #842029;
+  display: inline-block;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.result-pill.ok {
+  background: #d9fbe7;
+  color: #146c43;
 }
 
 .response-box {
@@ -670,6 +700,7 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .danger-action,
   .compact-form,
   .sync-form {
     grid-template-columns: 1fr;

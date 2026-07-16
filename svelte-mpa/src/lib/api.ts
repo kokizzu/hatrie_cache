@@ -171,6 +171,28 @@ export type ReplicationResult = {
   targets?: ReplicationTargetResult[];
 };
 
+export type AuditEvent = {
+  time: string;
+  node?: string;
+  protocol?: string;
+  remote_addr?: string;
+  method?: string;
+  path?: string;
+  action: string;
+  command?: string;
+  key?: string;
+  ok: boolean;
+  status?: number;
+  message?: string;
+  details?: Record<string, unknown>;
+};
+
+export type AuditStatus = {
+  configured: boolean;
+  events: AuditEvent[];
+  limit?: number;
+};
+
 const sampleHealth: CacheHealth = {
   status: 'online',
   node: 'local-dev',
@@ -345,6 +367,12 @@ const sampleReplicationResult: ReplicationResult = {
   reason: 'replication is not configured'
 };
 
+const sampleAuditStatus: AuditStatus = {
+  configured: false,
+  events: [],
+  limit: 25
+};
+
 async function readJSONWithFallback<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
   try {
     const response = await fetch(path, {
@@ -454,6 +482,14 @@ export async function compactStorage(startKey = '', limitKey = ''): Promise<Stor
 
 export async function loadReplicationStatus(): Promise<ReplicationResult> {
   return readJSONWithFallback<ReplicationResult>('/api/replication', sampleReplicationResult);
+}
+
+export async function loadAuditEvents(limit = 25): Promise<AuditStatus> {
+  const boundedLimit = Math.max(1, Math.floor(limit));
+  return readJSONWithFallback<AuditStatus>(`/api/audit?limit=${boundedLimit}`, {
+    ...sampleAuditStatus,
+    limit: boundedLimit
+  });
 }
 
 export async function syncReplication(prefix = ''): Promise<ReplicationResult> {

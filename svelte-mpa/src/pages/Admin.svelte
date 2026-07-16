@@ -1,14 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Activity, Clock3, Database, HardDrive, RefreshCw, Send } from '@lucide/svelte';
+  import { Activity, Clock3, Database, HardDrive, RefreshCw, Send, ShieldCheck } from '@lucide/svelte';
   import Shell from '../components/Shell.svelte';
   import StatTile from '../components/StatTile.svelte';
   import {
     compactStorage,
     flushStorage,
+    loadAuditEvents,
     loadReplicationStatus,
     loadStorageStatus,
     syncReplication,
+    type AuditEvent,
+    type AuditStatus,
     type ReplicationResult,
     type ReplicationQueueStats,
     type StorageCompactResult,
@@ -19,6 +22,7 @@
 
   let storage: StorageStatus | null = null;
   let replication: ReplicationResult | null = null;
+  let audit: AuditStatus | null = null;
   let lastFlush: StorageFlushResult | null = null;
   let lastCompact: StorageCompactResult | null = null;
   let syncResult: ReplicationResult | null = null;
@@ -30,19 +34,27 @@
   let loading = true;
   let storageAction: '' | 'flush' | 'compact' = '';
   let replicationAction: '' | 'sync' = '';
+  let confirmFlush = false;
+  let confirmCompact = false;
+  let confirmSync = false;
 
   async function refresh() {
     loading = true;
     try {
-      const [nextStorage, nextReplication] = await Promise.all([loadStorageStatus(), loadReplicationStatus()]);
+      const [nextStorage, nextReplication, nextAudit] = await Promise.all([loadStorageStatus(), loadReplicationStatus(), loadAuditEvents()]);
       storage = nextStorage;
       replication = nextReplication;
+      audit = nextAudit;
     } finally {
       loading = false;
     }
   }
 
   async function runFlush() {
+    if (!confirmFlush) {
+      storageMessage = 'Confirm flush before running it.';
+      return;
+    }
     storageAction = 'flush';
     storageMessage = '';
     try {
@@ -52,11 +64,16 @@
     } catch (error) {
       storageMessage = error instanceof Error ? error.message : 'Storage flush failed.';
     } finally {
+      confirmFlush = false;
       storageAction = '';
     }
   }
 
   async function runCompact() {
+    if (!confirmCompact) {
+      storageMessage = 'Confirm compaction before running it.';
+      return;
+    }
     storageAction = 'compact';
     storageMessage = '';
     try {
@@ -66,11 +83,16 @@
     } catch (error) {
       storageMessage = error instanceof Error ? error.message : 'Storage compaction failed.';
     } finally {
+      confirmCompact = false;
       storageAction = '';
     }
   }
 
   async function runSync() {
+    if (!confirmSync) {
+      replicationMessage = 'Confirm sync before running it.';
+      return;
+    }
     replicationAction = 'sync';
     replicationMessage = '';
     try {
@@ -82,6 +104,7 @@
     } catch (error) {
       replicationMessage = error instanceof Error ? error.message : 'Replication sync failed.';
     } finally {
+      confirmSync = false;
       replicationAction = '';
     }
   }
@@ -116,6 +139,17 @@
     return props.stats || props.sstables || props.write_delay || props.block_pool || 'No LevelDB properties reported.';
   }
 
+  function auditResult(event: AuditEvent): string {
+    if (event.ok) {
+      return event.status ? `ok ${event.status}` : 'ok';
+    }
+    return event.status ? String(event.status) : 'failed';
+  }
+
+  function auditSubject(event: AuditEvent): string {
+    return event.key || event.command || event.path || event.action;
+  }
+
   onMount(refresh);
 
   $: queue = replication?.queue;
@@ -123,6 +157,7 @@
   $: effectiveLastFlush = lastFlush ?? storage?.last_flush ?? null;
   $: effectiveLastCompact = lastCompact ?? storage?.last_compact ?? null;
   $: targets = replication?.targets ?? [];
+  $: auditEvents = audit?.events ?? [];
   $: dropsByTarget = targetRows(queue?.dropped_by_target);
   $: failuresByTarget = targetRows(queue?.failures_by_target);
 </script>
@@ -163,10 +198,16 @@
       {/if}
 
       <div class="action-grid">
-        <button class="primary-button" type="button" on:click={runFlush} disabled={!storage?.leveldb_configured || Boolean(storageAction)}>
-          <HardDrive size={17} aria-hidden="true" />
-          Flush
-        </button>
+        <div class="danger-action">
+          <label class="checkbox-row confirm-row">
+            <input type="checkbox" bind:checked={confirmFlush} disabled={!storage?.leveldb_configured || Boolean(storageAction)} />
+            <span>Confirm flush</span>
+          </label>
+          <button class="primary-button" type="button" on:click={runFlush} disabled={!storage?.leveldb_configured || Boolean(storageAction) || !confirmFlush}>
+            <HardDrive size={17} aria-hidden="true" />
+            Flush
+          </button>
+        </div>
 
         <div class="compact-form">
           <label>
@@ -177,7 +218,11 @@
             <span>Limit key</span>
             <input bind:value={compactLimitKey} placeholder="omega" disabled={!storage?.leveldb_configured || Boolean(storageAction)} />
           </label>
-          <button class="secondary-button" type="button" on:click={runCompact} disabled={!storage?.leveldb_configured || Boolean(storageAction)}>
+          <label class="checkbox-row confirm-row">
+            <input type="checkbox" bind:checked={confirmCompact} disabled={!storage?.leveldb_configured || Boolean(storageAction)} />
+            <span>Confirm compact</span>
+          </label>
+          <button class="secondary-button" type="button" on:click={runCompact} disabled={!storage?.leveldb_configured || Boolean(storageAction) || !confirmCompact}>
             <RefreshCw size={17} class={storageAction === 'compact' ? 'spin' : ''} aria-hidden="true" />
             Compact
           </button>
@@ -215,7 +260,11 @@
           <span>Prefix</span>
           <input bind:value={syncPrefix} placeholder="session:" disabled={replicationAction === 'sync'} />
         </label>
-        <button class="primary-button" type="button" on:click={runSync} disabled={replicationAction === 'sync'}>
+        <label class="checkbox-row confirm-row">
+          <input type="checkbox" bind:checked={confirmSync} disabled={replicationAction === 'sync'} />
+          <span>Confirm sync</span>
+        </label>
+        <button class="primary-button" type="button" on:click={runSync} disabled={replicationAction === 'sync' || !confirmSync}>
           <Send size={17} aria-hidden="true" />
           Sync
         </button>
@@ -260,6 +309,43 @@
           {/each}
           {#if !targets.length}
             <tr><td colspan="5">No target results</td></tr>
+          {/if}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <div>
+        <h2>Audit Trail</h2>
+        <p>{audit?.configured ? `${auditEvents.length.toLocaleString()} recent events` : 'Not configured'}</p>
+      </div>
+      <ShieldCheck size={18} aria-hidden="true" />
+    </div>
+
+    {#if audit && !audit.configured}
+      <p class="notice">Set AUDIT_LOG_PATH to persist and view recent dangerous admin actions.</p>
+    {/if}
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Time</th><th>Action</th><th>Result</th><th>Method</th><th>Subject</th><th>Message</th></tr>
+        </thead>
+        <tbody>
+          {#each auditEvents as event}
+            <tr>
+              <td>{formatRelativeTime(event.time)}</td>
+              <td>{event.action}</td>
+              <td><span class:ok={event.ok} class="result-pill">{auditResult(event)}</span></td>
+              <td>{event.method ?? event.protocol ?? ''}</td>
+              <td><code>{auditSubject(event)}</code></td>
+              <td>{event.message ?? ''}</td>
+            </tr>
+          {/each}
+          {#if !auditEvents.length}
+            <tr><td colspan="6">No audit events</td></tr>
           {/if}
         </tbody>
       </table>

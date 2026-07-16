@@ -1508,8 +1508,9 @@ func TestMonitoringHandlerExposesRuntimeConfig(t *testing.T) {
 func TestMonitoringAuditLogRecordsDangerousActions(t *testing.T) {
 	ht := newTestTrie(t)
 	var audit bytes.Buffer
+	auditLog := NewAuditLogger(&audit)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
-		AuditLog: NewAuditLogger(&audit),
+		AuditLog: auditLog,
 		Snapshot: func() error {
 			return nil
 		},
@@ -1540,6 +1541,40 @@ func TestMonitoringAuditLogRecordsDangerousActions(t *testing.T) {
 	}
 	if strings.Contains(audit.String(), "ivi") {
 		t.Fatalf("audit log leaked command value: %s", audit.String())
+	}
+
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/audit?limit=1", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("audit status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	var status auditStatus
+	if err := json.Unmarshal(resp.Body.Bytes(), &status); err != nil {
+		t.Fatalf("audit status JSON error = %v", err)
+	}
+	if !status.Configured || status.Limit != 1 || len(status.Events) != 1 || status.Events[0].Action != "snapshot" {
+		t.Fatalf("audit status = %#v, want latest snapshot event", status)
+	}
+	if strings.Contains(resp.Body.String(), "ivi") {
+		t.Fatalf("audit status leaked command value: %s", resp.Body.String())
+	}
+}
+
+func TestMonitoringAuditStatusReportsUnconfiguredLogger(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/audit", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("audit status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	var status auditStatus
+	if err := json.Unmarshal(resp.Body.Bytes(), &status); err != nil {
+		t.Fatalf("audit status JSON error = %v", err)
+	}
+	if status.Configured || len(status.Events) != 0 {
+		t.Fatalf("audit status = %#v, want unconfigured empty event list", status)
 	}
 }
 

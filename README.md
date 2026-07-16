@@ -481,6 +481,11 @@ names and keys but intentionally omit command values:
 make monitoring-server AUDIT_LOG_PATH=data/audit.jsonl
 ```
 
+The Svelte MPA Admin page requires explicit confirmation before running flush,
+compact, or replication sync operations. It also shows the bounded in-memory
+recent audit view from `GET /api/audit?limit=25`; the full durable trail stays
+in the JSONL file configured by `AUDIT_LOG_PATH`.
+
 Set `WRITE_PROTECTION=true` to reject dangerous write/admin actions while still
 allowing read-only health, stats, entry listing, metrics, and status endpoints.
 Set `RATE_LIMIT=N` to token-bucket limit dangerous HTTP/gRPC API actions to
@@ -777,7 +782,8 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 
 The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/entries`, `/api/storage`, `/api/storage/flush`, `/api/storage/compact`,
-`/api/topology`, `/api/election`, `/api/replication`, `/api/journal`, and `/api/commands`, plus
+`/api/audit`, `/api/topology`, `/api/election`, `/api/replication`,
+`/api/journal`, and `/api/commands`, plus
 Prometheus metrics at `/metrics`.
 Prometheus output includes cache counters plus audit and protection counters:
 `hatrie_cache_audit_events_total`, `hatrie_cache_audit_errors_total`,
