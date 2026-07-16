@@ -1763,7 +1763,7 @@ func TestRunRestoreRehearsalVerifiesBackupPath(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	workDir := filepath.Join(t.TempDir(), "rehearsal")
-	if err := run(context.Background(), []string{"restore-rehearsal", "-path", dir, "-work-dir", workDir}, stdout, &bytes.Buffer{}, http.DefaultClient); err != nil {
+	if err := run(context.Background(), []string{"restore-rehearsal", "-path", dir, "-work-dir", workDir, "-runtime-get", "name=ivi"}, stdout, &bytes.Buffer{}, http.DefaultClient); err != nil {
 		t.Fatalf("run(restore-rehearsal) error = %v", err)
 	}
 	var report hatriecache.RestoreRehearsalReport
@@ -1772,6 +1772,12 @@ func TestRunRestoreRehearsalVerifiesBackupPath(t *testing.T) {
 	}
 	if !report.OK || report.SourceKind != "directory" || report.RecoveredKeys != 1 || report.RestoredDir == "" {
 		t.Fatalf("rehearsal report = %#v, want ok directory with one key", report)
+	}
+	if report.Runtime == nil || !report.Runtime.OK || report.Runtime.Health == nil || report.Runtime.Stats == nil || len(report.Runtime.Gets) != 1 {
+		t.Fatalf("runtime report = %#v, want health/stats/one GET", report.Runtime)
+	}
+	if got := report.Runtime.Gets[0]; !got.OK || got.Key != "name" || got.Value != "ivi" || got.Expected == nil || *got.Expected != "ivi" {
+		t.Fatalf("runtime GET = %#v, want name=ivi", got)
 	}
 }
 

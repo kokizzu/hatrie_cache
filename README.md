@@ -314,13 +314,21 @@ make cli ARGS='doctor -path backup/run-001.tar.gz'
 
 Rehearse a restore into an isolated work directory before touching the real
 `DATA_DIR`. The rehearsal verifies the source, restores or copies it into a
-temporary `data` directory, then verifies the restored result:
+temporary `data` directory, verifies the restored result, starts a temporary
+loopback monitoring server from that restored data, and checks health, stats,
+and GET command handling:
 
 ```
 make restore-rehearsal RESTORE_REHEARSAL_PATH=backup/run-001
 make restore-rehearsal RESTORE_REHEARSAL_PATH=backup/run-001.tar.gz
 make restore-rehearsal RESTORE_REHEARSAL_PATH=backup/run-001.tar.gz RESTORE_REHEARSAL_KEEP_WORK_DIR=true
+make restore-rehearsal RESTORE_REHEARSAL_PATH=backup/run-001 RESTORE_REHEARSAL_RUNTIME_GET='name=ivi session:1'
 ```
+
+Set `RESTORE_REHEARSAL_RUNTIME_CHECK=false` only when you want the older
+file-level rehearsal without starting a temporary server. Set
+`RESTORE_REHEARSAL_RUNTIME_SERVER_BIN=/path/to/hatrie-cache` to reuse an
+existing binary instead of building a temporary one from the current checkout.
 
 Restore an atomic backup bundle after verification:
 

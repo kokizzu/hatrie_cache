@@ -31,16 +31,33 @@ type RestoreRehearsalOptions struct {
 }
 
 type RestoreRehearsalReport struct {
-	OK              bool               `json:"ok"`
-	Source          string             `json:"source"`
-	SourceKind      string             `json:"source_kind"`
-	WorkDir         string             `json:"work_dir,omitempty"`
-	WorkDirKept     bool               `json:"work_dir_kept"`
-	RestoredDir     string             `json:"restored_dir"`
-	RecoveredKeys   int                `json:"recovered_keys"`
-	JournalSequence uint64             `json:"journal_sequence,omitempty"`
-	Backup          BackupDoctorReport `json:"backup"`
-	Restored        BackupDoctorReport `json:"restored"`
+	OK              bool                           `json:"ok"`
+	Source          string                         `json:"source"`
+	SourceKind      string                         `json:"source_kind"`
+	WorkDir         string                         `json:"work_dir,omitempty"`
+	WorkDirKept     bool                           `json:"work_dir_kept"`
+	RestoredDir     string                         `json:"restored_dir"`
+	RecoveredKeys   int                            `json:"recovered_keys"`
+	JournalSequence uint64                         `json:"journal_sequence,omitempty"`
+	Backup          BackupDoctorReport             `json:"backup"`
+	Restored        BackupDoctorReport             `json:"restored"`
+	Runtime         *RestoreRehearsalRuntimeReport `json:"runtime,omitempty"`
+}
+
+type RestoreRehearsalRuntimeReport struct {
+	OK     bool                       `json:"ok"`
+	Addr   string                     `json:"addr"`
+	Health *MonitoringHealth          `json:"health,omitempty"`
+	Stats  *CacheStats                `json:"stats,omitempty"`
+	Gets   []RestoreRehearsalGetCheck `json:"gets,omitempty"`
+}
+
+type RestoreRehearsalGetCheck struct {
+	Key      string  `json:"key"`
+	OK       bool    `json:"ok"`
+	Value    string  `json:"value,omitempty"`
+	Expected *string `json:"expected,omitempty"`
+	Error    string  `json:"error,omitempty"`
 }
 
 func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundleRestoreOptions) (BackupBundleRestoreReport, error) {

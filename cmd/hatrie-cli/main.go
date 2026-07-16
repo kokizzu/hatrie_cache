@@ -7,9 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -106,7 +109,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 	case "restore-bundle":
 		return runRestoreBundle(remaining[1:], stdout, stderr)
 	case "restore-rehearsal":
-		return runRestoreRehearsal(remaining[1:], stdout, stderr)
+		return runRestoreRehearsal(ctx, client, remaining[1:], stdout, stderr)
 	case "cluster":
 		return runCluster(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "doctor":
@@ -406,12 +409,16 @@ func runRestoreBundle(args []string, stdout io.Writer, stderr io.Writer) error {
 	return err
 }
 
-func runRestoreRehearsal(args []string, stdout io.Writer, stderr io.Writer) error {
+func runRestoreRehearsal(ctx context.Context, client *http.Client, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("restore-rehearsal", flag.ContinueOnError)
 	flags.SetOutput(cliWriter(stderr))
 	path := flags.String("path", "", "backup directory or atomic backup bundle path to rehearse")
 	workDir := flags.String("work-dir", "", "optional rehearsal work directory")
 	keepWorkDir := flags.Bool("keep-work-dir", false, "keep the temporary rehearsal work directory")
+	runtimeCheck := flags.Bool("runtime-check", true, "start a temporary server and validate restored health, stats, and GET checks")
+	runtimeServerBin := flags.String("runtime-server-bin", "", "optional hatrie-cache server binary for runtime checks; defaults to building ./cmd/hatrie-cache")
+	var runtimeGets repeatedStringFlag
+	flags.Var(&runtimeGets, "runtime-get", "key or key=value to GET from the temporary restored server; repeat for multiple keys")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -425,12 +432,279 @@ func runRestoreRehearsal(args []string, stdout io.Writer, stderr io.Writer) erro
 	if err != nil {
 		return err
 	}
+	if *runtimeCheck {
+		runtimeReport, err := runRestoreRehearsalRuntimeChecks(ctx, client, report.RestoredDir, runtimeGets, *runtimeServerBin, stderr)
+		if err != nil {
+			return err
+		}
+		report.Runtime = &runtimeReport
+	}
 	data, err := jsonwire.Marshal(report)
 	if err != nil {
 		return err
 	}
 	_, err = stdout.Write(append(data, '\n'))
 	return err
+}
+
+type repeatedStringFlag []string
+
+func (values *repeatedStringFlag) String() string {
+	if values == nil {
+		return ""
+	}
+	return strings.Join(*values, ",")
+}
+
+func (values *repeatedStringFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("value must be non-empty")
+	}
+	*values = append(*values, value)
+	return nil
+}
+
+func runRestoreRehearsalRuntimeChecks(ctx context.Context, client *http.Client, restoredDir string, getSpecs []string, serverBinary string, stderr io.Writer) (hatriecache.RestoreRehearsalRuntimeReport, error) {
+	restoredDir = strings.TrimSpace(restoredDir)
+	if restoredDir == "" {
+		return hatriecache.RestoreRehearsalRuntimeReport{}, errors.New("restore rehearsal runtime restored dir is required")
+	}
+	serverBinary = strings.TrimSpace(serverBinary)
+	var cleanup func()
+	if serverBinary == "" {
+		var err error
+		serverBinary, cleanup, err = buildRestoreRehearsalServerBinary(ctx, stderr)
+		if err != nil {
+			return hatriecache.RestoreRehearsalRuntimeReport{}, err
+		}
+		defer cleanup()
+	}
+	addr, err := freeLocalTCPAddr()
+	if err != nil {
+		return hatriecache.RestoreRehearsalRuntimeReport{}, err
+	}
+	baseURL := "http://" + addr
+	args := []string{
+		"-monitoring-server",
+		"-monitoring-addr", addr,
+		"-monitoring-web-dir", "",
+	}
+	hasData := false
+	if snapshotPath := firstExistingRestorePath(restoredDir, "snapshot.hc", "snapshot.json"); snapshotPath != "" {
+		args = append(args, "-snapshot-path", snapshotPath)
+		hasData = true
+	}
+	if journalPath := filepath.Join(restoredDir, "commands.journal"); fileExistsCLI(journalPath) {
+		args = append(args, "-journal-path", journalPath)
+		hasData = true
+	}
+	if dbPath := filepath.Join(restoredDir, "cache.leveldb"); fileExistsCLI(dbPath) {
+		args = append(args, "-db-path", dbPath)
+		hasData = true
+	}
+	if !hasData {
+		return hatriecache.RestoreRehearsalRuntimeReport{}, errors.New("restore rehearsal runtime found no restored snapshot, journal, or LevelDB data")
+	}
+
+	cmd := exec.CommandContext(cliContext(ctx), serverBinary, args...)
+	cmd.Stdout = cliWriter(stderr)
+	cmd.Stderr = cliWriter(stderr)
+	if err := cmd.Start(); err != nil {
+		return hatriecache.RestoreRehearsalRuntimeReport{}, err
+	}
+	defer stopRestoreRehearsalRuntime(cmd)
+
+	client = cliHTTPClient(client)
+	health, err := waitForRestoreRehearsalHealth(ctx, client, baseURL)
+	if err != nil {
+		return hatriecache.RestoreRehearsalRuntimeReport{}, err
+	}
+	stats, err := getJSONValue[hatriecache.CacheStats](ctx, client, baseURL, "/api/stats")
+	if err != nil {
+		return hatriecache.RestoreRehearsalRuntimeReport{}, fmt.Errorf("restore rehearsal runtime stats: %w", err)
+	}
+	checks, err := runRestoreRehearsalGETChecks(ctx, client, baseURL, getSpecs)
+	if err != nil {
+		return hatriecache.RestoreRehearsalRuntimeReport{}, err
+	}
+	return hatriecache.RestoreRehearsalRuntimeReport{
+		OK:     true,
+		Addr:   baseURL,
+		Health: &health,
+		Stats:  &stats,
+		Gets:   checks,
+	}, nil
+}
+
+func buildRestoreRehearsalServerBinary(ctx context.Context, stderr io.Writer) (string, func(), error) {
+	root := findModuleRoot()
+	if root == "" {
+		return "", nil, errors.New("restore rehearsal runtime could not find go.mod; pass -runtime-server-bin")
+	}
+	dir, err := os.MkdirTemp("", "hatrie-cache-restore-runtime-bin-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(dir)
+	}
+	binary := filepath.Join(dir, "hatrie-cache")
+	cmd := exec.CommandContext(cliContext(ctx), "go", "build", "-o", binary, "./cmd/hatrie-cache")
+	cmd.Dir = root
+	cmd.Stdout = cliWriter(stderr)
+	cmd.Stderr = cliWriter(stderr)
+	if err := cmd.Run(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("build restore rehearsal runtime server: %w", err)
+	}
+	return binary, cleanup, nil
+}
+
+func waitForRestoreRehearsalHealth(ctx context.Context, client *http.Client, baseURL string) (hatriecache.MonitoringHealth, error) {
+	deadline := time.Now().Add(10 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := cliContext(ctx).Err(); err != nil {
+			return hatriecache.MonitoringHealth{}, err
+		}
+		health, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, baseURL, "/api/health")
+		if err == nil && health.Status == "online" {
+			return health, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("health status is %q", health.Status)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = errors.New("timed out")
+	}
+	return hatriecache.MonitoringHealth{}, fmt.Errorf("restore rehearsal runtime health: %w", lastErr)
+}
+
+func runRestoreRehearsalGETChecks(ctx context.Context, client *http.Client, baseURL string, specs []string) ([]hatriecache.RestoreRehearsalGetCheck, error) {
+	if len(specs) == 0 {
+		specs = []string{"__hatrie_restore_rehearsal_probe__"}
+	}
+	checks := make([]hatriecache.RestoreRehearsalGetCheck, 0, len(specs))
+	for _, spec := range specs {
+		key, expected := restoreRehearsalGETSpec(spec)
+		response, err := postCommandJSONValue(ctx, client, baseURL, hatriecache.CacheCommandRequest{Command: "GET", Key: key})
+		check := hatriecache.RestoreRehearsalGetCheck{Key: key, Expected: expected}
+		if err != nil {
+			check.Error = err.Error()
+			checks = append(checks, check)
+			return checks, fmt.Errorf("restore rehearsal runtime GET %q: %w", key, err)
+		}
+		check.OK = response.OK
+		check.Value = response.Value
+		if !response.OK {
+			check.Error = response.Message
+			checks = append(checks, check)
+			return checks, fmt.Errorf("restore rehearsal runtime GET %q failed: %s", key, response.Message)
+		}
+		if expected != nil && response.Value != *expected {
+			check.OK = false
+			check.Error = fmt.Sprintf("got %q want %q", response.Value, *expected)
+			checks = append(checks, check)
+			return checks, fmt.Errorf("restore rehearsal runtime GET %q: got %q want %q", key, response.Value, *expected)
+		}
+		checks = append(checks, check)
+	}
+	return checks, nil
+}
+
+func restoreRehearsalGETSpec(spec string) (string, *string) {
+	key, expected, found := strings.Cut(spec, "=")
+	key = strings.TrimSpace(key)
+	if !found {
+		return key, nil
+	}
+	return key, &expected
+}
+
+func postCommandJSONValue(ctx context.Context, client *http.Client, addr string, request hatriecache.CacheCommandRequest) (hatriecache.CacheCommandResponse, error) {
+	var response hatriecache.CacheCommandResponse
+	body, err := jsonwire.Marshal(request)
+	if err != nil {
+		return response, err
+	}
+	req, err := http.NewRequestWithContext(cliContext(ctx), http.MethodPost, endpoint(addr, "/api/commands"), bytes.NewReader(body))
+	if err != nil {
+		return response, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if err := doAndDecodeJSON(client, req, &response); err != nil {
+		return response, err
+	}
+	return response, nil
+}
+
+func stopRestoreRehearsalRuntime(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	_ = cmd.Process.Signal(os.Interrupt)
+	select {
+	case <-done:
+		return
+	case <-time.After(2 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+}
+
+func freeLocalTCPAddr() (string, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		return "", err
+	}
+	return addr, nil
+}
+
+func firstExistingRestorePath(dir string, names ...string) string {
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if fileExistsCLI(path) {
+			return path
+		}
+	}
+	return ""
+}
+
+func fileExistsCLI(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func findModuleRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if fileExistsCLI(filepath.Join(dir, "go.mod")) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 type clusterJoinResult struct {

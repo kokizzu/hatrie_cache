@@ -102,6 +102,9 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/restore-bundle.sh",
 		"restore-rehearsal:",
 		"./scripts/restore-rehearsal.sh",
+		"RESTORE_REHEARSAL_RUNTIME_CHECK ?= true",
+		"RESTORE_REHEARSAL_RUNTIME_GET ?=",
+		"RESTORE_REHEARSAL_RUNTIME_SERVER_BIN ?=",
 		"doctor:",
 		"./scripts/doctor.sh",
 		"check-config:",
@@ -171,6 +174,12 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"restore-rehearsal -path",
 		"RESTORE_REHEARSAL_WORK_DIR",
 		"-keep-work-dir",
+		"RESTORE_REHEARSAL_RUNTIME_CHECK",
+		"-runtime-check",
+		"RESTORE_REHEARSAL_RUNTIME_GET",
+		"-runtime-get",
+		"RESTORE_REHEARSAL_RUNTIME_SERVER_BIN",
+		"-runtime-server-bin",
 	} {
 		if !strings.Contains(string(data), token) {
 			t.Fatalf("restore-rehearsal script missing token %q", token)
