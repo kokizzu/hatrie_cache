@@ -111,6 +111,234 @@ Run one-off commands through the Makefile/script wrapper:
 make run CMD='go env GOMOD'
 ```
 
+## Operations Manual
+
+This section is the operator runbook for installing, running, backing up,
+recovering, and joining nodes to a cluster. The examples use the Makefile
+wrappers so the same flags and defaults are used in development, CI, and local
+operations.
+
+### Install And Build
+
+Runtime requirements:
+
+- Go 1.20 or newer.
+- `make`, a POSIX shell, and a C toolchain for the bundled HAT-trie C code.
+- Node.js plus `pnpm` or `bun` only when building the Svelte MPA web UI.
+
+Build and verify the service:
+
+```
+make verify
+make run CMD='mkdir -p build'
+make run CMD='go build -o build/hatrie-cache ./cmd/hatrie-cache'
+make run CMD='go build -o build/hatrie-cli ./cmd/hatrie-cli'
+```
+
+Install the binaries wherever your service manager expects them. For a
+frontend-enabled deployment, build the static web assets and point
+`MONITORING_WEB_DIR` at the generated directory:
+
+```
+make frontend-install
+make frontend-build
+make monitoring-server MONITORING_WEB_DIR=svelte-mpa/dist
+```
+
+For API-only deployments, the web assets are optional. The HTTP monitoring/API
+server is opt-in; `go run ./cmd/hatrie-cache` by itself does not bind HTTP or
+gRPC unless `-monitoring-server` or `GRPC_ADDR` is configured through the
+wrapper.
+
+### Run As A Service
+
+Use `make monitoring-server` while developing and run the compiled binary under
+systemd, supervisord, Docker, or another process supervisor in production. A
+durable single-node service normally enables a command journal plus either
+snapshots or LevelDB persistence:
+
+```
+make monitoring-server \
+  MONITORING_ADDR=0.0.0.0:8080 \
+  SNAPSHOT_PATH=data/snapshot.hc \
+  SNAPSHOT_INTERVAL=30s \
+  JOURNAL_PATH=data/commands.journal
+```
+
+Example systemd unit for a compiled binary:
+
+```
+[Unit]
+Description=HAT-trie cache
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hatrie-cache
+Group=hatrie-cache
+WorkingDirectory=/var/lib/hatrie-cache
+ExecStart=/usr/local/bin/hatrie-cache \
+  -monitoring-server \
+  -monitoring-addr 0.0.0.0:8080 \
+  -monitoring-web-dir /usr/share/hatrie-cache/svelte-mpa/dist \
+  -snapshot-path /var/lib/hatrie-cache/snapshot.hc \
+  -snapshot-interval 30s \
+  -journal-path /var/lib/hatrie-cache/commands.journal
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Bind to localhost or a private network unless the API is protected by another
+network layer. For direct TLS/HTTP2, set `MONITORING_TLS_CERT` and
+`MONITORING_TLS_KEY`; for native protobuf clients, set `GRPC_ADDR`.
+
+### Persistence Model
+
+The server restores data in this order:
+
+1. Load LevelDB when `DB_PATH` is set.
+2. Load the snapshot when `SNAPSHOT_PATH` is set, replacing the current
+   in-memory key set.
+3. Replay journal entries newer than the snapshot checkpoint when
+   `JOURNAL_PATH` is set.
+
+That means `SNAPSHOT_PATH + JOURNAL_PATH` is the usual point-in-time recovery
+pair, while `DB_PATH` is a full key/value persistence store. You can enable
+both, but keep in mind the snapshot is loaded after LevelDB and therefore wins
+for overlapping keys.
+
+Recommended durability profiles:
+
+| Profile | Configuration | Use case |
+| --- | --- | --- |
+| Fast local persistence | `DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s` | Full persisted key/value store with periodic sync. |
+| Point-in-time recovery | `SNAPSHOT_PATH=data/snapshot.hc SNAPSHOT_INTERVAL=30s JOURNAL_PATH=data/commands.journal` | Compact snapshots plus replayable mutations after the latest snapshot. |
+| Replica catch-up | `JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080` | Pull another node's journal tail during bootstrap or after downtime. |
+
+### Backup Runbook
+
+For snapshot+journal deployments:
+
+1. Trigger an online snapshot.
+2. Copy the snapshot, journal, and journal pull state if present.
+3. Keep file ownership and permissions when copying.
+
+```
+make cli ARGS='snapshot'
+make run CMD='mkdir -p backup'
+make run CMD='cp -a data/snapshot.hc data/commands.journal backup/'
+make run CMD='test ! -f data/commands.journal.pull_state.json || cp -a data/commands.journal.pull_state.json backup/'
+```
+
+For LevelDB deployments, prefer stopping the process or using filesystem-level
+snapshots before copying the LevelDB directory:
+
+```
+make run CMD='cp -a data/cache.leveldb backup/cache.leveldb'
+```
+
+The safest operational pattern is to store cache data under one directory such
+as `/var/lib/hatrie-cache`, keep snapshots/journals/LevelDB on the same durable
+volume, and back up that directory with your normal host snapshot tooling.
+
+### Restore And Recovery Runbook
+
+Restore snapshot+journal data to a clean data directory, then start the node
+with the same paths:
+
+```
+make run CMD='mkdir -p data'
+make run CMD='cp -a backup/snapshot.hc data/snapshot.hc'
+make run CMD='cp -a backup/commands.journal data/commands.journal'
+make monitoring-server SNAPSHOT_PATH=data/snapshot.hc JOURNAL_PATH=data/commands.journal
+```
+
+On startup, the server loads the snapshot and replays journal entries after the
+snapshot checkpoint. If the journal contains records older than the compacted
+checkpoint, they are skipped; if a follower asks for a journal range older than
+the checkpoint, `/api/journal` returns `409` and the follower must fall back to a
+snapshot or an explicit replication sync.
+
+Restore LevelDB data by restoring the directory and starting with `DB_PATH`:
+
+```
+make run CMD='cp -a backup/cache.leveldb data/cache.leveldb'
+make monitoring-server DB_PATH=data/cache.leveldb
+```
+
+For crash recovery, restart with the same persistence flags first. If a node was
+offline while a leader continued accepting writes, also pull journal catch-up or
+run anti-entropy replication sync after the node is reachable:
+
+```
+make monitoring-server \
+  JOURNAL_PATH=data/commands.journal \
+  JOURNAL_PULL_SOURCE=http://leader:8080 \
+  JOURNAL_PULL_INTERVAL=5s
+
+make cli ARGS='replication -sync'
+make cli ARGS='replication -sync -prefix session:'
+```
+
+### Joining A Cluster
+
+There is no separate auto-discovery join command. Joining a cluster means
+adding the node to the topology, starting it with a stable `NODE_ID`, catching
+it up from an existing node, and then allowing replication and leader routing to
+use it.
+
+1. Add the new node to the topology JSON. For sharded mode, add it as a replica
+   first; move primaries or bucket ranges only after it has caught up.
+2. Copy the same topology file to every node or update it through
+   `/api/topology`.
+3. Start the new node with its own data directory, `NODE_ID`, and
+   `TOPOLOGY_PATH`.
+4. Catch up from an existing leader with journal pull or an explicit
+   replication sync.
+5. Enable `REPLICATION=true` on leaders and, when ready to enforce routing,
+   enable `ENFORCE_LEADER_WRITES=true`.
+
+Example new replica startup:
+
+```
+make monitoring-server \
+  NODE_ID=node-c \
+  TOPOLOGY_PATH=data/topology.json \
+  JOURNAL_PATH=data/commands.journal \
+  JOURNAL_PULL_SOURCE=http://node-a:8080 \
+  JOURNAL_PULL_INTERVAL=5s \
+  REPLICATION=true
+```
+
+After catch-up, check routing, election, and replication status:
+
+```
+make cli ARGS='topology'
+make cli ARGS='election'
+make cli ARGS='replication'
+make cli ARGS='entries -limit 10'
+```
+
+For sharded clusters, only enable `ENFORCE_LEADER_WRITES=true` after clients can
+write to the elected leader for each key or after the client/proxy layer handles
+leader errors. Internal replication commands are still accepted on followers.
+
+### Rolling Restart Checklist
+
+1. Confirm persistence is configured with `SNAPSHOT_PATH + JOURNAL_PATH` or
+   `DB_PATH`.
+2. Trigger a snapshot when snapshots are configured.
+3. Stop one node at a time.
+4. Start it with the same `NODE_ID`, `TOPOLOGY_PATH`, and persistence paths.
+5. Confirm `/api/health`, `/api/election`, `/api/replication`, and
+   `/api/stats`.
+6. Wait for journal pull or replication sync to finish before restarting the
+   next node.
+
 Regenerate native gRPC/protobuf stubs after editing
 `proto/hatriecache/v1/cache.proto`:
 
