@@ -146,6 +146,21 @@ func (pq *priorityQueueData) PushOneChecked(priority int64, value interface{}, v
 	return count, nil
 }
 
+func (pq *priorityQueueData) PushStringChecked(priority int64, value string) error {
+	if err := pq.ensureSequenceCapacity(1); err != nil {
+		return err
+	}
+	item := priorityQueueItem{
+		Priority: priority,
+		Sequence: pq.nextSequence,
+		Value:    value,
+	}
+	pq.nextSequence++
+	pq.items = append(pq.items, item)
+	pq.siftUp(len(pq.items) - 1)
+	return nil
+}
+
 func (pq *priorityQueueData) ensureSequenceCapacity(count int) error {
 	if count <= 0 {
 		return nil
@@ -207,6 +222,24 @@ func (pq *priorityQueueData) popItem() (priorityQueueItem, bool) {
 	if len(pq.items) > 0 {
 		pq.siftDown(0)
 	}
+	pq.compactIfSparse()
+	return root, true
+}
+
+func (pq *priorityQueueData) popItemRetain() (priorityQueueItem, bool) {
+	if pq == nil || len(pq.items) == 0 {
+		return priorityQueueItem{}, false
+	}
+
+	root := pq.items[0]
+	last := len(pq.items) - 1
+	pq.items[0] = pq.items[last]
+	pq.items[last].Value = nil
+	pq.items = pq.items[:last]
+	if len(pq.items) == 0 {
+		return root, true
+	}
+	pq.siftDown(0)
 	pq.compactIfSparse()
 	return root, true
 }

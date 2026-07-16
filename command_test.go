@@ -451,6 +451,66 @@ func TestExecuteCommandPriorityQueueOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandPriorityQueueExactPathPreservesSemantics(t *testing.T) {
+	ht := newTestTrie(t)
+	lowPriority := int64(10)
+	highPriority := int64(1)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHPQ", Key: "jobs", Value: "slow", Priority: &lowPriority}); !got.OK || got.Value != "1" {
+		t.Fatalf("PUSHPQ exact slow response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHPQ", Key: "jobs", Value: "urgent", Priority: &highPriority}); !got.OK || got.Value != "1" {
+		t.Fatalf("PUSHPQ exact urgent response = %#v, want added 1", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPPQ", Key: "jobs"}); !got.OK || got.Value != `{"priority":1,"value":"urgent"}` {
+		t.Fatalf("POPPQ exact first response = %#v, want urgent", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPPQ", Key: "jobs"}); !got.OK || got.Value != `{"priority":10,"value":"slow"}` {
+		t.Fatalf("POPPQ exact second response = %#v, want slow", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPPQ", Key: "jobs"}); !got.OK || got.Message != "value not found" {
+		t.Fatalf("POPPQ exact empty response = %#v, want value not found", got)
+	}
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "replace", Value: "old"}); !got.OK {
+		t.Fatalf("SETSTR replace response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "PUSHPQ", Key: "replace", Value: "new", Priority: &highPriority}); !got.OK || got.Value != "1" {
+		t.Fatalf("PUSHPQ exact replace response = %#v, want added 1", got)
+	}
+	if got := ht.GetString("replace"); got != "" {
+		t.Fatalf("GetString(replace) = %q, want replaced by priority queue", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "POPPQ", Key: "replace"}); !got.OK || got.Value != `{"priority":1,"value":"new"}` {
+		t.Fatalf("POPPQ exact replaced queue response = %#v, want new", got)
+	}
+}
+
+func TestExecuteCommandPriorityQueueExactPathAllocationBudget(t *testing.T) {
+	ht := newTestTrie(t)
+	priority := int64(1)
+	push := CacheCommandRequest{Command: "PUSHPQ", Key: "jobs", Value: "value", Priority: &priority}
+	pop := CacheCommandRequest{Command: "POPPQ", Key: "jobs"}
+	if got := ht.ExecuteCommand(push); !got.OK {
+		t.Fatalf("warm PUSHPQ response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(pop); !got.OK {
+		t.Fatalf("warm POPPQ response = %#v, want ok", got)
+	}
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		if got := ht.ExecuteCommand(push); !got.OK || got.Value != "1" {
+			t.Fatalf("PUSHPQ response = %#v, want added 1", got)
+		}
+		if got := ht.ExecuteCommand(pop); !got.OK || got.Value != `{"priority":1,"value":"value"}` {
+			t.Fatalf("POPPQ response = %#v, want value", got)
+		}
+	})
+	if allocs > 4 {
+		t.Fatalf("PUSHPQ+POPPQ exact path allocations = %.2f, want <= 4", allocs)
+	}
+}
+
 func TestExecuteCommandPriorityQueueRejectsUnsupportedValues(t *testing.T) {
 	ht := newTestTrie(t)
 	unsupported := func() {}

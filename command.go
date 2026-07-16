@@ -1043,6 +1043,17 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastHasSetCommand(key, valueKey)
+	case "PUSHPQ", "PUSHPRIORITY":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		priority, ok := commandPriority(request)
+		if !ok {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastPushPriorityQueueCommand(key, priority, request.Value)
+	case "POPPQ", "POPPRIORITY":
+		return ht.executeFastPopPriorityQueueCommand(key)
 	case "PEEKMAP":
 		if !commandFastPathField(request.Subkey) {
 			return CacheCommandResponse{}, false
@@ -1315,6 +1326,85 @@ func (ht *HatTrie) executeFastHasSetCommand(key string, valueKey string) (CacheC
 	return commandBool01Response(hit), true
 }
 
+func (ht *HatTrie) executeFastPushPriorityQueueCommand(key string, priority int64, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsPriorityQueue() {
+			if err := ht.priorityQueues.array[hval.Index].PushStringChecked(priority, value); err != nil {
+				return commandError(err.Error()), true
+			}
+			ht.recordWriteLocked(key)
+			ht.cacheValueLocked(key, hval)
+			return CacheCommandResponse{OK: true, Message: "pushed priority queue values", Value: "1"}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsPriorityQueue() {
+		if err := ht.priorityQueues.array[hval.Index].PushStringChecked(priority, value); err != nil {
+			return commandError(err.Error()), true
+		}
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "pushed priority queue values", Value: "1"}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.priorityQueues.Add(nil)
+	if err := ht.priorityQueues.array[idx].PushStringChecked(priority, value); err != nil {
+		ht.priorityQueues.Del(idx)
+		return commandError(err.Error()), true
+	}
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "pushed priority queue values", Value: "1"}, true
+}
+
+func (ht *HatTrie) executeFastPopPriorityQueueCommand(key string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsPriorityQueue() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	item, ok := ht.priorityQueues.array[hval.Index].popItemRetain()
+	if !ok {
+		ht.recordReadLocked(false, key)
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	ht.recordReadLocked(true, key)
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	if text, ok := item.Value.(string); ok {
+		if payload, ok := commandFastPriorityQueueItemJSON(item.Priority, text); ok {
+			return CacheCommandResponse{OK: true, Message: "removed", Value: payload}, true
+		}
+	}
+	return commandValueResponse("removed", item.PriorityItem()), true
+}
+
 func commandFastPathField(value string) bool {
 	if value == "" {
 		return false
@@ -1328,16 +1418,39 @@ func commandFastPathField(value string) bool {
 }
 
 func commandFastJSONStringKey(value string) (string, bool) {
-	if value == "" {
+	if !commandFastJSONPlainString(value) {
 		return "", false
+	}
+	return `"` + value + `"`, true
+}
+
+func commandFastJSONPlainString(value string) bool {
+	if value == "" {
+		return false
 	}
 	for idx := 0; idx < len(value); idx++ {
 		c := value[idx]
 		if c < 0x20 || c == '"' || c == '\\' || c >= utf8.RuneSelf {
-			return "", false
+			return false
 		}
 	}
-	return `"` + value + `"`, true
+	return true
+}
+
+func commandFastPriorityQueueItemJSON(priority int64, value string) (string, bool) {
+	if !commandFastJSONPlainString(value) {
+		return "", false
+	}
+	var digits [20]byte
+	priorityDigits := strconv.AppendInt(digits[:0], priority, 10)
+	var builder strings.Builder
+	builder.Grow(len(`{"priority":`) + len(priorityDigits) + len(`,"value":""}`) + len(value))
+	builder.WriteString(`{"priority":`)
+	_, _ = builder.Write(priorityDigits)
+	builder.WriteString(`,"value":"`)
+	builder.WriteString(value)
+	builder.WriteString(`"}`)
+	return builder.String(), true
 }
 
 func commandFastUint32Field(value string) (uint32, bool) {
