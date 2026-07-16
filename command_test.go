@@ -596,6 +596,56 @@ func TestExecuteCommandBloomFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandBloomFilterExactPathPreservesSemantics(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDBF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("ADDBF exact create response = %#v, want added 1", got)
+	}
+	if !ht.HasBloomFilter("seen", "alpha") {
+		t.Fatal("public HasBloomFilter missed value added by exact ADDBF")
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASBF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASBF exact hit response = %#v, want 1", got)
+	}
+	missing := bloomFilterMissingValue(t, ht, "seen")
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASBF", Key: "seen", Value: missing}); !got.OK || got.Value != "0" {
+		t.Fatalf("HASBF exact miss response = %#v, want 0", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDBF", Key: "seen", Value: "alpha"}); !got.OK || got.Value != "0" {
+		t.Fatalf("ADDBF exact duplicate response = %#v, want added 0", got)
+	}
+
+	ht.UpsertBloomFilter("generic", DefaultBloomFilterExpectedItems, DefaultBloomFilterFalsePositiveRate)
+	if added := ht.AddBloomFilter("generic", "beta"); added != 1 {
+		t.Fatalf("public AddBloomFilter(beta) = %d, want 1", added)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "HASBF", Key: "generic", Value: "beta"}); !got.OK || got.Value != "1" {
+		t.Fatalf("HASBF exact after public add response = %#v, want 1", got)
+	}
+}
+
+func TestExecuteCommandBloomFilterExactPathAllocationBudget(t *testing.T) {
+	ht := newTestTrie(t)
+	add := CacheCommandRequest{Command: "ADDBF", Key: "seen", Value: "alpha"}
+	has := CacheCommandRequest{Command: "HASBF", Key: "seen", Value: "alpha"}
+	if got := ht.ExecuteCommand(add); !got.OK {
+		t.Fatalf("warm ADDBF response = %#v, want ok", got)
+	}
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		if got := ht.ExecuteCommand(add); !got.OK {
+			t.Fatalf("ADDBF response = %#v, want ok", got)
+		}
+		if got := ht.ExecuteCommand(has); !got.OK || got.Value != "1" {
+			t.Fatalf("HASBF response = %#v, want hit", got)
+		}
+	})
+	if allocs > 1 {
+		t.Fatalf("ADDBF+HASBF exact path allocations = %.2f, want <= 1", allocs)
+	}
+}
+
 func TestExecuteCommandBloomFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDBF", Key: "seen", Value: "alpha"}); !got.OK {

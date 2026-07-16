@@ -1054,6 +1054,16 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		return ht.executeFastPushPriorityQueueCommand(key, priority, request.Value)
 	case "POPPQ", "POPPRIORITY":
 		return ht.executeFastPopPriorityQueueCommand(key)
+	case "ADDBF", "BFADD":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddBloomFilterCommand(key, request.Value)
+	case "HASBF", "BFHAS", "BFEXISTS":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastHasBloomFilterCommand(key, request.Value)
 	case "PEEKMAP":
 		if !commandFastPathField(request.Subkey) {
 			return CacheCommandResponse{}, false
@@ -1403,6 +1413,71 @@ func (ht *HatTrie) executeFastPopPriorityQueueCommand(key string) (CacheCommandR
 		}
 	}
 	return commandValueResponse("removed", item.PriorityItem()), true
+}
+
+func (ht *HatTrie) executeFastAddBloomFilterCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	if hval, ok := ht.cachedValueLocked(key); ok {
+		if ht.expireIfNeededLocked(key, hval) {
+			ht.clearHotKeyLocked(key)
+		} else if hval.IsBloomFilter() {
+			added := boolInt(ht.bloomFilters.array[hval.Index].addJSONString(value))
+			if added > 0 {
+				ht.recordWriteLocked(key)
+				ht.cacheValueLocked(key, hval)
+			}
+			return CacheCommandResponse{OK: true, Message: "added bloom filter values", Value: strconv.Itoa(added)}, true
+		}
+	}
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsBloomFilter() {
+		added := boolInt(ht.bloomFilters.array[hval.Index].addJSONString(value))
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		if added > 0 {
+			ht.recordWriteLocked(key)
+		}
+		ht.cacheValueLocked(key, hval)
+		return CacheCommandResponse{OK: true, Message: "added bloom filter values", Value: strconv.Itoa(added)}, true
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	data := newDefaultBloomFilterData()
+	added := boolInt(data.addJSONString(value))
+	idx := ht.bloomFilters.AddData(data)
+	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_BLOOM_FILTER}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "added bloom filter values", Value: strconv.Itoa(added)}, true
+}
+
+func (ht *HatTrie) executeFastHasBloomFilterCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsBloomFilter() {
+		if hval.IsLevelDBReference() {
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}, true
+	}
+	hit := ht.bloomFilters.array[hval.Index].containsJSONString(value)
+	ht.recordReadLocked(hit, key)
+	return commandBool01Response(hit), true
 }
 
 func commandFastPathField(value string) bool {

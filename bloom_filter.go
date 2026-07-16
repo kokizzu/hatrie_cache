@@ -231,6 +231,26 @@ func (filter *bloomFilterData) addKey(key []byte) bool {
 	return changed
 }
 
+func (filter *bloomFilterData) addJSONString(value string) bool {
+	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
+		return false
+	}
+	filter.ensureWords()
+	changed := false
+	filter.visitJSONStringIndexes(value, func(index uint64) {
+		word := index / 64
+		mask := uint64(1) << uint(index%64)
+		if filter.words[word]&mask == 0 {
+			filter.words[word] |= mask
+			changed = true
+		}
+	})
+	if changed {
+		filter.insertions++
+	}
+	return changed
+}
+
 func (filter *bloomFilterData) Contains(value interface{}) bool {
 	contains, _ := filter.ContainsChecked(value)
 	return contains
@@ -253,6 +273,21 @@ func (filter *bloomFilterData) containsKey(key []byte) bool {
 	}
 	contains := true
 	filter.visitIndexes(key, func(index uint64) {
+		word := index / 64
+		mask := uint64(1) << uint(index%64)
+		if filter.words[word]&mask == 0 {
+			contains = false
+		}
+	})
+	return contains
+}
+
+func (filter *bloomFilterData) containsJSONString(value string) bool {
+	if filter == nil || len(filter.words) == 0 {
+		return false
+	}
+	contains := true
+	filter.visitJSONStringIndexes(value, func(index uint64) {
 		word := index / 64
 		mask := uint64(1) << uint(index%64)
 		if filter.words[word]&mask == 0 {
@@ -310,6 +345,18 @@ func (filter bloomFilterData) EncodedSize() int64 {
 func (filter *bloomFilterData) visitIndexes(key []byte, visit func(uint64)) {
 	first := bloomFilterFNV64a(key)
 	step := bloomFilterFNV64(key)
+	if step == 0 {
+		step = bloomFilterFNVPrime64
+	}
+	step |= 1
+	for idx := uint8(0); idx < filter.hashCount; idx++ {
+		visit((first + uint64(idx)*step) % filter.bitCount)
+	}
+}
+
+func (filter *bloomFilterData) visitJSONStringIndexes(value string, visit func(uint64)) {
+	first := bloomFilterFNV64aJSONString(value)
+	step := bloomFilterFNV64JSONString(value)
 	if step == 0 {
 		step = bloomFilterFNVPrime64
 	}
@@ -378,6 +425,32 @@ func bloomFilterFNV64(value []byte) uint64 {
 		hash *= bloomFilterFNVPrime64
 		hash ^= uint64(value[idx])
 	}
+	return hash
+}
+
+func bloomFilterFNV64aJSONString(value string) uint64 {
+	hash := bloomFilterFNVOffset64
+	hash ^= uint64('"')
+	hash *= bloomFilterFNVPrime64
+	for idx := 0; idx < len(value); idx++ {
+		hash ^= uint64(value[idx])
+		hash *= bloomFilterFNVPrime64
+	}
+	hash ^= uint64('"')
+	hash *= bloomFilterFNVPrime64
+	return hash
+}
+
+func bloomFilterFNV64JSONString(value string) uint64 {
+	hash := bloomFilterFNVOffset64
+	hash *= bloomFilterFNVPrime64
+	hash ^= uint64('"')
+	for idx := 0; idx < len(value); idx++ {
+		hash *= bloomFilterFNVPrime64
+		hash ^= uint64(value[idx])
+	}
+	hash *= bloomFilterFNVPrime64
+	hash ^= uint64('"')
 	return hash
 }
 
