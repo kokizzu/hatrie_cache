@@ -78,7 +78,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot, backup, cluster")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, command, snapshot, backup, cluster, doctor")
 	}
 
 	switch remaining[0] {
@@ -104,6 +104,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runBackup(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "cluster":
 		return runCluster(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "doctor":
+		return runDoctor(remaining[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown subcommand %q", remaining[0])
 	}
@@ -351,6 +353,28 @@ func runBackup(ctx context.Context, client *http.Client, addr string, args []str
 		return err
 	}
 	return postJSON(ctx, client, addr, "/api/backup", body, stdout)
+}
+
+func runDoctor(args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	path := flags.String("path", "", "backup directory or atomic backup bundle path to verify")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*path) == "" {
+		return errors.New("doctor -path is required")
+	}
+	report, err := hatriecache.VerifyBackupPath(*path)
+	if err != nil {
+		return err
+	}
+	data, err := jsonwire.Marshal(report)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
 }
 
 type clusterJoinResult struct {

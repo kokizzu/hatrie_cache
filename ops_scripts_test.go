@@ -98,10 +98,20 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/backup.sh",
 		"restore:",
 		"./scripts/restore.sh",
+		"doctor:",
+		"./scripts/doctor.sh",
 	} {
 		if !strings.Contains(makefile, token) {
 			t.Fatalf("Makefile missing backup/restore token %q", token)
 		}
+	}
+
+	data, err = os.ReadFile("scripts/doctor.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/doctor.sh) error = %v", err)
+	}
+	if !strings.Contains(string(data), "go run ./cmd/hatrie-cli doctor -path") {
+		t.Fatal("doctor script should invoke hatrie-cli doctor")
 	}
 }
 

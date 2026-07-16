@@ -284,6 +284,13 @@ make monitoring-server DB_PATH=data/cache.leveldb
 `make restore` refuses to copy into a non-empty `DATA_DIR` unless
 `RESTORE_OVERWRITE=true` is set.
 
+Verify a backup directory or atomic bundle before restore:
+
+```
+make doctor DOCTOR_PATH=backup/run-001
+make cli ARGS='doctor -path backup/run-001.tar.gz'
+```
+
 For a server-side atomic backup bundle, ask the monitoring API to write a
 tar.gz bundle containing `manifest.json`, `snapshot.hc`, and a compacted
 `commands.journal` checkpoint. The manifest records file sizes, SHA-256
