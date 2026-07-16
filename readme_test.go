@@ -308,6 +308,8 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 		"`REPLICATION_WIRE_FORMAT=json`",
 		"oldest queued key/age",
 		"per-target drops",
+		"`health_score`",
+		"`hatrie_cache_replication_health_score`",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md does not document %s", token)

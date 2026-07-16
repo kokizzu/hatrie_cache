@@ -120,6 +120,24 @@
     return `${Math.min(100, Math.round((queue.depth / queue.capacity) * 100))}%`;
   }
 
+  function replicationTone(health?: string): 'blue' | 'green' | 'amber' | 'red' {
+    switch (health) {
+      case 'ok':
+        return 'green';
+      case 'degraded':
+        return 'amber';
+      case 'unhealthy':
+        return 'red';
+      default:
+        return 'blue';
+    }
+  }
+
+  function replicationHealthText(result: ReplicationResult | null): string {
+    if (!result || result.health_score === undefined) return 'unknown';
+    return `${result.health_score}/100 ${result.health ?? ''}`.trim();
+  }
+
   function formatSignedBytes(value: number): string {
     if (value === 0) return '0 B';
     const sign = value > 0 ? '+' : '-';
@@ -176,7 +194,7 @@
   <section class="stats-grid">
     <StatTile label="LevelDB" value={storage?.leveldb_configured ? 'enabled' : 'off'} detail={storage?.format ? `${storage.format} format` : 'storage engine'} tone="blue" icon={Database} />
     <StatTile label="Storage size" value={formatBytes(storage?.size_bytes ?? 0)} detail={operation?.running ? `${operation.action} running` : 'on disk'} tone={operation?.running ? 'amber' : 'green'} icon={HardDrive} />
-    <StatTile label="Queue" value={queue ? `${queue.depth}/${queue.capacity}` : 'off'} detail={queue?.closed ? 'closed' : queue?.enabled ? 'async enabled' : 'not configured'} tone="green" icon={Activity} />
+    <StatTile label="Replication" value={replicationHealthText(replication)} detail={replication?.health_reason ?? 'health score'} tone={replicationTone(replication?.health)} icon={Activity} />
     <StatTile label="Oldest" value={queue?.oldest_queued_age_millis ? formatMillis(queue.oldest_queued_age_millis) : 'none'} detail={queue?.oldest_queued_key ?? 'queued key'} tone="amber" icon={Clock3} />
   </section>
 
@@ -271,6 +289,8 @@
       </div>
 
       <dl class="detail-list">
+        <div><dt>Health</dt><dd>{replicationHealthText(replication)}</dd></div>
+        <div><dt>Health reason</dt><dd>{replication?.health_reason ?? 'unknown'}</dd></div>
         <div><dt>Queue fill</dt><dd>{queueFill(queue)}</dd></div>
         <div><dt>Enqueued</dt><dd>{(queue?.enqueued ?? 0).toLocaleString()}</dd></div>
         <div><dt>Attempts</dt><dd>{(queue?.attempts ?? 0).toLocaleString()}</dd></div>

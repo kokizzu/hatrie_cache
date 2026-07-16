@@ -104,6 +104,9 @@ message ReplicationResponse {
   int64 started_at_unix_nano = 9;
   int64 finished_at_unix_nano = 10;
   int64 duration_millis = 11;
+  string health = 12;
+  int32 health_score = 13;
+  string health_reason = 14;
 }
 
 message ReplicationQueue {

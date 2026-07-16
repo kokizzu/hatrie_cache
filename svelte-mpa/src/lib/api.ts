@@ -164,6 +164,9 @@ export type ReplicationResult = {
   queued?: boolean;
   skipped: boolean;
   reason?: string;
+  health?: string;
+  health_score?: number;
+  health_reason?: string;
   started_at?: string;
   finished_at?: string;
   duration_millis?: number;
@@ -364,7 +367,10 @@ const sampleStorageStatus: StorageStatus = {
 
 const sampleReplicationResult: ReplicationResult = {
   skipped: true,
-  reason: 'replication is not configured'
+  reason: 'replication is not configured',
+  health: 'disabled',
+  health_score: 0,
+  health_reason: 'replication is not configured'
 };
 
 const sampleAuditStatus: AuditStatus = {

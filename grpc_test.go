@@ -1222,6 +1222,9 @@ func TestCacheGRPCServerReplicatesCommands(t *testing.T) {
 	if len(replication.GetTargets()) != 1 || !replication.GetTargets()[0].GetOk() {
 		t.Fatalf("replication targets = %#v, want one ok target", replication.GetTargets())
 	}
+	if replication.GetHealth() != "ok" || replication.GetHealthScore() != 100 {
+		t.Fatalf("replication health = %s/%d, want ok 100", replication.GetHealth(), replication.GetHealthScore())
+	}
 	if replication.GetStartedAtUnixNano() <= 0 || replication.GetFinishedAtUnixNano() < replication.GetStartedAtUnixNano() || replication.GetDurationMillis() < 0 {
 		t.Fatalf("replication timing = started %d finished %d duration %d, want ordered timestamps", replication.GetStartedAtUnixNano(), replication.GetFinishedAtUnixNano(), replication.GetDurationMillis())
 	}
@@ -1239,6 +1242,9 @@ func TestCacheGRPCServerReplicationReportsNotConfigured(t *testing.T) {
 	if !replication.GetSkipped() || replication.GetReason() != "replication is not configured" {
 		t.Fatalf("replication status = %#v, want not configured skip", replication)
 	}
+	if replication.GetHealth() != "disabled" || replication.GetHealthScore() != 0 {
+		t.Fatalf("replication health = %s/%d, want disabled 0", replication.GetHealth(), replication.GetHealthScore())
+	}
 
 	replication, err = client.Replication(context.Background(), &hatriecachev1.ReplicationRequest{
 		Sync:   true,
@@ -1249,6 +1255,9 @@ func TestCacheGRPCServerReplicationReportsNotConfigured(t *testing.T) {
 	}
 	if !replication.GetSkipped() || replication.GetCommand() != "SYNC" || replication.GetKey() != "session:" || replication.GetReason() != "replication is not configured" {
 		t.Fatalf("replication sync status = %#v, want not configured sync skip", replication)
+	}
+	if replication.GetHealth() != "disabled" || replication.GetHealthScore() != 0 {
+		t.Fatalf("replication sync health = %s/%d, want disabled 0", replication.GetHealth(), replication.GetHealthScore())
 	}
 }
 
@@ -1357,6 +1366,9 @@ func TestCacheGRPCServerReportsAsyncReplicationQueue(t *testing.T) {
 	queue := replication.GetQueue()
 	if !replication.GetQueued() || queue == nil || !queue.GetEnabled() || queue.GetCapacity() != 2 || queue.GetEnqueued() != 1 {
 		t.Fatalf("async replication status = %#v, want queued status with queue stats", replication)
+	}
+	if replication.GetHealth() == "" || replication.GetHealthScore() <= 0 || replication.GetHealthScore() > 100 {
+		t.Fatalf("async replication health = %s/%d, want populated score", replication.GetHealth(), replication.GetHealthScore())
 	}
 	select {
 	case request := <-requests:
@@ -1673,6 +1685,9 @@ func TestCacheGRPCServerHandlesNilContextAndRequests(t *testing.T) {
 	}
 	if !replication.GetSkipped() || !strings.Contains(replication.GetReason(), "replication is not configured") {
 		t.Fatalf("Replication(nil) = %#v, want not configured response", replication)
+	}
+	if replication.GetHealth() != "disabled" || replication.GetHealthScore() != 0 {
+		t.Fatalf("Replication(nil) health = %s/%d, want disabled 0", replication.GetHealth(), replication.GetHealthScore())
 	}
 	topology, err := server.Topology(nil, nil)
 	if err != nil {

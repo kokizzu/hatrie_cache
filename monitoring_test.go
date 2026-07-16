@@ -1718,6 +1718,35 @@ func TestMonitoringPrometheusMetricsCountAuditAndLimitRejections(t *testing.T) {
 	}
 }
 
+func TestMonitoringPrometheusMetricsExposeReplicationHealthScore(t *testing.T) {
+	ht := newTestTrie(t)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		AsyncQueueSize: 2,
+	})
+	defer replicator.Close()
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:   "node-a",
+		Replicator: replicator,
+	}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", resp.Code)
+	}
+	body := resp.Body.String()
+	for _, token := range []string{
+		"# HELP hatrie_cache_replication_health_score",
+		"# TYPE hatrie_cache_replication_health_score gauge",
+		`hatrie_cache_replication_health_score{node="node-a"} 100`,
+	} {
+		if !strings.Contains(body, token) {
+			t.Fatalf("metrics body missing %q:\n%s", token, body)
+		}
+	}
+}
+
 func TestMonitoringHandlerManagesTopology(t *testing.T) {
 	ht := newTestTrie(t)
 	store, err := NewTopologyStore(SingleNodeTopology("node-a", "127.0.0.1:8080"))
@@ -2000,6 +2029,9 @@ func TestMonitoringHandlerReportsAsyncReplicationQueue(t *testing.T) {
 	}
 	if !result.Queued || result.Queue == nil || !result.Queue.Enabled || result.Queue.Capacity != 2 || result.Queue.Enqueued != 1 {
 		t.Fatalf("async replication result = %#v, want queued result with queue stats", result)
+	}
+	if result.Health == "" || result.HealthScore <= 0 || result.HealthScore > 100 {
+		t.Fatalf("async replication health = %q/%d, want populated score", result.Health, result.HealthScore)
 	}
 }
 

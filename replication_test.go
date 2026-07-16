@@ -46,6 +46,42 @@ func assertReplicationResultTiming(t *testing.T, result ReplicationResult) {
 	}
 }
 
+func TestReplicationHealthScoresQueueState(t *testing.T) {
+	healthy := withReplicationHealth(ReplicationResult{
+		Queue: &ReplicationQueueStats{Enabled: true, Depth: 0, Capacity: 8},
+	})
+	if healthy.Health != "ok" || healthy.HealthScore != 100 || healthy.HealthReason != "healthy" {
+		t.Fatalf("healthy replication = %#v, want ok 100", healthy)
+	}
+
+	degraded := withReplicationHealth(ReplicationResult{
+		Queue: &ReplicationQueueStats{Enabled: true, Depth: 6, Capacity: 8},
+	})
+	if degraded.Health != "degraded" || degraded.HealthScore >= healthy.HealthScore {
+		t.Fatalf("degraded replication = %#v, want lower degraded score", degraded)
+	}
+
+	unhealthy := withReplicationHealth(ReplicationResult{
+		Queue: &ReplicationQueueStats{
+			Enabled:               true,
+			Depth:                 8,
+			Capacity:              8,
+			Dropped:               2,
+			Attempts:              10,
+			Failures:              8,
+			OldestQueuedAgeMillis: int64((6 * time.Minute).Milliseconds()),
+		},
+	})
+	if unhealthy.Health != "unhealthy" || unhealthy.HealthScore >= 60 {
+		t.Fatalf("unhealthy replication = %#v, want unhealthy score below 60", unhealthy)
+	}
+
+	disabled := withReplicationHealth(ReplicationResult{Skipped: true, Reason: "replication is not configured"})
+	if disabled.Health != "disabled" || disabled.HealthScore != 0 {
+		t.Fatalf("disabled replication = %#v, want disabled 0", disabled)
+	}
+}
+
 func writeReplicationTestCommandResponse(w http.ResponseWriter, r *http.Request, response CacheCommandResponse) {
 	writeCommandResponseWire(w, r, http.StatusOK, response, CommandWireFormatJSON)
 }

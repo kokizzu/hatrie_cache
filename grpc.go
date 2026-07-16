@@ -436,6 +436,9 @@ func grpcReplicationResponse(result ReplicationResult) *hatriecachev1.Replicatio
 		StartedAtUnixNano:  unixNanoPtrOrZero(result.StartedAt),
 		FinishedAtUnixNano: unixNanoPtrOrZero(result.FinishedAt),
 		DurationMillis:     result.DurationMillis,
+		Health:             result.Health,
+		HealthScore:        int32(result.HealthScore),
+		HealthReason:       result.HealthReason,
 		Targets:            make([]*hatriecachev1.ReplicationTarget, 0, len(result.Targets)),
 	}
 	if result.Queue != nil {

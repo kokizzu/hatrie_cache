@@ -775,7 +775,8 @@ lifetime to a parent service context.
 `GET /api/replication` includes the latest replication start/finish timestamps,
 duration, async queue depth, capacity, enqueue/drop counts, delivery attempts,
 successes, failures, retries, oldest queued key/age, in-flight key/age, last
-retry age, per-target drops, per-target failures, and closed state:
+retry age, per-target drops, per-target failures, closed state, and a
+`health_score` from `0` to `100` with `health` and `health_reason`:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true
@@ -800,7 +801,8 @@ Prometheus output includes cache counters plus audit and protection counters:
 `hatrie_cache_write_protection_rejections_total`,
 `hatrie_cache_rate_limit_rejections_total`, and gauges for
 `hatrie_cache_write_protection_enabled` and
-`hatrie_cache_rate_limit_per_second`.
+`hatrie_cache_rate_limit_per_second`. When replication is configured,
+Prometheus also exports `hatrie_cache_replication_health_score`.
 Use `GET /api/entries?prefix=...&limit=N` to bound large key listings; limited
 responses include `has_more` and `next_after_key` for cursor paging with
 `after_key`. Empty keys are valid, so when `next_after_key` is empty and

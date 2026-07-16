@@ -450,6 +450,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	}
 	if handler.options.Replicator != nil {
 		result := handler.options.Replicator.LastResult()
+		writePrometheusGauge(&builder, "hatrie_cache_replication_health_score", "Current replication health score from 0 to 100.", node, uint64(result.HealthScore))
 		if result.Queue != nil {
 			writePrometheusHelp(&builder, "hatrie_cache_replication_queue_depth", "Current async replication queue depth.")
 			writePrometheusType(&builder, "hatrie_cache_replication_queue_depth", "gauge")

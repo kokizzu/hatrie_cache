@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -71,6 +72,9 @@ type ReplicationResult struct {
 	Queued         bool                      `json:"queued,omitempty"`
 	Skipped        bool                      `json:"skipped"`
 	Reason         string                    `json:"reason,omitempty"`
+	Health         string                    `json:"health"`
+	HealthScore    int                       `json:"health_score"`
+	HealthReason   string                    `json:"health_reason,omitempty"`
 	StartedAt      *time.Time                `json:"started_at,omitempty"`
 	FinishedAt     *time.Time                `json:"finished_at,omitempty"`
 	DurationMillis int64                     `json:"duration_millis,omitempty"`
@@ -237,7 +241,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 
 func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 	if replicator == nil {
-		return ReplicationResult{Skipped: true, Reason: "replication is not configured"}
+		return withReplicationHealth(ReplicationResult{Skipped: true, Reason: "replication is not configured"})
 	}
 	replicator.mu.RLock()
 	defer replicator.mu.RUnlock()
@@ -246,7 +250,7 @@ func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 		stats := replicator.queueStatsLocked()
 		result.Queue = &stats
 	}
-	return result
+	return withReplicationHealth(result)
 }
 
 func (replicator *HTTPReplicator) Close() {
@@ -266,12 +270,12 @@ func (replicator *HTTPReplicator) Close() {
 
 func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
 	if replicator == nil {
-		return ReplicationResult{
+		return withReplicationHealth(ReplicationResult{
 			Command: normalizedCommand(request.Command),
 			Key:     strings.TrimSpace(request.Key),
 			Skipped: true,
 			Reason:  "replication is not configured",
-		}
+		})
 	}
 
 	startedAt := time.Now().UTC()
@@ -282,22 +286,24 @@ func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *Ha
 		result = replicator.replicateCommand(ctx, trie, request, response)
 	}
 	result = finishReplicationResult(result, startedAt)
+	result = replicator.attachReplicationHealth(result)
 	replicator.storeLastResult(result)
 	return result
 }
 
 func (replicator *HTTPReplicator) SyncAll(ctx context.Context, trie *HatTrie, prefix string) ReplicationResult {
 	if replicator == nil {
-		return ReplicationResult{
+		return withReplicationHealth(ReplicationResult{
 			Command: "SYNC",
 			Key:     prefix,
 			Skipped: true,
 			Reason:  "replication is not configured",
-		}
+		})
 	}
 
 	startedAt := time.Now().UTC()
 	result := finishReplicationResult(replicator.syncAll(ctx, trie, prefix), startedAt)
+	result = replicator.attachReplicationHealth(result)
 	replicator.storeLastResult(result)
 	return result
 }
@@ -638,6 +644,7 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 			result.Skipped = true
 			result.Reason = err.Error()
 			result.Targets = nil
+			result = replicator.attachReplicationHealth(result)
 			replicator.storeLastResult(result)
 			return
 		}
@@ -646,6 +653,7 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 		needsRetry := replicationNeedsRetry(result)
 		willRetry := needsRetry && attempt < attempts
 		replicator.recordAsyncAttempt(result, willRetry)
+		result = replicator.attachReplicationHealth(result)
 		replicator.storeLastResult(result)
 		if !needsRetry || attempt == attempts {
 			return
@@ -886,6 +894,131 @@ func finishReplicationResult(result ReplicationResult, startedAt time.Time) Repl
 		result.DurationMillis = 0
 	}
 	return result
+}
+
+func (replicator *HTTPReplicator) attachReplicationHealth(result ReplicationResult) ReplicationResult {
+	if replicator != nil && replicator.queue != nil && result.Queue == nil {
+		replicator.mu.RLock()
+		stats := replicator.queueStatsLocked()
+		replicator.mu.RUnlock()
+		result.Queue = &stats
+	}
+	return withReplicationHealth(result)
+}
+
+func withReplicationHealth(result ReplicationResult) ReplicationResult {
+	result.Health, result.HealthScore, result.HealthReason = replicationHealth(result)
+	return result
+}
+
+func replicationHealth(result ReplicationResult) (string, int, string) {
+	if result.Skipped && result.Reason == "replication is not configured" {
+		return "disabled", 0, "replication is not configured"
+	}
+
+	score := 100
+	reason := "healthy"
+	if result.Queue != nil {
+		queue := result.Queue
+		if queue.Closed {
+			return "unhealthy", 0, "replication queue is closed"
+		}
+		if queue.Capacity > 0 && queue.Depth > 0 {
+			fillPercent := (queue.Depth * 100) / queue.Capacity
+			switch {
+			case fillPercent >= 100:
+				score -= 45
+				reason = "replication queue is full"
+			case fillPercent >= 75:
+				score -= 25
+				if reason == "healthy" {
+					reason = "replication queue is above 75%"
+				}
+			case fillPercent >= 50:
+				score -= 10
+				if reason == "healthy" {
+					reason = "replication queue is above 50%"
+				}
+			}
+		}
+		if queue.Dropped > 0 {
+			score -= 30
+			reason = "async replication drops recorded"
+		}
+		if queue.Failures > 0 {
+			penalty := 20
+			if queue.Attempts > 0 {
+				penalty = int(math.Ceil((float64(queue.Failures) / float64(queue.Attempts)) * 40))
+				if penalty < 10 {
+					penalty = 10
+				}
+				if penalty > 40 {
+					penalty = 40
+				}
+			}
+			score -= penalty
+			if reason == "healthy" {
+				reason = "target failures recorded"
+			}
+		}
+		switch {
+		case queue.OldestQueuedAgeMillis >= int64((5 * time.Minute).Milliseconds()):
+			score -= 30
+			reason = "old queued replication work"
+		case queue.OldestQueuedAgeMillis >= int64((30 * time.Second).Milliseconds()):
+			score -= 10
+			if reason == "healthy" {
+				reason = "queued replication work is aging"
+			}
+		}
+		switch {
+		case queue.InFlightAgeMillis >= int64((5 * time.Minute).Milliseconds()):
+			score -= 30
+			reason = "replication delivery is stuck"
+		case queue.InFlightAgeMillis >= int64((30 * time.Second).Milliseconds()):
+			score -= 10
+			if reason == "healthy" {
+				reason = "replication delivery is slow"
+			}
+		}
+	}
+
+	failedTargets := 0
+	for _, target := range result.Targets {
+		if !target.OK {
+			failedTargets++
+		}
+	}
+	if failedTargets > 0 {
+		if failedTargets == len(result.Targets) {
+			score -= 40
+			reason = "all replication targets failed"
+		} else {
+			score -= 20
+			if reason == "healthy" {
+				reason = "some replication targets failed"
+			}
+		}
+	}
+
+	score = clampReplicationHealthScore(score)
+	status := "unhealthy"
+	if score >= 90 {
+		status = "ok"
+	} else if score >= 60 {
+		status = "degraded"
+	}
+	return status, score, reason
+}
+
+func clampReplicationHealthScore(score int) int {
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
 }
 
 func (replicator *HTTPReplicator) routeForKey(key string) (ElectionKeyRoute, bool) {

@@ -194,7 +194,7 @@ describe('command fallback', () => {
         });
       }
       expect(path).toBe('/api/replication');
-      return new Response(JSON.stringify({ skipped: false, queue: { enabled: true, depth: 1, capacity: 4, enqueued: 2, dropped: 0, attempts: 2, successes: 1, failures: 1, retried: 1, closed: false } }), {
+      return new Response(JSON.stringify({ skipped: false, health: 'degraded', health_score: 80, health_reason: 'target failures recorded', queue: { enabled: true, depth: 1, capacity: 4, enqueued: 2, dropped: 0, attempts: 2, successes: 1, failures: 1, retried: 1, closed: false } }), {
         status: 200,
         headers: { 'content-type': 'application/json' }
       });
@@ -211,6 +211,8 @@ describe('command fallback', () => {
     });
     await expect(loadReplicationStatus()).resolves.toMatchObject({
       skipped: false,
+      health: 'degraded',
+      health_score: 80,
       queue: { depth: 1, capacity: 4 }
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
