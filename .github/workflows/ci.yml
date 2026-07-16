@@ -55,6 +55,9 @@ jobs:
       - name: Verify Go
         run: make verify-go
 
+      - name: Benchmark smoke
+        run: make bench-ci-smoke
+
   c-and-ops:
     name: C and Ops
     runs-on: ubuntu-latest

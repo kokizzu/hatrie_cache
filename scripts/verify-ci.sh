@@ -48,15 +48,18 @@ require_file "$workflow"
 require_file Makefile
 require_executable scripts/check-config.sh
 require_executable scripts/docker-build.sh
+require_executable scripts/benchmark-ci-smoke.sh
 require_executable scripts/verify-ci.sh
 
 require_pattern Makefile '^[[:space:]]*verify-ci:' "Makefile is missing verify-ci target"
+require_pattern Makefile '^[[:space:]]*bench-ci-smoke:' "Makefile is missing bench-ci-smoke target"
 require_pattern "$workflow" '^permissions:' "CI workflow is missing explicit permissions"
 require_pattern "$workflow" 'contents:[[:space:]]*read' "CI workflow must keep contents: read"
 require_pattern "$workflow" '^concurrency:' "CI workflow is missing concurrency cancellation"
 require_pattern "$workflow" 'cancel-in-progress:[[:space:]]*true' "CI workflow must cancel superseded runs"
 require_pattern "$workflow" 'run:[[:space:]]*make verify-ci' "CI workflow does not run make verify-ci"
 require_pattern "$workflow" 'run:[[:space:]]*make verify-go' "CI workflow does not run make verify-go"
+require_pattern "$workflow" 'run:[[:space:]]*make bench-ci-smoke' "CI workflow does not run make bench-ci-smoke"
 require_pattern "$workflow" 'run:[[:space:]]*make verify-c' "CI workflow does not run make verify-c"
 require_pattern "$workflow" 'run:[[:space:]]*make verify-ops' "CI workflow does not run make verify-ops"
 require_pattern "$workflow" 'run:[[:space:]]*make verify-frontend' "CI workflow does not run make verify-frontend"

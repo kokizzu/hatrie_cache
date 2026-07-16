@@ -84,6 +84,11 @@ TARANTOOL_BIN ?= tarantool
 TARANTOOL_WORK_DIR ?=
 HATRIE_COMMAND_BENCH ?= ^BenchmarkCommandFeature$$
 HATRIE_TRANSPORT_BENCH ?= ^BenchmarkCommandTransportFeature$$
+BENCH_CI_SMOKE_BENCHTIME ?= 5x
+BENCH_CI_SMOKE_COUNT ?= 1
+BENCH_CI_SMOKE_COMMAND_BENCH ?= ^BenchmarkCommandFeature/(StringGet|ReservoirSampleAdd)$$
+BENCH_CI_SMOKE_TRANSPORT_BENCH ?= ^BenchmarkCommandTransportFeature/InProcess/(StringSet|StringGet)$$
+BENCH_CI_SMOKE_SERIALIZATION_BENCH ?= Benchmark(CommandWireJSON|CommandWireProtobuf)$$
 CONFIG_PATH ?=
 SERVER_ARGS ?=
 CHECK_CONFIG_ARGS ?=
@@ -94,7 +99,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-ci-smoke command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -175,6 +180,9 @@ bench-redis-command-features:
 
 bench-tarantool-command-features:
 	TARANTOOL_REQUESTS='$(TARANTOOL_REQUESTS)' TARANTOOL_KEYSPACE='$(TARANTOOL_KEYSPACE)' TARANTOOL_MEMTX_MEMORY='$(TARANTOOL_MEMTX_MEMORY)' TARANTOOL_BIN='$(TARANTOOL_BIN)' TARANTOOL_WORK_DIR='$(TARANTOOL_WORK_DIR)' ./scripts/benchmark-tarantool-command-features.sh
+
+bench-ci-smoke:
+	BENCH_CI_SMOKE_BENCHTIME='$(BENCH_CI_SMOKE_BENCHTIME)' BENCH_CI_SMOKE_COUNT='$(BENCH_CI_SMOKE_COUNT)' BENCH_CI_SMOKE_COMMAND_BENCH='$(BENCH_CI_SMOKE_COMMAND_BENCH)' BENCH_CI_SMOKE_TRANSPORT_BENCH='$(BENCH_CI_SMOKE_TRANSPORT_BENCH)' BENCH_CI_SMOKE_SERIALIZATION_BENCH='$(BENCH_CI_SMOKE_SERIALIZATION_BENCH)' ./scripts/benchmark-ci-smoke.sh
 
 command-support:
 	./scripts/command-support.sh

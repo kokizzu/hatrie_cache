@@ -82,6 +82,12 @@ make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQ
 make bench-tarantool-command-features TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
 ```
 
+Run the CI benchmark smoke locally:
+
+```
+make bench-ci-smoke
+```
+
 The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
 
 ```

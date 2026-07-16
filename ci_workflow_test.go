@@ -15,6 +15,7 @@ func TestCIWorkflowRunsProjectVerification(t *testing.T) {
 	for _, token := range []string{
 		"actions/setup-go@v5",
 		"make verify-go",
+		"make bench-ci-smoke",
 		"make verify-c",
 		"make verify-ops",
 		"actions/setup-node@v4",

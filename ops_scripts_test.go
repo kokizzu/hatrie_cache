@@ -109,6 +109,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/doctor.sh",
 		"check-config:",
 		"./scripts/check-config.sh",
+		"bench-ci-smoke:",
+		"./scripts/benchmark-ci-smoke.sh",
 		"GRPC_TLS_CERT ?=",
 		"GRPC_CLIENT_CA ?=",
 	} {
