@@ -75,6 +75,27 @@ make command-support
 The full HAT-trie benchmark includes rows beyond the Redis/Tarantool comparable
 tables, such as `BenchmarkCommandFeature/FenwickTreeRange`.
 
+## Latest Optimization Spot Check
+
+After adding exact command fast paths for set, priority queue, Bloom filter,
+Cuckoo filter, and Count-Min Sketch single-string workloads, this local
+100,000-iteration spot check measured the optimized rows below:
+
+```
+make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/(SetAddHas|PriorityQueuePushPop|BloomAdd|BloomHas|CuckooDeleteAdd|CuckooHas|CountMinSketchIncrement|CountMinSketchEstimate)$' BENCHTIME=100000x
+```
+
+| Feature | Benchmark row | Time/op | Bytes/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 598.8 ns | 24 B | 2 |
+| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 702.4 ns | 56 B | 3 |
+| Bloom filter add | `BenchmarkCommandFeature/BloomAdd` | 205.1 ns | 0 B | 0 |
+| Bloom filter lookup | `BenchmarkCommandFeature/BloomHas` | 271.4 ns | 0 B | 0 |
+| Cuckoo filter delete+add | `BenchmarkCommandFeature/CuckooDeleteAdd` | 591.5 ns | 0 B | 0 |
+| Cuckoo filter lookup | `BenchmarkCommandFeature/CuckooHas` | 278.1 ns | 0 B | 0 |
+| Count-Min Sketch increment | `BenchmarkCommandFeature/CountMinSketchIncrement` | 303.8 ns | 5 B | 0 |
+| Count-Min Sketch estimate | `BenchmarkCommandFeature/CountMinSketchEstimate` | 267.6 ns | 0 B | 0 |
+
 ## Memory Summary
 
 | System | Run | Memory metric | Value |
