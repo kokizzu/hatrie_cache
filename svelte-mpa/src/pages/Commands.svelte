@@ -22,15 +22,19 @@
   $: subkeyPlaceholder = command === 'CREATECMS' ? '4' : command === 'CREATECF' ? '0.01' : command === 'RANGEFW' ? '10' : command === 'PREFIXRT' ? 'user:' : ['PUTRT', 'GETRT', 'DELRT', 'HASRT'].includes(command) ? 'user:100/profile' : '1';
 
   async function submit() {
-    const result = await runCommand({
-      command,
-      key,
-      value,
-      subkey: needsSubkey ? subkey : undefined,
-      priority: needsPriority ? priority : null,
-      ttl_seconds: needsTTL && !persist ? ttl : null
-    });
-    response = result.value ? `${result.message} ${result.value}` : result.message;
+    try {
+      const result = await runCommand({
+        command,
+        key,
+        value,
+        subkey: needsSubkey ? subkey : undefined,
+        priority: needsPriority ? priority : null,
+        ttl_seconds: needsTTL && !persist ? ttl : null
+      });
+      response = result.value ? `${result.message} ${result.value}` : result.message;
+    } catch (error) {
+      response = error instanceof Error ? error.message : 'Command failed.';
+    }
   }
 </script>
 

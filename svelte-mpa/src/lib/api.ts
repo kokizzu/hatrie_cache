@@ -321,32 +321,12 @@ const sampleStorageStatus: StorageStatus = {
   leveldb_configured: false
 };
 
-const sampleFlushResult: StorageFlushResult = {
-  store: 'leveldb',
-  keys: 0,
-  started_at: new Date(Date.now() - 120).toISOString(),
-  finished_at: new Date().toISOString(),
-  duration_millis: 120
-};
-
-const sampleCompactResult: StorageCompactResult = {
-  store: 'leveldb',
-  size_bytes_before: 0,
-  size_bytes_after: 0,
-  size_bytes_delta: 0,
-  properties_before: {},
-  properties_after: {},
-  started_at: new Date(Date.now() - 180).toISOString(),
-  finished_at: new Date().toISOString(),
-  duration_millis: 180
-};
-
 const sampleReplicationResult: ReplicationResult = {
   skipped: true,
   reason: 'replication is not configured'
 };
 
-async function readJSON<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
+async function readJSONWithFallback<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
   try {
     const response = await fetch(path, {
       headers: { accept: 'application/json', ...(init?.headers ?? {}) },
@@ -359,6 +339,30 @@ async function readJSON<T>(path: string, fallback: T, init?: RequestInit): Promi
   } catch {
     return fallback;
   }
+}
+
+async function postJSON<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as T;
+}
+
+async function responseErrorMessage(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as Partial<CommandResponse>;
+    if (payload.message) {
+      return payload.message;
+    }
+  } catch {
+    // Fall back to HTTP status text below.
+  }
+  return `${response.status} ${response.statusText}`.trim();
 }
 
 export function sampleCommandResponse(request: CommandRequest): CommandResponse {
@@ -379,11 +383,11 @@ export function sampleCommandResponse(request: CommandRequest): CommandResponse 
 }
 
 export async function loadHealth(): Promise<CacheHealth> {
-  return readJSON<CacheHealth>('/api/health', sampleHealth);
+  return readJSONWithFallback<CacheHealth>('/api/health', sampleHealth);
 }
 
 export async function loadStats(): Promise<CacheStats> {
-  return readJSON<CacheStats>('/api/stats', sampleStats);
+  return readJSONWithFallback<CacheStats>('/api/stats', sampleStats);
 }
 
 export async function loadEntries(prefix = '', limit = 0, afterKey = ''): Promise<EntriesResponse> {
@@ -405,27 +409,19 @@ export async function loadEntries(prefix = '', limit = 0, afterKey = ''): Promis
     ...(afterKey ? { after_key: afterKey } : {}),
     ...(hasMore && entries.length > 0 ? { next_after_key: entries[entries.length - 1].key } : {})
   };
-  return readJSON<EntriesResponse>(path, fallback);
+  return readJSONWithFallback<EntriesResponse>(path, fallback);
 }
 
 export async function runCommand(request: CommandRequest): Promise<CommandResponse> {
-  return readJSON<CommandResponse>('/api/commands', sampleCommandResponse(request), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request)
-  });
+  return postJSON<CommandResponse>('/api/commands', request);
 }
 
 export async function loadStorageStatus(): Promise<StorageStatus> {
-  return readJSON<StorageStatus>('/api/storage', sampleStorageStatus);
+  return readJSONWithFallback<StorageStatus>('/api/storage', sampleStorageStatus);
 }
 
 export async function flushStorage(): Promise<StorageFlushResult> {
-  return readJSON<StorageFlushResult>('/api/storage/flush', sampleFlushResult, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({})
-  });
+  return postJSON<StorageFlushResult>('/api/storage/flush', {});
 }
 
 export async function compactStorage(startKey = '', limitKey = ''): Promise<StorageCompactResult> {
@@ -434,26 +430,14 @@ export async function compactStorage(startKey = '', limitKey = ''): Promise<Stor
   const limit = limitKey.trim();
   if (start) request.start_key = start;
   if (limit) request.limit_key = limit;
-  return readJSON<StorageCompactResult>('/api/storage/compact', { ...sampleCompactResult, start_key: start, limit_key: limit }, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request)
-  });
+  return postJSON<StorageCompactResult>('/api/storage/compact', request);
 }
 
 export async function loadReplicationStatus(): Promise<ReplicationResult> {
-  return readJSON<ReplicationResult>('/api/replication', sampleReplicationResult);
+  return readJSONWithFallback<ReplicationResult>('/api/replication', sampleReplicationResult);
 }
 
 export async function syncReplication(prefix = ''): Promise<ReplicationResult> {
   const trimmedPrefix = prefix.trim();
-  return readJSON<ReplicationResult>(
-    '/api/replication',
-    { ...sampleReplicationResult, command: 'SYNC', key: trimmedPrefix },
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(trimmedPrefix ? { prefix: trimmedPrefix } : {})
-    }
-  );
+  return postJSON<ReplicationResult>('/api/replication', trimmedPrefix ? { prefix: trimmedPrefix } : {});
 }

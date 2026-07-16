@@ -33,39 +33,57 @@
 
   async function refresh() {
     loading = true;
-    const [nextStorage, nextReplication] = await Promise.all([loadStorageStatus(), loadReplicationStatus()]);
-    storage = nextStorage;
-    replication = nextReplication;
-    loading = false;
+    try {
+      const [nextStorage, nextReplication] = await Promise.all([loadStorageStatus(), loadReplicationStatus()]);
+      storage = nextStorage;
+      replication = nextReplication;
+    } finally {
+      loading = false;
+    }
   }
 
   async function runFlush() {
     storageAction = 'flush';
     storageMessage = '';
-    lastFlush = await flushStorage();
-    storageMessage = `Flushed ${lastFlush.keys.toLocaleString()} keys in ${formatMillis(lastFlush.duration_millis)}.`;
-    storageAction = '';
-    await refresh();
+    try {
+      lastFlush = await flushStorage();
+      storageMessage = `Flushed ${lastFlush.keys.toLocaleString()} keys in ${formatMillis(lastFlush.duration_millis)}.`;
+      await refresh();
+    } catch (error) {
+      storageMessage = error instanceof Error ? error.message : 'Storage flush failed.';
+    } finally {
+      storageAction = '';
+    }
   }
 
   async function runCompact() {
     storageAction = 'compact';
     storageMessage = '';
-    lastCompact = await compactStorage(compactStartKey, compactLimitKey);
-    storageMessage = `Compacted ${formatBytes(lastCompact.size_bytes_before)} to ${formatBytes(lastCompact.size_bytes_after)} in ${formatMillis(lastCompact.duration_millis)}.`;
-    storageAction = '';
-    await refresh();
+    try {
+      lastCompact = await compactStorage(compactStartKey, compactLimitKey);
+      storageMessage = `Compacted ${formatBytes(lastCompact.size_bytes_before)} to ${formatBytes(lastCompact.size_bytes_after)} in ${formatMillis(lastCompact.duration_millis)}.`;
+      await refresh();
+    } catch (error) {
+      storageMessage = error instanceof Error ? error.message : 'Storage compaction failed.';
+    } finally {
+      storageAction = '';
+    }
   }
 
   async function runSync() {
     replicationAction = 'sync';
     replicationMessage = '';
-    syncResult = await syncReplication(syncPrefix);
-    replicationMessage = syncResult.skipped
-      ? (syncResult.reason ?? 'Sync skipped.')
-      : `Synced ${(syncResult.entries ?? 0).toLocaleString()} entries in ${formatMillis(syncResult.duration_millis)}.`;
-    replicationAction = '';
-    await refresh();
+    try {
+      syncResult = await syncReplication(syncPrefix);
+      replicationMessage = syncResult.skipped
+        ? (syncResult.reason ?? 'Sync skipped.')
+        : `Synced ${(syncResult.entries ?? 0).toLocaleString()} entries in ${formatMillis(syncResult.duration_millis)}.`;
+      await refresh();
+    } catch (error) {
+      replicationMessage = error instanceof Error ? error.message : 'Replication sync failed.';
+    } finally {
+      replicationAction = '';
+    }
   }
 
   function formatMillis(value?: number): string {

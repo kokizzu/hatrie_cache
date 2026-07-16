@@ -273,4 +273,32 @@ describe('command fallback', () => {
     });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it('rejects failed admin mutations instead of returning sample success', async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ ok: false, message: 'leveldb store is not configured' }), {
+        status: 409,
+        statusText: 'Conflict',
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(flushStorage()).rejects.toThrow('leveldb store is not configured');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('rejects failed commands instead of using command fallbacks', async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ ok: false, message: 'writes are disabled' }), {
+        status: 403,
+        statusText: 'Forbidden',
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCommand({ command: 'SETSTR', key: 'session:1', value: 'ivi' })).rejects.toThrow('writes are disabled');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });
