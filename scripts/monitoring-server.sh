@@ -24,6 +24,9 @@ replication_sync_interval=${REPLICATION_SYNC_INTERVAL:-0}
 replication_sync_prefix=${REPLICATION_SYNC_PREFIX:-}
 enforce_leader_writes=${ENFORCE_LEADER_WRITES:-false}
 grpc_addr=${GRPC_ADDR:-}
+grpc_tls_cert=${GRPC_TLS_CERT:-}
+grpc_tls_key=${GRPC_TLS_KEY:-}
+grpc_client_ca=${GRPC_CLIENT_CA:-}
 db_path=${DB_PATH:-}
 db_format=${DB_FORMAT:-}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
@@ -67,6 +70,9 @@ set -- \
 	-replication-sync-prefix "$replication_sync_prefix" \
 	-enforce-leader-writes="$enforce_leader_writes" \
 	-grpc-addr "$grpc_addr" \
+	-grpc-tls-cert "$grpc_tls_cert" \
+	-grpc-tls-key "$grpc_tls_key" \
+	-grpc-client-ca "$grpc_client_ca" \
 	-db-path "$db_path" \
 	-db-sync-interval "$db_sync_interval" \
 	-db-hot-load="$db_hot_load" \

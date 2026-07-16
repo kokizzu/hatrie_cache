@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -592,12 +593,18 @@ func TestParseConfigGRPCFlag(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"-monitoring-server",
 		"-grpc-addr", "127.0.0.1:9091",
+		"-grpc-tls-cert", "/tmp/grpc-cert.pem",
+		"-grpc-tls-key", "/tmp/grpc-key.pem",
+		"-grpc-client-ca", "/tmp/client-ca.pem",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
 	}
 	if cfg.grpcAddr != "127.0.0.1:9091" {
 		t.Fatalf("grpcAddr = %q, want explicit address", cfg.grpcAddr)
+	}
+	if cfg.grpcTLSCert != "/tmp/grpc-cert.pem" || cfg.grpcTLSKey != "/tmp/grpc-key.pem" || cfg.grpcClientCA != "/tmp/client-ca.pem" {
+		t.Fatalf("gRPC TLS config = %q/%q/%q, want explicit paths", cfg.grpcTLSCert, cfg.grpcTLSKey, cfg.grpcClientCA)
 	}
 }
 
@@ -680,6 +687,18 @@ func TestParseConfigRejectsPartialMonitoringTLSConfig(t *testing.T) {
 	}
 	if _, err := parseConfig([]string{"-monitoring-tls-key", "/tmp/key.pem"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("parseConfig(partial TLS key) error = nil, want error")
+	}
+}
+
+func TestParseConfigRejectsPartialGRPCTLSConfig(t *testing.T) {
+	if _, err := parseConfig([]string{"-grpc-tls-cert", "/tmp/cert.pem"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseConfig(partial gRPC TLS cert) error = nil, want error")
+	}
+	if _, err := parseConfig([]string{"-grpc-tls-key", "/tmp/key.pem"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseConfig(partial gRPC TLS key) error = nil, want error")
+	}
+	if _, err := parseConfig([]string{"-grpc-client-ca", "/tmp/client-ca.pem"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseConfig(gRPC client CA without TLS) error = nil, want error")
 	}
 }
 
@@ -1081,6 +1100,116 @@ func TestNewGRPCServerPassesMonitoringAuthToken(t *testing.T) {
 	}
 }
 
+func TestNewGRPCServerUsesTLS(t *testing.T) {
+	certPath, keyPath := writeTestCertificate(t)
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+
+	server, listener, err := newGRPCServer(config{
+		grpcAddr:    "127.0.0.1:0",
+		grpcTLSCert: certPath,
+		grpcTLSKey:  keyPath,
+	}, ht, nil, nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newGRPCServer(TLS) error = %v", err)
+	}
+	defer listener.Close()
+	defer server.Stop()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	conn, err := grpc.DialContext(ctx, listener.Addr().String(),
+		grpc.WithBlock(),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})),
+	)
+	cancel()
+	if err != nil {
+		t.Fatalf("DialContext(TLS) error = %v", err)
+	}
+	defer conn.Close()
+
+	client := hatriecachev1.NewCacheServiceClient(conn)
+	if _, err := client.Health(context.Background(), &hatriecachev1.HealthRequest{}); err != nil {
+		t.Fatalf("Health(TLS) error = %v", err)
+	}
+
+	server.Stop()
+	if err := <-serveErr; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+		t.Fatalf("gRPC Serve() error = %v", err)
+	}
+}
+
+func TestNewGRPCServerRequiresClientCertificate(t *testing.T) {
+	serverCertPath, serverKeyPath := writeTestCertificate(t)
+	clientCertPath, clientKeyPath := writeTestClientCertificate(t)
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+
+	server, listener, err := newGRPCServer(config{
+		grpcAddr:     "127.0.0.1:0",
+		grpcTLSCert:  serverCertPath,
+		grpcTLSKey:   serverKeyPath,
+		grpcClientCA: clientCertPath,
+	}, ht, nil, nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newGRPCServer(mTLS) error = %v", err)
+	}
+	defer listener.Close()
+	defer server.Stop()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	connWithoutClientCert, err := grpc.DialContext(ctx, listener.Addr().String(),
+		grpc.WithBlock(),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})),
+	)
+	cancel()
+	if err == nil {
+		client := hatriecachev1.NewCacheServiceClient(connWithoutClientCert)
+		_, healthErr := client.Health(context.Background(), &hatriecachev1.HealthRequest{})
+		_ = connWithoutClientCert.Close()
+		if healthErr == nil {
+			t.Fatal("Health(mTLS without client certificate) error = nil, want rejection")
+		}
+	}
+
+	clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
+	if err != nil {
+		t.Fatalf("LoadX509KeyPair(client) error = %v", err)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	connWithClientCert, err := grpc.DialContext(ctx, listener.Addr().String(),
+		grpc.WithBlock(),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			InsecureSkipVerify: true,
+			Certificates:       []tls.Certificate{clientCert},
+		})),
+	)
+	cancel()
+	if err != nil {
+		t.Fatalf("DialContext(mTLS client cert) error = %v", err)
+	}
+	defer connWithClientCert.Close()
+
+	client := hatriecachev1.NewCacheServiceClient(connWithClientCert)
+	if _, err := client.Health(context.Background(), &hatriecachev1.HealthRequest{}); err != nil {
+		t.Fatalf("Health(mTLS client cert) error = %v", err)
+	}
+
+	server.Stop()
+	if err := <-serveErr; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+		t.Fatalf("gRPC Serve() error = %v", err)
+	}
+}
+
 func TestRunRefreshesLocalElectionHeartbeat(t *testing.T) {
 	monitoringAddr := freeTCPAddr(t)
 	topologyPath := filepath.Join(t.TempDir(), "topology.json")
@@ -1397,6 +1526,14 @@ func TestTopologyLifecycleHelperLoadsAndSaves(t *testing.T) {
 }
 
 func writeTestCertificate(t *testing.T) (string, string) {
+	return writeTestCertificateWithExtKeyUsage(t, "localhost", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+}
+
+func writeTestClientCertificate(t *testing.T) (string, string) {
+	return writeTestCertificateWithExtKeyUsage(t, "hatrie-client", []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+}
+
+func writeTestCertificateWithExtKeyUsage(t *testing.T, commonName string, usages []x509.ExtKeyUsage) (string, string) {
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -1406,14 +1543,12 @@ func writeTestCertificate(t *testing.T) (string, string) {
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			CommonName: "localhost",
+			CommonName: commonName,
 		},
-		NotBefore: time.Now().Add(-time.Hour),
-		NotAfter:  time.Now().Add(time.Hour),
-		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{
-			x509.ExtKeyUsageServerAuth,
-		},
+		NotBefore:   time.Now().Add(-time.Hour),
+		NotAfter:    time.Now().Add(time.Hour),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: usages,
 		DNSNames:    []string{"localhost"},
 		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 	}

@@ -497,7 +497,17 @@ make monitoring-server GRPC_ADDR=127.0.0.1:9090
 ```
 
 Use `MONITORING_AUTH_TOKEN` with `GRPC_ADDR` when the native protobuf API is
-reachable outside a trusted localhost-only environment.
+reachable outside a trusted localhost-only environment. For native gRPC TLS,
+set `GRPC_TLS_CERT` and `GRPC_TLS_KEY`; add `GRPC_CLIENT_CA` to require mTLS
+client certificates signed by that CA:
+
+```
+make monitoring-server GRPC_ADDR=0.0.0.0:9090 GRPC_TLS_CERT=server.pem GRPC_TLS_KEY=server-key.pem
+make monitoring-server GRPC_ADDR=0.0.0.0:9090 GRPC_TLS_CERT=server.pem GRPC_TLS_KEY=server-key.pem GRPC_CLIENT_CA=clients-ca.pem
+```
+
+The matching JSON config keys are `grpc_tls_cert`, `grpc_tls_key`, and
+`grpc_client_ca`.
 
 Set `DB_PATH` to load and save cache data through LevelDB with Snappy
 compression. LevelDB records use the binary storage format by default

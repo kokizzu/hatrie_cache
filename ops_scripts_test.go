@@ -104,6 +104,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/restore-rehearsal.sh",
 		"doctor:",
 		"./scripts/doctor.sh",
+		"GRPC_TLS_CERT ?=",
+		"GRPC_CLIENT_CA ?=",
 	} {
 		if !strings.Contains(makefile, token) {
 			t.Fatalf("Makefile missing backup/restore token %q", token)
@@ -116,6 +118,20 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "go run ./cmd/hatrie-cli doctor -path") {
 		t.Fatal("doctor script should invoke hatrie-cli doctor")
+	}
+	data, err = os.ReadFile("scripts/monitoring-server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/monitoring-server.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"GRPC_TLS_CERT",
+		"-grpc-tls-cert",
+		"GRPC_CLIENT_CA",
+		"-grpc-client-ca",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("monitoring server script missing token %q", token)
+		}
 	}
 	data, err = os.ReadFile("scripts/restore-bundle.sh")
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	stdjson "encoding/json"
 	"errors"
 	"flag"
@@ -25,6 +26,7 @@ import (
 	hatriecache "hatrie_cache"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 const (
@@ -62,6 +64,9 @@ type config struct {
 	replicationSyncPrefix       string
 	enforceLeaderWrites         bool
 	grpcAddr                    string
+	grpcTLSCert                 string
+	grpcTLSKey                  string
+	grpcClientCA                string
 	dbPath                      string
 	dbFormat                    string
 	dbSyncInterval              time.Duration
@@ -323,6 +328,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
 	flags.StringVar(&cfg.grpcAddr, "grpc-addr", "", "optional native gRPC API listen address")
+	flags.StringVar(&cfg.grpcTLSCert, "grpc-tls-cert", "", "TLS certificate path for the native gRPC API")
+	flags.StringVar(&cfg.grpcTLSKey, "grpc-tls-key", "", "TLS private key path for the native gRPC API")
+	flags.StringVar(&cfg.grpcClientCA, "grpc-client-ca", "", "optional client CA PEM path; when set, native gRPC requires mTLS client certificates")
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
 	flags.StringVar(&cfg.dbFormat, "db-format", string(hatriecache.DefaultStorageFormat), "LevelDB record storage format: binary or json")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
@@ -351,6 +359,12 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if (cfg.monitoringTLSCert == "") != (cfg.monitoringTLSKey == "") {
 		return config{}, errors.New("monitoring TLS requires both -monitoring-tls-cert and -monitoring-tls-key")
+	}
+	if (cfg.grpcTLSCert == "") != (cfg.grpcTLSKey == "") {
+		return config{}, errors.New("gRPC TLS requires both -grpc-tls-cert and -grpc-tls-key")
+	}
+	if cfg.grpcClientCA != "" && cfg.grpcTLSCert == "" {
+		return config{}, errors.New("gRPC client CA requires -grpc-tls-cert and -grpc-tls-key")
 	}
 	if cfg.monitoringReadHeaderTimeout < 0 {
 		return config{}, errors.New("monitoring read header timeout must be non-negative")
@@ -677,11 +691,15 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 	if cfg.grpcAddr == "" {
 		return nil, nil, nil
 	}
+	options, err := grpcServerOptions(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
 	listener, err := net.Listen("tcp", cfg.grpcAddr)
 	if err != nil {
 		return nil, nil, err
 	}
-	server := grpc.NewServer()
+	server := grpc.NewServer(options...)
 	hatriecache.RegisterCacheGRPCServer(server, hatriecache.NewCacheGRPCServer(trie, hatriecache.CacheGRPCOptions{
 		NodeName:            defaultNodeID(cfg.nodeID),
 		AuthToken:           cfg.monitoringAuthToken,
@@ -696,6 +714,42 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		EnforceLeaderWrites: cfg.enforceLeaderWrites,
 	}))
 	return server, listener, nil
+}
+
+func grpcServerOptions(cfg config) ([]grpc.ServerOption, error) {
+	if cfg.grpcTLSCert == "" {
+		return nil, nil
+	}
+	tlsConfig, err := grpcTLSConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return []grpc.ServerOption{grpc.Creds(credentials.NewTLS(tlsConfig))}, nil
+}
+
+func grpcTLSConfig(cfg config) (*tls.Config, error) {
+	cert, err := tls.LoadX509KeyPair(cfg.grpcTLSCert, cfg.grpcTLSKey)
+	if err != nil {
+		return nil, fmt.Errorf("load gRPC TLS certificate: %w", err)
+	}
+	tlsConfig := &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		NextProtos:   withHTTP2Proto(nil),
+		Certificates: []tls.Certificate{cert},
+	}
+	if cfg.grpcClientCA != "" {
+		caPEM, err := os.ReadFile(cfg.grpcClientCA)
+		if err != nil {
+			return nil, fmt.Errorf("read gRPC client CA: %w", err)
+		}
+		clientCAs := x509.NewCertPool()
+		if !clientCAs.AppendCertsFromPEM(caPEM) {
+			return nil, errors.New("gRPC client CA does not contain any PEM certificates")
+		}
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConfig.ClientCAs = clientCAs
+	}
+	return tlsConfig, nil
 }
 
 func stopGRPCServer(server *grpc.Server) {
