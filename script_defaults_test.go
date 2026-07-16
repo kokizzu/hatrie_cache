@@ -79,6 +79,39 @@ func TestMonitoringWrapperPassesAuthToken(t *testing.T) {
 	}
 }
 
+func TestServerWrapperPassesConfigFile(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"CONFIG_PATH ?=\n",
+		"SERVER_ARGS ?=\n",
+		"server:",
+		"CONFIG_PATH='$(CONFIG_PATH)' ./scripts/server.sh $(SERVER_ARGS)",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile missing server config token %q", token)
+		}
+	}
+
+	script, err := os.ReadFile("scripts/server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/server.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"config_path=${CONFIG_PATH:-}",
+		`set -- -config "$config_path" "$@"`,
+		"exec go run ./cmd/hatrie-cache",
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("server wrapper missing config token %q", token)
+		}
+	}
+}
+
 func TestVerifyCScriptUsesRunScopedTemporaryDirectory(t *testing.T) {
 	data, err := os.ReadFile("scripts/verify-c.sh")
 	if err != nil {

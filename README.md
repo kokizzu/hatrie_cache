@@ -418,6 +418,29 @@ make monitoring-server MONITORING_READ_HEADER_TIMEOUT=10s MONITORING_IDLE_TIMEOU
 make run CMD='go run ./cmd/hatrie-cache'
 ```
 
+Long-running daemon options can also live in a JSON config file. Config keys
+match flag names and may use hyphens or underscores; duration values use Go
+duration strings. Explicit CLI flags override file values:
+
+```json
+{
+  "monitoring_server": true,
+  "monitoring_addr": "0.0.0.0:8080",
+  "monitoring_web_dir": "svelte-mpa/dist",
+  "db_path": "data/cache.leveldb",
+  "snapshot_path": "data/snapshot.hc",
+  "snapshot_interval": "30s",
+  "journal_path": "data/commands.journal"
+}
+```
+
+Run a config-file based server through the script wrapper:
+
+```
+make server CONFIG_PATH=deploy/hatrie-cache.json
+make server CONFIG_PATH=deploy/hatrie-cache.json SERVER_ARGS='-monitoring-addr 127.0.0.1:8081'
+```
+
 Provide a TLS certificate and key to serve the same monitoring API over HTTPS
 with HTTP/2 ALPN enabled:
 

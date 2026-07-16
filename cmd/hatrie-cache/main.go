@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	stdjson "encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,6 +37,7 @@ const (
 var errHatTrieDestroyed = errors.New("hatrie-cache: trie is destroyed")
 
 type config struct {
+	configPath                  string
 	monitoringServer            bool
 	monitoringAddr              string
 	monitoringTLSCert           string
@@ -274,8 +278,15 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
 		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
 	}
+	configPath, err := configPathFromArgs(args)
+	if err != nil {
+		return config{}, err
+	}
+	cfg.configPath = configPath
 	flags := flag.NewFlagSet("hatrie-cache", flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.StringVar(&cfg.configPath, "config", cfg.configPath, "optional JSON config file path")
+	flags.StringVar(&cfg.configPath, "config-file", cfg.configPath, "optional JSON config file path")
 	flags.BoolVar(&cfg.monitoringServer, "monitoring-server", false, "run the grpc/http2/web monitoring server")
 	flags.StringVar(&cfg.monitoringAddr, "monitoring-addr", cfg.monitoringAddr, "monitoring server listen address")
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
@@ -315,6 +326,11 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.journalPullTimeout, "journal-pull-timeout", cfg.journalPullTimeout, "HTTP timeout for each journal pull request; use 0 to disable")
 	flags.Uint64Var(&cfg.journalPullLimit, "journal-pull-limit", 0, "maximum entries per journal pull batch")
 	flags.Uint64Var(&cfg.journalPullMaxBatches, "journal-pull-max-batches", 0, "maximum batches per journal pull attempt")
+	if configPath != "" {
+		if err := applyConfigFile(configPath, flags); err != nil {
+			return config{}, err
+		}
+	}
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -367,6 +383,94 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		return config{}, err
 	}
 	return cfg, nil
+}
+
+func configPathFromArgs(args []string) (string, error) {
+	var path string
+outer:
+	for idx := 0; idx < len(args); idx++ {
+		arg := args[idx]
+		if arg == "--" {
+			break
+		}
+		for _, name := range []string{"-config", "--config", "-config-file", "--config-file"} {
+			if arg == name {
+				if idx+1 >= len(args) {
+					return "", fmt.Errorf("%s requires a value", name)
+				}
+				idx++
+				if strings.TrimSpace(args[idx]) == "" {
+					return "", fmt.Errorf("%s requires a non-empty value", name)
+				}
+				path = args[idx]
+				continue outer
+			}
+			if strings.HasPrefix(arg, name+"=") {
+				value := strings.TrimSpace(strings.TrimPrefix(arg, name+"="))
+				if value == "" {
+					return "", fmt.Errorf("%s requires a non-empty value", name)
+				}
+				path = value
+			}
+		}
+	}
+	return path, nil
+}
+
+func applyConfigFile(path string, flags *flag.FlagSet) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config file %s: %w", path, err)
+	}
+	values := make(map[string]stdjson.RawMessage)
+	if err := stdjson.Unmarshal(data, &values); err != nil {
+		return fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	for key, raw := range values {
+		name := configOptionName(key)
+		if name == "config" || name == "config-file" {
+			return fmt.Errorf("config file %s: option %q must be provided on the command line", path, key)
+		}
+		flagValue := flags.Lookup(name)
+		if flagValue == nil {
+			return fmt.Errorf("config file %s: unknown option %q", path, key)
+		}
+		value, err := configFlagValueString(raw)
+		if err != nil {
+			return fmt.Errorf("config file %s: option %q: %w", path, key, err)
+		}
+		if err := flagValue.Value.Set(value); err != nil {
+			return fmt.Errorf("config file %s: option %q: %w", path, key, err)
+		}
+	}
+	return nil
+}
+
+func configOptionName(key string) string {
+	key = strings.TrimSpace(key)
+	key = strings.TrimLeft(key, "-")
+	return strings.ReplaceAll(key, "_", "-")
+}
+
+func configFlagValueString(raw stdjson.RawMessage) (string, error) {
+	decoder := stdjson.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value interface{}
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case bool:
+		return strconv.FormatBool(typed), nil
+	case stdjson.Number:
+		return typed.String(), nil
+	case nil:
+		return "", errors.New("null values are not supported")
+	default:
+		return "", fmt.Errorf("value must be a string, bool, or number")
+	}
 }
 
 func replicationQueueSize(cfg config) int {

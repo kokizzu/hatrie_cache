@@ -91,6 +91,127 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	}
 }
 
+func TestParseConfigLoadsConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hatrie-cache.json")
+	if err := os.WriteFile(path, []byte(`{
+		"monitoring_server": true,
+		"monitoring_addr": "0.0.0.0:18080",
+		"monitoring_web_dir": "/srv/hatrie-cache/web",
+		"monitoring_auth_token": "secret",
+		"monitoring_read_header_timeout": "9s",
+		"monitoring_idle_timeout": "45s",
+		"node_id": "node-a",
+		"grpc_addr": "0.0.0.0:19090",
+		"replication": true,
+		"replication_async": true,
+		"replication_queue_size": 16,
+		"replication_retry_interval": "10ms",
+		"replication_max_attempts": 2,
+		"db_path": "/data/cache.leveldb",
+		"db_hot_load": true,
+		"db_hot_load_max_bytes": 2048,
+		"snapshot_interval": "30s",
+		"journal_pull_limit": 123
+	}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cfg, err := parseConfig([]string{"-config", path}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(config file) error = %v", err)
+	}
+	if cfg.configPath != path || !cfg.monitoringServer || cfg.monitoringAddr != "0.0.0.0:18080" || cfg.monitoringWebDir != "/srv/hatrie-cache/web" || cfg.monitoringAuthToken != "secret" {
+		t.Fatalf("monitoring config = %#v, want file values", cfg)
+	}
+	if cfg.monitoringReadHeaderTimeout != 9*time.Second || cfg.monitoringIdleTimeout != 45*time.Second {
+		t.Fatalf("monitoring timeouts = %s/%s, want 9s/45s", cfg.monitoringReadHeaderTimeout, cfg.monitoringIdleTimeout)
+	}
+	if cfg.nodeID != "node-a" || cfg.grpcAddr != "0.0.0.0:19090" {
+		t.Fatalf("node/grpc config = %q/%q, want node-a/grpc addr", cfg.nodeID, cfg.grpcAddr)
+	}
+	if !cfg.replication || !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 10*time.Millisecond || cfg.replicationAttempts != 2 {
+		t.Fatalf("replication config = %#v, want file values", cfg)
+	}
+	if cfg.dbPath != "/data/cache.leveldb" || !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 {
+		t.Fatalf("db config = %#v, want file values", cfg)
+	}
+	if cfg.snapshotInterval != 30*time.Second || cfg.journalPullLimit != 123 {
+		t.Fatalf("snapshot/journal config = %s/%d, want 30s/123", cfg.snapshotInterval, cfg.journalPullLimit)
+	}
+}
+
+func TestParseConfigCLIOverridesConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hatrie-cache.json")
+	if err := os.WriteFile(path, []byte(`{
+		"monitoring_server": false,
+		"monitoring_addr": "0.0.0.0:18080",
+		"replication": false
+	}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cfg, err := parseConfig([]string{
+		"-config", path,
+		"-monitoring-server",
+		"-monitoring-addr", "127.0.0.1:19090",
+		"-replication=true",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(config override) error = %v", err)
+	}
+	if !cfg.monitoringServer || cfg.monitoringAddr != "127.0.0.1:19090" || !cfg.replication {
+		t.Fatalf("cfg = %#v, want CLI values to override config file", cfg)
+	}
+}
+
+func TestParseConfigRejectsInvalidConfigFile(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "unknown option",
+			body: `{"not_real": true}`,
+			want: `unknown option "not_real"`,
+		},
+		{
+			name: "bad value type",
+			body: `{"monitoring_server": {"enabled": true}}`,
+			want: "value must be a string, bool, or number",
+		},
+		{
+			name: "bad duration",
+			body: `{"snapshot_interval": "often"}`,
+			want: "parse error",
+		},
+		{
+			name: "nested config",
+			body: `{"config": "other.json"}`,
+			want: `must be provided on the command line`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "hatrie-cache.json")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatalf("WriteFile(config) error = %v", err)
+			}
+			_, err := parseConfig([]string{"-config", path}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("parseConfig(%s) error = %v, want %q", tt.name, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseConfigRejectsMissingConfigValue(t *testing.T) {
+	_, err := parseConfig([]string{"-config"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "-config requires a value") {
+		t.Fatalf("parseConfig(missing config) error = %v, want missing value", err)
+	}
+}
+
 func TestParseConfigRejectsNegativeMonitoringTimeouts(t *testing.T) {
 	for _, tt := range []struct {
 		name string
