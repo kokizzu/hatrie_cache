@@ -86,7 +86,17 @@ Run the CI benchmark smoke locally:
 
 ```
 make bench-ci-smoke
+make bench-ci-smoke BENCH_CI_SMOKE_CHECK_THRESHOLDS=1
+make bench-ci-smoke BENCH_CI_SMOKE_CHECK_THRESHOLDS=1 BENCH_CI_SMOKE_MAX_COMMAND_NS_OP=100000 BENCH_CI_SMOKE_MAX_B_OP=262144
 ```
+
+`BENCH_CI_SMOKE_CHECK_THRESHOLDS=1` turns the smoke run into an optional
+regression guard. It checks representative command, transport, and
+serialization benchmark rows against `BENCH_CI_SMOKE_MAX_COMMAND_NS_OP`,
+`BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP`,
+`BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP`, `BENCH_CI_SMOKE_MAX_B_OP`, and
+`BENCH_CI_SMOKE_MAX_ALLOCS_OP`. Set any max to `0` to disable that specific
+limit.
 
 The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
 

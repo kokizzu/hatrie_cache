@@ -42,3 +42,45 @@ func TestHatTrieTransportFeatureBenchmarkScriptReportsRSS(t *testing.T) {
 		}
 	}
 }
+
+func TestBenchmarkCISmokeScriptSupportsRegressionThresholds(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-ci-smoke.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-ci-smoke.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		"BENCH_CI_SMOKE_CHECK_THRESHOLDS",
+		"BENCH_CI_SMOKE_MAX_COMMAND_NS_OP",
+		"BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP",
+		"BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP",
+		"BENCH_CI_SMOKE_MAX_B_OP",
+		"BENCH_CI_SMOKE_MAX_ALLOCS_OP",
+		"ns/op",
+		"B/op",
+		"allocs/op",
+		"Benchmark CI smoke regression guard failed",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("benchmark-ci-smoke.sh missing threshold token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefile := string(data)
+	for _, token := range []string{
+		"BENCH_CI_SMOKE_CHECK_THRESHOLDS ?= 0",
+		"BENCH_CI_SMOKE_MAX_COMMAND_NS_OP ?=",
+		"BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP ?=",
+		"BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP ?=",
+		"BENCH_CI_SMOKE_MAX_B_OP ?=",
+		"BENCH_CI_SMOKE_MAX_ALLOCS_OP ?=",
+	} {
+		if !strings.Contains(makefile, token) {
+			t.Fatalf("Makefile missing benchmark CI smoke threshold token %q", token)
+		}
+	}
+}

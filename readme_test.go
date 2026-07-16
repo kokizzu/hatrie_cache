@@ -110,6 +110,28 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 	}
 }
 
+func TestREADMEListsBenchmarkRegressionGuard(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"make bench-ci-smoke BENCH_CI_SMOKE_CHECK_THRESHOLDS=1",
+		"`BENCH_CI_SMOKE_CHECK_THRESHOLDS=1`",
+		"`BENCH_CI_SMOKE_MAX_COMMAND_NS_OP`",
+		"`BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP`",
+		"`BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP`",
+		"`BENCH_CI_SMOKE_MAX_B_OP`",
+		"`BENCH_CI_SMOKE_MAX_ALLOCS_OP`",
+		"Set any max to `0` to disable that specific",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md does not document benchmark regression guard token %q", token)
+		}
+	}
+}
+
 func TestCommandSupportScriptListsExecuteCommandAliases(t *testing.T) {
 	commandGroups := executeCommandCases(t)
 	data, err := os.ReadFile("scripts/command-support.sh")

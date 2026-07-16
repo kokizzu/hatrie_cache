@@ -6,14 +6,121 @@ count=${BENCH_CI_SMOKE_COUNT:-${COUNT:-1}}
 command_bench=${BENCH_CI_SMOKE_COMMAND_BENCH:-^BenchmarkCommandFeature/(StringGet|ReservoirSampleAdd)$}
 transport_bench=${BENCH_CI_SMOKE_TRANSPORT_BENCH:-^BenchmarkCommandTransportFeature/InProcess/(StringSet|StringGet)$}
 serialization_bench=${BENCH_CI_SMOKE_SERIALIZATION_BENCH:-Benchmark(CommandWireJSON|CommandWireProtobuf)$}
+check_thresholds=${BENCH_CI_SMOKE_CHECK_THRESHOLDS:-0}
+max_command_ns=${BENCH_CI_SMOKE_MAX_COMMAND_NS_OP:-250000}
+max_transport_ns=${BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP:-500000}
+max_serialization_ns=${BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP:-250000}
+max_b_op=${BENCH_CI_SMOKE_MAX_B_OP:-1048576}
+max_allocs_op=${BENCH_CI_SMOKE_MAX_ALLOCS_OP:-512}
+tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/hatrie-bench-ci-smoke.XXXXXX")
+command_output="$tmp_dir/command.txt"
+transport_output="$tmp_dir/transport.txt"
+serialization_output="$tmp_dir/serialization.txt"
+
+cleanup() {
+	rm -rf "$tmp_dir"
+}
+trap cleanup EXIT HUP INT TERM
+
+bool_true() {
+	case "$1" in
+		1|true|TRUE|yes|YES|on|ON)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+run_capture() {
+	output_file=$1
+	shift
+	if "$@" >"$output_file" 2>&1; then
+		cat "$output_file"
+	else
+		status=$?
+		cat "$output_file"
+		exit "$status"
+	fi
+}
+
+check_benchmark_file() {
+	label=$1
+	output_file=$2
+	max_ns=$3
+	awk \
+		-v label="$label" \
+		-v max_ns="$max_ns" \
+		-v max_b_op="$max_b_op" \
+		-v max_allocs_op="$max_allocs_op" '
+function number(value) {
+	gsub(/,/, "", value)
+	return value + 0
+}
+/^Benchmark/ {
+	seen = 1
+	name = $1
+	ns = -1
+	bytes = -1
+	allocs = -1
+	for (i = 2; i <= NF; i++) {
+		if ($i == "ns/op" && i > 1) {
+			ns = number($(i - 1))
+		}
+		if ($i == "B/op" && i > 1) {
+			bytes = number($(i - 1))
+		}
+		if ($i == "allocs/op" && i > 1) {
+			allocs = number($(i - 1))
+		}
+	}
+	if (max_ns > 0 && ns >= 0 && ns > max_ns) {
+		printf("%s regression: %s %.0f ns/op > %.0f ns/op\n", label, name, ns, max_ns) > "/dev/stderr"
+		failures++
+	}
+	if (max_b_op > 0 && bytes >= 0 && bytes > max_b_op) {
+		printf("%s regression: %s %.0f B/op > %.0f B/op\n", label, name, bytes, max_b_op) > "/dev/stderr"
+		failures++
+	}
+	if (max_allocs_op > 0 && allocs >= 0 && allocs > max_allocs_op) {
+		printf("%s regression: %s %.0f allocs/op > %.0f allocs/op\n", label, name, allocs, max_allocs_op) > "/dev/stderr"
+		failures++
+	}
+}
+END {
+	if (!seen) {
+		printf("%s regression guard: no benchmark rows found\n", label) > "/dev/stderr"
+		exit 1
+	}
+	if (failures > 0) {
+		exit 1
+	}
+}
+' "$output_file"
+}
 
 printf 'Benchmark CI smoke: benchtime=%s count=%s\n\n' "$benchtime" "$count"
 
 printf '== Command feature benchmarks ==\n'
-HATRIE_BENCH="$command_bench" BENCHTIME="$benchtime" COUNT="$count" ./scripts/benchmark-hatrie-command-features.sh
+run_capture "$command_output" env HATRIE_BENCH="$command_bench" BENCHTIME="$benchtime" COUNT="$count" ./scripts/benchmark-hatrie-command-features.sh
 
 printf '\n== Transport feature benchmarks ==\n'
-HATRIE_TRANSPORT_BENCH="$transport_bench" BENCHTIME="$benchtime" COUNT="$count" ./scripts/benchmark-hatrie-transport-features.sh
+run_capture "$transport_output" env HATRIE_TRANSPORT_BENCH="$transport_bench" BENCHTIME="$benchtime" COUNT="$count" ./scripts/benchmark-hatrie-transport-features.sh
 
 printf '\n== Serialization benchmarks ==\n'
-SERIALIZATION_BENCH="$serialization_bench" BENCHTIME="$benchtime" COUNT="$count" ./scripts/benchmark-serialization.sh
+run_capture "$serialization_output" env SERIALIZATION_BENCH="$serialization_bench" BENCHTIME="$benchtime" COUNT="$count" ./scripts/benchmark-serialization.sh
+
+if bool_true "$check_thresholds"; then
+	printf '\n== Regression guard ==\n'
+	printf 'Max ns/op: command=%s transport=%s serialization=%s; max B/op=%s; max allocs/op=%s\n' "$max_command_ns" "$max_transport_ns" "$max_serialization_ns" "$max_b_op" "$max_allocs_op"
+	threshold_status=0
+	check_benchmark_file "Command feature" "$command_output" "$max_command_ns" || threshold_status=1
+	check_benchmark_file "Transport feature" "$transport_output" "$max_transport_ns" || threshold_status=1
+	check_benchmark_file "Serialization" "$serialization_output" "$max_serialization_ns" || threshold_status=1
+	if [ "$threshold_status" -ne 0 ]; then
+		echo "Benchmark CI smoke regression guard failed" >&2
+		exit 1
+	fi
+	echo "Benchmark CI smoke regression guard passed"
+fi
