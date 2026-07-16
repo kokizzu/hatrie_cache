@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const rateLimiterMaxClients = 4096
+
 type RateLimiter struct {
 	mu      sync.Mutex
 	limit   int
@@ -14,8 +16,8 @@ type RateLimiter struct {
 }
 
 type rateLimitClient struct {
-	windowStart time.Time
-	count       int
+	lastSeen time.Time
+	tokens   float64
 }
 
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
@@ -47,17 +49,27 @@ func (limiter *RateLimiter) Allow(key string) bool {
 	now := limiter.now()
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
-	client := limiter.clients[key]
-	if client.windowStart.IsZero() || now.Sub(client.windowStart) >= limiter.window {
-		client = rateLimitClient{windowStart: now}
+	client, ok := limiter.clients[key]
+	if !ok || client.lastSeen.IsZero() {
+		client = rateLimitClient{lastSeen: now, tokens: float64(limiter.limit)}
+	} else {
+		elapsed := now.Sub(client.lastSeen)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		client.tokens += float64(limiter.limit) * float64(elapsed) / float64(limiter.window)
+		if maxTokens := float64(limiter.limit); client.tokens > maxTokens {
+			client.tokens = maxTokens
+		}
+		client.lastSeen = now
 	}
-	if client.count >= limiter.limit {
+	if client.tokens < 1 {
 		limiter.clients[key] = client
 		return false
 	}
-	client.count++
+	client.tokens--
 	limiter.clients[key] = client
-	if len(limiter.clients) > 4096 {
+	if len(limiter.clients) > rateLimiterMaxClients {
 		limiter.pruneLocked(now)
 	}
 	return true
@@ -65,8 +77,22 @@ func (limiter *RateLimiter) Allow(key string) bool {
 
 func (limiter *RateLimiter) pruneLocked(now time.Time) {
 	for key, client := range limiter.clients {
-		if now.Sub(client.windowStart) >= limiter.window {
+		if now.Sub(client.lastSeen) >= limiter.window {
 			delete(limiter.clients, key)
 		}
+	}
+	for len(limiter.clients) > rateLimiterMaxClients {
+		oldestKey := ""
+		var oldest time.Time
+		for key, client := range limiter.clients {
+			if oldestKey == "" || client.lastSeen.Before(oldest) {
+				oldestKey = key
+				oldest = client.lastSeen
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(limiter.clients, oldestKey)
 	}
 }

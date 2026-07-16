@@ -474,8 +474,10 @@ make monitoring-server AUDIT_LOG_PATH=data/audit.jsonl
 
 Set `WRITE_PROTECTION=true` to reject dangerous write/admin actions while still
 allowing read-only health, stats, entry listing, metrics, and status endpoints.
-Set `RATE_LIMIT=N` to cap dangerous HTTP/gRPC API actions to `N` requests per
-caller per second; `0` disables rate limiting:
+Set `RATE_LIMIT=N` to token-bucket limit dangerous HTTP/gRPC API actions to
+`N` requests per caller per second, with a burst capacity of `N`; `0` disables
+rate limiting. Per-caller limiter state is bounded and oldest caller records
+are evicted under high cardinality:
 
 ```
 make monitoring-server WRITE_PROTECTION=true
