@@ -265,6 +265,8 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 		"`REPLICATION_WIRE_FORMAT=protobuf`",
 		"automatically use the previous JSON",
 		"`REPLICATION_WIRE_FORMAT=json`",
+		"oldest queued key/age",
+		"per-target drops",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md does not document %s", token)

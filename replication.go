@@ -58,6 +58,8 @@ type HTTPReplicator struct {
 	close      sync.Once
 	closed     bool
 	sequence   uint64
+	queueSeq   uint64
+	pending    []replicationQueueMeta
 	queueStats ReplicationQueueStats
 	last       ReplicationResult
 }
@@ -78,16 +80,28 @@ type ReplicationResult struct {
 
 // ReplicationQueueStats reports bounded async replication outbox health.
 type ReplicationQueueStats struct {
-	Enabled   bool   `json:"enabled"`
-	Depth     int    `json:"depth"`
-	Capacity  int    `json:"capacity"`
-	Enqueued  uint64 `json:"enqueued"`
-	Dropped   uint64 `json:"dropped"`
-	Attempts  uint64 `json:"attempts"`
-	Successes uint64 `json:"successes"`
-	Failures  uint64 `json:"failures"`
-	Retried   uint64 `json:"retried"`
-	Closed    bool   `json:"closed"`
+	Enabled               bool              `json:"enabled"`
+	Depth                 int               `json:"depth"`
+	Capacity              int               `json:"capacity"`
+	Enqueued              uint64            `json:"enqueued"`
+	Dropped               uint64            `json:"dropped"`
+	Attempts              uint64            `json:"attempts"`
+	Successes             uint64            `json:"successes"`
+	Failures              uint64            `json:"failures"`
+	Retried               uint64            `json:"retried"`
+	OldestQueuedAt        *time.Time        `json:"oldest_queued_at,omitempty"`
+	OldestQueuedAgeMillis int64             `json:"oldest_queued_age_millis,omitempty"`
+	OldestQueuedKey       string            `json:"oldest_queued_key,omitempty"`
+	OldestQueuedTargets   []string          `json:"oldest_queued_targets,omitempty"`
+	InFlightStartedAt     *time.Time        `json:"in_flight_started_at,omitempty"`
+	InFlightAgeMillis     int64             `json:"in_flight_age_millis,omitempty"`
+	InFlightKey           string            `json:"in_flight_key,omitempty"`
+	LastRetryAt           *time.Time        `json:"last_retry_at,omitempty"`
+	LastRetryAgeMillis    int64             `json:"last_retry_age_millis,omitempty"`
+	LastRetryKey          string            `json:"last_retry_key,omitempty"`
+	DroppedByTarget       map[string]uint64 `json:"dropped_by_target,omitempty"`
+	FailuresByTarget      map[string]uint64 `json:"failures_by_target,omitempty"`
+	Closed                bool              `json:"closed"`
 }
 
 type ReplicationTargetResult struct {
@@ -119,8 +133,16 @@ type replicationTask struct {
 }
 
 type replicationJob struct {
+	id     uint64
 	result ReplicationResult
 	tasks  []replicationTask
+}
+
+type replicationQueueMeta struct {
+	id         uint64
+	key        string
+	targets    []string
+	enqueuedAt time.Time
 }
 
 type ReplicationSafetyStore struct {
@@ -313,26 +335,29 @@ func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *
 		result.Skipped = true
 		result.Reason = "replication queue is closed"
 		result.Targets = nil
-		replicator.recordAsyncDropped()
+		replicator.recordAsyncDroppedForTasks(tasks)
 		return result
 	}
+	replicator.reserveAsyncJob(&job)
 	select {
 	case replicator.queue <- job:
 		replicator.recordAsyncEnqueued()
 		return result
 	case <-replicator.done:
+		replicator.unreserveAsyncJob(job.id)
 		result.Queued = false
 		result.Skipped = true
 		result.Reason = "replication queue is closed"
 		result.Targets = nil
-		replicator.recordAsyncDropped()
+		replicator.recordAsyncDroppedForTasks(tasks)
 		return result
 	default:
+		replicator.unreserveAsyncJob(job.id)
 		result.Queued = false
 		result.Skipped = true
 		result.Reason = "replication queue is full"
 		result.Targets = nil
-		replicator.recordAsyncDropped()
+		replicator.recordAsyncDroppedForTasks(tasks)
 		return result
 	}
 }
@@ -365,6 +390,75 @@ func (replicator *HTTPReplicator) recordAsyncEnqueued() {
 	replicator.queueStats.Enqueued++
 }
 
+func (replicator *HTTPReplicator) reserveAsyncJob(job *replicationJob) {
+	if replicator == nil || job == nil || replicator.queue == nil {
+		return
+	}
+	targets := make([]string, 0, len(job.tasks))
+	for _, task := range job.tasks {
+		if task.target.ID != "" {
+			targets = append(targets, task.target.ID)
+		}
+	}
+	now := time.Now().UTC()
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.queueSeq++
+	job.id = replicator.queueSeq
+	replicator.pending = append(replicator.pending, replicationQueueMeta{
+		id:         job.id,
+		key:        job.result.Key,
+		targets:    targets,
+		enqueuedAt: now,
+	})
+}
+
+func (replicator *HTTPReplicator) unreserveAsyncJob(id uint64) {
+	if replicator == nil || id == 0 {
+		return
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.removePendingLocked(id)
+}
+
+func (replicator *HTTPReplicator) markAsyncDequeued(job replicationJob) {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	now := time.Now().UTC()
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.removePendingLocked(job.id)
+	replicator.queueStats.InFlightStartedAt = cloneTimePtr(&now)
+	replicator.queueStats.InFlightKey = job.result.Key
+}
+
+func (replicator *HTTPReplicator) clearAsyncInFlight(job replicationJob) {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	if replicator.queueStats.InFlightKey == job.result.Key {
+		replicator.queueStats.InFlightStartedAt = nil
+		replicator.queueStats.InFlightAgeMillis = 0
+		replicator.queueStats.InFlightKey = ""
+	}
+}
+
+func (replicator *HTTPReplicator) removePendingLocked(id uint64) {
+	for idx, meta := range replicator.pending {
+		if meta.id != id {
+			continue
+		}
+		copy(replicator.pending[idx:], replicator.pending[idx+1:])
+		replicator.pending[len(replicator.pending)-1] = replicationQueueMeta{}
+		replicator.pending = replicator.pending[:len(replicator.pending)-1]
+		return
+	}
+}
+
 func (replicator *HTTPReplicator) recordAsyncDropped() {
 	if replicator == nil || replicator.queue == nil {
 		return
@@ -372,6 +466,26 @@ func (replicator *HTTPReplicator) recordAsyncDropped() {
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
 	replicator.queueStats.Dropped++
+}
+
+func (replicator *HTTPReplicator) recordAsyncDroppedForTasks(tasks []replicationTask) {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.queueStats.Dropped++
+	if len(tasks) == 0 {
+		return
+	}
+	if replicator.queueStats.DroppedByTarget == nil {
+		replicator.queueStats.DroppedByTarget = map[string]uint64{}
+	}
+	for _, task := range tasks {
+		if task.target.ID != "" {
+			replicator.queueStats.DroppedByTarget[task.target.ID]++
+		}
+	}
 }
 
 func (replicator *HTTPReplicator) recordAsyncAttempt(result ReplicationResult, retried bool) {
@@ -386,18 +500,41 @@ func (replicator *HTTPReplicator) recordAsyncAttempt(result ReplicationResult, r
 			replicator.queueStats.Successes++
 		} else {
 			replicator.queueStats.Failures++
+			if target.Node != "" {
+				if replicator.queueStats.FailuresByTarget == nil {
+					replicator.queueStats.FailuresByTarget = map[string]uint64{}
+				}
+				replicator.queueStats.FailuresByTarget[target.Node]++
+			}
 		}
 	}
 	if retried {
+		now := time.Now().UTC()
 		replicator.queueStats.Retried++
+		replicator.queueStats.LastRetryAt = cloneTimePtr(&now)
+		replicator.queueStats.LastRetryKey = result.Key
 	}
 }
 
 func (replicator *HTTPReplicator) queueStatsLocked() ReplicationQueueStats {
-	stats := replicator.queueStats
+	stats := cloneReplicationQueueStats(replicator.queueStats)
+	now := time.Now().UTC()
 	if replicator.queue != nil {
 		stats.Depth = len(replicator.queue)
 		stats.Capacity = cap(replicator.queue)
+	}
+	if len(replicator.pending) > 0 {
+		oldest := replicator.pending[0]
+		stats.OldestQueuedAt = cloneTimePtr(&oldest.enqueuedAt)
+		stats.OldestQueuedAgeMillis = now.Sub(oldest.enqueuedAt).Milliseconds()
+		stats.OldestQueuedKey = oldest.key
+		stats.OldestQueuedTargets = append([]string(nil), oldest.targets...)
+	}
+	if stats.InFlightStartedAt != nil {
+		stats.InFlightAgeMillis = now.Sub(*stats.InFlightStartedAt).Milliseconds()
+	}
+	if stats.LastRetryAt != nil {
+		stats.LastRetryAgeMillis = now.Sub(*stats.LastRetryAt).Milliseconds()
 	}
 	return stats
 }
@@ -481,7 +618,9 @@ func (replicator *HTTPReplicator) runAsync(ctx context.Context) {
 		case <-replicator.done:
 			return
 		case job := <-replicator.queue:
+			replicator.markAsyncDequeued(job)
 			replicator.runAsyncJob(ctx, job)
+			replicator.clearAsyncInFlight(job)
 		}
 	}
 }
@@ -1057,8 +1196,35 @@ func cloneReplicationResult(result ReplicationResult) ReplicationResult {
 	out := result
 	out.StartedAt = cloneTimePtr(result.StartedAt)
 	out.FinishedAt = cloneTimePtr(result.FinishedAt)
+	if result.Queue != nil {
+		stats := cloneReplicationQueueStats(*result.Queue)
+		out.Queue = &stats
+	}
 	if result.Targets != nil {
 		out.Targets = append([]ReplicationTargetResult(nil), result.Targets...)
+	}
+	return out
+}
+
+func cloneReplicationQueueStats(stats ReplicationQueueStats) ReplicationQueueStats {
+	out := stats
+	out.OldestQueuedAt = cloneTimePtr(stats.OldestQueuedAt)
+	out.InFlightStartedAt = cloneTimePtr(stats.InFlightStartedAt)
+	out.LastRetryAt = cloneTimePtr(stats.LastRetryAt)
+	if stats.OldestQueuedTargets != nil {
+		out.OldestQueuedTargets = append([]string(nil), stats.OldestQueuedTargets...)
+	}
+	if stats.DroppedByTarget != nil {
+		out.DroppedByTarget = make(map[string]uint64, len(stats.DroppedByTarget))
+		for target, count := range stats.DroppedByTarget {
+			out.DroppedByTarget[target] = count
+		}
+	}
+	if stats.FailuresByTarget != nil {
+		out.FailuresByTarget = make(map[string]uint64, len(stats.FailuresByTarget))
+		for target, count := range stats.FailuresByTarget {
+			out.FailuresByTarget[target] = count
+		}
 	}
 	return out
 }

@@ -688,6 +688,9 @@ func TestHTTPReplicatorAsyncRetriesFailedDelivery(t *testing.T) {
 	if final.Queue == nil || final.Queue.Enqueued != 1 || final.Queue.Attempts != 2 || final.Queue.Successes != 1 || final.Queue.Failures != 1 || final.Queue.Retried != 1 {
 		t.Fatalf("retry queue stats = %#v, want one failed attempt, one retry, one success", final.Queue)
 	}
+	if final.Queue.LastRetryAt == nil || final.Queue.LastRetryAgeMillis < 0 || final.Queue.FailuresByTarget["node-b"] != 1 {
+		t.Fatalf("retry visibility stats = %#v, want retry timestamp and node-b failure count", final.Queue)
+	}
 }
 
 func TestHTTPReplicatorAsyncReportsFullQueue(t *testing.T) {
@@ -737,6 +740,15 @@ func TestHTTPReplicatorAsyncReportsFullQueue(t *testing.T) {
 	last := replicator.LastResult()
 	if last.Queue == nil || last.Queue.Enqueued != 2 || last.Queue.Dropped != 1 || last.Queue.Depth != 1 || last.Queue.Capacity != 1 {
 		t.Fatalf("full queue stats = %#v, want two enqueued, one dropped, one pending", last.Queue)
+	}
+	if last.Queue.OldestQueuedAt == nil || last.Queue.OldestQueuedKey != "session:2" || last.Queue.OldestQueuedAgeMillis < 0 {
+		t.Fatalf("oldest queued stats = %#v, want pending session:2 with age", last.Queue)
+	}
+	if last.Queue.InFlightStartedAt == nil || last.Queue.InFlightKey != "session:1" || last.Queue.InFlightAgeMillis < 0 {
+		t.Fatalf("in-flight stats = %#v, want blocked session:1 with age", last.Queue)
+	}
+	if last.Queue.DroppedByTarget["node-b"] != 1 {
+		t.Fatalf("dropped target stats = %#v, want one dropped node-b target", last.Queue)
 	}
 }
 

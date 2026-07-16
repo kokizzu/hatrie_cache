@@ -746,7 +746,8 @@ Library users can pass `HTTPReplicatorOptions.Context` to tie the async worker
 lifetime to a parent service context.
 `GET /api/replication` includes the latest replication start/finish timestamps,
 duration, async queue depth, capacity, enqueue/drop counts, delivery attempts,
-successes, failures, retries, and closed state:
+successes, failures, retries, oldest queued key/age, in-flight key/age, last
+retry age, per-target drops, per-target failures, and closed state:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true
