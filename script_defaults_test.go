@@ -109,3 +109,39 @@ func TestVerifyCScriptRunsLeakSanitizerFallbackWhenAddressSanitizerIsSkipped(t *
 		}
 	}
 }
+
+func TestVerifyOpsScriptExercisesRestoreAndJournalPull(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"verify: verify-go verify-c verify-frontend verify-ops",
+		"verify-ops:",
+		"./scripts/verify-ops.sh",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile should wire verify-ops into verify; missing %q", token)
+		}
+	}
+
+	data, err := os.ReadFile("scripts/verify-ops.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/verify-ops.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		"run_snapshot_journal_restore_smoke",
+		"run_journal_pull_smoke",
+		"-snapshot-path",
+		"-journal-path",
+		"-journal-pull-source",
+		"journal -pull-from",
+		"expect_value",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("verify-ops script should exercise operational workflow token %q", token)
+		}
+	}
+}

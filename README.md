@@ -130,10 +130,15 @@ Build and verify the service:
 
 ```
 make verify
+make verify-ops
 make run CMD='mkdir -p build'
 make run CMD='go build -o build/hatrie-cache ./cmd/hatrie-cache'
 make run CMD='go build -o build/hatrie-cli ./cmd/hatrie-cli'
 ```
+
+`make verify-ops` runs executable smoke tests for snapshot+journal restore and
+journal-pull catch-up. Keep it green when changing persistence, recovery,
+replication, or CLI behavior.
 
 Install the binaries wherever your service manager expects them. For a
 frontend-enabled deployment, build the static web assets and point

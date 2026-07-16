@@ -59,11 +59,11 @@ TARANTOOL_BIN ?= tarantool
 TARANTOOL_WORK_DIR ?=
 HATRIE_COMMAND_BENCH ?= ^BenchmarkCommandFeature$$
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
-verify: verify-go verify-c verify-frontend
+verify: verify-go verify-c verify-frontend verify-ops
 
 verify-go:
 	./scripts/verify-go.sh
@@ -77,6 +77,9 @@ verify-c:
 
 verify-frontend:
 	./scripts/frontend.sh verify
+
+verify-ops:
+	./scripts/verify-ops.sh
 
 bench:
 	go test -run '^$$' -bench='$(BENCH)' -benchmem
