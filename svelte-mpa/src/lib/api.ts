@@ -76,6 +76,22 @@ export type CommandResponse = {
 
 export type StorageStatus = {
   leveldb_configured: boolean;
+  store?: string;
+  path?: string;
+  format?: string;
+  size_bytes?: number;
+  error?: string;
+  properties?: LevelDBProperties;
+  operation: StorageOperationStatus;
+  last_flush?: StorageFlushResult;
+  last_compact?: StorageCompactResult;
+};
+
+export type StorageOperationStatus = {
+  running: boolean;
+  action?: string;
+  started_at?: string;
+  age_millis?: number;
 };
 
 export type LevelDBProperties = {
@@ -318,7 +334,10 @@ const sampleEntries: CacheEntry[] = [
 ];
 
 const sampleStorageStatus: StorageStatus = {
-  leveldb_configured: false
+  leveldb_configured: false,
+  operation: {
+    running: false
+  }
 };
 
 const sampleReplicationResult: ReplicationResult = {

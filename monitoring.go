@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -51,8 +52,10 @@ type MonitoringOptions struct {
 }
 
 type MonitoringHandler struct {
-	trie    *HatTrie
-	options MonitoringOptions
+	trie      *HatTrie
+	options   MonitoringOptions
+	storageMu sync.Mutex
+	storage   monitoringStorageState
 }
 
 type commandExecutionOptions struct {
@@ -134,12 +137,35 @@ type backupBundleRequest struct {
 }
 
 type storageStatus struct {
-	LevelDBConfigured bool `json:"leveldb_configured"`
+	LevelDBConfigured bool                     `json:"leveldb_configured"`
+	Store             string                   `json:"store,omitempty"`
+	Path              string                   `json:"path,omitempty"`
+	Format            string                   `json:"format,omitempty"`
+	SizeBytes         int64                    `json:"size_bytes,omitempty"`
+	Error             string                   `json:"error,omitempty"`
+	Properties        LevelDBProperties        `json:"properties,omitempty"`
+	Operation         storageOperationStatus   `json:"operation"`
+	LastFlush         *LevelDBFlushResult      `json:"last_flush,omitempty"`
+	LastCompact       *LevelDBCompactionResult `json:"last_compact,omitempty"`
 }
 
 type storageCompactRequest struct {
 	StartKey string `json:"start_key,omitempty"`
 	LimitKey string `json:"limit_key,omitempty"`
+}
+
+type monitoringStorageState struct {
+	action      string
+	startedAt   time.Time
+	lastFlush   *LevelDBFlushResult
+	lastCompact *LevelDBCompactionResult
+}
+
+type storageOperationStatus struct {
+	Running   bool       `json:"running"`
+	Action    string     `json:"action,omitempty"`
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	AgeMillis int64      `json:"age_millis,omitempty"`
 }
 
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
@@ -729,7 +755,89 @@ func (handler *MonitoringHandler) handleStorage(w http.ResponseWriter, r *http.R
 	if requestContextDone(w, r) {
 		return
 	}
-	writeJSON(w, storageStatus{LevelDBConfigured: handler.options.LevelDBStore != nil})
+	writeJSON(w, handler.storageStatus())
+}
+
+func (handler *MonitoringHandler) storageStatus() storageStatus {
+	status := storageStatus{
+		LevelDBConfigured: handler.options.LevelDBStore != nil,
+		Operation:         handler.storageOperationStatus(time.Now().UTC()),
+	}
+	handler.storageMu.Lock()
+	if handler.storage.lastFlush != nil {
+		flush := *handler.storage.lastFlush
+		status.LastFlush = &flush
+	}
+	if handler.storage.lastCompact != nil {
+		compact := *handler.storage.lastCompact
+		status.LastCompact = &compact
+	}
+	handler.storageMu.Unlock()
+
+	store := handler.options.LevelDBStore
+	if store == nil {
+		return status
+	}
+	status.Store = "leveldb"
+	status.Path = store.path
+	status.Format = string(store.format)
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		status.Error = err.Error()
+		return status
+	}
+	defer unlock()
+	status.SizeBytes, err = directorySizeBytes(store.path)
+	if err != nil {
+		status.Error = err.Error()
+	}
+	status.Properties = levelDBProperties(db)
+	return status
+}
+
+func (handler *MonitoringHandler) storageOperationStatus(now time.Time) storageOperationStatus {
+	handler.storageMu.Lock()
+	defer handler.storageMu.Unlock()
+	if handler.storage.action == "" {
+		return storageOperationStatus{}
+	}
+	startedAt := handler.storage.startedAt
+	return storageOperationStatus{
+		Running:   true,
+		Action:    handler.storage.action,
+		StartedAt: &startedAt,
+		AgeMillis: now.Sub(startedAt).Milliseconds(),
+	}
+}
+
+func (handler *MonitoringHandler) beginStorageOperation(action string) bool {
+	handler.storageMu.Lock()
+	defer handler.storageMu.Unlock()
+	if handler.storage.action != "" {
+		return false
+	}
+	handler.storage.action = action
+	handler.storage.startedAt = time.Now().UTC()
+	return true
+}
+
+func (handler *MonitoringHandler) finishStorageOperation() {
+	handler.storageMu.Lock()
+	defer handler.storageMu.Unlock()
+	handler.storage.action = ""
+	handler.storage.startedAt = time.Time{}
+}
+
+func (handler *MonitoringHandler) recordStorageFlush(result LevelDBFlushResult) {
+	handler.storageMu.Lock()
+	defer handler.storageMu.Unlock()
+	handler.storage.lastFlush = &result
+}
+
+func (handler *MonitoringHandler) recordStorageCompact(result LevelDBCompactionResult) {
+	handler.storageMu.Lock()
+	defer handler.storageMu.Unlock()
+	handler.storage.lastCompact = &result
 }
 
 func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *http.Request) {
@@ -771,12 +879,19 @@ func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *h
 	if handler.rejectDangerousHTTP(w, r, "storage.flush", map[string]interface{}{"store": "leveldb"}) {
 		return
 	}
+	if !handler.beginStorageOperation("flush") {
+		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusConflict, Message: "storage operation is already running", Details: map[string]interface{}{"store": "leveldb"}})
+		writeJSONStatus(w, http.StatusConflict, commandError("storage operation is already running"))
+		return
+	}
+	defer handler.finishStorageOperation()
 	result, err := handler.options.LevelDBStore.Flush(handler.trie)
 	if err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"store": "leveldb"}})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
 	}
+	handler.recordStorageFlush(result)
 	handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"store": result.Store, "keys": result.Keys, "duration_millis": result.DurationMillis}})
 	writeJSON(w, result)
 }
@@ -823,12 +938,19 @@ func (handler *MonitoringHandler) handleStorageCompact(w http.ResponseWriter, r 
 	if handler.rejectDangerousHTTP(w, r, "storage.compact", details) {
 		return
 	}
+	if !handler.beginStorageOperation("compact") {
+		handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: false, Status: http.StatusConflict, Message: "storage operation is already running", Details: details})
+		writeJSONStatus(w, http.StatusConflict, commandError("storage operation is already running"))
+		return
+	}
+	defer handler.finishStorageOperation()
 	result, err := handler.options.LevelDBStore.Compact(LevelDBCompactionOptions{StartKey: request.StartKey, LimitKey: request.LimitKey})
 	if err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: details})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
 	}
+	handler.recordStorageCompact(result)
 	handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"store": result.Store, "start_key": result.StartKey, "limit_key": result.LimitKey, "duration_millis": result.DurationMillis}})
 	writeJSON(w, result)
 }

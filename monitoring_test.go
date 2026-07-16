@@ -1244,6 +1244,72 @@ func TestMonitoringHandlerCompactsLevelDBStorage(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerReportsLevelDBStorageStatus(t *testing.T) {
+	ht := newTestTrie(t)
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStoreWithFormat(path, StorageFormatJSON)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStoreWithFormat() error = %v", err)
+	}
+	defer store.Close()
+	handler := NewMonitoringHandler(ht, MonitoringOptions{LevelDBStore: store})
+	mux := handler.Handler()
+
+	if !handler.beginStorageOperation("compact") {
+		t.Fatal("beginStorageOperation(compact) = false, want true")
+	}
+	resp := httptest.NewRecorder()
+	mux.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/storage", nil))
+	handler.finishStorageOperation()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("storage status while running status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	var status storageStatus
+	if err := json.Unmarshal(resp.Body.Bytes(), &status); err != nil {
+		t.Fatalf("storage status JSON error = %v", err)
+	}
+	if !status.LevelDBConfigured || status.Store != "leveldb" || status.Path != path || status.Format != string(StorageFormatJSON) {
+		t.Fatalf("storage status = %#v, want configured leveldb path and JSON format", status)
+	}
+	if !status.Operation.Running || status.Operation.Action != "compact" || status.Operation.StartedAt == nil || status.Operation.AgeMillis < 0 {
+		t.Fatalf("storage running operation = %#v, want compact operation metadata", status.Operation)
+	}
+
+	ht.UpsertString("session:storage", "saved")
+	flushResp := httptest.NewRecorder()
+	mux.ServeHTTP(flushResp, httptest.NewRequest(http.MethodPost, "/api/storage/flush", strings.NewReader(`{}`)))
+	if flushResp.Code != http.StatusOK {
+		t.Fatalf("storage flush status = %d, want 200: %s", flushResp.Code, flushResp.Body.String())
+	}
+	compactResp := httptest.NewRecorder()
+	mux.ServeHTTP(compactResp, httptest.NewRequest(http.MethodPost, "/api/storage/compact", strings.NewReader(`{}`)))
+	if compactResp.Code != http.StatusOK {
+		t.Fatalf("storage compact status = %d, want 200: %s", compactResp.Code, compactResp.Body.String())
+	}
+
+	resp = httptest.NewRecorder()
+	mux.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/storage", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("storage status status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	status = storageStatus{}
+	if err := json.Unmarshal(resp.Body.Bytes(), &status); err != nil {
+		t.Fatalf("storage status JSON error = %v", err)
+	}
+	if status.Operation.Running {
+		t.Fatalf("storage operation after completion = %#v, want not running", status.Operation)
+	}
+	if status.SizeBytes <= 0 {
+		t.Fatalf("storage size bytes = %d, want non-zero LevelDB directory size", status.SizeBytes)
+	}
+	if status.LastFlush == nil || status.LastFlush.Keys != 1 || status.LastFlush.Store != "leveldb" {
+		t.Fatalf("storage last flush = %#v, want remembered flush result", status.LastFlush)
+	}
+	if status.LastCompact == nil || status.LastCompact.Store != "leveldb" || status.LastCompact.DurationMillis < 0 {
+		t.Fatalf("storage last compact = %#v, want remembered compact result", status.LastCompact)
+	}
+}
+
 func TestMonitoringHandlerFlushesLevelDBStorage(t *testing.T) {
 	ht := newTestTrie(t)
 	store, err := OpenLevelDBStore(filepath.Join(t.TempDir(), "cache.leveldb"))

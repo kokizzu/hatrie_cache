@@ -108,7 +108,10 @@
   }
 
   function compactPropertyText(result: StorageCompactResult | null): string {
-    if (!result) return 'No compaction has run in this session.';
+    const statusProperties = storage?.properties;
+    if (!result) {
+      return statusProperties?.stats || statusProperties?.sstables || statusProperties?.write_delay || statusProperties?.block_pool || 'No LevelDB properties reported.';
+    }
     const props = result.properties_after;
     return props.stats || props.sstables || props.write_delay || props.block_pool || 'No LevelDB properties reported.';
   }
@@ -116,6 +119,9 @@
   onMount(refresh);
 
   $: queue = replication?.queue;
+  $: operation = storage?.operation;
+  $: effectiveLastFlush = lastFlush ?? storage?.last_flush ?? null;
+  $: effectiveLastCompact = lastCompact ?? storage?.last_compact ?? null;
   $: targets = replication?.targets ?? [];
   $: dropsByTarget = targetRows(queue?.dropped_by_target);
   $: failuresByTarget = targetRows(queue?.failures_by_target);
@@ -133,10 +139,10 @@
   </header>
 
   <section class="stats-grid">
-    <StatTile label="LevelDB" value={storage?.leveldb_configured ? 'enabled' : 'off'} detail={lastFlush ? `${lastFlush.keys.toLocaleString()} keys flushed` : 'storage engine'} tone="blue" icon={Database} />
+    <StatTile label="LevelDB" value={storage?.leveldb_configured ? 'enabled' : 'off'} detail={storage?.format ? `${storage.format} format` : 'storage engine'} tone="blue" icon={Database} />
+    <StatTile label="Storage size" value={formatBytes(storage?.size_bytes ?? 0)} detail={operation?.running ? `${operation.action} running` : 'on disk'} tone={operation?.running ? 'amber' : 'green'} icon={HardDrive} />
     <StatTile label="Queue" value={queue ? `${queue.depth}/${queue.capacity}` : 'off'} detail={queue?.closed ? 'closed' : queue?.enabled ? 'async enabled' : 'not configured'} tone="green" icon={Activity} />
     <StatTile label="Oldest" value={queue?.oldest_queued_age_millis ? formatMillis(queue.oldest_queued_age_millis) : 'none'} detail={queue?.oldest_queued_key ?? 'queued key'} tone="amber" icon={Clock3} />
-    <StatTile label="Dropped" value={(queue?.dropped ?? 0).toLocaleString()} detail={`${(queue?.failures ?? 0).toLocaleString()} failures`} tone={queue?.dropped || queue?.failures ? 'red' : 'blue'} icon={HardDrive} />
   </section>
 
   <section class="admin-layout">
@@ -144,13 +150,16 @@
       <div class="panel-heading">
         <div>
           <h2>LevelDB Storage</h2>
-          <p>{storage?.leveldb_configured ? 'Configured' : 'Not configured'}</p>
+          <p>{storage?.path ?? (storage?.leveldb_configured ? 'Configured' : 'Not configured')}</p>
         </div>
         <Database size={18} aria-hidden="true" />
       </div>
 
       {#if storageMessage}
         <p class="notice">{storageMessage}</p>
+      {/if}
+      {#if storage?.error}
+        <p class="notice danger-notice">{storage.error}</p>
       {/if}
 
       <div class="action-grid">
@@ -176,13 +185,16 @@
       </div>
 
       <dl class="detail-list">
-        <div><dt>Last flush</dt><dd>{lastFlush ? formatRelativeTime(lastFlush.finished_at) : 'never'}</dd></div>
-        <div><dt>Flush duration</dt><dd>{lastFlush ? formatMillis(lastFlush.duration_millis) : '0 ms'}</dd></div>
-        <div><dt>Compaction delta</dt><dd>{lastCompact ? formatSignedBytes(lastCompact.size_bytes_delta) : '0 B'}</dd></div>
-        <div><dt>Compaction range</dt><dd>{lastCompact ? `${lastCompact.start_key || '*'} to ${lastCompact.limit_key || '*'}` : '*'}</dd></div>
+        <div><dt>Format</dt><dd>{storage?.format ?? 'none'}</dd></div>
+        <div><dt>Size</dt><dd>{formatBytes(storage?.size_bytes ?? 0)}</dd></div>
+        <div><dt>Operation</dt><dd>{operation?.running ? `${operation.action} for ${formatMillis(operation.age_millis)}` : 'idle'}</dd></div>
+        <div><dt>Last flush</dt><dd>{effectiveLastFlush ? formatRelativeTime(effectiveLastFlush.finished_at) : 'never'}</dd></div>
+        <div><dt>Flush duration</dt><dd>{effectiveLastFlush ? formatMillis(effectiveLastFlush.duration_millis) : '0 ms'}</dd></div>
+        <div><dt>Compaction delta</dt><dd>{effectiveLastCompact ? formatSignedBytes(effectiveLastCompact.size_bytes_delta) : '0 B'}</dd></div>
+        <div><dt>Compaction range</dt><dd>{effectiveLastCompact ? `${effectiveLastCompact.start_key || '*'} to ${effectiveLastCompact.limit_key || '*'}` : '*'}</dd></div>
       </dl>
 
-      <pre class="property-box">{compactPropertyText(lastCompact)}</pre>
+      <pre class="property-box">{compactPropertyText(effectiveLastCompact)}</pre>
     </div>
 
     <div class="panel">

@@ -418,6 +418,12 @@ textarea {
   padding: 10px 12px;
 }
 
+.danger-notice {
+  background: #f8d7da;
+  border-color: #f1aeb5;
+  color: #842029;
+}
+
 .type-pill {
   border-radius: 999px;
   display: inline-block;

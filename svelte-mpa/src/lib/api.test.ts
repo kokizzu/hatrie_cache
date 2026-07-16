@@ -187,7 +187,7 @@ describe('command fallback', () => {
   it('loads storage and replication admin status', async () => {
     const fetchMock = vi.fn(async (path: string | URL | Request) => {
       if (path === '/api/storage') {
-        return new Response(JSON.stringify({ leveldb_configured: true }), {
+        return new Response(JSON.stringify({ leveldb_configured: true, store: 'leveldb', path: '/tmp/cache.leveldb', format: 'binary', size_bytes: 2048, operation: { running: false } }), {
           status: 200,
           headers: { 'content-type': 'application/json' }
         });
@@ -200,7 +200,14 @@ describe('command fallback', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(loadStorageStatus()).resolves.toEqual({ leveldb_configured: true });
+    await expect(loadStorageStatus()).resolves.toMatchObject({
+      leveldb_configured: true,
+      store: 'leveldb',
+      path: '/tmp/cache.leveldb',
+      format: 'binary',
+      size_bytes: 2048,
+      operation: { running: false }
+    });
     await expect(loadReplicationStatus()).resolves.toMatchObject({
       skipped: false,
       queue: { depth: 1, capacity: 4 }
