@@ -391,6 +391,9 @@ make monitoring-server \
 After catch-up, check routing, election, and replication status:
 
 ```
+make cluster-status CLUSTER_PEER=http://node-a:8080
+make cli ARGS='cluster status -peer http://node-a:8080'
+make cli ARGS='cluster doctor -peer http://node-a:8080 -probe-nodes=false'
 make cli ARGS='topology'
 make cli ARGS='election'
 make cli ARGS='replication'

@@ -443,16 +443,117 @@ type clusterJoinResult struct {
 	JournalPulled   bool   `json:"journal_pulled"`
 }
 
+type clusterStatusResult struct {
+	OK               bool                           `json:"ok"`
+	Peer             string                         `json:"peer"`
+	Health           *hatriecache.MonitoringHealth  `json:"health,omitempty"`
+	Topology         *hatriecache.ClusterTopology   `json:"topology,omitempty"`
+	Election         *hatriecache.ElectionStatus    `json:"election,omitempty"`
+	Replication      *hatriecache.ReplicationResult `json:"replication,omitempty"`
+	ReplicationError string                         `json:"replication_error,omitempty"`
+	Nodes            []clusterNodeStatus            `json:"nodes,omitempty"`
+	Errors           []string                       `json:"errors,omitempty"`
+}
+
+type clusterNodeStatus struct {
+	ID      string                        `json:"id"`
+	Role    string                        `json:"role,omitempty"`
+	Address string                        `json:"address,omitempty"`
+	OK      bool                          `json:"ok"`
+	Health  *hatriecache.MonitoringHealth `json:"health,omitempty"`
+	Error   string                        `json:"error,omitempty"`
+}
+
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("cluster subcommand is required: join")
+		return errors.New("cluster subcommand is required: join, status, doctor")
 	}
 	switch args[0] {
 	case "join":
 		return runClusterJoin(ctx, client, addr, args[1:], stdout, stderr)
+	case "status", "doctor":
+		return runClusterStatus(ctx, client, addr, args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown cluster subcommand %q", args[0])
 	}
+}
+
+func runClusterStatus(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cluster status", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	peer := flags.String("peer", addr, "cluster node monitoring API base URL")
+	probeNodes := flags.Bool("probe-nodes", true, "probe health for topology node addresses")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*peer = strings.TrimSpace(*peer)
+	if *peer == "" {
+		return errors.New("cluster status -peer is required")
+	}
+
+	result := clusterStatusResult{OK: true, Peer: *peer}
+	health, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, *peer, "/api/health")
+	if err != nil {
+		return fmt.Errorf("cluster health: %w", err)
+	}
+	result.Health = &health
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	result.Topology = &topology
+	election, err := getJSONValue[hatriecache.ElectionStatus](ctx, client, *peer, "/api/election")
+	if err != nil {
+		return fmt.Errorf("cluster election: %w", err)
+	}
+	result.Election = &election
+	replication, err := getJSONValue[hatriecache.ReplicationResult](ctx, client, *peer, "/api/replication")
+	if err != nil {
+		result.ReplicationError = err.Error()
+	} else {
+		result.Replication = &replication
+	}
+	if *probeNodes {
+		result.Nodes = probeClusterNodes(ctx, client, topology)
+		for _, node := range result.Nodes {
+			if !node.OK {
+				result.OK = false
+				result.Errors = append(result.Errors, "node "+node.ID+": "+node.Error)
+			}
+		}
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+func probeClusterNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology) []clusterNodeStatus {
+	nodes := make([]clusterNodeStatus, 0, len(topology.Nodes))
+	for _, node := range topology.Nodes {
+		status := clusterNodeStatus{
+			ID:      node.ID,
+			Role:    node.Role,
+			Address: strings.TrimSpace(node.Address),
+		}
+		if status.Address == "" {
+			status.Error = "address is empty"
+			nodes = append(nodes, status)
+			continue
+		}
+		health, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, status.Address, "/api/health")
+		if err != nil {
+			status.Error = err.Error()
+			nodes = append(nodes, status)
+			continue
+		}
+		status.OK = true
+		status.Health = &health
+		nodes = append(nodes, status)
+	}
+	return nodes
 }
 
 func runClusterJoin(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {

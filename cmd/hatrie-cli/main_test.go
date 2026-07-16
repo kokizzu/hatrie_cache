@@ -1816,6 +1816,79 @@ func TestClusterJoinTopologyAddsReplica(t *testing.T) {
 	}
 }
 
+func TestRunClusterStatusReportsPeerAndNodeHealth(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(hatriecache.ClusterTopology{
+				Version: 1,
+				Mode:    hatriecache.TopologyModeFullReplica,
+				Self:    "node-a",
+				Nodes: []hatriecache.TopologyNode{
+					{ID: "node-a", Address: serverURL, Role: "primary"},
+				},
+			})
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{
+				Nodes: []hatriecache.ElectionNodeStatus{{ID: "node-a", Online: true}},
+			})
+		case "/api/replication":
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", server.URL, "cluster", "status"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(cluster status) error = %v", err)
+	}
+	var result clusterStatusResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster status) error = %v", err)
+	}
+	if !result.OK || result.Health == nil || result.Topology == nil || result.Election == nil || len(result.Nodes) != 1 || !result.Nodes[0].OK {
+		t.Fatalf("cluster status result = %#v, want healthy peer and node", result)
+	}
+}
+
+func TestRunClusterDoctorAliasSkipsNodeProbe(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(hatriecache.ClusterTopology{Version: 1, Mode: hatriecache.TopologyModeFullReplica})
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{})
+		case "/api/replication":
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"cluster", "doctor", "-peer", server.URL, "-probe-nodes=false"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(cluster doctor) error = %v", err)
+	}
+	var result clusterStatusResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster doctor) error = %v", err)
+	}
+	if !result.OK || result.Peer != server.URL || len(result.Nodes) != 0 {
+		t.Fatalf("cluster doctor result = %#v, want healthy peer without node probes", result)
+	}
+}
+
 func TestRunClusterJoinUpdatesPeerTargetAndPullsJournal(t *testing.T) {
 	initialTopology := hatriecache.ClusterTopology{
 		Version: 1,

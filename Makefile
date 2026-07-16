@@ -49,6 +49,8 @@ RESTORE_BUNDLE_OVERWRITE ?= false
 RESTORE_REHEARSAL_PATH ?= $(BACKUP_DIR)
 RESTORE_REHEARSAL_WORK_DIR ?=
 RESTORE_REHEARSAL_KEEP_WORK_DIR ?= false
+CLUSTER_PEER ?= http://127.0.0.1:8080
+CLUSTER_PROBE_NODES ?= true
 SANITIZE_C ?= auto
 SANITIZE_C_ALLOW_STRICT_OVERCOMMIT ?= 0
 SANITIZE_C_ALLOW_LOW_COMMIT_HEADROOM ?= 0
@@ -81,7 +83,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore restore-bundle restore-rehearsal doctor server docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore restore-bundle restore-rehearsal doctor cluster-status server docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -117,6 +119,9 @@ restore-rehearsal:
 
 doctor:
 	DOCTOR_PATH='$(DOCTOR_PATH)' ./scripts/doctor.sh
+
+cluster-status:
+	CLUSTER_PEER='$(CLUSTER_PEER)' CLUSTER_PROBE_NODES='$(CLUSTER_PROBE_NODES)' ./scripts/cluster-status.sh
 
 server:
 	CONFIG_PATH='$(CONFIG_PATH)' ./scripts/server.sh $(SERVER_ARGS)

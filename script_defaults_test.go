@@ -170,6 +170,40 @@ func TestServerWrapperPassesConfigFile(t *testing.T) {
 	}
 }
 
+func TestClusterStatusWrapperWiring(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"CLUSTER_PEER ?= http://127.0.0.1:8080",
+		"CLUSTER_PROBE_NODES ?= true",
+		"cluster-status:",
+		"./scripts/cluster-status.sh",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile missing cluster status token %q", token)
+		}
+	}
+
+	script, err := os.ReadFile("scripts/cluster-status.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/cluster-status.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"peer=${CLUSTER_PEER:-http://127.0.0.1:8080}",
+		"probe_nodes=${CLUSTER_PROBE_NODES:-true}",
+		"cluster status -peer",
+		"-probe-nodes=false",
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("cluster status wrapper missing token %q", token)
+		}
+	}
+}
+
 func TestVerifyCScriptUsesRunScopedTemporaryDirectory(t *testing.T) {
 	data, err := os.ReadFile("scripts/verify-c.sh")
 	if err != nil {
