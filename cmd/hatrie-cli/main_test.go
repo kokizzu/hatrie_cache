@@ -1949,6 +1949,80 @@ func TestRunClusterStatusReportsTopologyDrift(t *testing.T) {
 	}
 }
 
+func TestRunClusterStatusReportsElectionDrift(t *testing.T) {
+	var nodeAURL string
+	var nodeBURL string
+	topology := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeFullReplica,
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: nodeAURL, Role: "primary"},
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+		}
+	}
+	nodeB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-b"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(topology())
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{
+				Leaders: []hatriecache.ElectionLeader{{Shard: 0, Leader: "node-b", Available: true}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer nodeB.Close()
+	nodeBURL = nodeB.URL
+
+	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(topology())
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{
+				Leaders: []hatriecache.ElectionLeader{{Shard: 0, Leader: "node-a", Available: true}},
+			})
+		case "/api/replication":
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer nodeA.Close()
+	nodeAURL = nodeA.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{"-addr", nodeA.URL, "cluster", "doctor"}, stdout, &bytes.Buffer{}, nodeA.Client()); err != nil {
+		t.Fatalf("run(cluster doctor) error = %v", err)
+	}
+	var result clusterStatusResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster doctor) error = %v", err)
+	}
+	if result.OK {
+		t.Fatalf("cluster doctor result = %#v, want unhealthy due election drift", result)
+	}
+	var nodeBStatus *clusterNodeStatus
+	for idx := range result.Nodes {
+		if result.Nodes[idx].ID == "node-b" {
+			nodeBStatus = &result.Nodes[idx]
+			break
+		}
+	}
+	if nodeBStatus == nil || nodeBStatus.OK || !nodeBStatus.TopologyConsistent || nodeBStatus.ElectionConsistent || !strings.Contains(nodeBStatus.ElectionError, "leaders differ") {
+		t.Fatalf("node-b status = %#v, want election drift only", nodeBStatus)
+	}
+}
+
 func TestRunClusterDoctorAliasSkipsNodeProbe(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -44,6 +44,7 @@ type MonitoringOptions struct {
 	Topology             *TopologyStore
 	Election             *ElectionStore
 	Replicator           *HTTPReplicator
+	ReplicationSafety    *ReplicationSafetyStore
 	EnforceLeaderWrites  bool
 	RuntimeConfig        map[string]interface{}
 }
@@ -56,8 +57,10 @@ type MonitoringHandler struct {
 type commandExecutionOptions struct {
 	NodeName            string
 	Journal             *CommandJournal
+	Topology            *TopologyStore
 	Election            *ElectionStore
 	Replicator          *HTTPReplicator
+	ReplicationSafety   *ReplicationSafetyStore
 	EnforceLeaderWrites bool
 }
 
@@ -152,6 +155,9 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	if options.Election == nil && options.Topology != nil {
 		options.Election = NewElectionStore(options.Topology, ElectionOptions{})
 		_ = options.Election.Heartbeat(options.NodeName)
+	}
+	if options.ReplicationSafety == nil {
+		options.ReplicationSafety = NewReplicationSafetyStore()
 	}
 	return &MonitoringHandler{trie: trie, options: options}
 }
@@ -514,8 +520,10 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
 		NodeName:            handler.options.NodeName,
 		Journal:             handler.options.Journal,
+		Topology:            handler.options.Topology,
 		Election:            handler.options.Election,
 		Replicator:          handler.options.Replicator,
+		ReplicationSafety:   handler.options.ReplicationSafety,
 		EnforceLeaderWrites: handler.options.EnforceLeaderWrites,
 	})
 	if rejected {
@@ -545,19 +553,45 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if trie == nil {
 		return commandError("trie is not configured"), false
 	}
+	replicationToken, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
+	if handled {
+		return response, rejected
+	}
 	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
 		return response, true
 	}
-	var response CacheCommandResponse
 	if options.Journal != nil {
 		response = options.Journal.ExecuteCommand(trie, request)
 	} else {
 		response = trie.ExecuteCommand(request)
 	}
+	if response.OK {
+		options.ReplicationSafety.Commit(replicationToken)
+	}
 	if options.Replicator != nil {
 		options.Replicator.ReplicateCommand(ctx, trie, request, response)
 	}
 	return response, false
+}
+
+func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
+	switch normalizedCommand(request.Command) {
+	case "INTERNALSET", "INTERNALDEL":
+	default:
+		return replicationSafetyToken{}, CacheCommandResponse{}, false, false
+	}
+	source, sequence, fingerprint := replicationSafetyMetadata(request)
+	if fingerprint != "" && topology != nil && topology.VerifiesReplicationFingerprint() {
+		localFingerprint := topology.Fingerprint()
+		if localFingerprint != "" && localFingerprint != fingerprint {
+			return replicationSafetyToken{}, commandError("replication topology fingerprint mismatch"), true, true
+		}
+	}
+	token, duplicate := safety.Check(source, sequence)
+	if duplicate {
+		return token, CacheCommandResponse{OK: true, Message: "duplicate replication command"}, true, false
+	}
+	return token, CacheCommandResponse{}, false, false
 }
 
 func rejectNonLeaderWrite(request CacheCommandRequest, nodeName string, election *ElectionStore, enforce bool) (CacheCommandResponse, bool) {

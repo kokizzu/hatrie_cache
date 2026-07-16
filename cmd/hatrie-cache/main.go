@@ -145,6 +145,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	defer closeAuditLog(auditLog, stderr)
 	rateLimiter := hatriecache.NewRateLimiter(cfg.rateLimit, time.Second)
 	apiMetrics := hatriecache.NewAPIMetrics()
+	replicationSafety := hatriecache.NewReplicationSafetyStore()
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
@@ -252,12 +253,13 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Topology:             topology,
 		Election:             election,
 		Replicator:           replicator,
+		ReplicationSafety:    replicationSafety,
 		EnforceLeaderWrites:  cfg.enforceLeaderWrites,
 		RuntimeConfig:        redactedConfig(cfg),
 	}).Handler()
 	server := newMonitoringServer(cfg, handler)
 
-	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator, auditLog, rateLimiter, apiMetrics)
+	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator, auditLog, rateLimiter, apiMetrics, replicationSafety)
 	if err != nil {
 		return err
 	}
@@ -796,7 +798,7 @@ func closeAuditLog(logger *hatriecache.AuditLogger, stderr io.Writer) {
 	}
 }
 
-func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator, auditLog *hatriecache.AuditLogger, rateLimiter *hatriecache.RateLimiter, apiMetrics *hatriecache.APIMetrics) (*grpc.Server, net.Listener, error) {
+func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator, auditLog *hatriecache.AuditLogger, rateLimiter *hatriecache.RateLimiter, apiMetrics *hatriecache.APIMetrics, replicationSafety *hatriecache.ReplicationSafetyStore) (*grpc.Server, net.Listener, error) {
 	if cfg.grpcAddr == "" {
 		return nil, nil, nil
 	}
@@ -821,6 +823,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		Topology:            topology,
 		Election:            election,
 		Replicator:          replicator,
+		ReplicationSafety:   replicationSafety,
 		EnforceLeaderWrites: cfg.enforceLeaderWrites,
 	}))
 	return server, listener, nil

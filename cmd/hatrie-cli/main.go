@@ -740,6 +740,7 @@ type clusterNodeStatus struct {
 	TopologyVersion    uint64                        `json:"topology_version,omitempty"`
 	TopologyError      string                        `json:"topology_error,omitempty"`
 	ElectionOK         bool                          `json:"election_ok,omitempty"`
+	ElectionConsistent bool                          `json:"election_consistent,omitempty"`
 	ElectionError      string                        `json:"election_error,omitempty"`
 	Error              string                        `json:"error,omitempty"`
 }
@@ -794,7 +795,7 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 		result.Replication = &replication
 	}
 	if *probeNodes {
-		result.Nodes = probeClusterNodes(ctx, client, topology)
+		result.Nodes = probeClusterNodes(ctx, client, topology, election)
 		for _, node := range result.Nodes {
 			if !node.OK {
 				result.OK = false
@@ -810,7 +811,7 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 	return err
 }
 
-func probeClusterNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology) []clusterNodeStatus {
+func probeClusterNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, election hatriecache.ElectionStatus) []clusterNodeStatus {
 	nodes := make([]clusterNodeStatus, 0, len(topology.Nodes))
 	for _, node := range topology.Nodes {
 		status := clusterNodeStatus{
@@ -849,15 +850,43 @@ func probeClusterNodes(ctx context.Context, client *http.Client, topology hatrie
 				}
 			}
 		}
-		if _, err := getJSONValue[hatriecache.ElectionStatus](ctx, client, status.Address, "/api/election"); err != nil {
+		nodeElection, err := getJSONValue[hatriecache.ElectionStatus](ctx, client, status.Address, "/api/election")
+		if err != nil {
 			status.OK = false
 			status.ElectionError = err.Error()
 		} else {
 			status.ElectionOK = true
+			status.ElectionConsistent = clusterElectionLeadersConsistent(election, nodeElection)
+			if !status.ElectionConsistent {
+				status.OK = false
+				status.ElectionError = "elected leaders differ from peer"
+			}
 		}
 		nodes = append(nodes, status)
 	}
 	return nodes
+}
+
+func clusterElectionLeadersConsistent(peer hatriecache.ElectionStatus, node hatriecache.ElectionStatus) bool {
+	peerLeaders := clusterElectionLeaderMap(peer)
+	nodeLeaders := clusterElectionLeaderMap(node)
+	if len(peerLeaders) != len(nodeLeaders) {
+		return false
+	}
+	for shard, peerLeader := range peerLeaders {
+		if nodeLeaders[shard] != peerLeader {
+			return false
+		}
+	}
+	return true
+}
+
+func clusterElectionLeaderMap(status hatriecache.ElectionStatus) map[uint32]string {
+	out := make(map[uint32]string, len(status.Leaders))
+	for _, leader := range status.Leaders {
+		out[leader.Shard] = leader.Leader
+	}
+	return out
 }
 
 func clusterTopologiesConsistent(peerTopology hatriecache.ClusterTopology, nodeTopology hatriecache.ClusterTopology) (bool, error) {

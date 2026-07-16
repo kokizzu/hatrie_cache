@@ -27,6 +27,7 @@ type CacheGRPCOptions struct {
 	Topology            *TopologyStore
 	Election            *ElectionStore
 	Replicator          *HTTPReplicator
+	ReplicationSafety   *ReplicationSafetyStore
 	EnforceLeaderWrites bool
 }
 
@@ -50,6 +51,9 @@ func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServe
 	}
 	if options.Metrics == nil {
 		options.Metrics = NewAPIMetrics()
+	}
+	if options.ReplicationSafety == nil {
+		options.ReplicationSafety = NewReplicationSafetyStore()
 	}
 	return &CacheGRPCServer{trie: trie, options: options}
 }
@@ -226,8 +230,10 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 	response, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
 		NodeName:            server.options.NodeName,
 		Journal:             server.options.Journal,
+		Topology:            server.options.Topology,
 		Election:            server.options.Election,
 		Replicator:          server.options.Replicator,
+		ReplicationSafety:   server.options.ReplicationSafety,
 		EnforceLeaderWrites: server.options.EnforceLeaderWrites,
 	})
 	if commandShouldJournal(command) {

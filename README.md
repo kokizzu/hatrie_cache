@@ -423,7 +423,9 @@ make cli ARGS='entries -limit 10'
 `cluster status` and `cluster doctor` fetch the peer health, topology,
 election, and replication state. With node probes enabled, they also call each
 topology node's health, topology, and election endpoints and report topology
-drift when a node's normalized topology differs from the peer view.
+drift when a node's normalized topology differs from the peer view. They also
+compare elected shard leaders across probed nodes and report election drift
+when a peer would route writes to a different leader.
 
 For sharded clusters, only enable `ENFORCE_LEADER_WRITES=true` after clients can
 write to the elected leader for each key or after the client/proxy layer handles
@@ -695,6 +697,14 @@ current topology replicas:
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_WIRE_FORMAT=json
 ```
+
+Replication payloads include source-node, monotonic sequence, and topology
+fingerprint metadata. Receivers suppress duplicate internal replication
+commands from the same source/sequence. Clustered receivers reject replication
+when the sender fingerprint does not match their local topology, which catches
+split-brain or stale-topology delivery before the write is applied. Nodes
+without cluster routing metadata still accept replication and only use the
+source/sequence duplicate guard.
 
 Set `REPLICATION_SYNC_INTERVAL` to run the same anti-entropy sync
 periodically from the local leader. The first sync runs immediately at startup,

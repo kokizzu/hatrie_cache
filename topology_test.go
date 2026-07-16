@@ -49,6 +49,58 @@ func TestTopologyStoreValidatesNormalizesAndRoutes(t *testing.T) {
 	}
 }
 
+func TestTopologyFingerprintIgnoresSelfAndChangesOnRoutes(t *testing.T) {
+	base := ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+			{ID: "node-b", Address: "http://node-b:8080", Role: "replica"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	}
+	otherSelf := base
+	otherSelf.Self = "node-b"
+	if got, want := base.Fingerprint(), otherSelf.Fingerprint(); got == "" || got != want {
+		t.Fatalf("fingerprints with different self = %q/%q, want same non-empty", got, want)
+	}
+
+	changed := base
+	changed.Shards = []TopologyShard{{ID: 0, Primary: "node-b", Replicas: []string{"node-a"}}}
+	if got, changed := base.Fingerprint(), changed.Fingerprint(); got == changed {
+		t.Fatalf("fingerprint did not change after route owner change: %q", got)
+	}
+}
+
+func TestTopologyStoreVerifiesReplicationFingerprintOnlyForClusterRoutes(t *testing.T) {
+	singleNode, err := NewTopologyStore(SingleNodeTopology("node-a", ""))
+	if err != nil {
+		t.Fatalf("NewTopologyStore(single) error = %v", err)
+	}
+	if singleNode.VerifiesReplicationFingerprint() {
+		t.Fatal("single-node topology verifies replication fingerprint, want false")
+	}
+
+	cluster, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Nodes: []TopologyNode{
+			{ID: "node-a"},
+			{ID: "node-b"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore(cluster) error = %v", err)
+	}
+	if !cluster.VerifiesReplicationFingerprint() {
+		t.Fatal("cluster topology does not verify replication fingerprint")
+	}
+}
+
 func TestTopologyStoreRoutesVirtualBucketRanges(t *testing.T) {
 	topology := ClusterTopology{
 		Version:     1,

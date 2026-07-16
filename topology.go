@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -150,6 +151,24 @@ func (store *TopologyStore) Get() ClusterTopology {
 	return cloneTopology(store.topology)
 }
 
+// Fingerprint returns a stable content hash for the current topology. The local
+// Self field is ignored so the same cluster file can be compared across nodes.
+func (store *TopologyStore) Fingerprint() string {
+	if store == nil {
+		return ""
+	}
+	return store.Get().Fingerprint()
+}
+
+// VerifiesReplicationFingerprint reports whether the store has enough cluster
+// routing metadata to reject replication from a different topology.
+func (store *TopologyStore) VerifiesReplicationFingerprint() bool {
+	if store == nil {
+		return false
+	}
+	return store.Get().verifiesReplicationFingerprint()
+}
+
 // Set validates and stores topology, persisting it when the store has a path.
 func (store *TopologyStore) Set(topology ClusterTopology) error {
 	if store == nil {
@@ -179,6 +198,69 @@ func (store *TopologyStore) Route(key string) (TopologyRoute, bool) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	return store.topology.RouteForKey(key)
+}
+
+// Fingerprint returns a stable content hash for topology routing and ownership.
+// The Self field is ignored because each node may set it to its own id.
+func (topology ClusterTopology) Fingerprint() string {
+	normalized, err := normalizeTopology(topology)
+	if err != nil {
+		return ""
+	}
+	normalized.Self = ""
+	sort.Slice(normalized.Nodes, func(i, j int) bool {
+		return normalized.Nodes[i].ID < normalized.Nodes[j].ID
+	})
+	sort.Slice(normalized.Shards, func(i, j int) bool {
+		return normalized.Shards[i].ID < normalized.Shards[j].ID
+	})
+	sort.Slice(normalized.BucketRanges, func(i, j int) bool {
+		if normalized.BucketRanges[i].Start != normalized.BucketRanges[j].Start {
+			return normalized.BucketRanges[i].Start < normalized.BucketRanges[j].Start
+		}
+		if normalized.BucketRanges[i].End != normalized.BucketRanges[j].End {
+			return normalized.BucketRanges[i].End < normalized.BucketRanges[j].End
+		}
+		return normalized.BucketRanges[i].Shard < normalized.BucketRanges[j].Shard
+	})
+
+	hash := fnv.New64a()
+	writeTopologyFingerprintPart(hash, strconv.FormatUint(normalized.Version, 10))
+	writeTopologyFingerprintPart(hash, normalized.Mode)
+	writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(normalized.BucketCount), 10))
+	for _, bucketRange := range normalized.BucketRanges {
+		writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(bucketRange.Start), 10))
+		writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(bucketRange.End), 10))
+		writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(bucketRange.Shard), 10))
+	}
+	for _, node := range normalized.Nodes {
+		writeTopologyFingerprintPart(hash, node.ID)
+		writeTopologyFingerprintPart(hash, node.Address)
+		writeTopologyFingerprintPart(hash, node.Role)
+	}
+	for _, shard := range normalized.Shards {
+		writeTopologyFingerprintPart(hash, strconv.FormatUint(uint64(shard.ID), 10))
+		writeTopologyFingerprintPart(hash, shard.Primary)
+		replicas := append([]string(nil), shard.Replicas...)
+		sort.Strings(replicas)
+		for _, replica := range replicas {
+			writeTopologyFingerprintPart(hash, replica)
+		}
+	}
+	return strconv.FormatUint(hash.Sum64(), 16)
+}
+
+func writeTopologyFingerprintPart(writer io.Writer, value string) {
+	_, _ = writer.Write([]byte(value))
+	_, _ = writer.Write([]byte{0})
+}
+
+func (topology ClusterTopology) verifiesReplicationFingerprint() bool {
+	normalized, err := normalizeTopology(topology)
+	if err != nil {
+		return false
+	}
+	return len(normalized.Nodes) > 1 || len(normalized.Shards) > 1 || len(normalized.BucketRanges) > 0
 }
 
 // ShardForKey returns the shard selected for key.

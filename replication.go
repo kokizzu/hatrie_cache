@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +57,7 @@ type HTTPReplicator struct {
 	cancel     context.CancelFunc
 	close      sync.Once
 	closed     bool
+	sequence   uint64
 	queueStats ReplicationQueueStats
 	last       ReplicationResult
 }
@@ -105,6 +107,12 @@ const (
 	replicationPayloadDelete
 )
 
+const (
+	replicationMetaSourceNode          = "_hatrie_replication_source"
+	replicationMetaSequence            = "_hatrie_replication_sequence"
+	replicationMetaTopologyFingerprint = "_hatrie_topology_fingerprint"
+)
+
 type replicationTask struct {
 	target  TopologyNode
 	payload CacheCommandRequest
@@ -113,6 +121,41 @@ type replicationTask struct {
 type replicationJob struct {
 	result ReplicationResult
 	tasks  []replicationTask
+}
+
+type ReplicationSafetyStore struct {
+	mu   sync.Mutex
+	last map[string]uint64
+}
+
+type replicationSafetyToken struct {
+	source   string
+	sequence uint64
+}
+
+func NewReplicationSafetyStore() *ReplicationSafetyStore {
+	return &ReplicationSafetyStore{last: map[string]uint64{}}
+}
+
+func (store *ReplicationSafetyStore) Check(source string, sequence uint64) (replicationSafetyToken, bool) {
+	if store == nil || source == "" || sequence == 0 {
+		return replicationSafetyToken{}, false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	token := replicationSafetyToken{source: source, sequence: sequence}
+	return token, sequence <= store.last[source]
+}
+
+func (store *ReplicationSafetyStore) Commit(token replicationSafetyToken) {
+	if store == nil || token.source == "" || token.sequence == 0 {
+		return
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if token.sequence > store.last[token.source] {
+		store.last[token.source] = token.sequence
+	}
 }
 
 func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
@@ -411,6 +454,7 @@ func (replicator *HTTPReplicator) planReplication(ctx context.Context, trie *Hat
 		result.Reason = "no local value to replicate"
 		return result, nil
 	}
+	payload = replicator.annotateReplicationPayload(payload)
 	tasks := make([]replicationTask, 0, len(targets))
 	for _, target := range targets {
 		tasks = append(tasks, replicationTask{target: target, payload: payload})
@@ -526,6 +570,32 @@ func (replicator *HTTPReplicator) syncAll(ctx context.Context, trie *HatTrie, pr
 	return replicator.syncAllPaged(ctx, trie, prefix, defaultReplicationSyncKeyPageSize)
 }
 
+func (replicator *HTTPReplicator) annotateReplicationPayload(payload CacheCommandRequest) CacheCommandRequest {
+	if replicator == nil {
+		return payload
+	}
+	if payload.Pairs == nil {
+		payload.Pairs = Map{}
+	}
+	if replicator.self != "" {
+		payload.Pairs[replicationMetaSourceNode] = replicator.self
+	}
+	payload.Pairs[replicationMetaSequence] = strconv.FormatUint(replicator.nextReplicationSequence(), 10)
+	if replicator.topology != nil {
+		if fingerprint := replicator.topology.Fingerprint(); fingerprint != "" {
+			payload.Pairs[replicationMetaTopologyFingerprint] = fingerprint
+		}
+	}
+	return payload
+}
+
+func (replicator *HTTPReplicator) nextReplicationSequence() uint64 {
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.sequence++
+	return replicator.sequence
+}
+
 func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTrie, prefix string, pageSize int) ReplicationResult {
 	ctx = replicationContext(ctx)
 	result := ReplicationResult{Command: "SYNC", Key: prefix}
@@ -593,6 +663,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			if !ok {
 				continue
 			}
+			payload = replicator.annotateReplicationPayload(payload)
 			result.Entries++
 			for _, target := range targets {
 				targetResult := replicator.postReplicationCommand(ctx, target, payload)
@@ -889,6 +960,32 @@ func replicationCommandPayload(trie *HatTrie, key string, kind replicationPayloa
 		return CacheCommandRequest{}, false
 	}
 	return CacheCommandRequest{Command: "INTERNALSET", Key: key, Value: dump.Value}, true
+}
+
+func replicationSafetyMetadata(request CacheCommandRequest) (string, uint64, string) {
+	source := commandPairString(request.Pairs, replicationMetaSourceNode)
+	sequence := uint64(0)
+	if value, ok := request.Pairs[replicationMetaSequence]; ok {
+		if parsed, err := commandUint64Value(value); err == nil {
+			sequence = parsed
+		}
+	}
+	return source, sequence, commandPairString(request.Pairs, replicationMetaTopologyFingerprint)
+}
+
+func commandPairString(pairs Map, key string) string {
+	if len(pairs) == 0 {
+		return ""
+	}
+	value, ok := pairs[key]
+	if !ok {
+		return ""
+	}
+	text, err := commandScalarString(value)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(text)
 }
 
 func replicationPayloadKindFor(request CacheCommandRequest, response CacheCommandResponse) replicationPayloadKind {

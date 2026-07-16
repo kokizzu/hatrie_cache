@@ -121,6 +121,181 @@ func TestHTTPReplicatorReplicatesSetAndDeleteToOwners(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAnnotatesReplicationSafetyMetadata(t *testing.T) {
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080"},
+			{ID: "node-b", Address: "http://node-b:8080"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Topology: topology})
+
+	first := replicator.annotateReplicationPayload(CacheCommandRequest{Command: "INTERNALSET", Key: "k", Value: "{}"})
+	second := replicator.annotateReplicationPayload(CacheCommandRequest{Command: "INTERNALDEL", Key: "k"})
+	if first.Pairs[replicationMetaSourceNode] != "node-a" || second.Pairs[replicationMetaSourceNode] != "node-a" {
+		t.Fatalf("source metadata = %#v/%#v, want node-a", first.Pairs, second.Pairs)
+	}
+	if first.Pairs[replicationMetaTopologyFingerprint] != topology.Fingerprint() || second.Pairs[replicationMetaTopologyFingerprint] != topology.Fingerprint() {
+		t.Fatalf("topology fingerprint metadata = %#v/%#v, want %q", first.Pairs, second.Pairs, topology.Fingerprint())
+	}
+	firstSequence, err := commandUint64Value(first.Pairs[replicationMetaSequence])
+	if err != nil {
+		t.Fatalf("first sequence metadata error = %v", err)
+	}
+	secondSequence, err := commandUint64Value(second.Pairs[replicationMetaSequence])
+	if err != nil {
+		t.Fatalf("second sequence metadata error = %v", err)
+	}
+	if firstSequence == 0 || secondSequence != firstSequence+1 {
+		t.Fatalf("replication sequences = %d/%d, want monotonically increasing", firstSequence, secondSequence)
+	}
+}
+
+func TestExecuteCacheCommandSkipsDuplicateReplicationSequence(t *testing.T) {
+	topology, err := NewTopologyStore(SingleNodeTopology("node-b", ""))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	safety := NewReplicationSafetyStore()
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	source := CreateHatTrie()
+	defer source.Destroy()
+	source.UpsertString("session:1", "replicated")
+	dump := source.ExecuteCommand(CacheCommandRequest{Command: "DUMP", Key: "session:1"})
+	if !dump.OK || dump.Value == "" {
+		t.Fatalf("source dump = %#v, want snapshot", dump)
+	}
+
+	request := CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:1",
+		Value:   dump.Value,
+		Pairs: Map{
+			replicationMetaSourceNode:          "node-a",
+			replicationMetaSequence:            "1",
+			replicationMetaTopologyFingerprint: topology.Fingerprint(),
+		},
+	}
+	response, rejected := executeCacheCommand(context.Background(), ht, request, commandExecutionOptions{
+		Topology:          topology,
+		ReplicationSafety: safety,
+	})
+	if rejected || !response.OK {
+		t.Fatalf("first replication response = %#v rejected=%v, want ok", response, rejected)
+	}
+	duplicate := request
+	duplicate.Command = "INTERNALDEL"
+	duplicate.Value = ""
+	response, rejected = executeCacheCommand(context.Background(), ht, duplicate, commandExecutionOptions{
+		Topology:          topology,
+		ReplicationSafety: safety,
+	})
+	if rejected || !response.OK || response.Message != "duplicate replication command" {
+		t.Fatalf("duplicate replication response = %#v rejected=%v, want duplicate ok", response, rejected)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "session:1"}); !got.OK || got.Value != "replicated" {
+		t.Fatalf("GET after duplicate replication = %#v, want original value", got)
+	}
+}
+
+func TestExecuteCacheCommandRejectsReplicationTopologyMismatch(t *testing.T) {
+	localTopology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080"},
+			{ID: "node-b", Address: "http://node-b:9090"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore(local) error = %v", err)
+	}
+	remoteTopology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080"},
+			{ID: "node-b", Address: "http://node-b:8080"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore(remote) error = %v", err)
+	}
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	response, rejected := executeCacheCommand(context.Background(), ht, CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:1",
+		Value:   `{"type":"string","string":"replicated"}`,
+		Pairs: Map{
+			replicationMetaSourceNode:          "node-a",
+			replicationMetaSequence:            "1",
+			replicationMetaTopologyFingerprint: remoteTopology.Fingerprint(),
+		},
+	}, commandExecutionOptions{
+		Topology:          localTopology,
+		ReplicationSafety: NewReplicationSafetyStore(),
+	})
+	if !rejected || response.OK || !strings.Contains(response.Message, "topology fingerprint mismatch") {
+		t.Fatalf("topology mismatch response = %#v rejected=%v, want rejected mismatch", response, rejected)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "session:1"}); got.Value != "" {
+		t.Fatalf("GET after rejected replication = %#v, want missing value", got)
+	}
+}
+
+func TestExecuteCacheCommandAllowsReplicationFingerprintWithoutClusterTopology(t *testing.T) {
+	localTopology, err := NewTopologyStore(SingleNodeTopology("node-b", ""))
+	if err != nil {
+		t.Fatalf("NewTopologyStore(local) error = %v", err)
+	}
+	remoteTopology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080"},
+			{ID: "node-b", Address: "http://node-b:8080"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore(remote) error = %v", err)
+	}
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	response, rejected := executeCacheCommand(context.Background(), ht, CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "session:1",
+		Value:   `{"type":"string","string":"replicated"}`,
+		Pairs: Map{
+			replicationMetaSourceNode:          "node-a",
+			replicationMetaSequence:            "1",
+			replicationMetaTopologyFingerprint: remoteTopology.Fingerprint(),
+		},
+	}, commandExecutionOptions{
+		Topology:          localTopology,
+		ReplicationSafety: NewReplicationSafetyStore(),
+	})
+	if rejected || !response.OK {
+		t.Fatalf("single-node replication response = %#v rejected=%v, want ok", response, rejected)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "session:1"}); !got.OK || got.Value != "replicated" {
+		t.Fatalf("GET after single-node replication = %#v, want replicated value", got)
+	}
+}
+
 func TestHTTPReplicatorUsesProtobufWireByDefault(t *testing.T) {
 	var gotRequest CacheCommandRequest
 	var gotContentType string
