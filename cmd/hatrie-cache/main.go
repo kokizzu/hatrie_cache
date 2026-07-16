@@ -40,6 +40,7 @@ var errHatTrieDestroyed = errors.New("hatrie-cache: trie is destroyed")
 
 type config struct {
 	configPath                  string
+	checkConfig                 bool
 	monitoringServer            bool
 	monitoringAddr              string
 	monitoringTLSCert           string
@@ -118,6 +119,13 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	cfg, err := parseConfig(args, stderr)
 	if err != nil {
 		return err
+	}
+	if cfg.checkConfig {
+		if err := validateConfigReferences(cfg); err != nil {
+			return err
+		}
+		fmt.Fprintln(stdout, "configuration ok")
+		return nil
 	}
 	if !cfg.monitoringServer {
 		fmt.Fprintln(stdout, "monitoring server disabled; pass -monitoring-server to start it")
@@ -304,6 +312,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.SetOutput(output)
 	flags.StringVar(&cfg.configPath, "config", cfg.configPath, "optional JSON config file path")
 	flags.StringVar(&cfg.configPath, "config-file", cfg.configPath, "optional JSON config file path")
+	flags.BoolVar(&cfg.checkConfig, "check-config", false, "validate configuration and exit without starting listeners")
 	flags.BoolVar(&cfg.monitoringServer, "monitoring-server", false, "run the grpc/http2/web monitoring server")
 	flags.StringVar(&cfg.monitoringAddr, "monitoring-addr", cfg.monitoringAddr, "monitoring server listen address")
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
@@ -473,6 +482,25 @@ func applyConfigFile(path string, flags *flag.FlagSet) error {
 		}
 		if err := flagValue.Value.Set(value); err != nil {
 			return fmt.Errorf("config file %s: option %q: %w", path, key, err)
+		}
+	}
+	return nil
+}
+
+func validateConfigReferences(cfg config) error {
+	if cfg.monitoringTLSCert != "" {
+		if _, err := tls.LoadX509KeyPair(cfg.monitoringTLSCert, cfg.monitoringTLSKey); err != nil {
+			return fmt.Errorf("load monitoring TLS certificate: %w", err)
+		}
+	}
+	if cfg.grpcTLSCert != "" {
+		if _, err := grpcTLSConfig(cfg); err != nil {
+			return err
+		}
+	}
+	if cfg.topologyPath != "" {
+		if _, err := hatriecache.LoadTopology(cfg.topologyPath); err != nil {
+			return fmt.Errorf("load topology: %w", err)
 		}
 	}
 	return nil

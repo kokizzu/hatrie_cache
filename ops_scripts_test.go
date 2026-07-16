@@ -104,6 +104,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/restore-rehearsal.sh",
 		"doctor:",
 		"./scripts/doctor.sh",
+		"check-config:",
+		"./scripts/check-config.sh",
 		"GRPC_TLS_CERT ?=",
 		"GRPC_CLIENT_CA ?=",
 	} {
@@ -118,6 +120,19 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "go run ./cmd/hatrie-cli doctor -path") {
 		t.Fatal("doctor script should invoke hatrie-cli doctor")
+	}
+	data, err = os.ReadFile("scripts/check-config.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/check-config.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"-check-config",
+		"CONFIG_PATH",
+		"go run ./cmd/hatrie-cache",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("check-config script missing token %q", token)
+		}
 	}
 	data, err = os.ReadFile("scripts/monitoring-server.sh")
 	if err != nil {

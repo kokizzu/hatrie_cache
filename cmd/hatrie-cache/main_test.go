@@ -71,6 +71,7 @@ func TestRunMonitoringDisabledAcceptsNilWriters(t *testing.T) {
 
 func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	cfg, err := parseConfig([]string{
+		"-check-config",
 		"-monitoring-server",
 		"-monitoring-addr", "127.0.0.1:9090",
 		"-monitoring-web-dir", "/tmp/web",
@@ -86,6 +87,9 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	}
 	if !cfg.monitoringServer {
 		t.Fatal("monitoringServer = false, want true")
+	}
+	if !cfg.checkConfig {
+		t.Fatal("checkConfig = false, want true")
 	}
 	if cfg.monitoringAddr != "127.0.0.1:9090" || cfg.monitoringWebDir != "/tmp/web" || cfg.monitoringAuthToken != "secret" || cfg.auditLogPath != "/tmp/audit.jsonl" {
 		t.Fatalf("cfg = %#v, want explicit address and web dir", cfg)
@@ -883,6 +887,97 @@ func TestRunDoesNotStartServerByDefault(t *testing.T) {
 	}
 }
 
+func TestRunCheckConfigDoesNotStartListeners(t *testing.T) {
+	monitoringAddr := freeTCPAddr(t)
+	grpcAddr := freeTCPAddr(t)
+	stdout := &bytes.Buffer{}
+
+	if err := run(context.Background(), []string{
+		"-check-config",
+		"-monitoring-server",
+		"-monitoring-addr", monitoringAddr,
+		"-grpc-addr", grpcAddr,
+	}, stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run(check-config) error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "configuration ok") {
+		t.Fatalf("stdout = %q, want configuration ok", stdout.String())
+	}
+	assertAddrAvailable(t, monitoringAddr)
+	assertAddrAvailable(t, grpcAddr)
+}
+
+func TestRunCheckConfigValidatesTLSAndTopology(t *testing.T) {
+	serverCertPath, serverKeyPath := writeTestCertificate(t)
+	clientCertPath, _ := writeTestClientCertificate(t)
+	topologyPath := filepath.Join(t.TempDir(), "topology.json")
+	if err := hatriecache.SaveTopology(topologyPath, hatriecache.SingleNodeTopology("node-a", "http://127.0.0.1:8080")); err != nil {
+		t.Fatalf("SaveTopology() error = %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-check-config",
+		"-monitoring-tls-cert", serverCertPath,
+		"-monitoring-tls-key", serverKeyPath,
+		"-grpc-tls-cert", serverCertPath,
+		"-grpc-tls-key", serverKeyPath,
+		"-grpc-client-ca", clientCertPath,
+		"-topology-path", topologyPath,
+	}, stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run(check-config valid references) error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "configuration ok") {
+		t.Fatalf("stdout = %q, want configuration ok", stdout.String())
+	}
+}
+
+func TestRunCheckConfigRejectsInvalidReferences(t *testing.T) {
+	serverCertPath, serverKeyPath := writeTestCertificate(t)
+	dir := t.TempDir()
+	invalidCAPath := filepath.Join(dir, "client-ca.pem")
+	if err := os.WriteFile(invalidCAPath, []byte("not pem"), 0o600); err != nil {
+		t.Fatalf("WriteFile(client CA) error = %v", err)
+	}
+	invalidTopologyPath := filepath.Join(dir, "topology.json")
+	if err := os.WriteFile(invalidTopologyPath, []byte(`{"nodes":`), 0o600); err != nil {
+		t.Fatalf("WriteFile(topology) error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "client CA",
+			args: []string{
+				"-check-config",
+				"-grpc-tls-cert", serverCertPath,
+				"-grpc-tls-key", serverKeyPath,
+				"-grpc-client-ca", invalidCAPath,
+			},
+			want: "gRPC client CA",
+		},
+		{
+			name: "topology",
+			args: []string{
+				"-check-config",
+				"-topology-path", invalidTopologyPath,
+			},
+			want: "load topology",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := run(context.Background(), tt.args, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("run(check-config %s) error = %v, want %q", tt.name, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunRejectsJournalPullWithoutJournalPath(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	err := run(context.Background(), []string{
@@ -1388,6 +1483,17 @@ func waitForAddrReusable(t *testing.T, addr string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("address %s was not released", addr)
+}
+
+func assertAddrAvailable(t *testing.T, addr string) {
+	t.Helper()
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("address %s is not available: %v", addr, err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatalf("listener Close() error = %v", err)
+	}
 }
 
 func TestLoadSnapshotIfConfiguredIgnoresMissingSnapshot(t *testing.T) {

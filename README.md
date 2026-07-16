@@ -480,6 +480,17 @@ make server CONFIG_PATH=deploy/hatrie-cache.json
 make server CONFIG_PATH=deploy/hatrie-cache.json SERVER_ARGS='-monitoring-addr 127.0.0.1:8081'
 ```
 
+Validate a config file without opening listeners or persistence handles:
+
+```
+make check-config CONFIG_PATH=deploy/hatrie-cache.json
+make check-config CHECK_CONFIG_ARGS='-grpc-tls-cert server.pem -grpc-tls-key server-key.pem -grpc-client-ca clients-ca.pem'
+```
+
+The validator parses the same flags/config file as the daemon and checks
+cross-field constraints, referenced TLS key pairs, gRPC client CA PEM files,
+and topology JSON when `TOPOLOGY_PATH`/`-topology-path` is set.
+
 Provide a TLS certificate and key to serve the same monitoring API over HTTPS
 with HTTP/2 ALPN enabled:
 

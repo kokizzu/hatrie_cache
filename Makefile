@@ -79,6 +79,7 @@ TARANTOOL_WORK_DIR ?=
 HATRIE_COMMAND_BENCH ?= ^BenchmarkCommandFeature$$
 CONFIG_PATH ?=
 SERVER_ARGS ?=
+CHECK_CONFIG_ARGS ?=
 DOCKER_IMAGE ?= hatrie-cache:latest
 DOCKERFILE ?= Dockerfile
 DOCKER_CONTEXT ?= .
@@ -86,7 +87,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore restore-bundle restore-rehearsal doctor cluster-status server docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops backup restore restore-bundle restore-rehearsal doctor cluster-status server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-redis-command-features bench-tarantool-command-features command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build
 
 test: verify-go
 
@@ -128,6 +129,9 @@ cluster-status:
 
 server:
 	CONFIG_PATH='$(CONFIG_PATH)' ./scripts/server.sh $(SERVER_ARGS)
+
+check-config:
+	CONFIG_PATH='$(CONFIG_PATH)' ./scripts/check-config.sh $(CHECK_CONFIG_ARGS)
 
 docker-build:
 	DOCKER_IMAGE='$(DOCKER_IMAGE)' DOCKERFILE='$(DOCKERFILE)' DOCKER_CONTEXT='$(DOCKER_CONTEXT)' DOCKER_PLATFORM='$(DOCKER_PLATFORM)' DOCKER_TARGET='$(DOCKER_TARGET)' ./scripts/docker-build.sh $(DOCKER_BUILD_ARGS)
