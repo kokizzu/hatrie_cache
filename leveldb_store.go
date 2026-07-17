@@ -77,6 +77,29 @@ type LevelDBFlushResult struct {
 	DurationMillis int64     `json:"duration_millis"`
 }
 
+// LevelDBSpillOptions controls conversion of materialized in-memory values
+// into lazy LevelDB references.
+type LevelDBSpillOptions struct {
+	MaxHotBytes   int64 `json:"max_hot_bytes"`
+	MinValueBytes int64 `json:"min_value_bytes,omitempty"`
+}
+
+// LevelDBSpillResult reports a completed hot-value spill pass.
+type LevelDBSpillResult struct {
+	Store          string    `json:"store"`
+	MaxHotBytes    int64     `json:"max_hot_bytes"`
+	MinValueBytes  int64     `json:"min_value_bytes"`
+	KeysScanned    int       `json:"keys_scanned"`
+	ValuesScanned  int       `json:"values_scanned"`
+	KeysSpilled    int       `json:"keys_spilled"`
+	HotBytesBefore int64     `json:"hot_bytes_before"`
+	HotBytesAfter  int64     `json:"hot_bytes_after"`
+	BytesSpilled   int64     `json:"bytes_spilled"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at"`
+	DurationMillis int64     `json:"duration_millis"`
+}
+
 // LevelDBDirtyTracker tracks keys that changed since the last successful
 // incremental LevelDB save.
 type LevelDBDirtyTracker struct {
@@ -316,6 +339,45 @@ func (store *LevelDBStore) Flush(trie *HatTrie) (LevelDBFlushResult, error) {
 	return result, nil
 }
 
+// SpillCold persists cold materialized values to LevelDB and replaces them
+// with lazy references until estimated in-memory hot value bytes are below the
+// configured cap or no eligible values remain.
+func (store *LevelDBStore) SpillCold(trie *HatTrie, options LevelDBSpillOptions) (LevelDBSpillResult, error) {
+	startedAt := time.Now().UTC()
+	result := LevelDBSpillResult{
+		Store:         "leveldb",
+		MaxHotBytes:   options.MaxHotBytes,
+		MinValueBytes: options.MinValueBytes,
+		StartedAt:     startedAt,
+	}
+	finish := func(err error) (LevelDBSpillResult, error) {
+		result.FinishedAt = time.Now().UTC()
+		result.DurationMillis = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
+		return result, err
+	}
+	if trie == nil {
+		return finish(ErrNilHatTrie)
+	}
+	if options.MaxHotBytes < 0 {
+		return finish(errors.New("hatriecache: leveldb spill max hot bytes must be non-negative"))
+	}
+	if options.MinValueBytes < 0 {
+		return finish(errors.New("hatriecache: leveldb spill min value bytes must be non-negative"))
+	}
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return finish(err)
+	}
+	defer unlock()
+
+	trie.mu.Lock()
+	defer trie.mu.Unlock()
+	if err := trie.spillColdLevelDBLocked(store, db, options, &result); err != nil {
+		return finish(err)
+	}
+	return finish(nil)
+}
+
 func (store *LevelDBStore) Compact(options LevelDBCompactionOptions) (LevelDBCompactionResult, error) {
 	startedAt := time.Now().UTC()
 	result := LevelDBCompactionResult{
@@ -455,6 +517,156 @@ func levelDBDiffBatch(store *LevelDBStore, db *leveldb.DB, trie *HatTrie) (*leve
 		return nil, err
 	}
 	return batch, nil
+}
+
+type levelDBSpillCandidate struct {
+	key        string
+	value      HatValue
+	valueBytes int64
+	hits       uint64
+	lastHit    time.Time
+}
+
+func (trie *HatTrie) spillColdLevelDBLocked(store *LevelDBStore, db *leveldb.DB, options LevelDBSpillOptions, result *LevelDBSpillResult) error {
+	trie.ensureOpen()
+	now := time.Time{}
+	if len(trie.expires) > 0 {
+		now = trie.currentTime()
+	}
+	candidates := []levelDBSpillCandidate{}
+	if err := trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
+		result.KeysScanned++
+		valueBytes, err := trie.levelDBHotValueBytesLocked(entry)
+		if err != nil {
+			return err
+		}
+		if valueBytes <= 0 {
+			return nil
+		}
+		result.ValuesScanned++
+		result.HotBytesBefore += valueBytes
+		if valueBytes < options.MinValueBytes {
+			return nil
+		}
+		candidate := levelDBSpillCandidate{
+			key:        entry.Key,
+			value:      entry.Value,
+			valueBytes: valueBytes,
+		}
+		if stats := trie.keyStats[entry.Key]; stats != nil {
+			candidate.hits = stats.Hits
+			candidate.lastHit = stats.LastHit
+		}
+		candidates = append(candidates, candidate)
+		return nil
+	}); err != nil {
+		return err
+	}
+	result.HotBytesAfter = result.HotBytesBefore
+	if result.HotBytesAfter <= options.MaxHotBytes || len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return levelDBSpillCandidateLess(candidates[i], candidates[j])
+	})
+	for _, candidate := range candidates {
+		if result.HotBytesAfter <= options.MaxHotBytes {
+			break
+		}
+		rawPtr := trie.tryLocation(candidate.key)
+		if rawPtr == nil {
+			continue
+		}
+		current := HatValue{}
+		current.fromValue(*rawPtr)
+		if current != candidate.value || current.IsLevelDBReference() {
+			continue
+		}
+		data, err := trie.levelDBEntryDataForStoreLocked(Entry{Key: candidate.key, Value: current}, store, db, store.format)
+		if err != nil {
+			return err
+		}
+		entry, err := decodeLevelDBEntryForKey(candidate.key, data)
+		if err != nil {
+			return err
+		}
+		if err := db.Put(levelDBKey(candidate.key), data, &opt.WriteOptions{Sync: true}); err != nil {
+			return err
+		}
+		if _, err := trie.applyLevelDBReferenceLocked(store, entry, data); err != nil {
+			return err
+		}
+		result.KeysSpilled++
+		result.BytesSpilled += candidate.valueBytes
+		result.HotBytesAfter -= candidate.valueBytes
+	}
+	return nil
+}
+
+func levelDBSpillCandidateLess(left, right levelDBSpillCandidate) bool {
+	if left.lastHit.IsZero() != right.lastHit.IsZero() {
+		return left.lastHit.IsZero()
+	}
+	if !left.lastHit.Equal(right.lastHit) {
+		return left.lastHit.Before(right.lastHit)
+	}
+	if left.hits != right.hits {
+		return left.hits < right.hits
+	}
+	if left.valueBytes != right.valueBytes {
+		return left.valueBytes > right.valueBytes
+	}
+	return left.key < right.key
+}
+
+func (trie *HatTrie) levelDBHotValueBytesLocked(entry Entry) (int64, error) {
+	switch entry.Value.Type() {
+	case DATAVALUE_TYPE_COUNTER:
+		return 4, nil
+	case DATAVALUE_TYPE_RAW_STRING:
+		return int64(len(trie.raws.array[entry.Value.Index])), nil
+	case DATAVALUE_TYPE_RAW_BYTES:
+		if entry.Value.OnDisk() {
+			return 0, nil
+		}
+		return int64(len(trie.raws.array[entry.Value.Index])), nil
+	case DATAVALUE_TYPE_MAP:
+		return jsonEncodedSize(trie.maps.array[entry.Value.Index])
+	case DATAVALUE_TYPE_SLICE:
+		return jsonEncodedSize(trie.slices.array[entry.Value.Index].Slice())
+	case DATAVALUE_TYPE_LEVELDB_REF:
+		return 0, nil
+	case DATAVALUE_TYPE_SET:
+		return jsonEncodedSize(trie.sets.array[entry.Value.Index].Values())
+	case DATAVALUE_TYPE_PRIORITY_QUEUE:
+		return jsonEncodedSize(trie.priorityQueues.array[entry.Value.Index].SnapshotItems())
+	case DATAVALUE_TYPE_BLOOM_FILTER:
+		return trie.bloomFilters.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_COUNT_MIN_SKETCH:
+		return trie.countMinSketches.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_HYPERLOGLOG:
+		return trie.hyperLogLogs.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_TOP_K:
+		return trie.topKs.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_CUCKOO_FILTER:
+		return trie.cuckooFilters.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_ROARING_BITMAP:
+		return trie.roaringBitmaps.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_QUANTILE_SKETCH:
+		return trie.quantileSketches.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_FENWICK_TREE:
+		return trie.fenwickTrees.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_SPARSE_BITSET:
+		return trie.sparseBitsets.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_RESERVOIR_SAMPLE:
+		return trie.reservoirSamples.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_XOR_FILTER:
+		return trie.xorFilters.array[entry.Value.Index].EncodedSize(), nil
+	case DATAVALUE_TYPE_RADIX_TREE:
+		return trie.radixTrees.array[entry.Value.Index].EncodedSize(), nil
+	default:
+		return 0, errors.New("hatriecache: unsupported snapshot value type")
+	}
 }
 
 func (store *LevelDBStore) Load(trie *HatTrie) (int, error) {
@@ -928,6 +1140,7 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snap
 	if !old.Empty() {
 		trie.returnStorage(old)
 	}
+	trie.clearHotKeyLocked(entry.Key)
 	trie.clearExpirationLocked(entry.Key)
 
 	idx := trie.dbrefs.Add(LevelDBReference{

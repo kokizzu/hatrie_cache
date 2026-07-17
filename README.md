@@ -695,6 +695,27 @@ closing it to materialize all references into the trie:
 make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
 ```
 
+Set `DB_MEMORY_CAP_BYTES` with `DB_MEMORY_EVICT_INTERVAL` to keep the running
+hot value set under a soft byte cap. The governor estimates in-memory value
+payload bytes, writes cold eligible values to LevelDB, and replaces them with
+lazy LevelDB references. Values with no recent hits spill first; ties prefer
+older hits, fewer hits, then larger values. `DB_MEMORY_EVICT_MIN_VALUE_BYTES`
+defaults to 1024 so tiny keys are left in memory unless you lower it. This is a
+soft cap: keys already stored outside the Go heap, such as large byte payloads
+on disk, are not counted, and the cap may remain above target when there are no
+eligible values to spill. The tradeoff is lower heap/RSS pressure in exchange
+for LevelDB write I/O during spill passes and one LevelDB read when a cold value
+is accessed again:
+
+```
+make monitoring-server DB_PATH=data/cache.leveldb DB_MEMORY_CAP_BYTES=1073741824 DB_MEMORY_EVICT_INTERVAL=30s
+```
+
+`GET /api/storage` includes the last spill result as `last_spill`, and
+Prometheus exposes `hatrie_cache_storage_last_spill_keys`,
+`hatrie_cache_storage_last_spill_hot_bytes_before`, and
+`hatrie_cache_storage_last_spill_hot_bytes_after`.
+
 Set `SNAPSHOT_PATH` to load a snapshot at startup and save it on shutdown.
 Snapshots save as storage-optimized gzip binary by default
 (`SNAPSHOT_FORMAT=gzip-best-binary`) and still load binary, gzip binary, older

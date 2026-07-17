@@ -164,6 +164,7 @@ type storageStatus struct {
 	Operation         storageOperationStatus   `json:"operation"`
 	LastFlush         *LevelDBFlushResult      `json:"last_flush,omitempty"`
 	LastCompact       *LevelDBCompactionResult `json:"last_compact,omitempty"`
+	LastSpill         *LevelDBSpillResult      `json:"last_spill,omitempty"`
 }
 
 type storageCompactRequest struct {
@@ -176,6 +177,7 @@ type monitoringStorageState struct {
 	startedAt   time.Time
 	lastFlush   *LevelDBFlushResult
 	lastCompact *LevelDBCompactionResult
+	lastSpill   *LevelDBSpillResult
 }
 
 type storageOperationStatus struct {
@@ -528,6 +530,12 @@ func (handler *MonitoringHandler) writePrometheusStorageMetrics(builder *strings
 	if status.LastCompact != nil {
 		writePrometheusGaugeInt64(builder, "hatrie_cache_storage_last_compact_duration_millis", "Duration of the last LevelDB compaction in milliseconds.", node, status.LastCompact.DurationMillis)
 		writePrometheusGaugeInt64(builder, "hatrie_cache_storage_last_compact_size_bytes_delta", "Size delta from the last LevelDB compaction in bytes.", node, status.LastCompact.SizeBytesDelta)
+	}
+	if status.LastSpill != nil {
+		writePrometheusGauge(builder, "hatrie_cache_storage_last_spill_keys", "Keys converted to cold LevelDB references in the last spill pass.", node, uint64(status.LastSpill.KeysSpilled))
+		writePrometheusGaugeInt64(builder, "hatrie_cache_storage_last_spill_duration_millis", "Duration of the last LevelDB cold spill in milliseconds.", node, status.LastSpill.DurationMillis)
+		writePrometheusGaugeInt64(builder, "hatrie_cache_storage_last_spill_hot_bytes_before", "Estimated hot value bytes before the last LevelDB cold spill.", node, status.LastSpill.HotBytesBefore)
+		writePrometheusGaugeInt64(builder, "hatrie_cache_storage_last_spill_hot_bytes_after", "Estimated hot value bytes after the last LevelDB cold spill.", node, status.LastSpill.HotBytesAfter)
 	}
 }
 
@@ -1173,6 +1181,10 @@ func (handler *MonitoringHandler) storageStatus() storageStatus {
 		compact := *handler.storage.lastCompact
 		status.LastCompact = &compact
 	}
+	if handler.storage.lastSpill != nil {
+		spill := *handler.storage.lastSpill
+		status.LastSpill = &spill
+	}
 	handler.storageMu.Unlock()
 
 	store := handler.options.LevelDBStore
@@ -1241,12 +1253,26 @@ func (handler *MonitoringHandler) recordStorageCompact(result LevelDBCompactionR
 	handler.storage.lastCompact = &result
 }
 
+func (handler *MonitoringHandler) recordStorageSpill(result LevelDBSpillResult) {
+	handler.storageMu.Lock()
+	defer handler.storageMu.Unlock()
+	handler.storage.lastSpill = &result
+}
+
 // RecordStorageCompact stores the latest LevelDB compaction result for storage status.
 func (handler *MonitoringHandler) RecordStorageCompact(result LevelDBCompactionResult) {
 	if handler == nil {
 		return
 	}
 	handler.recordStorageCompact(result)
+}
+
+// RecordStorageSpill stores the latest LevelDB cold-spill result for storage status.
+func (handler *MonitoringHandler) RecordStorageSpill(result LevelDBSpillResult) {
+	if handler == nil {
+		return
+	}
+	handler.recordStorageSpill(result)
 }
 
 func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *http.Request) {

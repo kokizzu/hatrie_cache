@@ -2791,6 +2791,69 @@ func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T)
 	}
 }
 
+func TestLevelDBStoreSpillColdValuesUnderHotByteCap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	now := time.Unix(4700, 0)
+	ht.now = func() time.Time { return now }
+	coldValue := strings.Repeat("c", 64)
+	warmValue := strings.Repeat("w", 64)
+	ht.UpsertString("cold-large", coldValue)
+	ht.UpsertString("warm-large", warmValue)
+	now = now.Add(time.Second)
+	if got := ht.GetString("warm-large"); got != warmValue {
+		t.Fatalf("GetString(warm-large) = %q, want warm value", got)
+	}
+	ht.UpsertString("small", "ok")
+	beforeWrites := ht.Stats().Writes
+
+	result, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   80,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold() error = %v", err)
+	}
+	if result.KeysSpilled != 1 {
+		t.Fatalf("SpillCold() spilled %d keys, want 1: %#v", result.KeysSpilled, result)
+	}
+	if result.HotBytesBefore <= result.HotBytesAfter || result.HotBytesAfter > 80 {
+		t.Fatalf("SpillCold() hot bytes before/after = %d/%d, want reduction under cap", result.HotBytesBefore, result.HotBytesAfter)
+	}
+	if got := ht.Stats().Writes; got != beforeWrites {
+		t.Fatalf("SpillCold() changed write stats to %d, want %d", got, beforeWrites)
+	}
+
+	valuesByKey := map[string]HatValue{}
+	for _, entry := range ht.Entries(true) {
+		valuesByKey[entry.Key] = entry.Value
+	}
+	if !valuesByKey["cold-large"].IsLevelDBReference() {
+		t.Fatalf("cold-large value = %+v, want spilled LevelDB reference", valuesByKey["cold-large"])
+	}
+	if !valuesByKey["warm-large"].IsStringAtRaws() {
+		t.Fatalf("warm-large value = %+v, want retained in memory", valuesByKey["warm-large"])
+	}
+	if !valuesByKey["small"].IsStringAtRaws() {
+		t.Fatalf("small value = %+v, want retained in memory", valuesByKey["small"])
+	}
+	if entry, ok, err := store.Entry("cold-large"); err != nil || !ok || entry.String != coldValue {
+		t.Fatalf("Entry(cold-large) = %#v/%v/%v, want spilled record", entry, ok, err)
+	}
+	if got := ht.GetString("cold-large"); got != coldValue {
+		t.Fatalf("hydrated cold-large = %q, want spilled value", got)
+	}
+	if hval := ht.Get("cold-large"); !hval.IsStringAtRaws() {
+		t.Fatalf("cold-large after hydration = %+v, want in-memory string", hval)
+	}
+}
+
 func TestLevelDBStoreHotLoadKeepsLargeBytesColdWithoutMaterializing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

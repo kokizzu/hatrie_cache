@@ -164,6 +164,12 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"-db-compact-start-key",
 		"DB_COMPACT_LIMIT_KEY",
 		"-db-compact-limit-key",
+		"DB_MEMORY_CAP_BYTES",
+		"-db-memory-cap-bytes",
+		"DB_MEMORY_EVICT_INTERVAL",
+		"-db-memory-evict-interval",
+		"DB_MEMORY_EVICT_MIN_VALUE_BYTES",
+		"-db-memory-evict-min-value-bytes",
 	} {
 		if !strings.Contains(string(data), token) {
 			t.Fatalf("monitoring server script missing token %q", token)

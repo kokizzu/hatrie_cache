@@ -45,6 +45,9 @@ db_hot_load=${DB_HOT_LOAD:-false}
 db_hot_load_max_bytes=${DB_HOT_LOAD_MAX_BYTES:-1024}
 db_hot_load_max_age=${DB_HOT_LOAD_MAX_AGE:-1h}
 db_hot_load_min_hits=${DB_HOT_LOAD_MIN_HITS:-1000}
+db_memory_cap_bytes=${DB_MEMORY_CAP_BYTES:-0}
+db_memory_evict_interval=${DB_MEMORY_EVICT_INTERVAL:-0}
+db_memory_evict_min_value_bytes=${DB_MEMORY_EVICT_MIN_VALUE_BYTES:-1024}
 snapshot_path=${SNAPSHOT_PATH:-}
 snapshot_interval=${SNAPSHOT_INTERVAL:-0}
 snapshot_format=${SNAPSHOT_FORMAT:-}
@@ -101,6 +104,9 @@ set -- \
 	-db-hot-load-max-bytes "$db_hot_load_max_bytes" \
 	-db-hot-load-max-age "$db_hot_load_max_age" \
 	-db-hot-load-min-hits "$db_hot_load_min_hits" \
+	-db-memory-cap-bytes "$db_memory_cap_bytes" \
+	-db-memory-evict-interval "$db_memory_evict_interval" \
+	-db-memory-evict-min-value-bytes "$db_memory_evict_min_value_bytes" \
 	-snapshot-path "$snapshot_path" \
 	-snapshot-interval "$snapshot_interval" \
 	-journal-path "$journal_path" \

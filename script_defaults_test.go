@@ -137,6 +137,44 @@ func TestMonitoringWrapperPassesWriteProtectionAndRateLimit(t *testing.T) {
 	}
 }
 
+func TestMonitoringWrapperPassesMemoryGovernorOptions(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"DB_MEMORY_CAP_BYTES ?= 0",
+		"DB_MEMORY_EVICT_INTERVAL ?= 0",
+		"DB_MEMORY_EVICT_MIN_VALUE_BYTES ?= 1024",
+		"DB_MEMORY_CAP_BYTES='$(DB_MEMORY_CAP_BYTES)'",
+		"DB_MEMORY_EVICT_INTERVAL='$(DB_MEMORY_EVICT_INTERVAL)'",
+		"DB_MEMORY_EVICT_MIN_VALUE_BYTES='$(DB_MEMORY_EVICT_MIN_VALUE_BYTES)'",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile missing memory governor token %q", token)
+		}
+	}
+
+	script, err := os.ReadFile("scripts/monitoring-server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/monitoring-server.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"db_memory_cap_bytes=${DB_MEMORY_CAP_BYTES:-0}",
+		"db_memory_evict_interval=${DB_MEMORY_EVICT_INTERVAL:-0}",
+		"db_memory_evict_min_value_bytes=${DB_MEMORY_EVICT_MIN_VALUE_BYTES:-1024}",
+		`-db-memory-cap-bytes "$db_memory_cap_bytes"`,
+		`-db-memory-evict-interval "$db_memory_evict_interval"`,
+		`-db-memory-evict-min-value-bytes "$db_memory_evict_min_value_bytes"`,
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("monitoring wrapper missing memory governor token %q", token)
+		}
+	}
+}
+
 func TestStorageWrappersUseCLI(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {

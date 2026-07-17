@@ -764,6 +764,9 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 		"-db-hot-load-max-bytes", "2048",
 		"-db-hot-load-max-age", "30m",
 		"-db-hot-load-min-hits", "42",
+		"-db-memory-cap-bytes", "4096",
+		"-db-memory-evict-interval", "15s",
+		"-db-memory-evict-min-value-bytes", "128",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
@@ -779,6 +782,9 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 	}
 	if !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 || cfg.dbHotLoadMaxAge != 30*time.Minute || cfg.dbHotLoadMinHits != 42 {
 		t.Fatalf("cfg hot-load = %#v, want explicit hot-load options", cfg)
+	}
+	if cfg.dbMemoryCapBytes != 4096 || cfg.dbMemoryEvictInterval != 15*time.Second || cfg.dbMemoryEvictMinValueBytes != 128 {
+		t.Fatalf("cfg memory governor = %#v, want explicit memory cap options", cfg)
 	}
 	policy := levelDBLoadPolicy(cfg)
 	if !policy.HotValuesOnly || policy.MaxValueBytes != 2048 || policy.MaxLastHitAge != 30*time.Minute || policy.MinHits != 42 {
@@ -802,6 +808,18 @@ func TestParseConfigRejectsNegativeHotLoadLimits(t *testing.T) {
 		{
 			name: "compact interval",
 			args: []string{"-db-compact-interval", "-1s"},
+		},
+		{
+			name: "memory cap",
+			args: []string{"-db-memory-cap-bytes", "-1"},
+		},
+		{
+			name: "memory evict interval",
+			args: []string{"-db-memory-evict-interval", "-1s"},
+		},
+		{
+			name: "memory evict min value bytes",
+			args: []string{"-db-memory-evict-min-value-bytes", "-1"},
 		},
 	}
 
@@ -2553,6 +2571,56 @@ func TestStartLevelDBCompactorRunsPeriodically(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("periodic LevelDB compaction did not run")
+	}
+}
+
+func TestStartLevelDBMemoryGovernorSpillsColdValues(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	coldValue := strings.Repeat("c", 64)
+	warmValue := strings.Repeat("w", 64)
+	ht.UpsertString("cold-large", coldValue)
+	ht.UpsertString("warm-large", warmValue)
+	if got := ht.GetString("warm-large"); got != warmValue {
+		t.Fatalf("GetString(warm-large) = %q, want warm value", got)
+	}
+	ht.UpsertString("small", "ok")
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan hatriecache.LevelDBSpillResult, 1)
+	stop := startLevelDBMemoryGovernor(ctx, ht, store, time.Millisecond, hatriecache.LevelDBSpillOptions{
+		MaxHotBytes:   80,
+		MinValueBytes: 16,
+	}, func(result hatriecache.LevelDBSpillResult) {
+		if result.KeysSpilled > 0 {
+			select {
+			case results <- result:
+			default:
+			}
+		}
+	}, &bytes.Buffer{})
+	defer stop()
+
+	select {
+	case result := <-results:
+		if result.KeysSpilled != 1 || result.HotBytesAfter > 80 {
+			t.Fatalf("spill result = %#v, want one spill under cap", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("periodic LevelDB memory governor did not spill")
+	}
+	if entry, ok, err := store.Entry("cold-large"); err != nil || !ok || entry.String != coldValue {
+		t.Fatalf("Entry(cold-large) = %#v/%v/%v, want spilled record", entry, ok, err)
+	}
+	if got := ht.GetString("cold-large"); got != coldValue {
+		t.Fatalf("hydrated cold-large = %q, want spilled value", got)
 	}
 }
 

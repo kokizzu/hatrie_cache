@@ -1317,6 +1317,7 @@ func TestMonitoringHandlerReportsLevelDBStorageStatus(t *testing.T) {
 	if compactResp.Code != http.StatusOK {
 		t.Fatalf("storage compact status = %d, want 200: %s", compactResp.Code, compactResp.Body.String())
 	}
+	handler.recordStorageSpill(LevelDBSpillResult{Store: "leveldb", KeysSpilled: 1, HotBytesBefore: 128, HotBytesAfter: 64, DurationMillis: 5})
 
 	resp = httptest.NewRecorder()
 	mux.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/storage", nil))
@@ -1338,6 +1339,9 @@ func TestMonitoringHandlerReportsLevelDBStorageStatus(t *testing.T) {
 	}
 	if status.LastCompact == nil || status.LastCompact.Store != "leveldb" || status.LastCompact.DurationMillis < 0 {
 		t.Fatalf("storage last compact = %#v, want remembered compact result", status.LastCompact)
+	}
+	if status.LastSpill == nil || status.LastSpill.KeysSpilled != 1 || status.LastSpill.HotBytesAfter != 64 {
+		t.Fatalf("storage last spill = %#v, want remembered spill result", status.LastSpill)
 	}
 }
 
@@ -2149,6 +2153,7 @@ func TestMonitoringPrometheusMetricsExposeStorageOpsState(t *testing.T) {
 	})
 	handler.recordStorageFlush(LevelDBFlushResult{Store: "leveldb", Keys: 3, DurationMillis: 7})
 	handler.recordStorageCompact(LevelDBCompactionResult{Store: "leveldb", DurationMillis: 9, SizeBytesDelta: -4})
+	handler.recordStorageSpill(LevelDBSpillResult{Store: "leveldb", KeysSpilled: 2, HotBytesBefore: 512, HotBytesAfter: 128, DurationMillis: 11})
 	if !handler.beginStorageOperation("flush") {
 		t.Fatal("beginStorageOperation(flush) = false, want true")
 	}
@@ -2167,6 +2172,10 @@ func TestMonitoringPrometheusMetricsExposeStorageOpsState(t *testing.T) {
 		`hatrie_cache_storage_last_flush_duration_millis{node="node-a"} 7`,
 		`hatrie_cache_storage_last_compact_duration_millis{node="node-a"} 9`,
 		`hatrie_cache_storage_last_compact_size_bytes_delta{node="node-a"} -4`,
+		`hatrie_cache_storage_last_spill_keys{node="node-a"} 2`,
+		`hatrie_cache_storage_last_spill_duration_millis{node="node-a"} 11`,
+		`hatrie_cache_storage_last_spill_hot_bytes_before{node="node-a"} 512`,
+		`hatrie_cache_storage_last_spill_hot_bytes_after{node="node-a"} 128`,
 	} {
 		if !strings.Contains(body, token) {
 			t.Fatalf("metrics body missing %q:\n%s", token, body)

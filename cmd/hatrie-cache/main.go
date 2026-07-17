@@ -90,6 +90,9 @@ type config struct {
 	dbHotLoadMaxBytes           int64
 	dbHotLoadMaxAge             time.Duration
 	dbHotLoadMinHits            uint64
+	dbMemoryCapBytes            int64
+	dbMemoryEvictInterval       time.Duration
+	dbMemoryEvictMinValueBytes  int64
 	snapshotPath                string
 	snapshotInterval            time.Duration
 	snapshotFormat              string
@@ -295,6 +298,11 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		LimitKey: cfg.dbCompactLimitKey,
 	}, monitoringHandler.RecordStorageCompact, stderr)
 	defer stopDBCompactor()
+	stopDBMemoryGovernor := startLevelDBMemoryGovernor(ctx, trie, dbStore, cfg.dbMemoryEvictInterval, hatriecache.LevelDBSpillOptions{
+		MaxHotBytes:   cfg.dbMemoryCapBytes,
+		MinValueBytes: cfg.dbMemoryEvictMinValueBytes,
+	}, monitoringHandler.RecordStorageSpill, stderr)
+	defer stopDBMemoryGovernor()
 	handler := monitoringHandler.Handler()
 	server := newMonitoringServer(cfg, handler)
 
@@ -411,6 +419,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for LevelDB hot-load")
 	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for LevelDB hot-load")
 	flags.Uint64Var(&cfg.dbHotLoadMinHits, "db-hot-load-min-hits", 1000, "minimum hits required for LevelDB hot-load")
+	flags.Int64Var(&cfg.dbMemoryCapBytes, "db-memory-cap-bytes", 0, "estimated hot value bytes cap for periodic LevelDB cold eviction; use 0 to disable")
+	flags.DurationVar(&cfg.dbMemoryEvictInterval, "db-memory-evict-interval", 0, "periodic LevelDB cold eviction interval; use 0 to disable")
+	flags.Int64Var(&cfg.dbMemoryEvictMinValueBytes, "db-memory-evict-min-value-bytes", 1024, "minimum estimated value bytes eligible for LevelDB cold eviction")
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
 	flags.StringVar(&cfg.snapshotFormat, "snapshot-format", string(hatriecache.DefaultSnapshotFormat), "snapshot save format: gzip-best-binary, gzip-binary, binary, gzip-best-json, gzip-json, or json")
@@ -456,6 +467,21 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.dbCompactInterval < 0 {
 		return config{}, errors.New("db compact interval must be non-negative")
+	}
+	if cfg.dbMemoryCapBytes < 0 {
+		return config{}, errors.New("db memory cap bytes must be non-negative")
+	}
+	if cfg.dbMemoryEvictInterval < 0 {
+		return config{}, errors.New("db memory evict interval must be non-negative")
+	}
+	if cfg.dbMemoryEvictMinValueBytes < 0 {
+		return config{}, errors.New("db memory evict min value bytes must be non-negative")
+	}
+	if cfg.dbMemoryEvictInterval > 0 && cfg.dbMemoryCapBytes == 0 {
+		return config{}, errors.New("db memory evict interval requires positive -db-memory-cap-bytes")
+	}
+	if cfg.dbMemoryEvictInterval > 0 && strings.TrimSpace(cfg.dbPath) == "" {
+		return config{}, errors.New("db memory eviction requires -db-path")
 	}
 	if cfg.replicationQueueSize < 0 {
 		return config{}, errors.New("replication queue size must be non-negative")
@@ -665,6 +691,9 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"db_hot_load_max_bytes":                cfg.dbHotLoadMaxBytes,
 		"db_hot_load_max_age":                  cfg.dbHotLoadMaxAge.String(),
 		"db_hot_load_min_hits":                 cfg.dbHotLoadMinHits,
+		"db_memory_cap_bytes":                  cfg.dbMemoryCapBytes,
+		"db_memory_evict_interval":             cfg.dbMemoryEvictInterval.String(),
+		"db_memory_evict_min_value_bytes":      cfg.dbMemoryEvictMinValueBytes,
 		"snapshot_path":                        cfg.snapshotPath,
 		"snapshot_interval":                    cfg.snapshotInterval.String(),
 		"snapshot_format":                      cfg.snapshotFormat,
@@ -1202,6 +1231,54 @@ func startLevelDBCompactor(ctx context.Context, store *hatriecache.LevelDBStore,
 		}
 	}()
 	return periodicStopper(done, stopped)
+}
+
+func startLevelDBMemoryGovernor(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, interval time.Duration, options hatriecache.LevelDBSpillOptions, record func(hatriecache.LevelDBSpillResult), stderr io.Writer) func() {
+	ctx = serverContext(ctx)
+	if store == nil || interval <= 0 || options.MaxHotBytes <= 0 {
+		return func() {}
+	}
+	stderr = diagnosticWriter(stderr)
+
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	spill := func() bool {
+		result, err := spillColdLevelDBIfOpen(trie, store, options)
+		if errors.Is(err, errHatTrieDestroyed) || errors.Is(err, hatriecache.ErrLevelDBStoreClosed) {
+			return false
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "spill cold leveldb values: %v\n", err)
+			return true
+		}
+		if record != nil {
+			record(result)
+		}
+		return true
+	}
+	go func() {
+		defer close(stopped)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if !spill() {
+					return
+				}
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
+	return periodicStopper(done, stopped)
+}
+
+func spillColdLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, options hatriecache.LevelDBSpillOptions) (result hatriecache.LevelDBSpillResult, err error) {
+	defer recoverDestroyedHatTrie(&err)
+	return store.SpillCold(trie, options)
 }
 
 func openJournalIfConfigured(path string, format hatriecache.CommandJournalFormat) (*hatriecache.CommandJournal, error) {
