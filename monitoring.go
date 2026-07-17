@@ -757,15 +757,41 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 	batchOptions := options
 	batchOptions.Replicator = nil
 	for idx, payload := range payloads {
-		if !isSingleInternalReplicationCommand(payload) {
-			return commandError(fmt.Sprintf("internal replication batch value %d must be INTERNALSET or INTERNALDEL", idx)), false
+		response, rejected := validateInternalReplicationBatchPayload(payload, batchOptions, idx)
+		if rejected || !response.OK {
+			return response, rejected
 		}
+	}
+	for _, payload := range payloads {
 		response, rejected := executeCacheCommand(ctx, trie, payload, batchOptions)
 		if rejected || !response.OK {
 			return response, rejected
 		}
 	}
 	return CacheCommandResponse{OK: true, Message: "internal replication batch applied"}, false
+}
+
+func validateInternalReplicationBatchPayload(request CacheCommandRequest, options commandExecutionOptions, index int) (CacheCommandResponse, bool) {
+	if !isSingleInternalReplicationCommand(request) {
+		return commandError(fmt.Sprintf("internal replication batch value %d must be INTERNALSET or INTERNALDEL", index)), false
+	}
+	key := strings.TrimSpace(request.Key)
+	if key == "" {
+		return commandError(fmt.Sprintf("internal replication batch value %d: key is required", index)), false
+	}
+	if err := validateKey(key); err != nil {
+		return commandError(fmt.Sprintf("internal replication batch value %d: %s", index, err.Error())), false
+	}
+	if normalizedCommand(request.Command) == "INTERNALSET" {
+		if _, err := commandSnapshotOperation(key, request.Value); err != nil {
+			return commandError(fmt.Sprintf("internal replication batch value %d: %s", index, err.Error())), false
+		}
+	}
+	_, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
+	if handled {
+		return response, rejected
+	}
+	return CacheCommandResponse{OK: true, Message: "ok"}, false
 }
 
 func internalReplicationBatchRequests(request CacheCommandRequest) ([]CacheCommandRequest, error) {

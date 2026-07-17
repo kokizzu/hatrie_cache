@@ -1622,6 +1622,46 @@ func TestMonitoringHandlerExecutesInternalReplicationBatch(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerRejectsInvalidInternalReplicationBatchWithoutPartialMutation(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{ReplicationAuthToken: "replica-secret"}).Handler()
+	body := mustMarshalMonitoringTestCommand(t, CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Batch: []CacheCommandRequest{
+			{
+				Command: "INTERNALSET",
+				Key:     "safe",
+				Value:   `{"type":"string","string":"should-not-apply"}`,
+			},
+			{
+				Command: "INTERNALSET",
+				Key:     "broken",
+				Value:   `{"type":"string"`,
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(body))
+	req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("invalid batch status = %d body %q, want 200 command error", resp.Code, resp.Body.String())
+	}
+	var response CacheCommandResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+		t.Fatalf("invalid batch response JSON error = %v", err)
+	}
+	if response.OK {
+		t.Fatalf("invalid batch response = %#v, want command error", response)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "safe"}); !got.OK || got.Value != "0" {
+		t.Fatalf("safe key EXISTS after invalid batch = %#v, want no partial mutation", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "broken"}); !got.OK || got.Value != "0" {
+		t.Fatalf("broken key EXISTS after invalid batch = %#v, want no mutation", got)
+	}
+}
+
 func mustMarshalMonitoringTestCommand(t *testing.T, request CacheCommandRequest) string {
 	t.Helper()
 	data, err := json.Marshal(request)
