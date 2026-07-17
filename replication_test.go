@@ -1089,6 +1089,47 @@ func TestLevelDBReplicationOutboxPersistsJobsAndDeadLetters(t *testing.T) {
 	}
 }
 
+func TestLevelDBReplicationOutboxSkipsCorruptPartialJobRecords(t *testing.T) {
+	outboxPath := filepath.Join(t.TempDir(), "replication-outbox.leveldb")
+	outbox, err := OpenLevelDBReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutbox() error = %v", err)
+	}
+	valid := replicationJob{
+		id: 2,
+		result: ReplicationResult{
+			Command: "SETSTR",
+			Key:     "session:valid",
+		},
+		tasks: []replicationTask{{
+			target:  TopologyNode{ID: "node-b", Address: "http://node-b"},
+			payload: CacheCommandRequest{Command: "INTERNALSET", Key: "session:valid", Value: `{"type":"string","string":"value"}`},
+		}},
+		enqueuedAt: time.Now().UTC(),
+	}
+	if err := outbox.putJob(valid); err != nil {
+		t.Fatalf("putJob(valid) error = %v", err)
+	}
+	if err := outbox.db.Put(replicationOutboxLevelDBJobKey(1), []byte(`{"id":1,"result":`), nil); err != nil {
+		t.Fatalf("put corrupt job error = %v", err)
+	}
+	if jobs := outbox.jobs(); len(jobs) != 1 || jobs[0].id != 2 || jobs[0].result.Key != "session:valid" {
+		t.Fatalf("jobs() with corrupt record = %#v, want only valid job", jobs)
+	}
+	if err := outbox.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := OpenLevelDBReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutbox(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+	if jobs := reopened.jobs(); len(jobs) != 1 || jobs[0].id != 2 || jobs[0].result.Key != "session:valid" {
+		t.Fatalf("reopened jobs() with corrupt record = %#v, want only valid job", jobs)
+	}
+}
+
 func TestHTTPReplicatorLevelDBOutboxReplaysPendingJobAfterRestart(t *testing.T) {
 	var mode atomic.Int32
 	entered := make(chan struct{}, 1)
@@ -1168,6 +1209,95 @@ func TestHTTPReplicatorLevelDBOutboxReplaysPendingJobAfterRestart(t *testing.T) 
 		}
 	case <-time.After(time.Second):
 		t.Fatal("persisted replication job was not replayed")
+	}
+	waitUntil(t, time.Second, func() bool {
+		return len(reopened.jobs()) == 0
+	})
+}
+
+func TestHTTPReplicatorLevelDBOutboxReplaysPendingJobsInOrderAfterRetryInterrupted(t *testing.T) {
+	var mode atomic.Int32
+	attempted := make(chan string, 2)
+	delivered := make(chan string, 2)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if mode.Load() == 0 {
+			attempted <- request.Key
+			http.Error(w, "temporarily down", http.StatusBadGateway)
+			return
+		}
+		delivered <- request.Key
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	outboxPath := filepath.Join(t.TempDir(), "replication-outbox.leveldb")
+	outbox, err := OpenLevelDBReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutbox() error = %v", err)
+	}
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:               "node-a",
+		Topology:           topology,
+		Election:           election,
+		Client:             target.Client(),
+		AsyncQueueSize:     2,
+		AsyncMaxAttempts:   2,
+		AsyncRetryInterval: time.Hour,
+		AsyncOutbox:        outbox,
+	})
+
+	for _, key := range []string{"session:first", "session:second"} {
+		write := CacheCommandRequest{Command: "SETSTR", Key: key, Value: "value"}
+		response := trie.ExecuteCommand(write)
+		if result := replicator.ReplicateCommand(context.Background(), trie, write, response); !result.Queued || result.Skipped {
+			t.Fatalf("enqueue %s result = %#v, want queued", key, result)
+		}
+	}
+	select {
+	case key := <-attempted:
+		if key != "session:first" {
+			t.Fatalf("first failed attempt key = %q, want session:first", key)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first replication attempt did not start")
+	}
+	replicator.Close()
+	if err := outbox.Close(); err != nil {
+		t.Fatalf("Close(outbox) error = %v", err)
+	}
+
+	reopened, err := OpenLevelDBReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutbox(reopen) error = %v", err)
+	}
+	if jobs := reopened.jobs(); len(jobs) != 2 || jobs[0].result.Key != "session:first" || jobs[1].result.Key != "session:second" {
+		t.Fatalf("persisted jobs = %#v, want first then second", jobs)
+	}
+	mode.Store(1)
+	replayed := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 2,
+		AsyncOutbox:    reopened,
+	})
+	defer reopened.Close()
+	defer replayed.Close()
+
+	for _, want := range []string{"session:first", "session:second"} {
+		select {
+		case got := <-delivered:
+			if got != want {
+				t.Fatalf("delivered key = %q, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for replayed %s", want)
+		}
 	}
 	waitUntil(t, time.Second, func() bool {
 		return len(reopened.jobs()) == 0
