@@ -37,6 +37,22 @@ concepts, but set `bucket_count` to `65536` for new sharded topologies. Rename
 the operator-facing language from "bucket" to "slot" in docs and CLI output over
 time; internally they can remain compatible.
 
+Add explicit hash metadata to every sharded topology:
+
+```json
+{
+  "hash": "xxh3-64",
+  "hash_seed": "fixed-hex-seed",
+  "slot_count": 65536,
+  "slot_epoch": 12
+}
+```
+
+`slot_epoch` is a monotonic routing epoch, separate from the general topology
+version. It changes only when slot ownership or migration state changes. Clients
+can cheaply compare `slot_epoch` to decide whether a cached slot table is stale
+without treating unrelated node metadata edits as routing changes.
+
 Each slot range maps to a shard. Each shard has:
 
 - one primary node
@@ -51,6 +67,26 @@ Migration states should be explicit:
   client writes yet.
 - `cutover`: topology version has switched; clients should route to the target,
   and the old owner forwards or rejects with a route hint.
+
+Persist migration metadata per contiguous slot range:
+
+```json
+{
+  "start": 1024,
+  "end": 2047,
+  "from_shard": 0,
+  "to_shard": 3,
+  "state": "exporting",
+  "started_at": "2026-07-18T00:00:00Z",
+  "journal_sequence_fence": 9918273
+}
+```
+
+The journal sequence fence is the source sequence observed when the copy starts.
+The target must replay from that fence before cutover. That gives operators a
+clear invariant: no slot can enter `active` on the target until its copied
+snapshot and journal tail cover every source mutation through the cutover
+sequence.
 
 ## Placement Planner
 
@@ -72,6 +108,20 @@ removed, or weighted without assuming contiguous node indexes. Only slots owned
 by changed nodes need to move. The runtime hot path should not evaluate
 rendezvous for every command; it should route through the persisted slot ranges.
 
+The planner output should be a reviewable artifact, not an implicit mutation. Emit
+JSON and Markdown summaries containing:
+
+- topology fingerprint before and after
+- slot epoch before and proposed after
+- moved slot count and percentage
+- per-node primary slot counts before and after
+- estimated key counts and bytes when sampled from live nodes
+- ordered migration batches with source, target, slot range, and expected journal sequence fence
+- rollback plan for each batch
+
+The first implementation should stop at `plan` and `apply --dry-run`; an
+operator should explicitly approve `apply`.
+
 ## Rebalance Flow
 
 1. Generate a target slot map with rendezvous hashing.
@@ -89,6 +139,13 @@ Writes during migration should either stay on the old primary until cutover or
 be synchronously forwarded to the target. The simpler first implementation is
 old-primary writes plus journal catch-up; it has fewer split-brain cases.
 
+Rollback should be available until source cleanup. For `exporting` and
+`importing`, rollback means removing target-side imported keys for the slot
+range and returning the migration state to `active` on the source. During
+`cutover`, rollback is only safe if the old primary still has the source copy
+and can replay any target-accepted writes back through a reverse journal fence.
+After source cleanup, rollback becomes a new forward migration.
+
 ## Client And Batch Behavior
 
 Clients should cache the topology fingerprint and route by slot. On a
@@ -97,6 +154,22 @@ the command is idempotent. Public `BATCH` requests should be grouped by slot on
 the client when possible. The server can reject or split cross-slot batches
 later, but the first phase can execute them in order through the existing command
 path.
+
+Use Redis-compatible route hints for client behavior. The command names are
+`MOVED` for permanent routing changes and `ASK` for temporary migration
+redirects:
+
+- `MOVED slot host:port slot_epoch`: permanent owner changed; refresh the cached
+  slot table and retry against the new primary.
+- `ASK slot host:port slot_epoch`: temporary importing target; retry only this
+  command against the target and keep the cached table until `slot_epoch`
+  advances.
+
+Server-side public `BATCH` should eventually validate whether all mutating
+commands share one slot. Single-slot batches can execute locally. Cross-slot
+batches should either be rejected with a route summary or split into per-slot
+sub-batches only for commands that are individually safe to retry. Hash tags are
+the explicit client contract for colocating multi-key workflows.
 
 ## Implementation Steps
 
@@ -109,6 +182,9 @@ path.
 4. Add a planner command that outputs slot moves but does not apply them.
 5. Add migration states and read-only inspection endpoints before enabling
    automated movement.
+6. Add route-hint responses and client retry behavior.
+7. Add journal sequence fence tracking, catch-up verification, and rollback
+   rehearsal tests before allowing source cleanup.
 
 The big win is predictable resharding: a fast hash on the hot path, explicit
 slot ownership in the persisted topology, and rendezvous hashing only in the

@@ -136,6 +136,12 @@ func TestREADMELinksShardingProposal(t *testing.T) {
 		"rendezvous hashing",
 		"hash tags",
 		"migration states",
+		"slot epoch",
+		"`MOVED`",
+		"`ASK`",
+		"journal sequence fence",
+		"planner output",
+		"rollback",
 	} {
 		if !strings.Contains(proposal, token) {
 			t.Fatalf("SHARDING_PROPOSAL.md missing token %q", token)
