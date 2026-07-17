@@ -12,7 +12,7 @@ awk '
 	/^func \(ht \*HatTrie\) ExecuteCommand/ {
 		in_execute = 1
 	}
-	/^func \(ht \*HatTrie\) executeExactFastCommand/ {
+	/^func \(ht \*HatTrie\) executePublicBatchCommand/ {
 		in_execute = 0
 	}
 	in_execute && /^[[:space:]]*case "/ {

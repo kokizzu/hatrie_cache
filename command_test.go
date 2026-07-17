@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"encoding/json"
 	"math"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -50,6 +51,41 @@ func TestExecuteCommandBatchReturnsSubResponses(t *testing.T) {
 	}
 	if !response.Responses[3].OK || response.Responses[3].Value != "1" {
 		t.Fatalf("BATCH continued response = %#v, want EXISTS 1", response.Responses[3])
+	}
+}
+
+func TestExecuteCommandScalarBatchUsesLowAllocationFastPath(t *testing.T) {
+	batch := make([]CacheCommandRequest, 0, benchmarkCommandPipelineOps)
+	for i := 0; i < benchmarkCommandPipelineOps; i++ {
+		batch = append(batch, CacheCommandRequest{Command: "SETSTR", Key: "batch:key:" + strconv.Itoa(i), Value: "value"})
+	}
+	ht := newTestTrie(t)
+	allocs := testing.AllocsPerRun(100, func() {
+		response := ht.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Batch: batch})
+		if !response.OK {
+			t.Fatalf("ExecuteCommand(BATCH) = %#v, want ok", response)
+		}
+	})
+	if allocs > 17 {
+		t.Fatalf("BATCH scalar fast path allocations = %.0f, want <= 17", allocs)
+	}
+}
+
+func TestExecuteCommandScalarBatchFastPathKeepsSingleLockExecutor(t *testing.T) {
+	data, err := os.ReadFile("command.go")
+	if err != nil {
+		t.Fatalf("ReadFile(command.go) error = %v", err)
+	}
+	source := string(data)
+	for _, token := range []string{
+		"func (ht *HatTrie) executePublicScalarBatchCommand",
+		"ht.mu.Lock()",
+		"executePublicScalarBatchPayloadLocked",
+		"publicScalarBatchCommandCode",
+	} {
+		if !strings.Contains(source, token) {
+			t.Fatalf("command.go missing scalar batch fast-path token %q", token)
+		}
 	}
 }
 

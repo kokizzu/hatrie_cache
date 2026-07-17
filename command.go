@@ -1006,6 +1006,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 }
 
 func (ht *HatTrie) executePublicBatchCommand(request CacheCommandRequest) CacheCommandResponse {
+	if response, ok := ht.executePublicScalarBatchCommand(request); ok {
+		return response
+	}
 	return executePublicCommandBatchRequests(request, ht.ExecuteCommand)
 }
 
@@ -1031,6 +1034,225 @@ func executePublicCommandBatchRequests(request CacheCommandRequest, execute func
 	return publicCommandBatchResponse(responses, allOK)
 }
 
+func (ht *HatTrie) executePublicScalarBatchCommand(request CacheCommandRequest) (CacheCommandResponse, bool) {
+	payloads, err := publicCommandBatchRequests(request)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	for _, payload := range payloads {
+		if _, _, supported := publicScalarBatchCommandCode(payload.Command); !supported {
+			return CacheCommandResponse{}, false
+		}
+	}
+
+	responses := make([]CacheCommandResponse, len(payloads))
+	allOK := true
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	for idx, payload := range payloads {
+		response := ht.executePublicScalarBatchPayloadLocked(payload, idx)
+		if !response.OK {
+			allOK = false
+		}
+		responses[idx] = response
+	}
+	return publicCommandBatchResponse(responses, allOK), true
+}
+
+type publicScalarBatchCommand uint8
+
+const (
+	publicScalarBatchInvalid publicScalarBatchCommand = iota
+	publicScalarBatchGet
+	publicScalarBatchExists
+	publicScalarBatchSetString
+	publicScalarBatchSetStringTTL
+	publicScalarBatchSetCounter
+	publicScalarBatchSetCounterTTL
+	publicScalarBatchIncrement
+	publicScalarBatchDelete
+	publicScalarBatchTTL
+	publicScalarBatchExpire
+	publicScalarBatchExpireAt
+	publicScalarBatchPersist
+)
+
+func publicScalarBatchCommandCode(command string) (publicScalarBatchCommand, string, bool) {
+	switch command {
+	case "":
+		return publicScalarBatchInvalid, "command is required", true
+	case "BATCH":
+		return publicScalarBatchInvalid, "nested BATCH is not supported", true
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH":
+		return publicScalarBatchInvalid, "internal replication command " + command + " is not allowed", true
+	case "GET", "GETSTR":
+		return publicScalarBatchGet, "", true
+	case "EXISTS":
+		return publicScalarBatchExists, "", true
+	case "SET", "SETSTR":
+		return publicScalarBatchSetString, "", true
+	case "SETX", "SETSTRX":
+		return publicScalarBatchSetStringTTL, "", true
+	case "SETINT":
+		return publicScalarBatchSetCounter, "", true
+	case "SETINTX":
+		return publicScalarBatchSetCounterTTL, "", true
+	case "INC":
+		return publicScalarBatchIncrement, "", true
+	case "DEL":
+		return publicScalarBatchDelete, "", true
+	case "TTL":
+		return publicScalarBatchTTL, "", true
+	case "EXPIRE":
+		return publicScalarBatchExpire, "", true
+	case "EXPIREAT":
+		return publicScalarBatchExpireAt, "", true
+	case "PERSIST":
+		return publicScalarBatchPersist, "", true
+	default:
+		return publicScalarBatchInvalid, "", false
+	}
+}
+
+func (ht *HatTrie) executePublicScalarBatchPayloadLocked(request CacheCommandRequest, index int) CacheCommandResponse {
+	command, validationMessage, supported := publicScalarBatchCommandCode(request.Command)
+	if !supported {
+		return commandError("unsupported command")
+	}
+	if validationMessage != "" {
+		return commandError(fmt.Sprintf("batch value %d: %s", index, validationMessage))
+	}
+	key := strings.TrimSpace(request.Key)
+	if key == "" {
+		return commandError("key is required")
+	}
+	if err := validateKey(key); err != nil {
+		return commandError(err.Error())
+	}
+
+	switch command {
+	case publicScalarBatchGet:
+		value, ok, err := ht.commandValueLockedForKey(key)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "key not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: value}
+	case publicScalarBatchExists:
+		hval := ht.peekLocked(key)
+		hit := !hval.Empty()
+		ht.recordReadLocked(hit, key)
+		if hit {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
+	case publicScalarBatchSetString:
+		if response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds); ok && !response.OK {
+			return response
+		}
+		if err := ht.upsertStringLocked(key, request.Value); err != nil {
+			return commandError(err.Error())
+		}
+		if response, ok := ht.applyCommandExpirationLocked(key, request.TTLSeconds, request.UnixSeconds); ok {
+			return response
+		}
+		return CacheCommandResponse{OK: true, Message: "stored string"}
+	case publicScalarBatchSetStringTTL:
+		ttl, ok := requirePositiveTTL(request.TTLSeconds)
+		if !ok {
+			return commandError("positive ttl_seconds is required")
+		}
+		if err := ht.upsertStringLocked(key, request.Value); err != nil {
+			return commandError(err.Error())
+		}
+		if !ht.expireRelativeLocked(key, ttl) {
+			return commandError("failed to set ttl")
+		}
+		return CacheCommandResponse{OK: true, Message: "stored string with ttl"}
+	case publicScalarBatchSetCounter:
+		value, ok := parseCommandInt32(request.Value)
+		if !ok {
+			return commandError("value must be a 32-bit integer")
+		}
+		if response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds); ok && !response.OK {
+			return response
+		}
+		if err := ht.upsertCounterLocked(key, value); err != nil {
+			return commandError(err.Error())
+		}
+		if response, ok := ht.applyCommandExpirationLocked(key, request.TTLSeconds, request.UnixSeconds); ok {
+			return response
+		}
+		return CacheCommandResponse{OK: true, Message: "stored counter"}
+	case publicScalarBatchSetCounterTTL:
+		value, ok := parseCommandInt32(request.Value)
+		if !ok {
+			return commandError("value must be a 32-bit integer")
+		}
+		ttl, ok := requirePositiveTTL(request.TTLSeconds)
+		if !ok {
+			return commandError("positive ttl_seconds is required")
+		}
+		if err := ht.upsertCounterLocked(key, value); err != nil {
+			return commandError(err.Error())
+		}
+		if !ht.expireRelativeLocked(key, ttl) {
+			return commandError("failed to set ttl")
+		}
+		return CacheCommandResponse{OK: true, Message: "stored counter with ttl"}
+	case publicScalarBatchIncrement:
+		by, ok := parseCommandIncrement(request.Value)
+		if !ok {
+			return commandError("value must be a 32-bit integer")
+		}
+		value, ok, err := ht.incrementCounterLocked(key, by, true)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
+			return commandError("counter overflow")
+		}
+		return CacheCommandResponse{OK: true, Message: "incremented", Value: strconv.FormatInt(int64(value), 10)}
+	case publicScalarBatchDelete:
+		if ht.deleteAndRecordLocked(key) {
+			return CacheCommandResponse{OK: true, Message: "deleted"}
+		}
+		return CacheCommandResponse{OK: true, Message: "key not found"}
+	case publicScalarBatchTTL:
+		ttl := ht.ttlLocked(key)
+		if ttl == NoTTL {
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "-1"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatInt(int64(ttl/time.Second), 10)}
+	case publicScalarBatchExpire:
+		ttl, ok := requirePositiveTTL(request.TTLSeconds)
+		if !ok {
+			return commandError("positive ttl_seconds is required")
+		}
+		if !ht.expireRelativeLocked(key, ttl) {
+			return CacheCommandResponse{OK: true, Message: "key not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ttl updated"}
+	case publicScalarBatchExpireAt:
+		if request.UnixSeconds == nil {
+			return commandError("unix_seconds is required")
+		}
+		if !ht.expireAtAndRecordLocked(key, time.Unix(*request.UnixSeconds, 0)) {
+			return CacheCommandResponse{OK: true, Message: "key not found"}
+		}
+		return CacheCommandResponse{OK: true, Message: "expiration updated"}
+	case publicScalarBatchPersist:
+		if !ht.persistLocked(key) {
+			return CacheCommandResponse{OK: true, Message: "key not found or no ttl"}
+		}
+		return CacheCommandResponse{OK: true, Message: "ttl removed"}
+	default:
+		return commandError("unsupported command")
+	}
+}
+
 func publicCommandBatchRequests(request CacheCommandRequest) ([]CacheCommandRequest, error) {
 	if len(request.Batch) == 0 {
 		return nil, errors.New("batch requires requests")
@@ -1038,7 +1260,7 @@ func publicCommandBatchRequests(request CacheCommandRequest) ([]CacheCommandRequ
 	if len(request.Batch) > maxPublicCommandBatchSize {
 		return nil, fmt.Errorf("batch size must be <= %d", maxPublicCommandBatchSize)
 	}
-	return append([]CacheCommandRequest(nil), request.Batch...), nil
+	return request.Batch, nil
 }
 
 func validatePublicCommandBatchPayload(request CacheCommandRequest, index int) error {
@@ -2486,6 +2708,10 @@ func (ht *HatTrie) commandValue(key string) (string, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	return ht.commandValueLockedForKey(key)
+}
+
+func (ht *HatTrie) commandValueLockedForKey(key string) (string, bool, error) {
 	hval, err := ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
@@ -2503,6 +2729,176 @@ func (ht *HatTrie) commandValue(key string) (string, bool, error) {
 	}
 	ht.recordReadLocked(true, key)
 	return value, true, nil
+}
+
+func (ht *HatTrie) upsertStringLocked(key string, value string) error {
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
+	if hval.IsStringAtRaws() {
+		ht.raws.putStringOwned(hval.Index, value)
+		ht.clearExpirationLocked(key)
+		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked(key)
+		return nil
+	}
+
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.raws.addStringOwned(value)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
+	ht.recordWriteLocked(key)
+	return nil
+}
+
+func (ht *HatTrie) upsertCounterLocked(key string, value int32) error {
+	rawPtr, hval, err := ht.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
+	if !hval.IsCounter() {
+		ht.returnStorage(hval)
+	}
+	ht.clearExpirationLocked(key)
+	*rawPtr = HatValue{Index: value, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
+	ht.recordWriteLocked(key)
+	return nil
+}
+
+func (ht *HatTrie) incrementCounterLocked(key string, by int32, checkOverflow bool) (int32, bool, error) {
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return 0, false, err
+	}
+	if hval.IsCounter() {
+		if checkOverflow {
+			next := int64(hval.Index) + int64(by)
+			if next < minCommandInt32 || next > maxCommandInt32 {
+				return hval.Index, false, nil
+			}
+			hval.Index = int32(next)
+		} else {
+			hval.Index += by
+		}
+	} else {
+		if rawPtr == nil {
+			rawPtr = ht.upsertLocation(key)
+		}
+		ht.returnStorage(hval)
+		ht.clearExpirationLocked(key)
+		hval.Flags = DATAVALUE_TYPE_COUNTER
+		hval.Index = by
+	}
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	return hval.Index, true, nil
+}
+
+func (ht *HatTrie) deleteAndRecordLocked(key string) bool {
+	deleted := ht.deleteLocked(key)
+	if deleted {
+		ht.recordDeleteLocked(key)
+	}
+	return deleted
+}
+
+func (ht *HatTrie) expireRelativeLocked(key string, ttl time.Duration) bool {
+	if ttl <= 0 {
+		return ht.deleteAndRecordLocked(key)
+	}
+	return ht.expireAtAndRecordLocked(key, ht.currentTime().Add(ttl))
+}
+
+func (ht *HatTrie) expireAtAndRecordLocked(key string, at time.Time) bool {
+	ok, deleted := ht.expireAtLocked(key, at)
+	if ok {
+		if deleted {
+			ht.recordDeleteLocked(key)
+		} else {
+			ht.recordWriteLocked(key)
+		}
+	}
+	return ok
+}
+
+func (ht *HatTrie) persistLocked(key string) bool {
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		ht.clearExpirationLocked(key)
+		return false
+	}
+
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
+		return false
+	}
+	if _, ok := ht.expires[key]; !ok {
+		return false
+	}
+
+	ht.clearExpirationLocked(key)
+	hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+	*rawPtr = hval.toValue()
+	ht.recordWriteLocked(key)
+	return true
+}
+
+func (ht *HatTrie) ttlLocked(key string) time.Duration {
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		ht.clearExpirationLocked(key)
+		ht.recordReadLocked(false, key)
+		return NoTTL
+	}
+
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
+		ht.recordReadLocked(false, key)
+		return NoTTL
+	}
+
+	expiresAt, ok := ht.expires[key]
+	if !ok {
+		ht.recordReadLocked(false, key)
+		return NoTTL
+	}
+	ttl := expiresAt.Sub(ht.currentTime())
+	if ttl <= 0 {
+		if ht.deleteKnownLocked(key, hval) {
+			ht.recordExpirationLocked(key)
+		}
+		ht.recordReadLocked(false, key)
+		return NoTTL
+	}
+	ht.recordReadLocked(true, key)
+	return ttl
+}
+
+func (ht *HatTrie) applyCommandExpirationLocked(key string, ttlSeconds *int64, unixSeconds *int64) (CacheCommandResponse, bool) {
+	if ttlSeconds == nil && unixSeconds == nil {
+		return CacheCommandResponse{}, false
+	}
+	if ttlSeconds != nil && unixSeconds != nil {
+		return commandError("ttl_seconds and unix_seconds are mutually exclusive"), true
+	}
+	if ttlSeconds != nil {
+		ttl, ok := requirePositiveTTL(ttlSeconds)
+		if !ok {
+			return commandError("ttl_seconds must be positive"), true
+		}
+		if !ht.expireRelativeLocked(key, ttl) {
+			return commandError("failed to set ttl"), true
+		}
+		return CacheCommandResponse{OK: true, Message: "stored with ttl"}, true
+	}
+	if !ht.expireAtAndRecordLocked(key, time.Unix(*unixSeconds, 0)) {
+		return commandError("failed to set expiration"), true
+	}
+	return CacheCommandResponse{OK: true, Message: "stored with expiration"}, true
 }
 
 func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {

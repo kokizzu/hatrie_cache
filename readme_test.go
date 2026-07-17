@@ -329,7 +329,7 @@ func executeCommandCases(t *testing.T) [][]string {
 		t.Fatal("ExecuteCommand function not found")
 	}
 	data = data[start:]
-	end := bytes.Index(data, []byte("\nfunc (ht *HatTrie) executeExactFastCommand"))
+	end := bytes.Index(data, []byte("\nfunc (ht *HatTrie) executePublicBatchCommand"))
 	if end < 0 {
 		t.Fatal("ExecuteCommand end marker not found")
 	}

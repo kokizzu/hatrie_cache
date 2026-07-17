@@ -302,7 +302,7 @@ payload shape before assuming it beats HTTP JSON.
 
 ## HAT-trie Command Families
 
-HAT-trie cache currently has 94 canonical command groups in `ExecuteCommand`,
+HAT-trie cache currently has 92 canonical command groups in `ExecuteCommand`,
 plus Redis-style aliases for several probabilistic and compact structures. The
 command set is strongest where Redis is also strong as a data-structure server:
 strings, counters, TTLs, lists/queues, sets, priority queues/sorted-set-like

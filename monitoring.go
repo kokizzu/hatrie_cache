@@ -846,6 +846,9 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	if err != nil {
 		return commandError(err.Error()), false
 	}
+	if publicCommandBatchCanUseTrieFastPath(options) {
+		return trie.ExecuteCommand(request), false
+	}
 	responses := make([]CacheCommandResponse, 0, len(payloads))
 	allOK := true
 	for idx, payload := range payloads {
@@ -866,6 +869,14 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 		responses = append(responses, response)
 	}
 	return publicCommandBatchResponse(responses, allOK), false
+}
+
+func publicCommandBatchCanUseTrieFastPath(options commandExecutionOptions) bool {
+	return options.Journal == nil &&
+		options.DirtyTracker == nil &&
+		options.Replicator == nil &&
+		options.ReplicationSafety == nil &&
+		!options.EnforceLeaderWrites
 }
 
 func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
