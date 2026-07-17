@@ -112,6 +112,37 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 	}
 }
 
+func TestREADMELinksShardingProposal(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	proposalData, err := os.ReadFile("SHARDING_PROPOSAL.md")
+	if err != nil {
+		t.Fatalf("ReadFile(SHARDING_PROPOSAL.md) error = %v", err)
+	}
+	readme := string(readmeData)
+	proposal := string(proposalData)
+	for _, token := range []string{
+		"[`SHARDING_PROPOSAL.md`](SHARDING_PROPOSAL.md)",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md missing sharding token %q", token)
+		}
+	}
+	for _, token := range []string{
+		"XXH3 64-bit",
+		"65,536 logical slots",
+		"rendezvous hashing",
+		"hash tags",
+		"migration states",
+	} {
+		if !strings.Contains(proposal, token) {
+			t.Fatalf("SHARDING_PROPOSAL.md missing token %q", token)
+		}
+	}
+}
+
 func TestREADMEListsBenchmarkRegressionGuard(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {

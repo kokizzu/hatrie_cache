@@ -757,6 +757,8 @@ The topology endpoint validates nodes, shard ownership, and replicas, and can
 route a key to its shard. Topologies default to `mode: "sharded"`. Set
 `bucket_count` and compact `bucket_ranges` to use vbucket-style routing, or set
 `mode: "full_replica"` to route every key to every node without partitions:
+see [`SHARDING_PROPOSAL.md`](SHARDING_PROPOSAL.md) for the proposed XXH3 slot
+hash, hash tags, rendezvous placement planner, and migration states.
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json
