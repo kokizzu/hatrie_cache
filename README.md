@@ -789,6 +789,14 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_WIRE_FORMAT=json
 ```
 
+Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP
+replication and require the same token for inbound `INTERNALSET`/`INTERNALDEL`
+commands. Replication clients send both `Authorization: Bearer <token>` and
+`X-Hatrie-Replication-Token: <token>`. The replication token is intentionally
+narrow: it is accepted only on `POST /api/commands` for internal replication
+commands, not for health, metrics, config, or normal client commands. The
+operator `MONITORING_AUTH_TOKEN` still has full monitoring API access.
+
 Replication payloads include source-node, monotonic sequence, and topology
 fingerprint metadata. Receivers suppress duplicate internal replication
 commands from the same source/sequence. Clustered receivers reject replication
@@ -837,6 +845,7 @@ retry age, per-target drops, per-target failures, closed state,
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true REPLICATION_OUTBOX_PATH=data/replication-outbox.json
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_AUTH_TOKEN=replica-secret
 ```
 
 Set `ENFORCE_LEADER_WRITES=true` on clustered nodes to reject mutating client

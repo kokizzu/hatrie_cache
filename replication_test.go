@@ -159,6 +159,37 @@ func TestHTTPReplicatorReplicatesSetAndDeleteToOwners(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSendsReplicationAuthToken(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer replica-secret" {
+			t.Fatalf("Authorization = %q, want bearer replication token", got)
+		}
+		if got := r.Header.Get("X-Hatrie-Replication-Token"); got != "replica-secret" {
+			t.Fatalf("X-Hatrie-Replication-Token = %q, want replication token", got)
+		}
+		_ = mustDecodeReplicationTestCommand(t, w, r)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:      "node-a",
+		Topology:  topology,
+		Election:  election,
+		Client:    target.Client(),
+		AuthToken: " replica-secret ",
+	})
+
+	response := trie.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"})
+	result := replicator.ReplicateCommand(context.Background(), trie, CacheCommandRequest{Command: "SETSTR", Key: "session:1", Value: "value"}, response)
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("replication result = %#v, want one authenticated ok target", result)
+	}
+}
+
 func TestHTTPReplicatorAnnotatesReplicationSafetyMetadata(t *testing.T) {
 	topology, err := NewTopologyStore(ClusterTopology{
 		Version: 1,

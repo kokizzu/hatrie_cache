@@ -123,6 +123,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"replication_outbox_path": "/data/replication-outbox.json",
 		"replication_circuit_breaker_failures": 4,
 		"replication_circuit_breaker_cooldown": "12s",
+		"replication_auth_token": "replica-secret",
 		"db_path": "/data/cache.leveldb",
 		"db_hot_load": true,
 		"db_hot_load_max_bytes": 2048,
@@ -153,6 +154,9 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	}
 	if cfg.replicationCircuitFailures != 4 || cfg.replicationCircuitCooldown != 12*time.Second {
 		t.Fatalf("replication circuit breaker config = %d/%s, want 4/12s", cfg.replicationCircuitFailures, cfg.replicationCircuitCooldown)
+	}
+	if cfg.replicationAuthToken != "replica-secret" {
+		t.Fatalf("replication auth token = %q, want config file value", cfg.replicationAuthToken)
 	}
 	if cfg.dbPath != "/data/cache.leveldb" || !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 {
 		t.Fatalf("db config = %#v, want file values", cfg)
@@ -384,6 +388,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-circuit-breaker-failures", "4",
 		"-replication-circuit-breaker-cooldown", "20s",
 		"-replication-wire-format", "json",
+		"-replication-auth-token", "replica-secret",
 		"-replication-sync-interval", "10s",
 		"-replication-sync-prefix", "session:",
 		"-enforce-leader-writes",
@@ -405,6 +410,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if cfg.replicationWireFormat != "json" || replicationWireFormat(cfg) != hatriecache.CommandWireFormatJSON {
 		t.Fatalf("replication wire format = %q, want json", cfg.replicationWireFormat)
+	}
+	if cfg.replicationAuthToken != "replica-secret" {
+		t.Fatalf("replication auth token = %q, want explicit value", cfg.replicationAuthToken)
 	}
 	if cfg.replicationSyncInterval != 10*time.Second || cfg.replicationSyncPrefix != "session:" {
 		t.Fatalf("cfg replication sync = %s/%q, want 10s/session:", cfg.replicationSyncInterval, cfg.replicationSyncPrefix)
@@ -1029,20 +1037,21 @@ func TestRunPrintConfigRedactsSecretsAndDoesNotStartListeners(t *testing.T) {
 		"-monitoring-server",
 		"-monitoring-addr", monitoringAddr,
 		"-monitoring-auth-token", "super-secret",
+		"-replication-auth-token", "replica-secret",
 		"-rate-limit", "4",
 	}, stdout, &bytes.Buffer{}); err != nil {
 		t.Fatalf("run(print-config) error = %v", err)
 	}
 	body := stdout.String()
-	if strings.Contains(body, "super-secret") {
+	if strings.Contains(body, "super-secret") || strings.Contains(body, "replica-secret") {
 		t.Fatalf("print-config leaked auth token: %s", body)
 	}
 	var got map[string]interface{}
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("print-config JSON error = %v\n%s", err, body)
 	}
-	if got["monitoring_auth_token"] != "<redacted>" || got["monitoring_addr"] != monitoringAddr || got["rate_limit"] != float64(4) {
-		t.Fatalf("print-config = %#v, want redacted token, address, and rate limit", got)
+	if got["monitoring_auth_token"] != "<redacted>" || got["replication_auth_token"] != "<redacted>" || got["monitoring_addr"] != monitoringAddr || got["rate_limit"] != float64(4) {
+		t.Fatalf("print-config = %#v, want redacted tokens, address, and rate limit", got)
 	}
 	assertAddrAvailable(t, monitoringAddr)
 }
@@ -1204,6 +1213,7 @@ func TestRunServesRedactedConfigEndpoint(t *testing.T) {
 			"-monitoring-addr", monitoringAddr,
 			"-monitoring-web-dir", "",
 			"-monitoring-auth-token", "super-secret",
+			"-replication-auth-token", "replica-secret",
 			"-rate-limit", "9",
 		}, &bytes.Buffer{}, &bytes.Buffer{})
 	}()
@@ -1227,10 +1237,10 @@ func TestRunServesRedactedConfigEndpoint(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("/api/config JSON error = %v", err)
 	}
-	if got["monitoring_auth_token"] != "<redacted>" || got["rate_limit"] != float64(9) || got["monitoring_addr"] != monitoringAddr {
-		t.Fatalf("/api/config = %#v, want redacted token, rate limit, and address", got)
+	if got["monitoring_auth_token"] != "<redacted>" || got["replication_auth_token"] != "<redacted>" || got["rate_limit"] != float64(9) || got["monitoring_addr"] != monitoringAddr {
+		t.Fatalf("/api/config = %#v, want redacted tokens, rate limit, and address", got)
 	}
-	if text := fmt.Sprint(got); strings.Contains(text, "super-secret") {
+	if text := fmt.Sprint(got); strings.Contains(text, "super-secret") || strings.Contains(text, "replica-secret") {
 		t.Fatalf("/api/config leaked auth token: %s", text)
 	}
 

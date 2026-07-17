@@ -34,6 +34,7 @@ type MonitoringOptions struct {
 	NodeName             string
 	WebDir               string
 	AuthToken            string
+	ReplicationAuthToken string
 	AuditLog             *AuditLogger
 	WriteProtected       bool
 	RateLimiter          *RateLimiter
@@ -228,21 +229,31 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
 	var out http.Handler = mux
-	if strings.TrimSpace(handler.options.AuthToken) != "" {
-		out = monitoringAuthHandler(strings.TrimSpace(handler.options.AuthToken), out)
+	authToken := normalizeAuthToken(handler.options.AuthToken)
+	replicationAuthToken := normalizeAuthToken(handler.options.ReplicationAuthToken)
+	if authToken != "" || replicationAuthToken != "" {
+		out = monitoringAuthHandler(authToken, replicationAuthToken, out)
 	}
 	return gzipHTTPHandler(out)
 }
 
-func monitoringAuthHandler(token string, next http.Handler) http.Handler {
+func monitoringAuthHandler(token string, replicationToken string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !monitoringPathRequiresAuth(r.URL.Path) || monitoringRequestAuthorized(r, token) {
+		if !monitoringPathRequiresAuth(r.URL.Path) || token == "" || monitoringRequestAuthorized(r, token) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		w.Header().Set("WWW-Authenticate", `Bearer realm="hatrie-cache"`)
-		writeJSONStatus(w, http.StatusUnauthorized, commandError("unauthorized"))
+		if r.URL.Path == "/api/commands" && monitoringReplicationRequestAuthorized(r, replicationToken) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeMonitoringUnauthorized(w)
 	})
+}
+
+func writeMonitoringUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="hatrie-cache"`)
+	writeJSONStatus(w, http.StatusUnauthorized, commandError("unauthorized"))
 }
 
 func monitoringPathRequiresAuth(path string) bool {
@@ -254,7 +265,26 @@ func monitoringRequestAuthorized(r *http.Request, token string) bool {
 	if token == "" {
 		return true
 	}
+	return monitoringRequestHasAuthToken(r, token)
+}
+
+func monitoringRequestHasAuthToken(r *http.Request, token string) bool {
+	token = normalizeAuthToken(token)
+	if token == "" {
+		return false
+	}
 	if authTokenMatches(r.Header.Get("X-Hatrie-Auth-Token"), token) {
+		return true
+	}
+	return authTokenMatches(authBearerToken(r.Header.Get("Authorization")), token)
+}
+
+func monitoringReplicationRequestAuthorized(r *http.Request, token string) bool {
+	token = normalizeAuthToken(token)
+	if token == "" {
+		return false
+	}
+	if authTokenMatches(r.Header.Get("X-Hatrie-Replication-Token"), token) {
 		return true
 	}
 	return authTokenMatches(authBearerToken(r.Header.Get("Authorization")), token)
@@ -611,6 +641,9 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if requestContextDone(w, r) {
 		return
 	}
+	if handler.rejectReplicationAuthHTTP(w, r, request) {
+		return
+	}
 	if handler.rejectDangerousCommandHTTP(w, r, request, requestFormat) {
 		return
 	}
@@ -631,6 +664,34 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	}
 	handler.auditCommandHTTP(r, request, response, response.OK, http.StatusOK)
 	writeCommandResponseWire(w, r, http.StatusOK, response, requestFormat)
+}
+
+func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest) bool {
+	replicationToken := normalizeAuthToken(handler.options.ReplicationAuthToken)
+	if replicationToken == "" {
+		return false
+	}
+	monitoringAuthorized := monitoringRequestHasAuthToken(r, normalizeAuthToken(handler.options.AuthToken))
+	replicationAuthorized := monitoringReplicationRequestAuthorized(r, replicationToken)
+	isInternal := isInternalReplicationCommand(request)
+	if isInternal && !monitoringAuthorized && !replicationAuthorized {
+		writeMonitoringUnauthorized(w)
+		return true
+	}
+	if !isInternal && replicationAuthorized && !monitoringAuthorized {
+		writeMonitoringUnauthorized(w)
+		return true
+	}
+	return false
+}
+
+func isInternalReplicationCommand(request CacheCommandRequest) bool {
+	switch normalizedCommand(request.Command) {
+	case "INTERNALSET", "INTERNALDEL":
+		return true
+	default:
+		return false
+	}
 }
 
 func (handler *MonitoringHandler) auditCommandHTTP(r *http.Request, request CacheCommandRequest, response CacheCommandResponse, ok bool, status int) {

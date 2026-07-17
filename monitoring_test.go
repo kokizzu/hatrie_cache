@@ -1510,6 +1510,56 @@ func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
 	}
 }
 
+func TestMonitoringReplicationAuthTokenOnlyAllowsInternalCommands(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		AuthToken:            "operator-secret",
+		ReplicationAuthToken: "replica-secret",
+	}).Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("replication token health status = %d, want 401", resp.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"name","value":"ivi"}`))
+	req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("replication token client command status = %d, want 401", resp.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"INTERNALSET","key":"name","value":"{\"type\":\"string\",\"string\":\"replicated\"}"}`))
+	req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("replication token internal command status = %d body %q, want 200", resp.Code, resp.Body.String())
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: "name"}); !got.OK || got.Value != "replicated" {
+		t.Fatalf("replicated GETSTR = %#v, want replicated value", got)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"name","value":"operator"}`))
+	req.Header.Set("Authorization", "Bearer operator-secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("operator token command status = %d body %q, want 200", resp.Code, resp.Body.String())
+	}
+
+	openHandler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{ReplicationAuthToken: "replica-secret"}).Handler()
+	resp = httptest.NewRecorder()
+	openHandler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"INTERNALDEL","key":"name"}`)))
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("internal command without replication token status = %d, want 401", resp.Code)
+	}
+}
+
 func TestMonitoringHandlerExposesRuntimeConfig(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{

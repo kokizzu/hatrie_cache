@@ -47,6 +47,7 @@ type HTTPReplicatorOptions struct {
 	CircuitBreakerFailures int
 	CircuitBreakerCooldown time.Duration
 	WireFormat             CommandWireFormat
+	AuthToken              string
 }
 
 type HTTPReplicator struct {
@@ -60,6 +61,7 @@ type HTTPReplicator struct {
 	retry           time.Duration
 	attempts        uint
 	wireFormat      CommandWireFormat
+	authToken       string
 	outbox          *ReplicationOutboxStore
 	breakerFailures int
 	breakerCooldown time.Duration
@@ -267,6 +269,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		client:          client,
 		timeout:         timeout,
 		wireFormat:      wireFormat,
+		authToken:       normalizeAuthToken(options.AuthToken),
 		outbox:          options.AsyncOutbox,
 		breakerFailures: options.CircuitBreakerFailures,
 		breakerCooldown: options.CircuitBreakerCooldown,
@@ -1477,6 +1480,10 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	req.Header.Set("Accept", contentType)
 	req.Header.Set("Content-Type", contentType)
+	if replicator.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+replicator.authToken)
+		req.Header.Set("X-Hatrie-Replication-Token", replicator.authToken)
+	}
 	if contentEncoding != "" {
 		req.Header.Set("Content-Encoding", contentEncoding)
 	}
