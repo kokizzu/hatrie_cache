@@ -31,4 +31,6 @@ luikore__hat-trie/test-driver
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+# Local generated artifacts
+build/
 

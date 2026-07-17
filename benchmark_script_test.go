@@ -56,9 +56,16 @@ func TestBenchmarkCISmokeScriptSupportsRegressionThresholds(t *testing.T) {
 		"BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP",
 		"BENCH_CI_SMOKE_MAX_B_OP",
 		"BENCH_CI_SMOKE_MAX_ALLOCS_OP",
+		"BENCH_CI_SMOKE_ARTIFACT_DIR",
+		"BENCH_CI_SMOKE_BASELINE_JSON",
+		"BENCH_CI_SMOKE_MAX_REGRESSION_PCT",
+		"BENCH_CI_SMOKE_COMPARE_MEMORY",
 		"ns/op",
 		"B/op",
 		"allocs/op",
+		"benchmark-ci-smoke.json",
+		"benchmark-ci-smoke.md",
+		"go run ./cmd/hatrie-benchcmp",
 		"Benchmark CI smoke regression guard failed",
 	} {
 		if !strings.Contains(script, token) {
@@ -78,6 +85,10 @@ func TestBenchmarkCISmokeScriptSupportsRegressionThresholds(t *testing.T) {
 		"BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP ?=",
 		"BENCH_CI_SMOKE_MAX_B_OP ?=",
 		"BENCH_CI_SMOKE_MAX_ALLOCS_OP ?=",
+		"BENCH_CI_SMOKE_ARTIFACT_DIR ?=",
+		"BENCH_CI_SMOKE_BASELINE_JSON ?=",
+		"BENCH_CI_SMOKE_MAX_REGRESSION_PCT ?= 20",
+		"BENCH_CI_SMOKE_COMPARE_MEMORY ?= 0",
 	} {
 		if !strings.Contains(makefile, token) {
 			t.Fatalf("Makefile missing benchmark CI smoke threshold token %q", token)

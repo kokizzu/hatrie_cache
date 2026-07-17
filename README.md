@@ -88,6 +88,8 @@ Run the CI benchmark smoke locally:
 make bench-ci-smoke
 make bench-ci-smoke BENCH_CI_SMOKE_CHECK_THRESHOLDS=1
 make bench-ci-smoke BENCH_CI_SMOKE_CHECK_THRESHOLDS=1 BENCH_CI_SMOKE_MAX_COMMAND_NS_OP=100000 BENCH_CI_SMOKE_MAX_B_OP=262144
+make bench-ci-smoke BENCH_CI_SMOKE_ARTIFACT_DIR=build/benchmarks
+make bench-ci-smoke BENCH_CI_SMOKE_ARTIFACT_DIR=build/current BENCH_CI_SMOKE_BASELINE_JSON=build/main/benchmark-ci-smoke.json
 ```
 
 `BENCH_CI_SMOKE_CHECK_THRESHOLDS=1` turns the smoke run into an optional
@@ -97,6 +99,12 @@ serialization benchmark rows against `BENCH_CI_SMOKE_MAX_COMMAND_NS_OP`,
 `BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP`, `BENCH_CI_SMOKE_MAX_B_OP`, and
 `BENCH_CI_SMOKE_MAX_ALLOCS_OP`. Set any max to `0` to disable that specific
 limit.
+Set `BENCH_CI_SMOKE_ARTIFACT_DIR` to write raw output plus
+`benchmark-ci-smoke.json`, `benchmark-ci-smoke.md`, and timestamped history
+copies. Set `BENCH_CI_SMOKE_BASELINE_JSON` to compare the current artifact
+against a baseline from `origin/master` or a checked-in/downloaded artifact;
+`BENCH_CI_SMOKE_MAX_REGRESSION_PCT` controls the allowed `ns/op` regression,
+and `BENCH_CI_SMOKE_COMPARE_MEMORY=1` also compares `B/op` and `allocs/op`.
 
 The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
 

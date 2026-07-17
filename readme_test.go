@@ -124,6 +124,12 @@ func TestREADMEListsBenchmarkRegressionGuard(t *testing.T) {
 		"`BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP`",
 		"`BENCH_CI_SMOKE_MAX_B_OP`",
 		"`BENCH_CI_SMOKE_MAX_ALLOCS_OP`",
+		"`BENCH_CI_SMOKE_ARTIFACT_DIR`",
+		"`benchmark-ci-smoke.json`",
+		"`benchmark-ci-smoke.md`",
+		"`BENCH_CI_SMOKE_BASELINE_JSON`",
+		"`BENCH_CI_SMOKE_MAX_REGRESSION_PCT`",
+		"`BENCH_CI_SMOKE_COMPARE_MEMORY=1`",
 		"Set any max to `0` to disable that specific",
 	} {
 		if !strings.Contains(readme, token) {

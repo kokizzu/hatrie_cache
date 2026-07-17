@@ -12,10 +12,19 @@ max_transport_ns=${BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP:-500000}
 max_serialization_ns=${BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP:-250000}
 max_b_op=${BENCH_CI_SMOKE_MAX_B_OP:-1048576}
 max_allocs_op=${BENCH_CI_SMOKE_MAX_ALLOCS_OP:-512}
+artifact_dir=${BENCH_CI_SMOKE_ARTIFACT_DIR:-}
+baseline_json=${BENCH_CI_SMOKE_BASELINE_JSON:-}
+max_regression_pct=${BENCH_CI_SMOKE_MAX_REGRESSION_PCT:-20}
+compare_memory=${BENCH_CI_SMOKE_COMPARE_MEMORY:-0}
+run_id=${BENCH_CI_SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
+created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/hatrie-bench-ci-smoke.XXXXXX")
 command_output="$tmp_dir/command.txt"
 transport_output="$tmp_dir/transport.txt"
 serialization_output="$tmp_dir/serialization.txt"
+rows_file="$tmp_dir/rows.tsv"
+current_json="$tmp_dir/benchmark-ci-smoke.json"
+current_md="$tmp_dir/benchmark-ci-smoke.md"
 
 cleanup() {
 	rm -rf "$tmp_dir"
@@ -100,6 +109,128 @@ END {
 ' "$output_file"
 }
 
+collect_benchmark_rows() {
+	section=$1
+	output_file=$2
+	awk -v section="$section" '
+function number(value) {
+	gsub(/,/, "", value)
+	return value + 0
+}
+/^Benchmark/ {
+	name = $1
+	ns = 0
+	bytes = 0
+	allocs = 0
+	for (i = 2; i <= NF; i++) {
+		if ($i == "ns/op" && i > 1) {
+			ns = number($(i - 1))
+		}
+		if ($i == "B/op" && i > 1) {
+			bytes = number($(i - 1))
+		}
+		if ($i == "allocs/op" && i > 1) {
+			allocs = number($(i - 1))
+		}
+	}
+	printf "%s\t%s\t%.0f\t%.0f\t%.0f\n", section, name, ns, bytes, allocs
+}
+' "$output_file"
+}
+
+write_json_artifact() {
+	output_file=$1
+	{
+		printf '{\n'
+		printf '  "schema": "hatrie-cache-benchmark-ci-smoke/v1",\n'
+		printf '  "run_id": "%s",\n' "$run_id"
+		printf '  "created_at": "%s",\n' "$created_at"
+		printf '  "benchtime": "%s",\n' "$benchtime"
+		printf '  "count": "%s",\n' "$count"
+		printf '  "metadata": {\n'
+		printf '    "command_bench": "%s",\n' "$(json_escape "$command_bench")"
+		printf '    "transport_bench": "%s",\n' "$(json_escape "$transport_bench")"
+		printf '    "serialization_bench": "%s"\n' "$(json_escape "$serialization_bench")"
+		printf '  },\n'
+		printf '  "results": [\n'
+		awk -F '\t' '
+function escape(value) {
+	gsub(/\\/, "\\\\", value)
+	gsub(/"/, "\\\"", value)
+	return value
+}
+{
+	if (NR > 1) {
+		printf ",\n"
+	}
+	printf "    {\"section\":\"%s\",\"name\":\"%s\",\"ns_op\":%s,\"b_op\":%s,\"allocs_op\":%s}", escape($1), escape($2), $3, $4, $5
+}
+END {
+	if (NR > 0) {
+		printf "\n"
+	}
+}
+' "$rows_file"
+		printf '  ]\n'
+		printf '}\n'
+	} >"$output_file"
+}
+
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_markdown_artifact() {
+	output_file=$1
+	{
+		printf '%s\n\n' '# Benchmark CI Smoke'
+		printf '%s\n' "- Run ID: \`$run_id\`"
+		printf '%s\n' "- Created at: \`$created_at\`"
+		printf '%s\n' "- Benchtime: \`$benchtime\`"
+		printf '%s\n\n' "- Count: \`$count\`"
+		printf '%s\n' '| Section | Benchmark | ns/op | B/op | allocs/op |'
+		printf '%s\n' '| --- | --- | ---: | ---: | ---: |'
+		awk -F '\t' '{ printf "| %s | `%s` | %s | %s | %s |\n", $1, $2, $3, $4, $5 }' "$rows_file"
+	} >"$output_file"
+}
+
+write_artifacts() {
+	: >"$rows_file"
+	collect_benchmark_rows "Command feature" "$command_output" >>"$rows_file"
+	collect_benchmark_rows "Transport feature" "$transport_output" >>"$rows_file"
+	collect_benchmark_rows "Serialization" "$serialization_output" >>"$rows_file"
+	write_json_artifact "$current_json"
+	write_markdown_artifact "$current_md"
+	if [ -n "$artifact_dir" ]; then
+		mkdir -p "$artifact_dir/raw"
+		cp "$command_output" "$artifact_dir/raw/command.txt"
+		cp "$transport_output" "$artifact_dir/raw/transport.txt"
+		cp "$serialization_output" "$artifact_dir/raw/serialization.txt"
+		cp "$rows_file" "$artifact_dir/benchmark-ci-smoke.tsv"
+		cp "$current_json" "$artifact_dir/benchmark-ci-smoke.json"
+		cp "$current_md" "$artifact_dir/benchmark-ci-smoke.md"
+		cp "$current_json" "$artifact_dir/benchmark-ci-smoke-$run_id.json"
+		cp "$current_md" "$artifact_dir/benchmark-ci-smoke-$run_id.md"
+		printf '\nBenchmark artifacts written to %s\n' "$artifact_dir"
+	fi
+}
+
+compare_baseline() {
+	if [ -z "$baseline_json" ]; then
+		return
+	fi
+	compare_memory_flag=false
+	if bool_true "$compare_memory"; then
+		compare_memory_flag=true
+	fi
+	printf '\n== Baseline comparison ==\n'
+	go run ./cmd/hatrie-benchcmp \
+		-current "$current_json" \
+		-baseline "$baseline_json" \
+		-max-regression-pct "$max_regression_pct" \
+		-compare-memory="$compare_memory_flag"
+}
+
 printf 'Benchmark CI smoke: benchtime=%s count=%s\n\n' "$benchtime" "$count"
 
 printf '== Command feature benchmarks ==\n'
@@ -123,4 +254,9 @@ if bool_true "$check_thresholds"; then
 		exit 1
 	fi
 	echo "Benchmark CI smoke regression guard passed"
+fi
+
+if [ -n "$artifact_dir" ] || [ -n "$baseline_json" ]; then
+	write_artifacts
+	compare_baseline
 fi
