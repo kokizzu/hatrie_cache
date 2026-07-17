@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -820,6 +821,113 @@ func TestHTTPReplicatorAsyncDeadLettersAreBounded(t *testing.T) {
 	})
 	if final.DeadLetters[0].ID != 2 {
 		t.Fatalf("dead letters = %#v, want only newest id 2 retained", final.DeadLetters)
+	}
+}
+
+func TestHTTPReplicatorCircuitBreakerSkipsOnlyOpenTarget(t *testing.T) {
+	failedRequests := make(chan struct{}, 4)
+	healthyRequests := make(chan struct{}, 4)
+	failingTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case failedRequests <- struct{}{}:
+		default:
+		}
+		http.Error(w, "still down", http.StatusBadGateway)
+	}))
+	defer failingTarget.Close()
+	healthyTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case healthyRequests <- struct{}{}:
+		default:
+		}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer healthyTarget.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopologyWithReplicas(t, failingTarget.URL, healthyTarget.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                   "node-a",
+		Topology:               topology,
+		Election:               election,
+		Client:                 failingTarget.Client(),
+		CircuitBreakerFailures: 1,
+		CircuitBreakerCooldown: time.Hour,
+	})
+
+	firstWrite := CacheCommandRequest{Command: "SETSTR", Key: "session:breaker", Value: "first"}
+	first := replicator.ReplicateCommand(context.Background(), trie, firstWrite, trie.ExecuteCommand(firstWrite))
+	if len(first.Targets) != 2 || first.Targets[0].Node != "node-b" || !first.Targets[0].CircuitOpen || first.Targets[1].Node != "node-c" || !first.Targets[1].OK {
+		t.Fatalf("first replication targets = %#v, want node-b open and node-c ok", first.Targets)
+	}
+	if len(failedRequests) != 1 || len(healthyRequests) != 1 {
+		t.Fatalf("request counts after first write = failed:%d healthy:%d, want 1/1", len(failedRequests), len(healthyRequests))
+	}
+
+	secondWrite := CacheCommandRequest{Command: "SETSTR", Key: "session:breaker", Value: "second"}
+	second := replicator.ReplicateCommand(context.Background(), trie, secondWrite, trie.ExecuteCommand(secondWrite))
+	if len(second.Targets) != 2 || second.Targets[0].Node != "node-b" || !second.Targets[0].CircuitOpen || second.Targets[0].CircuitState != replicationCircuitOpen || second.Targets[1].Node != "node-c" || !second.Targets[1].OK {
+		t.Fatalf("second replication targets = %#v, want node-b skipped open and node-c ok", second.Targets)
+	}
+	if len(failedRequests) != 1 || len(healthyRequests) != 2 {
+		t.Fatalf("request counts after open breaker = failed:%d healthy:%d, want 1/2", len(failedRequests), len(healthyRequests))
+	}
+	last := replicator.LastResult()
+	if len(last.CircuitBreakers) != 1 || last.CircuitBreakers[0].Node != "node-b" || last.CircuitBreakers[0].State != replicationCircuitOpen {
+		t.Fatalf("circuit breakers = %#v, want only node-b open", last.CircuitBreakers)
+	}
+	if last.Health == "ok" || !strings.Contains(last.HealthReason, "circuit breaker") {
+		t.Fatalf("health = %s/%d/%q, want breaker-degraded health", last.Health, last.HealthScore, last.HealthReason)
+	}
+}
+
+func TestHTTPReplicatorCircuitBreakerHalfOpenRecovers(t *testing.T) {
+	var attempts atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt := attempts.Add(1)
+		if attempt == 1 {
+			http.Error(w, "try later", http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                   "node-a",
+		Topology:               topology,
+		Election:               election,
+		Client:                 target.Client(),
+		CircuitBreakerFailures: 1,
+		CircuitBreakerCooldown: 10 * time.Millisecond,
+	})
+
+	firstWrite := CacheCommandRequest{Command: "SETSTR", Key: "session:recover", Value: "first"}
+	first := replicator.ReplicateCommand(context.Background(), trie, firstWrite, trie.ExecuteCommand(firstWrite))
+	if len(first.Targets) != 1 || !first.Targets[0].CircuitOpen {
+		t.Fatalf("first targets = %#v, want open circuit after failure", first.Targets)
+	}
+	secondWrite := CacheCommandRequest{Command: "SETSTR", Key: "session:recover", Value: "second"}
+	second := replicator.ReplicateCommand(context.Background(), trie, secondWrite, trie.ExecuteCommand(secondWrite))
+	if len(second.Targets) != 1 || !second.Targets[0].CircuitOpen || attempts.Load() != 1 {
+		t.Fatalf("second targets = %#v attempts=%d, want skipped while open", second.Targets, attempts.Load())
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	thirdWrite := CacheCommandRequest{Command: "SETSTR", Key: "session:recover", Value: "third"}
+	third := replicator.ReplicateCommand(context.Background(), trie, thirdWrite, trie.ExecuteCommand(thirdWrite))
+	if len(third.Targets) != 1 || !third.Targets[0].OK || third.Targets[0].CircuitState != replicationCircuitClosed {
+		t.Fatalf("third targets = %#v, want half-open probe success and closed circuit", third.Targets)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("attempts = %d, want one failure plus one half-open probe", attempts.Load())
+	}
+	if breakers := replicator.LastResult().CircuitBreakers; len(breakers) != 0 {
+		t.Fatalf("circuit breakers = %#v, want cleared after successful probe", breakers)
 	}
 }
 
@@ -2394,6 +2502,26 @@ func replicationTestTopology(t *testing.T, replicaAddress string) *TopologyStore
 		},
 		Shards: []TopologyShard{
 			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	return topology
+}
+
+func replicationTestTopologyWithReplicas(t *testing.T, replicaBAddress string, replicaCAddress string) *TopologyStore {
+	t.Helper()
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://127.0.0.1:1"},
+			{ID: "node-b", Address: replicaBAddress},
+			{ID: "node-c", Address: replicaCAddress},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
 		},
 	})
 	if err != nil {

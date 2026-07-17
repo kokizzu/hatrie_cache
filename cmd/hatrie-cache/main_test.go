@@ -120,6 +120,8 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"replication_retry_interval": "10ms",
 		"replication_max_attempts": 2,
 		"replication_dead_letter_limit": 9,
+		"replication_circuit_breaker_failures": 4,
+		"replication_circuit_breaker_cooldown": "12s",
 		"db_path": "/data/cache.leveldb",
 		"db_hot_load": true,
 		"db_hot_load_max_bytes": 2048,
@@ -144,6 +146,9 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	}
 	if !cfg.replication || !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 10*time.Millisecond || cfg.replicationAttempts != 2 || cfg.replicationDeadLetterLimit != 9 {
 		t.Fatalf("replication config = %#v, want file values", cfg)
+	}
+	if cfg.replicationCircuitFailures != 4 || cfg.replicationCircuitCooldown != 12*time.Second {
+		t.Fatalf("replication circuit breaker config = %d/%s, want 4/12s", cfg.replicationCircuitFailures, cfg.replicationCircuitCooldown)
 	}
 	if cfg.dbPath != "/data/cache.leveldb" || !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 {
 		t.Fatalf("db config = %#v, want file values", cfg)
@@ -371,6 +376,8 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-retry-interval", "50ms",
 		"-replication-max-attempts", "5",
 		"-replication-dead-letter-limit", "7",
+		"-replication-circuit-breaker-failures", "4",
+		"-replication-circuit-breaker-cooldown", "20s",
 		"-replication-wire-format", "json",
 		"-replication-sync-interval", "10s",
 		"-replication-sync-prefix", "session:",
@@ -384,6 +391,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 50*time.Millisecond || cfg.replicationAttempts != 5 || cfg.replicationDeadLetterLimit != 7 {
 		t.Fatalf("cfg replication async = %#v, want explicit async queue settings", cfg)
+	}
+	if cfg.replicationCircuitFailures != 4 || cfg.replicationCircuitCooldown != 20*time.Second {
+		t.Fatalf("cfg replication circuit breaker = %d/%s, want 4/20s", cfg.replicationCircuitFailures, cfg.replicationCircuitCooldown)
 	}
 	if cfg.replicationWireFormat != "json" || replicationWireFormat(cfg) != hatriecache.CommandWireFormatJSON {
 		t.Fatalf("replication wire format = %q, want json", cfg.replicationWireFormat)
@@ -420,6 +430,14 @@ func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
 		{
 			name: "negative retry",
 			args: []string{"-replication-retry-interval", "-1s"},
+		},
+		{
+			name: "negative circuit breaker failures",
+			args: []string{"-replication-circuit-breaker-failures", "-1"},
+		},
+		{
+			name: "negative circuit breaker cooldown",
+			args: []string{"-replication-circuit-breaker-cooldown", "-1s"},
 		},
 		{
 			name: "negative sync interval",

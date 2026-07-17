@@ -793,14 +793,19 @@ mutations do not change what is delivered for the original write. Tune
 After the final async retry fails, the job is retained in a bounded dead-letter
 list without command values; tune `REPLICATION_DEAD_LETTER_LIMIT` or set it to
 `0` to disable retention.
+Per-target circuit breakers stop repeatedly calling unhealthy replicas after
+`REPLICATION_CIRCUIT_BREAKER_FAILURES` consecutive failures, then allow a
+half-open probe after `REPLICATION_CIRCUIT_BREAKER_COOLDOWN`. Set either value
+to `0` to disable the breaker.
 Library users can pass `HTTPReplicatorOptions.Context` to tie the async worker
 lifetime to a parent service context.
 `GET /api/replication` includes the latest replication start/finish timestamps,
 duration, async queue depth, capacity, enqueue/drop counts, delivery attempts,
 successes, failures, retries, oldest queued key/age, in-flight key/age, last
 retry age, per-target drops, per-target failures, closed state,
-`dead_letter_count`, recent `dead_letters`, and a `health_score` from `0` to
-`100` with `health` and `health_reason`:
+`dead_letter_count`, recent `dead_letters`, `circuit_breakers`, target-level
+`circuit_open` state, and a `health_score` from `0` to `100` with `health` and
+`health_reason`:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true

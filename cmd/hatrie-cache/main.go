@@ -62,6 +62,8 @@ type config struct {
 	replicationRetry            time.Duration
 	replicationAttempts         uint
 	replicationDeadLetterLimit  int
+	replicationCircuitFailures  int
+	replicationCircuitCooldown  time.Duration
 	replicationWireFormat       string
 	replicationSyncInterval     time.Duration
 	replicationSyncPrefix       string
@@ -226,15 +228,17 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	var replicator *hatriecache.HTTPReplicator
 	if cfg.replication {
 		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
-			Context:              ctx,
-			Self:                 defaultNodeID(cfg.nodeID),
-			Topology:             topology,
-			Election:             election,
-			AsyncQueueSize:       replicationQueueSize(cfg),
-			AsyncRetryInterval:   cfg.replicationRetry,
-			AsyncMaxAttempts:     cfg.replicationAttempts,
-			AsyncDeadLetterLimit: cfg.replicationDeadLetterLimit,
-			WireFormat:           replicationWireFormat(cfg),
+			Context:                ctx,
+			Self:                   defaultNodeID(cfg.nodeID),
+			Topology:               topology,
+			Election:               election,
+			AsyncQueueSize:         replicationQueueSize(cfg),
+			AsyncRetryInterval:     cfg.replicationRetry,
+			AsyncMaxAttempts:       cfg.replicationAttempts,
+			AsyncDeadLetterLimit:   cfg.replicationDeadLetterLimit,
+			CircuitBreakerFailures: cfg.replicationCircuitFailures,
+			CircuitBreakerCooldown: cfg.replicationCircuitCooldown,
+			WireFormat:             replicationWireFormat(cfg),
 		})
 		defer replicator.Close()
 	}
@@ -349,6 +353,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.replicationRetry, "replication-retry-interval", hatriecache.DefaultReplicationRetryInterval, "delay between async replication retry attempts")
 	flags.UintVar(&cfg.replicationAttempts, "replication-max-attempts", 3, "maximum async replication delivery attempts")
 	flags.IntVar(&cfg.replicationDeadLetterLimit, "replication-dead-letter-limit", hatriecache.DefaultReplicationDeadLetterLimit, "maximum retained async replication dead-letter failures; use 0 to disable")
+	flags.IntVar(&cfg.replicationCircuitFailures, "replication-circuit-breaker-failures", hatriecache.DefaultReplicationCircuitBreakerFailures, "consecutive per-target replication failures before opening the circuit breaker; use 0 to disable")
+	flags.DurationVar(&cfg.replicationCircuitCooldown, "replication-circuit-breaker-cooldown", hatriecache.DefaultReplicationCircuitBreakerCooldown, "per-target replication circuit breaker cooldown before a half-open probe; use 0 to disable")
 	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", string(hatriecache.DefaultCommandWireFormat), "HTTP replication command wire format: protobuf or json")
 	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
 	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
@@ -421,6 +427,12 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.replicationDeadLetterLimit < 0 {
 		return config{}, errors.New("replication dead-letter limit must be non-negative")
+	}
+	if cfg.replicationCircuitFailures < 0 {
+		return config{}, errors.New("replication circuit breaker failures must be non-negative")
+	}
+	if cfg.replicationCircuitCooldown < 0 {
+		return config{}, errors.New("replication circuit breaker cooldown must be non-negative")
 	}
 	if cfg.replicationSyncInterval < 0 {
 		return config{}, errors.New("replication sync interval must be non-negative")
@@ -538,55 +550,57 @@ func writeRedactedConfig(writer io.Writer, cfg config) error {
 
 func redactedConfig(cfg config) map[string]interface{} {
 	return map[string]interface{}{
-		"config_path":                    cfg.configPath,
-		"check_config":                   cfg.checkConfig,
-		"print_config":                   cfg.printConfig,
-		"monitoring_server":              cfg.monitoringServer,
-		"monitoring_addr":                cfg.monitoringAddr,
-		"monitoring_tls_cert":            cfg.monitoringTLSCert,
-		"monitoring_tls_key":             cfg.monitoringTLSKey,
-		"monitoring_auth_token":          redactedSecret(cfg.monitoringAuthToken),
-		"audit_log_path":                 cfg.auditLogPath,
-		"write_protection":               cfg.writeProtection,
-		"rate_limit":                     cfg.rateLimit,
-		"monitoring_web_dir":             cfg.monitoringWebDir,
-		"monitoring_read_header_timeout": cfg.monitoringReadHeaderTimeout.String(),
-		"monitoring_idle_timeout":        cfg.monitoringIdleTimeout.String(),
-		"node_id":                        cfg.nodeID,
-		"topology_path":                  cfg.topologyPath,
-		"election_timeout":               cfg.electionTimeout.String(),
-		"replication":                    cfg.replication,
-		"replication_async":              cfg.replicationAsync,
-		"replication_queue_size":         cfg.replicationQueueSize,
-		"replication_retry_interval":     cfg.replicationRetry.String(),
-		"replication_max_attempts":       cfg.replicationAttempts,
-		"replication_dead_letter_limit":  cfg.replicationDeadLetterLimit,
-		"replication_wire_format":        cfg.replicationWireFormat,
-		"replication_sync_interval":      cfg.replicationSyncInterval.String(),
-		"replication_sync_prefix":        cfg.replicationSyncPrefix,
-		"enforce_leader_writes":          cfg.enforceLeaderWrites,
-		"grpc_addr":                      cfg.grpcAddr,
-		"grpc_tls_cert":                  cfg.grpcTLSCert,
-		"grpc_tls_key":                   cfg.grpcTLSKey,
-		"grpc_client_ca":                 cfg.grpcClientCA,
-		"db_path":                        cfg.dbPath,
-		"db_format":                      cfg.dbFormat,
-		"db_sync_interval":               cfg.dbSyncInterval.String(),
-		"db_hot_load":                    cfg.dbHotLoad,
-		"db_hot_load_max_bytes":          cfg.dbHotLoadMaxBytes,
-		"db_hot_load_max_age":            cfg.dbHotLoadMaxAge.String(),
-		"db_hot_load_min_hits":           cfg.dbHotLoadMinHits,
-		"snapshot_path":                  cfg.snapshotPath,
-		"snapshot_interval":              cfg.snapshotInterval.String(),
-		"snapshot_format":                cfg.snapshotFormat,
-		"journal_path":                   cfg.journalPath,
-		"journal_format":                 cfg.journalFormat,
-		"journal_pull_source":            cfg.journalPullSource,
-		"journal_pull_state_path":        cfg.journalPullStatePath,
-		"journal_pull_interval":          cfg.journalPullInterval.String(),
-		"journal_pull_timeout":           cfg.journalPullTimeout.String(),
-		"journal_pull_limit":             cfg.journalPullLimit,
-		"journal_pull_max_batches":       cfg.journalPullMaxBatches,
+		"config_path":                          cfg.configPath,
+		"check_config":                         cfg.checkConfig,
+		"print_config":                         cfg.printConfig,
+		"monitoring_server":                    cfg.monitoringServer,
+		"monitoring_addr":                      cfg.monitoringAddr,
+		"monitoring_tls_cert":                  cfg.monitoringTLSCert,
+		"monitoring_tls_key":                   cfg.monitoringTLSKey,
+		"monitoring_auth_token":                redactedSecret(cfg.monitoringAuthToken),
+		"audit_log_path":                       cfg.auditLogPath,
+		"write_protection":                     cfg.writeProtection,
+		"rate_limit":                           cfg.rateLimit,
+		"monitoring_web_dir":                   cfg.monitoringWebDir,
+		"monitoring_read_header_timeout":       cfg.monitoringReadHeaderTimeout.String(),
+		"monitoring_idle_timeout":              cfg.monitoringIdleTimeout.String(),
+		"node_id":                              cfg.nodeID,
+		"topology_path":                        cfg.topologyPath,
+		"election_timeout":                     cfg.electionTimeout.String(),
+		"replication":                          cfg.replication,
+		"replication_async":                    cfg.replicationAsync,
+		"replication_queue_size":               cfg.replicationQueueSize,
+		"replication_retry_interval":           cfg.replicationRetry.String(),
+		"replication_max_attempts":             cfg.replicationAttempts,
+		"replication_dead_letter_limit":        cfg.replicationDeadLetterLimit,
+		"replication_circuit_breaker_failures": cfg.replicationCircuitFailures,
+		"replication_circuit_breaker_cooldown": cfg.replicationCircuitCooldown.String(),
+		"replication_wire_format":              cfg.replicationWireFormat,
+		"replication_sync_interval":            cfg.replicationSyncInterval.String(),
+		"replication_sync_prefix":              cfg.replicationSyncPrefix,
+		"enforce_leader_writes":                cfg.enforceLeaderWrites,
+		"grpc_addr":                            cfg.grpcAddr,
+		"grpc_tls_cert":                        cfg.grpcTLSCert,
+		"grpc_tls_key":                         cfg.grpcTLSKey,
+		"grpc_client_ca":                       cfg.grpcClientCA,
+		"db_path":                              cfg.dbPath,
+		"db_format":                            cfg.dbFormat,
+		"db_sync_interval":                     cfg.dbSyncInterval.String(),
+		"db_hot_load":                          cfg.dbHotLoad,
+		"db_hot_load_max_bytes":                cfg.dbHotLoadMaxBytes,
+		"db_hot_load_max_age":                  cfg.dbHotLoadMaxAge.String(),
+		"db_hot_load_min_hits":                 cfg.dbHotLoadMinHits,
+		"snapshot_path":                        cfg.snapshotPath,
+		"snapshot_interval":                    cfg.snapshotInterval.String(),
+		"snapshot_format":                      cfg.snapshotFormat,
+		"journal_path":                         cfg.journalPath,
+		"journal_format":                       cfg.journalFormat,
+		"journal_pull_source":                  cfg.journalPullSource,
+		"journal_pull_state_path":              cfg.journalPullStatePath,
+		"journal_pull_interval":                cfg.journalPullInterval.String(),
+		"journal_pull_timeout":                 cfg.journalPullTimeout.String(),
+		"journal_pull_limit":                   cfg.journalPullLimit,
+		"journal_pull_max_batches":             cfg.journalPullMaxBatches,
 	}
 }
 

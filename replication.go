@@ -20,6 +20,8 @@ import (
 const DefaultReplicationTimeout = 2 * time.Second
 const DefaultReplicationRetryInterval = 250 * time.Millisecond
 const DefaultReplicationDeadLetterLimit = 128
+const DefaultReplicationCircuitBreakerFailures = 5
+const DefaultReplicationCircuitBreakerCooldown = 30 * time.Second
 const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
 const minCompressedReplicationRequestBytes = 16 << 10
@@ -31,63 +33,69 @@ var (
 )
 
 type HTTPReplicatorOptions struct {
-	Context              context.Context
-	Self                 string
-	Topology             *TopologyStore
-	Election             *ElectionStore
-	Client               *http.Client
-	Timeout              time.Duration
-	AsyncQueueSize       int
-	AsyncRetryInterval   time.Duration
-	AsyncMaxAttempts     uint
-	AsyncDeadLetterLimit int
-	WireFormat           CommandWireFormat
+	Context                context.Context
+	Self                   string
+	Topology               *TopologyStore
+	Election               *ElectionStore
+	Client                 *http.Client
+	Timeout                time.Duration
+	AsyncQueueSize         int
+	AsyncRetryInterval     time.Duration
+	AsyncMaxAttempts       uint
+	AsyncDeadLetterLimit   int
+	CircuitBreakerFailures int
+	CircuitBreakerCooldown time.Duration
+	WireFormat             CommandWireFormat
 }
 
 type HTTPReplicator struct {
-	mu          sync.RWMutex
-	self        string
-	topology    *TopologyStore
-	election    *ElectionStore
-	client      *http.Client
-	timeout     time.Duration
-	queue       chan replicationJob
-	retry       time.Duration
-	attempts    uint
-	wireFormat  CommandWireFormat
-	done        chan struct{}
-	stopped     chan struct{}
-	asyncCtx    context.Context
-	cancel      context.CancelFunc
-	close       sync.Once
-	closed      bool
-	sequence    uint64
-	queueSeq    uint64
-	deadSeq     uint64
-	deadLimit   int
-	pending     []replicationQueueMeta
-	deadLetters []ReplicationDeadLetter
-	queueStats  ReplicationQueueStats
-	last        ReplicationResult
+	mu              sync.RWMutex
+	self            string
+	topology        *TopologyStore
+	election        *ElectionStore
+	client          *http.Client
+	timeout         time.Duration
+	queue           chan replicationJob
+	retry           time.Duration
+	attempts        uint
+	wireFormat      CommandWireFormat
+	breakerFailures int
+	breakerCooldown time.Duration
+	breakers        map[string]replicationCircuitBreakerState
+	done            chan struct{}
+	stopped         chan struct{}
+	asyncCtx        context.Context
+	cancel          context.CancelFunc
+	close           sync.Once
+	closed          bool
+	sequence        uint64
+	queueSeq        uint64
+	deadSeq         uint64
+	deadLimit       int
+	pending         []replicationQueueMeta
+	deadLetters     []ReplicationDeadLetter
+	queueStats      ReplicationQueueStats
+	last            ReplicationResult
 }
 
 type ReplicationResult struct {
-	Command         string                    `json:"command,omitempty"`
-	Key             string                    `json:"key,omitempty"`
-	Entries         int                       `json:"entries,omitempty"`
-	Queued          bool                      `json:"queued,omitempty"`
-	Skipped         bool                      `json:"skipped"`
-	Reason          string                    `json:"reason,omitempty"`
-	Health          string                    `json:"health"`
-	HealthScore     int                       `json:"health_score"`
-	HealthReason    string                    `json:"health_reason,omitempty"`
-	DeadLetterCount int                       `json:"dead_letter_count,omitempty"`
-	DeadLetters     []ReplicationDeadLetter   `json:"dead_letters,omitempty"`
-	StartedAt       *time.Time                `json:"started_at,omitempty"`
-	FinishedAt      *time.Time                `json:"finished_at,omitempty"`
-	DurationMillis  int64                     `json:"duration_millis,omitempty"`
-	Queue           *ReplicationQueueStats    `json:"queue,omitempty"`
-	Targets         []ReplicationTargetResult `json:"targets,omitempty"`
+	Command         string                            `json:"command,omitempty"`
+	Key             string                            `json:"key,omitempty"`
+	Entries         int                               `json:"entries,omitempty"`
+	Queued          bool                              `json:"queued,omitempty"`
+	Skipped         bool                              `json:"skipped"`
+	Reason          string                            `json:"reason,omitempty"`
+	Health          string                            `json:"health"`
+	HealthScore     int                               `json:"health_score"`
+	HealthReason    string                            `json:"health_reason,omitempty"`
+	DeadLetterCount int                               `json:"dead_letter_count,omitempty"`
+	DeadLetters     []ReplicationDeadLetter           `json:"dead_letters,omitempty"`
+	CircuitBreakers []ReplicationCircuitBreakerTarget `json:"circuit_breakers,omitempty"`
+	StartedAt       *time.Time                        `json:"started_at,omitempty"`
+	FinishedAt      *time.Time                        `json:"finished_at,omitempty"`
+	DurationMillis  int64                             `json:"duration_millis,omitempty"`
+	Queue           *ReplicationQueueStats            `json:"queue,omitempty"`
+	Targets         []ReplicationTargetResult         `json:"targets,omitempty"`
 }
 
 type ReplicationDeadLetter struct {
@@ -98,6 +106,17 @@ type ReplicationDeadLetter struct {
 	Attempts uint                      `json:"attempts"`
 	Reason   string                    `json:"reason,omitempty"`
 	Targets  []ReplicationTargetResult `json:"targets,omitempty"`
+}
+
+type ReplicationCircuitBreakerTarget struct {
+	Node              string     `json:"node"`
+	State             string     `json:"state"`
+	Failures          int        `json:"failures"`
+	OpenedAt          *time.Time `json:"opened_at,omitempty"`
+	OpenUntil         *time.Time `json:"open_until,omitempty"`
+	LastFailureAt     *time.Time `json:"last_failure_at,omitempty"`
+	LastSuccessAt     *time.Time `json:"last_success_at,omitempty"`
+	LastFailureReason string     `json:"last_failure_reason,omitempty"`
 }
 
 // ReplicationQueueStats reports bounded async replication outbox health.
@@ -127,12 +146,15 @@ type ReplicationQueueStats struct {
 }
 
 type ReplicationTargetResult struct {
-	Node    string `json:"node"`
-	Key     string `json:"key,omitempty"`
-	Address string `json:"address,omitempty"`
-	OK      bool   `json:"ok"`
-	Status  int    `json:"status,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Node             string     `json:"node"`
+	Key              string     `json:"key,omitempty"`
+	Address          string     `json:"address,omitempty"`
+	OK               bool       `json:"ok"`
+	Status           int        `json:"status,omitempty"`
+	Error            string     `json:"error,omitempty"`
+	CircuitOpen      bool       `json:"circuit_open,omitempty"`
+	CircuitState     string     `json:"circuit_state,omitempty"`
+	CircuitOpenUntil *time.Time `json:"circuit_open_until,omitempty"`
 }
 
 type replicationPayloadKind int
@@ -166,6 +188,22 @@ type replicationQueueMeta struct {
 	targets    []string
 	enqueuedAt time.Time
 }
+
+type replicationCircuitBreakerState struct {
+	state             string
+	failures          int
+	openedAt          *time.Time
+	openUntil         *time.Time
+	lastFailureAt     *time.Time
+	lastSuccessAt     *time.Time
+	lastFailureReason string
+}
+
+const (
+	replicationCircuitClosed   = "closed"
+	replicationCircuitOpen     = "open"
+	replicationCircuitHalfOpen = "half_open"
+)
 
 type ReplicationSafetyStore struct {
 	mu   sync.Mutex
@@ -220,12 +258,23 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		wireFormat = DefaultCommandWireFormat
 	}
 	replicator := &HTTPReplicator{
-		self:       strings.TrimSpace(options.Self),
-		topology:   options.Topology,
-		election:   options.Election,
-		client:     client,
-		timeout:    timeout,
-		wireFormat: wireFormat,
+		self:            strings.TrimSpace(options.Self),
+		topology:        options.Topology,
+		election:        options.Election,
+		client:          client,
+		timeout:         timeout,
+		wireFormat:      wireFormat,
+		breakerFailures: options.CircuitBreakerFailures,
+		breakerCooldown: options.CircuitBreakerCooldown,
+	}
+	if replicator.breakerFailures < 0 {
+		replicator.breakerFailures = 0
+	}
+	if replicator.breakerCooldown < 0 {
+		replicator.breakerCooldown = 0
+	}
+	if replicator.breakerFailures > 0 && replicator.breakerCooldown > 0 {
+		replicator.breakers = map[string]replicationCircuitBreakerState{}
 	}
 	if options.AsyncQueueSize > 0 {
 		retry := options.AsyncRetryInterval
@@ -278,6 +327,7 @@ func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 	}
 	result.DeadLetterCount = len(replicator.deadLetters)
 	result.DeadLetters = cloneReplicationDeadLetters(replicator.deadLetters)
+	result.CircuitBreakers = replicator.replicationCircuitBreakersLocked()
 	return withReplicationHealth(result)
 }
 
@@ -682,7 +732,7 @@ func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, r
 	result.Queued = false
 	result.Targets = make([]ReplicationTargetResult, 0, len(tasks))
 	for _, task := range tasks {
-		result.Targets = append(result.Targets, replicator.postReplicationCommand(ctx, task.target, task.payload))
+		result.Targets = append(result.Targets, replicator.executeReplicationTarget(ctx, task.target, task.payload))
 	}
 	return result
 }
@@ -889,7 +939,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			payload = replicator.annotateReplicationPayload(payload)
 			result.Entries++
 			for _, target := range targets {
-				targetResult := replicator.postReplicationCommand(ctx, target, payload)
+				targetResult := replicator.executeReplicationTarget(ctx, target, payload)
 				targetResult.Key = key
 				result.Targets = append(result.Targets, targetResult)
 			}
@@ -979,6 +1029,9 @@ func (replicator *HTTPReplicator) attachReplicationHealth(result ReplicationResu
 		replicator.mu.RUnlock()
 		result.Queue = &stats
 	}
+	if replicator != nil && result.CircuitBreakers == nil {
+		result.CircuitBreakers = replicator.replicationCircuitBreakers()
+	}
 	return withReplicationHealth(result)
 }
 
@@ -1062,6 +1115,25 @@ func replicationHealth(result ReplicationResult) (string, int, string) {
 		score -= 25
 		if reason == "healthy" {
 			reason = "replication dead letters retained"
+		}
+	}
+	openBreakers := 0
+	halfOpenBreakers := 0
+	for _, breaker := range result.CircuitBreakers {
+		switch breaker.State {
+		case replicationCircuitOpen:
+			openBreakers++
+		case replicationCircuitHalfOpen:
+			halfOpenBreakers++
+		}
+	}
+	if openBreakers > 0 {
+		score -= 30
+		reason = "replication circuit breaker open"
+	} else if halfOpenBreakers > 0 {
+		score -= 10
+		if reason == "healthy" {
+			reason = "replication circuit breaker probing"
 		}
 	}
 
@@ -1160,6 +1232,123 @@ func (replicator *HTTPReplicator) replicationTargets(route ElectionKeyRoute) []T
 		return targets[i].ID < targets[j].ID
 	})
 	return targets
+}
+
+func (replicator *HTTPReplicator) executeReplicationTarget(ctx context.Context, target TopologyNode, payload CacheCommandRequest) ReplicationTargetResult {
+	if result, allowed, state := replicator.beforeReplicationTarget(target); !allowed {
+		return result
+	} else {
+		return replicator.afterReplicationTarget(target, state, replicator.postReplicationCommand(ctx, target, payload))
+	}
+}
+
+func (replicator *HTTPReplicator) beforeReplicationTarget(target TopologyNode) (ReplicationTargetResult, bool, string) {
+	result := ReplicationTargetResult{
+		Node:    target.ID,
+		Address: target.Address,
+	}
+	if !replicator.replicationCircuitBreakerEnabled() {
+		return result, true, replicationCircuitClosed
+	}
+	node := replicationCircuitBreakerNode(target)
+	if node == "" {
+		return result, true, replicationCircuitClosed
+	}
+	now := time.Now().UTC()
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	state := replicator.breakers[node]
+	switch state.state {
+	case replicationCircuitOpen:
+		if state.openUntil == nil || now.Before(*state.openUntil) {
+			result.CircuitOpen = true
+			result.CircuitState = replicationCircuitOpen
+			result.CircuitOpenUntil = cloneTimePtr(state.openUntil)
+			result.Error = "replication circuit breaker open"
+			return result, false, replicationCircuitOpen
+		}
+		state.state = replicationCircuitHalfOpen
+		replicator.breakers[node] = state
+		return result, true, replicationCircuitHalfOpen
+	case replicationCircuitHalfOpen:
+		result.CircuitOpen = true
+		result.CircuitState = replicationCircuitHalfOpen
+		result.CircuitOpenUntil = cloneTimePtr(state.openUntil)
+		result.Error = "replication circuit breaker half-open probe in progress"
+		return result, false, replicationCircuitHalfOpen
+	default:
+		return result, true, replicationCircuitClosed
+	}
+}
+
+func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, attemptState string, result ReplicationTargetResult) ReplicationTargetResult {
+	if !replicator.replicationCircuitBreakerEnabled() {
+		return result
+	}
+	node := replicationCircuitBreakerNode(target)
+	if node == "" {
+		return result
+	}
+	now := time.Now().UTC()
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	if result.OK {
+		result.CircuitState = replicationCircuitClosed
+		if existing, ok := replicator.breakers[node]; ok {
+			existing.state = replicationCircuitClosed
+			existing.failures = 0
+			existing.openedAt = nil
+			existing.openUntil = nil
+			existing.lastSuccessAt = cloneTimePtr(&now)
+			existing.lastFailureReason = ""
+			if existing.lastFailureAt == nil {
+				delete(replicator.breakers, node)
+			} else {
+				replicator.breakers[node] = existing
+			}
+		}
+		return result
+	}
+
+	state := replicator.breakers[node]
+	state.failures++
+	state.lastFailureAt = cloneTimePtr(&now)
+	state.lastFailureReason = replicationTargetFailureReason(result)
+	if attemptState == replicationCircuitHalfOpen || state.failures >= replicator.breakerFailures {
+		openUntil := now.Add(replicator.breakerCooldown)
+		state.state = replicationCircuitOpen
+		state.openedAt = cloneTimePtr(&now)
+		state.openUntil = cloneTimePtr(&openUntil)
+		result.CircuitOpen = true
+		result.CircuitState = replicationCircuitOpen
+		result.CircuitOpenUntil = cloneTimePtr(&openUntil)
+	} else {
+		state.state = replicationCircuitClosed
+		result.CircuitState = replicationCircuitClosed
+	}
+	replicator.breakers[node] = state
+	return result
+}
+
+func (replicator *HTTPReplicator) replicationCircuitBreakerEnabled() bool {
+	return replicator != nil && replicator.breakerFailures > 0 && replicator.breakerCooldown > 0
+}
+
+func replicationCircuitBreakerNode(target TopologyNode) string {
+	if node := strings.TrimSpace(target.ID); node != "" {
+		return node
+	}
+	return strings.TrimSpace(target.Address)
+}
+
+func replicationTargetFailureReason(result ReplicationTargetResult) string {
+	if result.Error != "" {
+		return result.Error
+	}
+	if result.Status != 0 {
+		return fmt.Sprintf("target returned HTTP %d", result.Status)
+	}
+	return "replication target delivery failed"
 }
 
 func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, target TopologyNode, payload CacheCommandRequest) ReplicationTargetResult {
@@ -1407,6 +1596,45 @@ func onlineElectionNodes(election *ElectionStore) map[string]bool {
 	return nodes
 }
 
+func (replicator *HTTPReplicator) replicationCircuitBreakers() []ReplicationCircuitBreakerTarget {
+	if replicator == nil {
+		return nil
+	}
+	replicator.mu.RLock()
+	defer replicator.mu.RUnlock()
+	return replicator.replicationCircuitBreakersLocked()
+}
+
+func (replicator *HTTPReplicator) replicationCircuitBreakersLocked() []ReplicationCircuitBreakerTarget {
+	if replicator == nil || len(replicator.breakers) == 0 {
+		return nil
+	}
+	out := make([]ReplicationCircuitBreakerTarget, 0, len(replicator.breakers))
+	for node, state := range replicator.breakers {
+		if state.failures == 0 && state.state != replicationCircuitOpen && state.state != replicationCircuitHalfOpen {
+			continue
+		}
+		publicState := state.state
+		if publicState == "" {
+			publicState = replicationCircuitClosed
+		}
+		out = append(out, ReplicationCircuitBreakerTarget{
+			Node:              node,
+			State:             publicState,
+			Failures:          state.failures,
+			OpenedAt:          cloneTimePtr(state.openedAt),
+			OpenUntil:         cloneTimePtr(state.openUntil),
+			LastFailureAt:     cloneTimePtr(state.lastFailureAt),
+			LastSuccessAt:     cloneTimePtr(state.lastSuccessAt),
+			LastFailureReason: state.lastFailureReason,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Node < out[j].Node
+	})
+	return out
+}
+
 func cloneReplicationResult(result ReplicationResult) ReplicationResult {
 	out := result
 	out.StartedAt = cloneTimePtr(result.StartedAt)
@@ -1418,8 +1646,11 @@ func cloneReplicationResult(result ReplicationResult) ReplicationResult {
 	if result.DeadLetters != nil {
 		out.DeadLetters = cloneReplicationDeadLetters(result.DeadLetters)
 	}
+	if result.CircuitBreakers != nil {
+		out.CircuitBreakers = cloneReplicationCircuitBreakers(result.CircuitBreakers)
+	}
 	if result.Targets != nil {
-		out.Targets = append([]ReplicationTargetResult(nil), result.Targets...)
+		out.Targets = cloneReplicationTargets(result.Targets)
 	}
 	return out
 }
@@ -1433,8 +1664,35 @@ func cloneReplicationDeadLetters(deadLetters []ReplicationDeadLetter) []Replicat
 		out[idx] = deadLetter
 		out[idx].FailedAt = cloneTimePtr(deadLetter.FailedAt)
 		if deadLetter.Targets != nil {
-			out[idx].Targets = append([]ReplicationTargetResult(nil), deadLetter.Targets...)
+			out[idx].Targets = cloneReplicationTargets(deadLetter.Targets)
 		}
+	}
+	return out
+}
+
+func cloneReplicationCircuitBreakers(breakers []ReplicationCircuitBreakerTarget) []ReplicationCircuitBreakerTarget {
+	if breakers == nil {
+		return nil
+	}
+	out := make([]ReplicationCircuitBreakerTarget, len(breakers))
+	for idx, breaker := range breakers {
+		out[idx] = breaker
+		out[idx].OpenedAt = cloneTimePtr(breaker.OpenedAt)
+		out[idx].OpenUntil = cloneTimePtr(breaker.OpenUntil)
+		out[idx].LastFailureAt = cloneTimePtr(breaker.LastFailureAt)
+		out[idx].LastSuccessAt = cloneTimePtr(breaker.LastSuccessAt)
+	}
+	return out
+}
+
+func cloneReplicationTargets(targets []ReplicationTargetResult) []ReplicationTargetResult {
+	if targets == nil {
+		return nil
+	}
+	out := make([]ReplicationTargetResult, len(targets))
+	for idx, target := range targets {
+		out[idx] = target
+		out[idx].CircuitOpenUntil = cloneTimePtr(target.CircuitOpenUntil)
 	}
 	return out
 }

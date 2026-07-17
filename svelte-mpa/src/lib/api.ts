@@ -155,6 +155,9 @@ export type ReplicationTargetResult = {
   ok: boolean;
   status?: number;
   error?: string;
+  circuit_open?: boolean;
+  circuit_state?: string;
+  circuit_open_until?: string;
 };
 
 export type ReplicationResult = {
@@ -169,11 +172,23 @@ export type ReplicationResult = {
   health_reason?: string;
   dead_letter_count?: number;
   dead_letters?: ReplicationDeadLetter[];
+  circuit_breakers?: ReplicationCircuitBreakerTarget[];
   started_at?: string;
   finished_at?: string;
   duration_millis?: number;
   queue?: ReplicationQueueStats;
   targets?: ReplicationTargetResult[];
+};
+
+export type ReplicationCircuitBreakerTarget = {
+  node: string;
+  state: string;
+  failures: number;
+  opened_at?: string;
+  open_until?: string;
+  last_failure_at?: string;
+  last_success_at?: string;
+  last_failure_reason?: string;
 };
 
 export type ReplicationDeadLetter = {

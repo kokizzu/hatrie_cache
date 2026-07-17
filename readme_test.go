@@ -338,6 +338,10 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 		"per-target drops",
 		"`dead_letter_count`",
 		"recent `dead_letters`",
+		"`REPLICATION_CIRCUIT_BREAKER_FAILURES`",
+		"`REPLICATION_CIRCUIT_BREAKER_COOLDOWN`",
+		"`circuit_breakers`",
+		"`circuit_open`",
 		"`health_score`",
 		"`hatrie_cache_replication_health_score`",
 	} {

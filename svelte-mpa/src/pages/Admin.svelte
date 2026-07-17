@@ -12,6 +12,7 @@
     syncReplication,
     type AuditEvent,
     type AuditStatus,
+    type ReplicationCircuitBreakerTarget,
     type ReplicationDeadLetter,
     type ReplicationResult,
     type ReplicationQueueStats,
@@ -19,7 +20,7 @@
     type StorageFlushResult,
     type StorageStatus
   } from '../lib/api';
-  import { formatBytes, formatRelativeTime } from '../lib/format';
+  import { formatBytes, formatDuration, formatRelativeTime } from '../lib/format';
 
   let storage: StorageStatus | null = null;
   let replication: ReplicationResult | null = null;
@@ -175,6 +176,17 @@
       .join(', ');
   }
 
+  function circuitBreakerStatus(breaker: ReplicationCircuitBreakerTarget): string {
+    const until = breaker.open_until ? ` until ${formatFutureTime(breaker.open_until)}` : '';
+    return `${breaker.state}${until}`;
+  }
+
+  function formatFutureTime(value: string): string {
+    const seconds = (new Date(value).getTime() - Date.now()) / 1000;
+    if (seconds > 0) return `in ${formatDuration(seconds)}`;
+    return formatRelativeTime(value);
+  }
+
   onMount(refresh);
 
   $: queue = replication?.queue;
@@ -184,6 +196,8 @@
   $: targets = replication?.targets ?? [];
   $: auditEvents = audit?.events ?? [];
   $: deadLetters = replication?.dead_letters ?? [];
+  $: circuitBreakers = replication?.circuit_breakers ?? [];
+  $: openCircuitBreakers = circuitBreakers.filter((breaker) => breaker.state === 'open' || breaker.state === 'half_open').length;
   $: dropsByTarget = targetRows(queue?.dropped_by_target);
   $: failuresByTarget = targetRows(queue?.failures_by_target);
 </script>
@@ -300,6 +314,7 @@
         <div><dt>Health</dt><dd>{replicationHealthText(replication)}</dd></div>
         <div><dt>Health reason</dt><dd>{replication?.health_reason ?? 'unknown'}</dd></div>
         <div><dt>Dead letters</dt><dd>{(replication?.dead_letter_count ?? 0).toLocaleString()}</dd></div>
+        <div><dt>Open circuits</dt><dd>{openCircuitBreakers.toLocaleString()}</dd></div>
         <div><dt>Queue fill</dt><dd>{queueFill(queue)}</dd></div>
         <div><dt>Enqueued</dt><dd>{(queue?.enqueued ?? 0).toLocaleString()}</dd></div>
         <div><dt>Attempts</dt><dd>{(queue?.attempts ?? 0).toLocaleString()}</dd></div>
@@ -324,7 +339,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Node</th><th>Address</th><th>Key</th><th>Status</th><th>Error</th></tr>
+          <tr><th>Node</th><th>Address</th><th>Key</th><th>Status</th><th>Circuit</th><th>Error</th></tr>
         </thead>
         <tbody>
           {#each targets as target}
@@ -333,16 +348,47 @@
               <td>{target.address ?? ''}</td>
               <td><code>{target.key ?? ''}</code></td>
               <td>{target.ok ? 'ok' : target.status || 'failed'}</td>
+              <td>{target.circuit_state ?? (target.circuit_open ? 'open' : '')}</td>
               <td>{target.error ?? ''}</td>
             </tr>
           {/each}
           {#if !targets.length}
-            <tr><td colspan="5">No target results</td></tr>
+            <tr><td colspan="6">No target results</td></tr>
           {/if}
         </tbody>
       </table>
     </div>
   </section>
+
+  {#if circuitBreakers.length}
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <h2>Replication Circuit Breakers</h2>
+          <p>{circuitBreakers.length.toLocaleString()} tracked targets</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Node</th><th>State</th><th>Failures</th><th>Last failure</th><th>Last success</th><th>Reason</th></tr>
+          </thead>
+          <tbody>
+            {#each circuitBreakers as breaker}
+              <tr>
+                <td>{breaker.node}</td>
+                <td>{circuitBreakerStatus(breaker)}</td>
+                <td>{breaker.failures.toLocaleString()}</td>
+                <td>{breaker.last_failure_at ? formatRelativeTime(breaker.last_failure_at) : 'never'}</td>
+                <td>{breaker.last_success_at ? formatRelativeTime(breaker.last_success_at) : 'never'}</td>
+                <td>{breaker.last_failure_reason ?? ''}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {/if}
 
   <section class="panel">
     <div class="panel-heading">
