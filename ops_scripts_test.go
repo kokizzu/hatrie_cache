@@ -150,6 +150,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"-grpc-client-ca",
 		"REPLICATION_DEAD_LETTER_LIMIT",
 		"-replication-dead-letter-limit",
+		"REPLICATION_OUTBOX_PATH",
+		"-replication-outbox-path",
 		"REPLICATION_CIRCUIT_BREAKER_FAILURES",
 		"-replication-circuit-breaker-failures",
 		"REPLICATION_CIRCUIT_BREAKER_COOLDOWN",

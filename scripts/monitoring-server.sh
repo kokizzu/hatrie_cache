@@ -20,6 +20,7 @@ replication_queue_size=${REPLICATION_QUEUE_SIZE:-1024}
 replication_retry_interval=${REPLICATION_RETRY_INTERVAL:-250ms}
 replication_max_attempts=${REPLICATION_MAX_ATTEMPTS:-3}
 replication_dead_letter_limit=${REPLICATION_DEAD_LETTER_LIMIT:-128}
+replication_outbox_path=${REPLICATION_OUTBOX_PATH:-}
 replication_circuit_breaker_failures=${REPLICATION_CIRCUIT_BREAKER_FAILURES:-5}
 replication_circuit_breaker_cooldown=${REPLICATION_CIRCUIT_BREAKER_COOLDOWN:-30s}
 replication_wire_format=${REPLICATION_WIRE_FORMAT:-}
@@ -73,6 +74,7 @@ set -- \
 	-replication-retry-interval "$replication_retry_interval" \
 	-replication-max-attempts "$replication_max_attempts" \
 	-replication-dead-letter-limit "$replication_dead_letter_limit" \
+	-replication-outbox-path "$replication_outbox_path" \
 	-replication-circuit-breaker-failures "$replication_circuit_breaker_failures" \
 	-replication-circuit-breaker-cooldown "$replication_circuit_breaker_cooldown" \
 	-replication-sync-interval "$replication_sync_interval" \

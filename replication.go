@@ -43,6 +43,7 @@ type HTTPReplicatorOptions struct {
 	AsyncRetryInterval     time.Duration
 	AsyncMaxAttempts       uint
 	AsyncDeadLetterLimit   int
+	AsyncOutbox            *ReplicationOutboxStore
 	CircuitBreakerFailures int
 	CircuitBreakerCooldown time.Duration
 	WireFormat             CommandWireFormat
@@ -59,6 +60,7 @@ type HTTPReplicator struct {
 	retry           time.Duration
 	attempts        uint
 	wireFormat      CommandWireFormat
+	outbox          *ReplicationOutboxStore
 	breakerFailures int
 	breakerCooldown time.Duration
 	breakers        map[string]replicationCircuitBreakerState
@@ -177,9 +179,10 @@ type replicationTask struct {
 }
 
 type replicationJob struct {
-	id     uint64
-	result ReplicationResult
-	tasks  []replicationTask
+	id         uint64
+	result     ReplicationResult
+	tasks      []replicationTask
+	enqueuedAt time.Time
 }
 
 type replicationQueueMeta struct {
@@ -264,6 +267,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		client:          client,
 		timeout:         timeout,
 		wireFormat:      wireFormat,
+		outbox:          options.AsyncOutbox,
 		breakerFailures: options.CircuitBreakerFailures,
 		breakerCooldown: options.CircuitBreakerCooldown,
 	}
@@ -297,7 +301,12 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 			parent = context.Background()
 		}
 		ctx, cancel := context.WithCancel(parent)
-		replicator.queue = make(chan replicationJob, options.AsyncQueueSize)
+		restoredJobs := replicator.restoreAsyncOutbox()
+		queueSize := options.AsyncQueueSize
+		if len(restoredJobs) > queueSize {
+			queueSize = len(restoredJobs)
+		}
+		replicator.queue = make(chan replicationJob, queueSize)
 		replicator.retry = retry
 		replicator.attempts = attempts
 		replicator.deadLimit = deadLimit
@@ -307,8 +316,9 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		replicator.cancel = cancel
 		replicator.queueStats = ReplicationQueueStats{
 			Enabled:  true,
-			Capacity: options.AsyncQueueSize,
+			Capacity: queueSize,
 		}
+		replicator.enqueueRestoredAsyncJobs(restoredJobs)
 		go replicator.runAsync(ctx)
 	}
 	return replicator
@@ -329,6 +339,38 @@ func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 	result.DeadLetters = cloneReplicationDeadLetters(replicator.deadLetters)
 	result.CircuitBreakers = replicator.replicationCircuitBreakersLocked()
 	return withReplicationHealth(result)
+}
+
+func (replicator *HTTPReplicator) restoreAsyncOutbox() []replicationJob {
+	if replicator == nil || replicator.outbox == nil {
+		return nil
+	}
+	deadSeq, deadLetters := replicator.outbox.deadLetters()
+	replicator.deadSeq = deadSeq
+	replicator.deadLetters = cloneReplicationDeadLetters(deadLetters)
+	return replicator.outbox.jobs()
+}
+
+func (replicator *HTTPReplicator) enqueueRestoredAsyncJobs(jobs []replicationJob) {
+	if replicator == nil || replicator.queue == nil {
+		return
+	}
+	for _, job := range jobs {
+		if job.id > replicator.queueSeq {
+			replicator.queueSeq = job.id
+		}
+		if job.enqueuedAt.IsZero() {
+			job.enqueuedAt = time.Now().UTC()
+		}
+		replicator.pending = append(replicator.pending, replicationQueueMeta{
+			id:         job.id,
+			key:        job.result.Key,
+			targets:    replicationJobTargetIDs(job.tasks),
+			enqueuedAt: job.enqueuedAt,
+		})
+		replicator.queue <- job
+		replicator.queueStats.Enqueued++
+	}
 }
 
 func (replicator *HTTPReplicator) Close() {
@@ -423,12 +465,22 @@ func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *
 		return result
 	}
 	replicator.reserveAsyncJob(&job)
+	if err := replicator.persistAsyncJob(job); err != nil {
+		replicator.unreserveAsyncJob(job.id)
+		result.Queued = false
+		result.Skipped = true
+		result.Reason = "replication outbox write failed: " + err.Error()
+		result.Targets = nil
+		replicator.recordAsyncDroppedForTasks(tasks)
+		return result
+	}
 	select {
 	case replicator.queue <- job:
 		replicator.recordAsyncEnqueued()
 		return result
 	case <-replicator.done:
 		replicator.unreserveAsyncJob(job.id)
+		replicator.deleteAsyncJob(job.id)
 		result.Queued = false
 		result.Skipped = true
 		result.Reason = "replication queue is closed"
@@ -437,6 +489,7 @@ func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *
 		return result
 	default:
 		replicator.unreserveAsyncJob(job.id)
+		replicator.deleteAsyncJob(job.id)
 		result.Queued = false
 		result.Skipped = true
 		result.Reason = "replication queue is full"
@@ -489,12 +542,37 @@ func (replicator *HTTPReplicator) reserveAsyncJob(job *replicationJob) {
 	defer replicator.mu.Unlock()
 	replicator.queueSeq++
 	job.id = replicator.queueSeq
+	job.enqueuedAt = now
 	replicator.pending = append(replicator.pending, replicationQueueMeta{
 		id:         job.id,
 		key:        job.result.Key,
 		targets:    targets,
 		enqueuedAt: now,
 	})
+}
+
+func replicationJobTargetIDs(tasks []replicationTask) []string {
+	targets := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task.target.ID != "" {
+			targets = append(targets, task.target.ID)
+		}
+	}
+	return targets
+}
+
+func (replicator *HTTPReplicator) persistAsyncJob(job replicationJob) error {
+	if replicator == nil || replicator.outbox == nil {
+		return nil
+	}
+	return replicator.outbox.putJob(job)
+}
+
+func (replicator *HTTPReplicator) deleteAsyncJob(id uint64) {
+	if replicator == nil || replicator.outbox == nil || id == 0 {
+		return
+	}
+	_ = replicator.outbox.deleteJob(id)
 }
 
 func (replicator *HTTPReplicator) unreserveAsyncJob(id uint64) {
@@ -630,6 +708,9 @@ func (replicator *HTTPReplicator) recordDeadLetter(result ReplicationResult, att
 	if len(replicator.deadLetters) > replicator.deadLimit {
 		copy(replicator.deadLetters, replicator.deadLetters[len(replicator.deadLetters)-replicator.deadLimit:])
 		replicator.deadLetters = replicator.deadLetters[:replicator.deadLimit]
+	}
+	if replicator.outbox != nil {
+		_ = replicator.outbox.setDeadLetters(replicator.deadSeq, replicator.deadLetters)
 	}
 }
 
@@ -773,6 +854,16 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 		}
 		startedAt := time.Now().UTC()
 		result = finishReplicationResult(replicator.executeReplicationTasks(ctx, job.result, job.tasks), startedAt)
+		if err := ctx.Err(); err != nil {
+			result = job.result
+			result.Queued = false
+			result.Skipped = true
+			result.Reason = err.Error()
+			result.Targets = nil
+			result = replicator.attachReplicationHealth(result)
+			replicator.storeLastResult(result)
+			return
+		}
 		needsRetry := replicationNeedsRetry(result)
 		willRetry := needsRetry && attempt < attempts
 		replicator.recordAsyncAttempt(result, willRetry)
@@ -782,6 +873,7 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 		result = replicator.attachReplicationHealth(result)
 		replicator.storeLastResult(result)
 		if !needsRetry || attempt == attempts {
+			replicator.deleteAsyncJob(job.id)
 			return
 		}
 		if !replicator.waitForRetry(ctx) {

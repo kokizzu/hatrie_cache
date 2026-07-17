@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -821,6 +822,146 @@ func TestHTTPReplicatorAsyncDeadLettersAreBounded(t *testing.T) {
 	})
 	if final.DeadLetters[0].ID != 2 {
 		t.Fatalf("dead letters = %#v, want only newest id 2 retained", final.DeadLetters)
+	}
+}
+
+func TestHTTPReplicatorAsyncOutboxReplaysPendingJobAfterRestart(t *testing.T) {
+	var mode atomic.Int32
+	entered := make(chan struct{}, 1)
+	delivered := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if mode.Load() == 0 {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			http.Error(w, "temporarily down", http.StatusBadGateway)
+			return
+		}
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		delivered <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	outboxPath := filepath.Join(t.TempDir(), "replication-outbox.json")
+	outbox, err := OpenReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenReplicationOutbox() error = %v", err)
+	}
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:               "node-a",
+		Topology:           topology,
+		Election:           election,
+		Client:             target.Client(),
+		AsyncQueueSize:     1,
+		AsyncMaxAttempts:   2,
+		AsyncRetryInterval: time.Hour,
+		AsyncOutbox:        outbox,
+	})
+
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:outbox", Value: "value"}
+	response := trie.ExecuteCommand(write)
+	if result := replicator.ReplicateCommand(context.Background(), trie, write, response); !result.Queued || result.Skipped {
+		t.Fatalf("enqueue result = %#v, want queued", result)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first replication attempt did not start")
+	}
+	replicator.Close()
+
+	reopened, err := OpenReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenReplicationOutbox(reopen) error = %v", err)
+	}
+	if jobs := reopened.jobs(); len(jobs) != 1 || jobs[0].result.Key != "session:outbox" {
+		t.Fatalf("persisted jobs = %#v, want queued session:outbox job", jobs)
+	}
+	mode.Store(1)
+	replayed := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 1,
+		AsyncOutbox:    reopened,
+	})
+	defer replayed.Close()
+
+	select {
+	case request := <-delivered:
+		if request.Command != "INTERNALSET" || request.Key != "session:outbox" || request.Value == "" {
+			t.Fatalf("replayed request = %#v, want materialized INTERNALSET", request)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("persisted replication job was not replayed")
+	}
+	waitUntil(t, time.Second, func() bool {
+		return len(reopened.jobs()) == 0
+	})
+}
+
+func TestHTTPReplicatorAsyncOutboxPersistsDeadLetters(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "still down", http.StatusBadGateway)
+	}))
+	defer target.Close()
+
+	outboxPath := filepath.Join(t.TempDir(), "replication-outbox.json")
+	outbox, err := OpenReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenReplicationOutbox() error = %v", err)
+	}
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:             "node-a",
+		Topology:         topology,
+		Election:         election,
+		Client:           target.Client(),
+		AsyncQueueSize:   1,
+		AsyncMaxAttempts: 1,
+		AsyncOutbox:      outbox,
+	})
+
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:dead-outbox", Value: "value"}
+	response := trie.ExecuteCommand(write)
+	if result := replicator.ReplicateCommand(context.Background(), trie, write, response); !result.Queued || result.Skipped {
+		t.Fatalf("enqueue result = %#v, want queued", result)
+	}
+	final := waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
+		return result.DeadLetterCount == 1
+	})
+	if len(final.DeadLetters) != 1 || final.DeadLetters[0].Key != "session:dead-outbox" {
+		t.Fatalf("dead letters = %#v, want persisted key", final.DeadLetters)
+	}
+	replicator.Close()
+
+	reopened, err := OpenReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenReplicationOutbox(reopen) error = %v", err)
+	}
+	replayed := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 1,
+		AsyncOutbox:    reopened,
+	})
+	defer replayed.Close()
+	last := replayed.LastResult()
+	if last.DeadLetterCount != 1 || len(last.DeadLetters) != 1 || last.DeadLetters[0].Key != "session:dead-outbox" {
+		t.Fatalf("restored dead letters = %#v count=%d, want retained session:dead-outbox", last.DeadLetters, last.DeadLetterCount)
+	}
+	if jobs := reopened.jobs(); len(jobs) != 0 {
+		t.Fatalf("persisted jobs after dead-letter = %#v, want none", jobs)
 	}
 }
 
