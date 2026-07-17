@@ -79,6 +79,20 @@ make command-support
 The full HAT-trie benchmark includes rows beyond the Redis/Tarantool comparable
 tables, such as `BenchmarkCommandFeature/FenwickTreeRange`.
 
+Artifact-based comparison regeneration:
+
+```
+make bench-hatrie-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks BENCHTIME=100x
+make bench-redis-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000
+make bench-tarantool-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
+make bench-command-comparison BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+The artifact directory receives `hatrie-command-features.tsv`,
+`redis-command-features.tsv`, `tarantool-command-features.tsv`, matching memory
+TSV files, raw Markdown output, and generated
+`command-feature-comparison.md`.
+
 HAT-trie end-to-end transport rows:
 
 ```

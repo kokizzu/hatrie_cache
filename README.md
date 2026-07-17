@@ -80,7 +80,16 @@ make bench-command-features BENCHTIME=100x
 make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(HTTPJSON|HTTPProtobuf|GRPC)/(StringSet|StringGet)$' BENCHTIME=100x
 make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000
 make bench-tarantool-command-features TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
+make bench-hatrie-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks BENCHTIME=100x
+make bench-redis-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000
+make bench-tarantool-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
+make bench-command-comparison BENCHMARK_ARTIFACT_DIR=build/benchmarks
 ```
+
+When `BENCHMARK_ARTIFACT_DIR` is set, the HAT-trie, Redis, and Tarantool
+command benchmark scripts write raw Markdown plus TSV rows and memory summaries.
+`make bench-command-comparison` joins those TSV files into
+`command-feature-comparison.md` with seconds-per-10k and speedup columns.
 
 Run the CI benchmark smoke locally:
 

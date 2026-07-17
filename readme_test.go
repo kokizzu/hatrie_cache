@@ -90,6 +90,8 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 		"BenchmarkCommandTransportFeature/GRPC/StringGet",
 		"make bench-redis-command-features REDIS_START_DOCKER=1",
 		"make bench-tarantool-command-features TARANTOOL_REQUESTS=1000000",
+		"make bench-command-comparison BENCHMARK_ARTIFACT_DIR=build/benchmarks",
+		"`command-feature-comparison.md`",
 		"BenchmarkCommandFeature/StringSet",
 		"BenchmarkCommandFeature/FenwickTreeRange",
 		"Redis 7.0.4",
@@ -189,6 +191,9 @@ func TestRedisCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T) {
 	for _, token := range []string{
 		"REDIS_START_DOCKER",
 		"redis-benchmark",
+		"BENCHMARK_ARTIFACT_DIR",
+		"redis-command-features.tsv",
+		"redis-command-memory.tsv",
 		"10000 / qps",
 		"Seconds / 10k ops",
 		"Memory summary",
@@ -223,6 +228,20 @@ func TestTarantoolCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T
 			t.Fatalf("Tarantool command benchmark script missing token %q", token)
 		}
 	}
+	data, err = os.ReadFile("scripts/benchmark-tarantool-command-features.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-tarantool-command-features.sh) error = %v", err)
+	}
+	wrapper := string(data)
+	for _, token := range []string{
+		"BENCHMARK_ARTIFACT_DIR",
+		"tarantool-command-features.tsv",
+		"tarantool-command-memory.tsv",
+	} {
+		if !strings.Contains(wrapper, token) {
+			t.Fatalf("Tarantool command benchmark wrapper missing token %q", token)
+		}
+	}
 }
 
 func TestHatTrieCommandFeatureBenchmarkScriptReportsRSS(t *testing.T) {
@@ -233,6 +252,9 @@ func TestHatTrieCommandFeatureBenchmarkScriptReportsRSS(t *testing.T) {
 	script := string(data)
 	for _, token := range []string{
 		"HATRIE_BENCH",
+		"BENCHMARK_ARTIFACT_DIR",
+		"hatrie-command-features.tsv",
+		"hatrie-command-memory.tsv",
 		"go test -c",
 		"-test.benchmem",
 		"/usr/bin/time",

@@ -95,3 +95,40 @@ func TestBenchmarkCISmokeScriptSupportsRegressionThresholds(t *testing.T) {
 		}
 	}
 }
+
+func TestCommandFeatureComparisonScriptJoinsBackendArtifacts(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-command-comparison.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-command-comparison.sh) error = %v", err)
+	}
+	script := string(data)
+	for _, token := range []string{
+		"BENCHMARK_ARTIFACT_DIR",
+		"hatrie-command-features.tsv",
+		"redis-command-features.tsv",
+		"tarantool-command-features.tsv",
+		"command-feature-comparison.md",
+		"Redis/HAT speedup",
+		"Tarantool/HAT speedup",
+		"seconds_per_10k",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("benchmark-command-comparison.sh missing token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefile := string(data)
+	for _, token := range []string{
+		"BENCHMARK_ARTIFACT_DIR ?=",
+		"bench-command-comparison",
+		"./scripts/benchmark-command-comparison.sh",
+	} {
+		if !strings.Contains(makefile, token) {
+			t.Fatalf("Makefile missing benchmark comparison token %q", token)
+		}
+	}
+}

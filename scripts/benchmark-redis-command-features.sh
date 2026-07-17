@@ -9,7 +9,28 @@ keyspace=${REDIS_KEYSPACE:-10000}
 start_docker=${REDIS_START_DOCKER:-0}
 docker_image=${REDIS_DOCKER_IMAGE:-redis:7.0.4}
 prefix=${REDIS_KEY_PREFIX:-hatriebench:$$}
+artifact_dir=${BENCHMARK_ARTIFACT_DIR:-${REDIS_BENCHMARK_ARTIFACT_DIR:-}}
 container=
+raw_file=
+rows_tsv=
+memory_tsv=
+
+if [ -n "$artifact_dir" ]; then
+	mkdir -p "$artifact_dir"
+	raw_file="$artifact_dir/redis-command-features.md"
+	rows_tsv="$artifact_dir/redis-command-features.tsv"
+	memory_tsv="$artifact_dir/redis-command-memory.tsv"
+	: >"$raw_file"
+	printf 'feature\tcommand\tthroughput_req_per_sec\tseconds_per_10k\n' >"$rows_tsv"
+	printf 'metric\tvalue\tunit\n' >"$memory_tsv"
+fi
+
+emit() {
+	printf "$@"
+	if [ -n "$raw_file" ]; then
+		printf "$@" >>"$raw_file"
+	fi
+}
 
 cleanup() {
 	if [ -n "$container" ]; then
@@ -49,7 +70,10 @@ run_redis_benchmark() {
 	output=$(redis-benchmark -h "$host" -p "$port" -n "$requests" -c "$clients" -r "$keyspace" --csv "$@" | tail -n 1)
 	qps=$(printf '%s\n' "$output" | awk -F, '{ value = $2; gsub(/"/, "", value); print value }')
 	seconds_10k=$(awk -v qps="$qps" 'BEGIN { if (qps <= 0) { print "0.000000"; } else { printf "%.6f", 10000 / qps } }')
-	printf '| %s | `%s` | %.2f req/s | %s s |\n' "$feature" "$*" "$qps" "$seconds_10k"
+	emit '| %s | `%s` | %.2f req/s | %s s |\n' "$feature" "$*" "$qps" "$seconds_10k"
+	if [ -n "$rows_tsv" ]; then
+		printf '%s\t%s\t%.2f\t%s\n' "$feature" "$*" "$qps" "$seconds_10k" >>"$rows_tsv"
+	fi
 }
 
 prime() {
@@ -65,9 +89,9 @@ redis-cli -h "$host" -p "$port" PFADD "$prefix:hll" value >/dev/null
 redis-cli -h "$host" -p "$port" SETBIT "$prefix:bitmap" 65543 1 >/dev/null
 redis-cli -h "$host" -p "$port" SET "$prefix:ttl" value >/dev/null
 
-printf 'Redis benchmark: host=%s port=%s requests=%s clients=%s keyspace=%s\n\n' "$host" "$port" "$requests" "$clients" "$keyspace"
-printf '| Feature family | Redis command | Throughput | Seconds / 10k ops |\n'
-printf '| --- | --- | ---: | ---: |\n'
+emit 'Redis benchmark: host=%s port=%s requests=%s clients=%s keyspace=%s\n\n' "$host" "$port" "$requests" "$clients" "$keyspace"
+emit '| Feature family | Redis command | Throughput | Seconds / 10k ops |\n'
+emit '| --- | --- | ---: | ---: |\n'
 run_redis_benchmark 'String write' SET "$prefix:string" value
 run_redis_benchmark 'String read' GET "$prefix:string:__rand_int__"
 run_redis_benchmark 'Integer counter' INCR "$prefix:counter"
@@ -94,9 +118,14 @@ used_memory=$(memory_field used_memory)
 used_memory_rss=$(memory_field used_memory_rss)
 used_memory_peak=$(memory_field used_memory_peak)
 
-printf '\nMemory summary:\n\n'
-printf '| Metric | Value |\n'
-printf '| --- | ---: |\n'
-printf '| used_memory | %s B |\n' "${used_memory:-unknown}"
-printf '| used_memory_rss | %s B |\n' "${used_memory_rss:-unknown}"
-printf '| used_memory_peak | %s B |\n' "${used_memory_peak:-unknown}"
+emit '\nMemory summary:\n\n'
+emit '| Metric | Value |\n'
+emit '| --- | ---: |\n'
+emit '| used_memory | %s B |\n' "${used_memory:-unknown}"
+emit '| used_memory_rss | %s B |\n' "${used_memory_rss:-unknown}"
+emit '| used_memory_peak | %s B |\n' "${used_memory_peak:-unknown}"
+if [ -n "$memory_tsv" ]; then
+	printf 'used_memory\t%s\tB\n' "${used_memory:-unknown}" >>"$memory_tsv"
+	printf 'used_memory_rss\t%s\tB\n' "${used_memory_rss:-unknown}" >>"$memory_tsv"
+	printf 'used_memory_peak\t%s\tB\n' "${used_memory_peak:-unknown}" >>"$memory_tsv"
+fi
