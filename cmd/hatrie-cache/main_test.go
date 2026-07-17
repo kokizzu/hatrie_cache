@@ -765,6 +765,7 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 		"-db-hot-load-max-age", "30m",
 		"-db-hot-load-min-hits", "42",
 		"-db-memory-cap-bytes", "4096",
+		"-db-rss-cap-bytes", "8192",
 		"-db-memory-evict-interval", "15s",
 		"-db-memory-evict-min-value-bytes", "128",
 	}, &bytes.Buffer{})
@@ -783,7 +784,7 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 	if !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 || cfg.dbHotLoadMaxAge != 30*time.Minute || cfg.dbHotLoadMinHits != 42 {
 		t.Fatalf("cfg hot-load = %#v, want explicit hot-load options", cfg)
 	}
-	if cfg.dbMemoryCapBytes != 4096 || cfg.dbMemoryEvictInterval != 15*time.Second || cfg.dbMemoryEvictMinValueBytes != 128 {
+	if cfg.dbMemoryCapBytes != 4096 || cfg.dbRSSCapBytes != 8192 || cfg.dbMemoryEvictInterval != 15*time.Second || cfg.dbMemoryEvictMinValueBytes != 128 {
 		t.Fatalf("cfg memory governor = %#v, want explicit memory cap options", cfg)
 	}
 	policy := levelDBLoadPolicy(cfg)
@@ -812,6 +813,10 @@ func TestParseConfigRejectsNegativeHotLoadLimits(t *testing.T) {
 		{
 			name: "memory cap",
 			args: []string{"-db-memory-cap-bytes", "-1"},
+		},
+		{
+			name: "rss cap",
+			args: []string{"-db-rss-cap-bytes", "-1"},
 		},
 		{
 			name: "memory evict interval",
@@ -2595,9 +2600,11 @@ func TestStartLevelDBMemoryGovernorSpillsColdValues(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	results := make(chan hatriecache.LevelDBSpillResult, 1)
-	stop := startLevelDBMemoryGovernor(ctx, ht, store, time.Millisecond, hatriecache.LevelDBSpillOptions{
-		MaxHotBytes:   80,
-		MinValueBytes: 16,
+	stop := startLevelDBMemoryGovernor(ctx, ht, store, time.Millisecond, levelDBMemoryGovernorOptions{
+		Spill: hatriecache.LevelDBSpillOptions{
+			MaxHotBytes:   80,
+			MinValueBytes: 16,
+		},
 	}, func(result hatriecache.LevelDBSpillResult) {
 		if result.KeysSpilled > 0 {
 			select {
@@ -2621,6 +2628,119 @@ func TestStartLevelDBMemoryGovernorSpillsColdValues(t *testing.T) {
 	}
 	if got := ht.GetString("cold-large"); got != coldValue {
 		t.Fatalf("hydrated cold-large = %q, want spilled value", got)
+	}
+}
+
+func TestStartLevelDBMemoryGovernorSpillsWhenRSSCapBreached(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	coldValue := strings.Repeat("c", 64)
+	warmValue := strings.Repeat("w", 64)
+	ht.UpsertString("cold-large", coldValue)
+	ht.UpsertString("warm-large", warmValue)
+	if got := ht.GetString("warm-large"); got != warmValue {
+		t.Fatalf("GetString(warm-large) = %q, want warm value", got)
+	}
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan hatriecache.LevelDBSpillResult, 1)
+	stop := startLevelDBMemoryGovernor(ctx, ht, store, time.Millisecond, levelDBMemoryGovernorOptions{
+		Spill: hatriecache.LevelDBSpillOptions{
+			MinValueBytes: 16,
+		},
+		RSSCapBytes: 1,
+		RSS: func() (uint64, error) {
+			return 2, nil
+		},
+	}, func(result hatriecache.LevelDBSpillResult) {
+		if result.KeysSpilled > 0 {
+			select {
+			case results <- result:
+			default:
+			}
+		}
+	}, &bytes.Buffer{})
+	defer stop()
+
+	select {
+	case result := <-results:
+		if result.KeysSpilled == 0 || result.HotBytesAfter != 0 {
+			t.Fatalf("spill result = %#v, want RSS-triggered full eligible spill", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("periodic LevelDB memory governor did not spill under RSS pressure")
+	}
+	if entry, ok, err := store.Entry("cold-large"); err != nil || !ok || entry.String != coldValue {
+		t.Fatalf("Entry(cold-large) = %#v/%v/%v, want spilled record", entry, ok, err)
+	}
+}
+
+func TestStartLevelDBMemoryGovernorKeepsHotCapWhenRSSReadFails(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	coldValue := strings.Repeat("c", 64)
+	warmValue := strings.Repeat("w", 64)
+	ht.UpsertString("cold-large", coldValue)
+	ht.UpsertString("warm-large", warmValue)
+	if got := ht.GetString("warm-large"); got != warmValue {
+		t.Fatalf("GetString(warm-large) = %q, want warm value", got)
+	}
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan hatriecache.LevelDBSpillResult, 1)
+	stop := startLevelDBMemoryGovernor(ctx, ht, store, time.Millisecond, levelDBMemoryGovernorOptions{
+		Spill: hatriecache.LevelDBSpillOptions{
+			MaxHotBytes:   80,
+			MinValueBytes: 16,
+		},
+		RSSCapBytes: 1,
+		RSS: func() (uint64, error) {
+			return 0, errors.New("statm unavailable")
+		},
+	}, func(result hatriecache.LevelDBSpillResult) {
+		if result.KeysSpilled > 0 {
+			select {
+			case results <- result:
+			default:
+			}
+		}
+	}, &bytes.Buffer{})
+	defer stop()
+
+	select {
+	case result := <-results:
+		if result.KeysSpilled != 1 || result.HotBytesAfter > 80 {
+			t.Fatalf("spill result = %#v, want hot-cap spill despite RSS read error", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("periodic LevelDB memory governor did not spill with hot cap after RSS read error")
+	}
+}
+
+func TestRSSBytesFromStatm(t *testing.T) {
+	got, err := rssBytesFromStatm("10 3 2 1 0 0 0\n", 4096)
+	if err != nil {
+		t.Fatalf("rssBytesFromStatm() error = %v", err)
+	}
+	if got != 12288 {
+		t.Fatalf("rssBytesFromStatm() = %d, want 12288", got)
+	}
+	if _, err := rssBytesFromStatm("10\n", 4096); err == nil {
+		t.Fatal("rssBytesFromStatm(short) error = nil, want error")
 	}
 }
 

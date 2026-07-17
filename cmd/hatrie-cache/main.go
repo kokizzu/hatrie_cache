@@ -91,6 +91,7 @@ type config struct {
 	dbHotLoadMaxAge             time.Duration
 	dbHotLoadMinHits            uint64
 	dbMemoryCapBytes            int64
+	dbRSSCapBytes               int64
 	dbMemoryEvictInterval       time.Duration
 	dbMemoryEvictMinValueBytes  int64
 	snapshotPath                string
@@ -298,9 +299,13 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		LimitKey: cfg.dbCompactLimitKey,
 	}, monitoringHandler.RecordStorageCompact, stderr)
 	defer stopDBCompactor()
-	stopDBMemoryGovernor := startLevelDBMemoryGovernor(ctx, trie, dbStore, cfg.dbMemoryEvictInterval, hatriecache.LevelDBSpillOptions{
-		MaxHotBytes:   cfg.dbMemoryCapBytes,
-		MinValueBytes: cfg.dbMemoryEvictMinValueBytes,
+	stopDBMemoryGovernor := startLevelDBMemoryGovernor(ctx, trie, dbStore, cfg.dbMemoryEvictInterval, levelDBMemoryGovernorOptions{
+		Spill: hatriecache.LevelDBSpillOptions{
+			MaxHotBytes:   cfg.dbMemoryCapBytes,
+			MinValueBytes: cfg.dbMemoryEvictMinValueBytes,
+		},
+		RSSCapBytes: uint64(cfg.dbRSSCapBytes),
+		RSS:         processRSSBytes,
 	}, monitoringHandler.RecordStorageSpill, stderr)
 	defer stopDBMemoryGovernor()
 	handler := monitoringHandler.Handler()
@@ -420,6 +425,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for LevelDB hot-load")
 	flags.Uint64Var(&cfg.dbHotLoadMinHits, "db-hot-load-min-hits", 1000, "minimum hits required for LevelDB hot-load")
 	flags.Int64Var(&cfg.dbMemoryCapBytes, "db-memory-cap-bytes", 0, "estimated hot value bytes cap for periodic LevelDB cold eviction; use 0 to disable")
+	flags.Int64Var(&cfg.dbRSSCapBytes, "db-rss-cap-bytes", 0, "process RSS bytes threshold that triggers periodic LevelDB cold eviction; use 0 to disable")
 	flags.DurationVar(&cfg.dbMemoryEvictInterval, "db-memory-evict-interval", 0, "periodic LevelDB cold eviction interval; use 0 to disable")
 	flags.Int64Var(&cfg.dbMemoryEvictMinValueBytes, "db-memory-evict-min-value-bytes", 1024, "minimum estimated value bytes eligible for LevelDB cold eviction")
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional snapshot path to load on startup and save on shutdown")
@@ -471,14 +477,17 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.dbMemoryCapBytes < 0 {
 		return config{}, errors.New("db memory cap bytes must be non-negative")
 	}
+	if cfg.dbRSSCapBytes < 0 {
+		return config{}, errors.New("db rss cap bytes must be non-negative")
+	}
 	if cfg.dbMemoryEvictInterval < 0 {
 		return config{}, errors.New("db memory evict interval must be non-negative")
 	}
 	if cfg.dbMemoryEvictMinValueBytes < 0 {
 		return config{}, errors.New("db memory evict min value bytes must be non-negative")
 	}
-	if cfg.dbMemoryEvictInterval > 0 && cfg.dbMemoryCapBytes == 0 {
-		return config{}, errors.New("db memory evict interval requires positive -db-memory-cap-bytes")
+	if cfg.dbMemoryEvictInterval > 0 && cfg.dbMemoryCapBytes == 0 && cfg.dbRSSCapBytes == 0 {
+		return config{}, errors.New("db memory evict interval requires positive -db-memory-cap-bytes or -db-rss-cap-bytes")
 	}
 	if cfg.dbMemoryEvictInterval > 0 && strings.TrimSpace(cfg.dbPath) == "" {
 		return config{}, errors.New("db memory eviction requires -db-path")
@@ -692,6 +701,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"db_hot_load_max_age":                  cfg.dbHotLoadMaxAge.String(),
 		"db_hot_load_min_hits":                 cfg.dbHotLoadMinHits,
 		"db_memory_cap_bytes":                  cfg.dbMemoryCapBytes,
+		"db_rss_cap_bytes":                     cfg.dbRSSCapBytes,
 		"db_memory_evict_interval":             cfg.dbMemoryEvictInterval.String(),
 		"db_memory_evict_min_value_bytes":      cfg.dbMemoryEvictMinValueBytes,
 		"snapshot_path":                        cfg.snapshotPath,
@@ -1233,18 +1243,39 @@ func startLevelDBCompactor(ctx context.Context, store *hatriecache.LevelDBStore,
 	return periodicStopper(done, stopped)
 }
 
-func startLevelDBMemoryGovernor(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, interval time.Duration, options hatriecache.LevelDBSpillOptions, record func(hatriecache.LevelDBSpillResult), stderr io.Writer) func() {
+type levelDBMemoryGovernorOptions struct {
+	Spill       hatriecache.LevelDBSpillOptions
+	RSSCapBytes uint64
+	RSS         func() (uint64, error)
+}
+
+func startLevelDBMemoryGovernor(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, interval time.Duration, options levelDBMemoryGovernorOptions, record func(hatriecache.LevelDBSpillResult), stderr io.Writer) func() {
 	ctx = serverContext(ctx)
-	if store == nil || interval <= 0 || options.MaxHotBytes <= 0 {
+	if store == nil || interval <= 0 || (options.Spill.MaxHotBytes <= 0 && options.RSSCapBytes == 0) {
 		return func() {}
 	}
 	stderr = diagnosticWriter(stderr)
+	if options.RSS == nil {
+		options.RSS = processRSSBytes
+	}
 
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	spill := func() bool {
-		result, err := spillColdLevelDBIfOpen(trie, store, options)
+		spillOptions := options.Spill
+		if options.RSSCapBytes > 0 {
+			rssBytes, err := options.RSS()
+			if err != nil {
+				fmt.Fprintf(stderr, "read process rss: %v\n", err)
+				if spillOptions.MaxHotBytes <= 0 {
+					return true
+				}
+			} else if rssBytes < options.RSSCapBytes && spillOptions.MaxHotBytes <= 0 {
+				return true
+			}
+		}
+		result, err := spillColdLevelDBIfOpen(trie, store, spillOptions)
 		if errors.Is(err, errHatTrieDestroyed) || errors.Is(err, hatriecache.ErrLevelDBStoreClosed) {
 			return false
 		}
@@ -1274,6 +1305,32 @@ func startLevelDBMemoryGovernor(ctx context.Context, trie *hatriecache.HatTrie, 
 		}
 	}()
 	return periodicStopper(done, stopped)
+}
+
+func processRSSBytes() (uint64, error) {
+	data, err := os.ReadFile("/proc/self/statm")
+	if err != nil {
+		return 0, err
+	}
+	return rssBytesFromStatm(string(data), uint64(os.Getpagesize()))
+}
+
+func rssBytesFromStatm(data string, pageSize uint64) (uint64, error) {
+	fields := strings.Fields(data)
+	if len(fields) < 2 {
+		return 0, errors.New("statm missing rss pages")
+	}
+	pages, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse statm rss pages: %w", err)
+	}
+	if pageSize == 0 {
+		return 0, errors.New("page size must be positive")
+	}
+	if pages > ^uint64(0)/pageSize {
+		return 0, errors.New("statm rss bytes overflow")
+	}
+	return pages * pageSize, nil
 }
 
 func spillColdLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, options hatriecache.LevelDBSpillOptions) (result hatriecache.LevelDBSpillResult, err error) {

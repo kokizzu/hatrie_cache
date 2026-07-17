@@ -166,6 +166,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"-db-compact-limit-key",
 		"DB_MEMORY_CAP_BYTES",
 		"-db-memory-cap-bytes",
+		"DB_RSS_CAP_BYTES",
+		"-db-rss-cap-bytes",
 		"DB_MEMORY_EVICT_INTERVAL",
 		"-db-memory-evict-interval",
 		"DB_MEMORY_EVICT_MIN_VALUE_BYTES",

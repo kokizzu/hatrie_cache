@@ -145,9 +145,11 @@ func TestMonitoringWrapperPassesMemoryGovernorOptions(t *testing.T) {
 	makefileText := string(makefile)
 	for _, token := range []string{
 		"DB_MEMORY_CAP_BYTES ?= 0",
+		"DB_RSS_CAP_BYTES ?= 0",
 		"DB_MEMORY_EVICT_INTERVAL ?= 0",
 		"DB_MEMORY_EVICT_MIN_VALUE_BYTES ?= 1024",
 		"DB_MEMORY_CAP_BYTES='$(DB_MEMORY_CAP_BYTES)'",
+		"DB_RSS_CAP_BYTES='$(DB_RSS_CAP_BYTES)'",
 		"DB_MEMORY_EVICT_INTERVAL='$(DB_MEMORY_EVICT_INTERVAL)'",
 		"DB_MEMORY_EVICT_MIN_VALUE_BYTES='$(DB_MEMORY_EVICT_MIN_VALUE_BYTES)'",
 	} {
@@ -163,9 +165,11 @@ func TestMonitoringWrapperPassesMemoryGovernorOptions(t *testing.T) {
 	scriptText := string(script)
 	for _, token := range []string{
 		"db_memory_cap_bytes=${DB_MEMORY_CAP_BYTES:-0}",
+		"db_rss_cap_bytes=${DB_RSS_CAP_BYTES:-0}",
 		"db_memory_evict_interval=${DB_MEMORY_EVICT_INTERVAL:-0}",
 		"db_memory_evict_min_value_bytes=${DB_MEMORY_EVICT_MIN_VALUE_BYTES:-1024}",
 		`-db-memory-cap-bytes "$db_memory_cap_bytes"`,
+		`-db-rss-cap-bytes "$db_rss_cap_bytes"`,
 		`-db-memory-evict-interval "$db_memory_evict_interval"`,
 		`-db-memory-evict-min-value-bytes "$db_memory_evict_min_value_bytes"`,
 	} {

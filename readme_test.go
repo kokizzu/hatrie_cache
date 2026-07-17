@@ -454,6 +454,7 @@ func TestREADMEListsStorageFormatTradeoffs(t *testing.T) {
 		"`DB_COMPACT_START_KEY`",
 		"`DB_COMPACT_LIMIT_KEY`",
 		"`DB_MEMORY_CAP_BYTES`",
+		"`DB_RSS_CAP_BYTES`",
 		"`DB_MEMORY_EVICT_INTERVAL`",
 		"`DB_MEMORY_EVICT_MIN_VALUE_BYTES`",
 		"performs one full LevelDB save at startup",

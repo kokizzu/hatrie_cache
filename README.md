@@ -695,20 +695,26 @@ closing it to materialize all references into the trie:
 make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
 ```
 
-Set `DB_MEMORY_CAP_BYTES` with `DB_MEMORY_EVICT_INTERVAL` to keep the running
-hot value set under a soft byte cap. The governor estimates in-memory value
-payload bytes, writes cold eligible values to LevelDB, and replaces them with
-lazy LevelDB references. Values with no recent hits spill first; ties prefer
-older hits, fewer hits, then larger values. `DB_MEMORY_EVICT_MIN_VALUE_BYTES`
-defaults to 1024 so tiny keys are left in memory unless you lower it. This is a
-soft cap: keys already stored outside the Go heap, such as large byte payloads
-on disk, are not counted, and the cap may remain above target when there are no
-eligible values to spill. The tradeoff is lower heap/RSS pressure in exchange
-for LevelDB write I/O during spill passes and one LevelDB read when a cold value
-is accessed again:
+Set `DB_MEMORY_CAP_BYTES` and/or `DB_RSS_CAP_BYTES` with
+`DB_MEMORY_EVICT_INTERVAL` to keep the running hot value set under a soft byte
+cap or to react when process RSS crosses a threshold. The governor estimates
+in-memory value payload bytes, writes cold eligible values to LevelDB, and
+replaces them with lazy LevelDB references. Values with no recent hits spill
+first; ties prefer older hits, fewer hits, then larger values.
+`DB_MEMORY_EVICT_MIN_VALUE_BYTES` defaults to 1024 so tiny keys are left in
+memory unless you lower it. `DB_MEMORY_CAP_BYTES` targets estimated hot payload
+bytes; `DB_RSS_CAP_BYTES` is a coarser process-level pressure trigger. With only
+`DB_RSS_CAP_BYTES` set, a breached RSS threshold spills all eligible cold values.
+With both set, RSS is an extra trigger while `DB_MEMORY_CAP_BYTES` remains the
+hot-byte target. This is a soft cap: keys already stored outside the Go heap,
+such as large byte payloads on disk, are not counted, and the cap may remain
+above target when there are no eligible values to spill. The tradeoff is lower
+heap/RSS pressure in exchange for LevelDB write I/O during spill passes and one
+LevelDB read when a cold value is accessed again:
 
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_MEMORY_CAP_BYTES=1073741824 DB_MEMORY_EVICT_INTERVAL=30s
+make monitoring-server DB_PATH=data/cache.leveldb DB_RSS_CAP_BYTES=2147483648 DB_MEMORY_EVICT_INTERVAL=30s
 ```
 
 `GET /api/storage` includes the last spill result as `last_spill`, and
