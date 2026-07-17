@@ -165,6 +165,7 @@ make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeatur
 | --- | --- | ---: | ---: | ---: |
 | Reservoir sample add | `BenchmarkCommandFeature/ReservoirSampleAdd` | 956.7 ns, 168 B, 6 allocs | 465.3 ns, 64 B, 1 alloc | 2.06x faster, 2.63x less memory, 6.00x fewer allocs |
 
+<!-- BEGIN GENERATED COMMAND BENCHMARK COMPARISON -->
 ## Memory Summary
 
 | System | Run | Memory metric | Value |
@@ -234,6 +235,7 @@ commands add the two Redis seconds-per-10k values before computing speedup.
 | HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 0.054010 s | `PFCOUNT` | 1.186000 s | 21.96x |
 | Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.004782 s | `DUMP` | 1.088000 s | 227.52x |
 
+<!-- END GENERATED COMMAND BENCHMARK COMPARISON -->
 ## HAT-trie Transport Costs
 
 Run this section locally when you need apples-to-apples HAT-trie protocol
@@ -300,6 +302,7 @@ reservoir samples, and Fenwick trees.
 | Quantile sketch | `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ` |
 | Fenwick tree | `CREATEFW`, `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW` |
 
+<!-- BEGIN GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Raw Results
 
 ### Raw HAT-trie Comparable Result
@@ -446,6 +449,7 @@ Memory summary:
 | used_memory_peak | 3171296 B |
 ```
 
+<!-- END GENERATED COMMAND BENCHMARK RAW RESULTS -->
 ## Gaps Versus Redis
 
 HAT-trie cache intentionally does not try to implement the entire Redis command

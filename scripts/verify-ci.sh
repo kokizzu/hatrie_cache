@@ -49,10 +49,14 @@ require_file Makefile
 require_executable scripts/check-config.sh
 require_executable scripts/docker-build.sh
 require_executable scripts/benchmark-ci-smoke.sh
+require_executable scripts/update-benchmark-md.sh
+require_executable scripts/verify-benchmark-md-update.sh
 require_executable scripts/verify-ci.sh
 
 require_pattern Makefile '^[[:space:]]*verify-ci:' "Makefile is missing verify-ci target"
 require_pattern Makefile '^[[:space:]]*bench-ci-smoke:' "Makefile is missing bench-ci-smoke target"
+require_pattern Makefile '^[[:space:]]*benchmark-md:' "Makefile is missing benchmark-md target"
+require_pattern Makefile '^[[:space:]]*verify-benchmark-md-update:' "Makefile is missing benchmark md update verifier target"
 require_pattern "$workflow" '^permissions:' "CI workflow is missing explicit permissions"
 require_pattern "$workflow" 'contents:[[:space:]]*read' "CI workflow must keep contents: read"
 require_pattern "$workflow" '^concurrency:' "CI workflow is missing concurrency cancellation"
@@ -92,5 +96,7 @@ CONFIG_PATH=deploy/hatrie-cache.json ./scripts/check-config.sh >/dev/null
 if [ "${CI_VERIFY_DOCKER_COMPOSE:-0}" = "1" ]; then
 	MONITORING_AUTH_TOKEN=ci docker compose -f deploy/docker-compose.production.yml config >/dev/null
 fi
+
+./scripts/verify-benchmark-md-update.sh >/dev/null
 
 echo "verify-ci: ok"

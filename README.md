@@ -84,12 +84,15 @@ make bench-hatrie-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks BENCH
 make bench-redis-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000
 make bench-tarantool-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
 make bench-command-comparison BENCHMARK_ARTIFACT_DIR=build/benchmarks
+make benchmark-md BENCHMARK_ARTIFACT_DIR=build/benchmarks
 ```
 
 When `BENCHMARK_ARTIFACT_DIR` is set, the HAT-trie, Redis, and Tarantool
 command benchmark scripts write raw Markdown plus TSV rows and memory summaries.
 `make bench-command-comparison` joins those TSV files into
 `command-feature-comparison.md` with seconds-per-10k and speedup columns.
+`make benchmark-md` refreshes the generated comparison and raw-result regions
+in `BENCHMARK.md` from those artifacts.
 
 Run the CI benchmark smoke locally:
 
