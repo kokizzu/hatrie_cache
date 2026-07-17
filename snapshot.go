@@ -1659,6 +1659,7 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 		hval = ht.setExpirationLocked(entry.Key, *entry.ExpiresAt, rawPtr, hval)
 	}
 	ht.updateLevelDBSpillCandidateLocked(entry.Key, hval)
+	ht.updateLevelDBHotByteAccountingForKeyLocked(entry.Key)
 	ht.restoreKeyStatsLocked(entry.Key, entry.Stats)
 	return hval, nil
 }

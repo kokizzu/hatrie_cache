@@ -2921,8 +2921,8 @@ func TestLevelDBStoreSpillColdReusesCandidateIndexAfterFirstPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SpillCold(second) error = %v", err)
 	}
-	if second.KeysScanned != 1 || second.ValuesScanned != 1 {
-		t.Fatalf("SpillCold(second) scanned keys/values = %d/%d, want indexed 1/1: %#v", second.KeysScanned, second.ValuesScanned, second)
+	if second.KeysScanned != 0 || second.ValuesScanned != 0 {
+		t.Fatalf("SpillCold(second) scanned keys/values = %d/%d, want cached hot-byte total without value scan: %#v", second.KeysScanned, second.ValuesScanned, second)
 	}
 	if second.KeysSpilled != 0 || second.HotBytesBefore != 64 || second.HotBytesAfter != 64 {
 		t.Fatalf("SpillCold(second) result = %#v, want one retained hot value under cap", second)
@@ -2974,6 +2974,44 @@ func TestLevelDBStoreSpillColdCandidateIndexTracksHydratedReferences(t *testing.
 	}
 	if second.KeysSpilled != 1 || second.HotBytesBefore != 128 || second.HotBytesAfter != 64 {
 		t.Fatalf("SpillCold(second) result = %#v, want hydrated key re-spilled to cap", second)
+	}
+}
+
+func TestLevelDBStoreSpillColdCandidateIndexTracksHotByteGrowth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	ht.UpsertString("hot", strings.Repeat("x", 64))
+
+	first, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold(first) error = %v", err)
+	}
+	if first.KeysSpilled != 0 || first.HotBytesBefore != 64 {
+		t.Fatalf("SpillCold(first) = %#v, want retained hot value at cap", first)
+	}
+
+	ht.UpsertString("hot", strings.Repeat("x", 128))
+	second, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold(second) error = %v", err)
+	}
+	if second.KeysScanned != 1 || second.ValuesScanned != 1 {
+		t.Fatalf("SpillCold(second) scanned keys/values = %d/%d, want one updated hot candidate: %#v", second.KeysScanned, second.ValuesScanned, second)
+	}
+	if second.KeysSpilled != 1 || second.HotBytesBefore != 128 || second.HotBytesAfter != 0 {
+		t.Fatalf("SpillCold(second) = %#v, want grown hot value spilled", second)
 	}
 }
 

@@ -1891,6 +1891,8 @@ type HatTrie struct {
 	stats            CacheStats
 	keyStats         map[string]*KeyStats
 	levelDBSpillKeys map[string]struct{}
+	levelDBHotBytes  int64
+	levelDBHotValues map[string]int64
 	now              func() time.Time
 }
 
@@ -1984,6 +1986,8 @@ func (ht *HatTrie) Destroy() {
 	ht.hotValid = false
 	ht.keyStats = nil
 	ht.levelDBSpillKeys = nil
+	ht.levelDBHotBytes = 0
+	ht.levelDBHotValues = nil
 	ht.now = nil
 }
 
@@ -2587,6 +2591,7 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	for _, key := range keys {
 		ht.clearHotKeyLocked(key)
 		ht.updateLevelDBSpillCandidateForKeyLocked(key)
+		ht.updateLevelDBHotByteAccountingForKeyLocked(key)
 		stats := ht.keyStats[key]
 		if stats == nil {
 			stats = &KeyStats{}
@@ -2601,6 +2606,7 @@ func (ht *HatTrie) recordDeleteLocked(key string) {
 	ht.stats.Deletes++
 	ht.recordWriteLocked()
 	ht.deleteLevelDBSpillCandidateLocked(key)
+	ht.deleteLevelDBHotByteAccountingLocked(key)
 	delete(ht.keyStats, key)
 }
 
@@ -2609,6 +2615,7 @@ func (ht *HatTrie) recordExpirationLocked(keys ...string) {
 	ht.recordWriteLocked()
 	for _, key := range keys {
 		ht.deleteLevelDBSpillCandidateLocked(key)
+		ht.deleteLevelDBHotByteAccountingLocked(key)
 		delete(ht.keyStats, key)
 	}
 }
