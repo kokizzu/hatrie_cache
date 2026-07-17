@@ -2035,6 +2035,55 @@ func TestMonitoringHandlerReportsAsyncReplicationQueue(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerReportsReplicationDeadLetters(t *testing.T) {
+	ht := newTestTrie(t)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "down", http.StatusBadGateway)
+	}))
+	defer target.Close()
+
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:             "node-a",
+		Topology:         topology,
+		Election:         election,
+		Client:           target.Client(),
+		AsyncQueueSize:   1,
+		AsyncMaxAttempts: 1,
+	})
+	defer replicator.Close()
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:   "node-a",
+		Topology:   topology,
+		Election:   election,
+		Replicator: replicator,
+	}).Handler()
+
+	commandResp := httptest.NewRecorder()
+	handler.ServeHTTP(commandResp, httptest.NewRequest(http.MethodPost, "/api/commands", bytes.NewBufferString(`{"command":"SETSTR","key":"session:dead","value":"value"}`)))
+	if commandResp.Code != http.StatusOK {
+		t.Fatalf("command status = %d, want 200", commandResp.Code)
+	}
+
+	var result ReplicationResult
+	waitUntil(t, time.Second, func() bool {
+		replicationResp := httptest.NewRecorder()
+		handler.ServeHTTP(replicationResp, httptest.NewRequest(http.MethodGet, "/api/replication", nil))
+		if replicationResp.Code != http.StatusOK {
+			return false
+		}
+		result = ReplicationResult{}
+		if err := json.Unmarshal(replicationResp.Body.Bytes(), &result); err != nil {
+			return false
+		}
+		return result.DeadLetterCount == 1
+	})
+	if len(result.DeadLetters) != 1 || result.DeadLetters[0].Key != "session:dead" || result.DeadLetters[0].Attempts != 1 {
+		t.Fatalf("replication dead letters = %#v, want retained session:dead failure", result.DeadLetters)
+	}
+}
+
 func TestMonitoringHandlerSyncsReplication(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("session:1", "value")

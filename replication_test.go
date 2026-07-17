@@ -729,6 +729,100 @@ func TestHTTPReplicatorAsyncRetriesFailedDelivery(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAsyncRecordsDeadLetterAfterExhaustedRetries(t *testing.T) {
+	attempts := make(chan struct{}, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case attempts <- struct{}{}:
+		default:
+		}
+		http.Error(w, "still down", http.StatusBadGateway)
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:               "node-a",
+		Topology:           topology,
+		Election:           election,
+		Client:             target.Client(),
+		AsyncQueueSize:     1,
+		AsyncMaxAttempts:   2,
+		AsyncRetryInterval: time.Millisecond,
+	})
+	defer replicator.Close()
+
+	write := CacheCommandRequest{Command: "SETSTR", Key: "session:dead", Value: "secret"}
+	response := trie.ExecuteCommand(write)
+	if result := replicator.ReplicateCommand(context.Background(), trie, write, response); !result.Queued || result.Skipped {
+		t.Fatalf("enqueue result = %#v, want queued", result)
+	}
+
+	final := waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
+		return result.DeadLetterCount == 1
+	})
+	if final.Queue == nil || final.Queue.Failures != 2 || final.Queue.Retried != 1 {
+		t.Fatalf("queue stats = %#v, want two failures and one retry", final.Queue)
+	}
+	if len(final.DeadLetters) != 1 {
+		t.Fatalf("dead letters = %#v, want one", final.DeadLetters)
+	}
+	deadLetter := final.DeadLetters[0]
+	if deadLetter.ID != 1 || deadLetter.Command != "SETSTR" || deadLetter.Key != "session:dead" || deadLetter.Attempts != 2 || deadLetter.FailedAt == nil {
+		t.Fatalf("dead letter = %#v, want SETSTR session:dead with attempts", deadLetter)
+	}
+	if len(deadLetter.Targets) != 1 || deadLetter.Targets[0].Node != "node-b" || deadLetter.Targets[0].OK {
+		t.Fatalf("dead letter targets = %#v, want failed node-b target", deadLetter.Targets)
+	}
+	if strings.Contains(deadLetter.Reason, "secret") {
+		t.Fatalf("dead letter reason leaked command value: %#v", deadLetter)
+	}
+	if got := len(attempts); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
+	}
+	if final.Health == "ok" || final.HealthScore >= 100 {
+		t.Fatalf("health = %s/%d/%q, want dead-letter failure to reduce health", final.Health, final.HealthScore, final.HealthReason)
+	}
+}
+
+func TestHTTPReplicatorAsyncDeadLettersAreBounded(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "still down", http.StatusBadGateway)
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                 "node-a",
+		Topology:             topology,
+		Election:             election,
+		Client:               target.Client(),
+		AsyncQueueSize:       2,
+		AsyncMaxAttempts:     1,
+		AsyncDeadLetterLimit: 1,
+	})
+	defer replicator.Close()
+
+	for _, key := range []string{"session:first", "session:second"} {
+		write := CacheCommandRequest{Command: "SETSTR", Key: key, Value: "value"}
+		response := trie.ExecuteCommand(write)
+		if result := replicator.ReplicateCommand(context.Background(), trie, write, response); !result.Queued || result.Skipped {
+			t.Fatalf("enqueue %s result = %#v, want queued", key, result)
+		}
+	}
+
+	final := waitForReplicationLastResult(t, replicator, func(result ReplicationResult) bool {
+		return result.DeadLetterCount == 1 && len(result.DeadLetters) == 1 && result.DeadLetters[0].Key == "session:second"
+	})
+	if final.DeadLetters[0].ID != 2 {
+		t.Fatalf("dead letters = %#v, want only newest id 2 retained", final.DeadLetters)
+	}
+}
+
 func TestHTTPReplicatorAsyncReportsFullQueue(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)

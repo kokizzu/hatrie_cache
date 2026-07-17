@@ -119,6 +119,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"replication_queue_size": 16,
 		"replication_retry_interval": "10ms",
 		"replication_max_attempts": 2,
+		"replication_dead_letter_limit": 9,
 		"db_path": "/data/cache.leveldb",
 		"db_hot_load": true,
 		"db_hot_load_max_bytes": 2048,
@@ -141,7 +142,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	if cfg.nodeID != "node-a" || cfg.grpcAddr != "0.0.0.0:19090" {
 		t.Fatalf("node/grpc config = %q/%q, want node-a/grpc addr", cfg.nodeID, cfg.grpcAddr)
 	}
-	if !cfg.replication || !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 10*time.Millisecond || cfg.replicationAttempts != 2 {
+	if !cfg.replication || !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 10*time.Millisecond || cfg.replicationAttempts != 2 || cfg.replicationDeadLetterLimit != 9 {
 		t.Fatalf("replication config = %#v, want file values", cfg)
 	}
 	if cfg.dbPath != "/data/cache.leveldb" || !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 {
@@ -369,6 +370,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-queue-size", "16",
 		"-replication-retry-interval", "50ms",
 		"-replication-max-attempts", "5",
+		"-replication-dead-letter-limit", "7",
 		"-replication-wire-format", "json",
 		"-replication-sync-interval", "10s",
 		"-replication-sync-prefix", "session:",
@@ -380,7 +382,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	if cfg.nodeID != "node-a" || cfg.topologyPath != "/tmp/topology.json" || cfg.electionTimeout != 30*time.Second || !cfg.replication || !cfg.enforceLeaderWrites {
 		t.Fatalf("cfg topology = %#v, want explicit node and path", cfg)
 	}
-	if !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 50*time.Millisecond || cfg.replicationAttempts != 5 {
+	if !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 50*time.Millisecond || cfg.replicationAttempts != 5 || cfg.replicationDeadLetterLimit != 7 {
 		t.Fatalf("cfg replication async = %#v, want explicit async queue settings", cfg)
 	}
 	if cfg.replicationWireFormat != "json" || replicationWireFormat(cfg) != hatriecache.CommandWireFormatJSON {

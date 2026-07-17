@@ -148,6 +148,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"-grpc-tls-cert",
 		"GRPC_CLIENT_CA",
 		"-grpc-client-ca",
+		"REPLICATION_DEAD_LETTER_LIMIT",
+		"-replication-dead-letter-limit",
 	} {
 		if !strings.Contains(string(data), token) {
 			t.Fatalf("monitoring server script missing token %q", token)

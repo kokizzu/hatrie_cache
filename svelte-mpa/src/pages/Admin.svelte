@@ -12,6 +12,7 @@
     syncReplication,
     type AuditEvent,
     type AuditStatus,
+    type ReplicationDeadLetter,
     type ReplicationResult,
     type ReplicationQueueStats,
     type StorageCompactResult,
@@ -168,6 +169,12 @@
     return event.key || event.command || event.path || event.action;
   }
 
+  function deadLetterTargets(deadLetter: ReplicationDeadLetter): string {
+    return (deadLetter.targets ?? [])
+      .map((target) => target.node || target.address || target.error || 'target')
+      .join(', ');
+  }
+
   onMount(refresh);
 
   $: queue = replication?.queue;
@@ -176,6 +183,7 @@
   $: effectiveLastCompact = lastCompact ?? storage?.last_compact ?? null;
   $: targets = replication?.targets ?? [];
   $: auditEvents = audit?.events ?? [];
+  $: deadLetters = replication?.dead_letters ?? [];
   $: dropsByTarget = targetRows(queue?.dropped_by_target);
   $: failuresByTarget = targetRows(queue?.failures_by_target);
 </script>
@@ -291,6 +299,7 @@
       <dl class="detail-list">
         <div><dt>Health</dt><dd>{replicationHealthText(replication)}</dd></div>
         <div><dt>Health reason</dt><dd>{replication?.health_reason ?? 'unknown'}</dd></div>
+        <div><dt>Dead letters</dt><dd>{(replication?.dead_letter_count ?? 0).toLocaleString()}</dd></div>
         <div><dt>Queue fill</dt><dd>{queueFill(queue)}</dd></div>
         <div><dt>Enqueued</dt><dd>{(queue?.enqueued ?? 0).toLocaleString()}</dd></div>
         <div><dt>Attempts</dt><dd>{(queue?.attempts ?? 0).toLocaleString()}</dd></div>
@@ -371,6 +380,37 @@
       </table>
     </div>
   </section>
+
+  {#if deadLetters.length}
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <h2>Replication Dead Letters</h2>
+          <p>{deadLetters.length.toLocaleString()} retained failures</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Failed</th><th>Command</th><th>Key</th><th>Attempts</th><th>Targets</th><th>Reason</th></tr>
+          </thead>
+          <tbody>
+            {#each deadLetters as deadLetter}
+              <tr>
+                <td>{deadLetter.id}</td>
+                <td>{deadLetter.failed_at ? formatRelativeTime(deadLetter.failed_at) : ''}</td>
+                <td>{deadLetter.command ?? ''}</td>
+                <td><code>{deadLetter.key ?? ''}</code></td>
+                <td>{deadLetter.attempts}</td>
+                <td>{deadLetterTargets(deadLetter)}</td>
+                <td>{deadLetter.reason ?? ''}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {/if}
 
   {#if dropsByTarget.length || failuresByTarget.length}
     <section class="admin-layout">

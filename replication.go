@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 
 const DefaultReplicationTimeout = 2 * time.Second
 const DefaultReplicationRetryInterval = 250 * time.Millisecond
+const DefaultReplicationDeadLetterLimit = 128
 const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
 const minCompressedReplicationRequestBytes = 16 << 10
@@ -29,57 +31,73 @@ var (
 )
 
 type HTTPReplicatorOptions struct {
-	Context            context.Context
-	Self               string
-	Topology           *TopologyStore
-	Election           *ElectionStore
-	Client             *http.Client
-	Timeout            time.Duration
-	AsyncQueueSize     int
-	AsyncRetryInterval time.Duration
-	AsyncMaxAttempts   uint
-	WireFormat         CommandWireFormat
+	Context              context.Context
+	Self                 string
+	Topology             *TopologyStore
+	Election             *ElectionStore
+	Client               *http.Client
+	Timeout              time.Duration
+	AsyncQueueSize       int
+	AsyncRetryInterval   time.Duration
+	AsyncMaxAttempts     uint
+	AsyncDeadLetterLimit int
+	WireFormat           CommandWireFormat
 }
 
 type HTTPReplicator struct {
-	mu         sync.RWMutex
-	self       string
-	topology   *TopologyStore
-	election   *ElectionStore
-	client     *http.Client
-	timeout    time.Duration
-	queue      chan replicationJob
-	retry      time.Duration
-	attempts   uint
-	wireFormat CommandWireFormat
-	done       chan struct{}
-	stopped    chan struct{}
-	asyncCtx   context.Context
-	cancel     context.CancelFunc
-	close      sync.Once
-	closed     bool
-	sequence   uint64
-	queueSeq   uint64
-	pending    []replicationQueueMeta
-	queueStats ReplicationQueueStats
-	last       ReplicationResult
+	mu          sync.RWMutex
+	self        string
+	topology    *TopologyStore
+	election    *ElectionStore
+	client      *http.Client
+	timeout     time.Duration
+	queue       chan replicationJob
+	retry       time.Duration
+	attempts    uint
+	wireFormat  CommandWireFormat
+	done        chan struct{}
+	stopped     chan struct{}
+	asyncCtx    context.Context
+	cancel      context.CancelFunc
+	close       sync.Once
+	closed      bool
+	sequence    uint64
+	queueSeq    uint64
+	deadSeq     uint64
+	deadLimit   int
+	pending     []replicationQueueMeta
+	deadLetters []ReplicationDeadLetter
+	queueStats  ReplicationQueueStats
+	last        ReplicationResult
 }
 
 type ReplicationResult struct {
-	Command        string                    `json:"command,omitempty"`
-	Key            string                    `json:"key,omitempty"`
-	Entries        int                       `json:"entries,omitempty"`
-	Queued         bool                      `json:"queued,omitempty"`
-	Skipped        bool                      `json:"skipped"`
-	Reason         string                    `json:"reason,omitempty"`
-	Health         string                    `json:"health"`
-	HealthScore    int                       `json:"health_score"`
-	HealthReason   string                    `json:"health_reason,omitempty"`
-	StartedAt      *time.Time                `json:"started_at,omitempty"`
-	FinishedAt     *time.Time                `json:"finished_at,omitempty"`
-	DurationMillis int64                     `json:"duration_millis,omitempty"`
-	Queue          *ReplicationQueueStats    `json:"queue,omitempty"`
-	Targets        []ReplicationTargetResult `json:"targets,omitempty"`
+	Command         string                    `json:"command,omitempty"`
+	Key             string                    `json:"key,omitempty"`
+	Entries         int                       `json:"entries,omitempty"`
+	Queued          bool                      `json:"queued,omitempty"`
+	Skipped         bool                      `json:"skipped"`
+	Reason          string                    `json:"reason,omitempty"`
+	Health          string                    `json:"health"`
+	HealthScore     int                       `json:"health_score"`
+	HealthReason    string                    `json:"health_reason,omitempty"`
+	DeadLetterCount int                       `json:"dead_letter_count,omitempty"`
+	DeadLetters     []ReplicationDeadLetter   `json:"dead_letters,omitempty"`
+	StartedAt       *time.Time                `json:"started_at,omitempty"`
+	FinishedAt      *time.Time                `json:"finished_at,omitempty"`
+	DurationMillis  int64                     `json:"duration_millis,omitempty"`
+	Queue           *ReplicationQueueStats    `json:"queue,omitempty"`
+	Targets         []ReplicationTargetResult `json:"targets,omitempty"`
+}
+
+type ReplicationDeadLetter struct {
+	ID       uint64                    `json:"id"`
+	Command  string                    `json:"command,omitempty"`
+	Key      string                    `json:"key,omitempty"`
+	FailedAt *time.Time                `json:"failed_at,omitempty"`
+	Attempts uint                      `json:"attempts"`
+	Reason   string                    `json:"reason,omitempty"`
+	Targets  []ReplicationTargetResult `json:"targets,omitempty"`
 }
 
 // ReplicationQueueStats reports bounded async replication outbox health.
@@ -218,6 +236,13 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		if attempts == 0 {
 			attempts = 1
 		}
+		deadLimit := options.AsyncDeadLetterLimit
+		if deadLimit == 0 {
+			deadLimit = DefaultReplicationDeadLetterLimit
+		}
+		if deadLimit < 0 {
+			deadLimit = 0
+		}
 		parent := options.Context
 		if parent == nil {
 			parent = context.Background()
@@ -226,6 +251,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		replicator.queue = make(chan replicationJob, options.AsyncQueueSize)
 		replicator.retry = retry
 		replicator.attempts = attempts
+		replicator.deadLimit = deadLimit
 		replicator.done = make(chan struct{})
 		replicator.stopped = make(chan struct{})
 		replicator.asyncCtx = ctx
@@ -250,6 +276,8 @@ func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 		stats := replicator.queueStatsLocked()
 		result.Queue = &stats
 	}
+	result.DeadLetterCount = len(replicator.deadLetters)
+	result.DeadLetters = cloneReplicationDeadLetters(replicator.deadLetters)
 	return withReplicationHealth(result)
 }
 
@@ -522,6 +550,51 @@ func (replicator *HTTPReplicator) recordAsyncAttempt(result ReplicationResult, r
 	}
 }
 
+func (replicator *HTTPReplicator) recordDeadLetter(result ReplicationResult, attempts uint) {
+	if replicator == nil || replicator.queue == nil || replicator.deadLimit <= 0 {
+		return
+	}
+	failedTargets := make([]ReplicationTargetResult, 0, len(result.Targets))
+	for _, target := range result.Targets {
+		if !target.OK {
+			failedTargets = append(failedTargets, target)
+		}
+	}
+	if len(failedTargets) == 0 {
+		return
+	}
+	failedAt := time.Now().UTC()
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	replicator.deadSeq++
+	deadLetter := ReplicationDeadLetter{
+		ID:       replicator.deadSeq,
+		Command:  result.Command,
+		Key:      result.Key,
+		FailedAt: cloneTimePtr(&failedAt),
+		Attempts: attempts,
+		Reason:   replicationDeadLetterReason(failedTargets),
+		Targets:  append([]ReplicationTargetResult(nil), failedTargets...),
+	}
+	replicator.deadLetters = append(replicator.deadLetters, deadLetter)
+	if len(replicator.deadLetters) > replicator.deadLimit {
+		copy(replicator.deadLetters, replicator.deadLetters[len(replicator.deadLetters)-replicator.deadLimit:])
+		replicator.deadLetters = replicator.deadLetters[:replicator.deadLimit]
+	}
+}
+
+func replicationDeadLetterReason(targets []ReplicationTargetResult) string {
+	for _, target := range targets {
+		if target.Error != "" {
+			return target.Error
+		}
+		if target.Status != 0 {
+			return fmt.Sprintf("target returned HTTP %d", target.Status)
+		}
+	}
+	return "replication target delivery failed"
+}
+
 func (replicator *HTTPReplicator) queueStatsLocked() ReplicationQueueStats {
 	stats := cloneReplicationQueueStats(replicator.queueStats)
 	now := time.Now().UTC()
@@ -653,6 +726,9 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 		needsRetry := replicationNeedsRetry(result)
 		willRetry := needsRetry && attempt < attempts
 		replicator.recordAsyncAttempt(result, willRetry)
+		if needsRetry && attempt == attempts {
+			replicator.recordDeadLetter(result, attempt)
+		}
 		result = replicator.attachReplicationHealth(result)
 		replicator.storeLastResult(result)
 		if !needsRetry || attempt == attempts {
@@ -980,6 +1056,12 @@ func replicationHealth(result ReplicationResult) (string, int, string) {
 			if reason == "healthy" {
 				reason = "replication delivery is slow"
 			}
+		}
+	}
+	if result.DeadLetterCount > 0 {
+		score -= 25
+		if reason == "healthy" {
+			reason = "replication dead letters retained"
 		}
 	}
 
@@ -1333,8 +1415,26 @@ func cloneReplicationResult(result ReplicationResult) ReplicationResult {
 		stats := cloneReplicationQueueStats(*result.Queue)
 		out.Queue = &stats
 	}
+	if result.DeadLetters != nil {
+		out.DeadLetters = cloneReplicationDeadLetters(result.DeadLetters)
+	}
 	if result.Targets != nil {
 		out.Targets = append([]ReplicationTargetResult(nil), result.Targets...)
+	}
+	return out
+}
+
+func cloneReplicationDeadLetters(deadLetters []ReplicationDeadLetter) []ReplicationDeadLetter {
+	if deadLetters == nil {
+		return nil
+	}
+	out := make([]ReplicationDeadLetter, len(deadLetters))
+	for idx, deadLetter := range deadLetters {
+		out[idx] = deadLetter
+		out[idx].FailedAt = cloneTimePtr(deadLetter.FailedAt)
+		if deadLetter.Targets != nil {
+			out[idx].Targets = append([]ReplicationTargetResult(nil), deadLetter.Targets...)
+		}
 	}
 	return out
 }

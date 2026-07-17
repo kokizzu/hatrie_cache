@@ -620,7 +620,7 @@ func TestRunReplicationFetchesStatus(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %s, want GET", r.Method)
 		}
-		w.Write([]byte(`{"skipped":true,"reason":"none"}`))
+		w.Write([]byte(`{"skipped":true,"reason":"none","dead_letter_count":1,"dead_letters":[{"id":1,"key":"session:1","attempts":2}]}`))
 	}))
 	defer server.Close()
 
@@ -631,7 +631,7 @@ func TestRunReplicationFetchesStatus(t *testing.T) {
 	if gotPath != "/api/replication" {
 		t.Fatalf("path = %q, want /api/replication", gotPath)
 	}
-	if got := stdout.String(); got != "{\"skipped\":true,\"reason\":\"none\"}\n" {
+	if got := stdout.String(); got != "{\"skipped\":true,\"reason\":\"none\",\"dead_letter_count\":1,\"dead_letters\":[{\"id\":1,\"key\":\"session:1\",\"attempts\":2}]}\n" {
 		t.Fatalf("stdout = %q, want replication JSON", got)
 	}
 }

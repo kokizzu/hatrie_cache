@@ -61,6 +61,7 @@ type config struct {
 	replicationQueueSize        int
 	replicationRetry            time.Duration
 	replicationAttempts         uint
+	replicationDeadLetterLimit  int
 	replicationWireFormat       string
 	replicationSyncInterval     time.Duration
 	replicationSyncPrefix       string
@@ -225,14 +226,15 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	var replicator *hatriecache.HTTPReplicator
 	if cfg.replication {
 		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
-			Context:            ctx,
-			Self:               defaultNodeID(cfg.nodeID),
-			Topology:           topology,
-			Election:           election,
-			AsyncQueueSize:     replicationQueueSize(cfg),
-			AsyncRetryInterval: cfg.replicationRetry,
-			AsyncMaxAttempts:   cfg.replicationAttempts,
-			WireFormat:         replicationWireFormat(cfg),
+			Context:              ctx,
+			Self:                 defaultNodeID(cfg.nodeID),
+			Topology:             topology,
+			Election:             election,
+			AsyncQueueSize:       replicationQueueSize(cfg),
+			AsyncRetryInterval:   cfg.replicationRetry,
+			AsyncMaxAttempts:     cfg.replicationAttempts,
+			AsyncDeadLetterLimit: cfg.replicationDeadLetterLimit,
+			WireFormat:           replicationWireFormat(cfg),
 		})
 		defer replicator.Close()
 	}
@@ -346,6 +348,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.replicationQueueSize, "replication-queue-size", 1024, "maximum queued async replication jobs")
 	flags.DurationVar(&cfg.replicationRetry, "replication-retry-interval", hatriecache.DefaultReplicationRetryInterval, "delay between async replication retry attempts")
 	flags.UintVar(&cfg.replicationAttempts, "replication-max-attempts", 3, "maximum async replication delivery attempts")
+	flags.IntVar(&cfg.replicationDeadLetterLimit, "replication-dead-letter-limit", hatriecache.DefaultReplicationDeadLetterLimit, "maximum retained async replication dead-letter failures; use 0 to disable")
 	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", string(hatriecache.DefaultCommandWireFormat), "HTTP replication command wire format: protobuf or json")
 	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
 	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
@@ -415,6 +418,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.replicationRetry < 0 {
 		return config{}, errors.New("replication retry interval must be non-negative")
+	}
+	if cfg.replicationDeadLetterLimit < 0 {
+		return config{}, errors.New("replication dead-letter limit must be non-negative")
 	}
 	if cfg.replicationSyncInterval < 0 {
 		return config{}, errors.New("replication sync interval must be non-negative")
@@ -554,6 +560,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_queue_size":         cfg.replicationQueueSize,
 		"replication_retry_interval":     cfg.replicationRetry.String(),
 		"replication_max_attempts":       cfg.replicationAttempts,
+		"replication_dead_letter_limit":  cfg.replicationDeadLetterLimit,
 		"replication_wire_format":        cfg.replicationWireFormat,
 		"replication_sync_interval":      cfg.replicationSyncInterval.String(),
 		"replication_sync_prefix":        cfg.replicationSyncPrefix,

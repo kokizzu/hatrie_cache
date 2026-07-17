@@ -167,10 +167,22 @@ export type ReplicationResult = {
   health?: string;
   health_score?: number;
   health_reason?: string;
+  dead_letter_count?: number;
+  dead_letters?: ReplicationDeadLetter[];
   started_at?: string;
   finished_at?: string;
   duration_millis?: number;
   queue?: ReplicationQueueStats;
+  targets?: ReplicationTargetResult[];
+};
+
+export type ReplicationDeadLetter = {
+  id: number;
+  command?: string;
+  key?: string;
+  failed_at?: string;
+  attempts: number;
+  reason?: string;
   targets?: ReplicationTargetResult[];
 };
 

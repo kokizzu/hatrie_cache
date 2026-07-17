@@ -288,6 +288,7 @@ func TestREADMEListsAsyncReplicationOptions(t *testing.T) {
 		"REPLICATION_QUEUE_SIZE",
 		"REPLICATION_RETRY_INTERVAL",
 		"REPLICATION_MAX_ATTEMPTS",
+		"REPLICATION_DEAD_LETTER_LIMIT",
 		"REPLICATION_SYNC_INTERVAL",
 		"REPLICATION_SYNC_PREFIX",
 	} {
@@ -335,6 +336,8 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 		"`REPLICATION_WIRE_FORMAT=json`",
 		"oldest queued key/age",
 		"per-target drops",
+		"`dead_letter_count`",
+		"recent `dead_letters`",
 		"`health_score`",
 		"`hatrie_cache_replication_health_score`",
 	} {
