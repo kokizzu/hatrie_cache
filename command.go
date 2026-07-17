@@ -1035,6 +1035,12 @@ func executePublicCommandBatchRequests(request CacheCommandRequest, execute func
 }
 
 func (ht *HatTrie) executePublicScalarBatchCommand(request CacheCommandRequest) (CacheCommandResponse, bool) {
+	return ht.executePublicScalarBatchCommandWithExecutor(request, nil)
+}
+
+type publicScalarBatchPayloadExecutor func(index int, request CacheCommandRequest, execute func() CacheCommandResponse) (CacheCommandResponse, bool)
+
+func (ht *HatTrie) executePublicScalarBatchCommandWithExecutor(request CacheCommandRequest, executor publicScalarBatchPayloadExecutor) (CacheCommandResponse, bool) {
 	payloads, err := publicCommandBatchRequests(request)
 	if err != nil {
 		return commandError(err.Error()), true
@@ -1045,16 +1051,34 @@ func (ht *HatTrie) executePublicScalarBatchCommand(request CacheCommandRequest) 
 		}
 	}
 
-	responses := make([]CacheCommandResponse, len(payloads))
-	allOK := true
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
+	if executor == nil {
+		responses := make([]CacheCommandResponse, len(payloads))
+		allOK := true
+		for idx, payload := range payloads {
+			response := ht.executePublicScalarBatchPayloadLocked(payload, idx)
+			if !response.OK {
+				allOK = false
+			}
+			responses[idx] = response
+		}
+		return publicCommandBatchResponse(responses, allOK), true
+	}
+
+	responses := make([]CacheCommandResponse, 0, len(payloads))
+	allOK := true
 	for idx, payload := range payloads {
-		response := ht.executePublicScalarBatchPayloadLocked(payload, idx)
+		response, stop := executor(idx, payload, func() CacheCommandResponse {
+			return ht.executePublicScalarBatchPayloadLocked(payload, idx)
+		})
 		if !response.OK {
 			allOK = false
 		}
-		responses[idx] = response
+		responses = append(responses, response)
+		if stop {
+			break
+		}
 	}
 	return publicCommandBatchResponse(responses, allOK), true
 }

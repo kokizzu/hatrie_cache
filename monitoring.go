@@ -846,6 +846,9 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	if err != nil {
 		return commandError(err.Error()), false
 	}
+	if response, ok := executePublicScalarBatchWithSideEffects(ctx, trie, request, options); ok {
+		return response, false
+	}
 	if publicCommandBatchCanUseTrieFastPath(options) {
 		return trie.ExecuteCommand(request), false
 	}
@@ -869,6 +872,53 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 		responses = append(responses, response)
 	}
 	return publicCommandBatchResponse(responses, allOK), false
+}
+
+func executePublicScalarBatchWithSideEffects(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
+	if options.Replicator != nil {
+		return CacheCommandResponse{}, false
+	}
+	executor := publicScalarBatchSideEffectExecutor(ctx, trie, options)
+	if options.Journal == nil {
+		return trie.executePublicScalarBatchCommandWithExecutor(request, executor)
+	}
+	options.Journal.mu.Lock()
+	defer options.Journal.mu.Unlock()
+	return trie.executePublicScalarBatchCommandWithExecutor(request, executor)
+}
+
+func publicScalarBatchSideEffectExecutor(ctx context.Context, trie *HatTrie, options commandExecutionOptions) publicScalarBatchPayloadExecutor {
+	return func(index int, payload CacheCommandRequest, execute func() CacheCommandResponse) (CacheCommandResponse, bool) {
+		if err := ctx.Err(); err != nil {
+			return commandError(err.Error()), true
+		}
+		if response, rejected := rejectNonLeaderWrite(payload, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
+			return response, false
+		}
+
+		var appendState commandJournalAppendState
+		journaled := false
+		if options.Journal != nil && commandShouldJournal(payload) {
+			var err error
+			appendState, err = options.Journal.appendLocked(normalizeJournalRequest(payload, trie.currentTime()))
+			if err != nil {
+				return commandError(err.Error()), false
+			}
+			journaled = true
+		}
+
+		response := execute()
+		if !response.OK {
+			if journaled {
+				if err := options.Journal.rollbackAppendLocked(appendState); err != nil {
+					return commandError(response.Message + "; failed to remove rejected journal entry: " + err.Error()), false
+				}
+			}
+			return response, false
+		}
+		options.DirtyTracker.markCommand(payload)
+		return response, false
+	}
 }
 
 func publicCommandBatchCanUseTrieFastPath(options commandExecutionOptions) bool {

@@ -845,6 +845,77 @@ func TestMonitoringHandlerExecutesPublicBatchCommand(t *testing.T) {
 	}
 }
 
+func TestExecutePublicCommandBatchUsesProductionScalarFastPath(t *testing.T) {
+	data, err := os.ReadFile("monitoring.go")
+	if err != nil {
+		t.Fatalf("ReadFile(monitoring.go) error = %v", err)
+	}
+	source := string(data)
+	for _, token := range []string{
+		"executePublicScalarBatchWithSideEffects",
+		"executePublicScalarBatchCommandWithExecutor",
+		"options.Replicator != nil",
+	} {
+		if !strings.Contains(source, token) {
+			t.Fatalf("monitoring.go missing production scalar batch fast-path token %q", token)
+		}
+	}
+}
+
+func TestExecutePublicCommandBatchProductionFastPathPreservesJournalDirtyAndRollback(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertCounter("max", maxCommandInt32)
+	journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalFormatJSON)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
+	}
+	defer journal.Close()
+	dirty := NewLevelDBDirtyTracker()
+	request := CacheCommandRequest{
+		Command: "BATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "SETSTR", Key: "name", Value: "ivi"},
+			{Command: "GETSTR", Key: "name"},
+			{Command: "INC", Key: "max", Value: "1"},
+			{Command: "SETSTR", Key: "city", Value: "Singapore"},
+		},
+	}
+
+	response, rejected := executeCacheCommand(context.Background(), ht, request, commandExecutionOptions{
+		Journal:           journal,
+		DirtyTracker:      dirty,
+		ReplicationSafety: NewReplicationSafetyStore(),
+	})
+	if rejected || response.OK {
+		t.Fatalf("executeCacheCommand(batch) = %#v rejected=%v, want aggregate failure without rejection", response, rejected)
+	}
+	if len(response.Responses) != 4 {
+		t.Fatalf("batch responses len = %d, want 4", len(response.Responses))
+	}
+	if !response.Responses[0].OK || !response.Responses[1].OK || response.Responses[1].Value != "ivi" {
+		t.Fatalf("first batch responses = %#v, want SETSTR and GETSTR success", response.Responses[:2])
+	}
+	if response.Responses[2].OK || !strings.Contains(response.Responses[2].Message, "overflow") {
+		t.Fatalf("overflow batch response = %#v, want counter overflow failure", response.Responses[2])
+	}
+	if !response.Responses[3].OK {
+		t.Fatalf("final batch response = %#v, want success", response.Responses[3])
+	}
+	if got := ht.GetCounter("max"); got != maxCommandInt32 {
+		t.Fatalf("counter after failed INC = %d, want max int32", got)
+	}
+	if snapshot := dirty.Snapshot(); !reflect.DeepEqual(snapshot.keys, []string{"city", "name"}) {
+		t.Fatalf("dirty keys = %#v, want city and name", snapshot.keys)
+	}
+	entries, err := readCommandJournalEntries(journal.path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 || entries[0].Request.Command != "SETSTR" || entries[0].Request.Key != "name" || entries[1].Request.Key != "city" {
+		t.Fatalf("journal entries = %#v, want only successful mutating commands", entries)
+	}
+}
+
 func TestMonitoringHandlerJournalsMutatingCommands(t *testing.T) {
 	ht := newTestTrie(t)
 	journalPath := filepath.Join(t.TempDir(), "commands.journal")
