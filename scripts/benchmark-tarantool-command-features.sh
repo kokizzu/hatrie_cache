@@ -4,6 +4,7 @@ set -eu
 tarantool_bin=${TARANTOOL_BIN:-tarantool}
 requests=${TARANTOOL_REQUESTS:-10000}
 keyspace=${TARANTOOL_KEYSPACE:-10000}
+pipeline=${TARANTOOL_PIPELINE:-16}
 memtx_memory=${TARANTOOL_MEMTX_MEMORY:-268435456}
 work_dir=${TARANTOOL_WORK_DIR:-}
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-${TARANTOOL_BENCHMARK_ARTIFACT_DIR:-}}
@@ -30,6 +31,7 @@ if [ -n "$artifact_dir" ]; then
 	memory_tsv="$artifact_dir/tarantool-command-memory.tsv"
 	TARANTOOL_REQUESTS="$requests" \
 	TARANTOOL_KEYSPACE="$keyspace" \
+	TARANTOOL_PIPELINE="$pipeline" \
 	TARANTOOL_MEMTX_MEMORY="$memtx_memory" \
 	TARANTOOL_WORK_DIR="$work_dir" \
 	"$tarantool_bin" scripts/tarantool-command-features.lua >"$raw_file"
@@ -76,6 +78,7 @@ if [ -n "$artifact_dir" ]; then
 else
 	TARANTOOL_REQUESTS="$requests" \
 	TARANTOOL_KEYSPACE="$keyspace" \
+	TARANTOOL_PIPELINE="$pipeline" \
 	TARANTOOL_MEMTX_MEMORY="$memtx_memory" \
 	TARANTOOL_WORK_DIR="$work_dir" \
 	"$tarantool_bin" scripts/tarantool-command-features.lua

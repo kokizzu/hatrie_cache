@@ -3,6 +3,7 @@ local msgpack = require('msgpack')
 
 local requests = tonumber(os.getenv('TARANTOOL_REQUESTS') or '10000')
 local keyspace = tonumber(os.getenv('TARANTOOL_KEYSPACE') or '10000')
+local pipeline = tonumber(os.getenv('TARANTOOL_PIPELINE') or '16')
 local work_dir = os.getenv('TARANTOOL_WORK_DIR') or '.'
 local memtx_memory = tonumber(os.getenv('TARANTOOL_MEMTX_MEMORY') or '268435456')
 
@@ -53,12 +54,16 @@ queue:truncate()
 pq:truncate()
 box.snapshot()
 
-local function seconds_for(fn)
+local function seconds_for_ops(fn, ops_per_cycle)
 	collectgarbage('collect')
 	local start = clock.monotonic()
 	fn()
 	local elapsed = clock.monotonic() - start
-	return elapsed * (10000 / requests)
+	return elapsed * (10000 / (requests * ops_per_cycle))
+end
+
+local function seconds_for(fn)
+	return seconds_for_ops(fn, 1)
 end
 
 local function format_seconds(seconds)
@@ -69,7 +74,7 @@ local function print_row(feature, command, seconds)
 	print(string.format('| %s | `%s` | %s |', feature, command, format_seconds(seconds)))
 end
 
-print(string.format('Tarantool benchmark: version=%s requests=%d keyspace=%d', box.info.version, requests, keyspace))
+print(string.format('Tarantool benchmark: version=%s requests=%d keyspace=%d pipeline=%d', box.info.version, requests, keyspace, pipeline))
 print('')
 print('| Feature family | Tarantool operation | Seconds / 10k feature cycles |')
 print('| --- | --- | ---: |')
@@ -79,6 +84,15 @@ print_row('String write', 'space:replace()', seconds_for(function()
 		kv:replace({key_for(i), 'value'})
 	end
 end))
+
+print_row('Pipelined string write', string.format('%dx space:replace() batch loop', pipeline), seconds_for_ops(function()
+	for i = 1, requests do
+		local offset = (i - 1) * pipeline
+		for j = 1, pipeline do
+			kv:replace({key_for(offset + j), 'value'})
+		end
+	end
+end, pipeline))
 
 print_row('String read', 'space.index.primary:get()', seconds_for(function()
 	for i = 1, requests do

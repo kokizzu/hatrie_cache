@@ -111,6 +111,8 @@ func TestCommandFeatureComparisonScriptJoinsBackendArtifacts(t *testing.T) {
 		"Redis/HAT speedup",
 		"Tarantool/HAT speedup",
 		"seconds_per_10k",
+		"Pipelined string write",
+		"PipelineBatch16",
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("benchmark-command-comparison.sh missing token %q", token)

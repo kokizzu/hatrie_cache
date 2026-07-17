@@ -231,6 +231,9 @@ func TestRedisCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T) {
 		"used_memory_rss",
 		"SETBIT",
 		"PFCOUNT",
+		"REDIS_PIPELINE",
+		"-P \"$pipeline\"",
+		"Pipelined string write",
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("Redis command benchmark script missing token %q", token)
@@ -254,6 +257,9 @@ func TestTarantoolCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T
 		"space:replace() + space:delete()",
 		"msgpack.encode(tuple)",
 		"index:pairs(prefix",
+		"TARANTOOL_PIPELINE",
+		"seconds_for_ops",
+		"Pipelined string write",
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("Tarantool command benchmark script missing token %q", token)
@@ -290,10 +296,19 @@ func TestHatTrieCommandFeatureBenchmarkScriptReportsRSS(t *testing.T) {
 		"-test.benchmem",
 		"/usr/bin/time",
 		"Max resident set size",
+		"HATRIE_PIPELINE_OPS",
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("HAT-trie command benchmark script missing token %q", token)
 		}
+	}
+	data, err = os.ReadFile("command_feature_benchmark_test.go")
+	if err != nil {
+		t.Fatalf("ReadFile(command_feature_benchmark_test.go) error = %v", err)
+	}
+	benchmarks := string(data)
+	if !strings.Contains(benchmarks, "PipelineBatch16") {
+		t.Fatal("BenchmarkCommandFeature missing PipelineBatch16")
 	}
 }
 

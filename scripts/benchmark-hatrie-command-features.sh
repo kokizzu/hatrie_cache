@@ -2,6 +2,7 @@
 set -eu
 
 bench=${HATRIE_BENCH:-^BenchmarkCommandFeature$}
+pipeline_ops=${HATRIE_PIPELINE_OPS:-16}
 benchtime=${BENCHTIME:-}
 count=${COUNT:-1}
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-${HATRIE_BENCHMARK_ARTIFACT_DIR:-}}
@@ -39,7 +40,7 @@ record_benchmark_rows() {
 	if [ -z "$rows_tsv" ]; then
 		return
 	fi
-	awk '
+	awk -v pipeline_ops="$pipeline_ops" '
 		/^Benchmark/ {
 			benchmark = $1
 			sub(/-[0-9]+$/, "", benchmark)
@@ -47,7 +48,11 @@ record_benchmark_rows() {
 			ns_per_op = $3
 			bytes_per_op = $5
 			allocs_per_op = $7
-			seconds_per_10k = ns_per_op * 10000 / 1000000000
+			ops_per_iter = 1
+			if (benchmark ~ /PipelineBatch16$/) {
+				ops_per_iter = pipeline_ops
+			}
+			seconds_per_10k = ns_per_op * 10000 / (1000000000 * ops_per_iter)
 			printf "%s\t%s\t%s\t%s\t%s\t%.6f\n", benchmark, iterations, ns_per_op, bytes_per_op, allocs_per_op, seconds_per_10k
 		}
 	' "$output_file" >>"$rows_tsv"
@@ -55,7 +60,7 @@ record_benchmark_rows() {
 
 go test -c -o "$binary" .
 
-emit 'HAT-trie benchmark: bench=%s benchtime=%s count=%s\n\n' "$bench" "${benchtime:-default}" "$count"
+emit 'HAT-trie benchmark: bench=%s benchtime=%s count=%s pipeline_ops=%s\n\n' "$bench" "${benchtime:-default}" "$count" "$pipeline_ops"
 
 run_benchmark() {
 	if [ -n "$benchtime" ]; then

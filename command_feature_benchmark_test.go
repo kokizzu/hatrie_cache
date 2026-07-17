@@ -7,7 +7,14 @@ import (
 
 var benchmarkCommandResponseSink CacheCommandResponse
 
+const benchmarkCommandPipelineOps = 16
+
 func BenchmarkCommandFeature(b *testing.B) {
+	pipelineBatch := make([]CacheCommandRequest, 0, benchmarkCommandPipelineOps)
+	for i := 0; i < benchmarkCommandPipelineOps; i++ {
+		idx := strconv.Itoa(i)
+		pipelineBatch = append(pipelineBatch, CacheCommandRequest{Command: "SETSTR", Key: "pipeline:string:" + idx, Value: "value"})
+	}
 	benchmarks := []struct {
 		name  string
 		setup func(*testing.B, *HatTrie)
@@ -15,6 +22,9 @@ func BenchmarkCommandFeature(b *testing.B) {
 	}{
 		{name: "StringSet", run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "SETSTR", Key: "string:key", Value: "value"})
+		}},
+		{name: "PipelineBatch16", run: func(b *testing.B, ht *HatTrie, i int) {
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "BATCH", Batch: pipelineBatch})
 		}},
 		{name: "StringGet", setup: func(b *testing.B, ht *HatTrie) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "SETSTR", Key: "string:key", Value: "value"})

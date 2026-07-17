@@ -45,10 +45,11 @@ Local runs were measured on an AMD Ryzen 9 5950X.
 
 ## Run Commands
 
-Large HAT-trie comparable command rows:
+Large HAT-trie comparable command rows, including the public `BATCH` pipeline
+row:
 
 ```
-make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/(StringSet|StringGet|CounterInc|TTLExpire|MapPut|MapPeek|SlicePushPop|SetAddHas|PriorityQueuePushPop|RoaringAdd|RoaringHas|SparseBitsetAdd|SparseBitsetHas|RadixPut|RadixPrefix|ReplicationDump)$' BENCHTIME=1000000x
+make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/(StringSet|PipelineBatch16|StringGet|CounterInc|TTLExpire|MapPut|MapPeek|SlicePushPop|SetAddHas|PriorityQueuePushPop|RoaringAdd|RoaringHas|SparseBitsetAdd|SparseBitsetHas|RadixPut|RadixPrefix|ReplicationDump)$' BENCHTIME=1000000x
 ```
 
 HAT-trie HyperLogLog rows used by the Redis comparison:
@@ -66,8 +67,13 @@ make bench-tarantool-command-features TARANTOOL_REQUESTS=1000000 TARANTOOL_KEYSP
 Redis 10,000-request network run:
 
 ```
-make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000 REDIS_CLIENTS=1 REDIS_KEYSPACE=10000
+make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000 REDIS_CLIENTS=1 REDIS_KEYSPACE=10000 REDIS_PIPELINE=16
 ```
+
+Pipeline rows are normalized to seconds per 10,000 sub-operations. HAT-trie
+uses `BenchmarkCommandFeature/PipelineBatch16` with a public `BATCH` of 16
+`SETSTR` commands, Redis uses `redis-benchmark -P 16`, and Tarantool times 16
+`space:replace()` calls per loop with `TARANTOOL_PIPELINE=16`.
 
 Full HAT-trie command benchmark and command support extraction:
 
@@ -83,8 +89,8 @@ Artifact-based comparison regeneration:
 
 ```
 make bench-hatrie-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks BENCHTIME=100x
-make bench-redis-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000
-make bench-tarantool-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
+make bench-redis-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000 REDIS_PIPELINE=16
+make bench-tarantool-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000 TARANTOOL_PIPELINE=16
 make bench-command-comparison BENCHMARK_ARTIFACT_DIR=build/benchmarks
 ```
 
