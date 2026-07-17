@@ -68,6 +68,7 @@ type config struct {
 	replicationCircuitCooldown  time.Duration
 	replicationWireFormat       string
 	replicationAuthToken        string
+	replicationBatchMaxBytes    int
 	replicationSyncInterval     time.Duration
 	replicationSyncPrefix       string
 	enforceLeaderWrites         bool
@@ -244,19 +245,20 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		}
 		defer closeReplicationOutbox(replicationOutbox, stderr)
 		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
-			Context:                ctx,
-			Self:                   defaultNodeID(cfg.nodeID),
-			Topology:               topology,
-			Election:               election,
-			AsyncQueueSize:         replicationQueueSize(cfg),
-			AsyncRetryInterval:     cfg.replicationRetry,
-			AsyncMaxAttempts:       cfg.replicationAttempts,
-			AsyncDeadLetterLimit:   cfg.replicationDeadLetterLimit,
-			AsyncOutbox:            replicationOutbox,
-			CircuitBreakerFailures: cfg.replicationCircuitFailures,
-			CircuitBreakerCooldown: cfg.replicationCircuitCooldown,
-			WireFormat:             replicationWireFormat(cfg),
-			AuthToken:              cfg.replicationAuthToken,
+			Context:                  ctx,
+			Self:                     defaultNodeID(cfg.nodeID),
+			Topology:                 topology,
+			Election:                 election,
+			AsyncQueueSize:           replicationQueueSize(cfg),
+			AsyncRetryInterval:       cfg.replicationRetry,
+			AsyncMaxAttempts:         cfg.replicationAttempts,
+			AsyncDeadLetterLimit:     cfg.replicationDeadLetterLimit,
+			AsyncOutbox:              replicationOutbox,
+			CircuitBreakerFailures:   cfg.replicationCircuitFailures,
+			CircuitBreakerCooldown:   cfg.replicationCircuitCooldown,
+			WireFormat:               replicationWireFormat(cfg),
+			AuthToken:                cfg.replicationAuthToken,
+			ReplicationBatchMaxBytes: cfg.replicationBatchMaxBytes,
 		})
 		defer replicator.Close()
 	}
@@ -385,6 +387,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.replicationCircuitCooldown, "replication-circuit-breaker-cooldown", hatriecache.DefaultReplicationCircuitBreakerCooldown, "per-target replication circuit breaker cooldown before a half-open probe; use 0 to disable")
 	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", string(hatriecache.DefaultCommandWireFormat), "HTTP replication command wire format: protobuf or json")
 	flags.StringVar(&cfg.replicationAuthToken, "replication-auth-token", "", "optional bearer token sent on HTTP replication and accepted only for internal replication commands")
+	flags.IntVar(&cfg.replicationBatchMaxBytes, "replication-batch-max-bytes", hatriecache.DefaultReplicationBatchMaxBytes, "maximum estimated bytes per HTTP replication batch; use 0 to disable batch splitting")
 	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
 	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
@@ -486,6 +489,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if _, err := hatriecache.ParseCommandWireFormat(cfg.replicationWireFormat); err != nil {
 		return config{}, err
+	}
+	if cfg.replicationBatchMaxBytes < 0 {
+		return config{}, errors.New("replication batch max bytes must be non-negative")
 	}
 	if _, err := hatriecache.ParseStorageFormat(cfg.dbFormat); err != nil {
 		return config{}, err
@@ -620,6 +626,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_circuit_breaker_cooldown": cfg.replicationCircuitCooldown.String(),
 		"replication_wire_format":              cfg.replicationWireFormat,
 		"replication_auth_token":               redactedSecret(cfg.replicationAuthToken),
+		"replication_batch_max_bytes":          cfg.replicationBatchMaxBytes,
 		"replication_sync_interval":            cfg.replicationSyncInterval.String(),
 		"replication_sync_prefix":              cfg.replicationSyncPrefix,
 		"enforce_leader_writes":                cfg.enforceLeaderWrites,

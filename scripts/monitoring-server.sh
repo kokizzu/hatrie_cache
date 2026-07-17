@@ -26,6 +26,7 @@ replication_circuit_breaker_failures=${REPLICATION_CIRCUIT_BREAKER_FAILURES:-5}
 replication_circuit_breaker_cooldown=${REPLICATION_CIRCUIT_BREAKER_COOLDOWN:-30s}
 replication_wire_format=${REPLICATION_WIRE_FORMAT:-}
 replication_auth_token=${REPLICATION_AUTH_TOKEN:-}
+replication_batch_max_bytes=${REPLICATION_BATCH_MAX_BYTES:-1048576}
 replication_sync_interval=${REPLICATION_SYNC_INTERVAL:-0}
 replication_sync_prefix=${REPLICATION_SYNC_PREFIX:-}
 enforce_leader_writes=${ENFORCE_LEADER_WRITES:-false}
@@ -81,6 +82,7 @@ set -- \
 	-replication-circuit-breaker-failures "$replication_circuit_breaker_failures" \
 	-replication-circuit-breaker-cooldown "$replication_circuit_breaker_cooldown" \
 	-replication-auth-token "$replication_auth_token" \
+	-replication-batch-max-bytes "$replication_batch_max_bytes" \
 	-replication-sync-interval "$replication_sync_interval" \
 	-replication-sync-prefix "$replication_sync_prefix" \
 	-enforce-leader-writes="$enforce_leader_writes" \

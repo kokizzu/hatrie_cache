@@ -156,6 +156,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"-replication-circuit-breaker-failures",
 		"REPLICATION_CIRCUIT_BREAKER_COOLDOWN",
 		"-replication-circuit-breaker-cooldown",
+		"REPLICATION_BATCH_MAX_BYTES",
+		"-replication-batch-max-bytes",
 		"DB_COMPACT_INTERVAL",
 		"-db-compact-interval",
 		"DB_COMPACT_START_KEY",

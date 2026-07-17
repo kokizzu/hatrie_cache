@@ -777,6 +777,9 @@ internal `DUMP`/`INTERNALSET`, `INTERNALDEL`, and `INTERNALBATCH` commands,
 skips internal replication commands to avoid loops, and records the last
 replication attempt at `/api/replication`. `INTERNALBATCH` batches multiple
 internal replication commands for the same target during sync and async replay.
+Replication batches are split before send when their estimated uncompressed
+request body would exceed `REPLICATION_BATCH_MAX_BYTES` (default `1048576`).
+Set `REPLICATION_BATCH_MAX_BYTES=0` to disable byte-based splitting.
 HTTP replication command bodies use protobuf by default
 (`REPLICATION_WIRE_FORMAT=protobuf`), then automatically use the previous JSON
 wire format for structured `values` or `pairs` payloads that protobuf cannot
@@ -789,6 +792,7 @@ current topology replicas:
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_WIRE_FORMAT=json
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_BATCH_MAX_BYTES=262144
 ```
 
 Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP

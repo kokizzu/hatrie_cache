@@ -125,6 +125,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"replication_circuit_breaker_failures": 4,
 		"replication_circuit_breaker_cooldown": "12s",
 		"replication_auth_token": "replica-secret",
+		"replication_batch_max_bytes": 4096,
 		"db_path": "/data/cache.leveldb",
 		"db_hot_load": true,
 		"db_hot_load_max_bytes": 2048,
@@ -158,6 +159,9 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	}
 	if cfg.replicationAuthToken != "replica-secret" {
 		t.Fatalf("replication auth token = %q, want config file value", cfg.replicationAuthToken)
+	}
+	if cfg.replicationBatchMaxBytes != 4096 {
+		t.Fatalf("replication batch max bytes = %d, want config file value", cfg.replicationBatchMaxBytes)
 	}
 	if cfg.dbPath != "/data/cache.leveldb" || !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 {
 		t.Fatalf("db config = %#v, want file values", cfg)
@@ -391,6 +395,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-circuit-breaker-cooldown", "20s",
 		"-replication-wire-format", "json",
 		"-replication-auth-token", "replica-secret",
+		"-replication-batch-max-bytes", "2048",
 		"-replication-sync-interval", "10s",
 		"-replication-sync-prefix", "session:",
 		"-enforce-leader-writes",
@@ -415,6 +420,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if cfg.replicationAuthToken != "replica-secret" {
 		t.Fatalf("replication auth token = %q, want explicit value", cfg.replicationAuthToken)
+	}
+	if cfg.replicationBatchMaxBytes != 2048 {
+		t.Fatalf("replication batch max bytes = %d, want explicit value", cfg.replicationBatchMaxBytes)
 	}
 	if cfg.replicationSyncInterval != 10*time.Second || cfg.replicationSyncPrefix != "session:" {
 		t.Fatalf("cfg replication sync = %s/%q, want 10s/session:", cfg.replicationSyncInterval, cfg.replicationSyncPrefix)

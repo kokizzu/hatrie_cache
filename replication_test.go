@@ -1610,6 +1610,55 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSplitsSyncBatchesByEstimatedBytes(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 3)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/commands" {
+			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
+		}
+		requests <- mustDecodeReplicationTestCommand(t, w, r)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "value-1")
+	trie.UpsertString("session:2", "value-2")
+	trie.UpsertString("session:3", "value-3")
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                     "node-a",
+		Topology:                 topology,
+		Election:                 election,
+		Client:                   target.Client(),
+		ReplicationBatchMaxBytes: 1,
+	})
+
+	result := replicator.SyncAll(context.Background(), trie, "session:")
+	if result.Skipped || result.Entries != 3 || len(result.Targets) != 3 {
+		t.Fatalf("sync result = %#v, want three split target requests", result)
+	}
+	seen := map[string]bool{}
+	for idx := 0; idx < 3; idx++ {
+		request := <-requests
+		if request.Command != "INTERNALSET" || request.Value == "" {
+			t.Fatalf("split request %d = %#v, want single INTERNALSET snapshot", idx, request)
+		}
+		seen[request.Key] = true
+	}
+	for _, key := range []string{"session:1", "session:2", "session:3"} {
+		if !seen[key] {
+			t.Fatalf("split requests keys = %#v, missing %s", seen, key)
+		}
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("unexpected sync request = %#v", request)
+	default:
+	}
+}
+
 func TestHTTPReplicatorSyncAllFullReplicaReplicatesToRemoteOwners(t *testing.T) {
 	type targetRequest struct {
 		node    string

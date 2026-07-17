@@ -22,6 +22,7 @@ const DefaultReplicationRetryInterval = 250 * time.Millisecond
 const DefaultReplicationDeadLetterLimit = 128
 const DefaultReplicationCircuitBreakerFailures = 5
 const DefaultReplicationCircuitBreakerCooldown = 30 * time.Second
+const DefaultReplicationBatchMaxBytes = 1 << 20
 const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
 const minCompressedReplicationRequestBytes = 16 << 10
@@ -33,21 +34,22 @@ var (
 )
 
 type HTTPReplicatorOptions struct {
-	Context                context.Context
-	Self                   string
-	Topology               *TopologyStore
-	Election               *ElectionStore
-	Client                 *http.Client
-	Timeout                time.Duration
-	AsyncQueueSize         int
-	AsyncRetryInterval     time.Duration
-	AsyncMaxAttempts       uint
-	AsyncDeadLetterLimit   int
-	AsyncOutbox            *ReplicationOutboxStore
-	CircuitBreakerFailures int
-	CircuitBreakerCooldown time.Duration
-	WireFormat             CommandWireFormat
-	AuthToken              string
+	Context                  context.Context
+	Self                     string
+	Topology                 *TopologyStore
+	Election                 *ElectionStore
+	Client                   *http.Client
+	Timeout                  time.Duration
+	AsyncQueueSize           int
+	AsyncRetryInterval       time.Duration
+	AsyncMaxAttempts         uint
+	AsyncDeadLetterLimit     int
+	AsyncOutbox              *ReplicationOutboxStore
+	CircuitBreakerFailures   int
+	CircuitBreakerCooldown   time.Duration
+	WireFormat               CommandWireFormat
+	AuthToken                string
+	ReplicationBatchMaxBytes int
 }
 
 type HTTPReplicator struct {
@@ -65,6 +67,7 @@ type HTTPReplicator struct {
 	outbox          *ReplicationOutboxStore
 	breakerFailures int
 	breakerCooldown time.Duration
+	batchMaxBytes   int
 	breakers        map[string]replicationCircuitBreakerState
 	done            chan struct{}
 	stopped         chan struct{}
@@ -279,6 +282,10 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		outbox:          options.AsyncOutbox,
 		breakerFailures: options.CircuitBreakerFailures,
 		breakerCooldown: options.CircuitBreakerCooldown,
+		batchMaxBytes:   options.ReplicationBatchMaxBytes,
+	}
+	if replicator.batchMaxBytes < 0 {
+		replicator.batchMaxBytes = 0
 	}
 	if replicator.breakerFailures < 0 {
 		replicator.breakerFailures = 0
@@ -460,7 +467,7 @@ func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *
 		return result
 	}
 	result.Queued = true
-	result.Targets = plannedReplicationTargets(tasks)
+	result.Targets = replicator.plannedReplicationTargets(tasks)
 	job := replicationJob{
 		result: cloneReplicationResult(result),
 		tasks:  tasks,
@@ -820,7 +827,7 @@ func (replicator *HTTPReplicator) planReplication(ctx context.Context, trie *Hat
 
 func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, result ReplicationResult, tasks []replicationTask) ReplicationResult {
 	result.Queued = false
-	groups := groupReplicationTasksByTarget(tasks)
+	groups := replicator.groupReplicationTasksByTarget(tasks)
 	result.Targets = make([]ReplicationTargetResult, 0, len(groups))
 	for _, group := range groups {
 		targetResult := replicator.executeReplicationTargetBatch(ctx, group.target, group.payloads)
@@ -861,6 +868,58 @@ func groupReplicationTasksByTarget(tasks []replicationTask) []replicationTaskGro
 		})
 	}
 	return groups
+}
+
+func (replicator *HTTPReplicator) groupReplicationTasksByTarget(tasks []replicationTask) []replicationTaskGroup {
+	groups := groupReplicationTasksByTarget(tasks)
+	if replicator == nil || replicator.batchMaxBytes <= 0 {
+		return groups
+	}
+	return splitReplicationTaskGroupsByMaxBytes(groups, replicator.batchMaxBytes)
+}
+
+func splitReplicationTaskGroupsByMaxBytes(groups []replicationTaskGroup, maxBytes int) []replicationTaskGroup {
+	if maxBytes <= 0 || len(groups) == 0 {
+		return groups
+	}
+	out := make([]replicationTaskGroup, 0, len(groups))
+	for _, group := range groups {
+		out = append(out, splitReplicationTaskGroupByMaxBytes(group, maxBytes)...)
+	}
+	return out
+}
+
+func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes int) []replicationTaskGroup {
+	if maxBytes <= 0 || len(group.payloads) <= 1 {
+		return []replicationTaskGroup{group}
+	}
+	threshold := maxBytes + 1
+	current := replicationTaskGroup{target: group.target}
+	currentBytes := estimatedReplicationBatchEnvelopeBytes(threshold)
+	out := make([]replicationTaskGroup, 0, len(group.payloads))
+	for idx, payload := range group.payloads {
+		payloadBytes := estimatedReplicationRequestBytesWithin(payload, threshold)
+		if len(current.payloads) > 0 && currentBytes+payloadBytes+2 > maxBytes {
+			out = append(out, current)
+			current = replicationTaskGroup{target: group.target}
+			currentBytes = estimatedReplicationBatchEnvelopeBytes(threshold)
+		}
+		current.payloads = append(current.payloads, payload)
+		key := strings.TrimSpace(payload.Key)
+		if idx < len(group.keys) {
+			key = group.keys[idx]
+		}
+		current.keys = append(current.keys, key)
+		currentBytes = jsonwire.AddEstimate(currentBytes, payloadBytes+2, threshold)
+	}
+	if len(current.payloads) > 0 {
+		out = append(out, current)
+	}
+	return out
+}
+
+func estimatedReplicationBatchEnvelopeBytes(threshold int) int {
+	return 64 + jsonwire.EstimateJSONStringBytes("INTERNALBATCH")
 }
 
 func replicationTaskTargetKey(target TopologyNode) string {
@@ -972,8 +1031,8 @@ func replicationNeedsRetry(result ReplicationResult) bool {
 	return false
 }
 
-func plannedReplicationTargets(tasks []replicationTask) []ReplicationTargetResult {
-	groups := groupReplicationTasksByTarget(tasks)
+func (replicator *HTTPReplicator) plannedReplicationTargets(tasks []replicationTask) []ReplicationTargetResult {
+	groups := replicator.groupReplicationTasksByTarget(tasks)
 	out := make([]ReplicationTargetResult, len(groups))
 	for idx, group := range groups {
 		out[idx] = ReplicationTargetResult{
@@ -1624,38 +1683,51 @@ func replicationRequestBodyForFormat(payload CacheCommandRequest, format Command
 }
 
 func estimatedReplicationRequestBytes(payload CacheCommandRequest) int {
+	return estimatedReplicationRequestBytesWithin(payload, minCompressedReplicationRequestBytes)
+}
+
+func estimatedReplicationRequestBytesWithin(payload CacheCommandRequest, threshold int) int {
+	if threshold <= 0 {
+		threshold = int(^uint(0) >> 1)
+	}
 	estimate := 64 +
 		jsonwire.EstimateJSONStringBytes(payload.Command) +
 		jsonwire.EstimateJSONStringBytes(payload.Key) +
 		jsonwire.EstimateJSONStringBytes(payload.Value) +
 		jsonwire.EstimateJSONStringBytes(payload.Subkey)
-	if estimate >= minCompressedReplicationRequestBytes {
-		return minCompressedReplicationRequestBytes
+	if estimate >= threshold {
+		return threshold
 	}
 	for _, value := range payload.Values {
-		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(value, minCompressedReplicationRequestBytes), minCompressedReplicationRequestBytes)
-		if estimate >= minCompressedReplicationRequestBytes {
-			return minCompressedReplicationRequestBytes
+		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(value, threshold), threshold)
+		if estimate >= threshold {
+			return threshold
 		}
 	}
 	for key, value := range payload.Pairs {
-		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONStringBytes(key)+1, minCompressedReplicationRequestBytes)
-		if estimate >= minCompressedReplicationRequestBytes {
-			return minCompressedReplicationRequestBytes
+		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONStringBytes(key)+1, threshold)
+		if estimate >= threshold {
+			return threshold
 		}
-		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(value, minCompressedReplicationRequestBytes), minCompressedReplicationRequestBytes)
-		if estimate >= minCompressedReplicationRequestBytes {
-			return minCompressedReplicationRequestBytes
+		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(value, threshold), threshold)
+		if estimate >= threshold {
+			return threshold
+		}
+	}
+	for _, payload := range payload.Batch {
+		estimate = jsonwire.AddEstimate(estimate, estimatedReplicationRequestBytesWithin(payload, threshold), threshold)
+		if estimate >= threshold {
+			return threshold
 		}
 	}
 	if payload.Priority != nil {
-		estimate = addEstimatedOptionalCommandInt64(estimate, payload.Priority, minCompressedReplicationRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, payload.Priority, threshold)
 	}
 	if payload.TTLSeconds != nil {
-		estimate = addEstimatedOptionalCommandInt64(estimate, payload.TTLSeconds, minCompressedReplicationRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, payload.TTLSeconds, threshold)
 	}
 	if payload.UnixSeconds != nil {
-		estimate = addEstimatedOptionalCommandInt64(estimate, payload.UnixSeconds, minCompressedReplicationRequestBytes)
+		estimate = addEstimatedOptionalCommandInt64(estimate, payload.UnixSeconds, threshold)
 	}
 	return estimate
 }
