@@ -983,9 +983,9 @@ owners.
 when journaling is configured. `POST /api/journal` pulls a remote journal tail
 from `source` and applies it locally.
 `POST /api/commands` accepts `command`, `key`, optional `value`, `values`,
-`subkey`, `pairs`,
+`batch`, `subkey`, `pairs`,
 `priority`, `ttl_seconds`, and `unix_seconds`; it currently
-supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
+supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `SETINT`, `SETINTX`, `INC`, `DEL`, `TTL`, `EXPIRE`, `EXPIREAT`, `PUTMAP`,
 `PEEKMAP`, `TAKEMAP`, `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`,
 `TAILSLICE`, `ADDSET`, `REMSET`, `HASSET`, `GETSET`, `PUSHPQ`, `PEEKPQ`,
@@ -1005,6 +1005,11 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
 persistence. `INTERNALBATCH` batches multiple internal replication commands and
 is accepted only for internal replication traffic.
+`BATCH` is the public pipeline command: send `{"command":"BATCH","batch":[...]}`
+with ordinary command requests to reduce client/server round trips. It executes
+subcommands in order, returns one response per subcommand in `responses`, and is
+not transactional; a failed subcommand does not roll back earlier subcommands.
+Internal replication commands are rejected inside public `BATCH` requests.
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
 Redis/Tarantool speedup comparisons.
@@ -1019,6 +1024,7 @@ make cli ARGS='entries -prefix session:'
 make cli ARGS='entries -prefix session: -limit 1000'
 make cli ARGS='entries -prefix session: -limit 1000 -after-key session:1000'
 make cli ARGS='command -cmd SETSTR -key name -value ivi'
+make cli ARGS="command -batch '[{\"command\":\"SETSTR\",\"key\":\"name\",\"value\":\"ivi\"},{\"command\":\"GETSTR\",\"key\":\"name\"}]'"
 make cli ARGS='command -cmd INC -key views'
 make cli ARGS="command -cmd PUTMAP -key user:1 -pairs '{\"name\":\"ivi\",\"age\":32}'"
 make cli ARGS="command -cmd PUSHSLICE -key jobs -values '[\"build\",\"verify\"]'"
@@ -1210,6 +1216,7 @@ build files have not been generated.
 - [x] add client CLI support for cache command management:
 ```		
 any type:
+  BATCH [command request...]
   SET/SETSTR/SETINT key value
   SETX/SETSTRX/SETINTX key ttl value
   EXISTS/GET/GETSTR/DUMP key

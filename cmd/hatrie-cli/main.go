@@ -1166,6 +1166,7 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 	key := flags.String("key", "", "cache key")
 	value := flags.String("value", "", "cache value")
 	valuesJSON := flags.String("values", "", "JSON array for commands that accept multiple values")
+	batchJSON := flags.String("batch", "", "JSON array of command requests for a public BATCH command")
 	subkey := flags.String("subkey", "", "secondary key or command argument")
 	pairsJSON := flags.String("pairs", "", "JSON object for map or radix tree fields")
 	priority := flags.String("priority", "", "priority for priority queue push")
@@ -1208,6 +1209,17 @@ func runCommand(ctx context.Context, client *http.Client, addr string, args []st
 			return fmt.Errorf("pairs: %w", err)
 		}
 		request.Pairs = pairs
+	}
+	if *batchJSON != "" {
+		if strings.TrimSpace(*command) != "" && !strings.EqualFold(strings.TrimSpace(*command), "BATCH") {
+			return errors.New("batch cannot be combined with non-BATCH -cmd")
+		}
+		batch, err := decodeJSONFlag[[]hatriecache.CacheCommandRequest](*batchJSON)
+		if err != nil {
+			return fmt.Errorf("batch: %w", err)
+		}
+		request.Command = "BATCH"
+		request.Batch = batch
 	}
 	return postCommandValue(ctx, client, addr, request, *wireFormat, stdout)
 }
@@ -1357,6 +1369,12 @@ func estimatedCommandRequestBytes(request hatriecache.CacheCommandRequest) int {
 			return minCompressedJSONRequestBytes
 		}
 		estimate = jsonwire.AddEstimate(estimate, jsonwire.EstimateJSONValueBytes(value, minCompressedJSONRequestBytes), minCompressedJSONRequestBytes)
+		if estimate >= minCompressedJSONRequestBytes {
+			return minCompressedJSONRequestBytes
+		}
+	}
+	for _, value := range request.Batch {
+		estimate = jsonwire.AddEstimate(estimate, estimatedCommandRequestBytes(value)+1, minCompressedJSONRequestBytes)
 		if estimate >= minCompressedJSONRequestBytes {
 			return minCompressedJSONRequestBytes
 		}

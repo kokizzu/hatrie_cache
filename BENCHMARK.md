@@ -296,7 +296,7 @@ payload shape before assuming it beats HTTP JSON.
 
 ## HAT-trie Command Families
 
-HAT-trie cache currently has 92 canonical command groups in `ExecuteCommand`,
+HAT-trie cache currently has 94 canonical command groups in `ExecuteCommand`,
 plus Redis-style aliases for several probabilistic and compact structures. The
 command set is strongest where Redis is also strong as a data-structure server:
 strings, counters, TTLs, lists/queues, sets, priority queues/sorted-set-like
@@ -308,7 +308,7 @@ reservoir samples, and Fenwick trees.
 
 | Family | Canonical HAT-trie commands |
 | --- | --- |
-| Generic key/value, counters, TTL, replication primitives | `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALDEL`, `INTERNALBATCH`, `TTL`, `EXPIRE`, `EXPIREAT` |
+| Generic key/value, counters, TTL, batching, replication primitives | `BATCH`, `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALDEL`, `INTERNALBATCH`, `TTL`, `EXPIRE`, `EXPIREAT` |
 | Map/hash fields | `PUTMAP`, `PEEKMAP`, `TAKEMAP` |
 | Slice/list/deque | `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`, `TAILSLICE` |
 | Set | `ADDSET`, `REMSET`, `HASSET`, `GETSET` |

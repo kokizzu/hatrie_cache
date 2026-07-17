@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -207,6 +208,38 @@ func TestDecodeCommandResponseWireRejectsUnsupportedAndOversized(t *testing.T) {
 	}
 	if _, err := decodeCommandResponseWire(bytes.NewReader([]byte{0, 1}), commandWireContentTypeProtobuf, 1); !errors.Is(err, errReplicationResponseTooLarge) {
 		t.Fatalf("decodeCommandResponseWire(oversized protobuf) error = %v, want errReplicationResponseTooLarge", err)
+	}
+}
+
+func TestCommandResponseWireRoundTripsBatchResponses(t *testing.T) {
+	original := CacheCommandResponse{
+		OK:      false,
+		Message: "batch completed with errors",
+		Responses: []CacheCommandResponse{
+			{OK: true, Message: "stored string"},
+			{OK: true, Message: "ok", Value: "ivi"},
+			{OK: false, Message: "value must be a 32-bit integer"},
+		},
+	}
+	data, err := proto.Marshal(grpcCommandResponse(original))
+	if err != nil {
+		t.Fatalf("Marshal(CommandResponse) error = %v", err)
+	}
+	decoded, err := decodeCommandResponseWire(bytes.NewReader(data), commandWireContentTypeProtobuf, 1<<20)
+	if err != nil {
+		t.Fatalf("decodeCommandResponseWire(protobuf batch response) error = %v", err)
+	}
+	if decoded.OK || decoded.Message != original.Message {
+		t.Fatalf("decoded batch response = %#v, want aggregate failure message %q", decoded, original.Message)
+	}
+	if len(decoded.Responses) != len(original.Responses) {
+		t.Fatalf("decoded responses len = %d, want %d", len(decoded.Responses), len(original.Responses))
+	}
+	if !decoded.Responses[1].OK || decoded.Responses[1].Value != "ivi" {
+		t.Fatalf("decoded second response = %#v, want ok ivi", decoded.Responses[1])
+	}
+	if decoded.Responses[2].OK || decoded.Responses[2].Message == "" {
+		t.Fatalf("decoded failing response = %#v, want error message", decoded.Responses[2])
 	}
 }
 
@@ -454,7 +487,7 @@ func TestDecodeCommandResponseWireExportedDecodesProtobufAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeCommandResponseWire(protobuf) error = %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DecodeCommandResponseWire(protobuf) = %#v, want %#v", got, want)
 	}
 
@@ -466,7 +499,7 @@ func TestDecodeCommandResponseWireExportedDecodesProtobufAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeCommandResponseWire(JSON) error = %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DecodeCommandResponseWire(JSON) = %#v, want %#v", got, want)
 	}
 }

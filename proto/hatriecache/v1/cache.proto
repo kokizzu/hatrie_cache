@@ -84,6 +84,7 @@ message CommandResponse {
   bool ok = 1;
   string message = 2;
   string value = 3;
+  repeated CommandResponse responses = 4;
 }
 
 message SnapshotRequest {}

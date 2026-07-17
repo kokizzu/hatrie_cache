@@ -814,6 +814,37 @@ func TestMonitoringHandlerExecutesCommands(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerExecutesPublicBatchCommand(t *testing.T) {
+	ht := newTestTrie(t)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()
+
+	body := `{"command":"BATCH","batch":[{"command":"SETSTR","key":"name","value":"ivi"},{"command":"GETSTR","key":"name"},{"command":"SETINT","key":"bad","value":"not-int"},{"command":"EXISTS","key":"name"}]}`
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(body)))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("BATCH status = %d, want 200", resp.Code)
+	}
+	var result CacheCommandResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
+		t.Fatalf("BATCH JSON error = %v", err)
+	}
+	if result.OK {
+		t.Fatalf("BATCH response = %#v, want aggregate failure", result)
+	}
+	if len(result.Responses) != 4 {
+		t.Fatalf("BATCH responses len = %d, want 4", len(result.Responses))
+	}
+	if !result.Responses[1].OK || result.Responses[1].Value != "ivi" {
+		t.Fatalf("BATCH GET response = %#v, want ivi", result.Responses[1])
+	}
+	if result.Responses[2].OK {
+		t.Fatalf("BATCH invalid SETINT response = %#v, want failure", result.Responses[2])
+	}
+	if got := ht.GetString("name"); got != "ivi" {
+		t.Fatalf("BATCH stored name = %q, want ivi", got)
+	}
+}
+
 func TestMonitoringHandlerJournalsMutatingCommands(t *testing.T) {
 	ht := newTestTrie(t)
 	journalPath := filepath.Join(t.TempDir(), "commands.journal")
@@ -1890,6 +1921,16 @@ func TestMonitoringWriteProtectionRejectsDangerousActions(t *testing.T) {
 	}
 	if got := ht.GetString("name"); got != "" {
 		t.Fatalf("write-protected command wrote value %q, want empty", got)
+	}
+
+	resp = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"BATCH","batch":[{"command":"GET","key":"name"},{"command":"SETSTR","key":"name","value":"ivi"}]}`))
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("write-protected batch status = %d, want 403", resp.Code)
+	}
+	if got := ht.GetString("name"); got != "" {
+		t.Fatalf("write-protected batch wrote value %q, want empty", got)
 	}
 }
 

@@ -23,6 +23,36 @@ func TestExecuteCommandRejectsNilTrie(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandBatchReturnsSubResponses(t *testing.T) {
+	ht := newTestTrie(t)
+
+	response := ht.ExecuteCommand(CacheCommandRequest{
+		Command: "BATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "SETSTR", Key: "name", Value: "ivi"},
+			{Command: "GETSTR", Key: "name"},
+			{Command: "SETINT", Key: "bad", Value: "not-int"},
+			{Command: "EXISTS", Key: "name"},
+		},
+	})
+
+	if response.OK {
+		t.Fatalf("BATCH response = %#v, want aggregate failure", response)
+	}
+	if len(response.Responses) != 4 {
+		t.Fatalf("BATCH responses len = %d, want 4", len(response.Responses))
+	}
+	if !response.Responses[0].OK || !response.Responses[1].OK || response.Responses[1].Value != "ivi" {
+		t.Fatalf("BATCH first responses = %#v, want SETSTR ok and GETSTR ivi", response.Responses[:2])
+	}
+	if response.Responses[2].OK {
+		t.Fatalf("BATCH invalid SETINT response = %#v, want failure", response.Responses[2])
+	}
+	if !response.Responses[3].OK || response.Responses[3].Value != "1" {
+		t.Fatalf("BATCH continued response = %#v, want EXISTS 1", response.Responses[3])
+	}
+}
+
 func TestExecuteCommandStringCounterTTLAndDelete(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(1200, 0)
@@ -2426,7 +2456,7 @@ func TestExecuteExactFastCommandCoversCompactNumericRows(t *testing.T) {
 			genericRequest := tt.request
 			genericRequest.Command = strings.ToLower(genericRequest.Command)
 			want := generic.ExecuteCommand(genericRequest)
-			if got != want {
+			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("fast response = %#v, generic response = %#v", got, want)
 			}
 		})

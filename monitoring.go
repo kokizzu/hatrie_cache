@@ -802,8 +802,11 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if trie == nil {
 		return commandError("trie is not configured"), false
 	}
-	if normalizedCommand(request.Command) == "INTERNALBATCH" {
+	switch normalizedCommand(request.Command) {
+	case "INTERNALBATCH":
 		return executeInternalReplicationBatch(ctx, trie, request, options)
+	case "BATCH":
+		return executePublicCommandBatch(ctx, trie, request, options)
 	}
 	replicationToken, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
 	if handled {
@@ -825,6 +828,36 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		options.Replicator.ReplicateCommand(ctx, trie, request, response)
 	}
 	return response, false
+}
+
+func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
+	if err := ctx.Err(); err != nil {
+		return commandError(err.Error()), false
+	}
+	payloads, err := publicCommandBatchRequests(request)
+	if err != nil {
+		return commandError(err.Error()), false
+	}
+	responses := make([]CacheCommandResponse, 0, len(payloads))
+	allOK := true
+	for idx, payload := range payloads {
+		if err := ctx.Err(); err != nil {
+			responses = append(responses, commandError(err.Error()))
+			allOK = false
+			break
+		}
+		if err := validatePublicCommandBatchPayload(payload, idx); err != nil {
+			responses = append(responses, commandError(err.Error()))
+			allOK = false
+			continue
+		}
+		response, _ := executeCacheCommand(ctx, trie, payload, options)
+		if !response.OK {
+			allOK = false
+		}
+		responses = append(responses, response)
+	}
+	return publicCommandBatchResponse(responses, allOK), false
 }
 
 func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {

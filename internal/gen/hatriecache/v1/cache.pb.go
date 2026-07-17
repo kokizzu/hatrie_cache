@@ -663,9 +663,10 @@ type CommandResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Ok      bool   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Value   string `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	Ok        bool               `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message   string             `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Value     string             `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	Responses []*CommandResponse `protobuf:"bytes,4,rep,name=responses,proto3" json:"responses,omitempty"`
 }
 
 func (x *CommandResponse) Reset() {
@@ -719,6 +720,13 @@ func (x *CommandResponse) GetValue() string {
 		return x.Value
 	}
 	return ""
+}
+
+func (x *CommandResponse) GetResponses() []*CommandResponse {
+	if x != nil {
+		return x.Responses
+	}
+	return nil
 }
 
 type SnapshotRequest struct {
@@ -2253,12 +2261,16 @@ var file_proto_hatriecache_v1_cache_proto_rawDesc = []byte{
 	0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x42,
 	0x0e, 0x0a, 0x0c, 0x5f, 0x74, 0x74, 0x6c, 0x5f, 0x73, 0x65, 0x63, 0x6f, 0x6e, 0x64, 0x73, 0x42,
 	0x0f, 0x0a, 0x0d, 0x5f, 0x75, 0x6e, 0x69, 0x78, 0x5f, 0x73, 0x65, 0x63, 0x6f, 0x6e, 0x64, 0x73,
-	0x42, 0x0b, 0x0a, 0x09, 0x5f, 0x70, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x22, 0x51, 0x0a,
-	0x0f, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
-	0x12, 0x0e, 0x0a, 0x02, 0x6f, 0x6b, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x02, 0x6f, 0x6b,
-	0x12, 0x18, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28,
-	0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61,
-	0x6c, 0x75, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65,
+	0x42, 0x0b, 0x0a, 0x09, 0x5f, 0x70, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x22, 0x90, 0x01,
+	0x0a, 0x0f, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x12, 0x0e, 0x0a, 0x02, 0x6f, 0x6b, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x02, 0x6f,
+	0x6b, 0x12, 0x18, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x76,
+	0x61, 0x6c, 0x75, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75,
+	0x65, 0x12, 0x3d, 0x0a, 0x09, 0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x73, 0x18, 0x04,
+	0x20, 0x03, 0x28, 0x0b, 0x32, 0x1f, 0x2e, 0x68, 0x61, 0x74, 0x72, 0x69, 0x65, 0x63, 0x61, 0x63,
+	0x68, 0x65, 0x2e, 0x76, 0x31, 0x2e, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65, 0x73,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x52, 0x09, 0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x73,
 	0x22, 0x11, 0x0a, 0x0f, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x52, 0x65, 0x71, 0x75,
 	0x65, 0x73, 0x74, 0x22, 0x40, 0x0a, 0x12, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69,
 	0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x12, 0x0a, 0x04, 0x73, 0x79, 0x6e,
@@ -2552,46 +2564,47 @@ var file_proto_hatriecache_v1_cache_proto_depIdxs = []int32{
 	5,  // 0: hatriecache.v1.EntriesResponse.entries:type_name -> hatriecache.v1.Entry
 	29, // 1: hatriecache.v1.CommandRequest.pairs:type_name -> hatriecache.v1.CommandRequest.PairsEntry
 	7,  // 2: hatriecache.v1.CommandRequest.batch:type_name -> hatriecache.v1.CommandRequest
-	12, // 3: hatriecache.v1.ReplicationResponse.queue:type_name -> hatriecache.v1.ReplicationQueue
-	13, // 4: hatriecache.v1.ReplicationResponse.targets:type_name -> hatriecache.v1.ReplicationTarget
-	17, // 5: hatriecache.v1.UpdateTopologyRequest.topology:type_name -> hatriecache.v1.ClusterTopology
-	17, // 6: hatriecache.v1.TopologyResponse.topology:type_name -> hatriecache.v1.ClusterTopology
-	21, // 7: hatriecache.v1.TopologyResponse.route:type_name -> hatriecache.v1.TopologyRoute
-	20, // 8: hatriecache.v1.ClusterTopology.bucket_ranges:type_name -> hatriecache.v1.TopologyBucketRange
-	18, // 9: hatriecache.v1.ClusterTopology.nodes:type_name -> hatriecache.v1.TopologyNode
-	19, // 10: hatriecache.v1.ClusterTopology.shards:type_name -> hatriecache.v1.TopologyShard
-	19, // 11: hatriecache.v1.TopologyRoute.shard:type_name -> hatriecache.v1.TopologyShard
-	25, // 12: hatriecache.v1.ElectionResponse.status:type_name -> hatriecache.v1.ElectionStatus
-	28, // 13: hatriecache.v1.ElectionResponse.route:type_name -> hatriecache.v1.ElectionKeyRoute
-	26, // 14: hatriecache.v1.ElectionStatus.nodes:type_name -> hatriecache.v1.ElectionNodeStatus
-	27, // 15: hatriecache.v1.ElectionStatus.leaders:type_name -> hatriecache.v1.ElectionLeader
-	21, // 16: hatriecache.v1.ElectionKeyRoute.route:type_name -> hatriecache.v1.TopologyRoute
-	27, // 17: hatriecache.v1.ElectionKeyRoute.leader:type_name -> hatriecache.v1.ElectionLeader
-	0,  // 18: hatriecache.v1.CacheService.Health:input_type -> hatriecache.v1.HealthRequest
-	2,  // 19: hatriecache.v1.CacheService.Stats:input_type -> hatriecache.v1.StatsRequest
-	4,  // 20: hatriecache.v1.CacheService.Entries:input_type -> hatriecache.v1.EntriesRequest
-	7,  // 21: hatriecache.v1.CacheService.Command:input_type -> hatriecache.v1.CommandRequest
-	9,  // 22: hatriecache.v1.CacheService.Snapshot:input_type -> hatriecache.v1.SnapshotRequest
-	10, // 23: hatriecache.v1.CacheService.Replication:input_type -> hatriecache.v1.ReplicationRequest
-	14, // 24: hatriecache.v1.CacheService.Topology:input_type -> hatriecache.v1.TopologyRequest
-	15, // 25: hatriecache.v1.CacheService.UpdateTopology:input_type -> hatriecache.v1.UpdateTopologyRequest
-	22, // 26: hatriecache.v1.CacheService.Election:input_type -> hatriecache.v1.ElectionRequest
-	23, // 27: hatriecache.v1.CacheService.UpdateElection:input_type -> hatriecache.v1.UpdateElectionRequest
-	1,  // 28: hatriecache.v1.CacheService.Health:output_type -> hatriecache.v1.HealthResponse
-	3,  // 29: hatriecache.v1.CacheService.Stats:output_type -> hatriecache.v1.StatsResponse
-	6,  // 30: hatriecache.v1.CacheService.Entries:output_type -> hatriecache.v1.EntriesResponse
-	8,  // 31: hatriecache.v1.CacheService.Command:output_type -> hatriecache.v1.CommandResponse
-	8,  // 32: hatriecache.v1.CacheService.Snapshot:output_type -> hatriecache.v1.CommandResponse
-	11, // 33: hatriecache.v1.CacheService.Replication:output_type -> hatriecache.v1.ReplicationResponse
-	16, // 34: hatriecache.v1.CacheService.Topology:output_type -> hatriecache.v1.TopologyResponse
-	16, // 35: hatriecache.v1.CacheService.UpdateTopology:output_type -> hatriecache.v1.TopologyResponse
-	24, // 36: hatriecache.v1.CacheService.Election:output_type -> hatriecache.v1.ElectionResponse
-	24, // 37: hatriecache.v1.CacheService.UpdateElection:output_type -> hatriecache.v1.ElectionResponse
-	28, // [28:38] is the sub-list for method output_type
-	18, // [18:28] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	8,  // 3: hatriecache.v1.CommandResponse.responses:type_name -> hatriecache.v1.CommandResponse
+	12, // 4: hatriecache.v1.ReplicationResponse.queue:type_name -> hatriecache.v1.ReplicationQueue
+	13, // 5: hatriecache.v1.ReplicationResponse.targets:type_name -> hatriecache.v1.ReplicationTarget
+	17, // 6: hatriecache.v1.UpdateTopologyRequest.topology:type_name -> hatriecache.v1.ClusterTopology
+	17, // 7: hatriecache.v1.TopologyResponse.topology:type_name -> hatriecache.v1.ClusterTopology
+	21, // 8: hatriecache.v1.TopologyResponse.route:type_name -> hatriecache.v1.TopologyRoute
+	20, // 9: hatriecache.v1.ClusterTopology.bucket_ranges:type_name -> hatriecache.v1.TopologyBucketRange
+	18, // 10: hatriecache.v1.ClusterTopology.nodes:type_name -> hatriecache.v1.TopologyNode
+	19, // 11: hatriecache.v1.ClusterTopology.shards:type_name -> hatriecache.v1.TopologyShard
+	19, // 12: hatriecache.v1.TopologyRoute.shard:type_name -> hatriecache.v1.TopologyShard
+	25, // 13: hatriecache.v1.ElectionResponse.status:type_name -> hatriecache.v1.ElectionStatus
+	28, // 14: hatriecache.v1.ElectionResponse.route:type_name -> hatriecache.v1.ElectionKeyRoute
+	26, // 15: hatriecache.v1.ElectionStatus.nodes:type_name -> hatriecache.v1.ElectionNodeStatus
+	27, // 16: hatriecache.v1.ElectionStatus.leaders:type_name -> hatriecache.v1.ElectionLeader
+	21, // 17: hatriecache.v1.ElectionKeyRoute.route:type_name -> hatriecache.v1.TopologyRoute
+	27, // 18: hatriecache.v1.ElectionKeyRoute.leader:type_name -> hatriecache.v1.ElectionLeader
+	0,  // 19: hatriecache.v1.CacheService.Health:input_type -> hatriecache.v1.HealthRequest
+	2,  // 20: hatriecache.v1.CacheService.Stats:input_type -> hatriecache.v1.StatsRequest
+	4,  // 21: hatriecache.v1.CacheService.Entries:input_type -> hatriecache.v1.EntriesRequest
+	7,  // 22: hatriecache.v1.CacheService.Command:input_type -> hatriecache.v1.CommandRequest
+	9,  // 23: hatriecache.v1.CacheService.Snapshot:input_type -> hatriecache.v1.SnapshotRequest
+	10, // 24: hatriecache.v1.CacheService.Replication:input_type -> hatriecache.v1.ReplicationRequest
+	14, // 25: hatriecache.v1.CacheService.Topology:input_type -> hatriecache.v1.TopologyRequest
+	15, // 26: hatriecache.v1.CacheService.UpdateTopology:input_type -> hatriecache.v1.UpdateTopologyRequest
+	22, // 27: hatriecache.v1.CacheService.Election:input_type -> hatriecache.v1.ElectionRequest
+	23, // 28: hatriecache.v1.CacheService.UpdateElection:input_type -> hatriecache.v1.UpdateElectionRequest
+	1,  // 29: hatriecache.v1.CacheService.Health:output_type -> hatriecache.v1.HealthResponse
+	3,  // 30: hatriecache.v1.CacheService.Stats:output_type -> hatriecache.v1.StatsResponse
+	6,  // 31: hatriecache.v1.CacheService.Entries:output_type -> hatriecache.v1.EntriesResponse
+	8,  // 32: hatriecache.v1.CacheService.Command:output_type -> hatriecache.v1.CommandResponse
+	8,  // 33: hatriecache.v1.CacheService.Snapshot:output_type -> hatriecache.v1.CommandResponse
+	11, // 34: hatriecache.v1.CacheService.Replication:output_type -> hatriecache.v1.ReplicationResponse
+	16, // 35: hatriecache.v1.CacheService.Topology:output_type -> hatriecache.v1.TopologyResponse
+	16, // 36: hatriecache.v1.CacheService.UpdateTopology:output_type -> hatriecache.v1.TopologyResponse
+	24, // 37: hatriecache.v1.CacheService.Election:output_type -> hatriecache.v1.ElectionResponse
+	24, // 38: hatriecache.v1.CacheService.UpdateElection:output_type -> hatriecache.v1.ElectionResponse
+	29, // [29:39] is the sub-list for method output_type
+	19, // [19:29] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_proto_hatriecache_v1_cache_proto_init() }

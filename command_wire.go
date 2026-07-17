@@ -228,13 +228,27 @@ func decodeCommandResponseWire(reader io.Reader, contentType string, limit int64
 		if err := proto.Unmarshal(data, &response); err != nil {
 			return CacheCommandResponse{}, err
 		}
-		return CacheCommandResponse{
-			OK:      response.GetOk(),
-			Message: response.GetMessage(),
-			Value:   response.GetValue(),
-		}, nil
+		return cacheCommandResponseFromProto(&response), nil
 	}
 	return decodeCommandResponseJSON(reader, limit)
+}
+
+func cacheCommandResponseFromProto(response *hatriecachev1.CommandResponse) CacheCommandResponse {
+	if response == nil {
+		return CacheCommandResponse{}
+	}
+	out := CacheCommandResponse{
+		OK:      response.GetOk(),
+		Message: response.GetMessage(),
+		Value:   response.GetValue(),
+	}
+	if len(response.GetResponses()) > 0 {
+		out.Responses = make([]CacheCommandResponse, len(response.GetResponses()))
+		for i, value := range response.GetResponses() {
+			out.Responses[i] = cacheCommandResponseFromProto(value)
+		}
+	}
+	return out
 }
 
 // DecodeCommandResponseWire decodes an HTTP command API response body.

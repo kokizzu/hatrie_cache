@@ -746,8 +746,14 @@ func validateCommandJournalEntrySequence(previous uint64, hasPrevious bool, entr
 
 func commandShouldJournal(request CacheCommandRequest) bool {
 	command := strings.ToUpper(strings.TrimSpace(request.Command))
+	if command == "" {
+		return false
+	}
+	if command == "BATCH" {
+		return commandBatchShouldJournal(request)
+	}
 	key := strings.TrimSpace(request.Key)
-	if command == "" || key == "" {
+	if key == "" {
 		return false
 	}
 
@@ -889,6 +895,15 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	default:
 		return false
 	}
+}
+
+func commandBatchShouldJournal(request CacheCommandRequest) bool {
+	for _, payload := range request.Batch {
+		if commandShouldJournal(payload) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeJournalRequest(request CacheCommandRequest, now time.Time) CacheCommandRequest {

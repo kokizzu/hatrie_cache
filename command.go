@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 )
 
 const maxCommandTTLSeconds = int64(1<<63-1) / int64(time.Second)
+const maxPublicCommandBatchSize = 4096
 
 type CacheCommandRequest struct {
 	Command     string                `json:"command"`
@@ -27,9 +29,10 @@ type CacheCommandRequest struct {
 }
 
 type CacheCommandResponse struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
-	Value   string `json:"value,omitempty"`
+	OK        bool                   `json:"ok"`
+	Message   string                 `json:"message"`
+	Value     string                 `json:"value,omitempty"`
+	Responses []CacheCommandResponse `json:"responses,omitempty"`
 }
 
 func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandResponse {
@@ -43,6 +46,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	key := strings.TrimSpace(request.Key)
 	if command == "" {
 		return commandError("command is required")
+	}
+	if command == "BATCH" {
+		return ht.executePublicBatchCommand(request)
 	}
 	if key == "" {
 		return commandError("key is required")
@@ -997,6 +1003,65 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	default:
 		return commandError("unsupported command")
 	}
+}
+
+func (ht *HatTrie) executePublicBatchCommand(request CacheCommandRequest) CacheCommandResponse {
+	return executePublicCommandBatchRequests(request, ht.ExecuteCommand)
+}
+
+func executePublicCommandBatchRequests(request CacheCommandRequest, execute func(CacheCommandRequest) CacheCommandResponse) CacheCommandResponse {
+	payloads, err := publicCommandBatchRequests(request)
+	if err != nil {
+		return commandError(err.Error())
+	}
+	responses := make([]CacheCommandResponse, 0, len(payloads))
+	allOK := true
+	for idx, payload := range payloads {
+		if err := validatePublicCommandBatchPayload(payload, idx); err != nil {
+			responses = append(responses, commandError(err.Error()))
+			allOK = false
+			continue
+		}
+		response := execute(payload)
+		if !response.OK {
+			allOK = false
+		}
+		responses = append(responses, response)
+	}
+	return publicCommandBatchResponse(responses, allOK)
+}
+
+func publicCommandBatchRequests(request CacheCommandRequest) ([]CacheCommandRequest, error) {
+	if len(request.Batch) == 0 {
+		return nil, errors.New("batch requires requests")
+	}
+	if len(request.Batch) > maxPublicCommandBatchSize {
+		return nil, fmt.Errorf("batch size must be <= %d", maxPublicCommandBatchSize)
+	}
+	return append([]CacheCommandRequest(nil), request.Batch...), nil
+}
+
+func validatePublicCommandBatchPayload(request CacheCommandRequest, index int) error {
+	command := normalizedCommand(request.Command)
+	if command == "" {
+		return fmt.Errorf("batch value %d: command is required", index)
+	}
+	switch command {
+	case "BATCH":
+		return fmt.Errorf("batch value %d: nested BATCH is not supported", index)
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH":
+		return fmt.Errorf("batch value %d: internal replication command %s is not allowed", index, command)
+	default:
+		return nil
+	}
+}
+
+func publicCommandBatchResponse(responses []CacheCommandResponse, ok bool) CacheCommandResponse {
+	message := "batch applied"
+	if !ok {
+		message = "batch completed with errors"
+	}
+	return CacheCommandResponse{OK: ok, Message: message, Responses: responses}
 }
 
 func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCommandResponse, bool) {

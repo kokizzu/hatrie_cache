@@ -1295,6 +1295,38 @@ func TestRunCommandPostsStructuredJSONFields(t *testing.T) {
 	}
 }
 
+func TestRunCommandPostsBatchFlag(t *testing.T) {
+	var gotRequest hatriecache.CacheCommandRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decoder := json.NewDecoder(r.Body)
+		decoder.UseNumber()
+		if err := decoder.Decode(&gotRequest); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		w.Write([]byte(`{"ok":false,"message":"batch completed with errors","responses":[{"ok":true,"message":"stored string"},{"ok":false,"message":"value must be a 32-bit integer"}]}`))
+	}))
+	defer server.Close()
+
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"command",
+		"-wire-format", "json",
+		"-batch", `[{"command":"SETSTR","key":"name","value":"ivi"},{"command":"SETINT","key":"bad","value":"not-int"}]`,
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(command batch) error = %v", err)
+	}
+
+	if gotRequest.Command != "BATCH" || len(gotRequest.Batch) != 2 {
+		t.Fatalf("batch request = %#v, want BATCH with two requests", gotRequest)
+	}
+	if gotRequest.Batch[0].Command != "SETSTR" || gotRequest.Batch[0].Key != "name" || gotRequest.Batch[0].Value != "ivi" {
+		t.Fatalf("first batch request = %#v, want SETSTR name ivi", gotRequest.Batch[0])
+	}
+	if gotRequest.Batch[1].Command != "SETINT" || gotRequest.Batch[1].Value != "not-int" {
+		t.Fatalf("second batch request = %#v, want SETINT bad value", gotRequest.Batch[1])
+	}
+}
+
 func TestRunCommandPostsRadixTreeFields(t *testing.T) {
 	var gotRequests []hatriecache.CacheCommandRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

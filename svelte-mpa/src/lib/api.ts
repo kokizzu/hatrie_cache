@@ -61,17 +61,22 @@ export const DEFAULT_ENTRIES_LIMIT = 1000;
 
 export type CommandRequest = {
   command: string;
-  key: string;
+  key?: string;
   value?: string;
+  values?: unknown[];
+  batch?: CommandRequest[];
   subkey?: string;
+  pairs?: Record<string, unknown>;
   priority?: number | null;
   ttl_seconds?: number | null;
+  unix_seconds?: number | null;
 };
 
 export type CommandResponse = {
   ok: boolean;
   message: string;
   value?: string;
+  responses?: CommandResponse[];
 };
 
 export type StorageStatus = {
@@ -446,7 +451,15 @@ async function responseErrorMessage(response: Response): Promise<string> {
 }
 
 export function sampleCommandResponse(request: CommandRequest): CommandResponse {
-  const key = request.key.trim();
+  if (request.command === 'BATCH') {
+    const responses = request.batch?.map((value) => sampleCommandResponse(value)) ?? [];
+    return {
+      ok: responses.every((value) => value.ok),
+      message: responses.every((value) => value.ok) ? 'batch applied' : 'batch completed with errors',
+      responses,
+    };
+  }
+  const key = request.key?.trim() ?? '';
   if (!key) {
     return { ok: false, message: 'A key is required.' };
   }

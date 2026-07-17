@@ -674,11 +674,18 @@ func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) CacheCo
 }
 
 func grpcCommandResponse(response CacheCommandResponse) *hatriecachev1.CommandResponse {
-	return &hatriecachev1.CommandResponse{
+	out := &hatriecachev1.CommandResponse{
 		Ok:      response.OK,
 		Message: response.Message,
 		Value:   response.Value,
 	}
+	if len(response.Responses) > 0 {
+		out.Responses = make([]*hatriecachev1.CommandResponse, len(response.Responses))
+		for i := range response.Responses {
+			out.Responses[i] = grpcCommandResponse(response.Responses[i])
+		}
+	}
+	return out
 }
 
 func unixNanoOrZero(value time.Time) int64 {
