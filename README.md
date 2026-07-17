@@ -853,8 +853,14 @@ Prometheus output includes cache counters plus audit and protection counters:
 `hatrie_cache_write_protection_rejections_total`,
 `hatrie_cache_rate_limit_rejections_total`, and gauges for
 `hatrie_cache_write_protection_enabled` and
-`hatrie_cache_rate_limit_per_second`. When replication is configured,
-Prometheus also exports `hatrie_cache_replication_health_score`.
+`hatrie_cache_rate_limit_per_second`. When LevelDB is configured, Prometheus
+exports `hatrie_cache_leveldb_dirty_keys` and
+`hatrie_cache_storage_operation_running`. When replication is configured,
+Prometheus also exports `hatrie_cache_replication_health_score`,
+`hatrie_cache_replication_dead_letters`,
+`hatrie_cache_replication_queue_capacity`, and async queue counters such as
+`hatrie_cache_replication_queue_enqueued_total` and
+`hatrie_cache_replication_retried_total`.
 Use `GET /api/entries?prefix=...&limit=N` to bound large key listings; limited
 responses include `has_more` and `next_after_key` for cursor paging with
 `after_key`. Empty keys are valid, so when `next_after_key` is empty and

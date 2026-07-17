@@ -367,6 +367,12 @@ func TestREADMEListsGRPCReplication(t *testing.T) {
 		"`circuit_open`",
 		"`health_score`",
 		"`hatrie_cache_replication_health_score`",
+		"`hatrie_cache_replication_dead_letters`",
+		"`hatrie_cache_replication_queue_capacity`",
+		"`hatrie_cache_replication_queue_enqueued_total`",
+		"`hatrie_cache_replication_retried_total`",
+		"`hatrie_cache_leveldb_dirty_keys`",
+		"`hatrie_cache_storage_operation_running`",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md does not document %s", token)

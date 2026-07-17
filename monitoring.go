@@ -445,6 +445,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	writePrometheusGauge(&builder, "hatrie_cache_write_protection_enabled", "Whether dangerous API writes are currently blocked by write protection.", node, boolGauge(handler.options.WriteProtected))
 	writePrometheusGauge(&builder, "hatrie_cache_rate_limit_per_second", "Configured dangerous API action rate limit per caller per second; zero means disabled.", node, uint64(handler.options.RateLimiter.Limit()))
 
+	handler.writePrometheusStorageMetrics(&builder, node)
 	if handler.options.Journal != nil {
 		writePrometheusHelp(&builder, "hatrie_cache_journal_sequence", "Latest local command journal sequence.")
 		writePrometheusType(&builder, "hatrie_cache_journal_sequence", "gauge")
@@ -453,17 +454,58 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	if handler.options.Replicator != nil {
 		result := handler.options.Replicator.LastResult()
 		writePrometheusGauge(&builder, "hatrie_cache_replication_health_score", "Current replication health score from 0 to 100.", node, uint64(result.HealthScore))
+		writePrometheusGauge(&builder, "hatrie_cache_replication_dead_letters", "Current retained async replication dead-letter count.", node, uint64(result.DeadLetterCount))
 		if result.Queue != nil {
 			writePrometheusHelp(&builder, "hatrie_cache_replication_queue_depth", "Current async replication queue depth.")
 			writePrometheusType(&builder, "hatrie_cache_replication_queue_depth", "gauge")
 			fmt.Fprintf(&builder, "hatrie_cache_replication_queue_depth{node=\"%s\"} %d\n", node, result.Queue.Depth)
+			writePrometheusGauge(&builder, "hatrie_cache_replication_queue_capacity", "Configured async replication queue capacity.", node, uint64(result.Queue.Capacity))
+			writePrometheusCounter(&builder, "hatrie_cache_replication_queue_enqueued_total", "Total enqueued async replication jobs.", node, result.Queue.Enqueued)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_queue_dropped_total", "Total dropped async replication jobs.", node, result.Queue.Dropped)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_attempts_total", "Total async replication target delivery attempts.", node, result.Queue.Attempts)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_successes_total", "Total successful async replication target deliveries.", node, result.Queue.Successes)
 			writePrometheusCounter(&builder, "hatrie_cache_replication_failures_total", "Total failed async replication target deliveries.", node, result.Queue.Failures)
+			writePrometheusCounter(&builder, "hatrie_cache_replication_retried_total", "Total async replication jobs scheduled for retry.", node, result.Queue.Retried)
+			writePrometheusGaugeInt64(&builder, "hatrie_cache_replication_queue_oldest_age_millis", "Age of the oldest queued async replication job in milliseconds.", node, result.Queue.OldestQueuedAgeMillis)
+			writePrometheusGaugeInt64(&builder, "hatrie_cache_replication_in_flight_age_millis", "Age of the current in-flight async replication job in milliseconds.", node, result.Queue.InFlightAgeMillis)
+			writePrometheusGaugeInt64(&builder, "hatrie_cache_replication_last_retry_age_millis", "Age of the last async replication retry scheduling event in milliseconds.", node, result.Queue.LastRetryAgeMillis)
 		}
+		writePrometheusReplicationCircuitBreakers(&builder, node, result.CircuitBreakers)
 	}
 	return builder.String()
+}
+
+func (handler *MonitoringHandler) writePrometheusStorageMetrics(builder *strings.Builder, node string) {
+	if handler.options.LevelDBStore == nil {
+		return
+	}
+	writePrometheusGauge(builder, "hatrie_cache_leveldb_dirty_keys", "Current number of dirty keys waiting for incremental LevelDB sync.", node, uint64(handler.options.LevelDBDirtyTracker.Pending()))
+	status := handler.storageStatus()
+	writePrometheusGauge(builder, "hatrie_cache_storage_operation_running", "Whether a storage flush or compaction operation is running.", node, boolGauge(status.Operation.Running))
+	if status.LastFlush != nil {
+		writePrometheusGauge(builder, "hatrie_cache_storage_last_flush_keys", "Keys included in the last manual LevelDB flush.", node, uint64(status.LastFlush.Keys))
+		writePrometheusGaugeInt64(builder, "hatrie_cache_storage_last_flush_duration_millis", "Duration of the last manual LevelDB flush in milliseconds.", node, status.LastFlush.DurationMillis)
+	}
+	if status.LastCompact != nil {
+		writePrometheusGaugeInt64(builder, "hatrie_cache_storage_last_compact_duration_millis", "Duration of the last LevelDB compaction in milliseconds.", node, status.LastCompact.DurationMillis)
+		writePrometheusGaugeInt64(builder, "hatrie_cache_storage_last_compact_size_bytes_delta", "Size delta from the last LevelDB compaction in bytes.", node, status.LastCompact.SizeBytesDelta)
+	}
+}
+
+func writePrometheusReplicationCircuitBreakers(builder *strings.Builder, node string, breakers []ReplicationCircuitBreakerTarget) {
+	if len(breakers) == 0 {
+		return
+	}
+	writePrometheusHelp(builder, "hatrie_cache_replication_circuit_breaker_open", "Whether a replication circuit breaker target is currently open.")
+	writePrometheusType(builder, "hatrie_cache_replication_circuit_breaker_open", "gauge")
+	writePrometheusHelp(builder, "hatrie_cache_replication_circuit_breaker_failures", "Current consecutive replication circuit breaker failures per target.")
+	writePrometheusType(builder, "hatrie_cache_replication_circuit_breaker_failures", "gauge")
+	for _, breaker := range breakers {
+		target := prometheusLabelValue(breaker.Node)
+		state := prometheusLabelValue(breaker.State)
+		fmt.Fprintf(builder, "hatrie_cache_replication_circuit_breaker_open{node=\"%s\",target=\"%s\",state=\"%s\"} %d\n", node, target, state, boolGauge(breaker.State == replicationCircuitOpen))
+		fmt.Fprintf(builder, "hatrie_cache_replication_circuit_breaker_failures{node=\"%s\",target=\"%s\",state=\"%s\"} %d\n", node, target, state, breaker.Failures)
+	}
 }
 
 func writePrometheusCounter(builder *strings.Builder, name string, help string, node string, value uint64) {
@@ -473,6 +515,12 @@ func writePrometheusCounter(builder *strings.Builder, name string, help string, 
 }
 
 func writePrometheusGauge(builder *strings.Builder, name string, help string, node string, value uint64) {
+	writePrometheusHelp(builder, name, help)
+	writePrometheusType(builder, name, "gauge")
+	fmt.Fprintf(builder, "%s{node=\"%s\"} %d\n", name, node, value)
+}
+
+func writePrometheusGaugeInt64(builder *strings.Builder, name string, help string, node string, value int64) {
 	writePrometheusHelp(builder, name, help)
 	writePrometheusType(builder, name, "gauge")
 	fmt.Fprintf(builder, "%s{node=\"%s\"} %d\n", name, node, value)

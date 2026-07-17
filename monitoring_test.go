@@ -1775,6 +1775,54 @@ func TestMonitoringPrometheusMetricsExposeReplicationHealthScore(t *testing.T) {
 		"# HELP hatrie_cache_replication_health_score",
 		"# TYPE hatrie_cache_replication_health_score gauge",
 		`hatrie_cache_replication_health_score{node="node-a"} 100`,
+		`hatrie_cache_replication_dead_letters{node="node-a"} 0`,
+		`hatrie_cache_replication_queue_capacity{node="node-a"} 2`,
+		`hatrie_cache_replication_queue_enqueued_total{node="node-a"} 0`,
+		`hatrie_cache_replication_retried_total{node="node-a"} 0`,
+		`hatrie_cache_replication_queue_oldest_age_millis{node="node-a"} 0`,
+		`hatrie_cache_replication_in_flight_age_millis{node="node-a"} 0`,
+		`hatrie_cache_replication_last_retry_age_millis{node="node-a"} 0`,
+	} {
+		if !strings.Contains(body, token) {
+			t.Fatalf("metrics body missing %q:\n%s", token, body)
+		}
+	}
+}
+
+func TestMonitoringPrometheusMetricsExposeStorageOpsState(t *testing.T) {
+	ht := newTestTrie(t)
+	store, err := OpenLevelDBStore(filepath.Join(t.TempDir(), "cache.leveldb"))
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	dirty := NewLevelDBDirtyTracker()
+	dirty.Mark("session:dirty")
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:            "node-a",
+		LevelDBStore:        store,
+		LevelDBDirtyTracker: dirty,
+	})
+	handler.recordStorageFlush(LevelDBFlushResult{Store: "leveldb", Keys: 3, DurationMillis: 7})
+	handler.recordStorageCompact(LevelDBCompactionResult{Store: "leveldb", DurationMillis: 9, SizeBytesDelta: -4})
+	if !handler.beginStorageOperation("flush") {
+		t.Fatal("beginStorageOperation(flush) = false, want true")
+	}
+	defer handler.finishStorageOperation()
+
+	resp := httptest.NewRecorder()
+	handler.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", resp.Code)
+	}
+	body := resp.Body.String()
+	for _, token := range []string{
+		`hatrie_cache_leveldb_dirty_keys{node="node-a"} 1`,
+		`hatrie_cache_storage_operation_running{node="node-a"} 1`,
+		`hatrie_cache_storage_last_flush_keys{node="node-a"} 3`,
+		`hatrie_cache_storage_last_flush_duration_millis{node="node-a"} 7`,
+		`hatrie_cache_storage_last_compact_duration_millis{node="node-a"} 9`,
+		`hatrie_cache_storage_last_compact_size_bytes_delta{node="node-a"} -4`,
 	} {
 		if !strings.Contains(body, token) {
 			t.Fatalf("metrics body missing %q:\n%s", token, body)
