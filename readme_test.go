@@ -146,9 +146,12 @@ func TestREADMEListsFrontendSmoke(t *testing.T) {
 	readme := string(data)
 	for _, token := range []string{
 		"make frontend-smoke",
+		"make frontend-backend-smoke",
 		"Vite preview",
 		"dashboard/keys/commands/admin HTML",
 		"`FRONTEND_SMOKE_REQUIRE_BROWSER=true`",
+		"real `hatrie-cache` monitoring server",
+		"`/api/storage/flush`",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md does not document frontend smoke token %q", token)

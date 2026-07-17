@@ -110,7 +110,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-ci-smoke command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-ci-smoke command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -227,3 +227,6 @@ frontend-build:
 
 frontend-smoke:
 	./scripts/frontend-smoke.sh
+
+frontend-backend-smoke:
+	./scripts/frontend-backend-smoke.sh

@@ -198,6 +198,8 @@ func TestFrontendSmokeScriptIsWiredThroughMakefile(t *testing.T) {
 	for _, token := range []string{
 		"frontend-smoke:",
 		"./scripts/frontend-smoke.sh",
+		"frontend-backend-smoke:",
+		"./scripts/frontend-backend-smoke.sh",
 	} {
 		if !strings.Contains(makefile, token) {
 			t.Fatalf("Makefile missing frontend smoke token %q", token)
@@ -233,6 +235,26 @@ func TestFrontendSmokeScriptIsWiredThroughMakefile(t *testing.T) {
 	} {
 		if !strings.Contains(smokeScript, token) {
 			t.Fatalf("frontend-smoke.sh missing token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("scripts/frontend-backend-smoke.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/frontend-backend-smoke.sh) error = %v", err)
+	}
+	backendSmokeScript := string(data)
+	for _, token := range []string{
+		"go build -o",
+		"-monitoring-server",
+		"-db-path",
+		"-audit-log-path",
+		"/api/storage/flush",
+		"/api/replication",
+		"storage.flush",
+		"FRONTEND_BACKEND_SMOKE_REQUIRE_BROWSER",
+	} {
+		if !strings.Contains(backendSmokeScript, token) {
+			t.Fatalf("frontend-backend-smoke.sh missing token %q", token)
 		}
 	}
 }
