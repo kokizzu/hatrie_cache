@@ -92,6 +92,7 @@ type LevelDBSpillResult struct {
 	KeysScanned    int       `json:"keys_scanned"`
 	ValuesScanned  int       `json:"values_scanned"`
 	KeysSpilled    int       `json:"keys_spilled"`
+	WriteBatches   int       `json:"write_batches"`
 	HotBytesBefore int64     `json:"hot_bytes_before"`
 	HotBytesAfter  int64     `json:"hot_bytes_after"`
 	BytesSpilled   int64     `json:"bytes_spilled"`
@@ -527,6 +528,12 @@ type levelDBSpillCandidate struct {
 	lastHit    time.Time
 }
 
+type levelDBPreparedSpill struct {
+	candidate levelDBSpillCandidate
+	entry     snapshotEntry
+	data      []byte
+}
+
 func (trie *HatTrie) spillColdLevelDBLocked(store *LevelDBStore, db *leveldb.DB, options LevelDBSpillOptions, result *LevelDBSpillResult) error {
 	trie.ensureOpen()
 	now := time.Time{}
@@ -569,8 +576,11 @@ func (trie *HatTrie) spillColdLevelDBLocked(store *LevelDBStore, db *leveldb.DB,
 	sort.Slice(candidates, func(i, j int) bool {
 		return levelDBSpillCandidateLess(candidates[i], candidates[j])
 	})
+	batch := new(leveldb.Batch)
+	prepared := make([]levelDBPreparedSpill, 0, len(candidates))
+	selectedHotBytesAfter := result.HotBytesAfter
 	for _, candidate := range candidates {
-		if result.HotBytesAfter <= options.MaxHotBytes {
+		if selectedHotBytesAfter <= options.MaxHotBytes {
 			break
 		}
 		rawPtr := trie.tryLocation(candidate.key)
@@ -590,15 +600,28 @@ func (trie *HatTrie) spillColdLevelDBLocked(store *LevelDBStore, db *leveldb.DB,
 		if err != nil {
 			return err
 		}
-		if err := db.Put(levelDBKey(candidate.key), data, &opt.WriteOptions{Sync: true}); err != nil {
-			return err
-		}
-		if _, err := trie.applyLevelDBReferenceLocked(store, entry, data); err != nil {
+		batch.Put(levelDBKey(candidate.key), data)
+		prepared = append(prepared, levelDBPreparedSpill{
+			candidate: candidate,
+			entry:     entry,
+			data:      data,
+		})
+		selectedHotBytesAfter -= candidate.valueBytes
+	}
+	if len(prepared) == 0 {
+		return nil
+	}
+	if err := db.Write(batch, &opt.WriteOptions{Sync: true}); err != nil {
+		return err
+	}
+	result.WriteBatches++
+	for _, preparedSpill := range prepared {
+		if _, err := trie.applyLevelDBReferenceLocked(store, preparedSpill.entry, preparedSpill.data); err != nil {
 			return err
 		}
 		result.KeysSpilled++
-		result.BytesSpilled += candidate.valueBytes
-		result.HotBytesAfter -= candidate.valueBytes
+		result.BytesSpilled += preparedSpill.candidate.valueBytes
+		result.HotBytesAfter -= preparedSpill.candidate.valueBytes
 	}
 	return nil
 }

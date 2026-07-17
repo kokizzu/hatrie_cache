@@ -2854,6 +2854,42 @@ func TestLevelDBStoreSpillColdValuesUnderHotByteCap(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreSpillColdWritesSelectedKeysInOneBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	ht.UpsertString("cold-a", strings.Repeat("a", 64))
+	ht.UpsertString("cold-b", strings.Repeat("b", 64))
+	ht.UpsertString("warm", strings.Repeat("w", 64))
+	if got := ht.GetString("warm"); got == "" {
+		t.Fatal("GetString(warm) = empty, want warm hit")
+	}
+
+	result, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold() error = %v", err)
+	}
+	if result.KeysSpilled != 2 {
+		t.Fatalf("SpillCold() spilled %d keys, want 2: %#v", result.KeysSpilled, result)
+	}
+	if result.WriteBatches != 1 {
+		t.Fatalf("SpillCold() write batches = %d, want one synced LevelDB batch", result.WriteBatches)
+	}
+	for _, key := range []string{"cold-a", "cold-b"} {
+		if value := ht.Get(key); !value.IsStringAtRaws() {
+			t.Fatalf("%s after hydration = %+v, want in-memory string", key, value)
+		}
+	}
+}
+
 func TestLevelDBStoreHotLoadKeepsLargeBytesColdWithoutMaterializing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
