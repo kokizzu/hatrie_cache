@@ -506,9 +506,18 @@ func TestImprovementReportIncludesLatestReplicationWork(t *testing.T) {
 		"`a2ca705`",
 		"`bb8b86d`",
 		"`e899eb8`",
+		"`a0c7561`",
+		"`f34ea71`",
+		"`2c24768`",
+		"`675bccc`",
+		"`2f3deb6`",
 		"LevelDB replication outbox backend",
 		"Batch replication by target",
 		"multi-node replication failure tests",
+		"native replication batch wire format",
+		"Preflight replication batches before apply",
+		"Benchmark replication batching",
+		"multi-node replication chaos tests",
 	} {
 		if !strings.Contains(report, token) {
 			t.Fatalf("IMPROVEMENT_REPORT.md does not include latest replication token %q", token)
