@@ -1720,6 +1720,93 @@ func TestRunAsyncLevelDBOutboxReplaysAfterTargetRestart(t *testing.T) {
 	}
 }
 
+func TestRunReplicaAcceptsLeaderWriteAfterPrimaryMarkedOffline(t *testing.T) {
+	addrA := freeTCPAddr(t)
+	addrB := freeTCPAddr(t)
+	dir := t.TempDir()
+	_, topologyBPath := writeTwoNodeRunTopologies(t, dir, addrA, addrB)
+
+	ctxB, cancelB := context.WithCancel(context.Background())
+	errB := make(chan error, 1)
+	go func() {
+		errB <- run(ctxB, []string{
+			"-monitoring-server",
+			"-monitoring-addr", addrB,
+			"-monitoring-web-dir", "",
+			"-node-id", "node-b",
+			"-topology-path", topologyBPath,
+			"-enforce-leader-writes",
+		}, &bytes.Buffer{}, &bytes.Buffer{})
+	}()
+	defer stopRunServerForTest(t, cancelB, errB, addrB)
+	waitForHTTPHealth(t, "http://"+addrB+"/api/health")
+
+	status, before := postTestCommandStatus(t, "http://"+addrB, `{"command":"SETSTR","key":"session:failover","value":"before"}`)
+	if status != http.StatusConflict || before.OK {
+		t.Fatalf("node-b pre-failover write status/response = %d/%#v, want 409 leader rejection", status, before)
+	}
+
+	postTestElectionUpdate(t, "http://"+addrB, `{"node":"node-a","online":false}`)
+	after := postTestCommand(t, "http://"+addrB, `{"command":"SETSTR","key":"session:failover","value":"after"}`)
+	if !after.OK {
+		t.Fatalf("node-b post-failover write response = %#v, want ok", after)
+	}
+	if got := postTestCommand(t, "http://"+addrB, `{"command":"GETSTR","key":"session:failover"}`); !got.OK || got.Value != "after" {
+		t.Fatalf("node-b post-failover GETSTR = %#v, want after", got)
+	}
+}
+
+func TestRunRejectsReplicationWithStaleTopologyFingerprint(t *testing.T) {
+	addrA := freeTCPAddr(t)
+	addrB := freeTCPAddr(t)
+	dir := t.TempDir()
+	topologyAPath := writeTwoNodeRunTopology(t, dir, "node-a-topology.json", "node-a", addrA, addrB, 1)
+	topologyBPath := writeTwoNodeRunTopologyWithRoles(t, dir, "node-b-topology.json", "node-b", addrA, addrB, 1, "", "replica")
+
+	ctxB, cancelB := context.WithCancel(context.Background())
+	errB := make(chan error, 1)
+	go func() {
+		errB <- run(ctxB, []string{
+			"-monitoring-server",
+			"-monitoring-addr", addrB,
+			"-monitoring-web-dir", "",
+			"-node-id", "node-b",
+			"-topology-path", topologyBPath,
+			"-enforce-leader-writes",
+		}, &bytes.Buffer{}, &bytes.Buffer{})
+	}()
+	defer stopRunServerForTest(t, cancelB, errB, addrB)
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	errA := make(chan error, 1)
+	go func() {
+		errA <- run(ctxA, []string{
+			"-monitoring-server",
+			"-monitoring-addr", addrA,
+			"-monitoring-web-dir", "",
+			"-node-id", "node-a",
+			"-topology-path", topologyAPath,
+			"-replication",
+			"-enforce-leader-writes",
+		}, &bytes.Buffer{}, &bytes.Buffer{})
+	}()
+	defer stopRunServerForTest(t, cancelA, errA, addrA)
+
+	waitForHTTPHealth(t, "http://"+addrA+"/api/health")
+	waitForHTTPHealth(t, "http://"+addrB+"/api/health")
+
+	write := postTestCommand(t, "http://"+addrA, `{"command":"SETSTR","key":"session:stale-topology","value":"blocked"}`)
+	if !write.OK {
+		t.Fatalf("node-a stale-topology write response = %#v, want local ok", write)
+	}
+	waitForReplicationResult(t, "http://"+addrA, func(result hatriecache.ReplicationResult) bool {
+		return len(result.Targets) == 1 && result.Targets[0].Node == "node-b" && !result.Targets[0].OK && result.Targets[0].Status == http.StatusConflict
+	})
+	if got := postTestCommand(t, "http://"+addrB, `{"command":"EXISTS","key":"session:stale-topology"}`); !got.OK || got.Value != "0" {
+		t.Fatalf("node-b EXISTS after stale topology replication = %#v, want missing key", got)
+	}
+}
+
 func TestStartElectionHeartbeatStopIsIdempotent(t *testing.T) {
 	topology, err := hatriecache.NewTopologyStore(hatriecache.SingleNodeTopology("node-a", "http://127.0.0.1"))
 	if err != nil {
@@ -1780,27 +1867,36 @@ func freeTCPAddr(t *testing.T) string {
 
 func writeTwoNodeRunTopologies(t *testing.T, dir string, addrA string, addrB string) (string, string) {
 	t.Helper()
-	topology := func(self string) hatriecache.ClusterTopology {
-		return hatriecache.ClusterTopology{
-			Self: self,
-			Nodes: []hatriecache.TopologyNode{
-				{ID: "node-a", Address: "http://" + addrA},
-				{ID: "node-b", Address: "http://" + addrB},
-			},
-			Shards: []hatriecache.TopologyShard{
-				{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
-			},
-		}
-	}
+	return writeTwoNodeRunTopology(t, dir, "node-a-topology.json", "node-a", addrA, addrB, 0),
+		writeTwoNodeRunTopology(t, dir, "node-b-topology.json", "node-b", addrA, addrB, 0)
+}
+
+func writeTwoNodeRunTopology(t *testing.T, dir string, filename string, self string, addrA string, addrB string, version uint64) string {
+	t.Helper()
+	return writeTwoNodeRunTopologyWithRoles(t, dir, filename, self, addrA, addrB, version, "", "")
+}
+
+func writeTwoNodeRunTopologyWithRoles(t *testing.T, dir string, filename string, self string, addrA string, addrB string, version uint64, nodeARole string, nodeBRole string) string {
+	t.Helper()
 	topologyAPath := filepath.Join(dir, "node-a-topology.json")
-	topologyBPath := filepath.Join(dir, "node-b-topology.json")
-	if err := hatriecache.SaveTopology(topologyAPath, topology("node-a")); err != nil {
-		t.Fatalf("SaveTopology(node-a) error = %v", err)
+	if filename != "" {
+		topologyAPath = filepath.Join(dir, filename)
 	}
-	if err := hatriecache.SaveTopology(topologyBPath, topology("node-b")); err != nil {
-		t.Fatalf("SaveTopology(node-b) error = %v", err)
+	topology := hatriecache.ClusterTopology{
+		Version: version,
+		Self:    self,
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://" + addrA, Role: nodeARole},
+			{ID: "node-b", Address: "http://" + addrB, Role: nodeBRole},
+		},
+		Shards: []hatriecache.TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
 	}
-	return topologyAPath, topologyBPath
+	if err := hatriecache.SaveTopology(topologyAPath, topology); err != nil {
+		t.Fatalf("SaveTopology(%s) error = %v", self, err)
+	}
+	return topologyAPath
 }
 
 func waitForHTTPHealth(t *testing.T, url string) {
@@ -1866,21 +1962,39 @@ func waitForHTTPHealthWithToken(t *testing.T, url string, token string) {
 
 func postTestCommand(t *testing.T, baseURL string, body string) hatriecache.CacheCommandResponse {
 	t.Helper()
+	status, response := postTestCommandStatus(t, baseURL, body)
+	if status != http.StatusOK {
+		t.Fatalf("POST %s/api/commands status = %d response %#v, want 200", baseURL, status, response)
+	}
+	return response
+}
+
+func postTestCommandStatus(t *testing.T, baseURL string, body string) (int, hatriecache.CacheCommandResponse) {
+	t.Helper()
 	resp, err := http.Post(baseURL+"/api/commands", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST %s/api/commands error = %v", baseURL, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		var text bytes.Buffer
-		_, _ = text.ReadFrom(resp.Body)
-		t.Fatalf("POST %s/api/commands status = %d body %q, want 200", baseURL, resp.StatusCode, text.String())
-	}
 	var response hatriecache.CacheCommandResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		t.Fatalf("Decode(%s/api/commands) error = %v", baseURL, err)
 	}
-	return response
+	return resp.StatusCode, response
+}
+
+func postTestElectionUpdate(t *testing.T, baseURL string, body string) {
+	t.Helper()
+	resp, err := http.Post(baseURL+"/api/election", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST %s/api/election error = %v", baseURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var text bytes.Buffer
+		_, _ = text.ReadFrom(resp.Body)
+		t.Fatalf("POST %s/api/election status = %d body %q, want 200", baseURL, resp.StatusCode, text.String())
+	}
 }
 
 func stopRunServerForTest(t *testing.T, cancel context.CancelFunc, errCh <-chan error, addr string) {
