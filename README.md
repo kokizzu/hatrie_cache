@@ -1069,7 +1069,8 @@ not transactional; a failed subcommand does not roll back earlier subcommands.
 Internal replication commands are rejected inside public `BATCH` requests.
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
-Redis/Tarantool speedup comparisons.
+Redis/Tarantool speedup comparisons. The comparison includes single-command
+rows, pipelined write rows, and mixed read-heavy/write-heavy workload profiles.
 
 Use the HTTP client CLI against a running monitoring server:
 

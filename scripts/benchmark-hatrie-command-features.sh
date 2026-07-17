@@ -3,6 +3,7 @@ set -eu
 
 bench=${HATRIE_BENCH:-^BenchmarkCommandFeature$}
 pipeline_ops=${HATRIE_PIPELINE_OPS:-16}
+mixed_profile_ops=${HATRIE_MIXED_PROFILE_OPS:-100}
 benchtime=${BENCHTIME:-}
 count=${COUNT:-1}
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-${HATRIE_BENCHMARK_ARTIFACT_DIR:-}}
@@ -36,11 +37,13 @@ emit() {
 	fi
 }
 
+# Mixed read-heavy profile and Mixed write-heavy profile benchmarks execute
+# HATRIE_MIXED_PROFILE_OPS subcommands per benchmark iteration.
 record_benchmark_rows() {
 	if [ -z "$rows_tsv" ]; then
 		return
 	fi
-	awk -v pipeline_ops="$pipeline_ops" '
+	awk -v pipeline_ops="$pipeline_ops" -v mixed_profile_ops="$mixed_profile_ops" '
 		/^Benchmark/ {
 			benchmark = $1
 			sub(/-[0-9]+$/, "", benchmark)
@@ -51,6 +54,8 @@ record_benchmark_rows() {
 			ops_per_iter = 1
 			if (benchmark ~ /PipelineBatch16$/) {
 				ops_per_iter = pipeline_ops
+			} else if (benchmark ~ /Mixed(ReadHeavy|WriteHeavy)100$/) {
+				ops_per_iter = mixed_profile_ops
 			}
 			seconds_per_10k = ns_per_op * 10000 / (1000000000 * ops_per_iter)
 			printf "%s\t%s\t%s\t%s\t%s\t%.6f\n", benchmark, iterations, ns_per_op, bytes_per_op, allocs_per_op, seconds_per_10k
@@ -60,7 +65,7 @@ record_benchmark_rows() {
 
 go test -c -o "$binary" .
 
-emit 'HAT-trie benchmark: bench=%s benchtime=%s count=%s pipeline_ops=%s\n\n' "$bench" "${benchtime:-default}" "$count" "$pipeline_ops"
+emit 'HAT-trie benchmark: bench=%s benchtime=%s count=%s pipeline_ops=%s mixed_profile_ops=%s\n\n' "$bench" "${benchtime:-default}" "$count" "$pipeline_ops" "$mixed_profile_ops"
 
 run_benchmark() {
 	if [ -n "$benchtime" ]; then

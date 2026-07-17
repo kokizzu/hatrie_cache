@@ -97,7 +97,22 @@ func TestBenchmarkCISmokeScriptSupportsRegressionThresholds(t *testing.T) {
 }
 
 func TestCommandFeatureComparisonScriptJoinsBackendArtifacts(t *testing.T) {
-	data, err := os.ReadFile("scripts/benchmark-command-comparison.sh")
+	data, err := os.ReadFile("command_feature_benchmark_test.go")
+	if err != nil {
+		t.Fatalf("ReadFile(command_feature_benchmark_test.go) error = %v", err)
+	}
+	source := string(data)
+	for _, token := range []string{
+		"MixedReadHeavy100",
+		"MixedWriteHeavy100",
+		"benchmarkCommandMixedProfileOps",
+	} {
+		if !strings.Contains(source, token) {
+			t.Fatalf("command_feature_benchmark_test.go missing mixed workload token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("scripts/benchmark-command-comparison.sh")
 	if err != nil {
 		t.Fatalf("ReadFile(benchmark-command-comparison.sh) error = %v", err)
 	}
@@ -113,6 +128,10 @@ func TestCommandFeatureComparisonScriptJoinsBackendArtifacts(t *testing.T) {
 		"seconds_per_10k",
 		"Pipelined string write",
 		"PipelineBatch16",
+		"Mixed read-heavy profile",
+		"Mixed write-heavy profile",
+		"MixedReadHeavy100",
+		"MixedWriteHeavy100",
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("benchmark-command-comparison.sh missing token %q", token)
@@ -131,6 +150,23 @@ func TestCommandFeatureComparisonScriptJoinsBackendArtifacts(t *testing.T) {
 	} {
 		if !strings.Contains(makefile, token) {
 			t.Fatalf("Makefile missing benchmark comparison token %q", token)
+		}
+	}
+
+	for _, path := range []string{
+		"scripts/benchmark-hatrie-command-features.sh",
+		"scripts/benchmark-redis-command-features.sh",
+		"scripts/tarantool-command-features.lua",
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		source := string(data)
+		for _, token := range []string{"Mixed read-heavy profile", "Mixed write-heavy profile"} {
+			if !strings.Contains(source, token) {
+				t.Fatalf("%s missing mixed workload token %q", path, token)
+			}
 		}
 	}
 }

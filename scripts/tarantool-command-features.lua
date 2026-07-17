@@ -94,6 +94,38 @@ print_row('Pipelined string write', string.format('%dx space:replace() batch loo
 	end
 end, pipeline))
 
+print_row('Mixed read-heavy profile', '90 get + 5 replace + 4 exists + 1 counter', seconds_for_ops(function()
+	for i = 1, requests do
+		for j = 1, 90 do
+			kv.index.primary:get(key_for(j))
+		end
+		for j = 1, 5 do
+			kv:replace({key_for(j), 'value'})
+		end
+		for j = 1, 4 do
+			kv.index.primary:get(key_for(j))
+		end
+		counters:update(1, {{'+', 2, 1}})
+	end
+end, 100))
+
+print_row('Mixed write-heavy profile', '40 replace + 30 ttl update + 20 get + 10 counter', seconds_for_ops(function()
+	for i = 1, requests do
+		for j = 1, 40 do
+			kv:replace({key_for(j), 'value'})
+		end
+		for j = 1, 30 do
+			ttl:update(key_for(j), {{'=', 3, 3600 + i}})
+		end
+		for j = 1, 20 do
+			kv.index.primary:get(key_for(j))
+		end
+		for j = 1, 10 do
+			counters:update(key_for(j), {{'+', 2, 1}})
+		end
+	end
+end, 100))
+
 print_row('String read', 'space.index.primary:get()', seconds_for(function()
 	for i = 1, requests do
 		kv.index.primary:get(key_for(i))

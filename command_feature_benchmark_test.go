@@ -8,6 +8,8 @@ import (
 var benchmarkCommandResponseSink CacheCommandResponse
 
 const benchmarkCommandPipelineOps = 16
+const benchmarkCommandMixedProfileOps = 100
+const benchmarkCommandMixedKeyspace = 100
 
 func BenchmarkCommandFeature(b *testing.B) {
 	pipelineBatch := make([]CacheCommandRequest, 0, benchmarkCommandPipelineOps)
@@ -15,6 +17,8 @@ func BenchmarkCommandFeature(b *testing.B) {
 		idx := strconv.Itoa(i)
 		pipelineBatch = append(pipelineBatch, CacheCommandRequest{Command: "SETSTR", Key: "pipeline:string:" + idx, Value: "value"})
 	}
+	mixedReadHeavy := benchmarkCommandMixedReadHeavyRequests()
+	mixedWriteHeavy := benchmarkCommandMixedWriteHeavyRequests()
 	benchmarks := []struct {
 		name  string
 		setup func(*testing.B, *HatTrie)
@@ -25,6 +29,12 @@ func BenchmarkCommandFeature(b *testing.B) {
 		}},
 		{name: "PipelineBatch16", run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "BATCH", Batch: pipelineBatch})
+		}},
+		{name: "MixedReadHeavy100", setup: setupCommandFeatureMixedProfile, run: func(b *testing.B, ht *HatTrie, i int) {
+			benchmarkExecuteCommandProfile(b, ht, mixedReadHeavy)
+		}},
+		{name: "MixedWriteHeavy100", setup: setupCommandFeatureMixedProfile, run: func(b *testing.B, ht *HatTrie, i int) {
+			benchmarkExecuteCommandProfile(b, ht, mixedWriteHeavy)
 		}},
 		{name: "StringGet", setup: func(b *testing.B, ht *HatTrie) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "SETSTR", Key: "string:key", Value: "value"})
@@ -172,6 +182,58 @@ func benchmarkExecuteCommand(b *testing.B, ht *HatTrie, request CacheCommandRequ
 	}
 	benchmarkCommandResponseSink = response
 	return response
+}
+
+func benchmarkExecuteCommandProfile(b *testing.B, ht *HatTrie, requests []CacheCommandRequest) {
+	b.Helper()
+	for _, request := range requests {
+		response := ht.ExecuteCommand(request)
+		if !response.OK {
+			b.Fatalf("ExecuteCommand(%s, %s) = %#v, want ok", request.Command, request.Key, response)
+		}
+		benchmarkCommandResponseSink = response
+	}
+}
+
+func setupCommandFeatureMixedProfile(b *testing.B, ht *HatTrie) {
+	for idx := 0; idx < benchmarkCommandMixedKeyspace; idx++ {
+		key := "mixed:string:" + strconv.Itoa(idx)
+		benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "SETSTR", Key: key, Value: "value"})
+	}
+	benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "SETINT", Key: "mixed:counter", Value: "0"})
+}
+
+func benchmarkCommandMixedReadHeavyRequests() []CacheCommandRequest {
+	requests := make([]CacheCommandRequest, 0, benchmarkCommandMixedProfileOps)
+	for idx := 0; idx < 90; idx++ {
+		requests = append(requests, CacheCommandRequest{Command: "GET", Key: "mixed:string:" + strconv.Itoa(idx)})
+	}
+	for idx := 0; idx < 5; idx++ {
+		requests = append(requests, CacheCommandRequest{Command: "SETSTR", Key: "mixed:string:" + strconv.Itoa(idx), Value: "value"})
+	}
+	for idx := 0; idx < 4; idx++ {
+		requests = append(requests, CacheCommandRequest{Command: "EXISTS", Key: "mixed:string:" + strconv.Itoa(idx)})
+	}
+	requests = append(requests, CacheCommandRequest{Command: "INC", Key: "mixed:counter", Value: "1"})
+	return requests
+}
+
+func benchmarkCommandMixedWriteHeavyRequests() []CacheCommandRequest {
+	ttl := int64(3600)
+	requests := make([]CacheCommandRequest, 0, benchmarkCommandMixedProfileOps)
+	for idx := 0; idx < 40; idx++ {
+		requests = append(requests, CacheCommandRequest{Command: "SETSTR", Key: "mixed:string:" + strconv.Itoa(idx), Value: "value"})
+	}
+	for idx := 0; idx < 30; idx++ {
+		requests = append(requests, CacheCommandRequest{Command: "EXPIRE", Key: "mixed:string:" + strconv.Itoa(idx), TTLSeconds: &ttl})
+	}
+	for idx := 0; idx < 20; idx++ {
+		requests = append(requests, CacheCommandRequest{Command: "GET", Key: "mixed:string:" + strconv.Itoa(idx)})
+	}
+	for idx := 0; idx < 10; idx++ {
+		requests = append(requests, CacheCommandRequest{Command: "INC", Key: "mixed:counter", Value: "1"})
+	}
+	return requests
 }
 
 func setupCommandFeatureBloom(b *testing.B, ht *HatTrie) {

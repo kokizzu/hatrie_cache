@@ -75,6 +75,13 @@ uses `BenchmarkCommandFeature/PipelineBatch16` with a public `BATCH` of 16
 `SETSTR` commands, Redis uses `redis-benchmark -P 16`, and Tarantool times 16
 `space:replace()` calls per loop with `TARANTOOL_PIPELINE=16`.
 
+Mixed profile rows are also normalized to seconds per 10,000 sub-operations.
+`MixedReadHeavy100` runs 90 reads, 5 writes, 4 existence checks, and 1 counter
+increment per profile cycle. `MixedWriteHeavy100` runs 40 writes, 30 TTL
+updates, 20 reads, and 10 counter increments per profile cycle. Redis uses an
+`EVAL` profile to keep the mix server-side; Tarantool runs the equivalent loop
+inside `scripts/tarantool-command-features.lua`.
+
 Full HAT-trie command benchmark and command support extraction:
 
 ```

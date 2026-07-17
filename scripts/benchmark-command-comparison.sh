@@ -97,6 +97,8 @@ FILENAME == ARGV[3] && FNR > 1 {
 END {
 	add_mapping("String write", "BenchmarkCommandFeature/StringSet", "String write", "String write")
 	add_mapping("Pipelined string write", "BenchmarkCommandFeature/PipelineBatch16", "Pipelined string write", "Pipelined string write")
+	add_mapping("Mixed read-heavy profile", "BenchmarkCommandFeature/MixedReadHeavy100", "Mixed read-heavy profile", "Mixed read-heavy profile")
+	add_mapping("Mixed write-heavy profile", "BenchmarkCommandFeature/MixedWriteHeavy100", "Mixed write-heavy profile", "Mixed write-heavy profile")
 	add_mapping("String read", "BenchmarkCommandFeature/StringGet", "String read", "String read")
 	add_mapping("Integer counter", "BenchmarkCommandFeature/CounterInc", "Integer counter", "Integer counter")
 	add_mapping("TTL update", "BenchmarkCommandFeature/TTLExpire", "TTL update", "TTL update")
