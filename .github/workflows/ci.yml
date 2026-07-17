@@ -57,6 +57,17 @@ jobs:
 
       - name: Benchmark smoke
         run: make bench-ci-smoke
+        env:
+          BENCH_CI_SMOKE_ARTIFACT_DIR: build/benchmark-ci-smoke
+          BENCH_CI_SMOKE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload benchmark smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-ci-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/benchmark-ci-smoke
+          if-no-files-found: error
+          retention-days: 30
 
   c-and-ops:
     name: C and Ops

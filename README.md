@@ -114,6 +114,8 @@ copies. Set `BENCH_CI_SMOKE_BASELINE_JSON` to compare the current artifact
 against a baseline from `origin/master` or a checked-in/downloaded artifact;
 `BENCH_CI_SMOKE_MAX_REGRESSION_PCT` controls the allowed `ns/op` regression,
 and `BENCH_CI_SMOKE_COMPARE_MEMORY=1` also compares `B/op` and `allocs/op`.
+GitHub Actions writes these files to `build/benchmark-ci-smoke` and uploads
+them as the `benchmark-ci-smoke-<run>-<attempt>` workflow artifact.
 
 The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
 
