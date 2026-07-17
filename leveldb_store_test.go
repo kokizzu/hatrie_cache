@@ -2890,6 +2890,138 @@ func TestLevelDBStoreSpillColdWritesSelectedKeysInOneBatch(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreSpillColdReusesCandidateIndexAfterFirstPass(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	for idx := 0; idx < 20; idx++ {
+		ht.UpsertString(fmt.Sprintf("cold:%02d", idx), strings.Repeat("x", 64))
+	}
+
+	first, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold(first) error = %v", err)
+	}
+	if first.KeysSpilled != 19 {
+		t.Fatalf("SpillCold(first) spilled %d keys, want 19: %#v", first.KeysSpilled, first)
+	}
+
+	second, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold(second) error = %v", err)
+	}
+	if second.KeysScanned != 1 || second.ValuesScanned != 1 {
+		t.Fatalf("SpillCold(second) scanned keys/values = %d/%d, want indexed 1/1: %#v", second.KeysScanned, second.ValuesScanned, second)
+	}
+	if second.KeysSpilled != 0 || second.HotBytesBefore != 64 || second.HotBytesAfter != 64 {
+		t.Fatalf("SpillCold(second) result = %#v, want one retained hot value under cap", second)
+	}
+}
+
+func TestLevelDBStoreSpillColdCandidateIndexTracksHydratedReferences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	for idx := 0; idx < 20; idx++ {
+		ht.UpsertString(fmt.Sprintf("cold:%02d", idx), strings.Repeat("x", 64))
+	}
+
+	first, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold(first) error = %v", err)
+	}
+	if first.KeysSpilled != 19 {
+		t.Fatalf("SpillCold(first) spilled %d keys, want 19: %#v", first.KeysSpilled, first)
+	}
+	for _, entry := range ht.Entries(true) {
+		if !entry.Value.IsLevelDBReference() {
+			continue
+		}
+		if got := ht.GetString(entry.Key); got != strings.Repeat("x", 64) {
+			t.Fatalf("GetString(%s) = %q, want hydrated value", entry.Key, got)
+		}
+		break
+	}
+
+	second, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold(second) error = %v", err)
+	}
+	if second.KeysScanned != 2 || second.ValuesScanned != 2 {
+		t.Fatalf("SpillCold(second) scanned keys/values = %d/%d, want indexed 2/2 after hydration: %#v", second.KeysScanned, second.ValuesScanned, second)
+	}
+	if second.KeysSpilled != 1 || second.HotBytesBefore != 128 || second.HotBytesAfter != 64 {
+		t.Fatalf("SpillCold(second) result = %#v, want hydrated key re-spilled to cap", second)
+	}
+}
+
+func TestLevelDBStoreSpillColdCandidateIndexDropsDeletedKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	for idx := 0; idx < 20; idx++ {
+		ht.UpsertString(fmt.Sprintf("cold:%02d", idx), strings.Repeat("x", 64))
+	}
+
+	first, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold(first) error = %v", err)
+	}
+	if first.KeysSpilled != 19 {
+		t.Fatalf("SpillCold(first) spilled %d keys, want 19: %#v", first.KeysSpilled, first)
+	}
+	for _, entry := range ht.Entries(true) {
+		if entry.Value.IsLevelDBReference() {
+			continue
+		}
+		if !ht.Delete(entry.Key) {
+			t.Fatalf("Delete(%s) = false, want true", entry.Key)
+		}
+		break
+	}
+
+	second, err := store.SpillCold(ht, LevelDBSpillOptions{
+		MaxHotBytes:   64,
+		MinValueBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("SpillCold(second) error = %v", err)
+	}
+	if second.KeysScanned != 0 || second.ValuesScanned != 0 || second.HotBytesBefore != 0 {
+		t.Fatalf("SpillCold(second) result = %#v, want empty maintained candidate index after delete", second)
+	}
+}
+
 func TestLevelDBStoreHotLoadKeepsLargeBytesColdWithoutMaterializing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

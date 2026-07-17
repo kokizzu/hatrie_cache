@@ -540,33 +540,8 @@ func (trie *HatTrie) spillColdLevelDBLocked(store *LevelDBStore, db *leveldb.DB,
 	if len(trie.expires) > 0 {
 		now = trie.currentTime()
 	}
-	candidates := []levelDBSpillCandidate{}
-	if err := trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		result.KeysScanned++
-		valueBytes, err := trie.levelDBHotValueBytesLocked(entry)
-		if err != nil {
-			return err
-		}
-		if valueBytes <= 0 {
-			return nil
-		}
-		result.ValuesScanned++
-		result.HotBytesBefore += valueBytes
-		if valueBytes < options.MinValueBytes {
-			return nil
-		}
-		candidate := levelDBSpillCandidate{
-			key:        entry.Key,
-			value:      entry.Value,
-			valueBytes: valueBytes,
-		}
-		if stats := trie.keyStats[entry.Key]; stats != nil {
-			candidate.hits = stats.Hits
-			candidate.lastHit = stats.LastHit
-		}
-		candidates = append(candidates, candidate)
-		return nil
-	}); err != nil {
+	candidates, err := trie.levelDBSpillCandidatesLocked(now, options, result)
+	if err != nil {
 		return err
 	}
 	result.HotBytesAfter = result.HotBytesBefore
@@ -624,6 +599,143 @@ func (trie *HatTrie) spillColdLevelDBLocked(store *LevelDBStore, db *leveldb.DB,
 		result.HotBytesAfter -= preparedSpill.candidate.valueBytes
 	}
 	return nil
+}
+
+func (trie *HatTrie) levelDBSpillCandidatesLocked(now time.Time, options LevelDBSpillOptions, result *LevelDBSpillResult) ([]levelDBSpillCandidate, error) {
+	if trie.levelDBSpillKeys == nil {
+		return trie.levelDBSpillCandidatesFromFullScanLocked(now, options, result)
+	}
+	return trie.levelDBSpillCandidatesFromIndexLocked(options, result)
+}
+
+func (trie *HatTrie) levelDBSpillCandidatesFromFullScanLocked(now time.Time, options LevelDBSpillOptions, result *LevelDBSpillResult) ([]levelDBSpillCandidate, error) {
+	index := make(map[string]struct{})
+	candidates := []levelDBSpillCandidate{}
+	if err := trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
+		result.KeysScanned++
+		valueBytes, err := trie.levelDBHotValueBytesLocked(entry)
+		if err != nil {
+			return err
+		}
+		if valueBytes <= 0 {
+			return nil
+		}
+		index[entry.Key] = struct{}{}
+		trie.appendLevelDBSpillCandidateLocked(&candidates, entry, valueBytes, options, result)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	trie.levelDBSpillKeys = index
+	return candidates, nil
+}
+
+func (trie *HatTrie) levelDBSpillCandidatesFromIndexLocked(options LevelDBSpillOptions, result *LevelDBSpillResult) ([]levelDBSpillCandidate, error) {
+	candidates := []levelDBSpillCandidate{}
+	for key := range trie.levelDBSpillKeys {
+		result.KeysScanned++
+		rawPtr := trie.tryLocation(key)
+		if rawPtr == nil {
+			trie.deleteLevelDBSpillCandidateLocked(key)
+			continue
+		}
+		hval := HatValue{}
+		hval.fromValue(*rawPtr)
+		if trie.expireIfNeededLocked(key, hval) {
+			continue
+		}
+		valueBytes, err := trie.levelDBHotValueBytesLocked(Entry{Key: key, Value: hval})
+		if err != nil {
+			return nil, err
+		}
+		if valueBytes <= 0 {
+			trie.deleteLevelDBSpillCandidateLocked(key)
+			continue
+		}
+		trie.appendLevelDBSpillCandidateLocked(&candidates, Entry{Key: key, Value: hval}, valueBytes, options, result)
+	}
+	return candidates, nil
+}
+
+func (trie *HatTrie) appendLevelDBSpillCandidateLocked(candidates *[]levelDBSpillCandidate, entry Entry, valueBytes int64, options LevelDBSpillOptions, result *LevelDBSpillResult) {
+	result.ValuesScanned++
+	result.HotBytesBefore += valueBytes
+	if valueBytes < options.MinValueBytes {
+		return
+	}
+	candidate := levelDBSpillCandidate{
+		key:        entry.Key,
+		value:      entry.Value,
+		valueBytes: valueBytes,
+	}
+	if stats := trie.keyStats[entry.Key]; stats != nil {
+		candidate.hits = stats.Hits
+		candidate.lastHit = stats.LastHit
+	}
+	*candidates = append(*candidates, candidate)
+}
+
+func (trie *HatTrie) updateLevelDBSpillCandidateForKeyLocked(key string) {
+	if trie.levelDBSpillKeys == nil {
+		return
+	}
+	rawPtr := trie.tryLocation(key)
+	if rawPtr == nil {
+		trie.deleteLevelDBSpillCandidateLocked(key)
+		return
+	}
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	trie.updateLevelDBSpillCandidateLocked(key, hval)
+}
+
+func (trie *HatTrie) updateLevelDBSpillCandidateLocked(key string, hval HatValue) {
+	if trie.levelDBSpillKeys == nil {
+		return
+	}
+	if trie.levelDBPotentialSpillCandidateLocked(hval) {
+		trie.levelDBSpillKeys[key] = struct{}{}
+		return
+	}
+	trie.deleteLevelDBSpillCandidateLocked(key)
+}
+
+func (trie *HatTrie) deleteLevelDBSpillCandidateLocked(key string) {
+	if trie.levelDBSpillKeys != nil {
+		delete(trie.levelDBSpillKeys, key)
+	}
+}
+
+func (trie *HatTrie) levelDBPotentialSpillCandidateLocked(hval HatValue) bool {
+	switch hval.Type() {
+	case DATAVALUE_TYPE_COUNTER:
+		return true
+	case DATAVALUE_TYPE_RAW_STRING:
+		return hval.Index >= 0 && int(hval.Index) < len(trie.raws.array) && len(trie.raws.array[hval.Index]) > 0
+	case DATAVALUE_TYPE_RAW_BYTES:
+		return !hval.OnDisk() && hval.Index >= 0 && int(hval.Index) < len(trie.raws.array) && len(trie.raws.array[hval.Index]) > 0
+	case DATAVALUE_TYPE_LEVELDB_REF:
+		return false
+	case DATAVALUE_TYPE_MAP,
+		DATAVALUE_TYPE_SLICE,
+		DATAVALUE_TYPE_SET,
+		DATAVALUE_TYPE_PRIORITY_QUEUE,
+		DATAVALUE_TYPE_BLOOM_FILTER,
+		DATAVALUE_TYPE_COUNT_MIN_SKETCH,
+		DATAVALUE_TYPE_HYPERLOGLOG,
+		DATAVALUE_TYPE_TOP_K,
+		DATAVALUE_TYPE_CUCKOO_FILTER,
+		DATAVALUE_TYPE_ROARING_BITMAP,
+		DATAVALUE_TYPE_QUANTILE_SKETCH,
+		DATAVALUE_TYPE_FENWICK_TREE,
+		DATAVALUE_TYPE_SPARSE_BITSET,
+		DATAVALUE_TYPE_RESERVOIR_SAMPLE,
+		DATAVALUE_TYPE_XOR_FILTER,
+		DATAVALUE_TYPE_RADIX_TREE:
+		return true
+	default:
+		return false
+	}
 }
 
 func levelDBSpillCandidateLess(left, right levelDBSpillCandidate) bool {
@@ -1180,6 +1292,7 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snap
 		hval = trie.setExpirationLocked(entry.Key, *entry.ExpiresAt, rawPtr, hval)
 	}
 	*rawPtr = hval.toValue()
+	trie.updateLevelDBSpillCandidateLocked(entry.Key, hval)
 	trie.restoreKeyStatsLocked(entry.Key, entry.Stats)
 	return hval, nil
 }

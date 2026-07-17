@@ -1658,6 +1658,7 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 	if entry.ExpiresAt != nil {
 		hval = ht.setExpirationLocked(entry.Key, *entry.ExpiresAt, rawPtr, hval)
 	}
+	ht.updateLevelDBSpillCandidateLocked(entry.Key, hval)
 	ht.restoreKeyStatsLocked(entry.Key, entry.Stats)
 	return hval, nil
 }
