@@ -478,6 +478,24 @@ func TestBenchmarkDocsListInternalBatchPrimitive(t *testing.T) {
 	}
 }
 
+func TestBenchmarkDocsListReplicationBatchingBenchmark(t *testing.T) {
+	data, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	benchmark := string(data)
+	for _, token := range []string{
+		"BenchmarkHTTPReplicatorSyncAllBatching",
+		"requests/op",
+		"wire_B/op",
+		"batching request reduction",
+	} {
+		if !strings.Contains(benchmark, token) {
+			t.Fatalf("BENCHMARK.md does not document replication batching benchmark token %q", token)
+		}
+	}
+}
+
 func TestImprovementReportIncludesLatestReplicationWork(t *testing.T) {
 	data, err := os.ReadFile("IMPROVEMENT_REPORT.md")
 	if err != nil {

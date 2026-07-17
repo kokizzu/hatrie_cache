@@ -210,6 +210,30 @@ HAT-trie was measured with the matching `BenchmarkCommandFeature/*` rows at
 
 In this run HAT-trie is faster on all 16 measured Tarantool-comparable rows.
 
+## Replication Batching Benchmark
+
+Run:
+
+```sh
+go test . -run NoTestsForBenchmark -bench BenchmarkHTTPReplicatorSyncAllBatching -benchmem -benchtime=1x
+```
+
+`BenchmarkHTTPReplicatorSyncAllBatching` syncs 10,000 leader-owned keys to one
+local HTTP target. `Batched10k` uses one SyncAll page and native
+`INTERNALBATCH`; `Unbatched10k` uses page size 1 to model the previous
+one-request-per-key path.
+
+| Mode | Time/op | requests/op | wire_B/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Batched 10k | 153,473,837 ns | 1 | 147,521 | 56,366,320 | 980,814 |
+| Unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
+
+The batching request reduction is 10,000x for this single-target sync. In this
+local benchmark the batched path is about 335x faster, sends about 14.5x fewer
+request-body bytes, uses about 31.8x less heap, and performs about 206x fewer
+allocations. Header bytes are not included in `wire_B/op`, so the real network
+savings are larger than the body-only metric.
+
 ## HAT-trie vs Redis
 
 Redis was measured with Redis 7.0.4 in a temporary Docker container, one
