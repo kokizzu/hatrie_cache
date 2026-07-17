@@ -63,6 +63,7 @@ type config struct {
 	replicationAttempts         uint
 	replicationDeadLetterLimit  int
 	replicationOutboxPath       string
+	replicationOutboxFormat     string
 	replicationCircuitFailures  int
 	replicationCircuitCooldown  time.Duration
 	replicationWireFormat       string
@@ -237,10 +238,11 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	defer stopElectionHeartbeat()
 	var replicator *hatriecache.HTTPReplicator
 	if cfg.replication {
-		replicationOutbox, err := openReplicationOutboxIfConfigured(cfg.replicationOutboxPath)
+		replicationOutbox, err := openReplicationOutboxIfConfigured(cfg.replicationOutboxPath, cfg.replicationOutboxFormat)
 		if err != nil {
 			return err
 		}
+		defer closeReplicationOutbox(replicationOutbox, stderr)
 		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
 			Context:                ctx,
 			Self:                   defaultNodeID(cfg.nodeID),
@@ -377,7 +379,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.replicationRetry, "replication-retry-interval", hatriecache.DefaultReplicationRetryInterval, "delay between async replication retry attempts")
 	flags.UintVar(&cfg.replicationAttempts, "replication-max-attempts", 3, "maximum async replication delivery attempts")
 	flags.IntVar(&cfg.replicationDeadLetterLimit, "replication-dead-letter-limit", hatriecache.DefaultReplicationDeadLetterLimit, "maximum retained async replication dead-letter failures; use 0 to disable")
-	flags.StringVar(&cfg.replicationOutboxPath, "replication-outbox-path", "", "optional durable async replication outbox JSON path")
+	flags.StringVar(&cfg.replicationOutboxPath, "replication-outbox-path", "", "optional durable async replication outbox path")
+	flags.StringVar(&cfg.replicationOutboxFormat, "replication-outbox-format", "auto", "durable replication outbox backend: auto, json, or leveldb")
 	flags.IntVar(&cfg.replicationCircuitFailures, "replication-circuit-breaker-failures", hatriecache.DefaultReplicationCircuitBreakerFailures, "consecutive per-target replication failures before opening the circuit breaker; use 0 to disable")
 	flags.DurationVar(&cfg.replicationCircuitCooldown, "replication-circuit-breaker-cooldown", hatriecache.DefaultReplicationCircuitBreakerCooldown, "per-target replication circuit breaker cooldown before a half-open probe; use 0 to disable")
 	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", string(hatriecache.DefaultCommandWireFormat), "HTTP replication command wire format: protobuf or json")
@@ -462,6 +465,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.replicationOutboxPath != "" && (!cfg.replication || !cfg.replicationAsync) {
 		return config{}, errors.New("replication outbox path requires -replication and -replication-async")
+	}
+	if _, err := parseReplicationOutboxFormat(cfg.replicationOutboxFormat); err != nil {
+		return config{}, err
 	}
 	if cfg.replicationCircuitFailures < 0 {
 		return config{}, errors.New("replication circuit breaker failures must be non-negative")
@@ -609,6 +615,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_max_attempts":             cfg.replicationAttempts,
 		"replication_dead_letter_limit":        cfg.replicationDeadLetterLimit,
 		"replication_outbox_path":              cfg.replicationOutboxPath,
+		"replication_outbox_format":            cfg.replicationOutboxFormat,
 		"replication_circuit_breaker_failures": cfg.replicationCircuitFailures,
 		"replication_circuit_breaker_cooldown": cfg.replicationCircuitCooldown.String(),
 		"replication_wire_format":              cfg.replicationWireFormat,
@@ -838,16 +845,57 @@ func closeLevelDB(store *hatriecache.LevelDBStore, stderr io.Writer) {
 	}
 }
 
-func openReplicationOutboxIfConfigured(path string) (*hatriecache.ReplicationOutboxStore, error) {
+func openReplicationOutboxIfConfigured(path string, format string) (*hatriecache.ReplicationOutboxStore, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, nil
 	}
-	outbox, err := hatriecache.OpenReplicationOutbox(path)
+	outboxFormat, err := parseReplicationOutboxFormat(format)
+	if err != nil {
+		return nil, err
+	}
+	if outboxFormat == "auto" {
+		outboxFormat = "leveldb"
+		if strings.EqualFold(filepath.Ext(path), ".json") {
+			outboxFormat = "json"
+		}
+	}
+	var outbox *hatriecache.ReplicationOutboxStore
+	switch outboxFormat {
+	case "json":
+		outbox, err = hatriecache.OpenReplicationOutbox(path)
+	case "leveldb":
+		outbox, err = hatriecache.OpenLevelDBReplicationOutbox(path)
+	default:
+		err = fmt.Errorf("unsupported replication outbox format %q", format)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("open replication outbox: %w", err)
 	}
 	return outbox, nil
+}
+
+func closeReplicationOutbox(outbox *hatriecache.ReplicationOutboxStore, stderr io.Writer) {
+	if outbox == nil {
+		return
+	}
+	stderr = diagnosticWriter(stderr)
+	if err := outbox.Close(); err != nil {
+		fmt.Fprintf(stderr, "close replication outbox: %v\n", err)
+	}
+}
+
+func parseReplicationOutboxFormat(format string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", "auto":
+		return "auto", nil
+	case "json":
+		return "json", nil
+	case "leveldb":
+		return "leveldb", nil
+	default:
+		return "", fmt.Errorf("replication outbox format must be auto, json, or leveldb")
+	}
 }
 
 func openAuditLogIfConfigured(path string) (*hatriecache.AuditLogger, error) {

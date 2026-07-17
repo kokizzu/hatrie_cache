@@ -1,19 +1,32 @@
 package hatriecache
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type ReplicationOutboxStore struct {
 	mu       sync.Mutex
 	path     string
 	snapshot replicationOutboxSnapshot
+	db       *leveldb.DB
 }
+
+var (
+	replicationOutboxLevelDBJobPrefix      = []byte("job:")
+	replicationOutboxLevelDBDeadSeqKey     = []byte("meta:dead-seq")
+	replicationOutboxLevelDBDeadLettersKey = []byte("meta:dead-letters")
+)
 
 type replicationOutboxSnapshot struct {
 	Jobs        []replicationOutboxJob  `json:"jobs,omitempty"`
@@ -57,12 +70,45 @@ func OpenReplicationOutbox(path string) (*ReplicationOutboxStore, error) {
 	return store, nil
 }
 
+func OpenLevelDBReplicationOutbox(path string) (*ReplicationOutboxStore, error) {
+	if path == "" {
+		return nil, errors.New("hatriecache: replication outbox path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	db, err := leveldb.OpenFile(path, &opt.Options{
+		Compression: opt.SnappyCompression,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &ReplicationOutboxStore{path: path, db: db}, nil
+}
+
+func (store *ReplicationOutboxStore) Close() error {
+	if store == nil {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.db == nil {
+		return nil
+	}
+	db := store.db
+	store.db = nil
+	return db.Close()
+}
+
 func (store *ReplicationOutboxStore) jobs() []replicationJob {
 	if store == nil {
 		return nil
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.db != nil {
+		return store.levelDBJobsLocked()
+	}
 	jobs := make([]replicationJob, 0, len(store.snapshot.Jobs))
 	for _, record := range store.snapshot.Jobs {
 		jobs = append(jobs, record.replicationJob())
@@ -76,6 +122,9 @@ func (store *ReplicationOutboxStore) deadLetters() (uint64, []ReplicationDeadLet
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.db != nil {
+		return store.levelDBDeadLettersLocked()
+	}
 	return store.snapshot.DeadSeq, cloneReplicationDeadLetters(store.snapshot.DeadLetters)
 }
 
@@ -85,6 +134,13 @@ func (store *ReplicationOutboxStore) putJob(job replicationJob) error {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.db != nil {
+		data, err := json.Marshal(newReplicationOutboxJob(job))
+		if err != nil {
+			return err
+		}
+		return store.db.Put(replicationOutboxLevelDBJobKey(job.id), data, &opt.WriteOptions{Sync: true})
+	}
 	record := newReplicationOutboxJob(job)
 	for idx, existing := range store.snapshot.Jobs {
 		if existing.ID == job.id {
@@ -102,6 +158,9 @@ func (store *ReplicationOutboxStore) deleteJob(id uint64) error {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.db != nil {
+		return store.db.Delete(replicationOutboxLevelDBJobKey(id), &opt.WriteOptions{Sync: true})
+	}
 	for idx, job := range store.snapshot.Jobs {
 		if job.ID != id {
 			continue
@@ -120,6 +179,16 @@ func (store *ReplicationOutboxStore) setDeadLetters(deadSeq uint64, deadLetters 
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.db != nil {
+		data, err := json.Marshal(cloneReplicationDeadLetters(deadLetters))
+		if err != nil {
+			return err
+		}
+		batch := new(leveldb.Batch)
+		batch.Put(replicationOutboxLevelDBDeadSeqKey, []byte(strconv.FormatUint(deadSeq, 10)))
+		batch.Put(replicationOutboxLevelDBDeadLettersKey, data)
+		return store.db.Write(batch, &opt.WriteOptions{Sync: true})
+	}
 	store.snapshot.DeadSeq = deadSeq
 	store.snapshot.DeadLetters = cloneReplicationDeadLetters(deadLetters)
 	return store.saveLocked()
@@ -171,6 +240,45 @@ func syncDir(path string) error {
 	}
 	defer dir.Close()
 	return dir.Sync()
+}
+
+func (store *ReplicationOutboxStore) levelDBJobsLocked() []replicationJob {
+	if store == nil || store.db == nil {
+		return nil
+	}
+	iter := store.db.NewIterator(util.BytesPrefix(replicationOutboxLevelDBJobPrefix), nil)
+	defer iter.Release()
+	var jobs []replicationJob
+	for iter.Next() {
+		var record replicationOutboxJob
+		if err := json.Unmarshal(iter.Value(), &record); err != nil {
+			continue
+		}
+		jobs = append(jobs, record.replicationJob())
+	}
+	return jobs
+}
+
+func (store *ReplicationOutboxStore) levelDBDeadLettersLocked() (uint64, []ReplicationDeadLetter) {
+	if store == nil || store.db == nil {
+		return 0, nil
+	}
+	var deadSeq uint64
+	if data, err := store.db.Get(replicationOutboxLevelDBDeadSeqKey, nil); err == nil {
+		deadSeq, _ = strconv.ParseUint(string(data), 10, 64)
+	}
+	var deadLetters []ReplicationDeadLetter
+	if data, err := store.db.Get(replicationOutboxLevelDBDeadLettersKey, nil); err == nil {
+		_ = json.Unmarshal(data, &deadLetters)
+	}
+	return deadSeq, cloneReplicationDeadLetters(deadLetters)
+}
+
+func replicationOutboxLevelDBJobKey(id uint64) []byte {
+	key := make([]byte, len(replicationOutboxLevelDBJobPrefix)+8)
+	copy(key, replicationOutboxLevelDBJobPrefix)
+	binary.BigEndian.PutUint64(key[len(replicationOutboxLevelDBJobPrefix):], id)
+	return key
 }
 
 func newReplicationOutboxJob(job replicationJob) replicationOutboxJob {

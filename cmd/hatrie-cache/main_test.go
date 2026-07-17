@@ -121,6 +121,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"replication_max_attempts": 2,
 		"replication_dead_letter_limit": 9,
 		"replication_outbox_path": "/data/replication-outbox.json",
+		"replication_outbox_format": "json",
 		"replication_circuit_breaker_failures": 4,
 		"replication_circuit_breaker_cooldown": "12s",
 		"replication_auth_token": "replica-secret",
@@ -149,8 +150,8 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	if !cfg.replication || !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 10*time.Millisecond || cfg.replicationAttempts != 2 || cfg.replicationDeadLetterLimit != 9 {
 		t.Fatalf("replication config = %#v, want file values", cfg)
 	}
-	if cfg.replicationOutboxPath != "/data/replication-outbox.json" {
-		t.Fatalf("replicationOutboxPath = %q, want config file value", cfg.replicationOutboxPath)
+	if cfg.replicationOutboxPath != "/data/replication-outbox.json" || cfg.replicationOutboxFormat != "json" {
+		t.Fatalf("replication outbox config = %q/%q, want config file values", cfg.replicationOutboxPath, cfg.replicationOutboxFormat)
 	}
 	if cfg.replicationCircuitFailures != 4 || cfg.replicationCircuitCooldown != 12*time.Second {
 		t.Fatalf("replication circuit breaker config = %d/%s, want 4/12s", cfg.replicationCircuitFailures, cfg.replicationCircuitCooldown)
@@ -385,6 +386,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-max-attempts", "5",
 		"-replication-dead-letter-limit", "7",
 		"-replication-outbox-path", "/tmp/replication-outbox.json",
+		"-replication-outbox-format", "leveldb",
 		"-replication-circuit-breaker-failures", "4",
 		"-replication-circuit-breaker-cooldown", "20s",
 		"-replication-wire-format", "json",
@@ -402,8 +404,8 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	if !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 50*time.Millisecond || cfg.replicationAttempts != 5 || cfg.replicationDeadLetterLimit != 7 {
 		t.Fatalf("cfg replication async = %#v, want explicit async queue settings", cfg)
 	}
-	if cfg.replicationOutboxPath != "/tmp/replication-outbox.json" {
-		t.Fatalf("cfg replication outbox path = %q, want explicit path", cfg.replicationOutboxPath)
+	if cfg.replicationOutboxPath != "/tmp/replication-outbox.json" || cfg.replicationOutboxFormat != "leveldb" {
+		t.Fatalf("cfg replication outbox = %q/%q, want explicit path and format", cfg.replicationOutboxPath, cfg.replicationOutboxFormat)
 	}
 	if cfg.replicationCircuitFailures != 4 || cfg.replicationCircuitCooldown != 20*time.Second {
 		t.Fatalf("cfg replication circuit breaker = %d/%s, want 4/20s", cfg.replicationCircuitFailures, cfg.replicationCircuitCooldown)
@@ -450,6 +452,10 @@ func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
 		{
 			name: "outbox without async replication",
 			args: []string{"-replication", "-replication-outbox-path", "/tmp/outbox.json"},
+		},
+		{
+			name: "invalid outbox format",
+			args: []string{"-replication-outbox-format", "sqlite"},
 		},
 		{
 			name: "negative circuit breaker failures",
