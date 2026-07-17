@@ -626,14 +626,22 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_FORMAT=json
 Run a manual LevelDB flush before planned maintenance when `DB_SYNC_INTERVAL=0`
 or when you want the current in-memory state written immediately. Run manual
 LevelDB compaction after large delete or rewrite batches to reclaim storage-file
-space and reduce read amplification. `GET /api/storage` reports whether
-LevelDB is configured, the store `path`, storage `format`, approximate
-`size_bytes`, selected engine `properties`, current `operation`, and the
-`last_flush`/`last_compact` result remembered by the monitoring handler. Empty
-bounds compact all cache-entry records; `start-key` is inclusive and
-`limit-key` is exclusive. The compaction response includes `size_bytes_before`,
-`size_bytes_after`, `size_bytes_delta`, duration, and selected LevelDB property
-snapshots before and after compaction:
+space and reduce read amplification. Set `DB_COMPACT_INTERVAL` to compact
+LevelDB automatically on a schedule; optional `DB_COMPACT_START_KEY` and
+`DB_COMPACT_LIMIT_KEY` bound the periodic compaction to one key range:
+
+```
+make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s DB_COMPACT_INTERVAL=10m
+make monitoring-server DB_PATH=data/cache.leveldb DB_COMPACT_INTERVAL=10m DB_COMPACT_START_KEY=session: DB_COMPACT_LIMIT_KEY=session~
+```
+
+`GET /api/storage` reports whether LevelDB is configured, the store `path`,
+storage `format`, approximate `size_bytes`, selected engine `properties`, current `operation`,
+and the `last_flush`/`last_compact` result remembered by the monitoring
+handler. Empty bounds compact all cache-entry records;
+`start-key` is inclusive and `limit-key` is exclusive. The compaction response
+includes `size_bytes_before`, `size_bytes_after`, `size_bytes_delta`, duration,
+and selected LevelDB property snapshots before and after compaction:
 
 ```
 make storage-status STORAGE_PEER=http://127.0.0.1:8080

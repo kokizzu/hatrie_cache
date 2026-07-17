@@ -75,6 +75,9 @@ type config struct {
 	dbPath                      string
 	dbFormat                    string
 	dbSyncInterval              time.Duration
+	dbCompactInterval           time.Duration
+	dbCompactStartKey           string
+	dbCompactLimitKey           string
 	dbHotLoad                   bool
 	dbHotLoadMaxBytes           int64
 	dbHotLoadMaxAge             time.Duration
@@ -245,7 +248,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	stopReplicationSyncer := startReplicationSyncer(ctx, trie, replicator, cfg.replicationSyncInterval, cfg.replicationSyncPrefix, stderr)
 	defer stopReplicationSyncer()
 
-	handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
+	monitoringHandler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
 		NodeName:             defaultNodeID(cfg.nodeID),
 		WebDir:               cfg.monitoringWebDir,
 		AuthToken:            cfg.monitoringAuthToken,
@@ -263,7 +266,13 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		ReplicationSafety:    replicationSafety,
 		EnforceLeaderWrites:  cfg.enforceLeaderWrites,
 		RuntimeConfig:        redactedConfig(cfg),
-	}).Handler()
+	})
+	stopDBCompactor := startLevelDBCompactor(ctx, dbStore, cfg.dbCompactInterval, levelDBCompactorOptions{
+		StartKey: cfg.dbCompactStartKey,
+		LimitKey: cfg.dbCompactLimitKey,
+	}, monitoringHandler.RecordStorageCompact, stderr)
+	defer stopDBCompactor()
+	handler := monitoringHandler.Handler()
 	server := newMonitoringServer(cfg, handler)
 
 	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator, auditLog, rateLimiter, apiMetrics, replicationSafety)
@@ -366,6 +375,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
 	flags.StringVar(&cfg.dbFormat, "db-format", string(hatriecache.DefaultStorageFormat), "LevelDB record storage format: binary or json")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
+	flags.DurationVar(&cfg.dbCompactInterval, "db-compact-interval", 0, "optional periodic LevelDB compaction interval")
+	flags.StringVar(&cfg.dbCompactStartKey, "db-compact-start-key", "", "first cache key to include in periodic LevelDB compaction")
+	flags.StringVar(&cfg.dbCompactLimitKey, "db-compact-limit-key", "", "first cache key after the periodic LevelDB compaction range")
 	flags.BoolVar(&cfg.dbHotLoad, "db-hot-load", false, "load cold LevelDB keys as lazy references and hot small values into memory")
 	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for LevelDB hot-load")
 	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for LevelDB hot-load")
@@ -412,6 +424,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.dbHotLoadMaxAge < 0 {
 		return config{}, errors.New("db hot-load max age must be non-negative")
+	}
+	if cfg.dbCompactInterval < 0 {
+		return config{}, errors.New("db compact interval must be non-negative")
 	}
 	if cfg.replicationQueueSize < 0 {
 		return config{}, errors.New("replication queue size must be non-negative")
@@ -586,6 +601,9 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"db_path":                              cfg.dbPath,
 		"db_format":                            cfg.dbFormat,
 		"db_sync_interval":                     cfg.dbSyncInterval.String(),
+		"db_compact_interval":                  cfg.dbCompactInterval.String(),
+		"db_compact_start_key":                 cfg.dbCompactStartKey,
+		"db_compact_limit_key":                 cfg.dbCompactLimitKey,
 		"db_hot_load":                          cfg.dbHotLoad,
 		"db_hot_load_max_bytes":                cfg.dbHotLoadMaxBytes,
 		"db_hot_load_max_age":                  cfg.dbHotLoadMaxAge.String(),
@@ -965,6 +983,57 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 func saveLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore) (err error) {
 	defer recoverDestroyedHatTrie(&err)
 	return store.Save(trie)
+}
+
+type levelDBCompactorOptions struct {
+	StartKey string
+	LimitKey string
+}
+
+func startLevelDBCompactor(ctx context.Context, store *hatriecache.LevelDBStore, interval time.Duration, options levelDBCompactorOptions, record func(hatriecache.LevelDBCompactionResult), stderr io.Writer) func() {
+	ctx = serverContext(ctx)
+	if store == nil || interval <= 0 {
+		return func() {}
+	}
+	stderr = diagnosticWriter(stderr)
+
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	compact := func() bool {
+		result, err := store.Compact(hatriecache.LevelDBCompactionOptions{
+			StartKey: strings.TrimSpace(options.StartKey),
+			LimitKey: strings.TrimSpace(options.LimitKey),
+		})
+		if err != nil {
+			if errors.Is(err, hatriecache.ErrLevelDBStoreClosed) {
+				return false
+			}
+			fmt.Fprintf(stderr, "compact leveldb: %v\n", err)
+			return true
+		}
+		if record != nil {
+			record(result)
+		}
+		return true
+	}
+	go func() {
+		defer close(stopped)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if !compact() {
+					return
+				}
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
+	return periodicStopper(done, stopped)
 }
 
 func openJournalIfConfigured(path string, format hatriecache.CommandJournalFormat) (*hatriecache.CommandJournal, error) {

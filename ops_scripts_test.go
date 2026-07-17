@@ -154,6 +154,12 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"-replication-circuit-breaker-failures",
 		"REPLICATION_CIRCUIT_BREAKER_COOLDOWN",
 		"-replication-circuit-breaker-cooldown",
+		"DB_COMPACT_INTERVAL",
+		"-db-compact-interval",
+		"DB_COMPACT_START_KEY",
+		"-db-compact-start-key",
+		"DB_COMPACT_LIMIT_KEY",
+		"-db-compact-limit-key",
 	} {
 		if !strings.Contains(string(data), token) {
 			t.Fatalf("monitoring server script missing token %q", token)

@@ -33,6 +33,9 @@ grpc_client_ca=${GRPC_CLIENT_CA:-}
 db_path=${DB_PATH:-}
 db_format=${DB_FORMAT:-}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
+db_compact_interval=${DB_COMPACT_INTERVAL:-0}
+db_compact_start_key=${DB_COMPACT_START_KEY:-}
+db_compact_limit_key=${DB_COMPACT_LIMIT_KEY:-}
 db_hot_load=${DB_HOT_LOAD:-false}
 db_hot_load_max_bytes=${DB_HOT_LOAD_MAX_BYTES:-1024}
 db_hot_load_max_age=${DB_HOT_LOAD_MAX_AGE:-1h}
@@ -81,6 +84,9 @@ set -- \
 	-grpc-client-ca "$grpc_client_ca" \
 	-db-path "$db_path" \
 	-db-sync-interval "$db_sync_interval" \
+	-db-compact-interval "$db_compact_interval" \
+	-db-compact-start-key "$db_compact_start_key" \
+	-db-compact-limit-key "$db_compact_limit_key" \
 	-db-hot-load="$db_hot_load" \
 	-db-hot-load-max-bytes "$db_hot_load_max_bytes" \
 	-db-hot-load-max-age "$db_hot_load_max_age" \

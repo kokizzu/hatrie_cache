@@ -639,6 +639,9 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 		"-db-path", "/tmp/cache.leveldb",
 		"-db-format", "json",
 		"-db-sync-interval", "10s",
+		"-db-compact-interval", "30s",
+		"-db-compact-start-key", "alpha",
+		"-db-compact-limit-key", "omega",
 		"-db-hot-load",
 		"-db-hot-load-max-bytes", "2048",
 		"-db-hot-load-max-age", "30m",
@@ -647,8 +650,11 @@ func TestParseConfigLevelDBFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
 	}
-	if cfg.dbPath != "/tmp/cache.leveldb" || cfg.dbSyncInterval != 10*time.Second {
-		t.Fatalf("cfg db = %q/%s, want explicit path and interval", cfg.dbPath, cfg.dbSyncInterval)
+	if cfg.dbPath != "/tmp/cache.leveldb" || cfg.dbSyncInterval != 10*time.Second || cfg.dbCompactInterval != 30*time.Second {
+		t.Fatalf("cfg db = %q/%s/%s, want explicit path and intervals", cfg.dbPath, cfg.dbSyncInterval, cfg.dbCompactInterval)
+	}
+	if cfg.dbCompactStartKey != "alpha" || cfg.dbCompactLimitKey != "omega" {
+		t.Fatalf("cfg db compact range = %q/%q, want alpha/omega", cfg.dbCompactStartKey, cfg.dbCompactLimitKey)
 	}
 	if cfg.dbFormat != "json" || storageFormat(cfg) != hatriecache.StorageFormatJSON {
 		t.Fatalf("db format = %q, want json", cfg.dbFormat)
@@ -674,6 +680,10 @@ func TestParseConfigRejectsNegativeHotLoadLimits(t *testing.T) {
 		{
 			name: "max age",
 			args: []string{"-db-hot-load-max-age", "-1s"},
+		},
+		{
+			name: "compact interval",
+			args: []string{"-db-compact-interval", "-1s"},
 		},
 	}
 
@@ -1968,6 +1978,45 @@ func TestStartLevelDBSaverWritesImmediately(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("initial LevelDB save was not written")
+}
+
+func TestStartLevelDBCompactorRunsPeriodically(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("alpha", "one")
+	ht.UpsertString("omega", "two")
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+	if err := store.Save(ht); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	results := make(chan hatriecache.LevelDBCompactionResult, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := startLevelDBCompactor(ctx, store, time.Millisecond, levelDBCompactorOptions{
+		StartKey: "alpha",
+		LimitKey: "omega\x00",
+	}, func(result hatriecache.LevelDBCompactionResult) {
+		select {
+		case results <- result:
+		default:
+		}
+	}, &bytes.Buffer{})
+	defer stop()
+
+	select {
+	case result := <-results:
+		if result.Store != "leveldb" || result.StartKey != "alpha" || result.LimitKey != "omega\x00" || result.DurationMillis < 0 {
+			t.Fatalf("compaction result = %#v, want leveldb range result", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("periodic LevelDB compaction did not run")
+	}
 }
 
 func TestStartLevelDBSaverStopIsIdempotent(t *testing.T) {

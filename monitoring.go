@@ -880,6 +880,14 @@ func (handler *MonitoringHandler) recordStorageCompact(result LevelDBCompactionR
 	handler.storage.lastCompact = &result
 }
 
+// RecordStorageCompact stores the latest LevelDB compaction result for storage status.
+func (handler *MonitoringHandler) RecordStorageCompact(result LevelDBCompactionResult) {
+	if handler == nil {
+		return
+	}
+	handler.recordStorageCompact(result)
+}
+
 func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
