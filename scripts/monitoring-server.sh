@@ -15,6 +15,7 @@ node_id=${NODE_ID:-}
 topology_path=${TOPOLOGY_PATH:-}
 election_timeout=${ELECTION_TIMEOUT:-15s}
 replication=${REPLICATION:-false}
+replication_mode=${REPLICATION_MODE:-journal}
 replication_async=${REPLICATION_ASYNC:-false}
 replication_queue_size=${REPLICATION_QUEUE_SIZE:-1024}
 replication_retry_interval=${REPLICATION_RETRY_INTERVAL:-250ms}
@@ -72,6 +73,7 @@ set -- \
 	-topology-path "$topology_path" \
 	-election-timeout "$election_timeout" \
 	-replication="$replication" \
+	-replication-mode "$replication_mode" \
 	-replication-async="$replication_async" \
 	-replication-queue-size "$replication_queue_size" \
 	-replication-retry-interval "$replication_retry_interval" \

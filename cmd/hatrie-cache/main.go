@@ -34,6 +34,9 @@ const (
 	defaultMonitoringReadHeaderTimeout = 5 * time.Second
 	defaultMonitoringIdleTimeout       = 2 * time.Minute
 	destroyedHatTriePanic              = "hatriecache: use of destroyed HatTrie"
+	replicationModeJournal             = "journal"
+	replicationModeCommand             = "command"
+	replicationModeDual                = "dual"
 )
 
 var errHatTrieDestroyed = errors.New("hatrie-cache: trie is destroyed")
@@ -57,6 +60,7 @@ type config struct {
 	topologyPath                string
 	electionTimeout             time.Duration
 	replication                 bool
+	replicationMode             string
 	replicationAsync            bool
 	replicationQueueSize        int
 	replicationRetry            time.Duration
@@ -238,7 +242,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 	defer stopElectionHeartbeat()
 	var replicator *hatriecache.HTTPReplicator
-	if cfg.replication {
+	if cfg.replication && replicationModeUsesCommandFanout(cfg.replicationMode) {
 		replicationOutbox, err := openReplicationOutboxIfConfigured(cfg.replicationOutboxPath, cfg.replicationOutboxFormat)
 		if err != nil {
 			return err
@@ -348,6 +352,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		monitoringReadHeaderTimeout: defaultMonitoringReadHeaderTimeout,
 		monitoringIdleTimeout:       defaultMonitoringIdleTimeout,
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
+		replicationMode:             replicationModeJournal,
 		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
 	}
 	configPath, err := configPathFromArgs(args)
@@ -375,7 +380,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.nodeID, "node-id", "", "local cluster node id")
 	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
 	flags.DurationVar(&cfg.electionTimeout, "election-timeout", cfg.electionTimeout, "node heartbeat timeout for deterministic topology leader election")
-	flags.BoolVar(&cfg.replication, "replication", false, "replicate successful leader writes to topology owners over HTTP")
+	flags.BoolVar(&cfg.replication, "replication", false, "enable the configured replication mode")
+	flags.StringVar(&cfg.replicationMode, "replication-mode", cfg.replicationMode, "replication mode: journal, command, or dual")
 	flags.BoolVar(&cfg.replicationAsync, "replication-async", false, "queue successful leader-write replication in a bounded async worker")
 	flags.IntVar(&cfg.replicationQueueSize, "replication-queue-size", 1024, "maximum queued async replication jobs")
 	flags.DurationVar(&cfg.replicationRetry, "replication-retry-interval", hatriecache.DefaultReplicationRetryInterval, "delay between async replication retry attempts")
@@ -454,6 +460,17 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.replicationQueueSize < 0 {
 		return config{}, errors.New("replication queue size must be non-negative")
 	}
+	replicationMode, err := parseReplicationMode(cfg.replicationMode)
+	if err != nil {
+		return config{}, err
+	}
+	cfg.replicationMode = replicationMode
+	if cfg.replication && replicationModeUsesJournal(cfg.replicationMode) && strings.TrimSpace(cfg.journalPath) == "" {
+		return config{}, errors.New("journal replication mode requires -journal-path")
+	}
+	if cfg.replicationAsync && !replicationModeUsesCommandFanout(cfg.replicationMode) {
+		return config{}, errors.New("replication async requires -replication-mode command or dual")
+	}
 	if cfg.replicationAsync && cfg.replicationQueueSize == 0 {
 		return config{}, errors.New("replication async requires positive queue size")
 	}
@@ -466,8 +483,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.replicationDeadLetterLimit < 0 {
 		return config{}, errors.New("replication dead-letter limit must be non-negative")
 	}
-	if cfg.replicationOutboxPath != "" && (!cfg.replication || !cfg.replicationAsync) {
-		return config{}, errors.New("replication outbox path requires -replication and -replication-async")
+	if cfg.replicationOutboxPath != "" && (!cfg.replication || !cfg.replicationAsync || !replicationModeUsesCommandFanout(cfg.replicationMode)) {
+		return config{}, errors.New("replication outbox path requires -replication, -replication-mode command or dual, and -replication-async")
 	}
 	if _, err := parseReplicationOutboxFormat(cfg.replicationOutboxFormat); err != nil {
 		return config{}, err
@@ -483,6 +500,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.replicationSyncInterval > 0 && !cfg.replication {
 		return config{}, errors.New("replication sync interval requires -replication")
+	}
+	if cfg.replicationSyncInterval > 0 && !replicationModeUsesCommandFanout(cfg.replicationMode) {
+		return config{}, errors.New("replication sync interval requires -replication-mode command or dual")
 	}
 	if cfg.journalPullTimeout < 0 {
 		return config{}, errors.New("journal pull timeout must be non-negative")
@@ -615,6 +635,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"topology_path":                        cfg.topologyPath,
 		"election_timeout":                     cfg.electionTimeout.String(),
 		"replication":                          cfg.replication,
+		"replication_mode":                     cfg.replicationMode,
 		"replication_async":                    cfg.replicationAsync,
 		"replication_queue_size":               cfg.replicationQueueSize,
 		"replication_retry_interval":           cfg.replicationRetry.String(),
@@ -697,6 +718,35 @@ func replicationQueueSize(cfg config) int {
 		return 0
 	}
 	return cfg.replicationQueueSize
+}
+
+func parseReplicationMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", replicationModeJournal:
+		return replicationModeJournal, nil
+	case replicationModeCommand:
+		return replicationModeCommand, nil
+	case replicationModeDual:
+		return replicationModeDual, nil
+	default:
+		return "", fmt.Errorf("replication mode must be %s, %s, or %s", replicationModeJournal, replicationModeCommand, replicationModeDual)
+	}
+}
+
+func replicationModeUsesJournal(mode string) bool {
+	normalized, err := parseReplicationMode(mode)
+	if err != nil {
+		return false
+	}
+	return normalized == replicationModeJournal || normalized == replicationModeDual
+}
+
+func replicationModeUsesCommandFanout(mode string) bool {
+	normalized, err := parseReplicationMode(mode)
+	if err != nil {
+		return false
+	}
+	return normalized == replicationModeCommand || normalized == replicationModeDual
 }
 
 func replicationWireFormat(cfg config) hatriecache.CommandWireFormat {

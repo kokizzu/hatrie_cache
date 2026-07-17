@@ -773,28 +773,42 @@ monitoring server refreshes its own node heartbeat periodically while it is up:
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_TIMEOUT=15s
 ```
 
-Set `REPLICATION=true` to let an elected leader broadcast successful local
-mutations to the current key's topology owners over HTTP. Replication uses the
-internal `DUMP`/`INTERNALSET`, `INTERNALDEL`, and `INTERNALBATCH` commands,
-skips internal replication commands to avoid loops, and records the last
-replication attempt at `/api/replication`. `INTERNALBATCH` batches multiple
-internal replication commands for the same target during sync and async replay.
-Replication batches are split before send when their estimated uncompressed
-request body would exceed `REPLICATION_BATCH_MAX_BYTES` (default `1048576`).
-Set `REPLICATION_BATCH_MAX_BYTES=0` to disable byte-based splitting.
-HTTP replication command bodies use protobuf by default
+Set `REPLICATION=true` to enable the configured replication mode.
+`REPLICATION_MODE=journal` is the default and makes the command journal the
+primary replication log; it requires `JOURNAL_PATH`. Source nodes append local
+mutations to the journal and serve `/api/journal`; replicas use
+`JOURNAL_PULL_SOURCE`, `JOURNAL_PULL_STATE_PATH`, and `JOURNAL_PULL_INTERVAL` to
+pull ordered journal tails and persist the applied sequence. Use this mode for
+normal replica catch-up because it preserves command order and avoids per-write
+remote fanout in the write path.
+
+Set `REPLICATION_MODE=command` to keep the previous HTTP command fanout mode, or
+`REPLICATION_MODE=dual` to run journal-stream replication and command fanout
+together during migration. Command fanout lets an elected leader broadcast
+successful local mutations to the current key's topology owners over HTTP. It
+uses the internal `DUMP`/`INTERNALSET`, `INTERNALDEL`, and `INTERNALBATCH`
+commands, skips internal replication commands to avoid loops, and records the
+last command-fanout attempt at `/api/replication`. `INTERNALBATCH` batches
+multiple internal replication commands for the same target during sync and async
+replay. Replication batches are split before send when their estimated
+uncompressed request body would exceed `REPLICATION_BATCH_MAX_BYTES` (default
+`1048576`). Set `REPLICATION_BATCH_MAX_BYTES=0` to disable byte-based
+splitting. HTTP replication command bodies use protobuf by default
 (`REPLICATION_WIRE_FORMAT=protobuf`), then automatically use the previous JSON
 wire format for structured `values` or `pairs` payloads that protobuf cannot
 represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON. Large HTTP
 replication request bodies are gzip-compressed.
-`POST /api/replication` runs an explicit anti-entropy sync
-that pushes the local leader-owned keys, optionally filtered by prefix, to their
-current topology replicas:
+`POST /api/replication` runs an explicit command-fanout anti-entropy sync that
+pushes the local leader-owned keys, optionally filtered by prefix, to their
+current topology replicas; it requires `REPLICATION_MODE=command` or
+`REPLICATION_MODE=dual`:
 
 ```
-make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true
-make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_WIRE_FORMAT=json
-make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_BATCH_MAX_BYTES=262144
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true JOURNAL_PATH=data/node-a.journal
+make monitoring-server NODE_ID=node-b TOPOLOGY_PATH=data/topology.json REPLICATION=true JOURNAL_PATH=data/node-b.journal JOURNAL_PULL_SOURCE=http://node-a:8080 JOURNAL_PULL_INTERVAL=5s
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_WIRE_FORMAT=json
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=dual JOURNAL_PATH=data/node-a.journal REPLICATION_BATCH_MAX_BYTES=262144
 ```
 
 Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP
@@ -814,20 +828,23 @@ split-brain or stale-topology delivery before the write is applied. Nodes
 without cluster routing metadata still accept replication and only use the
 source/sequence duplicate guard.
 
-Set `REPLICATION_SYNC_INTERVAL` to run the same anti-entropy sync
-periodically from the local leader. The first sync runs immediately at startup,
-then repeats at the configured interval. Set `REPLICATION_SYNC_PREFIX` to limit
-the scheduled sync to one key prefix:
+Set `REPLICATION_SYNC_INTERVAL` to run the command-fanout anti-entropy sync
+periodically from the local leader. It requires `REPLICATION_MODE=command` or
+`REPLICATION_MODE=dual`. The first sync runs immediately at startup, then
+repeats at the configured interval. Set `REPLICATION_SYNC_PREFIX` to limit the
+scheduled sync to one key prefix:
 
 ```
-make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_SYNC_INTERVAL=30s
-make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_SYNC_INTERVAL=30s REPLICATION_SYNC_PREFIX=session:
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_SYNC_INTERVAL=30s
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_SYNC_INTERVAL=30s REPLICATION_SYNC_PREFIX=session:
 ```
 
-Set `REPLICATION_ASYNC=true` to enqueue replication in a bounded in-process
-outbox instead of waiting for remote owners in the write request path. Queued
-jobs store the already-materialized internal snapshot payload, so later local
-mutations do not change what is delivered for the original write. Tune
+Set `REPLICATION_ASYNC=true` with `REPLICATION_MODE=command` or
+`REPLICATION_MODE=dual` to enqueue command-fanout replication in a bounded
+in-process outbox instead of waiting for remote owners in the write request
+path. Queued jobs store the already-materialized internal snapshot payload, so
+later local mutations do not change what is delivered for the original write.
+Tune
 `REPLICATION_QUEUE_SIZE`, `REPLICATION_RETRY_INTERVAL`, and
 `REPLICATION_MAX_ATTEMPTS` to bound memory and retry failed HTTP deliveries.
 Set `REPLICATION_OUTBOX_PATH=data/replication-outbox` to persist queued async

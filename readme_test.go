@@ -337,6 +337,10 @@ func TestREADMEListsAsyncReplicationOptions(t *testing.T) {
 	}
 	readme := string(data)
 	for _, token := range []string{
+		"REPLICATION_MODE",
+		"journal",
+		"command",
+		"dual",
 		"REPLICATION_ASYNC",
 		"REPLICATION_QUEUE_SIZE",
 		"REPLICATION_RETRY_INTERVAL",

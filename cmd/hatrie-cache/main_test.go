@@ -115,6 +115,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"node_id": "node-a",
 		"grpc_addr": "0.0.0.0:19090",
 		"replication": true,
+		"replication_mode": "command",
 		"replication_async": true,
 		"replication_queue_size": 16,
 		"replication_retry_interval": "10ms",
@@ -148,7 +149,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	if cfg.nodeID != "node-a" || cfg.grpcAddr != "0.0.0.0:19090" {
 		t.Fatalf("node/grpc config = %q/%q, want node-a/grpc addr", cfg.nodeID, cfg.grpcAddr)
 	}
-	if !cfg.replication || !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 10*time.Millisecond || cfg.replicationAttempts != 2 || cfg.replicationDeadLetterLimit != 9 {
+	if !cfg.replication || cfg.replicationMode != replicationModeCommand || !cfg.replicationAsync || cfg.replicationQueueSize != 16 || cfg.replicationRetry != 10*time.Millisecond || cfg.replicationAttempts != 2 || cfg.replicationDeadLetterLimit != 9 {
 		t.Fatalf("replication config = %#v, want file values", cfg)
 	}
 	if cfg.replicationOutboxPath != "/data/replication-outbox.json" || cfg.replicationOutboxFormat != "json" {
@@ -186,6 +187,7 @@ func TestParseConfigCLIOverridesConfigFile(t *testing.T) {
 		"-monitoring-server",
 		"-monitoring-addr", "127.0.0.1:19090",
 		"-replication=true",
+		"-replication-mode", "command",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig(config override) error = %v", err)
@@ -384,6 +386,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-topology-path", "/tmp/topology.json",
 		"-election-timeout", "30s",
 		"-replication",
+		"-replication-mode", "command",
 		"-replication-async",
 		"-replication-queue-size", "16",
 		"-replication-retry-interval", "50ms",
@@ -433,6 +436,87 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	cfg.replicationAsync = false
 	if got := replicationQueueSize(cfg); got != 0 {
 		t.Fatalf("replicationQueueSize(sync cfg) = %d, want 0", got)
+	}
+}
+
+func TestParseConfigReplicationModeDefaultsToJournal(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-replication",
+		"-journal-path", "/tmp/cache.journal",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.replicationMode != replicationModeJournal {
+		t.Fatalf("replication mode = %q, want %q", cfg.replicationMode, replicationModeJournal)
+	}
+	if replicationModeUsesCommandFanout(cfg.replicationMode) {
+		t.Fatal("journal replication mode unexpectedly enables command fanout")
+	}
+	if !replicationModeUsesJournal(cfg.replicationMode) {
+		t.Fatal("journal replication mode does not use journal stream")
+	}
+}
+
+func TestParseConfigReplicationModeCommandKeepsHTTPFanout(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-replication",
+		"-replication-mode", "command",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.replicationMode != replicationModeCommand {
+		t.Fatalf("replication mode = %q, want %q", cfg.replicationMode, replicationModeCommand)
+	}
+	if !replicationModeUsesCommandFanout(cfg.replicationMode) {
+		t.Fatal("command replication mode does not enable command fanout")
+	}
+	if replicationModeUsesJournal(cfg.replicationMode) {
+		t.Fatal("command replication mode unexpectedly requires journal stream")
+	}
+}
+
+func TestParseConfigReplicationModeDualUsesJournalAndHTTPFanout(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-replication",
+		"-replication-mode", "dual",
+		"-journal-path", "/tmp/cache.journal",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.replicationMode != replicationModeDual {
+		t.Fatalf("replication mode = %q, want %q", cfg.replicationMode, replicationModeDual)
+	}
+	if !replicationModeUsesCommandFanout(cfg.replicationMode) {
+		t.Fatal("dual replication mode does not enable command fanout")
+	}
+	if !replicationModeUsesJournal(cfg.replicationMode) {
+		t.Fatal("dual replication mode does not use journal stream")
+	}
+}
+
+func TestParseConfigRejectsInvalidReplicationMode(t *testing.T) {
+	_, err := parseConfig([]string{
+		"-monitoring-server",
+		"-replication-mode", "raft",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "replication mode") {
+		t.Fatalf("parseConfig(invalid replication mode) error = %v, want replication mode error", err)
+	}
+}
+
+func TestParseConfigRejectsJournalReplicationWithoutJournalPath(t *testing.T) {
+	_, err := parseConfig([]string{
+		"-monitoring-server",
+		"-replication",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "journal replication mode requires -journal-path") {
+		t.Fatalf("parseConfig(journal replication without journal) error = %v, want journal path error", err)
 	}
 }
 
@@ -1568,6 +1652,7 @@ func TestRunReplicatesBetweenTwoMonitoringServers(t *testing.T) {
 			"-node-id", "node-a",
 			"-topology-path", topologyAPath,
 			"-replication",
+			"-replication-mode", "command",
 			"-enforce-leader-writes",
 		}, &bytes.Buffer{}, &bytes.Buffer{})
 	}()
@@ -1633,6 +1718,7 @@ func TestRunReplicationAuthFailureReportsUnauthorizedTarget(t *testing.T) {
 			"-node-id", "node-a",
 			"-topology-path", topologyAPath,
 			"-replication",
+			"-replication-mode", "command",
 			"-replication-auth-token", "wrong-secret",
 			"-enforce-leader-writes",
 		}, &bytes.Buffer{}, &bytes.Buffer{})
@@ -1671,6 +1757,7 @@ func TestRunAsyncLevelDBOutboxReplaysAfterTargetRestart(t *testing.T) {
 		"-node-id", "node-a",
 		"-topology-path", topologyAPath,
 		"-replication",
+		"-replication-mode", "command",
 		"-replication-async",
 		"-replication-queue-size", "8",
 		"-replication-retry-interval", "5s",
@@ -1795,6 +1882,7 @@ func TestRunRejectsReplicationWithStaleTopologyFingerprint(t *testing.T) {
 			"-node-id", "node-a",
 			"-topology-path", topologyAPath,
 			"-replication",
+			"-replication-mode", "command",
 			"-enforce-leader-writes",
 		}, &bytes.Buffer{}, &bytes.Buffer{})
 	}()
