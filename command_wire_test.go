@@ -405,6 +405,25 @@ func TestCommandRequestBodyExportedEncodesProtobufDefault(t *testing.T) {
 	}
 }
 
+func TestCommandRequestBodyProtobufScalarUsesLowAllocationPath(t *testing.T) {
+	request := CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: `{"type":"string","string":"value"}`}
+	allocs := testing.AllocsPerRun(1000, func() {
+		body, contentType, contentEncoding, err := commandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
+		if err != nil {
+			t.Fatalf("commandRequestBody(protobuf) error = %v", err)
+		}
+		if contentType != commandWireContentTypeProtobuf || contentEncoding != "" {
+			t.Fatalf("commandRequestBody(protobuf) content type/encoding = %q/%q, want protobuf/empty", contentType, contentEncoding)
+		}
+		if _, err := io.Copy(io.Discard, body); err != nil {
+			t.Fatalf("ReadAll(protobuf body) error = %v", err)
+		}
+	})
+	if allocs > 2 {
+		t.Fatalf("protobuf scalar command body allocations = %.0f, want <= 2", allocs)
+	}
+}
+
 func TestCommandRequestBodyEncodesNativeBatchProtobuf(t *testing.T) {
 	request := CacheCommandRequest{
 		Command: "INTERNALBATCH",

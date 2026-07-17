@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"hatrie_cache/internal/gen/hatriecache/v1"
 	"hatrie_cache/internal/jsonwire"
@@ -40,6 +41,12 @@ var ErrUnsupportedCommandResponseContentType = errors.New("hatriecache: unsuppor
 var ErrUnsupportedCommandWireProtobufValue = errors.New("hatriecache: command request cannot be encoded as protobuf")
 
 var errCommandWireInvalidLimit = errors.New("hatriecache: command wire read limit is invalid")
+
+var commandRequestProtoPool = sync.Pool{
+	New: func() interface{} {
+		return new(hatriecachev1.CommandRequest)
+	},
+}
 
 func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -185,11 +192,12 @@ func commandWireAcceptPreference(fallback CommandWireFormat) []CommandWireFormat
 func commandRequestBody(request CacheCommandRequest, format CommandWireFormat, estimatedJSONSize int, compressionThreshold int) (io.Reader, string, string, error) {
 	switch format {
 	case CommandWireFormatProtobuf:
-		message, err := cacheCommandRequestToProto(request)
+		message, err := cacheCommandRequestToPooledProto(request)
 		if err != nil {
 			return nil, "", "", err
 		}
 		data, err := proto.Marshal(message)
+		releaseCommandRequestProto(message)
 		if err != nil {
 			return nil, "", "", err
 		}
@@ -389,6 +397,86 @@ func cacheCommandBatchToProto(batch []CacheCommandRequest) ([]*hatriecachev1.Com
 	for idx, request := range batch {
 		message, err := cacheCommandRequestToProto(request)
 		if err != nil {
+			return nil, fmt.Errorf("batch command %d: %w", idx, err)
+		}
+		out[idx] = message
+	}
+	return out, nil
+}
+
+func cacheCommandRequestToPooledProto(request CacheCommandRequest) (*hatriecachev1.CommandRequest, error) {
+	message := acquireCommandRequestProto()
+	if err := fillCacheCommandRequestProto(message, request); err != nil {
+		releaseCommandRequestProto(message)
+		return nil, err
+	}
+	return message, nil
+}
+
+func acquireCommandRequestProto() *hatriecachev1.CommandRequest {
+	return commandRequestProtoPool.Get().(*hatriecachev1.CommandRequest)
+}
+
+func releaseCommandRequestProto(message *hatriecachev1.CommandRequest) {
+	if message == nil {
+		return
+	}
+	children := message.Batch
+	message.Reset()
+	for _, child := range children {
+		releaseCommandRequestProto(child)
+	}
+	commandRequestProtoPool.Put(message)
+}
+
+func fillCacheCommandRequestProto(out *hatriecachev1.CommandRequest, request CacheCommandRequest) error {
+	batch, err := cacheCommandBatchToPooledProto(request.Batch)
+	if err != nil {
+		return err
+	}
+	out.Command = request.Command
+	out.Key = request.Key
+	out.Value = request.Value
+	out.Subkey = request.Subkey
+	out.TtlSeconds = request.TTLSeconds
+	out.UnixSeconds = request.UnixSeconds
+	out.Priority = request.Priority
+	out.Batch = batch
+	if len(request.Values) > 0 {
+		out.Values = make([]string, len(request.Values))
+		for idx, value := range request.Values {
+			text, ok := commandWireScalar(value)
+			if !ok {
+				return fmt.Errorf("%w: command value %d", ErrUnsupportedCommandWireProtobufValue, idx)
+			}
+			out.Values[idx] = text
+		}
+	}
+	if len(request.Pairs) > 0 {
+		out.Pairs = make(map[string]string, len(request.Pairs))
+		for key, value := range request.Pairs {
+			text, ok := commandWireScalar(value)
+			if !ok {
+				return fmt.Errorf("%w: command pair %q", ErrUnsupportedCommandWireProtobufValue, key)
+			}
+			out.Pairs[key] = text
+		}
+	}
+	return nil
+}
+
+func cacheCommandBatchToPooledProto(batch []CacheCommandRequest) ([]*hatriecachev1.CommandRequest, error) {
+	if len(batch) == 0 {
+		return nil, nil
+	}
+	out := make([]*hatriecachev1.CommandRequest, len(batch))
+	for idx, request := range batch {
+		message := acquireCommandRequestProto()
+		if err := fillCacheCommandRequestProto(message, request); err != nil {
+			releaseCommandRequestProto(message)
+			for _, previous := range out[:idx] {
+				releaseCommandRequestProto(previous)
+			}
 			return nil, fmt.Errorf("batch command %d: %w", idx, err)
 		}
 		out[idx] = message
