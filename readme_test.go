@@ -450,3 +450,50 @@ func TestREADMETracksImplementedDistributedTransport(t *testing.T) {
 		}
 	}
 }
+
+func TestREADMEDocumentsInternalReplicationBatch(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"`INTERNALBATCH`",
+		"batches multiple internal replication commands",
+		"accepted only for internal replication traffic",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md does not document internal replication batch token %q", token)
+		}
+	}
+}
+
+func TestBenchmarkDocsListInternalBatchPrimitive(t *testing.T) {
+	data, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	if !strings.Contains(string(data), "`INTERNALBATCH`") {
+		t.Fatal("BENCHMARK.md does not list INTERNALBATCH with replication primitives")
+	}
+}
+
+func TestImprovementReportIncludesLatestReplicationWork(t *testing.T) {
+	data, err := os.ReadFile("IMPROVEMENT_REPORT.md")
+	if err != nil {
+		t.Fatalf("ReadFile(IMPROVEMENT_REPORT.md) error = %v", err)
+	}
+	report := string(data)
+	for _, token := range []string{
+		"`a2ca705`",
+		"`bb8b86d`",
+		"`e899eb8`",
+		"LevelDB replication outbox backend",
+		"Batch replication by target",
+		"multi-node replication failure tests",
+	} {
+		if !strings.Contains(report, token) {
+			t.Fatalf("IMPROVEMENT_REPORT.md does not include latest replication token %q", token)
+		}
+	}
+}

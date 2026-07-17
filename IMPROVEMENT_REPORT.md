@@ -5,7 +5,7 @@ Date: 2026-07-17
 ## Scope
 
 This report covers the reliability, observability, benchmark, and replication
-auth improvements shipped in this work sequence.
+auth/transport improvements shipped in this work sequence.
 
 ## Shipped Improvements
 
@@ -18,6 +18,9 @@ auth improvements shipped in this work sequence.
 | `a2f93d9` | Benchmark artifact CI publishing | CI writes benchmark smoke JSON/Markdown/TSV/raw files and uploads them as workflow artifacts. |
 | `e36d412` | Artifact-driven benchmark docs | `make benchmark-md` regenerates generated `BENCHMARK.md` regions from benchmark artifacts. |
 | `96ed123` | Narrow replication auth token | `REPLICATION_AUTH_TOKEN` authenticates outbound HTTP replication and only permits inbound internal replication commands. |
+| `a2ca705` | LevelDB replication outbox backend | Async replication can use a low-overhead LevelDB outbox by default, with JSON retained as a configurable fallback. |
+| `bb8b86d` | Batch replication by target | Sync and async replay coalesce multiple payloads for the same target into `INTERNALBATCH`, reducing request count. |
+| `e899eb8` | multi-node replication failure tests | Real monitoring-server integration tests now cover unauthorized replication targets and LevelDB outbox replay after restart. |
 
 ## Operational Impact
 
@@ -30,6 +33,10 @@ auth improvements shipped in this work sequence.
   copying tables.
 - The replication token is intentionally narrower than `MONITORING_AUTH_TOKEN`;
   it is not accepted for health, metrics, config, or normal client commands.
+- Target-local replication batching reduces anti-entropy and async replay
+  request fanout while keeping single-key replication compatible.
+- Multi-node failure tests now prove bad replication credentials do not mutate
+  followers and durable outbox jobs can replay after target recovery.
 
 ## Verification
 

@@ -773,9 +773,11 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_
 
 Set `REPLICATION=true` to let an elected leader broadcast successful local
 mutations to the current key's topology owners over HTTP. Replication uses the
-internal `DUMP`/`INTERNALSET` and `INTERNALDEL` commands, skips internal
-replication commands to avoid loops, and records the last replication attempt at
-`/api/replication`. HTTP replication command bodies use protobuf by default
+internal `DUMP`/`INTERNALSET`, `INTERNALDEL`, and `INTERNALBATCH` commands,
+skips internal replication commands to avoid loops, and records the last
+replication attempt at `/api/replication`. `INTERNALBATCH` batches multiple
+internal replication commands for the same target during sync and async replay.
+HTTP replication command bodies use protobuf by default
 (`REPLICATION_WIRE_FORMAT=protobuf`), then automatically use the previous JSON
 wire format for structured `values` or `pairs` payloads that protobuf cannot
 represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON. Large HTTP
@@ -790,11 +792,12 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 ```
 
 Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP
-replication and require the same token for inbound `INTERNALSET`/`INTERNALDEL`
-commands. Replication clients send both `Authorization: Bearer <token>` and
-`X-Hatrie-Replication-Token: <token>`. The replication token is intentionally
-narrow: it is accepted only on `POST /api/commands` for internal replication
-commands, not for health, metrics, config, or normal client commands. The
+replication and require the same token for inbound `INTERNALSET`, `INTERNALDEL`,
+and `INTERNALBATCH` commands. Replication clients send both
+`Authorization: Bearer <token>` and `X-Hatrie-Replication-Token: <token>`.
+The replication token is intentionally narrow: it is accepted only on
+`POST /api/commands` for internal replication traffic, not for health, metrics,
+config, or normal client commands. The
 operator `MONITORING_AUTH_TOKEN` still has full monitoring API access.
 
 Replication payloads include source-node, monotonic sequence, and topology
@@ -992,11 +995,12 @@ supports `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATERS`, `ADDRS`,
 `GETRS`, `INFORS`, `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`, `CREATEFW`,
 `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW`, `DUMP`, `INTERNALSET`,
-and `INTERNALDEL`.
+`INTERNALDEL`, and `INTERNALBATCH`.
 `DUMP`,
 `INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
 one key as the same snapshot-entry JSON used by snapshot and LevelDB
-persistence.
+persistence. `INTERNALBATCH` batches multiple internal replication commands and
+is accepted only for internal replication traffic.
 See [`BENCHMARK.md`](BENCHMARK.md) for benchmarked supported commands, seconds
 per 10k operations, raw HAT-trie/Redis/Tarantool output, memory summaries, and
 Redis/Tarantool speedup comparisons.
@@ -1207,7 +1211,7 @@ any type:
   EXISTS/GET/GETSTR/DUMP key
    check the value on the hat_map
   DEL key
-  INTERNALSET/INTERNALDEL key
+  INTERNALSET/INTERNALDEL/INTERNALBATCH key
   TTL
    check if key exists -1 if expired or not exists, >0 if has ttl
   EXPIRE/EXPIREAT key

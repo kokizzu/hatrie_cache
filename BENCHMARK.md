@@ -284,7 +284,7 @@ reservoir samples, and Fenwick trees.
 
 | Family | Canonical HAT-trie commands |
 | --- | --- |
-| Generic key/value, counters, TTL, replication primitives | `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALDEL`, `TTL`, `EXPIRE`, `EXPIREAT` |
+| Generic key/value, counters, TTL, replication primitives | `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALDEL`, `INTERNALBATCH`, `TTL`, `EXPIRE`, `EXPIREAT` |
 | Map/hash fields | `PUTMAP`, `PEEKMAP`, `TAKEMAP` |
 | Slice/list/deque | `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`, `TAILSLICE` |
 | Set | `ADDSET`, `REMSET`, `HASSET`, `GETSET` |
