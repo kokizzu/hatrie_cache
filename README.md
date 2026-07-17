@@ -785,7 +785,11 @@ route a key to its shard. Topologies default to `mode: "sharded"`. Set
 `bucket_count` and compact `bucket_ranges` to use vbucket-style routing, or set
 `mode: "full_replica"` to route every key to every node without partitions:
 see [`SHARDING_PROPOSAL.md`](SHARDING_PROPOSAL.md) for the proposed XXH3 slot
-hash, hash tags, rendezvous placement planner, and migration states.
+hash, hash tags, rendezvous placement planner, and migration states. For
+multi-datacenter or region-owned datasets, see
+[`PARTITIONING_PROPOSAL.md`](PARTITIONING_PROPOSAL.md) for the proposal to keep
+explicit partition ownership, backup boundaries, and failover separate from
+automatic sharding.
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json

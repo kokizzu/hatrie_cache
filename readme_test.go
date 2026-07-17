@@ -149,6 +149,39 @@ func TestREADMELinksShardingProposal(t *testing.T) {
 	}
 }
 
+func TestREADMELinksPartitioningProposal(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	proposalData, err := os.ReadFile("PARTITIONING_PROPOSAL.md")
+	if err != nil {
+		t.Fatalf("ReadFile(PARTITIONING_PROPOSAL.md) error = %v", err)
+	}
+	readme := string(readmeData)
+	proposal := string(proposalData)
+	for _, token := range []string{
+		"[`PARTITIONING_PROPOSAL.md`](PARTITIONING_PROPOSAL.md)",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md missing partitioning token %q", token)
+		}
+	}
+	for _, token := range []string{
+		"multi-datacenter",
+		"`partitioned`",
+		"journal sequence fence",
+		"PARTITION partition_id host:port topology_epoch",
+		"Partitioning and sharding solve different problems",
+		"backup boundaries",
+		"sharding stays off by default",
+	} {
+		if !strings.Contains(proposal, token) {
+			t.Fatalf("PARTITIONING_PROPOSAL.md missing token %q", token)
+		}
+	}
+}
+
 func TestREADMEListsBenchmarkRegressionGuard(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {
