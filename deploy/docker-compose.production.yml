@@ -21,16 +21,32 @@ services:
       - /app/svelte-mpa/dist
       - -monitoring-auth-token
       - ${MONITORING_AUTH_TOKEN:?set MONITORING_AUTH_TOKEN}
+      - -audit-log-path
+      - /var/lib/hatrie-cache/audit.jsonl
+      - -write-protection=true
+      - -rate-limit
+      - "100"
       - -db-path
       - /var/lib/hatrie-cache/cache.leveldb
+      - -db-format
+      - binary
+      - -db-sync-interval
+      - ${HATRIE_CACHE_DB_SYNC_INTERVAL:-30s}
+      - -db-compact-interval
+      - ${HATRIE_CACHE_DB_COMPACT_INTERVAL:-10m}
+      - -db-hot-load=true
+      - -db-hot-load-max-bytes
+      - "4096"
       - -snapshot-path
       - /var/lib/hatrie-cache/snapshot.hc
       - -snapshot-interval
       - ${HATRIE_CACHE_SNAPSHOT_INTERVAL:-30s}
+      - -snapshot-format
+      - gzip-best-binary
       - -journal-path
       - /var/lib/hatrie-cache/commands.journal
-      - -audit-log-path
-      - /var/lib/hatrie-cache/audit.jsonl
+      - -journal-format
+      - binary
     volumes:
       - hatrie-cache-data:/var/lib/hatrie-cache
       - hatrie-cache-backups:/var/backups/hatrie-cache

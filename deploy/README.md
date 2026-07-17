@@ -5,7 +5,11 @@ resource limits, and network controls before using them outside a local test
 environment.
 
 - `systemd/hatrie-cache.service` runs one durable node from an installed binary.
-- `hatrie-cache.json` is a checked daemon config used by `make verify-ci`.
+- `hatrie-cache.json` is a checked daemon config used by `make verify-ci`. It
+  uses localhost binding, audited/write-protected admin operations, binary
+  LevelDB/journal records, protobuf replication payloads, periodic LevelDB sync
+  and compaction, hot-load for cold starts, and a durable async replication
+  outbox.
 - `topology/full-replica.json` defines two nodes that both own every key.
 - `topology/sharded.json` defines two shards over 1024 virtual buckets.
 - `docker-compose.yml` runs two local nodes from the checked-out source tree.

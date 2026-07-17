@@ -282,7 +282,7 @@ Recommended durability profiles:
 
 | Profile | Configuration | Use case |
 | --- | --- | --- |
-| Fast local persistence | `DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s` | Full persisted key/value store with periodic sync. |
+| Fast local persistence | `DB_PATH=data/cache.leveldb DB_FORMAT=binary DB_SYNC_INTERVAL=30s DB_COMPACT_INTERVAL=10m DB_HOT_LOAD=true` | Full persisted key/value store with periodic sync, compaction, and memory-efficient cold starts. |
 | Point-in-time recovery | `SNAPSHOT_PATH=data/snapshot.hc SNAPSHOT_INTERVAL=30s JOURNAL_PATH=data/commands.journal` | Compact snapshots plus replayable mutations after the latest snapshot. |
 | Replica catch-up | `JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080` | Pull another node's journal tail during bootstrap or after downtime. |
 

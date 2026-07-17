@@ -172,6 +172,38 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	}
 }
 
+func TestParseConfigDeployExampleUsesSaneDurableDefaults(t *testing.T) {
+	path := filepath.Join("..", "..", "deploy", "hatrie-cache.json")
+	cfg, err := parseConfig([]string{"-config", path}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(deploy example) error = %v", err)
+	}
+	if !cfg.monitoringServer || cfg.monitoringAddr != "127.0.0.1:8080" {
+		t.Fatalf("monitoring config = %v/%q, want enabled localhost default", cfg.monitoringServer, cfg.monitoringAddr)
+	}
+	if !cfg.writeProtection || cfg.auditLogPath != "data/audit.jsonl" || cfg.rateLimit != 100 {
+		t.Fatalf("admin safety config = writeProtection:%v audit:%q rate:%d, want protected audited defaults", cfg.writeProtection, cfg.auditLogPath, cfg.rateLimit)
+	}
+	if cfg.replicationMode != replicationModeCommand || cfg.replicationWireFormat != string(hatriecache.DefaultCommandWireFormat) {
+		t.Fatalf("replication format = %q/%q, want command/%s", cfg.replicationMode, cfg.replicationWireFormat, hatriecache.DefaultCommandWireFormat)
+	}
+	if !cfg.replication || !cfg.replicationAsync || cfg.replicationOutboxPath != "data/replication-outbox.leveldb" || cfg.replicationOutboxFormat != "leveldb" {
+		t.Fatalf("replication durability config = %#v, want async command replication with durable LevelDB outbox", cfg)
+	}
+	if cfg.dbPath != "data/cache.leveldb" || cfg.dbFormat != string(hatriecache.DefaultStorageFormat) || cfg.dbSyncInterval != 30*time.Second || cfg.dbCompactInterval != 10*time.Minute {
+		t.Fatalf("db config = path:%q format:%q sync:%s compact:%s, want durable binary LevelDB defaults", cfg.dbPath, cfg.dbFormat, cfg.dbSyncInterval, cfg.dbCompactInterval)
+	}
+	if !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 4096 || cfg.dbHotLoadMaxAge != time.Hour || cfg.dbHotLoadMinHits != 1000 {
+		t.Fatalf("db hot-load config = enabled:%v max:%d age:%s hits:%d, want cold-start memory defaults", cfg.dbHotLoad, cfg.dbHotLoadMaxBytes, cfg.dbHotLoadMaxAge, cfg.dbHotLoadMinHits)
+	}
+	if cfg.snapshotPath != "data/snapshot.hc" || cfg.snapshotInterval != 30*time.Second || cfg.snapshotFormat != string(hatriecache.DefaultSnapshotFormat) {
+		t.Fatalf("snapshot config = path:%q interval:%s format:%q, want durable default snapshot settings", cfg.snapshotPath, cfg.snapshotInterval, cfg.snapshotFormat)
+	}
+	if cfg.journalPath != "data/commands.journal" || cfg.journalFormat != string(hatriecache.DefaultCommandJournalFormat) || cfg.journalPullStatePath != "data/commands.journal.pull_state.json" {
+		t.Fatalf("journal config = path:%q format:%q pull-state:%q, want binary journal defaults", cfg.journalPath, cfg.journalFormat, cfg.journalPullStatePath)
+	}
+}
+
 func TestParseConfigCLIOverridesConfigFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hatrie-cache.json")
 	if err := os.WriteFile(path, []byte(`{

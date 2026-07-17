@@ -32,8 +32,16 @@ func TestDeployServiceAndComposeExamplesExposeDurableRuntime(t *testing.T) {
 	for _, token := range []string{
 		"-monitoring-server",
 		"-snapshot-path /var/lib/hatrie-cache/snapshot.hc",
+		"-snapshot-format gzip-best-binary",
 		"-journal-path /var/lib/hatrie-cache/commands.journal",
+		"-journal-format binary",
 		"-db-path /var/lib/hatrie-cache/cache.leveldb",
+		"-db-format binary",
+		"-db-sync-interval 30s",
+		"-db-compact-interval 10m",
+		"-db-hot-load",
+		"-audit-log-path /var/lib/hatrie-cache/audit.jsonl",
+		"-write-protection",
 		"Restart=on-failure",
 		"LimitNOFILE=1048576",
 	} {
@@ -133,6 +141,13 @@ func TestProductionComposeExampleHardensRuntime(t *testing.T) {
 		"MONITORING_AUTH_TOKEN",
 		"HATRIE_HEALTHCHECK_ADDR",
 		"/var/lib/hatrie-cache/cache.leveldb",
+		"-db-format",
+		"-db-sync-interval",
+		"-db-compact-interval",
+		"-db-hot-load=true",
+		"-snapshot-format",
+		"-journal-format",
+		"-write-protection=true",
 	} {
 		if !strings.Contains(compose, token) {
 			t.Fatalf("production compose missing %q", token)

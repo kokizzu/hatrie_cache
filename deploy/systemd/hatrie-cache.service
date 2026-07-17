@@ -11,14 +11,23 @@ ExecStart=/usr/local/bin/hatrie-cache \
   -monitoring-server \
   -monitoring-addr 0.0.0.0:8080 \
   -monitoring-web-dir /usr/share/hatrie-cache/svelte-mpa/dist \
+  -audit-log-path /var/lib/hatrie-cache/audit.jsonl \
+  -write-protection \
+  -rate-limit 100 \
   -node-id node-a \
   -topology-path /etc/hatrie-cache/topology.json \
   -snapshot-path /var/lib/hatrie-cache/snapshot.hc \
   -snapshot-interval 30s \
+  -snapshot-format gzip-best-binary \
   -journal-path /var/lib/hatrie-cache/commands.journal \
+  -journal-format binary \
   -journal-pull-state-path /var/lib/hatrie-cache/commands.journal.pull_state.json \
   -db-path /var/lib/hatrie-cache/cache.leveldb \
-  -db-sync-interval 30s
+  -db-format binary \
+  -db-sync-interval 30s \
+  -db-compact-interval 10m \
+  -db-hot-load \
+  -db-hot-load-max-bytes 4096
 Restart=on-failure
 RestartSec=2s
 LimitNOFILE=1048576

@@ -90,6 +90,7 @@ CONFIG_PATH=deploy/hatrie-cache.json ./scripts/check-config.sh >/dev/null
 	-node-id node-a \
 	-topology-path deploy/topology/sharded.json \
 	-replication=true \
+	-replication-mode command \
 	-enforce-leader-writes=true \
 	-grpc-addr 127.0.0.1:0 >/dev/null
 
