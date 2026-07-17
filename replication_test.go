@@ -1610,6 +1610,40 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorRecordsLatencyAndBatchMetrics(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = mustDecodeReplicationTestCommand(t, w, r)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "value-1")
+	trie.UpsertString("session:2", "value-2")
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+		Client:   target.Client(),
+	})
+
+	result := replicator.SyncAll(context.Background(), trie, "session:")
+	if result.Skipped || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("sync result = %#v, want one ok target", result)
+	}
+	metrics := replicator.MetricsSnapshot()
+	latency := metrics.TargetLatencyMillis["node-b"]
+	if latency.Count != 1 || latency.Sum < 0 {
+		t.Fatalf("target latency histogram = %#v, want one observation", latency)
+	}
+	batch := metrics.TargetBatchItems["node-b"]
+	if batch.Count != 1 || batch.Sum != 2 {
+		t.Fatalf("batch size histogram = %#v, want one two-item observation", batch)
+	}
+}
+
 func TestHTTPReplicatorSplitsSyncBatchesByEstimatedBytes(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 3)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

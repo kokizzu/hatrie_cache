@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -508,6 +509,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 			writePrometheusGaugeInt64(&builder, "hatrie_cache_replication_last_retry_age_millis", "Age of the last async replication retry scheduling event in milliseconds.", node, result.Queue.LastRetryAgeMillis)
 		}
 		writePrometheusReplicationCircuitBreakers(&builder, node, result.CircuitBreakers)
+		writePrometheusReplicationMetrics(&builder, node, handler.options.Replicator.MetricsSnapshot())
 	}
 	return builder.String()
 }
@@ -543,6 +545,78 @@ func writePrometheusReplicationCircuitBreakers(builder *strings.Builder, node st
 		fmt.Fprintf(builder, "hatrie_cache_replication_circuit_breaker_open{node=\"%s\",target=\"%s\",state=\"%s\"} %d\n", node, target, state, boolGauge(breaker.State == replicationCircuitOpen))
 		fmt.Fprintf(builder, "hatrie_cache_replication_circuit_breaker_failures{node=\"%s\",target=\"%s\",state=\"%s\"} %d\n", node, target, state, breaker.Failures)
 	}
+}
+
+func writePrometheusReplicationMetrics(builder *strings.Builder, node string, snapshot ReplicationMetricsSnapshot) {
+	if len(snapshot.TargetLatencyMillis) > 0 {
+		writePrometheusHelp(builder, "hatrie_cache_replication_target_latency_millis", "HTTP replication target delivery latency in milliseconds.")
+		writePrometheusType(builder, "hatrie_cache_replication_target_latency_millis", "histogram")
+		for _, target := range sortedReplicationMetricTargets(snapshot.TargetLatencyMillis) {
+			writePrometheusTargetHistogram(builder, "hatrie_cache_replication_target_latency_millis", node, target, snapshot.TargetLatencyMillis[target])
+		}
+	}
+	if len(snapshot.TargetBatchItems) > 0 {
+		writePrometheusHelp(builder, "hatrie_cache_replication_batch_items", "HTTP replication batch size in command items.")
+		writePrometheusType(builder, "hatrie_cache_replication_batch_items", "histogram")
+		for _, target := range sortedReplicationMetricTargets(snapshot.TargetBatchItems) {
+			writePrometheusTargetHistogram(builder, "hatrie_cache_replication_batch_items", node, target, snapshot.TargetBatchItems[target])
+		}
+	}
+	if snapshot.RetryDelayMillis.Count > 0 {
+		writePrometheusHelp(builder, "hatrie_cache_replication_retry_delay_millis", "Async replication retry wait duration in milliseconds.")
+		writePrometheusType(builder, "hatrie_cache_replication_retry_delay_millis", "histogram")
+		writePrometheusNodeHistogram(builder, "hatrie_cache_replication_retry_delay_millis", node, snapshot.RetryDelayMillis)
+	}
+	if len(snapshot.CircuitBreakerTransitions) > 0 {
+		writePrometheusHelp(builder, "hatrie_cache_replication_circuit_breaker_transitions_total", "Replication circuit breaker state transitions.")
+		writePrometheusType(builder, "hatrie_cache_replication_circuit_breaker_transitions_total", "counter")
+		for _, target := range sortedReplicationMetricTargets(snapshot.CircuitBreakerTransitions) {
+			transitions := snapshot.CircuitBreakerTransitions[target]
+			states := make([]string, 0, len(transitions))
+			for state := range transitions {
+				states = append(states, state)
+			}
+			sort.Strings(states)
+			for _, state := range states {
+				fmt.Fprintf(builder, "hatrie_cache_replication_circuit_breaker_transitions_total{node=\"%s\",target=\"%s\",state=\"%s\"} %d\n", node, prometheusLabelValue(target), prometheusLabelValue(state), transitions[state])
+			}
+		}
+	}
+}
+
+func writePrometheusTargetHistogram(builder *strings.Builder, name string, node string, target string, snapshot ReplicationHistogramSnapshot) {
+	target = prometheusLabelValue(target)
+	cumulative := uint64(0)
+	for idx, bound := range snapshot.Bounds {
+		if idx < len(snapshot.Buckets) {
+			cumulative += snapshot.Buckets[idx]
+		}
+		fmt.Fprintf(builder, "%s_bucket{node=\"%s\",target=\"%s\",le=\"%s\"} %d\n", name, node, target, prometheusBucketLabel(bound), cumulative)
+	}
+	fmt.Fprintf(builder, "%s_bucket{node=\"%s\",target=\"%s\",le=\"+Inf\"} %d\n", name, node, target, snapshot.Count)
+	fmt.Fprintf(builder, "%s_sum{node=\"%s\",target=\"%s\"} %s\n", name, node, target, prometheusFloat(snapshot.Sum))
+	fmt.Fprintf(builder, "%s_count{node=\"%s\",target=\"%s\"} %d\n", name, node, target, snapshot.Count)
+}
+
+func writePrometheusNodeHistogram(builder *strings.Builder, name string, node string, snapshot ReplicationHistogramSnapshot) {
+	cumulative := uint64(0)
+	for idx, bound := range snapshot.Bounds {
+		if idx < len(snapshot.Buckets) {
+			cumulative += snapshot.Buckets[idx]
+		}
+		fmt.Fprintf(builder, "%s_bucket{node=\"%s\",le=\"%s\"} %d\n", name, node, prometheusBucketLabel(bound), cumulative)
+	}
+	fmt.Fprintf(builder, "%s_bucket{node=\"%s\",le=\"+Inf\"} %d\n", name, node, snapshot.Count)
+	fmt.Fprintf(builder, "%s_sum{node=\"%s\"} %s\n", name, node, prometheusFloat(snapshot.Sum))
+	fmt.Fprintf(builder, "%s_count{node=\"%s\"} %d\n", name, node, snapshot.Count)
+}
+
+func prometheusBucketLabel(value float64) string {
+	return strconv.FormatFloat(value, 'g', -1, 64)
+}
+
+func prometheusFloat(value float64) string {
+	return strconv.FormatFloat(value, 'g', -1, 64)
 }
 
 func writePrometheusCounter(builder *strings.Builder, name string, help string, node string, value uint64) {

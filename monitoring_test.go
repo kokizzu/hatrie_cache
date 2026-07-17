@@ -2021,6 +2021,44 @@ func TestMonitoringPrometheusMetricsExposeReplicationHealthScore(t *testing.T) {
 	}
 }
 
+func TestMonitoringPrometheusMetricsExposeReplicationLatencyAndBatchHistograms(t *testing.T) {
+	ht := newTestTrie(t)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
+	replicator.recordReplicationTargetLatency(TopologyNode{ID: "node-b"}, 12*time.Millisecond)
+	replicator.recordReplicationBatchSize(TopologyNode{ID: "node-b"}, 3)
+	replicator.recordReplicationRetryDelay(25 * time.Millisecond)
+	replicator.recordReplicationCircuitTransition(TopologyNode{ID: "node-b"}, replicationCircuitOpen)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		NodeName:   "node-a",
+		Replicator: replicator,
+	}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", resp.Code)
+	}
+	body := resp.Body.String()
+	for _, token := range []string{
+		"# HELP hatrie_cache_replication_target_latency_millis",
+		"# TYPE hatrie_cache_replication_target_latency_millis histogram",
+		`hatrie_cache_replication_target_latency_millis_bucket{node="node-a",target="node-b",le="+Inf"} 1`,
+		`hatrie_cache_replication_target_latency_millis_count{node="node-a",target="node-b"} 1`,
+		"# HELP hatrie_cache_replication_batch_items",
+		`hatrie_cache_replication_batch_items_bucket{node="node-a",target="node-b",le="+Inf"} 1`,
+		`hatrie_cache_replication_batch_items_count{node="node-a",target="node-b"} 1`,
+		"# HELP hatrie_cache_replication_retry_delay_millis",
+		`hatrie_cache_replication_retry_delay_millis_bucket{node="node-a",le="+Inf"} 1`,
+		`hatrie_cache_replication_retry_delay_millis_count{node="node-a"} 1`,
+		"# HELP hatrie_cache_replication_circuit_breaker_transitions_total",
+		`hatrie_cache_replication_circuit_breaker_transitions_total{node="node-a",target="node-b",state="open"} 1`,
+	} {
+		if !strings.Contains(body, token) {
+			t.Fatalf("metrics body missing %q:\n%s", token, body)
+		}
+	}
+}
+
 func TestMonitoringPrometheusMetricsExposeStorageOpsState(t *testing.T) {
 	ht := newTestTrie(t)
 	store, err := OpenLevelDBStore(filepath.Join(t.TempDir(), "cache.leveldb"))

@@ -85,6 +85,7 @@ type HTTPReplicator struct {
 	deadLetters     []ReplicationDeadLetter
 	queueStats      ReplicationQueueStats
 	last            ReplicationResult
+	metrics         replicationMetrics
 }
 
 type ReplicationResult struct {
@@ -1073,6 +1074,7 @@ func (replicator *HTTPReplicator) waitForRetry(ctx context.Context) bool {
 	if retry <= 0 {
 		return true
 	}
+	startedAt := time.Now()
 	timer := time.NewTimer(retry)
 	defer stopReplicationRetryTimer(timer)
 	select {
@@ -1081,6 +1083,7 @@ func (replicator *HTTPReplicator) waitForRetry(ctx context.Context) bool {
 	case <-replicator.done:
 		return false
 	case <-timer.C:
+		replicator.recordReplicationRetryDelay(time.Since(startedAt))
 		return true
 	}
 }
@@ -1530,11 +1533,15 @@ func (replicator *HTTPReplicator) executeReplicationTarget(ctx context.Context, 
 	if result, allowed, state := replicator.beforeReplicationTarget(target); !allowed {
 		return result
 	} else {
-		return replicator.afterReplicationTarget(target, state, replicator.postReplicationCommand(ctx, target, payload))
+		startedAt := time.Now()
+		result := replicator.postReplicationCommand(ctx, target, payload)
+		replicator.recordReplicationTargetLatency(target, time.Since(startedAt))
+		return replicator.afterReplicationTarget(target, state, result)
 	}
 }
 
 func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Context, target TopologyNode, payloads []CacheCommandRequest) ReplicationTargetResult {
+	replicator.recordReplicationBatchSize(target, len(payloads))
 	if len(payloads) == 1 {
 		return replicator.executeReplicationTarget(ctx, target, payloads[0])
 	}
@@ -1587,6 +1594,7 @@ func (replicator *HTTPReplicator) beforeReplicationTarget(target TopologyNode) (
 		}
 		state.state = replicationCircuitHalfOpen
 		replicator.breakers[node] = state
+		replicator.recordReplicationCircuitTransition(target, replicationCircuitHalfOpen)
 		return result, true, replicationCircuitHalfOpen
 	case replicationCircuitHalfOpen:
 		result.CircuitOpen = true
@@ -1613,6 +1621,9 @@ func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, at
 	if result.OK {
 		result.CircuitState = replicationCircuitClosed
 		if existing, ok := replicator.breakers[node]; ok {
+			if existing.state == replicationCircuitOpen || existing.state == replicationCircuitHalfOpen {
+				replicator.recordReplicationCircuitTransition(target, replicationCircuitClosed)
+			}
 			existing.state = replicationCircuitClosed
 			existing.failures = 0
 			existing.openedAt = nil
@@ -1629,6 +1640,7 @@ func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, at
 	}
 
 	state := replicator.breakers[node]
+	previousState := state.state
 	state.failures++
 	state.lastFailureAt = cloneTimePtr(&now)
 	state.lastFailureReason = replicationTargetFailureReason(result)
@@ -1640,6 +1652,9 @@ func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, at
 		result.CircuitOpen = true
 		result.CircuitState = replicationCircuitOpen
 		result.CircuitOpenUntil = cloneTimePtr(&openUntil)
+		if previousState != replicationCircuitOpen {
+			replicator.recordReplicationCircuitTransition(target, replicationCircuitOpen)
+		}
 	} else {
 		state.state = replicationCircuitClosed
 		result.CircuitState = replicationCircuitClosed
