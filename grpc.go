@@ -664,6 +664,12 @@ func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) CacheCo
 			out.Pairs[key] = value
 		}
 	}
+	if len(request.Batch) > 0 {
+		out.Batch = make([]CacheCommandRequest, len(request.Batch))
+		for i, value := range request.Batch {
+			out.Batch[i] = cacheCommandRequestFromProto(value)
+		}
+	}
 	return out
 }
 

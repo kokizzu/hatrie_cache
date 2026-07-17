@@ -40,6 +40,9 @@ func mustDecodeReplicationBatchValues(t *testing.T, request CacheCommandRequest)
 	if request.Command != "INTERNALBATCH" {
 		t.Fatalf("replication request command = %q, want INTERNALBATCH", request.Command)
 	}
+	if len(request.Batch) > 0 {
+		return append([]CacheCommandRequest(nil), request.Batch...)
+	}
 	out := make([]CacheCommandRequest, 0, len(request.Values))
 	for idx, value := range request.Values {
 		text, ok := value.(string)

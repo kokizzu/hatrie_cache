@@ -372,6 +372,41 @@ func TestCommandRequestBodyExportedEncodesProtobufDefault(t *testing.T) {
 	}
 }
 
+func TestCommandRequestBodyEncodesNativeBatchProtobuf(t *testing.T) {
+	request := CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "INTERNALSET", Key: "session:1", Value: `{"type":"string","string":"one"}`},
+			{Command: "INTERNALDEL", Key: "session:2"},
+		},
+	}
+
+	body, contentType, contentEncoding, err := CommandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
+	if err != nil {
+		t.Fatalf("CommandRequestBody(native batch protobuf) error = %v", err)
+	}
+	if contentType != commandWireContentTypeProtobuf || contentEncoding != "" {
+		t.Fatalf("CommandRequestBody(native batch protobuf) content type/encoding = %q/%q, want protobuf/empty", contentType, contentEncoding)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll(native batch protobuf body) error = %v", err)
+	}
+	decoded, err := decodeCommandRequestProto(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("decodeCommandRequestProto(native batch) error = %v", err)
+	}
+	if decoded.Command != "INTERNALBATCH" || len(decoded.Values) != 0 || len(decoded.Batch) != 2 {
+		t.Fatalf("decoded native batch = %#v, want INTERNALBATCH with two batch entries and no legacy values", decoded)
+	}
+	if decoded.Batch[0].Command != "INTERNALSET" || decoded.Batch[0].Key != "session:1" || decoded.Batch[0].Value == "" {
+		t.Fatalf("decoded batch[0] = %#v, want INTERNALSET snapshot", decoded.Batch[0])
+	}
+	if decoded.Batch[1].Command != "INTERNALDEL" || decoded.Batch[1].Key != "session:2" {
+		t.Fatalf("decoded batch[1] = %#v, want INTERNALDEL", decoded.Batch[1])
+	}
+}
+
 func TestCommandRequestBodyExportedEncodesJSONFallback(t *testing.T) {
 	request := CacheCommandRequest{
 		Command: "PUTMAP",

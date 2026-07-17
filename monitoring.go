@@ -769,6 +769,9 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 }
 
 func internalReplicationBatchRequests(request CacheCommandRequest) ([]CacheCommandRequest, error) {
+	if len(request.Batch) > 0 {
+		return append([]CacheCommandRequest(nil), request.Batch...), nil
+	}
 	if len(request.Values) == 0 {
 		return nil, errors.New("internal replication batch requires values")
 	}

@@ -14,15 +14,16 @@ import (
 const maxCommandTTLSeconds = int64(1<<63-1) / int64(time.Second)
 
 type CacheCommandRequest struct {
-	Command     string `json:"command"`
-	Key         string `json:"key"`
-	Value       string `json:"value,omitempty"`
-	Values      Slice  `json:"values,omitempty"`
-	Subkey      string `json:"subkey,omitempty"`
-	Pairs       Map    `json:"pairs,omitempty"`
-	Priority    *int64 `json:"priority,omitempty"`
-	TTLSeconds  *int64 `json:"ttl_seconds,omitempty"`
-	UnixSeconds *int64 `json:"unix_seconds,omitempty"`
+	Command     string                `json:"command"`
+	Key         string                `json:"key"`
+	Value       string                `json:"value,omitempty"`
+	Values      Slice                 `json:"values,omitempty"`
+	Batch       []CacheCommandRequest `json:"batch,omitempty"`
+	Subkey      string                `json:"subkey,omitempty"`
+	Pairs       Map                   `json:"pairs,omitempty"`
+	Priority    *int64                `json:"priority,omitempty"`
+	TTLSeconds  *int64                `json:"ttl_seconds,omitempty"`
+	UnixSeconds *int64                `json:"unix_seconds,omitempty"`
 }
 
 type CacheCommandResponse struct {

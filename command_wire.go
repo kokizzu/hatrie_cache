@@ -330,6 +330,10 @@ func writeCommandResponseWire(w http.ResponseWriter, r *http.Request, status int
 }
 
 func cacheCommandRequestToProto(request CacheCommandRequest) (*hatriecachev1.CommandRequest, error) {
+	batch, err := cacheCommandBatchToProto(request.Batch)
+	if err != nil {
+		return nil, err
+	}
 	out := &hatriecachev1.CommandRequest{
 		Command:     request.Command,
 		Key:         request.Key,
@@ -338,6 +342,7 @@ func cacheCommandRequestToProto(request CacheCommandRequest) (*hatriecachev1.Com
 		TtlSeconds:  request.TTLSeconds,
 		UnixSeconds: request.UnixSeconds,
 		Priority:    request.Priority,
+		Batch:       batch,
 	}
 	if len(request.Values) > 0 {
 		out.Values = make([]string, len(request.Values))
@@ -358,6 +363,21 @@ func cacheCommandRequestToProto(request CacheCommandRequest) (*hatriecachev1.Com
 			}
 			out.Pairs[key] = text
 		}
+	}
+	return out, nil
+}
+
+func cacheCommandBatchToProto(batch []CacheCommandRequest) ([]*hatriecachev1.CommandRequest, error) {
+	if len(batch) == 0 {
+		return nil, nil
+	}
+	out := make([]*hatriecachev1.CommandRequest, len(batch))
+	for idx, request := range batch {
+		message, err := cacheCommandRequestToProto(request)
+		if err != nil {
+			return nil, fmt.Errorf("batch command %d: %w", idx, err)
+		}
+		out[idx] = message
 	}
 	return out, nil
 }

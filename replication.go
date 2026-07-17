@@ -1416,17 +1416,13 @@ func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Cont
 }
 
 func replicationBatchPayload(payloads []CacheCommandRequest) (CacheCommandRequest, error) {
-	values := make(Slice, len(payloads))
+	batch := make([]CacheCommandRequest, len(payloads))
 	for idx, payload := range payloads {
-		data, err := jsonwire.Marshal(payload)
-		if err != nil {
-			return CacheCommandRequest{}, fmt.Errorf("replication batch payload %d: %w", idx, err)
-		}
-		values[idx] = string(data)
+		batch[idx] = payload
 	}
 	return CacheCommandRequest{
 		Command: "INTERNALBATCH",
-		Values:  values,
+		Batch:   batch,
 	}, nil
 }
 
