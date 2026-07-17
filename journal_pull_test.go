@@ -99,8 +99,9 @@ func TestPullCommandJournalAcceptsNilContext(t *testing.T) {
 		t.Fatalf("OpenCommandJournal() error = %v", err)
 	}
 	defer journal.Close()
+	dirty := NewLevelDBDirtyTracker()
 
-	result, err := PullCommandJournal(nil, ht, journal, CommandJournalPullOptions{Source: source.URL})
+	result, err := PullCommandJournal(nil, ht, journal, CommandJournalPullOptions{Source: source.URL, DirtyTracker: dirty})
 	if err != nil {
 		t.Fatalf("PullCommandJournal(nil context) error = %v", err)
 	}
@@ -109,6 +110,9 @@ func TestPullCommandJournalAcceptsNilContext(t *testing.T) {
 	}
 	if got := ht.GetString("name"); got != "ivi" {
 		t.Fatalf("GetString(name) = %q, want replicated value", got)
+	}
+	if dirty.Pending() != 1 {
+		t.Fatalf("dirty pending after pull = %d, want pulled key marked", dirty.Pending())
 	}
 }
 

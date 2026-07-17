@@ -113,6 +113,73 @@ func TestLevelDBStoreJSONFormatWritesPreviousLayout(t *testing.T) {
 	}
 }
 
+func TestLevelDBStoreSaveDirtyWritesOnlyTrackedKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	ht.UpsertString("alpha", "old")
+	if err := store.Save(ht); err != nil {
+		t.Fatalf("Save(initial) error = %v", err)
+	}
+	stale, err := marshalLevelDBEntry(snapshotEntry{Key: "stale", Type: "string", String: "keep"}, DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntry(stale) error = %v", err)
+	}
+	if err := store.db.Put(levelDBKey("stale"), stale, nil); err != nil {
+		t.Fatalf("Put(stale) error = %v", err)
+	}
+
+	tracker := NewLevelDBDirtyTracker()
+	ht.UpsertString("alpha", "new")
+	ht.UpsertString("gamma", "added")
+	tracker.Mark("alpha")
+	tracker.Mark("gamma")
+	if err := store.SaveDirty(ht, tracker); err != nil {
+		t.Fatalf("SaveDirty(update) error = %v", err)
+	}
+	if tracker.Pending() != 0 {
+		t.Fatalf("dirty pending after save = %d, want 0", tracker.Pending())
+	}
+	if entry, ok, err := store.Entry("alpha"); err != nil || !ok || entry.String != "new" {
+		t.Fatalf("Entry(alpha) = %#v/%v/%v, want updated value", entry, ok, err)
+	}
+	if entry, ok, err := store.Entry("gamma"); err != nil || !ok || entry.String != "added" {
+		t.Fatalf("Entry(gamma) = %#v/%v/%v, want added value", entry, ok, err)
+	}
+	if entry, ok, err := store.Entry("stale"); err != nil || !ok || entry.String != "keep" {
+		t.Fatalf("Entry(stale) after unrelated dirty save = %#v/%v/%v, want retained stale row", entry, ok, err)
+	}
+
+	tracker.Mark("stale")
+	if err := store.SaveDirty(ht, tracker); err != nil {
+		t.Fatalf("SaveDirty(delete) error = %v", err)
+	}
+	if entry, ok, err := store.Entry("stale"); err != nil || ok {
+		t.Fatalf("Entry(stale) after tracked delete = %#v/%v/%v, want deleted", entry, ok, err)
+	}
+}
+
+func TestLevelDBDirtyTrackerClearKeepsNewerMarks(t *testing.T) {
+	tracker := NewLevelDBDirtyTracker()
+	tracker.Mark("alpha")
+	snapshot := tracker.Snapshot()
+	tracker.Mark("alpha")
+	tracker.Mark("beta")
+
+	tracker.Clear(snapshot)
+	if tracker.Pending() != 2 {
+		t.Fatalf("dirty pending after stale clear = %d, want alpha and beta retained", tracker.Pending())
+	}
+	if got := tracker.Snapshot().keys; !reflect.DeepEqual(got, []string{"alpha", "beta"}) {
+		t.Fatalf("dirty keys after stale clear = %#v, want alpha/beta", got)
+	}
+}
+
 func TestLevelDBBinaryRecordsPreallocateStringAndComplexValues(t *testing.T) {
 	expiresAt := time.Unix(1234, 0)
 	stats := &KeyStats{

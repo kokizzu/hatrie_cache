@@ -1342,6 +1342,41 @@ func TestMonitoringHandlerFlushesLevelDBStorage(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerMarksAndClearsLevelDBDirtyKeys(t *testing.T) {
+	ht := newTestTrie(t)
+	store, err := OpenLevelDBStore(filepath.Join(t.TempDir(), "cache.leveldb"))
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+	dirty := NewLevelDBDirtyTracker()
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		LevelDBStore:        store,
+		LevelDBDirtyTracker: dirty,
+	}).Handler()
+
+	commandResp := httptest.NewRecorder()
+	handler.ServeHTTP(commandResp, httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"SETSTR","key":"session:dirty","value":"saved"}`)))
+	if commandResp.Code != http.StatusOK {
+		t.Fatalf("command status = %d, want 200: %s", commandResp.Code, commandResp.Body.String())
+	}
+	if dirty.Pending() != 1 {
+		t.Fatalf("dirty pending after command = %d, want 1", dirty.Pending())
+	}
+
+	flushResp := httptest.NewRecorder()
+	handler.ServeHTTP(flushResp, httptest.NewRequest(http.MethodPost, "/api/storage/flush", strings.NewReader(`{}`)))
+	if flushResp.Code != http.StatusOK {
+		t.Fatalf("storage flush status = %d, want 200: %s", flushResp.Code, flushResp.Body.String())
+	}
+	if dirty.Pending() != 0 {
+		t.Fatalf("dirty pending after flush = %d, want 0", dirty.Pending())
+	}
+	if entry, ok, err := store.Entry("session:dirty"); err != nil || !ok || entry.String != "saved" {
+		t.Fatalf("Entry(session:dirty) = %#v/%v/%v, want flushed value", entry, ok, err)
+	}
+}
+
 func TestMonitoringHandlerRejectsLevelDBCompactionWhenUnconfigured(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{}).Handler()

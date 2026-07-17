@@ -624,8 +624,9 @@ tuples. Existing JSON records still load automatically.
 Leaving format variables unset in the Makefile wrapper uses the compiled Go
 defaults; set them only when you want to override the default format.
 Set `DB_FORMAT=json` to keep writing the previous JSON record layout.
-`DB_SYNC_INTERVAL` periodically syncs changed LevelDB records while the server
-is running:
+`DB_SYNC_INTERVAL` performs one full LevelDB save at startup, then periodically
+syncs only dirty keys changed by HTTP commands, gRPC commands, and journal pull
+replay while the server is running:
 
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
@@ -633,7 +634,7 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_FORMAT=json
 ```
 
 Run a manual LevelDB flush before planned maintenance when `DB_SYNC_INTERVAL=0`
-or when you want the current in-memory state written immediately. Run manual
+or when you want a full current in-memory state write immediately. Run manual
 LevelDB compaction after large delete or rewrite batches to reclaim storage-file
 space and reduce read amplification. Set `DB_COMPACT_INTERVAL` to compact
 LevelDB automatically on a schedule; optional `DB_COMPACT_START_KEY` and
@@ -1124,8 +1125,10 @@ the normal disk spill threshold for large byte values.
 
 Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
 disk persistence. LevelDB loads replace the current in-memory key set. The
-LevelDB writer uses Snappy compression, skips unchanged records, clears stale
-keys on each save, and preserves per-key access metadata. LevelDB writes use
+full LevelDB writer uses Snappy compression, skips unchanged records, clears
+stale keys on each full save, and preserves per-key access metadata.
+`LevelDBDirtyTracker` plus `LevelDBStore.SaveDirty` can persist only tracked
+dirty keys between full saves. LevelDB writes use
 `DefaultStorageFormat` (`StorageFormatBinary`) by default; use
 `SaveLevelDBWithFormat(path, StorageFormatJSON)` or
 `OpenLevelDBStoreWithFormat(path, StorageFormatJSON)` to keep writing the

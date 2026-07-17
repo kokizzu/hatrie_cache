@@ -18,6 +18,7 @@ type CommandJournalPullOptions struct {
 	MaxBatches    uint64
 	Timeout       time.Duration
 	Client        *http.Client
+	DirtyTracker  *LevelDBDirtyTracker
 }
 
 type CommandJournalPullError struct {
@@ -61,7 +62,7 @@ func PullCommandJournal(ctx context.Context, trie *HatTrie, journal *CommandJour
 	if err != nil {
 		return CommandJournalPullResult{}, commandJournalPullError(http.StatusBadRequest, err)
 	}
-	return pullCommandJournalTail(ctx, trie, journal, options.Source, options.AfterSequence, limit, options.UntilCurrent, maxBatches, client)
+	return pullCommandJournalTail(ctx, trie, journal, options.Source, options.AfterSequence, limit, options.UntilCurrent, maxBatches, client, options.DirtyTracker)
 }
 
 func commandJournalPullError(status int, err error) error {
@@ -81,7 +82,7 @@ func commandJournalPullHTTPClient(client *http.Client, timeout time.Duration) (*
 	return &http.Client{Timeout: timeout}, nil
 }
 
-func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int, client *http.Client) (CommandJournalPullResult, error) {
+func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int, client *http.Client, dirtyTracker *LevelDBDirtyTracker) (CommandJournalPullResult, error) {
 	result := CommandJournalPullResult{
 		Source:         source,
 		AfterSequence:  afterSequence,
@@ -96,7 +97,7 @@ func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *Command
 		if err != nil {
 			return result, commandJournalPullError(status, err)
 		}
-		batchResult, err := applyCommandJournalTail(trie, journal, source, result.AppliedThrough, tail)
+		batchResult, err := applyCommandJournalTail(trie, journal, source, result.AppliedThrough, tail, dirtyTracker)
 		if err != nil {
 			result.LastSequence = batchResult.LastSequence
 			result.CompactedThrough = batchResult.CompactedThrough
@@ -129,7 +130,11 @@ func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *Command
 	return result, nil
 }
 
-func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, tail CommandJournalTail) (CommandJournalPullResult, error) {
+func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, tail CommandJournalTail, dirtyTrackers ...*LevelDBDirtyTracker) (CommandJournalPullResult, error) {
+	var dirtyTracker *LevelDBDirtyTracker
+	if len(dirtyTrackers) > 0 {
+		dirtyTracker = dirtyTrackers[0]
+	}
 	result := CommandJournalPullResult{
 		Source:           source,
 		AfterSequence:    afterSequence,
@@ -149,6 +154,7 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 		if !response.OK {
 			return result, fmt.Errorf("journal entry %d failed: %s", entry.Sequence, response.Message)
 		}
+		dirtyTracker.markCommand(entry.Request)
 		result.Applied++
 		result.AppliedThrough = entry.Sequence
 	}

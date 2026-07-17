@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,19 @@ type LevelDBFlushResult struct {
 	DurationMillis int64     `json:"duration_millis"`
 }
 
+// LevelDBDirtyTracker tracks keys that changed since the last successful
+// incremental LevelDB save.
+type LevelDBDirtyTracker struct {
+	mu   sync.Mutex
+	seq  uint64
+	keys map[string]uint64
+}
+
+type LevelDBDirtySnapshot struct {
+	seq  uint64
+	keys []string
+}
+
 // DefaultLevelDBHotLoadPolicy loads all non-expired keys and only small, recent,
 // frequently-hit values.
 func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
@@ -84,6 +98,69 @@ func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
 		MaxValueBytes: 1024,
 		MaxLastHitAge: time.Hour,
 		MinHits:       1000,
+	}
+}
+
+func NewLevelDBDirtyTracker() *LevelDBDirtyTracker {
+	return &LevelDBDirtyTracker{keys: map[string]uint64{}}
+}
+
+func (tracker *LevelDBDirtyTracker) Mark(key string) {
+	if tracker == nil {
+		return
+	}
+	if err := validateKey(key); err != nil {
+		return
+	}
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if tracker.keys == nil {
+		tracker.keys = map[string]uint64{}
+	}
+	tracker.seq++
+	tracker.keys[key] = tracker.seq
+}
+
+func (tracker *LevelDBDirtyTracker) Pending() int {
+	if tracker == nil {
+		return 0
+	}
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	return len(tracker.keys)
+}
+
+func (tracker *LevelDBDirtyTracker) markCommand(request CacheCommandRequest) {
+	if tracker == nil || !commandShouldJournal(request) {
+		return
+	}
+	tracker.Mark(strings.TrimSpace(request.Key))
+}
+
+func (tracker *LevelDBDirtyTracker) Snapshot() LevelDBDirtySnapshot {
+	if tracker == nil {
+		return LevelDBDirtySnapshot{}
+	}
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	keys := make([]string, 0, len(tracker.keys))
+	for key := range tracker.keys {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return LevelDBDirtySnapshot{seq: tracker.seq, keys: keys}
+}
+
+func (tracker *LevelDBDirtyTracker) Clear(snapshot LevelDBDirtySnapshot) {
+	if tracker == nil || len(snapshot.keys) == 0 {
+		return
+	}
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	for _, key := range snapshot.keys {
+		if tracker.keys[key] <= snapshot.seq {
+			delete(tracker.keys, key)
+		}
 	}
 }
 
@@ -150,6 +227,77 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 		return nil
 	}
 	return db.Write(batch, &opt.WriteOptions{Sync: true})
+}
+
+func (store *LevelDBStore) SaveKeys(trie *HatTrie, keys []string) error {
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if trie == nil {
+		return ErrNilHatTrie
+	}
+
+	keys = normalizeLevelDBDirtyKeys(keys)
+	if len(keys) == 0 {
+		return nil
+	}
+	batch := new(leveldb.Batch)
+	for _, key := range keys {
+		data, ok, err := trie.levelDBEntryDataForKeyForStore(store, db, store.format, key)
+		if err != nil {
+			return err
+		}
+		dbKey := levelDBKey(key)
+		if !ok {
+			batch.Delete(dbKey)
+			continue
+		}
+		existing, exists, err := store.entryDataFromDB(db, key)
+		if err != nil {
+			return err
+		}
+		if !exists || !bytes.Equal(existing, data) {
+			batch.Put(dbKey, data)
+		}
+	}
+	if batch.Len() == 0 {
+		return nil
+	}
+	return db.Write(batch, &opt.WriteOptions{Sync: true})
+}
+
+func (store *LevelDBStore) SaveDirty(trie *HatTrie, tracker *LevelDBDirtyTracker) error {
+	if tracker == nil {
+		return store.Save(trie)
+	}
+	snapshot := tracker.Snapshot()
+	if len(snapshot.keys) == 0 {
+		return nil
+	}
+	if err := store.SaveKeys(trie, snapshot.keys); err != nil {
+		return err
+	}
+	tracker.Clear(snapshot)
+	return nil
+}
+
+func normalizeLevelDBDirtyKeys(keys []string) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(keys))
+	seen := map[string]struct{}{}
+	for _, key := range keys {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (store *LevelDBStore) Flush(trie *HatTrie) (LevelDBFlushResult, error) {
@@ -915,6 +1063,32 @@ func (trie *HatTrie) scanLevelDBEntryDataForStore(currentStore *LevelDBStore, cu
 		}
 		return nil
 	})
+}
+
+func (trie *HatTrie) levelDBEntryDataForKeyForStore(currentStore *LevelDBStore, currentDB *leveldb.DB, format StorageFormat, key string) ([]byte, bool, error) {
+	if trie == nil {
+		return nil, false, ErrNilHatTrie
+	}
+	trie.mu.Lock()
+	defer trie.mu.Unlock()
+
+	format, err := ParseStorageFormat(string(format))
+	if err != nil {
+		return nil, false, err
+	}
+	if err := validateKey(key); err != nil {
+		return nil, false, err
+	}
+	trie.ensureOpen()
+	hval := trie.peekCachedLocked(key)
+	if hval.Empty() {
+		return nil, false, nil
+	}
+	data, err := trie.levelDBEntryDataForStoreLocked(Entry{Key: key, Value: hval}, currentStore, currentDB, format)
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
 }
 
 func (trie *HatTrie) levelDBEntryDataLocked(entry Entry) ([]byte, error) {

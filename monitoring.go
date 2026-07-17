@@ -41,6 +41,7 @@ type MonitoringOptions struct {
 	StartAt              time.Time
 	Snapshot             func() error
 	LevelDBStore         *LevelDBStore
+	LevelDBDirtyTracker  *LevelDBDirtyTracker
 	BackupSnapshotFormat SnapshotFormat
 	Journal              *CommandJournal
 	Topology             *TopologyStore
@@ -61,6 +62,7 @@ type MonitoringHandler struct {
 type commandExecutionOptions struct {
 	NodeName            string
 	Journal             *CommandJournal
+	DirtyTracker        *LevelDBDirtyTracker
 	Topology            *TopologyStore
 	Election            *ElectionStore
 	Replicator          *HTTPReplicator
@@ -567,6 +569,7 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	response, rejected := executeCacheCommand(r.Context(), handler.trie, request, commandExecutionOptions{
 		NodeName:            handler.options.NodeName,
 		Journal:             handler.options.Journal,
+		DirtyTracker:        handler.options.LevelDBDirtyTracker,
 		Topology:            handler.options.Topology,
 		Election:            handler.options.Election,
 		Replicator:          handler.options.Replicator,
@@ -614,6 +617,7 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	}
 	if response.OK {
 		options.ReplicationSafety.Commit(replicationToken)
+		options.DirtyTracker.markCommand(request)
 	}
 	if options.Replicator != nil {
 		options.Replicator.ReplicateCommand(ctx, trie, request, response)
@@ -933,12 +937,14 @@ func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *h
 		return
 	}
 	defer handler.finishStorageOperation()
+	dirtySnapshot := handler.options.LevelDBDirtyTracker.Snapshot()
 	result, err := handler.options.LevelDBStore.Flush(handler.trie)
 	if err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"store": "leveldb"}})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
 	}
+	handler.options.LevelDBDirtyTracker.Clear(dirtySnapshot)
 	handler.recordStorageFlush(result)
 	handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"store": result.Store, "keys": result.Keys, "duration_millis": result.DurationMillis}})
 	writeJSON(w, result)
@@ -1266,6 +1272,7 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		UntilCurrent:  request.UntilCurrent,
 		MaxBatches:    request.MaxBatches,
 		Timeout:       DefaultCommandJournalPullTimeout,
+		DirtyTracker:  handler.options.LevelDBDirtyTracker,
 	})
 	if err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "journal.pull", OK: false, Status: http.StatusBadGateway, Message: err.Error(), Details: map[string]interface{}{"source": source, "after_sequence": request.AfterSequence}})

@@ -24,6 +24,7 @@ type CacheGRPCOptions struct {
 	StartAt             time.Time
 	Snapshot            func() error
 	Journal             *CommandJournal
+	DirtyTracker        *LevelDBDirtyTracker
 	Topology            *TopologyStore
 	Election            *ElectionStore
 	Replicator          *HTTPReplicator
@@ -230,6 +231,7 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 	response, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
 		NodeName:            server.options.NodeName,
 		Journal:             server.options.Journal,
+		DirtyTracker:        server.options.DirtyTracker,
 		Topology:            server.options.Topology,
 		Election:            server.options.Election,
 		Replicator:          server.options.Replicator,

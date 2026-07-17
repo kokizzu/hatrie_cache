@@ -162,6 +162,10 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 	defer closeLevelDB(dbStore, stderr)
+	var levelDBDirtyTracker *hatriecache.LevelDBDirtyTracker
+	if dbStore != nil {
+		levelDBDirtyTracker = hatriecache.NewLevelDBDirtyTracker()
+	}
 	if err := loadLevelDBIfConfigured(trie, dbStore, levelDBLoadPolicy(cfg)); err != nil {
 		return err
 	}
@@ -199,7 +203,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			}
 		}()
 	}
-	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, cfg.dbSyncInterval, stderr)
+	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, levelDBDirtyTracker, cfg.dbSyncInterval, stderr)
 	defer stopDBSync()
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, snapshotFormat(cfg), stderr)
 	defer stopSnapshots()
@@ -216,6 +220,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Timeout:    cfg.journalPullTimeout,
 		Limit:      cfg.journalPullLimit,
 		MaxBatches: cfg.journalPullMaxBatches,
+		Dirty:      levelDBDirtyTracker,
 	}, stderr)
 	defer stopJournalPuller()
 
@@ -264,6 +269,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		Metrics:              apiMetrics,
 		Snapshot:             snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
 		LevelDBStore:         dbStore,
+		LevelDBDirtyTracker:  levelDBDirtyTracker,
 		BackupSnapshotFormat: snapshotFormat(cfg),
 		Journal:              journal,
 		Topology:             topology,
@@ -281,7 +287,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	handler := monitoringHandler.Handler()
 	server := newMonitoringServer(cfg, handler)
 
-	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator, auditLog, rateLimiter, apiMetrics, replicationSafety)
+	grpcServer, grpcListener, err := newGRPCServer(cfg, trie, journal, snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)), topology, election, replicator, auditLog, rateLimiter, apiMetrics, replicationSafety, levelDBDirtyTracker)
 	if err != nil {
 		return err
 	}
@@ -861,7 +867,7 @@ func closeAuditLog(logger *hatriecache.AuditLogger, stderr io.Writer) {
 	}
 }
 
-func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator, auditLog *hatriecache.AuditLogger, rateLimiter *hatriecache.RateLimiter, apiMetrics *hatriecache.APIMetrics, replicationSafety *hatriecache.ReplicationSafetyStore) (*grpc.Server, net.Listener, error) {
+func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, snapshot func() error, topology *hatriecache.TopologyStore, election *hatriecache.ElectionStore, replicator *hatriecache.HTTPReplicator, auditLog *hatriecache.AuditLogger, rateLimiter *hatriecache.RateLimiter, apiMetrics *hatriecache.APIMetrics, replicationSafety *hatriecache.ReplicationSafetyStore, dirtyTracker *hatriecache.LevelDBDirtyTracker) (*grpc.Server, net.Listener, error) {
 	if cfg.grpcAddr == "" {
 		return nil, nil, nil
 	}
@@ -883,6 +889,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		Metrics:             apiMetrics,
 		Snapshot:            snapshot,
 		Journal:             journal,
+		DirtyTracker:        dirtyTracker,
 		Topology:            topology,
 		Election:            election,
 		Replicator:          replicator,
@@ -956,7 +963,7 @@ func stopGRPCServerWithTimeout(server *grpc.Server, timeout time.Duration) {
 	}
 }
 
-func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, interval time.Duration, stderr io.Writer) func() {
+func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker, interval time.Duration, stderr io.Writer) func() {
 	ctx = serverContext(ctx)
 	if store == nil || interval <= 0 {
 		return func() {}
@@ -966,12 +973,22 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
+	first := true
 	save := func() bool {
-		if err := saveLevelDBIfOpen(trie, store); errors.Is(err, errHatTrieDestroyed) {
-			return false
-		} else if err != nil {
-			fmt.Fprintf(stderr, "save leveldb: %v\n", err)
+		var err error
+		if first || dirty == nil {
+			err = saveLevelDBIfOpenAndClearDirty(trie, store, dirty)
+		} else {
+			err = saveDirtyLevelDBIfOpen(trie, store, dirty)
 		}
+		if errors.Is(err, errHatTrieDestroyed) {
+			return false
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "save leveldb: %v\n", err)
+			return true
+		}
+		first = false
 		return true
 	}
 	go func() {
@@ -1006,6 +1023,24 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 func saveLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore) (err error) {
 	defer recoverDestroyedHatTrie(&err)
 	return store.Save(trie)
+}
+
+func saveLevelDBIfOpenAndClearDirty(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker) (err error) {
+	defer recoverDestroyedHatTrie(&err)
+	if dirty == nil {
+		return store.Save(trie)
+	}
+	snapshot := dirty.Snapshot()
+	if err := store.Save(trie); err != nil {
+		return err
+	}
+	dirty.Clear(snapshot)
+	return nil
+}
+
+func saveDirtyLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker) (err error) {
+	defer recoverDestroyedHatTrie(&err)
+	return store.SaveDirty(trie, dirty)
 }
 
 type levelDBCompactorOptions struct {
@@ -1297,6 +1332,7 @@ type journalPullerConfig struct {
 	Timeout    time.Duration
 	Limit      uint64
 	MaxBatches uint64
+	Dirty      *hatriecache.LevelDBDirtyTracker
 }
 
 type journalPullState struct {
@@ -1367,6 +1403,7 @@ func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *ha
 		UntilCurrent:  true,
 		MaxBatches:    cfg.MaxBatches,
 		Timeout:       cfg.Timeout,
+		DirtyTracker:  cfg.Dirty,
 	})
 	if err != nil {
 		if result.AppliedThrough > afterSequence {

@@ -1301,7 +1301,7 @@ func TestNewGRPCServerPassesMonitoringAuthToken(t *testing.T) {
 	server, listener, err := newGRPCServer(config{
 		grpcAddr:            "127.0.0.1:0",
 		monitoringAuthToken: "secret",
-	}, ht, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	}, ht, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGRPCServer() error = %v", err)
 	}
@@ -1350,7 +1350,7 @@ func TestNewGRPCServerUsesTLS(t *testing.T) {
 		grpcAddr:    "127.0.0.1:0",
 		grpcTLSCert: certPath,
 		grpcTLSKey:  keyPath,
-	}, ht, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	}, ht, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGRPCServer(TLS) error = %v", err)
 	}
@@ -1395,7 +1395,7 @@ func TestNewGRPCServerRequiresClientCertificate(t *testing.T) {
 		grpcTLSCert:  serverCertPath,
 		grpcTLSKey:   serverKeyPath,
 		grpcClientCA: clientCertPath,
-	}, ht, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	}, ht, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGRPCServer(mTLS) error = %v", err)
 	}
@@ -1951,7 +1951,7 @@ func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stop := startLevelDBSaver(ctx, ht, store, time.Millisecond, &bytes.Buffer{})
+	stop := startLevelDBSaver(ctx, ht, store, nil, time.Millisecond, &bytes.Buffer{})
 	defer stop()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -1978,7 +1978,7 @@ func TestStartLevelDBSaverWritesImmediately(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stop := startLevelDBSaver(ctx, ht, store, time.Hour, &bytes.Buffer{})
+	stop := startLevelDBSaver(ctx, ht, store, nil, time.Hour, &bytes.Buffer{})
 	defer stop()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -1990,6 +1990,35 @@ func TestStartLevelDBSaverWritesImmediately(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("initial LevelDB save was not written")
+}
+
+func TestStartLevelDBSaverWritesDirtyKeysAfterInitialSave(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("key", "old")
+
+	store, err := openLevelDBIfConfigured(filepath.Join(t.TempDir(), "cache.leveldb"), hatriecache.DefaultStorageFormat)
+	if err != nil {
+		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
+	}
+	defer closeLevelDB(store, &bytes.Buffer{})
+	dirty := hatriecache.NewLevelDBDirtyTracker()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := startLevelDBSaver(ctx, ht, store, dirty, time.Millisecond, &bytes.Buffer{})
+	defer stop()
+
+	waitUntil(t, 2*time.Second, func() bool {
+		entry, ok, err := store.Entry("key")
+		return err == nil && ok && entry.Type == "string" && entry.String == "old"
+	})
+	ht.UpsertString("key", "new")
+	dirty.Mark("key")
+	waitUntil(t, 2*time.Second, func() bool {
+		entry, ok, err := store.Entry("key")
+		return err == nil && ok && entry.Type == "string" && entry.String == "new" && dirty.Pending() == 0
+	})
 }
 
 func TestStartLevelDBCompactorRunsPeriodically(t *testing.T) {
@@ -2042,7 +2071,7 @@ func TestStartLevelDBSaverStopIsIdempotent(t *testing.T) {
 	defer closeLevelDB(store, &bytes.Buffer{})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stop := startLevelDBSaver(ctx, ht, store, time.Hour, &bytes.Buffer{})
+	stop := startLevelDBSaver(ctx, ht, store, nil, time.Hour, &bytes.Buffer{})
 	cancel()
 
 	assertStopReturns(t, stop, "LevelDB saver repeated stop")
@@ -2074,7 +2103,7 @@ func TestStartLevelDBSaverStopsAfterDestroy(t *testing.T) {
 	}
 	defer closeLevelDB(store, &bytes.Buffer{})
 
-	stop := startLevelDBSaver(context.Background(), ht, store, time.Millisecond, &bytes.Buffer{})
+	stop := startLevelDBSaver(context.Background(), ht, store, nil, time.Millisecond, &bytes.Buffer{})
 	ht.Destroy()
 	time.Sleep(20 * time.Millisecond)
 
@@ -2099,7 +2128,7 @@ func TestPeriodicHelpersAcceptNilContext(t *testing.T) {
 		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
 	}
 	defer closeLevelDB(store, &bytes.Buffer{})
-	stopLevelDB := startLevelDBSaver(nil, ht, store, time.Hour, &bytes.Buffer{})
+	stopLevelDB := startLevelDBSaver(nil, ht, store, nil, time.Hour, &bytes.Buffer{})
 	waitUntil(t, 2*time.Second, func() bool {
 		entry, ok, err := store.Entry("key")
 		return err == nil && ok && entry.Type == "string" && entry.String == "value"
