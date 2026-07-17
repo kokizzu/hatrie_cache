@@ -403,12 +403,19 @@ make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data REST
 For a server-side atomic backup bundle, ask the monitoring API to write a
 tar.gz bundle containing `manifest.json`, `snapshot.hc`, and a compacted
 `commands.journal` checkpoint. The manifest records file sizes, SHA-256
-checksums, snapshot format, and journal sequence:
+checksums, snapshot format, journal sequence, and optional partition metadata:
 
 ```
 make cli ARGS='backup -path backup/run-001.tar.gz'
 make cli ARGS='backup -path backup/run-001.tar.gz -snapshot-format gzip-binary'
+make cli ARGS='backup -path backup/sg.tar.gz -partitions sg -partition-mode partitioned -partition-node node-sg-a -partition-epoch 42 -partition-fingerprint topology-v1 -partition-prefixes sg:'
 ```
+
+Partition metadata is intentionally descriptive today. It records which
+operator-defined partition ids, key prefixes, node id, topology epoch, and
+topology fingerprint a backup covered, and `doctor`/`restore-bundle` echo it
+back in their JSON reports. It does not enable automatic partition routing or
+partial restore by itself.
 
 For crash recovery, restart with the same persistence flags first. If a node was
 offline while a leader continued accepting writes, also pull journal catch-up or

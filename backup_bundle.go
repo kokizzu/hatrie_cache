@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"hatrie_cache/internal/jsonwire"
@@ -26,24 +27,93 @@ const (
 type BackupBundleOptions struct {
 	SnapshotFormat SnapshotFormat
 	CreatedAt      time.Time
+	Partition      BackupPartitionMetadata
+}
+
+type BackupPartitionMetadata struct {
+	Mode                string   `json:"mode,omitempty"`
+	Partitions          []string `json:"partitions,omitempty"`
+	NodeID              string   `json:"node_id,omitempty"`
+	TopologyEpoch       uint64   `json:"topology_epoch,omitempty"`
+	TopologyFingerprint string   `json:"topology_fingerprint,omitempty"`
+	KeyPrefixes         []string `json:"key_prefixes,omitempty"`
 }
 
 type BackupBundleManifest struct {
-	Version         int                `json:"version"`
-	CreatedAt       time.Time          `json:"created_at"`
-	Snapshot        string             `json:"snapshot"`
-	SnapshotFormat  string             `json:"snapshot_format"`
-	Journal         string             `json:"journal,omitempty"`
-	JournalFormat   string             `json:"journal_format,omitempty"`
-	JournalSequence uint64             `json:"journal_sequence"`
-	Files           []BackupBundleFile `json:"files"`
-	RestoreHint     string             `json:"restore_hint"`
+	Version         int                      `json:"version"`
+	CreatedAt       time.Time                `json:"created_at"`
+	Snapshot        string                   `json:"snapshot"`
+	SnapshotFormat  string                   `json:"snapshot_format"`
+	Journal         string                   `json:"journal,omitempty"`
+	JournalFormat   string                   `json:"journal_format,omitempty"`
+	JournalSequence uint64                   `json:"journal_sequence"`
+	Partition       *BackupPartitionMetadata `json:"partition,omitempty"`
+	Files           []BackupBundleFile       `json:"files"`
+	RestoreHint     string                   `json:"restore_hint"`
 }
 
 type BackupBundleFile struct {
 	Path   string `json:"path"`
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256"`
+}
+
+func normalizeBackupPartitionMetadata(input BackupPartitionMetadata) (*BackupPartitionMetadata, error) {
+	out := BackupPartitionMetadata{
+		Mode:                strings.TrimSpace(input.Mode),
+		NodeID:              strings.TrimSpace(input.NodeID),
+		TopologyEpoch:       input.TopologyEpoch,
+		TopologyFingerprint: strings.TrimSpace(input.TopologyFingerprint),
+	}
+	var err error
+	out.Partitions, err = normalizeBackupPartitionList("partition", input.Partitions)
+	if err != nil {
+		return nil, err
+	}
+	out.KeyPrefixes, err = normalizeBackupPartitionList("key prefix", input.KeyPrefixes)
+	if err != nil {
+		return nil, err
+	}
+	if out.Mode == "" && out.NodeID == "" && out.TopologyEpoch == 0 && out.TopologyFingerprint == "" && len(out.Partitions) == 0 && len(out.KeyPrefixes) == 0 {
+		return nil, nil
+	}
+	if out.Mode == "" {
+		out.Mode = "partitioned"
+	}
+	if len(out.Partitions) == 0 {
+		return nil, errors.New("hatriecache: backup partition metadata requires at least one partition id")
+	}
+	return &out, nil
+}
+
+func normalizeBackupPartitionList(label string, values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, fmt.Errorf("hatriecache: backup %s id is required", label)
+		}
+		if _, ok := seen[value]; ok {
+			return nil, fmt.Errorf("hatriecache: duplicate backup %s %q", label, value)
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+func cloneBackupPartitionMetadata(input *BackupPartitionMetadata) *BackupPartitionMetadata {
+	if input == nil {
+		return nil
+	}
+	out := *input
+	out.Partitions = append([]string(nil), input.Partitions...)
+	out.KeyPrefixes = append([]string(nil), input.KeyPrefixes...)
+	return &out
 }
 
 func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, options BackupBundleOptions) (BackupBundleManifest, error) {
@@ -54,6 +124,10 @@ func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, opt
 		return BackupBundleManifest{}, ErrNilHatTrie
 	}
 	snapshotFormat, err := ParseSnapshotFormat(string(options.SnapshotFormat))
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	partition, err := normalizeBackupPartitionMetadata(options.Partition)
 	if err != nil {
 		return BackupBundleManifest{}, err
 	}
@@ -79,12 +153,12 @@ func CreateBackupBundle(path string, trie *HatTrie, journal *CommandJournal, opt
 		if journal.closed {
 			return BackupBundleManifest{}, ErrCommandJournalClosed
 		}
-		return createBackupBundleLocked(path, tmpDir, trie, journal.lastSequenceLocked(), journal.format, snapshotFormat, createdAt, true)
+		return createBackupBundleLocked(path, tmpDir, trie, journal.lastSequenceLocked(), journal.format, snapshotFormat, createdAt, true, partition)
 	}
-	return createBackupBundleLocked(path, tmpDir, trie, 0, "", snapshotFormat, createdAt, false)
+	return createBackupBundleLocked(path, tmpDir, trie, 0, "", snapshotFormat, createdAt, false, partition)
 }
 
-func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journalSequence uint64, journalFormat CommandJournalFormat, snapshotFormat SnapshotFormat, createdAt time.Time, includeJournal bool) (BackupBundleManifest, error) {
+func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journalSequence uint64, journalFormat CommandJournalFormat, snapshotFormat SnapshotFormat, createdAt time.Time, includeJournal bool, partition *BackupPartitionMetadata) (BackupBundleManifest, error) {
 	snapshotPath := filepath.Join(tmpDir, backupBundleSnapshotPath)
 	if err := trie.SaveSnapshotWithJournalSequenceAndFormat(snapshotPath, journalSequence, snapshotFormat); err != nil {
 		return BackupBundleManifest{}, err
@@ -117,6 +191,7 @@ func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journal
 		Snapshot:        backupBundleSnapshotPath,
 		SnapshotFormat:  string(snapshotFormat),
 		JournalSequence: journalSequence,
+		Partition:       cloneBackupPartitionMetadata(partition),
 		Files:           files,
 		RestoreHint:     "extract snapshot.hc and commands.journal into DATA_DIR, then start with SNAPSHOT_PATH=DATA_DIR/snapshot.hc JOURNAL_PATH=DATA_DIR/commands.journal",
 	}

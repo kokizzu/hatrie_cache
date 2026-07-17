@@ -1743,6 +1743,14 @@ func TestRunBackupPostsToBackupEndpoint(t *testing.T) {
 	var gotRequest struct {
 		Path           string `json:"path"`
 		SnapshotFormat string `json:"snapshot_format"`
+		Partition      struct {
+			Mode                string   `json:"mode"`
+			Partitions          []string `json:"partitions"`
+			NodeID              string   `json:"node_id"`
+			TopologyEpoch       uint64   `json:"topology_epoch"`
+			TopologyFingerprint string   `json:"topology_fingerprint"`
+			KeyPrefixes         []string `json:"key_prefixes"`
+		} `json:"partition"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.String()
@@ -1755,7 +1763,18 @@ func TestRunBackupPostsToBackupEndpoint(t *testing.T) {
 	defer server.Close()
 
 	stdout := &bytes.Buffer{}
-	if err := run(context.Background(), []string{"-addr", server.URL, "backup", "-path", "/tmp/backup.tar.gz", "-snapshot-format", "gzip-binary"}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"backup",
+		"-path", "/tmp/backup.tar.gz",
+		"-snapshot-format", "gzip-binary",
+		"-partition-mode", "partitioned",
+		"-partitions", "sg",
+		"-partition-node", "node-sg-a",
+		"-partition-epoch", "42",
+		"-partition-fingerprint", "topology-v1",
+		"-partition-prefixes", "sg:",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
 		t.Fatalf("run(backup) error = %v", err)
 	}
 	if gotPath != "/api/backup" || gotMethod != http.MethodPost {
@@ -1763,6 +1782,9 @@ func TestRunBackupPostsToBackupEndpoint(t *testing.T) {
 	}
 	if gotRequest.Path != "/tmp/backup.tar.gz" || gotRequest.SnapshotFormat != "gzip-binary" {
 		t.Fatalf("backup request = %#v, want path and snapshot format", gotRequest)
+	}
+	if gotRequest.Partition.Mode != "partitioned" || !reflect.DeepEqual(gotRequest.Partition.Partitions, []string{"sg"}) || gotRequest.Partition.NodeID != "node-sg-a" || gotRequest.Partition.TopologyEpoch != 42 || gotRequest.Partition.TopologyFingerprint != "topology-v1" || !reflect.DeepEqual(gotRequest.Partition.KeyPrefixes, []string{"sg:"}) {
+		t.Fatalf("backup partition request = %#v, want requested partition metadata", gotRequest.Partition)
 	}
 	if got := stdout.String(); got != "{\"version\":1,\"snapshot\":\"snapshot.hc\"}\n" {
 		t.Fatalf("stdout = %q, want backup response", got)

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -86,6 +87,66 @@ func TestCreateBackupBundleRejectsMissingPath(t *testing.T) {
 	_, err := CreateBackupBundle("", newTestTrie(t), nil, BackupBundleOptions{})
 	if err == nil {
 		t.Fatal("CreateBackupBundle(empty path) error = nil, want rejection")
+	}
+}
+
+func TestCreateBackupBundleCarriesPartitionMetadataToDoctorAndRestore(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "sg:session:1", Value: "ivi"}); !got.OK {
+		t.Fatalf("SETSTR response = %#v, want ok", got)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	partition := BackupPartitionMetadata{
+		Mode:                "partitioned",
+		Partitions:          []string{"sg"},
+		NodeID:              "node-sg-a",
+		TopologyEpoch:       42,
+		TopologyFingerprint: "topology-v1",
+		KeyPrefixes:         []string{"sg:"},
+	}
+	manifest, err := CreateBackupBundle(bundlePath, ht, nil, BackupBundleOptions{
+		SnapshotFormat: SnapshotFormatJSON,
+		Partition:      partition,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackupBundle() error = %v", err)
+	}
+	if manifest.Partition == nil || !reflect.DeepEqual(*manifest.Partition, partition) {
+		t.Fatalf("manifest partition = %#v, want %#v", manifest.Partition, partition)
+	}
+
+	files := readBackupBundleFiles(t, bundlePath)
+	var bundledManifest BackupBundleManifest
+	if err := json.Unmarshal(files[backupBundleManifestPath], &bundledManifest); err != nil {
+		t.Fatalf("Unmarshal(manifest.json) error = %v", err)
+	}
+	if bundledManifest.Partition == nil || !reflect.DeepEqual(*bundledManifest.Partition, partition) {
+		t.Fatalf("bundled manifest partition = %#v, want %#v", bundledManifest.Partition, partition)
+	}
+
+	doctor, err := VerifyBackupBundle(bundlePath)
+	if err != nil {
+		t.Fatalf("VerifyBackupBundle() error = %v", err)
+	}
+	if doctor.Partition == nil || !reflect.DeepEqual(*doctor.Partition, partition) {
+		t.Fatalf("doctor partition = %#v, want %#v", doctor.Partition, partition)
+	}
+
+	restoreReport, err := RestoreBackupBundle(bundlePath, filepath.Join(t.TempDir(), "data"), BackupBundleRestoreOptions{})
+	if err != nil {
+		t.Fatalf("RestoreBackupBundle() error = %v", err)
+	}
+	if restoreReport.Partition == nil || !reflect.DeepEqual(*restoreReport.Partition, partition) {
+		t.Fatalf("restore partition = %#v, want %#v", restoreReport.Partition, partition)
+	}
+}
+
+func TestCreateBackupBundleRejectsInvalidPartitionMetadata(t *testing.T) {
+	_, err := CreateBackupBundle(filepath.Join(t.TempDir(), "backup.tar.gz"), newTestTrie(t), nil, BackupBundleOptions{
+		Partition: BackupPartitionMetadata{Mode: "partitioned", Partitions: []string{"sg", " "}},
+	})
+	if err == nil {
+		t.Fatal("CreateBackupBundle(invalid partition) error = nil, want rejection")
 	}
 }
 

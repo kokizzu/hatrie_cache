@@ -16,13 +16,14 @@ type BackupBundleRestoreOptions struct {
 }
 
 type BackupBundleRestoreReport struct {
-	OK              bool   `json:"ok"`
-	Bundle          string `json:"bundle"`
-	DataDir         string `json:"data_dir"`
-	Snapshot        string `json:"snapshot"`
-	Journal         string `json:"journal,omitempty"`
-	JournalSequence uint64 `json:"journal_sequence"`
-	RecoveredKeys   int    `json:"recovered_keys"`
+	OK              bool                     `json:"ok"`
+	Bundle          string                   `json:"bundle"`
+	DataDir         string                   `json:"data_dir"`
+	Snapshot        string                   `json:"snapshot"`
+	Journal         string                   `json:"journal,omitempty"`
+	Partition       *BackupPartitionMetadata `json:"partition,omitempty"`
+	JournalSequence uint64                   `json:"journal_sequence"`
+	RecoveredKeys   int                      `json:"recovered_keys"`
 }
 
 type RestoreRehearsalOptions struct {
@@ -125,6 +126,7 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		DataDir:         dataDir,
 		Snapshot:        snapshotPath,
 		Journal:         journalPath,
+		Partition:       cloneBackupPartitionMetadata(manifest.Partition),
 		JournalSequence: manifest.JournalSequence,
 		RecoveredKeys:   doctor.RecoveredKeys,
 	}, nil

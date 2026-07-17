@@ -17,15 +17,16 @@ import (
 )
 
 type BackupDoctorReport struct {
-	OK              bool                  `json:"ok"`
-	Kind            string                `json:"kind"`
-	Path            string                `json:"path"`
-	Snapshot        *BackupDoctorSnapshot `json:"snapshot,omitempty"`
-	Journal         *BackupDoctorJournal  `json:"journal,omitempty"`
-	LevelDB         *BackupDoctorLevelDB  `json:"leveldb,omitempty"`
-	Files           []BackupBundleFile    `json:"files,omitempty"`
-	RecoveredKeys   int                   `json:"recovered_keys,omitempty"`
-	JournalSequence uint64                `json:"journal_sequence,omitempty"`
+	OK              bool                     `json:"ok"`
+	Kind            string                   `json:"kind"`
+	Path            string                   `json:"path"`
+	Snapshot        *BackupDoctorSnapshot    `json:"snapshot,omitempty"`
+	Journal         *BackupDoctorJournal     `json:"journal,omitempty"`
+	LevelDB         *BackupDoctorLevelDB     `json:"leveldb,omitempty"`
+	Files           []BackupBundleFile       `json:"files,omitempty"`
+	Partition       *BackupPartitionMetadata `json:"partition,omitempty"`
+	RecoveredKeys   int                      `json:"recovered_keys,omitempty"`
+	JournalSequence uint64                   `json:"journal_sequence,omitempty"`
 }
 
 type BackupDoctorSnapshot struct {
@@ -94,6 +95,7 @@ func VerifyBackupBundle(path string) (BackupDoctorReport, error) {
 		Kind:            "bundle",
 		Path:            path,
 		Files:           manifest.Files,
+		Partition:       cloneBackupPartitionMetadata(manifest.Partition),
 		JournalSequence: manifest.JournalSequence,
 	}
 	trie := CreateHatTrie()

@@ -383,23 +383,63 @@ func runBackup(ctx context.Context, client *http.Client, addr string, args []str
 	flags.SetOutput(cliWriter(stderr))
 	path := flags.String("path", "", "server-side backup bundle output path")
 	snapshotFormat := flags.String("snapshot-format", "", "optional snapshot format override for the backup bundle")
+	partitionMode := flags.String("partition-mode", "", "optional backup partition mode metadata")
+	partitions := flags.String("partitions", "", "comma-separated partition ids covered by the backup")
+	partitionNode := flags.String("partition-node", "", "optional node id that produced the partition backup")
+	partitionEpoch := flags.Uint64("partition-epoch", 0, "optional topology epoch for partition metadata")
+	partitionFingerprint := flags.String("partition-fingerprint", "", "optional topology fingerprint for partition metadata")
+	partitionPrefixes := flags.String("partition-prefixes", "", "comma-separated key prefixes covered by the partition backup")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*path) == "" {
 		return errors.New("backup -path is required")
 	}
+	partition := backupPartitionMetadataFromFlags(*partitionMode, *partitions, *partitionNode, *partitionEpoch, *partitionFingerprint, *partitionPrefixes)
 	body, err := jsonwire.Marshal(struct {
-		Path           string `json:"path"`
-		SnapshotFormat string `json:"snapshot_format,omitempty"`
+		Path           string                               `json:"path"`
+		SnapshotFormat string                               `json:"snapshot_format,omitempty"`
+		Partition      *hatriecache.BackupPartitionMetadata `json:"partition,omitempty"`
 	}{
 		Path:           strings.TrimSpace(*path),
 		SnapshotFormat: strings.TrimSpace(*snapshotFormat),
+		Partition:      partition,
 	})
 	if err != nil {
 		return err
 	}
 	return postJSON(ctx, client, addr, "/api/backup", body, stdout)
+}
+
+func backupPartitionMetadataFromFlags(mode string, partitions string, node string, epoch uint64, fingerprint string, prefixes string) *hatriecache.BackupPartitionMetadata {
+	metadata := hatriecache.BackupPartitionMetadata{
+		Mode:                strings.TrimSpace(mode),
+		Partitions:          splitCLICommaList(partitions),
+		NodeID:              strings.TrimSpace(node),
+		TopologyEpoch:       epoch,
+		TopologyFingerprint: strings.TrimSpace(fingerprint),
+		KeyPrefixes:         splitCLICommaList(prefixes),
+	}
+	if metadata.Mode == "" && len(metadata.Partitions) == 0 && metadata.NodeID == "" && metadata.TopologyEpoch == 0 && metadata.TopologyFingerprint == "" && len(metadata.KeyPrefixes) == 0 {
+		return nil
+	}
+	return &metadata
+}
+
+func splitCLICommaList(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func runDoctor(args []string, stdout io.Writer, stderr io.Writer) error {

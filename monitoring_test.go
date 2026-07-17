@@ -1528,7 +1528,7 @@ func TestMonitoringHandlerWritesBackupBundle(t *testing.T) {
 	}).Handler()
 
 	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
-	body := `{"path":` + strconv.Quote(bundlePath) + `}`
+	body := `{"path":` + strconv.Quote(bundlePath) + `,"partition":{"mode":"partitioned","partitions":["sg"],"node_id":"node-sg-a","topology_epoch":42,"topology_fingerprint":"topology-v1","key_prefixes":["sg:"]}}`
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/backup", strings.NewReader(body)))
 	if resp.Code != http.StatusOK {
@@ -1543,6 +1543,16 @@ func TestMonitoringHandlerWritesBackupBundle(t *testing.T) {
 	}
 	if manifest.JournalSequence != 1 || manifest.Snapshot != backupBundleSnapshotPath || manifest.Journal != backupBundleJournalPath {
 		t.Fatalf("backup manifest = %#v, want snapshot and journal checkpoint at sequence 1", manifest)
+	}
+	if manifest.Partition == nil || !reflect.DeepEqual(*manifest.Partition, BackupPartitionMetadata{
+		Mode:                "partitioned",
+		Partitions:          []string{"sg"},
+		NodeID:              "node-sg-a",
+		TopologyEpoch:       42,
+		TopologyFingerprint: "topology-v1",
+		KeyPrefixes:         []string{"sg:"},
+	}) {
+		t.Fatalf("backup manifest partition = %#v, want requested partition metadata", manifest.Partition)
 	}
 
 	resp = httptest.NewRecorder()
