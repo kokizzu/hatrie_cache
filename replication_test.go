@@ -35,6 +35,47 @@ func mustDecodeReplicationTestCommand(t *testing.T, w http.ResponseWriter, r *ht
 	return request
 }
 
+func mustDecodeReplicationBatchValues(t *testing.T, request CacheCommandRequest) []CacheCommandRequest {
+	t.Helper()
+	if request.Command != "INTERNALBATCH" {
+		t.Fatalf("replication request command = %q, want INTERNALBATCH", request.Command)
+	}
+	out := make([]CacheCommandRequest, 0, len(request.Values))
+	for idx, value := range request.Values {
+		text, ok := value.(string)
+		if !ok {
+			t.Fatalf("batch value %d = %T, want string", idx, value)
+		}
+		var payload CacheCommandRequest
+		if err := json.Unmarshal([]byte(text), &payload); err != nil {
+			t.Fatalf("batch value %d JSON error = %v", idx, err)
+		}
+		out = append(out, payload)
+	}
+	return out
+}
+
+func replicationRequestKeys(t *testing.T, request CacheCommandRequest) []string {
+	t.Helper()
+	switch request.Command {
+	case "INTERNALSET", "INTERNALDEL":
+		return []string{request.Key}
+	case "INTERNALBATCH":
+		payloads := mustDecodeReplicationBatchValues(t, request)
+		keys := make([]string, 0, len(payloads))
+		for _, payload := range payloads {
+			if payload.Command != "INTERNALSET" && payload.Command != "INTERNALDEL" {
+				t.Fatalf("batch payload = %#v, want internal replication command", payload)
+			}
+			keys = append(keys, payload.Key)
+		}
+		return keys
+	default:
+		t.Fatalf("replication request = %#v, want internal replication command", request)
+		return nil
+	}
+}
+
 func assertReplicationResultTiming(t *testing.T, result ReplicationResult) {
 	t.Helper()
 	if result.StartedAt == nil || result.FinishedAt == nil {
@@ -1532,25 +1573,29 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	})
 
 	result := replicator.SyncAll(context.Background(), trie, "session:")
-	if result.Skipped || result.Command != "SYNC" || result.Key != "session:" || result.Entries != 2 || len(result.Targets) != 2 {
-		t.Fatalf("sync result = %#v, want two synced entries", result)
+	if result.Skipped || result.Command != "SYNC" || result.Key != "session:" || result.Entries != 2 || len(result.Targets) != 1 {
+		t.Fatalf("sync result = %#v, want one batched target for two synced entries", result)
 	}
 	assertReplicationResultTiming(t, result)
-	targetKeys := map[string]bool{}
 	for _, target := range result.Targets {
-		if !target.OK || target.Key == "" {
-			t.Fatalf("sync target = %#v, want ok target with key", target)
+		if !target.OK || target.Node != "node-b" {
+			t.Fatalf("sync target = %#v, want ok node-b target", target)
 		}
-		targetKeys[target.Key] = true
+	}
+	request := <-requests
+	payloads := mustDecodeReplicationBatchValues(t, request)
+	if len(payloads) != 2 {
+		t.Fatalf("sync batch payloads len = %d, want 2: %#v", len(payloads), payloads)
+	}
+	targetKeys := map[string]bool{}
+	for _, payload := range payloads {
+		if payload.Command != "INTERNALSET" || payload.Value == "" {
+			t.Fatalf("sync batch payload = %#v, want INTERNALSET snapshot", payload)
+		}
+		targetKeys[payload.Key] = true
 	}
 	if !targetKeys["session:1"] || !targetKeys["session:2"] {
-		t.Fatalf("sync target keys = %#v, want session keys", targetKeys)
-	}
-	for i := 0; i < 2; i++ {
-		request := <-requests
-		if request.Command != "INTERNALSET" || request.Value == "" || (request.Key != "session:1" && request.Key != "session:2") {
-			t.Fatalf("sync request = %#v, want INTERNALSET session snapshot", request)
-		}
+		t.Fatalf("sync batch keys = %#v, want session keys", targetKeys)
 	}
 	select {
 	case request := <-requests:
@@ -1662,25 +1707,47 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	})
 
 	result := replicator.syncAllPaged(context.Background(), trie, "session:", 2)
-	if result.Skipped || result.Entries != 3 || len(result.Targets) != 3 {
-		t.Fatalf("paged sync result = %#v, want three synced entries", result)
+	if result.Skipped || result.Entries != 3 || len(result.Targets) != 2 {
+		t.Fatalf("paged sync result = %#v, want two target requests for three synced entries", result)
+	}
+	for _, target := range result.Targets {
+		if !target.OK {
+			t.Fatalf("paged sync target = %#v, want ok target", target)
+		}
 	}
 	targetKeys := map[string]bool{}
-	for _, target := range result.Targets {
-		if !target.OK || target.Key == "" {
-			t.Fatalf("paged sync target = %#v, want ok target with key", target)
+	batches := 0
+	singles := 0
+	for i := 0; i < 2; i++ {
+		request := <-requests
+		switch request.Command {
+		case "INTERNALBATCH":
+			batches++
+			payloads := mustDecodeReplicationBatchValues(t, request)
+			if len(payloads) != 2 {
+				t.Fatalf("paged sync batch len = %d, want 2: %#v", len(payloads), payloads)
+			}
+		case "INTERNALSET":
+			singles++
+			if request.Value == "" {
+				t.Fatalf("paged sync single request = %#v, want snapshot value", request)
+			}
+		default:
+			t.Fatalf("paged sync request = %#v, want internal replication request", request)
 		}
-		targetKeys[target.Key] = true
+		for _, key := range replicationRequestKeys(t, request) {
+			if !strings.HasPrefix(key, "session:") {
+				t.Fatalf("paged sync request key = %q, want session key", key)
+			}
+			targetKeys[key] = true
+		}
+	}
+	if batches != 1 || singles != 1 {
+		t.Fatalf("paged sync request shape = %d batches %d singles, want 1 batch and 1 single", batches, singles)
 	}
 	for _, key := range []string{"session:1", "session:2", "session:3"} {
 		if !targetKeys[key] {
-			t.Fatalf("paged sync target keys = %#v, missing %s", targetKeys, key)
-		}
-	}
-	for i := 0; i < 3; i++ {
-		request := <-requests
-		if request.Command != "INTERNALSET" || request.Value == "" || !strings.HasPrefix(request.Key, "session:") {
-			t.Fatalf("paged sync request = %#v, want INTERNALSET session snapshot", request)
+			t.Fatalf("paged sync request keys = %#v, missing %s", targetKeys, key)
 		}
 	}
 	select {

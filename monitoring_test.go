@@ -1560,6 +1560,77 @@ func TestMonitoringReplicationAuthTokenOnlyAllowsInternalCommands(t *testing.T) 
 	}
 }
 
+func TestMonitoringHandlerExecutesInternalReplicationBatch(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("old", "value")
+	handler := NewMonitoringHandler(ht, MonitoringOptions{ReplicationAuthToken: "replica-secret"}).Handler()
+
+	batchedSet := mustMarshalMonitoringTestCommand(t, CacheCommandRequest{
+		Command: "INTERNALSET",
+		Key:     "name",
+		Value:   `{"type":"string","string":"batched"}`,
+	})
+	batchedDel := mustMarshalMonitoringTestCommand(t, CacheCommandRequest{Command: "INTERNALDEL", Key: "old"})
+	body := mustMarshalMonitoringTestCommand(t, CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Values:  Slice{batchedSet, batchedDel},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(body))
+	req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("batch status = %d body %q, want 200", resp.Code, resp.Body.String())
+	}
+	var response CacheCommandResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+		t.Fatalf("batch response JSON error = %v", err)
+	}
+	if !response.OK {
+		t.Fatalf("batch response = %#v, want ok", response)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: "name"}); !got.OK || got.Value != "batched" {
+		t.Fatalf("batched GETSTR = %#v, want batched value", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "old"}); !got.OK || got.Value != "0" {
+		t.Fatalf("batched old EXISTS = %#v, want deleted", got)
+	}
+
+	unsafeBody := mustMarshalMonitoringTestCommand(t, CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Values: Slice{mustMarshalMonitoringTestCommand(t, CacheCommandRequest{
+			Command: "SETSTR",
+			Key:     "unsafe",
+			Value:   "blocked",
+		})},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(unsafeBody))
+	req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("unsafe batch status = %d body %q, want 200 command error", resp.Code, resp.Body.String())
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unsafe batch response JSON error = %v", err)
+	}
+	if response.OK {
+		t.Fatalf("unsafe batch response = %#v, want command error", response)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "unsafe"}); !got.OK || got.Value != "0" {
+		t.Fatalf("unsafe key EXISTS = %#v, want not mutated", got)
+	}
+}
+
+func mustMarshalMonitoringTestCommand(t *testing.T, request CacheCommandRequest) string {
+	t.Helper()
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("Marshal(%#v) error = %v", request, err)
+	}
+	return string(data)
+}
+
 func TestMonitoringHandlerExposesRuntimeConfig(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{

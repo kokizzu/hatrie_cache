@@ -321,7 +321,7 @@ func (handler *MonitoringHandler) rejectDangerousHTTP(w http.ResponseWriter, r *
 }
 
 func (handler *MonitoringHandler) rejectDangerousCommandHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest, format CommandWireFormat) bool {
-	if !commandShouldJournal(request) {
+	if !commandShouldJournal(request) && normalizedCommand(request.Command) != "INTERNALBATCH" {
 		return false
 	}
 	if handler.options.WriteProtected {
@@ -687,6 +687,15 @@ func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWrite
 
 func isInternalReplicationCommand(request CacheCommandRequest) bool {
 	switch normalizedCommand(request.Command) {
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSingleInternalReplicationCommand(request CacheCommandRequest) bool {
+	switch normalizedCommand(request.Command) {
 	case "INTERNALSET", "INTERNALDEL":
 		return true
 	default:
@@ -712,6 +721,9 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if trie == nil {
 		return commandError("trie is not configured"), false
 	}
+	if normalizedCommand(request.Command) == "INTERNALBATCH" {
+		return executeInternalReplicationBatch(ctx, trie, request, options)
+	}
 	replicationToken, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
 	if handled {
 		return response, rejected
@@ -732,6 +744,65 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		options.Replicator.ReplicateCommand(ctx, trie, request, response)
 	}
 	return response, false
+}
+
+func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
+	if err := ctx.Err(); err != nil {
+		return commandError(err.Error()), false
+	}
+	payloads, err := internalReplicationBatchRequests(request)
+	if err != nil {
+		return commandError(err.Error()), false
+	}
+	batchOptions := options
+	batchOptions.Replicator = nil
+	for idx, payload := range payloads {
+		if !isSingleInternalReplicationCommand(payload) {
+			return commandError(fmt.Sprintf("internal replication batch value %d must be INTERNALSET or INTERNALDEL", idx)), false
+		}
+		response, rejected := executeCacheCommand(ctx, trie, payload, batchOptions)
+		if rejected || !response.OK {
+			return response, rejected
+		}
+	}
+	return CacheCommandResponse{OK: true, Message: "internal replication batch applied"}, false
+}
+
+func internalReplicationBatchRequests(request CacheCommandRequest) ([]CacheCommandRequest, error) {
+	if len(request.Values) == 0 {
+		return nil, errors.New("internal replication batch requires values")
+	}
+	payloads := make([]CacheCommandRequest, 0, len(request.Values))
+	for idx, value := range request.Values {
+		payload, err := decodeInternalReplicationBatchValue(value)
+		if err != nil {
+			return nil, fmt.Errorf("internal replication batch value %d: %w", idx, err)
+		}
+		payloads = append(payloads, payload)
+	}
+	return payloads, nil
+}
+
+func decodeInternalReplicationBatchValue(value interface{}) (CacheCommandRequest, error) {
+	text, ok := value.(string)
+	if !ok {
+		return CacheCommandRequest{}, fmt.Errorf("expected JSON string, got %T", value)
+	}
+	decoder := jsonwire.NewDecoder(strings.NewReader(text))
+	decoder.DisallowUnknownFields()
+	decoder.UseNumber()
+	var request CacheCommandRequest
+	if err := decoder.Decode(&request); err != nil {
+		return CacheCommandRequest{}, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return CacheCommandRequest{}, errors.New("invalid command request JSON")
+		}
+		return CacheCommandRequest{}, err
+	}
+	return request, nil
 }
 
 func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore) (replicationSafetyToken, CacheCommandResponse, bool, bool) {

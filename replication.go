@@ -180,6 +180,12 @@ type replicationTask struct {
 	payload CacheCommandRequest
 }
 
+type replicationTaskGroup struct {
+	target   TopologyNode
+	payloads []CacheCommandRequest
+	keys     []string
+}
+
 type replicationJob struct {
 	id         uint64
 	result     ReplicationResult
@@ -814,11 +820,54 @@ func (replicator *HTTPReplicator) planReplication(ctx context.Context, trie *Hat
 
 func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, result ReplicationResult, tasks []replicationTask) ReplicationResult {
 	result.Queued = false
-	result.Targets = make([]ReplicationTargetResult, 0, len(tasks))
-	for _, task := range tasks {
-		result.Targets = append(result.Targets, replicator.executeReplicationTarget(ctx, task.target, task.payload))
+	groups := groupReplicationTasksByTarget(tasks)
+	result.Targets = make([]ReplicationTargetResult, 0, len(groups))
+	for _, group := range groups {
+		targetResult := replicator.executeReplicationTargetBatch(ctx, group.target, group.payloads)
+		if len(group.keys) == 1 {
+			targetResult.Key = group.keys[0]
+		}
+		result.Targets = append(result.Targets, targetResult)
 	}
 	return result
+}
+
+func groupReplicationTasksByTarget(tasks []replicationTask) []replicationTaskGroup {
+	if len(tasks) == 0 {
+		return nil
+	}
+	if len(tasks) == 1 {
+		task := tasks[0]
+		return []replicationTaskGroup{{
+			target:   task.target,
+			payloads: []CacheCommandRequest{task.payload},
+			keys:     []string{strings.TrimSpace(task.payload.Key)},
+		}}
+	}
+	groups := make([]replicationTaskGroup, 0, len(tasks))
+	indexes := make(map[string]int, len(tasks))
+	for _, task := range tasks {
+		key := replicationTaskTargetKey(task.target)
+		if idx, ok := indexes[key]; ok {
+			groups[idx].payloads = append(groups[idx].payloads, task.payload)
+			groups[idx].keys = append(groups[idx].keys, strings.TrimSpace(task.payload.Key))
+			continue
+		}
+		indexes[key] = len(groups)
+		groups = append(groups, replicationTaskGroup{
+			target:   task.target,
+			payloads: []CacheCommandRequest{task.payload},
+			keys:     []string{strings.TrimSpace(task.payload.Key)},
+		})
+	}
+	return groups
+}
+
+func replicationTaskTargetKey(target TopologyNode) string {
+	if target.ID != "" {
+		return "id:" + target.ID
+	}
+	return "addr:" + target.Address
 }
 
 func (replicator *HTTPReplicator) runAsync(ctx context.Context) {
@@ -924,11 +973,15 @@ func replicationNeedsRetry(result ReplicationResult) bool {
 }
 
 func plannedReplicationTargets(tasks []replicationTask) []ReplicationTargetResult {
-	out := make([]ReplicationTargetResult, len(tasks))
-	for idx, task := range tasks {
+	groups := groupReplicationTasksByTarget(tasks)
+	out := make([]ReplicationTargetResult, len(groups))
+	for idx, group := range groups {
 		out[idx] = ReplicationTargetResult{
-			Node:    task.target.ID,
-			Address: task.target.Address,
+			Node:    group.target.ID,
+			Address: group.target.Address,
+		}
+		if len(group.keys) == 1 {
+			out[idx].Key = group.keys[0]
 		}
 	}
 	return out
@@ -1008,6 +1061,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 		}
 		seenKeys = true
 
+		pageTasks := make([]replicationTask, 0, len(page.keys))
 		for _, key := range page.keys {
 			if err := ctx.Err(); err != nil {
 				if len(result.Targets) == 0 {
@@ -1034,10 +1088,19 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			payload = replicator.annotateReplicationPayload(payload)
 			result.Entries++
 			for _, target := range targets {
-				targetResult := replicator.executeReplicationTarget(ctx, target, payload)
-				targetResult.Key = key
-				result.Targets = append(result.Targets, targetResult)
+				pageTasks = append(pageTasks, replicationTask{target: target, payload: payload})
 			}
+		}
+		if len(pageTasks) > 0 {
+			pageResult := replicator.executeReplicationTasks(ctx, ReplicationResult{}, pageTasks)
+			result.Targets = append(result.Targets, pageResult.Targets...)
+		}
+		if err := ctx.Err(); err != nil {
+			if len(result.Targets) == 0 {
+				result.Skipped = true
+				result.Reason = err.Error()
+			}
+			return result
 		}
 
 		if !page.hasMore {
@@ -1335,6 +1398,36 @@ func (replicator *HTTPReplicator) executeReplicationTarget(ctx context.Context, 
 	} else {
 		return replicator.afterReplicationTarget(target, state, replicator.postReplicationCommand(ctx, target, payload))
 	}
+}
+
+func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Context, target TopologyNode, payloads []CacheCommandRequest) ReplicationTargetResult {
+	if len(payloads) == 1 {
+		return replicator.executeReplicationTarget(ctx, target, payloads[0])
+	}
+	payload, err := replicationBatchPayload(payloads)
+	if err != nil {
+		return ReplicationTargetResult{
+			Node:    target.ID,
+			Address: target.Address,
+			Error:   err.Error(),
+		}
+	}
+	return replicator.executeReplicationTarget(ctx, target, payload)
+}
+
+func replicationBatchPayload(payloads []CacheCommandRequest) (CacheCommandRequest, error) {
+	values := make(Slice, len(payloads))
+	for idx, payload := range payloads {
+		data, err := jsonwire.Marshal(payload)
+		if err != nil {
+			return CacheCommandRequest{}, fmt.Errorf("replication batch payload %d: %w", idx, err)
+		}
+		values[idx] = string(data)
+	}
+	return CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Values:  values,
+	}, nil
 }
 
 func (replicator *HTTPReplicator) beforeReplicationTarget(target TopologyNode) (ReplicationTargetResult, bool, string) {
