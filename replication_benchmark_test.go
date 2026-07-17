@@ -89,3 +89,66 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkGroupReplicationTasksByTarget(b *testing.B) {
+	for _, tt := range []struct {
+		name          string
+		uniqueTargets int
+		tasks         int
+	}{
+		{name: "TwoTargetsTwoTasks", uniqueTargets: 2, tasks: 2},
+		{name: "ThreeTargetsTwelveTasks", uniqueTargets: 3, tasks: 12},
+		{name: "FourTargetsSixteenTasks", uniqueTargets: 4, tasks: 16},
+		{name: "EightTargetsSixteenTasks", uniqueTargets: 8, tasks: 16},
+		{name: "EightTargetsSixtyFourTasks", uniqueTargets: 8, tasks: 64},
+		{name: "SixtyFourTargetsOneKTasks", uniqueTargets: 64, tasks: 1024},
+	} {
+		tasks := replicationGroupingBenchmarkTasks(tt.uniqueTargets, tt.tasks)
+		b.Run(tt.name+"/Production", func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				groups := groupReplicationTasksByTarget(tasks)
+				if len(groups) != tt.uniqueTargets {
+					b.Fatalf("groups len = %d, want %d", len(groups), tt.uniqueTargets)
+				}
+			}
+		})
+		b.Run(tt.name+"/MapOnly", func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				groups := groupReplicationTasksByTargetMap(tasks)
+				if len(groups) != tt.uniqueTargets {
+					b.Fatalf("groups len = %d, want %d", len(groups), tt.uniqueTargets)
+				}
+			}
+		})
+		b.Run(tt.name+"/LinearOnly", func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				groups, ok := groupReplicationTasksByTargetLinear(tasks, 0)
+				if !ok {
+					b.Fatal("groupReplicationTasksByTargetLinear() unexpectedly hit target limit")
+				}
+				if len(groups) != tt.uniqueTargets {
+					b.Fatalf("groups len = %d, want %d", len(groups), tt.uniqueTargets)
+				}
+			}
+		})
+	}
+}
+
+func replicationGroupingBenchmarkTasks(uniqueTargets int, taskCount int) []replicationTask {
+	tasks := make([]replicationTask, 0, taskCount)
+	for idx := 0; idx < taskCount; idx++ {
+		targetID := "node-" + strconv.Itoa(idx%uniqueTargets)
+		tasks = append(tasks, replicationTask{
+			target: TopologyNode{ID: targetID, Address: "http://127.0.0.1/" + targetID},
+			payload: CacheCommandRequest{
+				Command: "INTERNALSET",
+				Key:     "session:" + strconv.Itoa(idx),
+				Value:   `{"type":"string","string":"value"}`,
+			},
+		})
+	}
+	return tasks
+}

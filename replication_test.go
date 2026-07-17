@@ -1659,6 +1659,27 @@ func TestHTTPReplicatorSplitsSyncBatchesByEstimatedBytes(t *testing.T) {
 	}
 }
 
+func TestGroupReplicationTasksByTargetAdaptiveMatchesMapGrouping(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		uniqueTargets int
+		tasks         int
+	}{
+		{name: "linear path", uniqueTargets: 3, tasks: 12},
+		{name: "map fallback", uniqueTargets: 8, tasks: 16},
+		{name: "large map path", uniqueTargets: 64, tasks: 128},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks := replicationGroupingBenchmarkTasks(tt.uniqueTargets, tt.tasks)
+			got := groupReplicationTasksByTarget(tasks)
+			want := groupReplicationTasksByTargetMap(tasks)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("adaptive groups = %#v, want map groups %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestHTTPReplicatorSyncAllFullReplicaReplicatesToRemoteOwners(t *testing.T) {
 	type targetRequest struct {
 		node    string

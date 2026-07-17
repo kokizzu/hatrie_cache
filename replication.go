@@ -27,6 +27,8 @@ const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
 const minCompressedReplicationRequestBytes = 16 << 10
 const defaultReplicationSyncKeyPageSize = 1024
+const replicationLinearGroupTaskLimit = 16
+const replicationLinearGroupTargetLimit = 4
 
 var (
 	errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
@@ -851,6 +853,45 @@ func groupReplicationTasksByTarget(tasks []replicationTask) []replicationTaskGro
 			keys:     []string{strings.TrimSpace(task.payload.Key)},
 		}}
 	}
+	if len(tasks) <= replicationLinearGroupTaskLimit {
+		if replicationTasksHaveAtMostTargets(tasks, replicationLinearGroupTargetLimit) {
+			groups, _ := groupReplicationTasksByTargetLinear(tasks, 0)
+			return groups
+		}
+	}
+	return groupReplicationTasksByTargetMap(tasks)
+}
+
+func replicationTasksHaveAtMostTargets(tasks []replicationTask, maxTargets int) bool {
+	if maxTargets <= 0 {
+		return false
+	}
+	var targets [replicationLinearGroupTargetLimit]TopologyNode
+	if maxTargets > len(targets) {
+		maxTargets = len(targets)
+	}
+	count := 0
+	for _, task := range tasks {
+		found := false
+		for idx := 0; idx < count; idx++ {
+			if replicationTargetsEqual(targets[idx], task.target) {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		if count >= maxTargets {
+			return false
+		}
+		targets[count] = task.target
+		count++
+	}
+	return true
+}
+
+func groupReplicationTasksByTargetMap(tasks []replicationTask) []replicationTaskGroup {
 	groups := make([]replicationTaskGroup, 0, len(tasks))
 	indexes := make(map[string]int, len(tasks))
 	for _, task := range tasks {
@@ -868,6 +909,40 @@ func groupReplicationTasksByTarget(tasks []replicationTask) []replicationTaskGro
 		})
 	}
 	return groups
+}
+
+func groupReplicationTasksByTargetLinear(tasks []replicationTask, maxTargets int) ([]replicationTaskGroup, bool) {
+	groups := make([]replicationTaskGroup, 0, len(tasks))
+	for _, task := range tasks {
+		found := -1
+		for idx := range groups {
+			if replicationTargetsEqual(groups[idx].target, task.target) {
+				found = idx
+				break
+			}
+		}
+		if found >= 0 {
+			groups[found].payloads = append(groups[found].payloads, task.payload)
+			groups[found].keys = append(groups[found].keys, strings.TrimSpace(task.payload.Key))
+			continue
+		}
+		if maxTargets > 0 && len(groups) >= maxTargets {
+			return nil, false
+		}
+		groups = append(groups, replicationTaskGroup{
+			target:   task.target,
+			payloads: []CacheCommandRequest{task.payload},
+			keys:     []string{strings.TrimSpace(task.payload.Key)},
+		})
+	}
+	return groups, true
+}
+
+func replicationTargetsEqual(left TopologyNode, right TopologyNode) bool {
+	if left.ID != "" || right.ID != "" {
+		return left.ID == right.ID
+	}
+	return left.Address == right.Address
 }
 
 func (replicator *HTTPReplicator) groupReplicationTasksByTarget(tasks []replicationTask) []replicationTaskGroup {
