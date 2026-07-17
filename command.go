@@ -2323,12 +2323,38 @@ func (ht *HatTrie) commandInternalSet(key string, payload string) error {
 	if err != nil {
 		return err
 	}
+	return ht.commandInternalSetOperation(operation)
+}
 
+func (ht *HatTrie) commandInternalSetOperation(operation snapshotOperation) error {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	_, err = ht.applySnapshotOperationLocked(operation)
+	_, err := ht.applySnapshotOperationLocked(operation)
 	return err
+}
+
+func executePreparedInternalReplicationCommand(trie *HatTrie, request CacheCommandRequest, operation *snapshotOperation) CacheCommandResponse {
+	if trie == nil {
+		return commandError(ErrNilHatTrie.Error())
+	}
+	switch normalizedCommand(request.Command) {
+	case "INTERNALSET":
+		if operation == nil {
+			return commandError("prepared internal set operation is required")
+		}
+		if err := trie.commandInternalSetOperation(*operation); err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "internal value stored"}
+	case "INTERNALDEL":
+		if trie.Delete(strings.TrimSpace(request.Key)) {
+			return CacheCommandResponse{OK: true, Message: "internal value deleted"}
+		}
+		return CacheCommandResponse{OK: true, Message: "key not found"}
+	default:
+		return commandError("prepared internal replication command must be INTERNALSET or INTERNALDEL")
+	}
 }
 
 func commandSnapshotOperation(key string, payload string) (snapshotOperation, error) {

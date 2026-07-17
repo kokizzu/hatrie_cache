@@ -71,6 +71,13 @@ type commandExecutionOptions struct {
 	EnforceLeaderWrites bool
 }
 
+type preparedInternalReplicationPayload struct {
+	request      CacheCommandRequest
+	operation    *snapshotOperation
+	safetyToken  replicationSafetyToken
+	skipResponse *CacheCommandResponse
+}
+
 type MonitoringHealth struct {
 	Status          string `json:"status"`
 	Node            string `json:"node"`
@@ -756,42 +763,76 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 	}
 	batchOptions := options
 	batchOptions.Replicator = nil
+	prepared := make([]preparedInternalReplicationPayload, 0, len(payloads))
 	for idx, payload := range payloads {
-		response, rejected := validateInternalReplicationBatchPayload(payload, batchOptions, idx)
+		preparedPayload, response, rejected := prepareInternalReplicationBatchPayload(payload, batchOptions, idx)
 		if rejected || !response.OK {
 			return response, rejected
 		}
+		prepared = append(prepared, preparedPayload)
 	}
-	for _, payload := range payloads {
-		response, rejected := executeCacheCommand(ctx, trie, payload, batchOptions)
-		if rejected || !response.OK {
-			return response, rejected
+	for _, payload := range prepared {
+		response := executePreparedInternalReplicationPayload(trie, payload, batchOptions)
+		if !response.OK {
+			return response, false
 		}
 	}
 	return CacheCommandResponse{OK: true, Message: "internal replication batch applied"}, false
 }
 
 func validateInternalReplicationBatchPayload(request CacheCommandRequest, options commandExecutionOptions, index int) (CacheCommandResponse, bool) {
+	_, response, rejected := prepareInternalReplicationBatchPayload(request, options, index)
+	return response, rejected
+}
+
+func prepareInternalReplicationBatchPayload(request CacheCommandRequest, options commandExecutionOptions, index int) (preparedInternalReplicationPayload, CacheCommandResponse, bool) {
 	if !isSingleInternalReplicationCommand(request) {
-		return commandError(fmt.Sprintf("internal replication batch value %d must be INTERNALSET or INTERNALDEL", index)), false
+		return preparedInternalReplicationPayload{}, commandError(fmt.Sprintf("internal replication batch value %d must be INTERNALSET or INTERNALDEL", index)), false
 	}
 	key := strings.TrimSpace(request.Key)
 	if key == "" {
-		return commandError(fmt.Sprintf("internal replication batch value %d: key is required", index)), false
+		return preparedInternalReplicationPayload{}, commandError(fmt.Sprintf("internal replication batch value %d: key is required", index)), false
 	}
 	if err := validateKey(key); err != nil {
-		return commandError(fmt.Sprintf("internal replication batch value %d: %s", index, err.Error())), false
+		return preparedInternalReplicationPayload{}, commandError(fmt.Sprintf("internal replication batch value %d: %s", index, err.Error())), false
 	}
-	if normalizedCommand(request.Command) == "INTERNALSET" {
-		if _, err := commandSnapshotOperation(key, request.Value); err != nil {
-			return commandError(fmt.Sprintf("internal replication batch value %d: %s", index, err.Error())), false
+	request.Command = normalizedCommand(request.Command)
+	request.Key = key
+	prepared := preparedInternalReplicationPayload{request: request}
+	if request.Command == "INTERNALSET" {
+		operation, err := commandSnapshotOperation(key, request.Value)
+		if err != nil {
+			return preparedInternalReplicationPayload{}, commandError(fmt.Sprintf("internal replication batch value %d: %s", index, err.Error())), false
 		}
+		prepared.operation = &operation
 	}
-	_, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
+	token, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
 	if handled {
-		return response, rejected
+		if response.OK {
+			prepared.skipResponse = &response
+			return prepared, response, false
+		}
+		return preparedInternalReplicationPayload{}, response, rejected
 	}
-	return CacheCommandResponse{OK: true, Message: "ok"}, false
+	prepared.safetyToken = token
+	return prepared, CacheCommandResponse{OK: true, Message: "ok"}, false
+}
+
+func executePreparedInternalReplicationPayload(trie *HatTrie, prepared preparedInternalReplicationPayload, options commandExecutionOptions) CacheCommandResponse {
+	if prepared.skipResponse != nil {
+		return *prepared.skipResponse
+	}
+	var response CacheCommandResponse
+	if options.Journal != nil {
+		response = options.Journal.executePreparedInternalReplicationCommand(trie, prepared.request, prepared.operation)
+	} else {
+		response = executePreparedInternalReplicationCommand(trie, prepared.request, prepared.operation)
+	}
+	if response.OK {
+		options.ReplicationSafety.Commit(prepared.safetyToken)
+		options.DirtyTracker.Mark(strings.TrimSpace(prepared.request.Key))
+	}
+	return response
 }
 
 func internalReplicationBatchRequests(request CacheCommandRequest) ([]CacheCommandRequest, error) {

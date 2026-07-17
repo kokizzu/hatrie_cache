@@ -173,6 +173,37 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	return response
 }
 
+func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *HatTrie, request CacheCommandRequest, operation *snapshotOperation) CacheCommandResponse {
+	if journal == nil {
+		return commandError(ErrNilCommandJournal.Error())
+	}
+	if trie == nil {
+		return commandError(ErrNilHatTrie.Error())
+	}
+	command := normalizedCommand(request.Command)
+	if command != "INTERNALSET" && command != "INTERNALDEL" {
+		return commandError("prepared internal replication command must be INTERNALSET or INTERNALDEL")
+	}
+	if command == "INTERNALSET" && operation == nil {
+		return commandError("prepared internal set operation is required")
+	}
+
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+
+	appendState, err := journal.appendLocked(normalizeJournalRequest(request, trie.currentTime()))
+	if err != nil {
+		return commandError(err.Error())
+	}
+	response := executePreparedInternalReplicationCommand(trie, request, operation)
+	if !response.OK {
+		if err := journal.rollbackAppendLocked(appendState); err != nil {
+			return commandError(response.Message + "; failed to remove rejected journal entry: " + err.Error())
+		}
+	}
+	return response
+}
+
 func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint64, error) {
 	if journal == nil {
 		return 0, ErrNilCommandJournal

@@ -1622,6 +1622,77 @@ func TestMonitoringHandlerExecutesInternalReplicationBatch(t *testing.T) {
 	}
 }
 
+func TestInternalReplicationBatchPreservesJournalDirtyAndSafetySideEffects(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("old", "value")
+	journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalFormatJSON)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
+	}
+	defer journal.Close()
+	dirty := NewLevelDBDirtyTracker()
+	safety := NewReplicationSafetyStore()
+	request := CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Batch: []CacheCommandRequest{
+			{
+				Command: "INTERNALSET",
+				Key:     "name",
+				Value:   `{"type":"string","string":"batched"}`,
+				Pairs: Map{
+					replicationMetaSourceNode: "node-a",
+					replicationMetaSequence:   "1",
+				},
+			},
+			{
+				Command: "INTERNALDEL",
+				Key:     "old",
+				Pairs: Map{
+					replicationMetaSourceNode: "node-a",
+					replicationMetaSequence:   "2",
+				},
+			},
+		},
+	}
+	options := commandExecutionOptions{
+		Journal:           journal,
+		DirtyTracker:      dirty,
+		ReplicationSafety: safety,
+	}
+	response, rejected := executeCacheCommand(context.Background(), ht, request, options)
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand(batch) = %#v rejected=%v, want ok", response, rejected)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: "name"}); !got.OK || got.Value != "batched" {
+		t.Fatalf("batched GETSTR = %#v, want batched value", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "old"}); !got.OK || got.Value != "0" {
+		t.Fatalf("batched old EXISTS = %#v, want deleted", got)
+	}
+	if snapshot := dirty.Snapshot(); !reflect.DeepEqual(snapshot.keys, []string{"name", "old"}) {
+		t.Fatalf("dirty keys = %#v, want name and old", snapshot.keys)
+	}
+	tail, err := journal.Tail(0, 10)
+	if err != nil {
+		t.Fatalf("journal Tail() error = %v", err)
+	}
+	if len(tail.Entries) != 2 {
+		t.Fatalf("journal entries len = %d, want 2", len(tail.Entries))
+	}
+
+	response, rejected = executeCacheCommand(context.Background(), ht, request, options)
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand(duplicate batch) = %#v rejected=%v, want ok duplicate skip", response, rejected)
+	}
+	tail, err = journal.Tail(0, 10)
+	if err != nil {
+		t.Fatalf("journal Tail(duplicate) error = %v", err)
+	}
+	if len(tail.Entries) != 2 {
+		t.Fatalf("journal entries after duplicate len = %d, want unchanged 2", len(tail.Entries))
+	}
+}
+
 func TestMonitoringHandlerRejectsInvalidInternalReplicationBatchWithoutPartialMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{ReplicationAuthToken: "replica-secret"}).Handler()
