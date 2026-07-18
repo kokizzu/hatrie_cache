@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -172,6 +173,75 @@ func TestVerifyBackupBundleRejectsPartitionPrefixMismatch(t *testing.T) {
 	_, err = VerifyBackupBundle(bundlePath)
 	if err == nil || !strings.Contains(err.Error(), "backup partition metadata does not cover key") {
 		t.Fatalf("VerifyBackupBundle(partition mismatch) error = %v, want partition coverage error", err)
+	}
+}
+
+func TestVerifyBackupBundleRejectsPartitionJournalPrefixMismatch(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "sg:session:1", Value: "ok"}); !got.OK {
+		t.Fatalf("SETSTR(sg) response = %#v, want ok", got)
+	}
+	snapshotPath := filepath.Join(t.TempDir(), backupBundleSnapshotPath)
+	if err := ht.SaveSnapshotWithJournalSequenceAndFormat(snapshotPath, 0, SnapshotFormatJSON); err != nil {
+		t.Fatalf("SaveSnapshotWithJournalSequenceAndFormat() error = %v", err)
+	}
+	snapshotFile, err := backupBundleFileInfo(backupBundleSnapshotPath, snapshotPath)
+	if err != nil {
+		t.Fatalf("backupBundleFileInfo(snapshot) error = %v", err)
+	}
+
+	var journal bytes.Buffer
+	if err := writeCommandJournalEntry(&journal, commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 1,
+		Request:  CacheCommandRequest{Command: "SETSTR", Key: "us:session:1", Value: "wrong partition"},
+	}, CommandJournalFormatJSON); err != nil {
+		t.Fatalf("writeCommandJournalEntry() error = %v", err)
+	}
+	partition := &BackupPartitionMetadata{
+		Mode:        "partitioned",
+		Partitions:  []string{"sg"},
+		KeyPrefixes: []string{"sg:"},
+	}
+	manifest := BackupBundleManifest{
+		Version:         BackupBundleVersion,
+		CreatedAt:       time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC),
+		Snapshot:        backupBundleSnapshotPath,
+		SnapshotFormat:  string(SnapshotFormatJSON),
+		Journal:         backupBundleJournalPath,
+		JournalFormat:   string(CommandJournalFormatJSON),
+		JournalSequence: 0,
+		Partition:       partition,
+		Files: []BackupBundleFile{
+			snapshotFile,
+			backupBundleBytesInfo(backupBundleJournalPath, journal.Bytes()),
+		},
+		RestoreHint: "test",
+	}
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("Marshal(manifest) error = %v", err)
+	}
+	manifestData = append(manifestData, '\n')
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	file, err := os.Create(bundlePath)
+	if err != nil {
+		t.Fatalf("Create(bundle) error = %v", err)
+	}
+	if err := writeBackupBundleTarGzip(file, snapshotPath, journal.Bytes(), manifestData, manifest.CreatedAt, true); err != nil {
+		_ = file.Close()
+		t.Fatalf("writeBackupBundleTarGzip() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close(bundle) error = %v", err)
+	}
+
+	doctor, err := VerifyBackupBundle(bundlePath)
+	if err == nil || !strings.Contains(err.Error(), "backup partition metadata does not cover journal key") {
+		t.Fatalf("VerifyBackupBundle(journal partition mismatch) error = %v, want journal partition coverage error", err)
+	}
+	if doctor.PartitionValidation == nil || doctor.PartitionValidation.CheckedJournalKeys != 1 || doctor.PartitionValidation.InvalidJournalKeys != 1 {
+		t.Fatalf("doctor partition validation = %#v, want one invalid journal key", doctor.PartitionValidation)
 	}
 }
 

@@ -51,11 +51,14 @@ type BackupDoctorLevelDB struct {
 }
 
 type BackupPartitionValidation struct {
-	OK                bool     `json:"ok"`
-	CheckedKeys       int      `json:"checked_keys"`
-	InvalidKeys       int      `json:"invalid_keys"`
-	KeyPrefixes       []string `json:"key_prefixes,omitempty"`
-	InvalidKeySamples []string `json:"invalid_key_samples,omitempty"`
+	OK                       bool     `json:"ok"`
+	CheckedKeys              int      `json:"checked_keys"`
+	InvalidKeys              int      `json:"invalid_keys"`
+	CheckedJournalKeys       int      `json:"checked_journal_keys,omitempty"`
+	InvalidJournalKeys       int      `json:"invalid_journal_keys,omitempty"`
+	KeyPrefixes              []string `json:"key_prefixes,omitempty"`
+	InvalidKeySamples        []string `json:"invalid_key_samples,omitempty"`
+	InvalidJournalKeySamples []string `json:"invalid_journal_key_samples,omitempty"`
 }
 
 const backupPartitionInvalidKeySampleLimit = 8
@@ -138,11 +141,19 @@ func VerifyBackupBundle(path string) (BackupDoctorReport, error) {
 		if !ok {
 			return BackupDoctorReport{}, fmt.Errorf("hatriecache: backup bundle missing %s", manifest.Journal)
 		}
-		journalReport, err := verifyJournalBytes(manifest.Journal, journalData)
+		journalReport, entries, err := verifyJournalBytes(manifest.Journal, journalData)
 		if err != nil {
 			return BackupDoctorReport{}, err
 		}
 		report.Journal = &journalReport
+		partitionValidation, err := validateBackupPartitionMetadataAgainstJournalEntries(report.PartitionValidation, entries, manifest.Partition)
+		if partitionValidation != nil {
+			report.PartitionValidation = partitionValidation
+		}
+		if err != nil {
+			report.OK = false
+			return report, err
+		}
 	}
 	return report, nil
 }
@@ -286,6 +297,53 @@ func validateBackupPartitionMetadataAgainstTrie(trie *HatTrie, partition *Backup
 	return validation, fmt.Errorf("hatriecache: backup partition metadata does not cover key %q", validation.InvalidKeySamples[0])
 }
 
+func validateBackupPartitionMetadataAgainstJournalEntries(validation *BackupPartitionValidation, entries []commandJournalEntry, partition *BackupPartitionMetadata) (*BackupPartitionValidation, error) {
+	if partition == nil || len(partition.KeyPrefixes) == 0 {
+		return validation, nil
+	}
+	if validation == nil {
+		validation = &BackupPartitionValidation{
+			OK:          true,
+			KeyPrefixes: append([]string(nil), partition.KeyPrefixes...),
+		}
+	}
+	for _, entry := range entries {
+		for _, key := range backupPartitionJournalRequestKeys(entry.Request, nil) {
+			validation.CheckedJournalKeys++
+			if backupPartitionKeyCoveredByPrefix(key, partition.KeyPrefixes) {
+				continue
+			}
+			validation.OK = false
+			validation.InvalidJournalKeys++
+			if len(validation.InvalidJournalKeySamples) < backupPartitionInvalidKeySampleLimit {
+				validation.InvalidJournalKeySamples = append(validation.InvalidJournalKeySamples, key)
+			}
+		}
+	}
+	if validation.InvalidJournalKeys == 0 {
+		return validation, nil
+	}
+	return validation, fmt.Errorf("hatriecache: backup partition metadata does not cover journal key %q", validation.InvalidJournalKeySamples[0])
+}
+
+func backupPartitionJournalRequestKeys(request CacheCommandRequest, keys []string) []string {
+	switch strings.ToUpper(strings.TrimSpace(request.Command)) {
+	case "BATCH", "INTERNALBATCH":
+		for _, payload := range request.Batch {
+			keys = backupPartitionJournalRequestKeys(payload, keys)
+		}
+		return keys
+	}
+	if !commandShouldJournal(request) {
+		return keys
+	}
+	key := strings.TrimSpace(request.Key)
+	if key == "" {
+		return keys
+	}
+	return append(keys, key)
+}
+
 func backupPartitionKeyCoveredByPrefix(key string, prefixes []string) bool {
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(key, prefix) {
@@ -302,6 +360,7 @@ func cloneBackupPartitionValidation(input *BackupPartitionValidation) *BackupPar
 	out := *input
 	out.KeyPrefixes = append([]string(nil), input.KeyPrefixes...)
 	out.InvalidKeySamples = append([]string(nil), input.InvalidKeySamples...)
+	out.InvalidJournalKeySamples = append([]string(nil), input.InvalidJournalKeySamples...)
 	return &out
 }
 
@@ -327,27 +386,33 @@ func verifySnapshotBytes(trie *HatTrie, name string, data []byte) (BackupDoctorS
 	return BackupDoctorSnapshot{Path: name, OK: true, Keys: trie.Size(), JournalSequence: metadata.JournalSequence}, nil
 }
 
-func verifyJournalBytes(name string, data []byte) (BackupDoctorJournal, error) {
+func verifyJournalBytes(name string, data []byte) (BackupDoctorJournal, []commandJournalEntry, error) {
 	tmp, err := os.CreateTemp("", "hatrie-cache-doctor-journal-*")
 	if err != nil {
-		return BackupDoctorJournal{}, err
+		return BackupDoctorJournal{}, nil, err
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 	if _, err := io.Copy(tmp, bytes.NewReader(data)); err != nil {
 		_ = tmp.Close()
-		return BackupDoctorJournal{}, err
+		return BackupDoctorJournal{}, nil, err
 	}
 	if err := tmp.Close(); err != nil {
-		return BackupDoctorJournal{}, err
+		return BackupDoctorJournal{}, nil, err
 	}
-	return verifyJournalFile(name, tmpPath)
+	report, entries, err := verifyJournalFileWithEntries(name, tmpPath)
+	return report, entries, err
 }
 
 func verifyJournalFile(displayPath string, path string) (BackupDoctorJournal, error) {
+	report, _, err := verifyJournalFileWithEntries(displayPath, path)
+	return report, err
+}
+
+func verifyJournalFileWithEntries(displayPath string, path string) (BackupDoctorJournal, []commandJournalEntry, error) {
 	entries, err := scanBackupJournalEntries(path)
 	if err != nil {
-		return BackupDoctorJournal{}, err
+		return BackupDoctorJournal{}, nil, err
 	}
 	var last uint64
 	for _, entry := range entries {
@@ -355,7 +420,7 @@ func verifyJournalFile(displayPath string, path string) (BackupDoctorJournal, er
 			last = entry.Sequence
 		}
 	}
-	return BackupDoctorJournal{Path: displayPath, OK: true, Entries: len(entries), LastSequence: last}, nil
+	return BackupDoctorJournal{Path: displayPath, OK: true, Entries: len(entries), LastSequence: last}, entries, nil
 }
 
 func scanBackupJournalEntries(path string) ([]commandJournalEntry, error) {

@@ -192,6 +192,8 @@ func TestREADMEDocumentsBackupPartitionValidation(t *testing.T) {
 		"`key_prefixes`",
 		"`partition_validation`",
 		"invalid key samples",
+		"`checked_journal_keys`",
+		"`invalid_journal_key_samples`",
 		"`restore-bundle` refuses",
 	} {
 		if !strings.Contains(readme, token) {

@@ -415,8 +415,9 @@ Partition metadata is intentionally descriptive today. It records which
 operator-defined partition ids, key prefixes, node id, topology epoch, and
 topology fingerprint a backup covered, and `doctor`/`restore-bundle` echo it
 back in their JSON reports. When `key_prefixes` are present, `doctor` verifies
-that recovered snapshot keys are covered and reports `partition_validation`
-with checked key counts plus invalid key samples; `restore-bundle` refuses
+that recovered snapshot keys and bundled journal write keys are covered and
+reports `partition_validation` with checked key counts, `checked_journal_keys`,
+invalid key samples, and `invalid_journal_key_samples`; `restore-bundle` refuses
 bundles that fail that check. It does not enable automatic partition routing or
 partial restore by itself.
 
