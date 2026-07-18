@@ -172,10 +172,39 @@ func TestTopologyStoreRoutesFullReplicaMode(t *testing.T) {
 	}
 }
 
+func TestTopologyDefaultsToFullReplicaWithShardingOff(t *testing.T) {
+	topology := ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a"},
+			{ID: "node-b"},
+		},
+	}
+	store, err := NewTopologyStore(topology)
+	if err != nil {
+		t.Fatalf("NewTopologyStore(default) error = %v", err)
+	}
+
+	got := store.Get()
+	if got.Mode != TopologyModeFullReplica || len(got.Shards) != 0 {
+		t.Fatalf("default topology = %#v, want full replica without shards", got)
+	}
+	route, ok := store.Route("session:1")
+	if !ok || route.Mode != TopologyModeFullReplica || !reflect.DeepEqual(route.Owners, []string{"node-a", "node-b"}) {
+		t.Fatalf("default route = %#v/%v, want all nodes", route, ok)
+	}
+
+	single := SingleNodeTopology("local", "127.0.0.1:8080")
+	if single.Mode != TopologyModeFullReplica || len(single.Shards) != 0 {
+		t.Fatalf("SingleNodeTopology() = %#v, want sharding off", single)
+	}
+}
+
 func TestTopologyStoreRejectsInvalidTopology(t *testing.T) {
 	for name, topology := range map[string]ClusterTopology{
 		"no nodes":        {Version: 1, Shards: []TopologyShard{{ID: 0, Primary: "node-a"}}},
-		"no shards":       {Version: 1, Nodes: []TopologyNode{{ID: "node-a"}}},
+		"no shards":       {Version: 1, Mode: TopologyModeSharded, Nodes: []TopologyNode{{ID: "node-a"}}},
 		"missing primary": {Version: 1, Nodes: []TopologyNode{{ID: "node-a"}}, Shards: []TopologyShard{{ID: 0, Primary: "missing"}}},
 		"bad mode":        {Version: 1, Mode: "bad", Nodes: []TopologyNode{{ID: "node-a"}}, Shards: []TopologyShard{{ID: 0, Primary: "node-a"}}},
 		"bucket range gap": {

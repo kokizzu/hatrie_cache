@@ -125,12 +125,14 @@ func TestREADMELinksShardingProposal(t *testing.T) {
 	proposal := string(proposalData)
 	for _, token := range []string{
 		"[`SHARDING_PROPOSAL.md`](SHARDING_PROPOSAL.md)",
+		"Sharding is opt-in",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md missing sharding token %q", token)
 		}
 	}
 	for _, token := range []string{
+		"Sharding is opt-in",
 		"XXH3 64-bit",
 		"65,536 logical slots",
 		"rendezvous hashing",

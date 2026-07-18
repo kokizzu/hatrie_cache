@@ -835,10 +835,12 @@ Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
 The topology endpoint validates nodes, shard ownership, and replicas, and can
 route a key to its shard. Each node uses `address` for HTTP and can set a
 separate `grpc_address` for native gRPC, for example `node-b:9090`,
-`grpc://node-b:9090`, or `grpcs://node-b:9090`. Topologies default to
-`mode: "sharded"`. Set
-`bucket_count` and compact `bucket_ranges` to use vbucket-style routing, or set
-`mode: "full_replica"` to route every key to every node without partitions:
+`grpc://node-b:9090`, or `grpcs://node-b:9090`. Sharding is opt-in. Topologies
+without a mode or shard metadata default to `mode: "full_replica"`, routing
+every key to every node. Existing mode-less topology files that contain
+`shards`, `bucket_count`, or `bucket_ranges` remain compatible and are inferred
+as sharded. Set `mode: "sharded"` explicitly for new sharded topologies, then
+set `bucket_count` and compact `bucket_ranges` for vbucket-style routing:
 see [`SHARDING_PROPOSAL.md`](SHARDING_PROPOSAL.md) for the proposed XXH3 slot
 hash, hash tags, rendezvous placement planner, and migration states. For
 multi-datacenter or region-owned datasets, see

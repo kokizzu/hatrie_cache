@@ -69,7 +69,7 @@ type TopologyStore struct {
 	topology ClusterTopology
 }
 
-// SingleNodeTopology returns a valid one-node, one-shard topology.
+// SingleNodeTopology returns a valid one-node topology with sharding disabled.
 func SingleNodeTopology(nodeID string, address string) ClusterTopology {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
@@ -77,13 +77,10 @@ func SingleNodeTopology(nodeID string, address string) ClusterTopology {
 	}
 	return ClusterTopology{
 		Version: clusterTopologyVersion,
-		Mode:    TopologyModeSharded,
+		Mode:    TopologyModeFullReplica,
 		Self:    nodeID,
 		Nodes: []TopologyNode{
 			{ID: nodeID, Address: strings.TrimSpace(address), Role: "primary"},
-		},
-		Shards: []TopologyShard{
-			{ID: 0, Primary: nodeID},
 		},
 	}
 }
@@ -273,7 +270,7 @@ func (topology ClusterTopology) ShardForKey(key string) (TopologyShard, bool) {
 
 // RouteForKey returns the deterministic route selected for key.
 func (topology ClusterTopology) RouteForKey(key string) (TopologyRoute, bool) {
-	mode := topologyMode(topology.Mode)
+	mode := topologyModeFor(topology)
 	if mode == TopologyModeFullReplica {
 		shard, ok := topology.fullReplicaShard()
 		if !ok {
@@ -334,7 +331,7 @@ func normalizeTopology(topology ClusterTopology) (ClusterTopology, error) {
 	if topology.Version != clusterTopologyVersion {
 		return ClusterTopology{}, errors.New("hatriecache: unsupported topology version")
 	}
-	topology.Mode = topologyMode(topology.Mode)
+	topology.Mode = topologyModeFor(topology)
 	if topology.Mode != TopologyModeSharded && topology.Mode != TopologyModeFullReplica {
 		return ClusterTopology{}, errors.New("hatriecache: topology mode must be sharded or full_replica")
 	}
@@ -434,9 +431,17 @@ func normalizeTopology(topology ClusterTopology) (ClusterTopology, error) {
 func topologyMode(mode string) string {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" {
-		return TopologyModeSharded
+		return TopologyModeFullReplica
 	}
 	return mode
+}
+
+func topologyModeFor(topology ClusterTopology) string {
+	if strings.TrimSpace(topology.Mode) == "" && (len(topology.Shards) > 0 || topology.BucketCount > 0 || len(topology.BucketRanges) > 0) {
+		// Preserve pre-mode topology files whose shard map made their intent clear.
+		return TopologyModeSharded
+	}
+	return topologyMode(topology.Mode)
 }
 
 func normalizeBucketRanges(topology *ClusterTopology, shardIDs map[uint32]bool) error {

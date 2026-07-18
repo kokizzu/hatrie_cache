@@ -4,6 +4,10 @@ This is a design proposal only. It keeps the current topology, election, and
 replication model, but makes shard routing faster, more stable, and easier to
 rebalance.
 
+Sharding is opt-in. The default topology mode remains `full_replica`; operators
+must explicitly choose `mode: "sharded"` before any automatic placement or
+rebalancing behavior proposed here applies.
+
 ## Default Hash
 
 Use XXH3 64-bit for key-to-slot hashing:

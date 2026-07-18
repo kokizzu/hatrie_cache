@@ -2499,8 +2499,8 @@ func TestMonitoringHandlerManagesTopology(t *testing.T) {
 	if err := json.Unmarshal(getResp.Body.Bytes(), &got); err != nil {
 		t.Fatalf("topology GET JSON error = %v", err)
 	}
-	if got.Self != "node-a" || len(got.Shards) != 1 {
-		t.Fatalf("topology GET = %#v, want node-a single shard", got)
+	if got.Self != "node-a" || got.Mode != TopologyModeFullReplica || len(got.Shards) != 0 {
+		t.Fatalf("topology GET = %#v, want node-a with sharding off", got)
 	}
 
 	update := `{"version":1,"self":"node-b","nodes":[{"id":"node-b","address":"127.0.0.1:8081"}],"shards":[{"id":0,"primary":"node-b"}]}`
