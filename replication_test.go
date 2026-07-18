@@ -1974,6 +1974,23 @@ func TestHTTPReplicatorAppendsTasksWithAnnotatedPayloadBytes(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAppendsTasksWithoutPayloadEstimateWhenBatchLimitDisabled(t *testing.T) {
+	replicator := &HTTPReplicator{self: "node-a"}
+	targets := []TopologyNode{{ID: "node-b", Address: "http://node-b"}}
+	payload := CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: "one"}
+
+	tasks := replicator.appendReplicationTasksForTargets(nil, targets, payload)
+	if len(tasks) != 1 {
+		t.Fatalf("tasks len = %d, want 1", len(tasks))
+	}
+	if tasks[0].payloadBytes != 0 {
+		t.Fatalf("payload bytes = %d, want no unused estimate without a batch byte limit", tasks[0].payloadBytes)
+	}
+	if tasks[0].payload.Pairs[replicationMetaSourceNode] != "node-a" || tasks[0].payload.Pairs[replicationMetaSequence] == "" {
+		t.Fatalf("payload metadata = %#v, want source and sequence", tasks[0].payload.Pairs)
+	}
+}
+
 func TestSplitReplicationTaskGroupByMaxBytesUsesCarriedPayloadBytes(t *testing.T) {
 	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
 	group := replicationTaskGroup{

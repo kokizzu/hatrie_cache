@@ -951,7 +951,10 @@ func (replicator *HTTPReplicator) tasksForReplicationPayload(result ReplicationR
 
 func (replicator *HTTPReplicator) appendReplicationTasksForTargets(tasks []replicationTask, targets []TopologyNode, payload CacheCommandRequest) []replicationTask {
 	payload = replicator.annotateReplicationPayload(payload)
-	payloadBytes := estimatedReplicationRequestBytesWithin(payload, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
+	payloadBytes := 0
+	if replicator.batchMaxBytes > 0 {
+		payloadBytes = estimatedReplicationRequestBytesWithin(payload, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
+	}
 	for _, target := range targets {
 		tasks = append(tasks, replicationTask{target: target, payload: payload, payloadBytes: payloadBytes})
 	}
