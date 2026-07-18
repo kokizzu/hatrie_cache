@@ -798,6 +798,17 @@ make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=gzip-jso
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=json
 ```
 
+Online snapshots capture an immutable point-in-time entry set under a short
+trie lock, then perform encoding, compression, disk writes, and network
+streaming after releasing it. Journaled commands that arrive after the captured
+sequence continue during output and remain available as ordered deltas. Full
+LevelDB saves use the same capture boundary before database comparison and
+record output. Allow temporary memory headroom for one captured data set;
+snapshot jobs sharing a journal are serialized. In the 100,000 short-string-key
+benchmark this reduced the maximum command pause by 73.1% while increasing peak
+RSS by 45.6%. See [BENCHMARK.md](BENCHMARK.md#point-in-time-snapshot-capture)
+for CPU, allocation, and RSS measurements.
+
 Set `JOURNAL_PATH` to replay an append-only command journal at startup and fsync
 mutating cache commands before applying them. When `SNAPSHOT_PATH` is also set,
 snapshots store the journal checkpoint and compact older journal entries after a
@@ -830,8 +841,9 @@ returns a bounded batch of ordered mutating commands after `N` plus the latest
 journal sequence. Responses include `has_more` when another batch is available.
 If `N` is older than the compacted snapshot checkpoint, the endpoint returns
 `409`. `GET /api/journal/snapshot` streams a fast-gzip binary point-in-time
-snapshot with its journal sequence. The source captures it under the journal
-write barrier, so writes after that sequence remain ordered delta records.
+snapshot with its journal sequence. The source captures state and sequence under
+the journal write barrier, releases that barrier before streaming, and retains
+writes after that sequence as ordered delta records.
 `POST /api/journal` accepts `source`, optional `after_sequence`, and optional
 `limit`, pulls that source node's journal tail, and applies the returned
 mutating commands locally through the configured journal. Set `until_current`

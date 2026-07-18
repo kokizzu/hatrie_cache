@@ -1619,28 +1619,32 @@ func (trie *HatTrie) scanLevelDBEntryData(visit func(string, []byte) error) erro
 }
 
 func (trie *HatTrie) scanLevelDBEntryDataForStore(currentStore *LevelDBStore, currentDB *leveldb.DB, format StorageFormat, visit func(string, []byte) error) error {
-	trie.mu.Lock()
-	defer trie.mu.Unlock()
-
 	format, err := ParseStorageFormat(string(format))
 	if err != nil {
 		return err
 	}
-	trie.ensureOpen()
-	now := time.Time{}
-	if len(trie.expires) > 0 {
-		now = trie.currentTime()
+	capture, err := trie.captureSnapshotForStore(currentStore, currentDB)
+	if err != nil {
+		return err
 	}
-	return trie.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		data, err := trie.levelDBEntryDataForStoreLocked(entry, currentStore, currentDB, format)
-		if err != nil {
-			return err
+	for _, page := range capture.pages {
+		for _, entry := range page {
+			data := entry.levelDBRecord
+			if data == nil {
+				var err error
+				data, err = marshalLevelDBEntry(entry, format)
+				if err != nil {
+					return err
+				}
+			}
+			if visit != nil {
+				if err := visit(entry.Key, data); err != nil {
+					return err
+				}
+			}
 		}
-		if visit != nil {
-			return visit(entry.Key, data)
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func (trie *HatTrie) levelDBEntryDataForKeyForStore(currentStore *LevelDBStore, currentDB *leveldb.DB, format StorageFormat, key string) ([]byte, bool, error) {

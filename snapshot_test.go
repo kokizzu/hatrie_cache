@@ -17,6 +17,141 @@ import (
 	"time"
 )
 
+type blockingSnapshotWriter struct {
+	buffer  bytes.Buffer
+	entered chan struct{}
+	release chan struct{}
+	blocked bool
+}
+
+func (writer *blockingSnapshotWriter) Write(data []byte) (int, error) {
+	if !writer.blocked {
+		writer.blocked = true
+		close(writer.entered)
+		<-writer.release
+	}
+	return writer.buffer.Write(data)
+}
+
+func TestSnapshotOutputDoesNotBlockMutationsAndKeepsCapturedValue(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "before")
+	writer := &blockingSnapshotWriter{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	written := make(chan error, 1)
+	go func() {
+		written <- ht.writeSnapshot(writer, 0, SnapshotFormatBinary)
+	}()
+	<-writer.entered
+
+	mutated := make(chan struct{})
+	go func() {
+		ht.UpsertString("key", "after")
+		close(mutated)
+	}()
+	mutationCompletedDuringOutput := false
+	select {
+	case <-mutated:
+		mutationCompletedDuringOutput = true
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(writer.release)
+	if err := <-written; err != nil {
+		t.Fatalf("writeSnapshot() error = %v", err)
+	}
+	<-mutated
+	if !mutationCompletedDuringOutput {
+		t.Fatal("snapshot output held the trie lock while the writer was blocked")
+	}
+
+	path := filepath.Join(t.TempDir(), "captured.hc")
+	if err := os.WriteFile(path, writer.buffer.Bytes(), 0o600); err != nil {
+		t.Fatalf("WriteFile(snapshot) error = %v", err)
+	}
+	restored := newTestTrie(t)
+	if err := restored.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if got := restored.GetString("key"); got != "before" {
+		t.Fatalf("captured GetString(key) = %q, want before", got)
+	}
+	if got := ht.GetString("key"); got != "after" {
+		t.Fatalf("live GetString(key) = %q, want after", got)
+	}
+}
+
+func TestLevelDBFullSaveRecordOutputDoesNotBlockMutations(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "before")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	written := make(chan error, 1)
+	var captured []byte
+	go func() {
+		written <- ht.scanLevelDBEntryDataForStore(nil, nil, StorageFormatBinary, func(key string, data []byte) error {
+			captured = cloneBytes(data)
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+
+	mutated := make(chan struct{})
+	go func() {
+		ht.UpsertString("key", "after")
+		close(mutated)
+	}()
+	mutationCompletedDuringOutput := false
+	select {
+	case <-mutated:
+		mutationCompletedDuringOutput = true
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	if err := <-written; err != nil {
+		t.Fatalf("scanLevelDBEntryDataForStore() error = %v", err)
+	}
+	<-mutated
+	if !mutationCompletedDuringOutput {
+		t.Fatal("LevelDB full-save output held the trie lock while the visitor was blocked")
+	}
+	entry, err := decodeLevelDBEntryForKey("key", captured)
+	if err != nil {
+		t.Fatalf("decodeLevelDBEntryForKey() error = %v", err)
+	}
+	if entry.String != "before" {
+		t.Fatalf("captured LevelDB string = %q, want before", entry.String)
+	}
+}
+
+func TestSnapshotCaptureUsesBoundedPages(t *testing.T) {
+	ht := newTestTrie(t)
+	for idx := 0; idx < snapshotCapturePageEntries+1; idx++ {
+		ht.UpsertCounter(fmt.Sprintf("key:%05d", idx), int32(idx))
+	}
+	capture, err := ht.captureSnapshot()
+	if err != nil {
+		t.Fatalf("captureSnapshot() error = %v", err)
+	}
+	if capture.count != snapshotCapturePageEntries+1 {
+		t.Fatalf("capture count = %d, want %d", capture.count, snapshotCapturePageEntries+1)
+	}
+	if len(capture.pages) != 2 {
+		t.Fatalf("capture pages = %d, want 2", len(capture.pages))
+	}
+	if len(capture.pages[0]) != snapshotCapturePageEntries || len(capture.pages[1]) != 1 {
+		t.Fatalf("capture page lengths = %d/%d, want %d/1", len(capture.pages[0]), len(capture.pages[1]), snapshotCapturePageEntries)
+	}
+	for idx, page := range capture.pages {
+		if cap(page) > snapshotCapturePageEntries {
+			t.Fatalf("capture page %d capacity = %d, want <= %d", idx, cap(page), snapshotCapturePageEntries)
+		}
+	}
+}
+
 func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(2000, 0)

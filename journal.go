@@ -96,6 +96,7 @@ type commandJournalJob struct {
 
 type CommandJournal struct {
 	mu                  sync.Mutex
+	snapshotMu          sync.Mutex
 	submitMu            sync.RWMutex
 	closeOnce           sync.Once
 	path                string
@@ -205,6 +206,9 @@ func (journal *CommandJournal) Close() error {
 		return nil
 	}
 	journal.closeOnce.Do(func() {
+		journal.snapshotMu.Lock()
+		defer journal.snapshotMu.Unlock()
+
 		journal.submitMu.Lock()
 		journal.accepting = false
 		if journal.groupCommitJobs != nil {
@@ -633,15 +637,34 @@ func (journal *CommandJournal) SaveSnapshotWithFormat(trie *HatTrie, path string
 	if trie == nil {
 		return ErrNilHatTrie
 	}
-	journal.mu.Lock()
-	defer journal.mu.Unlock()
+	format, err := ParseSnapshotFormat(string(format))
+	if err != nil {
+		return err
+	}
+	journal.snapshotMu.Lock()
+	defer journal.snapshotMu.Unlock()
 
+	journal.mu.Lock()
 	if journal.closed {
+		journal.mu.Unlock()
 		return ErrCommandJournalClosed
 	}
 	sequence := journal.lastSequenceLocked()
-	if err := trie.SaveSnapshotWithJournalSequenceAndFormat(path, sequence, format); err != nil {
+	capture, err := trie.captureSnapshot()
+	journal.mu.Unlock()
+	if err != nil {
 		return err
+	}
+	if err := writeFileAtomicStream(path, func(writer io.Writer) error {
+		return writeCapturedSnapshot(writer, sequence, format, capture)
+	}); err != nil {
+		return err
+	}
+
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return ErrCommandJournalClosed
 	}
 	return journal.compactLocked(sequence)
 }
@@ -661,13 +684,21 @@ func (journal *CommandJournal) WriteSnapshotWithFormat(trie *HatTrie, writer io.
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
+	journal.snapshotMu.Lock()
+	defer journal.snapshotMu.Unlock()
+
 	journal.mu.Lock()
-	defer journal.mu.Unlock()
 	if journal.closed {
+		journal.mu.Unlock()
 		return SnapshotMetadata{}, ErrCommandJournalClosed
 	}
 	sequence := journal.lastSequenceLocked()
-	if err := trie.writeSnapshot(writer, sequence, format); err != nil {
+	capture, err := trie.captureSnapshot()
+	journal.mu.Unlock()
+	if err != nil {
+		return SnapshotMetadata{}, err
+	}
+	if err := writeCapturedSnapshot(writer, sequence, format, capture); err != nil {
 		return SnapshotMetadata{}, err
 	}
 	return SnapshotMetadata{JournalSequence: sequence}, nil
@@ -682,6 +713,9 @@ func (journal *CommandJournal) ReplaceWithSnapshot(trie *HatTrie, path string) (
 	if trie == nil {
 		return SnapshotMetadata{}, ErrNilHatTrie
 	}
+	journal.snapshotMu.Lock()
+	defer journal.snapshotMu.Unlock()
+
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 	if journal.closed {

@@ -141,11 +141,28 @@ type snapshotEntry struct {
 	ExpiresAt       *time.Time               `json:"expires_at,omitempty"`
 	Stats           *KeyStats                `json:"stats,omitempty"`
 	rawBytes        []byte
+	levelDBRecord   []byte
 }
 
 type snapshotOperation struct {
 	entry snapshotEntry
 	bytes []byte
+}
+
+type snapshotCapture struct {
+	pages [][]snapshotEntry
+	count int
+}
+
+const snapshotCapturePageEntries = 4096
+
+func (capture *snapshotCapture) append(entry snapshotEntry) {
+	if len(capture.pages) == 0 || len(capture.pages[len(capture.pages)-1]) == snapshotCapturePageEntries {
+		capture.pages = append(capture.pages, make([]snapshotEntry, 0, snapshotCapturePageEntries))
+	}
+	last := len(capture.pages) - 1
+	capture.pages[last] = append(capture.pages[last], entry)
+	capture.count++
 }
 
 func snapshotEntryBytesBase64(entry snapshotEntry) string {
@@ -372,27 +389,35 @@ func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time, prepareOperat
 }
 
 func (ht *HatTrie) writeSnapshot(writer io.Writer, journalSequence uint64, format SnapshotFormat) error {
+	capture, err := ht.captureSnapshot()
+	if err != nil {
+		return err
+	}
+	return writeCapturedSnapshot(writer, journalSequence, format, capture)
+}
+
+func writeCapturedSnapshot(writer io.Writer, journalSequence uint64, format SnapshotFormat, capture snapshotCapture) error {
 	switch format {
 	case SnapshotFormatBinary:
-		return ht.writeSnapshotBinary(writer, journalSequence)
+		return writeCapturedSnapshotBinary(writer, journalSequence, capture)
 	case SnapshotFormatGzipBestBinary:
-		return ht.writeSnapshotGzipBinary(writer, journalSequence, acquireSnapshotBestGzipWriter, releaseSnapshotBestGzipWriter)
+		return writeCapturedSnapshotGzipBinary(writer, journalSequence, capture, acquireSnapshotBestGzipWriter, releaseSnapshotBestGzipWriter)
 	case SnapshotFormatGzipBinary:
-		return ht.writeSnapshotGzipBinary(writer, journalSequence, jsonwire.AcquireGzipWriter, jsonwire.ReleaseGzipWriter)
+		return writeCapturedSnapshotGzipBinary(writer, journalSequence, capture, jsonwire.AcquireGzipWriter, jsonwire.ReleaseGzipWriter)
 	case SnapshotFormatJSON:
-		return ht.writeSnapshotJSON(writer, journalSequence)
+		return writeCapturedSnapshotJSON(writer, journalSequence, capture)
 	case SnapshotFormatGzipBestJSON:
-		return ht.writeSnapshotGzipJSON(writer, journalSequence, acquireSnapshotBestGzipWriter, releaseSnapshotBestGzipWriter)
+		return writeCapturedSnapshotGzipJSON(writer, journalSequence, capture, acquireSnapshotBestGzipWriter, releaseSnapshotBestGzipWriter)
 	case SnapshotFormatGzipJSON:
-		return ht.writeSnapshotGzipJSON(writer, journalSequence, jsonwire.AcquireGzipWriter, jsonwire.ReleaseGzipWriter)
+		return writeCapturedSnapshotGzipJSON(writer, journalSequence, capture, jsonwire.AcquireGzipWriter, jsonwire.ReleaseGzipWriter)
 	default:
 		return fmt.Errorf("hatriecache: unsupported snapshot format %q", format)
 	}
 }
 
-func (ht *HatTrie) writeSnapshotGzipJSON(writer io.Writer, journalSequence uint64, acquire func(io.Writer) *gzip.Writer, release func(*gzip.Writer)) error {
+func writeCapturedSnapshotGzipJSON(writer io.Writer, journalSequence uint64, capture snapshotCapture, acquire func(io.Writer) *gzip.Writer, release func(*gzip.Writer)) error {
 	gzipWriter := acquire(writer)
-	err := ht.writeSnapshotJSON(gzipWriter, journalSequence)
+	err := writeCapturedSnapshotJSON(gzipWriter, journalSequence, capture)
 	closeErr := gzipWriter.Close()
 	release(gzipWriter)
 	if err != nil {
@@ -440,11 +465,7 @@ func snapshotOperationForEntry(entry snapshotEntry) (snapshotOperation, error) {
 	return validateSnapshotEntry(entry)
 }
 
-func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) error {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	ht.ensureOpen()
+func writeCapturedSnapshotJSON(writer io.Writer, journalSequence uint64, capture snapshotCapture) error {
 	if _, err := io.WriteString(writer, "{\n"); err != nil {
 		return err
 	}
@@ -460,24 +481,27 @@ func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) e
 		return err
 	}
 
-	now := time.Time{}
-	if len(ht.expires) > 0 {
-		now = ht.currentTime()
-	}
 	first := true
-	err := ht.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		if first {
-			if _, err := io.WriteString(writer, "\n"); err != nil {
+	for _, page := range capture.pages {
+		for _, entry := range page {
+			if first {
+				if _, err := io.WriteString(writer, "\n"); err != nil {
+					return err
+				}
+				first = false
+			} else if _, err := io.WriteString(writer, ",\n"); err != nil {
 				return err
 			}
-			first = false
-		} else if _, err := io.WriteString(writer, ",\n"); err != nil {
-			return err
+			var err error
+			if entry.levelDBRecord != nil && !levelDBEntryDataIsBinary(entry.levelDBRecord) {
+				err = writeSnapshotRawEntryJSON(writer, entry.levelDBRecord, "    ")
+			} else {
+				err = writeSnapshotEntryFieldsJSON(writer, entry, "    ")
+			}
+			if err != nil {
+				return err
+			}
 		}
-		return ht.writeSnapshotEntryJSONLocked(writer, entry, "    ")
-	})
-	if err != nil {
-		return err
 	}
 	if first {
 		if _, err := io.WriteString(writer, "]\n"); err != nil {
@@ -486,7 +510,7 @@ func (ht *HatTrie) writeSnapshotJSON(writer io.Writer, journalSequence uint64) e
 	} else if _, err := io.WriteString(writer, "\n  ]\n"); err != nil {
 		return err
 	}
-	_, err = io.WriteString(writer, "}\n")
+	_, err := io.WriteString(writer, "}\n")
 	return err
 }
 
@@ -909,6 +933,84 @@ func (writer *prefixedJSONLineWriter) Write(data []byte) (int, error) {
 
 func (ht *HatTrie) snapshotEntryLocked(entry Entry) (snapshotEntry, error) {
 	return ht.snapshotEntryForStoreLockedWithStats(entry, nil, nil, true)
+}
+
+func (ht *HatTrie) captureSnapshot() (snapshotCapture, error) {
+	return ht.captureSnapshotForStore(nil, nil)
+}
+
+func (ht *HatTrie) captureSnapshotForStore(currentStore *LevelDBStore, currentDB *leveldb.DB) (snapshotCapture, error) {
+	if ht == nil {
+		return snapshotCapture{}, ErrNilHatTrie
+	}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	ht.ensureOpen()
+	now := time.Time{}
+	if len(ht.expires) > 0 {
+		now = ht.currentTime()
+	}
+	capture := snapshotCapture{}
+	err := ht.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
+		captured, err := ht.captureSnapshotEntryForStoreLocked(entry, currentStore, currentDB)
+		if err != nil {
+			return err
+		}
+		capture.append(captured)
+		return nil
+	})
+	if err != nil {
+		return snapshotCapture{}, err
+	}
+	return capture, nil
+}
+
+func (ht *HatTrie) captureSnapshotEntryForStoreLocked(entry Entry, currentStore *LevelDBStore, currentDB *leveldb.DB) (snapshotEntry, error) {
+	if entry.Value.Type() == DATAVALUE_TYPE_RAW_BYTES {
+		value, err := ht.bytesValueLocked(entry.Value)
+		if err != nil {
+			return snapshotEntry{}, err
+		}
+		return snapshotEntry{
+			Key:       entry.Key,
+			Type:      "bytes",
+			ExpiresAt: snapshotExpiresAt(ht.expires[entry.Key]),
+			Stats:     clonedUpdatedKeyStats(ht.keyStats[entry.Key]),
+			rawBytes:  value,
+		}, nil
+	}
+	if entry.Value.Type() == DATAVALUE_TYPE_LEVELDB_REF {
+		data, ok, err := ht.levelDBReferenceEntryDataForStoreLocked(entry.Key, entry.Value, currentStore, currentDB)
+		if err != nil {
+			return snapshotEntry{}, err
+		}
+		if ok {
+			captured, err := decodeLevelDBEntryForKey(entry.Key, data)
+			if err != nil {
+				return snapshotEntry{}, err
+			}
+			captured.levelDBRecord = data
+			return capturedSnapshotEntryBytes(captured)
+		}
+	}
+	captured, err := ht.snapshotEntryForStoreLocked(entry, currentStore, currentDB)
+	if err != nil {
+		return snapshotEntry{}, err
+	}
+	return capturedSnapshotEntryBytes(captured)
+}
+
+func capturedSnapshotEntryBytes(captured snapshotEntry) (snapshotEntry, error) {
+	if captured.Type == "bytes" && captured.rawBytes == nil {
+		value, err := snapshotEntryBytesValue(captured)
+		if err != nil {
+			return snapshotEntry{}, err
+		}
+		captured.rawBytes = value
+		captured.Bytes = ""
+	}
+	return captured, nil
 }
 
 func (ht *HatTrie) snapshotEntryWithoutStatsLocked(entry Entry) (snapshotEntry, error) {

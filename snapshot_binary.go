@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"time"
 )
 
 var snapshotBinaryMagic = []byte{'h', 'c', 's', 'n', 1}
@@ -19,11 +18,7 @@ const (
 
 var errSnapshotBinaryRecordTooLarge = errors.New("hatriecache: binary snapshot entry is too large")
 
-func (ht *HatTrie) writeSnapshotBinary(writer io.Writer, journalSequence uint64) error {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	ht.ensureOpen()
+func writeCapturedSnapshotBinary(writer io.Writer, journalSequence uint64, capture snapshotCapture) error {
 	header := newBinaryFieldWriter(snapshotBinaryMagic, len(snapshotBinaryMagic)+(2*binaryFieldMaxVarintLen64))
 	header.writeUvarint(uint64(snapshotVersion))
 	header.writeUvarint(journalSequence)
@@ -31,22 +26,27 @@ func (ht *HatTrie) writeSnapshotBinary(writer io.Writer, journalSequence uint64)
 		return err
 	}
 
-	now := time.Time{}
-	if len(ht.expires) > 0 {
-		now = ht.currentTime()
-	}
-	return ht.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		data, err := ht.snapshotEntryBinaryRecordLocked(entry)
-		if err != nil {
-			return err
+	for _, page := range capture.pages {
+		for _, entry := range page {
+			data := entry.levelDBRecord
+			if !levelDBEntryDataIsBinary(data) {
+				var err error
+				data, err = marshalLevelDBEntry(entry, StorageFormatBinary)
+				if err != nil {
+					return err
+				}
+			}
+			if err := writeSnapshotBinaryRecord(writer, data); err != nil {
+				return err
+			}
 		}
-		return writeSnapshotBinaryRecord(writer, data)
-	})
+	}
+	return nil
 }
 
-func (ht *HatTrie) writeSnapshotGzipBinary(writer io.Writer, journalSequence uint64, acquire func(io.Writer) *gzip.Writer, release func(*gzip.Writer)) error {
+func writeCapturedSnapshotGzipBinary(writer io.Writer, journalSequence uint64, capture snapshotCapture, acquire func(io.Writer) *gzip.Writer, release func(*gzip.Writer)) error {
 	gzipWriter := acquire(writer)
-	err := ht.writeSnapshotBinary(gzipWriter, journalSequence)
+	err := writeCapturedSnapshotBinary(gzipWriter, journalSequence, capture)
 	closeErr := gzipWriter.Close()
 	release(gzipWriter)
 	if err != nil {

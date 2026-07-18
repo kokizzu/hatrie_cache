@@ -200,6 +200,37 @@ benchmark filesystem. A deterministic 16-caller test with a 20 ms collection
 window records exactly one `fsync` and verifies that neither response nor trie
 mutation occurs before that sync completes.
 
+### Point-in-Time Snapshot Capture
+
+Snapshots now copy a consistent point-in-time entry set while holding the trie
+lock, then release the lock before binary/JSON encoding, gzip compression, and
+file or network output. Journal snapshots capture the journal sequence and trie
+state under the same short barrier; later commands proceed during output and
+remain ordered journal deltas. Full LevelDB saves similarly run record visitors
+and database diff work after capture. Unchanged lazy LevelDB records retain their
+exact bytes.
+
+These nine-run medians compare `c549fb7` with the optimized implementation on
+the same host and use 100,000 string keys, the default gzip-best-binary format,
+and one snapshot per run:
+
+| Metric | Blocking output | Captured output | Change |
+| --- | ---: | ---: | ---: |
+| Maximum concurrent read pause | 528,624,130 ns | 142,374,086 ns | 3.71x shorter, 73.1% lower |
+| Total snapshot duration | 531,989,731 ns | 561,312,675 ns | 1.06x time, 5.5% higher |
+| Heap allocation/snapshot | 27,396,816 B | 72,075,424 B | 2.63x, 163.1% higher |
+| Allocations/snapshot | 509,437 | 1,304,616 | 2.56x, 156.1% higher |
+| Benchmark process peak RSS | 93,616 KiB | 136,336 KiB | 1.46x, 45.6% higher |
+
+The pause is the immutable capture itself, not output latency. The memory cost
+is temporary and scales with captured key/value state. This is an availability
+tradeoff: slow disks, compression, and blocked network clients no longer extend
+the command pause, at the cost of enough memory headroom for one in-flight
+capture. Snapshot jobs on one journal are serialized to prevent overlapping
+captures and compaction races. Captured entries use fixed 4,096-entry pages so
+no allocation trusts an unbounded reported key count or requires one dataset-
+sized contiguous block.
+
 ## Latest Optimization Spot Check
 
 After adding exact command fast paths for set, priority queue, Bloom filter,

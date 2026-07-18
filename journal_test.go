@@ -1925,6 +1925,80 @@ func TestCommandJournalStreamsAndReplacesFromExactSnapshot(t *testing.T) {
 	}
 }
 
+func TestCommandJournalSnapshotOutputDoesNotBlockLaterCommands(t *testing.T) {
+	trie := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+	if response := journal.ExecuteCommand(trie, CacheCommandRequest{Command: "SETSTR", Key: "key", Value: "before"}); !response.OK {
+		t.Fatalf("initial command response = %#v, want ok", response)
+	}
+
+	writer := &blockingSnapshotWriter{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	type snapshotResult struct {
+		metadata SnapshotMetadata
+		err      error
+	}
+	written := make(chan snapshotResult, 1)
+	go func() {
+		metadata, err := journal.WriteSnapshotWithFormat(trie, writer, SnapshotFormatBinary)
+		written <- snapshotResult{metadata: metadata, err: err}
+	}()
+	<-writer.entered
+
+	commandDone := make(chan CacheCommandResponse, 1)
+	go func() {
+		commandDone <- journal.ExecuteCommand(trie, CacheCommandRequest{Command: "SETSTR", Key: "key", Value: "after"})
+	}()
+	commandCompletedDuringOutput := false
+	var response CacheCommandResponse
+	select {
+	case response = <-commandDone:
+		commandCompletedDuringOutput = true
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(writer.release)
+	result := <-written
+	if result.err != nil {
+		t.Fatalf("WriteSnapshotWithFormat() error = %v", result.err)
+	}
+	if !commandCompletedDuringOutput {
+		response = <-commandDone
+		t.Fatal("snapshot output held the journal lock while the writer was blocked")
+	}
+	if !response.OK {
+		t.Fatalf("later command response = %#v, want ok", response)
+	}
+	if result.metadata.JournalSequence != 1 {
+		t.Fatalf("snapshot sequence = %d, want 1", result.metadata.JournalSequence)
+	}
+
+	snapshotPath := filepath.Join(t.TempDir(), "captured.hc")
+	if err := os.WriteFile(snapshotPath, writer.buffer.Bytes(), 0o600); err != nil {
+		t.Fatalf("WriteFile(snapshot) error = %v", err)
+	}
+	restored := newTestTrie(t)
+	metadata, err := restored.LoadSnapshotWithMetadata(snapshotPath)
+	if err != nil {
+		t.Fatalf("LoadSnapshotWithMetadata() error = %v", err)
+	}
+	if metadata.JournalSequence != 1 || restored.GetString("key") != "before" {
+		t.Fatalf("restored sequence/value = %d/%q, want 1/before", metadata.JournalSequence, restored.GetString("key"))
+	}
+	tail, err := journal.Tail(1, 10)
+	if err != nil {
+		t.Fatalf("Tail(after snapshot) error = %v", err)
+	}
+	if len(tail.Entries) != 1 || tail.Entries[0].Sequence != 2 {
+		t.Fatalf("tail after snapshot = %#v, want sequence 2", tail)
+	}
+}
+
 func TestCommandJournalCompactionStreamsLargeHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	largeValue := strings.Repeat("x", 70*1024)
