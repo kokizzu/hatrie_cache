@@ -981,9 +981,38 @@ func (replicator *HTTPReplicator) appendReplicationTasksForTargetsWithFingerprin
 	return tasks
 }
 
+func (replicator *HTTPReplicator) appendReplicationPayloadToTargetGroups(groups []replicationTaskGroup, indexes map[TopologyNode]int, groupCapacity int, targets []TopologyNode, payload CacheCommandRequest, fingerprint string) []replicationTaskGroup {
+	payload = replicator.annotateReplicationPayloadWithFingerprint(payload, fingerprint)
+	payloadBytes := 0
+	if replicator.batchMaxBytes > 0 {
+		payloadBytes = estimatedReplicationRequestBytesWithin(payload, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
+	}
+	key := strings.TrimSpace(payload.Key)
+	for _, target := range targets {
+		idx, ok := indexes[target]
+		if !ok {
+			idx = len(groups)
+			indexes[target] = idx
+			groups = append(groups, replicationTaskGroup{
+				target:       target,
+				payloads:     make([]CacheCommandRequest, 0, groupCapacity),
+				keys:         make([]string, 0, groupCapacity),
+				payloadBytes: make([]int, 0, groupCapacity),
+			})
+		}
+		groups[idx].payloads = append(groups[idx].payloads, payload)
+		groups[idx].keys = append(groups[idx].keys, key)
+		groups[idx].payloadBytes = append(groups[idx].payloadBytes, payloadBytes)
+	}
+	return groups
+}
+
 func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, result ReplicationResult, tasks []replicationTask) ReplicationResult {
+	return replicator.executeReplicationTaskGroups(ctx, result, replicator.groupReplicationTasksByTarget(tasks))
+}
+
+func (replicator *HTTPReplicator) executeReplicationTaskGroups(ctx context.Context, result ReplicationResult, groups []replicationTaskGroup) ReplicationResult {
 	result.Queued = false
-	groups := replicator.groupReplicationTasksByTarget(tasks)
 	result.Targets = make([]ReplicationTargetResult, 0, len(groups))
 	for _, group := range groups {
 		targetResult := replicator.executeReplicationTargetBatch(ctx, group.target, group.payloads)
@@ -1378,7 +1407,8 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 		seenKeys = true
 		routing, routingOK := replicator.snapshotReplicationRouting()
 
-		pageTasks := make([]replicationTask, 0, len(page.keys))
+		pageGroups := make([]replicationTaskGroup, 0, len(routing.shards))
+		pageGroupIndexes := make(map[TopologyNode]int, len(routing.nodes))
 		for _, key := range page.keys {
 			if err := ctx.Err(); err != nil {
 				if len(result.Targets) == 0 {
@@ -1406,10 +1436,13 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 				continue
 			}
 			result.Entries++
-			pageTasks = replicator.appendReplicationTasksForTargetsWithFingerprint(pageTasks, targets, payload, routing.fingerprint)
+			pageGroups = replicator.appendReplicationPayloadToTargetGroups(pageGroups, pageGroupIndexes, len(page.keys), targets, payload, routing.fingerprint)
 		}
-		if len(pageTasks) > 0 {
-			pageResult := replicator.executeReplicationTasks(ctx, ReplicationResult{}, pageTasks)
+		if len(pageGroups) > 0 {
+			if replicator.batchMaxBytes > 0 {
+				pageGroups = splitReplicationTaskGroupsByMaxBytes(pageGroups, replicator.batchMaxBytes)
+			}
+			pageResult := replicator.executeReplicationTaskGroups(ctx, ReplicationResult{}, pageGroups)
 			result.Targets = append(result.Targets, pageResult.Targets...)
 		}
 		if err := ctx.Err(); err != nil {

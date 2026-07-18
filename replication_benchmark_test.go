@@ -217,6 +217,50 @@ func BenchmarkReplicationBatchMetadataWire(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationSyncTargetPlanning(b *testing.B) {
+	const payloadCount = 10000
+	replicator := &HTTPReplicator{self: "node-a"}
+	targets := []TopologyNode{
+		{ID: "node-b", Address: "http://node-b"},
+		{ID: "node-c", Address: "http://node-c"},
+	}
+	payloads := make([]CacheCommandRequest, payloadCount)
+	for idx := range payloads {
+		payloads[idx] = CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     "session:" + strconv.Itoa(idx),
+			Value:   `{"type":"string","string":"value"}`,
+		}
+	}
+
+	b.Run("TasksThenGroup", func(b *testing.B) {
+		b.ReportAllocs()
+		for iter := 0; iter < b.N; iter++ {
+			tasks := make([]replicationTask, 0, payloadCount*len(targets))
+			for _, payload := range payloads {
+				tasks = replicator.appendReplicationTasksForTargetsWithFingerprint(tasks, targets, payload, "fingerprint-a")
+			}
+			groups := groupReplicationTasksByTarget(tasks)
+			if len(groups) != len(targets) {
+				b.Fatalf("groups len = %d, want %d", len(groups), len(targets))
+			}
+		}
+	})
+	b.Run("DirectPreallocatedGroups", func(b *testing.B) {
+		b.ReportAllocs()
+		for iter := 0; iter < b.N; iter++ {
+			groups := make([]replicationTaskGroup, 0, len(targets))
+			indexes := make(map[TopologyNode]int, len(targets))
+			for _, payload := range payloads {
+				groups = replicator.appendReplicationPayloadToTargetGroups(groups, indexes, payloadCount, targets, payload, "fingerprint-a")
+			}
+			if len(groups) != len(targets) {
+				b.Fatalf("groups len = %d, want %d", len(groups), len(targets))
+			}
+		}
+	})
+}
+
 func BenchmarkGroupReplicationTasksByTarget(b *testing.B) {
 	for _, tt := range []struct {
 		name          string

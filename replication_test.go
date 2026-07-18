@@ -2024,6 +2024,45 @@ func TestGroupReplicationTasksByTargetCarriesPayloadBytes(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAppendsPayloadDirectlyToTargetGroups(t *testing.T) {
+	replicator := &HTTPReplicator{self: "node-a", batchMaxBytes: 4096}
+	targetB := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	targetC := TopologyNode{ID: "node-c", Address: "http://node-c"}
+	groups := make([]replicationTaskGroup, 0, 2)
+	indexes := make(map[TopologyNode]int, 2)
+
+	groups = replicator.appendReplicationPayloadToTargetGroups(groups, indexes, 8, []TopologyNode{targetB, targetC}, CacheCommandRequest{
+		Command: "INTERNALSET", Key: "session:1", Value: `{"type":"string","string":"one"}`,
+	}, "fingerprint-a")
+	groups = replicator.appendReplicationPayloadToTargetGroups(groups, indexes, 8, []TopologyNode{targetB}, CacheCommandRequest{
+		Command: "INTERNALDEL", Key: "session:2",
+	}, "fingerprint-a")
+
+	if len(groups) != 2 {
+		t.Fatalf("groups len = %d, want 2", len(groups))
+	}
+	if !replicationTargetsEqual(groups[0].target, targetB) || !reflect.DeepEqual(groups[0].keys, []string{"session:1", "session:2"}) {
+		t.Fatalf("node-b group = %#v, want both payloads", groups[0])
+	}
+	if !replicationTargetsEqual(groups[1].target, targetC) || !reflect.DeepEqual(groups[1].keys, []string{"session:1"}) {
+		t.Fatalf("node-c group = %#v, want first payload", groups[1])
+	}
+	for groupIdx, group := range groups {
+		for payloadIdx, payload := range group.payloads {
+			source, sequence, fingerprint := replicationSafetyMetadata(payload)
+			if source != "node-a" || sequence == 0 || fingerprint != "fingerprint-a" {
+				t.Fatalf("group %d payload %d metadata = %q/%d/%q", groupIdx, payloadIdx, source, sequence, fingerprint)
+			}
+			if group.payloadBytes[payloadIdx] <= 0 {
+				t.Fatalf("group %d payload %d bytes = %d, want positive estimate", groupIdx, payloadIdx, group.payloadBytes[payloadIdx])
+			}
+		}
+	}
+	if groups[0].payloads[0].Pairs[replicationMetaSequence] != groups[1].payloads[0].Pairs[replicationMetaSequence] {
+		t.Fatalf("shared payload sequences = %#v/%#v, want same logical mutation sequence", groups[0].payloads[0].Pairs, groups[1].payloads[0].Pairs)
+	}
+}
+
 func TestHTTPReplicatorAppendsTasksWithAnnotatedPayloadBytes(t *testing.T) {
 	replicator := &HTTPReplicator{
 		self:          "node-a",
