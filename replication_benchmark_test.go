@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
@@ -86,6 +87,55 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 			b.ReportMetric(float64(requests.Load())/iterations, "requests/op")
 			b.ReportMetric(float64(wireBytes.Load())/iterations, "wire_B/op")
 			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkHTTPReplicatorTargetFanout(b *testing.B) {
+	const targetCount = 4
+	servers := make([]*httptest.Server, 0, targetCount)
+	groups := make([]replicationTaskGroup, 0, targetCount)
+	for idx := 0; idx < targetCount; idx++ {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			_ = r.Body.Close()
+			time.Sleep(2 * time.Millisecond)
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		}))
+		servers = append(servers, server)
+		groups = append(groups, replicationTaskGroup{
+			target:   TopologyNode{ID: "node-" + strconv.Itoa(idx), Address: server.URL},
+			payloads: []CacheCommandRequest{{Command: "INTERNALDEL", Key: "session:1"}},
+		})
+	}
+	b.Cleanup(func() {
+		for _, server := range servers {
+			server.Close()
+		}
+	})
+	for _, tt := range []struct {
+		name        string
+		maxInFlight int
+	}{
+		{name: "Serial", maxInFlight: 1},
+		{name: "Bounded4", maxInFlight: 4},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: servers[0].Client(), MaxInFlightTargets: tt.maxInFlight})
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				result := replicator.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, groups)
+				if len(result.Targets) != targetCount {
+					b.Fatalf("targets = %d, want %d", len(result.Targets), targetCount)
+				}
+				for _, target := range result.Targets {
+					if !target.OK {
+						b.Fatalf("target = %#v, want ok", target)
+					}
+				}
+			}
+			b.ReportMetric(targetCount, "targets/op")
 		})
 	}
 }

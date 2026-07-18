@@ -23,6 +23,7 @@ const DefaultReplicationDeadLetterLimit = 128
 const DefaultReplicationCircuitBreakerFailures = 5
 const DefaultReplicationCircuitBreakerCooldown = 30 * time.Second
 const DefaultReplicationBatchMaxBytes = 1 << 20
+const DefaultReplicationMaxInFlightTargets = 4
 const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
 const minCompressedReplicationRequestBytes = 16 << 10
@@ -55,6 +56,7 @@ type HTTPReplicatorOptions struct {
 	WireFormat               CommandWireFormat
 	AuthToken                string
 	ReplicationBatchMaxBytes int
+	MaxInFlightTargets       int
 }
 
 type HTTPReplicator struct {
@@ -73,6 +75,7 @@ type HTTPReplicator struct {
 	breakerFailures int
 	breakerCooldown time.Duration
 	batchMaxBytes   int
+	maxInFlight     int
 	breakers        map[string]replicationCircuitBreakerState
 	done            chan struct{}
 	stopped         chan struct{}
@@ -314,9 +317,15 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		breakerFailures: options.CircuitBreakerFailures,
 		breakerCooldown: options.CircuitBreakerCooldown,
 		batchMaxBytes:   options.ReplicationBatchMaxBytes,
+		maxInFlight:     options.MaxInFlightTargets,
 	}
 	if replicator.batchMaxBytes < 0 {
 		replicator.batchMaxBytes = 0
+	}
+	if replicator.maxInFlight == 0 {
+		replicator.maxInFlight = DefaultReplicationMaxInFlightTargets
+	} else if replicator.maxInFlight < 0 {
+		replicator.maxInFlight = 1
 	}
 	if replicator.breakerFailures < 0 {
 		replicator.breakerFailures = 0
@@ -1022,15 +1031,42 @@ func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, r
 
 func (replicator *HTTPReplicator) executeReplicationTaskGroups(ctx context.Context, result ReplicationResult, groups []replicationTaskGroup) ReplicationResult {
 	result.Queued = false
-	result.Targets = make([]ReplicationTargetResult, 0, len(groups))
-	for _, group := range groups {
-		targetResult := replicator.executeReplicationTargetGroup(ctx, group)
-		if len(group.keys) == 1 {
-			targetResult.Key = group.keys[0]
+	result.Targets = make([]ReplicationTargetResult, len(groups))
+	maxInFlight := replicator.maxInFlight
+	if maxInFlight <= 1 || len(groups) <= 1 {
+		for idx, group := range groups {
+			result.Targets[idx] = replicator.executeReplicationTaskGroup(ctx, group)
 		}
-		result.Targets = append(result.Targets, targetResult)
+		return result
 	}
+	if maxInFlight > len(groups) {
+		maxInFlight = len(groups)
+	}
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	workers.Add(maxInFlight)
+	for worker := 0; worker < maxInFlight; worker++ {
+		go func() {
+			defer workers.Done()
+			for idx := range jobs {
+				result.Targets[idx] = replicator.executeReplicationTaskGroup(ctx, groups[idx])
+			}
+		}()
+	}
+	for idx := range groups {
+		jobs <- idx
+	}
+	close(jobs)
+	workers.Wait()
 	return result
+}
+
+func (replicator *HTTPReplicator) executeReplicationTaskGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {
+	targetResult := replicator.executeReplicationTargetGroup(ctx, group)
+	if len(group.keys) == 1 {
+		targetResult.Key = group.keys[0]
+	}
+	return targetResult
 }
 
 func (replicator *HTTPReplicator) executeReplicationTargetGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {

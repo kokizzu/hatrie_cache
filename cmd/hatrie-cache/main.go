@@ -77,6 +77,7 @@ type config struct {
 	replicationWireFormat       string
 	replicationAuthToken        string
 	replicationBatchMaxBytes    int
+	replicationMaxTargets       int
 	replicationSyncInterval     time.Duration
 	replicationSyncPrefix       string
 	enforceLeaderWrites         bool
@@ -272,6 +273,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			WireFormat:               replicationWireFormat(cfg),
 			AuthToken:                cfg.replicationAuthToken,
 			ReplicationBatchMaxBytes: cfg.replicationBatchMaxBytes,
+			MaxInFlightTargets:       cfg.replicationMaxTargets,
 		})
 		defer replicator.Close()
 	}
@@ -373,6 +375,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		replicationMode:             replicationModeJournal,
 		replicationWireFormat:       string(hatriecache.DefaultCommandWireFormat),
 		replicationBatchMaxBytes:    hatriecache.DefaultReplicationBatchMaxBytes,
+		replicationMaxTargets:       hatriecache.DefaultReplicationMaxInFlightTargets,
 		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
 		dbFormat:                    string(hatriecache.DefaultStorageFormat),
 		dbCompareBeforeWrite:        string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
@@ -439,6 +442,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", cfg.replicationWireFormat, "HTTP replication command wire format: protobuf or json")
 	flags.StringVar(&cfg.replicationAuthToken, "replication-auth-token", "", "optional bearer token sent on HTTP replication and accepted only for internal replication commands")
 	flags.IntVar(&cfg.replicationBatchMaxBytes, "replication-batch-max-bytes", cfg.replicationBatchMaxBytes, "maximum estimated bytes per HTTP replication batch; use 0 to disable batch splitting")
+	flags.IntVar(&cfg.replicationMaxTargets, "replication-max-in-flight-targets", cfg.replicationMaxTargets, "maximum concurrent HTTP replication targets; use 1 for serial delivery")
 	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
 	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
@@ -586,6 +590,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.replicationBatchMaxBytes < 0 {
 		return config{}, errors.New("replication batch max bytes must be non-negative")
 	}
+	if cfg.replicationMaxTargets < 1 {
+		return config{}, errors.New("replication max in-flight targets must be positive")
+	}
 	if _, err := hatriecache.ParseStorageFormat(cfg.dbFormat); err != nil {
 		return config{}, err
 	}
@@ -633,6 +640,7 @@ func applyConfigProfileDefaults(cfg config, profile string) (config, error) {
 		cfg.journalFormat = string(hatriecache.DefaultCommandJournalFormat)
 		cfg.replicationWireFormat = string(hatriecache.DefaultCommandWireFormat)
 		cfg.replicationBatchMaxBytes = hatriecache.DefaultReplicationBatchMaxBytes
+		cfg.replicationMaxTargets = hatriecache.DefaultReplicationMaxInFlightTargets
 	case configProfileBench:
 		cfg.monitoringServer = true
 		cfg.monitoringAddr = "127.0.0.1:8080"
@@ -855,6 +863,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_wire_format":              cfg.replicationWireFormat,
 		"replication_auth_token":               redactedSecret(cfg.replicationAuthToken),
 		"replication_batch_max_bytes":          cfg.replicationBatchMaxBytes,
+		"replication_max_in_flight_targets":    cfg.replicationMaxTargets,
 		"replication_sync_interval":            cfg.replicationSyncInterval.String(),
 		"replication_sync_prefix":              cfg.replicationSyncPrefix,
 		"enforce_leader_writes":                cfg.enforceLeaderWrites,

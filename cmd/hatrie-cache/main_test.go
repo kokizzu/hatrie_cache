@@ -47,6 +47,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if cfg.replicationWireFormat != string(hatriecache.DefaultCommandWireFormat) {
 		t.Fatalf("replicationWireFormat = %q, want default", cfg.replicationWireFormat)
 	}
+	if cfg.replicationMaxTargets != hatriecache.DefaultReplicationMaxInFlightTargets {
+		t.Fatalf("replicationMaxTargets = %d, want default %d", cfg.replicationMaxTargets, hatriecache.DefaultReplicationMaxInFlightTargets)
+	}
 	if cfg.dbFormat != string(hatriecache.DefaultStorageFormat) {
 		t.Fatalf("dbFormat = %q, want default", cfg.dbFormat)
 	}
@@ -192,6 +195,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"replication_circuit_breaker_cooldown": "12s",
 		"replication_auth_token": "replica-secret",
 		"replication_batch_max_bytes": 4096,
+		"replication_max_in_flight_targets": 2,
 		"db_path": "/data/cache.leveldb",
 		"db_hot_load": true,
 		"db_hot_load_max_bytes": 2048,
@@ -228,6 +232,9 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	}
 	if cfg.replicationBatchMaxBytes != 4096 {
 		t.Fatalf("replication batch max bytes = %d, want config file value", cfg.replicationBatchMaxBytes)
+	}
+	if cfg.replicationMaxTargets != 2 {
+		t.Fatalf("replication max in-flight targets = %d, want config file value 2", cfg.replicationMaxTargets)
 	}
 	if cfg.dbPath != "/data/cache.leveldb" || !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 {
 		t.Fatalf("db config = %#v, want file values", cfg)
@@ -496,6 +503,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-wire-format", "json",
 		"-replication-auth-token", "replica-secret",
 		"-replication-batch-max-bytes", "2048",
+		"-replication-max-in-flight-targets", "2",
 		"-replication-sync-interval", "10s",
 		"-replication-sync-prefix", "session:",
 		"-enforce-leader-writes",
@@ -523,6 +531,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if cfg.replicationBatchMaxBytes != 2048 {
 		t.Fatalf("replication batch max bytes = %d, want explicit value", cfg.replicationBatchMaxBytes)
+	}
+	if cfg.replicationMaxTargets != 2 {
+		t.Fatalf("replication max in-flight targets = %d, want explicit value 2", cfg.replicationMaxTargets)
 	}
 	if cfg.replicationSyncInterval != 10*time.Second || cfg.replicationSyncPrefix != "session:" {
 		t.Fatalf("cfg replication sync = %s/%q, want 10s/session:", cfg.replicationSyncInterval, cfg.replicationSyncPrefix)
@@ -657,6 +668,10 @@ func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
 		{
 			name: "negative sync interval",
 			args: []string{"-replication", "-replication-sync-interval", "-1s"},
+		},
+		{
+			name: "zero max in-flight targets",
+			args: []string{"-replication-max-in-flight-targets", "0"},
 		},
 		{
 			name: "sync without replication",

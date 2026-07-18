@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -2398,6 +2399,124 @@ func TestHTTPReplicatorAppendsPayloadDirectlyToTargetGroups(t *testing.T) {
 	}
 	if replicator.sequence != 0 {
 		t.Fatalf("replication sequence = %d, want allocation-free metadata deferred until delivery", replicator.sequence)
+	}
+}
+
+func TestHTTPReplicatorExecutesTargetGroupsInParallelAndPreservesOrder(t *testing.T) {
+	entered := make(chan string, 3)
+	release := make(chan struct{})
+	newTarget := func(id string) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			entered <- id
+			<-release
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		}))
+	}
+	servers := []*httptest.Server{newTarget("node-c"), newTarget("node-a"), newTarget("node-b")}
+	defer func() {
+		for _, server := range servers {
+			server.Close()
+		}
+	}()
+	groups := make([]replicationTaskGroup, len(servers))
+	for idx, server := range servers {
+		groups[idx] = replicationTaskGroup{
+			target:   TopologyNode{ID: []string{"node-c", "node-a", "node-b"}[idx], Address: server.URL},
+			payloads: []CacheCommandRequest{{Command: "INTERNALDEL", Key: "session:1"}},
+			keys:     []string{"session:1"},
+		}
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: servers[0].Client()})
+	resultCh := make(chan ReplicationResult, 1)
+	go func() {
+		resultCh <- replicator.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, groups)
+	}()
+	for idx := 0; idx < len(groups); idx++ {
+		select {
+		case <-entered:
+		case <-time.After(500 * time.Millisecond):
+			close(release)
+			t.Fatalf("only %d/%d targets entered before release", idx, len(groups))
+		}
+	}
+	close(release)
+	result := <-resultCh
+	if len(result.Targets) != 3 {
+		t.Fatalf("targets = %#v, want three results", result.Targets)
+	}
+	for idx, want := range []string{"node-c", "node-a", "node-b"} {
+		if result.Targets[idx].Node != want || !result.Targets[idx].OK {
+			t.Fatalf("target %d = %#v, want ordered successful %s", idx, result.Targets[idx], want)
+		}
+	}
+}
+
+func TestHTTPReplicatorBoundsParallelTargetGroups(t *testing.T) {
+	var active atomic.Int64
+	var maximum atomic.Int64
+	entered := make(chan struct{}, 4)
+	release := make(chan struct{}, 4)
+	newTarget := func() *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			current := active.Add(1)
+			for {
+				previous := maximum.Load()
+				if current <= previous || maximum.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			entered <- struct{}{}
+			<-release
+			active.Add(-1)
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		}))
+	}
+	servers := []*httptest.Server{newTarget(), newTarget(), newTarget(), newTarget()}
+	defer func() {
+		for _, server := range servers {
+			server.Close()
+		}
+	}()
+	groups := make([]replicationTaskGroup, len(servers))
+	for idx, server := range servers {
+		groups[idx] = replicationTaskGroup{
+			target:   TopologyNode{ID: "node-" + strconv.Itoa(idx), Address: server.URL},
+			payloads: []CacheCommandRequest{{Command: "INTERNALDEL", Key: "session:1"}},
+		}
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: servers[0].Client(), MaxInFlightTargets: 2})
+	resultCh := make(chan ReplicationResult, 1)
+	go func() {
+		resultCh <- replicator.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, groups)
+	}()
+	for idx := 0; idx < 2; idx++ {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatalf("initial target %d did not enter", idx)
+		}
+	}
+	select {
+	case <-entered:
+		t.Fatal("third target entered before a bounded worker was released")
+	case <-time.After(50 * time.Millisecond):
+	}
+	release <- struct{}{}
+	release <- struct{}{}
+	for idx := 0; idx < 2; idx++ {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatalf("remaining target %d did not enter", idx)
+		}
+	}
+	release <- struct{}{}
+	release <- struct{}{}
+	result := <-resultCh
+	if len(result.Targets) != 4 || maximum.Load() != 2 {
+		t.Fatalf("result targets/max concurrency = %d/%d, want 4/2", len(result.Targets), maximum.Load())
 	}
 }
 

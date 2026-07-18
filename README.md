@@ -865,7 +865,11 @@ metadata. Replication
 batches are split before send when their estimated
 uncompressed request body would exceed `REPLICATION_BATCH_MAX_BYTES` (default
 `1048576`). Set `REPLICATION_BATCH_MAX_BYTES=0` to disable byte-based
-splitting. HTTP replication command bodies use protobuf by default
+splitting. Replication delivers to at most four targets concurrently by default
+(`REPLICATION_MAX_IN_FLIGHT_TARGETS=4`). Set
+`REPLICATION_MAX_IN_FLIGHT_TARGETS=1` for serial target delivery, or lower the
+default when each target is reached through the same bandwidth-limited link.
+Target results remain in deterministic topology order. HTTP replication command bodies use protobuf by default
 (`REPLICATION_WIRE_FORMAT=protobuf`), then automatically use the previous JSON
 wire format for structured `values` or `pairs` payloads that protobuf cannot
 represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON;
