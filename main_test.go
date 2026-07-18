@@ -2170,6 +2170,151 @@ func TestKeyStatsTrackExistingKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
 	}
 }
 
+func TestKeyStatsPolicyDefaultsToBounded(t *testing.T) {
+	ht := newTestTrie(t)
+
+	policy := ht.KeyStatsPolicy()
+	if policy.Mode != KeyStatsModeBounded || policy.Capacity != DefaultKeyStatsCapacity || policy.Tracked != 0 {
+		t.Fatalf("KeyStatsPolicy() = %#v, want bounded capacity %d with no tracked keys", policy, DefaultKeyStatsCapacity)
+	}
+}
+
+func TestKeyStatsBoundedPolicyEvictsTelemetryWithoutEvictingValues(t *testing.T) {
+	ht := newTestTrie(t)
+	if err := ht.ConfigureKeyStats(KeyStatsModeBounded, 2); err != nil {
+		t.Fatalf("ConfigureKeyStats(bounded) error = %v", err)
+	}
+
+	now := time.Unix(960, 0)
+	ht.now = func() time.Time { return now }
+	ht.UpsertString("cold", "cold-value")
+	now = now.Add(time.Second)
+	ht.UpsertString("hot", "hot-value")
+	now = now.Add(time.Second)
+	if got := ht.GetString("hot"); got != "hot-value" {
+		t.Fatalf("GetString(hot) = %q, want hot-value", got)
+	}
+	now = now.Add(time.Second)
+	ht.UpsertString("new", "new-value")
+
+	policy := ht.KeyStatsPolicy()
+	if policy.Tracked != 2 {
+		t.Fatalf("KeyStatsPolicy().Tracked = %d, want 2", policy.Tracked)
+	}
+	if stats, ok := ht.StatsForKey("cold"); ok {
+		t.Fatalf("StatsForKey(cold) = %#v, true; want telemetry evicted", stats)
+	}
+	if _, ok := ht.StatsForKey("hot"); !ok {
+		t.Fatal("StatsForKey(hot) = false, want recently active key tracked")
+	}
+	if _, ok := ht.StatsForKey("new"); !ok {
+		t.Fatal("StatsForKey(new) = false, want new key tracked")
+	}
+	if got := ht.GetString("cold"); got != "cold-value" {
+		t.Fatalf("GetString(cold after telemetry eviction) = %q, want cold-value", got)
+	}
+	if got := ht.GetString("new"); got != "new-value" {
+		t.Fatalf("GetString(new) = %q, want new-value", got)
+	}
+	if stats := ht.Stats(); stats.Writes != 3 || stats.Reads != 3 || stats.Hits != 3 {
+		t.Fatalf("Stats() = %#v, want exact global totals after telemetry replacement", stats)
+	}
+}
+
+func TestKeyStatsBoundedPolicyReusesSlotsAfterDelete(t *testing.T) {
+	ht := newTestTrie(t)
+	if err := ht.ConfigureKeyStats(KeyStatsModeBounded, 2); err != nil {
+		t.Fatalf("ConfigureKeyStats(bounded) error = %v", err)
+	}
+
+	ht.UpsertString("", "empty")
+	ht.UpsertString("stable", "value")
+	if !ht.Delete("") {
+		t.Fatal("Delete(empty key) = false, want true")
+	}
+	for idx := 0; idx < 100; idx++ {
+		key := fmt.Sprintf("rotating:%d", idx)
+		ht.UpsertString(key, "value")
+		if !ht.Delete(key) {
+			t.Fatalf("Delete(%q) = false, want true", key)
+		}
+	}
+
+	policy := ht.KeyStatsPolicy()
+	if policy.Tracked != 1 {
+		t.Fatalf("KeyStatsPolicy().Tracked = %d, want stable key only", policy.Tracked)
+	}
+	ht.mu.RLock()
+	slots := len(ht.keyStatsSlots)
+	free := len(ht.keyStatsFree)
+	ht.mu.RUnlock()
+	if slots != 2 || free != 1 {
+		t.Fatalf("bounded tracker slots/free = %d/%d, want fixed 2/1 after churn", slots, free)
+	}
+	if got := ht.GetString("stable"); got != "value" {
+		t.Fatalf("GetString(stable) = %q, want value", got)
+	}
+}
+
+func TestKeyStatsFullAndOffPolicies(t *testing.T) {
+	t.Run("full", func(t *testing.T) {
+		ht := newTestTrie(t)
+		if err := ht.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+			t.Fatalf("ConfigureKeyStats(full) error = %v", err)
+		}
+		for _, key := range []string{"one", "two", "three"} {
+			ht.UpsertString(key, key)
+		}
+		if policy := ht.KeyStatsPolicy(); policy.Mode != KeyStatsModeFull || policy.Capacity != 0 || policy.Tracked != 3 {
+			t.Fatalf("KeyStatsPolicy() = %#v, want full with three tracked keys", policy)
+		}
+	})
+
+	t.Run("off", func(t *testing.T) {
+		ht := newTestTrie(t)
+		if err := ht.ConfigureKeyStats(KeyStatsModeOff, 0); err != nil {
+			t.Fatalf("ConfigureKeyStats(off) error = %v", err)
+		}
+		ht.UpsertString("key", "value")
+		if got := ht.GetString("key"); got != "value" {
+			t.Fatalf("GetString(key) = %q, want value", got)
+		}
+		if stats, ok := ht.StatsForKey("key"); ok {
+			t.Fatalf("StatsForKey(key) = %#v, true; want telemetry disabled", stats)
+		}
+		if policy := ht.KeyStatsPolicy(); policy.Mode != KeyStatsModeOff || policy.Capacity != 0 || policy.Tracked != 0 {
+			t.Fatalf("KeyStatsPolicy() = %#v, want off with no tracked keys", policy)
+		}
+		if stats := ht.Stats(); stats.Writes != 1 || stats.Reads != 1 || stats.Hits != 1 {
+			t.Fatalf("Stats() = %#v, want exact global totals with key telemetry off", stats)
+		}
+	})
+}
+
+func TestConfigureKeyStatsRejectsInvalidPolicy(t *testing.T) {
+	ht := newTestTrie(t)
+
+	for _, test := range []struct {
+		name     string
+		mode     KeyStatsMode
+		capacity int
+	}{
+		{name: "mode", mode: "unknown", capacity: 1},
+		{name: "bounded zero", mode: KeyStatsModeBounded, capacity: 0},
+		{name: "bounded negative", mode: KeyStatsModeBounded, capacity: -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := ht.ConfigureKeyStats(test.mode, test.capacity); err == nil {
+				t.Fatalf("ConfigureKeyStats(%q, %d) error = nil, want validation error", test.mode, test.capacity)
+			}
+		})
+	}
+
+	if policy := ht.KeyStatsPolicy(); policy.Mode != KeyStatsModeBounded || policy.Capacity != DefaultKeyStatsCapacity {
+		t.Fatalf("KeyStatsPolicy() after rejected changes = %#v, want unchanged default", policy)
+	}
+}
+
 func TestRestoreKeyStatsUpdatesRatesAndClearsStats(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("key", "value")

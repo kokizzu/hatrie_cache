@@ -560,6 +560,19 @@ make monitoring-server WRITE_PROTECTION=true
 make monitoring-server RATE_LIMIT=50 AUDIT_LOG_PATH=data/audit.jsonl
 ```
 
+Per-key monitoring metadata is bounded to 100,000 active keys by default. This
+does not limit or evict cached values: cache-wide counters remain exact, while
+`StatsForKey` reports `false` for keys whose detailed telemetry is not retained.
+The bounded tracker samples five candidates and replaces the least recently
+active candidate in constant time. Use `full` for the previous unlimited
+per-key statistics behavior, or `off` to retain only cache-wide statistics:
+
+```
+make monitoring-server KEY_STATS_MODE=bounded KEY_STATS_CAPACITY=250000
+make monitoring-server KEY_STATS_MODE=full
+make monitoring-server KEY_STATS_MODE=off
+```
+
 Long-running daemon options can also live in a JSON config file. Config keys
 match flag names and may use hyphens or underscores; duration values use Go
 duration strings. Explicit CLI flags override file values:
@@ -569,6 +582,8 @@ duration strings. Explicit CLI flags override file values:
   "monitoring_server": true,
   "monitoring_addr": "0.0.0.0:8080",
   "monitoring_web_dir": "svelte-mpa/dist",
+  "key_stats_mode": "bounded",
+  "key_stats_capacity": 100000,
   "db_path": "data/cache.leveldb",
   "snapshot_path": "data/snapshot.hc",
   "snapshot_interval": "30s",
@@ -1300,10 +1315,13 @@ the `HatValue.OnDisk()` flag. `CreateHatTrie` uses an owned temporary spill
 directory that is removed by `Destroy`; use `CreateHatTrieWithDiskDir` to supply
 a specific directory.
 
-Use `Stats` to read cache counters and hit-rate metadata. `StatsForKey` returns
-per-key read/write counters and last access times without creating stats for
-unknown-key misses. `SaveStats` writes the global statistics snapshot as JSON,
-and `LoadStats` restores a saved snapshot.
+Use `Stats` to read exact cache counters and hit-rate metadata. `StatsForKey`
+returns retained per-key read/write counters and last access times without
+creating stats for unknown-key misses; its boolean is `false` for both unknown
+and currently untracked keys. `ConfigureKeyStats` selects bounded, full, or off
+retention, and `KeyStatsPolicy` reports the mode, capacity, and tracked count.
+`SaveStats` writes the global statistics snapshot as JSON, and `LoadStats`
+restores a saved snapshot.
 
 Use `SaveSnapshot` and `LoadSnapshot` for portable data snapshots.
 `SaveSnapshot` writes gzip-best binary by default; use

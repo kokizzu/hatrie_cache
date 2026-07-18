@@ -58,6 +58,8 @@ type config struct {
 	auditLogPath                string
 	writeProtection             bool
 	rateLimit                   int
+	keyStatsMode                string
+	keyStatsCapacity            int
 	monitoringWebDir            string
 	monitoringReadHeaderTimeout time.Duration
 	monitoringIdleTimeout       time.Duration
@@ -177,6 +179,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
+	if err := trie.ConfigureKeyStats(hatriecache.KeyStatsMode(cfg.keyStatsMode), cfg.keyStatsCapacity); err != nil {
+		return err
+	}
 
 	dbStore, err := openLevelDBIfConfigured(cfg.dbPath, storageFormat(cfg))
 	if err != nil {
@@ -391,6 +396,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		monitoringWebDir:            "svelte-mpa/dist",
 		monitoringReadHeaderTimeout: defaultMonitoringReadHeaderTimeout,
 		monitoringIdleTimeout:       defaultMonitoringIdleTimeout,
+		keyStatsMode:                string(hatriecache.KeyStatsModeBounded),
+		keyStatsCapacity:            hatriecache.DefaultKeyStatsCapacity,
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
 		replicationMode:             replicationModeJournal,
 		replicationWireFormat:       string(hatriecache.DefaultCommandWireFormat),
@@ -445,6 +452,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
 	flags.BoolVar(&cfg.writeProtection, "write-protection", cfg.writeProtection, "reject dangerous monitoring API writes")
 	flags.IntVar(&cfg.rateLimit, "rate-limit", cfg.rateLimit, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
+	flags.StringVar(&cfg.keyStatsMode, "key-stats-mode", cfg.keyStatsMode, "per-key telemetry retention: bounded, full, or off")
+	flags.IntVar(&cfg.keyStatsCapacity, "key-stats-capacity", cfg.keyStatsCapacity, "maximum keys with retained telemetry in bounded mode")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
@@ -532,6 +541,17 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.rateLimit < 0 {
 		return config{}, errors.New("rate limit must be non-negative")
+	}
+	cfg.keyStatsMode = strings.ToLower(strings.TrimSpace(cfg.keyStatsMode))
+	switch hatriecache.KeyStatsMode(cfg.keyStatsMode) {
+	case hatriecache.KeyStatsModeBounded:
+		if cfg.keyStatsCapacity <= 0 {
+			return config{}, errors.New("bounded key stats capacity must be positive")
+		}
+	case hatriecache.KeyStatsModeFull, hatriecache.KeyStatsModeOff:
+		cfg.keyStatsCapacity = 0
+	default:
+		return config{}, errors.New("key stats mode must be bounded, full, or off")
 	}
 	if cfg.dbHotLoadMaxBytes < 0 {
 		return config{}, errors.New("db hot-load max bytes must be non-negative")
@@ -874,6 +894,8 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"audit_log_path":                       cfg.auditLogPath,
 		"write_protection":                     cfg.writeProtection,
 		"rate_limit":                           cfg.rateLimit,
+		"key_stats_mode":                       cfg.keyStatsMode,
+		"key_stats_capacity":                   cfg.keyStatsCapacity,
 		"monitoring_web_dir":                   cfg.monitoringWebDir,
 		"monitoring_read_header_timeout":       cfg.monitoringReadHeaderTimeout.String(),
 		"monitoring_idle_timeout":              cfg.monitoringIdleTimeout.String(),

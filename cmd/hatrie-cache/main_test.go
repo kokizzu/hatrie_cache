@@ -256,6 +256,49 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	}
 }
 
+func TestParseConfigKeyStatsDefaultsAndOverrides(t *testing.T) {
+	defaultCfg, err := parseConfig(nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(defaults) error = %v", err)
+	}
+	if defaultCfg.keyStatsMode != string(hatriecache.KeyStatsModeBounded) || defaultCfg.keyStatsCapacity != hatriecache.DefaultKeyStatsCapacity {
+		t.Fatalf("default key stats config = %q/%d, want bounded/%d", defaultCfg.keyStatsMode, defaultCfg.keyStatsCapacity, hatriecache.DefaultKeyStatsCapacity)
+	}
+
+	fullCfg, err := parseConfig([]string{"-key-stats-mode", "full"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(full) error = %v", err)
+	}
+	if fullCfg.keyStatsMode != string(hatriecache.KeyStatsModeFull) || fullCfg.keyStatsCapacity != 0 {
+		t.Fatalf("full key stats config = %q/%d, want full/0", fullCfg.keyStatsMode, fullCfg.keyStatsCapacity)
+	}
+
+	boundedCfg, err := parseConfig([]string{"-key-stats-mode", "bounded", "-key-stats-capacity", "17"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(bounded override) error = %v", err)
+	}
+	if boundedCfg.keyStatsMode != string(hatriecache.KeyStatsModeBounded) || boundedCfg.keyStatsCapacity != 17 {
+		t.Fatalf("bounded key stats config = %q/%d, want bounded/17", boundedCfg.keyStatsMode, boundedCfg.keyStatsCapacity)
+	}
+}
+
+func TestParseConfigRejectsInvalidKeyStatsPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "mode", args: []string{"-key-stats-mode", "invalid"}},
+		{name: "bounded zero", args: []string{"-key-stats-mode", "bounded", "-key-stats-capacity", "0"}},
+		{name: "bounded negative", args: []string{"-key-stats-mode", "bounded", "-key-stats-capacity", "-1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := parseConfig(test.args, &bytes.Buffer{}); err == nil {
+				t.Fatalf("parseConfig(%v) error = nil, want key stats validation error", test.args)
+			}
+		})
+	}
+}
+
 func TestParseConfigDeployExampleUsesSaneDurableDefaults(t *testing.T) {
 	path := filepath.Join("..", "..", "deploy", "hatrie-cache.json")
 	cfg, err := parseConfig([]string{"-config", path}, &bytes.Buffer{})

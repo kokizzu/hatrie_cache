@@ -5,6 +5,8 @@
   "audit_log_path": "data/audit.jsonl",
   "write_protection": true,
   "rate_limit": 100,
+  "key_stats_mode": "bounded",
+  "key_stats_capacity": 100000,
   "node_id": "node-a",
   "topology_path": "deploy/topology/full-replica.json",
   "snapshot_path": "data/snapshot.hc",

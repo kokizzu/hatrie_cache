@@ -633,6 +633,121 @@ type KeyStats struct {
 	CumulativeHitRate float64   `json:"cumulative_hit_rate"`
 }
 
+// KeyStatsMode controls how much per-key telemetry the trie retains. Cache-wide
+// statistics remain exact in every mode.
+type KeyStatsMode string
+
+const (
+	KeyStatsModeBounded KeyStatsMode = "bounded"
+	KeyStatsModeFull    KeyStatsMode = "full"
+	KeyStatsModeOff     KeyStatsMode = "off"
+
+	DefaultKeyStatsCapacity = 100_000
+	keyStatsEvictionSamples = 5
+)
+
+// KeyStatsPolicy describes the active per-key telemetry policy. Tracked is the
+// current number of keys with retained detailed statistics.
+type KeyStatsPolicy struct {
+	Mode     KeyStatsMode `json:"mode"`
+	Capacity int          `json:"capacity"`
+	Tracked  int          `json:"tracked"`
+}
+
+type trackedKeyStats struct {
+	Reads         uint64
+	Hits          uint64
+	Misses        uint64
+	Writes        uint64
+	lastHitSec    int64
+	lastMissSec   int64
+	lastWriteSec  int64
+	lastHitNsec   uint32
+	lastMissNsec  uint32
+	lastWriteNsec uint32
+	slot          uint32
+}
+
+const keyStatsUnsetSecond = int64(-1 << 63)
+const keyStatsNoSlot = ^uint32(0)
+
+func newTrackedKeyStats() *trackedKeyStats {
+	return &trackedKeyStats{
+		lastHitSec:   keyStatsUnsetSecond,
+		lastMissSec:  keyStatsUnsetSecond,
+		lastWriteSec: keyStatsUnsetSecond,
+		slot:         keyStatsNoSlot,
+	}
+}
+
+func compactKeyStatsTime(value time.Time) (int64, uint32) {
+	if value.IsZero() {
+		return keyStatsUnsetSecond, 0
+	}
+	return value.Unix(), uint32(value.Nanosecond())
+}
+
+func expandedKeyStatsTime(seconds int64, nanoseconds uint32) time.Time {
+	if seconds == keyStatsUnsetSecond {
+		return time.Time{}
+	}
+	return time.Unix(seconds, int64(nanoseconds))
+}
+
+func (stats *trackedKeyStats) expanded() KeyStats {
+	if stats == nil {
+		return KeyStats{}
+	}
+	out := KeyStats{
+		Reads:     stats.Reads,
+		Hits:      stats.Hits,
+		Misses:    stats.Misses,
+		Writes:    stats.Writes,
+		LastHit:   expandedKeyStatsTime(stats.lastHitSec, stats.lastHitNsec),
+		LastMiss:  expandedKeyStatsTime(stats.lastMissSec, stats.lastMissNsec),
+		LastWrite: expandedKeyStatsTime(stats.lastWriteSec, stats.lastWriteNsec),
+	}
+	out.updateRates()
+	return out
+}
+
+func (stats *trackedKeyStats) restore(value KeyStats) {
+	stats.Reads = value.Reads
+	stats.Hits = value.Hits
+	stats.Misses = value.Misses
+	stats.Writes = value.Writes
+	stats.lastHitSec, stats.lastHitNsec = compactKeyStatsTime(value.LastHit)
+	stats.lastMissSec, stats.lastMissNsec = compactKeyStatsTime(value.LastMiss)
+	stats.lastWriteSec, stats.lastWriteNsec = compactKeyStatsTime(value.LastWrite)
+}
+
+func (stats *trackedKeyStats) setLastHit(value time.Time) {
+	stats.lastHitSec, stats.lastHitNsec = compactKeyStatsTime(value)
+}
+
+func (stats *trackedKeyStats) setLastMiss(value time.Time) {
+	stats.lastMissSec, stats.lastMissNsec = compactKeyStatsTime(value)
+}
+
+func (stats *trackedKeyStats) setLastWrite(value time.Time) {
+	stats.lastWriteSec, stats.lastWriteNsec = compactKeyStatsTime(value)
+}
+
+func (stats *trackedKeyStats) lastActivity() (int64, uint32) {
+	seconds, nanoseconds := stats.lastWriteSec, stats.lastWriteNsec
+	if compactKeyStatsTimeAfter(stats.lastHitSec, stats.lastHitNsec, seconds, nanoseconds) {
+		seconds, nanoseconds = stats.lastHitSec, stats.lastHitNsec
+	}
+	if compactKeyStatsTimeAfter(stats.lastMissSec, stats.lastMissNsec, seconds, nanoseconds) {
+		seconds, nanoseconds = stats.lastMissSec, stats.lastMissNsec
+	}
+	return seconds, nanoseconds
+}
+
+func compactKeyStatsTimeAfter(leftSec int64, leftNsec uint32, rightSec int64, rightNsec uint32) bool {
+	return leftSec > rightSec || leftSec == rightSec && leftNsec > rightNsec
+}
+
 func MarshalMapJSON(value Map) ([]byte, error) {
 	return json.Marshal(value)
 }
@@ -1913,7 +2028,12 @@ type HatTrie struct {
 	hotValue         HatValue
 	hotValid         bool
 	stats            CacheStats
-	keyStats         map[string]*KeyStats
+	keyStats         map[string]*trackedKeyStats
+	keyStatsMode     KeyStatsMode
+	keyStatsCapacity int
+	keyStatsSlots    []string
+	keyStatsFree     []uint32
+	keyStatsHand     int
 	levelDBSpillKeys map[string]struct{}
 	levelDBHotBytes  int64
 	levelDBHotValues map[string]int64
@@ -1961,7 +2081,9 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		radixTrees:       CreateRadixTreeStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
-		keyStats:         map[string]*KeyStats{},
+		keyStats:         map[string]*trackedKeyStats{},
+		keyStatsMode:     KeyStatsModeBounded,
+		keyStatsCapacity: DefaultKeyStatsCapacity,
 		now:              time.Now,
 	}
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
@@ -2010,6 +2132,11 @@ func (ht *HatTrie) Destroy() {
 	ht.hotValue = HatValue{}
 	ht.hotValid = false
 	ht.keyStats = nil
+	ht.keyStatsMode = ""
+	ht.keyStatsCapacity = 0
+	ht.keyStatsSlots = nil
+	ht.keyStatsFree = nil
+	ht.keyStatsHand = 0
 	ht.levelDBSpillKeys = nil
 	ht.levelDBHotBytes = 0
 	ht.levelDBHotValues = nil
@@ -2040,6 +2167,97 @@ func (ht *HatTrie) Stats() CacheStats {
 	return stats
 }
 
+// KeyStatsPolicy returns the active per-key telemetry policy.
+func (ht *HatTrie) KeyStatsPolicy() KeyStatsPolicy {
+	if ht == nil {
+		return KeyStatsPolicy{}
+	}
+	ht.mu.RLock()
+	defer ht.mu.RUnlock()
+
+	ht.ensureOpen()
+	return KeyStatsPolicy{
+		Mode:     ht.keyStatsMode,
+		Capacity: ht.keyStatsCapacity,
+		Tracked:  len(ht.keyStats),
+	}
+}
+
+// ConfigureKeyStats changes per-key telemetry retention. Bounded mode requires
+// a positive capacity. Full and off modes ignore capacity and report it as zero.
+func (ht *HatTrie) ConfigureKeyStats(mode KeyStatsMode, capacity int) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if mode != KeyStatsModeBounded && mode != KeyStatsModeFull && mode != KeyStatsModeOff {
+		return fmt.Errorf("hatriecache: invalid key stats mode %q", mode)
+	}
+	if mode == KeyStatsModeBounded && capacity <= 0 {
+		return errors.New("hatriecache: bounded key stats capacity must be positive")
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	ht.ensureOpen()
+	ht.configureKeyStatsLocked(mode, capacity)
+	return nil
+}
+
+func (ht *HatTrie) configureKeyStatsLocked(mode KeyStatsMode, capacity int) {
+	if mode == KeyStatsModeOff {
+		ht.keyStats = map[string]*trackedKeyStats{}
+		ht.keyStatsMode = mode
+		ht.keyStatsCapacity = 0
+		ht.keyStatsSlots = nil
+		ht.keyStatsFree = nil
+		ht.keyStatsHand = 0
+		return
+	}
+	if mode == KeyStatsModeFull {
+		ht.keyStatsMode = mode
+		ht.keyStatsCapacity = 0
+		ht.keyStatsSlots = nil
+		ht.keyStatsFree = nil
+		ht.keyStatsHand = 0
+		for _, stats := range ht.keyStats {
+			stats.slot = keyStatsNoSlot
+		}
+		return
+	}
+
+	keys := make([]string, 0, len(ht.keyStats))
+	for key := range ht.keyStats {
+		keys = append(keys, key)
+	}
+	sort.SliceStable(keys, func(left int, right int) bool {
+		leftStats := ht.keyStats[keys[left]]
+		rightStats := ht.keyStats[keys[right]]
+		leftSec, leftNsec := leftStats.lastActivity()
+		rightSec, rightNsec := rightStats.lastActivity()
+		if leftSec == rightSec && leftNsec == rightNsec {
+			return keys[left] < keys[right]
+		}
+		return compactKeyStatsTimeAfter(leftSec, leftNsec, rightSec, rightNsec)
+	})
+	if len(keys) > capacity {
+		for _, key := range keys[capacity:] {
+			delete(ht.keyStats, key)
+		}
+		keys = keys[:capacity]
+	}
+
+	ht.keyStatsMode = mode
+	ht.keyStatsCapacity = capacity
+	ht.keyStatsSlots = make([]string, 0, len(keys))
+	ht.keyStatsFree = nil
+	ht.keyStatsHand = 0
+	for idx, key := range keys {
+		stats := ht.keyStats[key]
+		stats.slot = uint32(idx)
+		ht.keyStatsSlots = append(ht.keyStatsSlots, key)
+	}
+}
+
 // StatsForKey returns access metadata for an existing key.
 func (ht *HatTrie) StatsForKey(key string) (KeyStats, bool) {
 	stats, ok, _ := ht.StatsForKeyChecked(key)
@@ -2061,7 +2279,7 @@ func (ht *HatTrie) StatsForKeyChecked(key string) (KeyStats, bool, error) {
 	ht.ensureOpen()
 	rawPtr := ht.tryLocation(key)
 	if rawPtr == nil {
-		delete(ht.keyStats, key)
+		ht.removeKeyStatsLocked(key)
 		return KeyStats{}, false, nil
 	}
 	hval := HatValue{}
@@ -2071,9 +2289,7 @@ func (ht *HatTrie) StatsForKeyChecked(key string) (KeyStats, bool, error) {
 	}
 	stats, ok := ht.keyStats[key]
 	if ok && stats != nil {
-		out := *stats
-		out.updateRates()
-		return out, true, nil
+		return stats.expanded(), true, nil
 	}
 	return KeyStats{}, false, nil
 }
@@ -2088,12 +2304,14 @@ func (ht *HatTrie) restoreKeyStats(key string, stats *KeyStats) {
 
 func (ht *HatTrie) restoreKeyStatsLocked(key string, stats *KeyStats) {
 	if stats == nil {
-		delete(ht.keyStats, key)
+		ht.removeKeyStatsLocked(key)
 		return
 	}
-	restored := *stats
-	restored.updateRates()
-	ht.keyStats[key] = &restored
+	restored := ht.ensureKeyStatsLocked(key)
+	if restored == nil {
+		return
+	}
+	restored.restore(*stats)
 }
 
 func (ht *HatTrie) SaveStats(path string) error {
@@ -2594,16 +2812,18 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 			continue
 		}
 		if stats == nil {
-			stats = &KeyStats{}
-			ht.keyStats[key] = stats
+			stats = ht.ensureKeyStatsLocked(key)
+			if stats == nil {
+				continue
+			}
 		}
 		stats.Reads++
 		if hit {
 			stats.Hits++
-			stats.LastHit = now
+			stats.setLastHit(now)
 		} else {
 			stats.Misses++
-			stats.LastMiss = now
+			stats.setLastMiss(now)
 		}
 	}
 }
@@ -2620,11 +2840,13 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 		ht.updateLevelDBHotByteAccountingForKeyLocked(key)
 		stats := ht.keyStats[key]
 		if stats == nil {
-			stats = &KeyStats{}
-			ht.keyStats[key] = stats
+			stats = ht.ensureKeyStatsLocked(key)
+			if stats == nil {
+				continue
+			}
 		}
 		stats.Writes++
-		stats.LastWrite = now
+		stats.setLastWrite(now)
 	}
 }
 
@@ -2633,7 +2855,7 @@ func (ht *HatTrie) recordDeleteLocked(key string) {
 	ht.recordWriteLocked()
 	ht.deleteLevelDBSpillCandidateLocked(key)
 	ht.deleteLevelDBHotByteAccountingLocked(key)
-	delete(ht.keyStats, key)
+	ht.removeKeyStatsLocked(key)
 }
 
 func (ht *HatTrie) recordExpirationLocked(keys ...string) {
@@ -2642,7 +2864,7 @@ func (ht *HatTrie) recordExpirationLocked(keys ...string) {
 	for _, key := range keys {
 		ht.deleteLevelDBSpillCandidateLocked(key)
 		ht.deleteLevelDBHotByteAccountingLocked(key)
-		delete(ht.keyStats, key)
+		ht.removeKeyStatsLocked(key)
 	}
 }
 
@@ -2705,13 +2927,99 @@ func (stats *KeyStats) updateRates() {
 	stats.CumulativeHitRate = rate
 }
 
-func clonedUpdatedKeyStats(stats *KeyStats) *KeyStats {
+func clonedUpdatedKeyStats(stats *trackedKeyStats) *KeyStats {
 	if stats == nil {
 		return nil
 	}
-	cloned := *stats
-	cloned.updateRates()
+	cloned := stats.expanded()
 	return &cloned
+}
+
+func (ht *HatTrie) ensureKeyStatsLocked(key string) *trackedKeyStats {
+	if stats := ht.keyStats[key]; stats != nil {
+		return stats
+	}
+	if ht.keyStatsMode == KeyStatsModeOff {
+		return nil
+	}
+
+	stats := newTrackedKeyStats()
+	if ht.keyStatsMode == KeyStatsModeFull {
+		ht.keyStats[key] = stats
+		return stats
+	}
+	if ht.keyStatsCapacity <= 0 {
+		return nil
+	}
+
+	if freeCount := len(ht.keyStatsFree); freeCount > 0 {
+		idx := int(ht.keyStatsFree[freeCount-1])
+		ht.keyStatsFree = ht.keyStatsFree[:freeCount-1]
+		stats.slot = uint32(idx)
+		ht.keyStatsSlots[idx] = key
+		ht.keyStats[key] = stats
+		return stats
+	}
+	if len(ht.keyStatsSlots) < ht.keyStatsCapacity {
+		stats.slot = uint32(len(ht.keyStatsSlots))
+		ht.keyStatsSlots = append(ht.keyStatsSlots, key)
+		ht.keyStats[key] = stats
+		return stats
+	}
+
+	victim := ht.keyStatsVictimSlotLocked()
+	oldKey := ht.keyStatsSlots[victim]
+	delete(ht.keyStats, oldKey)
+	stats.slot = uint32(victim)
+	ht.keyStatsSlots[victim] = key
+	ht.keyStats[key] = stats
+	return stats
+}
+
+func (ht *HatTrie) removeKeyStatsLocked(key string) {
+	stats := ht.keyStats[key]
+	if stats == nil {
+		return
+	}
+	delete(ht.keyStats, key)
+	if ht.keyStatsMode != KeyStatsModeBounded || stats.slot == keyStatsNoSlot {
+		return
+	}
+	idx := int(stats.slot)
+	if idx < 0 || idx >= len(ht.keyStatsSlots) || ht.keyStatsSlots[idx] != key {
+		return
+	}
+	ht.keyStatsSlots[idx] = ""
+	ht.keyStatsFree = append(ht.keyStatsFree, stats.slot)
+}
+
+func (ht *HatTrie) keyStatsVictimSlotLocked() int {
+	sampleCount := keyStatsEvictionSamples
+	if sampleCount > len(ht.keyStatsSlots) {
+		sampleCount = len(ht.keyStatsSlots)
+	}
+	victim := -1
+	var victimSec int64
+	var victimNsec uint32
+	for sample := 0; sample < sampleCount; sample++ {
+		idx := ht.keyStatsHand
+		ht.keyStatsHand++
+		if ht.keyStatsHand == len(ht.keyStatsSlots) {
+			ht.keyStatsHand = 0
+		}
+		key := ht.keyStatsSlots[idx]
+		stats := ht.keyStats[key]
+		if stats == nil || stats.slot != uint32(idx) {
+			return idx
+		}
+		seconds, nanoseconds := stats.lastActivity()
+		if victim < 0 || compactKeyStatsTimeAfter(victimSec, victimNsec, seconds, nanoseconds) {
+			victim = idx
+			victimSec = seconds
+			victimNsec = nanoseconds
+		}
+	}
+	return victim
 }
 
 func validateCacheStatsSnapshot(stats CacheStats) error {
@@ -2970,7 +3278,7 @@ func (ht *HatTrie) deleteKnownLocked(key string, hval HatValue) bool {
 	ht.clearHotKeyLocked(key)
 	ht.clearExpirationLocked(key)
 	ht.deleteLevelDBSpillCandidateLocked(key)
-	delete(ht.keyStats, key)
+	ht.removeKeyStatsLocked(key)
 	ht.returnStorage(hval)
 	return true
 }

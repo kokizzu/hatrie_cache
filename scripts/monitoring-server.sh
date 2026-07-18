@@ -9,6 +9,8 @@ auth_token=${MONITORING_AUTH_TOKEN:-}
 audit_log_path=${AUDIT_LOG_PATH:-}
 write_protection=${WRITE_PROTECTION:-false}
 rate_limit=${RATE_LIMIT:-0}
+key_stats_mode=${KEY_STATS_MODE:-bounded}
+key_stats_capacity=${KEY_STATS_CAPACITY:-100000}
 read_header_timeout=${MONITORING_READ_HEADER_TIMEOUT:-5s}
 idle_timeout=${MONITORING_IDLE_TIMEOUT:-2m}
 node_id=${NODE_ID:-}
@@ -76,6 +78,8 @@ set -- \
 	-audit-log-path "$audit_log_path" \
 	-write-protection="$write_protection" \
 	-rate-limit "$rate_limit" \
+	-key-stats-mode "$key_stats_mode" \
+	-key-stats-capacity "$key_stats_capacity" \
 	-monitoring-read-header-timeout "$read_header_timeout" \
 	-monitoring-idle-timeout "$idle_timeout" \
 	-node-id "$node_id" \

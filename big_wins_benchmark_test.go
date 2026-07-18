@@ -20,7 +20,9 @@ const bigWinsDurableWrites = 100
 
 func BenchmarkBigWins(b *testing.B) {
 	b.Run("ConcurrentRead", benchmarkBigWinsConcurrentRead)
-	b.Run("PerKeyMemory", benchmarkBigWinsPerKeyMemory)
+	b.Run("PerKeyMemory", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeBounded) })
+	b.Run("PerKeyMemoryFull", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeFull) })
+	b.Run("PerKeyMemoryOff", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeOff) })
 	b.Run("DurableWrite/Serial", func(b *testing.B) { benchmarkBigWinsDurableWrite(b, false) })
 	b.Run("DurableWrite/Concurrent", func(b *testing.B) { benchmarkBigWinsDurableWrite(b, true) })
 	b.Run("Snapshot", benchmarkBigWinsSnapshot)
@@ -66,7 +68,7 @@ func benchmarkBigWinsConcurrentRead(b *testing.B) {
 	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/read")
 }
 
-func benchmarkBigWinsPerKeyMemory(b *testing.B) {
+func benchmarkBigWinsPerKeyMemory(b *testing.B, mode KeyStatsMode) {
 	keyCount := bigWinsBenchmarkKeys(100000)
 	var retained uint64
 	var tracked uint64
@@ -78,6 +80,13 @@ func benchmarkBigWinsPerKeyMemory(b *testing.B) {
 		var before runtime.MemStats
 		runtime.ReadMemStats(&before)
 		trie := CreateHatTrie()
+		capacity := DefaultKeyStatsCapacity
+		if mode != KeyStatsModeBounded {
+			capacity = 0
+		}
+		if err := trie.ConfigureKeyStats(mode, capacity); err != nil {
+			b.Fatal(err)
+		}
 		b.StartTimer()
 		for idx := 0; idx < keyCount; idx++ {
 			trie.UpsertString(bigWinsKey(idx), "v")

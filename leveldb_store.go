@@ -838,7 +838,7 @@ func (trie *HatTrie) appendLevelDBSpillCandidateLocked(candidates *[]levelDBSpil
 	}
 	if stats := trie.keyStats[entry.Key]; stats != nil {
 		candidate.hits = stats.Hits
-		candidate.lastHit = stats.LastHit
+		candidate.lastHit = expandedKeyStatsTime(stats.lastHitSec, stats.lastHitNsec)
 	}
 	*candidates = append(*candidates, candidate)
 }

@@ -145,6 +145,28 @@ The combined benchmark process reached 99,824 KiB maximum RSS. These rows are
 diagnostic workloads rather than CI thresholds; each optimization section
 keeps the same fixture and reports its own before/after ratio.
 
+### Bounded Per-Key Telemetry
+
+The bounded telemetry implementation uses compact exact counters/timestamps, a
+fixed key replacement ring, and five-candidate least-recently-active sampling.
+These medians use the baseline command above with only the three per-key memory
+rows selected (`COUNT=3`).
+
+| Workload | Mode | Tracked keys | Retained B/cache key | Memory comparison | Median fill time/key |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 100,000 keys | Pre-change unlimited baseline | 100,000 | 242.5 B | baseline | not recorded |
+| 100,000 keys | `bounded` (default) | 100,000 | 213.5 B | 1.14x efficiency, 12.0% lower | 2.08 us |
+| 100,000 keys | `full` | 100,000 | 194.5 B | 1.25x efficiency, 19.8% lower | 2.22 us |
+| 100,000 keys | `off` | 0 | 63.57 B | 3.81x efficiency, 73.8% lower | 1.70 us |
+| 250,000 keys | `bounded` (default) | 100,000 | 136.6 B | 1.57x vs full, 36.3% lower | 2.38 us |
+| 250,000 keys | `full` | 250,000 | 214.5 B | comparison | 1.98 us |
+| 250,000 keys | `off` | 0 | 62.62 B | 3.43x vs full, 70.8% lower | 1.23 us |
+
+The 250,000-key bounded fill spends more CPU selecting replacement candidates
+after reaching 100,000 tracked keys. Normal cache reads and values remain
+unchanged; only detailed per-key telemetry is replaced. Cache-wide counters
+remain exact in all three modes.
+
 ## Latest Optimization Spot Check
 
 After adding exact command fast paths for set, priority queue, Bloom filter,
