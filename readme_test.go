@@ -626,7 +626,9 @@ func TestREADMEDocumentsInternalReplicationBatch(t *testing.T) {
 		"`INTERNALBATCHV2`",
 		"`INTERNALSETV2`",
 		"`INTERNALSETV3`",
+		"`INTERNALDIGESTV1`",
 		"keyless binary snapshot values",
+		"bounded, sorted",
 		"batches multiple internal replication commands",
 		"automatically retries the legacy",
 		"`REPLICATION_WIRE_FORMAT=json` converts snapshots to legacy JSON before send",
@@ -643,8 +645,11 @@ func TestBenchmarkDocsListInternalBatchPrimitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
 	}
-	if !strings.Contains(string(data), "`INTERNALBATCH`") {
-		t.Fatal("BENCHMARK.md does not list INTERNALBATCH with replication primitives")
+	document := string(data)
+	for _, token := range []string{"`INTERNALBATCH`", "`INTERNALDIGESTV1`", "BenchmarkReplicationDigestIncremental", "49,971x"} {
+		if !strings.Contains(document, token) {
+			t.Fatalf("BENCHMARK.md does not list replication benchmark token %q", token)
+		}
 	}
 }
 

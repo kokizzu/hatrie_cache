@@ -299,7 +299,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			Transport:                replicationTransport(cfg),
 			DisableHTTPFallback:      !cfg.replicationHTTPFallback,
 			AuthToken:                cfg.replicationAuthToken,
-			ReplicationBatchMaxBytes: cfg.replicationBatchMaxBytes,
+			ReplicationBatchMaxBytes: replicationBatchLimit(cfg),
 			MaxInFlightTargets:       cfg.replicationMaxTargets,
 		})
 		defer replicator.Close()
@@ -1012,6 +1012,13 @@ func replicationQueueSize(cfg config) int {
 		return 0
 	}
 	return cfg.replicationQueueSize
+}
+
+func replicationBatchLimit(cfg config) int {
+	if cfg.replicationBatchMaxBytes == 0 {
+		return -1
+	}
+	return cfg.replicationBatchMaxBytes
 }
 
 func parseReplicationMode(mode string) (string, error) {

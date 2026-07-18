@@ -3,7 +3,6 @@ package hatriecache
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -229,14 +228,21 @@ func benchmarkBigWinsSnapshot(b *testing.B) {
 func benchmarkBigWinsAntiEntropy(b *testing.B) {
 	keyCount := bigWinsBenchmarkKeys(10000)
 	trie := CreateHatTrie()
+	targetTrie := CreateHatTrie()
 	b.Cleanup(trie.Destroy)
+	b.Cleanup(targetTrie.Destroy)
 	for idx := 0; idx < keyCount; idx++ {
-		trie.UpsertString(bigWinsKey(idx), "value")
+		key := bigWinsKey(idx)
+		trie.UpsertString(key, "value")
+		targetTrie.UpsertString(key, "value")
 	}
+	var targetHandler http.Handler
+	var requests atomic.Int64
+	var wireBytes atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		_ = r.Body.Close()
-		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		requests.Add(1)
+		r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &wireBytes}
+		targetHandler.ServeHTTP(benchmarkCountingResponseWriter{ResponseWriter: w, bytes: &wireBytes}, r)
 	}))
 	b.Cleanup(target.Close)
 	topology, err := NewTopologyStore(ClusterTopology{
@@ -252,6 +258,11 @@ func benchmarkBigWinsAntiEntropy(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	targetHandler = NewMonitoringHandler(targetTrie, MonitoringOptions{
+		NodeName:          "node-b",
+		Topology:          topology,
+		ReplicationSafety: NewReplicationSafetyStore(),
+	}).Handler()
 	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Topology: topology, Client: target.Client()})
 	b.Cleanup(replicator.Close)
 	var total time.Duration
@@ -268,6 +279,9 @@ func benchmarkBigWinsAntiEntropy(b *testing.B) {
 	b.StopTimer()
 	b.ReportMetric(float64(keyCount), "keys/op")
 	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*keyCount), "ns/key")
+	b.ReportMetric(float64(requests.Load())/float64(b.N), "requests/op")
+	b.ReportMetric(float64(wireBytes.Load())/float64(b.N), "wire_B/op")
+	b.ReportMetric(float64(wireBytes.Load())/float64(b.N*keyCount), "wire_B/key")
 }
 
 func benchmarkBigWinsUnaryCommand(b *testing.B) {

@@ -942,10 +942,10 @@ wire format for structured `values` or `pairs` payloads that protobuf cannot
 represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON;
 `REPLICATION_WIRE_FORMAT=json` converts snapshots to legacy JSON before send.
 Large HTTP replication request bodies are gzip-compressed.
-Anti-entropy sync uses HTTP by default. Set
-`REPLICATION_TRANSPORT=grpc-stream` to keep one ordered, gzip-compressed
-HTTP/2 `ReplicationStream` open per target for all sync pages. Every page is
-acknowledged before the next page for that target is sent. The target node must
+Anti-entropy digest discovery uses the authenticated HTTP command endpoint.
+Set `REPLICATION_TRANSPORT=grpc-stream` to keep one ordered, gzip-compressed
+HTTP/2 `ReplicationStream` open per target for repair write batches. Every
+write batch is acknowledged before the next batch for that target is sent. The target node must
 publish `grpc_address` in the topology and run its opt-in native listener with
 `GRPC_ADDR`; normal write-path command fanout remains on HTTP. A bare address
 or `grpc://` uses an insecure internal connection, while `grpcs://` verifies
@@ -960,10 +960,21 @@ gRPC streaming had a 37.8ms median versus 45.0ms for HTTP (1.19x faster), used
 allocations; it allocated 16.18% more total heap bytes because of gRPC framing
 and compression buffers. See [`BENCHMARK.md`](BENCHMARK.md) for the raw run
 command and complete table.
-`POST /api/replication` runs an explicit command-fanout anti-entropy sync that
-pushes the local leader-owned keys, optionally filtered by prefix, to their
-current topology replicas; it requires `REPLICATION_MODE=command` or
-`REPLICATION_MODE=dual`:
+`POST /api/replication` runs an explicit command-fanout anti-entropy sync. For
+each current replica, the source and target first compare an xxHash64 aggregate
+over the local leader-owned key/value snapshots, optionally filtered by prefix.
+Equal replicas stop after one small request. A mismatch returns bounded, sorted
+key-digest pages; the source performs a bounded merge and sends only changed or
+missing values plus deletes for target-only stale keys. Write batches retain at
+most 1,024 keys and are also split by `REPLICATION_BATCH_MAX_BYTES`, so a large
+repair does not build a full-dataset map or request in memory.
+
+Peers that do not support `INTERNALDIGESTV1` automatically fall back to bounded
+full value push. That compatibility path can update and create source keys but
+cannot discover target-only stale keys; upgrade both peers before relying on
+anti-entropy deletion. Digest comparison is deliberately non-cryptographic: it
+trades a theoretical 64-bit collision risk for low CPU and memory overhead.
+Anti-entropy requires `REPLICATION_MODE=command` or `REPLICATION_MODE=dual`:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true JOURNAL_PATH=data/node-a.journal
@@ -977,7 +988,8 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 
 Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP
 replication and require the same token for inbound `INTERNALSET`, `INTERNALDEL`,
-`INTERNALSETV2`, `INTERNALSETV3`, `INTERNALBATCH`, and `INTERNALBATCHV2` commands. Replication clients send both
+`INTERNALSETV2`, `INTERNALSETV3`, `INTERNALBATCH`, `INTERNALBATCHV2`, and
+`INTERNALDIGESTV1` commands. Replication clients send both
 `Authorization: Bearer <token>` and `X-Hatrie-Replication-Token: <token>`.
 The replication token is intentionally narrow: it is accepted on
 `POST /api/commands` for internal replication traffic and on journal recovery
@@ -998,7 +1010,9 @@ Set `REPLICATION_SYNC_INTERVAL` to run the command-fanout anti-entropy sync
 periodically from the local leader. It requires `REPLICATION_MODE=command` or
 `REPLICATION_MODE=dual`. The first sync runs immediately at startup, then
 repeats at the configured interval. Set `REPLICATION_SYNC_PREFIX` to limit the
-scheduled sync to one key prefix:
+scheduled sync to one key prefix. See
+[`BENCHMARK.md`](BENCHMARK.md#incremental-anti-entropy) for equal, 1%-changed,
+and full-transfer CPU, heap, request, and bandwidth measurements:
 
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_SYNC_INTERVAL=30s
@@ -1162,8 +1176,8 @@ JSON request bodies may also be sent with `Content-Encoding: gzip`.
 for that key. `POST /api/election` accepts `node` and `online` to record a
 heartbeat or mark a node offline. `GET /api/replication` returns the most recent
 replication result with timing metadata. `POST /api/replication` accepts
-optional `prefix` and pushes matching local entries to their remote topology
-owners.
+optional `prefix` and reconciles matching local entries with their remote
+topology owners.
 `GET /api/journal?after_sequence=...&limit=...` returns the command journal tail
 when journaling is configured. `POST /api/journal` pulls a remote journal tail
 from `source` and applies it locally.
@@ -1184,7 +1198,8 @@ supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATERS`, `ADDRS`,
 `GETRS`, `INFORS`, `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`, `CREATEFW`,
 `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW`, `DUMP`, `INTERNALSET`,
-`INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`, `INTERNALBATCH`, and `INTERNALBATCHV2`.
+`INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`, `INTERNALBATCH`,
+`INTERNALBATCHV2`, and `INTERNALDIGESTV1`.
 `DUMP`,
 `INTERNALSET`, `INTERNALSETV2`, `INTERNALSETV3`, and `INTERNALDEL` are low-level replication
 primitives. `INTERNALSETV3` moves one key using a keyless binary value encoding;
@@ -1192,6 +1207,8 @@ primitives. `INTERNALSETV3` moves one key using a keyless binary value encoding;
 request key, and `INTERNALSET` is the snapshot-entry JSON fallback.
 `INTERNALBATCH` and `INTERNALBATCHV2` batch multiple internal replication
 commands and are accepted only for internal replication traffic.
+`INTERNALDIGESTV1` is the read-only, topology-scoped digest page used by
+anti-entropy and is also accepted only for authenticated internal replication.
 `BATCH` is the public pipeline command: send `{"command":"BATCH","batch":[...]}`
 with ordinary command requests to reduce client/server round trips. It executes
 subcommands in order, returns one response per subcommand in `responses`, and is

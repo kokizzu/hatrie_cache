@@ -785,7 +785,7 @@ func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWrite
 
 func isInternalReplicationCommand(request CacheCommandRequest) bool {
 	switch normalizedCommand(request.Command) {
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand:
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand, replicationDigestCommand:
 		return true
 	default:
 		return false
@@ -820,6 +820,8 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		return commandError("trie is not configured"), false
 	}
 	switch normalizedCommand(request.Command) {
+	case replicationDigestCommand:
+		return executeInternalReplicationDigest(ctx, trie, request, options)
 	case "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		return executeInternalReplicationBatch(ctx, trie, request, options)
 	case replicationSetBinaryCommand, replicationSetCompactCommand:

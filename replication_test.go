@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -36,6 +37,18 @@ func TestParseReplicationTransport(t *testing.T) {
 	}
 	if _, err := ParseReplicationTransport("udp"); err == nil {
 		t.Fatal("ParseReplicationTransport(udp) error = nil, want validation error")
+	}
+}
+
+func TestNewHTTPReplicatorDefaultsReplicationBatchLimit(t *testing.T) {
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{})
+	if replicator.batchMaxBytes != DefaultReplicationBatchMaxBytes {
+		t.Fatalf("default replication batch limit = %d, want %d", replicator.batchMaxBytes, DefaultReplicationBatchMaxBytes)
+	}
+
+	unlimited := NewHTTPReplicator(HTTPReplicatorOptions{ReplicationBatchMaxBytes: -1})
+	if unlimited.batchMaxBytes != 0 {
+		t.Fatalf("negative replication batch limit = %d, want unlimited", unlimited.batchMaxBytes)
 	}
 }
 
@@ -150,6 +163,16 @@ func mustDecodeReplicationBatchValues(t *testing.T, request CacheCommandRequest)
 		out = append(out, payload)
 	}
 	return out
+}
+
+func rejectReplicationDigestTestCommand(t *testing.T, w http.ResponseWriter, r *http.Request, request CacheCommandRequest) bool {
+	t.Helper()
+	if normalizedCommand(request.Command) != replicationDigestCommand {
+		return false
+	}
+	format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+	writeCommandResponseWire(w, r, http.StatusOK, commandError("unsupported command"), format)
+	return true
 }
 
 func TestReplicationBatchEnvelopeSharesMetadata(t *testing.T) {
@@ -2382,6 +2405,9 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
 		request := mustDecodeReplicationTestCommand(t, w, r)
+		if rejectReplicationDigestTestCommand(t, w, r, request) {
+			return
+		}
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -2435,9 +2461,407 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSyncAllDigestTransfersOnlyDifferencesAndDeletesStaleKeys(t *testing.T) {
+	source := newTestTrie(t)
+	targetTrie := newTestTrie(t)
+	for key, value := range map[string]string{
+		"session:changed": "new",
+		"session:missing": "source-only",
+		"session:same":    "equal",
+	} {
+		source.UpsertString(key, value)
+	}
+	for key, value := range map[string]string{
+		"other:preserved": "unrelated",
+		"session:changed": "old",
+		"session:same":    "equal",
+		"session:stale":   "target-only",
+	} {
+		targetTrie.UpsertString(key, value)
+	}
+
+	requests := make(chan CacheCommandRequest, 4)
+	var topology *TopologyStore
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		requests <- request
+		response, rejected := executeCacheCommand(r.Context(), targetTrie, request, commandExecutionOptions{
+			NodeName:          "node-b",
+			Topology:          topology,
+			ReplicationSafety: NewReplicationSafetyStore(),
+		})
+		status := http.StatusOK
+		if rejected {
+			status = http.StatusConflict
+		}
+		format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+		writeCommandResponseWire(w, r, status, response, format)
+	}))
+	defer target.Close()
+	topology = replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+
+	result := replicator.SyncAll(context.Background(), source, "session:")
+	if result.Skipped || result.Entries != 3 || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("SyncAll(digest) = %#v, want three compared entries and one successful changed batch", result)
+	}
+	if got := normalizedCommand((<-requests).Command); got != replicationDigestCommand {
+		t.Fatalf("first sync command = %q, want %s", got, replicationDigestCommand)
+	}
+	payloads := mustDecodeReplicationBatchValues(t, <-requests)
+	if len(payloads) != 3 {
+		t.Fatalf("changed payloads = %#v, want two sets and one delete", payloads)
+	}
+	commands := make(map[string]string, len(payloads))
+	for _, payload := range payloads {
+		commands[payload.Key] = normalizedCommand(payload.Command)
+	}
+	if commands["session:changed"] != replicationSetCompactCommand ||
+		commands["session:missing"] != replicationSetCompactCommand ||
+		commands["session:stale"] != "INTERNALDEL" {
+		t.Fatalf("changed commands = %#v, want changed/missing sets and stale delete", commands)
+	}
+	if _, exists := commands["session:same"]; exists {
+		t.Fatalf("unchanged key was transferred: %#v", commands)
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("unexpected extra sync request = %#v", request)
+	default:
+	}
+	for key, want := range map[string]string{
+		"session:changed": "new",
+		"session:missing": "source-only",
+		"session:same":    "equal",
+	} {
+		if got := targetTrie.GetString(key); got != want {
+			t.Fatalf("target %s = %q, want %q", key, got, want)
+		}
+	}
+	if targetTrie.Exists("session:stale") {
+		t.Fatal("target stale key still exists after digest sync")
+	}
+	if got := targetTrie.GetString("other:preserved"); got != "unrelated" {
+		t.Fatalf("unrelated target key = %q, want preserved", got)
+	}
+
+	unchanged := replicator.SyncAll(context.Background(), source, "session:")
+	if unchanged.Skipped || len(unchanged.Targets) != 1 || !unchanged.Targets[0].OK || !strings.Contains(unchanged.Reason, "transferred 0, deleted 0") {
+		t.Fatalf("SyncAll(unchanged digest) = %#v, want one digest request and no writes", unchanged)
+	}
+	if got := normalizedCommand((<-requests).Command); got != replicationDigestCommand {
+		t.Fatalf("unchanged sync command = %q, want %s", got, replicationDigestCommand)
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("unchanged sync sent value request = %#v", request)
+	default:
+	}
+}
+
+func TestHTTPReplicatorSyncAllDigestFallsBackToFullPushForOlderTarget(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	source.UpsertString("session:2", "two")
+	requests := make(chan CacheCommandRequest, 3)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		requests <- request
+		if normalizedCommand(request.Command) == replicationDigestCommand {
+			format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+			writeCommandResponseWire(w, r, http.StatusOK, commandError("unsupported command"), format)
+			return
+		}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+	topology := replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+
+	result := replicator.SyncAll(context.Background(), source, "session:")
+	if result.Skipped || result.Entries != 2 || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("SyncAll(fallback) = %#v, want one successful full-push batch", result)
+	}
+	if got := normalizedCommand((<-requests).Command); got != replicationDigestCommand {
+		t.Fatalf("first sync command = %q, want %s", got, replicationDigestCommand)
+	}
+	payloads := mustDecodeReplicationBatchValues(t, <-requests)
+	if len(payloads) != 2 {
+		t.Fatalf("fallback payloads = %#v, want both source values", payloads)
+	}
+	for _, payload := range payloads {
+		if normalizedCommand(payload.Command) != replicationSetCompactCommand {
+			t.Fatalf("fallback payload = %#v, want compact set", payload)
+		}
+	}
+}
+
+func TestReplicationValueDigestEncodingRoundTrip(t *testing.T) {
+	want := replicationDigest{hash: math.MaxUint64 - 7, size: math.MaxUint64 - 11}
+	encoded := encodeReplicationValueDigest(want)
+	got, err := decodeReplicationValueDigest(encoded)
+	if err != nil || got != want {
+		t.Fatalf("decodeReplicationValueDigest(%q) = %#v/%v, want %#v", encoded, got, err, want)
+	}
+	if _, err := decodeReplicationValueDigest(encoded + "x"); err == nil {
+		t.Fatal("decodeReplicationValueDigest(invalid) error = nil")
+	}
+}
+
+func TestHTTPReplicatorRejectsUnorderedDigestWithoutWriting(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	source.UpsertString("session:2", "two")
+	var writes atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+		if normalizedCommand(request.Command) != replicationDigestCommand {
+			writes.Add(1)
+			writeCommandResponseWire(w, r, http.StatusOK, CacheCommandResponse{OK: true}, format)
+			return
+		}
+		digest := encodeReplicationValueDigest(replicationDigest{hash: 1, size: 1})
+		writeCommandResponseWire(w, r, http.StatusOK, CacheCommandResponse{
+			OK:      true,
+			Message: replicationDigestFinalMessage,
+			Responses: []CacheCommandResponse{
+				{OK: true, Message: "session:2", Value: digest},
+				{OK: true, Message: "session:1", Value: digest},
+			},
+		}, format)
+	}))
+	defer target.Close()
+	topology := replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+
+	result := replicator.SyncAll(context.Background(), source, "session:")
+	if len(result.Targets) == 0 || result.Targets[len(result.Targets)-1].OK || !strings.Contains(result.Targets[len(result.Targets)-1].Error, "strictly ordered") {
+		t.Fatalf("SyncAll(unordered digest) = %#v, want ordered-entry failure", result)
+	}
+	if got := writes.Load(); got != 0 {
+		t.Fatalf("repair writes = %d, want none after malformed digest", got)
+	}
+}
+
+func TestHTTPReplicatorRejectsOutOfScopeDigestWithoutWriting(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	var writes atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+		if normalizedCommand(request.Command) != replicationDigestCommand {
+			writes.Add(1)
+			writeCommandResponseWire(w, r, http.StatusOK, CacheCommandResponse{OK: true}, format)
+			return
+		}
+		writeCommandResponseWire(w, r, http.StatusOK, CacheCommandResponse{
+			OK:      true,
+			Message: replicationDigestFinalMessage,
+			Responses: []CacheCommandResponse{{
+				OK:      true,
+				Message: "other:must-not-delete",
+				Value:   encodeReplicationValueDigest(replicationDigest{hash: 1, size: 1}),
+			}},
+		}, format)
+	}))
+	defer target.Close()
+	topology := replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+
+	result := replicator.SyncAll(context.Background(), source, "session:")
+	if len(result.Targets) == 0 || result.Targets[len(result.Targets)-1].OK || !strings.Contains(result.Targets[len(result.Targets)-1].Error, "outside replication digest scope") {
+		t.Fatalf("SyncAll(out-of-scope digest) = %#v, want scope failure", result)
+	}
+	if got := writes.Load(); got != 0 {
+		t.Fatalf("repair writes = %d, want none after out-of-scope digest", got)
+	}
+}
+
+func TestHTTPReplicatorSyncAllBoundsDigestAndFallbackWriteBatches(t *testing.T) {
+	const keyCount = defaultReplicationSyncKeyPageSize + 1
+	for _, test := range []struct {
+		name         string
+		legacyTarget bool
+	}{
+		{name: "digest mismatch"},
+		{name: "legacy fallback", legacyTarget: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := newTestTrie(t)
+			targetTrie := newTestTrie(t)
+			for idx := 0; idx < keyCount; idx++ {
+				key := fmt.Sprintf("session:%04d", idx)
+				source.UpsertString(key, "source")
+				if !test.legacyTarget {
+					targetTrie.UpsertString(key, "target")
+				}
+			}
+
+			var topology *TopologyStore
+			safety := NewReplicationSafetyStore()
+			largestBatch := 0
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				request := mustDecodeReplicationTestCommand(t, w, r)
+				format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+				if test.legacyTarget && normalizedCommand(request.Command) == replicationDigestCommand {
+					writeCommandResponseWire(w, r, http.StatusOK, commandError("unsupported command"), format)
+					return
+				}
+				if normalizedCommand(request.Command) != replicationDigestCommand {
+					size := 1
+					if normalizedCommand(request.Command) == "INTERNALBATCH" || normalizedCommand(request.Command) == replicationBatchEnvelopeCommand {
+						size = len(mustDecodeReplicationBatchValues(t, request))
+					}
+					if size > largestBatch {
+						largestBatch = size
+					}
+				}
+				response, rejected := executeCacheCommand(r.Context(), targetTrie, request, commandExecutionOptions{
+					NodeName:          "node-b",
+					Topology:          topology,
+					ReplicationSafety: safety,
+				})
+				status := http.StatusOK
+				if rejected {
+					status = http.StatusConflict
+				}
+				writeCommandResponseWire(w, r, status, response, format)
+			}))
+			defer target.Close()
+			topology = replicationTestTopology(t, target.URL)
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: NewElectionStore(topology, ElectionOptions{}),
+				Client:   target.Client(),
+			})
+
+			result := replicator.SyncAll(context.Background(), source, "session:")
+			if result.Skipped || len(result.Targets) == 0 {
+				t.Fatalf("SyncAll() = %#v, want successful bounded sync", result)
+			}
+			for _, targetResult := range result.Targets {
+				if !targetResult.OK {
+					t.Fatalf("SyncAll() target = %#v, want success", targetResult)
+				}
+			}
+			if largestBatch > defaultReplicationSyncKeyPageSize {
+				t.Fatalf("largest write batch = %d, want at most %d", largestBatch, defaultReplicationSyncKeyPageSize)
+			}
+			if got := targetTrie.GetString("session:0000"); got != "source" {
+				t.Fatalf("first target value = %q, want source", got)
+			}
+			if got := targetTrie.GetString(fmt.Sprintf("session:%04d", keyCount-1)); got != "source" {
+				t.Fatalf("last target value = %q, want source", got)
+			}
+		})
+	}
+}
+
+func TestHTTPReplicatorSyncAllChecksDigestTargetsConcurrently(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	arrived := make(chan string, 2)
+	release := make(chan struct{})
+	var topology *TopologyStore
+	newTarget := func(node string) *httptest.Server {
+		t.Helper()
+		trie := newTestTrie(t)
+		trie.UpsertString("session:1", "one")
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			request := mustDecodeReplicationTestCommand(t, w, r)
+			if normalizedCommand(request.Command) != replicationDigestCommand {
+				t.Fatalf("%s command = %q, want digest", node, request.Command)
+			}
+			arrived <- node
+			<-release
+			response, rejected := executeCacheCommand(r.Context(), trie, request, commandExecutionOptions{
+				NodeName: node,
+				Topology: topology,
+			})
+			status := http.StatusOK
+			if rejected {
+				status = http.StatusConflict
+			}
+			format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+			writeCommandResponseWire(w, r, status, response, format)
+		}))
+	}
+	targetB := newTarget("node-b")
+	defer targetB.Close()
+	targetC := newTarget("node-c")
+	defer targetC.Close()
+	var err error
+	topology, err = NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: targetB.URL},
+			{ID: "node-c", Address: targetC.URL},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:               "node-a",
+		Topology:           topology,
+		Client:             targetB.Client(),
+		MaxInFlightTargets: 2,
+	})
+	done := make(chan ReplicationResult, 1)
+	go func() {
+		done <- replicator.SyncAll(context.Background(), source, "session:")
+	}()
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case node := <-arrived:
+			seen[node] = true
+		case <-time.After(250 * time.Millisecond):
+			close(release)
+			<-done
+			t.Fatalf("concurrent digest arrivals = %#v, want node-b and node-c", seen)
+		}
+	}
+	close(release)
+	result := <-done
+	if len(result.Targets) != 2 || !result.Targets[0].OK || result.Targets[0].Node != "node-b" || !result.Targets[1].OK || result.Targets[1].Node != "node-c" {
+		t.Fatalf("SyncAll() targets = %#v, want ordered successful node-b/node-c", result.Targets)
+	}
+}
+
 func TestHTTPReplicatorRecordsLatencyAndBatchMetrics(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = mustDecodeReplicationTestCommand(t, w, r)
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if rejectReplicationDigestTestCommand(t, w, r, request) {
+			return
+		}
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
 	defer target.Close()
@@ -2475,7 +2899,11 @@ func TestHTTPReplicatorSplitsSyncBatchesByEstimatedBytes(t *testing.T) {
 		if r.URL.Path != "/api/commands" {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
-		requests <- mustDecodeReplicationTestCommand(t, w, r)
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if rejectReplicationDigestTestCommand(t, w, r, request) {
+			return
+		}
+		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
 	defer target.Close()
@@ -2850,9 +3278,13 @@ func TestHTTPReplicatorSyncAllFullReplicaReplicatesToRemoteOwners(t *testing.T) 
 			if r.URL.Path != "/api/commands" {
 				t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 			}
+			request := mustDecodeReplicationTestCommand(t, w, r)
+			if rejectReplicationDigestTestCommand(t, w, r, request) {
+				return
+			}
 			requests <- targetRequest{
 				node:    node,
-				request: mustDecodeReplicationTestCommand(t, w, r),
+				request: request,
 			}
 			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 		}))
@@ -2918,6 +3350,9 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 3)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := mustDecodeReplicationTestCommand(t, w, r)
+		if rejectReplicationDigestTestCommand(t, w, r, request) {
+			return
+		}
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -2938,8 +3373,8 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	})
 
 	result := replicator.syncAllPaged(context.Background(), trie, "session:", 2)
-	if result.Skipped || result.Entries != 3 || len(result.Targets) != 2 {
-		t.Fatalf("paged sync result = %#v, want two target requests for three synced entries", result)
+	if result.Skipped || result.Entries != 3 || len(result.Targets) != 1 {
+		t.Fatalf("paged sync result = %#v, want one coalesced target request for three synced entries", result)
 	}
 	for _, target := range result.Targets {
 		if !target.OK {
@@ -2949,14 +3384,14 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	targetKeys := map[string]bool{}
 	batches := 0
 	singles := 0
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
 		request := <-requests
 		switch request.Command {
 		case "INTERNALBATCH", replicationBatchEnvelopeCommand:
 			batches++
 			payloads := mustDecodeReplicationBatchValues(t, request)
-			if len(payloads) != 2 {
-				t.Fatalf("paged sync batch len = %d, want 2: %#v", len(payloads), payloads)
+			if len(payloads) != 3 {
+				t.Fatalf("paged sync batch len = %d, want 3: %#v", len(payloads), payloads)
 			}
 		case replicationSetBinaryCommand, replicationSetCompactCommand:
 			singles++
@@ -2973,8 +3408,8 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 			targetKeys[key] = true
 		}
 	}
-	if batches != 1 || singles != 1 {
-		t.Fatalf("paged sync request shape = %d batches %d singles, want 1 batch and 1 single", batches, singles)
+	if batches != 1 || singles != 0 {
+		t.Fatalf("paged sync request shape = %d batches %d singles, want one coalesced batch", batches, singles)
 	}
 	for _, key := range []string{"session:1", "session:2", "session:3"} {
 		if !targetKeys[key] {
@@ -3393,6 +3828,9 @@ func TestHTTPReplicatorSyncAllSkipsExpiredEntries(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 2)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := mustDecodeReplicationTestCommand(t, w, r)
+		if rejectReplicationDigestTestCommand(t, w, r, request) {
+			return
+		}
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
@@ -3435,9 +3873,18 @@ func TestHTTPReplicatorSyncAllSkipsExpiredEntries(t *testing.T) {
 	}
 }
 
-func TestHTTPReplicatorSyncAllSkipsNoEntries(t *testing.T) {
+func TestHTTPReplicatorSyncAllChecksTargetWhenSourceHasNoEntries(t *testing.T) {
 	trie := newTestTrie(t)
-	topology := replicationTestTopology(t, "127.0.0.1:1")
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if normalizedCommand(request.Command) != replicationDigestCommand {
+			t.Fatalf("empty source command = %q, want %s", request.Command, replicationDigestCommand)
+		}
+		format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
+		writeCommandResponseWire(w, r, http.StatusOK, CacheCommandResponse{OK: true, Message: replicationDigestFinalMessage}, format)
+	}))
+	defer target.Close()
+	topology := replicationTestTopology(t, target.URL)
 	election := NewElectionStore(topology, ElectionOptions{})
 	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
 		Self:     "node-a",
@@ -3446,8 +3893,8 @@ func TestHTTPReplicatorSyncAllSkipsNoEntries(t *testing.T) {
 	})
 
 	result := replicator.SyncAll(context.Background(), trie, "missing:")
-	if !result.Skipped || result.Reason != "no entries to sync" || result.Entries != 0 || len(result.Targets) != 0 {
-		t.Fatalf("empty sync result = %#v, want no entries skip", result)
+	if result.Skipped || result.Entries != 0 || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("empty sync result = %#v, want successful target digest check", result)
 	}
 	if got := replicator.LastResult(); !reflect.DeepEqual(got, result) {
 		t.Fatalf("LastResult() = %#v, want empty sync result %#v", got, result)
@@ -4402,7 +4849,7 @@ func TestReplicationEndpointNormalizesAddresses(t *testing.T) {
 	}
 }
 
-func replicationTestTopology(t *testing.T, replicaAddress string) *TopologyStore {
+func replicationTestTopology(t testing.TB, replicaAddress string) *TopologyStore {
 	t.Helper()
 	topology, err := NewTopologyStore(ClusterTopology{
 		Version: 1,

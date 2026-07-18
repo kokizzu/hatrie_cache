@@ -1110,7 +1110,7 @@ func publicScalarBatchCommandCode(command string) (publicScalarBatchCommand, str
 		return publicScalarBatchInvalid, "command is required", true
 	case "BATCH":
 		return publicScalarBatchInvalid, "nested BATCH is not supported", true
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand:
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand, replicationDigestCommand:
 		return publicScalarBatchInvalid, "internal replication command " + command + " is not allowed", true
 	case "GET", "GETSTR":
 		return publicScalarBatchGet, "", true
@@ -1298,7 +1298,7 @@ func validatePublicCommandBatchPayload(request CacheCommandRequest, index int) e
 	switch command {
 	case "BATCH":
 		return fmt.Errorf("batch value %d: nested BATCH is not supported", index)
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand:
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand, replicationDigestCommand:
 		return fmt.Errorf("batch value %d: internal replication command %s is not allowed", index, command)
 	default:
 		return nil
@@ -2645,6 +2645,16 @@ func (ht *HatTrie) commandDumpEntryBinary(key string) ([]byte, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 	return ht.commandDumpEntryBinaryLocked(key)
+}
+
+func (ht *HatTrie) commandDumpEntryBinaryWithoutStats(key string) ([]byte, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	hval := ht.peekCachedLocked(key)
+	if hval.Empty() {
+		return nil, false, nil
+	}
+	return ht.commandDumpScannedEntryBinaryWithoutStatsLocked(Entry{Key: key, Value: hval})
 }
 
 func (ht *HatTrie) commandDumpEntryBinaryLocked(key string) ([]byte, bool, error) {

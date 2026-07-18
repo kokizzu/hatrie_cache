@@ -145,6 +145,54 @@ The combined benchmark process reached 99,824 KiB maximum RSS. These rows are
 diagnostic workloads rather than CI thresholds; each optimization section
 keeps the same fixture and reports its own before/after ratio.
 
+### Incremental Anti-Entropy
+
+Run the focused 10,000-key comparison:
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationDigestIncremental -benchmem -benchtime=1x -count=5'
+```
+
+Both nodes start with 10,000 deterministic, incompressible 1 KiB values. The
+1%-changed case modifies 100 target values before each timed sync. The legacy
+case rejects `INTERNALDIGESTV1`, then accepts a complete bounded transfer; it
+therefore represents the current compatibility fallback rather than the former
+invalid oversized request. Values are five-run medians on the AMD Ryzen 9
+5950X host. Wire bytes include request and response bodies, but not HTTP
+headers.
+
+| State | Time/op | Requests/op | Wire B/op | Wire B/key | B/op | Allocs/op | CPU improvement vs full | Wire improvement vs full |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Equal digest | 22,129,470 ns | 1 | 215 | 0.0215 | 552,624 | 20,535 | 6.99x | 49,971x |
+| 1% changed | 72,812,784 ns | 3 | 240,086 | 24.01 | 9,932,888 | 98,789 | 2.13x | 44.75x |
+| Legacy full fallback | 154,735,234 ns | 20 | 10,743,774 | 1,074 | 113,891,072 | 148,955 | baseline | baseline |
+
+Equal replicas use 206.1x less cumulative heap and 7.25x fewer allocations
+than full transfer. At 1% changed, the digest path uses 11.47x less heap and
+1.51x fewer allocations. The source does not retain a full key-digest map:
+sorted source and target pages are merged into write batches capped at 1,024
+keys, with the independent one MiB byte limit applied before transmission.
+
+The 100,000-key equal-state architectural run is:
+
+```sh
+make bench-big-wins BIG_WINS_BENCH=BenchmarkBigWins/AntiEntropy BIG_WINS_KEYS=100000 BIG_WINS_OPS=100000 BENCHTIME=1x COUNT=5
+```
+
+Its median is 1,508 ns/key, one request, 205 wire bytes, and 3,440,960 B/op.
+The previous blind-push baseline was 1,621 ns/key and 11,160,456 B/op, so the
+digest check is 1.08x faster and uses 3.24x less cumulative heap even though
+the benchmark now executes real scans on both source and target. Process RSS
+is not directly comparable because the current fixture retains two tries.
+
+The tradeoff is scan CPU: equality still requires hashing each eligible value
+on both nodes. Mismatches also exchange per-key digests before changed values,
+which is why a 1% repair sends more metadata than a hypothetical perfect change
+log. xxHash64 plus encoded value length is probabilistic; an accidental digest
+collision can defer repair until a later state changes the digest. Ordered
+journal replication remains the primary catch-up path when a retained journal
+tail is available.
+
 ### Bounded Per-Key Telemetry
 
 The bounded telemetry implementation uses compact exact counters/timestamps, a
@@ -584,7 +632,7 @@ reservoir samples, and Fenwick trees.
 
 | Family | Canonical HAT-trie commands |
 | --- | --- |
-| Generic key/value, counters, TTL, batching, replication primitives | `BATCH`, `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`, `INTERNALBATCH`, `INTERNALBATCHV2`, `TTL`, `EXPIRE`, `EXPIREAT` |
+| Generic key/value, counters, TTL, batching, replication primitives | `BATCH`, `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`, `INTERNALBATCH`, `INTERNALBATCHV2`, `INTERNALDIGESTV1`, `TTL`, `EXPIRE`, `EXPIREAT` |
 | Map/hash fields | `PUTMAP`, `PEEKMAP`, `TAKEMAP` |
 | Slice/list/deque | `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`, `TAILSLICE` |
 | Set | `ADDSET`, `REMSET`, `HASSET`, `GETSET` |

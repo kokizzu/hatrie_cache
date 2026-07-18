@@ -36,6 +36,7 @@ const replicationLinearGroupTargetLimit = 4
 const replicationBatchEnvelopeCommand = "INTERNALBATCHV2"
 const replicationSetBinaryCommand = "INTERNALSETV2"
 const replicationSetCompactCommand = "INTERNALSETV3"
+const replicationDigestCommand = "INTERNALDIGESTV1"
 
 type ReplicationTransport string
 
@@ -364,7 +365,9 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		disableHTTPFallback: options.DisableHTTPFallback,
 		grpcDialOptions:     append([]grpc.DialOption(nil), options.GRPCDialOptions...),
 	}
-	if replicator.batchMaxBytes < 0 {
+	if replicator.batchMaxBytes == 0 {
+		replicator.batchMaxBytes = DefaultReplicationBatchMaxBytes
+	} else if replicator.batchMaxBytes < 0 {
 		replicator.batchMaxBytes = 0
 	}
 	if replicator.maxInFlight == 0 {
@@ -1589,129 +1592,6 @@ func (replicator *HTTPReplicator) nextReplicationSequence() uint64 {
 	return replicator.sequence
 }
 
-func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTrie, prefix string, pageSize int) ReplicationResult {
-	ctx = replicationContext(ctx)
-	result := ReplicationResult{Command: "SYNC", Key: prefix}
-	if replicator == nil {
-		result.Skipped = true
-		result.Reason = "replication is not configured"
-		return result
-	}
-	if trie == nil {
-		result.Skipped = true
-		result.Reason = "trie is not configured"
-		return result
-	}
-	if err := ctx.Err(); err != nil {
-		result.Skipped = true
-		result.Reason = err.Error()
-		return result
-	}
-	if pageSize <= 0 {
-		pageSize = defaultReplicationSyncKeyPageSize
-	}
-
-	afterKey := ""
-	hasAfterKey := false
-	seenKeys := false
-	cursor := &replicationSyncCursor{}
-	defer cursor.close(trie)
-	var grpcSession *replicationGRPCSyncSession
-	if replicator.transport == ReplicationTransportGRPCStream {
-		grpcSession = newReplicationGRPCSyncSession(ctx, replicator)
-		defer grpcSession.close()
-	}
-	for {
-		routing, routingOK := replicator.snapshotReplicationRouting()
-		pageArena := newReplicationSyncPayloadArena(pageSize)
-		pageGroups := make([]replicationTaskGroup, 0, len(routing.shards))
-		pageGroupIndexes := make(map[TopologyNode]int, len(routing.nodes))
-		page, err := replicationSyncEntriesPageWithCursor(trie, prefix, afterKey, hasAfterKey, pageSize, cursor, func(entry Entry) error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if !routingOK {
-				return nil
-			}
-			route, ok := routing.routeForKey(entry.Key)
-			if !ok {
-				return nil
-			}
-			if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
-				return nil
-			}
-			targets := routing.replicationTargets(route, replicator.self)
-			if len(targets) == 0 {
-				return nil
-			}
-			valueOffset := len(pageArena.values)
-			values, ok, err := trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(pageArena.values, entry)
-			if err != nil || !ok || len(values) == valueOffset {
-				return nil
-			}
-			pageArena.values = values
-			binaryValue := pageArena.values[valueOffset:]
-			payloadBytes := 0
-			if replicator.batchMaxBytes > 0 {
-				payloadBytes = estimatedReplicationRequestBytesWithin(CacheCommandRequest{Command: replicationSetCompactCommand, Key: entry.Key, BinaryValue: binaryValue}, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
-			}
-			recordIndex, err := pageArena.appendRecord(entry.Key, valueOffset, len(binaryValue), payloadBytes)
-			if err != nil {
-				return err
-			}
-			result.Entries++
-			pageGroups = replicator.appendReplicationSyncArenaRecordToTargetGroups(pageGroups, pageGroupIndexes, pageSize, targets, pageArena, recordIndex, routing.fingerprint)
-			return nil
-		})
-		if err != nil {
-			if len(result.Targets) == 0 {
-				result.Skipped = true
-				result.Reason = err.Error()
-			}
-			return result
-		}
-		if page.scanned == 0 {
-			if !seenKeys {
-				result.Skipped = true
-				result.Reason = "no entries to sync"
-				return result
-			}
-			break
-		}
-		seenKeys = true
-		if len(pageGroups) > 0 {
-			if replicator.batchMaxBytes > 0 {
-				pageGroups = splitReplicationTaskGroupsByMaxBytes(pageGroups, replicator.batchMaxBytes)
-			}
-			pageResult := ReplicationResult{}
-			if grpcSession != nil {
-				pageResult = grpcSession.executeReplicationTaskGroups(ctx, pageResult, pageGroups)
-			} else {
-				pageResult = replicator.executeReplicationTaskGroups(ctx, pageResult, pageGroups)
-			}
-			result.Targets = append(result.Targets, pageResult.Targets...)
-		}
-		if err := ctx.Err(); err != nil {
-			if len(result.Targets) == 0 {
-				result.Skipped = true
-				result.Reason = err.Error()
-			}
-			return result
-		}
-
-		if !page.hasMore {
-			break
-		}
-		afterKey = page.nextAfterKey
-		hasAfterKey = true
-	}
-	if len(result.Targets) == 0 {
-		result.Skipped = true
-		result.Reason = "no sync targets"
-	}
-	return result
-}
-
 type replicationSyncPage struct {
 	scanned      int
 	nextAfterKey string
@@ -2018,18 +1898,25 @@ func (replicator *HTTPReplicator) snapshotReplicationRouting() (replicationRouti
 	if replicator == nil || replicator.topology == nil {
 		return replicationRoutingSnapshot{}, false
 	}
-	topology := replicator.topology.Get()
+	return newReplicationRoutingSnapshot(replicator.self, replicator.topology, replicator.election)
+}
+
+func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshot, bool) {
+	if topologyStore == nil {
+		return replicationRoutingSnapshot{}, false
+	}
+	topology := topologyStore.Get()
 	snapshot := replicationRoutingSnapshot{
 		topology:    topology,
 		nodes:       topologyNodesByID(topology),
 		leaders:     make(map[uint32]ElectionLeader, len(topology.Shards)),
 		owners:      make(map[uint32][]string, len(topology.Shards)),
 		targets:     make(map[uint32][]TopologyNode, len(topology.Shards)),
-		self:        replicator.self,
+		self:        self,
 		fingerprint: topology.Fingerprint(),
 	}
-	if replicator.election != nil {
-		snapshot.online = replicator.election.activeNodesSnapshot(topology)
+	if election != nil {
+		snapshot.online = election.activeNodesSnapshot(topology)
 	}
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
 		shard, ok := topology.fullReplicaShard()
@@ -2047,7 +1934,7 @@ func (replicator *HTTPReplicator) snapshotReplicationRouting() (replicationRouti
 		owners := routeOwners(shard)
 		snapshot.owners[shard.ID] = owners
 		snapshot.targets[shard.ID] = precomputedReplicationTargets(owners, snapshot.nodes, snapshot.online, snapshot.self)
-		if replicator.election != nil {
+		if election != nil {
 			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
 			continue
 		}
@@ -2727,7 +2614,23 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	)
 }
 
+func (replicator *HTTPReplicator) postReplicationCommandResponse(ctx context.Context, target TopologyNode, payload CacheCommandRequest, rejectsPayload func(string) bool) (ReplicationTargetResult, CacheCommandResponse) {
+	return replicator.postReplicationCommandWithBodyResponse(
+		ctx,
+		target,
+		rejectsPayload,
+		func() (io.Reader, string, string, error) {
+			return replicationRequestBodyForFormat(payload, replicator.wireFormat)
+		},
+	)
+}
+
 func (replicator *HTTPReplicator) postReplicationCommandWithBody(ctx context.Context, target TopologyNode, rejectsTypedPayload func(string) bool, requestBody func() (io.Reader, string, string, error)) ReplicationTargetResult {
+	result, _ := replicator.postReplicationCommandWithBodyResponse(ctx, target, rejectsTypedPayload, requestBody)
+	return result
+}
+
+func (replicator *HTTPReplicator) postReplicationCommandWithBodyResponse(ctx context.Context, target TopologyNode, rejectsTypedPayload func(string) bool, requestBody func() (io.Reader, string, string, error)) (ReplicationTargetResult, CacheCommandResponse) {
 	ctx = replicationContext(ctx)
 	result := ReplicationTargetResult{
 		Node:    target.ID,
@@ -2735,12 +2638,12 @@ func (replicator *HTTPReplicator) postReplicationCommandWithBody(ctx context.Con
 	}
 	if err := ctx.Err(); err != nil {
 		result.Error = err.Error()
-		return result
+		return result, CacheCommandResponse{}
 	}
 	endpoint, err := replicationEndpoint(target.Address)
 	if err != nil {
 		result.Error = err.Error()
-		return result
+		return result, CacheCommandResponse{}
 	}
 	postCtx := ctx
 	cancel := func() {}
@@ -2752,12 +2655,12 @@ func (replicator *HTTPReplicator) postReplicationCommandWithBody(ctx context.Con
 	body, contentType, contentEncoding, err := requestBody()
 	if err != nil {
 		result.Error = err.Error()
-		return result
+		return result, CacheCommandResponse{}
 	}
 	req, err := http.NewRequestWithContext(postCtx, http.MethodPost, endpoint, body)
 	if err != nil {
 		result.Error = err.Error()
-		return result
+		return result, CacheCommandResponse{}
 	}
 	req.Header.Set("Accept", contentType)
 	req.Header.Set("Content-Type", contentType)
@@ -2771,29 +2674,29 @@ func (replicator *HTTPReplicator) postReplicationCommandWithBody(ctx context.Con
 	resp, err := replicator.client.Do(req)
 	if err != nil {
 		result.Error = err.Error()
-		return result
+		return result, CacheCommandResponse{}
 	}
 	defer drainAndClose(resp.Body)
 
 	result.Status = resp.StatusCode
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		result.Error = resp.Status
-		return result
+		return result, CacheCommandResponse{}
 	}
 	commandResponse, err := decodeReplicationCommandResponseWire(resp.Body, resp.Header.Get("Content-Type"))
 	if err != nil {
 		result.Error = err.Error()
-		return result
+		return result, CacheCommandResponse{}
 	}
 	if !commandResponse.OK {
 		result.Error = commandResponse.Message
 		if rejectsTypedPayload != nil {
 			result.unsupportedTypedReplication = rejectsTypedPayload(commandResponse.Message)
 		}
-		return result
+		return result, commandResponse
 	}
 	result.OK = true
-	return result
+	return result, commandResponse
 }
 
 func replicationResponseRejectsTypedPayload(payload CacheCommandRequest, message string) bool {

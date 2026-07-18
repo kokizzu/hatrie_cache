@@ -645,6 +645,15 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 }
 
+func TestReplicationBatchLimitPreservesExplicitUnlimitedCLIValue(t *testing.T) {
+	if got := replicationBatchLimit(config{}); got != -1 {
+		t.Fatalf("replicationBatchLimit(zero) = %d, want -1 constructor override", got)
+	}
+	if got := replicationBatchLimit(config{replicationBatchMaxBytes: 4096}); got != 4096 {
+		t.Fatalf("replicationBatchLimit(4096) = %d, want 4096", got)
+	}
+}
+
 func TestParseConfigReplicationModeDefaultsToJournal(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"-monitoring-server",

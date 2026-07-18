@@ -2,11 +2,13 @@ package hatriecache
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,6 +42,17 @@ func (handler *benchmarkGRPCWireStats) HandleConn(context.Context, stats.ConnSta
 type benchmarkCountingReadCloser struct {
 	io.ReadCloser
 	bytes *atomic.Int64
+}
+
+type benchmarkCountingResponseWriter struct {
+	http.ResponseWriter
+	bytes *atomic.Int64
+}
+
+func (writer benchmarkCountingResponseWriter) Write(data []byte) (int, error) {
+	n, err := writer.ResponseWriter.Write(data)
+	writer.bytes.Add(int64(n))
+	return n, err
 }
 
 func (reader benchmarkCountingReadCloser) Read(data []byte) (int, error) {
@@ -127,6 +140,117 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 			b.ReportMetric(keyCount, "keys/op")
 		})
 	}
+}
+
+func BenchmarkReplicationDigestIncremental(b *testing.B) {
+	const keyCount = 10000
+	for _, test := range []struct {
+		name          string
+		changedStride int
+		legacyTarget  bool
+	}{
+		{name: "Equal"},
+		{name: "OnePercentChanged", changedStride: 100},
+		{name: "LegacyFullFallback", legacyTarget: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			source := CreateHatTrie()
+			targetTrie := CreateHatTrie()
+			b.Cleanup(source.Destroy)
+			b.Cleanup(targetTrie.Destroy)
+			for idx := 0; idx < keyCount; idx++ {
+				key := "session:" + strconv.Itoa(idx)
+				value := replicationDigestBenchmarkValue(idx, 1)
+				source.UpsertString(key, value)
+				targetTrie.UpsertString(key, value)
+			}
+
+			var requests atomic.Int64
+			var wireBytes atomic.Int64
+			var targetHandler http.Handler
+			var topology *TopologyStore
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &wireBytes}
+				countingWriter := benchmarkCountingResponseWriter{ResponseWriter: w, bytes: &wireBytes}
+				if !test.legacyTarget {
+					targetHandler.ServeHTTP(countingWriter, r)
+					return
+				}
+				request, format, closeBody, ok := monitoringCommandRequest(countingWriter, r)
+				if !ok {
+					return
+				}
+				defer closeBody()
+				if normalizedCommand(request.Command) == replicationDigestCommand {
+					writeCommandResponseWire(countingWriter, r, http.StatusOK, commandError("unsupported command"), format)
+					return
+				}
+				response, _ := executeCacheCommand(r.Context(), targetTrie, request, commandExecutionOptions{
+					NodeName:          "node-b",
+					Topology:          topology,
+					ReplicationSafety: NewReplicationSafetyStore(),
+				})
+				writeCommandResponseWire(countingWriter, r, http.StatusOK, response, format)
+			}))
+			b.Cleanup(target.Close)
+			topology = replicationTestTopology(b, target.URL)
+			targetHandler = NewMonitoringHandler(targetTrie, MonitoringOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}).Handler()
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: NewElectionStore(topology, ElectionOptions{}),
+				Client:   target.Client(),
+			})
+			b.Cleanup(replicator.Close)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if test.changedStride > 0 {
+					b.StopTimer()
+					for idx := 0; idx < keyCount; idx += test.changedStride {
+						targetTrie.UpsertString("session:"+strconv.Itoa(idx), replicationDigestBenchmarkValue(idx, 0))
+					}
+					b.StartTimer()
+				}
+				result := replicator.SyncAll(context.Background(), source, "session:")
+				if result.Skipped || len(result.Targets) == 0 {
+					b.Fatalf("SyncAll() = %#v, want successful digest sync", result)
+				}
+				wantChanged := 0
+				if test.legacyTarget {
+					wantChanged = keyCount
+				} else if test.changedStride > 0 {
+					wantChanged = keyCount / test.changedStride
+				}
+				if !strings.Contains(result.Reason, fmt.Sprintf("transferred %d, deleted 0", wantChanged)) {
+					b.Fatalf("SyncAll() = %#v, want %d changed", result, wantChanged)
+				}
+			}
+			b.StopTimer()
+			iterations := float64(b.N)
+			b.ReportMetric(float64(requests.Load())/iterations, "requests/op")
+			b.ReportMetric(float64(wireBytes.Load())/iterations, "wire_B/op")
+			b.ReportMetric(float64(wireBytes.Load())/iterations/keyCount, "wire_B/key")
+		})
+	}
+}
+
+func replicationDigestBenchmarkValue(key int, version int) string {
+	data := make([]byte, 1024)
+	state := uint64(key+1)*0x9e3779b97f4a7c15 + uint64(version+1)
+	for idx := range data {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		data[idx] = byte(state)
+	}
+	return string(data)
 }
 
 func BenchmarkReplicationSyncTransport(b *testing.B) {
