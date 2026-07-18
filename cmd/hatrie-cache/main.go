@@ -110,6 +110,8 @@ type config struct {
 	snapshotFormat              string
 	journalPath                 string
 	journalFormat               string
+	journalGroupCommitWindow    time.Duration
+	journalGroupCommitMaxBatch  int
 	journalPullSource           string
 	journalPullStatePath        string
 	journalPullInterval         time.Duration
@@ -196,7 +198,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 
-	journal, err := openJournalIfConfigured(cfg.journalPath, journalFormat(cfg))
+	journal, err := openJournalIfConfiguredWithOptions(cfg.journalPath, journalOptions(cfg))
 	if err != nil {
 		return err
 	}
@@ -411,6 +413,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		dbCompareBeforeWrite:        string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
 		snapshotFormat:              string(hatriecache.DefaultSnapshotFormat),
 		journalFormat:               string(hatriecache.DefaultCommandJournalFormat),
+		journalGroupCommitWindow:    hatriecache.DefaultJournalGroupCommitWindow,
+		journalGroupCommitMaxBatch:  hatriecache.DefaultJournalGroupCommitMaxBatch,
 	}
 	configPath, err := configPathFromArgs(args)
 	if err != nil {
@@ -504,6 +508,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.snapshotFormat, "snapshot-format", cfg.snapshotFormat, "snapshot save format: gzip-best-binary, gzip-binary, binary, gzip-best-json, gzip-json, or json")
 	flags.StringVar(&cfg.journalPath, "journal-path", cfg.journalPath, "optional command journal path to replay on startup and append mutating commands")
 	flags.StringVar(&cfg.journalFormat, "journal-format", cfg.journalFormat, "command journal write format: binary or json")
+	flags.DurationVar(&cfg.journalGroupCommitWindow, "journal-group-commit-window", cfg.journalGroupCommitWindow, "maximum journal group commit wait; zero batches only already queued callers")
+	flags.IntVar(&cfg.journalGroupCommitMaxBatch, "journal-group-commit-max-batch", cfg.journalGroupCommitMaxBatch, "maximum commands per durable journal group commit; use 1 for immediate fsync")
 	flags.StringVar(&cfg.journalPullSource, "journal-pull-source", "", "optional source monitoring URL to pull journal catch-up batches from")
 	flags.StringVar(&cfg.journalPullStatePath, "journal-pull-state-path", "", "optional JSON path for persisted journal pull source sequence")
 	flags.DurationVar(&cfg.journalPullInterval, "journal-pull-interval", cfg.journalPullInterval, "optional interval for repeated journal pull catch-up")
@@ -629,6 +635,15 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.journalPullTimeout < 0 {
 		return config{}, errors.New("journal pull timeout must be non-negative")
+	}
+	if cfg.journalGroupCommitWindow < 0 {
+		return config{}, errors.New("journal group commit window must be non-negative")
+	}
+	if cfg.journalGroupCommitMaxBatch < 1 {
+		return config{}, errors.New("journal group commit max batch must be positive")
+	}
+	if cfg.journalGroupCommitMaxBatch > hatriecache.MaxJournalGroupCommitBatch {
+		return config{}, fmt.Errorf("journal group commit max batch must be <= %d", hatriecache.MaxJournalGroupCommitBatch)
 	}
 	if _, err := hatriecache.ParseCommandWireFormat(cfg.replicationWireFormat); err != nil {
 		return config{}, err
@@ -946,6 +961,8 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"snapshot_format":                      cfg.snapshotFormat,
 		"journal_path":                         cfg.journalPath,
 		"journal_format":                       cfg.journalFormat,
+		"journal_group_commit_window":          cfg.journalGroupCommitWindow.String(),
+		"journal_group_commit_max_batch":       cfg.journalGroupCommitMaxBatch,
 		"journal_pull_source":                  cfg.journalPullSource,
 		"journal_pull_state_path":              cfg.journalPullStatePath,
 		"journal_pull_interval":                cfg.journalPullInterval.String(),
@@ -1072,6 +1089,14 @@ func journalFormat(cfg config) hatriecache.CommandJournalFormat {
 		return hatriecache.DefaultCommandJournalFormat
 	}
 	return format
+}
+
+func journalOptions(cfg config) hatriecache.CommandJournalOptions {
+	return hatriecache.CommandJournalOptions{
+		Format:              journalFormat(cfg),
+		GroupCommitWindow:   cfg.journalGroupCommitWindow,
+		GroupCommitMaxBatch: cfg.journalGroupCommitMaxBatch,
+	}
 }
 
 func newMonitoringServer(cfg config, handler http.Handler) *http.Server {
@@ -1594,10 +1619,18 @@ func spillColdLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelD
 }
 
 func openJournalIfConfigured(path string, format hatriecache.CommandJournalFormat) (*hatriecache.CommandJournal, error) {
+	return openJournalIfConfiguredWithOptions(path, hatriecache.CommandJournalOptions{
+		Format:              format,
+		GroupCommitWindow:   hatriecache.DefaultJournalGroupCommitWindow,
+		GroupCommitMaxBatch: hatriecache.DefaultJournalGroupCommitMaxBatch,
+	})
+}
+
+func openJournalIfConfiguredWithOptions(path string, options hatriecache.CommandJournalOptions) (*hatriecache.CommandJournal, error) {
 	if path == "" {
 		return nil, nil
 	}
-	return hatriecache.OpenCommandJournalWithFormat(path, format)
+	return hatriecache.OpenCommandJournalWithOptions(path, options)
 }
 
 func closeJournal(journal *hatriecache.CommandJournal, stderr io.Writer) {

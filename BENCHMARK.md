@@ -181,6 +181,25 @@ Telemetry updates use a separate short critical section and remain exact.
 The optimized median is from three one-iteration runs with the same 100,000-key
 and 100,000-operation fixture as the architectural baseline.
 
+### Durable Journal Group Commit
+
+Mutating commands now enter a bounded journal worker. The default zero-wait
+mode yields once and batches already queued callers, preserving serial latency;
+a positive configurable window can trade latency for larger batches. Commands
+are applied and acknowledged only after their batch `fsync` succeeds. Rejected
+commands are truncated, and any later batch suffix is re-appended and synced
+before execution.
+
+| Workload | Baseline median | Group-commit median | Improvement |
+| --- | ---: | ---: | ---: |
+| 100 serial durable writes | 915,191 ns/write | 829,990 ns/write | 1.10x faster, 9.3% lower latency |
+| 100 durable writes, 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster, 91.7% lower latency |
+
+The concurrent result is about 13,645 acknowledged durable writes/second on the
+benchmark filesystem. A deterministic 16-caller test with a 20 ms collection
+window records exactly one `fsync` and verifies that neither response nor trie
+mutation occurs before that sync completes.
+
 ## Latest Optimization Spot Check
 
 After adding exact command fast paths for set, priority queue, Bloom filter,

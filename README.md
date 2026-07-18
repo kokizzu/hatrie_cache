@@ -807,11 +807,22 @@ including files that contain both old JSON records and new binary records.
 Binary journal records store structured `values` and `pairs` payloads with the
 compact binary value codec when that is smaller than their JSON representation,
 and otherwise keep the JSON inner payload. Set `JOURNAL_FORMAT=json` to keep
-writing the previous JSON journal layout:
+writing the previous JSON journal layout.
+
+Durable writes use group commit by default without delaying for a timer: the
+worker yields once, batches up to 64 already queued commands, writes them in
+order, and issues one `fsync`. Every successful command waits for that sync
+before it is applied or acknowledged. Set a positive
+`JOURNAL_GROUP_COMMIT_WINDOW` to wait briefly for larger batches under sparse
+traffic, or set `JOURNAL_GROUP_COMMIT_MAX_BATCH=1` for the previous immediate
+one-command-per-fsync behavior. Batch size is validated in the range 1-4096 to
+prevent malformed configuration from triggering a large allocation:
 
 ```
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json JOURNAL_PATH=data/commands.journal
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_FORMAT=json
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_GROUP_COMMIT_WINDOW=250us JOURNAL_GROUP_COMMIT_MAX_BATCH=64
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_GROUP_COMMIT_MAX_BATCH=1
 ```
 
 When journaling is enabled, `GET /api/journal?after_sequence=N&limit=1000`

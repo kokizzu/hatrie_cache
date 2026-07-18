@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +25,13 @@ const maxCommandJournalJSONRecordBytes = 1 << 30
 const maxCommandJournalReusablePayloadBufferBytes = 1 << 20
 
 const (
-	DefaultCommandJournalTailLimit   = 1000
-	MaxCommandJournalTailLimit       = 10000
-	DefaultCommandJournalPullBatches = 100
-	MaxCommandJournalPullBatches     = 1000
+	DefaultCommandJournalTailLimit                  = 1000
+	MaxCommandJournalTailLimit                      = 10000
+	DefaultCommandJournalPullBatches                = 100
+	MaxCommandJournalPullBatches                    = 1000
+	DefaultJournalGroupCommitWindow   time.Duration = 0
+	DefaultJournalGroupCommitMaxBatch               = 64
+	MaxJournalGroupCommitBatch                      = 4096
 )
 
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
@@ -71,14 +75,43 @@ type commandJournalEntry struct {
 	Request    CacheCommandRequest `json:"request,omitempty"`
 }
 
+// CommandJournalOptions configures journal encoding and durable group commit.
+// A zero window opportunistically batches callers already queued; a positive
+// window waits up to that duration for more callers. A maximum batch of one
+// disables group commit and uses the immediate-fsync path.
+type CommandJournalOptions struct {
+	Format              CommandJournalFormat
+	GroupCommitWindow   time.Duration
+	GroupCommitMaxBatch int
+}
+
+type commandJournalJob struct {
+	trie           *HatTrie
+	request        CacheCommandRequest
+	journalRequest CacheCommandRequest
+	operation      *snapshotOperation
+	prepared       bool
+	result         chan CacheCommandResponse
+}
+
 type CommandJournal struct {
-	mu                sync.Mutex
-	path              string
-	format            CommandJournalFormat
-	file              *os.File
-	closed            bool
-	nextSequence      uint64
-	sequenceExhausted bool
+	mu                  sync.Mutex
+	submitMu            sync.RWMutex
+	closeOnce           sync.Once
+	path                string
+	format              CommandJournalFormat
+	file                *os.File
+	closed              bool
+	accepting           bool
+	nextSequence        uint64
+	sequenceExhausted   bool
+	groupCommitWindow   time.Duration
+	groupCommitMaxBatch int
+	groupCommitJobs     chan *commandJournalJob
+	groupCommitDone     chan struct{}
+	closeDone           chan struct{}
+	closeErr            error
+	syncHook            func() error
 }
 
 type commandJournalAppendState struct {
@@ -88,16 +121,37 @@ type commandJournalAppendState struct {
 }
 
 func OpenCommandJournal(path string) (*CommandJournal, error) {
-	return OpenCommandJournalWithFormat(path, DefaultCommandJournalFormat)
+	return OpenCommandJournalWithOptions(path, CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitWindow:   DefaultJournalGroupCommitWindow,
+		GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+	})
 }
 
 func OpenCommandJournalWithFormat(path string, format CommandJournalFormat) (*CommandJournal, error) {
+	return OpenCommandJournalWithOptions(path, CommandJournalOptions{
+		Format:              format,
+		GroupCommitWindow:   DefaultJournalGroupCommitWindow,
+		GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+	})
+}
+
+func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (*CommandJournal, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("hatriecache: journal path is required")
 	}
-	format, err := ParseCommandJournalFormat(string(format))
+	format, err := ParseCommandJournalFormat(string(options.Format))
 	if err != nil {
 		return nil, err
+	}
+	if options.GroupCommitWindow < 0 {
+		return nil, errors.New("hatriecache: journal group commit window must be non-negative")
+	}
+	if options.GroupCommitMaxBatch < 1 {
+		return nil, errors.New("hatriecache: journal group commit max batch must be positive")
+	}
+	if options.GroupCommitMaxBatch > MaxJournalGroupCommitBatch {
+		return nil, fmt.Errorf("hatriecache: journal group commit max batch must be <= %d", MaxJournalGroupCommitBatch)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -125,10 +179,23 @@ func OpenCommandJournalWithFormat(path string, format CommandJournalFormat) (*Co
 	if err != nil {
 		return nil, err
 	}
-	journal := &CommandJournal{path: path, format: format, file: file}
+	journal := &CommandJournal{
+		path:                path,
+		format:              format,
+		file:                file,
+		accepting:           true,
+		groupCommitWindow:   options.GroupCommitWindow,
+		groupCommitMaxBatch: options.GroupCommitMaxBatch,
+		closeDone:           make(chan struct{}),
+	}
 	journal.advanceSequenceLocked(maxSequence)
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {
 		journal.nextSequence = 1
+	}
+	if journal.groupCommitEnabled() {
+		journal.groupCommitJobs = make(chan *commandJournalJob, journal.groupCommitMaxBatch)
+		journal.groupCommitDone = make(chan struct{})
+		go journal.runGroupCommit()
 	}
 	return journal, nil
 }
@@ -137,14 +204,29 @@ func (journal *CommandJournal) Close() error {
 	if journal == nil {
 		return nil
 	}
-	journal.mu.Lock()
-	defer journal.mu.Unlock()
+	journal.closeOnce.Do(func() {
+		journal.submitMu.Lock()
+		journal.accepting = false
+		if journal.groupCommitJobs != nil {
+			close(journal.groupCommitJobs)
+		}
+		journal.submitMu.Unlock()
+		if journal.groupCommitDone != nil {
+			<-journal.groupCommitDone
+		}
 
-	if journal.closed {
-		return nil
-	}
-	journal.closed = true
-	return journal.closeAppendFileLocked()
+		journal.mu.Lock()
+		journal.closed = true
+		journal.closeErr = journal.closeAppendFileLocked()
+		journal.mu.Unlock()
+		close(journal.closeDone)
+	})
+	<-journal.closeDone
+	return journal.closeErr
+}
+
+func (journal *CommandJournal) groupCommitEnabled() bool {
+	return journal.groupCommitMaxBatch > 1
 }
 
 func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheCommandRequest) CacheCommandResponse {
@@ -157,11 +239,20 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	if !commandShouldJournal(request) {
 		return trie.ExecuteCommand(request)
 	}
+	journalRequest := normalizeJournalRequest(request, trie.currentTime())
+	if journal.groupCommitEnabled() {
+		return journal.submitGroupCommit(&commandJournalJob{
+			trie:           trie,
+			request:        request,
+			journalRequest: journalRequest,
+			result:         make(chan CacheCommandResponse, 1),
+		})
+	}
 
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
-	appendState, err := journal.appendLocked(normalizeJournalRequest(request, trie.currentTime()))
+	appendState, err := journal.appendLocked(journalRequest)
 	if err != nil {
 		return commandError(err.Error())
 	}
@@ -172,6 +263,149 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 		}
 	}
 	return response
+}
+
+func (journal *CommandJournal) submitGroupCommit(job *commandJournalJob) CacheCommandResponse {
+	journal.submitMu.RLock()
+	if !journal.accepting {
+		journal.submitMu.RUnlock()
+		return commandError(ErrCommandJournalClosed.Error())
+	}
+	journal.groupCommitJobs <- job
+	journal.submitMu.RUnlock()
+	return <-job.result
+}
+
+func (journal *CommandJournal) runGroupCommit() {
+	defer close(journal.groupCommitDone)
+	for {
+		first, ok := <-journal.groupCommitJobs
+		if !ok {
+			return
+		}
+		batch := make([]*commandJournalJob, 1, journal.groupCommitMaxBatch)
+		batch[0] = first
+		if journal.groupCommitWindow == 0 {
+			runtime.Gosched()
+			channelClosed := false
+		drain:
+			for len(batch) < journal.groupCommitMaxBatch {
+				select {
+				case job, open := <-journal.groupCommitJobs:
+					if !open {
+						channelClosed = true
+						break drain
+					}
+					batch = append(batch, job)
+				default:
+					break drain
+				}
+			}
+			journal.processGroupCommit(batch)
+			if channelClosed {
+				return
+			}
+			continue
+		}
+		timer := time.NewTimer(journal.groupCommitWindow)
+		channelClosed := false
+	collect:
+		for len(batch) < journal.groupCommitMaxBatch {
+			select {
+			case job, open := <-journal.groupCommitJobs:
+				if !open {
+					channelClosed = true
+					break collect
+				}
+				batch = append(batch, job)
+			case <-timer.C:
+				break collect
+			}
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		journal.processGroupCommit(batch)
+		if channelClosed {
+			return
+		}
+	}
+}
+
+func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+
+	pending := batch
+	for len(pending) > 0 {
+		batchState, err := journal.currentAppendStateLocked()
+		if err != nil {
+			completeCommandJournalJobs(pending, commandError(err.Error()))
+			return
+		}
+		states := make([]commandJournalAppendState, len(pending))
+		offset := batchState.offset
+		for idx, job := range pending {
+			states[idx] = commandJournalAppendState{
+				offset:            offset,
+				nextSequence:      journal.nextSequence,
+				sequenceExhausted: journal.sequenceExhausted,
+			}
+			var written int
+			written, err = journal.writeWithoutSyncLocked(job.journalRequest)
+			if err != nil {
+				err = journal.rollbackPreparedBatchLocked(batchState, err)
+				completeCommandJournalJobs(pending, commandError(err.Error()))
+				return
+			}
+			offset += int64(written)
+		}
+		if err := journal.syncLocked(); err != nil {
+			err = journal.rollbackPreparedBatchLocked(batchState, err)
+			completeCommandJournalJobs(pending, commandError(err.Error()))
+			return
+		}
+
+		rejected := -1
+		for idx, job := range pending {
+			response := job.execute()
+			if response.OK {
+				job.result <- response
+				continue
+			}
+			rollbackErr := journal.rollbackAppendLocked(states[idx])
+			if rollbackErr != nil {
+				response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
+			}
+			job.result <- response
+			rejected = idx
+			if rollbackErr != nil {
+				completeCommandJournalJobs(pending[idx+1:], commandError(rollbackErr.Error()))
+				return
+			}
+			break
+		}
+		if rejected < 0 {
+			return
+		}
+		pending = pending[rejected+1:]
+	}
+}
+
+func (job *commandJournalJob) execute() CacheCommandResponse {
+	if job.prepared {
+		return executePreparedInternalReplicationCommand(job.trie, job.request, job.operation)
+	}
+	return job.trie.ExecuteCommand(job.request)
+}
+
+func completeCommandJournalJobs(jobs []*commandJournalJob, response CacheCommandResponse) {
+	for _, job := range jobs {
+		job.result <- response
+	}
 }
 
 func (journal *CommandJournal) executeJournalRecordsBatch(trie *HatTrie, records []CommandJournalRecord) (int, CacheCommandResponse) {
@@ -247,7 +481,7 @@ func (journal *CommandJournal) executeJournalRecordsBatch(trie *HatTrie, records
 		offset += int64(n)
 		journal.markAppendedLocked(sequence)
 	}
-	if err := journal.file.Sync(); err != nil {
+	if err := journal.syncLocked(); err != nil {
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
 	for idx, record := range records {
@@ -284,11 +518,22 @@ func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *H
 	if command == "INTERNALSET" && operation == nil {
 		return commandError("prepared internal set operation is required")
 	}
+	journalRequest := normalizeJournalRequest(request, trie.currentTime())
+	if journal.groupCommitEnabled() {
+		return journal.submitGroupCommit(&commandJournalJob{
+			trie:           trie,
+			request:        request,
+			journalRequest: journalRequest,
+			operation:      operation,
+			prepared:       true,
+			result:         make(chan CacheCommandResponse, 1),
+		})
+	}
 
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 
-	appendState, err := journal.appendLocked(normalizeJournalRequest(request, trie.currentTime()))
+	appendState, err := journal.appendLocked(journalRequest)
 	if err != nil {
 		return commandError(err.Error())
 	}
@@ -463,6 +708,17 @@ func (journal *CommandJournal) Sequence() uint64 {
 }
 
 func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (commandJournalAppendState, error) {
+	appendState, err := journal.appendWithoutSyncLocked(request)
+	if err != nil {
+		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+	}
+	if err := journal.syncLocked(); err != nil {
+		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+	}
+	return appendState, nil
+}
+
+func (journal *CommandJournal) currentAppendStateLocked() (commandJournalAppendState, error) {
 	if err := journal.ensureAppendFileLocked(); err != nil {
 		return commandJournalAppendState{}, err
 	}
@@ -470,14 +726,26 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (comman
 	if err != nil {
 		return commandJournalAppendState{}, err
 	}
-	appendState := commandJournalAppendState{
+	return commandJournalAppendState{
 		offset:            info.Size(),
 		nextSequence:      journal.nextSequence,
 		sequenceExhausted: journal.sequenceExhausted,
-	}
-	sequence, err := journal.nextAppendSequenceLocked()
+	}, nil
+}
+
+func (journal *CommandJournal) appendWithoutSyncLocked(request CacheCommandRequest) (commandJournalAppendState, error) {
+	appendState, err := journal.currentAppendStateLocked()
 	if err != nil {
 		return commandJournalAppendState{}, err
+	}
+	_, err = journal.writeWithoutSyncLocked(request)
+	return appendState, err
+}
+
+func (journal *CommandJournal) writeWithoutSyncLocked(request CacheCommandRequest) (int, error) {
+	sequence, err := journal.nextAppendSequenceLocked()
+	if err != nil {
+		return 0, err
 	}
 	entry := commandJournalEntry{
 		Version:  commandJournalVersion,
@@ -486,21 +754,28 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (comman
 	}
 	data, err := marshalCommandJournalEntry(entry, journal.format)
 	if err != nil {
-		return commandJournalAppendState{}, err
+		return 0, err
 	}
 
 	n, err := journal.file.Write(data)
 	if err != nil {
-		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+		return n, err
 	}
 	if n != len(data) {
-		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, io.ErrShortWrite)
-	}
-	if err := journal.file.Sync(); err != nil {
-		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+		return n, io.ErrShortWrite
 	}
 	journal.markAppendedLocked(sequence)
-	return appendState, nil
+	return n, nil
+}
+
+func (journal *CommandJournal) syncLocked() error {
+	if journal.syncHook != nil {
+		return journal.syncHook()
+	}
+	if journal.file == nil {
+		return ErrCommandJournalClosed
+	}
+	return journal.file.Sync()
 }
 
 func (journal *CommandJournal) rollbackFailedAppendLocked(state commandJournalAppendState, cause error) error {
@@ -520,7 +795,7 @@ func (journal *CommandJournal) rollbackAppendLocked(state commandJournalAppendSt
 	if _, err := journal.file.Seek(state.offset, io.SeekStart); err != nil {
 		return err
 	}
-	if err := journal.file.Sync(); err != nil {
+	if err := journal.syncLocked(); err != nil {
 		return err
 	}
 	journal.nextSequence = state.nextSequence

@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -483,6 +484,39 @@ func TestParseConfigSnapshotFlags(t *testing.T) {
 	}
 	if cfg.journalFormat != "json" || journalFormat(cfg) != hatriecache.CommandJournalFormatJSON {
 		t.Fatalf("journal format = %q, want json", cfg.journalFormat)
+	}
+}
+
+func TestParseConfigJournalGroupCommitDefaultsAndOverrides(t *testing.T) {
+	defaultCfg, err := parseConfig(nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(defaults) error = %v", err)
+	}
+	if defaultCfg.journalGroupCommitWindow != hatriecache.DefaultJournalGroupCommitWindow || defaultCfg.journalGroupCommitMaxBatch != hatriecache.DefaultJournalGroupCommitMaxBatch {
+		t.Fatalf("journal group commit defaults = %s/%d, want %s/%d", defaultCfg.journalGroupCommitWindow, defaultCfg.journalGroupCommitMaxBatch, hatriecache.DefaultJournalGroupCommitWindow, hatriecache.DefaultJournalGroupCommitMaxBatch)
+	}
+
+	cfg, err := parseConfig([]string{
+		"-journal-group-commit-window", "250us",
+		"-journal-group-commit-max-batch", "32",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(group commit) error = %v", err)
+	}
+	if cfg.journalGroupCommitWindow != 250*time.Microsecond || cfg.journalGroupCommitMaxBatch != 32 {
+		t.Fatalf("journal group commit config = %s/%d, want 250us/32", cfg.journalGroupCommitWindow, cfg.journalGroupCommitMaxBatch)
+	}
+}
+
+func TestParseConfigRejectsInvalidJournalGroupCommit(t *testing.T) {
+	for _, args := range [][]string{
+		{"-journal-group-commit-window", "-1ns"},
+		{"-journal-group-commit-max-batch", "0"},
+		{"-journal-group-commit-max-batch", strconv.Itoa(hatriecache.MaxJournalGroupCommitBatch + 1)},
+	} {
+		if _, err := parseConfig(args, &bytes.Buffer{}); err == nil {
+			t.Fatalf("parseConfig(%v) error = nil, want journal group commit validation error", args)
+		}
 	}
 }
 

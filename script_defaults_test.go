@@ -161,6 +161,40 @@ func TestMonitoringWrapperPassesBoundedKeyStatsDefaults(t *testing.T) {
 	}
 }
 
+func TestMonitoringWrapperPassesJournalGroupCommitDefaults(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"JOURNAL_GROUP_COMMIT_WINDOW ?= 0",
+		"JOURNAL_GROUP_COMMIT_MAX_BATCH ?= 64",
+		"JOURNAL_GROUP_COMMIT_WINDOW='$(JOURNAL_GROUP_COMMIT_WINDOW)'",
+		"JOURNAL_GROUP_COMMIT_MAX_BATCH='$(JOURNAL_GROUP_COMMIT_MAX_BATCH)'",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile missing journal group commit token %q", token)
+		}
+	}
+
+	script, err := os.ReadFile("scripts/monitoring-server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/monitoring-server.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"journal_group_commit_window=${JOURNAL_GROUP_COMMIT_WINDOW:-0}",
+		"journal_group_commit_max_batch=${JOURNAL_GROUP_COMMIT_MAX_BATCH:-64}",
+		`-journal-group-commit-window "$journal_group_commit_window"`,
+		`-journal-group-commit-max-batch "$journal_group_commit_max_batch"`,
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("monitoring wrapper missing journal group commit token %q", token)
+		}
+	}
+}
+
 func TestMonitoringWrapperPassesMemoryGovernorOptions(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {

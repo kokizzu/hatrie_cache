@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -62,6 +65,248 @@ func TestParseCommandJournalFormat(t *testing.T) {
 
 	if _, err := ParseCommandJournalFormat("msgpack"); err == nil {
 		t.Fatal("ParseCommandJournalFormat(msgpack) error = nil, want error")
+	}
+}
+
+func TestOpenCommandJournalRejectsInvalidGroupCommitOptions(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		options CommandJournalOptions
+	}{
+		{
+			name: "negative window",
+			options: CommandJournalOptions{
+				GroupCommitWindow:   -time.Nanosecond,
+				GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+			},
+		},
+		{
+			name: "zero batch",
+			options: CommandJournalOptions{
+				GroupCommitMaxBatch: 0,
+			},
+		},
+		{
+			name: "huge batch",
+			options: CommandJournalOptions{
+				GroupCommitMaxBatch: MaxJournalGroupCommitBatch + 1,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), test.options); err == nil {
+				t.Fatalf("OpenCommandJournalWithOptions(%#v) error = nil, want validation error", test.options)
+			}
+		})
+	}
+}
+
+func TestCommandJournalGroupCommitCoalescesConcurrentDurableWrites(t *testing.T) {
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitWindow:   20 * time.Millisecond,
+		GroupCommitMaxBatch: 64,
+	})
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	defer journal.Close()
+
+	var syncs atomic.Int64
+	journal.mu.Lock()
+	journal.syncHook = func() error {
+		syncs.Add(1)
+		return journal.file.Sync()
+	}
+	journal.mu.Unlock()
+
+	ht := newTestTrie(t)
+	const commands = 16
+	start := make(chan struct{})
+	responses := make(chan CacheCommandResponse, commands)
+	var workers sync.WaitGroup
+	workers.Add(commands)
+	for idx := 0; idx < commands; idx++ {
+		go func(idx int) {
+			defer workers.Done()
+			<-start
+			responses <- journal.ExecuteCommand(ht, CacheCommandRequest{
+				Command: "SETSTR",
+				Key:     fmt.Sprintf("key:%d", idx),
+				Value:   "value",
+			})
+		}(idx)
+	}
+	close(start)
+	workers.Wait()
+	close(responses)
+	for response := range responses {
+		if !response.OK {
+			t.Fatalf("ExecuteCommand() = %#v, want ok", response)
+		}
+	}
+	if got := syncs.Load(); got != 1 {
+		t.Fatalf("journal fsync calls = %d, want one group commit", got)
+	}
+	if got := ht.Size(); got != commands {
+		t.Fatalf("trie size = %d, want %d", got, commands)
+	}
+	if tail, err := journal.Tail(0, commands); err != nil || len(tail.Entries) != commands {
+		t.Fatalf("Tail() = %#v/%v, want %d durable entries", tail, err, commands)
+	}
+}
+
+func TestCommandJournalGroupCommitAcknowledgesOnlyAfterSync(t *testing.T) {
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitWindow:   time.Microsecond,
+		GroupCommitMaxBatch: 64,
+	})
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	defer journal.Close()
+
+	syncStarted := make(chan struct{})
+	releaseSync := make(chan struct{})
+	journal.mu.Lock()
+	journal.syncHook = func() error {
+		close(syncStarted)
+		<-releaseSync
+		return journal.file.Sync()
+	}
+	journal.mu.Unlock()
+
+	ht := newTestTrie(t)
+	response := make(chan CacheCommandResponse, 1)
+	go func() {
+		response <- journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "key", Value: "value"})
+	}()
+	<-syncStarted
+	select {
+	case got := <-response:
+		close(releaseSync)
+		t.Fatalf("ExecuteCommand() returned before fsync completed: %#v", got)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if got := ht.GetString("key"); got != "" {
+		close(releaseSync)
+		t.Fatalf("GetString(key) before fsync = %q, want command not applied", got)
+	}
+	close(releaseSync)
+	if got := <-response; !got.OK {
+		t.Fatalf("ExecuteCommand() after fsync = %#v, want ok", got)
+	}
+	if got := ht.GetString("key"); got != "value" {
+		t.Fatalf("GetString(key) after fsync = %q, want value", got)
+	}
+}
+
+func TestCommandJournalGroupCommitReappendsSuffixAfterRejectedCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournalWithOptions(path, CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitMaxBatch: 1,
+	})
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	defer journal.Close()
+
+	ht := newTestTrie(t)
+	requests := []CacheCommandRequest{
+		{Command: "SETSTR", Key: "first", Value: "one"},
+		{Command: "SETINT", Key: "rejected", Value: "not-an-integer"},
+		{Command: "SETSTR", Key: "last", Value: "three"},
+	}
+	jobs := make([]*commandJournalJob, len(requests))
+	for idx, request := range requests {
+		jobs[idx] = &commandJournalJob{
+			trie:           ht,
+			request:        request,
+			journalRequest: normalizeJournalRequest(request, time.Unix(1_000, 0)),
+			result:         make(chan CacheCommandResponse, 1),
+		}
+	}
+	journal.processGroupCommit(jobs)
+
+	if response := <-jobs[0].result; !response.OK {
+		t.Fatalf("first response = %#v, want ok", response)
+	}
+	if response := <-jobs[1].result; response.OK {
+		t.Fatalf("rejected response = %#v, want error", response)
+	}
+	if response := <-jobs[2].result; !response.OK {
+		t.Fatalf("last response = %#v, want ok", response)
+	}
+	if got := ht.GetString("first"); got != "one" {
+		t.Fatalf("GetString(first) = %q, want one", got)
+	}
+	if got := ht.GetString("rejected"); got != "" {
+		t.Fatalf("GetString(rejected) = %q, want missing", got)
+	}
+	if got := ht.GetString("last"); got != "three" {
+		t.Fatalf("GetString(last) = %q, want three", got)
+	}
+	tail, err := journal.Tail(0, 10)
+	if err != nil {
+		t.Fatalf("Tail() error = %v", err)
+	}
+	if len(tail.Entries) != 2 || tail.Entries[0].Request.Key != "first" || tail.Entries[1].Request.Key != "last" {
+		t.Fatalf("Tail().Entries = %#v, want first and re-appended last", tail.Entries)
+	}
+	if tail.Entries[0].Sequence != 1 || tail.Entries[1].Sequence != 2 {
+		t.Fatalf("Tail() sequences = %d/%d, want contiguous 1/2", tail.Entries[0].Sequence, tail.Entries[1].Sequence)
+	}
+
+	replayed := newTestTrie(t)
+	if _, err := journal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if replayed.GetString("first") != "one" || replayed.GetString("last") != "three" || replayed.GetString("rejected") != "" {
+		t.Fatal("Replay() did not preserve successful group commit commands")
+	}
+}
+
+func TestCommandJournalGroupCommitSyncFailureDoesNotApply(t *testing.T) {
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitMaxBatch: 1,
+	})
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	defer journal.Close()
+
+	var syncs int
+	journal.syncHook = func() error {
+		syncs++
+		if syncs == 1 {
+			return errors.New("injected fsync failure")
+		}
+		return journal.file.Sync()
+	}
+	ht := newTestTrie(t)
+	request := CacheCommandRequest{Command: "SETSTR", Key: "key", Value: "value"}
+	job := &commandJournalJob{
+		trie:           ht,
+		request:        request,
+		journalRequest: normalizeJournalRequest(request, time.Unix(1_001, 0)),
+		result:         make(chan CacheCommandResponse, 1),
+	}
+	journal.processGroupCommit([]*commandJournalJob{job})
+
+	if response := <-job.result; response.OK || !strings.Contains(response.Message, "injected fsync failure") {
+		t.Fatalf("group commit response = %#v, want injected fsync failure", response)
+	}
+	if got := ht.GetString("key"); got != "" {
+		t.Fatalf("GetString(key) = %q, want command unapplied", got)
+	}
+	if sequence := journal.Sequence(); sequence != 0 {
+		t.Fatalf("Sequence() = %d, want rollback to zero", sequence)
+	}
+	if tail, err := journal.Tail(0, 10); err != nil || len(tail.Entries) != 0 {
+		t.Fatalf("Tail() = %#v/%v, want empty journal after fsync failure", tail, err)
 	}
 }
 
