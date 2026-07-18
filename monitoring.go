@@ -332,7 +332,8 @@ func (handler *MonitoringHandler) rejectDangerousHTTP(w http.ResponseWriter, r *
 }
 
 func (handler *MonitoringHandler) rejectDangerousCommandHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest, format CommandWireFormat) bool {
-	if !commandShouldJournal(request) && normalizedCommand(request.Command) != "INTERNALBATCH" {
+	command := normalizedCommand(request.Command)
+	if !commandShouldJournal(request) && command != "INTERNALBATCH" && command != replicationBatchEnvelopeCommand {
 		return false
 	}
 	if handler.options.WriteProtected {
@@ -777,7 +778,7 @@ func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWrite
 
 func isInternalReplicationCommand(request CacheCommandRequest) bool {
 	switch normalizedCommand(request.Command) {
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH":
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		return true
 	default:
 		return false
@@ -812,7 +813,7 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		return commandError("trie is not configured"), false
 	}
 	switch normalizedCommand(request.Command) {
-	case "INTERNALBATCH":
+	case "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		return executeInternalReplicationBatch(ctx, trie, request, options)
 	case "BATCH":
 		return executePublicCommandBatch(ctx, trie, request, options)
@@ -947,6 +948,10 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 	if err := ctx.Err(); err != nil {
 		return commandError(err.Error()), false
 	}
+	envelopeToken, response, handled, rejected := checkReplicationSafety(request, options.Topology, options.ReplicationSafety)
+	if handled {
+		return response, rejected
+	}
 	payloads, err := internalReplicationBatchRequests(request)
 	if err != nil {
 		return commandError(err.Error()), false
@@ -967,6 +972,7 @@ func executeInternalReplicationBatch(ctx context.Context, trie *HatTrie, request
 			return response, false
 		}
 	}
+	options.ReplicationSafety.Commit(envelopeToken)
 	return CacheCommandResponse{OK: true, Message: "internal replication batch applied"}, false
 }
 
@@ -1067,7 +1073,7 @@ func decodeInternalReplicationBatchValue(value interface{}) (CacheCommandRequest
 
 func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
 	switch normalizedCommand(request.Command) {
-	case "INTERNALSET", "INTERNALDEL":
+	case "INTERNALSET", "INTERNALDEL", replicationBatchEnvelopeCommand:
 	default:
 		return replicationSafetyToken{}, CacheCommandResponse{}, false, false
 	}

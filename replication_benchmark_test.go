@@ -152,6 +152,71 @@ func BenchmarkReplicationRoutingPlanning(b *testing.B) {
 	})
 }
 
+func BenchmarkReplicationBatchMetadataWire(b *testing.B) {
+	const payloadCount = 10000
+	payloads := make([]CacheCommandRequest, payloadCount)
+	for idx := range payloads {
+		payloads[idx] = CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     "session:" + strconv.Itoa(idx),
+			Value:   `{"type":"string","string":"value"}`,
+			Pairs: Map{
+				replicationMetaSourceNode:          "node-a",
+				replicationMetaSequence:            strconv.Itoa(idx + 1),
+				replicationMetaTopologyFingerprint: "fingerprint-a",
+			},
+		}
+	}
+
+	for _, tt := range []struct {
+		name  string
+		build func([]CacheCommandRequest) (CacheCommandRequest, error)
+	}{
+		{name: "LegacyPerItem", build: replicationBatchPayload},
+		{name: "SharedEnvelope", build: replicationBatchEnvelopePayload},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			request, err := tt.build(payloads)
+			if err != nil {
+				b.Fatal(err)
+			}
+			body, _, _, err := commandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
+			if err != nil {
+				b.Fatal(err)
+			}
+			wireBytes, err := io.Copy(io.Discard, body)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if closer, ok := body.(io.Closer); ok {
+				_ = closer.Close()
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iter := 0; iter < b.N; iter++ {
+				request, err := tt.build(payloads)
+				if err != nil {
+					b.Fatal(err)
+				}
+				body, _, _, err := commandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if _, err := io.Copy(io.Discard, body); err != nil {
+					b.Fatal(err)
+				}
+				if closer, ok := body.(io.Closer); ok {
+					if err := closer.Close(); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			b.ReportMetric(float64(wireBytes), "wire_B/op")
+		})
+	}
+}
+
 func BenchmarkGroupReplicationTasksByTarget(b *testing.B) {
 	for _, tt := range []struct {
 		name          string

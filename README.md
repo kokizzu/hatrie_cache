@@ -854,9 +854,12 @@ together during migration. Command fanout lets an elected leader broadcast
 successful local mutations to the current key's topology owners over HTTP. It
 uses the internal `DUMP`/`INTERNALSET`, `INTERNALDEL`, and `INTERNALBATCH`
 commands, skips internal replication commands to avoid loops, and records the
-last command-fanout attempt at `/api/replication`. `INTERNALBATCH` batches
+last command-fanout attempt at `/api/replication`. `INTERNALBATCHV2` batches
 multiple internal replication commands for the same target during sync and async
-replay. Replication batches are split before send when their estimated
+replay while carrying source, sequence, and topology metadata once on the batch
+envelope. For an older peer, the sender automatically retries the legacy
+`INTERNALBATCH` request with per-item metadata. Replication
+batches are split before send when their estimated
 uncompressed request body would exceed `REPLICATION_BATCH_MAX_BYTES` (default
 `1048576`). Set `REPLICATION_BATCH_MAX_BYTES=0` to disable byte-based
 splitting. HTTP replication command bodies use protobuf by default
@@ -879,7 +882,7 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 
 Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP
 replication and require the same token for inbound `INTERNALSET`, `INTERNALDEL`,
-and `INTERNALBATCH` commands. Replication clients send both
+`INTERNALBATCH`, and `INTERNALBATCHV2` commands. Replication clients send both
 `Authorization: Bearer <token>` and `X-Hatrie-Replication-Token: <token>`.
 The replication token is intentionally narrow: it is accepted only on
 `POST /api/commands` for internal replication traffic, not for health, metrics,

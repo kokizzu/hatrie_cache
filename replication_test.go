@@ -37,8 +37,8 @@ func mustDecodeReplicationTestCommand(t *testing.T, w http.ResponseWriter, r *ht
 
 func mustDecodeReplicationBatchValues(t *testing.T, request CacheCommandRequest) []CacheCommandRequest {
 	t.Helper()
-	if request.Command != "INTERNALBATCH" {
-		t.Fatalf("replication request command = %q, want INTERNALBATCH", request.Command)
+	if request.Command != "INTERNALBATCH" && request.Command != replicationBatchEnvelopeCommand {
+		t.Fatalf("replication request command = %q, want internal batch", request.Command)
 	}
 	if len(request.Batch) > 0 {
 		return append([]CacheCommandRequest(nil), request.Batch...)
@@ -58,12 +58,98 @@ func mustDecodeReplicationBatchValues(t *testing.T, request CacheCommandRequest)
 	return out
 }
 
+func TestReplicationBatchEnvelopeSharesMetadata(t *testing.T) {
+	payloads := []CacheCommandRequest{
+		{
+			Command: "INTERNALSET",
+			Key:     "session:1",
+			Value:   `{"type":"string","string":"one"}`,
+			Pairs: Map{
+				replicationMetaSourceNode:          "node-a",
+				replicationMetaSequence:            "41",
+				replicationMetaTopologyFingerprint: "fingerprint-a",
+			},
+		},
+		{
+			Command: "INTERNALDEL",
+			Key:     "session:2",
+			Pairs: Map{
+				replicationMetaSourceNode:          "node-a",
+				replicationMetaSequence:            "42",
+				replicationMetaTopologyFingerprint: "fingerprint-a",
+			},
+		},
+	}
+
+	envelope, err := replicationBatchEnvelopePayload(payloads)
+	if err != nil {
+		t.Fatalf("replicationBatchEnvelopePayload() error = %v", err)
+	}
+	if envelope.Command != "INTERNALBATCHV2" || len(envelope.Batch) != 2 {
+		t.Fatalf("envelope = %#v, want INTERNALBATCHV2 with two payloads", envelope)
+	}
+	if source, sequence, fingerprint := replicationSafetyMetadata(envelope); source != "node-a" || sequence != 42 || fingerprint != "fingerprint-a" {
+		t.Fatalf("envelope metadata = %q/%d/%q, want node-a/42/fingerprint-a", source, sequence, fingerprint)
+	}
+	for idx, payload := range envelope.Batch {
+		if _, _, fingerprint := replicationSafetyMetadata(payload); len(payload.Pairs) != 0 || fingerprint != "" {
+			t.Fatalf("envelope payload %d metadata = %#v, want shared envelope metadata only", idx, payload.Pairs)
+		}
+	}
+	if payloads[0].Pairs[replicationMetaSequence] != "41" || payloads[1].Pairs[replicationMetaSequence] != "42" {
+		t.Fatalf("source payload metadata mutated = %#v/%#v", payloads[0].Pairs, payloads[1].Pairs)
+	}
+}
+
+func TestHTTPReplicatorBatchEnvelopeFallsBackToLegacyMetadata(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		requestNumber := requests.Add(1)
+		if requestNumber == 1 {
+			if request.Command != replicationBatchEnvelopeCommand {
+				t.Fatalf("first batch command = %q, want %s", request.Command, replicationBatchEnvelopeCommand)
+			}
+			writeJSON(w, commandError("unsupported command"))
+			return
+		}
+		if request.Command != "INTERNALBATCH" || len(request.Batch) != 2 {
+			t.Fatalf("fallback request = %#v, want legacy internal batch", request)
+		}
+		for idx, payload := range request.Batch {
+			source, sequence, fingerprint := replicationSafetyMetadata(payload)
+			if source != "node-a" || sequence == 0 || fingerprint != "fingerprint-a" {
+				t.Fatalf("fallback payload %d metadata = %q/%d/%q", idx, source, sequence, fingerprint)
+			}
+		}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: target.Client()})
+	payloads := []CacheCommandRequest{
+		{Command: "INTERNALSET", Key: "session:1", Value: `{"type":"string","string":"one"}`, Pairs: Map{
+			replicationMetaSourceNode: "node-a", replicationMetaSequence: "1", replicationMetaTopologyFingerprint: "fingerprint-a",
+		}},
+		{Command: "INTERNALDEL", Key: "session:2", Pairs: Map{
+			replicationMetaSourceNode: "node-a", replicationMetaSequence: "2", replicationMetaTopologyFingerprint: "fingerprint-a",
+		}},
+	}
+	result := replicator.executeReplicationTargetBatch(context.Background(), TopologyNode{ID: "node-b", Address: target.URL}, payloads)
+	if !result.OK || result.Error != "" {
+		t.Fatalf("fallback result = %#v, want success", result)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want envelope plus one legacy fallback", got)
+	}
+}
+
 func replicationRequestKeys(t *testing.T, request CacheCommandRequest) []string {
 	t.Helper()
 	switch request.Command {
 	case "INTERNALSET", "INTERNALDEL":
 		return []string{request.Key}
-	case "INTERNALBATCH":
+	case "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		payloads := mustDecodeReplicationBatchValues(t, request)
 		keys := make([]string, 0, len(payloads))
 		for _, payload := range payloads {
@@ -2129,7 +2215,7 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		request := <-requests
 		switch request.Command {
-		case "INTERNALBATCH":
+		case "INTERNALBATCH", replicationBatchEnvelopeCommand:
 			batches++
 			payloads := mustDecodeReplicationBatchValues(t, request)
 			if len(payloads) != 2 {

@@ -1109,7 +1109,7 @@ func publicScalarBatchCommandCode(command string) (publicScalarBatchCommand, str
 		return publicScalarBatchInvalid, "command is required", true
 	case "BATCH":
 		return publicScalarBatchInvalid, "nested BATCH is not supported", true
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH":
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		return publicScalarBatchInvalid, "internal replication command " + command + " is not allowed", true
 	case "GET", "GETSTR":
 		return publicScalarBatchGet, "", true
@@ -1297,7 +1297,7 @@ func validatePublicCommandBatchPayload(request CacheCommandRequest, index int) e
 	switch command {
 	case "BATCH":
 		return fmt.Errorf("batch value %d: nested BATCH is not supported", index)
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH":
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		return fmt.Errorf("batch value %d: internal replication command %s is not allowed", index, command)
 	default:
 		return nil

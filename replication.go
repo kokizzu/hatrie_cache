@@ -29,6 +29,7 @@ const minCompressedReplicationRequestBytes = 16 << 10
 const defaultReplicationSyncKeyPageSize = 1024
 const replicationLinearGroupTaskLimit = 16
 const replicationLinearGroupTargetLimit = 4
+const replicationBatchEnvelopeCommand = "INTERNALBATCHV2"
 
 var (
 	errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
@@ -156,15 +157,16 @@ type ReplicationQueueStats struct {
 }
 
 type ReplicationTargetResult struct {
-	Node             string     `json:"node"`
-	Key              string     `json:"key,omitempty"`
-	Address          string     `json:"address,omitempty"`
-	OK               bool       `json:"ok"`
-	Status           int        `json:"status,omitempty"`
-	Error            string     `json:"error,omitempty"`
-	CircuitOpen      bool       `json:"circuit_open,omitempty"`
-	CircuitState     string     `json:"circuit_state,omitempty"`
-	CircuitOpenUntil *time.Time `json:"circuit_open_until,omitempty"`
+	Node                     string     `json:"node"`
+	Key                      string     `json:"key,omitempty"`
+	Address                  string     `json:"address,omitempty"`
+	OK                       bool       `json:"ok"`
+	Status                   int        `json:"status,omitempty"`
+	Error                    string     `json:"error,omitempty"`
+	CircuitOpen              bool       `json:"circuit_open,omitempty"`
+	CircuitState             string     `json:"circuit_state,omitempty"`
+	CircuitOpenUntil         *time.Time `json:"circuit_open_until,omitempty"`
+	unsupportedBatchEnvelope bool
 }
 
 type replicationPayloadKind int
@@ -1817,7 +1819,7 @@ func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Cont
 	if len(payloads) == 1 {
 		return replicator.executeReplicationTarget(ctx, target, payloads[0])
 	}
-	payload, err := replicationBatchPayload(payloads)
+	payload, err := replicationBatchEnvelopePayload(payloads)
 	if err != nil {
 		return ReplicationTargetResult{
 			Node:    target.ID,
@@ -1825,7 +1827,19 @@ func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Cont
 			Error:   err.Error(),
 		}
 	}
-	return replicator.executeReplicationTarget(ctx, target, payload)
+	result := replicator.executeReplicationTarget(ctx, target, payload)
+	if !result.unsupportedBatchEnvelope {
+		return result
+	}
+	legacyPayload, err := replicationBatchPayload(payloads)
+	if err != nil {
+		return ReplicationTargetResult{
+			Node:    target.ID,
+			Address: target.Address,
+			Error:   err.Error(),
+		}
+	}
+	return replicator.executeReplicationTarget(ctx, target, legacyPayload)
 }
 
 func replicationBatchPayload(payloads []CacheCommandRequest) (CacheCommandRequest, error) {
@@ -1837,6 +1851,67 @@ func replicationBatchPayload(payloads []CacheCommandRequest) (CacheCommandReques
 		Command: "INTERNALBATCH",
 		Batch:   batch,
 	}, nil
+}
+
+func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheCommandRequest, error) {
+	batch := make([]CacheCommandRequest, len(payloads))
+	var source string
+	var fingerprint string
+	var sequence uint64
+	for idx, payload := range payloads {
+		payloadSource, payloadSequence, payloadFingerprint := replicationSafetyMetadata(payload)
+		if idx == 0 {
+			source = payloadSource
+			fingerprint = payloadFingerprint
+		} else if payloadSource != source || payloadFingerprint != fingerprint {
+			return CacheCommandRequest{}, errors.New("hatriecache: replication batch metadata mismatch")
+		}
+		if payloadSequence > sequence {
+			sequence = payloadSequence
+		}
+		payload.Pairs = commandPairsWithoutReplicationMetadata(payload.Pairs)
+		batch[idx] = payload
+	}
+	pairs := Map{}
+	if source != "" {
+		pairs[replicationMetaSourceNode] = source
+	}
+	if sequence > 0 {
+		pairs[replicationMetaSequence] = strconv.FormatUint(sequence, 10)
+	}
+	if fingerprint != "" {
+		pairs[replicationMetaTopologyFingerprint] = fingerprint
+	}
+	if len(pairs) == 0 {
+		pairs = nil
+	}
+	return CacheCommandRequest{
+		Command: replicationBatchEnvelopeCommand,
+		Pairs:   pairs,
+		Batch:   batch,
+	}, nil
+}
+
+func commandPairsWithoutReplicationMetadata(pairs Map) Map {
+	remaining := len(pairs)
+	for _, key := range []string{replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint} {
+		if _, ok := pairs[key]; ok {
+			remaining--
+		}
+	}
+	if remaining <= 0 {
+		return nil
+	}
+	out := make(Map, remaining)
+	for key, value := range pairs {
+		switch key {
+		case replicationMetaSourceNode, replicationMetaSequence, replicationMetaTopologyFingerprint:
+			continue
+		default:
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func (replicator *HTTPReplicator) beforeReplicationTarget(target TopologyNode) (ReplicationTargetResult, bool, string) {
@@ -1880,6 +1955,9 @@ func (replicator *HTTPReplicator) beforeReplicationTarget(target TopologyNode) (
 }
 
 func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, attemptState string, result ReplicationTargetResult) ReplicationTargetResult {
+	if result.unsupportedBatchEnvelope {
+		return result
+	}
 	if !replicator.replicationCircuitBreakerEnabled() {
 		return result
 	}
@@ -2016,6 +2094,7 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	if !commandResponse.OK {
 		result.Error = commandResponse.Message
+		result.unsupportedBatchEnvelope = normalizedCommand(payload.Command) == replicationBatchEnvelopeCommand && commandResponse.Message == "unsupported command"
 		return result
 	}
 	result.OK = true

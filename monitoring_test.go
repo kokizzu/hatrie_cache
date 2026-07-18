@@ -1859,6 +1859,45 @@ func TestInternalReplicationBatchPreservesJournalDirtyAndSafetySideEffects(t *te
 	}
 }
 
+func TestInternalReplicationBatchEnvelopeAppliesSafetyOnce(t *testing.T) {
+	ht := newTestTrie(t)
+	topology := replicationTestTopology(t, "http://node-b")
+	safety := NewReplicationSafetyStore()
+	request := CacheCommandRequest{
+		Command: replicationBatchEnvelopeCommand,
+		Pairs: Map{
+			replicationMetaSourceNode:          "node-a",
+			replicationMetaSequence:            "42",
+			replicationMetaTopologyFingerprint: topology.Fingerprint(),
+		},
+		Batch: []CacheCommandRequest{
+			{Command: "INTERNALSET", Key: "name", Value: `{"type":"string","string":"first"}`},
+			{Command: "INTERNALSET", Key: "city", Value: `{"type":"string","string":"Singapore"}`},
+		},
+	}
+	options := commandExecutionOptions{Topology: topology, ReplicationSafety: safety}
+	response, rejected := executeCacheCommand(context.Background(), ht, request, options)
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand(envelope) = %#v rejected=%v, want success", response, rejected)
+	}
+
+	request.Batch[0].Value = `{"type":"string","string":"duplicate"}`
+	response, rejected = executeCacheCommand(context.Background(), ht, request, options)
+	if rejected || !response.OK || response.Message != "duplicate replication command" {
+		t.Fatalf("executeCacheCommand(duplicate envelope) = %#v rejected=%v, want duplicate success", response, rejected)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: "name"}); !got.OK || got.Value != "first" {
+		t.Fatalf("GETSTR after duplicate envelope = %#v, want first", got)
+	}
+
+	request.Pairs[replicationMetaSequence] = "43"
+	request.Pairs[replicationMetaTopologyFingerprint] = "wrong-topology"
+	response, rejected = executeCacheCommand(context.Background(), ht, request, options)
+	if !rejected || response.OK || response.Message != "replication topology fingerprint mismatch" {
+		t.Fatalf("executeCacheCommand(mismatched envelope) = %#v rejected=%v, want topology rejection", response, rejected)
+	}
+}
+
 func TestMonitoringHandlerRejectsInvalidInternalReplicationBatchWithoutPartialMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{ReplicationAuthToken: "replica-secret"}).Handler()

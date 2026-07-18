@@ -596,7 +596,9 @@ func TestREADMEDocumentsInternalReplicationBatch(t *testing.T) {
 	readme := string(data)
 	for _, token := range []string{
 		"`INTERNALBATCH`",
+		"`INTERNALBATCHV2`",
 		"batches multiple internal replication commands",
+		"automatically retries the legacy",
 		"accepted only for internal replication traffic",
 	} {
 		if !strings.Contains(readme, token) {
