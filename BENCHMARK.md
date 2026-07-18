@@ -117,6 +117,34 @@ monitoring HTTP API and native gRPC API. HTTP protobuf uses
 `application/x-protobuf` on `/api/commands`; gRPC uses the generated
 `CacheService.Command` RPC over a local bufconn listener.
 
+## Architectural Big-Wins Baseline
+
+Run the cross-cutting baseline before and after changes to locking, telemetry,
+durability, snapshots, anti-entropy, or command transport:
+
+```sh
+make bench-big-wins BIG_WINS_KEYS=100000 BIG_WINS_OPS=100000 BENCHTIME=1x COUNT=3
+```
+
+The table records medians from the pre-optimization `b61923b` implementation
+on the same AMD Ryzen 9 5950X host. Snapshot pause is the longest observed
+latency of a concurrent `GetString` while the 100,000-key snapshot ran.
+
+| Architectural path | Work/op | Baseline median | Primary metric |
+| --- | ---: | ---: | --- |
+| Concurrent reads | 100,000 reads, 32 logical CPUs | 1,528 ns/read | Contended read latency |
+| Per-key memory | 100,000 string keys | 242.5 retained B/key | Post-GC heap delta |
+| Durable journal write, serial | 100 writes | 915,191 ns/write | Append plus per-command `fsync` |
+| Durable journal write, 16 callers | 100 writes | 878,909 ns/write | Contended append plus per-command `fsync` |
+| Snapshot | 100,000 keys | 541,364,799 ns/snapshot | Total snapshot duration |
+| Snapshot reader pause | 100,000 keys | 536,817,175 ns | Maximum concurrent read pause |
+| Full anti-entropy | 100,000 keys | 1,643 ns/key | Full scan and HTTP transfer |
+| Unary gRPC command | 100,000 reads | 64,542 ns/command | Persistent connection, unary RPC |
+
+The combined benchmark process reached 99,824 KiB maximum RSS. These rows are
+diagnostic workloads rather than CI thresholds; each optimization section
+keeps the same fixture and reports its own before/after ratio.
+
 ## Latest Optimization Spot Check
 
 After adding exact command fast paths for set, priority queue, Bloom filter,

@@ -86,6 +86,7 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 		"make bench-command-features BENCHTIME=100x",
 		"make bench-hatrie-command-features",
 		"make bench-hatrie-transport-features",
+		"make bench-big-wins BIG_WINS_KEYS=100000 BIG_WINS_OPS=100000 BENCHTIME=1x COUNT=3",
 		"BenchmarkCommandTransportFeature/HTTPProtobuf/StringSet",
 		"BenchmarkCommandTransportFeature/GRPC/StringGet",
 		"make bench-redis-command-features REDIS_START_DOCKER=1",

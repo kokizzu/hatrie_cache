@@ -170,3 +170,53 @@ func TestCommandFeatureComparisonScriptJoinsBackendArtifacts(t *testing.T) {
 		}
 	}
 }
+
+func TestBigWinsBenchmarkHarnessCoversArchitecturalBottlenecks(t *testing.T) {
+	scriptData, err := os.ReadFile("scripts/benchmark-big-wins.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-big-wins.sh) error = %v", err)
+	}
+	script := string(scriptData)
+	for _, token := range []string{
+		"BIG_WINS_BENCH",
+		"BenchmarkBigWins",
+		"-test.benchmem",
+		"/usr/bin/time",
+		"Max resident set size",
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("benchmark-big-wins.sh missing token %q", token)
+		}
+	}
+
+	makeData, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	for _, token := range []string{
+		"BIG_WINS_BENCH ?= ^BenchmarkBigWins$",
+		"bench-big-wins:",
+		"./scripts/benchmark-big-wins.sh",
+	} {
+		if !strings.Contains(string(makeData), token) {
+			t.Fatalf("Makefile missing big-wins benchmark token %q", token)
+		}
+	}
+
+	sourceData, err := os.ReadFile("big_wins_benchmark_test.go")
+	if err != nil {
+		t.Fatalf("ReadFile(big_wins_benchmark_test.go) error = %v", err)
+	}
+	for _, token := range []string{
+		"ConcurrentRead",
+		"PerKeyMemory",
+		"DurableWrite",
+		"Snapshot",
+		"AntiEntropy",
+		"UnaryCommand",
+	} {
+		if !strings.Contains(string(sourceData), token) {
+			t.Fatalf("big_wins_benchmark_test.go missing benchmark token %q", token)
+		}
+	}
+}

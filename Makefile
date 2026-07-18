@@ -91,6 +91,9 @@ BENCHTIME ?=
 COUNT ?= 1
 SERIALIZATION_BENCH ?=
 JOURNAL_CATCHUP_BENCH ?= BenchmarkJournalCatchUpDeltaVsFullSnapshot
+BIG_WINS_BENCH ?= ^BenchmarkBigWins$$
+BIG_WINS_KEYS ?= 100000
+BIG_WINS_OPS ?= 100000
 REDIS_HOST ?= 127.0.0.1
 REDIS_PORT ?= 6379
 REDIS_REQUESTS ?= 100000
@@ -138,7 +141,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-big-wins bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -213,6 +216,9 @@ bench-serialization:
 
 bench-journal-catchup:
 	JOURNAL_CATCHUP_BENCH='$(JOURNAL_CATCHUP_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-journal-catchup.sh
+
+bench-big-wins:
+	BIG_WINS_BENCH='$(BIG_WINS_BENCH)' BIG_WINS_KEYS='$(BIG_WINS_KEYS)' BIG_WINS_OPS='$(BIG_WINS_OPS)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-big-wins.sh
 
 bench-command-features:
 	go test -run '^$$' -bench='^BenchmarkCommandFeature$$' -benchmem -count='$(COUNT)' $(if $(BENCHTIME),-benchtime='$(BENCHTIME)')

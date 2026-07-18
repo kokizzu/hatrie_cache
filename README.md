@@ -73,6 +73,13 @@ make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
 ```
 
+Run the architectural baseline for concurrent reads, retained per-key memory,
+durable writes, snapshot pauses, anti-entropy, and unary command transport:
+
+```
+make bench-big-wins BIG_WINS_KEYS=100000 BIG_WINS_OPS=100000 BENCHTIME=1x
+```
+
 Run command-feature benchmarks for the Redis/Tarantool comparison matrix:
 
 ```
