@@ -296,8 +296,8 @@ func TestWriteCommandResponseWireProtobufBatchUsesLowAllocationPath(t *testing.T
 			t.Fatalf("writeCommandResponseWire status/bytes = %d/%d, want 200/non-empty", writer.status, writer.bytes)
 		}
 	})
-	if allocs > 8 {
-		t.Fatalf("protobuf batch response allocations = %.0f, want <= 8", allocs)
+	if allocs > 3 {
+		t.Fatalf("protobuf batch response allocations = %.0f, want <= 3", allocs)
 	}
 }
 
@@ -476,9 +476,14 @@ func TestCommandRequestBodyProtobufScalarUsesLowAllocationPath(t *testing.T) {
 		if _, err := io.Copy(io.Discard, body); err != nil {
 			t.Fatalf("ReadAll(protobuf body) error = %v", err)
 		}
+		if closer, ok := body.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				t.Fatalf("Close(protobuf body) error = %v", err)
+			}
+		}
 	})
-	if allocs > 2 {
-		t.Fatalf("protobuf scalar command body allocations = %.0f, want <= 2", allocs)
+	if allocs > 1 {
+		t.Fatalf("protobuf scalar command body allocations = %.0f, want <= 1", allocs)
 	}
 }
 

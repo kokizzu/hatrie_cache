@@ -54,6 +54,15 @@ var commandResponseProtoPool = sync.Pool{
 	},
 }
 
+var commandWireBufferPool = sync.Pool{
+	New: func() interface{} {
+		data := make([]byte, 0, 4096)
+		return data
+	},
+}
+
+const maxPooledCommandWireBufferCapacity = 1 << 20
+
 func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", string(CommandWireFormatProtobuf), "proto", "pb":
@@ -202,13 +211,16 @@ func commandRequestBody(request CacheCommandRequest, format CommandWireFormat, e
 		if err != nil {
 			return nil, "", "", err
 		}
-		data, err := proto.Marshal(message)
+		data := acquireCommandWireBuffer(proto.Size(message))
+		data, err = proto.MarshalOptions{}.MarshalAppend(data, message)
 		releaseCommandRequestProto(message)
 		if err != nil {
+			releaseCommandWireBuffer(data)
 			return nil, "", "", err
 		}
-		body, contentEncoding, err := jsonwire.EncodedRequestBody(data, compressionThreshold)
+		body, contentEncoding, err := jsonwire.EncodedRequestBodyWithRelease(data, compressionThreshold, releaseCommandWireBuffer)
 		if err != nil {
+			releaseCommandWireBuffer(data)
 			return nil, "", "", err
 		}
 		return body, commandWireContentTypeProtobuf, contentEncoding, nil
@@ -348,15 +360,18 @@ func writeCommandResponseWire(w http.ResponseWriter, r *http.Request, status int
 		return
 	}
 	message := cacheCommandResponseToPooledProto(response)
-	data, err := proto.Marshal(message)
+	data := acquireCommandWireBuffer(proto.Size(message))
+	data, err := proto.MarshalOptions{}.MarshalAppend(data, message)
 	releaseCommandResponseProto(message)
 	if err != nil {
+		releaseCommandWireBuffer(data)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", commandWireContentTypeProtobuf)
 	w.WriteHeader(status)
 	_, _ = w.Write(data)
+	releaseCommandWireBuffer(data)
 }
 
 func cacheCommandRequestToProto(request CacheCommandRequest) (*hatriecachev1.CommandRequest, error) {
@@ -492,6 +507,24 @@ func cacheCommandBatchToPooledProto(batch []CacheCommandRequest) ([]*hatriecache
 	return out, nil
 }
 
+func acquireCommandWireBuffer(size int) []byte {
+	if size < 0 {
+		size = 0
+	}
+	data := commandWireBufferPool.Get().([]byte)
+	if cap(data) < size {
+		return make([]byte, 0, size)
+	}
+	return data[:0]
+}
+
+func releaseCommandWireBuffer(data []byte) {
+	if data == nil || cap(data) > maxPooledCommandWireBufferCapacity {
+		return
+	}
+	commandWireBufferPool.Put(data[:0])
+}
+
 func cacheCommandResponseToPooledProto(response CacheCommandResponse) *hatriecachev1.CommandResponse {
 	message := acquireCommandResponseProto()
 	fillCacheCommandResponseProto(message, response)
@@ -507,9 +540,15 @@ func releaseCommandResponseProto(message *hatriecachev1.CommandResponse) {
 		return
 	}
 	children := message.Responses
-	message.Reset()
 	for _, child := range children {
 		releaseCommandResponseProto(child)
+	}
+	for idx := range children {
+		children[idx] = nil
+	}
+	message.Reset()
+	if cap(children) > 0 {
+		message.Responses = children[:0]
 	}
 	commandResponseProtoPool.Put(message)
 }
@@ -521,7 +560,11 @@ func fillCacheCommandResponseProto(out *hatriecachev1.CommandResponse, response 
 	if len(response.Responses) == 0 {
 		return
 	}
-	out.Responses = make([]*hatriecachev1.CommandResponse, len(response.Responses))
+	if cap(out.Responses) < len(response.Responses) {
+		out.Responses = make([]*hatriecachev1.CommandResponse, len(response.Responses))
+	} else {
+		out.Responses = out.Responses[:len(response.Responses)]
+	}
 	for idx := range response.Responses {
 		child := acquireCommandResponseProto()
 		fillCacheCommandResponseProto(child, response.Responses[idx])

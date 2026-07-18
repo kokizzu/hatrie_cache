@@ -130,6 +130,11 @@ func benchmarkCommandWireFormat(b *testing.B, format CommandWireFormat) {
 		if _, err := io.Copy(io.Discard, body); err != nil {
 			b.Fatal(err)
 		}
+		if closer, ok := body.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				b.Fatal(err)
+			}
+		}
 	}
 }
 

@@ -24,6 +24,12 @@ var gzipWriterPool = sync.Pool{
 	},
 }
 
+var releaseBytesReaderPool = sync.Pool{
+	New: func() interface{} {
+		return new(releaseBytesReader)
+	},
+}
+
 func AcquireGzipWriter(writer io.Writer) *gzip.Writer {
 	gzipWriter := gzipWriterPool.Get().(*gzip.Writer)
 	gzipWriter.Reset(writer)
@@ -61,25 +67,47 @@ func RequestBody(value interface{}, estimatedSize int, compressionThreshold int)
 }
 
 func EncodedRequestBody(data []byte, compressionThreshold int) (io.Reader, string, error) {
+	return EncodedRequestBodyWithRelease(data, compressionThreshold, nil)
+}
+
+func EncodedRequestBodyWithRelease(data []byte, compressionThreshold int, release func([]byte)) (io.Reader, string, error) {
 	if compressionThreshold <= 0 || len(data) < compressionThreshold {
-		return bytes.NewReader(data), "", nil
+		if release == nil {
+			return bytes.NewReader(data), "", nil
+		}
+		reader := releaseBytesReaderPool.Get().(*releaseBytesReader)
+		reader.data = data
+		reader.release = release
+		reader.closed = false
+		return reader, "", nil
 	}
-	return StreamingGzipBytesReader(data), "gzip", nil
+	if release == nil {
+		return StreamingGzipBytesReader(data), "gzip", nil
+	}
+	return StreamingGzipBytesReaderWithRelease(data, release), "gzip", nil
 }
 
 func StreamingGzipJSONReader(value interface{}) io.Reader {
 	return &StreamingGzipJSONBody{
 		streamingGzipBody: newStreamingGzipBody(func(writer *gzip.Writer) error {
 			return NewEncoder(writer).Encode(value)
-		}),
+		}, nil),
 	}
 }
 
 func StreamingGzipBytesReader(data []byte) io.Reader {
+	return StreamingGzipBytesReaderWithRelease(data, nil)
+}
+
+func StreamingGzipBytesReaderWithRelease(data []byte, release func([]byte)) io.Reader {
 	return &StreamingGzipBytesBody{
 		streamingGzipBody: newStreamingGzipBody(func(writer *gzip.Writer) error {
 			_, err := writer.Write(data)
 			return err
+		}, func() {
+			if release != nil {
+				release(data)
+			}
 		}),
 	}
 }
@@ -93,15 +121,18 @@ type streamingGzipBody struct {
 	closed    bool
 	closeErr  error
 	done      chan struct{}
+	release   func()
+	once      sync.Once
 }
 
-func newStreamingGzipBody(writeGzip func(*gzip.Writer) error) *streamingGzipBody {
+func newStreamingGzipBody(writeGzip func(*gzip.Writer) error, release func()) *streamingGzipBody {
 	reader, writer := io.Pipe()
 	return &streamingGzipBody{
 		reader:    reader,
 		writer:    writer,
 		writeGzip: writeGzip,
 		done:      make(chan struct{}),
+		release:   release,
 	}
 }
 
@@ -137,6 +168,9 @@ func (body *streamingGzipBody) Close() error {
 	body.mu.Unlock()
 
 	err := body.reader.Close()
+	if !started {
+		body.releaseData()
+	}
 
 	body.mu.Lock()
 	body.closeErr = err
@@ -150,6 +184,7 @@ func (body *streamingGzipBody) Close() error {
 func (body *streamingGzipBody) write() {
 	go func() {
 		defer close(body.done)
+		defer body.releaseData()
 		gzipWriter := AcquireGzipWriter(body.writer)
 		writeErr := body.writeGzip(gzipWriter)
 		closeErr := gzipWriter.Close()
@@ -160,6 +195,60 @@ func (body *streamingGzipBody) write() {
 		}
 		_ = body.writer.CloseWithError(closeErr)
 	}()
+}
+
+func (body *streamingGzipBody) releaseData() {
+	if body.release == nil {
+		return
+	}
+	body.once.Do(body.release)
+}
+
+type releaseBytesReader struct {
+	data     []byte
+	off      int
+	release  func([]byte)
+	released bool
+	closed   bool
+}
+
+func (reader *releaseBytesReader) Read(data []byte) (int, error) {
+	if reader.closed {
+		return 0, io.EOF
+	}
+	if reader.off >= len(reader.data) {
+		reader.releaseData()
+		return 0, io.EOF
+	}
+	n := copy(data, reader.data[reader.off:])
+	reader.off += n
+	if reader.off >= len(reader.data) {
+		reader.releaseData()
+	}
+	return n, nil
+}
+
+func (reader *releaseBytesReader) Close() error {
+	if reader.closed {
+		return nil
+	}
+	reader.releaseData()
+	reader.off = 0
+	reader.release = nil
+	reader.released = false
+	reader.closed = true
+	releaseBytesReaderPool.Put(reader)
+	return nil
+}
+
+func (reader *releaseBytesReader) releaseData() {
+	if reader.released || reader.release == nil {
+		return
+	}
+	data := reader.data
+	reader.data = nil
+	reader.released = true
+	reader.release(data)
 }
 
 type StreamingGzipBytesBody struct {
