@@ -275,6 +275,9 @@ func TestCommandResponseWireRoundTripsBatchResponses(t *testing.T) {
 }
 
 func TestWriteCommandResponseWireProtobufBatchUsesLowAllocationPath(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts include race detector instrumentation")
+	}
 	response := CacheCommandResponse{
 		OK:      true,
 		Message: "batch applied",
@@ -464,6 +467,9 @@ func TestCommandRequestBodyExportedEncodesProtobufDefault(t *testing.T) {
 }
 
 func TestCommandRequestBodyProtobufScalarUsesLowAllocationPath(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts include race detector instrumentation")
+	}
 	request := CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: `{"type":"string","string":"value"}`}
 	allocs := testing.AllocsPerRun(1000, func() {
 		body, contentType, contentEncoding, err := commandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
