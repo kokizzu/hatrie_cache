@@ -198,10 +198,13 @@ type plannedReplicationBatch struct {
 }
 
 type replicationTaskGroup struct {
-	target       TopologyNode
-	payloads     []CacheCommandRequest
-	keys         []string
-	payloadBytes []int
+	target           TopologyNode
+	payloads         []CacheCommandRequest
+	keys             []string
+	payloadBytes     []int
+	deferredMetadata bool
+	metadataSource   string
+	metadataTopology string
 }
 
 type replicationRoutingSnapshot struct {
@@ -983,7 +986,6 @@ func (replicator *HTTPReplicator) appendReplicationTasksForTargetsWithFingerprin
 }
 
 func (replicator *HTTPReplicator) appendReplicationPayloadToTargetGroups(groups []replicationTaskGroup, indexes map[TopologyNode]int, groupCapacity int, targets []TopologyNode, payload CacheCommandRequest, fingerprint string) []replicationTaskGroup {
-	payload = replicator.annotateReplicationPayloadWithFingerprint(payload, fingerprint)
 	payloadBytes := 0
 	if replicator.batchMaxBytes > 0 {
 		payloadBytes = estimatedReplicationRequestBytesWithin(payload, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
@@ -995,10 +997,13 @@ func (replicator *HTTPReplicator) appendReplicationPayloadToTargetGroups(groups 
 			idx = len(groups)
 			indexes[target] = idx
 			groups = append(groups, replicationTaskGroup{
-				target:       target,
-				payloads:     make([]CacheCommandRequest, 0, groupCapacity),
-				keys:         make([]string, 0, groupCapacity),
-				payloadBytes: make([]int, 0, groupCapacity),
+				target:           target,
+				payloads:         make([]CacheCommandRequest, 0, groupCapacity),
+				keys:             make([]string, 0, groupCapacity),
+				payloadBytes:     make([]int, 0, groupCapacity),
+				deferredMetadata: true,
+				metadataSource:   replicator.self,
+				metadataTopology: fingerprint,
 			})
 		}
 		groups[idx].payloads = append(groups[idx].payloads, payload)
@@ -1016,13 +1021,20 @@ func (replicator *HTTPReplicator) executeReplicationTaskGroups(ctx context.Conte
 	result.Queued = false
 	result.Targets = make([]ReplicationTargetResult, 0, len(groups))
 	for _, group := range groups {
-		targetResult := replicator.executeReplicationTargetBatch(ctx, group.target, group.payloads)
+		targetResult := replicator.executeReplicationTargetGroup(ctx, group)
 		if len(group.keys) == 1 {
 			targetResult.Key = group.keys[0]
 		}
 		result.Targets = append(result.Targets, targetResult)
 	}
 	return result
+}
+
+func (replicator *HTTPReplicator) executeReplicationTargetGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {
+	if group.deferredMetadata {
+		return replicator.executeDeferredReplicationTargetBatch(ctx, group.target, group.payloads, group.metadataSource, group.metadataTopology)
+	}
+	return replicator.executeReplicationTargetBatch(ctx, group.target, group.payloads)
 }
 
 func groupReplicationTasksByTarget(tasks []replicationTask) []replicationTaskGroup {
@@ -1158,14 +1170,24 @@ func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes in
 		return []replicationTaskGroup{group}
 	}
 	threshold := maxBytes + 1
-	current := replicationTaskGroup{target: group.target}
+	current := replicationTaskGroup{
+		target:           group.target,
+		deferredMetadata: group.deferredMetadata,
+		metadataSource:   group.metadataSource,
+		metadataTopology: group.metadataTopology,
+	}
 	currentBytes := estimatedReplicationBatchEnvelopeBytes(threshold)
 	out := make([]replicationTaskGroup, 0, len(group.payloads))
 	for idx, payload := range group.payloads {
 		payloadBytes := replicationTaskPayloadBytes(group, idx, payload, threshold)
 		if len(current.payloads) > 0 && currentBytes+payloadBytes+2 > maxBytes {
 			out = append(out, current)
-			current = replicationTaskGroup{target: group.target}
+			current = replicationTaskGroup{
+				target:           group.target,
+				deferredMetadata: group.deferredMetadata,
+				metadataSource:   group.metadataSource,
+				metadataTopology: group.metadataTopology,
+			}
 			currentBytes = estimatedReplicationBatchEnvelopeBytes(threshold)
 		}
 		current.payloads = append(current.payloads, payload)
@@ -1343,11 +1365,18 @@ func (replicator *HTTPReplicator) annotateReplicationPayloadWithFingerprint(payl
 	if replicator == nil {
 		return payload
 	}
+	return replicator.annotateReplicationPayloadWithMetadata(payload, replicator.self, fingerprint)
+}
+
+func (replicator *HTTPReplicator) annotateReplicationPayloadWithMetadata(payload CacheCommandRequest, source string, fingerprint string) CacheCommandRequest {
+	if replicator == nil {
+		return payload
+	}
 	if payload.Pairs == nil {
 		payload.Pairs = Map{}
 	}
-	if replicator.self != "" {
-		payload.Pairs[replicationMetaSourceNode] = replicator.self
+	if source != "" {
+		payload.Pairs[replicationMetaSourceNode] = source
 	}
 	payload.Pairs[replicationMetaSequence] = strconv.FormatUint(replicator.nextReplicationSequence(), 10)
 	if fingerprint != "" {
@@ -1899,6 +1928,59 @@ func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Cont
 	return replicator.executeReplicationTarget(ctx, target, legacyPayload)
 }
 
+func (replicator *HTTPReplicator) executeDeferredReplicationTargetBatch(ctx context.Context, target TopologyNode, payloads []CacheCommandRequest, source string, fingerprint string) ReplicationTargetResult {
+	replicator.recordReplicationBatchSize(target, len(payloads))
+	if len(payloads) == 0 {
+		return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: "hatriecache: empty replication batch"}
+	}
+	if len(payloads) == 1 {
+		payload := replicator.annotateReplicationPayloadWithMetadata(payloads[0], source, fingerprint)
+		if replicator.wireFormat == CommandWireFormatJSON {
+			legacy, err := replicationLegacyPayload(payload)
+			if err != nil {
+				return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+			}
+			return replicator.executeReplicationTarget(ctx, target, legacy)
+		}
+		result := replicator.executeReplicationTarget(ctx, target, payload)
+		if !result.unsupportedTypedReplication {
+			return result
+		}
+		legacy, err := replicationLegacyPayload(payload)
+		if err != nil {
+			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+		}
+		return replicator.executeReplicationTarget(ctx, target, legacy)
+	}
+
+	if replicator.wireFormat == CommandWireFormatJSON {
+		legacyPayload, err := replicator.deferredReplicationLegacyBatchPayload(payloads, source, fingerprint)
+		if err != nil {
+			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+		}
+		return replicator.executeReplicationTarget(ctx, target, legacyPayload)
+	}
+
+	payload := replicationBatchEnvelopePayloadWithMetadata(payloads, source, replicator.nextReplicationSequence(), fingerprint)
+	result := replicator.executeReplicationTarget(ctx, target, payload)
+	if !result.unsupportedTypedReplication {
+		return result
+	}
+	legacyPayload, err := replicator.deferredReplicationLegacyBatchPayload(payloads, source, fingerprint)
+	if err != nil {
+		return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+	}
+	return replicator.executeReplicationTarget(ctx, target, legacyPayload)
+}
+
+func (replicator *HTTPReplicator) deferredReplicationLegacyBatchPayload(payloads []CacheCommandRequest, source string, fingerprint string) (CacheCommandRequest, error) {
+	annotated := make([]CacheCommandRequest, len(payloads))
+	for idx, payload := range payloads {
+		annotated[idx] = replicator.annotateReplicationPayloadWithMetadata(payload, source, fingerprint)
+	}
+	return replicationBatchPayload(annotated)
+}
+
 func replicationBatchPayload(payloads []CacheCommandRequest) (CacheCommandRequest, error) {
 	batch := make([]CacheCommandRequest, len(payloads))
 	for idx, payload := range payloads {
@@ -1969,6 +2051,34 @@ func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheComma
 		Pairs:   pairs,
 		Batch:   batch,
 	}, nil
+}
+
+func replicationBatchEnvelopePayloadWithMetadata(payloads []CacheCommandRequest, source string, sequence uint64, fingerprint string) CacheCommandRequest {
+	batch := make([]CacheCommandRequest, len(payloads))
+	copy(batch, payloads)
+	pairs := replicationMetadataPairs(source, sequence, fingerprint)
+	return CacheCommandRequest{
+		Command: replicationBatchEnvelopeCommand,
+		Pairs:   pairs,
+		Batch:   batch,
+	}
+}
+
+func replicationMetadataPairs(source string, sequence uint64, fingerprint string) Map {
+	pairs := Map{}
+	if source != "" {
+		pairs[replicationMetaSourceNode] = source
+	}
+	if sequence > 0 {
+		pairs[replicationMetaSequence] = strconv.FormatUint(sequence, 10)
+	}
+	if fingerprint != "" {
+		pairs[replicationMetaTopologyFingerprint] = fingerprint
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	return pairs
 }
 
 func commandPairsWithoutReplicationMetadata(pairs Map) Map {

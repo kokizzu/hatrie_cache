@@ -2228,17 +2228,66 @@ func TestHTTPReplicatorAppendsPayloadDirectlyToTargetGroups(t *testing.T) {
 	}
 	for groupIdx, group := range groups {
 		for payloadIdx, payload := range group.payloads {
-			source, sequence, fingerprint := replicationSafetyMetadata(payload)
-			if source != "node-a" || sequence == 0 || fingerprint != "fingerprint-a" {
-				t.Fatalf("group %d payload %d metadata = %q/%d/%q", groupIdx, payloadIdx, source, sequence, fingerprint)
+			if len(payload.Pairs) != 0 {
+				t.Fatalf("group %d payload %d metadata = %#v, want deferred batch metadata", groupIdx, payloadIdx, payload.Pairs)
 			}
 			if group.payloadBytes[payloadIdx] <= 0 {
 				t.Fatalf("group %d payload %d bytes = %d, want positive estimate", groupIdx, payloadIdx, group.payloadBytes[payloadIdx])
 			}
 		}
 	}
-	if groups[0].payloads[0].Pairs[replicationMetaSequence] != groups[1].payloads[0].Pairs[replicationMetaSequence] {
-		t.Fatalf("shared payload sequences = %#v/%#v, want same logical mutation sequence", groups[0].payloads[0].Pairs, groups[1].payloads[0].Pairs)
+	if replicator.sequence != 0 {
+		t.Fatalf("replication sequence = %d, want allocation-free metadata deferred until delivery", replicator.sequence)
+	}
+}
+
+func TestHTTPReplicatorDeferredGroupMetadataFallsBackToLegacy(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		switch requests.Add(1) {
+		case 1:
+			if request.Command != replicationBatchEnvelopeCommand || len(request.Batch) != 2 {
+				t.Fatalf("typed request = %#v, want two-item batch envelope", request)
+			}
+			if source, sequence, fingerprint := replicationSafetyMetadata(request); source != "node-a" || sequence == 0 || fingerprint != "fingerprint-a" {
+				t.Fatalf("typed envelope metadata = %q/%d/%q", source, sequence, fingerprint)
+			}
+			for idx, payload := range request.Batch {
+				if len(payload.Pairs) != 0 {
+					t.Fatalf("typed child %d metadata = %#v, want envelope-only metadata", idx, payload.Pairs)
+				}
+			}
+			writeJSON(w, commandError("unsupported command"))
+		case 2:
+			if request.Command != "INTERNALBATCH" || len(request.Batch) != 2 {
+				t.Fatalf("legacy fallback = %#v, want two-item INTERNALBATCH", request)
+			}
+			for idx, payload := range request.Batch {
+				source, sequence, fingerprint := replicationSafetyMetadata(payload)
+				if source != "node-a" || sequence == 0 || fingerprint != "fingerprint-a" {
+					t.Fatalf("legacy child %d metadata = %q/%d/%q", idx, source, sequence, fingerprint)
+				}
+			}
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		default:
+			t.Fatalf("unexpected request %d", requests.Load())
+		}
+	}))
+	defer target.Close()
+
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Client: target.Client()})
+	targetNode := TopologyNode{ID: "node-b", Address: target.URL}
+	groups := replicator.appendReplicationPayloadToTargetGroups(nil, map[TopologyNode]int{}, 2, []TopologyNode{targetNode}, CacheCommandRequest{
+		Command: "INTERNALSET", Key: "session:1", Value: `{"type":"string","string":"one"}`,
+	}, "fingerprint-a")
+	groups = replicator.appendReplicationPayloadToTargetGroups(groups, map[TopologyNode]int{targetNode: 0}, 2, []TopologyNode{targetNode}, CacheCommandRequest{
+		Command: "INTERNALDEL", Key: "session:2",
+	}, "fingerprint-a")
+
+	result := replicator.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, groups)
+	if len(result.Targets) != 1 || !result.Targets[0].OK || requests.Load() != 2 {
+		t.Fatalf("fallback result = %#v requests=%d, want successful typed-to-legacy retry", result, requests.Load())
 	}
 }
 
