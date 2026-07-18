@@ -333,7 +333,7 @@ func (handler *MonitoringHandler) rejectDangerousHTTP(w http.ResponseWriter, r *
 
 func (handler *MonitoringHandler) rejectDangerousCommandHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest, format CommandWireFormat) bool {
 	command := normalizedCommand(request.Command)
-	if !commandShouldJournal(request) && command != "INTERNALBATCH" && command != replicationBatchEnvelopeCommand && command != replicationSetBinaryCommand {
+	if !commandShouldJournal(request) && command != "INTERNALBATCH" && command != replicationBatchEnvelopeCommand && command != replicationSetBinaryCommand && command != replicationSetCompactCommand {
 		return false
 	}
 	if handler.options.WriteProtected {
@@ -778,7 +778,7 @@ func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWrite
 
 func isInternalReplicationCommand(request CacheCommandRequest) bool {
 	switch normalizedCommand(request.Command) {
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand:
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand:
 		return true
 	default:
 		return false
@@ -787,7 +787,7 @@ func isInternalReplicationCommand(request CacheCommandRequest) bool {
 
 func isSingleInternalReplicationCommand(request CacheCommandRequest) bool {
 	switch normalizedCommand(request.Command) {
-	case "INTERNALSET", "INTERNALDEL", replicationSetBinaryCommand:
+	case "INTERNALSET", "INTERNALDEL", replicationSetBinaryCommand, replicationSetCompactCommand:
 		return true
 	default:
 		return false
@@ -815,7 +815,7 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	switch normalizedCommand(request.Command) {
 	case "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		return executeInternalReplicationBatch(ctx, trie, request, options)
-	case replicationSetBinaryCommand:
+	case replicationSetBinaryCommand, replicationSetCompactCommand:
 		return executeInternalReplicationBinary(ctx, trie, request, options)
 	case "BATCH":
 		return executePublicCommandBatch(ctx, trie, request, options)
@@ -1016,8 +1016,14 @@ func prepareInternalReplicationBatchPayload(request CacheCommandRequest, options
 			return preparedInternalReplicationPayload{}, commandError(fmt.Sprintf("internal replication batch value %d: %s", index, err.Error())), false
 		}
 		prepared.operation = &operation
-	case replicationSetBinaryCommand:
-		operation, err := commandSnapshotBinaryOperation(key, request.BinaryValue)
+	case replicationSetBinaryCommand, replicationSetCompactCommand:
+		var operation snapshotOperation
+		var err error
+		if request.Command == replicationSetCompactCommand {
+			operation, err = commandReplicationValueOperation(key, request.BinaryValue)
+		} else {
+			operation, err = commandSnapshotBinaryOperation(key, request.BinaryValue)
+		}
 		if err != nil {
 			return preparedInternalReplicationPayload{}, commandError(fmt.Sprintf("internal replication batch value %d: %s", index, err.Error())), false
 		}
@@ -1101,7 +1107,7 @@ func decodeInternalReplicationBatchValue(value interface{}) (CacheCommandRequest
 
 func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore, safety *ReplicationSafetyStore) (replicationSafetyToken, CacheCommandResponse, bool, bool) {
 	switch normalizedCommand(request.Command) {
-	case "INTERNALSET", "INTERNALDEL", replicationBatchEnvelopeCommand, replicationSetBinaryCommand:
+	case "INTERNALSET", "INTERNALDEL", replicationBatchEnvelopeCommand, replicationSetBinaryCommand, replicationSetCompactCommand:
 	default:
 		return replicationSafetyToken{}, CacheCommandResponse{}, false, false
 	}

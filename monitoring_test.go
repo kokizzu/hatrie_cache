@@ -885,12 +885,12 @@ func TestExecutePublicCommandBatchFastPathReplicatesCapturedWritesInOneTargetBat
 		if !isTypedReplicationSetPayload(payload, "session:batch") {
 			t.Fatalf("replicated payload %d = %#v, want typed binary session:batch", idx, payload)
 		}
-		operation, err := commandSnapshotBinaryOperation(payload.Key, payload.BinaryValue)
+		entry, err := decodeTypedReplicationSnapshot(payload.Key, payload.Command, payload.BinaryValue)
 		if err != nil {
 			t.Fatalf("replicated payload %d snapshot error = %v", idx, err)
 		}
-		if operation.entry.String != wantValues[idx] {
-			t.Fatalf("replicated payload %d string = %q, want %q", idx, operation.entry.String, wantValues[idx])
+		if entry.String != wantValues[idx] {
+			t.Fatalf("replicated payload %d string = %q, want %q", idx, entry.String, wantValues[idx])
 		}
 	}
 }

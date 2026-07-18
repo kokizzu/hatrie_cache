@@ -36,23 +36,34 @@ func mustDecodeReplicationTestCommand(t *testing.T, w http.ResponseWriter, r *ht
 }
 
 func isTypedReplicationSetPayload(request CacheCommandRequest, key string) bool {
-	if request.Command != replicationSetBinaryCommand || request.Key != key || request.Value != "" || !levelDBEntryDataIsBinary(request.BinaryValue) {
+	if request.Key != key || request.Value != "" {
 		return false
 	}
-	entry, err := decodeLevelDBEntryForKey(key, request.BinaryValue)
+	entry, err := decodeTypedReplicationSnapshot(key, request.Command, request.BinaryValue)
 	return err == nil && entry.Key == key
 }
 
 func mustDecodeTypedReplicationSnapshot(t *testing.T, request CacheCommandRequest, key string) snapshotEntry {
 	t.Helper()
-	if request.Command != replicationSetBinaryCommand || request.Key != key || request.Value != "" {
+	if request.Key != key || request.Value != "" {
 		t.Fatalf("replication request = %#v, want typed binary snapshot for %q", request, key)
 	}
-	entry, err := decodeLevelDBEntryForKey(key, request.BinaryValue)
+	entry, err := decodeTypedReplicationSnapshot(key, request.Command, request.BinaryValue)
 	if err != nil {
 		t.Fatalf("decode typed replication snapshot error = %v", err)
 	}
 	return entry
+}
+
+func decodeTypedReplicationSnapshot(key string, command string, data []byte) (snapshotEntry, error) {
+	switch normalizedCommand(command) {
+	case replicationSetCompactCommand:
+		return unmarshalReplicationValueBinary(key, data)
+	case replicationSetBinaryCommand:
+		return decodeLevelDBEntryForKey(key, data)
+	default:
+		return snapshotEntry{}, errors.New("not a typed replication set")
+	}
 }
 
 func mustDecodeReplicationBatchValues(t *testing.T, request CacheCommandRequest) []CacheCommandRequest {
@@ -129,10 +140,10 @@ func TestReplicationCommandPayloadUsesTypedBinaryValue(t *testing.T) {
 	if !ok {
 		t.Fatal("replicationCommandPayload() ok = false, want payload")
 	}
-	if payload.Command != replicationSetBinaryCommand || payload.Value != "" || !levelDBEntryDataIsBinary(payload.BinaryValue) {
-		t.Fatalf("replication payload = %#v, want typed binary internal set", payload)
+	if payload.Command != replicationSetCompactCommand || payload.Value != "" || !replicationValueDataIsBinary(payload.BinaryValue) {
+		t.Fatalf("replication payload = %#v, want compact keyless binary internal set", payload)
 	}
-	operation, err := commandSnapshotBinaryOperation(payload.Key, payload.BinaryValue)
+	operation, err := commandReplicationValueOperation(payload.Key, payload.BinaryValue)
 	if err != nil {
 		t.Fatalf("commandSnapshotBinaryOperation() error = %v", err)
 	}
@@ -142,6 +153,147 @@ func TestReplicationCommandPayloadUsesTypedBinaryValue(t *testing.T) {
 	}
 	if got, ok, err := restored.GetStringChecked("session:1"); err != nil || !ok || got != "one" {
 		t.Fatalf("restored GetStringChecked() = %q/%v/%v, want one/true/nil", got, ok, err)
+	}
+}
+
+func TestHTTPReplicatorCompactSetFallsBackToV2Binary(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		switch requests.Add(1) {
+		case 1:
+			if request.Command != replicationSetCompactCommand || !replicationValueDataIsBinary(request.BinaryValue) {
+				t.Fatalf("first request = %#v, want compact V3 set", request)
+			}
+			writeJSON(w, commandError("unsupported command"))
+		case 2:
+			if request.Command != replicationSetBinaryCommand || !levelDBEntryDataIsBinary(request.BinaryValue) {
+				t.Fatalf("second request = %#v, want V2 binary fallback", request)
+			}
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		default:
+			t.Fatalf("unexpected request %d", requests.Load())
+		}
+	}))
+	defer target.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	payload, ok := replicationCommandPayload(source, "session:1", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload() ok = false")
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Client: target.Client()})
+	payload = replicator.annotateReplicationPayloadWithFingerprint(payload, "fingerprint-a")
+	result := replicator.executeReplicationTargetBatch(context.Background(), TopologyNode{ID: "node-b", Address: target.URL}, []CacheCommandRequest{payload})
+	if !result.OK || requests.Load() != 2 {
+		t.Fatalf("compact fallback result = %#v requests=%d, want successful V2 retry", result, requests.Load())
+	}
+}
+
+func TestHTTPReplicatorCompactSetFallsBackThroughV2ToLegacy(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		switch requests.Add(1) {
+		case 1:
+			if request.Command != replicationSetCompactCommand {
+				t.Fatalf("first command = %q, want compact V3", request.Command)
+			}
+			writeJSON(w, commandError("unsupported command"))
+		case 2:
+			if request.Command != replicationSetBinaryCommand {
+				t.Fatalf("second command = %q, want binary V2", request.Command)
+			}
+			writeJSON(w, commandError("unsupported command"))
+		case 3:
+			if request.Command != "INTERNALSET" || request.Value == "" || len(request.BinaryValue) != 0 {
+				t.Fatalf("third request = %#v, want legacy JSON set", request)
+			}
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		default:
+			t.Fatalf("unexpected request %d", requests.Load())
+		}
+	}))
+	defer target.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	payload, ok := replicationCommandPayload(source, "session:1", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload() ok = false")
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: target.Client()})
+	result := replicator.executeReplicationTargetBatch(context.Background(), TopologyNode{ID: "node-b", Address: target.URL}, []CacheCommandRequest{payload})
+	if !result.OK || requests.Load() != 3 {
+		t.Fatalf("legacy fallback result = %#v requests=%d, want successful three-step retry", result, requests.Load())
+	}
+}
+
+func TestHTTPReplicatorDeferredCompactBatchFallsBackToV2(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if request.Command != replicationBatchEnvelopeCommand || len(request.Batch) != 2 {
+			t.Fatalf("request = %#v, want two-item batch envelope", request)
+		}
+		if source, sequence, fingerprint := replicationSafetyMetadata(request); source != "node-a" || sequence == 0 || fingerprint != "fingerprint-a" {
+			t.Fatalf("envelope metadata = %q/%d/%q", source, sequence, fingerprint)
+		}
+		switch requests.Add(1) {
+		case 1:
+			if request.Batch[0].Command != replicationSetCompactCommand || !replicationValueDataIsBinary(request.Batch[0].BinaryValue) {
+				t.Fatalf("first batch child = %#v, want compact V3", request.Batch[0])
+			}
+			writeJSON(w, commandError("internal replication batch value 0 must be INTERNALSET or INTERNALDEL"))
+		case 2:
+			for idx, payload := range request.Batch {
+				if payload.Command != replicationSetBinaryCommand || !levelDBEntryDataIsBinary(payload.BinaryValue) {
+					t.Fatalf("V2 batch child %d = %#v", idx, payload)
+				}
+			}
+			writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+		default:
+			t.Fatalf("unexpected request %d", requests.Load())
+		}
+	}))
+	defer target.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	source.UpsertString("session:2", "two")
+	targetNode := TopologyNode{ID: "node-b", Address: target.URL}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Client: target.Client()})
+	groups := make([]replicationTaskGroup, 0, 1)
+	indexes := make(map[TopologyNode]int, 1)
+	for _, key := range []string{"session:1", "session:2"} {
+		payload, ok := replicationCommandPayload(source, key, replicationPayloadSet)
+		if !ok {
+			t.Fatalf("replicationCommandPayload(%q) ok = false", key)
+		}
+		groups = replicator.appendReplicationPayloadToTargetGroups(groups, indexes, 2, []TopologyNode{targetNode}, payload, "fingerprint-a")
+	}
+	result := replicator.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, groups)
+	if len(result.Targets) != 1 || !result.Targets[0].OK || requests.Load() != 2 {
+		t.Fatalf("V2 batch fallback result = %#v requests=%d", result, requests.Load())
+	}
+}
+
+func TestExecuteCacheCommandAcceptsCompactReplicationValue(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	payload, ok := replicationCommandPayload(source, "session:1", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload() ok = false")
+	}
+
+	restored := newTestTrie(t)
+	response, rejected := executeCacheCommand(context.Background(), restored, payload, commandExecutionOptions{})
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand() = %#v/%v, want compact value accepted", response, rejected)
+	}
+	if got, ok, err := restored.GetStringChecked("session:1"); err != nil || !ok || got != "one" {
+		t.Fatalf("restored value = %q/%v/%v, want one/true/nil", got, ok, err)
 	}
 }
 
@@ -220,6 +372,10 @@ func TestHTTPReplicatorTypedBatchFallsBackForPreviousEnvelopePeer(t *testing.T) 
 		if !ok {
 			t.Fatalf("replicationCommandPayload(%q) ok = false", key)
 		}
+		payload, err := replicationBinaryV2Payload(payload)
+		if err != nil {
+			t.Fatalf("replicationBinaryV2Payload(%q) error = %v", key, err)
+		}
 		payloads = append(payloads, payload)
 	}
 	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: target.Client()})
@@ -256,6 +412,10 @@ func TestHTTPReplicatorTypedBinaryFallsBackToLegacySet(t *testing.T) {
 	payload, ok := replicationCommandPayload(source, "session:1", replicationPayloadSet)
 	if !ok {
 		t.Fatal("replicationCommandPayload() ok = false")
+	}
+	payload, err := replicationBinaryV2Payload(payload)
+	if err != nil {
+		t.Fatalf("replicationBinaryV2Payload() error = %v", err)
 	}
 	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: target.Client()})
 	result := replicator.executeReplicationTargetBatch(context.Background(), TopologyNode{ID: "node-b", Address: target.URL}, []CacheCommandRequest{payload})
@@ -301,13 +461,13 @@ func TestHTTPReplicatorJSONWireSendsLegacySetDirectly(t *testing.T) {
 func replicationRequestKeys(t *testing.T, request CacheCommandRequest) []string {
 	t.Helper()
 	switch request.Command {
-	case "INTERNALSET", replicationSetBinaryCommand, "INTERNALDEL":
+	case "INTERNALSET", replicationSetBinaryCommand, replicationSetCompactCommand, "INTERNALDEL":
 		return []string{request.Key}
 	case "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		payloads := mustDecodeReplicationBatchValues(t, request)
 		keys := make([]string, 0, len(payloads))
 		for _, payload := range payloads {
-			if payload.Command != "INTERNALSET" && payload.Command != replicationSetBinaryCommand && payload.Command != "INTERNALDEL" {
+			if payload.Command != "INTERNALSET" && payload.Command != replicationSetBinaryCommand && payload.Command != replicationSetCompactCommand && payload.Command != "INTERNALDEL" {
 				t.Fatalf("batch payload = %#v, want internal replication command", payload)
 			}
 			keys = append(keys, payload.Key)
@@ -1055,12 +1215,12 @@ func TestExecutePublicCommandBatchAsyncOutboxQueuesOneGroupedTargetJob(t *testin
 		if !isTypedReplicationSetPayload(payload, "session:outbox-batch") {
 			t.Fatalf("task %d payload = %#v, want typed binary session:outbox-batch", idx, payload)
 		}
-		operation, err := commandSnapshotBinaryOperation(payload.Key, payload.BinaryValue)
+		entry, err := decodeTypedReplicationSnapshot(payload.Key, payload.Command, payload.BinaryValue)
 		if err != nil {
 			t.Fatalf("task %d snapshot error = %v", idx, err)
 		}
-		if operation.entry.String != wantValues[idx] {
-			t.Fatalf("task %d snapshot string = %q, want %q", idx, operation.entry.String, wantValues[idx])
+		if entry.String != wantValues[idx] {
+			t.Fatalf("task %d snapshot string = %q, want %q", idx, entry.String, wantValues[idx])
 		}
 	}
 
@@ -2488,7 +2648,7 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 			if len(payloads) != 2 {
 				t.Fatalf("paged sync batch len = %d, want 2: %#v", len(payloads), payloads)
 			}
-		case replicationSetBinaryCommand:
+		case replicationSetBinaryCommand, replicationSetCompactCommand:
 			singles++
 			if !isTypedReplicationSetPayload(request, request.Key) {
 				t.Fatalf("paged sync single request = %#v, want typed binary snapshot", request)
@@ -2643,7 +2803,7 @@ func TestReplicationSyncEntriesPageCapturesPointInTimeValues(t *testing.T) {
 			return err
 		}
 		if ok {
-			payloads = append(payloads, CacheCommandRequest{Command: replicationSetBinaryCommand, Key: entry.Key, BinaryValue: data})
+			payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: entry.Key, BinaryValue: data})
 		}
 		return nil
 	})
@@ -2658,7 +2818,7 @@ func TestReplicationSyncEntriesPageCapturesPointInTimeValues(t *testing.T) {
 
 	restored := newTestTrie(t)
 	for idx, payload := range payloads {
-		operation, err := commandSnapshotBinaryOperation(payload.Key, payload.BinaryValue)
+		operation, err := commandReplicationValueOperation(payload.Key, payload.BinaryValue)
 		if err != nil {
 			t.Fatalf("payload %d decode error = %v", idx, err)
 		}

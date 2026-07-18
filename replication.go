@@ -31,6 +31,7 @@ const replicationLinearGroupTaskLimit = 16
 const replicationLinearGroupTargetLimit = 4
 const replicationBatchEnvelopeCommand = "INTERNALBATCHV2"
 const replicationSetBinaryCommand = "INTERNALSETV2"
+const replicationSetCompactCommand = "INTERNALSETV3"
 
 var (
 	errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
@@ -1446,7 +1447,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 				return nil
 			}
 			payload := CacheCommandRequest{
-				Command:     replicationSetBinaryCommand,
+				Command:     replicationSetCompactCommand,
 				Key:         entry.Key,
 				BinaryValue: data,
 			}
@@ -1932,6 +1933,17 @@ func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Cont
 		if !result.unsupportedTypedReplication {
 			return result
 		}
+		if normalizedCommand(payload.Command) == replicationSetCompactCommand {
+			v2, err := replicationBinaryV2Payload(payload)
+			if err != nil {
+				return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+			}
+			result = replicator.executeReplicationTarget(ctx, target, v2)
+			if !result.unsupportedTypedReplication {
+				return result
+			}
+			payload = v2
+		}
 		legacy, err := replicationLegacyPayload(payload)
 		if err != nil {
 			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
@@ -1956,6 +1968,20 @@ func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Cont
 	result := replicator.executeReplicationTarget(ctx, target, payload)
 	if !result.unsupportedTypedReplication {
 		return result
+	}
+	if replicationPayloadsContainCompact(payloads) {
+		payloads, err = replicationBinaryV2Payloads(payloads)
+		if err != nil {
+			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+		}
+		payload, err = replicationBatchEnvelopePayload(payloads)
+		if err != nil {
+			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+		}
+		result = replicator.executeReplicationTarget(ctx, target, payload)
+		if !result.unsupportedTypedReplication {
+			return result
+		}
 	}
 	legacyPayload, err := replicationBatchPayload(payloads)
 	if err != nil {
@@ -1986,6 +2012,17 @@ func (replicator *HTTPReplicator) executeDeferredReplicationTargetBatch(ctx cont
 		if !result.unsupportedTypedReplication {
 			return result
 		}
+		if normalizedCommand(payload.Command) == replicationSetCompactCommand {
+			v2, err := replicationBinaryV2Payload(payload)
+			if err != nil {
+				return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+			}
+			result = replicator.executeReplicationTarget(ctx, target, v2)
+			if !result.unsupportedTypedReplication {
+				return result
+			}
+			payload = v2
+		}
 		legacy, err := replicationLegacyPayload(payload)
 		if err != nil {
 			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
@@ -2001,10 +2038,22 @@ func (replicator *HTTPReplicator) executeDeferredReplicationTargetBatch(ctx cont
 		return replicator.executeReplicationTarget(ctx, target, legacyPayload)
 	}
 
-	payload := replicationBatchEnvelopePayloadWithMetadata(payloads, source, replicator.nextReplicationSequence(), fingerprint)
+	sequence := replicator.nextReplicationSequence()
+	payload := replicationBatchEnvelopePayloadWithMetadata(payloads, source, sequence, fingerprint)
 	result := replicator.executeReplicationTarget(ctx, target, payload)
 	if !result.unsupportedTypedReplication {
 		return result
+	}
+	if replicationPayloadsContainCompact(payloads) {
+		v2Payloads, err := replicationBinaryV2Payloads(payloads)
+		if err != nil {
+			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+		}
+		result = replicator.executeReplicationTarget(ctx, target, replicationBatchEnvelopePayloadWithMetadata(v2Payloads, source, sequence, fingerprint))
+		if !result.unsupportedTypedReplication {
+			return result
+		}
+		payloads = v2Payloads
 	}
 	legacyPayload, err := replicator.deferredReplicationLegacyBatchPayload(payloads, source, fingerprint)
 	if err != nil {
@@ -2037,6 +2086,10 @@ func replicationBatchPayload(payloads []CacheCommandRequest) (CacheCommandReques
 }
 
 func replicationLegacyPayload(payload CacheCommandRequest) (CacheCommandRequest, error) {
+	payload, err := replicationBinaryV2Payload(payload)
+	if err != nil {
+		return CacheCommandRequest{}, err
+	}
 	if normalizedCommand(payload.Command) != replicationSetBinaryCommand {
 		return payload, nil
 	}
@@ -2052,6 +2105,44 @@ func replicationLegacyPayload(payload CacheCommandRequest) (CacheCommandRequest,
 	payload.Value = string(data)
 	payload.BinaryValue = nil
 	return payload, nil
+}
+
+func replicationBinaryV2Payload(payload CacheCommandRequest) (CacheCommandRequest, error) {
+	if normalizedCommand(payload.Command) != replicationSetCompactCommand {
+		return payload, nil
+	}
+	entry, err := unmarshalReplicationValueBinary(strings.TrimSpace(payload.Key), payload.BinaryValue)
+	if err != nil {
+		return CacheCommandRequest{}, err
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		return CacheCommandRequest{}, err
+	}
+	payload.Command = replicationSetBinaryCommand
+	payload.BinaryValue = data
+	return payload, nil
+}
+
+func replicationPayloadsContainCompact(payloads []CacheCommandRequest) bool {
+	for _, payload := range payloads {
+		if normalizedCommand(payload.Command) == replicationSetCompactCommand {
+			return true
+		}
+	}
+	return false
+}
+
+func replicationBinaryV2Payloads(payloads []CacheCommandRequest) ([]CacheCommandRequest, error) {
+	v2 := make([]CacheCommandRequest, len(payloads))
+	for idx, payload := range payloads {
+		converted, err := replicationBinaryV2Payload(payload)
+		if err != nil {
+			return nil, fmt.Errorf("replication V2 payload %d: %w", idx, err)
+		}
+		v2[idx] = converted
+	}
+	return v2, nil
 }
 
 func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheCommandRequest, error) {
@@ -2332,7 +2423,7 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 
 func replicationResponseRejectsTypedPayload(payload CacheCommandRequest, message string) bool {
 	command := normalizedCommand(payload.Command)
-	if command != replicationSetBinaryCommand && command != replicationBatchEnvelopeCommand {
+	if command != replicationSetBinaryCommand && command != replicationSetCompactCommand && command != replicationBatchEnvelopeCommand {
 		return false
 	}
 	if message == "unsupported command" {
@@ -2342,7 +2433,8 @@ func replicationResponseRejectsTypedPayload(payload CacheCommandRequest, message
 		return false
 	}
 	for _, child := range payload.Batch {
-		if normalizedCommand(child.Command) == replicationSetBinaryCommand {
+		childCommand := normalizedCommand(child.Command)
+		if childCommand == replicationSetBinaryCommand || childCommand == replicationSetCompactCommand {
 			return true
 		}
 	}
@@ -2452,7 +2544,7 @@ func replicationCommandPayload(trie *HatTrie, key string, kind replicationPayloa
 	if err != nil || !ok || len(data) == 0 {
 		return CacheCommandRequest{}, false
 	}
-	return CacheCommandRequest{Command: replicationSetBinaryCommand, Key: key, BinaryValue: data}, true
+	return CacheCommandRequest{Command: replicationSetCompactCommand, Key: key, BinaryValue: data}, true
 }
 
 func replicationCommandPayloadLocked(trie *HatTrie, key string, kind replicationPayloadKind) (CacheCommandRequest, bool) {
@@ -2463,7 +2555,7 @@ func replicationCommandPayloadLocked(trie *HatTrie, key string, kind replication
 	if err != nil || !ok || len(data) == 0 {
 		return CacheCommandRequest{}, false
 	}
-	return CacheCommandRequest{Command: replicationSetBinaryCommand, Key: key, BinaryValue: data}, true
+	return CacheCommandRequest{Command: replicationSetCompactCommand, Key: key, BinaryValue: data}, true
 }
 
 func replicationSafetyMetadata(request CacheCommandRequest) (string, uint64, string) {

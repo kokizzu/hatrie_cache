@@ -852,13 +852,14 @@ Set `REPLICATION_MODE=command` to keep the previous HTTP command fanout mode, or
 `REPLICATION_MODE=dual` to run journal-stream replication and command fanout
 together during migration. Command fanout lets an elected leader broadcast
 successful local mutations to the current key's topology owners over HTTP. It
-uses `INTERNALSETV2` typed binary snapshot values by default with protobuf,
+uses `INTERNALSETV3` keyless binary snapshot values by default with protobuf,
 plus the internal `INTERNALDEL` and batch commands. It skips internal
 replication commands to avoid loops and records the last command-fanout attempt
 at `/api/replication`. `INTERNALBATCHV2` batches multiple internal replication commands
 for the same target during sync and async
 replay while carrying source, sequence, and topology metadata once on the batch
-envelope. For an older peer, the sender automatically retries the legacy
+envelope. For an older peer, the sender first retries `INTERNALSETV2`, whose
+binary value includes the key, then automatically retries the legacy
 `INTERNALSET` or `INTERNALBATCH` request with JSON snapshots and per-item
 metadata. Replication
 batches are split before send when their estimated
@@ -885,7 +886,7 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 
 Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP
 replication and require the same token for inbound `INTERNALSET`, `INTERNALDEL`,
-`INTERNALSETV2`, `INTERNALBATCH`, and `INTERNALBATCHV2` commands. Replication clients send both
+`INTERNALSETV2`, `INTERNALSETV3`, `INTERNALBATCH`, and `INTERNALBATCHV2` commands. Replication clients send both
 `Authorization: Bearer <token>` and `X-Hatrie-Replication-Token: <token>`.
 The replication token is intentionally narrow: it is accepted only on
 `POST /api/commands` for internal replication traffic, not for health, metrics,
@@ -1090,11 +1091,12 @@ supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATERS`, `ADDRS`,
 `GETRS`, `INFORS`, `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`, `CREATEFW`,
 `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW`, `DUMP`, `INTERNALSET`,
-`INTERNALSETV2`, `INTERNALDEL`, `INTERNALBATCH`, and `INTERNALBATCHV2`.
+`INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`, `INTERNALBATCH`, and `INTERNALBATCHV2`.
 `DUMP`,
-`INTERNALSET`, `INTERNALSETV2`, and `INTERNALDEL` are low-level replication
-primitives. `INTERNALSETV2` moves one key using the compact binary storage
-encoding; `INTERNALSET` is the compatible snapshot-entry JSON fallback.
+`INTERNALSET`, `INTERNALSETV2`, `INTERNALSETV3`, and `INTERNALDEL` are low-level replication
+primitives. `INTERNALSETV3` moves one key using a keyless binary value encoding;
+`INTERNALSETV2` is the binary compatibility fallback whose value repeats the
+request key, and `INTERNALSET` is the snapshot-entry JSON fallback.
 `INTERNALBATCH` and `INTERNALBATCHV2` batch multiple internal replication
 commands and are accepted only for internal replication traffic.
 `BATCH` is the public pipeline command: send `{"command":"BATCH","batch":[...]}`
