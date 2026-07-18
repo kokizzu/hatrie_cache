@@ -3110,16 +3110,25 @@ func (cursor *hatTrieScanCursor) loadCurrentEntry() bool {
 		return false
 	}
 	cursor.advance = C.bool(false)
-	key := C.GoStringN(cursor.keyPtr, C.int(cursor.keyLen))
-	if cursor.prefix != "" {
-		key = cursor.prefix + key
-	}
+	suffix := unsafe.Slice((*byte)(unsafe.Pointer(cursor.keyPtr)), int(cursor.keyLen))
+	key := scanKeyFromBytes(cursor.prefix, suffix)
 	hval := HatValue{}
 	hval.fromValue(cursor.value)
 	cursor.entry = Entry{Key: key, Value: hval}
 	cursor.loaded = true
 	cursor.visited++
 	return true
+}
+
+func scanKeyFromBytes(prefix string, suffix []byte) string {
+	length := len(prefix) + len(suffix)
+	if length == 0 {
+		return ""
+	}
+	key := make([]byte, length)
+	copy(key, prefix)
+	copy(key[len(prefix):], suffix)
+	return unsafe.String(unsafe.SliceData(key), len(key))
 }
 
 func (cursor *hatTrieScanCursor) currentLiveEntryLocked(ht *HatTrie, now time.Time) (Entry, bool) {

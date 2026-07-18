@@ -28,6 +28,20 @@ func newTestTrie(t *testing.T) *HatTrie {
 	return ht
 }
 
+func TestScanKeyFromBytesUsesOneAllocation(t *testing.T) {
+	suffix := []byte{'1', '2', 0, '3'}
+	var got string
+	allocations := testing.AllocsPerRun(100, func() {
+		got = scanKeyFromBytes("session:", suffix)
+	})
+	if want := "session:12\x003"; got != want {
+		t.Fatalf("scanKeyFromBytes() = %q, want %q", got, want)
+	}
+	if allocations > 1 {
+		t.Fatalf("scanKeyFromBytes() allocations = %.1f, want at most 1", allocations)
+	}
+}
+
 func TestCoreAPIsRejectNilTrie(t *testing.T) {
 	var ht *HatTrie
 

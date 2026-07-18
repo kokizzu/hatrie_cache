@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -3052,6 +3053,96 @@ func TestReplicationSyncPayloadGroupsStayCompactWhenSplit(t *testing.T) {
 	}
 	if total != 3 {
 		t.Fatalf("split payload total = %d, want 3", total)
+	}
+}
+
+func TestReplicationSyncArenaIndexesPayloadsAcrossTargetGroups(t *testing.T) {
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
+	targets := []TopologyNode{
+		{ID: "node-b", Address: "http://node-b"},
+		{ID: "node-c", Address: "http://node-c"},
+	}
+	arena := newReplicationSyncPayloadArena(2)
+	groups := make([]replicationTaskGroup, 0, len(targets))
+	indexes := make(map[TopologyNode]int, len(targets))
+	var err error
+	groups, err = replicator.appendReplicationSyncArenaPayloadToTargetGroups(
+		groups, indexes, 2, targets, arena, "session:1", []byte("binary-one"), "fingerprint-a",
+	)
+	if err != nil {
+		t.Fatalf("append first arena payload: %v", err)
+	}
+	groups, err = replicator.appendReplicationSyncArenaPayloadToTargetGroups(
+		groups, indexes, 2, targets, arena, "session:2", []byte("binary-two"), "fingerprint-a",
+	)
+	if err != nil {
+		t.Fatalf("append second arena payload: %v", err)
+	}
+
+	if len(arena.records) != 2 || len(groups) != 2 {
+		t.Fatalf("arena records/groups = %d/%d, want 2/2", len(arena.records), len(groups))
+	}
+	for idx, group := range groups {
+		if len(group.syncPayloads) != 0 || group.syncPayloadArena != arena {
+			t.Fatalf("group %d inline payloads/arena = %d/%p, want 0/%p", idx, len(group.syncPayloads), group.syncPayloadArena, arena)
+		}
+		if !reflect.DeepEqual(group.syncPayloadIndexes, []uint32{0, 1}) {
+			t.Fatalf("group %d indexes = %#v, want [0 1]", idx, group.syncPayloadIndexes)
+		}
+		batch := group.replicationSyncPayloadBatch()
+		if batch.len() != 2 {
+			t.Fatalf("group %d batch len = %d, want 2", idx, batch.len())
+		}
+		for payloadIdx, want := range []replicationSyncPayload{
+			{key: "session:1", binaryValue: []byte("binary-one")},
+			{key: "session:2", binaryValue: []byte("binary-two")},
+		} {
+			got := batch.payload(payloadIdx)
+			if got.key != want.key || !bytes.Equal(got.binaryValue, want.binaryValue) {
+				t.Fatalf("group %d payload %d = %#v, want %#v", idx, payloadIdx, got, want)
+			}
+		}
+	}
+
+	split := splitReplicationTaskGroupByMaxBytes(groups[0], 180)
+	if len(split) != 2 || split[0].replicationSyncPayloadBatch().len() != 1 || split[1].replicationSyncPayloadBatch().len() != 1 {
+		t.Fatalf("split arena groups = %#v, want two one-payload groups", split)
+	}
+	for idx, group := range split {
+		if group.syncPayloadArena != arena || len(group.syncPayloads) != 0 {
+			t.Fatalf("split group %d lost arena ownership: %#v", idx, group)
+		}
+	}
+
+	body, contentType, contentEncoding, err := replicationSyncBatchRequestBodyBatch(
+		groups[0].replicationSyncPayloadBatch(), replicationSetCompactCommand, "node-a", 42, "fingerprint-a", 0,
+	)
+	if err != nil {
+		t.Fatalf("replicationSyncBatchRequestBodyBatch() error = %v", err)
+	}
+	if contentType != commandWireContentTypeProtobuf || contentEncoding != "" {
+		t.Fatalf("arena content type/encoding = %q/%q, want protobuf/uncompressed", contentType, contentEncoding)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll(arena body) error = %v", err)
+	}
+	decoded, err := decodeCommandRequestProto(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("decode arena protobuf: %v", err)
+	}
+	if len(decoded.Batch) != 2 || decoded.Batch[0].Key != "session:1" || decoded.Batch[1].Key != "session:2" {
+		t.Fatalf("decoded arena batch = %#v, want both indexed payloads", decoded.Batch)
+	}
+}
+
+func TestReplicationSyncArenaCapsEagerAllocation(t *testing.T) {
+	arena := newReplicationSyncPayloadArena(math.MaxInt)
+	if cap(arena.records) != maxReplicationSyncArenaInitialEntries {
+		t.Fatalf("record capacity = %d, want capped %d", cap(arena.records), maxReplicationSyncArenaInitialEntries)
+	}
+	if cap(arena.keys) != maxReplicationSyncArenaInitialEntries*12 || cap(arena.values) != maxReplicationSyncArenaInitialEntries*24 {
+		t.Fatalf("key/value capacity = %d/%d, want bounded estimates", cap(arena.keys), cap(arena.values))
 	}
 }
 

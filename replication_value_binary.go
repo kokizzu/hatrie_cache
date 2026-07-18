@@ -13,19 +13,42 @@ func replicationValueDataIsBinary(data []byte) bool {
 }
 
 func marshalReplicationValueBinary(entry snapshotEntry) ([]byte, error) {
+	return appendReplicationValueBinary(nil, entry)
+}
+
+func appendReplicationValueBinary(destination []byte, entry snapshotEntry) ([]byte, error) {
 	value, err := prepareLevelDBBinaryEntryValue(entry)
 	if err != nil {
-		return nil, err
+		return destination, err
 	}
 	capacity, err := replicationValueBinaryCapacity(entry.Type, value.encodedSize, entry.ExpiresAt)
 	if err != nil {
-		return nil, err
+		return destination, err
 	}
-	writer := levelDBBinaryWriter{binaryFieldWriter: newBinaryFieldWriter(replicationValueBinaryMagic, capacity)}
+	destination = growBinaryAppendBuffer(destination, capacity)
+	writer := levelDBBinaryWriter{binaryFieldWriter: binaryFieldWriter{buf: destination}}
+	writer.buf = append(writer.buf, replicationValueBinaryMagic...)
 	writer.writeString(entry.Type)
 	writer.writePreparedSnapshotEntryValue(value)
 	writer.writeTimePtr(entry.ExpiresAt)
 	return writer.bytes(), nil
+}
+
+func growBinaryAppendBuffer(destination []byte, additional int) []byte {
+	if additional <= cap(destination)-len(destination) {
+		return destination
+	}
+	needed := len(destination) + additional
+	capacity := cap(destination) * 2
+	if capacity < needed {
+		capacity = needed
+	}
+	if capacity == 0 {
+		capacity = additional
+	}
+	grown := make([]byte, len(destination), capacity)
+	copy(grown, destination)
+	return grown
 }
 
 func marshalReplicationStringValueBinary(value string) ([]byte, error) {

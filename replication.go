@@ -201,14 +201,24 @@ type plannedReplicationBatch struct {
 }
 
 type replicationTaskGroup struct {
-	target           TopologyNode
-	payloads         []CacheCommandRequest
-	syncPayloads     []replicationSyncPayload
-	keys             []string
-	payloadBytes     []int
-	deferredMetadata bool
-	metadataSource   string
-	metadataTopology string
+	target             TopologyNode
+	payloads           []CacheCommandRequest
+	syncPayloads       []replicationSyncPayload
+	syncPayloadArena   *replicationSyncPayloadArena
+	syncPayloadIndexes []uint32
+	keys               []string
+	payloadBytes       []int
+	deferredMetadata   bool
+	metadataSource     string
+	metadataTopology   string
+}
+
+func (group replicationTaskGroup) replicationSyncPayloadBatch() replicationSyncPayloadBatch {
+	return replicationSyncPayloadBatch{
+		inline:  group.syncPayloads,
+		arena:   group.syncPayloadArena,
+		indexes: group.syncPayloadIndexes,
+	}
 }
 
 type replicationRoutingSnapshot struct {
@@ -1053,6 +1063,38 @@ func (replicator *HTTPReplicator) appendReplicationSyncPayloadToTargetGroups(gro
 	return groups
 }
 
+func (replicator *HTTPReplicator) appendReplicationSyncArenaPayloadToTargetGroups(groups []replicationTaskGroup, indexes map[TopologyNode]int, groupCapacity int, targets []TopologyNode, arena *replicationSyncPayloadArena, key string, binaryValue []byte, fingerprint string) ([]replicationTaskGroup, error) {
+	payloadBytes := 0
+	if replicator.batchMaxBytes > 0 {
+		payloadBytes = estimatedReplicationRequestBytesWithin(CacheCommandRequest{Command: replicationSetCompactCommand, Key: key, BinaryValue: binaryValue}, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
+	}
+	recordIndex, err := arena.append(key, binaryValue, payloadBytes)
+	if err != nil {
+		return groups, err
+	}
+	return replicator.appendReplicationSyncArenaRecordToTargetGroups(groups, indexes, groupCapacity, targets, arena, recordIndex, fingerprint), nil
+}
+
+func (replicator *HTTPReplicator) appendReplicationSyncArenaRecordToTargetGroups(groups []replicationTaskGroup, indexes map[TopologyNode]int, groupCapacity int, targets []TopologyNode, arena *replicationSyncPayloadArena, recordIndex uint32, fingerprint string) []replicationTaskGroup {
+	for _, target := range targets {
+		idx, ok := indexes[target]
+		if !ok {
+			idx = len(groups)
+			indexes[target] = idx
+			groups = append(groups, replicationTaskGroup{
+				target:             target,
+				syncPayloadArena:   arena,
+				syncPayloadIndexes: make([]uint32, 0, groupCapacity),
+				deferredMetadata:   true,
+				metadataSource:     replicator.self,
+				metadataTopology:   fingerprint,
+			})
+		}
+		groups[idx].syncPayloadIndexes = append(groups[idx].syncPayloadIndexes, recordIndex)
+	}
+	return groups
+}
+
 func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, result ReplicationResult, tasks []replicationTask) ReplicationResult {
 	return replicator.executeReplicationTaskGroups(ctx, result, replicator.groupReplicationTasksByTarget(tasks))
 }
@@ -1091,8 +1133,8 @@ func (replicator *HTTPReplicator) executeReplicationTaskGroups(ctx context.Conte
 
 func (replicator *HTTPReplicator) executeReplicationTaskGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {
 	targetResult := replicator.executeReplicationTargetGroup(ctx, group)
-	if len(group.syncPayloads) == 1 {
-		targetResult.Key = group.syncPayloads[0].key
+	if payloads := group.replicationSyncPayloadBatch(); payloads.len() == 1 {
+		targetResult.Key = payloads.payload(0).key
 	} else if len(group.keys) == 1 {
 		targetResult.Key = group.keys[0]
 	}
@@ -1100,8 +1142,8 @@ func (replicator *HTTPReplicator) executeReplicationTaskGroup(ctx context.Contex
 }
 
 func (replicator *HTTPReplicator) executeReplicationTargetGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {
-	if len(group.syncPayloads) > 0 {
-		return replicator.executeDeferredReplicationSyncTargetBatch(ctx, group.target, group.syncPayloads, group.metadataSource, group.metadataTopology)
+	if payloads := group.replicationSyncPayloadBatch(); payloads.len() > 0 {
+		return replicator.executeDeferredReplicationSyncTargetBatchSource(ctx, group.target, payloads, group.metadataSource, group.metadataTopology)
 	}
 	if group.deferredMetadata {
 		return replicator.executeDeferredReplicationTargetBatch(ctx, group.target, group.payloads, group.metadataSource, group.metadataTopology)
@@ -1238,7 +1280,7 @@ func splitReplicationTaskGroupsByMaxBytes(groups []replicationTaskGroup, maxByte
 }
 
 func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes int) []replicationTaskGroup {
-	if len(group.syncPayloads) > 0 {
+	if group.replicationSyncPayloadBatch().len() > 0 {
 		return splitReplicationSyncTaskGroupByMaxBytes(group, maxBytes)
 	}
 	if maxBytes <= 0 || len(group.payloads) <= 1 {
@@ -1281,13 +1323,15 @@ func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes in
 }
 
 func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes int) []replicationTaskGroup {
-	if maxBytes <= 0 || len(group.syncPayloads) <= 1 {
+	payloads := group.replicationSyncPayloadBatch()
+	if maxBytes <= 0 || payloads.len() <= 1 {
 		return []replicationTaskGroup{group}
 	}
 	threshold := maxBytes + 1
 	newGroup := func() replicationTaskGroup {
 		return replicationTaskGroup{
 			target:           group.target,
+			syncPayloadArena: group.syncPayloadArena,
 			deferredMetadata: group.deferredMetadata,
 			metadataSource:   group.metadataSource,
 			metadataTopology: group.metadataTopology,
@@ -1295,24 +1339,29 @@ func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxByte
 	}
 	current := newGroup()
 	currentBytes := estimatedReplicationBatchEnvelopeBytes(threshold)
-	out := make([]replicationTaskGroup, 0, len(group.syncPayloads))
-	for _, payload := range group.syncPayloads {
+	out := make([]replicationTaskGroup, 0, payloads.len())
+	for idx := 0; idx < payloads.len(); idx++ {
+		payload := payloads.payload(idx)
 		payloadBytes := payload.payloadBytes
 		if payloadBytes <= 0 {
 			payloadBytes = estimatedReplicationRequestBytesWithin(CacheCommandRequest{
 				Command: replicationSetCompactCommand, Key: payload.key, BinaryValue: payload.binaryValue,
 			}, threshold)
 		}
-		if len(current.syncPayloads) > 0 && currentBytes+payloadBytes+2 > maxBytes {
+		if current.replicationSyncPayloadBatch().len() > 0 && currentBytes+payloadBytes+2 > maxBytes {
 			out = append(out, current)
 			current = newGroup()
 			currentBytes = estimatedReplicationBatchEnvelopeBytes(threshold)
 		}
-		payload.payloadBytes = payloadBytes
-		current.syncPayloads = append(current.syncPayloads, payload)
+		if group.syncPayloadArena != nil {
+			current.syncPayloadIndexes = append(current.syncPayloadIndexes, group.syncPayloadIndexes[idx])
+		} else {
+			payload.payloadBytes = payloadBytes
+			current.syncPayloads = append(current.syncPayloads, payload)
+		}
 		currentBytes = jsonwire.AddEstimate(currentBytes, payloadBytes+2, threshold)
 	}
-	if len(current.syncPayloads) > 0 {
+	if current.replicationSyncPayloadBatch().len() > 0 {
 		out = append(out, current)
 	}
 	return out
@@ -1534,6 +1583,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 	defer cursor.close(trie)
 	for {
 		routing, routingOK := replicator.snapshotReplicationRouting()
+		pageArena := newReplicationSyncPayloadArena(pageSize)
 		pageGroups := make([]replicationTaskGroup, 0, len(routing.shards))
 		pageGroupIndexes := make(map[TopologyNode]int, len(routing.nodes))
 		page, err := replicationSyncEntriesPageWithCursor(trie, prefix, afterKey, hasAfterKey, pageSize, cursor, func(entry Entry) error {
@@ -1554,12 +1604,23 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			if len(targets) == 0 {
 				return nil
 			}
-			data, ok, err := trie.commandDumpScannedEntryBinaryWithoutStatsLocked(entry)
-			if err != nil || !ok || len(data) == 0 {
+			valueOffset := len(pageArena.values)
+			values, ok, err := trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(pageArena.values, entry)
+			if err != nil || !ok || len(values) == valueOffset {
 				return nil
 			}
+			pageArena.values = values
+			binaryValue := pageArena.values[valueOffset:]
+			payloadBytes := 0
+			if replicator.batchMaxBytes > 0 {
+				payloadBytes = estimatedReplicationRequestBytesWithin(CacheCommandRequest{Command: replicationSetCompactCommand, Key: entry.Key, BinaryValue: binaryValue}, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
+			}
+			recordIndex, err := pageArena.appendRecord(entry.Key, valueOffset, len(binaryValue), payloadBytes)
+			if err != nil {
+				return err
+			}
 			result.Entries++
-			pageGroups = replicator.appendReplicationSyncPayloadToTargetGroups(pageGroups, pageGroupIndexes, pageSize, targets, entry.Key, data, routing.fingerprint)
+			pageGroups = replicator.appendReplicationSyncArenaRecordToTargetGroups(pageGroups, pageGroupIndexes, pageSize, targets, pageArena, recordIndex, routing.fingerprint)
 			return nil
 		})
 		if err != nil {
@@ -2084,6 +2145,10 @@ func (replicator *HTTPReplicator) executeReplicationTarget(ctx context.Context, 
 }
 
 func (replicator *HTTPReplicator) executeReplicationSyncTarget(ctx context.Context, target TopologyNode, payloads []replicationSyncPayload, command string, source string, sequence uint64, fingerprint string) ReplicationTargetResult {
+	return replicator.executeReplicationSyncTargetBatch(ctx, target, replicationSyncPayloadBatch{inline: payloads}, command, source, sequence, fingerprint)
+}
+
+func (replicator *HTTPReplicator) executeReplicationSyncTargetBatch(ctx context.Context, target TopologyNode, payloads replicationSyncPayloadBatch, command string, source string, sequence uint64, fingerprint string) ReplicationTargetResult {
 	if result, allowed, state := replicator.beforeReplicationTarget(target); !allowed {
 		return result
 	} else {
@@ -2095,7 +2160,7 @@ func (replicator *HTTPReplicator) executeReplicationSyncTarget(ctx context.Conte
 				return replicationResponseRejectsTypedCommand(replicationBatchEnvelopeCommand, true, message)
 			},
 			func() (io.Reader, string, string, error) {
-				return replicationSyncBatchRequestBody(payloads, command, source, sequence, fingerprint, minCompressedReplicationRequestBytes)
+				return replicationSyncBatchRequestBodyBatch(payloads, command, source, sequence, fingerprint, minCompressedReplicationRequestBytes)
 			},
 		)
 		replicator.recordReplicationTargetLatency(target, time.Since(startedAt))
@@ -2248,12 +2313,16 @@ func (replicator *HTTPReplicator) executeDeferredReplicationTargetBatch(ctx cont
 }
 
 func (replicator *HTTPReplicator) executeDeferredReplicationSyncTargetBatch(ctx context.Context, target TopologyNode, payloads []replicationSyncPayload, source string, fingerprint string) ReplicationTargetResult {
-	if len(payloads) <= 1 {
-		return replicator.executeDeferredReplicationTargetBatch(ctx, target, replicationSyncPayloadsToCommandRequests(payloads, replicationSetCompactCommand), source, fingerprint)
+	return replicator.executeDeferredReplicationSyncTargetBatchSource(ctx, target, replicationSyncPayloadBatch{inline: payloads}, source, fingerprint)
+}
+
+func (replicator *HTTPReplicator) executeDeferredReplicationSyncTargetBatchSource(ctx context.Context, target TopologyNode, payloads replicationSyncPayloadBatch, source string, fingerprint string) ReplicationTargetResult {
+	if payloads.len() <= 1 {
+		return replicator.executeDeferredReplicationTargetBatch(ctx, target, replicationSyncPayloadBatchToCommandRequests(payloads, replicationSetCompactCommand), source, fingerprint)
 	}
-	replicator.recordReplicationBatchSize(target, len(payloads))
+	replicator.recordReplicationBatchSize(target, payloads.len())
 	if replicator.wireFormat == CommandWireFormatJSON {
-		legacyPayload, err := replicator.deferredReplicationLegacyBatchPayload(replicationSyncPayloadsToCommandRequests(payloads, replicationSetCompactCommand), source, fingerprint)
+		legacyPayload, err := replicator.deferredReplicationLegacyBatchPayload(replicationSyncPayloadBatchToCommandRequests(payloads, replicationSetCompactCommand), source, fingerprint)
 		if err != nil {
 			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
 		}
@@ -2261,11 +2330,11 @@ func (replicator *HTTPReplicator) executeDeferredReplicationSyncTargetBatch(ctx 
 	}
 
 	sequence := replicator.nextReplicationSequence()
-	result := replicator.executeReplicationSyncTarget(ctx, target, payloads, replicationSetCompactCommand, source, sequence, fingerprint)
+	result := replicator.executeReplicationSyncTargetBatch(ctx, target, payloads, replicationSetCompactCommand, source, sequence, fingerprint)
 	if !result.unsupportedTypedReplication {
 		return result
 	}
-	v2Payloads, err := replicationSyncPayloadsV2(payloads)
+	v2Payloads, err := replicationSyncPayloadBatchV2(payloads)
 	if err != nil {
 		return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
 	}
@@ -2281,16 +2350,26 @@ func (replicator *HTTPReplicator) executeDeferredReplicationSyncTargetBatch(ctx 
 }
 
 func replicationSyncPayloadsToCommandRequests(payloads []replicationSyncPayload, command string) []CacheCommandRequest {
-	requests := make([]CacheCommandRequest, len(payloads))
-	for idx, payload := range payloads {
+	return replicationSyncPayloadBatchToCommandRequests(replicationSyncPayloadBatch{inline: payloads}, command)
+}
+
+func replicationSyncPayloadBatchToCommandRequests(payloads replicationSyncPayloadBatch, command string) []CacheCommandRequest {
+	requests := make([]CacheCommandRequest, payloads.len())
+	for idx := 0; idx < payloads.len(); idx++ {
+		payload := payloads.payload(idx)
 		requests[idx] = CacheCommandRequest{Command: command, Key: payload.key, BinaryValue: payload.binaryValue}
 	}
 	return requests
 }
 
 func replicationSyncPayloadsV2(payloads []replicationSyncPayload) ([]replicationSyncPayload, error) {
-	v2 := make([]replicationSyncPayload, len(payloads))
-	for idx, payload := range payloads {
+	return replicationSyncPayloadBatchV2(replicationSyncPayloadBatch{inline: payloads})
+}
+
+func replicationSyncPayloadBatchV2(payloads replicationSyncPayloadBatch) ([]replicationSyncPayload, error) {
+	v2 := make([]replicationSyncPayload, payloads.len())
+	for idx := 0; idx < payloads.len(); idx++ {
+		payload := payloads.payload(idx)
 		converted, err := replicationBinaryV2Payload(CacheCommandRequest{
 			Command: replicationSetCompactCommand, Key: payload.key, BinaryValue: payload.binaryValue,
 		})
