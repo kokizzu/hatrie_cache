@@ -876,19 +876,28 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 }
 
 func executePublicScalarBatchWithSideEffects(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
+	var planned plannedReplicationBatch
+	var plannedPtr *plannedReplicationBatch
 	if options.Replicator != nil {
-		return CacheCommandResponse{}, false
+		plannedPtr = &planned
 	}
-	executor := publicScalarBatchSideEffectExecutor(ctx, trie, options)
+	executor := publicScalarBatchSideEffectExecutor(ctx, trie, options, plannedPtr)
+	var response CacheCommandResponse
+	var ok bool
 	if options.Journal == nil {
-		return trie.executePublicScalarBatchCommandWithExecutor(request, executor)
+		response, ok = trie.executePublicScalarBatchCommandWithExecutor(request, executor)
+	} else {
+		options.Journal.mu.Lock()
+		response, ok = trie.executePublicScalarBatchCommandWithExecutor(request, executor)
+		options.Journal.mu.Unlock()
 	}
-	options.Journal.mu.Lock()
-	defer options.Journal.mu.Unlock()
-	return trie.executePublicScalarBatchCommandWithExecutor(request, executor)
+	if ok && options.Replicator != nil && planned.seen {
+		options.Replicator.replicatePlannedBatch(ctx, planned)
+	}
+	return response, ok
 }
 
-func publicScalarBatchSideEffectExecutor(ctx context.Context, trie *HatTrie, options commandExecutionOptions) publicScalarBatchPayloadExecutor {
+func publicScalarBatchSideEffectExecutor(ctx context.Context, trie *HatTrie, options commandExecutionOptions, planned *plannedReplicationBatch) publicScalarBatchPayloadExecutor {
 	return func(index int, payload CacheCommandRequest, execute func() CacheCommandResponse) (CacheCommandResponse, bool) {
 		if err := ctx.Err(); err != nil {
 			return commandError(err.Error()), true
@@ -918,6 +927,10 @@ func publicScalarBatchSideEffectExecutor(ctx context.Context, trie *HatTrie, opt
 			return response, false
 		}
 		options.DirtyTracker.markCommand(payload)
+		if options.Replicator != nil && planned != nil {
+			result, tasks := options.Replicator.planReplicationLocked(ctx, trie, payload, response)
+			planned.add(result, tasks)
+		}
 		return response, false
 	}
 }

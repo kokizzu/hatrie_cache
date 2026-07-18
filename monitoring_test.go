@@ -845,6 +845,56 @@ func TestMonitoringHandlerExecutesPublicBatchCommand(t *testing.T) {
 	}
 }
 
+func TestExecutePublicCommandBatchFastPathReplicatesCapturedWritesInOneTargetBatch(t *testing.T) {
+	var replicated []CacheCommandRequest
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		replicated = append(replicated, mustDecodeReplicationTestCommand(t, w, r))
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	ht := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Client:   target.Client(),
+	})
+	request := CacheCommandRequest{
+		Command: "BATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "SETSTR", Key: "session:batch", Value: "first"},
+			{Command: "SETSTR", Key: "session:batch", Value: "second"},
+			{Command: "GET", Key: "session:batch"},
+		},
+	}
+
+	response, rejected := executeCacheCommand(context.Background(), ht, request, commandExecutionOptions{Replicator: replicator})
+	if rejected || !response.OK || len(response.Responses) != 3 || response.Responses[2].Value != "second" {
+		t.Fatalf("BATCH response = %#v rejected=%v, want ok with final GET second", response, rejected)
+	}
+	if len(replicated) != 1 {
+		t.Fatalf("replicated requests len = %d, want one grouped target request", len(replicated))
+	}
+	payloads := mustDecodeReplicationBatchValues(t, replicated[0])
+	if len(payloads) != 2 {
+		t.Fatalf("replicated payloads len = %d, want two writes", len(payloads))
+	}
+	wantValues := []string{"first", "second"}
+	for idx, payload := range payloads {
+		if payload.Command != "INTERNALSET" || payload.Key != "session:batch" {
+			t.Fatalf("replicated payload %d = %#v, want INTERNALSET session:batch", idx, payload)
+		}
+		operation, err := commandSnapshotOperation(payload.Key, payload.Value)
+		if err != nil {
+			t.Fatalf("replicated payload %d snapshot error = %v", idx, err)
+		}
+		if operation.entry.String != wantValues[idx] {
+			t.Fatalf("replicated payload %d string = %q, want %q", idx, operation.entry.String, wantValues[idx])
+		}
+	}
+}
+
 func TestExecutePublicCommandBatchUsesProductionScalarFastPath(t *testing.T) {
 	data, err := os.ReadFile("monitoring.go")
 	if err != nil {

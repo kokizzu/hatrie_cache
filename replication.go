@@ -186,6 +186,13 @@ type replicationTask struct {
 	payload CacheCommandRequest
 }
 
+type plannedReplicationBatch struct {
+	last    ReplicationResult
+	tasks   []replicationTask
+	entries int
+	seen    bool
+}
+
 type replicationTaskGroup struct {
 	target   TopologyNode
 	payloads []CacheCommandRequest
@@ -430,6 +437,22 @@ func (replicator *HTTPReplicator) ReplicateCommand(ctx context.Context, trie *Ha
 	return result
 }
 
+func (replicator *HTTPReplicator) replicatePlannedBatch(ctx context.Context, planned plannedReplicationBatch) ReplicationResult {
+	if replicator == nil {
+		return withReplicationHealth(ReplicationResult{
+			Command: "BATCH",
+			Skipped: true,
+			Reason:  "replication is not configured",
+		})
+	}
+	startedAt := time.Now().UTC()
+	result := replicator.replicatePlannedBatchTasks(ctx, planned)
+	result = finishReplicationResult(result, startedAt)
+	result = replicator.attachReplicationHealth(result)
+	replicator.storeLastResult(result)
+	return result
+}
+
 func (replicator *HTTPReplicator) SyncAll(ctx context.Context, trie *HatTrie, prefix string) ReplicationResult {
 	if replicator == nil {
 		return withReplicationHealth(ReplicationResult{
@@ -455,6 +478,17 @@ func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *Ha
 	return replicator.executeReplicationTasks(ctx, result, tasks)
 }
 
+func (replicator *HTTPReplicator) replicatePlannedBatchTasks(ctx context.Context, planned plannedReplicationBatch) ReplicationResult {
+	result, tasks := aggregatePlannedReplication(planned)
+	if len(tasks) == 0 {
+		return result
+	}
+	if replicator.queue != nil {
+		return replicator.enqueueReplicationTasks(result, tasks)
+	}
+	return replicator.executeReplicationTasks(replicationContext(ctx), result, tasks)
+}
+
 func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
 	if replicator.asyncClosed() {
 		replicator.recordAsyncDropped()
@@ -467,6 +501,21 @@ func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *
 	}
 	result, tasks := replicator.planReplication(ctx, trie, request, response)
 	if len(tasks) == 0 {
+		return result
+	}
+	return replicator.enqueueReplicationTasks(result, tasks)
+}
+
+func (replicator *HTTPReplicator) enqueueReplicationTasks(result ReplicationResult, tasks []replicationTask) ReplicationResult {
+	if len(tasks) == 0 {
+		return result
+	}
+	if replicator.asyncClosed() {
+		result.Queued = false
+		result.Skipped = true
+		result.Reason = "replication queue is closed"
+		result.Targets = nil
+		replicator.recordAsyncDroppedForTasks(tasks)
 		return result
 	}
 	result.Queued = true
@@ -516,6 +565,40 @@ func (replicator *HTTPReplicator) enqueueReplication(ctx context.Context, trie *
 		replicator.recordAsyncDroppedForTasks(tasks)
 		return result
 	}
+}
+
+func (planned *plannedReplicationBatch) add(result ReplicationResult, tasks []replicationTask) {
+	if planned == nil {
+		return
+	}
+	planned.seen = true
+	planned.last = result
+	if len(tasks) == 0 {
+		if result.Reason != "command is not replicated" {
+			planned.entries++
+		}
+		return
+	}
+	planned.entries++
+	planned.tasks = append(planned.tasks, tasks...)
+}
+
+func aggregatePlannedReplication(planned plannedReplicationBatch) (ReplicationResult, []replicationTask) {
+	result := ReplicationResult{
+		Command: "BATCH",
+		Entries: planned.entries,
+	}
+	if !planned.seen {
+		result.Skipped = true
+		result.Reason = "command is not replicated"
+		return result, nil
+	}
+	if len(planned.tasks) == 0 {
+		result.Skipped = true
+		result.Reason = planned.last.Reason
+		return result, nil
+	}
+	return result, planned.tasks
 }
 
 func (replicator *HTTPReplicator) asyncClosed() bool {
@@ -769,6 +852,54 @@ func (replicator *HTTPReplicator) queueStatsLocked() ReplicationQueueStats {
 }
 
 func (replicator *HTTPReplicator) planReplication(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) (ReplicationResult, []replicationTask) {
+	if trie == nil {
+		result := ReplicationResult{
+			Command: normalizedCommand(request.Command),
+			Key:     strings.TrimSpace(request.Key),
+			Skipped: true,
+			Reason:  "trie is not configured",
+		}
+		return result, nil
+	}
+	result, kind, targets, ok := replicator.planReplicationTargets(ctx, request, response)
+	if !ok {
+		return result, nil
+	}
+
+	payload, ok := replicationCommandPayload(trie, result.Key, kind)
+	if !ok {
+		result.Skipped = true
+		result.Reason = "no local value to replicate"
+		return result, nil
+	}
+	return replicator.tasksForReplicationPayload(result, targets, payload)
+}
+
+func (replicator *HTTPReplicator) planReplicationLocked(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) (ReplicationResult, []replicationTask) {
+	if trie == nil {
+		result := ReplicationResult{
+			Command: normalizedCommand(request.Command),
+			Key:     strings.TrimSpace(request.Key),
+			Skipped: true,
+			Reason:  "trie is not configured",
+		}
+		return result, nil
+	}
+	result, kind, targets, ok := replicator.planReplicationTargets(ctx, request, response)
+	if !ok {
+		return result, nil
+	}
+
+	payload, ok := replicationCommandPayloadLocked(trie, result.Key, kind)
+	if !ok {
+		result.Skipped = true
+		result.Reason = "no local value to replicate"
+		return result, nil
+	}
+	return replicator.tasksForReplicationPayload(result, targets, payload)
+}
+
+func (replicator *HTTPReplicator) planReplicationTargets(ctx context.Context, request CacheCommandRequest, response CacheCommandResponse) (ReplicationResult, replicationPayloadKind, []TopologyNode, bool) {
 	ctx = replicationContext(ctx)
 	command := normalizedCommand(request.Command)
 	key := strings.TrimSpace(request.Key)
@@ -776,50 +907,42 @@ func (replicator *HTTPReplicator) planReplication(ctx context.Context, trie *Hat
 	if replicator == nil {
 		result.Skipped = true
 		result.Reason = "replication is not configured"
-		return result, nil
-	}
-	if trie == nil {
-		result.Skipped = true
-		result.Reason = "trie is not configured"
-		return result, nil
+		return result, replicationPayloadNone, nil, false
 	}
 	if err := ctx.Err(); err != nil {
 		result.Skipped = true
 		result.Reason = err.Error()
-		return result, nil
+		return result, replicationPayloadNone, nil, false
 	}
 	kind := replicationPayloadKindFor(request, response)
 	if kind == replicationPayloadNone {
 		result.Skipped = true
 		result.Reason = "command is not replicated"
-		return result, nil
+		return result, kind, nil, false
 	}
 
 	route, ok := replicator.routeForKey(key)
 	if !ok {
 		result.Skipped = true
 		result.Reason = "topology cannot route key"
-		return result, nil
+		return result, kind, nil, false
 	}
 	if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
 		result.Skipped = true
 		result.Reason = "local node is not elected leader"
-		return result, nil
+		return result, kind, nil, false
 	}
 
 	targets := replicator.replicationTargets(route)
 	if len(targets) == 0 {
 		result.Skipped = true
 		result.Reason = "no remote replication targets"
-		return result, nil
+		return result, kind, nil, false
 	}
+	return result, kind, targets, true
+}
 
-	payload, ok := replicationCommandPayload(trie, key, kind)
-	if !ok {
-		result.Skipped = true
-		result.Reason = "no local value to replicate"
-		return result, nil
-	}
+func (replicator *HTTPReplicator) tasksForReplicationPayload(result ReplicationResult, targets []TopologyNode, payload CacheCommandRequest) (ReplicationResult, []replicationTask) {
 	payload = replicator.annotateReplicationPayload(payload)
 	tasks := make([]replicationTask, 0, len(targets))
 	for _, target := range targets {
@@ -1853,6 +1976,17 @@ func replicationCommandPayload(trie *HatTrie, key string, kind replicationPayloa
 		return CacheCommandRequest{}, false
 	}
 	return CacheCommandRequest{Command: "INTERNALSET", Key: key, Value: dump.Value}, true
+}
+
+func replicationCommandPayloadLocked(trie *HatTrie, key string, kind replicationPayloadKind) (CacheCommandRequest, bool) {
+	if kind == replicationPayloadDelete {
+		return CacheCommandRequest{Command: "INTERNALDEL", Key: key}, true
+	}
+	value, ok, err := trie.commandDumpEntryLocked(key)
+	if err != nil || !ok || strings.TrimSpace(value) == "" {
+		return CacheCommandRequest{}, false
+	}
+	return CacheCommandRequest{Command: "INTERNALSET", Key: key, Value: value}, true
 }
 
 func replicationSafetyMetadata(request CacheCommandRequest) (string, uint64, string) {

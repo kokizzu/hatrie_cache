@@ -2574,6 +2574,10 @@ func (ht *HatTrie) commandDumpEntry(key string) (string, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
+	return ht.commandDumpEntryLocked(key)
+}
+
+func (ht *HatTrie) commandDumpEntryLocked(key string) (string, bool, error) {
 	hval := ht.peekCachedLocked(key)
 	if hval.Empty() {
 		ht.recordReadLocked(false, key)
