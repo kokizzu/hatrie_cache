@@ -1912,6 +1912,7 @@ type HatTrie struct {
 	levelDBSpillKeys map[string]struct{}
 	levelDBHotBytes  int64
 	levelDBHotValues map[string]int64
+	mutationEpoch    uint64
 	now              func() time.Time
 }
 
@@ -2603,6 +2604,7 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 }
 
 func (ht *HatTrie) recordWriteLocked(keys ...string) {
+	ht.mutationEpoch++
 	now := ht.currentTime()
 	ht.stats.Writes++
 	ht.stats.LastWrite = now
@@ -3038,9 +3040,50 @@ func (ht *HatTrie) entriesWithPrefixAtLockedChecked(prefix string, sorted bool, 
 }
 
 func (ht *HatTrie) scanEntriesWithPrefixAtLockedChecked(prefix string, sorted bool, now time.Time, visit func(Entry) error) error {
+	cursor, err := ht.newScanCursorLocked(prefix, sorted)
+	if err != nil {
+		return err
+	}
+	defer cursor.closeLocked(ht)
+
+	for {
+		entry, ok := cursor.currentLiveEntryLocked(ht, now)
+		if !ok {
+			return nil
+		}
+		if visit != nil {
+			if err := visit(entry); err != nil {
+				return err
+			}
+		}
+		cursor.consume()
+	}
+}
+
+type scanExpiredEntry struct {
+	key   string
+	value HatValue
+}
+
+type hatTrieScanCursor struct {
+	iter       *C.hattrie_iter_t
+	prefix     string
+	generation uint64
+	advance    C.bool
+	loaded     bool
+	finished   bool
+	entry      Entry
+	expired    []scanExpiredEntry
+	visited    int
+	keyPtr     *C.char
+	keyLen     C.size_t
+	value      C.value_t
+}
+
+func (ht *HatTrie) newScanCursorLocked(prefix string, sorted bool) (*hatTrieScanCursor, error) {
 	ht.ensureOpen()
 	if err := validateKey(prefix); err != nil {
-		return err
+		return nil, err
 	}
 
 	var iter *C.hattrie_iter_t
@@ -3051,48 +3094,74 @@ func (ht *HatTrie) scanEntriesWithPrefixAtLockedChecked(prefix string, sorted bo
 		iter = C.hattrie_iter_with_prefix(ht.root, C.bool(sorted), cprefix, prefixLen)
 		runtime.KeepAlive(prefix)
 	}
+	return &hatTrieScanCursor{iter: iter, prefix: prefix, generation: ht.mutationEpoch}, nil
+}
 
-	type expiredEntry struct {
-		key   string
-		value HatValue
+func (cursor *hatTrieScanCursor) loadCurrentEntry() bool {
+	if cursor == nil || cursor.finished {
+		return false
 	}
-	expired := []expiredEntry{}
-	var scanErr error
-
-	var keyPtr *C.char
-	var keyLen C.size_t
-	var value C.value_t
-	advance := C.bool(false)
-	for bool(C.hattrie_iter_read(iter, advance, &keyPtr, &keyLen, &value)) {
-		advance = C.bool(true)
-		key := C.GoStringN(keyPtr, C.int(keyLen))
-		if prefix != "" {
-			key = prefix + key
-		}
-
-		hval := HatValue{}
-		hval.fromValue(value)
-
-		if expiresAt, ok := ht.expires[key]; ok && !now.Before(expiresAt) {
-			expired = append(expired, expiredEntry{key: key, value: hval})
-		} else {
-			if visit != nil {
-				if err := visit(Entry{Key: key, Value: hval}); err != nil {
-					scanErr = err
-					break
-				}
-			}
-		}
+	if cursor.loaded {
+		return true
 	}
-	C.hattrie_iter_free(iter)
 
+	if !bool(C.hattrie_iter_read(cursor.iter, cursor.advance, &cursor.keyPtr, &cursor.keyLen, &cursor.value)) {
+		cursor.finished = true
+		return false
+	}
+	cursor.advance = C.bool(false)
+	key := C.GoStringN(cursor.keyPtr, C.int(cursor.keyLen))
+	if cursor.prefix != "" {
+		key = cursor.prefix + key
+	}
+	hval := HatValue{}
+	hval.fromValue(cursor.value)
+	cursor.entry = Entry{Key: key, Value: hval}
+	cursor.loaded = true
+	cursor.visited++
+	return true
+}
+
+func (cursor *hatTrieScanCursor) currentLiveEntryLocked(ht *HatTrie, now time.Time) (Entry, bool) {
+	for cursor.loadCurrentEntry() {
+		entry := cursor.entry
+		if expiresAt, ok := ht.expires[entry.Key]; ok && !now.Before(expiresAt) {
+			cursor.expired = append(cursor.expired, scanExpiredEntry{key: entry.Key, value: entry.Value})
+			cursor.consume()
+			continue
+		}
+		return entry, true
+	}
+	return Entry{}, false
+}
+
+func (cursor *hatTrieScanCursor) consume() {
+	if cursor == nil || !cursor.loaded {
+		return
+	}
+	cursor.loaded = false
+	cursor.entry = Entry{}
+	cursor.advance = C.bool(true)
+}
+
+func (cursor *hatTrieScanCursor) closeLocked(ht *HatTrie) {
+	if cursor == nil {
+		return
+	}
+	if cursor.iter != nil {
+		C.hattrie_iter_free(cursor.iter)
+		cursor.iter = nil
+	}
+	expired := cursor.expired
+	cursor.expired = nil
+	cursor.loaded = false
+	cursor.finished = true
+	cursor.entry = Entry{}
 	for _, entry := range expired {
 		if ht.deleteKnownLocked(entry.key, entry.value) {
 			ht.recordExpirationLocked(entry.key)
 		}
 	}
-
-	return scanErr
 }
 
 func (ht *HatTrie) Get(key string) HatValue {

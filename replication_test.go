@@ -3085,6 +3085,71 @@ func TestReplicationSyncEntriesPageAdvancesAfterEmptyKey(t *testing.T) {
 	}
 }
 
+func TestReplicationSyncCursorVisitsEachEntryOnceAcrossPages(t *testing.T) {
+	trie := newTestTrie(t)
+	for idx := 0; idx < 10; idx++ {
+		trie.UpsertString("session:"+strconv.Itoa(idx), "value")
+	}
+
+	cursor := &replicationSyncCursor{}
+	defer cursor.close(trie)
+	afterKey := ""
+	hasAfterKey := false
+	var keys []string
+	for {
+		page, err := replicationSyncEntriesPageWithCursor(trie, "session:", afterKey, hasAfterKey, 3, cursor, func(entry Entry) error {
+			keys = append(keys, entry.Key)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("replicationSyncEntriesPageWithCursor() error = %v", err)
+		}
+		if !page.hasMore {
+			break
+		}
+		afterKey = page.nextAfterKey
+		hasAfterKey = true
+	}
+	if want := []string{"session:0", "session:1", "session:2", "session:3", "session:4", "session:5", "session:6", "session:7", "session:8", "session:9"}; !reflect.DeepEqual(keys, want) {
+		t.Fatalf("cursor keys = %#v, want %#v", keys, want)
+	}
+	if cursor.visited != len(keys) || cursor.restarts != 0 {
+		t.Fatalf("cursor visits/restarts = %d/%d, want %d/0", cursor.visited, cursor.restarts, len(keys))
+	}
+}
+
+func TestReplicationSyncCursorRestartsAfterMutation(t *testing.T) {
+	trie := newTestTrie(t)
+	for _, key := range []string{"session:1", "session:3", "session:5"} {
+		trie.UpsertString(key, "value")
+	}
+
+	cursor := &replicationSyncCursor{}
+	defer cursor.close(trie)
+	var keys []string
+	page, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, 2, cursor, func(entry Entry) error {
+		keys = append(keys, entry.Key)
+		return nil
+	})
+	if err != nil || !page.hasMore {
+		t.Fatalf("first page = %#v/%v, want more entries", page, err)
+	}
+	trie.UpsertString("session:4", "inserted")
+	page, err = replicationSyncEntriesPageWithCursor(trie, "session:", page.nextAfterKey, true, 2, cursor, func(entry Entry) error {
+		keys = append(keys, entry.Key)
+		return nil
+	})
+	if err != nil || page.hasMore {
+		t.Fatalf("second page = %#v/%v, want final page", page, err)
+	}
+	if want := []string{"session:1", "session:3", "session:4", "session:5"}; !reflect.DeepEqual(keys, want) {
+		t.Fatalf("cursor keys after mutation = %#v, want %#v", keys, want)
+	}
+	if cursor.restarts != 1 {
+		t.Fatalf("cursor restarts = %d, want 1", cursor.restarts)
+	}
+}
+
 func TestReplicationSyncEntriesPageCapturesPointInTimeValues(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("session:1", "one")

@@ -36,7 +36,6 @@ const replicationSetCompactCommand = "INTERNALSETV3"
 
 var (
 	errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
-	errReplicationSyncKeyPageFull  = errors.New("hatriecache: replication sync key page full")
 )
 
 type HTTPReplicatorOptions struct {
@@ -1531,11 +1530,13 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 	afterKey := ""
 	hasAfterKey := false
 	seenKeys := false
+	cursor := &replicationSyncCursor{}
+	defer cursor.close(trie)
 	for {
 		routing, routingOK := replicator.snapshotReplicationRouting()
 		pageGroups := make([]replicationTaskGroup, 0, len(routing.shards))
 		pageGroupIndexes := make(map[TopologyNode]int, len(routing.nodes))
-		page, err := replicationSyncEntriesPage(trie, prefix, afterKey, hasAfterKey, pageSize, func(entry Entry) error {
+		page, err := replicationSyncEntriesPageWithCursor(trie, prefix, afterKey, hasAfterKey, pageSize, cursor, func(entry Entry) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -1611,13 +1612,59 @@ type replicationSyncPage struct {
 	hasMore      bool
 }
 
+type replicationSyncCursor struct {
+	scan     *hatTrieScanCursor
+	prefix   string
+	visited  int
+	restarts int
+}
+
+func (cursor *replicationSyncCursor) close(trie *HatTrie) {
+	if cursor == nil || trie == nil {
+		return
+	}
+	trie.mu.Lock()
+	defer trie.mu.Unlock()
+	cursor.closeLocked(trie)
+}
+
+func (cursor *replicationSyncCursor) closeLocked(trie *HatTrie) {
+	if cursor == nil || cursor.scan == nil {
+		return
+	}
+	cursor.scan.closeLocked(trie)
+	cursor.scan = nil
+}
+
 func replicationSyncEntriesPage(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int, visit func(Entry) error) (replicationSyncPage, error) {
+	cursor := &replicationSyncCursor{}
+	defer cursor.close(trie)
+	return replicationSyncEntriesPageWithCursor(trie, prefix, afterKey, hasAfterKey, limit, cursor, visit)
+}
+
+func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int, cursor *replicationSyncCursor, visit func(Entry) error) (replicationSyncPage, error) {
 	if limit <= 0 {
 		limit = 1
+	}
+	if cursor == nil {
+		return replicationSyncPage{}, errors.New("hatriecache: replication sync cursor is nil")
 	}
 
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
+	if cursor.scan == nil || cursor.prefix != prefix || cursor.scan.generation != trie.mutationEpoch {
+		restarting := cursor.scan != nil
+		cursor.closeLocked(trie)
+		scan, err := trie.newScanCursorLocked(prefix, true)
+		if err != nil {
+			return replicationSyncPage{}, err
+		}
+		cursor.scan = scan
+		cursor.prefix = prefix
+		if restarting {
+			cursor.restarts++
+		}
+	}
 
 	now := time.Time{}
 	if len(trie.expires) > 0 {
@@ -1625,28 +1672,40 @@ func replicationSyncEntriesPage(trie *HatTrie, prefix string, afterKey string, h
 	}
 
 	page := replicationSyncPage{}
-	err := trie.scanEntriesWithPrefixAtLockedChecked(prefix, true, now, func(entry Entry) error {
+	visitedBefore := cursor.scan.visited
+	defer func() {
+		if cursor.scan != nil {
+			cursor.visited += cursor.scan.visited - visitedBefore
+		}
+	}()
+	for {
+		entry, ok := cursor.scan.currentLiveEntryLocked(trie, now)
+		if !ok {
+			cursor.visited += cursor.scan.visited - visitedBefore
+			visitedBefore = cursor.scan.visited
+			cursor.closeLocked(trie)
+			return page, nil
+		}
 		if hasAfterKey && entry.Key <= afterKey {
-			return nil
+			cursor.scan.consume()
+			continue
 		}
 		if page.scanned >= limit {
 			page.hasMore = true
-			return errReplicationSyncKeyPageFull
+			return page, nil
 		}
 		page.scanned++
 		page.nextAfterKey = entry.Key
 		if visit != nil {
-			return visit(entry)
+			if err := visit(entry); err != nil {
+				cursor.visited += cursor.scan.visited - visitedBefore
+				visitedBefore = cursor.scan.visited
+				cursor.closeLocked(trie)
+				return replicationSyncPage{}, err
+			}
 		}
-		return nil
-	})
-	if errors.Is(err, errReplicationSyncKeyPageFull) {
-		return page, nil
+		cursor.scan.consume()
 	}
-	if err != nil {
-		return replicationSyncPage{}, err
-	}
-	return page, nil
 }
 
 func (replicator *HTTPReplicator) storeLastResult(result ReplicationResult) {

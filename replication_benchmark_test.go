@@ -18,6 +18,7 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 		pageSize int
 	}{
 		{name: "Batched10k", pageSize: keyCount},
+		{name: "Default1k", pageSize: defaultReplicationSyncKeyPageSize},
 		{name: "Unbatched10k", pageSize: 1},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
