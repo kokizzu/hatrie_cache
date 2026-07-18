@@ -1333,6 +1333,12 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastPutRadixTreeCommand(key, request.Subkey, request.Value)
+	case "PREFIXRT", "SCANRT", "RTPREFIX", "RTSCAN":
+		prefix := strings.TrimSpace(request.Subkey)
+		if prefix != request.Subkey {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastScanRadixTreeCommand(key, prefix)
 	case "PUSHSLICE":
 		if len(request.Values) != 0 || request.Value == "" {
 			return CacheCommandResponse{}, false
@@ -1764,6 +1770,26 @@ func (ht *HatTrie) executeFastHasSetCommand(key string, value string) (CacheComm
 	return commandBool01Response(hit), true
 }
 
+func (ht *HatTrie) executeFastScanRadixTreeCommand(key string, prefix string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if !hval.IsRadixTree() {
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	payload, ok := ht.radixTrees.array[hval.Index].plainItemsWithPrefixJSON(prefix)
+	if !ok {
+		return CacheCommandResponse{}, false
+	}
+	ht.recordReadLocked(true, key)
+	return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+}
+
 func (ht *HatTrie) executeFastPushPriorityQueueCommand(key string, priority int64, value string) (CacheCommandResponse, bool) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -1835,7 +1861,7 @@ func (ht *HatTrie) executeFastPopPriorityQueueCommand(key string) (CacheCommandR
 	ht.recordReadLocked(true, key)
 	ht.recordWriteLocked(key)
 	ht.cacheValueLocked(key, hval)
-	if text, ok := item.Value.(string); ok {
+	if text, ok := item.value().(string); ok {
 		if payload, ok := commandFastPriorityQueueItemJSON(item.Priority, text); ok {
 			return CacheCommandResponse{OK: true, Message: "removed", Value: payload}, true
 		}

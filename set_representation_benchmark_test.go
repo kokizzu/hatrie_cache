@@ -6,6 +6,7 @@ import (
 )
 
 var setRepresentationBenchmarkHit bool
+var setRepresentationBenchmarkValues Set
 
 type setRepresentationLinearEntry struct {
 	key   string
@@ -88,6 +89,17 @@ func BenchmarkSetRepresentationSmallLookup(b *testing.B) {
 				setRepresentationBenchmarkHit = hit
 			}
 		})
+	}
+}
+
+func BenchmarkSetRepresentationSmallValues(b *testing.B) {
+	set := setData{}
+	set.addPlainString("beta")
+	set.addPlainString("alpha")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		setRepresentationBenchmarkValues = set.Values()
 	}
 }
 

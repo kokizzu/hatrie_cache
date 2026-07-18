@@ -620,6 +620,24 @@ func TestBenchmarkDocsListInternalBatchPrimitive(t *testing.T) {
 	}
 }
 
+func TestBenchmarkDocsLatestCollectionAllocationReductions(t *testing.T) {
+	data, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	document := string(data)
+	for _, token := range []string{
+		"BenchmarkSetRepresentationSmallValues",
+		"Typed priority-queue string slot",
+		"Direct radix prefix JSON",
+		"20 to 1",
+	} {
+		if !strings.Contains(document, token) {
+			t.Fatalf("BENCHMARK.md does not document collection allocation token %q", token)
+		}
+	}
+}
+
 func TestBenchmarkDocsListReplicationBatchingBenchmark(t *testing.T) {
 	data, err := os.ReadFile("BENCHMARK.md")
 	if err != nil {

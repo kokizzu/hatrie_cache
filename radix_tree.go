@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	json "github.com/goccy/go-json"
 )
@@ -53,6 +54,7 @@ type radixTreeStats struct {
 }
 
 const maxRadixTreePrefixScanCapacity = 64
+const radixTreeJSONStackPathCapacity = 256
 
 func newRadixTreeData() radixTreeData {
 	return radixTreeData{root: &radixTreeNode{}}
@@ -142,6 +144,22 @@ func (tree radixTreeData) Contains(key string) bool {
 
 func (tree radixTreeData) ItemsWithPrefix(prefix string) []RadixTreeItem {
 	return tree.itemsWithPrefixCapacity(prefix, radixTreePrefixScanCapacity(tree.items))
+}
+
+func (tree radixTreeData) plainItemsWithPrefixJSON(prefix string) (string, bool) {
+	if tree.root == nil || tree.items == 0 {
+		return "[]", true
+	}
+	var builder strings.Builder
+	builder.Grow(radixTreePrefixScanCapacity(tree.items) * 64)
+	builder.WriteByte('[')
+	first := true
+	var stackPath [radixTreeJSONStackPathCapacity]byte
+	if !tree.root.collectPlainPrefixJSON(prefix, stackPath[:0], &builder, &first) {
+		return "", false
+	}
+	builder.WriteByte(']')
+	return builder.String(), true
 }
 
 func (tree radixTreeData) itemsWithPrefixCapacity(prefix string, capacity int) []RadixTreeItem {
@@ -333,6 +351,63 @@ func (node *radixTreeNode) collect(path string, items *[]RadixTreeItem) {
 		child := &node.children[idx]
 		child.collect(path+child.prefix, items)
 	}
+}
+
+func (node *radixTreeNode) collectPlainPrefixJSON(prefix string, path []byte, builder *strings.Builder, first *bool) bool {
+	common := commonPrefixLen(prefix, node.prefix)
+	if common < len(prefix) && common < len(node.prefix) {
+		return true
+	}
+	nextPath := append(path, node.prefix...)
+	if common == len(prefix) {
+		return node.collectPlainJSON(nextPath, builder, first)
+	}
+	remainder := prefix[common:]
+	idx, found := node.childIndex(remainder[0])
+	if !found {
+		return true
+	}
+	return node.children[idx].collectPlainPrefixJSON(remainder, nextPath, builder, first)
+}
+
+func (node *radixTreeNode) collectPlainJSON(path []byte, builder *strings.Builder, first *bool) bool {
+	if node.hasValue {
+		value, ok := node.value.(string)
+		if !ok || !radixTreePlainJSONString(path) || !commandFastJSONPlainString(value) {
+			return false
+		}
+		if !*first {
+			builder.WriteByte(',')
+		}
+		*first = false
+		builder.WriteString(`{"key":"`)
+		_, _ = builder.Write(path)
+		builder.WriteString(`","value":"`)
+		builder.WriteString(value)
+		builder.WriteString(`"}`)
+	}
+	for idx := range node.children {
+		child := &node.children[idx]
+		pathLen := len(path)
+		path = append(path, child.prefix...)
+		if !child.collectPlainJSON(path, builder, first) {
+			return false
+		}
+		path = path[:pathLen]
+	}
+	return true
+}
+
+func radixTreePlainJSONString(value []byte) bool {
+	if len(value) == 0 {
+		return false
+	}
+	for _, c := range value {
+		if c < 0x20 || c == '"' || c == '\\' || c >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 func (node *radixTreeNode) collectStats(depth uint64, stats *radixTreeStats) {

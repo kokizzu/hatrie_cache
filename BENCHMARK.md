@@ -144,6 +144,30 @@ lookup faster through two entries and map lookup faster from three entries
 upward; the command row became allocation-free but did not show a clear CPU
 win in repeated local runs.
 
+### Collection Allocation Follow-up
+
+The following medians use five one-million-iteration runs on the same
+AMD Ryzen 9 5950X host. Small-set reads now sort their two inline values
+directly. A Typed priority-queue string slot avoids boxing a string into
+`interface{}` on every push. Direct radix prefix JSON writes plain-string scan
+results without allocating an intermediate `[]RadixTreeItem`.
+
+```sh
+make run CMD='go test -run=NONE -bench=BenchmarkSetRepresentationSmallValues -benchmem -benchtime=1000000x -count=5'
+make run CMD='go test -run=NONE -bench=BenchmarkCommandFeature/PriorityQueuePushPop -benchmem -benchtime=1000000x -count=5'
+make run CMD='go test -run=NONE -bench=BenchmarkCommandFeature/RadixPrefix -benchmem -benchtime=1000000x -count=5'
+```
+
+| Feature | Before | After | CPU improvement | Heap improvement | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Two-value small-set read (`BenchmarkSetRepresentationSmallValues`) | 155.5 ns, 48 B, 3 allocs | 54.46 ns, 32 B, 1 alloc | 2.86x | 1.50x | 3.00x |
+| Priority queue push+pop | 875.9 ns, 56 B, 3 allocs | 769.1 ns, 40 B, 2 allocs | 1.14x | 1.40x | 1.50x |
+| Radix prefix scan | 3,979 ns, 1,468 B, 20 allocs | 1,972 ns, 1,024 B, 1 alloc | 2.02x | 1.43x | 20.00x |
+
+The radix command allocation count falls from 20 to 1; the remaining
+allocation is the returned JSON string. Non-string or JSON-escaped radix values
+use the generic clone-and-encode path to preserve behavior.
+
 A later fast-path pass added exact numeric and plain-string command routes for
 roaring/sparse adds, HyperLogLog add/count, Top-K add/get, quantile add/query,
 and Fenwick add/range. The test `TestExecuteExactFastCommandCoversCompactNumericRows`

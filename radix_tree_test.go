@@ -106,6 +106,36 @@ func TestRadixTreePrefixScanUsesBoundedCapacity(t *testing.T) {
 	}
 }
 
+func TestExecuteFastScanRadixTreeCommandUsesPlainStringPathAndFallsBack(t *testing.T) {
+	trie := newTestTrie(t)
+	if !trie.PutRadixTree("index", "session:1", "active") || !trie.PutRadixTree("index", "session:2", "idle") {
+		t.Fatal("PutRadixTree() failed")
+	}
+	response, handled := trie.executeFastScanRadixTreeCommand("index", "session:")
+	if !handled || !response.OK {
+		t.Fatalf("executeFastScanRadixTreeCommand() = %#v/%v, want handled success", response, handled)
+	}
+	var items []RadixTreeItem
+	if err := json.Unmarshal([]byte(response.Value), &items); err != nil {
+		t.Fatalf("fast prefix JSON error = %v", err)
+	}
+	if got, want := radixTreeItemKeys(items), []string{"session:1", "session:2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("fast prefix keys = %#v, want %#v", got, want)
+	}
+
+	trie.PutRadixTree("index", "session:3", Map{"state": "nested"})
+	if response, handled := trie.executeFastScanRadixTreeCommand("index", "session:"); handled {
+		t.Fatalf("nested fast scan = %#v/%v, want generic fallback", response, handled)
+	}
+	response = trie.ExecuteCommand(CacheCommandRequest{Command: "PREFIXRT", Key: "index", Subkey: "session:"})
+	if !response.OK {
+		t.Fatalf("PREFIXRT fallback response = %#v, want success", response)
+	}
+	if err := json.Unmarshal([]byte(response.Value), &items); err != nil || len(items) != 3 {
+		t.Fatalf("PREFIXRT fallback items = %#v error=%v, want three values", items, err)
+	}
+}
+
 func TestRadixTreeSnapshotValidationRejectsCorruptPayload(t *testing.T) {
 	if err := validateRadixTreeSnapshot(radixTreeSnapshot{
 		Count: 1,

@@ -1607,6 +1607,16 @@ func (set *setData) Values() Set {
 		if len(set.small) == 0 {
 			return make(Set, 0)
 		}
+		if len(set.small) == 1 {
+			return Set{cloneValue(set.small[0].value)}
+		}
+		if len(set.small) == 2 {
+			first, second := set.small[0], set.small[1]
+			if setSmallEntryLess(second, first) {
+				first, second = second, first
+			}
+			return Set{cloneValue(first.value), cloneValue(second.value)}
+		}
 		keys := make([]string, len(set.small))
 		for idx := range set.small {
 			keys[idx] = set.small[idx].jsonKey()
@@ -1634,6 +1644,15 @@ func (set *setData) Values() Set {
 		out[idx] = cloneValue(set.items[key])
 	}
 	return out
+}
+
+func setSmallEntryLess(left setSmallEntry, right setSmallEntry) bool {
+	leftValue, leftPlain := left.value.(string)
+	rightValue, rightPlain := right.value.(string)
+	if left.key == "" && right.key == "" && leftPlain && rightPlain {
+		return leftValue < rightValue
+	}
+	return left.jsonKey() < right.jsonKey()
 }
 
 func (set *setData) smallIndexByKey(key string) int {

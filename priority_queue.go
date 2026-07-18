@@ -17,9 +17,11 @@ type PriorityItem struct {
 type PriorityQueue []PriorityItem
 
 type priorityQueueItem struct {
-	Priority int64       `json:"priority"`
-	Sequence uint64      `json:"sequence"`
-	Value    interface{} `json:"value"`
+	Priority    int64       `json:"priority"`
+	Sequence    uint64      `json:"sequence"`
+	Value       interface{} `json:"value"`
+	stringValue string
+	hasString   bool
 }
 
 type priorityQueueData struct {
@@ -78,11 +80,7 @@ func newPriorityQueueData(values PriorityQueue) priorityQueueData {
 		nextSequence: uint64(len(values)),
 	}
 	for idx, value := range values {
-		out.items[idx] = priorityQueueItem{
-			Priority: value.Priority,
-			Sequence: uint64(idx),
-			Value:    cloneValue(value.Value),
-		}
+		out.items[idx] = newPriorityQueueItem(value.Priority, uint64(idx), value.Value)
 	}
 	for i := len(out.items)/2 - 1; i >= 0; i-- {
 		out.siftDown(i)
@@ -95,11 +93,7 @@ func newPriorityQueueDataFromItems(values []priorityQueueItem) priorityQueueData
 		items: make([]priorityQueueItem, len(values)),
 	}
 	for idx, value := range values {
-		out.items[idx] = priorityQueueItem{
-			Priority: value.Priority,
-			Sequence: value.Sequence,
-			Value:    cloneValue(value.Value),
-		}
+		out.items[idx] = newPriorityQueueItem(value.Priority, value.Sequence, value.Value)
 	}
 	for _, value := range values {
 		if value.Sequence >= out.nextSequence {
@@ -151,9 +145,10 @@ func (pq *priorityQueueData) PushStringChecked(priority int64, value string) err
 		return err
 	}
 	item := priorityQueueItem{
-		Priority: priority,
-		Sequence: pq.nextSequence,
-		Value:    value,
+		Priority:    priority,
+		Sequence:    pq.nextSequence,
+		stringValue: value,
+		hasString:   true,
 	}
 	pq.nextSequence++
 	pq.items = append(pq.items, item)
@@ -184,11 +179,7 @@ func (pq *priorityQueueData) reserveCapacity(needed int) {
 }
 
 func (pq *priorityQueueData) pushValue(priority int64, value interface{}) {
-	item := priorityQueueItem{
-		Priority: priority,
-		Sequence: pq.nextSequence,
-		Value:    cloneValue(value),
-	}
+	item := newPriorityQueueItem(priority, pq.nextSequence, value)
 	pq.nextSequence++
 	pq.items = append(pq.items, item)
 	pq.siftUp(len(pq.items) - 1)
@@ -217,7 +208,7 @@ func (pq *priorityQueueData) popItem() (priorityQueueItem, bool) {
 	root := pq.items[0]
 	last := len(pq.items) - 1
 	pq.items[0] = pq.items[last]
-	pq.items[last].Value = nil
+	pq.items[last].clearValue()
 	pq.items = pq.items[:last]
 	if len(pq.items) > 0 {
 		pq.siftDown(0)
@@ -234,7 +225,7 @@ func (pq *priorityQueueData) popItemRetain() (priorityQueueItem, bool) {
 	root := pq.items[0]
 	last := len(pq.items) - 1
 	pq.items[0] = pq.items[last]
-	pq.items[last].Value = nil
+	pq.items[last].clearValue()
 	pq.items = pq.items[:last]
 	if len(pq.items) == 0 {
 		return root, true
@@ -284,7 +275,9 @@ func (pq *priorityQueueData) SnapshotItems() []priorityQueueItem {
 	out := make([]priorityQueueItem, 0, len(copyData.items))
 	for len(copyData.items) > 0 {
 		item, _ := copyData.popItem()
-		item.Value = cloneValue(item.Value)
+		item.Value = cloneValue(item.value())
+		item.stringValue = ""
+		item.hasString = false
 		out = append(out, item)
 	}
 	return out
@@ -346,8 +339,28 @@ func priorityQueueLess(a, b priorityQueueItem) bool {
 func (item priorityQueueItem) PriorityItem() PriorityItem {
 	return PriorityItem{
 		Priority: item.Priority,
-		Value:    cloneValue(item.Value),
+		Value:    cloneValue(item.value()),
 	}
+}
+
+func newPriorityQueueItem(priority int64, sequence uint64, value interface{}) priorityQueueItem {
+	if text, ok := value.(string); ok {
+		return priorityQueueItem{Priority: priority, Sequence: sequence, stringValue: text, hasString: true}
+	}
+	return priorityQueueItem{Priority: priority, Sequence: sequence, Value: cloneValue(value)}
+}
+
+func (item priorityQueueItem) value() interface{} {
+	if item.hasString {
+		return item.stringValue
+	}
+	return item.Value
+}
+
+func (item *priorityQueueItem) clearValue() {
+	item.Value = nil
+	item.stringValue = ""
+	item.hasString = false
 }
 
 // PriorityQueueStorage stores priority queue values outside the trie.
