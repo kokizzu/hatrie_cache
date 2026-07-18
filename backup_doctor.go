@@ -17,16 +17,17 @@ import (
 )
 
 type BackupDoctorReport struct {
-	OK              bool                     `json:"ok"`
-	Kind            string                   `json:"kind"`
-	Path            string                   `json:"path"`
-	Snapshot        *BackupDoctorSnapshot    `json:"snapshot,omitempty"`
-	Journal         *BackupDoctorJournal     `json:"journal,omitempty"`
-	LevelDB         *BackupDoctorLevelDB     `json:"leveldb,omitempty"`
-	Files           []BackupBundleFile       `json:"files,omitempty"`
-	Partition       *BackupPartitionMetadata `json:"partition,omitempty"`
-	RecoveredKeys   int                      `json:"recovered_keys,omitempty"`
-	JournalSequence uint64                   `json:"journal_sequence,omitempty"`
+	OK                  bool                       `json:"ok"`
+	Kind                string                     `json:"kind"`
+	Path                string                     `json:"path"`
+	Snapshot            *BackupDoctorSnapshot      `json:"snapshot,omitempty"`
+	Journal             *BackupDoctorJournal       `json:"journal,omitempty"`
+	LevelDB             *BackupDoctorLevelDB       `json:"leveldb,omitempty"`
+	Files               []BackupBundleFile         `json:"files,omitempty"`
+	Partition           *BackupPartitionMetadata   `json:"partition,omitempty"`
+	PartitionValidation *BackupPartitionValidation `json:"partition_validation,omitempty"`
+	RecoveredKeys       int                        `json:"recovered_keys,omitempty"`
+	JournalSequence     uint64                     `json:"journal_sequence,omitempty"`
 }
 
 type BackupDoctorSnapshot struct {
@@ -48,6 +49,16 @@ type BackupDoctorLevelDB struct {
 	OK   bool   `json:"ok"`
 	Keys int    `json:"keys"`
 }
+
+type BackupPartitionValidation struct {
+	OK                bool     `json:"ok"`
+	CheckedKeys       int      `json:"checked_keys"`
+	InvalidKeys       int      `json:"invalid_keys"`
+	KeyPrefixes       []string `json:"key_prefixes,omitempty"`
+	InvalidKeySamples []string `json:"invalid_key_samples,omitempty"`
+}
+
+const backupPartitionInvalidKeySampleLimit = 8
 
 func VerifyBackupPath(path string) (BackupDoctorReport, error) {
 	path = strings.TrimSpace(path)
@@ -113,6 +124,14 @@ func VerifyBackupBundle(path string) (BackupDoctorReport, error) {
 	}
 	report.Snapshot = &snapshotReport
 	report.RecoveredKeys = trie.Size()
+	partitionValidation, err := validateBackupPartitionMetadataAgainstTrie(trie, manifest.Partition)
+	if partitionValidation != nil {
+		report.PartitionValidation = partitionValidation
+	}
+	if err != nil {
+		report.OK = false
+		return report, err
+	}
 
 	if manifest.Journal != "" {
 		journalData, ok := files[manifest.Journal]
@@ -236,6 +255,54 @@ func verifyBackupFileChecksum(file BackupBundleFile, data []byte) error {
 		return fmt.Errorf("hatriecache: backup file checksum mismatch for %s", file.Path)
 	}
 	return nil
+}
+
+func validateBackupPartitionMetadataAgainstTrie(trie *HatTrie, partition *BackupPartitionMetadata) (*BackupPartitionValidation, error) {
+	if trie == nil || partition == nil || len(partition.KeyPrefixes) == 0 {
+		return nil, nil
+	}
+	keys, err := trie.KeysWithPrefixChecked("", true)
+	if err != nil {
+		return nil, err
+	}
+	validation := &BackupPartitionValidation{
+		OK:          true,
+		CheckedKeys: len(keys),
+		KeyPrefixes: append([]string(nil), partition.KeyPrefixes...),
+	}
+	for _, key := range keys {
+		if backupPartitionKeyCoveredByPrefix(key, partition.KeyPrefixes) {
+			continue
+		}
+		validation.OK = false
+		validation.InvalidKeys++
+		if len(validation.InvalidKeySamples) < backupPartitionInvalidKeySampleLimit {
+			validation.InvalidKeySamples = append(validation.InvalidKeySamples, key)
+		}
+	}
+	if validation.InvalidKeys == 0 {
+		return validation, nil
+	}
+	return validation, fmt.Errorf("hatriecache: backup partition metadata does not cover key %q", validation.InvalidKeySamples[0])
+}
+
+func backupPartitionKeyCoveredByPrefix(key string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneBackupPartitionValidation(input *BackupPartitionValidation) *BackupPartitionValidation {
+	if input == nil {
+		return nil
+	}
+	out := *input
+	out.KeyPrefixes = append([]string(nil), input.KeyPrefixes...)
+	out.InvalidKeySamples = append([]string(nil), input.InvalidKeySamples...)
+	return &out
 }
 
 func verifySnapshotBytes(trie *HatTrie, name string, data []byte) (BackupDoctorSnapshot, error) {

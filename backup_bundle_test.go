@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -131,6 +132,9 @@ func TestCreateBackupBundleCarriesPartitionMetadataToDoctorAndRestore(t *testing
 	if doctor.Partition == nil || !reflect.DeepEqual(*doctor.Partition, partition) {
 		t.Fatalf("doctor partition = %#v, want %#v", doctor.Partition, partition)
 	}
+	if doctor.PartitionValidation == nil || !doctor.PartitionValidation.OK || doctor.PartitionValidation.CheckedKeys != 1 || doctor.PartitionValidation.InvalidKeys != 0 {
+		t.Fatalf("doctor partition validation = %#v, want ok with one checked key", doctor.PartitionValidation)
+	}
 
 	restoreReport, err := RestoreBackupBundle(bundlePath, filepath.Join(t.TempDir(), "data"), BackupBundleRestoreOptions{})
 	if err != nil {
@@ -138,6 +142,36 @@ func TestCreateBackupBundleCarriesPartitionMetadataToDoctorAndRestore(t *testing
 	}
 	if restoreReport.Partition == nil || !reflect.DeepEqual(*restoreReport.Partition, partition) {
 		t.Fatalf("restore partition = %#v, want %#v", restoreReport.Partition, partition)
+	}
+	if restoreReport.PartitionValidation == nil || !restoreReport.PartitionValidation.OK || restoreReport.PartitionValidation.CheckedKeys != 1 || restoreReport.PartitionValidation.InvalidKeys != 0 {
+		t.Fatalf("restore partition validation = %#v, want ok with one checked key", restoreReport.PartitionValidation)
+	}
+}
+
+func TestVerifyBackupBundleRejectsPartitionPrefixMismatch(t *testing.T) {
+	ht := newTestTrie(t)
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "sg:session:1", Value: "ok"}); !got.OK {
+		t.Fatalf("SETSTR(sg) response = %#v, want ok", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "us:session:1", Value: "wrong partition"}); !got.OK {
+		t.Fatalf("SETSTR(us) response = %#v, want ok", got)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	_, err := CreateBackupBundle(bundlePath, ht, nil, BackupBundleOptions{
+		SnapshotFormat: SnapshotFormatJSON,
+		Partition: BackupPartitionMetadata{
+			Mode:        "partitioned",
+			Partitions:  []string{"sg"},
+			KeyPrefixes: []string{"sg:"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBackupBundle() error = %v", err)
+	}
+
+	_, err = VerifyBackupBundle(bundlePath)
+	if err == nil || !strings.Contains(err.Error(), "backup partition metadata does not cover key") {
+		t.Fatalf("VerifyBackupBundle(partition mismatch) error = %v, want partition coverage error", err)
 	}
 }
 

@@ -16,14 +16,15 @@ type BackupBundleRestoreOptions struct {
 }
 
 type BackupBundleRestoreReport struct {
-	OK              bool                     `json:"ok"`
-	Bundle          string                   `json:"bundle"`
-	DataDir         string                   `json:"data_dir"`
-	Snapshot        string                   `json:"snapshot"`
-	Journal         string                   `json:"journal,omitempty"`
-	Partition       *BackupPartitionMetadata `json:"partition,omitempty"`
-	JournalSequence uint64                   `json:"journal_sequence"`
-	RecoveredKeys   int                      `json:"recovered_keys"`
+	OK                  bool                       `json:"ok"`
+	Bundle              string                     `json:"bundle"`
+	DataDir             string                     `json:"data_dir"`
+	Snapshot            string                     `json:"snapshot"`
+	Journal             string                     `json:"journal,omitempty"`
+	Partition           *BackupPartitionMetadata   `json:"partition,omitempty"`
+	PartitionValidation *BackupPartitionValidation `json:"partition_validation,omitempty"`
+	JournalSequence     uint64                     `json:"journal_sequence"`
+	RecoveredKeys       int                        `json:"recovered_keys"`
 }
 
 type RestoreRehearsalOptions struct {
@@ -121,14 +122,15 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		}
 	}
 	return BackupBundleRestoreReport{
-		OK:              true,
-		Bundle:          bundlePath,
-		DataDir:         dataDir,
-		Snapshot:        snapshotPath,
-		Journal:         journalPath,
-		Partition:       cloneBackupPartitionMetadata(manifest.Partition),
-		JournalSequence: manifest.JournalSequence,
-		RecoveredKeys:   doctor.RecoveredKeys,
+		OK:                  true,
+		Bundle:              bundlePath,
+		DataDir:             dataDir,
+		Snapshot:            snapshotPath,
+		Journal:             journalPath,
+		Partition:           cloneBackupPartitionMetadata(manifest.Partition),
+		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),
+		JournalSequence:     manifest.JournalSequence,
+		RecoveredKeys:       doctor.RecoveredKeys,
 	}, nil
 }
 
