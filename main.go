@@ -2002,6 +2002,7 @@ func (rs *LevelDBReferenceStorage) Del(idx int32) {
 // pools referenced by compact HatValue records.
 type HatTrie struct {
 	mu               sync.RWMutex
+	telemetryMu      sync.Mutex
 	root             *C.hattrie_t
 	raws             *BytesStorage
 	disks            *DiskStorage
@@ -2160,6 +2161,8 @@ func (ht *HatTrie) Stats() CacheStats {
 	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
+	ht.telemetryMu.Lock()
+	defer ht.telemetryMu.Unlock()
 
 	ht.ensureOpen()
 	stats := ht.stats
@@ -2174,6 +2177,8 @@ func (ht *HatTrie) KeyStatsPolicy() KeyStatsPolicy {
 	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
+	ht.telemetryMu.Lock()
+	defer ht.telemetryMu.Unlock()
 
 	ht.ensureOpen()
 	return KeyStatsPolicy{
@@ -2770,13 +2775,27 @@ func (ht *HatTrie) ExistsChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	ht.mu.RLock()
+	hval, fallback, err := ht.readValueRLockedChecked(key, false)
+	if !fallback {
+		if err != nil {
+			ht.mu.RUnlock()
+			return false, err
+		}
+		hit := !hval.Empty()
+		ht.recordReadLocked(hit, key)
+		ht.mu.RUnlock()
+		return hit, nil
+	}
+	ht.mu.RUnlock()
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
 	if err := validateKey(key); err != nil {
 		return false, err
 	}
-	hval := ht.peekLocked(key)
+	hval = ht.peekLocked(key)
 	hit := !hval.Empty()
 	ht.recordReadLocked(hit, key)
 	return hit, nil
@@ -2797,6 +2816,8 @@ func (ht *HatTrie) currentTime() time.Time {
 
 func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 	now := ht.currentTime()
+	ht.telemetryMu.Lock()
+	defer ht.telemetryMu.Unlock()
 	ht.stats.Reads++
 	if hit {
 		ht.stats.Hits++
@@ -2831,13 +2852,18 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	ht.mutationEpoch++
 	now := ht.currentTime()
-	ht.stats.Writes++
-	ht.stats.LastWrite = now
-
 	for _, key := range keys {
 		ht.clearHotKeyLocked(key)
 		ht.updateLevelDBSpillCandidateForKeyLocked(key)
 		ht.updateLevelDBHotByteAccountingForKeyLocked(key)
+	}
+
+	ht.telemetryMu.Lock()
+	defer ht.telemetryMu.Unlock()
+	ht.stats.Writes++
+	ht.stats.LastWrite = now
+
+	for _, key := range keys {
 		stats := ht.keyStats[key]
 		if stats == nil {
 			stats = ht.ensureKeyStatsLocked(key)
@@ -3555,10 +3581,19 @@ func (ht *HatTrie) GetChecked(key string) (HatValue, error) {
 	if ht == nil {
 		return HatValue{}, ErrNilHatTrie
 	}
+	ht.mu.RLock()
+	hval, fallback, err := ht.readValueRLockedChecked(key, true)
+	if !fallback {
+		ht.recordReadLocked(err == nil && !hval.Empty(), key)
+		ht.mu.RUnlock()
+		return hval, err
+	}
+	ht.mu.RUnlock()
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval, err := ht.getLockedChecked(key)
+	hval, err = ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return HatValue{}, err
@@ -3645,6 +3680,45 @@ func (ht *HatTrie) getLockedChecked(key string) (HatValue, error) {
 		ht.clearHotKeyLocked(key)
 	}
 	return hval, nil
+}
+
+// readValueRLockedChecked returns ordinary in-memory values without mutating
+// trie state. The caller must retry under the exclusive lock when fallback is
+// true so expiration and lazy LevelDB hydration retain their existing behavior.
+func (ht *HatTrie) readValueRLockedChecked(key string, hydrateLevelDB bool) (hval HatValue, fallback bool, err error) {
+	if err := validateKey(key); err != nil {
+		return HatValue{}, false, err
+	}
+	ht.ensureOpen()
+	if cached, ok := ht.cachedValueLocked(key); ok {
+		if ht.readValueNeedsExclusiveLockRLocked(key, cached, hydrateLevelDB) {
+			return HatValue{}, true, nil
+		}
+		return cached, false, nil
+	}
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		if _, hasExpiration := ht.expires[key]; hasExpiration {
+			return HatValue{}, true, nil
+		}
+		return HatValue{}, false, nil
+	}
+	hval.fromValue(*rawPtr)
+	if ht.readValueNeedsExclusiveLockRLocked(key, hval, hydrateLevelDB) {
+		return HatValue{}, true, nil
+	}
+	return hval, false, nil
+}
+
+func (ht *HatTrie) readValueNeedsExclusiveLockRLocked(key string, hval HatValue, hydrateLevelDB bool) bool {
+	if hydrateLevelDB && hval.IsLevelDBReference() {
+		return true
+	}
+	if !hval.HasTtl() {
+		return false
+	}
+	expiresAt, ok := ht.expires[key]
+	return !ok || !ht.currentTime().Before(expiresAt)
 }
 
 // HydrateLevelDBReferences materializes all lazy LevelDB-backed values into the
@@ -3818,10 +3892,24 @@ func (ht *HatTrie) GetCounterChecked(key string) (int32, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
 	}
+	ht.mu.RLock()
+	hval, fallback, err := ht.readValueRLockedChecked(key, true)
+	if !fallback {
+		hit := err == nil && hval.IsCounter()
+		value := int32(0)
+		if hit {
+			value = hval.Index
+		}
+		ht.recordReadLocked(hit, key)
+		ht.mu.RUnlock()
+		return value, hit, err
+	}
+	ht.mu.RUnlock()
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval, err := ht.getLockedChecked(key)
+	hval, err = ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return 0, false, err
@@ -3969,10 +4057,26 @@ func (ht *HatTrie) GetStringChecked(key string) (string, bool, error) {
 	if ht == nil {
 		return "", false, ErrNilHatTrie
 	}
+	ht.mu.RLock()
+	hval, fallback, err := ht.readValueRLockedChecked(key, true)
+	if !fallback {
+		hit := err == nil && (hval.IsStringAtRaws() || hval.IsCounter())
+		var value string
+		if hval.IsStringAtRaws() {
+			value = ht.raws.stringValue(hval.Index)
+		} else if hval.IsCounter() {
+			value = strconv.FormatInt(int64(hval.Index), 10)
+		}
+		ht.recordReadLocked(hit, key)
+		ht.mu.RUnlock()
+		return value, hit, err
+	}
+	ht.mu.RUnlock()
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval, err := ht.getLockedChecked(key)
+	hval, err = ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return "", false, err
@@ -4042,10 +4146,32 @@ func (ht *HatTrie) GetBytesChecked(key string) ([]byte, error) {
 	if ht == nil {
 		return nil, ErrNilHatTrie
 	}
+	ht.mu.RLock()
+	hval, fallback, err := ht.readValueRLockedChecked(key, true)
+	if !fallback {
+		var value []byte
+		hit := false
+		if err == nil && hval.IsStringAtRaws() {
+			value = cloneBytes(ht.raws.array[hval.Index])
+			hit = true
+		} else if err == nil && hval.IsBytesAtRaws() {
+			if hval.OnDisk() {
+				value, err = ht.disks.Get(hval.Index)
+			} else {
+				value = cloneBytes(ht.raws.array[hval.Index])
+			}
+			hit = err == nil
+		}
+		ht.recordReadLocked(hit, key)
+		ht.mu.RUnlock()
+		return value, err
+	}
+	ht.mu.RUnlock()
+
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	hval, err := ht.getLockedChecked(key)
+	hval, err = ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return nil, err

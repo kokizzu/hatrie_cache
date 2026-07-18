@@ -2170,6 +2170,181 @@ func TestKeyStatsTrackExistingKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
 	}
 }
 
+func TestGetStringReadsCanOverlap(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+	if err := ht.ConfigureKeyStats(KeyStatsModeOff, 0); err != nil {
+		t.Fatalf("ConfigureKeyStats(off) error = %v", err)
+	}
+
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	ht.now = func() time.Time {
+		entered <- struct{}{}
+		<-release
+		return time.Unix(955, 0)
+	}
+	results := make(chan string, 2)
+	go func() { results <- ht.GetString("key") }()
+	<-entered
+	go func() { results <- ht.GetString("key") }()
+
+	overlapped := false
+	select {
+	case <-entered:
+		overlapped = true
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	for read := 0; read < 2; read++ {
+		if got := <-results; got != "value" {
+			t.Fatalf("GetString(key) = %q, want value", got)
+		}
+	}
+	if !overlapped {
+		t.Fatal("concurrent GetString calls did not overlap")
+	}
+	if stats := ht.Stats(); stats.Reads != 2 || stats.Hits != 2 {
+		t.Fatalf("Stats() = %#v, want two exact read hits", stats)
+	}
+}
+
+func TestScalarReadMethodsCanOverlap(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*HatTrie)
+		read    func(*HatTrie) bool
+	}{
+		{
+			name:    "Get",
+			prepare: func(ht *HatTrie) { ht.UpsertString("key", "value") },
+			read:    func(ht *HatTrie) bool { return ht.Get("key").IsStringAtRaws() },
+		},
+		{
+			name:    "Exists",
+			prepare: func(ht *HatTrie) { ht.UpsertString("key", "value") },
+			read:    func(ht *HatTrie) bool { return ht.Exists("key") },
+		},
+		{
+			name:    "GetCounter",
+			prepare: func(ht *HatTrie) { ht.UpsertCounter("key", 42) },
+			read:    func(ht *HatTrie) bool { return ht.GetCounter("key") == 42 },
+		},
+		{
+			name:    "GetBytes",
+			prepare: func(ht *HatTrie) { ht.UpsertBytes("key", []byte("value")) },
+			read:    func(ht *HatTrie) bool { return bytes.Equal(ht.GetBytes("key"), []byte("value")) },
+		},
+		{
+			name:    "ExecuteCommand GET",
+			prepare: func(ht *HatTrie) { ht.UpsertString("key", "value") },
+			read: func(ht *HatTrie) bool {
+				response := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "key"})
+				return response.OK && response.Value == "value"
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ht := newTestTrie(t)
+			test.prepare(ht)
+			if err := ht.ConfigureKeyStats(KeyStatsModeOff, 0); err != nil {
+				t.Fatalf("ConfigureKeyStats(off) error = %v", err)
+			}
+
+			entered := make(chan struct{}, 2)
+			release := make(chan struct{})
+			ht.now = func() time.Time {
+				entered <- struct{}{}
+				<-release
+				return time.Unix(956, 0)
+			}
+			results := make(chan bool, 2)
+			go func() { results <- test.read(ht) }()
+			<-entered
+			go func() { results <- test.read(ht) }()
+
+			overlapped := false
+			select {
+			case <-entered:
+				overlapped = true
+			case <-time.After(500 * time.Millisecond):
+			}
+			close(release)
+			for read := 0; read < 2; read++ {
+				if !<-results {
+					t.Fatalf("%s returned an incorrect value", test.name)
+				}
+			}
+			if !overlapped {
+				t.Fatalf("concurrent %s calls did not overlap", test.name)
+			}
+		})
+	}
+}
+
+func TestConcurrentStringReadFastPathPreservesValuesAndStats(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value-a")
+
+	const readers = 16
+	const readsPerWorker = 1_000
+	const writes = 1_000
+	start := make(chan struct{})
+	errors := make(chan string, 1)
+	reportError := func(message string) {
+		select {
+		case errors <- message:
+		default:
+		}
+	}
+	var workers sync.WaitGroup
+	workers.Add(readers + 1)
+	for worker := 0; worker < readers; worker++ {
+		go func() {
+			defer workers.Done()
+			<-start
+			for read := 0; read < readsPerWorker; read++ {
+				value := ht.GetString("key")
+				if value != "value-a" && value != "value-b" {
+					reportError(fmt.Sprintf("GetString(key) = %q", value))
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		defer workers.Done()
+		<-start
+		for write := 0; write < writes; write++ {
+			value := "value-a"
+			if write%2 != 0 {
+				value = "value-b"
+			}
+			ht.UpsertString("key", value)
+		}
+	}()
+	close(start)
+	workers.Wait()
+	close(errors)
+	for message := range errors {
+		t.Fatal(message)
+	}
+
+	stats := ht.Stats()
+	if stats.Reads != readers*readsPerWorker || stats.Hits != readers*readsPerWorker || stats.Misses != 0 || stats.Writes != writes+1 {
+		t.Fatalf("Stats() = %#v, want exact concurrent read/write counters", stats)
+	}
+	keyStats, ok := ht.StatsForKey("key")
+	if !ok {
+		t.Fatal("StatsForKey(key) = false, want tracked key")
+	}
+	if keyStats.Reads != readers*readsPerWorker || keyStats.Hits != readers*readsPerWorker || keyStats.Misses != 0 || keyStats.Writes != writes+1 {
+		t.Fatalf("StatsForKey(key) = %#v, want exact concurrent read/write counters", keyStats)
+	}
+}
+
 func TestKeyStatsPolicyDefaultsToBounded(t *testing.T) {
 	ht := newTestTrie(t)
 

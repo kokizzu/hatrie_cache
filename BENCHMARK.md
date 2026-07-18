@@ -167,6 +167,20 @@ after reaching 100,000 tracked keys. Normal cache reads and values remain
 unchanged; only detailed per-key telemetry is replaced. Cache-wide counters
 remain exact in all three modes.
 
+### Concurrent Scalar Read Fast Path
+
+Ordinary in-memory `Get`, `Exists`, string, counter, and bytes reads now use the
+trie's shared lock. Exact command `GET` uses the same path. Expired values and
+lazy LevelDB references retry under the exclusive lock for cleanup or hydration.
+Telemetry updates use a separate short critical section and remain exact.
+
+| Workload | Baseline median | Optimized median | Improvement |
+| --- | ---: | ---: | ---: |
+| 100,000 `GetString` reads, 32 logical CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster, 58.6% lower latency |
+
+The optimized median is from three one-iteration runs with the same 100,000-key
+and 100,000-operation fixture as the architectural baseline.
+
 ## Latest Optimization Spot Check
 
 After adding exact command fast paths for set, priority queue, Bloom filter,

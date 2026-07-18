@@ -2496,25 +2496,35 @@ func commandFastFloat64Field(value string) (float64, bool) {
 }
 
 func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool) {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	hval := ht.peekCachedLocked(key)
+	ht.mu.RLock()
+	hval, fallback, err := ht.readValueRLockedChecked(key, true)
+	if fallback || err != nil {
+		ht.mu.RUnlock()
+		return CacheCommandResponse{}, false
+	}
 	if hval.Empty() {
 		ht.recordReadLocked(false, key)
+		ht.mu.RUnlock()
 		return CacheCommandResponse{OK: true, Message: "key not found"}, true
 	}
 	switch {
 	case hval.IsStringAtRaws():
+		value := ht.raws.stringValue(hval.Index)
 		ht.recordReadLocked(true, key)
-		return CacheCommandResponse{OK: true, Message: "ok", Value: ht.raws.stringValue(hval.Index)}, true
+		ht.mu.RUnlock()
+		return CacheCommandResponse{OK: true, Message: "ok", Value: value}, true
 	case hval.IsCounter():
+		value := strconv.FormatInt(int64(hval.Index), 10)
 		ht.recordReadLocked(true, key)
-		return CacheCommandResponse{OK: true, Message: "ok", Value: strconv.FormatInt(int64(hval.Index), 10)}, true
+		ht.mu.RUnlock()
+		return CacheCommandResponse{OK: true, Message: "ok", Value: value}, true
 	case hval.IsBytesAtRaws() && !hval.OnDisk():
+		value := string(ht.raws.array[hval.Index])
 		ht.recordReadLocked(true, key)
-		return CacheCommandResponse{OK: true, Message: "ok", Value: string(ht.raws.array[hval.Index])}, true
+		ht.mu.RUnlock()
+		return CacheCommandResponse{OK: true, Message: "ok", Value: value}, true
 	default:
+		ht.mu.RUnlock()
 		return CacheCommandResponse{}, false
 	}
 }

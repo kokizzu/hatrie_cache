@@ -1306,6 +1306,11 @@ Use `Keys`, `KeysWithPrefix`, `Entries`, and `EntriesWithPrefix` to iterate
 over non-expired keys and value metadata. Prefix iteration returns full keys and
 supports keys containing NUL bytes.
 
+Ordinary in-memory `Get`, `Exists`, `GetString`, `GetCounter`, and `GetBytes`
+calls use concurrent shared locking; exact command `GET` uses the same path for
+HTTP/gRPC command traffic. Reads that must remove an expired value or hydrate a
+lazy LevelDB reference automatically retry under the exclusive lock.
+
 Use `MarshalMapJSON`, `UnmarshalMapJSON`, `UpsertMapJSON`, and `GetMapJSON`
 for JSON serialization of Go map values. The JSON decoder preserves numbers as
 `json.Number`.
