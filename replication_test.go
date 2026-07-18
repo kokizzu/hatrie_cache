@@ -1938,6 +1938,42 @@ func TestGroupReplicationTasksByTargetCarriesPayloadBytes(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorAppendsTasksWithAnnotatedPayloadBytes(t *testing.T) {
+	replicator := &HTTPReplicator{
+		self:          "node-a",
+		batchMaxBytes: 4096,
+	}
+	targets := []TopologyNode{
+		{ID: "node-b", Address: "http://node-b"},
+		{ID: "node-c", Address: "http://node-c"},
+	}
+	payload := CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: "one"}
+
+	tasks := replicator.appendReplicationTasksForTargets(nil, targets, payload)
+	if len(tasks) != len(targets) {
+		t.Fatalf("tasks len = %d, want %d", len(tasks), len(targets))
+	}
+	for idx, task := range tasks {
+		if !replicationTargetsEqual(task.target, targets[idx]) {
+			t.Fatalf("task %d target = %#v, want %#v", idx, task.target, targets[idx])
+		}
+		if task.payloadBytes <= 0 {
+			t.Fatalf("task %d payload bytes = %d, want positive carried estimate", idx, task.payloadBytes)
+		}
+		if task.payload.Pairs[replicationMetaSourceNode] != "node-a" || task.payload.Pairs[replicationMetaSequence] == "" {
+			t.Fatalf("task %d payload metadata = %#v, want source and sequence", idx, task.payload.Pairs)
+		}
+		if idx > 0 {
+			if task.payloadBytes != tasks[0].payloadBytes {
+				t.Fatalf("task %d payload bytes = %d, want shared estimate %d", idx, task.payloadBytes, tasks[0].payloadBytes)
+			}
+			if task.payload.Pairs[replicationMetaSequence] != tasks[0].payload.Pairs[replicationMetaSequence] {
+				t.Fatalf("task %d sequence = %q, want shared sequence %q", idx, task.payload.Pairs[replicationMetaSequence], tasks[0].payload.Pairs[replicationMetaSequence])
+			}
+		}
+	}
+}
+
 func TestSplitReplicationTaskGroupByMaxBytesUsesCarriedPayloadBytes(t *testing.T) {
 	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
 	group := replicationTaskGroup{

@@ -945,13 +945,17 @@ func (replicator *HTTPReplicator) planReplicationTargets(ctx context.Context, re
 }
 
 func (replicator *HTTPReplicator) tasksForReplicationPayload(result ReplicationResult, targets []TopologyNode, payload CacheCommandRequest) (ReplicationResult, []replicationTask) {
+	tasks := make([]replicationTask, 0, len(targets))
+	return result, replicator.appendReplicationTasksForTargets(tasks, targets, payload)
+}
+
+func (replicator *HTTPReplicator) appendReplicationTasksForTargets(tasks []replicationTask, targets []TopologyNode, payload CacheCommandRequest) []replicationTask {
 	payload = replicator.annotateReplicationPayload(payload)
 	payloadBytes := estimatedReplicationRequestBytesWithin(payload, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
-	tasks := make([]replicationTask, 0, len(targets))
 	for _, target := range targets {
 		tasks = append(tasks, replicationTask{target: target, payload: payload, payloadBytes: payloadBytes})
 	}
-	return result, tasks
+	return tasks
 }
 
 func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, result ReplicationResult, tasks []replicationTask) ReplicationResult {
@@ -1368,11 +1372,8 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			if !ok {
 				continue
 			}
-			payload = replicator.annotateReplicationPayload(payload)
 			result.Entries++
-			for _, target := range targets {
-				pageTasks = append(pageTasks, replicationTask{target: target, payload: payload})
-			}
+			pageTasks = replicator.appendReplicationTasksForTargets(pageTasks, targets, payload)
 		}
 		if len(pageTasks) > 0 {
 			pageResult := replicator.executeReplicationTasks(ctx, ReplicationResult{}, pageTasks)
