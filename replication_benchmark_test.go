@@ -137,6 +137,49 @@ func BenchmarkGroupReplicationTasksByTarget(b *testing.B) {
 	}
 }
 
+func BenchmarkSplitReplicationTaskGroupByMaxBytes(b *testing.B) {
+	const payloadCount = 4096
+	const maxBytes = 16 << 10
+	group := replicationTaskGroup{
+		target:   TopologyNode{ID: "node-b", Address: "http://127.0.0.1/node-b"},
+		payloads: make([]CacheCommandRequest, 0, payloadCount),
+		keys:     make([]string, 0, payloadCount),
+	}
+	payloadBytes := make([]int, 0, payloadCount)
+	threshold := maxBytes + 1
+	for idx := 0; idx < payloadCount; idx++ {
+		key := "session:" + strconv.Itoa(idx)
+		payload := CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     key,
+			Value:   `{"type":"string","string":"value-` + strconv.Itoa(idx) + `"}`,
+		}
+		group.payloads = append(group.payloads, payload)
+		group.keys = append(group.keys, key)
+		payloadBytes = append(payloadBytes, estimatedReplicationRequestBytesWithin(payload, threshold))
+	}
+	groupWithBytes := group
+	groupWithBytes.payloadBytes = payloadBytes
+
+	for _, tt := range []struct {
+		name  string
+		group replicationTaskGroup
+	}{
+		{name: "EstimateInSplit", group: group},
+		{name: "CarriedPayloadBytes", group: groupWithBytes},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				groups := splitReplicationTaskGroupByMaxBytes(tt.group, maxBytes)
+				if len(groups) == 0 {
+					b.Fatal("splitReplicationTaskGroupByMaxBytes() returned no groups")
+				}
+			}
+		})
+	}
+}
+
 func replicationGroupingBenchmarkTasks(uniqueTargets int, taskCount int) []replicationTask {
 	tasks := make([]replicationTask, 0, taskCount)
 	for idx := 0; idx < taskCount; idx++ {

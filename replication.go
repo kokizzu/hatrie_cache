@@ -182,8 +182,9 @@ const (
 )
 
 type replicationTask struct {
-	target  TopologyNode
-	payload CacheCommandRequest
+	target       TopologyNode
+	payload      CacheCommandRequest
+	payloadBytes int
 }
 
 type plannedReplicationBatch struct {
@@ -194,9 +195,10 @@ type plannedReplicationBatch struct {
 }
 
 type replicationTaskGroup struct {
-	target   TopologyNode
-	payloads []CacheCommandRequest
-	keys     []string
+	target       TopologyNode
+	payloads     []CacheCommandRequest
+	keys         []string
+	payloadBytes []int
 }
 
 type replicationJob struct {
@@ -944,9 +946,10 @@ func (replicator *HTTPReplicator) planReplicationTargets(ctx context.Context, re
 
 func (replicator *HTTPReplicator) tasksForReplicationPayload(result ReplicationResult, targets []TopologyNode, payload CacheCommandRequest) (ReplicationResult, []replicationTask) {
 	payload = replicator.annotateReplicationPayload(payload)
+	payloadBytes := estimatedReplicationRequestBytesWithin(payload, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
 	tasks := make([]replicationTask, 0, len(targets))
 	for _, target := range targets {
-		tasks = append(tasks, replicationTask{target: target, payload: payload})
+		tasks = append(tasks, replicationTask{target: target, payload: payload, payloadBytes: payloadBytes})
 	}
 	return result, tasks
 }
@@ -972,9 +975,10 @@ func groupReplicationTasksByTarget(tasks []replicationTask) []replicationTaskGro
 	if len(tasks) == 1 {
 		task := tasks[0]
 		return []replicationTaskGroup{{
-			target:   task.target,
-			payloads: []CacheCommandRequest{task.payload},
-			keys:     []string{strings.TrimSpace(task.payload.Key)},
+			target:       task.target,
+			payloads:     []CacheCommandRequest{task.payload},
+			keys:         []string{strings.TrimSpace(task.payload.Key)},
+			payloadBytes: []int{task.payloadBytes},
 		}}
 	}
 	if len(tasks) <= replicationLinearGroupTaskLimit {
@@ -1023,13 +1027,15 @@ func groupReplicationTasksByTargetMap(tasks []replicationTask) []replicationTask
 		if idx, ok := indexes[key]; ok {
 			groups[idx].payloads = append(groups[idx].payloads, task.payload)
 			groups[idx].keys = append(groups[idx].keys, strings.TrimSpace(task.payload.Key))
+			groups[idx].payloadBytes = append(groups[idx].payloadBytes, task.payloadBytes)
 			continue
 		}
 		indexes[key] = len(groups)
 		groups = append(groups, replicationTaskGroup{
-			target:   task.target,
-			payloads: []CacheCommandRequest{task.payload},
-			keys:     []string{strings.TrimSpace(task.payload.Key)},
+			target:       task.target,
+			payloads:     []CacheCommandRequest{task.payload},
+			keys:         []string{strings.TrimSpace(task.payload.Key)},
+			payloadBytes: []int{task.payloadBytes},
 		})
 	}
 	return groups
@@ -1048,15 +1054,17 @@ func groupReplicationTasksByTargetLinear(tasks []replicationTask, maxTargets int
 		if found >= 0 {
 			groups[found].payloads = append(groups[found].payloads, task.payload)
 			groups[found].keys = append(groups[found].keys, strings.TrimSpace(task.payload.Key))
+			groups[found].payloadBytes = append(groups[found].payloadBytes, task.payloadBytes)
 			continue
 		}
 		if maxTargets > 0 && len(groups) >= maxTargets {
 			return nil, false
 		}
 		groups = append(groups, replicationTaskGroup{
-			target:   task.target,
-			payloads: []CacheCommandRequest{task.payload},
-			keys:     []string{strings.TrimSpace(task.payload.Key)},
+			target:       task.target,
+			payloads:     []CacheCommandRequest{task.payload},
+			keys:         []string{strings.TrimSpace(task.payload.Key)},
+			payloadBytes: []int{task.payloadBytes},
 		})
 	}
 	return groups, true
@@ -1097,7 +1105,7 @@ func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes in
 	currentBytes := estimatedReplicationBatchEnvelopeBytes(threshold)
 	out := make([]replicationTaskGroup, 0, len(group.payloads))
 	for idx, payload := range group.payloads {
-		payloadBytes := estimatedReplicationRequestBytesWithin(payload, threshold)
+		payloadBytes := replicationTaskPayloadBytes(group, idx, payload, threshold)
 		if len(current.payloads) > 0 && currentBytes+payloadBytes+2 > maxBytes {
 			out = append(out, current)
 			current = replicationTaskGroup{target: group.target}
@@ -1109,12 +1117,27 @@ func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes in
 			key = group.keys[idx]
 		}
 		current.keys = append(current.keys, key)
+		current.payloadBytes = append(current.payloadBytes, payloadBytes)
 		currentBytes = jsonwire.AddEstimate(currentBytes, payloadBytes+2, threshold)
 	}
 	if len(current.payloads) > 0 {
 		out = append(out, current)
 	}
 	return out
+}
+
+func replicationPayloadEstimateThreshold(maxBytes int) int {
+	if maxBytes > 0 {
+		return maxBytes + 1
+	}
+	return minCompressedReplicationRequestBytes
+}
+
+func replicationTaskPayloadBytes(group replicationTaskGroup, idx int, payload CacheCommandRequest, threshold int) int {
+	if idx < len(group.payloadBytes) && group.payloadBytes[idx] > 0 {
+		return group.payloadBytes[idx]
+	}
+	return estimatedReplicationRequestBytesWithin(payload, threshold)
 }
 
 func estimatedReplicationBatchEnvelopeBytes(threshold int) int {

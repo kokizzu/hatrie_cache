@@ -1922,6 +1922,46 @@ func TestGroupReplicationTasksByTargetAdaptiveMatchesMapGrouping(t *testing.T) {
 	}
 }
 
+func TestGroupReplicationTasksByTargetCarriesPayloadBytes(t *testing.T) {
+	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	tasks := []replicationTask{
+		{target: target, payload: CacheCommandRequest{Command: "INTERNALSET", Key: "session:1", Value: "one"}, payloadBytes: 101},
+		{target: target, payload: CacheCommandRequest{Command: "INTERNALSET", Key: "session:2", Value: "two"}, payloadBytes: 202},
+	}
+
+	groups := groupReplicationTasksByTarget(tasks)
+	if len(groups) != 1 {
+		t.Fatalf("groups len = %d, want 1", len(groups))
+	}
+	if !reflect.DeepEqual(groups[0].payloadBytes, []int{101, 202}) {
+		t.Fatalf("group payload bytes = %#v, want carried estimates", groups[0].payloadBytes)
+	}
+}
+
+func TestSplitReplicationTaskGroupByMaxBytesUsesCarriedPayloadBytes(t *testing.T) {
+	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	group := replicationTaskGroup{
+		target: target,
+		payloads: []CacheCommandRequest{
+			{Command: "INTERNALSET", Key: "session:1", Value: "one"},
+			{Command: "INTERNALSET", Key: "session:2", Value: "two"},
+		},
+		keys:         []string{"session:1", "session:2"},
+		payloadBytes: []int{90, 90},
+	}
+
+	groups := splitReplicationTaskGroupByMaxBytes(group, 160)
+	if len(groups) != 2 {
+		t.Fatalf("split groups len = %d, want 2 from carried estimates", len(groups))
+	}
+	if len(groups[0].payloadBytes) != 1 || groups[0].payloadBytes[0] != 90 {
+		t.Fatalf("first split payload bytes = %#v, want carried first estimate", groups[0].payloadBytes)
+	}
+	if len(groups[1].payloadBytes) != 1 || groups[1].payloadBytes[0] != 90 {
+		t.Fatalf("second split payload bytes = %#v, want carried second estimate", groups[1].payloadBytes)
+	}
+}
+
 func TestHTTPReplicatorSyncAllFullReplicaReplicatesToRemoteOwners(t *testing.T) {
 	type targetRequest struct {
 		node    string
