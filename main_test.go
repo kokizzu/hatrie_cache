@@ -6840,6 +6840,38 @@ func TestKeysWithPrefixReturnsFullKeys(t *testing.T) {
 	}
 }
 
+func TestScanEntriesWithPrefixPreservesCursorContract(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("app", "root")
+	ht.UpsertString("app\x00binary", "nul")
+	ht.UpsertString("apple", "fruit")
+	ht.UpsertString("application", "program")
+	ht.UpsertString("banana", "yellow")
+
+	stop := errors.New("stop scan")
+	var keys []string
+	var values []string
+	ht.mu.Lock()
+	err := ht.scanEntriesWithPrefixAtLockedChecked("app", true, time.Time{}, func(entry Entry) error {
+		keys = append(keys, entry.Key)
+		values = append(values, ht.raws.stringValue(entry.Value.Index))
+		if entry.Key == "apple" {
+			return stop
+		}
+		return nil
+	})
+	ht.mu.Unlock()
+	if !errors.Is(err, stop) {
+		t.Fatalf("scan error = %v, want stop", err)
+	}
+	if want := []string{"app", "app\x00binary", "apple"}; !reflect.DeepEqual(keys, want) {
+		t.Fatalf("scan keys = %#v, want %#v", keys, want)
+	}
+	if want := []string{"root", "nul", "fruit"}; !reflect.DeepEqual(values, want) {
+		t.Fatalf("scan values = %#v, want %#v", values, want)
+	}
+}
+
 func TestKeysWithPrefixFiltersExpiredEntries(t *testing.T) {
 	ht := newTestTrie(t)
 	base := time.Unix(700, 0)

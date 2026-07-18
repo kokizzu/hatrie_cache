@@ -3059,19 +3059,19 @@ func (ht *HatTrie) scanEntriesWithPrefixAtLockedChecked(prefix string, sorted bo
 	expired := []expiredEntry{}
 	var scanErr error
 
-	for !bool(C.hattrie_iter_finished(iter)) {
-		var keyLen C.size_t
-		keyPtr := C.hattrie_iter_key(iter, &keyLen)
-		key := string(C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen)))
+	var keyPtr *C.char
+	var keyLen C.size_t
+	var value C.value_t
+	advance := C.bool(false)
+	for bool(C.hattrie_iter_read(iter, advance, &keyPtr, &keyLen, &value)) {
+		advance = C.bool(true)
+		key := C.GoStringN(keyPtr, C.int(keyLen))
 		if prefix != "" {
 			key = prefix + key
 		}
 
-		valPtr := C.hattrie_iter_val(iter)
 		hval := HatValue{}
-		if valPtr != nil {
-			hval.fromValue(*valPtr)
-		}
+		hval.fromValue(value)
 
 		if expiresAt, ok := ht.expires[key]; ok && !now.Before(expiresAt) {
 			expired = append(expired, expiredEntry{key: key, value: hval})
@@ -3083,7 +3083,6 @@ func (ht *HatTrie) scanEntriesWithPrefixAtLockedChecked(prefix string, sorted bo
 				}
 			}
 		}
-		C.hattrie_iter_next(iter)
 	}
 	C.hattrie_iter_free(iter)
 

@@ -876,3 +876,24 @@ value_t* hattrie_iter_val(hattrie_iter_t* i)
 
     return ahtable_iter_val(i->i);
 }
+
+
+bool hattrie_iter_read(hattrie_iter_t* i, bool advance, const char** key, size_t* len, value_t* val)
+{
+    if (key != NULL) *key = NULL;
+    if (len != NULL) *len = 0;
+    if (val != NULL) *val = 0;
+
+    if (advance) hattrie_iter_next(i);
+    if (hattrie_iter_finished(i)) return false;
+
+    size_t current_len = 0;
+    const char* current_key = hattrie_iter_key(i, &current_len);
+    value_t* current_val = hattrie_iter_val(i);
+    if (current_key == NULL || current_val == NULL) return false;
+
+    if (key != NULL) *key = current_key;
+    if (len != NULL) *len = current_len;
+    if (val != NULL) *val = *current_val;
+    return true;
+}

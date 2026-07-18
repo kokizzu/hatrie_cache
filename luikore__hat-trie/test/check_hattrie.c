@@ -448,6 +448,56 @@ void test_hattrie_key_length_limit()
 }
 
 
+void test_hattrie_fused_iteration()
+{
+    fprintf(stderr, "checking fused iterator reads... \n");
+
+    hattrie_t* trie = hattrie_create();
+    value_t* value = hattrie_get(trie, "", 0);
+    if (value != NULL) *value = 3;
+    value = hattrie_get(trie, "alpha", 5);
+    if (value != NULL) *value = 5;
+    value = hattrie_get(trie, "beta", 4);
+    if (value != NULL) *value = 7;
+
+    const char* expected_keys[] = {"", "alpha", "beta"};
+    const size_t expected_lengths[] = {0, 5, 4};
+    const value_t expected_values[] = {3, 5, 7};
+    hattrie_iter_t* iter = hattrie_iter_begin(trie, true);
+    const char* key = (const char*) 1;
+    size_t len = 123;
+    value_t iter_value = 99;
+    size_t count = 0;
+    bool live = hattrie_iter_read(iter, false, &key, &len, &iter_value);
+    while (live) {
+        if (count >= 3 || len != expected_lengths[count] ||
+            memcmp(key, expected_keys[count], len) != 0 || iter_value != expected_values[count]) {
+            fprintf(stderr, "[error] fused iterator returned an unexpected entry at %zu\n", count);
+            have_error = 1;
+            break;
+        }
+        ++count;
+        live = hattrie_iter_read(iter, true, &key, &len, &iter_value);
+    }
+    if (count != 3 || key != NULL || len != 0 || iter_value != 0) {
+        fprintf(stderr, "[error] fused iterator exhaustion state is invalid\n");
+        have_error = 1;
+    }
+    hattrie_iter_free(iter);
+    hattrie_free(trie);
+
+    key = (const char*) 1;
+    len = 123;
+    iter_value = 99;
+    if (hattrie_iter_read(NULL, false, &key, &len, &iter_value) || key != NULL || len != 0 || iter_value != 0) {
+        fprintf(stderr, "[error] fused iterator accepted a null iterator\n");
+        have_error = 1;
+    }
+
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_hattrie_clear_resets_root()
 {
     fprintf(stderr, "checking trie clear reset... \n");
@@ -741,6 +791,7 @@ int main()
     test_hattrie_dup_copies_values();
     test_hattrie_clear_resets_root();
     test_hattrie_key_length_limit();
+    test_hattrie_fused_iteration();
 
     setup();
     test_hattrie_insert();
