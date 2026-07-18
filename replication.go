@@ -1420,15 +1420,48 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 	hasAfterKey := false
 	seenKeys := false
 	for {
-		page, err := replicationSyncKeysPage(trie, prefix, afterKey, hasAfterKey, pageSize)
+		routing, routingOK := replicator.snapshotReplicationRouting()
+		pageGroups := make([]replicationTaskGroup, 0, len(routing.shards))
+		pageGroupIndexes := make(map[TopologyNode]int, len(routing.nodes))
+		page, err := replicationSyncEntriesPage(trie, prefix, afterKey, hasAfterKey, pageSize, func(entry Entry) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if !routingOK {
+				return nil
+			}
+			route, ok := routing.routeForKey(entry.Key)
+			if !ok {
+				return nil
+			}
+			if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
+				return nil
+			}
+			targets := routing.replicationTargets(route, replicator.self)
+			if len(targets) == 0 {
+				return nil
+			}
+			data, ok, err := trie.commandDumpScannedEntryBinaryLocked(entry)
+			if err != nil || !ok || len(data) == 0 {
+				return nil
+			}
+			payload := CacheCommandRequest{
+				Command:     replicationSetBinaryCommand,
+				Key:         entry.Key,
+				BinaryValue: data,
+			}
+			result.Entries++
+			pageGroups = replicator.appendReplicationPayloadToTargetGroups(pageGroups, pageGroupIndexes, pageSize, targets, payload, routing.fingerprint)
+			return nil
+		})
 		if err != nil {
 			if len(result.Targets) == 0 {
 				result.Skipped = true
-				result.Reason = "no entries to sync"
+				result.Reason = err.Error()
 			}
 			return result
 		}
-		if len(page.keys) == 0 {
+		if page.scanned == 0 {
 			if !seenKeys {
 				result.Skipped = true
 				result.Reason = "no entries to sync"
@@ -1437,39 +1470,6 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			break
 		}
 		seenKeys = true
-		routing, routingOK := replicator.snapshotReplicationRouting()
-
-		pageGroups := make([]replicationTaskGroup, 0, len(routing.shards))
-		pageGroupIndexes := make(map[TopologyNode]int, len(routing.nodes))
-		for _, key := range page.keys {
-			if err := ctx.Err(); err != nil {
-				if len(result.Targets) == 0 {
-					result.Skipped = true
-					result.Reason = err.Error()
-				}
-				return result
-			}
-			if !routingOK {
-				continue
-			}
-			route, ok := routing.routeForKey(key)
-			if !ok {
-				continue
-			}
-			if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
-				continue
-			}
-			targets := routing.replicationTargets(route, replicator.self)
-			if len(targets) == 0 {
-				continue
-			}
-			payload, ok := replicationCommandPayload(trie, key, replicationPayloadSet)
-			if !ok {
-				continue
-			}
-			result.Entries++
-			pageGroups = replicator.appendReplicationPayloadToTargetGroups(pageGroups, pageGroupIndexes, len(page.keys), targets, payload, routing.fingerprint)
-		}
 		if len(pageGroups) > 0 {
 			if replicator.batchMaxBytes > 0 {
 				pageGroups = splitReplicationTaskGroupsByMaxBytes(pageGroups, replicator.batchMaxBytes)
@@ -1498,13 +1498,13 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 	return result
 }
 
-type replicationSyncKeyPage struct {
-	keys         []string
+type replicationSyncPage struct {
+	scanned      int
 	nextAfterKey string
 	hasMore      bool
 }
 
-func replicationSyncKeysPage(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int) (replicationSyncKeyPage, error) {
+func replicationSyncEntriesPage(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int, visit func(Entry) error) (replicationSyncPage, error) {
 	if limit <= 0 {
 		limit = 1
 	}
@@ -1517,24 +1517,27 @@ func replicationSyncKeysPage(trie *HatTrie, prefix string, afterKey string, hasA
 		now = trie.currentTime()
 	}
 
-	page := replicationSyncKeyPage{keys: make([]string, 0, limit)}
+	page := replicationSyncPage{}
 	err := trie.scanEntriesWithPrefixAtLockedChecked(prefix, true, now, func(entry Entry) error {
 		if hasAfterKey && entry.Key <= afterKey {
 			return nil
 		}
-		if len(page.keys) >= limit {
+		if page.scanned >= limit {
 			page.hasMore = true
 			return errReplicationSyncKeyPageFull
 		}
-		page.keys = append(page.keys, entry.Key)
+		page.scanned++
 		page.nextAfterKey = entry.Key
+		if visit != nil {
+			return visit(entry)
+		}
 		return nil
 	})
 	if errors.Is(err, errReplicationSyncKeyPageFull) {
 		return page, nil
 	}
 	if err != nil {
-		return replicationSyncKeyPage{}, err
+		return replicationSyncPage{}, err
 	}
 	return page, nil
 }

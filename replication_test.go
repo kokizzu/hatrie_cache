@@ -2601,25 +2601,75 @@ func TestReplicationRoutingSnapshotReusesPrecomputedTargets(t *testing.T) {
 	}
 }
 
-func TestReplicationSyncKeysPageAdvancesAfterEmptyKey(t *testing.T) {
+func TestReplicationSyncEntriesPageAdvancesAfterEmptyKey(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("", "empty")
 	trie.UpsertString("session:1", "value")
 
-	page, err := replicationSyncKeysPage(trie, "", "", false, 1)
+	var keys []string
+	page, err := replicationSyncEntriesPage(trie, "", "", false, 1, func(entry Entry) error {
+		keys = append(keys, entry.Key)
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("replicationSyncKeysPage(first) error = %v", err)
+		t.Fatalf("replicationSyncEntriesPage(first) error = %v", err)
 	}
-	if !reflect.DeepEqual(page.keys, []string{""}) || !page.hasMore || page.nextAfterKey != "" {
+	if page.scanned != 1 || !reflect.DeepEqual(keys, []string{""}) || !page.hasMore || page.nextAfterKey != "" {
 		t.Fatalf("first page = %#v, want empty key with more entries", page)
 	}
 
-	page, err = replicationSyncKeysPage(trie, "", page.nextAfterKey, true, 1)
+	keys = keys[:0]
+	page, err = replicationSyncEntriesPage(trie, "", page.nextAfterKey, true, 1, func(entry Entry) error {
+		keys = append(keys, entry.Key)
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("replicationSyncKeysPage(second) error = %v", err)
+		t.Fatalf("replicationSyncEntriesPage(second) error = %v", err)
 	}
-	if !reflect.DeepEqual(page.keys, []string{"session:1"}) || page.hasMore || page.nextAfterKey != "session:1" {
+	if page.scanned != 1 || !reflect.DeepEqual(keys, []string{"session:1"}) || page.hasMore || page.nextAfterKey != "session:1" {
 		t.Fatalf("second page = %#v, want session key without more entries", page)
+	}
+}
+
+func TestReplicationSyncEntriesPageCapturesPointInTimeValues(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+	trie.UpsertString("session:2", "two")
+
+	var payloads []CacheCommandRequest
+	page, err := replicationSyncEntriesPage(trie, "session:", "", false, 2, func(entry Entry) error {
+		data, ok, err := trie.commandDumpScannedEntryBinaryLocked(entry)
+		if err != nil {
+			return err
+		}
+		if ok {
+			payloads = append(payloads, CacheCommandRequest{Command: replicationSetBinaryCommand, Key: entry.Key, BinaryValue: data})
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("replicationSyncEntriesPage() error = %v", err)
+	}
+	if page.scanned != 2 || len(payloads) != 2 || page.hasMore {
+		t.Fatalf("payload page = %#v, want two complete point-in-time payloads", page)
+	}
+	trie.Delete("session:1")
+	trie.Delete("session:2")
+
+	restored := newTestTrie(t)
+	for idx, payload := range payloads {
+		operation, err := commandSnapshotBinaryOperation(payload.Key, payload.BinaryValue)
+		if err != nil {
+			t.Fatalf("payload %d decode error = %v", idx, err)
+		}
+		if response := executePreparedInternalReplicationCommand(restored, payload, &operation); !response.OK {
+			t.Fatalf("payload %d restore = %#v", idx, response)
+		}
+	}
+	for key, want := range map[string]string{"session:1": "one", "session:2": "two"} {
+		if got, ok, err := restored.GetStringChecked(key); err != nil || !ok || got != want {
+			t.Fatalf("restored %s = %q/%v/%v, want %q/true/nil", key, got, ok, err, want)
+		}
 	}
 }
 
