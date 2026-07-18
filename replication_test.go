@@ -2567,6 +2567,40 @@ func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 	}
 }
 
+func TestReplicationRoutingSnapshotReusesPrecomputedTargets(t *testing.T) {
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b"},
+			{ID: "node-c", Address: "http://node-c"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-c", "node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Topology: topology})
+	snapshot, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	route, ok := snapshot.routeForKey("session:1")
+	if !ok {
+		t.Fatal("routeForKey() ok = false")
+	}
+
+	first := snapshot.replicationTargets(route, replicator.self)
+	second := snapshot.replicationTargets(route, replicator.self)
+	if len(first) != 2 || first[0].ID != "node-b" || first[1].ID != "node-c" {
+		t.Fatalf("precomputed targets = %#v, want node-b then node-c", first)
+	}
+	if &first[0] != &second[0] {
+		t.Fatalf("target backing arrays differ: %p != %p, want immutable snapshot reuse", &first[0], &second[0])
+	}
+}
+
 func TestReplicationSyncKeysPageAdvancesAfterEmptyKey(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("", "empty")

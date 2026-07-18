@@ -214,6 +214,8 @@ type replicationRoutingSnapshot struct {
 	online      map[string]bool
 	leaders     map[uint32]ElectionLeader
 	owners      map[uint32][]string
+	targets     map[uint32][]TopologyNode
+	self        string
 	fingerprint string
 }
 
@@ -1747,6 +1749,8 @@ func (replicator *HTTPReplicator) snapshotReplicationRouting() (replicationRouti
 		nodes:       topologyNodesByID(topology),
 		leaders:     make(map[uint32]ElectionLeader, len(topology.Shards)),
 		owners:      make(map[uint32][]string, len(topology.Shards)),
+		targets:     make(map[uint32][]TopologyNode, len(topology.Shards)),
+		self:        replicator.self,
 		fingerprint: topology.Fingerprint(),
 	}
 	if replicator.election != nil {
@@ -1767,6 +1771,7 @@ func (replicator *HTTPReplicator) snapshotReplicationRouting() (replicationRouti
 	for _, shard := range snapshot.shards {
 		owners := routeOwners(shard)
 		snapshot.owners[shard.ID] = owners
+		snapshot.targets[shard.ID] = precomputedReplicationTargets(owners, snapshot.nodes, snapshot.online, snapshot.self)
 		if replicator.election != nil {
 			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
 			continue
@@ -1808,6 +1813,11 @@ func (snapshot replicationRoutingSnapshot) routeForKey(key string) (ElectionKeyR
 }
 
 func (snapshot replicationRoutingSnapshot) replicationTargets(route ElectionKeyRoute, self string) []TopologyNode {
+	if self == snapshot.self {
+		if targets, ok := snapshot.targets[route.Route.Shard.ID]; ok {
+			return targets
+		}
+	}
 	owners := route.Route.Owners
 	if len(owners) == 0 {
 		owners = snapshot.owners[route.Route.Shard.ID]
@@ -1824,6 +1834,33 @@ func (snapshot replicationRoutingSnapshot) replicationTargets(route ElectionKeyR
 		if ok {
 			targets = append(targets, node)
 		}
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
+}
+
+func precomputedReplicationTargets(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
+	targets := make([]TopologyNode, 0, len(owners))
+	seen := make(map[string]struct{}, len(owners))
+	for _, nodeID := range owners {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || nodeID == self {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		if online != nil && !online[nodeID] {
+			continue
+		}
+		node, ok := nodes[nodeID]
+		if !ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		targets = append(targets, node)
 	}
 	sort.Slice(targets, func(i, j int) bool {
 		return targets[i].ID < targets[j].ID
