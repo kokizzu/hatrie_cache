@@ -257,25 +257,53 @@ make run CMD='go test -run=NONE -bench=BenchmarkHTTPReplicatorSyncAllBatching/Ba
 
 `BenchmarkHTTPReplicatorSyncAllBatching` syncs 10,000 leader-owned keys to one
 local HTTP target. `Batched10k` uses one SyncAll page and native protobuf
-replication. The start-of-pass and current rows are medians from identical ten-run
-commands on the same AMD Ryzen 9 5950X host.
+replication. The latest start and final rows are medians from identical ten-run
+commands on the same AMD Ryzen 9 5950X host. Older rows are retained from their
+original controlled runs.
 
 | Mode | Time/op | requests/op | wire_B/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Before optimization (`b897b64`) | 162,195,812 ns | 1 | 144,227 | 57,035,706 | 1,040,310 |
 | Start of this pass (`10cf4c8`) | 39,010,494 ns | 1 | 87,095 | 11,982,835 | 131,264 |
-| Current optimized (`c70d849`) | 31,830,774 ns | 1 | 55,792 | 5,668,513 | 50,753 |
+| Previous optimized (`c70d849`) | 31,830,774 ns | 1 | 55,792 | 5,668,513 | 50,753 |
+| Start of latest pass (`84325af`) | 28,554,528 ns | 1 | 55,794 | 5,781,645 | 50,756 |
+| Final optimized (`69a6018`) | 18,893,092 ns | 1 | 55,795 | 948,495 | 30,197 |
 | Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
-This pass is 1.23x faster than its starting point, sends 1.56x fewer
-request-body bytes, uses 2.11x less cumulative allocated heap, and performs
-2.59x fewer allocations. Against the earlier `b897b64` batched baseline, the
-current path is 5.10x faster, sends 2.59x fewer body bytes, uses 10.06x less
-allocated heap, and performs 20.50x fewer allocations. The historical
-batching request reduction is 10,000x for this single-target sync. Header bytes
-are not included in `wire_B/op`, so the real
+The latest five-feature pass is 1.51x faster, uses 6.10x less cumulative allocated heap,
+and performs 1.68x fewer allocations while keeping request-body
+bytes effectively unchanged. From `10cf4c8`, the cumulative result is 2.06x
+faster, 1.56x fewer body bytes, 12.63x less allocated heap, and 4.35x fewer
+allocations. Against the earlier `b897b64` batched baseline, it is 8.58x faster,
+sends 2.59x fewer body bytes, uses 60.13x less allocated heap, and performs
+34.45x fewer allocations. The historical batching request reduction is 10,000x
+for this single-target sync. Header bytes are not included in `wire_B/op`, so the real
 network savings from batching are larger than the body-only metric. `B/op`
 measures bytes allocated during one operation, not peak process RSS.
+
+### Replication Compression Tradeoff
+
+Run:
+
+```sh
+make run CMD='go test ./internal/jsonwire -run=NONE -bench=BenchmarkGzipCompressionLevels -benchtime=20x -count=3 -benchmem'
+```
+
+The benchmark compresses a 10,000-row replication-shaped payload. Rows are
+three-run medians after writer initialization and buffer growth are excluded.
+
+| Gzip level | Time/op | wire_B/op | B/op | allocs/op | CPU vs BestSpeed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| BestSpeed, level 1 (default) | 346,578 ns | 4,710 | 0 | 0 | 1.00x |
+| Default, level 6 | 1,438,824 ns | 1,967 | 0 | 0 | 4.15x slower |
+| BestCompression, level 9 | 1,443,409 ns | 1,967 | 0 | 0 | 4.16x slower |
+| HuffmanOnly | 1,782,782 ns | 385,362 | 0 | 0 | 5.14x slower |
+
+Default compression saves 2.39x body bytes versus BestSpeed on this highly
+repetitive fixture but costs 4.15x CPU, so BestSpeed remains the latency-oriented
+default. Replacing the GC-ephemeral gzip `sync.Pool` with a bounded four-writer
+cache reduced sampled compressor allocation from 15.23 MB to 1.14 MB across 50
+10k-key syncs, or 13.4x less compressor allocation, without changing wire bytes.
 
 ### Replication Target Fanout
 

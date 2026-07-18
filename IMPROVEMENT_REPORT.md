@@ -38,6 +38,11 @@ after the first report pass.
 | `0ef0207` | Scan-time sync snapshots | Page scans serialize the visited entry under one lock and avoid a second lookup for every key. |
 | `7401e05` | Keyless replication values | `INTERNALSETV3` omits the duplicated key and stats, with automatic V2 binary and JSON fallback. |
 | `c70d849` | Bounded target concurrency | Replication sends to four targets concurrently by default, preserves result order, and supports a serial setting of one. |
+| `2747005` | Borrowed deferred batch payloads | Sync envelopes reuse their exclusively owned payload slice instead of copying the full request array. |
+| `2b700e5` | Maintenance sync statistics | Anti-entropy sync no longer inflates client read or per-key hit statistics; explicit dumps retain read accounting. |
+| `86fe5ca` | Fused HAT-trie iteration | One cgo call reads and advances each key/value pair, and direct Go string construction removes an intermediate byte allocation. |
+| `f871c79` | Compact streaming replication protobuf | Sync groups retain compact key/binary records and stream chunked protowire encoding into gzip, materializing generic requests only for JSON or legacy fallback. |
+| `69a6018` | Bounded gzip writer cache | Four gzip writers survive garbage collection, avoiding repeated compressor construction while bounding retained memory. |
 
 ## Operational Impact
 
@@ -64,10 +69,13 @@ after the first report pass.
   path in the measured run.
 - Multi-node chaos tests now exercise election-state changes and topology
   fingerprint mismatches through real HTTP monitoring servers.
-- Deferred metadata, precomputed routing, scan-time serialization, and keyless
-  values reduce the 10k-key batched path to one request, about 5.67 MB of
-  cumulative heap, about 50.8k allocations, and 55.8 KB of body bytes in the
-  controlled median run.
+- Borrowed envelopes, maintenance-only statistics, fused iteration, compact
+  protowire streaming, and bounded gzip reuse reduce the 10k-key batched path
+  to one request, about 0.95 MB of cumulative heap, about 30.2k allocations,
+  and 55.8 KB of body bytes in the controlled median run.
+- The latest pass is 1.51x faster, uses 6.10x less allocated heap, and performs
+  1.68x fewer allocations than `84325af`; gzip compressor allocation alone is
+  13.4x lower in the focused before/after profile.
 - Four-target bounded delivery is 3.65x faster than serial delivery in the
   measured local latency benchmark, at about 1.15x cumulative heap and 12
   additional allocations per fanout.
@@ -83,15 +91,24 @@ The current controlled comparison used 10,000 keys, `-benchtime=20x`, and
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Before optimization (`b897b64`) | 162,195,812 ns | 1 | 144,227 | 57,035,706 | 1,040,310 |
 | Start of this pass (`10cf4c8`) | 39,010,494 ns | 1 | 87,095 | 11,982,835 | 131,264 |
-| Current optimized (`c70d849`) | 31,830,774 ns | 1 | 55,792 | 5,668,513 | 50,753 |
+| Previous optimized (`c70d849`) | 31,830,774 ns | 1 | 55,792 | 5,668,513 | 50,753 |
+| Start of latest pass (`84325af`) | 28,554,528 ns | 1 | 55,794 | 5,781,645 | 50,756 |
+| Final optimized (`69a6018`) | 18,893,092 ns | 1 | 55,795 | 948,495 | 30,197 |
 | Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
-This pass is 1.23x faster, sends 1.56x fewer body bytes, uses 2.11x less
-cumulative allocated heap, and performs 2.59x fewer allocations than its
-starting point. Against `b897b64`, the cumulative gains are 5.10x CPU, 2.59x
-body bytes, 10.06x allocated heap, and 20.50x allocations. The historical
-unbatched row remains as evidence of the original 10,000x request reduction;
-it is not used to attribute the later routing and encoding gains.
+The latest pass is 1.51x faster, uses 6.10x less allocated heap, and performs
+1.68x fewer allocations than `84325af`, with body bytes unchanged. From
+`10cf4c8`, the cumulative gains are 2.06x CPU, 1.56x body bytes, 12.63x
+allocated heap, and 4.35x allocations. Against `b897b64`, the cumulative gains
+are 8.58x CPU, 2.59x body bytes, 60.13x allocated heap, and 34.45x allocations.
+The historical unbatched row remains as evidence of the original 10,000x
+request reduction; it is not used to attribute the later routing and encoding
+gains.
+
+The gzip level benchmark kept BestSpeed as the default: default compression
+used 2.39x fewer bytes on the repetitive fixture but required 4.15x CPU. The
+bounded writer cache reduced sampled compressor allocation from 15.23 MB to
+1.14 MB over 50 syncs, or 13.4x less compressor allocation.
 
 The four-target latency benchmark used `-benchtime=20x -count=5`. Its medians
 were 9,544,371 ns/op, 48,172 B/op, and 420 allocs/op in serial mode versus
@@ -110,6 +127,7 @@ make run CMD='go test . -run TestMonitoringHandlerRejectsInvalidInternalReplicat
 make run CMD='go test . -run TestBenchmarkDocsListReplicationBatchingBenchmark -count=1 -v'
 make run CMD='go test . -run NoTestsForBenchmark -bench BenchmarkHTTPReplicatorSyncAllBatching -benchmem -benchtime=1x'
 make run CMD='go test -run=NONE -bench=BenchmarkHTTPReplicatorTargetFanout -benchmem -benchtime=20x -count=5'
+make run CMD='go test ./internal/jsonwire -run=NONE -bench=BenchmarkGzipCompressionLevels -benchtime=20x -count=3 -benchmem'
 make run CMD='go test ./cmd/hatrie-cache -run "TestRunReplicaAcceptsLeaderWriteAfterPrimaryMarkedOffline|TestRunRejectsReplicationWithStaleTopologyFingerprint" -count=1 -v'
 make run CMD='go test ./...'
 make verify-ci
