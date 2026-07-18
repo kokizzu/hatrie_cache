@@ -271,7 +271,7 @@ func (tracker *LevelDBDirtyTracker) Clear(snapshot LevelDBDirtySnapshot) {
 			delete(tracker.keys, key)
 		}
 	}
-	if len(tracker.keys) <= levelDBDirtyTrackerInlineLimit {
+	if len(snapshot.keys) <= levelDBDirtyTrackerInlineLimit && len(tracker.keys) <= levelDBDirtyTrackerInlineLimit {
 		tracker.demoteDirtyKeysLocked()
 	}
 }

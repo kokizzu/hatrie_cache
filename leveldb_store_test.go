@@ -290,7 +290,7 @@ func TestLevelDBDirtyTrackerInlineClearKeepsNewerMarks(t *testing.T) {
 	}
 }
 
-func TestLevelDBDirtyTrackerDemotesMapAfterClear(t *testing.T) {
+func TestLevelDBDirtyTrackerRetainsMapAfterLargeClearThenDemotesAfterSmallClear(t *testing.T) {
 	tracker := NewLevelDBDirtyTracker()
 	for i := 0; i <= levelDBDirtyTrackerInlineLimit; i++ {
 		tracker.Mark(fmt.Sprintf("dirty:%02d", i))
@@ -302,11 +302,21 @@ func TestLevelDBDirtyTrackerDemotesMapAfterClear(t *testing.T) {
 	tracker.Mark("fresh")
 
 	tracker.Clear(snapshot)
-	if tracker.keys != nil {
-		t.Fatal("dirty tracker kept map after clear left inline-sized pending set")
+	if tracker.keys == nil {
+		t.Fatal("dirty tracker demoted after a large clear, want map retained for another large cycle")
 	}
 	if got := tracker.Snapshot().keys; !reflect.DeepEqual(got, []string{"fresh"}) {
-		t.Fatalf("dirty keys after demotion = %#v, want fresh", got)
+		t.Fatalf("dirty keys after large clear = %#v, want fresh", got)
+	}
+
+	smallSnapshot := tracker.Snapshot()
+	tracker.Mark("newer")
+	tracker.Clear(smallSnapshot)
+	if tracker.keys != nil {
+		t.Fatal("dirty tracker kept map after a small clear left an inline-sized pending set")
+	}
+	if got := tracker.Snapshot().keys; !reflect.DeepEqual(got, []string{"newer"}) {
+		t.Fatalf("dirty keys after small-clear demotion = %#v, want newer", got)
 	}
 }
 
