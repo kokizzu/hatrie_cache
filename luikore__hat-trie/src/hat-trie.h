@@ -68,6 +68,13 @@ int hattrie_del(hattrie_t* T, const char* key, size_t len);
 
 typedef struct hattrie_iter_t_ hattrie_iter_t;
 
+typedef struct hattrie_iter_record_t_
+{
+    size_t key_offset;
+    size_t key_len;
+    value_t value;
+} hattrie_iter_record_t;
+
 hattrie_iter_t* hattrie_iter_begin     (const hattrie_t*, bool sorted);
 void            hattrie_iter_next      (hattrie_iter_t*);
 bool            hattrie_iter_finished  (hattrie_iter_t*);
@@ -75,6 +82,9 @@ void            hattrie_iter_free      (hattrie_iter_t*);
 const char*     hattrie_iter_key       (hattrie_iter_t*, size_t* len);
 value_t*        hattrie_iter_val       (hattrie_iter_t*);
 bool            hattrie_iter_read      (hattrie_iter_t*, bool advance, const char** key, size_t* len, value_t* val);
+size_t          hattrie_iter_read_batch(hattrie_iter_t*, char* keys, size_t keys_size,
+                                        hattrie_iter_record_t* records, size_t records_size,
+                                        size_t* required_keys_size, bool* finished);
 
 /** Note the hattrie_iter_key() for prefixed search gets the suffix instead of the whole key
  */

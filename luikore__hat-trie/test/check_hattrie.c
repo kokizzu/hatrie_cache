@@ -497,6 +497,67 @@ void test_hattrie_fused_iteration()
     fprintf(stderr, "done.\n");
 }
 
+void test_hattrie_batch_iteration()
+{
+    fprintf(stderr, "checking batched iterator reads... \n");
+
+    hattrie_t* trie = hattrie_create();
+    const char* expected_keys[] = {"", "alpha", "beta", "long-key-value"};
+    const size_t expected_lengths[] = {0, 5, 4, 14};
+    size_t i;
+    for (i = 0; i < 4; ++i) {
+        value_t* value = hattrie_get(trie, expected_keys[i], expected_lengths[i]);
+        if (value != NULL) *value = (value_t)(i + 1);
+    }
+
+    hattrie_iter_t* iter = hattrie_iter_begin(trie, true);
+    hattrie_iter_record_t records[2];
+    char small_keys[4];
+    size_t required = 0;
+    bool finished = true;
+    size_t count = hattrie_iter_read_batch(iter, small_keys, sizeof(small_keys), records, 2, &required, &finished);
+    if (count != 1 || records[0].key_len != 0 || records[0].value != 1 || required != 5 || finished) {
+        fprintf(stderr, "[error] batched iterator small-buffer state is invalid\n");
+        have_error = 1;
+    }
+
+    char keys[32];
+    size_t seen = count;
+    while (!hattrie_iter_finished(iter)) {
+        required = 0;
+        count = hattrie_iter_read_batch(iter, keys, sizeof(keys), records, 2, &required, &finished);
+        if (count == 0 || required != 0) {
+            fprintf(stderr, "[error] batched iterator made no progress\n");
+            have_error = 1;
+            break;
+        }
+        for (i = 0; i < count; ++i) {
+            size_t expected = seen + i;
+            if (expected >= 4 || records[i].key_len != expected_lengths[expected] ||
+                memcmp(keys + records[i].key_offset, expected_keys[expected], records[i].key_len) != 0 ||
+                records[i].value != (value_t)(expected + 1)) {
+                fprintf(stderr, "[error] batched iterator returned an unexpected entry at %zu\n", expected);
+                have_error = 1;
+            }
+        }
+        seen += count;
+    }
+    if (seen != 4 || !finished || hattrie_iter_read_batch(iter, keys, sizeof(keys), records, 2, &required, &finished) != 0) {
+        fprintf(stderr, "[error] batched iterator exhaustion state is invalid\n");
+        have_error = 1;
+    }
+    hattrie_iter_free(iter);
+    hattrie_free(trie);
+
+    required = 99;
+    if (hattrie_iter_read_batch(NULL, keys, sizeof(keys), records, 2, &required, &finished) != 0 || required != 0 || !finished) {
+        fprintf(stderr, "[error] batched iterator accepted a null iterator\n");
+        have_error = 1;
+    }
+
+    fprintf(stderr, "done.\n");
+}
+
 
 void test_hattrie_clear_resets_root()
 {
@@ -792,6 +853,7 @@ int main()
     test_hattrie_clear_resets_root();
     test_hattrie_key_length_limit();
     test_hattrie_fused_iteration();
+    test_hattrie_batch_iteration();
 
     setup();
     test_hattrie_insert();

@@ -897,3 +897,40 @@ bool hattrie_iter_read(hattrie_iter_t* i, bool advance, const char** key, size_t
     if (val != NULL) *val = *current_val;
     return true;
 }
+
+
+size_t hattrie_iter_read_batch(hattrie_iter_t* i, char* keys, size_t keys_size,
+                               hattrie_iter_record_t* records, size_t records_size,
+                               size_t* required_keys_size, bool* finished)
+{
+    if (required_keys_size != NULL) *required_keys_size = 0;
+    if (finished != NULL) *finished = hattrie_iter_finished(i);
+    if (i == NULL || records_size == 0 || records == NULL || (keys_size > 0 && keys == NULL)) {
+        return 0;
+    }
+
+    size_t count = 0;
+    size_t keys_used = 0;
+    while (count < records_size && !hattrie_iter_finished(i)) {
+        size_t key_len = 0;
+        const char* key = hattrie_iter_key(i, &key_len);
+        value_t* value = hattrie_iter_val(i);
+        if (key == NULL || value == NULL) break;
+
+        if (key_len > keys_size - keys_used) {
+            if (required_keys_size != NULL) {
+                *required_keys_size = size_add_or_die(keys_used, key_len);
+            }
+            break;
+        }
+        if (key_len > 0) memcpy(keys + keys_used, key, key_len);
+        records[count].key_offset = keys_used;
+        records[count].key_len = key_len;
+        records[count].value = *value;
+        keys_used += key_len;
+        count++;
+        hattrie_iter_next(i);
+    }
+    if (finished != NULL) *finished = hattrie_iter_finished(i);
+    return count;
+}

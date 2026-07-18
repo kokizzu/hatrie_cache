@@ -47,6 +47,11 @@ const (
 )
 
 const (
+	defaultHatTrieScanBatchEntries  = 256
+	defaultHatTrieScanBatchKeyBytes = 4 << 10
+)
+
+const (
 	DATAVALUE_TYPE_NULL uint8 = iota
 	DATAVALUE_TYPE_COUNTER
 	DATAVALUE_TYPE_RAW_BYTES
@@ -3066,18 +3071,21 @@ type scanExpiredEntry struct {
 }
 
 type hatTrieScanCursor struct {
-	iter       *C.hattrie_iter_t
-	prefix     string
-	generation uint64
-	advance    C.bool
-	loaded     bool
-	finished   bool
-	entry      Entry
-	expired    []scanExpiredEntry
-	visited    int
-	keyPtr     *C.char
-	keyLen     C.size_t
-	value      C.value_t
+	iter              *C.hattrie_iter_t
+	prefix            string
+	generation        uint64
+	loaded            bool
+	finished          bool
+	entry             Entry
+	expired           []scanExpiredEntry
+	visited           int
+	batchRecords      [defaultHatTrieScanBatchEntries]C.hattrie_iter_record_t
+	batchKeys         []byte
+	batchCount        int
+	batchIndex        int
+	batchRequiredKeys int
+	batchFinished     bool
+	nativeBatchReads  int
 }
 
 func (ht *HatTrie) newScanCursorLocked(prefix string, sorted bool) (*hatTrieScanCursor, error) {
@@ -3094,7 +3102,12 @@ func (ht *HatTrie) newScanCursorLocked(prefix string, sorted bool) (*hatTrieScan
 		iter = C.hattrie_iter_with_prefix(ht.root, C.bool(sorted), cprefix, prefixLen)
 		runtime.KeepAlive(prefix)
 	}
-	return &hatTrieScanCursor{iter: iter, prefix: prefix, generation: ht.mutationEpoch}, nil
+	return &hatTrieScanCursor{
+		iter:       iter,
+		prefix:     prefix,
+		generation: ht.mutationEpoch,
+		batchKeys:  make([]byte, defaultHatTrieScanBatchKeyBytes),
+	}, nil
 }
 
 func (cursor *hatTrieScanCursor) loadCurrentEntry() bool {
@@ -3105,19 +3118,67 @@ func (cursor *hatTrieScanCursor) loadCurrentEntry() bool {
 		return true
 	}
 
-	if !bool(C.hattrie_iter_read(cursor.iter, cursor.advance, &cursor.keyPtr, &cursor.keyLen, &cursor.value)) {
-		cursor.finished = true
+	if !cursor.loadNativeBatch() {
 		return false
 	}
-	cursor.advance = C.bool(false)
-	suffix := unsafe.Slice((*byte)(unsafe.Pointer(cursor.keyPtr)), int(cursor.keyLen))
+	record := cursor.batchRecords[cursor.batchIndex]
+	cursor.batchIndex++
+	keyOffset := int(record.key_offset)
+	keyLength := int(record.key_len)
+	suffix := cursor.batchKeys[keyOffset : keyOffset+keyLength]
 	key := scanKeyFromBytes(cursor.prefix, suffix)
 	hval := HatValue{}
-	hval.fromValue(cursor.value)
+	hval.fromValue(record.value)
 	cursor.entry = Entry{Key: key, Value: hval}
 	cursor.loaded = true
 	cursor.visited++
 	return true
+}
+
+func (cursor *hatTrieScanCursor) loadNativeBatch() bool {
+	if cursor == nil || cursor.finished {
+		return false
+	}
+	if cursor.batchIndex < cursor.batchCount {
+		return true
+	}
+	if cursor.batchFinished {
+		cursor.finished = true
+		return false
+	}
+
+	for {
+		if cursor.batchRequiredKeys > len(cursor.batchKeys) {
+			cursor.batchKeys = make([]byte, cursor.batchRequiredKeys)
+		}
+		cursor.batchRequiredKeys = 0
+		cursor.batchCount = 0
+		cursor.batchIndex = 0
+		var required C.size_t
+		var finished C.bool
+		count := C.hattrie_iter_read_batch(
+			cursor.iter,
+			(*C.char)(unsafe.Pointer(unsafe.SliceData(cursor.batchKeys))),
+			C.size_t(len(cursor.batchKeys)),
+			&cursor.batchRecords[0],
+			C.size_t(len(cursor.batchRecords)),
+			&required,
+			&finished,
+		)
+		runtime.KeepAlive(cursor)
+		cursor.nativeBatchReads++
+		cursor.batchCount = int(count)
+		cursor.batchRequiredKeys = int(required)
+		cursor.batchFinished = bool(finished)
+		if cursor.batchCount > 0 {
+			return true
+		}
+		if cursor.batchRequiredKeys > len(cursor.batchKeys) {
+			continue
+		}
+		cursor.finished = true
+		return false
+	}
 }
 
 func scanKeyFromBytes(prefix string, suffix []byte) string {
@@ -3150,7 +3211,6 @@ func (cursor *hatTrieScanCursor) consume() {
 	}
 	cursor.loaded = false
 	cursor.entry = Entry{}
-	cursor.advance = C.bool(true)
 }
 
 func (cursor *hatTrieScanCursor) closeLocked(ht *HatTrie) {
@@ -3166,6 +3226,11 @@ func (cursor *hatTrieScanCursor) closeLocked(ht *HatTrie) {
 	cursor.loaded = false
 	cursor.finished = true
 	cursor.entry = Entry{}
+	cursor.batchKeys = nil
+	cursor.batchCount = 0
+	cursor.batchIndex = 0
+	cursor.batchRequiredKeys = 0
+	cursor.batchFinished = true
 	for _, entry := range expired {
 		if ht.deleteKnownLocked(entry.key, entry.value) {
 			ht.recordExpirationLocked(entry.key)

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -39,6 +40,63 @@ func TestScanKeyFromBytesUsesOneAllocation(t *testing.T) {
 	}
 	if allocations > 1 {
 		t.Fatalf("scanKeyFromBytes() allocations = %.1f, want at most 1", allocations)
+	}
+}
+
+func TestScanCursorReadsEntriesInNativeBatches(t *testing.T) {
+	ht := newTestTrie(t)
+	for idx := 0; idx < 300; idx++ {
+		ht.UpsertString(fmt.Sprintf("key:%03d", idx), "value")
+	}
+
+	ht.mu.Lock()
+	cursor, err := ht.newScanCursorLocked("", true)
+	if err != nil {
+		ht.mu.Unlock()
+		t.Fatalf("newScanCursorLocked() error = %v", err)
+	}
+	count := 0
+	for {
+		_, ok := cursor.currentLiveEntryLocked(ht, time.Time{})
+		if !ok {
+			break
+		}
+		count++
+		cursor.consume()
+	}
+	batchReads := cursor.nativeBatchReads
+	cursor.closeLocked(ht)
+	ht.mu.Unlock()
+
+	if count != 300 {
+		t.Fatalf("scanned entries = %d, want 300", count)
+	}
+	if batchReads != 2 {
+		t.Fatalf("native batch reads = %d, want 2", batchReads)
+	}
+}
+
+func TestScanCursorGrowsNativeBatchBufferForLongKey(t *testing.T) {
+	ht := newTestTrie(t)
+	longKey := strings.Repeat("k", defaultHatTrieScanBatchKeyBytes+1)
+	ht.UpsertString(longKey, "long")
+
+	ht.mu.Lock()
+	cursor, err := ht.newScanCursorLocked("", true)
+	if err != nil {
+		ht.mu.Unlock()
+		t.Fatalf("newScanCursorLocked() error = %v", err)
+	}
+	entry, ok := cursor.currentLiveEntryLocked(ht, time.Time{})
+	batchReads := cursor.nativeBatchReads
+	cursor.closeLocked(ht)
+	ht.mu.Unlock()
+
+	if !ok || entry.Key != longKey {
+		t.Fatalf("long-key scan = %q/%v, want preserved key", entry.Key, ok)
+	}
+	if batchReads != 2 {
+		t.Fatalf("long-key native batch reads = %d, want resize retry in 2 calls", batchReads)
 	}
 }
 
