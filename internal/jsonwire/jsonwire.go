@@ -112,6 +112,14 @@ func StreamingGzipBytesReaderWithRelease(data []byte, release func([]byte)) io.R
 	}
 }
 
+func StreamingGzipWriterReader(write func(io.Writer) error) io.Reader {
+	return &StreamingGzipWriterBody{
+		streamingGzipBody: newStreamingGzipBody(func(writer *gzip.Writer) error {
+			return write(writer)
+		}, nil),
+	}
+}
+
 type streamingGzipBody struct {
 	mu        sync.Mutex
 	reader    *io.PipeReader
@@ -256,6 +264,10 @@ type StreamingGzipBytesBody struct {
 }
 
 type StreamingGzipJSONBody struct {
+	*streamingGzipBody
+}
+
+type StreamingGzipWriterBody struct {
 	*streamingGzipBody
 }
 

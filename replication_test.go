@@ -133,6 +133,70 @@ func TestReplicationBatchEnvelopeSharesMetadata(t *testing.T) {
 	}
 }
 
+func TestReplicationSyncBatchRequestBodyRoundTripsProtobuf(t *testing.T) {
+	payloads := []replicationSyncPayload{
+		{key: "session:1", binaryValue: []byte{0, 1, 2, 3}},
+		{key: "session:\x00two", binaryValue: []byte{255, 4, 5}},
+	}
+	for _, tt := range []struct {
+		name                 string
+		compressionThreshold int
+		wantEncoding         string
+	}{
+		{name: "uncompressed", compressionThreshold: 0},
+		{name: "streaming gzip", compressionThreshold: 1, wantEncoding: "gzip"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body, contentType, contentEncoding, err := replicationSyncBatchRequestBody(
+				payloads, replicationSetCompactCommand, "node-a", 42, "fingerprint-a", tt.compressionThreshold,
+			)
+			if err != nil {
+				t.Fatalf("replicationSyncBatchRequestBody() error = %v", err)
+			}
+			if contentType != commandWireContentTypeProtobuf || contentEncoding != tt.wantEncoding {
+				t.Fatalf("content type/encoding = %q/%q, want protobuf/%q", contentType, contentEncoding, tt.wantEncoding)
+			}
+			reader := body
+			if contentEncoding == "gzip" {
+				gzipReader, err := gzip.NewReader(body)
+				if err != nil {
+					t.Fatalf("gzip.NewReader() error = %v", err)
+				}
+				defer gzipReader.Close()
+				reader = gzipReader
+			}
+			data, err := io.ReadAll(reader)
+			if err != nil {
+				t.Fatalf("ReadAll(request body) error = %v", err)
+			}
+			if closer, ok := body.(io.Closer); ok {
+				if err := closer.Close(); err != nil {
+					t.Fatalf("Close(request body) error = %v", err)
+				}
+			}
+			if got := len(data); got != replicationSyncBatchProtoSize(payloads, replicationSetCompactCommand, "node-a", 42, "fingerprint-a") {
+				t.Fatalf("protobuf size = %d, want exact estimate %d", got, replicationSyncBatchProtoSize(payloads, replicationSetCompactCommand, "node-a", 42, "fingerprint-a"))
+			}
+			decoded, err := decodeCommandRequestProto(bytes.NewReader(data), int64(len(data)))
+			if err != nil {
+				t.Fatalf("decodeCommandRequestProto() error = %v", err)
+			}
+			if decoded.Command != replicationBatchEnvelopeCommand || len(decoded.Batch) != len(payloads) {
+				t.Fatalf("decoded envelope = %#v, want two sync payloads", decoded)
+			}
+			if source, sequence, fingerprint := replicationSafetyMetadata(decoded); source != "node-a" || sequence != 42 || fingerprint != "fingerprint-a" {
+				t.Fatalf("decoded metadata = %q/%d/%q, want node-a/42/fingerprint-a", source, sequence, fingerprint)
+			}
+			for idx, payload := range payloads {
+				child := decoded.Batch[idx]
+				if child.Command != replicationSetCompactCommand || child.Key != payload.key || !bytes.Equal(child.BinaryValue, payload.binaryValue) {
+					t.Fatalf("decoded child %d = %#v, want %q compact binary", idx, child, payload.key)
+				}
+			}
+		})
+	}
+}
+
 func TestDeferredReplicationBatchEnvelopeBorrowsPayloads(t *testing.T) {
 	payloads := []CacheCommandRequest{
 		{Command: replicationSetCompactCommand, Key: "session:1", BinaryValue: []byte("one")},
@@ -296,7 +360,7 @@ func TestHTTPReplicatorDeferredCompactBatchFallsBackToV2(t *testing.T) {
 		if !ok {
 			t.Fatalf("replicationCommandPayload(%q) ok = false", key)
 		}
-		groups = replicator.appendReplicationPayloadToTargetGroups(groups, indexes, 2, []TopologyNode{targetNode}, payload, "fingerprint-a")
+		groups = replicator.appendReplicationSyncPayloadToTargetGroups(groups, indexes, 2, []TopologyNode{targetNode}, payload.Key, payload.BinaryValue, "fingerprint-a")
 	}
 	result := replicator.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, groups)
 	if len(result.Targets) != 1 || !result.Targets[0].OK || requests.Load() != 2 {
@@ -480,6 +544,47 @@ func TestHTTPReplicatorJSONWireSendsLegacySetDirectly(t *testing.T) {
 	case extra := <-requests:
 		t.Fatalf("unexpected JSON wire fallback request = %#v", extra)
 	default:
+	}
+}
+
+func TestHTTPReplicatorJSONWireSendsCompactSyncGroupAsLegacyBatch(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	source.UpsertString("session:2", "two")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Client: target.Client(), WireFormat: CommandWireFormatJSON})
+	targetNode := TopologyNode{ID: "node-b", Address: target.URL}
+	groups := make([]replicationTaskGroup, 0, 1)
+	indexes := make(map[TopologyNode]int, 1)
+	for _, key := range []string{"session:1", "session:2"} {
+		payload, ok := replicationCommandPayload(source, key, replicationPayloadSet)
+		if !ok {
+			t.Fatalf("replicationCommandPayload(%q) ok = false", key)
+		}
+		groups = replicator.appendReplicationSyncPayloadToTargetGroups(groups, indexes, 2, []TopologyNode{targetNode}, payload.Key, payload.BinaryValue, "fingerprint-a")
+	}
+	result := replicator.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, groups)
+	if len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("JSON sync result = %#v, want success", result)
+	}
+	request := <-requests
+	if request.Command != "INTERNALBATCH" || len(request.Batch) != 2 {
+		t.Fatalf("JSON sync request = %#v, want two-item legacy batch", request)
+	}
+	for idx, payload := range request.Batch {
+		if payload.Command != "INTERNALSET" || payload.Value == "" || len(payload.BinaryValue) != 0 {
+			t.Fatalf("JSON sync child %d = %#v, want legacy JSON set", idx, payload)
+		}
+		if source, sequence, fingerprint := replicationSafetyMetadata(payload); source != "node-a" || sequence == 0 || fingerprint != "fingerprint-a" {
+			t.Fatalf("JSON sync child %d metadata = %q/%d/%q", idx, source, sequence, fingerprint)
+		}
 	}
 }
 
@@ -2901,6 +3006,47 @@ func TestReplicationRoutingSnapshotReusesPrecomputedTargets(t *testing.T) {
 	}
 	if &first[0] != &second[0] {
 		t.Fatalf("target backing arrays differ: %p != %p, want immutable snapshot reuse", &first[0], &second[0])
+	}
+}
+
+func TestReplicationSyncPayloadGroupsStayCompactWhenSplit(t *testing.T) {
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
+	targets := []TopologyNode{
+		{ID: "node-b", Address: "http://node-b"},
+		{ID: "node-c", Address: "http://node-c"},
+	}
+	groups := make([]replicationTaskGroup, 0, len(targets))
+	indexes := make(map[TopologyNode]int, len(targets))
+	for _, key := range []string{"session:1", "session:2", "session:3"} {
+		groups = replicator.appendReplicationSyncPayloadToTargetGroups(
+			groups, indexes, 3, targets, key, []byte("binary-"+key), "fingerprint-a",
+		)
+	}
+	if len(groups) != len(targets) {
+		t.Fatalf("groups = %d, want %d targets", len(groups), len(targets))
+	}
+	for idx, group := range groups {
+		if len(group.payloads) != 0 || len(group.keys) != 0 || len(group.payloadBytes) != 0 {
+			t.Fatalf("group %d generic storage = %d/%d/%d, want empty", idx, len(group.payloads), len(group.keys), len(group.payloadBytes))
+		}
+		if len(group.syncPayloads) != 3 || !group.deferredMetadata || group.metadataSource != "node-a" || group.metadataTopology != "fingerprint-a" {
+			t.Fatalf("group %d = %#v, want three compact deferred payloads", idx, group)
+		}
+	}
+
+	split := splitReplicationTaskGroupByMaxBytes(groups[0], 180)
+	if len(split) < 2 {
+		t.Fatalf("split groups = %d, want byte cap to create multiple groups", len(split))
+	}
+	total := 0
+	for idx, group := range split {
+		total += len(group.syncPayloads)
+		if len(group.payloads) != 0 || !group.deferredMetadata || group.metadataSource != "node-a" || group.metadataTopology != "fingerprint-a" {
+			t.Fatalf("split group %d = %#v, want compact metadata-preserving group", idx, group)
+		}
+	}
+	if total != 3 {
+		t.Fatalf("split payload total = %d, want 3", total)
 	}
 }
 

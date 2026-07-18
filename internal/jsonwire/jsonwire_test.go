@@ -269,6 +269,39 @@ func TestStreamingGzipJSONReaderPropagatesEncodeErrors(t *testing.T) {
 	}
 }
 
+func TestStreamingGzipWriterReaderStreamsCallback(t *testing.T) {
+	body := StreamingGzipWriterReader(func(writer io.Writer) error {
+		_, err := io.WriteString(writer, "streamed payload")
+		return err
+	})
+	compressed, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll(streaming writer) error = %v", err)
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatalf("NewReader(streaming writer) error = %v", err)
+	}
+	decompressed, err := io.ReadAll(reader)
+	if closeErr := reader.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatalf("ReadAll(decompressed streaming writer) error = %v", err)
+	}
+	if string(decompressed) != "streamed payload" {
+		t.Fatalf("decompressed streaming writer = %q, want streamed payload", decompressed)
+	}
+}
+
+func TestStreamingGzipWriterReaderPropagatesCallbackError(t *testing.T) {
+	want := errors.New("encode failed")
+	body := StreamingGzipWriterReader(func(io.Writer) error { return want })
+	if _, err := io.ReadAll(body); !errors.Is(err, want) {
+		t.Fatalf("ReadAll(streaming writer) error = %v, want encode failed", err)
+	}
+}
+
 func TestAcquireGzipWriterCompressesAndReleases(t *testing.T) {
 	var compressed bytes.Buffer
 	writer := AcquireGzipWriter(&compressed)
