@@ -252,24 +252,25 @@ In this run HAT-trie is faster on all 16 measured Tarantool-comparable rows.
 Run:
 
 ```sh
-go test . -run NoTestsForBenchmark -bench BenchmarkHTTPReplicatorSyncAllBatching -benchmem -benchtime=1x
+make run CMD='go test -run=NONE -bench=BenchmarkHTTPReplicatorSyncAllBatching/Batched10k -benchmem -benchtime=3x -count=3'
 ```
 
 `BenchmarkHTTPReplicatorSyncAllBatching` syncs 10,000 leader-owned keys to one
-local HTTP target. `Batched10k` uses one SyncAll page and native
-`INTERNALBATCH`; `Unbatched10k` uses page size 1 to model the previous
-one-request-per-key path.
+local HTTP target. `Batched10k` uses one SyncAll page and native protobuf
+replication. The before and after rows are medians from identical three-run
+commands on the same AMD Ryzen 9 5950X host.
 
 | Mode | Time/op | requests/op | wire_B/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Batched 10k | 153,473,837 ns | 1 | 147,521 | 56,366,320 | 980,814 |
-| Unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
+| Before optimization (`b897b64`) | 162,195,812 ns | 1 | 144,227 | 57,035,706 | 1,040,310 |
+| Current optimized (`ae64ce3`) | 46,480,194 ns | 1 | 87,103 | 12,109,898 | 133,612 |
+| Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
-The batching request reduction is 10,000x for this single-target sync. In this
-local benchmark the batched path is about 335x faster, sends about 14.5x fewer
-request-body bytes, uses about 31.8x less heap, and performs about 206x fewer
-allocations. Header bytes are not included in `wire_B/op`, so the real network
-savings are larger than the body-only metric.
+The current batched path is 3.49x faster than the pre-pass batched path, sends
+1.66x fewer request-body bytes, uses 4.71x less heap, and performs 7.79x fewer
+allocations. The historical batching request reduction is 10,000x for this
+single-target sync. Header bytes are not included in `wire_B/op`, so the real
+network savings from batching are larger than the body-only metric.
 
 ## HAT-trie vs Redis
 

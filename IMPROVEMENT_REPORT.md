@@ -1,6 +1,6 @@
 # Improvement Report
 
-Date: 2026-07-17
+Date: 2026-07-18
 
 ## Scope
 
@@ -28,6 +28,11 @@ after the first report pass.
 | `2c24768` | Preflight replication batches before apply | Batch receivers validate every item before mutation, preventing partial writes when a later batch entry is invalid. |
 | `675bccc` | Benchmark replication batching | A 10k-key local SyncAll benchmark now compares batched and unbatched replication request, wire, CPU, heap, and allocation costs. |
 | `2f3deb6` | multi-node replication chaos tests | Real-server tests now cover follower promotion after primary offline marking and stale topology fingerprint rejection. |
+| `7a69306` | Snapshot replication routing per page | Anti-entropy sync clones topology and election state once per page instead of once per key. |
+| `f187b83` | Shared replication batch metadata | `INTERNALBATCHV2` carries source, sequence, and topology metadata once on the envelope with automatic legacy fallback. |
+| `d471652` | Direct sync target groups | Sync builds per-target batches directly and avoids an intermediate task list and regrouping pass. |
+| `70775ee` | Typed binary replication snapshots | Protobuf replication uses compact binary values, persists them through async outboxes, and retries legacy JSON for older peers. |
+| `ae64ce3` | Collection allocation reductions | Two-value set reads, priority-queue string pushes, and plain-string radix prefix responses allocate less while preserving generic fallbacks. |
 
 ## Operational Impact
 
@@ -54,19 +59,27 @@ after the first report pass.
   path in the measured run.
 - Multi-node chaos tests now exercise election-state changes and topology
   fingerprint mismatches through real HTTP monitoring servers.
+- Sync routing, metadata, grouping, and typed snapshots reduce the current
+  10k-key batched path to one request, about 12.11 MB of heap, and about 134k
+  allocations in the controlled median run.
+- Small-set reads are 2.86x faster, plain-string radix scans are 2.02x faster,
+  and priority-queue string push/pop is 1.14x faster in the focused medians.
 
 ## Replication Batching Measurement
 
-The focused local benchmark used 10,000 keys and `-benchtime=1x` to keep the
-unbatched comparison bounded:
+The current controlled comparison used 10,000 keys, `-benchtime=3x`, and
+`-count=3` on the same AMD Ryzen 9 5950X host:
 
 | Case | Time/op | Requests/op | Wire B/op | Heap B/op | Allocs/op |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Batched10k | 153,473,837 ns | 1 | 147,521 | 56,366,320 | 980,814 |
-| Unbatched10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
+| Before optimization (`b897b64`) | 162,195,812 ns | 1 | 144,227 | 57,035,706 | 1,040,310 |
+| Current optimized (`ae64ce3`) | 46,480,194 ns | 1 | 87,103 | 12,109,898 | 133,612 |
+| Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
-Measured deltas: about 335x faster, 10,000x fewer requests, 14.5x fewer body
-bytes, 31.8x less heap, and 206x fewer allocations for the batched path.
+The five-commit pass is 3.49x faster, sends 1.66x fewer body bytes, uses 4.71x
+less heap, and performs 7.79x fewer allocations than its batched baseline. The
+historical unbatched row remains as evidence of the original 10,000x request
+reduction; it is not used to attribute the later routing and encoding gains.
 
 ## Verification
 
