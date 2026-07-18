@@ -125,6 +125,20 @@ func marshalLevelDBEntryBinary(entry snapshotEntry) ([]byte, error) {
 	return writer.bytes(), nil
 }
 
+func marshalLevelDBStringEntryBinary(key string, value string) ([]byte, error) {
+	capacity, err := levelDBBinaryRecordCapacity(key, "string", int64(len(value)), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(key)
+	writer.writeString("string")
+	writer.writeString(value)
+	writer.writeTimePtr(nil)
+	writer.writeKeyStatsPtr(nil)
+	return writer.bytes(), nil
+}
+
 func marshalLevelDBBytesEntryBinary(key string, raw []byte, expiresAt *time.Time, stats *KeyStats) ([]byte, error) {
 	capacity, err := levelDBBinaryRecordCapacity(key, "bytes", int64(len(raw)), expiresAt, stats)
 	if err != nil {

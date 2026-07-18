@@ -26,6 +26,7 @@ type CacheCommandRequest struct {
 	Priority    *int64                `json:"priority,omitempty"`
 	TTLSeconds  *int64                `json:"ttl_seconds,omitempty"`
 	UnixSeconds *int64                `json:"unix_seconds,omitempty"`
+	BinaryValue []byte                `json:"-"`
 }
 
 type CacheCommandResponse struct {
@@ -1109,7 +1110,7 @@ func publicScalarBatchCommandCode(command string) (publicScalarBatchCommand, str
 		return publicScalarBatchInvalid, "command is required", true
 	case "BATCH":
 		return publicScalarBatchInvalid, "nested BATCH is not supported", true
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand:
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand:
 		return publicScalarBatchInvalid, "internal replication command " + command + " is not allowed", true
 	case "GET", "GETSTR":
 		return publicScalarBatchGet, "", true
@@ -1297,7 +1298,7 @@ func validatePublicCommandBatchPayload(request CacheCommandRequest, index int) e
 	switch command {
 	case "BATCH":
 		return fmt.Errorf("batch value %d: nested BATCH is not supported", index)
-	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand:
+	case "INTERNALSET", "INTERNALDEL", "INTERNALBATCH", replicationBatchEnvelopeCommand, replicationSetBinaryCommand:
 		return fmt.Errorf("batch value %d: internal replication command %s is not allowed", index, command)
 	default:
 		return nil
@@ -2604,6 +2605,41 @@ func (ht *HatTrie) commandDumpEntryLocked(key string) (string, bool, error) {
 	return string(data), true, nil
 }
 
+func (ht *HatTrie) commandDumpEntryBinary(key string) ([]byte, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	return ht.commandDumpEntryBinaryLocked(key)
+}
+
+func (ht *HatTrie) commandDumpEntryBinaryLocked(key string) ([]byte, bool, error) {
+	hval := ht.peekCachedLocked(key)
+	if hval.Empty() {
+		ht.recordReadLocked(false, key)
+		return nil, false, nil
+	}
+	if hval.IsStringAtRaws() && ht.expires[key].IsZero() {
+		data, err := marshalLevelDBStringEntryBinary(key, ht.raws.stringValue(hval.Index))
+		if err != nil {
+			ht.recordReadLocked(false, key)
+			return nil, false, err
+		}
+		ht.recordReadLocked(true, key)
+		return data, true, nil
+	}
+	entry, err := ht.snapshotEntryWithoutStatsLocked(Entry{Key: key, Value: hval})
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
+	data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return nil, false, err
+	}
+	ht.recordReadLocked(true, key)
+	return data, true, nil
+}
+
 func commandDumpStringJSON(key string, value string) string {
 	var builder strings.Builder
 	builder.Grow(len(key) + len(value) + 36)
@@ -2656,7 +2692,7 @@ func executePreparedInternalReplicationCommand(trie *HatTrie, request CacheComma
 		return commandError(ErrNilHatTrie.Error())
 	}
 	switch normalizedCommand(request.Command) {
-	case "INTERNALSET":
+	case "INTERNALSET", replicationSetBinaryCommand:
 		if operation == nil {
 			return commandError("prepared internal set operation is required")
 		}
@@ -2672,6 +2708,20 @@ func executePreparedInternalReplicationCommand(trie *HatTrie, request CacheComma
 	default:
 		return commandError("prepared internal replication command must be INTERNALSET or INTERNALDEL")
 	}
+}
+
+func commandSnapshotBinaryOperation(key string, payload []byte) (snapshotOperation, error) {
+	if len(payload) == 0 {
+		return snapshotOperation{}, errors.New("binary snapshot entry is required")
+	}
+	entry, err := decodeLevelDBEntry(payload)
+	if err != nil {
+		return snapshotOperation{}, err
+	}
+	if entry.Key != key {
+		return snapshotOperation{}, errors.New("snapshot entry key does not match request key")
+	}
+	return snapshotOperationForEntry(entry)
 }
 
 func commandSnapshotOperation(key string, payload string) (snapshotOperation, error) {

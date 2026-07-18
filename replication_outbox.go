@@ -42,8 +42,9 @@ type replicationOutboxJob struct {
 }
 
 type replicationOutboxTask struct {
-	Target  TopologyNode        `json:"target"`
-	Payload CacheCommandRequest `json:"payload"`
+	Target      TopologyNode        `json:"target"`
+	Payload     CacheCommandRequest `json:"payload"`
+	BinaryValue []byte              `json:"binary_value,omitempty"`
 }
 
 func OpenReplicationOutbox(path string) (*ReplicationOutboxStore, error) {
@@ -285,8 +286,9 @@ func newReplicationOutboxJob(job replicationJob) replicationOutboxJob {
 	tasks := make([]replicationOutboxTask, 0, len(job.tasks))
 	for _, task := range job.tasks {
 		tasks = append(tasks, replicationOutboxTask{
-			Target:  task.target,
-			Payload: task.payload,
+			Target:      task.target,
+			Payload:     task.payload,
+			BinaryValue: task.payload.BinaryValue,
 		})
 	}
 	return replicationOutboxJob{
@@ -304,6 +306,7 @@ func (record replicationOutboxJob) replicationJob() replicationJob {
 			target:  task.Target,
 			payload: task.Payload,
 		})
+		tasks[len(tasks)-1].payload.BinaryValue = task.BinaryValue
 	}
 	return replicationJob{
 		id:         record.ID,

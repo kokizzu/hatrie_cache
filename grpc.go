@@ -635,10 +635,11 @@ func cacheCommandRequestFromProto(request *hatriecachev1.CommandRequest) CacheCo
 		return CacheCommandRequest{}
 	}
 	out := CacheCommandRequest{
-		Command: request.GetCommand(),
-		Key:     request.GetKey(),
-		Value:   request.GetValue(),
-		Subkey:  request.GetSubkey(),
+		Command:     request.GetCommand(),
+		Key:         request.GetKey(),
+		Value:       request.GetValue(),
+		Subkey:      request.GetSubkey(),
+		BinaryValue: append([]byte(nil), request.GetBinaryValue()...),
 	}
 	if request.TtlSeconds != nil {
 		ttl := request.GetTtlSeconds()

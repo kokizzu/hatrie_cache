@@ -30,6 +30,7 @@ const defaultReplicationSyncKeyPageSize = 1024
 const replicationLinearGroupTaskLimit = 16
 const replicationLinearGroupTargetLimit = 4
 const replicationBatchEnvelopeCommand = "INTERNALBATCHV2"
+const replicationSetBinaryCommand = "INTERNALSETV2"
 
 var (
 	errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
@@ -157,16 +158,16 @@ type ReplicationQueueStats struct {
 }
 
 type ReplicationTargetResult struct {
-	Node                     string     `json:"node"`
-	Key                      string     `json:"key,omitempty"`
-	Address                  string     `json:"address,omitempty"`
-	OK                       bool       `json:"ok"`
-	Status                   int        `json:"status,omitempty"`
-	Error                    string     `json:"error,omitempty"`
-	CircuitOpen              bool       `json:"circuit_open,omitempty"`
-	CircuitState             string     `json:"circuit_state,omitempty"`
-	CircuitOpenUntil         *time.Time `json:"circuit_open_until,omitempty"`
-	unsupportedBatchEnvelope bool
+	Node                        string     `json:"node"`
+	Key                         string     `json:"key,omitempty"`
+	Address                     string     `json:"address,omitempty"`
+	OK                          bool       `json:"ok"`
+	Status                      int        `json:"status,omitempty"`
+	Error                       string     `json:"error,omitempty"`
+	CircuitOpen                 bool       `json:"circuit_open,omitempty"`
+	CircuitState                string     `json:"circuit_state,omitempty"`
+	CircuitOpenUntil            *time.Time `json:"circuit_open_until,omitempty"`
+	unsupportedTypedReplication bool
 }
 
 type replicationPayloadKind int
@@ -1850,7 +1851,30 @@ func (replicator *HTTPReplicator) executeReplicationTarget(ctx context.Context, 
 func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Context, target TopologyNode, payloads []CacheCommandRequest) ReplicationTargetResult {
 	replicator.recordReplicationBatchSize(target, len(payloads))
 	if len(payloads) == 1 {
-		return replicator.executeReplicationTarget(ctx, target, payloads[0])
+		payload := payloads[0]
+		if replicator.wireFormat == CommandWireFormatJSON {
+			legacy, err := replicationLegacyPayload(payload)
+			if err != nil {
+				return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+			}
+			return replicator.executeReplicationTarget(ctx, target, legacy)
+		}
+		result := replicator.executeReplicationTarget(ctx, target, payload)
+		if !result.unsupportedTypedReplication {
+			return result
+		}
+		legacy, err := replicationLegacyPayload(payload)
+		if err != nil {
+			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+		}
+		return replicator.executeReplicationTarget(ctx, target, legacy)
+	}
+	if replicator.wireFormat == CommandWireFormatJSON {
+		legacyPayload, err := replicationBatchPayload(payloads)
+		if err != nil {
+			return ReplicationTargetResult{Node: target.ID, Address: target.Address, Error: err.Error()}
+		}
+		return replicator.executeReplicationTarget(ctx, target, legacyPayload)
 	}
 	payload, err := replicationBatchEnvelopePayload(payloads)
 	if err != nil {
@@ -1861,7 +1885,7 @@ func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Cont
 		}
 	}
 	result := replicator.executeReplicationTarget(ctx, target, payload)
-	if !result.unsupportedBatchEnvelope {
+	if !result.unsupportedTypedReplication {
 		return result
 	}
 	legacyPayload, err := replicationBatchPayload(payloads)
@@ -1878,12 +1902,34 @@ func (replicator *HTTPReplicator) executeReplicationTargetBatch(ctx context.Cont
 func replicationBatchPayload(payloads []CacheCommandRequest) (CacheCommandRequest, error) {
 	batch := make([]CacheCommandRequest, len(payloads))
 	for idx, payload := range payloads {
-		batch[idx] = payload
+		legacy, err := replicationLegacyPayload(payload)
+		if err != nil {
+			return CacheCommandRequest{}, fmt.Errorf("replication batch payload %d: %w", idx, err)
+		}
+		batch[idx] = legacy
 	}
 	return CacheCommandRequest{
 		Command: "INTERNALBATCH",
 		Batch:   batch,
 	}, nil
+}
+
+func replicationLegacyPayload(payload CacheCommandRequest) (CacheCommandRequest, error) {
+	if normalizedCommand(payload.Command) != replicationSetBinaryCommand {
+		return payload, nil
+	}
+	operation, err := commandSnapshotBinaryOperation(strings.TrimSpace(payload.Key), payload.BinaryValue)
+	if err != nil {
+		return CacheCommandRequest{}, err
+	}
+	data, err := marshalSnapshotEntryJSON(operation.entry)
+	if err != nil {
+		return CacheCommandRequest{}, err
+	}
+	payload.Command = "INTERNALSET"
+	payload.Value = string(data)
+	payload.BinaryValue = nil
+	return payload, nil
 }
 
 func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheCommandRequest, error) {
@@ -1988,7 +2034,7 @@ func (replicator *HTTPReplicator) beforeReplicationTarget(target TopologyNode) (
 }
 
 func (replicator *HTTPReplicator) afterReplicationTarget(target TopologyNode, attemptState string, result ReplicationTargetResult) ReplicationTargetResult {
-	if result.unsupportedBatchEnvelope {
+	if result.unsupportedTypedReplication {
 		return result
 	}
 	if !replicator.replicationCircuitBreakerEnabled() {
@@ -2127,11 +2173,30 @@ func (replicator *HTTPReplicator) postReplicationCommand(ctx context.Context, ta
 	}
 	if !commandResponse.OK {
 		result.Error = commandResponse.Message
-		result.unsupportedBatchEnvelope = normalizedCommand(payload.Command) == replicationBatchEnvelopeCommand && commandResponse.Message == "unsupported command"
+		result.unsupportedTypedReplication = replicationResponseRejectsTypedPayload(payload, commandResponse.Message)
 		return result
 	}
 	result.OK = true
 	return result
+}
+
+func replicationResponseRejectsTypedPayload(payload CacheCommandRequest, message string) bool {
+	command := normalizedCommand(payload.Command)
+	if command != replicationSetBinaryCommand && command != replicationBatchEnvelopeCommand {
+		return false
+	}
+	if message == "unsupported command" {
+		return true
+	}
+	if command != replicationBatchEnvelopeCommand || !strings.HasPrefix(message, "internal replication batch value ") || !strings.HasSuffix(message, " must be INTERNALSET or INTERNALDEL") {
+		return false
+	}
+	for _, child := range payload.Batch {
+		if normalizedCommand(child.Command) == replicationSetBinaryCommand {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeReplicationCommandResponse(body io.Reader) (CacheCommandResponse, error) {
@@ -2169,6 +2234,7 @@ func estimatedReplicationRequestBytesWithin(payload CacheCommandRequest, thresho
 		jsonwire.EstimateJSONStringBytes(payload.Key) +
 		jsonwire.EstimateJSONStringBytes(payload.Value) +
 		jsonwire.EstimateJSONStringBytes(payload.Subkey)
+	estimate = jsonwire.AddEstimate(estimate, len(payload.BinaryValue), threshold)
 	if estimate >= threshold {
 		return threshold
 	}
@@ -2232,22 +2298,22 @@ func replicationCommandPayload(trie *HatTrie, key string, kind replicationPayloa
 	if kind == replicationPayloadDelete {
 		return CacheCommandRequest{Command: "INTERNALDEL", Key: key}, true
 	}
-	dump := trie.ExecuteCommand(CacheCommandRequest{Command: "DUMP", Key: key})
-	if !dump.OK || strings.TrimSpace(dump.Value) == "" {
+	data, ok, err := trie.commandDumpEntryBinary(key)
+	if err != nil || !ok || len(data) == 0 {
 		return CacheCommandRequest{}, false
 	}
-	return CacheCommandRequest{Command: "INTERNALSET", Key: key, Value: dump.Value}, true
+	return CacheCommandRequest{Command: replicationSetBinaryCommand, Key: key, BinaryValue: data}, true
 }
 
 func replicationCommandPayloadLocked(trie *HatTrie, key string, kind replicationPayloadKind) (CacheCommandRequest, bool) {
 	if kind == replicationPayloadDelete {
 		return CacheCommandRequest{Command: "INTERNALDEL", Key: key}, true
 	}
-	value, ok, err := trie.commandDumpEntryLocked(key)
-	if err != nil || !ok || strings.TrimSpace(value) == "" {
+	data, ok, err := trie.commandDumpEntryBinaryLocked(key)
+	if err != nil || !ok || len(data) == 0 {
 		return CacheCommandRequest{}, false
 	}
-	return CacheCommandRequest{Command: "INTERNALSET", Key: key, Value: value}, true
+	return CacheCommandRequest{Command: replicationSetBinaryCommand, Key: key, BinaryValue: data}, true
 }
 
 func replicationSafetyMetadata(request CacheCommandRequest) (string, uint64, string) {

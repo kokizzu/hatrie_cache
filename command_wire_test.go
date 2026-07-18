@@ -528,6 +528,28 @@ func TestCommandRequestBodyEncodesNativeBatchProtobuf(t *testing.T) {
 	}
 }
 
+func TestCommandRequestBodyRoundTripsTypedBinaryValue(t *testing.T) {
+	request := CacheCommandRequest{
+		Command:     replicationSetBinaryCommand,
+		Key:         "session:1",
+		BinaryValue: []byte{0, 1, 2, 3, 255},
+	}
+	body, contentType, contentEncoding, err := commandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
+	if err != nil {
+		t.Fatalf("commandRequestBody(binary protobuf) error = %v", err)
+	}
+	if contentType != commandWireContentTypeProtobuf || contentEncoding != "" {
+		t.Fatalf("content type/encoding = %q/%q, want protobuf/empty", contentType, contentEncoding)
+	}
+	decoded, err := decodeCommandRequestProto(body, maxMonitoringJSONRequestBytes)
+	if err != nil {
+		t.Fatalf("decodeCommandRequestProto(binary) error = %v", err)
+	}
+	if decoded.Command != request.Command || decoded.Key != request.Key || !bytes.Equal(decoded.BinaryValue, request.BinaryValue) {
+		t.Fatalf("decoded binary request = %#v, want %#v", decoded, request)
+	}
+}
+
 func TestCommandRequestBodyExportedEncodesJSONFallback(t *testing.T) {
 	request := CacheCommandRequest{
 		Command: "PUTMAP",

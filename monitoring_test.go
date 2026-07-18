@@ -882,10 +882,10 @@ func TestExecutePublicCommandBatchFastPathReplicatesCapturedWritesInOneTargetBat
 	}
 	wantValues := []string{"first", "second"}
 	for idx, payload := range payloads {
-		if payload.Command != "INTERNALSET" || payload.Key != "session:batch" {
-			t.Fatalf("replicated payload %d = %#v, want INTERNALSET session:batch", idx, payload)
+		if !isTypedReplicationSetPayload(payload, "session:batch") {
+			t.Fatalf("replicated payload %d = %#v, want typed binary session:batch", idx, payload)
 		}
-		operation, err := commandSnapshotOperation(payload.Key, payload.Value)
+		operation, err := commandSnapshotBinaryOperation(payload.Key, payload.BinaryValue)
 		if err != nil {
 			t.Fatalf("replicated payload %d snapshot error = %v", idx, err)
 		}
@@ -1898,6 +1898,40 @@ func TestInternalReplicationBatchEnvelopeAppliesSafetyOnce(t *testing.T) {
 	}
 }
 
+func TestTypedBinaryInternalSetCanonicalizesJournalEntry(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	request, ok := replicationCommandPayload(source, "session:1", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload() ok = false")
+	}
+	request.Pairs = Map{replicationMetaSourceNode: "node-a", replicationMetaSequence: "1"}
+
+	target := newTestTrie(t)
+	journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
+	}
+	defer journal.Close()
+	response, rejected := executeCacheCommand(context.Background(), target, request, commandExecutionOptions{
+		Journal:           journal,
+		ReplicationSafety: NewReplicationSafetyStore(),
+	})
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand(binary set) = %#v rejected=%v, want success", response, rejected)
+	}
+	if got := target.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: "session:1"}); !got.OK || got.Value != "one" {
+		t.Fatalf("target GETSTR = %#v, want one", got)
+	}
+	tail, err := journal.Tail(0, 10)
+	if err != nil {
+		t.Fatalf("journal Tail() error = %v", err)
+	}
+	if len(tail.Entries) != 1 || tail.Entries[0].Request.Command != "INTERNALSET" || tail.Entries[0].Request.Value == "" || len(tail.Entries[0].Request.BinaryValue) != 0 {
+		t.Fatalf("journal entry = %#v, want canonical legacy internal set", tail.Entries)
+	}
+}
+
 func TestMonitoringHandlerRejectsInvalidInternalReplicationBatchWithoutPartialMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{ReplicationAuthToken: "replica-secret"}).Handler()
@@ -2572,8 +2606,8 @@ func TestMonitoringHandlerReplicatesCommands(t *testing.T) {
 	if commandResp.Code != http.StatusOK {
 		t.Fatalf("command status = %d, want 200", commandResp.Code)
 	}
-	if gotRequest.Command != "INTERNALSET" || gotRequest.Key != "session:1" || gotRequest.Value == "" {
-		t.Fatalf("replicated request = %#v, want INTERNALSET snapshot", gotRequest)
+	if !isTypedReplicationSetPayload(gotRequest, "session:1") {
+		t.Fatalf("replicated request = %#v, want typed binary snapshot", gotRequest)
 	}
 
 	replicationResp := httptest.NewRecorder()
@@ -2733,8 +2767,8 @@ func TestMonitoringHandlerSyncsReplication(t *testing.T) {
 	}
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
-			t.Fatalf("replication sync request = %#v, want INTERNALSET snapshot", request)
+		if !isTypedReplicationSetPayload(request, "session:1") {
+			t.Fatalf("replication sync request = %#v, want typed binary snapshot", request)
 		}
 	default:
 		t.Fatal("replication sync did not reach remote target")

@@ -78,6 +78,7 @@ message CommandRequest {
   optional int64 unix_seconds = 8;
   optional int64 priority = 9;
   repeated CommandRequest batch = 10;
+  bytes binary_value = 11;
 }
 
 message CommandResponse {

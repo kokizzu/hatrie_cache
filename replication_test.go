@@ -35,6 +35,26 @@ func mustDecodeReplicationTestCommand(t *testing.T, w http.ResponseWriter, r *ht
 	return request
 }
 
+func isTypedReplicationSetPayload(request CacheCommandRequest, key string) bool {
+	if request.Command != replicationSetBinaryCommand || request.Key != key || request.Value != "" || !levelDBEntryDataIsBinary(request.BinaryValue) {
+		return false
+	}
+	entry, err := decodeLevelDBEntryForKey(key, request.BinaryValue)
+	return err == nil && entry.Key == key
+}
+
+func mustDecodeTypedReplicationSnapshot(t *testing.T, request CacheCommandRequest, key string) snapshotEntry {
+	t.Helper()
+	if request.Command != replicationSetBinaryCommand || request.Key != key || request.Value != "" {
+		t.Fatalf("replication request = %#v, want typed binary snapshot for %q", request, key)
+	}
+	entry, err := decodeLevelDBEntryForKey(key, request.BinaryValue)
+	if err != nil {
+		t.Fatalf("decode typed replication snapshot error = %v", err)
+	}
+	return entry
+}
+
 func mustDecodeReplicationBatchValues(t *testing.T, request CacheCommandRequest) []CacheCommandRequest {
 	t.Helper()
 	if request.Command != "INTERNALBATCH" && request.Command != replicationBatchEnvelopeCommand {
@@ -101,6 +121,30 @@ func TestReplicationBatchEnvelopeSharesMetadata(t *testing.T) {
 	}
 }
 
+func TestReplicationCommandPayloadUsesTypedBinaryValue(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+
+	payload, ok := replicationCommandPayload(trie, "session:1", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload() ok = false, want payload")
+	}
+	if payload.Command != replicationSetBinaryCommand || payload.Value != "" || !levelDBEntryDataIsBinary(payload.BinaryValue) {
+		t.Fatalf("replication payload = %#v, want typed binary internal set", payload)
+	}
+	operation, err := commandSnapshotBinaryOperation(payload.Key, payload.BinaryValue)
+	if err != nil {
+		t.Fatalf("commandSnapshotBinaryOperation() error = %v", err)
+	}
+	restored := newTestTrie(t)
+	if response := executePreparedInternalReplicationCommand(restored, payload, &operation); !response.OK {
+		t.Fatalf("executePreparedInternalReplicationCommand() = %#v, want success", response)
+	}
+	if got, ok, err := restored.GetStringChecked("session:1"); err != nil || !ok || got != "one" {
+		t.Fatalf("restored GetStringChecked() = %q/%v/%v, want one/true/nil", got, ok, err)
+	}
+}
+
 func TestHTTPReplicatorBatchEnvelopeFallsBackToLegacyMetadata(t *testing.T) {
 	var requests atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -144,16 +188,126 @@ func TestHTTPReplicatorBatchEnvelopeFallsBackToLegacyMetadata(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorTypedBatchFallsBackForPreviousEnvelopePeer(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if requests.Add(1) == 1 {
+			if request.Command != replicationBatchEnvelopeCommand || len(request.Batch) != 2 || request.Batch[0].Command != replicationSetBinaryCommand {
+				t.Fatalf("first request = %#v, want typed envelope batch", request)
+			}
+			writeJSON(w, commandError("internal replication batch value 0 must be INTERNALSET or INTERNALDEL"))
+			return
+		}
+		if request.Command != "INTERNALBATCH" || len(request.Batch) != 2 {
+			t.Fatalf("fallback request = %#v, want legacy batch", request)
+		}
+		for idx, payload := range request.Batch {
+			if payload.Command != "INTERNALSET" || payload.Value == "" || len(payload.BinaryValue) != 0 {
+				t.Fatalf("fallback payload %d = %#v, want legacy JSON snapshot", idx, payload)
+			}
+		}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	source.UpsertString("session:2", "two")
+	payloads := make([]CacheCommandRequest, 0, 2)
+	for _, key := range []string{"session:1", "session:2"} {
+		payload, ok := replicationCommandPayload(source, key, replicationPayloadSet)
+		if !ok {
+			t.Fatalf("replicationCommandPayload(%q) ok = false", key)
+		}
+		payloads = append(payloads, payload)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: target.Client()})
+	result := replicator.executeReplicationTargetBatch(context.Background(), TopologyNode{ID: "node-b", Address: target.URL}, payloads)
+	if !result.OK || requests.Load() != 2 {
+		t.Fatalf("typed batch result = %#v requests=%d, want successful legacy retry", result, requests.Load())
+	}
+}
+
+func TestHTTPReplicatorTypedBinaryFallsBackToLegacySet(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		requestNumber := requests.Add(1)
+		if requestNumber == 1 {
+			if request.Command != replicationSetBinaryCommand || len(request.BinaryValue) == 0 || request.Value != "" {
+				t.Fatalf("typed request = %#v, want binary internal set", request)
+			}
+			writeJSON(w, commandError("unsupported command"))
+			return
+		}
+		if request.Command != "INTERNALSET" || request.Value == "" || len(request.BinaryValue) != 0 {
+			t.Fatalf("fallback request = %#v, want legacy JSON internal set", request)
+		}
+		if _, err := commandSnapshotOperation(request.Key, request.Value); err != nil {
+			t.Fatalf("fallback snapshot JSON error = %v", err)
+		}
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	payload, ok := replicationCommandPayload(source, "session:1", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload() ok = false")
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: target.Client()})
+	result := replicator.executeReplicationTargetBatch(context.Background(), TopologyNode{ID: "node-b", Address: target.URL}, []CacheCommandRequest{payload})
+	if !result.OK || result.Error != "" {
+		t.Fatalf("typed fallback result = %#v, want success", result)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want typed request plus one legacy fallback", got)
+	}
+}
+
+func TestHTTPReplicatorJSONWireSendsLegacySetDirectly(t *testing.T) {
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		requests <- request
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	source := newTestTrie(t)
+	source.UpsertString("session:1", "one")
+	payload, ok := replicationCommandPayload(source, "session:1", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload() ok = false")
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: target.Client(), WireFormat: CommandWireFormatJSON})
+	result := replicator.executeReplicationTargetBatch(context.Background(), TopologyNode{ID: "node-b", Address: target.URL}, []CacheCommandRequest{payload})
+	if !result.OK {
+		t.Fatalf("JSON wire result = %#v, want success", result)
+	}
+	request := <-requests
+	if request.Command != "INTERNALSET" || request.Value == "" || len(request.BinaryValue) != 0 {
+		t.Fatalf("JSON wire request = %#v, want direct legacy set", request)
+	}
+	select {
+	case extra := <-requests:
+		t.Fatalf("unexpected JSON wire fallback request = %#v", extra)
+	default:
+	}
+}
+
 func replicationRequestKeys(t *testing.T, request CacheCommandRequest) []string {
 	t.Helper()
 	switch request.Command {
-	case "INTERNALSET", "INTERNALDEL":
+	case "INTERNALSET", replicationSetBinaryCommand, "INTERNALDEL":
 		return []string{request.Key}
 	case "INTERNALBATCH", replicationBatchEnvelopeCommand:
 		payloads := mustDecodeReplicationBatchValues(t, request)
 		keys := make([]string, 0, len(payloads))
 		for _, payload := range payloads {
-			if payload.Command != "INTERNALSET" && payload.Command != "INTERNALDEL" {
+			if payload.Command != "INTERNALSET" && payload.Command != replicationSetBinaryCommand && payload.Command != "INTERNALDEL" {
 				t.Fatalf("batch payload = %#v, want internal replication command", payload)
 			}
 			keys = append(keys, payload.Key)
@@ -278,8 +432,8 @@ func TestHTTPReplicatorReplicatesSetAndDeleteToOwners(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("replicated requests len = %d, want 2", len(requests))
 	}
-	if requests[0].Command != "INTERNALSET" || requests[0].Key != "session:1" || requests[0].Value == "" {
-		t.Fatalf("first replicated request = %#v, want INTERNALSET with snapshot", requests[0])
+	if !isTypedReplicationSetPayload(requests[0], "session:1") {
+		t.Fatalf("first replicated request = %#v, want typed binary snapshot", requests[0])
 	}
 	if requests[1].Command != "INTERNALDEL" || requests[1].Key != "session:1" {
 		t.Fatalf("second replicated request = %#v, want INTERNALDEL", requests[1])
@@ -778,8 +932,8 @@ func TestHTTPReplicatorAcceptsNilContext(t *testing.T) {
 	}
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
-			t.Fatalf("nil context replicated request = %#v, want INTERNALSET snapshot", request)
+		if !isTypedReplicationSetPayload(request, "session:1") {
+			t.Fatalf("nil context replicated request = %#v, want typed binary snapshot", request)
 		}
 	default:
 		t.Fatal("nil context replication did not reach remote target")
@@ -820,13 +974,10 @@ func TestHTTPReplicatorAsyncQueuesMaterializedPayload(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "session:1" {
-			t.Fatalf("async request = %#v, want INTERNALSET session:1", request)
+		if !isTypedReplicationSetPayload(request, "session:1") {
+			t.Fatalf("async request = %#v, want typed binary session:1", request)
 		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("async snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "session:1")
 		if entry.String != "first" {
 			t.Fatalf("async snapshot string = %q, want first", entry.String)
 		}
@@ -901,10 +1052,10 @@ func TestExecutePublicCommandBatchAsyncOutboxQueuesOneGroupedTargetJob(t *testin
 			t.Fatalf("task %d target = %#v, want node-b", idx, task.target)
 		}
 		payload := task.payload
-		if payload.Command != "INTERNALSET" || payload.Key != "session:outbox-batch" {
-			t.Fatalf("task %d payload = %#v, want INTERNALSET session:outbox-batch", idx, payload)
+		if !isTypedReplicationSetPayload(payload, "session:outbox-batch") {
+			t.Fatalf("task %d payload = %#v, want typed binary session:outbox-batch", idx, payload)
 		}
-		operation, err := commandSnapshotOperation(payload.Key, payload.Value)
+		operation, err := commandSnapshotBinaryOperation(payload.Key, payload.BinaryValue)
 		if err != nil {
 			t.Fatalf("task %d snapshot error = %v", idx, err)
 		}
@@ -1134,8 +1285,8 @@ func TestHTTPReplicatorAsyncOutboxReplaysPendingJobAfterRestart(t *testing.T) {
 
 	select {
 	case request := <-delivered:
-		if request.Command != "INTERNALSET" || request.Key != "session:outbox" || request.Value == "" {
-			t.Fatalf("replayed request = %#v, want materialized INTERNALSET", request)
+		if !isTypedReplicationSetPayload(request, "session:outbox") {
+			t.Fatalf("replayed request = %#v, want persisted typed binary snapshot", request)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("persisted replication job was not replayed")
@@ -1201,6 +1352,34 @@ func TestHTTPReplicatorAsyncOutboxPersistsDeadLetters(t *testing.T) {
 	}
 	if jobs := reopened.jobs(); len(jobs) != 0 {
 		t.Fatalf("persisted jobs after dead-letter = %#v, want none", jobs)
+	}
+}
+
+func TestReplicationOutboxJobPreservesTypedBinaryPayload(t *testing.T) {
+	payload := CacheCommandRequest{
+		Command:     replicationSetBinaryCommand,
+		Key:         "session:binary-outbox",
+		BinaryValue: []byte{0x48, 0x43, 0x42, 0x31, 0x01, 0x02, 0x03},
+	}
+	record := newReplicationOutboxJob(replicationJob{
+		id: 1,
+		tasks: []replicationTask{{
+			target:  TopologyNode{ID: "node-b", Address: "http://node-b"},
+			payload: payload,
+		}},
+	})
+
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var decoded replicationOutboxJob
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	restored := decoded.replicationJob()
+	if len(restored.tasks) != 1 || !bytes.Equal(restored.tasks[0].payload.BinaryValue, payload.BinaryValue) {
+		t.Fatalf("restored payload = %#v, want binary value %x", restored.tasks, payload.BinaryValue)
 	}
 }
 
@@ -1368,8 +1547,8 @@ func TestHTTPReplicatorLevelDBOutboxReplaysPendingJobAfterRestart(t *testing.T) 
 
 	select {
 	case request := <-delivered:
-		if request.Command != "INTERNALSET" || request.Key != "session:leveldb-outbox" || request.Value == "" {
-			t.Fatalf("replayed request = %#v, want materialized INTERNALSET", request)
+		if !isTypedReplicationSetPayload(request, "session:leveldb-outbox") {
+			t.Fatalf("replayed request = %#v, want persisted typed binary snapshot", request)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("persisted replication job was not replayed")
@@ -1826,8 +2005,8 @@ func TestHTTPReplicatorUsesTopologyWhenElectionUnconfigured(t *testing.T) {
 	}
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
-			t.Fatalf("topology-only replicated request = %#v, want INTERNALSET snapshot", request)
+		if !isTypedReplicationSetPayload(request, "session:1") {
+			t.Fatalf("topology-only replicated request = %#v, want typed binary snapshot", request)
 		}
 	default:
 		t.Fatal("topology-only replication did not reach remote target")
@@ -1886,8 +2065,8 @@ func TestHTTPReplicatorSyncAllReplicatesLeaderOwnedEntries(t *testing.T) {
 	}
 	targetKeys := map[string]bool{}
 	for _, payload := range payloads {
-		if payload.Command != "INTERNALSET" || payload.Value == "" {
-			t.Fatalf("sync batch payload = %#v, want INTERNALSET snapshot", payload)
+		if !isTypedReplicationSetPayload(payload, payload.Key) {
+			t.Fatalf("sync batch payload = %#v, want typed binary snapshot", payload)
 		}
 		targetKeys[payload.Key] = true
 	}
@@ -1970,8 +2149,8 @@ func TestHTTPReplicatorSplitsSyncBatchesByEstimatedBytes(t *testing.T) {
 	seen := map[string]bool{}
 	for idx := 0; idx < 3; idx++ {
 		request := <-requests
-		if request.Command != "INTERNALSET" || request.Value == "" {
-			t.Fatalf("split request %d = %#v, want single INTERNALSET snapshot", idx, request)
+		if !isTypedReplicationSetPayload(request, request.Key) {
+			t.Fatalf("split request %d = %#v, want single typed binary snapshot", idx, request)
 		}
 		seen[request.Key] = true
 	}
@@ -2201,8 +2380,8 @@ func TestHTTPReplicatorSyncAllFullReplicaReplicatesToRemoteOwners(t *testing.T) 
 	seen := map[string]bool{}
 	for i := 0; i < 2; i++ {
 		targetRequest := <-requests
-		if targetRequest.request.Command != "INTERNALSET" || targetRequest.request.Key != "session:1" || targetRequest.request.Value == "" {
-			t.Fatalf("full-replica sync request = %#v, want INTERNALSET session snapshot", targetRequest.request)
+		if !isTypedReplicationSetPayload(targetRequest.request, "session:1") {
+			t.Fatalf("full-replica sync request = %#v, want typed binary session snapshot", targetRequest.request)
 		}
 		seen[targetRequest.node] = true
 	}
@@ -2260,10 +2439,10 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 			if len(payloads) != 2 {
 				t.Fatalf("paged sync batch len = %d, want 2: %#v", len(payloads), payloads)
 			}
-		case "INTERNALSET":
+		case replicationSetBinaryCommand:
 			singles++
-			if request.Value == "" {
-				t.Fatalf("paged sync single request = %#v, want snapshot value", request)
+			if !isTypedReplicationSetPayload(request, request.Key) {
+				t.Fatalf("paged sync single request = %#v, want typed binary snapshot", request)
 			}
 		default:
 			t.Fatalf("paged sync request = %#v, want internal replication request", request)
@@ -2397,8 +2576,8 @@ func TestHTTPReplicatorSyncAllSkipsExpiredEntries(t *testing.T) {
 		t.Fatalf("sync result = %#v, want only live session entry", result)
 	}
 	request := <-requests
-	if request.Command != "INTERNALSET" || request.Key != "session:live" {
-		t.Fatalf("sync request = %#v, want live INTERNALSET", request)
+	if !isTypedReplicationSetPayload(request, "session:live") {
+		t.Fatalf("sync request = %#v, want live typed binary snapshot", request)
 	}
 	select {
 	case request := <-requests:
@@ -2798,13 +2977,7 @@ func TestHTTPReplicatorReplicatesBloomFilterMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "seen" || request.Value == "" {
-			t.Fatalf("replicated Bloom request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated Bloom snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "seen")
 		if entry.Type != "bloom_filter" || entry.BloomFilter == nil {
 			t.Fatalf("replicated Bloom snapshot = %#v, want bloom_filter payload", entry)
 		}
@@ -2856,13 +3029,7 @@ func TestHTTPReplicatorReplicatesXorFilterMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "seen" || request.Value == "" {
-			t.Fatalf("replicated XOR request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated XOR snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "seen")
 		if entry.Type != "xor_filter" || entry.XorFilter == nil || !entry.XorFilter.Built {
 			t.Fatalf("replicated XOR snapshot = %#v, want built xor_filter payload", entry)
 		}
@@ -2911,13 +3078,7 @@ func TestHTTPReplicatorReplicatesRadixTreeMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "index" || request.Value == "" {
-			t.Fatalf("replicated radix request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated radix snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "index")
 		if entry.Type != "radix_tree" || entry.RadixTree == nil || entry.RadixTree.Count != 1 {
 			t.Fatalf("replicated radix snapshot = %#v, want radix_tree payload", entry)
 		}
@@ -2967,13 +3128,7 @@ func TestHTTPReplicatorReplicatesCuckooFilterMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "seen" || request.Value == "" {
-			t.Fatalf("replicated Cuckoo request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated Cuckoo snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "seen")
 		if entry.Type != "cuckoo_filter" || entry.CuckooFilter == nil {
 			t.Fatalf("replicated Cuckoo snapshot = %#v, want cuckoo_filter payload", entry)
 		}
@@ -3023,13 +3178,7 @@ func TestHTTPReplicatorReplicatesRoaringBitmapMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "ids" || request.Value == "" {
-			t.Fatalf("replicated Roaring bitmap request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated Roaring bitmap snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "ids")
 		if entry.Type != "roaring_bitmap" || entry.RoaringBitmap == nil {
 			t.Fatalf("replicated Roaring bitmap snapshot = %#v, want roaring_bitmap payload", entry)
 		}
@@ -3079,13 +3228,7 @@ func TestHTTPReplicatorReplicatesSparseBitsetMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "ids" || request.Value == "" {
-			t.Fatalf("replicated sparse bitset request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated sparse bitset snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "ids")
 		if entry.Type != "sparse_bitset" || entry.SparseBitset == nil {
 			t.Fatalf("replicated sparse bitset snapshot = %#v, want sparse_bitset payload", entry)
 		}
@@ -3135,13 +3278,7 @@ func TestHTTPReplicatorReplicatesCountMinSketchMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "freq" || request.Value == "" {
-			t.Fatalf("replicated Count-Min Sketch request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated Count-Min Sketch snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "freq")
 		if entry.Type != "count_min_sketch" || entry.CountMinSketch == nil {
 			t.Fatalf("replicated Count-Min Sketch snapshot = %#v, want count_min_sketch payload", entry)
 		}
@@ -3191,13 +3328,7 @@ func TestHTTPReplicatorReplicatesHyperLogLogMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "card" || request.Value == "" {
-			t.Fatalf("replicated HyperLogLog request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated HyperLogLog snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "card")
 		if entry.Type != "hyperloglog" || entry.HyperLogLog == nil {
 			t.Fatalf("replicated HyperLogLog snapshot = %#v, want hyperloglog payload", entry)
 		}
@@ -3247,13 +3378,7 @@ func TestHTTPReplicatorReplicatesTopKMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "top" || request.Value == "" {
-			t.Fatalf("replicated Top-K request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated Top-K snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "top")
 		if entry.Type != "top_k" || entry.TopK == nil {
 			t.Fatalf("replicated Top-K snapshot = %#v, want top_k payload", entry)
 		}
@@ -3303,13 +3428,7 @@ func TestHTTPReplicatorReplicatesReservoirSampleMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "sample" || request.Value == "" {
-			t.Fatalf("replicated reservoir sample request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated reservoir sample snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "sample")
 		if entry.Type != "reservoir_sample" || entry.ReservoirSample == nil {
 			t.Fatalf("replicated reservoir sample snapshot = %#v, want reservoir_sample payload", entry)
 		}
@@ -3359,13 +3478,7 @@ func TestHTTPReplicatorReplicatesQuantileSketchMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "latency" || request.Value == "" {
-			t.Fatalf("replicated quantile sketch request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated quantile sketch snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "latency")
 		if entry.Type != "quantile_sketch" || entry.QuantileSketch == nil {
 			t.Fatalf("replicated quantile sketch snapshot = %#v, want quantile_sketch payload", entry)
 		}
@@ -3415,13 +3528,7 @@ func TestHTTPReplicatorReplicatesFenwickTreeMutations(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "scores" || request.Value == "" {
-			t.Fatalf("replicated Fenwick tree request = %#v, want INTERNALSET snapshot", request)
-		}
-		var entry snapshotEntry
-		if err := json.Unmarshal([]byte(request.Value), &entry); err != nil {
-			t.Fatalf("replicated Fenwick tree snapshot JSON error = %v", err)
-		}
+		entry := mustDecodeTypedReplicationSnapshot(t, request, "scores")
 		if entry.Type != "fenwick_tree" || entry.FenwickTree == nil {
 			t.Fatalf("replicated Fenwick tree snapshot = %#v, want fenwick_tree payload", entry)
 		}

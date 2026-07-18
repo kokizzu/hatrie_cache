@@ -1205,8 +1205,8 @@ func TestCacheGRPCServerReplicatesCommands(t *testing.T) {
 	}
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
-			t.Fatalf("replicated request = %#v, want INTERNALSET snapshot", request)
+		if !isTypedReplicationSetPayload(request, "session:1") {
+			t.Fatalf("replicated request = %#v, want typed binary snapshot", request)
 		}
 	default:
 		t.Fatal("gRPC write did not reach replication target")
@@ -1306,8 +1306,8 @@ func TestCacheGRPCServerSyncsReplication(t *testing.T) {
 	}
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
-			t.Fatalf("replication sync request = %#v, want INTERNALSET snapshot", request)
+		if !isTypedReplicationSetPayload(request, "session:1") {
+			t.Fatalf("replication sync request = %#v, want typed binary snapshot", request)
 		}
 	default:
 		t.Fatal("gRPC replication sync did not reach remote target")
@@ -1372,8 +1372,8 @@ func TestCacheGRPCServerReportsAsyncReplicationQueue(t *testing.T) {
 	}
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
-			t.Fatalf("async replication request = %#v, want INTERNALSET snapshot", request)
+		if !isTypedReplicationSetPayload(request, "session:1") {
+			t.Fatalf("async replication request = %#v, want typed binary snapshot", request)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("async replication request did not reach target")

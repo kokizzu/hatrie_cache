@@ -852,21 +852,24 @@ Set `REPLICATION_MODE=command` to keep the previous HTTP command fanout mode, or
 `REPLICATION_MODE=dual` to run journal-stream replication and command fanout
 together during migration. Command fanout lets an elected leader broadcast
 successful local mutations to the current key's topology owners over HTTP. It
-uses the internal `DUMP`/`INTERNALSET`, `INTERNALDEL`, and `INTERNALBATCH`
-commands, skips internal replication commands to avoid loops, and records the
-last command-fanout attempt at `/api/replication`. `INTERNALBATCHV2` batches
-multiple internal replication commands for the same target during sync and async
+uses `INTERNALSETV2` typed binary snapshot values by default with protobuf,
+plus the internal `INTERNALDEL` and batch commands. It skips internal
+replication commands to avoid loops and records the last command-fanout attempt
+at `/api/replication`. `INTERNALBATCHV2` batches multiple internal replication commands
+for the same target during sync and async
 replay while carrying source, sequence, and topology metadata once on the batch
 envelope. For an older peer, the sender automatically retries the legacy
-`INTERNALBATCH` request with per-item metadata. Replication
+`INTERNALSET` or `INTERNALBATCH` request with JSON snapshots and per-item
+metadata. Replication
 batches are split before send when their estimated
 uncompressed request body would exceed `REPLICATION_BATCH_MAX_BYTES` (default
 `1048576`). Set `REPLICATION_BATCH_MAX_BYTES=0` to disable byte-based
 splitting. HTTP replication command bodies use protobuf by default
 (`REPLICATION_WIRE_FORMAT=protobuf`), then automatically use the previous JSON
 wire format for structured `values` or `pairs` payloads that protobuf cannot
-represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON. Large HTTP
-replication request bodies are gzip-compressed.
+represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON;
+`REPLICATION_WIRE_FORMAT=json` converts snapshots to legacy JSON before send.
+Large HTTP replication request bodies are gzip-compressed.
 `POST /api/replication` runs an explicit command-fanout anti-entropy sync that
 pushes the local leader-owned keys, optionally filtered by prefix, to their
 current topology replicas; it requires `REPLICATION_MODE=command` or
@@ -882,7 +885,7 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 
 Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP
 replication and require the same token for inbound `INTERNALSET`, `INTERNALDEL`,
-`INTERNALBATCH`, and `INTERNALBATCHV2` commands. Replication clients send both
+`INTERNALSETV2`, `INTERNALBATCH`, and `INTERNALBATCHV2` commands. Replication clients send both
 `Authorization: Bearer <token>` and `X-Hatrie-Replication-Token: <token>`.
 The replication token is intentionally narrow: it is accepted only on
 `POST /api/commands` for internal replication traffic, not for health, metrics,
@@ -1087,12 +1090,13 @@ supports `BATCH`, `GET`, `GETSTR`, `EXISTS`, `SET`, `SETSTR`, `SETX`, `SETSTRX`,
 `ADDTOPK`, `ESTTOPK`, `GETTOPK`, `INFOTOPK`, `CREATERS`, `ADDRS`,
 `GETRS`, `INFORS`, `CREATEQ`, `ADDQ`, `ESTQ`, `INFOQ`, `CREATEFW`,
 `ADDFW`, `GETFW`, `SUMFW`, `RANGEFW`, `INFOFW`, `DUMP`, `INTERNALSET`,
-`INTERNALDEL`, and `INTERNALBATCH`.
+`INTERNALSETV2`, `INTERNALDEL`, `INTERNALBATCH`, and `INTERNALBATCHV2`.
 `DUMP`,
-`INTERNALSET`, and `INTERNALDEL` are low-level replication primitives that move
-one key as the same snapshot-entry JSON used by snapshot and LevelDB
-persistence. `INTERNALBATCH` batches multiple internal replication commands and
-is accepted only for internal replication traffic.
+`INTERNALSET`, `INTERNALSETV2`, and `INTERNALDEL` are low-level replication
+primitives. `INTERNALSETV2` moves one key using the compact binary storage
+encoding; `INTERNALSET` is the compatible snapshot-entry JSON fallback.
+`INTERNALBATCH` and `INTERNALBATCHV2` batch multiple internal replication
+commands and are accepted only for internal replication traffic.
 `BATCH` is the public pipeline command: send `{"command":"BATCH","batch":[...]}`
 with ordinary command requests to reduce client/server round trips. It executes
 subcommands in order, returns one response per subcommand in `responses`, and is

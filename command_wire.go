@@ -465,6 +465,7 @@ func fillCacheCommandRequestProto(out *hatriecachev1.CommandRequest, request Cac
 	out.UnixSeconds = request.UnixSeconds
 	out.Priority = request.Priority
 	out.Batch = batch
+	out.BinaryValue = request.BinaryValue
 	if len(request.Values) > 0 {
 		out.Values = make([]string, len(request.Values))
 		for idx, value := range request.Values {

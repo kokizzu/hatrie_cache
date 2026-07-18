@@ -597,8 +597,11 @@ func TestREADMEDocumentsInternalReplicationBatch(t *testing.T) {
 	for _, token := range []string{
 		"`INTERNALBATCH`",
 		"`INTERNALBATCHV2`",
+		"`INTERNALSETV2`",
+		"typed binary snapshot values",
 		"batches multiple internal replication commands",
 		"automatically retries the legacy",
+		"`REPLICATION_WIRE_FORMAT=json` converts snapshots to legacy JSON before send",
 		"accepted only for internal replication traffic",
 	} {
 		if !strings.Contains(readme, token) {
