@@ -1027,10 +1027,14 @@ func (replicator *HTTPReplicator) appendReplicationPayloadToTargetGroups(groups 
 }
 
 func (replicator *HTTPReplicator) appendReplicationSyncPayloadToTargetGroups(groups []replicationTaskGroup, indexes map[TopologyNode]int, groupCapacity int, targets []TopologyNode, key string, binaryValue []byte, fingerprint string) []replicationTaskGroup {
+	payloadBytes := 0
+	if replicator.batchMaxBytes > 0 {
+		payloadBytes = estimatedReplicationRequestBytesWithin(CacheCommandRequest{Command: replicationSetCompactCommand, Key: key, BinaryValue: binaryValue}, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
+	}
 	payload := replicationSyncPayload{
 		key:          key,
 		binaryValue:  binaryValue,
-		payloadBytes: estimatedReplicationRequestBytesWithin(CacheCommandRequest{Command: replicationSetCompactCommand, Key: key, BinaryValue: binaryValue}, replicationPayloadEstimateThreshold(replicator.batchMaxBytes)),
+		payloadBytes: payloadBytes,
 	}
 	for _, target := range targets {
 		idx, ok := indexes[target]

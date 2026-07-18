@@ -3032,6 +3032,11 @@ func TestReplicationSyncPayloadGroupsStayCompactWhenSplit(t *testing.T) {
 		if len(group.syncPayloads) != 3 || !group.deferredMetadata || group.metadataSource != "node-a" || group.metadataTopology != "fingerprint-a" {
 			t.Fatalf("group %d = %#v, want three compact deferred payloads", idx, group)
 		}
+		for payloadIdx, payload := range group.syncPayloads {
+			if payload.payloadBytes != 0 {
+				t.Fatalf("group %d payload %d estimated bytes = %d, want disabled without byte cap", idx, payloadIdx, payload.payloadBytes)
+			}
+		}
 	}
 
 	split := splitReplicationTaskGroupByMaxBytes(groups[0], 180)
