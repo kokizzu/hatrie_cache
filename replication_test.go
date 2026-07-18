@@ -2165,6 +2165,55 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version:     1,
+		Self:        "node-a",
+		BucketCount: 16,
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b"},
+			{ID: "node-c", Address: "http://node-c"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+			{ID: 1, Primary: "node-b", Replicas: []string{"node-a", "node-c"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	election := NewElectionStore(topology, ElectionOptions{})
+	if err := election.MarkOffline("node-c"); err != nil {
+		t.Fatalf("MarkOffline(node-c) error = %v", err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: election,
+	})
+
+	snapshot, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false, want routing snapshot")
+	}
+	for _, key := range []string{keyForShard(t, topology, 0), keyForShard(t, topology, 1)} {
+		wantRoute, wantOK := replicator.routeForKey(key)
+		gotRoute, gotOK := snapshot.routeForKey(key)
+		if gotOK != wantOK || !reflect.DeepEqual(gotRoute, wantRoute) {
+			t.Fatalf("snapshot route %q = %#v/%v, want %#v/%v", key, gotRoute, gotOK, wantRoute, wantOK)
+		}
+		gotTargets := snapshot.replicationTargets(gotRoute, replicator.self)
+		wantTargets := replicator.replicationTargets(wantRoute)
+		if !reflect.DeepEqual(gotTargets, wantTargets) {
+			t.Fatalf("snapshot targets %q = %#v, want %#v", key, gotTargets, wantTargets)
+		}
+	}
+	if snapshot.fingerprint == "" || snapshot.fingerprint != topology.Fingerprint() {
+		t.Fatalf("snapshot fingerprint = %q, want %q", snapshot.fingerprint, topology.Fingerprint())
+	}
+}
+
 func TestReplicationSyncKeysPageAdvancesAfterEmptyKey(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("", "empty")

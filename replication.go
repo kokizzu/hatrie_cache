@@ -201,6 +201,16 @@ type replicationTaskGroup struct {
 	payloadBytes []int
 }
 
+type replicationRoutingSnapshot struct {
+	topology    ClusterTopology
+	shards      []TopologyShard
+	nodes       map[string]TopologyNode
+	online      map[string]bool
+	leaders     map[uint32]ElectionLeader
+	owners      map[uint32][]string
+	fingerprint string
+}
+
 type replicationJob struct {
 	id         uint64
 	result     ReplicationResult
@@ -950,7 +960,15 @@ func (replicator *HTTPReplicator) tasksForReplicationPayload(result ReplicationR
 }
 
 func (replicator *HTTPReplicator) appendReplicationTasksForTargets(tasks []replicationTask, targets []TopologyNode, payload CacheCommandRequest) []replicationTask {
-	payload = replicator.annotateReplicationPayload(payload)
+	fingerprint := ""
+	if replicator.topology != nil {
+		fingerprint = replicator.topology.Fingerprint()
+	}
+	return replicator.appendReplicationTasksForTargetsWithFingerprint(tasks, targets, payload, fingerprint)
+}
+
+func (replicator *HTTPReplicator) appendReplicationTasksForTargetsWithFingerprint(tasks []replicationTask, targets []TopologyNode, payload CacheCommandRequest, fingerprint string) []replicationTask {
+	payload = replicator.annotateReplicationPayloadWithFingerprint(payload, fingerprint)
 	payloadBytes := 0
 	if replicator.batchMaxBytes > 0 {
 		payloadBytes = estimatedReplicationRequestBytesWithin(payload, replicationPayloadEstimateThreshold(replicator.batchMaxBytes))
@@ -1282,6 +1300,14 @@ func (replicator *HTTPReplicator) syncAll(ctx context.Context, trie *HatTrie, pr
 }
 
 func (replicator *HTTPReplicator) annotateReplicationPayload(payload CacheCommandRequest) CacheCommandRequest {
+	fingerprint := ""
+	if replicator != nil && replicator.topology != nil {
+		fingerprint = replicator.topology.Fingerprint()
+	}
+	return replicator.annotateReplicationPayloadWithFingerprint(payload, fingerprint)
+}
+
+func (replicator *HTTPReplicator) annotateReplicationPayloadWithFingerprint(payload CacheCommandRequest, fingerprint string) CacheCommandRequest {
 	if replicator == nil {
 		return payload
 	}
@@ -1292,10 +1318,8 @@ func (replicator *HTTPReplicator) annotateReplicationPayload(payload CacheComman
 		payload.Pairs[replicationMetaSourceNode] = replicator.self
 	}
 	payload.Pairs[replicationMetaSequence] = strconv.FormatUint(replicator.nextReplicationSequence(), 10)
-	if replicator.topology != nil {
-		if fingerprint := replicator.topology.Fingerprint(); fingerprint != "" {
-			payload.Pairs[replicationMetaTopologyFingerprint] = fingerprint
-		}
+	if fingerprint != "" {
+		payload.Pairs[replicationMetaTopologyFingerprint] = fingerprint
 	}
 	return payload
 }
@@ -1350,6 +1374,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			break
 		}
 		seenKeys = true
+		routing, routingOK := replicator.snapshotReplicationRouting()
 
 		pageTasks := make([]replicationTask, 0, len(page.keys))
 		for _, key := range page.keys {
@@ -1360,14 +1385,17 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 				}
 				return result
 			}
-			route, ok := replicator.routeForKey(key)
+			if !routingOK {
+				continue
+			}
+			route, ok := routing.routeForKey(key)
 			if !ok {
 				continue
 			}
 			if replicator.self != "" && route.Leader.Leader != "" && route.Leader.Leader != replicator.self {
 				continue
 			}
-			targets := replicator.replicationTargets(route)
+			targets := routing.replicationTargets(route, replicator.self)
 			if len(targets) == 0 {
 				continue
 			}
@@ -1376,7 +1404,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 				continue
 			}
 			result.Entries++
-			pageTasks = replicator.appendReplicationTasksForTargets(pageTasks, targets, payload)
+			pageTasks = replicator.appendReplicationTasksForTargetsWithFingerprint(pageTasks, targets, payload, routing.fingerprint)
 		}
 		if len(pageTasks) > 0 {
 			pageResult := replicator.executeReplicationTasks(ctx, ReplicationResult{}, pageTasks)
@@ -1642,6 +1670,100 @@ func (replicator *HTTPReplicator) routeForKey(key string) (ElectionKeyRoute, boo
 			Candidates: routeOwners(route.Shard),
 		},
 	}, true
+}
+
+func (replicator *HTTPReplicator) snapshotReplicationRouting() (replicationRoutingSnapshot, bool) {
+	if replicator == nil || replicator.topology == nil {
+		return replicationRoutingSnapshot{}, false
+	}
+	topology := replicator.topology.Get()
+	snapshot := replicationRoutingSnapshot{
+		topology:    topology,
+		nodes:       topologyNodesByID(topology),
+		leaders:     make(map[uint32]ElectionLeader, len(topology.Shards)),
+		owners:      make(map[uint32][]string, len(topology.Shards)),
+		fingerprint: topology.Fingerprint(),
+	}
+	if replicator.election != nil {
+		snapshot.online = replicator.election.activeNodesSnapshot(topology)
+	}
+	if topologyMode(topology.Mode) == TopologyModeFullReplica {
+		shard, ok := topology.fullReplicaShard()
+		if !ok {
+			return replicationRoutingSnapshot{}, false
+		}
+		snapshot.shards = []TopologyShard{shard}
+	} else {
+		snapshot.shards = topology.Shards
+	}
+	if len(snapshot.shards) == 0 {
+		return replicationRoutingSnapshot{}, false
+	}
+	for _, shard := range snapshot.shards {
+		owners := routeOwners(shard)
+		snapshot.owners[shard.ID] = owners
+		if replicator.election != nil {
+			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
+			continue
+		}
+		snapshot.leaders[shard.ID] = ElectionLeader{
+			Shard:      shard.ID,
+			Leader:     shard.Primary,
+			Available:  true,
+			Primary:    shard.Primary,
+			Candidates: owners,
+		}
+	}
+	return snapshot, true
+}
+
+func (snapshot replicationRoutingSnapshot) routeForKey(key string) (ElectionKeyRoute, bool) {
+	if len(snapshot.shards) == 0 {
+		return ElectionKeyRoute{}, false
+	}
+	mode := topologyMode(snapshot.topology.Mode)
+	shard := snapshot.shards[0]
+	var bucket *uint32
+	if mode != TopologyModeFullReplica {
+		if snapshot.topology.BucketCount > 0 {
+			value := hashKeyToBucket(key, snapshot.topology.BucketCount)
+			selected, ok := snapshot.topology.shardForBucket(value, snapshot.shards)
+			if !ok {
+				return ElectionKeyRoute{}, false
+			}
+			shard = selected
+			bucket = &value
+		} else {
+			shard = snapshot.shards[hashKeyToShardIndex(key, len(snapshot.shards))]
+		}
+	}
+	owners := snapshot.owners[shard.ID]
+	route := TopologyRoute{Key: key, Mode: mode, Bucket: bucket, Shard: shard, Owners: owners}
+	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[shard.ID]}, true
+}
+
+func (snapshot replicationRoutingSnapshot) replicationTargets(route ElectionKeyRoute, self string) []TopologyNode {
+	owners := route.Route.Owners
+	if len(owners) == 0 {
+		owners = snapshot.owners[route.Route.Shard.ID]
+	}
+	targets := make([]TopologyNode, 0, len(owners))
+	for _, nodeID := range owners {
+		if nodeID == "" || nodeID == self {
+			continue
+		}
+		if snapshot.online != nil && !snapshot.online[nodeID] {
+			continue
+		}
+		node, ok := snapshot.nodes[nodeID]
+		if ok {
+			targets = append(targets, node)
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
 }
 
 func (replicator *HTTPReplicator) replicationTargets(route ElectionKeyRoute) []TopologyNode {

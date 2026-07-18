@@ -1375,7 +1375,8 @@ func TestCacheGRPCServerReportsAsyncReplicationQueue(t *testing.T) {
 		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
 			t.Fatalf("async replication request = %#v, want INTERNALSET snapshot", request)
 		}
-	default:
+	case <-time.After(time.Second):
+		t.Fatal("async replication request did not reach target")
 	}
 }
 

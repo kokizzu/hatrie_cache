@@ -90,6 +90,68 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationRoutingPlanning(b *testing.B) {
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b"},
+			{ID: "node-c", Address: "http://node-c"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+			{ID: 1, Primary: "node-b", Replicas: []string{"node-a", "node-c"}},
+		},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", Topology: topology, Election: election})
+	keys := make([]string, 10000)
+	for idx := range keys {
+		keys[idx] = "session:" + strconv.Itoa(idx)
+	}
+
+	b.Run("PerKeyDynamic", func(b *testing.B) {
+		b.ReportAllocs()
+		for iter := 0; iter < b.N; iter++ {
+			targets := 0
+			for _, key := range keys {
+				route, ok := replicator.routeForKey(key)
+				if !ok {
+					b.Fatal("routeForKey() failed")
+				}
+				targets += len(replicator.replicationTargets(route))
+			}
+			if targets == 0 {
+				b.Fatal("dynamic routing returned no targets")
+			}
+		}
+	})
+	b.Run("SnapshotPerPage", func(b *testing.B) {
+		b.ReportAllocs()
+		for iter := 0; iter < b.N; iter++ {
+			snapshot, ok := replicator.snapshotReplicationRouting()
+			if !ok {
+				b.Fatal("snapshotReplicationRouting() failed")
+			}
+			targets := 0
+			for _, key := range keys {
+				route, ok := snapshot.routeForKey(key)
+				if !ok {
+					b.Fatal("snapshot routeForKey() failed")
+				}
+				targets += len(snapshot.replicationTargets(route, replicator.self))
+			}
+			if targets == 0 {
+				b.Fatal("snapshot routing returned no targets")
+			}
+		}
+	})
+}
+
 func BenchmarkGroupReplicationTasksByTarget(b *testing.B) {
 	for _, tt := range []struct {
 		name          string

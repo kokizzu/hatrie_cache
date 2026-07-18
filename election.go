@@ -180,6 +180,15 @@ func (store *ElectionStore) activeNodesLocked(topology ClusterTopology) map[stri
 	return active
 }
 
+func (store *ElectionStore) activeNodesSnapshot(topology ClusterTopology) map[string]bool {
+	if store == nil {
+		return nil
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.activeNodesLocked(topology)
+}
+
 func (store *ElectionStore) nodeStatusLocked(nodeID string, active map[string]bool) (bool, string, *time.Time) {
 	record, tracked := store.nodes[nodeID]
 	if !tracked {
