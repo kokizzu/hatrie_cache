@@ -592,6 +592,26 @@ func TestREADMETracksImplementedDistributedTransport(t *testing.T) {
 	}
 }
 
+func TestREADMEDocumentsDeltaFirstJournalRecovery(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"`GET /api/journal/snapshot`",
+		"Journal pull is delta-first by default",
+		"including stale-key deletion",
+		"`JOURNAL_PULL_FULL_SYNC_FALLBACK=false`",
+		"hash of `JOURNAL_PULL_SOURCE`",
+		"only then advances `JOURNAL_PULL_STATE_PATH`",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md journal recovery section missing %q", token)
+		}
+	}
+}
+
 func TestREADMEDocumentsInternalReplicationBatch(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {
@@ -664,6 +684,25 @@ func TestBenchmarkDocsListReplicationBatchingBenchmark(t *testing.T) {
 	} {
 		if !strings.Contains(benchmark, token) {
 			t.Fatalf("BENCHMARK.md does not document replication batching benchmark token %q", token)
+		}
+	}
+}
+
+func TestBenchmarkDocsListJournalDeltaFirstRecovery(t *testing.T) {
+	data, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	benchmark := string(data)
+	for _, token := range []string{
+		"BenchmarkJournalCatchUpDeltaVsFullSnapshot",
+		"make bench-journal-catchup BENCHTIME=5x COUNT=7",
+		"56.55x faster",
+		"42.70x slower",
+		"329.28x fewer",
+	} {
+		if !strings.Contains(benchmark, token) {
+			t.Fatalf("BENCHMARK.md does not document journal recovery benchmark token %q", token)
 		}
 	}
 }

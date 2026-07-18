@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,6 +79,65 @@ func TestCommandJournalPullHTTPClientTimeouts(t *testing.T) {
 	}
 }
 
+func TestPullCommandJournalSnapshotKeepsPreviousFileWhenDownloadIsInvalid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pull.hc")
+	if err := os.WriteFile(path, []byte("previous-snapshot"), 0o600); err != nil {
+		t.Fatalf("WriteFile(previous) error = %v", err)
+	}
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", snapshotContentType)
+		_, _ = io.WriteString(w, "not-a-snapshot")
+	}))
+	defer source.Close()
+
+	if _, err := PullCommandJournalSnapshot(context.Background(), source.URL, "", source.Client(), path); err == nil {
+		t.Fatal("PullCommandJournalSnapshot() error = nil, want invalid snapshot rejection")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(previous) error = %v", err)
+	}
+	if got := string(data); got != "previous-snapshot" {
+		t.Fatalf("snapshot after invalid download = %q, want previous file", got)
+	}
+}
+
+func TestPullCommandJournalSnapshotKeepsPreviousFileWhenSequenceRegresses(t *testing.T) {
+	sourceTrie := newTestTrie(t)
+	sourceJournal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(source) error = %v", err)
+	}
+	defer sourceJournal.Close()
+	if response := sourceJournal.ExecuteCommand(sourceTrie, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "old"}); !response.OK {
+		t.Fatalf("source SETSTR response = %#v, want ok", response)
+	}
+	var snapshot strings.Builder
+	if _, err := sourceJournal.WriteSnapshotWithFormat(sourceTrie, &snapshot, SnapshotFormatJSON); err != nil {
+		t.Fatalf("WriteSnapshotWithFormat() error = %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", snapshotContentType)
+		_, _ = io.WriteString(w, snapshot.String())
+	}))
+	defer server.Close()
+	path := filepath.Join(t.TempDir(), "pull.hc")
+	if err := os.WriteFile(path, []byte("previous-snapshot"), 0o600); err != nil {
+		t.Fatalf("WriteFile(previous) error = %v", err)
+	}
+
+	if _, err := PullCommandJournalSnapshot(context.Background(), server.URL, "", server.Client(), path, 2); err == nil {
+		t.Fatal("PullCommandJournalSnapshot() error = nil, want sequence regression rejection")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(previous) error = %v", err)
+	}
+	if got := string(data); got != "previous-snapshot" {
+		t.Fatalf("snapshot after sequence regression = %q, want previous file", got)
+	}
+}
+
 func TestPullCommandJournalAcceptsNilContext(t *testing.T) {
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := CommandJournalTail{
@@ -113,6 +173,44 @@ func TestPullCommandJournalAcceptsNilContext(t *testing.T) {
 	}
 	if dirty.Pending() != 1 {
 		t.Fatalf("dirty pending after pull = %d, want pulled key marked", dirty.Pending())
+	}
+}
+
+func TestApplyCommandJournalTailPersistsOnlySuccessfulPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	result, err := applyCommandJournalTail(ht, journal, "source", 0, CommandJournalTail{
+		LastSequence: 2,
+		Entries: []CommandJournalRecord{
+			{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			{Sequence: 2, Request: CacheCommandRequest{Command: "INC", Key: "views", Value: "invalid"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "journal entry 2 failed") {
+		t.Fatalf("applyCommandJournalTail() error = %v, want entry 2 failure", err)
+	}
+	if result.Applied != 1 || result.AppliedThrough != 1 || ht.GetString("name") != "ivi" {
+		t.Fatalf("partial result/name = %#v/%q, want one applied entry", result, ht.GetString("name"))
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	replayed := newTestTrie(t)
+	replayJournal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(replay) error = %v", err)
+	}
+	defer replayJournal.Close()
+	if sequence, err := replayJournal.Replay(replayed, 0); err != nil || sequence != 1 {
+		t.Fatalf("Replay() sequence/error = %d/%v, want 1/nil", sequence, err)
+	}
+	if replayed.GetString("name") != "ivi" || replayed.Exists("views") {
+		t.Fatalf("replayed name/views = %q/%v, want ivi/false", replayed.GetString("name"), replayed.Exists("views"))
 	}
 }
 

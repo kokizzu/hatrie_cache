@@ -1047,6 +1047,55 @@ func TestMonitoringHandlerExposesJournalTail(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerStreamsJournalSnapshotForReplication(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !response.OK {
+		t.Fatalf("SETSTR response = %#v, want ok", response)
+	}
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		Journal:              journal,
+		ReplicationAuthToken: "replica-secret",
+	}).Handler()
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/journal/snapshot", nil))
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated snapshot status = %d, want 401", resp.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/journal/snapshot", nil)
+	req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+	resp = httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d body=%q, want 200", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Content-Type"); got != snapshotContentType {
+		t.Fatalf("snapshot content type = %q, want %q", got, snapshotContentType)
+	}
+
+	path := filepath.Join(t.TempDir(), "snapshot.hc")
+	if err := os.WriteFile(path, resp.Body.Bytes(), 0o600); err != nil {
+		t.Fatalf("WriteFile(snapshot) error = %v", err)
+	}
+	restored := newTestTrie(t)
+	metadata, err := restored.LoadSnapshotWithMetadata(path)
+	if err != nil {
+		t.Fatalf("LoadSnapshotWithMetadata() error = %v", err)
+	}
+	if metadata.JournalSequence != 1 || restored.GetString("name") != "ivi" {
+		t.Fatalf("snapshot sequence/name = %d/%q, want 1/ivi", metadata.JournalSequence, restored.GetString("name"))
+	}
+	if tail, err := journal.Tail(0, 10); err != nil || len(tail.Entries) != 1 {
+		t.Fatalf("journal tail after snapshot stream = %#v/%v, want uncompacted entry", tail, err)
+	}
+}
+
 func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
 	var gotSourcePath string
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1723,6 +1772,52 @@ func TestMonitoringReplicationAuthTokenOnlyAllowsInternalCommands(t *testing.T) 
 	openHandler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"INTERNALDEL","key":"name"}`)))
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("internal command without replication token status = %d, want 401", resp.Code)
+	}
+}
+
+func TestMonitoringReplicationAuthTokenAllowsOnlyJournalReadAndSnapshot(t *testing.T) {
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{
+		ReplicationAuthToken: "replica-secret",
+	}).Handler()
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "journal read", method: http.MethodGet, path: "/api/journal"},
+		{name: "journal snapshot", method: http.MethodGet, path: "/api/journal/snapshot"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, httptest.NewRequest(test.method, test.path, strings.NewReader(`{}`)))
+			if resp.Code != http.StatusUnauthorized {
+				t.Fatalf("unauthenticated status = %d, want 401", resp.Code)
+			}
+
+			req := httptest.NewRequest(test.method, test.path, strings.NewReader(`{}`))
+			req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+			resp = httptest.NewRecorder()
+			handler.ServeHTTP(resp, req)
+			if resp.Code != http.StatusConflict {
+				t.Fatalf("replication-authenticated status = %d, want handler conflict 409", resp.Code)
+			}
+		})
+	}
+
+	operatorHandler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{
+		AuthToken:            "operator-secret",
+		ReplicationAuthToken: "replica-secret",
+	}).Handler()
+	for _, path := range []string{"/api/journal", "/api/replication"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+		req.Header.Set("X-Hatrie-Replication-Token", "replica-secret")
+		resp := httptest.NewRecorder()
+		operatorHandler.ServeHTTP(resp, req)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("replication token POST %s status = %d, want 401", path, resp.Code)
+		}
 	}
 }
 

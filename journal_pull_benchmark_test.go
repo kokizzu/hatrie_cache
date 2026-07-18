@@ -1,0 +1,139 @@
+package hatriecache
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func BenchmarkJournalCatchUpDeltaVsFullSnapshot(b *testing.B) {
+	b.Run("Delta100Batched", func(b *testing.B) { benchmarkJournalCatchUpDelta100(b, true) })
+	b.Run("Delta100FsyncEach", func(b *testing.B) { benchmarkJournalCatchUpDelta100(b, false) })
+	b.Run("FullSnapshot10k", benchmarkJournalCatchUpFullSnapshot10k)
+}
+
+func benchmarkJournalCatchUpDelta100(b *testing.B, batched bool) {
+	tail := CommandJournalTail{
+		LastSequence: 100,
+		Entries:      make([]CommandJournalRecord, 100),
+	}
+	for idx := range tail.Entries {
+		tail.Entries[idx] = CommandJournalRecord{
+			Sequence: uint64(idx + 1),
+			Request: CacheCommandRequest{
+				Command: "SETSTR",
+				Key:     fmt.Sprintf("changed:%06d", idx),
+				Value:   "updated-value",
+			},
+		}
+	}
+	payload, err := json.Marshal(tail)
+	if err != nil {
+		b.Fatal(err)
+	}
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	defer source.Close()
+	dir := b.TempDir()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for idx := 0; idx < b.N; idx++ {
+		trie := CreateHatTrie()
+		journal, err := OpenCommandJournal(filepath.Join(dir, fmt.Sprintf("delta-%d.journal", idx)))
+		if err != nil {
+			b.Fatal(err)
+		}
+		applied := 0
+		if batched {
+			result, err := PullCommandJournal(context.Background(), trie, journal, CommandJournalPullOptions{
+				Source:       source.URL,
+				UntilCurrent: true,
+				MaxBatches:   1,
+				Client:       source.Client(),
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			applied = result.Applied
+		} else {
+			endpoint, err := commandJournalEndpoint(source.URL, 0, DefaultCommandJournalTailLimit)
+			if err != nil {
+				b.Fatal(err)
+			}
+			fetched, _, err := fetchCommandJournalTail(context.Background(), source.Client(), endpoint)
+			if err != nil {
+				b.Fatal(err)
+			}
+			for _, record := range fetched.Entries {
+				if response := journal.ExecuteCommand(trie, record.Request); !response.OK {
+					b.Fatalf("ExecuteCommand() = %#v", response)
+				}
+				applied++
+			}
+		}
+		if applied != 100 {
+			b.Fatalf("applied = %d, want 100", applied)
+		}
+		if err := journal.Close(); err != nil {
+			b.Fatal(err)
+		}
+		trie.Destroy()
+	}
+	b.ReportMetric(100, "delta_entries/op")
+	b.ReportMetric(float64(len(payload)), "wire_B/op")
+}
+
+func benchmarkJournalCatchUpFullSnapshot10k(b *testing.B) {
+	sourceTrie := CreateHatTrie()
+	defer sourceTrie.Destroy()
+	for idx := 0; idx < 10000; idx++ {
+		sourceTrie.UpsertString(fmt.Sprintf("key:%06d", idx), "snapshot-value")
+	}
+	sourceJournal, err := OpenCommandJournal(filepath.Join(b.TempDir(), "source.journal"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer sourceJournal.Close()
+	source := httptest.NewServer(NewMonitoringHandler(sourceTrie, MonitoringOptions{Journal: sourceJournal}).Handler())
+	defer source.Close()
+	dir := b.TempDir()
+	var transferredBytes int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	for idx := 0; idx < b.N; idx++ {
+		trie := CreateHatTrie()
+		trie.UpsertString("stale", "remove")
+		journal, err := OpenCommandJournal(filepath.Join(dir, fmt.Sprintf("full-%d.journal", idx)))
+		if err != nil {
+			b.Fatal(err)
+		}
+		snapshotPath := filepath.Join(dir, fmt.Sprintf("full-%d.hc", idx))
+		if _, err := PullCommandJournalSnapshot(context.Background(), source.URL, "", source.Client(), snapshotPath); err != nil {
+			b.Fatal(err)
+		}
+		info, err := os.Stat(snapshotPath)
+		if err != nil {
+			b.Fatal(err)
+		}
+		transferredBytes += info.Size()
+		if _, err := journal.ReplaceWithSnapshot(trie, snapshotPath); err != nil {
+			b.Fatal(err)
+		}
+		if trie.Exists("stale") || trie.GetString("key:009999") != "snapshot-value" {
+			b.Fatal("full snapshot did not replace exact state")
+		}
+		if err := journal.Close(); err != nil {
+			b.Fatal(err)
+		}
+		trie.Destroy()
+	}
+	b.ReportMetric(10000, "snapshot_entries/op")
+	b.ReportMetric(float64(transferredBytes)/float64(b.N), "wire_B/op")
+}

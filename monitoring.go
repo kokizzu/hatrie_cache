@@ -25,6 +25,7 @@ const (
 	maxCommandJournalErrorResponseBytes        = 1 << 20
 	maxMonitoringJSONRequestBytes              = 1 << 20
 	maxMonitoringEntriesLimit                  = 100000
+	snapshotContentType                        = "application/vnd.hatrie-cache.snapshot"
 	truncatedCommandJournalErrorResponseSuffix = "\n... journal source error body truncated"
 )
 
@@ -234,6 +235,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/topology", handler.handleTopology)
 	mux.HandleFunc("/api/election", handler.handleElection)
 	mux.HandleFunc("/api/replication", handler.handleReplication)
+	mux.HandleFunc("/api/journal/snapshot", handler.handleJournalSnapshot)
 	mux.HandleFunc("/api/journal", handler.handleJournal)
 	mux.HandleFunc("/metrics", handler.handleMetrics)
 	if handler.options.WebDir != "" {
@@ -250,16 +252,29 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 
 func monitoringAuthHandler(token string, replicationToken string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !monitoringPathRequiresAuth(r.URL.Path) || token == "" || monitoringRequestAuthorized(r, token) {
+		if !monitoringPathRequiresAuth(r.URL.Path) || monitoringRequestHasAuthToken(r, token) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/api/commands" && monitoringReplicationRequestAuthorized(r, replicationToken) {
+		if monitoringPathAcceptsReplicationAuth(r) && monitoringReplicationRequestAuthorized(r, replicationToken) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if token == "" && !monitoringPathRequiresReplicationAuth(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		writeMonitoringUnauthorized(w)
 	})
+}
+
+func monitoringPathAcceptsReplicationAuth(r *http.Request) bool {
+	return r.URL.Path == "/api/commands" || monitoringPathRequiresReplicationAuth(r)
+}
+
+func monitoringPathRequiresReplicationAuth(r *http.Request) bool {
+	return r.Method == http.MethodGet &&
+		(r.URL.Path == "/api/journal" || r.URL.Path == "/api/journal/snapshot")
 }
 
 func writeMonitoringUnauthorized(w http.ResponseWriter) {
@@ -269,14 +284,6 @@ func writeMonitoringUnauthorized(w http.ResponseWriter) {
 
 func monitoringPathRequiresAuth(path string) bool {
 	return strings.HasPrefix(path, "/api/") || path == "/metrics"
-}
-
-func monitoringRequestAuthorized(r *http.Request, token string) bool {
-	token = normalizeAuthToken(token)
-	if token == "" {
-		return true
-	}
-	return monitoringRequestHasAuthToken(r, token)
 }
 
 func monitoringRequestHasAuthToken(r *http.Request, token string) bool {
@@ -1738,6 +1745,56 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 	writeJSON(w, tail)
 }
 
+func (handler *MonitoringHandler) handleJournalSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if handler.options.Journal == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("journal is not configured"))
+		return
+	}
+	file, err := os.CreateTemp("", "hatrie-journal-snapshot-*.hc")
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	path := file.Name()
+	defer os.Remove(path)
+	defer file.Close()
+	metadata, err := handler.options.Journal.WriteSnapshotWithFormat(handler.trie, file, SnapshotFormatGzipBinary)
+	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "journal.snapshot", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	if err := file.Sync(); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	info, err := file.Stat()
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", snapshotContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	w.Header().Set("X-Hatrie-Journal-Sequence", strconv.FormatUint(metadata.JournalSequence, 10))
+	if _, err := io.Copy(w, file); err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "journal.snapshot", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
+		return
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "journal.snapshot", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"journal_sequence": metadata.JournalSequence, "bytes": info.Size()}})
+}
+
 func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *http.Request) {
 	var request journalPullRequest
 	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
@@ -1790,6 +1847,10 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 }
 
 func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint string) (CommandJournalTail, int, error) {
+	return fetchCommandJournalTailAuthorized(ctx, client, endpoint, "")
+}
+
+func fetchCommandJournalTailAuthorized(ctx context.Context, client *http.Client, endpoint string, authToken string) (CommandJournalTail, int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1801,6 +1862,7 @@ func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint 
 		return CommandJournalTail{}, 0, err
 	}
 	req.Header.Set("Accept", "application/json")
+	setReplicationAuthHeaders(req, authToken)
 	resp, err := client.Do(req)
 	if err != nil {
 		return CommandJournalTail{}, 0, err

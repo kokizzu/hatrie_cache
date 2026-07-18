@@ -61,6 +61,7 @@ type CommandJournalPullResult struct {
 	AppliedThrough   uint64 `json:"applied_through"`
 	Batches          int    `json:"batches,omitempty"`
 	HasMore          bool   `json:"has_more,omitempty"`
+	FullSyncFallback bool   `json:"full_sync_fallback,omitempty"`
 }
 
 type commandJournalEntry struct {
@@ -171,6 +172,102 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 		}
 	}
 	return response
+}
+
+func (journal *CommandJournal) executeJournalRecordsBatch(trie *HatTrie, records []CommandJournalRecord) (int, CacheCommandResponse) {
+	if journal == nil {
+		return 0, commandError(ErrNilCommandJournal.Error())
+	}
+	if trie == nil {
+		return 0, commandError(ErrNilHatTrie.Error())
+	}
+	if len(records) == 0 {
+		return 0, CacheCommandResponse{OK: true}
+	}
+	batchable := true
+	for _, record := range records {
+		if !commandShouldJournal(record.Request) {
+			batchable = false
+			break
+		}
+	}
+	if !batchable {
+		for idx, record := range records {
+			response := journal.ExecuteCommand(trie, record.Request)
+			if !response.OK {
+				return idx, response
+			}
+		}
+		return len(records), CacheCommandResponse{OK: true}
+	}
+
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if err := journal.ensureAppendFileLocked(); err != nil {
+		return 0, commandError(err.Error())
+	}
+	info, err := journal.file.Stat()
+	if err != nil {
+		return 0, commandError(err.Error())
+	}
+	batchState := commandJournalAppendState{
+		offset:            info.Size(),
+		nextSequence:      journal.nextSequence,
+		sequenceExhausted: journal.sequenceExhausted,
+	}
+	states := make([]commandJournalAppendState, len(records))
+	offset := info.Size()
+	now := trie.currentTime()
+	for idx, record := range records {
+		states[idx] = commandJournalAppendState{
+			offset:            offset,
+			nextSequence:      journal.nextSequence,
+			sequenceExhausted: journal.sequenceExhausted,
+		}
+		sequence, err := journal.nextAppendSequenceLocked()
+		if err != nil {
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+		}
+		entry := commandJournalEntry{
+			Version:  commandJournalVersion,
+			Sequence: sequence,
+			Request:  normalizeJournalRequest(record.Request, now),
+		}
+		data, err := marshalCommandJournalEntry(entry, journal.format)
+		if err != nil {
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+		}
+		n, err := journal.file.Write(data)
+		if err != nil {
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+		}
+		if n != len(data) {
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, io.ErrShortWrite).Error())
+		}
+		offset += int64(n)
+		journal.markAppendedLocked(sequence)
+	}
+	if err := journal.file.Sync(); err != nil {
+		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+	}
+	for idx, record := range records {
+		response := trie.ExecuteCommand(record.Request)
+		if response.OK {
+			continue
+		}
+		if rollbackErr := journal.rollbackAppendLocked(states[idx]); rollbackErr != nil {
+			response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
+		}
+		return idx, response
+	}
+	return len(records), CacheCommandResponse{OK: true}
+}
+
+func (journal *CommandJournal) rollbackPreparedBatchLocked(state commandJournalAppendState, cause error) error {
+	if err := journal.rollbackAppendLocked(state); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
 }
 
 func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *HatTrie, request CacheCommandRequest, operation *snapshotOperation) CacheCommandResponse {
@@ -304,6 +401,57 @@ func (journal *CommandJournal) SaveSnapshotWithFormat(trie *HatTrie, path string
 	return journal.compactLocked(sequence)
 }
 
+// WriteSnapshotWithFormat writes a point-in-time snapshot without compacting the journal.
+func (journal *CommandJournal) WriteSnapshotWithFormat(trie *HatTrie, writer io.Writer, format SnapshotFormat) (SnapshotMetadata, error) {
+	if journal == nil {
+		return SnapshotMetadata{}, ErrNilCommandJournal
+	}
+	if trie == nil {
+		return SnapshotMetadata{}, ErrNilHatTrie
+	}
+	if writer == nil {
+		return SnapshotMetadata{}, errors.New("hatriecache: snapshot writer is nil")
+	}
+	format, err := ParseSnapshotFormat(string(format))
+	if err != nil {
+		return SnapshotMetadata{}, err
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return SnapshotMetadata{}, ErrCommandJournalClosed
+	}
+	sequence := journal.lastSequenceLocked()
+	if err := trie.writeSnapshot(writer, sequence, format); err != nil {
+		return SnapshotMetadata{}, err
+	}
+	return SnapshotMetadata{JournalSequence: sequence}, nil
+}
+
+// ReplaceWithSnapshot replaces in-memory data, then resets the local journal
+// sequence to the snapshot's source checkpoint.
+func (journal *CommandJournal) ReplaceWithSnapshot(trie *HatTrie, path string) (SnapshotMetadata, error) {
+	if journal == nil {
+		return SnapshotMetadata{}, ErrNilCommandJournal
+	}
+	if trie == nil {
+		return SnapshotMetadata{}, ErrNilHatTrie
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return SnapshotMetadata{}, ErrCommandJournalClosed
+	}
+	metadata, err := trie.LoadSnapshotWithMetadata(path)
+	if err != nil {
+		return SnapshotMetadata{}, err
+	}
+	if err := journal.resetToCheckpointLocked(metadata.JournalSequence); err != nil {
+		return SnapshotMetadata{}, err
+	}
+	return metadata, nil
+}
+
 func (journal *CommandJournal) Sequence() uint64 {
 	if journal == nil {
 		return 0
@@ -392,6 +540,39 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 		return err
 	}
 	return journal.ensureAppendFileLocked()
+}
+
+func (journal *CommandJournal) resetToCheckpointLocked(sequence uint64) error {
+	if err := journal.closeAppendFileLocked(); err != nil {
+		return err
+	}
+	if err := writeCommandJournalCheckpointWithFormat(journal.path, sequence, journal.format); err != nil {
+		if reopenErr := journal.ensureAppendFileLocked(); reopenErr != nil {
+			return errors.Join(err, reopenErr)
+		}
+		return err
+	}
+	if sequence == ^uint64(0) {
+		journal.nextSequence = sequence
+		journal.sequenceExhausted = true
+	} else {
+		journal.nextSequence = sequence + 1
+		journal.sequenceExhausted = false
+	}
+	return journal.ensureAppendFileLocked()
+}
+
+func writeCommandJournalCheckpointWithFormat(path string, sequence uint64, format CommandJournalFormat) error {
+	return writeFileAtomicStream(path, func(writer io.Writer) error {
+		if sequence == 0 {
+			return nil
+		}
+		return writeCommandJournalEntry(writer, commandJournalEntry{
+			Version:    commandJournalVersion,
+			Sequence:   sequence,
+			Checkpoint: true,
+		}, format)
+	})
 }
 
 func writeCommandJournalCompacted(path string, throughSequence uint64) error {

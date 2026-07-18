@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	stdjson "encoding/json"
@@ -113,6 +114,7 @@ type config struct {
 	journalPullTimeout          time.Duration
 	journalPullLimit            uint64
 	journalPullMaxBatches       uint64
+	journalPullFullSyncFallback bool
 }
 
 func main() {
@@ -194,7 +196,19 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 	defer closeJournal(journal, stderr)
-	snapshotMetadata, err := loadSnapshotIfConfigured(trie, cfg.snapshotPath)
+	if cfg.journalPullSource != "" && journal == nil {
+		return errors.New("journal pull requires -journal-path")
+	}
+	if cfg.journalPullSource != "" && cfg.journalPullStatePath == "" {
+		cfg.journalPullStatePath = cfg.journalPath + ".pull_state.json"
+	}
+	if cfg.journalPullSource != "" {
+		if _, err := loadJournalPullState(cfg.journalPullStatePath, cfg.journalPullSource); err != nil {
+			return err
+		}
+	}
+	pullSnapshotPath := journalPullSnapshotPath(cfg.journalPullStatePath, cfg.journalPullSource)
+	snapshotMetadata, err := loadStartupSnapshot(trie, journal, cfg.snapshotPath, pullSnapshotPath)
 	if err != nil {
 		return err
 	}
@@ -226,20 +240,22 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	defer stopDBSync()
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, snapshotFormat(cfg), stderr)
 	defer stopSnapshots()
-	if cfg.journalPullSource != "" && journal == nil {
-		return errors.New("journal pull requires -journal-path")
-	}
-	if cfg.journalPullSource != "" && cfg.journalPullStatePath == "" {
-		cfg.journalPullStatePath = cfg.journalPath + ".pull_state.json"
+	var persistFullSync func() error
+	if dbStore != nil {
+		persistFullSync = func() error { return dbStore.Save(trie) }
 	}
 	stopJournalPuller := startJournalPuller(ctx, trie, journal, journalPullerConfig{
-		Source:     cfg.journalPullSource,
-		StatePath:  cfg.journalPullStatePath,
-		Interval:   cfg.journalPullInterval,
-		Timeout:    cfg.journalPullTimeout,
-		Limit:      cfg.journalPullLimit,
-		MaxBatches: cfg.journalPullMaxBatches,
-		Dirty:      levelDBDirtyTracker,
+		Source:           cfg.journalPullSource,
+		StatePath:        cfg.journalPullStatePath,
+		Interval:         cfg.journalPullInterval,
+		Timeout:          cfg.journalPullTimeout,
+		Limit:            cfg.journalPullLimit,
+		MaxBatches:       cfg.journalPullMaxBatches,
+		Dirty:            levelDBDirtyTracker,
+		FullSyncFallback: cfg.journalPullFullSyncFallback,
+		AuthToken:        cfg.replicationAuthToken,
+		SnapshotPath:     pullSnapshotPath,
+		PersistFullSync:  persistFullSync,
 	}, stderr)
 	defer stopJournalPuller()
 
@@ -383,6 +399,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		replicationBatchMaxBytes:    hatriecache.DefaultReplicationBatchMaxBytes,
 		replicationMaxTargets:       hatriecache.DefaultReplicationMaxInFlightTargets,
 		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
+		journalPullFullSyncFallback: true,
 		dbFormat:                    string(hatriecache.DefaultStorageFormat),
 		dbCompareBeforeWrite:        string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
 		snapshotFormat:              string(hatriecache.DefaultSnapshotFormat),
@@ -484,6 +501,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.journalPullTimeout, "journal-pull-timeout", cfg.journalPullTimeout, "HTTP timeout for each journal pull request; use 0 to disable")
 	flags.Uint64Var(&cfg.journalPullLimit, "journal-pull-limit", 0, "maximum entries per journal pull batch")
 	flags.Uint64Var(&cfg.journalPullMaxBatches, "journal-pull-max-batches", 0, "maximum batches per journal pull attempt")
+	flags.BoolVar(&cfg.journalPullFullSyncFallback, "journal-pull-full-sync-fallback", cfg.journalPullFullSyncFallback, "request an exact full snapshot when journal deltas were compacted")
 	if configPath != "" {
 		if err := applyConfigFile(configPath, flags); err != nil {
 			return config{}, err
@@ -912,6 +930,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"journal_pull_timeout":                 cfg.journalPullTimeout.String(),
 		"journal_pull_limit":                   cfg.journalPullLimit,
 		"journal_pull_max_batches":             cfg.journalPullMaxBatches,
+		"journal_pull_full_sync_fallback":      cfg.journalPullFullSyncFallback,
 	}
 }
 
@@ -1580,6 +1599,52 @@ func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) (hatriecac
 	return metadata, nil
 }
 
+func loadStartupSnapshot(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, configuredPath string, pullPath string) (hatriecache.SnapshotMetadata, error) {
+	selectedPath := ""
+	selectedPull := false
+	var selectedMetadata hatriecache.SnapshotMetadata
+	for _, candidate := range []struct {
+		path string
+		pull bool
+	}{{path: configuredPath}, {path: pullPath, pull: true}} {
+		if candidate.path == "" {
+			continue
+		}
+		metadata, err := hatriecache.ReadSnapshotMetadata(candidate.path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return hatriecache.SnapshotMetadata{}, err
+		}
+		if selectedPath == "" || metadata.JournalSequence > selectedMetadata.JournalSequence {
+			selectedPath = candidate.path
+			selectedPull = candidate.pull
+			selectedMetadata = metadata
+		}
+	}
+	if selectedPath == "" {
+		return hatriecache.SnapshotMetadata{}, nil
+	}
+	if selectedPull {
+		if journal == nil {
+			return hatriecache.SnapshotMetadata{}, errors.New("journal pull snapshot requires a journal")
+		}
+		return journal.ReplaceWithSnapshot(trie, selectedPath)
+	}
+	return trie.LoadSnapshotWithMetadata(selectedPath)
+}
+
+func journalPullSnapshotPath(statePath string, source string) string {
+	statePath = strings.TrimSpace(statePath)
+	source = strings.TrimSpace(source)
+	if statePath == "" || source == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(source))
+	return fmt.Sprintf("%s.%x.snapshot.hc", statePath, sum[:8])
+}
+
 func saveSnapshotIfConfigured(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, format hatriecache.SnapshotFormat) (err error) {
 	defer recoverDestroyedHatTrie(&err)
 	if path == "" {
@@ -1784,13 +1849,18 @@ func replicationSyncResultLogMessage(result hatriecache.ReplicationResult) strin
 }
 
 type journalPullerConfig struct {
-	Source     string
-	StatePath  string
-	Interval   time.Duration
-	Timeout    time.Duration
-	Limit      uint64
-	MaxBatches uint64
-	Dirty      *hatriecache.LevelDBDirtyTracker
+	Source           string
+	StatePath        string
+	Interval         time.Duration
+	Timeout          time.Duration
+	Limit            uint64
+	MaxBatches       uint64
+	Dirty            *hatriecache.LevelDBDirtyTracker
+	FullSyncFallback bool
+	AuthToken        string
+	Client           *http.Client
+	SnapshotPath     string
+	PersistFullSync  func() error
 }
 
 type journalPullState struct {
@@ -1862,8 +1932,38 @@ func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *ha
 		MaxBatches:    cfg.MaxBatches,
 		Timeout:       cfg.Timeout,
 		DirtyTracker:  cfg.Dirty,
+		AuthToken:     cfg.AuthToken,
+		Client:        cfg.Client,
 	})
 	if err != nil {
+		if cfg.FullSyncFallback && errors.Is(err, hatriecache.ErrCommandJournalCompacted) {
+			metadata, syncErr := hatriecache.PullCommandJournalSnapshot(ctx, cfg.Source, cfg.AuthToken, cfg.Client, cfg.SnapshotPath, result.LastSequence)
+			if syncErr != nil {
+				return result, errors.Join(err, fmt.Errorf("full sync fallback: %w", syncErr))
+			}
+			if metadata.JournalSequence < result.LastSequence {
+				return result, errors.Join(err, fmt.Errorf("full sync fallback snapshot sequence %d is older than journal sequence %d", metadata.JournalSequence, result.LastSequence))
+			}
+			restored, restoreErr := journal.ReplaceWithSnapshot(trie, cfg.SnapshotPath)
+			if restoreErr != nil {
+				return result, errors.Join(err, fmt.Errorf("full sync fallback restore: %w", restoreErr))
+			}
+			if restored.JournalSequence != metadata.JournalSequence {
+				return result, errors.Join(err, errors.New("full sync fallback snapshot changed during restore"))
+			}
+			if cfg.PersistFullSync != nil {
+				if persistErr := cfg.PersistFullSync(); persistErr != nil {
+					return result, errors.Join(err, fmt.Errorf("full sync fallback persistence: %w", persistErr))
+				}
+			}
+			result.FullSyncFallback = true
+			result.LastSequence = metadata.JournalSequence
+			result.AppliedThrough = metadata.JournalSequence
+			if saveErr := saveJournalPullState(cfg.StatePath, cfg.Source, result.AppliedThrough); saveErr != nil {
+				return result, saveErr
+			}
+			return result, nil
+		}
 		if result.AppliedThrough > afterSequence {
 			if saveErr := saveJournalPullState(cfg.StatePath, cfg.Source, result.AppliedThrough); saveErr != nil {
 				return result, errors.Join(err, saveErr)

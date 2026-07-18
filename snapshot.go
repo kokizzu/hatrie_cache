@@ -84,6 +84,33 @@ type SnapshotMetadata struct {
 	JournalSequence uint64
 }
 
+// ReadSnapshotMetadata validates a snapshot file without mutating a trie.
+func ReadSnapshotMetadata(path string) (SnapshotMetadata, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return SnapshotMetadata{}, err
+	}
+	defer file.Close()
+	seen := make(map[string]struct{})
+	metadata, err := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
+		if err := validateSnapshotEntryFields(entry, true); err != nil {
+			return err
+		}
+		if _, exists := seen[entry.Key]; exists {
+			return errSnapshotDuplicateActiveKey
+		}
+		seen[entry.Key] = struct{}{}
+		return nil
+	})
+	if err != nil {
+		return SnapshotMetadata{}, err
+	}
+	if metadata.Version != snapshotVersion {
+		return SnapshotMetadata{}, errors.New("hatriecache: unsupported snapshot version")
+	}
+	return SnapshotMetadata{JournalSequence: metadata.JournalSequence}, nil
+}
+
 type snapshotFileMetadata struct {
 	Version         int
 	JournalSequence uint64

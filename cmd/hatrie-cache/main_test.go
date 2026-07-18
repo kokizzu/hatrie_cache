@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -61,6 +62,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	}
 	if cfg.journalFormat != string(hatriecache.DefaultCommandJournalFormat) {
 		t.Fatalf("journalFormat = %q, want default", cfg.journalFormat)
+	}
+	if !cfg.journalPullFullSyncFallback {
+		t.Fatal("journalPullFullSyncFallback = false, want default true")
 	}
 	if cfg.monitoringReadHeaderTimeout != defaultMonitoringReadHeaderTimeout {
 		t.Fatalf("monitoring read header timeout = %s, want %s", cfg.monitoringReadHeaderTimeout, defaultMonitoringReadHeaderTimeout)
@@ -449,6 +453,7 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 		"-journal-pull-timeout", "750ms",
 		"-journal-pull-limit", "250",
 		"-journal-pull-max-batches", "8",
+		"-journal-pull-full-sync-fallback=false",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
@@ -461,6 +466,9 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 	}
 	if cfg.journalPullLimit != 250 || cfg.journalPullMaxBatches != 8 {
 		t.Fatalf("cfg journal pull limits = %d/%d, want 250/8", cfg.journalPullLimit, cfg.journalPullMaxBatches)
+	}
+	if cfg.journalPullFullSyncFallback {
+		t.Fatal("cfg journal pull full sync fallback = true, want explicit false")
 	}
 }
 
@@ -2345,6 +2353,62 @@ func TestLoadSnapshotIfConfiguredIgnoresMissingSnapshot(t *testing.T) {
 	}
 }
 
+func TestLoadStartupSnapshotPrefersNewestPullCheckpoint(t *testing.T) {
+	writeSnapshot := func(path string, requests ...hatriecache.CacheCommandRequest) {
+		t.Helper()
+		trie := hatriecache.CreateHatTrie()
+		defer trie.Destroy()
+		journal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))
+		if err != nil {
+			t.Fatalf("OpenCommandJournal(source) error = %v", err)
+		}
+		defer journal.Close()
+		for _, request := range requests {
+			if response := journal.ExecuteCommand(trie, request); !response.OK {
+				t.Fatalf("source command response = %#v, want ok", response)
+			}
+		}
+		if err := journal.SaveSnapshot(trie, path); err != nil {
+			t.Fatalf("SaveSnapshot(%s) error = %v", path, err)
+		}
+	}
+	dir := t.TempDir()
+	configuredPath := filepath.Join(dir, "configured.hc")
+	pullPath := filepath.Join(dir, "pull.hc")
+	writeSnapshot(configuredPath, hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "version", Value: "configured"})
+	writeSnapshot(pullPath,
+		hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "version", Value: "pull"},
+		hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "second", Value: "value"},
+	)
+
+	target := hatriecache.CreateHatTrie()
+	defer target.Destroy()
+	target.UpsertString("stale", "remove")
+	targetJournal, err := hatriecache.OpenCommandJournal(filepath.Join(dir, "target.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(target) error = %v", err)
+	}
+	defer targetJournal.Close()
+	metadata, err := loadStartupSnapshot(target, targetJournal, configuredPath, pullPath)
+	if err != nil {
+		t.Fatalf("loadStartupSnapshot() error = %v", err)
+	}
+	if metadata.JournalSequence != 2 || target.GetString("version") != "pull" || target.Exists("stale") {
+		t.Fatalf("startup snapshot sequence/version/stale = %d/%q/%v, want 2/pull/false", metadata.JournalSequence, target.GetString("version"), target.Exists("stale"))
+	}
+	if tail, err := targetJournal.Tail(0, 10); !errors.Is(err, hatriecache.ErrCommandJournalCompacted) || tail.CompactedThrough != 2 {
+		t.Fatalf("target journal tail = %#v/%v, want checkpoint 2", tail, err)
+	}
+}
+
+func TestJournalPullSnapshotPathIsSourceSpecific(t *testing.T) {
+	first := journalPullSnapshotPath("data/pull-state.json", "http://node-a:8080")
+	second := journalPullSnapshotPath("data/pull-state.json", "http://node-b:8080")
+	if first == "" || second == "" || first == second || !strings.HasPrefix(first, "data/pull-state.json.") || !strings.HasSuffix(first, ".snapshot.hc") {
+		t.Fatalf("snapshot paths = %q/%q, want distinct source-specific paths", first, second)
+	}
+}
+
 func TestSnapshotLifecycleHelpersLoadAndSave(t *testing.T) {
 	source := hatriecache.CreateHatTrie()
 	defer source.Destroy()
@@ -3140,6 +3204,132 @@ func TestPullJournalOncePersistsPartialProgressOnApplyError(t *testing.T) {
 	}
 	if after != 1 {
 		t.Fatalf("pull state after partial error = %d, want 1", after)
+	}
+}
+
+func TestPullJournalOnceFallsBackToFullSyncAfterCompaction(t *testing.T) {
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	ht.UpsertString("stale", "must-be-removed")
+	journal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+	statePath := filepath.Join(t.TempDir(), "pull-state.json")
+	snapshotPath := filepath.Join(t.TempDir(), "pull-snapshot.hc")
+
+	sourceTrie := hatriecache.CreateHatTrie()
+	defer sourceTrie.Destroy()
+	sourceJournal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(source) error = %v", err)
+	}
+	defer sourceJournal.Close()
+	if response := sourceJournal.ExecuteCommand(sourceTrie, hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "recovered", Value: "full-sync"}); !response.OK {
+		t.Fatalf("source SETSTR response = %#v, want ok", response)
+	}
+	sourceSnapshotPath := filepath.Join(t.TempDir(), "source.hc")
+	if err := sourceJournal.SaveSnapshot(sourceTrie, sourceSnapshotPath); err != nil {
+		t.Fatalf("SaveSnapshot(source) error = %v", err)
+	}
+	sourceSnapshot, err := os.ReadFile(sourceSnapshotPath)
+	if err != nil {
+		t.Fatalf("ReadFile(source snapshot) error = %v", err)
+	}
+
+	var fullSyncRequests atomic.Int64
+	var fullSyncPersists atomic.Int64
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/journal":
+			if got := r.Header.Get("X-Hatrie-Replication-Token"); got != "replica-secret" {
+				t.Fatalf("journal replication token = %q, want replica-secret", got)
+			}
+			if err := json.NewEncoder(w).Encode(hatriecache.CommandJournalTail{LastSequence: 1, CompactedThrough: 1}); err != nil {
+				t.Fatalf("encode journal tail: %v", err)
+			}
+		case "/api/journal/snapshot":
+			if r.Method != http.MethodGet {
+				t.Fatalf("snapshot method = %s, want GET", r.Method)
+			}
+			if got := r.Header.Get("X-Hatrie-Replication-Token"); got != "replica-secret" {
+				t.Fatalf("replication token = %q, want replica-secret", got)
+			}
+			fullSyncRequests.Add(1)
+			w.Header().Set("Content-Type", "application/vnd.hatrie-cache.snapshot")
+			_, _ = w.Write(sourceSnapshot)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer source.Close()
+
+	result, err := pullJournalOnce(context.Background(), ht, journal, journalPullerConfig{
+		Source:           source.URL,
+		StatePath:        statePath,
+		SnapshotPath:     snapshotPath,
+		Limit:            10,
+		MaxBatches:       1,
+		FullSyncFallback: true,
+		AuthToken:        "replica-secret",
+		Client:           source.Client(),
+		PersistFullSync: func() error {
+			if _, err := os.Stat(statePath); !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("pull state existed before full persistence: %v", err)
+			}
+			fullSyncPersists.Add(1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("pullJournalOnce() error = %v", err)
+	}
+	if !result.FullSyncFallback || result.AppliedThrough != 1 || result.LastSequence != 1 {
+		t.Fatalf("fallback result = %#v, want full sync through 1", result)
+	}
+	if fullSyncRequests.Load() != 1 || fullSyncPersists.Load() != 1 || ht.GetString("recovered") != "full-sync" || ht.Exists("stale") {
+		t.Fatalf("full sync requests/persists/value/stale = %d/%d/%q/%v, want 1/1/full-sync/false", fullSyncRequests.Load(), fullSyncPersists.Load(), ht.GetString("recovered"), ht.Exists("stale"))
+	}
+	after, err := loadJournalPullState(statePath, source.URL)
+	if err != nil {
+		t.Fatalf("loadJournalPullState() error = %v", err)
+	}
+	if after != 1 {
+		t.Fatalf("pull state after fallback = %d, want 1", after)
+	}
+}
+
+func TestPullJournalOnceLeavesCompactedGapWhenFullSyncFallbackIsDisabled(t *testing.T) {
+	var snapshotRequests atomic.Int64
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/journal/snapshot" {
+			snapshotRequests.Add(1)
+		}
+		_ = json.NewEncoder(w).Encode(hatriecache.CommandJournalTail{LastSequence: 4, CompactedThrough: 3})
+	}))
+	defer source.Close()
+	ht := hatriecache.CreateHatTrie()
+	defer ht.Destroy()
+	journal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+
+	_, err = pullJournalOnce(context.Background(), ht, journal, journalPullerConfig{
+		Source:       source.URL,
+		StatePath:    filepath.Join(t.TempDir(), "pull-state.json"),
+		SnapshotPath: filepath.Join(t.TempDir(), "pull-snapshot.hc"),
+		Limit:        10,
+		MaxBatches:   1,
+		Client:       source.Client(),
+	})
+	if !errors.Is(err, hatriecache.ErrCommandJournalCompacted) {
+		t.Fatalf("pullJournalOnce() error = %v, want compacted gap", err)
+	}
+	if snapshotRequests.Load() != 0 {
+		t.Fatalf("snapshot requests = %d, want 0", snapshotRequests.Load())
 	}
 }
 

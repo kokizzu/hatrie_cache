@@ -324,6 +324,36 @@ request for 2 ms. Medians from the five runs:
 The bounded path adds 12 allocations and about 1.15x cumulative heap for this
 four-target operation. Single-target delivery does not start worker goroutines.
 
+## Journal Delta-First Recovery Benchmark
+
+Run:
+
+```sh
+make bench-journal-catchup BENCHTIME=5x COUNT=7
+```
+
+`BenchmarkJournalCatchUpDeltaVsFullSnapshot` measures end-to-end local HTTP
+transfer, decode/validation, trie mutation, journal persistence, and cleanup.
+The delta fixture applies 100 retained `SETSTR` records. The exact-rebuild
+fixture replaces a follower from a 10,000-key fast-gzip binary snapshot,
+including stale-key deletion. The control delta row keeps the old one-`fsync`
+per command behavior. Values are seven-run medians on the same AMD Ryzen 9
+5950X host; filesystem `fsync` latency is host/load sensitive.
+
+| Recovery path | Work/op | Seconds/op | wire_B/op | B/op | allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Retained delta, one batch `fsync` (default) | 100 deltas | 0.002170 s | 9,425 | 163,918 | 702 | 56.55x faster than per-command `fsync` |
+| Retained delta, one `fsync` per command (control) | 100 deltas | 0.122684 s | 9,425 | 176,726 | 799 | 1.00x |
+| Exact snapshot fallback | 10,000 keys | 0.092649 s | 56,267 | 25,709,960 | 231,154 | 42.70x slower than retained delta |
+
+For this fixture, retaining 100 deltas instead of rebuilding 100x more entries
+uses 5.97x less wire, 156.85x less cumulative allocated heap, and 329.28x fewer
+allocations. Batching the durable delta append replaces 100 `fsync` calls with
+one while preserving successful-prefix replay semantics on command failure.
+The full snapshot remains the correctness fallback after compaction because it
+replaces the complete key set at a source journal sequence; it is not the
+normal catch-up path.
+
 ## HAT-trie vs Redis
 
 Redis was measured with Redis 7.0.4 in a temporary Docker container, one

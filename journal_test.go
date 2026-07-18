@@ -1627,6 +1627,59 @@ func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 	}
 }
 
+func TestCommandJournalStreamsAndReplacesFromExactSnapshot(t *testing.T) {
+	sourceTrie := newTestTrie(t)
+	sourceJournal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(source) error = %v", err)
+	}
+	defer sourceJournal.Close()
+	for _, request := range []CacheCommandRequest{
+		{Command: "SETSTR", Key: "kept", Value: "source"},
+		{Command: "SETSTR", Key: "second", Value: "value"},
+	} {
+		if response := sourceJournal.ExecuteCommand(sourceTrie, request); !response.OK {
+			t.Fatalf("source command response = %#v, want ok", response)
+		}
+	}
+
+	var snapshot bytes.Buffer
+	metadata, err := sourceJournal.WriteSnapshotWithFormat(sourceTrie, &snapshot, SnapshotFormatGzipBinary)
+	if err != nil {
+		t.Fatalf("WriteSnapshotWithFormat() error = %v", err)
+	}
+	if metadata.JournalSequence != 2 {
+		t.Fatalf("snapshot sequence = %d, want 2", metadata.JournalSequence)
+	}
+	if tail, err := sourceJournal.Tail(0, 10); err != nil || len(tail.Entries) != 2 {
+		t.Fatalf("source tail after stream = %#v/%v, want two uncompacted entries", tail, err)
+	}
+
+	snapshotPath := filepath.Join(t.TempDir(), "source.hc")
+	if err := os.WriteFile(snapshotPath, snapshot.Bytes(), 0o600); err != nil {
+		t.Fatalf("WriteFile(snapshot) error = %v", err)
+	}
+	targetTrie := newTestTrie(t)
+	targetTrie.UpsertString("stale", "remove")
+	targetJournal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "target.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(target) error = %v", err)
+	}
+	defer targetJournal.Close()
+
+	restored, err := targetJournal.ReplaceWithSnapshot(targetTrie, snapshotPath)
+	if err != nil {
+		t.Fatalf("ReplaceWithSnapshot() error = %v", err)
+	}
+	if restored.JournalSequence != 2 || targetTrie.GetString("kept") != "source" || targetTrie.Exists("stale") {
+		t.Fatalf("restored sequence/kept/stale = %d/%q/%v, want 2/source/false", restored.JournalSequence, targetTrie.GetString("kept"), targetTrie.Exists("stale"))
+	}
+	tail, err := targetJournal.Tail(0, 10)
+	if !errors.Is(err, ErrCommandJournalCompacted) || tail.CompactedThrough != 2 {
+		t.Fatalf("target tail after replacement = %#v/%v, want checkpoint 2", tail, err)
+	}
+}
+
 func TestCommandJournalCompactionStreamsLargeHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	largeValue := strings.Repeat("x", 70*1024)

@@ -796,7 +796,9 @@ When journaling is enabled, `GET /api/journal?after_sequence=N&limit=1000`
 returns a bounded batch of ordered mutating commands after `N` plus the latest
 journal sequence. Responses include `has_more` when another batch is available.
 If `N` is older than the compacted snapshot checkpoint, the endpoint returns
-`409` so a replica can fall back to a snapshot or explicit replication sync.
+`409`. `GET /api/journal/snapshot` streams a fast-gzip binary point-in-time
+snapshot with its journal sequence. The source captures it under the journal
+write barrier, so writes after that sequence remain ordered delta records.
 `POST /api/journal` accepts `source`, optional `after_sequence`, and optional
 `limit`, pulls that source node's journal tail, and applies the returned
 mutating commands locally through the configured journal. Set `until_current`
@@ -807,11 +809,26 @@ catch-up batches from another node at startup; `JOURNAL_PULL_STATE_PATH`
 persists the source sequence so non-idempotent commands are not replayed after
 restart. Journal pull HTTP requests use a 30 second timeout by default; set
 `JOURNAL_PULL_TIMEOUT=0` to disable that bound for a deliberate long-running
-source. Add `JOURNAL_PULL_INTERVAL` to repeat catch-up periodically:
+source. Add `JOURNAL_PULL_INTERVAL` to repeat catch-up periodically.
+
+Journal pull is delta-first by default. If the requested delta was compacted,
+the follower automatically downloads `/api/journal/snapshot`, validates it
+before replacing the previous recovery file, replaces its complete key set
+(including stale-key deletion), resets its local journal checkpoint to the
+source snapshot sequence, performs a full LevelDB save when LevelDB is enabled,
+and only then advances `JOURNAL_PULL_STATE_PATH`. The durable snapshot filename
+is derived from the state path and a hash of `JOURNAL_PULL_SOURCE`, preventing a
+snapshot from one source from being reused for another. On restart, the newer
+of this recovery snapshot and `SNAPSHOT_PATH` is loaded before journal replay.
+Set `JOURNAL_PULL_FULL_SYNC_FALLBACK=false` to keep the previous fail-closed
+`409` behavior. Full fallback is intentionally more CPU, disk, and bandwidth
+work than a delta pull, but it runs only when the required deltas no longer
+exist:
 
 ```
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_INTERVAL=5s
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_TIMEOUT=5s
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_FULL_SYNC_FALLBACK=false
 ```
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
@@ -914,9 +931,11 @@ Set `REPLICATION_AUTH_TOKEN` on each node to authenticate outbound HTTP
 replication and require the same token for inbound `INTERNALSET`, `INTERNALDEL`,
 `INTERNALSETV2`, `INTERNALSETV3`, `INTERNALBATCH`, and `INTERNALBATCHV2` commands. Replication clients send both
 `Authorization: Bearer <token>` and `X-Hatrie-Replication-Token: <token>`.
-The replication token is intentionally narrow: it is accepted only on
-`POST /api/commands` for internal replication traffic, not for health, metrics,
-config, or normal client commands. The
+The replication token is intentionally narrow: it is accepted on
+`POST /api/commands` for internal replication traffic and on journal recovery
+reads (`GET /api/journal` and `GET /api/journal/snapshot`). It is not accepted
+for health, metrics, config, normal client commands, `POST /api/journal`, or
+`POST /api/replication`. The
 operator `MONITORING_AUTH_TOKEN` still has full monitoring API access.
 
 Replication payloads include source-node, monotonic sequence, and topology

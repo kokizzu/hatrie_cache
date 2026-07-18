@@ -114,6 +114,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/print-sane-config.sh",
 		"bench-ci-smoke:",
 		"./scripts/benchmark-ci-smoke.sh",
+		"bench-journal-catchup:",
+		"./scripts/benchmark-journal-catchup.sh",
 		"GRPC_TLS_CERT ?=",
 		"GRPC_CLIENT_CA ?=",
 	} {
@@ -181,6 +183,8 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"-replication-http-fallback",
 		"REPLICATION_MAX_IN_FLIGHT_TARGETS",
 		"-replication-max-in-flight-targets",
+		"JOURNAL_PULL_FULL_SYNC_FALLBACK",
+		"-journal-pull-full-sync-fallback",
 		"DB_COMPACT_INTERVAL",
 		"-db-compact-interval",
 		"DB_COMPACT_START_KEY",
@@ -198,6 +202,19 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 	} {
 		if !strings.Contains(string(data), token) {
 			t.Fatalf("monitoring server script missing token %q", token)
+		}
+	}
+	data, err = os.ReadFile("scripts/benchmark-journal-catchup.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/benchmark-journal-catchup.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"JOURNAL_CATCHUP_BENCH",
+		"BENCHTIME",
+		"go test",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("journal catch-up benchmark script missing token %q", token)
 		}
 	}
 	data, err = os.ReadFile("scripts/restore-bundle.sh")
