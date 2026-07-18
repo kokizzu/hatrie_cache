@@ -133,6 +133,30 @@ func TestReplicationBatchEnvelopeSharesMetadata(t *testing.T) {
 	}
 }
 
+func TestDeferredReplicationBatchEnvelopeBorrowsPayloads(t *testing.T) {
+	payloads := []CacheCommandRequest{
+		{Command: replicationSetCompactCommand, Key: "session:1", BinaryValue: []byte("one")},
+		{Command: "INTERNALDEL", Key: "session:2"},
+	}
+
+	envelope := replicationBatchEnvelopePayloadWithMetadata(payloads, "node-a", 42, "fingerprint-a")
+	if envelope.Command != replicationBatchEnvelopeCommand || len(envelope.Batch) != len(payloads) {
+		t.Fatalf("envelope = %#v, want %s with %d payloads", envelope, replicationBatchEnvelopeCommand, len(payloads))
+	}
+	if &envelope.Batch[0] != &payloads[0] {
+		t.Fatalf("envelope batch backing array = %p, want borrowed payload array %p", &envelope.Batch[0], &payloads[0])
+	}
+	if source, sequence, fingerprint := replicationSafetyMetadata(envelope); source != "node-a" || sequence != 42 || fingerprint != "fingerprint-a" {
+		t.Fatalf("envelope metadata = %q/%d/%q, want node-a/42/fingerprint-a", source, sequence, fingerprint)
+	}
+	if payloads[0].Pairs != nil || payloads[1].Pairs != nil {
+		t.Fatalf("source payload metadata mutated = %#v/%#v", payloads[0].Pairs, payloads[1].Pairs)
+	}
+	if envelope.Batch[0].Key != "session:1" || string(envelope.Batch[0].BinaryValue) != "one" || envelope.Batch[1].Key != "session:2" {
+		t.Fatalf("envelope children = %#v, want original payload fields", envelope.Batch)
+	}
+}
+
 func TestReplicationCommandPayloadUsesTypedBinaryValue(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("session:1", "one")

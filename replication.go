@@ -2221,13 +2221,11 @@ func replicationBatchEnvelopePayload(payloads []CacheCommandRequest) (CacheComma
 }
 
 func replicationBatchEnvelopePayloadWithMetadata(payloads []CacheCommandRequest, source string, sequence uint64, fingerprint string) CacheCommandRequest {
-	batch := make([]CacheCommandRequest, len(payloads))
-	copy(batch, payloads)
 	pairs := replicationMetadataPairs(source, sequence, fingerprint)
 	return CacheCommandRequest{
 		Command: replicationBatchEnvelopeCommand,
 		Pairs:   pairs,
-		Batch:   batch,
+		Batch:   payloads,
 	}
 }
 
