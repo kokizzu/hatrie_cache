@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1227,6 +1228,93 @@ func TestCacheGRPCServerReplicatesCommands(t *testing.T) {
 	}
 	if replication.GetStartedAtUnixNano() <= 0 || replication.GetFinishedAtUnixNano() < replication.GetStartedAtUnixNano() || replication.GetDurationMillis() < 0 {
 		t.Fatalf("replication timing = started %d finished %d duration %d, want ordered timestamps", replication.GetStartedAtUnixNano(), replication.GetFinishedAtUnixNano(), replication.GetDurationMillis())
+	}
+}
+
+func TestReplicationGRPCStreamSyncPreservesPagedOrder(t *testing.T) {
+	targetTrie := newTestTrie(t)
+	listener := bufconn.Listen(testGRPCBufferSize)
+	server := grpc.NewServer()
+
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b", GRPCAddress: "bufnet"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	RegisterCacheGRPCServer(server, NewCacheGRPCServer(targetTrie, CacheGRPCOptions{
+		NodeName:             "node-b",
+		ReplicationAuthToken: "replica-secret",
+		Topology:             topology,
+		ReplicationSafety:    NewReplicationSafetyStore(),
+	}))
+	go func() {
+		if err := server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
+			t.Errorf("grpc Serve() error = %v", err)
+		}
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+	})
+
+	sourceTrie := newTestTrie(t)
+	for idx := 0; idx < 5; idx++ {
+		sourceTrie.UpsertString(fmt.Sprintf("session:%d", idx), fmt.Sprintf("value-%d", idx))
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                "node-a",
+		Topology:            topology,
+		Election:            NewElectionStore(topology, ElectionOptions{}),
+		Transport:           ReplicationTransportGRPCStream,
+		DisableHTTPFallback: true,
+		AuthToken:           "replica-secret",
+		GRPCDialOptions: []grpc.DialOption{
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+				return listener.Dial()
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		},
+	})
+	t.Cleanup(replicator.Close)
+
+	result := replicator.syncAllPaged(context.Background(), sourceTrie, "session:", 2)
+	if result.Skipped || result.Entries != 5 {
+		t.Fatalf("syncAllPaged() = %#v, want five streamed entries", result)
+	}
+	for idx := 0; idx < 5; idx++ {
+		key := fmt.Sprintf("session:%d", idx)
+		if got, want := targetTrie.GetString(key), fmt.Sprintf("value-%d", idx); got != want {
+			t.Fatalf("target %s = %q, want %q", key, got, want)
+		}
+	}
+	if got := replicator.grpcStreamBatches.Load(); got != 3 {
+		t.Fatalf("gRPC stream batches = %d, want 3 ordered pages", got)
+	}
+
+	unauthorized := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                "node-a",
+		Topology:            topology,
+		Election:            NewElectionStore(topology, ElectionOptions{}),
+		Transport:           ReplicationTransportGRPCStream,
+		DisableHTTPFallback: true,
+		GRPCDialOptions: []grpc.DialOption{
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+				return listener.Dial()
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		},
+	})
+	t.Cleanup(unauthorized.Close)
+	unauthorizedResult := unauthorized.syncAllPaged(context.Background(), sourceTrie, "session:", 2)
+	if len(unauthorizedResult.Targets) == 0 || !strings.Contains(strings.ToLower(unauthorizedResult.Targets[0].Error), "unauthenticated") {
+		t.Fatalf("unauthorized stream targets = %#v, want authentication failure", unauthorizedResult.Targets)
 	}
 }
 

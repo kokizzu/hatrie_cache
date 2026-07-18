@@ -75,6 +75,8 @@ type config struct {
 	replicationCircuitFailures  int
 	replicationCircuitCooldown  time.Duration
 	replicationWireFormat       string
+	replicationTransport        string
+	replicationHTTPFallback     bool
 	replicationAuthToken        string
 	replicationBatchMaxBytes    int
 	replicationMaxTargets       int
@@ -271,6 +273,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			CircuitBreakerFailures:   cfg.replicationCircuitFailures,
 			CircuitBreakerCooldown:   cfg.replicationCircuitCooldown,
 			WireFormat:               replicationWireFormat(cfg),
+			Transport:                replicationTransport(cfg),
+			DisableHTTPFallback:      !cfg.replicationHTTPFallback,
 			AuthToken:                cfg.replicationAuthToken,
 			ReplicationBatchMaxBytes: cfg.replicationBatchMaxBytes,
 			MaxInFlightTargets:       cfg.replicationMaxTargets,
@@ -374,6 +378,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
 		replicationMode:             replicationModeJournal,
 		replicationWireFormat:       string(hatriecache.DefaultCommandWireFormat),
+		replicationTransport:        string(hatriecache.ReplicationTransportHTTP),
+		replicationHTTPFallback:     true,
 		replicationBatchMaxBytes:    hatriecache.DefaultReplicationBatchMaxBytes,
 		replicationMaxTargets:       hatriecache.DefaultReplicationMaxInFlightTargets,
 		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
@@ -440,6 +446,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.replicationCircuitFailures, "replication-circuit-breaker-failures", hatriecache.DefaultReplicationCircuitBreakerFailures, "consecutive per-target replication failures before opening the circuit breaker; use 0 to disable")
 	flags.DurationVar(&cfg.replicationCircuitCooldown, "replication-circuit-breaker-cooldown", hatriecache.DefaultReplicationCircuitBreakerCooldown, "per-target replication circuit breaker cooldown before a half-open probe; use 0 to disable")
 	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", cfg.replicationWireFormat, "HTTP replication command wire format: protobuf or json")
+	flags.StringVar(&cfg.replicationTransport, "replication-transport", cfg.replicationTransport, "anti-entropy sync transport: http or grpc-stream")
+	flags.BoolVar(&cfg.replicationHTTPFallback, "replication-http-fallback", cfg.replicationHTTPFallback, "fall back to HTTP when a gRPC replication stream cannot be used")
 	flags.StringVar(&cfg.replicationAuthToken, "replication-auth-token", "", "optional bearer token sent on HTTP replication and accepted only for internal replication commands")
 	flags.IntVar(&cfg.replicationBatchMaxBytes, "replication-batch-max-bytes", cfg.replicationBatchMaxBytes, "maximum estimated bytes per HTTP replication batch; use 0 to disable batch splitting")
 	flags.IntVar(&cfg.replicationMaxTargets, "replication-max-in-flight-targets", cfg.replicationMaxTargets, "maximum concurrent HTTP replication targets; use 1 for serial delivery")
@@ -587,6 +595,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if _, err := hatriecache.ParseCommandWireFormat(cfg.replicationWireFormat); err != nil {
 		return config{}, err
 	}
+	if _, err := hatriecache.ParseReplicationTransport(cfg.replicationTransport); err != nil {
+		return config{}, err
+	}
 	if cfg.replicationBatchMaxBytes < 0 {
 		return config{}, errors.New("replication batch max bytes must be non-negative")
 	}
@@ -639,6 +650,8 @@ func applyConfigProfileDefaults(cfg config, profile string) (config, error) {
 		cfg.journalPath = "data/commands.journal"
 		cfg.journalFormat = string(hatriecache.DefaultCommandJournalFormat)
 		cfg.replicationWireFormat = string(hatriecache.DefaultCommandWireFormat)
+		cfg.replicationTransport = string(hatriecache.ReplicationTransportHTTP)
+		cfg.replicationHTTPFallback = true
 		cfg.replicationBatchMaxBytes = hatriecache.DefaultReplicationBatchMaxBytes
 		cfg.replicationMaxTargets = hatriecache.DefaultReplicationMaxInFlightTargets
 	case configProfileBench:
@@ -861,6 +874,8 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_circuit_breaker_failures": cfg.replicationCircuitFailures,
 		"replication_circuit_breaker_cooldown": cfg.replicationCircuitCooldown.String(),
 		"replication_wire_format":              cfg.replicationWireFormat,
+		"replication_transport":                cfg.replicationTransport,
+		"replication_http_fallback":            cfg.replicationHTTPFallback,
 		"replication_auth_token":               redactedSecret(cfg.replicationAuthToken),
 		"replication_batch_max_bytes":          cfg.replicationBatchMaxBytes,
 		"replication_max_in_flight_targets":    cfg.replicationMaxTargets,
@@ -976,6 +991,14 @@ func replicationWireFormat(cfg config) hatriecache.CommandWireFormat {
 		return hatriecache.DefaultCommandWireFormat
 	}
 	return format
+}
+
+func replicationTransport(cfg config) hatriecache.ReplicationTransport {
+	transport, err := hatriecache.ParseReplicationTransport(cfg.replicationTransport)
+	if err != nil {
+		return hatriecache.ReplicationTransportHTTP
+	}
+	return transport
 }
 
 func snapshotFormat(cfg config) hatriecache.SnapshotFormat {
@@ -1220,20 +1243,21 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 	}
 	server := grpc.NewServer(options...)
 	hatriecache.RegisterCacheGRPCServer(server, hatriecache.NewCacheGRPCServer(trie, hatriecache.CacheGRPCOptions{
-		NodeName:            defaultNodeID(cfg.nodeID),
-		AuthToken:           cfg.monitoringAuthToken,
-		AuditLog:            auditLog,
-		WriteProtected:      cfg.writeProtection,
-		RateLimiter:         rateLimiter,
-		Metrics:             apiMetrics,
-		Snapshot:            snapshot,
-		Journal:             journal,
-		DirtyTracker:        dirtyTracker,
-		Topology:            topology,
-		Election:            election,
-		Replicator:          replicator,
-		ReplicationSafety:   replicationSafety,
-		EnforceLeaderWrites: cfg.enforceLeaderWrites,
+		NodeName:             defaultNodeID(cfg.nodeID),
+		AuthToken:            cfg.monitoringAuthToken,
+		ReplicationAuthToken: cfg.replicationAuthToken,
+		AuditLog:             auditLog,
+		WriteProtected:       cfg.writeProtection,
+		RateLimiter:          rateLimiter,
+		Metrics:              apiMetrics,
+		Snapshot:             snapshot,
+		Journal:              journal,
+		DirtyTracker:         dirtyTracker,
+		Topology:             topology,
+		Election:             election,
+		Replicator:           replicator,
+		ReplicationSafety:    replicationSafety,
+		EnforceLeaderWrites:  cfg.enforceLeaderWrites,
 	}))
 	return server, listener, nil
 }

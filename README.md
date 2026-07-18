@@ -816,7 +816,10 @@ make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=ht
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.
 The topology endpoint validates nodes, shard ownership, and replicas, and can
-route a key to its shard. Topologies default to `mode: "sharded"`. Set
+route a key to its shard. Each node uses `address` for HTTP and can set a
+separate `grpc_address` for native gRPC, for example `node-b:9090`,
+`grpc://node-b:9090`, or `grpcs://node-b:9090`. Topologies default to
+`mode: "sharded"`. Set
 `bucket_count` and compact `bucket_ranges` to use vbucket-style routing, or set
 `mode: "full_replica"` to route every key to every node without partitions:
 see [`SHARDING_PROPOSAL.md`](SHARDING_PROPOSAL.md) for the proposed XXH3 slot
@@ -875,6 +878,23 @@ wire format for structured `values` or `pairs` payloads that protobuf cannot
 represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON;
 `REPLICATION_WIRE_FORMAT=json` converts snapshots to legacy JSON before send.
 Large HTTP replication request bodies are gzip-compressed.
+Anti-entropy sync uses HTTP by default. Set
+`REPLICATION_TRANSPORT=grpc-stream` to keep one ordered, gzip-compressed
+HTTP/2 `ReplicationStream` open per target for all sync pages. Every page is
+acknowledged before the next page for that target is sent. The target node must
+publish `grpc_address` in the topology and run its opt-in native listener with
+`GRPC_ADDR`; normal write-path command fanout remains on HTTP. A bare address
+or `grpc://` uses an insecure internal connection, while `grpcs://` verifies
+the server with the host trust store. `REPLICATION_AUTH_TOKEN` is accepted by
+the stream without granting access to other gRPC methods.
+
+If a stream cannot be opened or fails in transit, sync falls back to the
+existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
+closed instead. In the local 10k-entry, 10-page sender+receiver benchmark,
+gRPC streaming had a 26.4ms median versus 33.0ms for HTTP (1.25x faster), used
+52.0KB versus 57.5KB request wire (10% less), and made 24% fewer allocations;
+it allocated about 16% more total heap bytes because of gRPC framing and
+compression buffers.
 `POST /api/replication` runs an explicit command-fanout anti-entropy sync that
 pushes the local leader-owned keys, optionally filtered by prefix, to their
 current topology replicas; it requires `REPLICATION_MODE=command` or
@@ -885,6 +905,8 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 make monitoring-server NODE_ID=node-b TOPOLOGY_PATH=data/topology.json REPLICATION=true JOURNAL_PATH=data/node-b.journal JOURNAL_PULL_SOURCE=http://node-a:8080 JOURNAL_PULL_INTERVAL=5s
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_WIRE_FORMAT=json
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream REPLICATION_HTTP_FALLBACK=false
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=dual JOURNAL_PATH=data/node-a.journal REPLICATION_BATCH_MAX_BYTES=262144
 ```
 

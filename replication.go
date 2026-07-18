@@ -12,9 +12,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"hatrie_cache/internal/jsonwire"
+
+	"google.golang.org/grpc"
 )
 
 const DefaultReplicationTimeout = 2 * time.Second
@@ -33,6 +36,24 @@ const replicationLinearGroupTargetLimit = 4
 const replicationBatchEnvelopeCommand = "INTERNALBATCHV2"
 const replicationSetBinaryCommand = "INTERNALSETV2"
 const replicationSetCompactCommand = "INTERNALSETV3"
+
+type ReplicationTransport string
+
+const (
+	ReplicationTransportHTTP       ReplicationTransport = "http"
+	ReplicationTransportGRPCStream ReplicationTransport = "grpc-stream"
+)
+
+func ParseReplicationTransport(value string) (ReplicationTransport, error) {
+	switch ReplicationTransport(strings.ToLower(strings.TrimSpace(value))) {
+	case "", ReplicationTransportHTTP:
+		return ReplicationTransportHTTP, nil
+	case ReplicationTransportGRPCStream:
+		return ReplicationTransportGRPCStream, nil
+	default:
+		return "", errors.New("hatriecache: replication transport must be http or grpc-stream")
+	}
+}
 
 var (
 	errReplicationResponseTooLarge = errors.New("hatriecache: replication response is too large")
@@ -56,41 +77,48 @@ type HTTPReplicatorOptions struct {
 	AuthToken                string
 	ReplicationBatchMaxBytes int
 	MaxInFlightTargets       int
+	Transport                ReplicationTransport
+	DisableHTTPFallback      bool
+	GRPCDialOptions          []grpc.DialOption
 }
 
 type HTTPReplicator struct {
-	mu              sync.RWMutex
-	self            string
-	topology        *TopologyStore
-	election        *ElectionStore
-	client          *http.Client
-	timeout         time.Duration
-	queue           chan replicationJob
-	retry           time.Duration
-	attempts        uint
-	wireFormat      CommandWireFormat
-	authToken       string
-	outbox          *ReplicationOutboxStore
-	breakerFailures int
-	breakerCooldown time.Duration
-	batchMaxBytes   int
-	maxInFlight     int
-	breakers        map[string]replicationCircuitBreakerState
-	done            chan struct{}
-	stopped         chan struct{}
-	asyncCtx        context.Context
-	cancel          context.CancelFunc
-	close           sync.Once
-	closed          bool
-	sequence        uint64
-	queueSeq        uint64
-	deadSeq         uint64
-	deadLimit       int
-	pending         []replicationQueueMeta
-	deadLetters     []ReplicationDeadLetter
-	queueStats      ReplicationQueueStats
-	last            ReplicationResult
-	metrics         replicationMetrics
+	mu                  sync.RWMutex
+	self                string
+	topology            *TopologyStore
+	election            *ElectionStore
+	client              *http.Client
+	timeout             time.Duration
+	queue               chan replicationJob
+	retry               time.Duration
+	attempts            uint
+	wireFormat          CommandWireFormat
+	authToken           string
+	outbox              *ReplicationOutboxStore
+	breakerFailures     int
+	breakerCooldown     time.Duration
+	batchMaxBytes       int
+	maxInFlight         int
+	transport           ReplicationTransport
+	disableHTTPFallback bool
+	grpcDialOptions     []grpc.DialOption
+	grpcStreamBatches   atomic.Uint64
+	breakers            map[string]replicationCircuitBreakerState
+	done                chan struct{}
+	stopped             chan struct{}
+	asyncCtx            context.Context
+	cancel              context.CancelFunc
+	close               sync.Once
+	closed              bool
+	sequence            uint64
+	queueSeq            uint64
+	deadSeq             uint64
+	deadLimit           int
+	pending             []replicationQueueMeta
+	deadLetters         []ReplicationDeadLetter
+	queueStats          ReplicationQueueStats
+	last                ReplicationResult
+	metrics             replicationMetrics
 }
 
 type ReplicationResult struct {
@@ -315,19 +343,26 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 	} else {
 		wireFormat = DefaultCommandWireFormat
 	}
+	transport, err := ParseReplicationTransport(string(options.Transport))
+	if err != nil {
+		transport = ReplicationTransportHTTP
+	}
 	replicator := &HTTPReplicator{
-		self:            strings.TrimSpace(options.Self),
-		topology:        options.Topology,
-		election:        options.Election,
-		client:          client,
-		timeout:         timeout,
-		wireFormat:      wireFormat,
-		authToken:       normalizeAuthToken(options.AuthToken),
-		outbox:          options.AsyncOutbox,
-		breakerFailures: options.CircuitBreakerFailures,
-		breakerCooldown: options.CircuitBreakerCooldown,
-		batchMaxBytes:   options.ReplicationBatchMaxBytes,
-		maxInFlight:     options.MaxInFlightTargets,
+		self:                strings.TrimSpace(options.Self),
+		topology:            options.Topology,
+		election:            options.Election,
+		client:              client,
+		timeout:             timeout,
+		wireFormat:          wireFormat,
+		authToken:           normalizeAuthToken(options.AuthToken),
+		outbox:              options.AsyncOutbox,
+		breakerFailures:     options.CircuitBreakerFailures,
+		breakerCooldown:     options.CircuitBreakerCooldown,
+		batchMaxBytes:       options.ReplicationBatchMaxBytes,
+		maxInFlight:         options.MaxInFlightTargets,
+		transport:           transport,
+		disableHTTPFallback: options.DisableHTTPFallback,
+		grpcDialOptions:     append([]grpc.DialOption(nil), options.GRPCDialOptions...),
 	}
 	if replicator.batchMaxBytes < 0 {
 		replicator.batchMaxBytes = 0
@@ -1581,6 +1616,11 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 	seenKeys := false
 	cursor := &replicationSyncCursor{}
 	defer cursor.close(trie)
+	var grpcSession *replicationGRPCSyncSession
+	if replicator.transport == ReplicationTransportGRPCStream {
+		grpcSession = newReplicationGRPCSyncSession(ctx, replicator)
+		defer grpcSession.close()
+	}
 	for {
 		routing, routingOK := replicator.snapshotReplicationRouting()
 		pageArena := newReplicationSyncPayloadArena(pageSize)
@@ -1643,7 +1683,12 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			if replicator.batchMaxBytes > 0 {
 				pageGroups = splitReplicationTaskGroupsByMaxBytes(pageGroups, replicator.batchMaxBytes)
 			}
-			pageResult := replicator.executeReplicationTaskGroups(ctx, ReplicationResult{}, pageGroups)
+			pageResult := ReplicationResult{}
+			if grpcSession != nil {
+				pageResult = grpcSession.executeReplicationTaskGroups(ctx, pageResult, pageGroups)
+			} else {
+				pageResult = replicator.executeReplicationTaskGroups(ctx, pageResult, pageGroups)
+			}
 			result.Targets = append(result.Targets, pageResult.Targets...)
 		}
 		if err := ctx.Err(); err != nil {

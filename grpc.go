@@ -2,6 +2,8 @@ package hatriecache
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -15,21 +17,22 @@ import (
 )
 
 type CacheGRPCOptions struct {
-	NodeName            string
-	AuthToken           string
-	AuditLog            *AuditLogger
-	WriteProtected      bool
-	RateLimiter         *RateLimiter
-	Metrics             *APIMetrics
-	StartAt             time.Time
-	Snapshot            func() error
-	Journal             *CommandJournal
-	DirtyTracker        *LevelDBDirtyTracker
-	Topology            *TopologyStore
-	Election            *ElectionStore
-	Replicator          *HTTPReplicator
-	ReplicationSafety   *ReplicationSafetyStore
-	EnforceLeaderWrites bool
+	NodeName             string
+	AuthToken            string
+	ReplicationAuthToken string
+	AuditLog             *AuditLogger
+	WriteProtected       bool
+	RateLimiter          *RateLimiter
+	Metrics              *APIMetrics
+	StartAt              time.Time
+	Snapshot             func() error
+	Journal              *CommandJournal
+	DirtyTracker         *LevelDBDirtyTracker
+	Topology             *TopologyStore
+	Election             *ElectionStore
+	Replicator           *HTTPReplicator
+	ReplicationSafety    *ReplicationSafetyStore
+	EnforceLeaderWrites  bool
 }
 
 type CacheGRPCServer struct {
@@ -40,6 +43,7 @@ type CacheGRPCServer struct {
 
 func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServer {
 	options.AuthToken = normalizeAuthToken(options.AuthToken)
+	options.ReplicationAuthToken = normalizeAuthToken(options.ReplicationAuthToken)
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
 	}
@@ -57,6 +61,28 @@ func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServe
 		options.ReplicationSafety = NewReplicationSafetyStore()
 	}
 	return &CacheGRPCServer{trie: trie, options: options}
+}
+
+func (server *CacheGRPCServer) requireReplicationAuthorized(ctx context.Context) error {
+	if server.options.ReplicationAuthToken == "" {
+		return server.requireAuthorized(ctx)
+	}
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		for _, candidate := range md.Get("x-hatrie-replication-token") {
+			if authTokenMatches(candidate, server.options.ReplicationAuthToken) {
+				return nil
+			}
+		}
+		for _, candidate := range md.Get("authorization") {
+			if authTokenMatches(authBearerToken(candidate), server.options.ReplicationAuthToken) {
+				return nil
+			}
+		}
+	}
+	if server.options.AuthToken != "" {
+		return server.requireAuthorized(ctx)
+	}
+	return status.Error(codes.Unauthenticated, "unauthorized")
 }
 
 func RegisterCacheGRPCServer(registrar grpc.ServiceRegistrar, server *CacheGRPCServer) {
@@ -290,6 +316,81 @@ func (server *CacheGRPCServer) Replication(ctx context.Context, request *hatriec
 	return grpcReplicationResponse(server.options.Replicator.LastResult()), nil
 }
 
+func (server *CacheGRPCServer) ReplicationStream(stream hatriecachev1.CacheService_ReplicationStreamServer) error {
+	ctx := grpcContext(stream.Context())
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := server.requireTrie(); err != nil {
+		return err
+	}
+	if err := server.requireReplicationAuthorized(ctx); err != nil {
+		return err
+	}
+
+	for {
+		batch, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		ack := server.applyReplicationStreamBatch(ctx, batch)
+		if err := stream.Send(ack); err != nil {
+			return err
+		}
+	}
+}
+
+func (server *CacheGRPCServer) applyReplicationStreamBatch(ctx context.Context, batch *hatriecachev1.ReplicationStreamBatch) *hatriecachev1.ReplicationStreamAck {
+	if batch == nil {
+		return &hatriecachev1.ReplicationStreamAck{Message: "replication stream batch is required"}
+	}
+	ack := &hatriecachev1.ReplicationStreamAck{Sequence: batch.GetSequence()}
+	keys := batch.GetKeys()
+	values := batch.GetBinaryValues()
+	if len(keys) == 0 || len(keys) != len(values) {
+		ack.Message = "replication stream keys and values must have the same non-zero length"
+		return ack
+	}
+	if err := server.rejectDangerousGRPC("replication.stream", AuditEvent{
+		Method:  "/hatriecache.v1.CacheService/ReplicationStream",
+		Details: map[string]interface{}{"source": batch.GetSource(), "sequence": batch.GetSequence(), "entries": len(keys)},
+	}); err != nil {
+		ack.Message = err.Error()
+		return ack
+	}
+
+	payloads := make([]CacheCommandRequest, len(keys))
+	for idx := range keys {
+		payloads[idx] = CacheCommandRequest{
+			Command:     replicationSetCompactCommand,
+			Key:         keys[idx],
+			BinaryValue: values[idx],
+		}
+	}
+	request := replicationBatchEnvelopePayloadWithMetadata(payloads, batch.GetSource(), batch.GetSequence(), batch.GetTopologyFingerprint())
+	response, _ := executeCacheCommand(ctx, server.trie, request, commandExecutionOptions{
+		NodeName:          server.options.NodeName,
+		Journal:           server.options.Journal,
+		DirtyTracker:      server.options.DirtyTracker,
+		Topology:          server.options.Topology,
+		Election:          server.options.Election,
+		ReplicationSafety: server.options.ReplicationSafety,
+	})
+	ack.Ok = response.OK
+	ack.Message = response.Message
+	if response.OK {
+		ack.Entries = uint64(len(keys))
+	}
+	server.auditGRPC(AuditEvent{
+		Action: "replication.stream", OK: response.OK, Method: "/hatriecache.v1.CacheService/ReplicationStream", Message: response.Message,
+		Details: map[string]interface{}{"source": batch.GetSource(), "sequence": batch.GetSequence(), "entries": len(keys)},
+	})
+	return ack
+}
+
 func (server *CacheGRPCServer) Topology(ctx context.Context, request *hatriecachev1.TopologyRequest) (*hatriecachev1.TopologyResponse, error) {
 	ctx, err := server.requestContext(ctx)
 	if err != nil {
@@ -494,9 +595,10 @@ func grpcClusterTopology(topology ClusterTopology) *hatriecachev1.ClusterTopolog
 
 func grpcTopologyNode(node TopologyNode) *hatriecachev1.TopologyNode {
 	return &hatriecachev1.TopologyNode{
-		Id:      node.ID,
-		Address: node.Address,
-		Role:    node.Role,
+		Id:          node.ID,
+		Address:     node.Address,
+		GrpcAddress: node.GRPCAddress,
+		Role:        node.Role,
 	}
 }
 
@@ -560,9 +662,10 @@ func topologyNodeFromProto(node *hatriecachev1.TopologyNode) TopologyNode {
 		return TopologyNode{}
 	}
 	return TopologyNode{
-		ID:      node.GetId(),
-		Address: node.GetAddress(),
-		Role:    node.GetRole(),
+		ID:          node.GetId(),
+		Address:     node.GetAddress(),
+		GRPCAddress: node.GetGrpcAddress(),
+		Role:        node.GetRole(),
 	}
 }
 

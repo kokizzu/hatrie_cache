@@ -23,6 +23,67 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+func TestParseReplicationTransport(t *testing.T) {
+	for input, want := range map[string]ReplicationTransport{
+		"":            ReplicationTransportHTTP,
+		"http":        ReplicationTransportHTTP,
+		"grpc-stream": ReplicationTransportGRPCStream,
+	} {
+		got, err := ParseReplicationTransport(input)
+		if err != nil || got != want {
+			t.Fatalf("ParseReplicationTransport(%q) = %q/%v, want %q", input, got, err, want)
+		}
+	}
+	if _, err := ParseReplicationTransport("udp"); err == nil {
+		t.Fatal("ParseReplicationTransport(udp) error = nil, want validation error")
+	}
+}
+
+func TestReplicationGRPCStreamHTTPFallbackIsConfigurable(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = mustDecodeReplicationTestCommand(t, w, r)
+		requests.Add(1)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+	topology := replicationTestTopology(t, target.URL)
+
+	for _, tt := range []struct {
+		name            string
+		disableFallback bool
+		wantOK          bool
+		wantRequests    int64
+	}{
+		{name: "fallback enabled", wantOK: true, wantRequests: 1},
+		{name: "fallback disabled", disableFallback: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			requests.Store(0)
+			trie := newTestTrie(t)
+			trie.UpsertString("session:1", "value")
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:                "node-a",
+				Topology:            topology,
+				Election:            NewElectionStore(topology, ElectionOptions{}),
+				Client:              target.Client(),
+				Transport:           ReplicationTransportGRPCStream,
+				DisableHTTPFallback: tt.disableFallback,
+			})
+			result := replicator.syncAllPaged(context.Background(), trie, "session:", 10)
+			if len(result.Targets) != 1 || result.Targets[0].OK != tt.wantOK {
+				t.Fatalf("sync targets = %#v, want OK=%v", result.Targets, tt.wantOK)
+			}
+			if got := requests.Load(); got != tt.wantRequests {
+				t.Fatalf("HTTP fallback requests = %d, want %d", got, tt.wantRequests)
+			}
+			if tt.disableFallback && !strings.Contains(result.Targets[0].Error, "grpc_address") {
+				t.Fatalf("disabled fallback error = %q, want missing grpc_address", result.Targets[0].Error)
+			}
+		})
+	}
+}
+
 func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return fn(request)
 }

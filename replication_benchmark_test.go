@@ -3,13 +3,50 @@ package hatriecache
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/test/bufconn"
 )
+
+type benchmarkGRPCWireStats struct {
+	outbound atomic.Int64
+}
+
+func (handler *benchmarkGRPCWireStats) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+func (handler *benchmarkGRPCWireStats) HandleRPC(_ context.Context, rpcStats stats.RPCStats) {
+	if payload, ok := rpcStats.(*stats.OutPayload); ok {
+		handler.outbound.Add(int64(payload.WireLength))
+	}
+}
+
+func (handler *benchmarkGRPCWireStats) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+
+func (handler *benchmarkGRPCWireStats) HandleConn(context.Context, stats.ConnStats) {}
+
+type benchmarkCountingReadCloser struct {
+	io.ReadCloser
+	bytes *atomic.Int64
+}
+
+func (reader benchmarkCountingReadCloser) Read(data []byte) (int, error) {
+	n, err := reader.ReadCloser.Read(data)
+	reader.bytes.Add(int64(n))
+	return n, err
+}
 
 func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 	const keyCount = 10000
@@ -88,6 +125,112 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 			b.ReportMetric(float64(requests.Load())/iterations, "requests/op")
 			b.ReportMetric(float64(wireBytes.Load())/iterations, "wire_B/op")
 			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationSyncTransport(b *testing.B) {
+	const keyCount = 10000
+	for _, transport := range []ReplicationTransport{ReplicationTransportHTTP, ReplicationTransportGRPCStream} {
+		b.Run(string(transport), func(b *testing.B) {
+			sourceTrie := CreateHatTrie()
+			targetTrie := CreateHatTrie()
+			b.Cleanup(sourceTrie.Destroy)
+			b.Cleanup(targetTrie.Destroy)
+			for idx := 0; idx < keyCount; idx++ {
+				sourceTrie.UpsertString("session:"+strconv.Itoa(idx), "value-"+strconv.Itoa(idx))
+			}
+
+			httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				b.Fatalf("HTTP listen: %v", err)
+			}
+			grpcListener := bufconn.Listen(testGRPCBufferSize)
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a", Address: "http://node-a"},
+					{ID: "node-b", Address: "http://" + httpListener.Addr().String(), GRPCAddress: "bufnet"},
+				},
+				Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			})
+			if err != nil {
+				b.Fatalf("NewTopologyStore() error = %v", err)
+			}
+
+			var httpRequests atomic.Int64
+			var httpWireBytes atomic.Int64
+			monitoring := NewMonitoringHandler(targetTrie, MonitoringOptions{
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}).Handler()
+			httpServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				httpRequests.Add(1)
+				r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &httpWireBytes}
+				monitoring.ServeHTTP(w, r)
+			})}
+			go func() { _ = httpServer.Serve(httpListener) }()
+			b.Cleanup(func() {
+				_ = httpServer.Close()
+				_ = httpListener.Close()
+			})
+
+			grpcServer := grpc.NewServer()
+			RegisterCacheGRPCServer(grpcServer, NewCacheGRPCServer(targetTrie, CacheGRPCOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}))
+			go func() { _ = grpcServer.Serve(grpcListener) }()
+			b.Cleanup(func() {
+				grpcServer.Stop()
+				_ = grpcListener.Close()
+			})
+
+			grpcWireStats := &benchmarkGRPCWireStats{}
+			options := HTTPReplicatorOptions{
+				Self:      "node-a",
+				Topology:  topology,
+				Election:  NewElectionStore(topology, ElectionOptions{}),
+				Transport: transport,
+			}
+			if transport == ReplicationTransportGRPCStream {
+				options.DisableHTTPFallback = true
+				options.GRPCDialOptions = []grpc.DialOption{
+					grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+						return grpcListener.Dial()
+					}),
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithStatsHandler(grpcWireStats),
+				}
+			}
+			replicator := NewHTTPReplicator(options)
+			b.Cleanup(replicator.Close)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				result := replicator.syncAllPaged(context.Background(), sourceTrie, "session:", defaultReplicationSyncKeyPageSize)
+				if result.Skipped || result.Entries != keyCount {
+					b.Fatalf("syncAllPaged() = %#v, want %d entries", result, keyCount)
+				}
+				for _, targetResult := range result.Targets {
+					if !targetResult.OK {
+						b.Fatalf("sync target = %#v, want ok", targetResult)
+					}
+				}
+			}
+			b.StopTimer()
+			iterations := float64(b.N)
+			b.ReportMetric(keyCount, "keys/op")
+			if transport == ReplicationTransportGRPCStream {
+				b.ReportMetric(float64(replicator.grpcStreamBatches.Load())/iterations, "batches/op")
+				b.ReportMetric(float64(grpcWireStats.outbound.Load())/iterations, "wire_B/op")
+			} else {
+				b.ReportMetric(float64(httpRequests.Load())/iterations, "batches/op")
+				b.ReportMetric(float64(httpWireBytes.Load())/iterations, "wire_B/op")
+			}
 		})
 	}
 }

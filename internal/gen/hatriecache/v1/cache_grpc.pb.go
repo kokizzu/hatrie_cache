@@ -28,6 +28,7 @@ type CacheServiceClient interface {
 	Command(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	Replication(ctx context.Context, in *ReplicationRequest, opts ...grpc.CallOption) (*ReplicationResponse, error)
+	ReplicationStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ReplicationStreamClient, error)
 	Topology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
 	UpdateTopology(ctx context.Context, in *UpdateTopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
 	Election(ctx context.Context, in *ElectionRequest, opts ...grpc.CallOption) (*ElectionResponse, error)
@@ -96,6 +97,37 @@ func (c *cacheServiceClient) Replication(ctx context.Context, in *ReplicationReq
 	return out, nil
 }
 
+func (c *cacheServiceClient) ReplicationStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ReplicationStreamClient, error) {
+	stream, err := c.cc.NewStream(ctx, &CacheService_ServiceDesc.Streams[0], "/hatriecache.v1.CacheService/ReplicationStream", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &cacheServiceReplicationStreamClient{stream}
+	return x, nil
+}
+
+type CacheService_ReplicationStreamClient interface {
+	Send(*ReplicationStreamBatch) error
+	Recv() (*ReplicationStreamAck, error)
+	grpc.ClientStream
+}
+
+type cacheServiceReplicationStreamClient struct {
+	grpc.ClientStream
+}
+
+func (x *cacheServiceReplicationStreamClient) Send(m *ReplicationStreamBatch) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *cacheServiceReplicationStreamClient) Recv() (*ReplicationStreamAck, error) {
+	m := new(ReplicationStreamAck)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *cacheServiceClient) Topology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error) {
 	out := new(TopologyResponse)
 	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/Topology", in, out, opts...)
@@ -142,6 +174,7 @@ type CacheServiceServer interface {
 	Command(context.Context, *CommandRequest) (*CommandResponse, error)
 	Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error)
 	Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error)
+	ReplicationStream(CacheService_ReplicationStreamServer) error
 	Topology(context.Context, *TopologyRequest) (*TopologyResponse, error)
 	UpdateTopology(context.Context, *UpdateTopologyRequest) (*TopologyResponse, error)
 	Election(context.Context, *ElectionRequest) (*ElectionResponse, error)
@@ -170,6 +203,9 @@ func (UnimplementedCacheServiceServer) Snapshot(context.Context, *SnapshotReques
 }
 func (UnimplementedCacheServiceServer) Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Replication not implemented")
+}
+func (UnimplementedCacheServiceServer) ReplicationStream(CacheService_ReplicationStreamServer) error {
+	return status.Errorf(codes.Unimplemented, "method ReplicationStream not implemented")
 }
 func (UnimplementedCacheServiceServer) Topology(context.Context, *TopologyRequest) (*TopologyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Topology not implemented")
@@ -304,6 +340,32 @@ func _CacheService_Replication_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CacheService_ReplicationStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(CacheServiceServer).ReplicationStream(&cacheServiceReplicationStreamServer{stream})
+}
+
+type CacheService_ReplicationStreamServer interface {
+	Send(*ReplicationStreamAck) error
+	Recv() (*ReplicationStreamBatch, error)
+	grpc.ServerStream
+}
+
+type cacheServiceReplicationStreamServer struct {
+	grpc.ServerStream
+}
+
+func (x *cacheServiceReplicationStreamServer) Send(m *ReplicationStreamAck) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *cacheServiceReplicationStreamServer) Recv() (*ReplicationStreamBatch, error) {
+	m := new(ReplicationStreamBatch)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func _CacheService_Topology_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TopologyRequest)
 	if err := dec(in); err != nil {
@@ -424,6 +486,13 @@ var CacheService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _CacheService_UpdateElection_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "ReplicationStream",
+			Handler:       _CacheService_ReplicationStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "proto/hatriecache/v1/cache.proto",
 }

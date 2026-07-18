@@ -47,6 +47,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if cfg.replicationWireFormat != string(hatriecache.DefaultCommandWireFormat) {
 		t.Fatalf("replicationWireFormat = %q, want default", cfg.replicationWireFormat)
 	}
+	if cfg.replicationTransport != string(hatriecache.ReplicationTransportHTTP) || !cfg.replicationHTTPFallback {
+		t.Fatalf("replication transport/fallback = %q/%v, want http/true", cfg.replicationTransport, cfg.replicationHTTPFallback)
+	}
 	if cfg.replicationMaxTargets != hatriecache.DefaultReplicationMaxInFlightTargets {
 		t.Fatalf("replicationMaxTargets = %d, want default %d", cfg.replicationMaxTargets, hatriecache.DefaultReplicationMaxInFlightTargets)
 	}
@@ -194,6 +197,8 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"replication_circuit_breaker_failures": 4,
 		"replication_circuit_breaker_cooldown": "12s",
 		"replication_auth_token": "replica-secret",
+		"replication_transport": "grpc-stream",
+		"replication_http_fallback": false,
 		"replication_batch_max_bytes": 4096,
 		"replication_max_in_flight_targets": 2,
 		"db_path": "/data/cache.leveldb",
@@ -229,6 +234,9 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	}
 	if cfg.replicationAuthToken != "replica-secret" {
 		t.Fatalf("replication auth token = %q, want config file value", cfg.replicationAuthToken)
+	}
+	if cfg.replicationTransport != "grpc-stream" || cfg.replicationHTTPFallback {
+		t.Fatalf("replication transport/fallback = %q/%v, want grpc-stream/false", cfg.replicationTransport, cfg.replicationHTTPFallback)
 	}
 	if cfg.replicationBatchMaxBytes != 4096 {
 		t.Fatalf("replication batch max bytes = %d, want config file value", cfg.replicationBatchMaxBytes)
@@ -501,6 +509,8 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-circuit-breaker-failures", "4",
 		"-replication-circuit-breaker-cooldown", "20s",
 		"-replication-wire-format", "json",
+		"-replication-transport", "grpc-stream",
+		"-replication-http-fallback=false",
 		"-replication-auth-token", "replica-secret",
 		"-replication-batch-max-bytes", "2048",
 		"-replication-max-in-flight-targets", "2",
@@ -525,6 +535,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if cfg.replicationWireFormat != "json" || replicationWireFormat(cfg) != hatriecache.CommandWireFormatJSON {
 		t.Fatalf("replication wire format = %q, want json", cfg.replicationWireFormat)
+	}
+	if cfg.replicationTransport != "grpc-stream" || replicationTransport(cfg) != hatriecache.ReplicationTransportGRPCStream || cfg.replicationHTTPFallback {
+		t.Fatalf("replication transport/fallback = %q/%v, want grpc-stream/false", cfg.replicationTransport, cfg.replicationHTTPFallback)
 	}
 	if cfg.replicationAuthToken != "replica-secret" {
 		t.Fatalf("replication auth token = %q, want explicit value", cfg.replicationAuthToken)

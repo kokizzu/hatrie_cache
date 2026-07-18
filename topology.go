@@ -33,9 +33,10 @@ type ClusterTopology struct {
 
 // TopologyNode describes one cache node address and optional role.
 type TopologyNode struct {
-	ID      string `json:"id"`
-	Address string `json:"address"`
-	Role    string `json:"role,omitempty"`
+	ID          string `json:"id"`
+	Address     string `json:"address"`
+	GRPCAddress string `json:"grpc_address,omitempty"`
+	Role        string `json:"role,omitempty"`
 }
 
 // TopologyShard describes one shard primary and optional replicas.
@@ -236,6 +237,7 @@ func (topology ClusterTopology) Fingerprint() string {
 	for _, node := range normalized.Nodes {
 		writeTopologyFingerprintPart(hash, node.ID)
 		writeTopologyFingerprintPart(hash, node.Address)
+		writeTopologyFingerprintPart(hash, node.GRPCAddress)
 		writeTopologyFingerprintPart(hash, node.Role)
 	}
 	for _, shard := range normalized.Shards {
@@ -363,6 +365,7 @@ func normalizeTopology(topology ClusterTopology) (ClusterTopology, error) {
 	for idx := range out.Nodes {
 		out.Nodes[idx].ID = strings.TrimSpace(out.Nodes[idx].ID)
 		out.Nodes[idx].Address = strings.TrimSpace(out.Nodes[idx].Address)
+		out.Nodes[idx].GRPCAddress = strings.TrimSpace(out.Nodes[idx].GRPCAddress)
 		out.Nodes[idx].Role = strings.TrimSpace(out.Nodes[idx].Role)
 		if out.Nodes[idx].ID == "" {
 			return ClusterTopology{}, errors.New("hatriecache: topology node id is required")

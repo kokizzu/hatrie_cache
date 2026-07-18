@@ -26,6 +26,8 @@ replication_outbox_format=${REPLICATION_OUTBOX_FORMAT:-auto}
 replication_circuit_breaker_failures=${REPLICATION_CIRCUIT_BREAKER_FAILURES:-5}
 replication_circuit_breaker_cooldown=${REPLICATION_CIRCUIT_BREAKER_COOLDOWN:-30s}
 replication_wire_format=${REPLICATION_WIRE_FORMAT:-protobuf}
+replication_transport=${REPLICATION_TRANSPORT:-http}
+replication_http_fallback=${REPLICATION_HTTP_FALLBACK:-true}
 replication_auth_token=${REPLICATION_AUTH_TOKEN:-}
 replication_batch_max_bytes=${REPLICATION_BATCH_MAX_BYTES:-1048576}
 replication_max_in_flight_targets=${REPLICATION_MAX_IN_FLIGHT_TARGETS:-4}
@@ -90,6 +92,8 @@ set -- \
 	-replication-circuit-breaker-failures "$replication_circuit_breaker_failures" \
 	-replication-circuit-breaker-cooldown "$replication_circuit_breaker_cooldown" \
 	-replication-auth-token "$replication_auth_token" \
+	-replication-transport "$replication_transport" \
+	-replication-http-fallback="$replication_http_fallback" \
 	-replication-batch-max-bytes "$replication_batch_max_bytes" \
 	-replication-max-in-flight-targets "$replication_max_in_flight_targets" \
 	-replication-sync-interval "$replication_sync_interval" \

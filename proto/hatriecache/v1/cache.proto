@@ -11,6 +11,7 @@ service CacheService {
   rpc Command(CommandRequest) returns (CommandResponse);
   rpc Snapshot(SnapshotRequest) returns (CommandResponse);
   rpc Replication(ReplicationRequest) returns (ReplicationResponse);
+  rpc ReplicationStream(stream ReplicationStreamBatch) returns (stream ReplicationStreamAck);
   rpc Topology(TopologyRequest) returns (TopologyResponse);
   rpc UpdateTopology(UpdateTopologyRequest) returns (TopologyResponse);
   rpc Election(ElectionRequest) returns (ElectionResponse);
@@ -112,6 +113,21 @@ message ReplicationResponse {
   string health_reason = 14;
 }
 
+message ReplicationStreamBatch {
+  string source = 1;
+  uint64 sequence = 2;
+  string topology_fingerprint = 3;
+  repeated string keys = 4;
+  repeated bytes binary_values = 5;
+}
+
+message ReplicationStreamAck {
+  uint64 sequence = 1;
+  uint64 entries = 2;
+  bool ok = 3;
+  string message = 4;
+}
+
 message ReplicationQueue {
   bool enabled = 1;
   int64 depth = 2;
@@ -163,6 +179,7 @@ message TopologyNode {
   string id = 1;
   string address = 2;
   string role = 3;
+  string grpc_address = 4;
 }
 
 message TopologyShard {
