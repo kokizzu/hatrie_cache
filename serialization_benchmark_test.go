@@ -383,6 +383,29 @@ func BenchmarkLevelDBSaveDirtyCompareMode(b *testing.B) {
 	}
 }
 
+func BenchmarkLevelDBDirtyTrackerMarkSnapshotClear(b *testing.B) {
+	for _, keys := range []int{8, 32, 128, 4096} {
+		b.Run(fmt.Sprintf("keys=%d", keys), func(b *testing.B) {
+			benchKeys := make([]string, keys)
+			for idx := range benchKeys {
+				benchKeys[idx] = fmt.Sprintf("dirty:%04d", idx)
+			}
+			tracker := NewLevelDBDirtyTracker()
+
+			b.ReportAllocs()
+			b.ReportMetric(float64(keys), "dirty_keys/op")
+			b.ResetTimer()
+			for iter := 0; iter < b.N; iter++ {
+				for _, key := range benchKeys {
+					tracker.Mark(key)
+				}
+				snapshot := tracker.Snapshot()
+				tracker.Clear(snapshot)
+			}
+		})
+	}
+}
+
 func BenchmarkLevelDBLoadMaterialized(b *testing.B) {
 	store := benchmarkPopulatedLevelDBStoreWithFormat(b, DefaultStorageFormat)
 	benchmarkLevelDBLoad(b, store, LevelDBLoadPolicy{}, benchmarkSnapshotEntries)

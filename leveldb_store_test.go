@@ -240,6 +240,76 @@ func TestLevelDBDirtyTrackerClearKeepsNewerMarks(t *testing.T) {
 	}
 }
 
+func TestLevelDBDirtyTrackerUsesInlineStorageBeforePromotion(t *testing.T) {
+	tracker := NewLevelDBDirtyTracker()
+	if tracker.keys != nil {
+		t.Fatal("new dirty tracker allocated map, want inline storage until promotion")
+	}
+
+	for i := 0; i < levelDBDirtyTrackerInlineLimit; i++ {
+		tracker.Mark(fmt.Sprintf("inline:%02d", i))
+	}
+	if tracker.keys != nil {
+		t.Fatal("dirty tracker promoted map before inline limit")
+	}
+	if tracker.Pending() != levelDBDirtyTrackerInlineLimit {
+		t.Fatalf("dirty pending = %d, want inline limit", tracker.Pending())
+	}
+
+	tracker.Mark("promoted")
+	if tracker.keys == nil {
+		t.Fatal("dirty tracker did not promote map after inline limit")
+	}
+	if tracker.Pending() != levelDBDirtyTrackerInlineLimit+1 {
+		t.Fatalf("dirty pending after promotion = %d, want inline limit + 1", tracker.Pending())
+	}
+	got := tracker.Snapshot().keys
+	first := ""
+	if len(got) > 0 {
+		first = got[0]
+	}
+	if len(got) != levelDBDirtyTrackerInlineLimit+1 || first != "inline:00" {
+		t.Fatalf("dirty snapshot after promotion = len %d first %q, want sorted promoted keys", len(got), first)
+	}
+}
+
+func TestLevelDBDirtyTrackerInlineClearKeepsNewerMarks(t *testing.T) {
+	tracker := NewLevelDBDirtyTracker()
+	tracker.Mark("alpha")
+	tracker.Mark("beta")
+	snapshot := tracker.Snapshot()
+	tracker.Mark("alpha")
+	tracker.Mark("gamma")
+
+	tracker.Clear(snapshot)
+	if tracker.keys != nil {
+		t.Fatal("inline dirty tracker promoted map during clear")
+	}
+	if got := tracker.Snapshot().keys; !reflect.DeepEqual(got, []string{"alpha", "gamma"}) {
+		t.Fatalf("dirty keys after inline stale clear = %#v, want alpha/gamma", got)
+	}
+}
+
+func TestLevelDBDirtyTrackerDemotesMapAfterClear(t *testing.T) {
+	tracker := NewLevelDBDirtyTracker()
+	for i := 0; i <= levelDBDirtyTrackerInlineLimit; i++ {
+		tracker.Mark(fmt.Sprintf("dirty:%02d", i))
+	}
+	if tracker.keys == nil {
+		t.Fatal("dirty tracker did not promote before demotion test")
+	}
+	snapshot := tracker.Snapshot()
+	tracker.Mark("fresh")
+
+	tracker.Clear(snapshot)
+	if tracker.keys != nil {
+		t.Fatal("dirty tracker kept map after clear left inline-sized pending set")
+	}
+	if got := tracker.Snapshot().keys; !reflect.DeepEqual(got, []string{"fresh"}) {
+		t.Fatalf("dirty keys after demotion = %#v, want fresh", got)
+	}
+}
+
 func TestLevelDBBinaryRecordsPreallocateStringAndComplexValues(t *testing.T) {
 	expiresAt := time.Unix(1234, 0)
 	stats := &KeyStats{

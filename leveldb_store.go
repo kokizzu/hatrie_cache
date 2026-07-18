@@ -24,7 +24,10 @@ var levelDBRecordChecksumTable = crc64.MakeTable(crc64.ISO)
 
 var ErrLevelDBStoreClosed = errors.New("hatriecache: leveldb store is closed")
 
-const levelDBCompareBeforeWriteAutoKeyLimit = 1024
+const (
+	levelDBCompareBeforeWriteAutoKeyLimit = 1024
+	levelDBDirtyTrackerInlineLimit        = 32
+)
 
 type LevelDBCompareBeforeWriteMode string
 
@@ -121,9 +124,15 @@ type LevelDBSpillResult struct {
 // LevelDBDirtyTracker tracks keys that changed since the last successful
 // incremental LevelDB save.
 type LevelDBDirtyTracker struct {
-	mu   sync.Mutex
-	seq  uint64
-	keys map[string]uint64
+	mu     sync.Mutex
+	seq    uint64
+	keys   map[string]uint64
+	inline []levelDBDirtyKeyMark
+}
+
+type levelDBDirtyKeyMark struct {
+	key string
+	seq uint64
 }
 
 type LevelDBDirtySnapshot struct {
@@ -143,7 +152,7 @@ func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
 }
 
 func NewLevelDBDirtyTracker() *LevelDBDirtyTracker {
-	return &LevelDBDirtyTracker{keys: map[string]uint64{}}
+	return &LevelDBDirtyTracker{}
 }
 
 func ParseLevelDBCompareBeforeWriteMode(value string) (LevelDBCompareBeforeWriteMode, error) {
@@ -177,10 +186,22 @@ func (tracker *LevelDBDirtyTracker) Mark(key string) {
 	}
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
-	if tracker.keys == nil {
-		tracker.keys = map[string]uint64{}
-	}
 	tracker.seq++
+	if tracker.keys != nil {
+		tracker.keys[key] = tracker.seq
+		return
+	}
+	for idx := range tracker.inline {
+		if tracker.inline[idx].key == key {
+			tracker.inline[idx].seq = tracker.seq
+			return
+		}
+	}
+	if len(tracker.inline) < levelDBDirtyTrackerInlineLimit {
+		tracker.inline = append(tracker.inline, levelDBDirtyKeyMark{key: key, seq: tracker.seq})
+		return
+	}
+	tracker.promoteDirtyKeysLocked(len(tracker.inline) + 1)
 	tracker.keys[key] = tracker.seq
 }
 
@@ -190,6 +211,9 @@ func (tracker *LevelDBDirtyTracker) Pending() int {
 	}
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
+	if tracker.keys == nil {
+		return len(tracker.inline)
+	}
 	return len(tracker.keys)
 }
 
@@ -206,6 +230,14 @@ func (tracker *LevelDBDirtyTracker) Snapshot() LevelDBDirtySnapshot {
 	}
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
+	if tracker.keys == nil {
+		keys := make([]string, len(tracker.inline))
+		for idx, mark := range tracker.inline {
+			keys[idx] = mark.key
+		}
+		sort.Strings(keys)
+		return LevelDBDirtySnapshot{seq: tracker.seq, keys: keys}
+	}
 	keys := make([]string, 0, len(tracker.keys))
 	for key := range tracker.keys {
 		keys = append(keys, key)
@@ -220,11 +252,56 @@ func (tracker *LevelDBDirtyTracker) Clear(snapshot LevelDBDirtySnapshot) {
 	}
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
+	if tracker.keys == nil {
+		kept := tracker.inline[:0]
+		for _, mark := range tracker.inline {
+			if mark.seq <= snapshot.seq && sortedStringsContains(snapshot.keys, mark.key) {
+				continue
+			}
+			kept = append(kept, mark)
+		}
+		for idx := len(kept); idx < len(tracker.inline); idx++ {
+			tracker.inline[idx] = levelDBDirtyKeyMark{}
+		}
+		tracker.inline = kept
+		return
+	}
 	for _, key := range snapshot.keys {
 		if tracker.keys[key] <= snapshot.seq {
 			delete(tracker.keys, key)
 		}
 	}
+	if len(tracker.keys) <= levelDBDirtyTrackerInlineLimit {
+		tracker.demoteDirtyKeysLocked()
+	}
+}
+
+func (tracker *LevelDBDirtyTracker) promoteDirtyKeysLocked(capacity int) {
+	keys := make(map[string]uint64, capacity)
+	for _, mark := range tracker.inline {
+		keys[mark.key] = mark.seq
+	}
+	tracker.inline = nil
+	tracker.keys = keys
+}
+
+func (tracker *LevelDBDirtyTracker) demoteDirtyKeysLocked() {
+	if len(tracker.keys) == 0 {
+		tracker.keys = nil
+		tracker.inline = tracker.inline[:0]
+		return
+	}
+	inline := make([]levelDBDirtyKeyMark, 0, len(tracker.keys))
+	for key, seq := range tracker.keys {
+		inline = append(inline, levelDBDirtyKeyMark{key: key, seq: seq})
+	}
+	tracker.keys = nil
+	tracker.inline = inline
+}
+
+func sortedStringsContains(values []string, value string) bool {
+	idx := sort.SearchStrings(values, value)
+	return idx < len(values) && values[idx] == value
 }
 
 type LevelDBStore struct {
