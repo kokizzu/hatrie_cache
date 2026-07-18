@@ -26,6 +26,7 @@ type CacheServiceClient interface {
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsResponse, error)
 	Entries(ctx context.Context, in *EntriesRequest, opts ...grpc.CallOption) (*EntriesResponse, error)
 	Command(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandResponse, error)
+	CommandStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_CommandStreamClient, error)
 	Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	Replication(ctx context.Context, in *ReplicationRequest, opts ...grpc.CallOption) (*ReplicationResponse, error)
 	ReplicationStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ReplicationStreamClient, error)
@@ -79,6 +80,37 @@ func (c *cacheServiceClient) Command(ctx context.Context, in *CommandRequest, op
 	return out, nil
 }
 
+func (c *cacheServiceClient) CommandStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_CommandStreamClient, error) {
+	stream, err := c.cc.NewStream(ctx, &CacheService_ServiceDesc.Streams[0], "/hatriecache.v1.CacheService/CommandStream", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &cacheServiceCommandStreamClient{stream}
+	return x, nil
+}
+
+type CacheService_CommandStreamClient interface {
+	Send(*CommandRequest) error
+	Recv() (*CommandResponse, error)
+	grpc.ClientStream
+}
+
+type cacheServiceCommandStreamClient struct {
+	grpc.ClientStream
+}
+
+func (x *cacheServiceCommandStreamClient) Send(m *CommandRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *cacheServiceCommandStreamClient) Recv() (*CommandResponse, error) {
+	m := new(CommandResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *cacheServiceClient) Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*CommandResponse, error) {
 	out := new(CommandResponse)
 	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/Snapshot", in, out, opts...)
@@ -98,7 +130,7 @@ func (c *cacheServiceClient) Replication(ctx context.Context, in *ReplicationReq
 }
 
 func (c *cacheServiceClient) ReplicationStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ReplicationStreamClient, error) {
-	stream, err := c.cc.NewStream(ctx, &CacheService_ServiceDesc.Streams[0], "/hatriecache.v1.CacheService/ReplicationStream", opts...)
+	stream, err := c.cc.NewStream(ctx, &CacheService_ServiceDesc.Streams[1], "/hatriecache.v1.CacheService/ReplicationStream", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +204,7 @@ type CacheServiceServer interface {
 	Stats(context.Context, *StatsRequest) (*StatsResponse, error)
 	Entries(context.Context, *EntriesRequest) (*EntriesResponse, error)
 	Command(context.Context, *CommandRequest) (*CommandResponse, error)
+	CommandStream(CacheService_CommandStreamServer) error
 	Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error)
 	Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error)
 	ReplicationStream(CacheService_ReplicationStreamServer) error
@@ -197,6 +230,9 @@ func (UnimplementedCacheServiceServer) Entries(context.Context, *EntriesRequest)
 }
 func (UnimplementedCacheServiceServer) Command(context.Context, *CommandRequest) (*CommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Command not implemented")
+}
+func (UnimplementedCacheServiceServer) CommandStream(CacheService_CommandStreamServer) error {
+	return status.Errorf(codes.Unimplemented, "method CommandStream not implemented")
 }
 func (UnimplementedCacheServiceServer) Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Snapshot not implemented")
@@ -302,6 +338,32 @@ func _CacheService_Command_Handler(srv interface{}, ctx context.Context, dec fun
 		return srv.(CacheServiceServer).Command(ctx, req.(*CommandRequest))
 	}
 	return interceptor(ctx, in, info, handler)
+}
+
+func _CacheService_CommandStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(CacheServiceServer).CommandStream(&cacheServiceCommandStreamServer{stream})
+}
+
+type CacheService_CommandStreamServer interface {
+	Send(*CommandResponse) error
+	Recv() (*CommandRequest, error)
+	grpc.ServerStream
+}
+
+type cacheServiceCommandStreamServer struct {
+	grpc.ServerStream
+}
+
+func (x *cacheServiceCommandStreamServer) Send(m *CommandResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *cacheServiceCommandStreamServer) Recv() (*CommandRequest, error) {
+	m := new(CommandRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func _CacheService_Snapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -487,6 +549,12 @@ var CacheService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "CommandStream",
+			Handler:       _CacheService_CommandStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 		{
 			StreamName:    "ReplicationStream",
 			Handler:       _CacheService_ReplicationStream_Handler,

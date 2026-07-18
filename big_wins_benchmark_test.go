@@ -27,6 +27,8 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("Snapshot", benchmarkBigWinsSnapshot)
 	b.Run("AntiEntropy", benchmarkBigWinsAntiEntropy)
 	b.Run("UnaryCommand", benchmarkBigWinsUnaryCommand)
+	b.Run("StreamCommand", benchmarkBigWinsStreamCommand)
+	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
 }
 
 func benchmarkBigWinsConcurrentRead(b *testing.B) {
@@ -285,8 +287,16 @@ func benchmarkBigWinsAntiEntropy(b *testing.B) {
 }
 
 func benchmarkBigWinsUnaryCommand(b *testing.B) {
+	benchmarkBigWinsCommand(b, newGRPCBenchmarkExecutor)
+}
+
+func benchmarkBigWinsStreamCommand(b *testing.B) {
+	benchmarkBigWinsCommand(b, newGRPCStreamBenchmarkExecutor)
+}
+
+func benchmarkBigWinsCommand(b *testing.B, newExecutor func(*testing.B) (benchmarkCommandExecutor, func())) {
 	operations := bigWinsBenchmarkOperations(1000)
-	execute, stop := newGRPCBenchmarkExecutor(b)
+	execute, stop := newExecutor(b)
 	defer stop()
 	benchmarkExecuteTransportCommand(b, execute, CacheCommandRequest{Command: "SETSTR", Key: "command:key", Value: "value"})
 	var total time.Duration
@@ -299,6 +309,61 @@ func benchmarkBigWinsUnaryCommand(b *testing.B) {
 			if !response.OK || response.Value != "value" {
 				b.Fatalf("unary GET = %#v", response)
 			}
+		}
+		total += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(operations), "commands/op")
+	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/command")
+}
+
+func benchmarkBigWinsPipelinedStreamCommand(b *testing.B) {
+	operations := bigWinsBenchmarkOperations(1000)
+	client, stop := newGRPCBenchmarkClient(b)
+	defer stop()
+	stream, err := client.CommandStream(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer stream.CloseSend()
+	setup, err := cacheCommandRequestToProto(CacheCommandRequest{Command: "SETSTR", Key: "command:key", Value: "value"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := stream.Send(setup); err != nil {
+		b.Fatal(err)
+	}
+	if response, err := stream.Recv(); err != nil || !response.GetOk() {
+		b.Fatalf("stream setup response = %#v/%v", response, err)
+	}
+
+	var total time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		started := time.Now()
+		sendErr := make(chan error, 1)
+		go func() {
+			for operation := 0; operation < operations; operation++ {
+				request, err := cacheCommandRequestToProto(CacheCommandRequest{Command: "GET", Key: "command:key"})
+				if err == nil {
+					err = stream.Send(request)
+				}
+				if err != nil {
+					sendErr <- err
+					return
+				}
+			}
+			sendErr <- nil
+		}()
+		for operation := 0; operation < operations; operation++ {
+			response, err := stream.Recv()
+			if err != nil || !response.GetOk() || response.GetValue() != "value" {
+				b.Fatalf("pipelined stream GET %d = %#v/%v", operation, response, err)
+			}
+		}
+		if err := <-sendErr; err != nil {
+			b.Fatalf("pipelined stream send error = %v", err)
 		}
 		total += time.Since(started)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -798,6 +799,165 @@ func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 	}
 	if entry.TtlMillis == nil || entry.GetTtlMillis() != int64(time.Minute/time.Millisecond) {
 		t.Fatalf("entry ttl = %v, want 60000", entry.TtlMillis)
+	}
+}
+
+func TestCacheGRPCServerCommandStreamExecutesPipelinedCommandsInOrder(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.CommandStream(context.Background())
+	if err != nil {
+		t.Fatalf("CommandStream() error = %v", err)
+	}
+	requests := []*hatriecachev1.CommandRequest{
+		{Command: "SETSTR", Key: "name", Value: "ivi"},
+		{Command: "SETINT", Key: "count", Value: "40"},
+		{Command: "INC", Key: "count", Value: "2"},
+		{Command: "GETSTR", Key: "name"},
+	}
+	for _, request := range requests {
+		if err := stream.Send(request); err != nil {
+			t.Fatalf("CommandStream.Send(%s) error = %v", request.Command, err)
+		}
+	}
+	for index := range requests {
+		response, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("CommandStream.Recv(%d) error = %v", index, err)
+		}
+		if !response.GetOk() {
+			t.Fatalf("CommandStream.Recv(%d) = %#v, want ok", index, response)
+		}
+		switch index {
+		case 2:
+			if response.GetValue() != "42" {
+				t.Fatalf("INC response value = %q, want 42", response.GetValue())
+			}
+		case 3:
+			if response.GetValue() != "ivi" {
+				t.Fatalf("GETSTR response value = %q, want ivi", response.GetValue())
+			}
+		}
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("CommandStream.CloseSend() error = %v", err)
+	}
+	if _, err := stream.Recv(); !errors.Is(err, io.EOF) {
+		t.Fatalf("CommandStream final Recv() error = %v, want EOF", err)
+	}
+}
+
+func TestCacheGRPCServerCommandStreamRequiresAuthentication(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{AuthToken: "secret"})
+	defer stop()
+	unauthorized, err := client.CommandStream(context.Background())
+	if err != nil {
+		t.Fatalf("CommandStream(unauthorized) open error = %v", err)
+	}
+	if err := unauthorized.Send(&hatriecachev1.CommandRequest{Command: "GET", Key: "name"}); err != nil {
+		t.Fatalf("CommandStream(unauthorized) send error = %v", err)
+	}
+	if _, err := unauthorized.Recv(); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("CommandStream(unauthorized) recv error = %v, want Unauthenticated", err)
+	}
+
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "x-hatrie-auth-token", "secret")
+	authorized, err := client.CommandStream(ctx)
+	if err != nil {
+		t.Fatalf("CommandStream(authorized) open error = %v", err)
+	}
+	if err := authorized.Send(&hatriecachev1.CommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); err != nil {
+		t.Fatalf("CommandStream(authorized) send error = %v", err)
+	}
+	response, err := authorized.Recv()
+	if err != nil || !response.GetOk() {
+		t.Fatalf("CommandStream(authorized) response = %#v/%v, want ok", response, err)
+	}
+	if err := authorized.CloseSend(); err != nil {
+		t.Fatalf("CommandStream(authorized) close error = %v", err)
+	}
+}
+
+func TestCacheGRPCServerCommandStreamHonorsWriteProtection(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("name", "original")
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{WriteProtected: true})
+	defer stop()
+	stream, err := client.CommandStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.CommandRequest{Command: "GETSTR", Key: "name"}); err != nil {
+		t.Fatal(err)
+	}
+	if response, err := stream.Recv(); err != nil || !response.GetOk() || response.GetValue() != "original" {
+		t.Fatalf("streamed read = %#v/%v, want original", response, err)
+	}
+	if err := stream.Send(&hatriecachev1.CommandRequest{Command: "SETSTR", Key: "name", Value: "changed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("streamed write error = %v, want PermissionDenied", err)
+	}
+	if got := ht.GetString("name"); got != "original" {
+		t.Fatalf("write-protected value = %q, want original", got)
+	}
+}
+
+func TestCacheGRPCServerCommandStreamContinuesAfterCommandError(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("name", "ivi")
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.CommandStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.CommandRequest{Command: "NOTACOMMAND", Key: "invalid"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.CommandRequest{Command: "GETSTR", Key: "name"}); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := stream.Recv()
+	if err != nil || failed.GetOk() || !strings.Contains(failed.GetMessage(), "unsupported command") {
+		t.Fatalf("invalid streamed command = %#v/%v, want application error response", failed, err)
+	}
+	succeeded, err := stream.Recv()
+	if err != nil || !succeeded.GetOk() || succeeded.GetValue() != "ivi" {
+		t.Fatalf("stream command after error = %#v/%v, want ivi", succeeded, err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCacheGRPCServerCommandStreamAuditsStreamMethod(t *testing.T) {
+	ht := newTestTrie(t)
+	var audit bytes.Buffer
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{AuditLog: NewAuditLogger(&audit)})
+	defer stop()
+	stream, err := client.CommandStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.CommandRequest{Command: "SETSTR", Key: "name", Value: "secret-value"}); err != nil {
+		t.Fatal(err)
+	}
+	if response, err := stream.Recv(); err != nil || !response.GetOk() {
+		t.Fatalf("streamed write = %#v/%v, want ok", response, err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatal(err)
+	}
+	events := auditEventsFromJSONL(t, audit.String())
+	if len(events) != 1 || events[0].Method != "/hatriecache.v1.CacheService/CommandStream" || events[0].Command != "SETSTR" || !events[0].OK {
+		t.Fatalf("stream audit events = %#v, want one successful CommandStream event", events)
+	}
+	if strings.Contains(audit.String(), "secret-value") {
+		t.Fatalf("stream audit leaked command value: %s", audit.String())
 	}
 }
 

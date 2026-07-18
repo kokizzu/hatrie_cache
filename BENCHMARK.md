@@ -109,13 +109,14 @@ TSV files, raw Markdown output, and generated
 HAT-trie end-to-end transport rows:
 
 ```
-make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(InProcess|HTTPJSON|HTTPProtobuf|GRPC)/(StringSet|StringGet|CounterInc|MapPut|MapPeek)$' BENCHTIME=100x
+make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(InProcess|HTTPJSON|HTTPProtobuf|GRPC|GRPCStream)/(StringSet|StringGet|CounterInc|MapPut|MapPeek)$' BENCHTIME=100x
 ```
 
 The transport benchmark uses the same command execution semantics as the
 monitoring HTTP API and native gRPC API. HTTP protobuf uses
 `application/x-protobuf` on `/api/commands`; gRPC uses the generated
-`CacheService.Command` RPC over a local bufconn listener.
+`CacheService.Command` or persistent `CacheService.CommandStream` RPC over a
+local bufconn listener.
 
 ## Architectural Big-Wins Baseline
 
@@ -192,6 +193,50 @@ log. xxHash64 plus encoded value length is probabilistic; an accidental digest
 collision can defer repair until a later state changes the digest. Ordered
 journal replication remains the primary catch-up path when a retained journal
 tail is available.
+
+### Persistent gRPC Command Stream
+
+Run the 10,000-read architectural comparison:
+
+```sh
+make bench-big-wins BIG_WINS_BENCH=BenchmarkBigWins/UnaryCommand BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=5
+make bench-big-wins BIG_WINS_BENCH='BenchmarkBigWins/^StreamCommand$' BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=5
+make bench-big-wins BIG_WINS_BENCH='BenchmarkBigWins/^PipelinedStreamCommand$' BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=5
+```
+
+Sequential stream mode sends one request and receives its response before the
+next command, measuring latency without pipelining. Pipelined mode uses one
+sender and one receiver concurrently on the same ordered stream. Values are
+five-run medians on the AMD Ryzen 9 5950X host.
+
+| Mode | Time/10k | ns/command | B/10k | allocs/10k | CPU improvement | Heap improvement | Allocation improvement | Max RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Unary `Command` | 590,396,372 ns | 59,040 | 106,952,376 | 1,900,978 | baseline | baseline | baseline | 34,344 KiB |
+| Sequential `CommandStream` | 149,136,972 ns | 14,914 | 15,895,616 | 480,288 | 3.96x | 6.73x | 3.96x | 32,860 KiB |
+| Pipelined `CommandStream` | 31,177,515 ns | 3,118 | 13,941,440 | 289,157 | 18.94x | 7.67x | 6.57x | 34,012 KiB |
+
+Pipelining is another 4.78x faster than sequential streaming. Its peak RSS is
+0.97% below unary in these separate benchmark processes, and cumulative heap
+per 10,000 commands is 7.67x lower.
+
+Run the same sequential transport comparison across representative command
+families:
+
+```sh
+make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(GRPC|GRPCStream)/(StringSet|StringGet|CounterInc|MapPut|MapPeek)$' BENCHTIME=1000x
+```
+
+| Command feature | Unary ns/op | Stream ns/op | Speedup | Unary B/op | Stream B/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| String set | 67,028 | 18,123 | 3.70x | 10,872 | 1,665 |
+| String get | 60,266 | 15,316 | 3.94x | 10,697 | 1,584 |
+| Counter increment | 64,068 | 17,464 | 3.67x | 10,740 | 1,622 |
+| Map put | 64,308 | 19,956 | 3.22x | 11,653 | 2,414 |
+| Map peek | 62,284 | 15,495 | 4.02x | 10,724 | 1,607 |
+
+Both RPCs call the same command executor. The stream removes repeated unary RPC
+setup and permits HTTP/2 flow-control-bounded pipelining; it does not weaken
+command ordering or durability acknowledgements.
 
 ### Bounded Per-Key Telemetry
 

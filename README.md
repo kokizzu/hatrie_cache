@@ -74,7 +74,7 @@ make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Struc
 ```
 
 Run the architectural baseline for concurrent reads, retained per-key memory,
-durable writes, snapshot pauses, anti-entropy, and unary command transport:
+durable writes, snapshot pauses, anti-entropy, and unary/stream command transport:
 
 ```
 make bench-big-wins BIG_WINS_KEYS=100000 BIG_WINS_OPS=100000 BENCHTIME=1x
@@ -84,7 +84,7 @@ Run command-feature benchmarks for the Redis/Tarantool comparison matrix:
 
 ```
 make bench-command-features BENCHTIME=100x
-make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(HTTPJSON|HTTPProtobuf|GRPC)/(StringSet|StringGet)$' BENCHTIME=100x
+make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTransportFeature/(HTTPJSON|HTTPProtobuf|GRPC|GRPCStream)/(StringSet|StringGet)$' BENCHTIME=100x
 make bench-redis-command-features REDIS_START_DOCKER=1 REDIS_PORT=6380 REDIS_REQUESTS=10000
 make bench-tarantool-command-features TARANTOOL_REQUESTS=10000 TARANTOOL_KEYSPACE=10000
 make bench-hatrie-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks BENCHTIME=100x
@@ -1399,6 +1399,17 @@ gRPC command handling can use the same journal, leader-write enforcement, and
 HTTP replication options as the monitoring command API. Clients may request
 gRPC transfer compression with the standard `gzip` compressor; the server
 registers it at the fastest compression level.
+`CacheService.CommandStream` is the persistent bidirectional alternative to
+the unary `CacheService.Command` RPC. Requests are executed and responses are
+returned in stream order with the same authentication, write protection, rate
+limits, journal, replication, leader routing, metrics, and audit behavior.
+Clients may send and receive concurrently to pipeline commands; use one sender
+goroutine and one receiver goroutine per stream and pair responses by order.
+Application-level command failures remain `CommandResponse` values, while
+authentication, rate-limit, write-protection, and transport failures close the
+stream with their normal gRPC status. The stream is available whenever the
+same opt-in native listener is enabled with `GRPC_ADDR`; it starts no additional
+server or port. See [BENCHMARK.md](BENCHMARK.md#persistent-grpc-command-stream).
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with
 `next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
 page. Empty keys are valid, so Go clients should set the optional `AfterKey`

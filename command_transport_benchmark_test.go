@@ -160,6 +160,7 @@ func BenchmarkCommandTransportFeature(b *testing.B) {
 			return newHTTPBenchmarkExecutor(b, CommandWireFormatProtobuf)
 		}},
 		{name: "GRPC", new: newGRPCBenchmarkExecutor},
+		{name: "GRPCStream", new: newGRPCStreamBenchmarkExecutor},
 	}
 
 	for _, transport := range transports {
@@ -239,6 +240,53 @@ func newHTTPBenchmarkExecutor(b *testing.B, format CommandWireFormat) (benchmark
 }
 
 func newGRPCBenchmarkExecutor(b *testing.B) (benchmarkCommandExecutor, func()) {
+	return newGRPCBenchmarkExecutorMode(b, false)
+}
+
+func newGRPCStreamBenchmarkExecutor(b *testing.B) (benchmarkCommandExecutor, func()) {
+	return newGRPCBenchmarkExecutorMode(b, true)
+}
+
+func newGRPCBenchmarkExecutorMode(b *testing.B, streaming bool) (benchmarkCommandExecutor, func()) {
+	b.Helper()
+	client, stopClient := newGRPCBenchmarkClient(b)
+	var stream hatriecachev1.CacheService_CommandStreamClient
+	var err error
+	if streaming {
+		stream, err = client.CommandStream(context.Background())
+		if err != nil {
+			b.Fatalf("CommandStream() error = %v", err)
+		}
+	}
+	execute := func(request CacheCommandRequest) CacheCommandResponse {
+		protoRequest, callErr := cacheCommandRequestToProto(request)
+		if callErr != nil {
+			b.Fatalf("cacheCommandRequestToProto(%s) error = %v", request.Command, callErr)
+		}
+		var response *hatriecachev1.CommandResponse
+		if stream != nil {
+			callErr = stream.Send(protoRequest)
+			if callErr == nil {
+				response, callErr = stream.Recv()
+			}
+		} else {
+			response, callErr = client.Command(context.Background(), protoRequest)
+		}
+		if callErr != nil {
+			b.Fatalf("gRPC command %s error = %v", request.Command, callErr)
+		}
+		return cacheCommandResponseFromProto(response)
+	}
+	stop := func() {
+		if stream != nil {
+			_ = stream.CloseSend()
+		}
+		stopClient()
+	}
+	return execute, stop
+}
+
+func newGRPCBenchmarkClient(b *testing.B) (hatriecachev1.CacheServiceClient, func()) {
 	b.Helper()
 	ht := CreateHatTrie()
 	listener := bufconn.Listen(testGRPCBufferSize)
@@ -259,21 +307,6 @@ func newGRPCBenchmarkExecutor(b *testing.B) (benchmarkCommandExecutor, func()) {
 		b.Fatalf("DialContext() error = %v", err)
 	}
 	client := hatriecachev1.NewCacheServiceClient(conn)
-	execute := func(request CacheCommandRequest) CacheCommandResponse {
-		protoRequest, err := cacheCommandRequestToProto(request)
-		if err != nil {
-			b.Fatalf("cacheCommandRequestToProto(%s) error = %v", request.Command, err)
-		}
-		response, err := client.Command(context.Background(), protoRequest)
-		if err != nil {
-			b.Fatalf("gRPC command %s error = %v", request.Command, err)
-		}
-		return CacheCommandResponse{
-			OK:      response.GetOk(),
-			Message: response.GetMessage(),
-			Value:   response.GetValue(),
-		}
-	}
 	stop := func() {
 		if err := conn.Close(); err != nil {
 			b.Fatalf("Close() error = %v", err)
@@ -284,5 +317,5 @@ func newGRPCBenchmarkExecutor(b *testing.B) (benchmarkCommandExecutor, func()) {
 		}
 		ht.Destroy()
 	}
-	return execute, stop
+	return client, stop
 }

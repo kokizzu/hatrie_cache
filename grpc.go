@@ -243,12 +243,39 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 	if err != nil {
 		return nil, err
 	}
+	return server.executeGRPCCommand(ctx, request, "/hatriecache.v1.CacheService/Command")
+}
+
+func (server *CacheGRPCServer) CommandStream(stream hatriecachev1.CacheService_CommandStreamServer) error {
+	ctx, err := server.requestContext(stream.Context())
+	if err != nil {
+		return err
+	}
+	for {
+		request, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		response, err := server.executeGRPCCommand(ctx, request, "/hatriecache.v1.CacheService/CommandStream")
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(response); err != nil {
+			return err
+		}
+	}
+}
+
+func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *hatriecachev1.CommandRequest, method string) (*hatriecachev1.CommandResponse, error) {
 	command := cacheCommandRequestFromProto(request)
 	if commandShouldJournal(command) {
 		audit := AuditEvent{
 			Command: normalizedCommand(command.Command),
 			Key:     strings.TrimSpace(command.Key),
-			Method:  "/hatriecache.v1.CacheService/Command",
+			Method:  method,
 		}
 		if err := server.rejectDangerousGRPC("command", audit); err != nil {
 			return nil, err
@@ -270,7 +297,7 @@ func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecache
 			Command: normalizedCommand(command.Command),
 			Key:     strings.TrimSpace(command.Key),
 			OK:      response.OK,
-			Method:  "/hatriecache.v1.CacheService/Command",
+			Method:  method,
 			Message: response.Message,
 		})
 	}
