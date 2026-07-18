@@ -48,6 +48,12 @@ var commandRequestProtoPool = sync.Pool{
 	},
 }
 
+var commandResponseProtoPool = sync.Pool{
+	New: func() interface{} {
+		return new(hatriecachev1.CommandResponse)
+	},
+}
+
 func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", string(CommandWireFormatProtobuf), "proto", "pb":
@@ -341,7 +347,9 @@ func writeCommandResponseWire(w http.ResponseWriter, r *http.Request, status int
 		writeJSONStatus(w, status, response)
 		return
 	}
-	data, err := proto.Marshal(grpcCommandResponse(response))
+	message := cacheCommandResponseToPooledProto(response)
+	data, err := proto.Marshal(message)
+	releaseCommandResponseProto(message)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -482,6 +490,43 @@ func cacheCommandBatchToPooledProto(batch []CacheCommandRequest) ([]*hatriecache
 		out[idx] = message
 	}
 	return out, nil
+}
+
+func cacheCommandResponseToPooledProto(response CacheCommandResponse) *hatriecachev1.CommandResponse {
+	message := acquireCommandResponseProto()
+	fillCacheCommandResponseProto(message, response)
+	return message
+}
+
+func acquireCommandResponseProto() *hatriecachev1.CommandResponse {
+	return commandResponseProtoPool.Get().(*hatriecachev1.CommandResponse)
+}
+
+func releaseCommandResponseProto(message *hatriecachev1.CommandResponse) {
+	if message == nil {
+		return
+	}
+	children := message.Responses
+	message.Reset()
+	for _, child := range children {
+		releaseCommandResponseProto(child)
+	}
+	commandResponseProtoPool.Put(message)
+}
+
+func fillCacheCommandResponseProto(out *hatriecachev1.CommandResponse, response CacheCommandResponse) {
+	out.Ok = response.OK
+	out.Message = response.Message
+	out.Value = response.Value
+	if len(response.Responses) == 0 {
+		return
+	}
+	out.Responses = make([]*hatriecachev1.CommandResponse, len(response.Responses))
+	for idx := range response.Responses {
+		child := acquireCommandResponseProto()
+		fillCacheCommandResponseProto(child, response.Responses[idx])
+		out.Responses[idx] = child
+	}
 }
 
 func commandWireScalar(value interface{}) (string, bool) {

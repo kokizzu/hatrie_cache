@@ -30,6 +30,37 @@ func (body *commandWireTrackingBody) Close() error {
 	return nil
 }
 
+type discardCommandWireResponseWriter struct {
+	header http.Header
+	status int
+	bytes  int
+}
+
+func newDiscardCommandWireResponseWriter() *discardCommandWireResponseWriter {
+	return &discardCommandWireResponseWriter{header: http.Header{}}
+}
+
+func (writer *discardCommandWireResponseWriter) reset() {
+	for key := range writer.header {
+		delete(writer.header, key)
+	}
+	writer.status = 0
+	writer.bytes = 0
+}
+
+func (writer *discardCommandWireResponseWriter) Header() http.Header {
+	return writer.header
+}
+
+func (writer *discardCommandWireResponseWriter) Write(data []byte) (int, error) {
+	writer.bytes += len(data)
+	return len(data), nil
+}
+
+func (writer *discardCommandWireResponseWriter) WriteHeader(status int) {
+	writer.status = status
+}
+
 func TestParseCommandWireFormatAliases(t *testing.T) {
 	tests := []struct {
 		value string
@@ -240,6 +271,33 @@ func TestCommandResponseWireRoundTripsBatchResponses(t *testing.T) {
 	}
 	if decoded.Responses[2].OK || decoded.Responses[2].Message == "" {
 		t.Fatalf("decoded failing response = %#v, want error message", decoded.Responses[2])
+	}
+}
+
+func TestWriteCommandResponseWireProtobufBatchUsesLowAllocationPath(t *testing.T) {
+	response := CacheCommandResponse{
+		OK:      true,
+		Message: "batch applied",
+		Responses: []CacheCommandResponse{
+			{OK: true, Message: "stored string"},
+			{OK: true, Message: "ok", Value: "ivi"},
+			{OK: true, Message: "stored counter"},
+			{OK: true, Message: "ok", Value: "42"},
+		},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/commands", nil)
+	request.Header.Set("Accept", commandWireContentTypeProtobuf)
+	writer := newDiscardCommandWireResponseWriter()
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		writer.reset()
+		writeCommandResponseWire(writer, request, http.StatusOK, response, CommandWireFormatProtobuf)
+		if writer.status != http.StatusOK || writer.bytes == 0 {
+			t.Fatalf("writeCommandResponseWire status/bytes = %d/%d, want 200/non-empty", writer.status, writer.bytes)
+		}
+	})
+	if allocs > 8 {
+		t.Fatalf("protobuf batch response allocations = %.0f, want <= 8", allocs)
 	}
 }
 

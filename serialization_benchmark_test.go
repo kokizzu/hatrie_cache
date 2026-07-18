@@ -17,6 +17,28 @@ func BenchmarkCommandWireProtobuf(b *testing.B) {
 	benchmarkCommandWireFormat(b, CommandWireFormatProtobuf)
 }
 
+func BenchmarkCommandResponseWireProtobuf(b *testing.B) {
+	response := benchmarkCommandWireResponse()
+	request, err := http.NewRequest(http.MethodPost, "/api/commands", nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	request.Header.Set("Accept", commandWireContentTypeProtobuf)
+	writer := newDiscardCommandWireResponseWriter()
+	wireBytes := benchmarkCommandResponseWireBytes(b, writer, request, response)
+
+	b.ReportAllocs()
+	b.ReportMetric(float64(wireBytes), "wire_B/op")
+	b.ResetTimer()
+	for idx := 0; idx < b.N; idx++ {
+		writer.reset()
+		writeCommandResponseWire(writer, request, http.StatusOK, response, CommandWireFormatProtobuf)
+		if writer.status != http.StatusOK || writer.bytes != wireBytes {
+			b.Fatalf("writeCommandResponseWire status/bytes = %d/%d, want 200/%d", writer.status, writer.bytes, wireBytes)
+		}
+	}
+}
+
 func BenchmarkCommandWireAcceptNegotiation(b *testing.B) {
 	accept := "application/json; charset=utf-8; q=0.2, application/x-protobuf;q=0.9, */*;q=0.1"
 	b.ReportAllocs()
@@ -159,6 +181,16 @@ func benchmarkCommandWireBytes(b *testing.B, payload CacheCommandRequest, format
 	return len(data)
 }
 
+func benchmarkCommandResponseWireBytes(b *testing.B, writer *discardCommandWireResponseWriter, request *http.Request, response CacheCommandResponse) int {
+	b.Helper()
+	writer.reset()
+	writeCommandResponseWire(writer, request, http.StatusOK, response, CommandWireFormatProtobuf)
+	if writer.status != http.StatusOK || writer.bytes == 0 {
+		b.Fatalf("writeCommandResponseWire status/bytes = %d/%d, want 200/non-empty", writer.status, writer.bytes)
+	}
+	return writer.bytes
+}
+
 func benchmarkCommandJournalBytes(b *testing.B, entry commandJournalEntry, format CommandJournalFormat) int {
 	b.Helper()
 	data, err := marshalCommandJournalEntry(entry, format)
@@ -174,6 +206,19 @@ func benchmarkCommandWirePayload() CacheCommandRequest {
 		Command: "INTERNALSET",
 		Key:     "session:1",
 		Value:   entry,
+	}
+}
+
+func benchmarkCommandWireResponse() CacheCommandResponse {
+	return CacheCommandResponse{
+		OK:      true,
+		Message: "batch applied",
+		Responses: []CacheCommandResponse{
+			{OK: true, Message: "stored string"},
+			{OK: true, Message: "ok", Value: strings.Repeat("active-user-", 256)},
+			{OK: true, Message: "stored counter"},
+			{OK: true, Message: "ok", Value: "42"},
+		},
 	}
 }
 
