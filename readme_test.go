@@ -650,8 +650,10 @@ func TestBenchmarkDocsListReplicationBatchingBenchmark(t *testing.T) {
 		"requests/op",
 		"wire_B/op",
 		"batching request reduction",
-		"Current optimized (`ae64ce3`)",
-		"3.49x faster",
+		"Current optimized (`c70d849`)",
+		"1.23x faster",
+		"BenchmarkHTTPReplicatorTargetFanout",
+		"3.65x",
 	} {
 		if !strings.Contains(benchmark, token) {
 			t.Fatalf("BENCHMARK.md does not document replication batching benchmark token %q", token)
@@ -679,6 +681,11 @@ func TestImprovementReportIncludesLatestReplicationWork(t *testing.T) {
 		"`d471652`",
 		"`70775ee`",
 		"`ae64ce3`",
+		"`bdf8c70`",
+		"`66b1309`",
+		"`0ef0207`",
+		"`7401e05`",
+		"`c70d849`",
 		"LevelDB replication outbox backend",
 		"Batch replication by target",
 		"multi-node replication failure tests",
@@ -686,8 +693,9 @@ func TestImprovementReportIncludesLatestReplicationWork(t *testing.T) {
 		"Preflight replication batches before apply",
 		"Benchmark replication batching",
 		"multi-node replication chaos tests",
-		"3.49x faster",
-		"7.79x fewer allocations",
+		"1.23x faster",
+		"2.59x fewer allocations",
+		"3.65x faster",
 	} {
 		if !strings.Contains(report, token) {
 			t.Fatalf("IMPROVEMENT_REPORT.md does not include latest replication token %q", token)

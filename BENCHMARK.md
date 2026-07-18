@@ -252,25 +252,49 @@ In this run HAT-trie is faster on all 16 measured Tarantool-comparable rows.
 Run:
 
 ```sh
-make run CMD='go test -run=NONE -bench=BenchmarkHTTPReplicatorSyncAllBatching/Batched10k -benchmem -benchtime=3x -count=3'
+make run CMD='go test -run=NONE -bench=BenchmarkHTTPReplicatorSyncAllBatching/Batched10k -benchmem -benchtime=20x -count=10'
 ```
 
 `BenchmarkHTTPReplicatorSyncAllBatching` syncs 10,000 leader-owned keys to one
 local HTTP target. `Batched10k` uses one SyncAll page and native protobuf
-replication. The before and after rows are medians from identical three-run
+replication. The start-of-pass and current rows are medians from identical ten-run
 commands on the same AMD Ryzen 9 5950X host.
 
 | Mode | Time/op | requests/op | wire_B/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Before optimization (`b897b64`) | 162,195,812 ns | 1 | 144,227 | 57,035,706 | 1,040,310 |
-| Current optimized (`ae64ce3`) | 46,480,194 ns | 1 | 87,103 | 12,109,898 | 133,612 |
+| Start of this pass (`10cf4c8`) | 39,010,494 ns | 1 | 87,095 | 11,982,835 | 131,264 |
+| Current optimized (`c70d849`) | 31,830,774 ns | 1 | 55,792 | 5,668,513 | 50,753 |
 | Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
-The current batched path is 3.49x faster than the pre-pass batched path, sends
-1.66x fewer request-body bytes, uses 4.71x less heap, and performs 7.79x fewer
-allocations. The historical batching request reduction is 10,000x for this
-single-target sync. Header bytes are not included in `wire_B/op`, so the real
-network savings from batching are larger than the body-only metric.
+This pass is 1.23x faster than its starting point, sends 1.56x fewer
+request-body bytes, uses 2.11x less cumulative allocated heap, and performs
+2.59x fewer allocations. Against the earlier `b897b64` batched baseline, the
+current path is 5.10x faster, sends 2.59x fewer body bytes, uses 10.06x less
+allocated heap, and performs 20.50x fewer allocations. The historical
+batching request reduction is 10,000x for this single-target sync. Header bytes
+are not included in `wire_B/op`, so the real
+network savings from batching are larger than the body-only metric. `B/op`
+measures bytes allocated during one operation, not peak process RSS.
+
+### Replication Target Fanout
+
+Run:
+
+```sh
+make run CMD='go test -run=NONE -bench=BenchmarkHTTPReplicatorTargetFanout -benchmem -benchtime=20x -count=5'
+```
+
+Each operation sends to four local HTTP targets whose handlers each hold the
+request for 2 ms. Medians from the five runs:
+
+| Mode | Time/op | targets/op | B/op | allocs/op | Serial speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Serial (`REPLICATION_MAX_IN_FLIGHT_TARGETS=1`) | 9,544,371 ns | 4 | 48,172 | 420 | 1.00x |
+| Bounded parallel (`REPLICATION_MAX_IN_FLIGHT_TARGETS=4`) | 2,617,552 ns | 4 | 55,269 | 432 | 3.65x |
+
+The bounded path adds 12 allocations and about 1.15x cumulative heap for this
+four-target operation. Single-target delivery does not start worker goroutines.
 
 ## HAT-trie vs Redis
 
@@ -346,7 +370,7 @@ reservoir samples, and Fenwick trees.
 
 | Family | Canonical HAT-trie commands |
 | --- | --- |
-| Generic key/value, counters, TTL, batching, replication primitives | `BATCH`, `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALDEL`, `INTERNALBATCH`, `TTL`, `EXPIRE`, `EXPIREAT` |
+| Generic key/value, counters, TTL, batching, replication primitives | `BATCH`, `GET`, `DUMP`, `EXISTS`, `SET`, `SETX`, `SETINT`, `SETINTX`, `INC`, `DEL`, `INTERNALSET`, `INTERNALSETV2`, `INTERNALSETV3`, `INTERNALDEL`, `INTERNALBATCH`, `INTERNALBATCHV2`, `TTL`, `EXPIRE`, `EXPIREAT` |
 | Map/hash fields | `PUTMAP`, `PEEKMAP`, `TAKEMAP` |
 | Slice/list/deque | `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`, `TAILSLICE` |
 | Set | `ADDSET`, `REMSET`, `HASSET`, `GETSET` |
