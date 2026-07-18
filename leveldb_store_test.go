@@ -164,6 +164,66 @@ func TestLevelDBStoreSaveDirtyWritesOnlyTrackedKeys(t *testing.T) {
 	}
 }
 
+func TestParseLevelDBCompareBeforeWriteMode(t *testing.T) {
+	tests := []struct {
+		input string
+		want  LevelDBCompareBeforeWriteMode
+	}{
+		{input: "", want: LevelDBCompareBeforeWriteAuto},
+		{input: "auto", want: LevelDBCompareBeforeWriteAuto},
+		{input: "ALWAYS", want: LevelDBCompareBeforeWriteAlways},
+		{input: " never ", want: LevelDBCompareBeforeWriteNever},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := ParseLevelDBCompareBeforeWriteMode(tt.input)
+			if err != nil {
+				t.Fatalf("ParseLevelDBCompareBeforeWriteMode(%q) error = %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseLevelDBCompareBeforeWriteMode(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+	if _, err := ParseLevelDBCompareBeforeWriteMode("sometimes"); err == nil {
+		t.Fatal("ParseLevelDBCompareBeforeWriteMode(invalid) error = nil, want error")
+	}
+}
+
+func TestLevelDBStoreSaveDirtyWithCompareModeNeverWritesTrackedChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBStore() error = %v", err)
+	}
+	defer store.Close()
+
+	ht := newTestTrie(t)
+	ht.UpsertString("alpha", "old")
+	ht.UpsertString("stale", "remove")
+	if err := store.Save(ht); err != nil {
+		t.Fatalf("Save(initial) error = %v", err)
+	}
+
+	tracker := NewLevelDBDirtyTracker()
+	ht.UpsertString("alpha", "new")
+	ht.Delete("stale")
+	tracker.Mark("alpha")
+	tracker.Mark("stale")
+	if err := store.SaveDirtyWithOptions(ht, tracker, LevelDBSaveOptions{CompareBeforeWrite: LevelDBCompareBeforeWriteNever}); err != nil {
+		t.Fatalf("SaveDirtyWithOptions(never) error = %v", err)
+	}
+	if tracker.Pending() != 0 {
+		t.Fatalf("dirty pending after save = %d, want 0", tracker.Pending())
+	}
+	if entry, ok, err := store.Entry("alpha"); err != nil || !ok || entry.String != "new" {
+		t.Fatalf("Entry(alpha) = %#v/%v/%v, want updated value", entry, ok, err)
+	}
+	if entry, ok, err := store.Entry("stale"); err != nil || ok {
+		t.Fatalf("Entry(stale) = %#v/%v/%v, want deleted", entry, ok, err)
+	}
+}
+
 func TestLevelDBDirtyTrackerClearKeepsNewerMarks(t *testing.T) {
 	tracker := NewLevelDBDirtyTracker()
 	tracker.Mark("alpha")

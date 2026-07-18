@@ -358,6 +358,26 @@ func BenchmarkLevelDBSaveColdReferencesStatsChanged(b *testing.B) {
 	benchmarkLevelDBSave(b, store, trie)
 }
 
+func BenchmarkLevelDBSaveDirtyCompareMode(b *testing.B) {
+	tests := []struct {
+		name string
+		mode LevelDBCompareBeforeWriteMode
+		keys int
+	}{
+		{name: "always-128-changed", mode: LevelDBCompareBeforeWriteAlways, keys: 128},
+		{name: "never-128-changed", mode: LevelDBCompareBeforeWriteNever, keys: 128},
+		{name: "auto-128-changed", mode: LevelDBCompareBeforeWriteAuto, keys: 128},
+		{name: "always-2048-changed", mode: LevelDBCompareBeforeWriteAlways, keys: 2048},
+		{name: "never-2048-changed", mode: LevelDBCompareBeforeWriteNever, keys: 2048},
+		{name: "auto-2048-changed", mode: LevelDBCompareBeforeWriteAuto, keys: 2048},
+	}
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			benchmarkLevelDBSaveDirtyCompareMode(b, tt.mode, tt.keys)
+		})
+	}
+}
+
 func BenchmarkLevelDBLoadMaterialized(b *testing.B) {
 	store := benchmarkPopulatedLevelDBStoreWithFormat(b, DefaultStorageFormat)
 	benchmarkLevelDBLoad(b, store, LevelDBLoadPolicy{}, benchmarkSnapshotEntries)
@@ -608,6 +628,44 @@ func benchmarkLevelDBSave(b *testing.B, store *LevelDBStore, trie *HatTrie) {
 	b.ReportMetric(float64(recordBytes), "record_B/op")
 	for i := 0; i < b.N; i++ {
 		if err := store.Save(trie); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func benchmarkLevelDBSaveDirtyCompareMode(b *testing.B, mode LevelDBCompareBeforeWriteMode, keys int) {
+	path := filepath.Join(b.TempDir(), "cache.leveldb")
+	store, err := OpenLevelDBStore(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Close()
+	trie := CreateHatTrie()
+	defer trie.Destroy()
+	benchKeys := make([]string, keys)
+	for idx := range benchKeys {
+		key := fmt.Sprintf("dirty:%04d", idx)
+		benchKeys[idx] = key
+		trie.UpsertString(key, "initial")
+	}
+	if err := store.Save(trie); err != nil {
+		b.Fatal(err)
+	}
+	tracker := NewLevelDBDirtyTracker()
+	options := LevelDBSaveOptions{CompareBeforeWrite: mode}
+
+	b.ReportAllocs()
+	b.ReportMetric(float64(keys), "dirty_keys/op")
+	b.ResetTimer()
+	for iter := 0; iter < b.N; iter++ {
+		b.StopTimer()
+		value := fmt.Sprintf("value:%d", iter)
+		for _, key := range benchKeys {
+			trie.UpsertString(key, value)
+			tracker.Mark(key)
+		}
+		b.StartTimer()
+		if err := store.SaveDirtyWithOptions(trie, tracker, options); err != nil {
 			b.Fatal(err)
 		}
 	}

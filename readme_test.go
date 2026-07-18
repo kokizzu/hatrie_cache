@@ -480,6 +480,8 @@ func TestREADMEListsStorageFormatTradeoffs(t *testing.T) {
 	for _, token := range []string{
 		"`DB_FORMAT=binary`",
 		"`DB_FORMAT=json`",
+		"`DB_COMPARE_BEFORE_WRITE=auto`",
+		"`DB_COMPARE_BEFORE_WRITE=never`",
 		"`DefaultStorageFormat` (`StorageFormatBinary`)",
 		"`SaveLevelDBWithFormat(path, StorageFormatJSON)`",
 		"`OpenLevelDBStoreWithFormat(path, StorageFormatJSON)`",

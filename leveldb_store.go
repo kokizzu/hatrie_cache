@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"hash/crc64"
 	"io"
 	"os"
@@ -22,6 +23,22 @@ var levelDBEntryPrefix = []byte("entry:")
 var levelDBRecordChecksumTable = crc64.MakeTable(crc64.ISO)
 
 var ErrLevelDBStoreClosed = errors.New("hatriecache: leveldb store is closed")
+
+const levelDBCompareBeforeWriteAutoKeyLimit = 1024
+
+type LevelDBCompareBeforeWriteMode string
+
+const (
+	LevelDBCompareBeforeWriteAuto   LevelDBCompareBeforeWriteMode = "auto"
+	LevelDBCompareBeforeWriteAlways LevelDBCompareBeforeWriteMode = "always"
+	LevelDBCompareBeforeWriteNever  LevelDBCompareBeforeWriteMode = "never"
+)
+
+const DefaultLevelDBCompareBeforeWriteMode = LevelDBCompareBeforeWriteAuto
+
+type LevelDBSaveOptions struct {
+	CompareBeforeWrite LevelDBCompareBeforeWriteMode `json:"compare_before_write,omitempty"`
+}
 
 // LevelDBLoadPolicy controls how LevelDB entries are restored into memory.
 type LevelDBLoadPolicy struct {
@@ -127,6 +144,28 @@ func DefaultLevelDBHotLoadPolicy() LevelDBLoadPolicy {
 
 func NewLevelDBDirtyTracker() *LevelDBDirtyTracker {
 	return &LevelDBDirtyTracker{keys: map[string]uint64{}}
+}
+
+func ParseLevelDBCompareBeforeWriteMode(value string) (LevelDBCompareBeforeWriteMode, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(LevelDBCompareBeforeWriteAuto):
+		return LevelDBCompareBeforeWriteAuto, nil
+	case string(LevelDBCompareBeforeWriteAlways):
+		return LevelDBCompareBeforeWriteAlways, nil
+	case string(LevelDBCompareBeforeWriteNever):
+		return LevelDBCompareBeforeWriteNever, nil
+	default:
+		return "", fmt.Errorf("hatriecache: db compare before write must be auto, always, or never")
+	}
+}
+
+func normalizeLevelDBSaveOptions(options LevelDBSaveOptions) (LevelDBSaveOptions, error) {
+	mode, err := ParseLevelDBCompareBeforeWriteMode(string(options.CompareBeforeWrite))
+	if err != nil {
+		return LevelDBSaveOptions{}, err
+	}
+	options.CompareBeforeWrite = mode
+	return options, nil
 }
 
 func (tracker *LevelDBDirtyTracker) Mark(key string) {
@@ -254,6 +293,14 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 }
 
 func (store *LevelDBStore) SaveKeys(trie *HatTrie, keys []string) error {
+	return store.SaveKeysWithOptions(trie, keys, LevelDBSaveOptions{})
+}
+
+func (store *LevelDBStore) SaveKeysWithOptions(trie *HatTrie, keys []string, options LevelDBSaveOptions) error {
+	options, err := normalizeLevelDBSaveOptions(options)
+	if err != nil {
+		return err
+	}
 	db, unlock, err := store.lockDB()
 	if err != nil {
 		return err
@@ -267,6 +314,7 @@ func (store *LevelDBStore) SaveKeys(trie *HatTrie, keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
+	compareBeforeWrite := levelDBShouldCompareBeforeWrite(options.CompareBeforeWrite, len(keys))
 	batch := new(leveldb.Batch)
 	for _, key := range keys {
 		data, ok, err := trie.levelDBEntryDataForKeyForStore(store, db, store.format, key)
@@ -276,6 +324,10 @@ func (store *LevelDBStore) SaveKeys(trie *HatTrie, keys []string) error {
 		dbKey := levelDBKey(key)
 		if !ok {
 			batch.Delete(dbKey)
+			continue
+		}
+		if !compareBeforeWrite {
+			batch.Put(dbKey, data)
 			continue
 		}
 		existing, exists, err := store.entryDataFromDB(db, key)
@@ -293,6 +345,10 @@ func (store *LevelDBStore) SaveKeys(trie *HatTrie, keys []string) error {
 }
 
 func (store *LevelDBStore) SaveDirty(trie *HatTrie, tracker *LevelDBDirtyTracker) error {
+	return store.SaveDirtyWithOptions(trie, tracker, LevelDBSaveOptions{})
+}
+
+func (store *LevelDBStore) SaveDirtyWithOptions(trie *HatTrie, tracker *LevelDBDirtyTracker, options LevelDBSaveOptions) error {
 	if tracker == nil {
 		return store.Save(trie)
 	}
@@ -300,11 +356,22 @@ func (store *LevelDBStore) SaveDirty(trie *HatTrie, tracker *LevelDBDirtyTracker
 	if len(snapshot.keys) == 0 {
 		return nil
 	}
-	if err := store.SaveKeys(trie, snapshot.keys); err != nil {
+	if err := store.SaveKeysWithOptions(trie, snapshot.keys, options); err != nil {
 		return err
 	}
 	tracker.Clear(snapshot)
 	return nil
+}
+
+func levelDBShouldCompareBeforeWrite(mode LevelDBCompareBeforeWriteMode, keys int) bool {
+	switch mode {
+	case LevelDBCompareBeforeWriteAlways:
+		return true
+	case LevelDBCompareBeforeWriteNever:
+		return false
+	default:
+		return keys <= levelDBCompareBeforeWriteAutoKeyLimit
+	}
 }
 
 func normalizeLevelDBDirtyKeys(keys []string) []string {

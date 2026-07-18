@@ -643,7 +643,16 @@ replay while the server is running:
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
 make monitoring-server DB_PATH=data/cache.leveldb DB_FORMAT=json
+make monitoring-server DB_PATH=data/cache.leveldb DB_COMPARE_BEFORE_WRITE=never
 ```
+
+Dirty-key saves use `DB_COMPARE_BEFORE_WRITE=auto` by default. `auto` compares
+small dirty batches against existing LevelDB records to skip unchanged writes,
+but skips that read-before-write check for large dirty batches where the random
+read I/O is usually worse than rewriting changed records. Use `always` when
+storage write amplification matters more than read CPU/I/O, and
+`DB_COMPARE_BEFORE_WRITE=never` for bulk ingest or replay when you prefer lower
+CPU and fewer LevelDB reads.
 
 Run a manual LevelDB flush before planned maintenance when `DB_SYNC_INTERVAL=0`
 or when you want a full current in-memory state write immediately. Run manual

@@ -83,6 +83,7 @@ type config struct {
 	dbPath                      string
 	dbFormat                    string
 	dbSyncInterval              time.Duration
+	dbCompareBeforeWrite        string
 	dbCompactInterval           time.Duration
 	dbCompactStartKey           string
 	dbCompactLimitKey           string
@@ -214,7 +215,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			}
 		}()
 	}
-	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, levelDBDirtyTracker, cfg.dbSyncInterval, stderr)
+	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, levelDBDirtyTracker, cfg.dbSyncInterval, levelDBSaveOptions(cfg), stderr)
 	defer stopDBSync()
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, snapshotFormat(cfg), stderr)
 	defer stopSnapshots()
@@ -367,6 +368,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
 		replicationMode:             replicationModeJournal,
 		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
+		dbCompareBeforeWrite:        string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
 	}
 	configPath, err := configPathFromArgs(args)
 	if err != nil {
@@ -417,6 +419,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
 	flags.StringVar(&cfg.dbFormat, "db-format", string(hatriecache.DefaultStorageFormat), "LevelDB record storage format: binary or json")
 	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
+	flags.StringVar(&cfg.dbCompareBeforeWrite, "db-compare-before-write", cfg.dbCompareBeforeWrite, "dirty LevelDB save compare mode: auto, always, or never")
 	flags.DurationVar(&cfg.dbCompactInterval, "db-compact-interval", 0, "optional periodic LevelDB compaction interval")
 	flags.StringVar(&cfg.dbCompactStartKey, "db-compact-start-key", "", "first cache key to include in periodic LevelDB compaction")
 	flags.StringVar(&cfg.dbCompactLimitKey, "db-compact-limit-key", "", "first cache key after the periodic LevelDB compaction range")
@@ -549,6 +552,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		return config{}, errors.New("replication batch max bytes must be non-negative")
 	}
 	if _, err := hatriecache.ParseStorageFormat(cfg.dbFormat); err != nil {
+		return config{}, err
+	}
+	if _, err := hatriecache.ParseLevelDBCompareBeforeWriteMode(cfg.dbCompareBeforeWrite); err != nil {
 		return config{}, err
 	}
 	if _, err := hatriecache.ParseSnapshotFormat(cfg.snapshotFormat); err != nil {
@@ -693,6 +699,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"db_path":                              cfg.dbPath,
 		"db_format":                            cfg.dbFormat,
 		"db_sync_interval":                     cfg.dbSyncInterval.String(),
+		"db_compare_before_write":              cfg.dbCompareBeforeWrite,
 		"db_compact_interval":                  cfg.dbCompactInterval.String(),
 		"db_compact_start_key":                 cfg.dbCompactStartKey,
 		"db_compact_limit_key":                 cfg.dbCompactLimitKey,
@@ -810,6 +817,14 @@ func storageFormat(cfg config) hatriecache.StorageFormat {
 		return hatriecache.DefaultStorageFormat
 	}
 	return format
+}
+
+func levelDBSaveOptions(cfg config) hatriecache.LevelDBSaveOptions {
+	mode, err := hatriecache.ParseLevelDBCompareBeforeWriteMode(cfg.dbCompareBeforeWrite)
+	if err != nil {
+		mode = hatriecache.DefaultLevelDBCompareBeforeWriteMode
+	}
+	return hatriecache.LevelDBSaveOptions{CompareBeforeWrite: mode}
 }
 
 func journalFormat(cfg config) hatriecache.CommandJournalFormat {
@@ -1112,7 +1127,7 @@ func stopGRPCServerWithTimeout(server *grpc.Server, timeout time.Duration) {
 	}
 }
 
-func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker, interval time.Duration, stderr io.Writer) func() {
+func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker, interval time.Duration, options hatriecache.LevelDBSaveOptions, stderr io.Writer) func() {
 	ctx = serverContext(ctx)
 	if store == nil || interval <= 0 {
 		return func() {}
@@ -1128,7 +1143,7 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 		if first || dirty == nil {
 			err = saveLevelDBIfOpenAndClearDirty(trie, store, dirty)
 		} else {
-			err = saveDirtyLevelDBIfOpen(trie, store, dirty)
+			err = saveDirtyLevelDBIfOpen(trie, store, dirty, options)
 		}
 		if errors.Is(err, errHatTrieDestroyed) {
 			return false
@@ -1187,9 +1202,9 @@ func saveLevelDBIfOpenAndClearDirty(trie *hatriecache.HatTrie, store *hatriecach
 	return nil
 }
 
-func saveDirtyLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker) (err error) {
+func saveDirtyLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker, options hatriecache.LevelDBSaveOptions) (err error) {
 	defer recoverDestroyedHatTrie(&err)
-	return store.SaveDirty(trie, dirty)
+	return store.SaveDirtyWithOptions(trie, dirty, options)
 }
 
 type levelDBCompactorOptions struct {

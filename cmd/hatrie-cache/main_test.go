@@ -879,6 +879,33 @@ func TestParseConfigRejectsInvalidDBFormat(t *testing.T) {
 	}
 }
 
+func TestParseConfigAcceptsDBCompareBeforeWrite(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-monitoring-server",
+		"-db-compare-before-write", "never",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(db compare mode) error = %v", err)
+	}
+	if cfg.dbCompareBeforeWrite != "never" {
+		t.Fatalf("db compare mode = %q, want never", cfg.dbCompareBeforeWrite)
+	}
+	out := redactedConfig(cfg)
+	if out["db_compare_before_write"] != "never" {
+		t.Fatalf("redacted db compare mode = %#v, want never", out["db_compare_before_write"])
+	}
+}
+
+func TestParseConfigRejectsInvalidDBCompareBeforeWrite(t *testing.T) {
+	_, err := parseConfig([]string{
+		"-monitoring-server",
+		"-db-compare-before-write", "sometimes",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "db compare before write must be auto, always, or never") {
+		t.Fatalf("parseConfig(invalid db compare mode) error = %v, want compare mode error", err)
+	}
+}
+
 func TestParseConfigRejectsInvalidJournalFormat(t *testing.T) {
 	_, err := parseConfig([]string{
 		"-monitoring-server",
@@ -2502,7 +2529,7 @@ func TestStartLevelDBSaverWritesPeriodically(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stop := startLevelDBSaver(ctx, ht, store, nil, time.Millisecond, &bytes.Buffer{})
+	stop := startLevelDBSaver(ctx, ht, store, nil, time.Millisecond, hatriecache.LevelDBSaveOptions{}, &bytes.Buffer{})
 	defer stop()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -2529,7 +2556,7 @@ func TestStartLevelDBSaverWritesImmediately(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stop := startLevelDBSaver(ctx, ht, store, nil, time.Hour, &bytes.Buffer{})
+	stop := startLevelDBSaver(ctx, ht, store, nil, time.Hour, hatriecache.LevelDBSaveOptions{}, &bytes.Buffer{})
 	defer stop()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -2557,7 +2584,7 @@ func TestStartLevelDBSaverWritesDirtyKeysAfterInitialSave(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stop := startLevelDBSaver(ctx, ht, store, dirty, time.Millisecond, &bytes.Buffer{})
+	stop := startLevelDBSaver(ctx, ht, store, dirty, time.Millisecond, hatriecache.LevelDBSaveOptions{}, &bytes.Buffer{})
 	defer stop()
 
 	waitUntil(t, 2*time.Second, func() bool {
@@ -2787,7 +2814,7 @@ func TestStartLevelDBSaverStopIsIdempotent(t *testing.T) {
 	defer closeLevelDB(store, &bytes.Buffer{})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stop := startLevelDBSaver(ctx, ht, store, nil, time.Hour, &bytes.Buffer{})
+	stop := startLevelDBSaver(ctx, ht, store, nil, time.Hour, hatriecache.LevelDBSaveOptions{}, &bytes.Buffer{})
 	cancel()
 
 	assertStopReturns(t, stop, "LevelDB saver repeated stop")
@@ -2819,7 +2846,7 @@ func TestStartLevelDBSaverStopsAfterDestroy(t *testing.T) {
 	}
 	defer closeLevelDB(store, &bytes.Buffer{})
 
-	stop := startLevelDBSaver(context.Background(), ht, store, nil, time.Millisecond, &bytes.Buffer{})
+	stop := startLevelDBSaver(context.Background(), ht, store, nil, time.Millisecond, hatriecache.LevelDBSaveOptions{}, &bytes.Buffer{})
 	ht.Destroy()
 	time.Sleep(20 * time.Millisecond)
 
@@ -2844,7 +2871,7 @@ func TestPeriodicHelpersAcceptNilContext(t *testing.T) {
 		t.Fatalf("openLevelDBIfConfigured() error = %v", err)
 	}
 	defer closeLevelDB(store, &bytes.Buffer{})
-	stopLevelDB := startLevelDBSaver(nil, ht, store, nil, time.Hour, &bytes.Buffer{})
+	stopLevelDB := startLevelDBSaver(nil, ht, store, nil, time.Hour, hatriecache.LevelDBSaveOptions{}, &bytes.Buffer{})
 	waitUntil(t, 2*time.Second, func() bool {
 		entry, ok, err := store.Entry("key")
 		return err == nil && ok && entry.Type == "string" && entry.String == "value"

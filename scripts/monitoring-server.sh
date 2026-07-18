@@ -38,6 +38,7 @@ grpc_client_ca=${GRPC_CLIENT_CA:-}
 db_path=${DB_PATH:-}
 db_format=${DB_FORMAT:-binary}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
+db_compare_before_write=${DB_COMPARE_BEFORE_WRITE:-auto}
 db_compact_interval=${DB_COMPACT_INTERVAL:-0}
 db_compact_start_key=${DB_COMPACT_START_KEY:-}
 db_compact_limit_key=${DB_COMPACT_LIMIT_KEY:-}
@@ -98,6 +99,7 @@ set -- \
 	-grpc-client-ca "$grpc_client_ca" \
 	-db-path "$db_path" \
 	-db-sync-interval "$db_sync_interval" \
+	-db-compare-before-write "$db_compare_before_write" \
 	-db-compact-interval "$db_compact_interval" \
 	-db-compact-start-key "$db_compact_start_key" \
 	-db-compact-limit-key "$db_compact_limit_key" \
