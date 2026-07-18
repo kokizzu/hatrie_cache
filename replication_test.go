@@ -755,6 +755,84 @@ func TestHTTPReplicatorAsyncQueuesMaterializedPayload(t *testing.T) {
 	}
 }
 
+func TestExecutePublicCommandBatchAsyncOutboxQueuesOneGroupedTargetJob(t *testing.T) {
+	release := make(chan struct{})
+	requests := make(chan CacheCommandRequest, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		requests <- mustDecodeReplicationTestCommand(t, w, r)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	outboxPath := filepath.Join(t.TempDir(), "replication-outbox.json")
+	outbox, err := OpenReplicationOutbox(outboxPath)
+	if err != nil {
+		t.Fatalf("OpenReplicationOutbox() error = %v", err)
+	}
+	defer outbox.Close()
+
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, target.URL)
+	election := NewElectionStore(topology, ElectionOptions{})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       election,
+		Client:         target.Client(),
+		AsyncQueueSize: 1,
+		AsyncOutbox:    outbox,
+	})
+	defer replicator.Close()
+	defer close(release)
+
+	request := CacheCommandRequest{
+		Command: "BATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "SETSTR", Key: "session:outbox-batch", Value: "first"},
+			{Command: "SETSTR", Key: "session:outbox-batch", Value: "second"},
+			{Command: "GET", Key: "session:outbox-batch"},
+		},
+	}
+	response, rejected := executeCacheCommand(context.Background(), trie, request, commandExecutionOptions{Replicator: replicator})
+	if rejected || !response.OK || len(response.Responses) != 3 || response.Responses[2].Value != "second" {
+		t.Fatalf("executeCacheCommand(batch) = %#v rejected=%v, want ok with final GET second", response, rejected)
+	}
+
+	jobs := outbox.jobs()
+	if len(jobs) != 1 {
+		t.Fatalf("outbox jobs len = %d, want one grouped batch job", len(jobs))
+	}
+	if jobs[0].result.Command != "BATCH" || jobs[0].result.Entries != 2 || !jobs[0].result.Queued {
+		t.Fatalf("outbox job result = %#v, want queued BATCH with two entries", jobs[0].result)
+	}
+	if len(jobs[0].tasks) != 2 {
+		t.Fatalf("outbox job task len = %d, want two tasks", len(jobs[0].tasks))
+	}
+	wantValues := []string{"first", "second"}
+	for idx, task := range jobs[0].tasks {
+		if task.target.ID != "node-b" {
+			t.Fatalf("task %d target = %#v, want node-b", idx, task.target)
+		}
+		payload := task.payload
+		if payload.Command != "INTERNALSET" || payload.Key != "session:outbox-batch" {
+			t.Fatalf("task %d payload = %#v, want INTERNALSET session:outbox-batch", idx, payload)
+		}
+		operation, err := commandSnapshotOperation(payload.Key, payload.Value)
+		if err != nil {
+			t.Fatalf("task %d snapshot error = %v", idx, err)
+		}
+		if operation.entry.String != wantValues[idx] {
+			t.Fatalf("task %d snapshot string = %q, want %q", idx, operation.entry.String, wantValues[idx])
+		}
+	}
+
+	last := replicator.LastResult()
+	if last.Command != "BATCH" || !last.Queued || last.Queue == nil || last.Queue.Enqueued != 1 {
+		t.Fatalf("last replication result = %#v, want one queued BATCH job", last)
+	}
+}
+
 func TestHTTPReplicatorAsyncRetriesFailedDelivery(t *testing.T) {
 	attempts := make(chan struct{}, 2)
 	client := &http.Client{
