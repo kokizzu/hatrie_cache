@@ -14,15 +14,9 @@ import (
 
 type Decoder = json.Decoder
 
-var gzipWriterPool = sync.Pool{
-	New: func() interface{} {
-		writer, err := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
-		if err != nil {
-			panic(err)
-		}
-		return writer
-	},
-}
+const maxCachedGzipWriters = 4
+
+var gzipWriterCache = make(chan *gzip.Writer, maxCachedGzipWriters)
 
 var releaseBytesReaderPool = sync.Pool{
 	New: func() interface{} {
@@ -31,14 +25,29 @@ var releaseBytesReaderPool = sync.Pool{
 }
 
 func AcquireGzipWriter(writer io.Writer) *gzip.Writer {
-	gzipWriter := gzipWriterPool.Get().(*gzip.Writer)
+	var gzipWriter *gzip.Writer
+	select {
+	case gzipWriter = <-gzipWriterCache:
+	default:
+		var err error
+		gzipWriter, err = gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
+		if err != nil {
+			panic(err)
+		}
+	}
 	gzipWriter.Reset(writer)
 	return gzipWriter
 }
 
 func ReleaseGzipWriter(writer *gzip.Writer) {
+	if writer == nil {
+		return
+	}
 	writer.Reset(io.Discard)
-	gzipWriterPool.Put(writer)
+	select {
+	case gzipWriterCache <- writer:
+	default:
+	}
 }
 
 func Marshal(value interface{}) ([]byte, error) {

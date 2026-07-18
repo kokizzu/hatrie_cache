@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -325,6 +326,69 @@ func TestAcquireGzipWriterCompressesAndReleases(t *testing.T) {
 	}
 	if string(data) != "payload" {
 		t.Fatalf("decompressed = %q, want payload", data)
+	}
+}
+
+func TestGzipWriterCacheSurvivesGarbageCollection(t *testing.T) {
+	first := AcquireGzipWriter(io.Discard)
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close() error = %v", err)
+	}
+	ReleaseGzipWriter(first)
+	runtime.GC()
+	runtime.GC()
+
+	second := AcquireGzipWriter(io.Discard)
+	if second != first {
+		t.Fatalf("gzip writer after GC = %p, want retained writer %p", second, first)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	ReleaseGzipWriter(second)
+	runtime.KeepAlive(first)
+}
+
+func BenchmarkGzipCompressionLevels(b *testing.B) {
+	payload := bytes.Repeat([]byte("session:000123|INTERNALSETV3|value-000123|region=ap-southeast-1\n"), 10000)
+	for _, tt := range []struct {
+		name  string
+		level int
+	}{
+		{name: "BestSpeed", level: gzip.BestSpeed},
+		{name: "Default", level: gzip.DefaultCompression},
+		{name: "BestCompression", level: gzip.BestCompression},
+		{name: "HuffmanOnly", level: gzip.HuffmanOnly},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			var output bytes.Buffer
+			writer, err := gzip.NewWriterLevel(&output, tt.level)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err := writer.Write(payload); err != nil {
+				b.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				b.Fatal(err)
+			}
+			output.Grow(output.Len())
+			b.ReportAllocs()
+			b.ResetTimer()
+			var compressedBytes int64
+			for idx := 0; idx < b.N; idx++ {
+				output.Reset()
+				writer.Reset(&output)
+				if _, err := writer.Write(payload); err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					b.Fatal(err)
+				}
+				compressedBytes += int64(output.Len())
+			}
+			b.ReportMetric(float64(compressedBytes)/float64(b.N), "wire_B/op")
+		})
 	}
 }
 
