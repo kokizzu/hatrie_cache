@@ -7,7 +7,9 @@ Date: 2026-07-19
 This report covers the reliability, observability, benchmark, and replication
 auth/transport improvements shipped in this work sequence. It also records the
 follow-up batching, wire-format, and multi-node correctness hardening shipped
-after the first report pass.
+after the first report pass, plus the final cross-cutting architecture pass for
+bounded telemetry, concurrent reads, durability, snapshots, anti-entropy, and
+persistent command transport.
 
 ## Shipped Improvements
 
@@ -49,6 +51,13 @@ after the first report pass.
 | `5c6bd2f` | Native iterator batches | One cgo call returns up to 256 ordered trie records instead of crossing once per key. |
 | `4c869d0` | Ordered gRPC replication stream | Anti-entropy sync can keep one acknowledged HTTP/2 stream per target, with configurable HTTP fallback. |
 | `e5b127d` | Exact delta-first journal recovery | Retained deltas use one durable batch sync; compacted gaps fall back to an authenticated exact snapshot with stale-key deletion and restart-safe persistence. |
+| `532270c` | Architectural bottleneck baselines | Reproducible Makefile/script benchmarks capture per-key memory, contended reads, durable writes, snapshot pause, anti-entropy, and command transport. |
+| `3e79248` | Bounded per-key telemetry | Exact global counters remain while detailed key statistics default to a compact 100,000-key bound with configurable full/off modes. |
+| `6d148c2` | Concurrent scalar read fast path | In-memory scalar reads use shared locking and retain exclusive cleanup/hydration fallbacks for expiration and LevelDB. |
+| `c549fb7` | Durable journal group commit | Concurrent mutators share bounded append and `fsync` batches without acknowledging or applying commands before durability succeeds. |
+| `7f4c1e1` | Non-blocking snapshot output | Point-in-time capture remains consistent while encoding, compression, visitors, database diff, and output run after global locks are released. |
+| `943adc2` | Incremental digest anti-entropy | Equal replicas exchange one root; mismatches merge bounded key-digest pages and transfer only changed/missing values and stale-key deletes. |
+| `629ccca` | Persistent gRPC command stream | Ordered bidirectional commands share unary semantics while removing repeated RPC setup and supporting one-sender/one-receiver pipelining. |
 
 ## Operational Impact
 
@@ -96,6 +105,31 @@ after the first report pass.
 - Batching 100 pulled journal records behind one `fsync` is 56.55x faster than
   syncing every command. Retained deltas are 42.70x faster than rebuilding the
   10k-key fixture and use 156.85x less cumulative heap.
+- The final architecture pass bounds telemetry growth, makes contended scalar
+  reads 2.42x faster, makes 16-caller durable writes 11.99x faster, and shortens
+  the maximum snapshot reader pause by 3.71x.
+- Equal-state digest anti-entropy is 6.99x faster, 49,971x smaller on wire, and
+  206.1x lower in cumulative heap than a valid 10k-key full transfer. A 1%
+  repair remains 2.13x faster and 44.75x smaller on wire.
+- Sequential `CommandStream` is 3.96x faster than unary gRPC. Full-duplex
+  pipelining is 18.94x faster, uses 7.67x less cumulative heap, and performs
+  6.57x fewer allocations in the isolated 10,000-command medians.
+
+## Final Architecture Measurements
+
+All rows are medians on the same AMD Ryzen 9 5950X host. Detailed commands,
+raw rows, and tradeoffs are in `BENCHMARK.md`.
+
+| Feature | Baseline | Final | Improvement / tradeoff |
+| --- | ---: | ---: | --- |
+| Per-key telemetry, 100k keys | 242.5 retained B/key, unbounded | 213.5 retained B/key, 100k bound | 12.0% lower; `off` is 73.8% lower |
+| Concurrent scalar reads | 1,528 ns/read | 632.4 ns/read | 2.42x faster |
+| Durable writes, 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster |
+| Snapshot maximum read pause | 528,624,130 ns | 142,374,086 ns | 3.71x shorter; total snapshot time is 5.5% higher and heap is 2.63x higher |
+| Equal anti-entropy, 10k x 1 KiB | 154,735,234 ns, 10,743,774 wire B | 22,129,470 ns, 215 wire B | 6.99x faster, 49,971x smaller wire, 206.1x lower heap |
+| 1%-changed anti-entropy | Full-transfer baseline above | 72,812,784 ns, 240,086 wire B | 2.13x faster, 44.75x smaller wire, 11.47x lower heap |
+| Sequential command transport, 10k | Unary: 59,040 ns/command | Stream: 14,914 ns/command | 3.96x faster, 6.73x lower heap |
+| Pipelined command transport, 10k | Unary: 59,040 ns/command | Stream: 3,118 ns/command | 18.94x faster, 7.67x lower heap, 6.57x fewer allocations |
 
 ## Replication Batching Measurement
 

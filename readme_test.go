@@ -761,6 +761,13 @@ func TestImprovementReportIncludesLatestReplicationWork(t *testing.T) {
 		"`5c6bd2f`",
 		"`4c869d0`",
 		"`e5b127d`",
+		"`532270c`",
+		"`3e79248`",
+		"`6d148c2`",
+		"`c549fb7`",
+		"`7f4c1e1`",
+		"`943adc2`",
+		"`629ccca`",
 		"LevelDB replication outbox backend",
 		"Batch replication by target",
 		"multi-node replication failure tests",
@@ -776,6 +783,9 @@ func TestImprovementReportIncludesLatestReplicationWork(t *testing.T) {
 		"10.43x fewer allocations",
 		"56.55x faster",
 		"JOURNAL_PULL_FULL_SYNC_FALLBACK=false",
+		"49,971x smaller on wire",
+		"18.94x faster",
+		"3.71x shorter",
 	} {
 		if !strings.Contains(report, token) {
 			t.Fatalf("IMPROVEMENT_REPORT.md does not include latest replication token %q", token)

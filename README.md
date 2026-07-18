@@ -100,6 +100,8 @@ command benchmark scripts write raw Markdown plus TSV rows and memory summaries.
 `command-feature-comparison.md` with seconds-per-10k and speedup columns.
 `make benchmark-md` refreshes the generated comparison and raw-result regions
 in `BENCHMARK.md` from those artifacts.
+[`IMPROVEMENT_REPORT.md`](IMPROVEMENT_REPORT.md) consolidates the shipped
+feature commits, final before/after metrics, and measured tradeoffs.
 
 Run the CI benchmark smoke locally:
 
