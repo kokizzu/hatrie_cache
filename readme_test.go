@@ -202,6 +202,26 @@ func TestREADMEDocumentsBackupPartitionValidation(t *testing.T) {
 	}
 }
 
+func TestREADMEDocumentsSaneConfigProfiles(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"make print-sane-config",
+		"CONFIG_PROFILE=dev",
+		"CONFIG_PROFILE=bench",
+		"`production` enables",
+		"`bench` enables",
+		"Override any profile default",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md missing sane config profile token %q", token)
+		}
+	}
+}
+
 func TestREADMEListsBenchmarkRegressionGuard(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {

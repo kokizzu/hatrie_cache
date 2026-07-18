@@ -109,6 +109,9 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 		"./scripts/doctor.sh",
 		"check-config:",
 		"./scripts/check-config.sh",
+		"CONFIG_PROFILE ?= production",
+		"print-sane-config:",
+		"./scripts/print-sane-config.sh",
 		"bench-ci-smoke:",
 		"./scripts/benchmark-ci-smoke.sh",
 		"GRPC_TLS_CERT ?=",
@@ -137,6 +140,20 @@ func TestMakefileWiresBackupRestoreTargets(t *testing.T) {
 	} {
 		if !strings.Contains(string(data), token) {
 			t.Fatalf("check-config script missing token %q", token)
+		}
+	}
+	data, err = os.ReadFile("scripts/print-sane-config.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/print-sane-config.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"CONFIG_PROFILE",
+		"-print-config",
+		"-profile",
+		"go run ./cmd/hatrie-cache",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("print-sane-config script missing token %q", token)
 		}
 	}
 	data, err = os.ReadFile("scripts/monitoring-server.sh")

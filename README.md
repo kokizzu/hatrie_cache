@@ -569,6 +569,21 @@ duration strings. Explicit CLI flags override file values:
 }
 ```
 
+Generate a redacted sane default config without starting listeners:
+
+```
+make print-sane-config
+make print-sane-config CONFIG_PROFILE=dev
+make print-sane-config CONFIG_PROFILE=bench
+```
+
+Profiles are explicit opt-ins. `production` enables the monitoring server on
+`0.0.0.0:8080`, LevelDB, snapshot, and journal paths under `data/`, efficient
+binary/gzip formats, periodic dirty saves, and periodic snapshots. `dev` keeps
+loopback monitoring defaults. `bench` enables loopback monitoring and leaves
+persistence disabled. Override any profile default with normal flags, for
+example `make print-sane-config PRINT_CONFIG_ARGS='-monitoring-server=false'`.
+
 Run a config-file based server through the script wrapper:
 
 ```

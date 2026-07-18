@@ -37,12 +37,16 @@ const (
 	replicationModeJournal             = "journal"
 	replicationModeCommand             = "command"
 	replicationModeDual                = "dual"
+	configProfileDev                   = "dev"
+	configProfileProduction            = "production"
+	configProfileBench                 = "bench"
 )
 
 var errHatTrieDestroyed = errors.New("hatrie-cache: trie is destroyed")
 
 type config struct {
 	configPath                  string
+	configProfile               string
 	checkConfig                 bool
 	printConfig                 bool
 	monitoringServer            bool
@@ -367,37 +371,63 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		monitoringIdleTimeout:       defaultMonitoringIdleTimeout,
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
 		replicationMode:             replicationModeJournal,
+		replicationWireFormat:       string(hatriecache.DefaultCommandWireFormat),
+		replicationBatchMaxBytes:    hatriecache.DefaultReplicationBatchMaxBytes,
 		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
+		dbFormat:                    string(hatriecache.DefaultStorageFormat),
 		dbCompareBeforeWrite:        string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
+		snapshotFormat:              string(hatriecache.DefaultSnapshotFormat),
+		journalFormat:               string(hatriecache.DefaultCommandJournalFormat),
 	}
 	configPath, err := configPathFromArgs(args)
 	if err != nil {
 		return config{}, err
+	}
+	configProfile, err := configProfileFromArgs(args)
+	if err != nil {
+		return config{}, err
+	}
+	if configPath != "" {
+		fileProfile, err := configProfileFromFile(configPath)
+		if err != nil {
+			return config{}, err
+		}
+		if configProfile == "" {
+			configProfile = fileProfile
+		}
+	}
+	if configProfile != "" {
+		cfg, err = applyConfigProfileDefaults(cfg, configProfile)
+		if err != nil {
+			return config{}, err
+		}
 	}
 	cfg.configPath = configPath
 	flags := flag.NewFlagSet("hatrie-cache", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.StringVar(&cfg.configPath, "config", cfg.configPath, "optional JSON config file path")
 	flags.StringVar(&cfg.configPath, "config-file", cfg.configPath, "optional JSON config file path")
+	flags.StringVar(&cfg.configProfile, "profile", cfg.configProfile, "optional sane config profile: dev, production, or bench")
+	flags.StringVar(&cfg.configProfile, "config-profile", cfg.configProfile, "optional sane config profile: dev, production, or bench")
 	flags.BoolVar(&cfg.checkConfig, "check-config", false, "validate configuration and exit without starting listeners")
 	flags.BoolVar(&cfg.printConfig, "print-config", false, "print effective redacted configuration and exit without starting listeners")
-	flags.BoolVar(&cfg.monitoringServer, "monitoring-server", false, "run the grpc/http2/web monitoring server")
+	flags.BoolVar(&cfg.monitoringServer, "monitoring-server", cfg.monitoringServer, "run the grpc/http2/web monitoring server")
 	flags.StringVar(&cfg.monitoringAddr, "monitoring-addr", cfg.monitoringAddr, "monitoring server listen address")
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
-	flags.BoolVar(&cfg.writeProtection, "write-protection", false, "reject dangerous monitoring API writes")
-	flags.IntVar(&cfg.rateLimit, "rate-limit", 0, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
+	flags.BoolVar(&cfg.writeProtection, "write-protection", cfg.writeProtection, "reject dangerous monitoring API writes")
+	flags.IntVar(&cfg.rateLimit, "rate-limit", cfg.rateLimit, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
 	flags.StringVar(&cfg.nodeID, "node-id", "", "local cluster node id")
 	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
 	flags.DurationVar(&cfg.electionTimeout, "election-timeout", cfg.electionTimeout, "node heartbeat timeout for deterministic topology leader election")
-	flags.BoolVar(&cfg.replication, "replication", false, "enable the configured replication mode")
+	flags.BoolVar(&cfg.replication, "replication", cfg.replication, "enable the configured replication mode")
 	flags.StringVar(&cfg.replicationMode, "replication-mode", cfg.replicationMode, "replication mode: journal, command, or dual")
-	flags.BoolVar(&cfg.replicationAsync, "replication-async", false, "queue successful leader-write replication in a bounded async worker")
+	flags.BoolVar(&cfg.replicationAsync, "replication-async", cfg.replicationAsync, "queue successful leader-write replication in a bounded async worker")
 	flags.IntVar(&cfg.replicationQueueSize, "replication-queue-size", 1024, "maximum queued async replication jobs")
 	flags.DurationVar(&cfg.replicationRetry, "replication-retry-interval", hatriecache.DefaultReplicationRetryInterval, "delay between async replication retry attempts")
 	flags.UintVar(&cfg.replicationAttempts, "replication-max-attempts", 3, "maximum async replication delivery attempts")
@@ -406,9 +436,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.replicationOutboxFormat, "replication-outbox-format", "auto", "durable replication outbox backend: auto, json, or leveldb")
 	flags.IntVar(&cfg.replicationCircuitFailures, "replication-circuit-breaker-failures", hatriecache.DefaultReplicationCircuitBreakerFailures, "consecutive per-target replication failures before opening the circuit breaker; use 0 to disable")
 	flags.DurationVar(&cfg.replicationCircuitCooldown, "replication-circuit-breaker-cooldown", hatriecache.DefaultReplicationCircuitBreakerCooldown, "per-target replication circuit breaker cooldown before a half-open probe; use 0 to disable")
-	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", string(hatriecache.DefaultCommandWireFormat), "HTTP replication command wire format: protobuf or json")
+	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", cfg.replicationWireFormat, "HTTP replication command wire format: protobuf or json")
 	flags.StringVar(&cfg.replicationAuthToken, "replication-auth-token", "", "optional bearer token sent on HTTP replication and accepted only for internal replication commands")
-	flags.IntVar(&cfg.replicationBatchMaxBytes, "replication-batch-max-bytes", hatriecache.DefaultReplicationBatchMaxBytes, "maximum estimated bytes per HTTP replication batch; use 0 to disable batch splitting")
+	flags.IntVar(&cfg.replicationBatchMaxBytes, "replication-batch-max-bytes", cfg.replicationBatchMaxBytes, "maximum estimated bytes per HTTP replication batch; use 0 to disable batch splitting")
 	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
 	flags.StringVar(&cfg.replicationSyncPrefix, "replication-sync-prefix", "", "optional key prefix for periodic anti-entropy replication sync")
 	flags.BoolVar(&cfg.enforceLeaderWrites, "enforce-leader-writes", false, "reject mutating client commands when this node is not the elected key leader")
@@ -416,14 +446,14 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.grpcTLSCert, "grpc-tls-cert", "", "TLS certificate path for the native gRPC API")
 	flags.StringVar(&cfg.grpcTLSKey, "grpc-tls-key", "", "TLS private key path for the native gRPC API")
 	flags.StringVar(&cfg.grpcClientCA, "grpc-client-ca", "", "optional client CA PEM path; when set, native gRPC requires mTLS client certificates")
-	flags.StringVar(&cfg.dbPath, "db-path", "", "optional LevelDB path to load on startup and save on shutdown")
-	flags.StringVar(&cfg.dbFormat, "db-format", string(hatriecache.DefaultStorageFormat), "LevelDB record storage format: binary or json")
-	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", 0, "optional periodic LevelDB save interval")
+	flags.StringVar(&cfg.dbPath, "db-path", cfg.dbPath, "optional LevelDB path to load on startup and save on shutdown")
+	flags.StringVar(&cfg.dbFormat, "db-format", cfg.dbFormat, "LevelDB record storage format: binary or json")
+	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", cfg.dbSyncInterval, "optional periodic LevelDB save interval")
 	flags.StringVar(&cfg.dbCompareBeforeWrite, "db-compare-before-write", cfg.dbCompareBeforeWrite, "dirty LevelDB save compare mode: auto, always, or never")
-	flags.DurationVar(&cfg.dbCompactInterval, "db-compact-interval", 0, "optional periodic LevelDB compaction interval")
+	flags.DurationVar(&cfg.dbCompactInterval, "db-compact-interval", cfg.dbCompactInterval, "optional periodic LevelDB compaction interval")
 	flags.StringVar(&cfg.dbCompactStartKey, "db-compact-start-key", "", "first cache key to include in periodic LevelDB compaction")
 	flags.StringVar(&cfg.dbCompactLimitKey, "db-compact-limit-key", "", "first cache key after the periodic LevelDB compaction range")
-	flags.BoolVar(&cfg.dbHotLoad, "db-hot-load", false, "load cold LevelDB keys as lazy references and hot small values into memory")
+	flags.BoolVar(&cfg.dbHotLoad, "db-hot-load", cfg.dbHotLoad, "load cold LevelDB keys as lazy references and hot small values into memory")
 	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for LevelDB hot-load")
 	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for LevelDB hot-load")
 	flags.Uint64Var(&cfg.dbHotLoadMinHits, "db-hot-load-min-hits", 1000, "minimum hits required for LevelDB hot-load")
@@ -431,14 +461,14 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.Int64Var(&cfg.dbRSSCapBytes, "db-rss-cap-bytes", 0, "process RSS bytes threshold that triggers periodic LevelDB cold eviction; use 0 to disable")
 	flags.DurationVar(&cfg.dbMemoryEvictInterval, "db-memory-evict-interval", 0, "periodic LevelDB cold eviction interval; use 0 to disable")
 	flags.Int64Var(&cfg.dbMemoryEvictMinValueBytes, "db-memory-evict-min-value-bytes", 1024, "minimum estimated value bytes eligible for LevelDB cold eviction")
-	flags.StringVar(&cfg.snapshotPath, "snapshot-path", "", "optional snapshot path to load on startup and save on shutdown")
-	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", 0, "optional periodic snapshot interval")
-	flags.StringVar(&cfg.snapshotFormat, "snapshot-format", string(hatriecache.DefaultSnapshotFormat), "snapshot save format: gzip-best-binary, gzip-binary, binary, gzip-best-json, gzip-json, or json")
-	flags.StringVar(&cfg.journalPath, "journal-path", "", "optional command journal path to replay on startup and append mutating commands")
-	flags.StringVar(&cfg.journalFormat, "journal-format", string(hatriecache.DefaultCommandJournalFormat), "command journal write format: binary or json")
+	flags.StringVar(&cfg.snapshotPath, "snapshot-path", cfg.snapshotPath, "optional snapshot path to load on startup and save on shutdown")
+	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", cfg.snapshotInterval, "optional periodic snapshot interval")
+	flags.StringVar(&cfg.snapshotFormat, "snapshot-format", cfg.snapshotFormat, "snapshot save format: gzip-best-binary, gzip-binary, binary, gzip-best-json, gzip-json, or json")
+	flags.StringVar(&cfg.journalPath, "journal-path", cfg.journalPath, "optional command journal path to replay on startup and append mutating commands")
+	flags.StringVar(&cfg.journalFormat, "journal-format", cfg.journalFormat, "command journal write format: binary or json")
 	flags.StringVar(&cfg.journalPullSource, "journal-pull-source", "", "optional source monitoring URL to pull journal catch-up batches from")
 	flags.StringVar(&cfg.journalPullStatePath, "journal-pull-state-path", "", "optional JSON path for persisted journal pull source sequence")
-	flags.DurationVar(&cfg.journalPullInterval, "journal-pull-interval", 0, "optional interval for repeated journal pull catch-up")
+	flags.DurationVar(&cfg.journalPullInterval, "journal-pull-interval", cfg.journalPullInterval, "optional interval for repeated journal pull catch-up")
 	flags.DurationVar(&cfg.journalPullTimeout, "journal-pull-timeout", cfg.journalPullTimeout, "HTTP timeout for each journal pull request; use 0 to disable")
 	flags.Uint64Var(&cfg.journalPullLimit, "journal-pull-limit", 0, "maximum entries per journal pull batch")
 	flags.Uint64Var(&cfg.journalPullMaxBatches, "journal-pull-max-batches", 0, "maximum batches per journal pull attempt")
@@ -450,6 +480,11 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
+	configProfile, err = parseConfigProfile(cfg.configProfile)
+	if err != nil {
+		return config{}, err
+	}
+	cfg.configProfile = configProfile
 	if (cfg.monitoringTLSCert == "") != (cfg.monitoringTLSKey == "") {
 		return config{}, errors.New("monitoring TLS requires both -monitoring-tls-cert and -monitoring-tls-key")
 	}
@@ -566,6 +601,73 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	return cfg, nil
 }
 
+func applyConfigProfileDefaults(cfg config, profile string) (config, error) {
+	profile, err := parseConfigProfile(profile)
+	if err != nil {
+		return config{}, err
+	}
+	cfg.configProfile = profile
+	switch profile {
+	case "":
+		return cfg, nil
+	case configProfileDev:
+		cfg.monitoringServer = true
+		cfg.monitoringAddr = "127.0.0.1:8080"
+		cfg.rateLimit = 0
+		cfg.writeProtection = false
+	case configProfileProduction:
+		cfg.monitoringServer = true
+		cfg.monitoringAddr = "0.0.0.0:8080"
+		cfg.rateLimit = 100
+		cfg.writeProtection = false
+		cfg.dbPath = "data/cache.leveldb"
+		cfg.dbFormat = string(hatriecache.DefaultStorageFormat)
+		cfg.dbSyncInterval = 30 * time.Second
+		cfg.dbCompareBeforeWrite = string(hatriecache.DefaultLevelDBCompareBeforeWriteMode)
+		cfg.dbCompactInterval = 10 * time.Minute
+		cfg.dbHotLoad = true
+		cfg.snapshotPath = "data/snapshot.hc"
+		cfg.snapshotInterval = 5 * time.Minute
+		cfg.snapshotFormat = string(hatriecache.DefaultSnapshotFormat)
+		cfg.journalPath = "data/commands.journal"
+		cfg.journalFormat = string(hatriecache.DefaultCommandJournalFormat)
+		cfg.replicationWireFormat = string(hatriecache.DefaultCommandWireFormat)
+		cfg.replicationBatchMaxBytes = hatriecache.DefaultReplicationBatchMaxBytes
+	case configProfileBench:
+		cfg.monitoringServer = true
+		cfg.monitoringAddr = "127.0.0.1:8080"
+		cfg.rateLimit = 0
+		cfg.writeProtection = false
+		cfg.replication = false
+		cfg.replicationAsync = false
+		cfg.dbPath = ""
+		cfg.dbSyncInterval = 0
+		cfg.dbCompactInterval = 0
+		cfg.dbHotLoad = false
+		cfg.snapshotPath = ""
+		cfg.snapshotInterval = 0
+		cfg.journalPath = ""
+		cfg.journalPullSource = ""
+		cfg.journalPullInterval = 0
+	}
+	return cfg, nil
+}
+
+func parseConfigProfile(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return "", nil
+	case configProfileDev, "development":
+		return configProfileDev, nil
+	case configProfileProduction, "prod":
+		return configProfileProduction, nil
+	case configProfileBench, "benchmark":
+		return configProfileBench, nil
+	default:
+		return "", errors.New("config profile must be dev, production, or bench")
+	}
+}
+
 func configPathFromArgs(args []string) (string, error) {
 	var path string
 outer:
@@ -596,6 +698,69 @@ outer:
 		}
 	}
 	return path, nil
+}
+
+func configProfileFromArgs(args []string) (string, error) {
+	var profile string
+outer:
+	for idx := 0; idx < len(args); idx++ {
+		arg := args[idx]
+		if arg == "--" {
+			break
+		}
+		for _, name := range []string{"-profile", "--profile", "-config-profile", "--config-profile"} {
+			if arg == name {
+				if idx+1 >= len(args) {
+					return "", fmt.Errorf("%s requires a value", name)
+				}
+				idx++
+				value, err := parseConfigProfile(args[idx])
+				if err != nil {
+					return "", err
+				}
+				profile = value
+				continue outer
+			}
+			if strings.HasPrefix(arg, name+"=") {
+				value, err := parseConfigProfile(strings.TrimPrefix(arg, name+"="))
+				if err != nil {
+					return "", err
+				}
+				profile = value
+			}
+		}
+	}
+	return profile, nil
+}
+
+func configProfileFromFile(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read config file %s: %w", path, err)
+	}
+	values := make(map[string]stdjson.RawMessage)
+	if err := stdjson.Unmarshal(data, &values); err != nil {
+		return "", fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	for _, key := range []string{"config_profile", "config-profile", "profile"} {
+		raw, ok := values[key]
+		if !ok {
+			continue
+		}
+		value, err := configFlagValueString(raw)
+		if err != nil {
+			return "", fmt.Errorf("config file %s: option %q: %w", path, key, err)
+		}
+		profile, err := parseConfigProfile(value)
+		if err != nil {
+			return "", fmt.Errorf("config file %s: option %q: %w", path, key, err)
+		}
+		return profile, nil
+	}
+	return "", nil
 }
 
 func applyConfigFile(path string, flags *flag.FlagSet) error {
@@ -659,6 +824,7 @@ func writeRedactedConfig(writer io.Writer, cfg config) error {
 func redactedConfig(cfg config) map[string]interface{} {
 	return map[string]interface{}{
 		"config_path":                          cfg.configPath,
+		"config_profile":                       cfg.configProfile,
 		"check_config":                         cfg.checkConfig,
 		"print_config":                         cfg.printConfig,
 		"monitoring_server":                    cfg.monitoringServer,

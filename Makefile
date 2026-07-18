@@ -122,8 +122,10 @@ BENCH_CI_SMOKE_COMPARE_MEMORY ?= 0
 BENCH_CI_SMOKE_RUN_ID ?=
 BENCHMARK_MD_PATH ?= BENCHMARK.md
 CONFIG_PATH ?=
+CONFIG_PROFILE ?= production
 SERVER_ARGS ?=
 CHECK_CONFIG_ARGS ?=
+PRINT_CONFIG_ARGS ?=
 DOCKER_IMAGE ?= hatrie-cache:latest
 DOCKERFILE ?= Dockerfile
 DOCKER_CONTEXT ?= .
@@ -131,7 +133,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -191,6 +193,9 @@ server:
 
 check-config:
 	CONFIG_PATH='$(CONFIG_PATH)' ./scripts/check-config.sh $(CHECK_CONFIG_ARGS)
+
+print-sane-config:
+	CONFIG_PROFILE='$(CONFIG_PROFILE)' ./scripts/print-sane-config.sh $(PRINT_CONFIG_ARGS)
 
 docker-build:
 	DOCKER_IMAGE='$(DOCKER_IMAGE)' DOCKERFILE='$(DOCKERFILE)' DOCKER_CONTEXT='$(DOCKER_CONTEXT)' DOCKER_PLATFORM='$(DOCKER_PLATFORM)' DOCKER_TARGET='$(DOCKER_TARGET)' ./scripts/docker-build.sh $(DOCKER_BUILD_ARGS)

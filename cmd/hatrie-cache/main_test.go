@@ -64,6 +64,71 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	}
 }
 
+func TestParseConfigAppliesProductionProfileDefaults(t *testing.T) {
+	cfg, err := parseConfig([]string{"-profile", "production"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(production profile) error = %v", err)
+	}
+	if cfg.configProfile != "production" {
+		t.Fatalf("configProfile = %q, want production", cfg.configProfile)
+	}
+	if !cfg.monitoringServer || cfg.monitoringAddr != "0.0.0.0:8080" {
+		t.Fatalf("monitoring profile defaults = %v/%q, want enabled on 0.0.0.0:8080", cfg.monitoringServer, cfg.monitoringAddr)
+	}
+	if cfg.dbPath != "data/cache.leveldb" || cfg.dbSyncInterval != 30*time.Second || cfg.dbCompactInterval != 10*time.Minute {
+		t.Fatalf("db profile defaults = path %q sync %s compact %s, want production persistence", cfg.dbPath, cfg.dbSyncInterval, cfg.dbCompactInterval)
+	}
+	if cfg.snapshotPath != "data/snapshot.hc" || cfg.snapshotInterval != 5*time.Minute || cfg.journalPath != "data/commands.journal" {
+		t.Fatalf("snapshot/journal profile defaults = %q/%s/%q, want production persistence", cfg.snapshotPath, cfg.snapshotInterval, cfg.journalPath)
+	}
+	if cfg.dbFormat != string(hatriecache.DefaultStorageFormat) || cfg.snapshotFormat != string(hatriecache.DefaultSnapshotFormat) || cfg.journalFormat != string(hatriecache.DefaultCommandJournalFormat) {
+		t.Fatalf("profile formats = db %q snapshot %q journal %q, want default efficient formats", cfg.dbFormat, cfg.snapshotFormat, cfg.journalFormat)
+	}
+}
+
+func TestParseConfigProfileAllowsCLIOverride(t *testing.T) {
+	cfg, err := parseConfig([]string{
+		"-profile", "production",
+		"-monitoring-server=false",
+		"-monitoring-addr", "127.0.0.1:18080",
+		"-db-sync-interval", "3s",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(profile CLI override) error = %v", err)
+	}
+	if cfg.monitoringServer || cfg.monitoringAddr != "127.0.0.1:18080" || cfg.dbSyncInterval != 3*time.Second {
+		t.Fatalf("profile override cfg = %#v, want explicit CLI values to win", cfg)
+	}
+}
+
+func TestParseConfigAppliesConfigFileProfileDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hatrie-cache.json")
+	if err := os.WriteFile(path, []byte(`{
+		"config_profile": "bench",
+		"monitoring_addr": "127.0.0.1:18080"
+	}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cfg, err := parseConfig([]string{"-config", path}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(config profile) error = %v", err)
+	}
+	if cfg.configProfile != "bench" || !cfg.monitoringServer || cfg.monitoringAddr != "127.0.0.1:18080" {
+		t.Fatalf("config profile cfg = %#v, want bench defaults with file override", cfg)
+	}
+	if cfg.dbPath != "" || cfg.snapshotPath != "" || cfg.journalPath != "" {
+		t.Fatalf("bench profile persistence = db %q snapshot %q journal %q, want disabled", cfg.dbPath, cfg.snapshotPath, cfg.journalPath)
+	}
+}
+
+func TestParseConfigRejectsInvalidProfile(t *testing.T) {
+	_, err := parseConfig([]string{"-profile", "staging"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "config profile must be dev, production, or bench") {
+		t.Fatalf("parseConfig(invalid profile) error = %v, want profile rejection", err)
+	}
+}
+
 func TestRunMonitoringDisabledAcceptsNilWriters(t *testing.T) {
 	if err := run(context.Background(), nil, nil, nil); err != nil {
 		t.Fatalf("run(disabled, nil writers) error = %v", err)
