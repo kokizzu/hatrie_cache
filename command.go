@@ -2647,30 +2647,30 @@ func (ht *HatTrie) commandDumpEntryBinaryLocked(key string) ([]byte, bool, error
 }
 
 func (ht *HatTrie) commandDumpScannedEntryBinaryLocked(entry Entry) ([]byte, bool, error) {
+	data, ok, err := ht.commandDumpScannedEntryBinaryWithoutStatsLocked(entry)
+	ht.recordReadLocked(ok, entry.Key)
+	return data, ok, err
+}
+
+func (ht *HatTrie) commandDumpScannedEntryBinaryWithoutStatsLocked(entry Entry) ([]byte, bool, error) {
 	if entry.Value.Empty() {
-		ht.recordReadLocked(false, entry.Key)
 		return nil, false, nil
 	}
 	if entry.Value.IsStringAtRaws() && ht.expires[entry.Key].IsZero() {
 		data, err := marshalReplicationStringValueBinary(ht.raws.stringValue(entry.Value.Index))
 		if err != nil {
-			ht.recordReadLocked(false, entry.Key)
 			return nil, false, err
 		}
-		ht.recordReadLocked(true, entry.Key)
 		return data, true, nil
 	}
 	snapshot, err := ht.snapshotEntryWithoutStatsLocked(entry)
 	if err != nil {
-		ht.recordReadLocked(false, entry.Key)
 		return nil, false, err
 	}
 	data, err := marshalReplicationValueBinary(snapshot)
 	if err != nil {
-		ht.recordReadLocked(false, entry.Key)
 		return nil, false, err
 	}
-	ht.recordReadLocked(true, entry.Key)
 	return data, true, nil
 }
 

@@ -2976,6 +2976,51 @@ func TestReplicationSyncEntriesPageCapturesPointInTimeValues(t *testing.T) {
 	}
 }
 
+func TestHTTPReplicatorSyncDoesNotRecordUserReads(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = mustDecodeReplicationTestCommand(t, w, r)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+	trie.UpsertString("session:2", "two")
+	before := trie.Stats()
+	beforeKey, ok := trie.StatsForKey("session:1")
+	if !ok {
+		t.Fatal("StatsForKey(session:1) ok = false")
+	}
+
+	topology := replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+	result := replicator.syncAllPaged(context.Background(), trie, "session:", 10)
+	if result.Skipped || result.Entries != 2 || len(result.Targets) != 1 || !result.Targets[0].OK {
+		t.Fatalf("syncAllPaged() = %#v, want two entries sent successfully", result)
+	}
+	if after := trie.Stats(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("stats after internal sync = %#v, want unchanged %#v", after, before)
+	}
+	if afterKey, ok := trie.StatsForKey("session:1"); !ok || !reflect.DeepEqual(afterKey, beforeKey) {
+		t.Fatalf("key stats after internal sync = %#v/%v, want unchanged %#v/true", afterKey, ok, beforeKey)
+	}
+
+	if _, ok, err := trie.commandDumpEntryBinary("session:1"); err != nil || !ok {
+		t.Fatalf("commandDumpEntryBinary(session:1) = ok %v error %v, want true/nil", ok, err)
+	}
+	if after := trie.Stats(); after.Reads != before.Reads+1 || after.Hits != before.Hits+1 {
+		t.Fatalf("stats after explicit dump = %#v, want one additional hit", after)
+	}
+	if afterKey, ok := trie.StatsForKey("session:1"); !ok || afterKey.Reads != beforeKey.Reads+1 || afterKey.Hits != beforeKey.Hits+1 {
+		t.Fatalf("key stats after explicit dump = %#v/%v, want one additional hit", afterKey, ok)
+	}
+}
+
 func TestHTTPReplicatorSyncAllSkipsExpiredEntries(t *testing.T) {
 	requests := make(chan CacheCommandRequest, 2)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1478,7 +1478,7 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 			if len(targets) == 0 {
 				return nil
 			}
-			data, ok, err := trie.commandDumpScannedEntryBinaryLocked(entry)
+			data, ok, err := trie.commandDumpScannedEntryBinaryWithoutStatsLocked(entry)
 			if err != nil || !ok || len(data) == 0 {
 				return nil
 			}
