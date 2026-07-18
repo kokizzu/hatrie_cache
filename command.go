@@ -1066,7 +1066,8 @@ func (ht *HatTrie) executePublicScalarBatchCommandWithExecutor(request CacheComm
 		return publicCommandBatchResponse(responses, allOK), true
 	}
 
-	responses := make([]CacheCommandResponse, 0, len(payloads))
+	responses := make([]CacheCommandResponse, len(payloads))
+	responseCount := len(payloads)
 	allOK := true
 	for idx, payload := range payloads {
 		response, stop := executor(idx, payload, func() CacheCommandResponse {
@@ -1075,12 +1076,13 @@ func (ht *HatTrie) executePublicScalarBatchCommandWithExecutor(request CacheComm
 		if !response.OK {
 			allOK = false
 		}
-		responses = append(responses, response)
+		responses[idx] = response
 		if stop {
+			responseCount = idx + 1
 			break
 		}
 	}
-	return publicCommandBatchResponse(responses, allOK), true
+	return publicCommandBatchResponse(responses[:responseCount], allOK), true
 }
 
 type publicScalarBatchCommand uint8

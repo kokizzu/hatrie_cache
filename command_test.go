@@ -89,6 +89,59 @@ func TestExecuteCommandScalarBatchFastPathKeepsSingleLockExecutor(t *testing.T) 
 	}
 }
 
+func TestExecuteCommandScalarBatchExecutorUsesIndexedResponses(t *testing.T) {
+	data, err := os.ReadFile("command.go")
+	if err != nil {
+		t.Fatalf("ReadFile(command.go) error = %v", err)
+	}
+	source := string(data)
+	start := strings.Index(source, "func (ht *HatTrie) executePublicScalarBatchCommandWithExecutor")
+	if start < 0 {
+		t.Fatal("command.go missing executePublicScalarBatchCommandWithExecutor")
+	}
+	end := strings.Index(source[start:], "type publicScalarBatchCommand")
+	if end < 0 {
+		t.Fatal("command.go missing publicScalarBatchCommand after executor")
+	}
+	body := source[start : start+end]
+	for _, token := range []string{
+		"responses := make([]CacheCommandResponse, len(payloads))",
+		"responseCount := len(payloads)",
+		"responses[idx] = response",
+		"responseCount = idx + 1",
+		"publicCommandBatchResponse(responses[:responseCount], allOK)",
+	} {
+		if !strings.Contains(body, token) {
+			t.Fatalf("executePublicScalarBatchCommandWithExecutor missing indexed response token %q", token)
+		}
+	}
+}
+
+func TestExecuteCommandScalarBatchExecutorStopReturnsCompletedResponses(t *testing.T) {
+	ht := newTestTrie(t)
+	request := CacheCommandRequest{
+		Command: "BATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "SETSTR", Key: "name", Value: "ivi"},
+			{Command: "SETSTR", Key: "city", Value: "Singapore"},
+			{Command: "SETSTR", Key: "late", Value: "ignored"},
+		},
+	}
+
+	response, ok := ht.executePublicScalarBatchCommandWithExecutor(request, func(index int, request CacheCommandRequest, execute func() CacheCommandResponse) (CacheCommandResponse, bool) {
+		return execute(), index == 1
+	})
+	if !ok || !response.OK {
+		t.Fatalf("executePublicScalarBatchCommandWithExecutor() = %#v, %v, want ok", response, ok)
+	}
+	if len(response.Responses) != 2 {
+		t.Fatalf("responses len = %d, want 2", len(response.Responses))
+	}
+	if got, ok, err := ht.GetStringChecked("late"); err != nil || ok || got != "" {
+		t.Fatalf("late key = %q, ok %v, err %v, want skipped", got, ok, err)
+	}
+}
+
 func TestExecuteCommandStringCounterTTLAndDelete(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(1200, 0)
