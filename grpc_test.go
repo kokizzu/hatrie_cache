@@ -1395,13 +1395,20 @@ func TestReplicationGRPCStreamSyncPreservesPagedOrder(t *testing.T) {
 	targetTrie := newTestTrie(t)
 	listener := bufconn.Listen(testGRPCBufferSize)
 	server := grpc.NewServer()
+	digestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if !rejectReplicationDigestTestCommand(t, w, r, request) {
+			t.Fatalf("HTTP replication request = %#v, want digest capability check", request)
+		}
+	}))
+	defer digestServer.Close()
 
 	topology, err := NewTopologyStore(ClusterTopology{
 		Version: 1,
 		Self:    "node-a",
 		Nodes: []TopologyNode{
 			{ID: "node-a", Address: "http://node-a"},
-			{ID: "node-b", Address: "http://node-b", GRPCAddress: "bufnet"},
+			{ID: "node-b", Address: digestServer.URL, GRPCAddress: "bufnet"},
 		},
 		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
 	})
@@ -1445,8 +1452,13 @@ func TestReplicationGRPCStreamSyncPreservesPagedOrder(t *testing.T) {
 	t.Cleanup(replicator.Close)
 
 	result := replicator.syncAllPaged(context.Background(), sourceTrie, "session:", 2)
-	if result.Skipped || result.Entries != 5 {
+	if result.Skipped || result.Entries != 5 || len(result.Targets) == 0 {
 		t.Fatalf("syncAllPaged() = %#v, want five streamed entries", result)
+	}
+	for _, target := range result.Targets {
+		if !target.OK {
+			t.Fatalf("syncAllPaged() target = %#v, want successful gRPC stream", target)
+		}
 	}
 	for idx := 0; idx < 5; idx++ {
 		key := fmt.Sprintf("session:%d", idx)
@@ -1454,8 +1466,8 @@ func TestReplicationGRPCStreamSyncPreservesPagedOrder(t *testing.T) {
 			t.Fatalf("target %s = %q, want %q", key, got, want)
 		}
 	}
-	if got := replicator.grpcStreamBatches.Load(); got != 3 {
-		t.Fatalf("gRPC stream batches = %d, want 3 ordered pages", got)
+	if got := replicator.grpcStreamBatches.Load(); got != 1 {
+		t.Fatalf("gRPC stream batches = %d, want one bounded ordered batch", got)
 	}
 
 	unauthorized := NewHTTPReplicator(HTTPReplicatorOptions{
@@ -1519,6 +1531,9 @@ func TestCacheGRPCServerSyncsReplication(t *testing.T) {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
 		request := mustDecodeReplicationTestCommand(t, w, r)
+		if rejectReplicationDigestTestCommand(t, w, r, request) {
+			return
+		}
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
 	}))

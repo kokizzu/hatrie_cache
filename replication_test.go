@@ -53,10 +53,16 @@ func TestNewHTTPReplicatorDefaultsReplicationBatchLimit(t *testing.T) {
 }
 
 func TestReplicationGRPCStreamHTTPFallbackIsConfigurable(t *testing.T) {
-	var requests atomic.Int64
+	var digestRequests atomic.Int64
+	var writeRequests atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = mustDecodeReplicationTestCommand(t, w, r)
-		requests.Add(1)
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if normalizedCommand(request.Command) == replicationDigestCommand {
+			digestRequests.Add(1)
+			rejectReplicationDigestTestCommand(t, w, r, request)
+			return
+		}
+		writeRequests.Add(1)
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
 	}))
 	defer target.Close()
@@ -66,13 +72,14 @@ func TestReplicationGRPCStreamHTTPFallbackIsConfigurable(t *testing.T) {
 		name            string
 		disableFallback bool
 		wantOK          bool
-		wantRequests    int64
+		wantWrites      int64
 	}{
-		{name: "fallback enabled", wantOK: true, wantRequests: 1},
+		{name: "fallback enabled", wantOK: true, wantWrites: 1},
 		{name: "fallback disabled", disableFallback: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			requests.Store(0)
+			digestRequests.Store(0)
+			writeRequests.Store(0)
 			trie := newTestTrie(t)
 			trie.UpsertString("session:1", "value")
 			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
@@ -87,11 +94,84 @@ func TestReplicationGRPCStreamHTTPFallbackIsConfigurable(t *testing.T) {
 			if len(result.Targets) != 1 || result.Targets[0].OK != tt.wantOK {
 				t.Fatalf("sync targets = %#v, want OK=%v", result.Targets, tt.wantOK)
 			}
-			if got := requests.Load(); got != tt.wantRequests {
-				t.Fatalf("HTTP fallback requests = %d, want %d", got, tt.wantRequests)
+			if got := digestRequests.Load(); got != 1 {
+				t.Fatalf("HTTP digest requests = %d, want 1", got)
+			}
+			if got := writeRequests.Load(); got != tt.wantWrites {
+				t.Fatalf("HTTP fallback writes = %d, want %d", got, tt.wantWrites)
 			}
 			if tt.disableFallback && !strings.Contains(result.Targets[0].Error, "grpc_address") {
 				t.Fatalf("disabled fallback error = %q, want missing grpc_address", result.Targets[0].Error)
+			}
+		})
+	}
+}
+
+func TestReplicationGRPCStreamDigestDeleteUsesConfiguredHTTPFallback(t *testing.T) {
+	var requests atomic.Int64
+	var received CacheCommandRequest
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = mustDecodeReplicationTestCommand(t, w, r)
+		requests.Add(1)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer targetServer.Close()
+
+	trie := newTestTrie(t)
+	trie.UpsertString("session:new", "value")
+	topology := replicationTestTopology(t, targetServer.URL)
+	changes := []replicationDigestChange{{key: "session:new"}, {key: "session:stale"}}
+
+	for _, tt := range []struct {
+		name            string
+		disableFallback bool
+		wantOK          bool
+		wantRequests    int64
+	}{
+		{name: "fallback enabled", wantOK: true, wantRequests: 1},
+		{name: "fallback disabled", disableFallback: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			requests.Store(0)
+			received = CacheCommandRequest{}
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:                "node-a",
+				Topology:            topology,
+				Election:            NewElectionStore(topology, ElectionOptions{}),
+				Client:              targetServer.Client(),
+				DisableHTTPFallback: tt.disableFallback,
+			})
+			t.Cleanup(replicator.Close)
+			routing, ok := replicator.snapshotReplicationRouting()
+			if !ok {
+				t.Fatal("snapshotReplicationRouting() ok = false")
+			}
+			target := routing.nodes["node-b"]
+			session := newReplicationGRPCSyncSession(context.Background(), replicator)
+			t.Cleanup(session.close)
+
+			targets, changed, deleted, _ := replicator.executeReplicationDigestChanges(
+				context.Background(), trie, routing, target, changes, session, false,
+			)
+			if changed != 1 || deleted != 1 || len(targets) != 1 || targets[0].OK != tt.wantOK {
+				t.Fatalf("digest repair = targets %#v changed %d deleted %d, want OK=%v and 1/1", targets, changed, deleted, tt.wantOK)
+			}
+			if got := requests.Load(); got != tt.wantRequests {
+				t.Fatalf("HTTP repair requests = %d, want %d", got, tt.wantRequests)
+			}
+			if tt.disableFallback {
+				if !strings.Contains(targets[0].Error, "requires sync payloads") {
+					t.Fatalf("disabled fallback error = %q, want incompatible stream payload", targets[0].Error)
+				}
+				return
+			}
+			payloads := mustDecodeReplicationBatchValues(t, received)
+			commands := make(map[string]string, len(payloads))
+			for _, payload := range payloads {
+				commands[payload.Key] = normalizedCommand(payload.Command)
+			}
+			if commands["session:new"] != replicationSetCompactCommand || commands["session:stale"] != "INTERNALDEL" {
+				t.Fatalf("HTTP repair commands = %#v, want compact set plus stale delete", commands)
 			}
 		})
 	}
@@ -3507,7 +3587,7 @@ func TestReplicationRoutingSnapshotReusesPrecomputedTargets(t *testing.T) {
 }
 
 func TestReplicationSyncPayloadGroupsStayCompactWhenSplit(t *testing.T) {
-	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", ReplicationBatchMaxBytes: -1})
 	targets := []TopologyNode{
 		{ID: "node-b", Address: "http://node-b"},
 		{ID: "node-c", Address: "http://node-c"},

@@ -566,6 +566,11 @@ func (replicator *HTTPReplicator) syncDigestTargetFallback(ctx context.Context, 
 func (replicator *HTTPReplicator) executeReplicationDigestChanges(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, target TopologyNode, changes []replicationDigestChange, grpcSession *replicationGRPCSyncSession, fallback bool) ([]ReplicationTargetResult, int, int, bool) {
 	sort.Slice(changes, func(i, j int) bool { return changes[i].key < changes[j].key })
 	payloads := make([]CacheCommandRequest, 0, len(changes))
+	var syncPayloads []replicationSyncPayload
+	streamCompatible := grpcSession != nil
+	if streamCompatible {
+		syncPayloads = make([]replicationSyncPayload, 0, len(changes))
+	}
 	changed := 0
 	deleted := 0
 	for _, change := range changes {
@@ -575,9 +580,13 @@ func (replicator *HTTPReplicator) executeReplicationDigestChanges(ctx context.Co
 		}
 		if exists {
 			payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: change.key, BinaryValue: data})
+			if streamCompatible {
+				syncPayloads = append(syncPayloads, replicationSyncPayload{key: change.key, binaryValue: data})
+			}
 			changed++
 			continue
 		}
+		streamCompatible = false
 		payloads = append(payloads, CacheCommandRequest{Command: "INTERNALDEL", Key: change.key})
 		deleted++
 	}
@@ -591,6 +600,9 @@ func (replicator *HTTPReplicator) executeReplicationDigestChanges(ctx context.Co
 		deferredMetadata: true,
 		metadataSource:   replicator.self,
 		metadataTopology: routing.fingerprint,
+	}
+	if streamCompatible {
+		group.syncPayloads = syncPayloads
 	}
 	for idx := range payloads {
 		group.keys[idx] = payloads[idx].Key

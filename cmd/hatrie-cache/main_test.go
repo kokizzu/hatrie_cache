@@ -845,8 +845,11 @@ func TestStartReplicationSyncerRunsImmediatePrefixSync(t *testing.T) {
 
 	select {
 	case request := <-requests:
-		if request.Command != "INTERNALSET" || request.Key != "session:1" || request.Value == "" {
-			t.Fatalf("replication sync request = %#v, want session INTERNALSET", request)
+		if request.Command != "INTERNALDIGESTV1" || request.Key != "session:" {
+			t.Fatalf("replication sync request = %#v, want session digest", request)
+		}
+		if request.Pairs["_hatrie_replication_source"] != "node-a" || request.Pairs["_hatrie_topology_fingerprint"] == "" || request.Pairs["digest_root"] == "" {
+			t.Fatalf("replication sync metadata = %#v, want source, topology fingerprint, and digest root", request.Pairs)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("replication sync did not run")

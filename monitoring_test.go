@@ -2828,6 +2828,9 @@ func TestMonitoringHandlerSyncsReplication(t *testing.T) {
 			t.Fatalf("path = %s, want /api/commands", r.URL.Path)
 		}
 		request := mustDecodeReplicationTestCommand(t, w, r)
+		if rejectReplicationDigestTestCommand(t, w, r, request) {
+			return
+		}
 		requests <- request
 		writeJSON(w, CacheCommandResponse{OK: true, Message: "replicated"})
 	}))
