@@ -908,10 +908,11 @@ the stream without granting access to other gRPC methods.
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
 closed instead. In the local 10k-entry, 10-page sender+receiver benchmark,
-gRPC streaming had a 26.4ms median versus 33.0ms for HTTP (1.25x faster), used
-52.0KB versus 57.5KB request wire (10% less), and made 24% fewer allocations;
-it allocated about 16% more total heap bytes because of gRPC framing and
-compression buffers.
+gRPC streaming had a 37.8ms median versus 45.0ms for HTTP (1.19x faster), used
+52.0KB versus 57.5KB request wire (9.52% less), and made 24.41% fewer
+allocations; it allocated 16.18% more total heap bytes because of gRPC framing
+and compression buffers. See [`BENCHMARK.md`](BENCHMARK.md) for the raw run
+command and complete table.
 `POST /api/replication` runs an explicit command-fanout anti-entropy sync that
 pushes the local leader-owned keys, optionally filtered by prefix, to their
 current topology replicas; it requires `REPLICATION_MODE=command` or

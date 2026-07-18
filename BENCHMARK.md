@@ -268,6 +268,7 @@ original controlled runs.
 | Previous optimized (`c70d849`) | 31,830,774 ns | 1 | 55,792 | 5,668,513 | 50,753 |
 | Start of latest pass (`84325af`) | 28,554,528 ns | 1 | 55,794 | 5,781,645 | 50,756 |
 | Final optimized (`69a6018`) | 18,893,092 ns | 1 | 55,795 | 948,495 | 30,197 |
+| Current optimized (`e5b127d`) | 15,698,676 ns | 1 | 55,794 | 847,763 | 10,241 |
 | Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
 The latest five-feature pass is 1.51x faster, uses 6.10x less cumulative allocated heap,
@@ -280,6 +281,47 @@ sends 2.59x fewer body bytes, uses 60.13x less allocated heap, and performs
 for this single-target sync. Header bytes are not included in `wire_B/op`, so the real
 network savings from batching are larger than the body-only metric. `B/op`
 measures bytes allocated during one operation, not peak process RSS.
+
+The current row adds persistent generation-checked page cursors, packed page
+arenas, and 256-record native iterator batches. Against `69a6018`, it is 1.20x
+faster, uses 1.12x less cumulative heap, and performs 2.95x fewer allocations.
+Against `10cf4c8`, the cumulative result is 2.49x faster, 1.56x smaller on wire,
+14.14x lower in allocated heap, and 12.82x lower in allocations.
+
+### Replication Page Traversal
+
+The default 1,000-key page benchmark sends ten ordered pages for 10,000 keys.
+Medians use `-benchtime=20x`; the current row is a seven-run median.
+
+| Version | Time/op | requests/op | B/op | allocs/op | Cumulative speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Before persistent cursor (`471c229`) | 61,122,327 ns | 10 | 1,877,005 | 123,996 | 1.00x |
+| Current (`e5b127d`) | 19,709,083 ns | 10 | 999,805 | 11,885 | 3.10x |
+
+The current default-page path uses 1.88x less cumulative heap and 10.43x fewer
+allocations. The native iterator returns up to 256 records per cgo crossing, so
+a 10,000-key scan needs about 40 batch calls instead of one crossing per key.
+
+### Replication Transport
+
+Run:
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationSyncTransport -benchmem -benchtime=10x -count=7'
+```
+
+This measures the same 10,000-key, ten-page sender and receiver through local
+HTTP/protobuf and one ordered gzip-compressed gRPC stream per target.
+
+| Transport | Time/op | batches/op | wire_B/op | B/op | allocs/op | Speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| HTTP/protobuf (default) | 44,957,163 ns | 10 | 57,479 | 19,652,940 | 123,772 | 1.00x |
+| gRPC stream (opt-in) | 37,765,365 ns | 10 | 52,006 | 22,832,475 | 93,557 | 1.19x |
+
+The gRPC stream sends 9.52% fewer bytes and performs 24.41% fewer allocations,
+while allocating 16.18% more cumulative heap for gRPC framing and compression.
+HTTP remains the default and the configurable fallback because it has the
+smaller heap footprint and requires no native listener.
 
 ### Replication Compression Tradeoff
 

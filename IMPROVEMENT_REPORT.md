@@ -1,6 +1,6 @@
 # Improvement Report
 
-Date: 2026-07-18
+Date: 2026-07-19
 
 ## Scope
 
@@ -43,6 +43,12 @@ after the first report pass.
 | `86fe5ca` | Fused HAT-trie iteration | One cgo call reads and advances each key/value pair, and direct Go string construction removes an intermediate byte allocation. |
 | `f871c79` | Compact streaming replication protobuf | Sync groups retain compact key/binary records and stream chunked protowire encoding into gzip, materializing generic requests only for JSON or legacy fallback. |
 | `69a6018` | Bounded gzip writer cache | Four gzip writers survive garbage collection, avoiding repeated compressor construction while bounding retained memory. |
+| `471c229` | Skip unused sync payload estimates | Unlimited-size replication batches no longer calculate request-size estimates that will not be used. |
+| `c1bf95a` | Persistent sync cursor | Ten-page scans reuse a generation-checked HAT-trie cursor and restart safely after mutation. |
+| `a02c5a5` | Packed replication page arenas | Page keys and binary values share bounded byte arenas with compact indexes. |
+| `5c6bd2f` | Native iterator batches | One cgo call returns up to 256 ordered trie records instead of crossing once per key. |
+| `4c869d0` | Ordered gRPC replication stream | Anti-entropy sync can keep one acknowledged HTTP/2 stream per target, with configurable HTTP fallback. |
+| `e5b127d` | Exact delta-first journal recovery | Retained deltas use one durable batch sync; compacted gaps fall back to an authenticated exact snapshot with stale-key deletion and restart-safe persistence. |
 
 ## Operational Impact
 
@@ -81,6 +87,15 @@ after the first report pass.
   additional allocations per fanout.
 - Small-set reads are 2.86x faster, plain-string radix scans are 2.02x faster,
   and priority-queue string push/pop is 1.14x faster in the focused medians.
+- The current one-page 10k sync is 1.20x faster than `69a6018`, uses 1.12x
+  less cumulative heap, and performs 2.95x fewer allocations.
+- The default ten-page sync is 3.10x faster than the pre-cursor baseline, uses
+  1.88x less cumulative heap, and performs 10.43x fewer allocations.
+- Ordered gRPC sync is 1.19x faster than HTTP, sends 9.52% fewer bytes, and
+  performs 24.41% fewer allocations, at 16.18% more cumulative heap.
+- Batching 100 pulled journal records behind one `fsync` is 56.55x faster than
+  syncing every command. Retained deltas are 42.70x faster than rebuilding the
+  10k-key fixture and use 156.85x less cumulative heap.
 
 ## Replication Batching Measurement
 
@@ -114,6 +129,44 @@ The four-target latency benchmark used `-benchtime=20x -count=5`. Its medians
 were 9,544,371 ns/op, 48,172 B/op, and 420 allocs/op in serial mode versus
 2,617,552 ns/op, 55,269 B/op, and 432 allocs/op with a bound of four.
 
+## Final Optimization Measurements
+
+All rows below were measured on the same AMD Ryzen 9 5950X host. `B/op` is
+cumulative allocated heap, not peak RSS.
+
+| Replication sync case | Time/op | Wire B/op | B/op | Allocs/op | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| One-page 10k at `69a6018` | 18,893,092 ns | 55,795 | 948,495 | 30,197 | Previous optimized baseline |
+| One-page 10k at `e5b127d` | 15,698,676 ns | 55,794 | 847,763 | 10,241 | 1.20x CPU, 1.12x heap, 2.95x allocations |
+| Default ten-page before cursor | 61,122,327 ns | unchanged | 1,877,005 | 123,996 | Traversal baseline |
+| Default ten-page at `e5b127d` | 19,709,083 ns | 57,486 | 999,805 | 11,885 | 3.10x CPU, 1.88x heap, 10.43x allocations |
+
+The page cursor is invalidated by trie generation changes, the page arena caps
+eager allocation, and native iteration returns up to 256 records with a 4 KiB
+key buffer. A 10,000-key scan therefore uses about 40 native batch calls rather
+than roughly 10,000 per-record cgo crossings.
+
+| 10k/ten-page transport | Time/op | Wire B/op | B/op | Allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| HTTP/protobuf | 44,957,163 ns | 57,479 | 19,652,940 | 123,772 |
+| Ordered gRPC stream | 37,765,365 ns | 52,006 | 22,832,475 | 93,557 |
+
+The gRPC path is opt-in with `REPLICATION_TRANSPORT=grpc-stream`; HTTP remains
+the default and fallback. Set `REPLICATION_HTTP_FALLBACK=false` to fail closed.
+
+| Journal recovery path | Work/op | Time/op | Wire B/op | B/op | Allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Retained delta, batched durability | 100 commands | 2,169,591 ns | 9,425 | 163,918 | 702 |
+| Retained delta, per-command `fsync` control | 100 commands | 122,684,320 ns | 9,425 | 176,726 | 799 |
+| Exact snapshot fallback | 10,000 keys | 92,648,544 ns | 56,267 | 25,709,960 | 231,154 |
+
+The exact fallback is default-on only after a compacted gap. It streams a
+source journal-barrier snapshot to an atomic, source-specific recovery file,
+rejects regressing sequences before rename, replaces stale follower keys,
+resets the local journal checkpoint, persists LevelDB when configured, and
+advances the pull cursor last. Set
+`JOURNAL_PULL_FULL_SYNC_FALLBACK=false` to retain fail-closed `409` behavior.
+
 ## Verification
 
 Pre-change checks were run before each feature against the relevant existing
@@ -129,6 +182,9 @@ make run CMD='go test . -run NoTestsForBenchmark -bench BenchmarkHTTPReplicatorS
 make run CMD='go test -run=NONE -bench=BenchmarkHTTPReplicatorTargetFanout -benchmem -benchtime=20x -count=5'
 make run CMD='go test ./internal/jsonwire -run=NONE -bench=BenchmarkGzipCompressionLevels -benchtime=20x -count=3 -benchmem'
 make run CMD='go test ./cmd/hatrie-cache -run "TestRunReplicaAcceptsLeaderWriteAfterPrimaryMarkedOffline|TestRunRejectsReplicationWithStaleTopologyFingerprint" -count=1 -v'
+make run CMD='go test . -run=NONE -bench="BenchmarkHTTPReplicatorSyncAllBatching/(Batched10k|Default1k)" -benchmem -benchtime=20x -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationSyncTransport -benchmem -benchtime=10x -count=7'
+make bench-journal-catchup BENCHTIME=5x COUNT=7
 make run CMD='go test ./...'
 make verify-ci
 make verify-benchmark-md-update
