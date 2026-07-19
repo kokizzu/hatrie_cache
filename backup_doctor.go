@@ -182,7 +182,19 @@ func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
 
 	journalPath := filepath.Join(path, "commands.journal")
 	if fileExists(journalPath) {
-		journal, err := OpenCommandJournal(journalPath)
+		segments, err := listCommandJournalSegments(journalPath)
+		if err != nil {
+			return BackupDoctorReport{}, err
+		}
+		journalOptions := CommandJournalOptions{
+			Format:              DefaultCommandJournalFormat,
+			GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+		}
+		if len(segments) > 0 {
+			journalOptions.SegmentMaxBytes = DefaultCommandJournalSegmentMaxBytes
+			journalOptions.RetainedSegments = MaxCommandJournalRetainedSegments
+		}
+		journal, err := OpenCommandJournalWithOptions(journalPath, journalOptions)
 		if err != nil {
 			return BackupDoctorReport{}, err
 		}
@@ -193,7 +205,7 @@ func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
 		report.Journal = &BackupDoctorJournal{
 			Path:         journalPath,
 			OK:           true,
-			Entries:      countJournalEntries(journalPath),
+			Entries:      countJournalEntries(journalPath, len(segments) > 0),
 			LastSequence: journal.Sequence(),
 		}
 		report.JournalSequence = journal.Sequence()
@@ -432,12 +444,15 @@ func scanBackupJournalEntries(path string) ([]commandJournalEntry, error) {
 	return entries, err
 }
 
-func countJournalEntries(path string) int {
-	entries, err := scanBackupJournalEntries(path)
-	if err != nil {
+func countJournalEntries(path string, segmented bool) int {
+	count := 0
+	if _, err := scanCommandJournalSet(path, segmented, func(commandJournalEntry) error {
+		count++
+		return nil
+	}); err != nil {
 		return 0
 	}
-	return len(entries)
+	return count
 }
 
 func firstExistingPath(paths ...string) string {

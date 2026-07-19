@@ -183,6 +183,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
+| Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
@@ -440,6 +441,34 @@ durability; a client additionally saves up to 1,000 HTTP/gRPC round trips. A
 journal write or sync failure rolls back journal bytes and in-memory mutations.
 An ordinary failing subcommand preserves prior successful items, matching
 public pipeline semantics.
+
+### Segmented WAL Compaction
+
+The daemon now rotates an active journal into ordered sidecar files instead of
+rescanning and rewriting the complete WAL after every successful snapshot.
+Rotation happens between durable batches. Each new active file starts with a
+checkpoint, so it remains independently readable; cross-file scanning validates
+every sequence and rejects a torn archived segment. A torn active tail is still
+truncated to its last complete record on restart.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkCommandJournalCompaction100K -benchtime=1x -count=5 -benchmem'
+```
+
+Both modes start with the same 100,000-record binary active file. These are
+five-run medians from one matched run on the Ryzen 9 5950X host.
+
+| Mode | Time/compaction | Heap B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Single-file rewrite | 31,462,304 ns | 20,810,464 | 500,033 | baseline |
+| Segment rotate | 1,844,510 ns | 22,256 | 56 | 17.06x CPU, 935x heap, 8,929x allocations |
+
+The server defaults to 64 MiB segments and 16 retained closed files. This
+delays full-snapshot fallback for lagging replicas and bounds historical disk
+use to roughly 1 GiB plus the active file. A batch may cross the byte target,
+and rotation pays file rename, checkpoint `fsync`, and directory metadata
+`fsync`; those fixed costs explain the run-to-run latency variance. Setting
+`JOURNAL_SEGMENT_MAX_BYTES=0` restores the prior single-file rewrite path.
 
 ### Point-in-Time Snapshot Capture
 

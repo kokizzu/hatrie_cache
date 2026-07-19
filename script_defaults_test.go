@@ -172,6 +172,10 @@ func TestMonitoringWrapperPassesJournalGroupCommitDefaults(t *testing.T) {
 		"JOURNAL_GROUP_COMMIT_MAX_BATCH ?= 64",
 		"JOURNAL_GROUP_COMMIT_WINDOW='$(JOURNAL_GROUP_COMMIT_WINDOW)'",
 		"JOURNAL_GROUP_COMMIT_MAX_BATCH='$(JOURNAL_GROUP_COMMIT_MAX_BATCH)'",
+		"JOURNAL_SEGMENT_MAX_BYTES ?= 67108864",
+		"JOURNAL_RETAINED_SEGMENTS ?= 16",
+		"JOURNAL_SEGMENT_MAX_BYTES='$(JOURNAL_SEGMENT_MAX_BYTES)'",
+		"JOURNAL_RETAINED_SEGMENTS='$(JOURNAL_RETAINED_SEGMENTS)'",
 	} {
 		if !strings.Contains(makefileText, token) {
 			t.Fatalf("Makefile missing journal group commit token %q", token)
@@ -188,6 +192,10 @@ func TestMonitoringWrapperPassesJournalGroupCommitDefaults(t *testing.T) {
 		"journal_group_commit_max_batch=${JOURNAL_GROUP_COMMIT_MAX_BATCH:-64}",
 		`-journal-group-commit-window "$journal_group_commit_window"`,
 		`-journal-group-commit-max-batch "$journal_group_commit_max_batch"`,
+		"journal_segment_max_bytes=${JOURNAL_SEGMENT_MAX_BYTES:-67108864}",
+		"journal_retained_segments=${JOURNAL_RETAINED_SEGMENTS:-16}",
+		`-journal-segment-max-bytes "$journal_segment_max_bytes"`,
+		`-journal-retained-segments "$journal_retained_segments"`,
 	} {
 		if !strings.Contains(scriptText, token) {
 			t.Fatalf("monitoring wrapper missing journal group commit token %q", token)

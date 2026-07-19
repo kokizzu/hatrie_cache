@@ -118,6 +118,8 @@ type config struct {
 	journalFormat               string
 	journalGroupCommitWindow    time.Duration
 	journalGroupCommitMaxBatch  int
+	journalSegmentMaxBytes      int64
+	journalRetainedSegments     int
 	journalPullSource           string
 	journalPullStatePath        string
 	journalPullInterval         time.Duration
@@ -431,6 +433,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		journalFormat:               string(hatriecache.DefaultCommandJournalFormat),
 		journalGroupCommitWindow:    hatriecache.DefaultJournalGroupCommitWindow,
 		journalGroupCommitMaxBatch:  hatriecache.DefaultJournalGroupCommitMaxBatch,
+		journalSegmentMaxBytes:      hatriecache.DefaultCommandJournalSegmentMaxBytes,
+		journalRetainedSegments:     hatriecache.DefaultCommandJournalRetainedSegments,
 	}
 	configPath, err := configPathFromArgs(args)
 	if err != nil {
@@ -532,6 +536,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.journalFormat, "journal-format", cfg.journalFormat, "command journal write format: binary or json")
 	flags.DurationVar(&cfg.journalGroupCommitWindow, "journal-group-commit-window", cfg.journalGroupCommitWindow, "maximum journal group commit wait; zero batches only already queued callers")
 	flags.IntVar(&cfg.journalGroupCommitMaxBatch, "journal-group-commit-max-batch", cfg.journalGroupCommitMaxBatch, "maximum commands per durable journal group commit; use 1 for immediate fsync")
+	flags.Int64Var(&cfg.journalSegmentMaxBytes, "journal-segment-max-bytes", cfg.journalSegmentMaxBytes, "rotate the active journal after this many bytes at the next durable batch boundary; use 0 for one file")
+	flags.IntVar(&cfg.journalRetainedSegments, "journal-retained-segments", cfg.journalRetainedSegments, "maximum closed journal segments retained for incremental catch-up")
 	flags.StringVar(&cfg.journalPullSource, "journal-pull-source", "", "optional source monitoring URL to pull journal catch-up batches from")
 	flags.StringVar(&cfg.journalPullStatePath, "journal-pull-state-path", "", "optional JSON path for persisted journal pull source sequence")
 	flags.DurationVar(&cfg.journalPullInterval, "journal-pull-interval", cfg.journalPullInterval, "optional interval for repeated journal pull catch-up")
@@ -675,6 +681,15 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.journalGroupCommitMaxBatch > hatriecache.MaxJournalGroupCommitBatch {
 		return config{}, fmt.Errorf("journal group commit max batch must be <= %d", hatriecache.MaxJournalGroupCommitBatch)
+	}
+	if cfg.journalSegmentMaxBytes < 0 {
+		return config{}, errors.New("journal segment max bytes must be non-negative")
+	}
+	if cfg.journalRetainedSegments < 0 || cfg.journalRetainedSegments > hatriecache.MaxCommandJournalRetainedSegments {
+		return config{}, fmt.Errorf("journal retained segments must be between 0 and %d", hatriecache.MaxCommandJournalRetainedSegments)
+	}
+	if cfg.journalSegmentMaxBytes > 0 && cfg.journalRetainedSegments == 0 {
+		return config{}, errors.New("journal retained segments must be positive when segmentation is enabled")
 	}
 	if _, err := hatriecache.ParseCommandWireFormat(cfg.replicationWireFormat); err != nil {
 		return config{}, err
@@ -1012,6 +1027,8 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"journal_format":                       cfg.journalFormat,
 		"journal_group_commit_window":          cfg.journalGroupCommitWindow.String(),
 		"journal_group_commit_max_batch":       cfg.journalGroupCommitMaxBatch,
+		"journal_segment_max_bytes":            cfg.journalSegmentMaxBytes,
+		"journal_retained_segments":            cfg.journalRetainedSegments,
 		"journal_pull_source":                  cfg.journalPullSource,
 		"journal_pull_state_path":              cfg.journalPullStatePath,
 		"journal_pull_interval":                cfg.journalPullInterval.String(),
@@ -1152,6 +1169,8 @@ func journalOptions(cfg config) hatriecache.CommandJournalOptions {
 		Format:              journalFormat(cfg),
 		GroupCommitWindow:   cfg.journalGroupCommitWindow,
 		GroupCommitMaxBatch: cfg.journalGroupCommitMaxBatch,
+		SegmentMaxBytes:     cfg.journalSegmentMaxBytes,
+		RetainedSegments:    cfg.journalRetainedSegments,
 	}
 }
 
@@ -1686,6 +1705,8 @@ func openJournalIfConfigured(path string, format hatriecache.CommandJournalForma
 		Format:              format,
 		GroupCommitWindow:   hatriecache.DefaultJournalGroupCommitWindow,
 		GroupCommitMaxBatch: hatriecache.DefaultJournalGroupCommitMaxBatch,
+		SegmentMaxBytes:     hatriecache.DefaultCommandJournalSegmentMaxBytes,
+		RetainedSegments:    hatriecache.DefaultCommandJournalRetainedSegments,
 	})
 }
 

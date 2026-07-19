@@ -306,6 +306,13 @@ For snapshot+journal deployments:
 2. Copy the data directory to a fresh backup directory.
 3. Keep file ownership and permissions when copying.
 
+The active journal and `<JOURNAL_PATH>.segments/` are one WAL set. `make backup`
+copies the containing data directory, so keep both below `DATA_DIR`. For a raw
+copy outside the supplied workflow, stop the process or use one filesystem
+snapshot so rotation cannot move a segment between the two copies. Server-side
+atomic backup bundles do not need archived segments: they contain a
+point-in-time snapshot plus a journal checkpoint at the same sequence.
+
 ```
 make cli ARGS='snapshot'
 make backup DATA_DIR=data BACKUP_DIR=backup/run-001
@@ -836,8 +843,15 @@ snapshot time and cumulative heap remained effectively flat. See
 
 Set `JOURNAL_PATH` to replay an append-only command journal at startup and fsync
 mutating cache commands before applying them. When `SNAPSHOT_PATH` is also set,
-snapshots store the journal checkpoint and compact older journal entries after a
-successful snapshot. Journal records write in the binary format by default
+snapshots store the journal checkpoint. The server defaults to 64 MiB journal
+segments and retains 16 closed segments in `<JOURNAL_PATH>.segments/`. A
+successful snapshot rotates the active file instead of rewriting the complete
+history, so lagging replicas can continue incremental catch-up until their
+sequence falls behind the retained segment window. Pruning removes only whole
+closed segments and reports the resulting `compacted_through` boundary. Set
+`JOURNAL_SEGMENT_MAX_BYTES=0` for the previous single-file compaction behavior;
+set `JOURNAL_RETAINED_SEGMENTS` to size the catch-up window. Journal records
+write in the binary format by default
 (`JOURNAL_FORMAT=binary`) and still read existing line-delimited JSON journals,
 including files that contain both old JSON records and new binary records.
 Binary journal records store structured `values` and `pairs` payloads with the
@@ -859,7 +873,16 @@ make monitoring-server SNAPSHOT_PATH=data/snapshot.json JOURNAL_PATH=data/comman
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_FORMAT=json
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_GROUP_COMMIT_WINDOW=250us JOURNAL_GROUP_COMMIT_MAX_BATCH=64
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_GROUP_COMMIT_MAX_BATCH=1
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_SEGMENT_MAX_BYTES=134217728 JOURNAL_RETAINED_SEGMENTS=32
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_SEGMENT_MAX_BYTES=0
 ```
+
+Rotation occurs before a durable batch, never inside one, so rollback and
+group-commit acknowledgement semantics remain unchanged. A segment can exceed
+the byte target by one batch. With defaults, closed-history capacity is roughly
+1 GiB plus the active file; choose retention from write rate and maximum replica
+downtime, then alert on `409` journal responses that indicate the window was
+exceeded.
 
 A public `BATCH` with journaling enabled appends all successful subcommands in
 order and performs one final `fsync` before acknowledgement, rather than one

@@ -25,13 +25,16 @@ const maxCommandJournalJSONRecordBytes = 1 << 30
 const maxCommandJournalReusablePayloadBufferBytes = 1 << 20
 
 const (
-	DefaultCommandJournalTailLimit                  = 1000
-	MaxCommandJournalTailLimit                      = 10000
-	DefaultCommandJournalPullBatches                = 100
-	MaxCommandJournalPullBatches                    = 1000
-	DefaultJournalGroupCommitWindow   time.Duration = 0
-	DefaultJournalGroupCommitMaxBatch               = 64
-	MaxJournalGroupCommitBatch                      = 4096
+	DefaultCommandJournalTailLimit                      = 1000
+	MaxCommandJournalTailLimit                          = 10000
+	DefaultCommandJournalPullBatches                    = 100
+	MaxCommandJournalPullBatches                        = 1000
+	DefaultJournalGroupCommitWindow       time.Duration = 0
+	DefaultJournalGroupCommitMaxBatch                   = 64
+	MaxJournalGroupCommitBatch                          = 4096
+	DefaultCommandJournalSegmentMaxBytes  int64         = 64 << 20
+	DefaultCommandJournalRetainedSegments               = 16
+	MaxCommandJournalRetainedSegments                   = 1024
 )
 
 var ErrCommandJournalClosed = errors.New("hatriecache: command journal is closed")
@@ -75,7 +78,8 @@ type commandJournalEntry struct {
 	Request    CacheCommandRequest `json:"request,omitempty"`
 }
 
-// CommandJournalOptions configures journal encoding and durable group commit.
+// CommandJournalOptions configures journal encoding, durable group commit, and
+// optional bounded segment rotation. SegmentMaxBytes zero keeps one file.
 // A zero window opportunistically batches callers already queued; a positive
 // window waits up to that duration for more callers. A maximum batch of one
 // disables group commit and uses the immediate-fsync path.
@@ -83,6 +87,8 @@ type CommandJournalOptions struct {
 	Format              CommandJournalFormat
 	GroupCommitWindow   time.Duration
 	GroupCommitMaxBatch int
+	SegmentMaxBytes     int64
+	RetainedSegments    int
 }
 
 type commandJournalJob struct {
@@ -108,6 +114,9 @@ type CommandJournal struct {
 	sequenceExhausted   bool
 	groupCommitWindow   time.Duration
 	groupCommitMaxBatch int
+	segmentMaxBytes     int64
+	retainedSegments    int
+	activeSegmentStart  uint64
 	groupCommitJobs     chan *commandJournalJob
 	groupCommitDone     chan struct{}
 	closeDone           chan struct{}
@@ -154,11 +163,23 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	if options.GroupCommitMaxBatch > MaxJournalGroupCommitBatch {
 		return nil, fmt.Errorf("hatriecache: journal group commit max batch must be <= %d", MaxJournalGroupCommitBatch)
 	}
+	if options.SegmentMaxBytes < 0 {
+		return nil, errors.New("hatriecache: journal segment max bytes must be non-negative")
+	}
+	if options.RetainedSegments < 0 {
+		return nil, errors.New("hatriecache: retained journal segments must be non-negative")
+	}
+	if options.RetainedSegments > MaxCommandJournalRetainedSegments {
+		return nil, fmt.Errorf("hatriecache: retained journal segments must be <= %d", MaxCommandJournalRetainedSegments)
+	}
+	if options.SegmentMaxBytes > 0 && options.RetainedSegments == 0 {
+		return nil, errors.New("hatriecache: retained journal segments must be positive when segmentation is enabled")
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	var maxSequence uint64
-	validBytes, err := scanCommandJournalEntries(path, func(entry commandJournalEntry) error {
+	validBytes, err := scanCommandJournalSet(path, options.SegmentMaxBytes > 0, func(entry commandJournalEntry) error {
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
 		}
@@ -176,6 +197,11 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 			return nil, err
 		}
 	}
+	if options.SegmentMaxBytes > 0 && validBytes == 0 && maxSequence > 0 {
+		if err := writeCommandJournalCheckpointWithFormat(path, maxSequence, format); err != nil {
+			return nil, err
+		}
+	}
 	file, err := openCommandJournalAppendFile(path)
 	if err != nil {
 		return nil, err
@@ -187,11 +213,24 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		accepting:           true,
 		groupCommitWindow:   options.GroupCommitWindow,
 		groupCommitMaxBatch: options.GroupCommitMaxBatch,
+		segmentMaxBytes:     options.SegmentMaxBytes,
+		retainedSegments:    options.RetainedSegments,
 		closeDone:           make(chan struct{}),
 	}
 	journal.advanceSequenceLocked(maxSequence)
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {
 		journal.nextSequence = 1
+	}
+	journal.activeSegmentStart, err = commandJournalActiveSegmentStart(path, journal.lastSequenceLocked())
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if journal.segmented() {
+		if err := journal.pruneSegmentsLocked(); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
 	}
 	if journal.groupCommitEnabled() {
 		journal.groupCommitJobs = make(chan *commandJournalJob, journal.groupCommitMaxBatch)
@@ -441,20 +480,12 @@ func (journal *CommandJournal) executeJournalRecordsBatch(trie *HatTrie, records
 
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
-	if err := journal.ensureAppendFileLocked(); err != nil {
-		return 0, commandError(err.Error())
-	}
-	info, err := journal.file.Stat()
+	batchState, err := journal.currentAppendStateLocked()
 	if err != nil {
 		return 0, commandError(err.Error())
 	}
-	batchState := commandJournalAppendState{
-		offset:            info.Size(),
-		nextSequence:      journal.nextSequence,
-		sequenceExhausted: journal.sequenceExhausted,
-	}
 	states := make([]commandJournalAppendState, len(records))
-	offset := info.Size()
+	offset := batchState.offset
 	now := trie.currentTime()
 	for idx, record := range records {
 		states[idx] = commandJournalAppendState{
@@ -565,7 +596,7 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 	}
 	var maxSequence uint64
 	var compactedThrough uint64
-	if _, err := scanCommandJournalEntries(journal.path, func(entry commandJournalEntry) error {
+	if _, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
 		}
@@ -579,7 +610,7 @@ func (journal *CommandJournal) Replay(trie *HatTrie, afterSequence uint64) (uint
 	if afterSequence < compactedThrough {
 		return 0, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, compactedThrough)
 	}
-	if _, err := scanCommandJournalEntries(journal.path, func(entry commandJournalEntry) error {
+	if _, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
 		if entry.Checkpoint {
 			return nil
 		}
@@ -614,7 +645,7 @@ func (journal *CommandJournal) Tail(afterSequence uint64, limit int) (CommandJou
 	if limit > MaxCommandJournalTailLimit {
 		return CommandJournalTail{}, fmt.Errorf("hatriecache: journal tail limit must be <= %d", MaxCommandJournalTailLimit)
 	}
-	tail, err := readCommandJournalTail(journal.path, afterSequence, limit)
+	tail, err := readCommandJournalTailSet(journal.path, journal.segmented(), afterSequence, limit)
 	if err != nil {
 		return CommandJournalTail{}, err
 	}
@@ -765,6 +796,9 @@ func (journal *CommandJournal) currentAppendStateLocked() (commandJournalAppendS
 	if err := journal.ensureAppendFileLocked(); err != nil {
 		return commandJournalAppendState{}, err
 	}
+	if err := journal.rotateSegmentIfFullLocked(); err != nil {
+		return commandJournalAppendState{}, err
+	}
 	info, err := journal.file.Stat()
 	if err != nil {
 		return commandJournalAppendState{}, err
@@ -851,6 +885,9 @@ func (journal *CommandJournal) rollbackAppendWithoutSyncLocked(state commandJour
 }
 
 func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
+	if journal.segmented() {
+		return journal.rotateSegmentLocked(true)
+	}
 	if err := journal.closeAppendFileLocked(); err != nil {
 		return err
 	}
@@ -868,6 +905,11 @@ func (journal *CommandJournal) resetToCheckpointLocked(sequence uint64) error {
 	if err := journal.closeAppendFileLocked(); err != nil {
 		return err
 	}
+	if journal.segmented() {
+		if err := os.RemoveAll(commandJournalSegmentDir(journal.path)); err != nil {
+			return err
+		}
+	}
 	if err := writeCommandJournalCheckpointWithFormat(journal.path, sequence, journal.format); err != nil {
 		if reopenErr := journal.ensureAppendFileLocked(); reopenErr != nil {
 			return errors.Join(err, reopenErr)
@@ -881,6 +923,7 @@ func (journal *CommandJournal) resetToCheckpointLocked(sequence uint64) error {
 		journal.nextSequence = sequence + 1
 		journal.sequenceExhausted = false
 	}
+	journal.activeSegmentStart = journal.nextSequence
 	return journal.ensureAppendFileLocked()
 }
 
@@ -943,6 +986,25 @@ func (journal *CommandJournal) ensureAppendFileLocked() error {
 		return err
 	}
 	journal.file = file
+	if journal.segmented() {
+		info, err := file.Stat()
+		if err != nil {
+			_ = file.Close()
+			journal.file = nil
+			return err
+		}
+		if info.Size() == 0 {
+			sequence := journal.lastSequenceLocked()
+			if sequence > 0 {
+				if err := journal.writeCheckpointWithoutSyncLocked(sequence); err != nil {
+					_ = file.Close()
+					journal.file = nil
+					return err
+				}
+			}
+			journal.activeSegmentStart = journal.nextSequence
+		}
+	}
 	return nil
 }
 

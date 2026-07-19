@@ -522,16 +522,24 @@ func TestParseConfigJournalGroupCommitDefaultsAndOverrides(t *testing.T) {
 	if defaultCfg.journalGroupCommitWindow != hatriecache.DefaultJournalGroupCommitWindow || defaultCfg.journalGroupCommitMaxBatch != hatriecache.DefaultJournalGroupCommitMaxBatch {
 		t.Fatalf("journal group commit defaults = %s/%d, want %s/%d", defaultCfg.journalGroupCommitWindow, defaultCfg.journalGroupCommitMaxBatch, hatriecache.DefaultJournalGroupCommitWindow, hatriecache.DefaultJournalGroupCommitMaxBatch)
 	}
+	if defaultCfg.journalSegmentMaxBytes != hatriecache.DefaultCommandJournalSegmentMaxBytes || defaultCfg.journalRetainedSegments != hatriecache.DefaultCommandJournalRetainedSegments {
+		t.Fatalf("journal segment defaults = %d/%d, want %d/%d", defaultCfg.journalSegmentMaxBytes, defaultCfg.journalRetainedSegments, hatriecache.DefaultCommandJournalSegmentMaxBytes, hatriecache.DefaultCommandJournalRetainedSegments)
+	}
 
 	cfg, err := parseConfig([]string{
 		"-journal-group-commit-window", "250us",
 		"-journal-group-commit-max-batch", "32",
+		"-journal-segment-max-bytes", "1048576",
+		"-journal-retained-segments", "4",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig(group commit) error = %v", err)
 	}
 	if cfg.journalGroupCommitWindow != 250*time.Microsecond || cfg.journalGroupCommitMaxBatch != 32 {
 		t.Fatalf("journal group commit config = %s/%d, want 250us/32", cfg.journalGroupCommitWindow, cfg.journalGroupCommitMaxBatch)
+	}
+	if cfg.journalSegmentMaxBytes != 1048576 || cfg.journalRetainedSegments != 4 {
+		t.Fatalf("journal segment config = %d/%d, want 1048576/4", cfg.journalSegmentMaxBytes, cfg.journalRetainedSegments)
 	}
 }
 
@@ -540,6 +548,10 @@ func TestParseConfigRejectsInvalidJournalGroupCommit(t *testing.T) {
 		{"-journal-group-commit-window", "-1ns"},
 		{"-journal-group-commit-max-batch", "0"},
 		{"-journal-group-commit-max-batch", strconv.Itoa(hatriecache.MaxJournalGroupCommitBatch + 1)},
+		{"-journal-segment-max-bytes", "-1"},
+		{"-journal-retained-segments", "-1"},
+		{"-journal-retained-segments", strconv.Itoa(hatriecache.MaxCommandJournalRetainedSegments + 1)},
+		{"-journal-segment-max-bytes", "1", "-journal-retained-segments", "0"},
 	} {
 		if _, err := parseConfig(args, &bytes.Buffer{}); err == nil {
 			t.Fatalf("parseConfig(%v) error = nil, want journal group commit validation error", args)

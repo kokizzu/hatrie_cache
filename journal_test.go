@@ -92,6 +92,20 @@ func TestOpenCommandJournalRejectsInvalidGroupCommitOptions(t *testing.T) {
 				GroupCommitMaxBatch: MaxJournalGroupCommitBatch + 1,
 			},
 		},
+		{
+			name: "negative segment bytes",
+			options: CommandJournalOptions{
+				GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+				SegmentMaxBytes:     -1,
+			},
+		},
+		{
+			name: "negative retained segments",
+			options: CommandJournalOptions{
+				GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+				RetainedSegments:    -1,
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), test.options); err == nil {
@@ -2129,6 +2143,255 @@ func TestCommandJournalCompactionStreamsLargeHistory(t *testing.T) {
 	}
 }
 
+func TestSegmentedCommandJournalRetainsCatchUpAcrossSnapshotCompaction(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "commands.journal")
+	snapshotPath := filepath.Join(dir, "snapshot.hc")
+	options := CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitMaxBatch: 1,
+		SegmentMaxBytes:     256,
+		RetainedSegments:    8,
+	}
+	journal, err := OpenCommandJournalWithOptions(path, options)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	ht := newTestTrie(t)
+	for idx := 1; idx <= 6; idx++ {
+		response := journal.ExecuteCommand(ht, CacheCommandRequest{
+			Command: "SETSTR",
+			Key:     fmt.Sprintf("key:%02d", idx),
+			Value:   strings.Repeat(fmt.Sprintf("v%d", idx), 64),
+		})
+		if !response.OK {
+			t.Fatalf("ExecuteCommand(%d) = %#v, want ok", idx, response)
+		}
+	}
+	if err := journal.SaveSnapshot(ht, snapshotPath); err != nil {
+		t.Fatalf("SaveSnapshot() error = %v", err)
+	}
+	if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "after", Value: "snapshot"}); !response.OK {
+		t.Fatalf("ExecuteCommand(after snapshot) = %#v, want ok", response)
+	}
+
+	tail, err := journal.Tail(0, 0)
+	if err != nil {
+		t.Fatalf("Tail(0) error = %v", err)
+	}
+	if tail.CompactedThrough != 0 || tail.LastSequence != 7 || len(tail.Entries) != 7 {
+		t.Fatalf("Tail(0) = %#v, want all seven retained entries", tail)
+	}
+	segments, err := filepath.Glob(path + ".segments/*.journal")
+	if err != nil {
+		t.Fatalf("Glob(segments) error = %v", err)
+	}
+	if len(segments) < 2 {
+		t.Fatalf("segment files = %d, want at least 2", len(segments))
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := OpenCommandJournalWithOptions(path, options)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+	replayed := newTestTrie(t)
+	sequence, err := reopened.Replay(replayed, 0)
+	if err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if sequence != 7 || replayed.GetString("after") != "snapshot" || replayed.GetString("key:01") == "" {
+		t.Fatalf("Replay() sequence/values = %d/%q/%q, want retained history", sequence, replayed.GetString("after"), replayed.GetString("key:01"))
+	}
+}
+
+func TestSegmentedCommandJournalPrunesOldestWholeSegments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	options := CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitMaxBatch: 1,
+		SegmentMaxBytes:     1,
+		RetainedSegments:    2,
+	}
+	journal, err := OpenCommandJournalWithOptions(path, options)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	ht := newTestTrie(t)
+	for idx := 1; idx <= 4; idx++ {
+		if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: fmt.Sprintf("key:%d", idx), Value: "value"}); !response.OK {
+			t.Fatalf("ExecuteCommand(%d) = %#v, want ok", idx, response)
+		}
+	}
+	tail, err := journal.Tail(0, 0)
+	if !errors.Is(err, ErrCommandJournalCompacted) {
+		t.Fatalf("Tail(0) error = %v, want ErrCommandJournalCompacted", err)
+	}
+	if tail.CompactedThrough != 1 {
+		t.Fatalf("Tail(0) compacted through = %d, want 1", tail.CompactedThrough)
+	}
+	tail, err = journal.Tail(1, 0)
+	if err != nil {
+		t.Fatalf("Tail(1) error = %v", err)
+	}
+	if tail.LastSequence != 4 || len(tail.Entries) != 3 || tail.Entries[0].Sequence != 2 {
+		t.Fatalf("Tail(1) = %#v, want retained sequences 2..4", tail)
+	}
+	segments, err := filepath.Glob(path + ".segments/*.journal")
+	if err != nil {
+		t.Fatalf("Glob(segments) error = %v", err)
+	}
+	if len(segments) != 2 {
+		t.Fatalf("retained segment files = %d, want 2", len(segments))
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := OpenCommandJournalWithOptions(path, options)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+	replayed := newTestTrie(t)
+	sequence, err := reopened.Replay(replayed, 1)
+	if err != nil {
+		t.Fatalf("Replay(after retained boundary) error = %v", err)
+	}
+	if sequence != 4 || replayed.GetString("key:2") != "value" || replayed.GetString("key:1") != "" {
+		t.Fatalf("Replay() sequence/values = %d/%q/%q, want sequences 2..4", sequence, replayed.GetString("key:2"), replayed.GetString("key:1"))
+	}
+}
+
+func TestSegmentedCommandJournalRecoversPartialActiveTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	options := CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitMaxBatch: 1,
+		SegmentMaxBytes:     1,
+		RetainedSegments:    8,
+	}
+	journal, err := OpenCommandJournalWithOptions(path, options)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	ht := newTestTrie(t)
+	for idx := 1; idx <= 2; idx++ {
+		if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: fmt.Sprintf("key:%d", idx), Value: "value"}); !response.OK {
+			t.Fatalf("ExecuteCommand(%d) = %#v, want ok", idx, response)
+		}
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("OpenFile(active) error = %v", err)
+	}
+	if _, err := file.WriteString("hcji"); err != nil {
+		file.Close()
+		t.Fatalf("WriteString(partial active record) error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close(partial active) error = %v", err)
+	}
+
+	reopened, err := OpenCommandJournalWithOptions(path, options)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions(recover) error = %v", err)
+	}
+	defer reopened.Close()
+	if response := reopened.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "key:3", Value: "value"}); !response.OK {
+		t.Fatalf("ExecuteCommand(after recovery) = %#v, want ok", response)
+	}
+	tail, err := reopened.Tail(0, 0)
+	if err != nil {
+		t.Fatalf("Tail(0) error = %v", err)
+	}
+	if tail.LastSequence != 3 || len(tail.Entries) != 3 {
+		t.Fatalf("Tail(0) = %#v, want recovered sequences 1..3", tail)
+	}
+}
+
+func TestSegmentedCommandJournalRejectsPartialArchivedSegment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	options := CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitMaxBatch: 1,
+		SegmentMaxBytes:     1,
+		RetainedSegments:    8,
+	}
+	journal, err := OpenCommandJournalWithOptions(path, options)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	ht := newTestTrie(t)
+	for idx := 1; idx <= 2; idx++ {
+		if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: fmt.Sprintf("key:%d", idx), Value: "value"}); !response.OK {
+			t.Fatalf("ExecuteCommand(%d) = %#v, want ok", idx, response)
+		}
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	segments, err := filepath.Glob(path + ".segments/*.journal")
+	if err != nil || len(segments) == 0 {
+		t.Fatalf("Glob(segments) = %v/%v, want archived segment", segments, err)
+	}
+	file, err := os.OpenFile(segments[0], os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("OpenFile(segment) error = %v", err)
+	}
+	if _, err := file.WriteString("hcji"); err != nil {
+		file.Close()
+		t.Fatalf("WriteString(partial segment record) error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close(partial segment) error = %v", err)
+	}
+
+	if _, err := OpenCommandJournalWithOptions(path, options); err == nil || !strings.Contains(err.Error(), "archived journal segment") {
+		t.Fatalf("OpenCommandJournalWithOptions(partial segment) error = %v, want archived segment error", err)
+	}
+}
+
+func TestSegmentedCommandJournalRejectsMisnamedSegmentBounds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	options := CommandJournalOptions{
+		Format:              DefaultCommandJournalFormat,
+		GroupCommitMaxBatch: 1,
+		SegmentMaxBytes:     1,
+		RetainedSegments:    8,
+	}
+	journal, err := OpenCommandJournalWithOptions(path, options)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	ht := newTestTrie(t)
+	for idx := 1; idx <= 2; idx++ {
+		if response := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: fmt.Sprintf("key:%d", idx), Value: "value"}); !response.OK {
+			t.Fatalf("ExecuteCommand(%d) = %#v, want ok", idx, response)
+		}
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	segments, err := filepath.Glob(path + ".segments/*.journal")
+	if err != nil || len(segments) != 1 {
+		t.Fatalf("Glob(segments) = %v/%v, want one archived segment", segments, err)
+	}
+	misnamed := commandJournalSegmentPath(path, 1, 2)
+	if err := os.Rename(segments[0], misnamed); err != nil {
+		t.Fatalf("Rename(segment) error = %v", err)
+	}
+	if _, err := OpenCommandJournalWithOptions(path, options); err == nil || !strings.Contains(err.Error(), "bounds do not match") {
+		t.Fatalf("OpenCommandJournalWithOptions(misnamed segment) error = %v, want bounds error", err)
+	}
+}
+
 func TestCommandJournalReplayReportsCompactedBoundary(t *testing.T) {
 	dir := t.TempDir()
 	journalPath := filepath.Join(dir, "commands.journal")
@@ -2429,4 +2692,68 @@ func TestOpenCommandJournalRejectsUnsupportedVersion(t *testing.T) {
 	if _, err := OpenCommandJournal(path); err == nil {
 		t.Fatal("OpenCommandJournal(unsupported version) error = nil, want error")
 	}
+}
+
+func BenchmarkCommandJournalCompaction100KLegacy(b *testing.B) {
+	benchmarkCommandJournalCompaction100K(b, false)
+}
+
+func BenchmarkCommandJournalCompaction100KSegmented(b *testing.B) {
+	benchmarkCommandJournalCompaction100K(b, true)
+}
+
+func benchmarkCommandJournalCompaction100K(b *testing.B, segmented bool) {
+	const entries = 100000
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		path := filepath.Join(b.TempDir(), fmt.Sprintf("commands-%d.journal", iteration))
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			b.Fatal(err)
+		}
+		writer := bufio.NewWriterSize(file, 1<<20)
+		for idx := 1; idx <= entries; idx++ {
+			if err := writeCommandJournalEntry(writer, commandJournalEntry{
+				Version:  commandJournalVersion,
+				Sequence: uint64(idx),
+				Request:  CacheCommandRequest{Command: "SETSTR", Key: fmt.Sprintf("key:%06d", idx), Value: "value"},
+			}, DefaultCommandJournalFormat); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := writer.Flush(); err != nil {
+			b.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			b.Fatal(err)
+		}
+		var journal *CommandJournal
+		if segmented {
+			journal, err = OpenCommandJournalWithOptions(path, CommandJournalOptions{
+				Format:              DefaultCommandJournalFormat,
+				GroupCommitMaxBatch: DefaultJournalGroupCommitMaxBatch,
+				SegmentMaxBytes:     DefaultCommandJournalSegmentMaxBytes,
+				RetainedSegments:    DefaultCommandJournalRetainedSegments,
+			})
+		} else {
+			journal, err = OpenCommandJournal(path)
+		}
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.StartTimer()
+		journal.mu.Lock()
+		err = journal.compactLocked(entries)
+		journal.mu.Unlock()
+		b.StopTimer()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := journal.Close(); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(entries, "entries/op")
 }

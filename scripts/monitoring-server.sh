@@ -68,6 +68,8 @@ journal_path=${JOURNAL_PATH:-}
 journal_format=${JOURNAL_FORMAT:-binary}
 journal_group_commit_window=${JOURNAL_GROUP_COMMIT_WINDOW:-0}
 journal_group_commit_max_batch=${JOURNAL_GROUP_COMMIT_MAX_BATCH:-64}
+journal_segment_max_bytes=${JOURNAL_SEGMENT_MAX_BYTES:-67108864}
+journal_retained_segments=${JOURNAL_RETAINED_SEGMENTS:-16}
 journal_pull_source=${JOURNAL_PULL_SOURCE:-}
 journal_pull_state_path=${JOURNAL_PULL_STATE_PATH:-}
 journal_pull_interval=${JOURNAL_PULL_INTERVAL:-0}
@@ -141,6 +143,8 @@ set -- \
 	-journal-path "$journal_path" \
 	-journal-group-commit-window "$journal_group_commit_window" \
 	-journal-group-commit-max-batch "$journal_group_commit_max_batch" \
+	-journal-segment-max-bytes "$journal_segment_max_bytes" \
+	-journal-retained-segments "$journal_retained_segments" \
 	-journal-pull-source "$journal_pull_source" \
 	-journal-pull-state-path "$journal_pull_state_path" \
 	-journal-pull-interval "$journal_pull_interval" \

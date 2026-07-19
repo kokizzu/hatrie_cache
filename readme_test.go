@@ -156,6 +156,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Atomic cache-wide telemetry](#atomic-cache-wide-telemetry)",
 		"[Concurrent scalar reads](#concurrent-scalar-read-fast-path)",
 		"[Durable journal group commit](#durable-journal-group-commit)",
+		"[Segmented WAL compaction](#segmented-wal-compaction)",
 		"[Point-in-time snapshot capture](#point-in-time-snapshot-capture)",
 		"[Compact streaming snapshot capture](#compact-streaming-snapshot-capture)",
 		"[Equal-state anti-entropy](#incremental-anti-entropy)",
@@ -173,6 +174,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"3.44x fewer batches",
 		"118.0x lower heap",
 		"1.94x lower heap",
+		"8,929x fewer allocs",
 	} {
 		if !strings.Contains(summary, token) {
 			t.Fatalf("BENCHMARK.md missing final architecture summary token %q", token)
