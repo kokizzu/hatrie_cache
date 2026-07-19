@@ -25,6 +25,8 @@ replication_max_attempts=${REPLICATION_MAX_ATTEMPTS:-3}
 replication_dead_letter_limit=${REPLICATION_DEAD_LETTER_LIMIT:-128}
 replication_outbox_path=${REPLICATION_OUTBOX_PATH:-}
 replication_outbox_format=${REPLICATION_OUTBOX_FORMAT:-auto}
+replication_outbox_codec=${REPLICATION_OUTBOX_CODEC:-binary}
+replication_outbox_batch_window=${REPLICATION_OUTBOX_BATCH_WINDOW:-1ms}
 replication_circuit_breaker_failures=${REPLICATION_CIRCUIT_BREAKER_FAILURES:-5}
 replication_circuit_breaker_cooldown=${REPLICATION_CIRCUIT_BREAKER_COOLDOWN:-30s}
 replication_wire_format=${REPLICATION_WIRE_FORMAT:-protobuf}
@@ -97,6 +99,8 @@ set -- \
 	-replication-dead-letter-limit "$replication_dead_letter_limit" \
 	-replication-outbox-path "$replication_outbox_path" \
 	-replication-outbox-format "$replication_outbox_format" \
+	-replication-outbox-codec "$replication_outbox_codec" \
+	-replication-outbox-batch-window "$replication_outbox_batch_window" \
 	-replication-circuit-breaker-failures "$replication_circuit_breaker_failures" \
 	-replication-circuit-breaker-cooldown "$replication_circuit_breaker_cooldown" \
 	-replication-auth-token "$replication_auth_token" \

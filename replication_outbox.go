@@ -4,9 +4,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,11 +18,46 @@ import (
 )
 
 type ReplicationOutboxStore struct {
-	mu       sync.Mutex
-	path     string
-	snapshot replicationOutboxSnapshot
-	db       *leveldb.DB
+	mu                sync.Mutex
+	path              string
+	snapshot          replicationOutboxSnapshot
+	db                *leveldb.DB
+	levelDB           bool
+	codec             ReplicationOutboxCodec
+	batchWindow       time.Duration
+	writeLeader       bool
+	writePending      []*replicationOutboxWriteRequest
+	writeCond         *sync.Cond
+	closing           bool
+	levelDBSyncWrites uint64
 }
+
+type ReplicationOutboxCodec string
+
+const (
+	ReplicationOutboxCodecBinary ReplicationOutboxCodec = "binary"
+	ReplicationOutboxCodecJSON   ReplicationOutboxCodec = "json"
+)
+
+const DefaultReplicationOutboxBatchWindow = time.Millisecond
+
+type ReplicationOutboxOptions struct {
+	Codec       ReplicationOutboxCodec
+	BatchWindow time.Duration
+}
+
+type replicationOutboxWriteRequest struct {
+	puts    []replicationOutboxKeyValue
+	deletes [][]byte
+	done    chan error
+}
+
+type replicationOutboxKeyValue struct {
+	key   []byte
+	value []byte
+}
+
+var errReplicationOutboxClosed = errors.New("hatriecache: replication outbox is closed")
 
 var (
 	replicationOutboxLevelDBJobPrefix      = []byte("job:")
@@ -72,8 +109,22 @@ func OpenReplicationOutbox(path string) (*ReplicationOutboxStore, error) {
 }
 
 func OpenLevelDBReplicationOutbox(path string) (*ReplicationOutboxStore, error) {
+	return OpenLevelDBReplicationOutboxWithOptions(path, ReplicationOutboxOptions{
+		Codec:       ReplicationOutboxCodecBinary,
+		BatchWindow: DefaultReplicationOutboxBatchWindow,
+	})
+}
+
+func OpenLevelDBReplicationOutboxWithOptions(path string, options ReplicationOutboxOptions) (*ReplicationOutboxStore, error) {
 	if path == "" {
 		return nil, errors.New("hatriecache: replication outbox path is required")
+	}
+	codec, err := ParseReplicationOutboxCodec(string(options.Codec))
+	if err != nil {
+		return nil, err
+	}
+	if options.BatchWindow < 0 {
+		return nil, errors.New("hatriecache: replication outbox batch window cannot be negative")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -84,7 +135,26 @@ func OpenLevelDBReplicationOutbox(path string) (*ReplicationOutboxStore, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &ReplicationOutboxStore{path: path, db: db}, nil
+	store := &ReplicationOutboxStore{
+		path:        path,
+		db:          db,
+		levelDB:     true,
+		codec:       codec,
+		batchWindow: options.BatchWindow,
+	}
+	store.writeCond = sync.NewCond(&store.mu)
+	return store, nil
+}
+
+func ParseReplicationOutboxCodec(value string) (ReplicationOutboxCodec, error) {
+	switch ReplicationOutboxCodec(strings.ToLower(strings.TrimSpace(value))) {
+	case "", ReplicationOutboxCodecBinary:
+		return ReplicationOutboxCodecBinary, nil
+	case ReplicationOutboxCodecJSON:
+		return ReplicationOutboxCodecJSON, nil
+	default:
+		return "", fmt.Errorf("hatriecache: unsupported replication outbox codec %q", value)
+	}
 }
 
 func (store *ReplicationOutboxStore) Close() error {
@@ -93,8 +163,12 @@ func (store *ReplicationOutboxStore) Close() error {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if store.db == nil {
+	if !store.levelDB || store.db == nil {
 		return nil
+	}
+	store.closing = true
+	for store.writeLeader {
+		store.writeCond.Wait()
 	}
 	db := store.db
 	store.db = nil
@@ -107,7 +181,7 @@ func (store *ReplicationOutboxStore) jobs() []replicationJob {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if store.db != nil {
+	if store.levelDB {
 		return store.levelDBJobsLocked()
 	}
 	jobs := make([]replicationJob, 0, len(store.snapshot.Jobs))
@@ -123,7 +197,7 @@ func (store *ReplicationOutboxStore) deadLetters() (uint64, []ReplicationDeadLet
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if store.db != nil {
+	if store.levelDB {
 		return store.levelDBDeadLettersLocked()
 	}
 	return store.snapshot.DeadSeq, cloneReplicationDeadLetters(store.snapshot.DeadLetters)
@@ -133,16 +207,18 @@ func (store *ReplicationOutboxStore) putJob(job replicationJob) error {
 	if store == nil || job.id == 0 {
 		return nil
 	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if store.db != nil {
-		data, err := json.Marshal(newReplicationOutboxJob(job))
+	record := newReplicationOutboxJob(job)
+	if store.levelDB {
+		data, err := store.marshalJob(record)
 		if err != nil {
 			return err
 		}
-		return store.db.Put(replicationOutboxLevelDBJobKey(job.id), data, &opt.WriteOptions{Sync: true})
+		return store.writeLevelDB(replicationOutboxWriteRequest{
+			puts: []replicationOutboxKeyValue{{key: replicationOutboxLevelDBJobKey(job.id), value: data}},
+		})
 	}
-	record := newReplicationOutboxJob(job)
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	for idx, existing := range store.snapshot.Jobs {
 		if existing.ID == job.id {
 			store.snapshot.Jobs[idx] = record
@@ -154,14 +230,30 @@ func (store *ReplicationOutboxStore) putJob(job replicationJob) error {
 }
 
 func (store *ReplicationOutboxStore) deleteJob(id uint64) error {
+	return store.completeJob(id, 0, nil, false)
+}
+
+func (store *ReplicationOutboxStore) completeJob(id uint64, deadSeq uint64, deadLetters []ReplicationDeadLetter, updateDeadLetters bool) error {
 	if store == nil || id == 0 {
 		return nil
 	}
+	if store.levelDB {
+		request := replicationOutboxWriteRequest{deletes: [][]byte{replicationOutboxLevelDBJobKey(id)}}
+		if updateDeadLetters {
+			deadSeqData, deadLettersData, err := store.marshalDeadLetters(deadSeq, deadLetters)
+			if err != nil {
+				return err
+			}
+			request.puts = []replicationOutboxKeyValue{
+				{key: replicationOutboxLevelDBDeadSeqKey, value: deadSeqData},
+				{key: replicationOutboxLevelDBDeadLettersKey, value: deadLettersData},
+			}
+		}
+		return store.writeLevelDB(request)
+	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if store.db != nil {
-		return store.db.Delete(replicationOutboxLevelDBJobKey(id), &opt.WriteOptions{Sync: true})
-	}
+	changed := updateDeadLetters
 	for idx, job := range store.snapshot.Jobs {
 		if job.ID != id {
 			continue
@@ -169,30 +261,143 @@ func (store *ReplicationOutboxStore) deleteJob(id uint64) error {
 		copy(store.snapshot.Jobs[idx:], store.snapshot.Jobs[idx+1:])
 		store.snapshot.Jobs[len(store.snapshot.Jobs)-1] = replicationOutboxJob{}
 		store.snapshot.Jobs = store.snapshot.Jobs[:len(store.snapshot.Jobs)-1]
-		return store.saveLocked()
+		changed = true
+		break
 	}
-	return nil
+	if updateDeadLetters {
+		store.snapshot.DeadSeq = deadSeq
+		store.snapshot.DeadLetters = cloneReplicationDeadLetters(deadLetters)
+	}
+	if !changed {
+		return nil
+	}
+	return store.saveLocked()
 }
 
 func (store *ReplicationOutboxStore) setDeadLetters(deadSeq uint64, deadLetters []ReplicationDeadLetter) error {
 	if store == nil {
 		return nil
 	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if store.db != nil {
-		data, err := json.Marshal(cloneReplicationDeadLetters(deadLetters))
+	if store.levelDB {
+		deadSeqData, deadLettersData, err := store.marshalDeadLetters(deadSeq, deadLetters)
 		if err != nil {
 			return err
 		}
-		batch := new(leveldb.Batch)
-		batch.Put(replicationOutboxLevelDBDeadSeqKey, []byte(strconv.FormatUint(deadSeq, 10)))
-		batch.Put(replicationOutboxLevelDBDeadLettersKey, data)
-		return store.db.Write(batch, &opt.WriteOptions{Sync: true})
+		return store.writeLevelDB(replicationOutboxWriteRequest{
+			puts: []replicationOutboxKeyValue{
+				{key: replicationOutboxLevelDBDeadSeqKey, value: deadSeqData},
+				{key: replicationOutboxLevelDBDeadLettersKey, value: deadLettersData},
+			},
+		})
 	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	store.snapshot.DeadSeq = deadSeq
 	store.snapshot.DeadLetters = cloneReplicationDeadLetters(deadLetters)
 	return store.saveLocked()
+}
+
+func (store *ReplicationOutboxStore) marshalJob(record replicationOutboxJob) ([]byte, error) {
+	if store != nil && store.codec == ReplicationOutboxCodecJSON {
+		return json.Marshal(record)
+	}
+	return marshalReplicationOutboxJobBinary(record)
+}
+
+func (store *ReplicationOutboxStore) marshalDeadLetters(deadSeq uint64, deadLetters []ReplicationDeadLetter) ([]byte, []byte, error) {
+	deadLetters = cloneReplicationDeadLetters(deadLetters)
+	if store != nil && store.codec == ReplicationOutboxCodecJSON {
+		data, err := json.Marshal(deadLetters)
+		return []byte(strconv.FormatUint(deadSeq, 10)), data, err
+	}
+	data, err := marshalReplicationOutboxDeadLettersBinary(deadLetters)
+	return marshalReplicationOutboxDeadSeqBinary(deadSeq), data, err
+}
+
+func (store *ReplicationOutboxStore) writeLevelDB(request replicationOutboxWriteRequest) error {
+	if store == nil {
+		return nil
+	}
+	if store.batchWindow == 0 {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		if !store.levelDB || store.db == nil || store.closing {
+			return errReplicationOutboxClosed
+		}
+		batch := new(leveldb.Batch)
+		appendReplicationOutboxWriteRequest(batch, &request)
+		err := store.db.Write(batch, &opt.WriteOptions{Sync: true})
+		store.levelDBSyncWrites++
+		return err
+	}
+	request.done = make(chan error, 1)
+	store.mu.Lock()
+	if !store.levelDB || store.db == nil || store.closing {
+		store.mu.Unlock()
+		return errReplicationOutboxClosed
+	}
+	store.writePending = append(store.writePending, &request)
+	leader := !store.writeLeader
+	if leader {
+		store.writeLeader = true
+	}
+	store.mu.Unlock()
+
+	if leader {
+		store.flushLevelDBWrites()
+	}
+	return <-request.done
+}
+
+func (store *ReplicationOutboxStore) flushLevelDBWrites() {
+	if store == nil {
+		return
+	}
+	if store.batchWindow > 0 {
+		time.Sleep(store.batchWindow)
+	}
+	store.mu.Lock()
+	requests := store.writePending
+	store.writePending = nil
+	batch := new(leveldb.Batch)
+	for _, request := range requests {
+		appendReplicationOutboxWriteRequest(batch, request)
+	}
+	err := errReplicationOutboxClosed
+	if store.db != nil {
+		err = store.db.Write(batch, &opt.WriteOptions{Sync: true})
+		store.levelDBSyncWrites++
+	}
+	for _, request := range requests {
+		request.done <- err
+		close(request.done)
+	}
+	store.writeLeader = false
+	if store.writeCond != nil {
+		store.writeCond.Broadcast()
+	}
+	store.mu.Unlock()
+}
+
+func appendReplicationOutboxWriteRequest(batch *leveldb.Batch, request *replicationOutboxWriteRequest) {
+	if batch == nil || request == nil {
+		return
+	}
+	for _, put := range request.puts {
+		batch.Put(put.key, put.value)
+	}
+	for _, key := range request.deletes {
+		batch.Delete(key)
+	}
+}
+
+func (store *ReplicationOutboxStore) levelDBSyncWriteCount() uint64 {
+	if store == nil {
+		return 0
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.levelDBSyncWrites
 }
 
 func (store *ReplicationOutboxStore) saveLocked() error {
@@ -251,8 +456,8 @@ func (store *ReplicationOutboxStore) levelDBJobsLocked() []replicationJob {
 	defer iter.Release()
 	var jobs []replicationJob
 	for iter.Next() {
-		var record replicationOutboxJob
-		if err := json.Unmarshal(iter.Value(), &record); err != nil {
+		record, err := unmarshalReplicationOutboxJob(iter.Value())
+		if err != nil {
 			continue
 		}
 		jobs = append(jobs, record.replicationJob())
@@ -266,11 +471,11 @@ func (store *ReplicationOutboxStore) levelDBDeadLettersLocked() (uint64, []Repli
 	}
 	var deadSeq uint64
 	if data, err := store.db.Get(replicationOutboxLevelDBDeadSeqKey, nil); err == nil {
-		deadSeq, _ = strconv.ParseUint(string(data), 10, 64)
+		deadSeq, _ = unmarshalReplicationOutboxDeadSeq(data)
 	}
 	var deadLetters []ReplicationDeadLetter
 	if data, err := store.db.Get(replicationOutboxLevelDBDeadLettersKey, nil); err == nil {
-		_ = json.Unmarshal(data, &deadLetters)
+		deadLetters, _ = unmarshalReplicationOutboxDeadLetters(data)
 	}
 	return deadSeq, cloneReplicationDeadLetters(deadLetters)
 }

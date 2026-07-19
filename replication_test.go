@@ -15,11 +15,14 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"hatrie_cache/internal/jsonwire"
+
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -1984,6 +1987,208 @@ func TestLevelDBReplicationOutboxPersistsJobsAndDeadLetters(t *testing.T) {
 	}
 }
 
+func TestLevelDBReplicationOutboxBinaryDefaultAndJSONCompatibility(t *testing.T) {
+	job := replicationJob{
+		id:     1,
+		result: ReplicationResult{Command: "SETBYTES", Key: "session:binary"},
+		tasks: []replicationTask{{
+			target: TopologyNode{ID: "node-b", Address: "http://node-b", GRPCAddress: "node-b:9090"},
+			payload: CacheCommandRequest{
+				Command:     replicationSetCompactCommand,
+				Key:         "session:binary",
+				BinaryValue: bytes.Repeat([]byte{0xab}, 4096),
+			},
+		}},
+		enqueuedAt: time.Unix(1700000000, 123).UTC(),
+	}
+	path := filepath.Join(t.TempDir(), "replication-outbox.leveldb")
+	outbox, err := OpenLevelDBReplicationOutbox(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutbox() error = %v", err)
+	}
+	if err := outbox.putJob(job); err != nil {
+		t.Fatalf("putJob() error = %v", err)
+	}
+	raw, err := outbox.db.Get(replicationOutboxLevelDBJobKey(job.id), nil)
+	if err != nil {
+		t.Fatalf("read raw binary job error = %v", err)
+	}
+	if !bytes.HasPrefix(raw, replicationOutboxBinaryJobMagic) {
+		prefix := raw
+		if len(prefix) > len(replicationOutboxBinaryJobMagic) {
+			prefix = prefix[:len(replicationOutboxBinaryJobMagic)]
+		}
+		t.Fatalf("default outbox job prefix = %x, want binary magic %x", prefix, replicationOutboxBinaryJobMagic)
+	}
+	legacyJSON, err := json.Marshal(newReplicationOutboxJob(job))
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if len(raw) >= len(legacyJSON) {
+		t.Fatalf("binary job bytes = %d, want smaller than JSON bytes %d", len(raw), len(legacyJSON))
+	}
+
+	legacy := job
+	legacy.id = 2
+	legacy.result.Key = "session:legacy-json"
+	legacyJSON, err = json.Marshal(newReplicationOutboxJob(legacy))
+	if err != nil {
+		t.Fatalf("json.Marshal(legacy) error = %v", err)
+	}
+	if err := outbox.db.Put(replicationOutboxLevelDBJobKey(legacy.id), legacyJSON, &opt.WriteOptions{Sync: true}); err != nil {
+		t.Fatalf("put legacy JSON job error = %v", err)
+	}
+	jobs := outbox.jobs()
+	if len(jobs) != 2 || jobs[0].result.Key != "session:binary" || jobs[1].result.Key != "session:legacy-json" {
+		t.Fatalf("mixed binary/JSON jobs = %#v, want both records in order", jobs)
+	}
+	if len(jobs[0].tasks) != 1 || !bytes.Equal(jobs[0].tasks[0].payload.BinaryValue, job.tasks[0].payload.BinaryValue) {
+		t.Fatalf("binary job payload = %#v, want %d preserved bytes", jobs[0].tasks, len(job.tasks[0].payload.BinaryValue))
+	}
+	if err := outbox.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	jsonPath := filepath.Join(t.TempDir(), "replication-outbox-json.leveldb")
+	jsonOutbox, err := OpenLevelDBReplicationOutboxWithOptions(jsonPath, ReplicationOutboxOptions{Codec: ReplicationOutboxCodecJSON})
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutboxWithOptions(JSON) error = %v", err)
+	}
+	defer jsonOutbox.Close()
+	if err := jsonOutbox.putJob(job); err != nil {
+		t.Fatalf("putJob(JSON) error = %v", err)
+	}
+	rawJSON, err := jsonOutbox.db.Get(replicationOutboxLevelDBJobKey(job.id), nil)
+	if err != nil {
+		t.Fatalf("read raw JSON job error = %v", err)
+	}
+	if len(rawJSON) == 0 || rawJSON[0] != '{' {
+		t.Fatalf("configured JSON outbox job prefix = %x, want JSON object", rawJSON)
+	}
+}
+
+func TestLevelDBReplicationOutboxGroupsConcurrentDurableWrites(t *testing.T) {
+	const jobs = 32
+	path := filepath.Join(t.TempDir(), "replication-outbox.leveldb")
+	outbox, err := OpenLevelDBReplicationOutboxWithOptions(path, ReplicationOutboxOptions{
+		BatchWindow: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutboxWithOptions() error = %v", err)
+	}
+	defer outbox.Close()
+
+	start := make(chan struct{})
+	errs := make(chan error, jobs)
+	var writers sync.WaitGroup
+	writers.Add(jobs)
+	for id := 1; id <= jobs; id++ {
+		go func(id int) {
+			defer writers.Done()
+			<-start
+			errs <- outbox.putJob(replicationJob{
+				id:         uint64(id),
+				result:     ReplicationResult{Command: "SETSTR", Key: fmt.Sprintf("session:%02d", id)},
+				tasks:      []replicationTask{{target: TopologyNode{ID: "node-b"}, payload: CacheCommandRequest{Command: "INTERNALSET", Key: fmt.Sprintf("session:%02d", id), Value: "value"}}},
+				enqueuedAt: time.Now().UTC(),
+			})
+		}(id)
+	}
+	close(start)
+	writers.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent putJob() error = %v", err)
+		}
+	}
+	if got := outbox.levelDBSyncWriteCount(); got != 1 {
+		t.Fatalf("LevelDB synchronous writes = %d, want one grouped commit", got)
+	}
+	if got := len(outbox.jobs()); got != jobs {
+		t.Fatalf("persisted grouped jobs = %d, want %d", got, jobs)
+	}
+}
+
+func TestLevelDBReplicationOutboxCompletesDeadLetterAtomically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "replication-outbox.leveldb")
+	outbox, err := OpenLevelDBReplicationOutboxWithOptions(path, ReplicationOutboxOptions{})
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutboxWithOptions() error = %v", err)
+	}
+	job := replicationJob{id: 1, result: ReplicationResult{Command: "SETSTR", Key: "session:failed"}}
+	if err := outbox.putJob(job); err != nil {
+		t.Fatalf("putJob() error = %v", err)
+	}
+	writesBefore := outbox.levelDBSyncWriteCount()
+	deadLetters := []ReplicationDeadLetter{{ID: 7, Command: "SETSTR", Key: "session:failed", Attempts: 3}}
+	if err := outbox.completeJob(1, 7, deadLetters, true); err != nil {
+		t.Fatalf("completeJob() error = %v", err)
+	}
+	if got := outbox.levelDBSyncWriteCount() - writesBefore; got != 1 {
+		t.Fatalf("completion synchronous writes = %d, want one atomic commit", got)
+	}
+	if jobs := outbox.jobs(); len(jobs) != 0 {
+		t.Fatalf("jobs after completion = %#v, want none", jobs)
+	}
+	deadSeq, restored := outbox.deadLetters()
+	if deadSeq != 7 || len(restored) != 1 || restored[0].Key != "session:failed" {
+		t.Fatalf("dead letters after completion = %d/%#v, want atomic persisted failure", deadSeq, restored)
+	}
+	if err := outbox.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	reopened, err := OpenLevelDBReplicationOutbox(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutbox(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+	if jobs := reopened.jobs(); len(jobs) != 0 {
+		t.Fatalf("reopened jobs = %#v, want completed job absent", jobs)
+	}
+	deadSeq, restored = reopened.deadLetters()
+	if deadSeq != 7 || len(restored) != 1 || restored[0].Key != "session:failed" {
+		t.Fatalf("reopened dead letters = %d/%#v, want atomic persisted failure", deadSeq, restored)
+	}
+}
+
+func TestLevelDBReplicationOutboxCloseWaitsForGroupedCommit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "replication-outbox.leveldb")
+	outbox, err := OpenLevelDBReplicationOutboxWithOptions(path, ReplicationOutboxOptions{BatchWindow: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutboxWithOptions() error = %v", err)
+	}
+	job := replicationJob{id: 1, result: ReplicationResult{Command: "SETSTR", Key: "session:close"}}
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- outbox.putJob(job)
+	}()
+	waitUntil(t, time.Second, func() bool {
+		outbox.mu.Lock()
+		defer outbox.mu.Unlock()
+		return outbox.writeLeader
+	})
+	if err := outbox.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatalf("grouped putJob() error = %v", err)
+	}
+	if err := outbox.putJob(replicationJob{id: 2}); !errors.Is(err, errReplicationOutboxClosed) {
+		t.Fatalf("putJob() after close error = %v, want %v", err, errReplicationOutboxClosed)
+	}
+
+	reopened, err := OpenLevelDBReplicationOutbox(path)
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutbox(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+	jobs := reopened.jobs()
+	if len(jobs) != 1 || jobs[0].id != 1 || jobs[0].result.Key != "session:close" {
+		t.Fatalf("reopened jobs = %#v, want committed job 1", jobs)
+	}
+}
+
 func TestLevelDBReplicationOutboxSkipsCorruptPartialJobRecords(t *testing.T) {
 	outboxPath := filepath.Join(t.TempDir(), "replication-outbox.leveldb")
 	outbox, err := OpenLevelDBReplicationOutbox(outboxPath)
@@ -2007,6 +2212,9 @@ func TestLevelDBReplicationOutboxSkipsCorruptPartialJobRecords(t *testing.T) {
 	}
 	if err := outbox.db.Put(replicationOutboxLevelDBJobKey(1), []byte(`{"id":1,"result":`), nil); err != nil {
 		t.Fatalf("put corrupt job error = %v", err)
+	}
+	if err := outbox.db.Put(replicationOutboxLevelDBJobKey(3), append(append([]byte(nil), replicationOutboxBinaryJobMagic...), 0x80), nil); err != nil {
+		t.Fatalf("put corrupt binary job error = %v", err)
 	}
 	if jobs := outbox.jobs(); len(jobs) != 1 || jobs[0].id != 2 || jobs[0].result.Key != "session:valid" {
 		t.Fatalf("jobs() with corrupt record = %#v, want only valid job", jobs)

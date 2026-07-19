@@ -55,6 +55,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if cfg.replicationMaxTargets != hatriecache.DefaultReplicationMaxInFlightTargets {
 		t.Fatalf("replicationMaxTargets = %d, want default %d", cfg.replicationMaxTargets, hatriecache.DefaultReplicationMaxInFlightTargets)
 	}
+	if cfg.replicationOutboxCodec != string(hatriecache.ReplicationOutboxCodecBinary) || cfg.replicationOutboxBatch != hatriecache.DefaultReplicationOutboxBatchWindow {
+		t.Fatalf("replication outbox codec/batch = %q/%s, want binary/%s", cfg.replicationOutboxCodec, cfg.replicationOutboxBatch, hatriecache.DefaultReplicationOutboxBatchWindow)
+	}
 	if cfg.dbFormat != string(hatriecache.DefaultStorageFormat) {
 		t.Fatalf("dbFormat = %q, want default", cfg.dbFormat)
 	}
@@ -767,6 +770,14 @@ func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
 		{
 			name: "invalid outbox format",
 			args: []string{"-replication-outbox-format", "sqlite"},
+		},
+		{
+			name: "invalid outbox codec",
+			args: []string{"-replication-outbox-codec", "yaml"},
+		},
+		{
+			name: "negative outbox batch window",
+			args: []string{"-replication-outbox-batch-window", "-1ms"},
 		},
 		{
 			name: "negative circuit breaker failures",

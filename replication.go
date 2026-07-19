@@ -803,6 +803,13 @@ func (replicator *HTTPReplicator) deleteAsyncJob(id uint64) {
 	_ = replicator.outbox.deleteJob(id)
 }
 
+func (replicator *HTTPReplicator) completeAsyncJob(id uint64, deadSeq uint64, deadLetters []ReplicationDeadLetter, updateDeadLetters bool) {
+	if replicator == nil || replicator.outbox == nil || id == 0 {
+		return
+	}
+	_ = replicator.outbox.completeJob(id, deadSeq, deadLetters, updateDeadLetters)
+}
+
 func (replicator *HTTPReplicator) unreserveAsyncJob(id uint64) {
 	if replicator == nil || id == 0 {
 		return
@@ -906,9 +913,9 @@ func (replicator *HTTPReplicator) recordAsyncAttempt(result ReplicationResult, r
 	}
 }
 
-func (replicator *HTTPReplicator) recordDeadLetter(result ReplicationResult, attempts uint) {
+func (replicator *HTTPReplicator) recordDeadLetter(result ReplicationResult, attempts uint) (uint64, []ReplicationDeadLetter, bool) {
 	if replicator == nil || replicator.queue == nil || replicator.deadLimit <= 0 {
-		return
+		return 0, nil, false
 	}
 	failedTargets := make([]ReplicationTargetResult, 0, len(result.Targets))
 	for _, target := range result.Targets {
@@ -917,7 +924,7 @@ func (replicator *HTTPReplicator) recordDeadLetter(result ReplicationResult, att
 		}
 	}
 	if len(failedTargets) == 0 {
-		return
+		return 0, nil, false
 	}
 	failedAt := time.Now().UTC()
 	replicator.mu.Lock()
@@ -937,9 +944,7 @@ func (replicator *HTTPReplicator) recordDeadLetter(result ReplicationResult, att
 		copy(replicator.deadLetters, replicator.deadLetters[len(replicator.deadLetters)-replicator.deadLimit:])
 		replicator.deadLetters = replicator.deadLetters[:replicator.deadLimit]
 	}
-	if replicator.outbox != nil {
-		_ = replicator.outbox.setDeadLetters(replicator.deadSeq, replicator.deadLetters)
-	}
+	return replicator.deadSeq, cloneReplicationDeadLetters(replicator.deadLetters), true
 }
 
 func replicationDeadLetterReason(targets []ReplicationTargetResult) string {
@@ -1579,13 +1584,16 @@ func (replicator *HTTPReplicator) runAsyncJob(ctx context.Context, job replicati
 		needsRetry := replicationNeedsRetry(result)
 		willRetry := needsRetry && attempt < attempts
 		replicator.recordAsyncAttempt(result, willRetry)
+		deadSeq := uint64(0)
+		var deadLetters []ReplicationDeadLetter
+		deadLettersUpdated := false
 		if needsRetry && attempt == attempts {
-			replicator.recordDeadLetter(result, attempt)
+			deadSeq, deadLetters, deadLettersUpdated = replicator.recordDeadLetter(result, attempt)
 		}
 		result = replicator.attachReplicationHealth(result)
 		replicator.storeLastResult(result)
 		if !needsRetry || attempt == attempts {
-			replicator.deleteAsyncJob(job.id)
+			replicator.completeAsyncJob(job.id, deadSeq, deadLetters, deadLettersUpdated)
 			return
 		}
 		if !replicator.waitForRetry(ctx) {

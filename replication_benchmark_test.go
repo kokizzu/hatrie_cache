@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -14,11 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syndtr/goleveldb/leveldb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/test/bufconn"
 )
+
+var replicationOutboxBenchmarkData []byte
 
 type benchmarkGRPCWireStats struct {
 	outbound atomic.Int64
@@ -377,6 +381,152 @@ func BenchmarkReplicationMerkleIncremental(b *testing.B) {
 			b.ReportMetric(float64(source.replicationMerkleRetainedBytes())/keyCount, "retained_B/key")
 		})
 	}
+}
+
+func BenchmarkReplicationOutboxEncoding(b *testing.B) {
+	record := newReplicationOutboxJob(replicationOutboxBenchmarkJob(1, 4096))
+	for _, codec := range []ReplicationOutboxCodec{ReplicationOutboxCodecJSON, ReplicationOutboxCodecBinary} {
+		b.Run(string(codec), func(b *testing.B) {
+			var data []byte
+			var err error
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if codec == ReplicationOutboxCodecJSON {
+					data, err = json.Marshal(record)
+				} else {
+					data, err = marshalReplicationOutboxJobBinary(record)
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			replicationOutboxBenchmarkData = data
+			b.ReportMetric(float64(len(data)), "stored_B/op")
+		})
+	}
+}
+
+func BenchmarkReplicationOutboxDurableEnqueue(b *testing.B) {
+	const writers = 32
+	for _, test := range []struct {
+		name        string
+		codec       ReplicationOutboxCodec
+		batchWindow time.Duration
+	}{
+		{name: "JSONSyncEach", codec: ReplicationOutboxCodecJSON},
+		{name: "BinarySyncEach", codec: ReplicationOutboxCodecBinary},
+		{name: "BinaryGroupCommit", codec: ReplicationOutboxCodecBinary, batchWindow: DefaultReplicationOutboxBatchWindow},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			store, err := OpenLevelDBReplicationOutboxWithOptions(b.TempDir(), ReplicationOutboxOptions{
+				Codec:       test.codec,
+				BatchWindow: test.batchWindow,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(func() { _ = store.Close() })
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				start := make(chan struct{})
+				errs := make(chan error, writers)
+				var group sync.WaitGroup
+				group.Add(writers)
+				for writer := 0; writer < writers; writer++ {
+					id := uint64(iteration*writers + writer + 1)
+					go func() {
+						defer group.Done()
+						<-start
+						errs <- store.putJob(replicationOutboxBenchmarkJob(id, 1024))
+					}()
+				}
+				close(start)
+				group.Wait()
+				close(errs)
+				for err := range errs {
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(writers, "jobs/op")
+			b.ReportMetric(float64(store.levelDBSyncWriteCount())/float64(b.N), "sync_writes/op")
+		})
+	}
+}
+
+func BenchmarkReplicationOutboxReplay10k(b *testing.B) {
+	const jobs = 10000
+	for _, codec := range []ReplicationOutboxCodec{ReplicationOutboxCodecJSON, ReplicationOutboxCodecBinary} {
+		b.Run(string(codec), func(b *testing.B) {
+			store, err := OpenLevelDBReplicationOutboxWithOptions(b.TempDir(), ReplicationOutboxOptions{Codec: codec})
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(func() { _ = store.Close() })
+			batch := new(leveldb.Batch)
+			storedBytes := 0
+			for id := 1; id <= jobs; id++ {
+				record := newReplicationOutboxJob(replicationOutboxBenchmarkJob(uint64(id), 1024))
+				data, err := store.marshalJob(record)
+				if err != nil {
+					b.Fatal(err)
+				}
+				storedBytes += len(data)
+				batch.Put(replicationOutboxLevelDBJobKey(uint64(id)), data)
+			}
+			if err := store.db.Write(batch, nil); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if restored := store.jobs(); len(restored) != jobs {
+					b.Fatalf("jobs() = %d, want %d", len(restored), jobs)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(jobs, "jobs/op")
+			b.ReportMetric(float64(storedBytes)/jobs, "stored_B/job")
+		})
+	}
+}
+
+func replicationOutboxBenchmarkJob(id uint64, valueBytes int) replicationJob {
+	return replicationJob{
+		id:     id,
+		result: ReplicationResult{Command: "SETBYTES", Key: fmt.Sprintf("session:%08d", id), Queued: true},
+		tasks: []replicationTask{{
+			target: TopologyNode{ID: "node-b", Address: "http://node-b:8080", GRPCAddress: "node-b:9090"},
+			payload: CacheCommandRequest{
+				Command:     replicationSetCompactCommand,
+				Key:         fmt.Sprintf("session:%08d", id),
+				BinaryValue: replicationOutboxBenchmarkValue(id, valueBytes),
+				Pairs: Map{
+					replicationMetaSourceNode:          "node-a",
+					replicationMetaSequence:            strconv.FormatUint(id, 10),
+					replicationMetaTopologyFingerprint: "benchmark-topology",
+				},
+			},
+		}},
+		enqueuedAt: time.Unix(1700000000, int64(id)).UTC(),
+	}
+}
+
+func replicationOutboxBenchmarkValue(seed uint64, size int) []byte {
+	value := make([]byte, size)
+	state := seed*0x9e3779b97f4a7c15 + 1
+	for index := range value {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		value[index] = byte(state)
+	}
+	return value
 }
 
 func replicationDigestBenchmarkValue(key int, version int) string {
