@@ -1750,6 +1750,144 @@ func TestExecutePublicCommandBatchAsyncOutboxQueuesOneGroupedTargetJob(t *testin
 	}
 }
 
+func TestJournalBackedReplicationOutboxPersistsReferenceAndRestoresExactPayload(t *testing.T) {
+	dir := t.TempDir()
+	journalPath := filepath.Join(dir, "commands.journal")
+	outboxPath := filepath.Join(dir, "replication-outbox")
+	journal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	outbox, err := OpenLevelDBReplicationOutboxWithOptions(outboxPath, ReplicationOutboxOptions{
+		Codec: ReplicationOutboxCodecBinary,
+	})
+	if err != nil {
+		_ = journal.Close()
+		t.Fatalf("OpenLevelDBReplicationOutboxWithOptions() error = %v", err)
+	}
+
+	blocked := make(chan struct{})
+	var blockedOnce sync.Once
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		blockedOnce.Do(func() { close(blocked) })
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})}
+	trie := newTestTrie(t)
+	topology := replicationTestTopology(t, "http://node-b.example")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Context:        ctx,
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       NewElectionStore(topology, ElectionOptions{}),
+		Client:         client,
+		AsyncQueueSize: 1,
+		AsyncOutbox:    outbox,
+		Journal:        journal,
+		WireFormat:     CommandWireFormatJSON,
+	})
+	request := CacheCommandRequest{Command: "SETSTR", Key: "session:journal-ref", Value: strings.Repeat("payload-", 512)}
+	response, rejected := executeCacheCommand(context.Background(), trie, request, commandExecutionOptions{
+		Journal:    journal,
+		Replicator: replicator,
+	})
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand() = %#v rejected=%v, want success", response, rejected)
+	}
+	select {
+	case <-blocked:
+	case <-time.After(time.Second):
+		t.Fatal("replication worker did not dequeue journal-backed job")
+	}
+
+	jobID := journal.Sequence()
+	raw, err := outbox.db.Get(replicationOutboxLevelDBJobKey(jobID), nil)
+	if err != nil {
+		t.Fatalf("read durable outbox reference: %v", err)
+	}
+	record, err := unmarshalReplicationOutboxJob(raw)
+	if err != nil {
+		t.Fatalf("decode durable outbox reference: %v", err)
+	}
+	if record.JournalSequence != jobID || len(record.Tasks) != 0 {
+		t.Fatalf("durable outbox record = %#v, want compact journal reference %d without payload tasks", record, jobID)
+	}
+
+	cancel()
+	replicator.Close()
+	if err := outbox.db.Delete(replicationOutboxLevelDBJobKey(jobID), &opt.WriteOptions{Sync: true}); err != nil {
+		t.Fatalf("simulate crash before outbox index persistence: %v", err)
+	}
+	if err := outbox.Close(); err != nil {
+		t.Fatalf("close outbox: %v", err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("close journal: %v", err)
+	}
+
+	reopenedJournal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(reopen) error = %v", err)
+	}
+	defer reopenedJournal.Close()
+	reopenedOutbox, err := OpenLevelDBReplicationOutboxWithOptions(outboxPath, ReplicationOutboxOptions{
+		Codec: ReplicationOutboxCodecBinary,
+	})
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutboxWithOptions(reopen) error = %v", err)
+	}
+	defer reopenedOutbox.Close()
+
+	delivered := make(chan CacheCommandRequest, 1)
+	restoredClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		defer request.Body.Close()
+		var payload CacheCommandRequest
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			return nil, err
+		}
+		delivered <- payload
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"message":"ok"}`)),
+		}, nil
+	})}
+	restored := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:           "node-a",
+		Topology:       topology,
+		Election:       NewElectionStore(topology, ElectionOptions{}),
+		Client:         restoredClient,
+		AsyncQueueSize: 1,
+		AsyncOutbox:    reopenedOutbox,
+		Journal:        reopenedJournal,
+		WireFormat:     CommandWireFormatJSON,
+	})
+	defer restored.Close()
+	select {
+	case payload := <-delivered:
+		if payload.Command != "INTERNALSET" || payload.Key != request.Key {
+			t.Fatalf("restored payload = %#v, want exact legacy-compatible set", payload)
+		}
+		var entry snapshotEntry
+		if err := json.Unmarshal([]byte(payload.Value), &entry); err != nil {
+			t.Fatalf("decode restored snapshot: %v", err)
+		}
+		if entry.String != request.Value {
+			t.Fatalf("restored payload value length = %d, want %d", len(entry.String), len(request.Value))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("journal-backed outbox did not restore and deliver pending payload")
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(reopenedOutbox.jobs()) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if jobs := reopenedOutbox.jobs(); len(jobs) != 0 {
+		t.Fatalf("completed journal-backed outbox jobs = %d, want zero", len(jobs))
+	}
+}
+
 func TestHTTPReplicatorAsyncRetriesFailedDelivery(t *testing.T) {
 	attempts := make(chan struct{}, 2)
 	client := &http.Client{

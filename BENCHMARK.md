@@ -200,6 +200,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
 | Current pass | [Bounded lazy outbox restore](#binary-grouped-replication-outbox), 100k jobs | 466.884 ms; 100,000 resident jobs; 415.1 MB heap | 5.019 ms; 1,024 resident jobs; 3.52 MB heap | 93.03x faster, 97.66x fewer resident jobs, 118.0x lower heap | LevelDB pages are lazy; legacy whole-file JSON still loads its file snapshot |
 | Current pass | [Outbox group commit](#binary-grouped-replication-outbox), 32 writers | JSON sync-each: 50.289 ms; 32 syncs | Binary grouped: 3.542 ms; 1 sync | 14.20x faster, 32x fewer syncs | Cumulative heap is 1.49x higher |
+| Current pass | [Journal-backed outbox](#journal-backed-replication-outbox), 10k durable 4 KiB mutations | Full LevelDB jobs: 136.854 s; 20,993 heap B/op; 2 syncs/op | Journal references: 7.845 s; 26,094 heap B/op; 1 sync/op | 17.44x faster, 2x fewer syncs | Total encoded/disk bytes are effectively unchanged; cumulative heap is 1.24x higher |
 
 ### Incremental Anti-Entropy
 
@@ -710,6 +711,36 @@ behind the restore cursor and preserve FIFO order. Queue status reports
 `durable_backlog=true` until every disk page has entered the bounded channel.
 The legacy whole-file JSON backend also uses a bounded channel, but opening its
 JSON snapshot still materializes the complete file for compatibility.
+
+### Journal-Backed Replication Outbox
+
+With a binary command journal and LevelDB outbox configured together, each
+journal record owns the exact internal replication envelope and LevelDB stores
+only its job ID and journal sequence. The journal is synced before success; the
+reference does not need its own fsync because startup scans journal records newer
+than the durable completion watermark and recreates missing references. Journal
+segments containing unacknowledged envelopes are pinned. Existing full JSON and
+binary jobs remain readable.
+
+```sh
+make run CMD='go test . -run=none -bench=BenchmarkJournalBackedReplicationOutbox -benchtime=100x -count=5 -benchmem'
+```
+
+Five-run medians on the benchmark host:
+
+| Durable 4 KiB mutation path | Time/op | Seconds/10k | Heap B/op | Allocs/op | Encoded B/op | Disk B/op | Syncs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Separate journal + full LevelDB job | 13.685 ms | 136.854 | 20,993 | 18 | 8,550 | 8,591 | 2 |
+| Journal envelope + LevelDB reference | 0.785 ms | 7.845 | 26,094 | 21 | 8,559 | 8,598 | 1 |
+
+The measured latency improves 17.44x and sync work falls 2x. Cumulative heap is
+1.24x higher and allocations are 1.17x higher because the exact envelope is
+encoded as part of the journal transaction. Total storage is essentially flat:
+the payload moves from the LSM job value into the WAL rather than being removed.
+The operational gain is one durability boundary, compact outbox indexing, and
+crash repair without sacrificing exact payload semantics. Fsync latency varies
+substantially by filesystem, so use the included benchmark on deployment-class
+storage before sizing write throughput.
 
 ## Latest Optimization Spot Check
 

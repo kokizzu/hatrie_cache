@@ -297,6 +297,9 @@ func (journal *CommandJournal) pruneSegmentsLocked() error {
 		return nil
 	}
 	for _, segment := range segments[:remove] {
+		if journal.outboxRetainFrom > 0 && segment.end >= journal.outboxRetainFrom {
+			break
+		}
 		if err := os.Remove(segment.path); err != nil {
 			return err
 		}

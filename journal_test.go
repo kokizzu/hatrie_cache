@@ -124,7 +124,6 @@ func TestCommandJournalGroupCommitCoalescesConcurrentDurableWrites(t *testing.T)
 	if err != nil {
 		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
 	}
-	defer journal.Close()
 
 	var syncs atomic.Int64
 	journal.mu.Lock()
@@ -2263,6 +2262,87 @@ func TestSegmentedCommandJournalPrunesOldestWholeSegments(t *testing.T) {
 	}
 	if sequence != 4 || replayed.GetString("key:2") != "value" || replayed.GetString("key:1") != "" {
 		t.Fatalf("Replay() sequence/values = %d/%q/%q, want sequences 2..4", sequence, replayed.GetString("key:2"), replayed.GetString("key:1"))
+	}
+}
+
+func TestSegmentedCommandJournalPinsUnacknowledgedOutboxRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	journal, err := OpenCommandJournalWithOptions(path, CommandJournalOptions{
+		Format:              CommandJournalFormatBinary,
+		GroupCommitMaxBatch: 1,
+		SegmentMaxBytes:     256,
+		RetainedSegments:    1,
+	})
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
+	}
+	defer journal.Close()
+
+	for index := 0; index < 6; index++ {
+		request := CacheCommandRequest{
+			Command: "SETSTR",
+			Key:     fmt.Sprintf("pin:%d", index),
+			Value:   strings.Repeat("value", 64),
+		}
+		job := newReplicationOutboxJob(replicationJob{
+			id: uint64(index + 1),
+			result: ReplicationResult{
+				Command: "SETSTR",
+				Key:     request.Key,
+			},
+			tasks: []replicationTask{{
+				target:  TopologyNode{ID: "node-b", Address: "http://node-b.example"},
+				payload: CacheCommandRequest{Command: "INTERNALDEL", Key: request.Key},
+			}},
+			enqueuedAt: time.Now().UTC(),
+		})
+		journal.mu.Lock()
+		_, writeErr := journal.currentAppendStateLocked()
+		if writeErr == nil {
+			_, _, writeErr = journal.writeWithOutboxWithoutSyncLocked(normalizeJournalRequest(request, time.Now()), &job)
+		}
+		if writeErr == nil {
+			writeErr = journal.syncLocked()
+		}
+		journal.mu.Unlock()
+		if writeErr != nil {
+			t.Fatalf("append journal outbox record %d: %v", index, writeErr)
+		}
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	journal, err = OpenCommandJournalWithOptions(path, CommandJournalOptions{
+		Format:              CommandJournalFormatBinary,
+		GroupCommitMaxBatch: 1,
+		SegmentMaxBytes:     256,
+		RetainedSegments:    1,
+	})
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithOptions(reopen) error = %v", err)
+	}
+	defer journal.Close()
+	segments, err := listCommandJournalSegments(path)
+	if err != nil {
+		t.Fatalf("listCommandJournalSegments() error = %v", err)
+	}
+	if len(segments) <= 1 {
+		t.Fatalf("pinned journal segments = %d, want more than retention limit while jobs are unacknowledged", len(segments))
+	}
+
+	journal.acknowledgeOutboxThrough(journal.Sequence())
+	journal.mu.Lock()
+	err = journal.pruneSegmentsLocked()
+	journal.mu.Unlock()
+	if err != nil {
+		t.Fatalf("pruneSegmentsLocked() error = %v", err)
+	}
+	segments, err = listCommandJournalSegments(path)
+	if err != nil {
+		t.Fatalf("listCommandJournalSegments(after ack) error = %v", err)
+	}
+	if len(segments) > 1 {
+		t.Fatalf("journal segments after ack = %d, want retained limit 1", len(segments))
 	}
 }
 

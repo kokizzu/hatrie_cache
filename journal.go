@@ -17,7 +17,8 @@ import (
 
 const (
 	commandJournalVersion              = 1
-	commandJournalBinaryPayloadVersion = 2
+	commandJournalBinaryPayloadVersion = 3
+	commandJournalBinaryDynamicVersion = 2
 )
 
 const maxCommandJournalBinaryRecordBytes = 1 << 30
@@ -72,10 +73,11 @@ type CommandJournalPullResult struct {
 }
 
 type commandJournalEntry struct {
-	Version    int                 `json:"version"`
-	Sequence   uint64              `json:"sequence"`
-	Checkpoint bool                `json:"checkpoint,omitempty"`
-	Request    CacheCommandRequest `json:"request,omitempty"`
+	Version    int                   `json:"version"`
+	Sequence   uint64                `json:"sequence"`
+	Checkpoint bool                  `json:"checkpoint,omitempty"`
+	Request    CacheCommandRequest   `json:"request,omitempty"`
+	Outbox     *replicationOutboxJob `json:"outbox,omitempty"`
 }
 
 // CommandJournalOptions configures journal encoding, durable group commit, and
@@ -122,6 +124,7 @@ type CommandJournal struct {
 	closeDone           chan struct{}
 	closeErr            error
 	syncHook            func() error
+	outboxRetainFrom    uint64
 }
 
 type commandJournalAppendState struct {
@@ -179,9 +182,13 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		return nil, err
 	}
 	var maxSequence uint64
+	var earliestOutboxSequence uint64
 	validBytes, err := scanCommandJournalSet(path, options.SegmentMaxBytes > 0, func(entry commandJournalEntry) error {
 		if entry.Sequence > maxSequence {
 			maxSequence = entry.Sequence
+		}
+		if entry.Outbox != nil && (earliestOutboxSequence == 0 || entry.Sequence < earliestOutboxSequence) {
+			earliestOutboxSequence = entry.Sequence
 		}
 		return nil
 	})
@@ -215,6 +222,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		groupCommitMaxBatch: options.GroupCommitMaxBatch,
 		segmentMaxBytes:     options.SegmentMaxBytes,
 		retainedSegments:    options.RetainedSegments,
+		outboxRetainFrom:    earliestOutboxSequence,
 		closeDone:           make(chan struct{}),
 	}
 	journal.advanceSequenceLocked(maxSequence)
@@ -820,29 +828,121 @@ func (journal *CommandJournal) appendWithoutSyncLocked(request CacheCommandReque
 }
 
 func (journal *CommandJournal) writeWithoutSyncLocked(request CacheCommandRequest) (int, error) {
+	n, _, err := journal.writeWithOutboxWithoutSyncLocked(request, nil)
+	return n, err
+}
+
+func (journal *CommandJournal) writeWithOutboxWithoutSyncLocked(request CacheCommandRequest, outbox *replicationOutboxJob) (int, uint64, error) {
 	sequence, err := journal.nextAppendSequenceLocked()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
+	}
+	if outbox != nil {
+		if outbox.ID == 0 {
+			outbox.ID = sequence
+		}
+		outbox.JournalSequence = sequence
 	}
 	entry := commandJournalEntry{
 		Version:  commandJournalVersion,
 		Sequence: sequence,
 		Request:  request,
+		Outbox:   outbox,
 	}
 	data, err := marshalCommandJournalEntry(entry, journal.format)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	n, err := journal.file.Write(data)
 	if err != nil {
-		return n, err
+		return n, 0, err
 	}
 	if n != len(data) {
-		return n, io.ErrShortWrite
+		return n, 0, io.ErrShortWrite
 	}
 	journal.markAppendedLocked(sequence)
-	return n, nil
+	if outbox != nil && (journal.outboxRetainFrom == 0 || sequence < journal.outboxRetainFrom) {
+		journal.outboxRetainFrom = sequence
+	}
+	return n, sequence, nil
+}
+
+func (journal *CommandJournal) acknowledgeOutboxThrough(sequence uint64) {
+	if journal == nil || sequence == ^uint64(0) {
+		return
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.outboxRetainFrom == 0 || journal.outboxRetainFrom <= sequence {
+		journal.outboxRetainFrom = sequence + 1
+	}
+}
+
+func (journal *CommandJournal) setOutboxAcknowledgedThrough(sequence uint64) {
+	if journal == nil {
+		return
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if sequence == ^uint64(0) {
+		journal.outboxRetainFrom = sequence
+		return
+	}
+	journal.outboxRetainFrom = sequence + 1
+}
+
+func (journal *CommandJournal) visitOutboxJobsAfter(afterSequence uint64, visit func(replicationOutboxJob) error) error {
+	if journal == nil {
+		return ErrNilCommandJournal
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return ErrCommandJournalClosed
+	}
+	_, err := scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
+		if entry.Sequence <= afterSequence || entry.Outbox == nil {
+			return nil
+		}
+		return visit(*entry.Outbox)
+	})
+	return err
+}
+
+func resolveJournalReplicationJobs(journal *CommandJournal, jobs []replicationJob) []replicationJob {
+	if journal == nil || len(jobs) == 0 {
+		return jobs
+	}
+	wanted := make(map[uint64][]int)
+	for index, job := range jobs {
+		if job.journalSeq != 0 && len(job.tasks) == 0 {
+			wanted[job.journalSeq] = append(wanted[job.journalSeq], index)
+		}
+	}
+	if len(wanted) == 0 {
+		return jobs
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return jobs
+	}
+	_, _ = scanCommandJournalSet(journal.path, journal.segmented(), func(entry commandJournalEntry) error {
+		indexes := wanted[entry.Sequence]
+		if len(indexes) == 0 || entry.Outbox == nil {
+			return nil
+		}
+		resolved := entry.Outbox.replicationJob()
+		for _, index := range indexes {
+			resolved.id = jobs[index].id
+			resolved.journalSeq = jobs[index].journalSeq
+			jobs[index] = resolved
+		}
+		delete(wanted, entry.Sequence)
+		return nil
+	})
+	return jobs
 }
 
 func (journal *CommandJournal) syncLocked() error {
@@ -887,6 +987,9 @@ func (journal *CommandJournal) rollbackAppendWithoutSyncLocked(state commandJour
 func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 	if journal.segmented() {
 		return journal.rotateSegmentLocked(true)
+	}
+	if journal.outboxRetainFrom > 0 && throughSequence >= journal.outboxRetainFrom {
+		throughSequence = journal.outboxRetainFrom - 1
 	}
 	if err := journal.closeAppendFileLocked(); err != nil {
 		return err
@@ -1269,13 +1372,16 @@ func readCommandJournalTail(path string, afterSequence uint64, limit int) (Comma
 
 func validateCommandJournalEntryRequest(entry commandJournalEntry) error {
 	if entry.Checkpoint {
-		if commandJournalRequestEmpty(entry.Request) {
+		if commandJournalRequestEmpty(entry.Request) && entry.Outbox == nil {
 			return nil
 		}
-		return errors.New("hatriecache: command journal checkpoint cannot include a request")
+		return errors.New("hatriecache: command journal checkpoint cannot include a request or outbox job")
 	}
 	if !commandShouldJournal(entry.Request) {
 		return errors.New("hatriecache: command journal entry request is not journalable")
+	}
+	if entry.Outbox != nil && (entry.Outbox.ID == 0 || entry.Outbox.JournalSequence != entry.Sequence || len(entry.Outbox.Tasks) == 0) {
+		return errors.New("hatriecache: command journal outbox job must contain exact tasks for its sequence")
 	}
 	return nil
 }

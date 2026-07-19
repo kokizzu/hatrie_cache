@@ -299,6 +299,11 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		if err != nil {
 			return err
 		}
+		if replicationOutbox != nil && journal != nil {
+			if err := replicationOutbox.AttachJournal(journal); err != nil {
+				return fmt.Errorf("attach replication outbox to journal: %w", err)
+			}
+		}
 		defer closeReplicationOutbox(replicationOutbox, stderr)
 		replicator = hatriecache.NewHTTPReplicator(hatriecache.HTTPReplicatorOptions{
 			Context:                  ctx,
@@ -310,6 +315,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			AsyncMaxAttempts:         cfg.replicationAttempts,
 			AsyncDeadLetterLimit:     cfg.replicationDeadLetterLimit,
 			AsyncOutbox:              replicationOutbox,
+			Journal:                  journal,
 			CircuitBreakerFailures:   cfg.replicationCircuitFailures,
 			CircuitBreakerCooldown:   cfg.replicationCircuitCooldown,
 			WireFormat:               replicationWireFormat(cfg),

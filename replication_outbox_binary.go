@@ -11,7 +11,8 @@ import (
 )
 
 var (
-	replicationOutboxBinaryJobMagic         = []byte{'H', 'C', 'O', 'J', 1}
+	replicationOutboxBinaryJobMagicV1       = []byte{'H', 'C', 'O', 'J', 1}
+	replicationOutboxBinaryJobMagic         = []byte{'H', 'C', 'O', 'J', 2}
 	replicationOutboxBinaryDeadLettersMagic = []byte{'H', 'C', 'O', 'D', 1}
 	replicationOutboxBinaryDeadSeqMagic     = []byte{'H', 'C', 'O', 'S', 1}
 )
@@ -23,6 +24,12 @@ func marshalReplicationOutboxJobBinary(record replicationOutboxJob) ([]byte, err
 	}
 	writer := newBinaryFieldWriter(replicationOutboxBinaryJobMagic, len(result)+128)
 	writer.writeUvarint(record.ID)
+	writer.writeUvarint(record.JournalSequence)
+	compactReference := record.JournalSequence != 0 && len(record.Tasks) == 0
+	writer.writeBool(compactReference)
+	if compactReference {
+		return writer.bytes(), nil
+	}
 	writer.writeBytes(result)
 	writer.writeBool(!record.EnqueuedAt.IsZero())
 	if !record.EnqueuedAt.IsZero() {
@@ -42,7 +49,13 @@ func marshalReplicationOutboxJobBinary(record replicationOutboxJob) ([]byte, err
 }
 
 func unmarshalReplicationOutboxJob(data []byte) (replicationOutboxJob, error) {
-	if !bytes.HasPrefix(data, replicationOutboxBinaryJobMagic) {
+	version := byte(0)
+	switch {
+	case bytes.HasPrefix(data, replicationOutboxBinaryJobMagic):
+		version = 2
+	case bytes.HasPrefix(data, replicationOutboxBinaryJobMagicV1):
+		version = 1
+	default:
 		var record replicationOutboxJob
 		if err := json.Unmarshal(data, &record); err != nil {
 			return replicationOutboxJob{}, err
@@ -54,11 +67,26 @@ func unmarshalReplicationOutboxJob(data []byte) (replicationOutboxJob, error) {
 	if err != nil {
 		return replicationOutboxJob{}, err
 	}
+	record := replicationOutboxJob{ID: id}
+	if version >= 2 {
+		if record.JournalSequence, err = reader.readUvarint(); err != nil {
+			return replicationOutboxJob{}, err
+		}
+		compactReference, err := reader.readBool()
+		if err != nil {
+			return replicationOutboxJob{}, err
+		}
+		if compactReference {
+			if record.JournalSequence == 0 || !reader.done() {
+				return replicationOutboxJob{}, errors.New("hatriecache: invalid replication outbox journal reference")
+			}
+			return record, nil
+		}
+	}
 	resultData, err := reader.readBytes()
 	if err != nil {
 		return replicationOutboxJob{}, err
 	}
-	record := replicationOutboxJob{ID: id}
 	if err := json.Unmarshal(resultData, &record.Result); err != nil {
 		return replicationOutboxJob{}, err
 	}

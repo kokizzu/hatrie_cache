@@ -836,6 +836,24 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
 		return response, true
 	}
+	if options.Journal != nil && options.Replicator.usesJournalOutbox(options.Journal) {
+		effects := newPublicCommandBatchEffects(options)
+		effects.batch = false
+		options.Journal.mu.Lock()
+		response, stopped := effects.execute(ctx, trie, request, false, func() CacheCommandResponse {
+			return trie.ExecuteCommand(request)
+		})
+		if err := effects.commitLocked(trie); err != nil {
+			response = commandError(err.Error())
+			stopped = false
+		}
+		options.Journal.mu.Unlock()
+		if response.OK {
+			options.ReplicationSafety.Commit(replicationToken)
+		}
+		effects.publish(ctx)
+		return response, stopped
+	}
 	if options.Journal != nil {
 		response = options.Journal.ExecuteCommand(trie, request)
 	} else {
@@ -984,18 +1002,25 @@ type publicCommandBatchEffects struct {
 	rollback          publicCommandBatchRollback
 	dirtyRequests     []CacheCommandRequest
 	planned           plannedReplicationBatch
+	deferJournal      bool
+	journalRequests   []CacheCommandRequest
+	journalJob        replicationJob
+	batch             bool
 	infrastructureErr error
 }
 
 func newPublicCommandBatchEffects(options commandExecutionOptions) *publicCommandBatchEffects {
-	return &publicCommandBatchEffects{
+	effects := &publicCommandBatchEffects{
 		journal:       options.Journal,
 		dirtyTracker:  options.DirtyTracker,
 		replicator:    options.Replicator,
 		nodeName:      options.NodeName,
 		election:      options.Election,
 		enforceLeader: options.EnforceLeaderWrites,
+		batch:         true,
 	}
+	effects.deferJournal = effects.replicator.usesJournalOutbox(effects.journal)
+	return effects
 }
 
 func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *HatTrie, request CacheCommandRequest, trieLocked bool, execute func() CacheCommandResponse) (CacheCommandResponse, bool) {
@@ -1007,7 +1032,9 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 	}
 
 	journaled := effects.journal != nil && commandShouldJournal(request)
+	deferredJournal := journaled && effects.deferJournal
 	var appendState commandJournalAppendState
+	var journalRequest CacheCommandRequest
 	if journaled {
 		key := strings.TrimSpace(request.Key)
 		if err := validateKey(key); err == nil {
@@ -1024,8 +1051,8 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 				return commandError(captureErr.Error()), true
 			}
 		}
-		journalRequest := normalizeJournalRequest(request, trie.currentTime())
-		if !effects.appendStarted {
+		journalRequest = normalizeJournalRequest(request, trie.currentTime())
+		if !deferredJournal && !effects.appendStarted {
 			initial, err := effects.journal.currentAppendStateLocked()
 			if err != nil {
 				effects.infrastructureErr = err
@@ -1035,17 +1062,19 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 			effects.appendOffset = initial.offset
 			effects.appendStarted = true
 		}
-		appendState = commandJournalAppendState{
-			offset:            effects.appendOffset,
-			nextSequence:      effects.journal.nextSequence,
-			sequenceExhausted: effects.journal.sequenceExhausted,
-		}
-		n, err := effects.journal.writeWithoutSyncLocked(journalRequest)
-		effects.appendOffset += int64(n)
-		if err != nil {
-			err = effects.journal.rollbackFailedAppendLocked(appendState, err)
-			effects.infrastructureErr = err
-			return commandError(err.Error()), true
+		if !deferredJournal {
+			appendState = commandJournalAppendState{
+				offset:            effects.appendOffset,
+				nextSequence:      effects.journal.nextSequence,
+				sequenceExhausted: effects.journal.sequenceExhausted,
+			}
+			n, err := effects.journal.writeWithoutSyncLocked(journalRequest)
+			effects.appendOffset += int64(n)
+			if err != nil {
+				err = effects.journal.rollbackFailedAppendLocked(appendState, err)
+				effects.infrastructureErr = err
+				return commandError(err.Error()), true
+			}
 		}
 	}
 
@@ -1062,6 +1091,9 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 	}
 	if journaled {
 		effects.appended = true
+		if deferredJournal {
+			effects.journalRequests = append(effects.journalRequests, journalRequest)
+		}
 	}
 	if effects.dirtyTracker != nil {
 		effects.dirtyRequests = append(effects.dirtyRequests, request)
@@ -1086,8 +1118,53 @@ func (effects *publicCommandBatchEffects) commitLocked(trie *HatTrie) error {
 	if effects.journal == nil || !effects.appended {
 		return nil
 	}
+	if effects.deferJournal {
+		if err := effects.appendDeferredJournalLocked(); err != nil {
+			return effects.rollbackLocked(trie, err)
+		}
+	}
 	if err := effects.journal.syncLocked(); err != nil {
 		return effects.rollbackLocked(trie, err)
+	}
+	return nil
+}
+
+func (effects *publicCommandBatchEffects) appendDeferredJournalLocked() error {
+	initial, err := effects.journal.currentAppendStateLocked()
+	if err != nil {
+		return err
+	}
+	effects.initialAppend = initial
+	effects.appendStarted = true
+	effects.appendOffset = initial.offset
+	var outbox *replicationOutboxJob
+	result, tasks := aggregatePlannedReplication(effects.planned)
+	if !effects.batch && effects.planned.entries == 1 {
+		result = cloneReplicationResult(effects.planned.last)
+	}
+	if len(tasks) > 0 {
+		record := newReplicationOutboxJob(replicationJob{
+			id:         effects.replicator.reserveJournalOutboxID(),
+			result:     result,
+			tasks:      tasks,
+			enqueuedAt: time.Now().UTC(),
+		})
+		outbox = &record
+	}
+	for index, request := range effects.journalRequests {
+		var record *replicationOutboxJob
+		if index == len(effects.journalRequests)-1 {
+			record = outbox
+		}
+		n, sequence, err := effects.journal.writeWithOutboxWithoutSyncLocked(request, record)
+		effects.appendOffset += int64(n)
+		if err != nil {
+			return effects.journal.rollbackFailedAppendLocked(initial, err)
+		}
+		if record != nil {
+			effects.journalJob = record.replicationJob()
+			effects.journalJob.journalSeq = sequence
+		}
 	}
 	return nil
 }
@@ -1110,7 +1187,11 @@ func (effects *publicCommandBatchEffects) publish(ctx context.Context) {
 		effects.dirtyTracker.markCommand(request)
 	}
 	if effects.replicator != nil && effects.planned.seen {
-		effects.replicator.replicatePlannedBatch(ctx, effects.planned)
+		if effects.journalJob.journalSeq != 0 {
+			effects.replicator.replicateJournalJob(ctx, effects.journalJob)
+		} else {
+			effects.replicator.replicatePlannedBatch(ctx, effects.planned)
+		}
 	}
 }
 

@@ -88,7 +88,14 @@ func marshalCommandJournalEntryBinaryPayload(entry commandJournalEntry) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	capacity, err := commandJournalEntryBinaryPayloadCapacity(entry, len(values), len(pairs))
+	var outbox []byte
+	if entry.Outbox != nil {
+		outbox, err = marshalReplicationOutboxJobBinary(*entry.Outbox)
+		if err != nil {
+			return nil, err
+		}
+	}
+	capacity, err := commandJournalEntryBinaryPayloadCapacity(entry, len(values), len(pairs), len(outbox))
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +106,7 @@ func marshalCommandJournalEntryBinaryPayload(entry commandJournalEntry) ([]byte,
 	if err := writeCommandJournalRequestBinaryFields(&writer, entry.Request, values, pairs); err != nil {
 		return nil, err
 	}
+	writer.writeBytes(outbox)
 	return writer.bytes(), nil
 }
 
@@ -106,14 +114,23 @@ func commandJournalBinaryRecordCapacity(payloadBytes int) int {
 	return len(commandJournalBinaryMagic) + binaryUvarintSize(uint64(payloadBytes)) + payloadBytes
 }
 
-func commandJournalEntryBinaryPayloadCapacity(entry commandJournalEntry, valuesBytes int, pairsBytes int) (int, error) {
+func commandJournalEntryBinaryPayloadCapacity(entry commandJournalEntry, valuesBytes int, pairsBytes int, optionalOutboxBytes ...int) (int, error) {
+	outboxBytes := 0
+	includeOutbox := len(optionalOutboxBytes) > 0
+	if len(optionalOutboxBytes) > 0 {
+		outboxBytes = optionalOutboxBytes[0]
+	}
 	total := int64(binaryUvarintSize(commandJournalBinaryPayloadVersion))
 	var err error
 	requestSize, err := commandJournalRequestBinarySize(entry.Request, valuesBytes, pairsBytes)
 	if err != nil {
 		return 0, err
 	}
-	for _, size := range []int64{int64(binaryUvarintSize(entry.Sequence)), 1, requestSize} {
+	sizes := []int64{int64(binaryUvarintSize(entry.Sequence)), 1, requestSize}
+	if includeOutbox {
+		sizes = append(sizes, commandJournalBinaryBytesSize(outboxBytes))
+	}
+	for _, size := range sizes {
 		total, err = addCommandJournalBinaryPayloadSize(total, size)
 		if err != nil {
 			return 0, err
@@ -310,7 +327,7 @@ func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, e
 	if err != nil {
 		return commandJournalEntry{}, err
 	}
-	if version != commandJournalVersion && version != commandJournalBinaryPayloadVersion {
+	if version != commandJournalVersion && version != commandJournalBinaryDynamicVersion && version != commandJournalBinaryPayloadVersion {
 		return commandJournalEntry{}, errors.New("hatriecache: unsupported journal version")
 	}
 	if version > uint64(int(^uint(0)>>1)) {
@@ -328,6 +345,20 @@ func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, e
 	if err != nil {
 		return commandJournalEntry{}, err
 	}
+	var outbox *replicationOutboxJob
+	if version >= commandJournalBinaryPayloadVersion {
+		data, err := reader.readBytes()
+		if err != nil {
+			return commandJournalEntry{}, err
+		}
+		if len(data) > 0 {
+			record, err := unmarshalReplicationOutboxJob(data)
+			if err != nil {
+				return commandJournalEntry{}, err
+			}
+			outbox = &record
+		}
+	}
 	if !reader.done() {
 		return commandJournalEntry{}, errors.New("hatriecache: invalid trailing binary command journal payload data")
 	}
@@ -336,6 +367,7 @@ func decodeCommandJournalEntryBinaryPayload(data []byte) (commandJournalEntry, e
 		Sequence:   sequence,
 		Checkpoint: checkpoint,
 		Request:    request,
+		Outbox:     outbox,
 	}
 	if err := validateCommandJournalEntry(entry); err != nil {
 		return commandJournalEntry{}, err
@@ -404,7 +436,7 @@ func readCommandJournalRequestBinary(reader *binaryFieldReader, version uint64) 
 }
 
 func decodeJournalDynamicValues(data []byte, version uint64, values *Slice) error {
-	if version == commandJournalBinaryPayloadVersion && snapshotValueDataIsBinary(data) {
+	if version >= commandJournalBinaryDynamicVersion && snapshotValueDataIsBinary(data) {
 		value, err := unmarshalSnapshotValueBinary(data)
 		if err != nil {
 			return err
@@ -420,7 +452,7 @@ func decodeJournalDynamicValues(data []byte, version uint64, values *Slice) erro
 }
 
 func decodeJournalDynamicPairs(data []byte, version uint64, pairs *Map) error {
-	if version == commandJournalBinaryPayloadVersion && snapshotValueDataIsBinary(data) {
+	if version >= commandJournalBinaryDynamicVersion && snapshotValueDataIsBinary(data) {
 		value, err := unmarshalSnapshotValueBinary(data)
 		if err != nil {
 			return err

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -458,6 +459,118 @@ func BenchmarkReplicationOutboxDurableEnqueue(b *testing.B) {
 			b.ReportMetric(float64(store.levelDBSyncWriteCount())/float64(b.N), "sync_writes/op")
 		})
 	}
+}
+
+func BenchmarkJournalBackedReplicationOutbox(b *testing.B) {
+	for _, journalBacked := range []bool{false, true} {
+		name := "LegacyFullOutbox"
+		if journalBacked {
+			name = "JournalReference"
+		}
+		b.Run(name, func(b *testing.B) {
+			dir := b.TempDir()
+			journal, err := OpenCommandJournalWithOptions(filepath.Join(dir, "commands.journal"), CommandJournalOptions{
+				Format:              CommandJournalFormatBinary,
+				GroupCommitMaxBatch: 1,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			outbox, err := OpenLevelDBReplicationOutboxWithOptions(filepath.Join(dir, "outbox"), ReplicationOutboxOptions{
+				Codec: ReplicationOutboxCodecBinary,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			if journalBacked {
+				if err := outbox.AttachJournal(journal); err != nil {
+					b.Fatal(err)
+				}
+			}
+			request := CacheCommandRequest{Command: "SETSTR", Key: "benchmark:key", Value: strings.Repeat("payload-", 512)}
+			jobTemplate := replicationOutboxBenchmarkJob(1, 4096)
+			fullRecord := newReplicationOutboxJob(jobTemplate)
+			fullBytes, err := marshalReplicationOutboxJobBinary(fullRecord)
+			if err != nil {
+				b.Fatal(err)
+			}
+			journalEntry := commandJournalEntry{Version: commandJournalVersion, Sequence: 1, Request: request}
+			if journalBacked {
+				journalRecord := fullRecord
+				journalRecord.JournalSequence = 1
+				journalEntry.Outbox = &journalRecord
+			}
+			journalBytes, err := marshalCommandJournalEntry(journalEntry, CommandJournalFormatBinary)
+			if err != nil {
+				b.Fatal(err)
+			}
+			encodedBytes := len(journalBytes) + len(fullBytes)
+			if journalBacked {
+				referenceBytes, err := marshalReplicationOutboxJobBinary(replicationOutboxJob{ID: 1, JournalSequence: 1})
+				if err != nil {
+					b.Fatal(err)
+				}
+				encodedBytes = len(journalBytes) + len(referenceBytes)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				job := jobTemplate
+				job.id = uint64(iteration + 1)
+				journal.mu.Lock()
+				if journalBacked {
+					record := newReplicationOutboxJob(job)
+					_, sequence, err := journal.writeWithOutboxWithoutSyncLocked(request, &record)
+					job.journalSeq = sequence
+					if err == nil {
+						err = journal.syncLocked()
+					}
+					journal.mu.Unlock()
+					if err != nil {
+						b.Fatal(err)
+					}
+				} else {
+					_, err := journal.appendLocked(request)
+					journal.mu.Unlock()
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+				if err := outbox.putJob(job); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			if err := outbox.Close(); err != nil {
+				b.Fatal(err)
+			}
+			if err := journal.Close(); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportMetric(float64(encodedBytes), "encoded_B/op")
+			b.ReportMetric(float64(b.N+int(outbox.levelDBSyncWriteCount()))/float64(b.N), "sync_writes/op")
+			b.ReportMetric(float64(replicationBenchmarkDirectoryBytes(b, dir))/float64(b.N), "disk_B/op")
+		})
+	}
+}
+
+func replicationBenchmarkDirectoryBytes(b *testing.B, path string) int64 {
+	b.Helper()
+	var total int64
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	return total
 }
 
 func BenchmarkReplicationOutboxReplay10k(b *testing.B) {

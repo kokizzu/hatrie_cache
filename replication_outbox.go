@@ -31,6 +31,7 @@ type ReplicationOutboxStore struct {
 	writeCond         *sync.Cond
 	closing           bool
 	levelDBSyncWrites uint64
+	journal           *CommandJournal
 }
 
 type ReplicationOutboxCodec string
@@ -64,6 +65,7 @@ var (
 	replicationOutboxLevelDBJobPrefix      = []byte("job:")
 	replicationOutboxLevelDBDeadSeqKey     = []byte("meta:dead-seq")
 	replicationOutboxLevelDBDeadLettersKey = []byte("meta:dead-letters")
+	replicationOutboxLevelDBJournalAckKey  = []byte("meta:journal-ack")
 )
 
 type replicationOutboxSnapshot struct {
@@ -73,10 +75,11 @@ type replicationOutboxSnapshot struct {
 }
 
 type replicationOutboxJob struct {
-	ID         uint64                  `json:"id"`
-	Result     ReplicationResult       `json:"result"`
-	Tasks      []replicationOutboxTask `json:"tasks"`
-	EnqueuedAt time.Time               `json:"enqueued_at"`
+	ID              uint64                  `json:"id"`
+	JournalSequence uint64                  `json:"journal_sequence,omitempty"`
+	Result          ReplicationResult       `json:"result"`
+	Tasks           []replicationOutboxTask `json:"tasks"`
+	EnqueuedAt      time.Time               `json:"enqueued_at"`
 }
 
 type replicationOutboxTask struct {
@@ -158,6 +161,72 @@ func ParseReplicationOutboxCodec(value string) (ReplicationOutboxCodec, error) {
 	}
 }
 
+// AttachJournal enables compact outbox references backed by exact replication
+// envelopes in command journal records. Existing full outbox jobs remain valid.
+func (store *ReplicationOutboxStore) AttachJournal(journal *CommandJournal) error {
+	if store == nil || journal == nil {
+		return nil
+	}
+	store.mu.Lock()
+	if !store.levelDB || store.db == nil || store.closing {
+		store.mu.Unlock()
+		return nil
+	}
+	store.journal = journal
+	acknowledged := uint64(0)
+	if data, err := store.db.Get(replicationOutboxLevelDBJournalAckKey, nil); err == nil {
+		acknowledged, _ = unmarshalReplicationOutboxDeadSeq(data)
+	}
+	store.mu.Unlock()
+
+	journal.setOutboxAcknowledgedThrough(acknowledged)
+	const reconcileBatchSize = 512
+	batch := new(leveldb.Batch)
+	pending := 0
+	flush := func() error {
+		if pending == 0 {
+			return nil
+		}
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		if store.db == nil || store.closing {
+			return errReplicationOutboxClosed
+		}
+		if err := store.db.Write(batch, nil); err != nil {
+			return err
+		}
+		batch.Reset()
+		pending = 0
+		return nil
+	}
+	err := journal.visitOutboxJobsAfter(acknowledged, func(record replicationOutboxJob) error {
+		key := replicationOutboxLevelDBJobKey(record.ID)
+		store.mu.Lock()
+		exists, err := store.db.Has(key, nil)
+		store.mu.Unlock()
+		if err != nil || exists {
+			return err
+		}
+		data, err := store.marshalJob(replicationOutboxJob{
+			ID:              record.ID,
+			JournalSequence: record.JournalSequence,
+		})
+		if err != nil {
+			return err
+		}
+		batch.Put(key, data)
+		pending++
+		if pending == reconcileBatchSize {
+			return flush()
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return flush()
+}
+
 func (store *ReplicationOutboxStore) Close() error {
 	if store == nil {
 		return nil
@@ -181,15 +250,18 @@ func (store *ReplicationOutboxStore) jobs() []replicationJob {
 		return nil
 	}
 	store.mu.Lock()
-	defer store.mu.Unlock()
+	var jobs []replicationJob
 	if store.levelDB {
-		return store.levelDBJobsLocked()
+		jobs = store.levelDBJobsLocked()
+	} else {
+		jobs = make([]replicationJob, 0, len(store.snapshot.Jobs))
+		for _, record := range store.snapshot.Jobs {
+			jobs = append(jobs, record.replicationJob())
+		}
 	}
-	jobs := make([]replicationJob, 0, len(store.snapshot.Jobs))
-	for _, record := range store.snapshot.Jobs {
-		jobs = append(jobs, record.replicationJob())
-	}
-	return jobs
+	journal := store.journal
+	store.mu.Unlock()
+	return resolveJournalReplicationJobs(journal, jobs)
 }
 
 func (store *ReplicationOutboxStore) maxJobID() uint64 {
@@ -215,9 +287,11 @@ func (store *ReplicationOutboxStore) jobPage(afterID uint64, limit int) ([]repli
 		return nil, afterID, false
 	}
 	store.mu.Lock()
-	defer store.mu.Unlock()
 	if store.levelDB {
-		return store.levelDBJobPageLocked(afterID, limit)
+		jobs, cursor, hasMore := store.levelDBJobPageLocked(afterID, limit)
+		journal := store.journal
+		store.mu.Unlock()
+		return resolveJournalReplicationJobs(journal, jobs), cursor, hasMore
 	}
 	capacity := limit
 	if len(store.snapshot.Jobs) < capacity {
@@ -237,7 +311,9 @@ func (store *ReplicationOutboxStore) jobPage(afterID uint64, limit int) ([]repli
 		jobs = append(jobs, record.replicationJob())
 		cursor = record.ID
 	}
-	return jobs, cursor, hasMore
+	journal := store.journal
+	store.mu.Unlock()
+	return resolveJournalReplicationJobs(journal, jobs), cursor, hasMore
 }
 
 func (store *ReplicationOutboxStore) deadLetters() (uint64, []ReplicationDeadLetter) {
@@ -258,13 +334,20 @@ func (store *ReplicationOutboxStore) putJob(job replicationJob) error {
 	}
 	record := newReplicationOutboxJob(job)
 	if store.levelDB {
+		if job.journalSeq != 0 && store.journal != nil {
+			record = replicationOutboxJob{ID: job.id, JournalSequence: job.journalSeq}
+		}
 		data, err := store.marshalJob(record)
 		if err != nil {
 			return err
 		}
-		return store.writeLevelDB(replicationOutboxWriteRequest{
+		request := replicationOutboxWriteRequest{
 			puts: []replicationOutboxKeyValue{{key: replicationOutboxLevelDBJobKey(job.id), value: data}},
-		})
+		}
+		if record.JournalSequence != 0 && len(record.Tasks) == 0 {
+			return store.writeLevelDBUnsynced(request)
+		}
+		return store.writeLevelDB(request)
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -283,22 +366,36 @@ func (store *ReplicationOutboxStore) deleteJob(id uint64) error {
 }
 
 func (store *ReplicationOutboxStore) completeJob(id uint64, deadSeq uint64, deadLetters []ReplicationDeadLetter, updateDeadLetters bool) error {
+	return store.completeJournalJob(id, 0, deadSeq, deadLetters, updateDeadLetters)
+}
+
+func (store *ReplicationOutboxStore) completeJournalJob(id uint64, journalSequence uint64, deadSeq uint64, deadLetters []ReplicationDeadLetter, updateDeadLetters bool) error {
 	if store == nil || id == 0 {
 		return nil
 	}
 	if store.levelDB {
 		request := replicationOutboxWriteRequest{deletes: [][]byte{replicationOutboxLevelDBJobKey(id)}}
+		if journalSequence != 0 {
+			request.puts = append(request.puts, replicationOutboxKeyValue{
+				key:   replicationOutboxLevelDBJournalAckKey,
+				value: marshalReplicationOutboxDeadSeqBinary(journalSequence),
+			})
+		}
 		if updateDeadLetters {
 			deadSeqData, deadLettersData, err := store.marshalDeadLetters(deadSeq, deadLetters)
 			if err != nil {
 				return err
 			}
-			request.puts = []replicationOutboxKeyValue{
-				{key: replicationOutboxLevelDBDeadSeqKey, value: deadSeqData},
-				{key: replicationOutboxLevelDBDeadLettersKey, value: deadLettersData},
-			}
+			request.puts = append(request.puts,
+				replicationOutboxKeyValue{key: replicationOutboxLevelDBDeadSeqKey, value: deadSeqData},
+				replicationOutboxKeyValue{key: replicationOutboxLevelDBDeadLettersKey, value: deadLettersData},
+			)
 		}
-		return store.writeLevelDB(request)
+		err := store.writeLevelDB(request)
+		if err == nil && journalSequence != 0 && store.journal != nil {
+			store.journal.acknowledgeOutboxThrough(journalSequence)
+		}
+		return err
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -396,6 +493,20 @@ func (store *ReplicationOutboxStore) writeLevelDB(request replicationOutboxWrite
 		store.flushLevelDBWrites()
 	}
 	return <-request.done
+}
+
+func (store *ReplicationOutboxStore) writeLevelDBUnsynced(request replicationOutboxWriteRequest) error {
+	if store == nil {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if !store.levelDB || store.db == nil || store.closing {
+		return errReplicationOutboxClosed
+	}
+	batch := new(leveldb.Batch)
+	appendReplicationOutboxWriteRequest(batch, &request)
+	return store.db.Write(batch, nil)
 }
 
 func (store *ReplicationOutboxStore) flushLevelDBWrites() {
@@ -592,10 +703,11 @@ func newReplicationOutboxJob(job replicationJob) replicationOutboxJob {
 		})
 	}
 	return replicationOutboxJob{
-		ID:         job.id,
-		Result:     cloneReplicationResult(job.result),
-		Tasks:      tasks,
-		EnqueuedAt: job.enqueuedAt,
+		ID:              job.id,
+		JournalSequence: job.journalSeq,
+		Result:          cloneReplicationResult(job.result),
+		Tasks:           tasks,
+		EnqueuedAt:      job.enqueuedAt,
 	}
 }
 
@@ -610,6 +722,7 @@ func (record replicationOutboxJob) replicationJob() replicationJob {
 	}
 	return replicationJob{
 		id:         record.ID,
+		journalSeq: record.JournalSequence,
 		result:     cloneReplicationResult(record.Result),
 		tasks:      tasks,
 		enqueuedAt: record.EnqueuedAt,

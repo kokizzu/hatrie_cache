@@ -1140,6 +1140,16 @@ Concurrent durable puts use a 1 ms group-commit window by default; set
 `REPLICATION_OUTBOX_BATCH_WINDOW=0` to sync every put independently. Every
 caller still waits for its group sync before success. Keep the outbox on durable
 local storage and do not share the same outbox path between nodes.
+When both `JOURNAL_PATH` and a LevelDB `REPLICATION_OUTBOX_PATH` are configured,
+the server automatically stores the exact post-mutation replication envelope in
+the command journal and only an unsynced sequence reference in LevelDB. The
+journal fsync is the durability boundary; restart reconciliation recreates a
+missing reference, a synced completion watermark prevents acknowledged jobs
+from returning, and segmented journals retain records needed by pending jobs.
+This halves sync writes on a single durable enqueue. To retain the previous
+full-job outbox behavior, omit `JOURNAL_PATH` or select
+`REPLICATION_OUTBOX_FORMAT=json`. The JSON fallback remains independently
+durable and inspectable but cannot share the journal fsync.
 After the final async retry fails, the job is retained in a bounded dead-letter
 list without command values; tune `REPLICATION_DEAD_LETTER_LIMIT` or set it to
 `0` to disable retention.
