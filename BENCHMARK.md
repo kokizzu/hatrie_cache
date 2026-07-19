@@ -181,11 +181,19 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
+| Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
+| Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
+| Current pass | [Merkle equal-state preflight](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 18.272 ms; 560,720 heap B | Merkle: 0.993 ms; 233,744 heap B | 18.40x faster, 2.40x lower heap | First activation builds a 29.60 B/key index |
+| Current pass | [Merkle 1%-changed repair](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 55.401 ms; 240,086 wire B | Merkle: 25.443 ms; 132,820 wire B | 2.18x faster, 1.81x smaller wire | Active write tracking is 1.88x slower |
 | Final architecture | [Sequential gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 14,914 ns/command | 3.96x faster, 6.73x lower heap | Request/response remains sequential |
 | Final architecture | [Pipelined gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 3,118 ns/command | 18.94x faster, 7.67x lower heap, 6.57x fewer allocations | Requires concurrent sender/receiver with ordered response pairing |
+| Current pass | [Pipelined live gRPC replication](#pipelined-live-grpc-replication), 10k writes | HTTP: 178.079 ms; 1,868,894 wire B | gRPC: 167.797 ms; 1,081,746 wire B | 1.06x faster, 1.73x smaller wire | Requires native gRPC listener; HTTP remains fallback |
+| Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
+| Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
+| Current pass | [Outbox group commit](#binary-grouped-replication-outbox), 32 writers | JSON sync-each: 50.289 ms; 32 syncs | Binary grouped: 3.542 ms; 1 sync | 14.20x faster, 32x fewer syncs | Cumulative heap is 1.49x higher |
 
 ### Incremental Anti-Entropy
 
@@ -366,6 +374,30 @@ benchmark filesystem. A deterministic 16-caller test with a 20 ms collection
 window records exactly one `fsync` and verifies that neither response nor trie
 mutation occurs before that sync completes.
 
+### Durable Public Batches
+
+This benchmark compares 10,000 individually journaled `SETSTR` commands with
+the same commands in three public `BATCH` requests. The journal uses binary
+records and `GroupCommitMaxBatch=1`, isolating the public batch's one-sync
+commit from background group commit.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkPublicScalarBatchJournalDurability10K -benchtime=1x -count=5 -benchmem'
+```
+
+| Mode | Time/10k writes | Journal syncs | Heap B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Individual durable commands | 9.821 s | 10,000 | 4,809,288 | 40,052 | baseline |
+| Public batches, max 4,096 items | 29.051 ms | 3 | 5,771,560 | 40,310 | 338x faster, 3,333x fewer syncs |
+
+The batch path uses 1.20x cumulative heap and 0.64% more allocations to retain
+responses, rollback state, and side effects until durability succeeds. There is
+no remote-wire comparison because this fixture measures local journal
+durability; a client additionally saves up to 1,000 HTTP/gRPC round trips. A
+journal write or sync failure rolls back journal bytes and in-memory mutations.
+An ordinary failing subcommand preserves prior successful items, matching
+public pipeline semantics.
+
 ### Point-in-Time Snapshot Capture
 
 Snapshots now copy a consistent point-in-time entry set while holding the trie
@@ -396,6 +428,113 @@ capture. Snapshot jobs on one journal are serialized to prevent overlapping
 captures and compaction races. Captured entries use fixed 4,096-entry pages so
 no allocation trusts an unbounded reported key count or requires one dataset-
 sized contiguous block.
+
+### Bounded-Page Snapshot Capture
+
+The follow-up capture scans 256 entries per lock acquisition and tracks writes
+between pages, then reconciles changed keys at the journal barrier. This keeps
+the point-in-time guarantee while bounding individual lock holds.
+
+```sh
+make bench-big-wins BIG_WINS_BENCH=BenchmarkBigWins/Snapshot BIG_WINS_KEYS=100000 BIG_WINS_OPS=100000 BENCHTIME=1x COUNT=5
+```
+
+These are five-run medians from the same current checkout and the pre-change
+`baf19d6` worktree.
+
+| Metric | Whole-capture lock | Bounded pages | Change |
+| --- | ---: | ---: | ---: |
+| Maximum concurrent read pause | 61,740,215 ns | 2,821,866 ns | 21.88x shorter, 95.4% lower |
+| Total snapshot duration | 165,941,910 ns | 167,254,026 ns | 0.8% higher |
+| Heap allocation/snapshot | 47,546,264 B | 47,507,544 B | 0.1% lower |
+| Benchmark process peak RSS | 92,136 KiB | 95,492 KiB | 3.6% higher |
+
+Snapshot bytes and format are unchanged. The added mutation tracker is bounded
+by keys changed during capture rather than total data size; a write-heavy
+capture can therefore retain additional temporary key metadata until the final
+barrier.
+
+### Pipelined Live gRPC Replication
+
+One long-lived gRPC stream per target now has a dedicated sender/receiver loop
+and a configurable acknowledgement window (32 by default). Acknowledgements are
+matched by sequence, while replay safety is scoped per key so unrelated writes
+may complete out of order without being discarded.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationLiveTransport10K -benchtime=1x -count=5 -benchmem'
+```
+
+The fixture replicates 10,000 unique writes from 32 callers to one local target.
+Both rows complete with all 10,000 target keys; values are five-run medians.
+
+| Transport | Time/10k | Wire B/op | Heap B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| HTTP/protobuf | 178,078,879 ns | 1,868,894 | 352,841,520 | 3,634,481 | baseline |
+| Pipelined gRPC stream | 167,797,441 ns | 1,081,746 | 315,918,328 | 2,818,945 | 1.06x CPU, 1.73x wire, 1.12x heap, 1.29x allocations |
+
+The pre-change 32-caller path delivered only 4,402 of 10,000 keys in the same
+correctness fixture because a global source sequence rejected valid out-of-order
+writes, so it has no valid performance row. The new path's main win is complete,
+bounded concurrent delivery; HTTP remains the configurable fallback. Raising
+the window can increase in-flight message memory and should be load-tested
+against the target's latency and HTTP/2 flow-control limits.
+
+### Hierarchical Merkle Anti-Entropy
+
+The unfiltered single-shard path now compares a 1,024-leaf incremental Merkle
+root before requesting key digests. Equal replicas need one fixed-size request;
+a sparse mismatch fetches only differing leaves. Prefix and multi-shard syncs
+retain the compatible sorted-digest implementation.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIncremental -benchtime=1x -count=5 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIndexBuild -benchtime=1x -count=5 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleWriteTracking -benchtime=100000x -count=5 -benchmem'
+```
+
+Both replicas contain 10,000 deterministic incompressible 1 KiB values. Sparse
+repair changes 100 target values. Values are five-run medians.
+
+| State | Path | Time/op | Wire B/op | Heap B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Equal | Sorted digest | 18,271,905 ns | 215 | 560,720 | 20,538 |
+| Equal | Merkle root | 992,977 ns | 228 | 233,744 | 451 |
+| 1% changed | Sorted digest | 55,401,391 ns | 240,086 | 9,983,288 | 98,797 |
+| 1% changed | Differing Merkle leaves | 25,443,399 ns | 132,820 | 3,149,024 | 47,664 |
+
+Equal-state CPU improves 18.40x, heap 2.40x, and allocations 45.54x; its fixed
+wire request is 13 bytes larger. Sparse repair improves CPU 2.18x, wire 1.81x,
+heap 3.17x, and allocations 2.07x. Initial index construction takes 5.920 ms,
+730,496 heap bytes, and 10,059 allocations; the active index retains 29.60
+B/key. Subsequent tracked writes rise from 272.1 to 511.5 ns (1.88x slower)
+with the same 16 B and one allocation per write. The index therefore remains
+dormant until the first eligible anti-entropy sync.
+
+### Binary Grouped Replication Outbox
+
+LevelDB outbox records now default to a compact binary envelope while reading
+both binary and legacy JSON. Concurrent durable puts use a 1 ms group-commit
+window by default; every caller waits for the shared sync. The legacy whole-file
+JSON backend and JSON LevelDB codec remain configurable.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationOutboxEncoding -benchtime=100000x -count=5 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationOutboxReplay10k -benchtime=1x -count=5 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationOutboxDurableEnqueue -benchtime=5x -count=5 -benchmem'
+```
+
+| Operation | JSON/sync-each | Binary/grouped default | Improvement |
+| --- | ---: | ---: | ---: |
+| Encode 4 KiB job | 8,949 ns; 6,935 heap B; 10 allocs; 5,948 stored B | 4,123 ns; 5,491 heap B; 4 allocs; 4,412 stored B | 2.17x CPU, 1.26x heap, 2.50x allocs, 1.35x storage |
+| Replay 10k 1 KiB jobs | 217.479 ms; 54,882,672 heap B; 375,842 allocs; 1,858 B/job | 87.330 ms; 50,839,168 heap B; 279,883 allocs; 1,344 B/job | 2.49x CPU, 1.08x heap, 1.34x allocs, 1.38x storage |
+| Enqueue, 32 writers | 50.289 ms; 246,116 heap B; 968 allocs; 32 syncs | 3.542 ms; 366,531 heap B; 672 allocs; 1 sync | 14.20x CPU, 1.44x fewer allocs, 32x fewer syncs |
+
+Grouped enqueue uses 1.49x cumulative heap for waiter/job coordination. A
+measured 200 us window produced about two commits and a 4.79 ms median; 1 ms
+consistently produced one commit at about 3.08 ms in the window-selection
+fixture, so 1 ms is the default. `REPLICATION_OUTBOX_BATCH_WINDOW=0` restores
+sync-each behavior, and `REPLICATION_OUTBOX_CODEC=json` restores JSON records.
 
 ## Latest Optimization Spot Check
 

@@ -819,16 +819,16 @@ make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=gzip-jso
 make monitoring-server SNAPSHOT_PATH=data/snapshot.json SNAPSHOT_FORMAT=json
 ```
 
-Online snapshots capture an immutable point-in-time entry set under a short
-trie lock, then perform encoding, compression, disk writes, and network
-streaming after releasing it. Journaled commands that arrive after the captured
-sequence continue during output and remain available as ordered deltas. Full
-LevelDB saves use the same capture boundary before database comparison and
-record output. Allow temporary memory headroom for one captured data set;
-snapshot jobs sharing a journal are serialized. In the 100,000 short-string-key
-benchmark this reduced the maximum command pause by 73.1% while increasing peak
-RSS by 45.6%. See [BENCHMARK.md](BENCHMARK.md#point-in-time-snapshot-capture)
-for CPU, allocation, and RSS measurements.
+Online snapshots capture an immutable point-in-time entry set in bounded scan
+pages, releasing the trie lock between pages, then perform encoding,
+compression, disk writes, and network streaming without the trie lock.
+Concurrent mutations are tracked and reconciled at the journal sequence
+barrier. Journaled commands after that sequence remain available as ordered
+deltas. Full LevelDB saves use the same capture boundary. Snapshot jobs sharing
+a journal are serialized. In the 100,000-key benchmark, bounded pages reduced
+the median maximum reader pause from 61.740 ms to 2.822 ms (21.88x) while total
+snapshot time and cumulative heap remained effectively flat. See
+[BENCHMARK.md](BENCHMARK.md#bounded-page-snapshot-capture).
 
 Set `JOURNAL_PATH` to replay an append-only command journal at startup and fsync
 mutating cache commands before applying them. When `SNAPSHOT_PATH` is also set,
@@ -856,6 +856,16 @@ make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_FORMAT=json
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_GROUP_COMMIT_WINDOW=250us JOURNAL_GROUP_COMMIT_MAX_BATCH=64
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_GROUP_COMMIT_MAX_BATCH=1
 ```
+
+A public `BATCH` with journaling enabled appends all successful subcommands in
+order and performs one final `fsync` before acknowledgement, rather than one
+sync per subcommand. A sync/write failure rolls back both journal bytes and the
+batch's in-memory mutations. Ordinary command errors retain the documented
+non-transactional pipeline behavior: earlier successful subcommands remain
+applied. Three 4,096-item-or-smaller batches completed 10,000 durable writes in a
+29.051 ms median with three syncs versus 9.821 seconds and 10,000 syncs for
+individual commands; see
+[BENCHMARK.md](BENCHMARK.md#durable-public-batches).
 
 When journaling is enabled, `GET /api/journal?after_sequence=N&limit=1000`
 returns a bounded batch of ordered mutating commands after `N` plus the latest
@@ -965,30 +975,31 @@ represent. Set `REPLICATION_WIRE_FORMAT=json` to always use JSON;
 Large HTTP replication request bodies are gzip-compressed.
 Anti-entropy digest discovery uses the authenticated HTTP command endpoint.
 Set `REPLICATION_TRANSPORT=grpc-stream` to keep one ordered, gzip-compressed
-HTTP/2 `ReplicationStream` open per target for repair write batches. Every
-write batch is acknowledged before the next batch for that target is sent. The target node must
-publish `grpc_address` in the topology and run its opt-in native listener with
-`GRPC_ADDR`; normal write-path command fanout remains on HTTP. A bare address
-or `grpc://` uses an insecure internal connection, while `grpcs://` verifies
-the server with the host trust store. `REPLICATION_AUTH_TOKEN` is accepted by
-the stream without granting access to other gRPC methods.
+HTTP/2 `ReplicationStream` open per target for both live command fanout and
+repair writes. The default `REPLICATION_GRPC_WINDOW=32` permits up to 32 sent,
+unacknowledged batches per target; set it from 1 through 1,024 to bound
+throughput, memory, and backpressure. A dedicated receiver pairs acknowledgements
+by sequence while per-key replay safety permits independent keys to complete
+out of order. The target node must publish `grpc_address` and run its opt-in
+native listener with `GRPC_ADDR`. A bare address or `grpc://` uses an insecure
+internal connection, while `grpcs://` verifies the server with the host trust
+store. `REPLICATION_AUTH_TOKEN` is accepted by the stream without granting
+access to other gRPC methods.
 
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
-closed instead. In the local 10k-entry, 10-page sender+receiver benchmark,
-gRPC streaming had a 37.8ms median versus 45.0ms for HTTP (1.19x faster), used
-52.0KB versus 57.5KB request wire (9.52% less), and made 24.41% fewer
-allocations; it allocated 16.18% more total heap bytes because of gRPC framing
-and compression buffers. See [`BENCHMARK.md`](BENCHMARK.md) for the raw run
-command and complete table.
+closed instead. For 10,000 live writes from 32 callers, gRPC used 1.082 MB of
+wire versus HTTP's 1.869 MB (42.1% less), 10.5% less cumulative heap, and 22.4%
+fewer allocations. See [BENCHMARK.md](BENCHMARK.md#pipelined-live-grpc-replication).
 `POST /api/replication` runs an explicit command-fanout anti-entropy sync. For
-each current replica, the source and target first compare an xxHash64 aggregate
-over the local leader-owned key/value snapshots, optionally filtered by prefix.
-Equal replicas stop after one small request. A mismatch returns bounded, sorted
-key-digest pages; the source performs a bounded merge and sends only changed or
-missing values plus deletes for target-only stale keys. Write batches retain at
-most 1,024 keys and are also split by `REPLICATION_BATCH_MAX_BYTES`, so a large
-repair does not build a full-dataset map or request in memory.
+an unfiltered single-shard data set, the source and target first compare an
+incrementally maintained 1,024-bucket Merkle root. Equal replicas stop after one
+small request. A mismatch fetches only differing bucket digest pages, then sends
+changed or missing values plus deletes for target-only stale keys. The index is
+dormant until the first unfiltered sync, then retains about 29.6 B/key. Prefix
+sync and multi-shard routing use the compatible bounded, sorted digest path.
+Write batches retain at most 1,024 keys and are also split by
+`REPLICATION_BATCH_MAX_BYTES`.
 
 Peers that do not support `INTERNALDIGESTV1` automatically fall back to bounded
 full value push. That compatibility path can update and create source keys but
@@ -1003,6 +1014,7 @@ make monitoring-server NODE_ID=node-b TOPOLOGY_PATH=data/topology.json REPLICATI
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_WIRE_FORMAT=json
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream REPLICATION_GRPC_WINDOW=64
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream REPLICATION_HTTP_FALLBACK=false
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=dual JOURNAL_PATH=data/node-a.journal REPLICATION_BATCH_MAX_BYTES=262144
 ```
@@ -1055,8 +1067,13 @@ that were not confirmed before shutdown. The default
 each queued job as its own record so enqueue/delete does not rewrite the full
 outbox. Existing `*.json` paths keep the previous JSON snapshot backend; set
 `REPLICATION_OUTBOX_FORMAT=json` or `REPLICATION_OUTBOX_FORMAT=leveldb` to
-force either backend. Keep the outbox on durable local storage and do not share
-the same outbox path between nodes.
+force either backend. LevelDB records use the compact binary codec by default
+and automatically read existing JSON records. Set
+`REPLICATION_OUTBOX_CODEC=json` for new JSON LevelDB records. Concurrent durable
+puts use a 1 ms group-commit window by default; set
+`REPLICATION_OUTBOX_BATCH_WINDOW=0` to sync every put independently. Every
+caller still waits for its group sync before success. Keep the outbox on durable
+local storage and do not share the same outbox path between nodes.
 After the final async retry fails, the job is retained in a bounded dead-letter
 list without command values; tune `REPLICATION_DEAD_LETTER_LIMIT` or set it to
 `0` to disable retention.
@@ -1077,6 +1094,8 @@ retry age, per-target drops, per-target failures, closed state,
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true REPLICATION_OUTBOX_PATH=data/replication-outbox
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true REPLICATION_OUTBOX_PATH=data/replication-outbox REPLICATION_OUTBOX_CODEC=json
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true REPLICATION_OUTBOX_PATH=data/replication-outbox REPLICATION_OUTBOX_BATCH_WINDOW=0
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_ASYNC=true REPLICATION_OUTBOX_PATH=data/replication-outbox.json REPLICATION_OUTBOX_FORMAT=json
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_AUTH_TOKEN=replica-secret
 ```

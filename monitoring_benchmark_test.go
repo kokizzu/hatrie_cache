@@ -69,7 +69,8 @@ func BenchmarkPublicScalarBatchNoRemoteReplicator(b *testing.B) {
 
 func BenchmarkPublicScalarBatchJournalDurability10K(b *testing.B) {
 	const batchItems = 10_000
-	requests := make([]CacheCommandRequest, 0, (batchItems+maxPublicCommandBatchSize-1)/maxPublicCommandBatchSize)
+	individual := make([]CacheCommandRequest, batchItems)
+	batched := make([]CacheCommandRequest, 0, (batchItems+maxPublicCommandBatchSize-1)/maxPublicCommandBatchSize)
 	for first := 0; first < batchItems; first += maxPublicCommandBatchSize {
 		last := first + maxPublicCommandBatchSize
 		if last > batchItems {
@@ -78,36 +79,49 @@ func BenchmarkPublicScalarBatchJournalDurability10K(b *testing.B) {
 		payloads := make([]CacheCommandRequest, last-first)
 		for offset := range payloads {
 			idx := first + offset
-			payloads[offset] = CacheCommandRequest{
+			individual[idx] = CacheCommandRequest{
 				Command: "SETSTR",
 				Key:     "durable:" + strconv.Itoa(idx),
 				Value:   "value",
 			}
+			payloads[offset] = individual[idx]
 		}
-		requests = append(requests, CacheCommandRequest{Command: "BATCH", Batch: payloads})
+		batched = append(batched, CacheCommandRequest{Command: "BATCH", Batch: payloads})
 	}
-	trie := CreateHatTrie()
-	defer trie.Destroy()
-	journal, err := OpenCommandJournalWithOptions(filepath.Join(b.TempDir(), "commands.journal"), CommandJournalOptions{
-		Format:              CommandJournalFormatBinary,
-		GroupCommitMaxBatch: 1,
-	})
-	if err != nil {
-		b.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
-	}
-	defer journal.Close()
-	options := commandExecutionOptions{Journal: journal}
 
-	b.ReportAllocs()
-	b.ReportMetric(batchItems, "items/op")
-	b.ReportMetric(float64(len(requests)), "batches/op")
-	b.ResetTimer()
-	for idx := 0; idx < b.N; idx++ {
-		for _, request := range requests {
-			response, rejected := executeCacheCommand(context.Background(), trie, request, options)
-			if rejected || !response.OK {
-				b.Fatalf("executeCacheCommand() = %#v rejected=%v, want ok", response, rejected)
+	for _, test := range []struct {
+		name     string
+		requests []CacheCommandRequest
+	}{
+		{name: "Individual", requests: individual},
+		{name: "Batch4096", requests: batched},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			journal, err := OpenCommandJournalWithOptions(filepath.Join(b.TempDir(), "commands.journal"), CommandJournalOptions{
+				Format:              CommandJournalFormatBinary,
+				GroupCommitMaxBatch: 1,
+			})
+			if err != nil {
+				b.Fatalf("OpenCommandJournalWithOptions() error = %v", err)
 			}
-		}
+			b.Cleanup(func() { _ = journal.Close() })
+			options := commandExecutionOptions{Journal: journal}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				for _, request := range test.requests {
+					response, rejected := executeCacheCommand(context.Background(), trie, request, options)
+					if rejected || !response.OK {
+						b.Fatalf("executeCacheCommand() = %#v rejected=%v, want ok", response, rejected)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(batchItems, "items/op")
+			b.ReportMetric(float64(len(test.requests)), "journal_syncs/op")
+		})
 	}
 }
