@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -155,6 +156,50 @@ type snapshotCapture struct {
 }
 
 const snapshotCapturePageEntries = 4096
+const snapshotCaptureScanPageEntries = 256
+
+type snapshotMutationTracker struct {
+	mu    sync.Mutex
+	dirty map[string]struct{}
+}
+
+func (tracker *snapshotMutationTracker) mark(keys ...string) {
+	if tracker == nil || len(keys) == 0 {
+		return
+	}
+	tracker.mu.Lock()
+	if tracker.dirty == nil {
+		tracker.dirty = make(map[string]struct{})
+	}
+	for _, key := range keys {
+		if key != "" {
+			tracker.dirty[key] = struct{}{}
+		}
+	}
+	tracker.mu.Unlock()
+}
+
+func (tracker *snapshotMutationTracker) drain() []string {
+	if tracker == nil {
+		return nil
+	}
+	tracker.mu.Lock()
+	keys := make([]string, 0, len(tracker.dirty))
+	for key := range tracker.dirty {
+		keys = append(keys, key)
+	}
+	tracker.dirty = make(map[string]struct{})
+	tracker.mu.Unlock()
+	sort.Strings(keys)
+	return keys
+}
+
+func (ht *HatTrie) trackSnapshotMutationsLocked(keys ...string) {
+	if ht == nil || ht.snapshotMutations == nil {
+		return
+	}
+	ht.snapshotMutations.mark(keys...)
+}
 
 func (capture *snapshotCapture) append(entry snapshotEntry) {
 	if len(capture.pages) == 0 || len(capture.pages[len(capture.pages)-1]) == snapshotCapturePageEntries {
@@ -940,30 +985,197 @@ func (ht *HatTrie) captureSnapshot() (snapshotCapture, error) {
 }
 
 func (ht *HatTrie) captureSnapshotForStore(currentStore *LevelDBStore, currentDB *leveldb.DB) (snapshotCapture, error) {
-	if ht == nil {
-		return snapshotCapture{}, ErrNilHatTrie
-	}
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
+	capture, _, err := ht.captureSnapshotForStoreAtBarrier(currentStore, currentDB, nil)
+	return capture, err
+}
 
-	ht.ensureOpen()
-	now := time.Time{}
-	if len(ht.expires) > 0 {
-		now = ht.currentTime()
+type snapshotCaptureBarrier func() (uint64, func(), error)
+
+func (ht *HatTrie) captureSnapshotForStoreAtBarrier(currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) (snapshotCapture, uint64, error) {
+	if ht == nil {
+		return snapshotCapture{}, 0, ErrNilHatTrie
 	}
-	capture := snapshotCapture{}
-	err := ht.scanEntriesWithPrefixAtLockedChecked("", true, now, func(entry Entry) error {
-		captured, err := ht.captureSnapshotEntryForStoreLocked(entry, currentStore, currentDB)
-		if err != nil {
-			return err
+	ht.snapshotCaptureMu.Lock()
+	defer ht.snapshotCaptureMu.Unlock()
+
+	tracker := &snapshotMutationTracker{dirty: make(map[string]struct{})}
+	ht.mu.Lock()
+	func() {
+		defer ht.mu.Unlock()
+		ht.ensureOpen()
+		ht.snapshotMutations = tracker
+	}()
+	active := true
+	defer func() {
+		if !active {
+			return
 		}
-		capture.append(captured)
-		return nil
-	})
-	if err != nil {
-		return snapshotCapture{}, err
+		ht.mu.Lock()
+		if ht.snapshotMutations == tracker {
+			ht.snapshotMutations = nil
+		}
+		ht.mu.Unlock()
+	}()
+
+	capture := snapshotCapture{}
+	cursor := &replicationSyncCursor{}
+	afterKey := ""
+	hasAfterKey := false
+	pageNumber := 0
+	for {
+		page, err := replicationSyncEntriesPageWithCursor(ht, "", afterKey, hasAfterKey, snapshotCaptureScanPageEntries, cursor, func(entry Entry) error {
+			captured, err := ht.captureSnapshotEntryForStoreLocked(entry, currentStore, currentDB)
+			if err != nil {
+				return err
+			}
+			capture.append(captured)
+			return nil
+		})
+		if err != nil {
+			cursor.close(ht)
+			return snapshotCapture{}, 0, err
+		}
+		pageNumber++
+		if hook := ht.snapshotCapturePageHook; hook != nil {
+			hook(pageNumber)
+		}
+		if !page.hasMore {
+			break
+		}
+		afterKey = page.nextAfterKey
+		hasAfterKey = true
+		runtime.Gosched()
 	}
-	return capture, nil
+	cursor.close(ht)
+
+	replacements, sequence, err := ht.captureSnapshotMutationReplacements(tracker, currentStore, currentDB, barrier)
+	if err != nil {
+		return snapshotCapture{}, 0, err
+	}
+	active = false
+	return reconcileSnapshotCapture(capture, replacements), sequence, nil
+}
+
+type snapshotCaptureReplacement struct {
+	entry   snapshotEntry
+	present bool
+}
+
+func (ht *HatTrie) captureSnapshotMutationReplacements(tracker *snapshotMutationTracker, currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) (map[string]snapshotCaptureReplacement, uint64, error) {
+	replacements := make(map[string]snapshotCaptureReplacement)
+	for {
+		var sequence uint64
+		var releaseBarrier func()
+		if barrier != nil {
+			var err error
+			sequence, releaseBarrier, err = barrier()
+			if err != nil {
+				return nil, 0, err
+			}
+		}
+		ht.mu.Lock()
+		keys := tracker.drain()
+		if len(keys) == 0 {
+			if ht.snapshotMutations != tracker {
+				ht.mu.Unlock()
+				if releaseBarrier != nil {
+					releaseBarrier()
+				}
+				return nil, 0, errors.New("hatriecache: snapshot mutation tracker changed during capture")
+			}
+			ht.snapshotMutations = nil
+			ht.mu.Unlock()
+			if releaseBarrier != nil {
+				releaseBarrier()
+			}
+			return replacements, sequence, nil
+		}
+		ht.mu.Unlock()
+		if releaseBarrier != nil {
+			releaseBarrier()
+		}
+
+		for first := 0; first < len(keys); first += snapshotCaptureScanPageEntries {
+			last := first + snapshotCaptureScanPageEntries
+			if last > len(keys) {
+				last = len(keys)
+			}
+			var chunkErr error
+			ht.mu.Lock()
+			func() {
+				defer ht.mu.Unlock()
+				ht.ensureOpen()
+				for _, key := range keys[first:last] {
+					replacement, err := ht.captureSnapshotReplacementLocked(key, currentStore, currentDB)
+					if err != nil {
+						chunkErr = err
+						return
+					}
+					replacements[key] = replacement
+				}
+			}()
+			if chunkErr != nil {
+				return nil, 0, chunkErr
+			}
+			runtime.Gosched()
+		}
+	}
+}
+
+func (ht *HatTrie) captureSnapshotReplacementLocked(key string, currentStore *LevelDBStore, currentDB *leveldb.DB) (snapshotCaptureReplacement, error) {
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		return snapshotCaptureReplacement{}, nil
+	}
+	hval := HatValue{}
+	hval.fromValue(*rawPtr)
+	if ht.expireIfNeededLocked(key, hval) {
+		return snapshotCaptureReplacement{}, nil
+	}
+	entry, err := ht.captureSnapshotEntryForStoreLocked(Entry{Key: key, Value: hval}, currentStore, currentDB)
+	if err != nil {
+		return snapshotCaptureReplacement{}, err
+	}
+	return snapshotCaptureReplacement{entry: entry, present: true}, nil
+}
+
+func reconcileSnapshotCapture(capture snapshotCapture, replacements map[string]snapshotCaptureReplacement) snapshotCapture {
+	if len(replacements) == 0 {
+		return capture
+	}
+	keys := make([]string, 0, len(replacements))
+	for key := range replacements {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := snapshotCapture{}
+	replacementIndex := 0
+	appendReplacement := func(key string) {
+		replacement := replacements[key]
+		if replacement.present {
+			result.append(replacement.entry)
+		}
+	}
+	for _, page := range capture.pages {
+		for _, entry := range page {
+			for replacementIndex < len(keys) && keys[replacementIndex] < entry.Key {
+				appendReplacement(keys[replacementIndex])
+				replacementIndex++
+			}
+			if replacementIndex < len(keys) && keys[replacementIndex] == entry.Key {
+				appendReplacement(keys[replacementIndex])
+				replacementIndex++
+				continue
+			}
+			result.append(entry)
+		}
+	}
+	for replacementIndex < len(keys) {
+		appendReplacement(keys[replacementIndex])
+		replacementIndex++
+	}
+	return result
 }
 
 func (ht *HatTrie) captureSnapshotEntryForStoreLocked(entry Entry, currentStore *LevelDBStore, currentDB *leveldb.DB) (snapshotEntry, error) {

@@ -152,6 +152,77 @@ func TestSnapshotCaptureUsesBoundedPages(t *testing.T) {
 	}
 }
 
+func TestSnapshotCaptureReconcilesMutationsBetweenScanPages(t *testing.T) {
+	ht := newTestTrie(t)
+	for idx := 0; idx < snapshotCaptureScanPageEntries*2; idx++ {
+		ht.UpsertString(fmt.Sprintf("key:%05d", idx), "before")
+	}
+
+	firstPage := make(chan struct{})
+	release := make(chan struct{})
+	ht.snapshotCapturePageHook = func(page int) {
+		if page != 1 {
+			return
+		}
+		close(firstPage)
+		<-release
+	}
+	captured := make(chan snapshotCapture, 1)
+	captureErrors := make(chan error, 1)
+	go func() {
+		capture, err := ht.captureSnapshot()
+		captured <- capture
+		captureErrors <- err
+	}()
+	<-firstPage
+
+	mutated := make(chan struct{})
+	go func() {
+		ht.UpsertString("key:00000", "after")
+		ht.Delete("key:00001")
+		ht.UpsertMap("key:00002", Map{"state": "structured-after"})
+		ht.UpsertString("key:00000:new", "inserted-behind-cursor")
+		ht.UpsertString(fmt.Sprintf("key:%05d", snapshotCaptureScanPageEntries*2-1), "tail-after")
+		close(mutated)
+	}()
+	select {
+	case <-mutated:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer could not complete between snapshot scan pages")
+	}
+	close(release)
+	if err := <-captureErrors; err != nil {
+		t.Fatalf("captureSnapshot() error = %v", err)
+	}
+	capture := <-captured
+
+	entries := make(map[string]snapshotEntry, capture.count)
+	for _, page := range capture.pages {
+		for _, entry := range page {
+			entries[entry.Key] = entry
+		}
+	}
+	if got := entries["key:00000"].String; got != "after" {
+		t.Fatalf("already-scanned updated value = %q, want after", got)
+	}
+	if _, ok := entries["key:00001"]; ok {
+		t.Fatal("already-scanned deleted key remained in snapshot")
+	}
+	if got := entries["key:00002"].Map["state"]; got != "structured-after" {
+		t.Fatalf("already-scanned structured value = %#v, want structured-after", got)
+	}
+	if got := entries["key:00000:new"].String; got != "inserted-behind-cursor" {
+		t.Fatalf("new key behind cursor = %q, want inserted value", got)
+	}
+	tailKey := fmt.Sprintf("key:%05d", snapshotCaptureScanPageEntries*2-1)
+	if got := entries[tailKey].String; got != "tail-after" {
+		t.Fatalf("tail value = %q, want tail-after", got)
+	}
+	if capture.count != snapshotCaptureScanPageEntries*2 {
+		t.Fatalf("capture count = %d, want %d after one deletion and one insertion", capture.count, snapshotCaptureScanPageEntries*2)
+	}
+}
+
 func TestSnapshotRoundTripRestoresValuesAndTTL(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(2000, 0)

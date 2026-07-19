@@ -643,15 +643,14 @@ func (journal *CommandJournal) SaveSnapshotWithFormat(trie *HatTrie, path string
 	}
 	journal.snapshotMu.Lock()
 	defer journal.snapshotMu.Unlock()
-
 	journal.mu.Lock()
 	if journal.closed {
 		journal.mu.Unlock()
 		return ErrCommandJournalClosed
 	}
-	sequence := journal.lastSequenceLocked()
-	capture, err := trie.captureSnapshot()
 	journal.mu.Unlock()
+
+	capture, sequence, err := trie.captureSnapshotForStoreAtBarrier(nil, nil, journal.snapshotCaptureBarrier())
 	if err != nil {
 		return err
 	}
@@ -686,15 +685,14 @@ func (journal *CommandJournal) WriteSnapshotWithFormat(trie *HatTrie, writer io.
 	}
 	journal.snapshotMu.Lock()
 	defer journal.snapshotMu.Unlock()
-
 	journal.mu.Lock()
 	if journal.closed {
 		journal.mu.Unlock()
 		return SnapshotMetadata{}, ErrCommandJournalClosed
 	}
-	sequence := journal.lastSequenceLocked()
-	capture, err := trie.captureSnapshot()
 	journal.mu.Unlock()
+
+	capture, sequence, err := trie.captureSnapshotForStoreAtBarrier(nil, nil, journal.snapshotCaptureBarrier())
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
@@ -702,6 +700,17 @@ func (journal *CommandJournal) WriteSnapshotWithFormat(trie *HatTrie, writer io.
 		return SnapshotMetadata{}, err
 	}
 	return SnapshotMetadata{JournalSequence: sequence}, nil
+}
+
+func (journal *CommandJournal) snapshotCaptureBarrier() snapshotCaptureBarrier {
+	return func() (uint64, func(), error) {
+		journal.mu.Lock()
+		if journal.closed {
+			journal.mu.Unlock()
+			return 0, nil, ErrCommandJournalClosed
+		}
+		return journal.lastSequenceLocked(), journal.mu.Unlock, nil
+	}
 }
 
 // ReplaceWithSnapshot replaces in-memory data, then resets the local journal

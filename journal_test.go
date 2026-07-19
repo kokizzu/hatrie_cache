@@ -1872,6 +1872,64 @@ func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 	}
 }
 
+func TestCommandJournalSnapshotAllowsWritesBetweenPagesAndCapturesFinalSequence(t *testing.T) {
+	dir := t.TempDir()
+	journalPath := filepath.Join(dir, "commands.journal")
+	snapshotPath := filepath.Join(dir, "snapshot.hc")
+	journal, err := OpenCommandJournal(journalPath)
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+	ht := newTestTrie(t)
+	for idx := 0; idx < snapshotCaptureScanPageEntries*2; idx++ {
+		ht.UpsertString(fmt.Sprintf("key:%05d", idx), "before")
+	}
+
+	firstPage := make(chan struct{})
+	release := make(chan struct{})
+	ht.snapshotCapturePageHook = func(page int) {
+		if page == 1 {
+			close(firstPage)
+			<-release
+		}
+	}
+	saved := make(chan error, 1)
+	go func() {
+		saved <- journal.SaveSnapshot(ht, snapshotPath)
+	}()
+	<-firstPage
+
+	written := make(chan CacheCommandResponse, 1)
+	go func() {
+		written <- journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "key:00000", Value: "after"})
+	}()
+	select {
+	case response := <-written:
+		if !response.OK {
+			t.Fatalf("ExecuteCommand() = %#v, want success", response)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("journaled writer could not complete between snapshot pages")
+	}
+	close(release)
+	if err := <-saved; err != nil {
+		t.Fatalf("SaveSnapshot() error = %v", err)
+	}
+
+	loaded := newTestTrie(t)
+	metadata, err := loaded.LoadSnapshotWithMetadata(snapshotPath)
+	if err != nil {
+		t.Fatalf("LoadSnapshotWithMetadata() error = %v", err)
+	}
+	if metadata.JournalSequence != 1 {
+		t.Fatalf("snapshot journal sequence = %d, want concurrent write sequence 1", metadata.JournalSequence)
+	}
+	if got := loaded.GetString("key:00000"); got != "after" {
+		t.Fatalf("snapshot concurrent value = %q, want after", got)
+	}
+}
+
 func TestCommandJournalStreamsAndReplacesFromExactSnapshot(t *testing.T) {
 	sourceTrie := newTestTrie(t)
 	sourceJournal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))

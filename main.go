@@ -2002,45 +2002,48 @@ func (rs *LevelDBReferenceStorage) Del(idx int32) {
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing
 // pools referenced by compact HatValue records.
 type HatTrie struct {
-	mu               sync.RWMutex
-	telemetryMu      sync.Mutex
-	root             *C.hattrie_t
-	raws             *BytesStorage
-	disks            *DiskStorage
-	maps             *MapStorage
-	slices           *SliceStorage
-	sets             *SetStorage
-	priorityQueues   *PriorityQueueStorage
-	bloomFilters     *BloomFilterStorage
-	countMinSketches *CountMinSketchStorage
-	hyperLogLogs     *HyperLogLogStorage
-	topKs            *TopKStorage
-	cuckooFilters    *CuckooFilterStorage
-	roaringBitmaps   *RoaringBitmapStorage
-	quantileSketches *QuantileSketchStorage
-	fenwickTrees     *FenwickTreeStorage
-	sparseBitsets    *SparseBitsetStorage
-	reservoirSamples *ReservoirSampleStorage
-	xorFilters       *XorFilterStorage
-	radixTrees       *RadixTreeStorage
-	dbrefs           *LevelDBReferenceStorage
-	expires          map[string]time.Time
-	expirations      expirationHeap
-	hotKey           string
-	hotValue         HatValue
-	hotValid         bool
-	stats            CacheStats
-	keyStats         map[string]*trackedKeyStats
-	keyStatsMode     KeyStatsMode
-	keyStatsCapacity int
-	keyStatsSlots    []string
-	keyStatsFree     []uint32
-	keyStatsHand     int
-	levelDBSpillKeys map[string]struct{}
-	levelDBHotBytes  int64
-	levelDBHotValues map[string]int64
-	mutationEpoch    uint64
-	now              func() time.Time
+	mu                      sync.RWMutex
+	telemetryMu             sync.Mutex
+	snapshotCaptureMu       sync.Mutex
+	root                    *C.hattrie_t
+	raws                    *BytesStorage
+	disks                   *DiskStorage
+	maps                    *MapStorage
+	slices                  *SliceStorage
+	sets                    *SetStorage
+	priorityQueues          *PriorityQueueStorage
+	bloomFilters            *BloomFilterStorage
+	countMinSketches        *CountMinSketchStorage
+	hyperLogLogs            *HyperLogLogStorage
+	topKs                   *TopKStorage
+	cuckooFilters           *CuckooFilterStorage
+	roaringBitmaps          *RoaringBitmapStorage
+	quantileSketches        *QuantileSketchStorage
+	fenwickTrees            *FenwickTreeStorage
+	sparseBitsets           *SparseBitsetStorage
+	reservoirSamples        *ReservoirSampleStorage
+	xorFilters              *XorFilterStorage
+	radixTrees              *RadixTreeStorage
+	dbrefs                  *LevelDBReferenceStorage
+	expires                 map[string]time.Time
+	expirations             expirationHeap
+	hotKey                  string
+	hotValue                HatValue
+	hotValid                bool
+	stats                   CacheStats
+	keyStats                map[string]*trackedKeyStats
+	keyStatsMode            KeyStatsMode
+	keyStatsCapacity        int
+	keyStatsSlots           []string
+	keyStatsFree            []uint32
+	keyStatsHand            int
+	levelDBSpillKeys        map[string]struct{}
+	levelDBHotBytes         int64
+	levelDBHotValues        map[string]int64
+	mutationEpoch           uint64
+	snapshotMutations       *snapshotMutationTracker
+	snapshotCapturePageHook func(int)
+	now                     func() time.Time
 }
 
 func CreateHatTrie() *HatTrie {
@@ -2851,6 +2854,7 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 }
 
 func (ht *HatTrie) recordWriteLocked(keys ...string) {
+	ht.trackSnapshotMutationsLocked(keys...)
 	ht.mutationEpoch++
 	now := ht.currentTime()
 	for _, key := range keys {
@@ -2878,6 +2882,7 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 }
 
 func (ht *HatTrie) recordDeleteLocked(key string) {
+	ht.trackSnapshotMutationsLocked(key)
 	ht.stats.Deletes++
 	ht.recordWriteLocked()
 	ht.deleteLevelDBSpillCandidateLocked(key)
@@ -2886,6 +2891,7 @@ func (ht *HatTrie) recordDeleteLocked(key string) {
 }
 
 func (ht *HatTrie) recordExpirationLocked(keys ...string) {
+	ht.trackSnapshotMutationsLocked(keys...)
 	ht.stats.Expirations++
 	ht.recordWriteLocked()
 	for _, key := range keys {
