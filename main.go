@@ -2128,6 +2128,7 @@ type HatTrie struct {
 	levelDBHotBytes         int64
 	levelDBHotValues        map[string]int64
 	mutationEpoch           uint64
+	memoryCompactionEpoch   uint64
 	replicationMerkle       *replicationMerkleIndex
 	snapshotMutations       *snapshotMutationTracker
 	snapshotCapturePageHook func(int)

@@ -187,6 +187,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
+| Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
 | Current pass | [Merkle equal-state preflight](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 18.272 ms; 560,720 heap B | Merkle: 0.993 ms; 233,744 heap B | 18.40x faster, 2.40x lower heap | First activation builds a 29.60 B/key index |
@@ -556,6 +557,43 @@ point-in-time semantics are unchanged. Encoding inside each 256-key scan page
 accounts for the small pause increase. A single value larger than 1 MiB owns a
 dedicated page because its payload cannot be subdivided without changing the
 record format.
+
+### Delete-Churn Memory Compaction
+
+Deleted typed values leave reusable holes when survivors occupy later indexes,
+and Go slice capacity plus the activated Merkle table retain their prior high
+water marks. `CompactMemory` prepares dense in-memory typed pools, duplicates
+the C trie, rewrites every compact index in the duplicate, and atomically swaps
+the complete state under the trie write lock. Disk-spill indexes stay stable to
+preserve unique file ownership. It also rebuilds TTL and bounded key-stat
+metadata without changing values, expiration, statistics, or Merkle roots.
+
+```sh
+make bench-big-wins BIG_WINS_BENCH='^BenchmarkBigWins/(ChurnRetentionBaseline|ChurnRetentionCompacted)$' BIG_WINS_KEYS=100000 BENCHTIME=1x COUNT=5
+```
+
+The fixture activates Merkle tracking, inserts 100,000 string keys, deletes
+90,000, retains every tenth key, forces a Go collection, and measures live heap
+and deterministic outer backing. Backing bytes include typed pool slices,
+reusable-index metadata, and Merkle table/leaves/scratch; they exclude nested
+payloads, allocator metadata, and C allocator pages. Values are five-run medians
+on the Ryzen 9 5950X host.
+
+| Metric | No compaction | Compacted | Improvement / cost |
+| --- | ---: | ---: | ---: |
+| Retained backing | 9,679,075 B | 704,912 B | 13.73x lower, 92.7% reclaimed |
+| Retained Go heap | 9,850,096 B | 884,600 B | 11.13x lower, 91.0% reclaimed |
+| Full insert/delete cycle | 226,957,849 ns | 239,289,284 ns | 5.4% slower with compaction |
+| Compaction pause | 0 | 8,801,699 ns | one exclusive rebuild |
+| Cumulative heap/cycle | 49,003,944 B | 50,204,120 B | 2.4% more transient allocation |
+| Allocations/cycle | 481,254 | 491,287 | 2.1% more transient allocations |
+
+The daemon keeps periodic compaction off by default. Set
+`MEMORY_COMPACTION_INTERVAL` to a positive duration to opt in; unchanged ticks
+are skipped. The peak during a rebuild temporarily includes both C tries,
+compaction remap arrays, and both generations of outer pool slices, so operators
+should schedule it with enough memory headroom and outside latency-sensitive
+windows.
 
 ### Pipelined Live gRPC Replication
 

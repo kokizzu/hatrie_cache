@@ -40,6 +40,11 @@ reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
 uses a min-heap schedule plus an authoritative key map, so vacuuming pops due
 keys instead of scanning every TTL entry and compacts stale schedule entries
 under churn.
+Long-running delete-heavy workloads can call `CompactMemory` to rebuild the C
+trie, densely reindex in-memory typed pools, and shrink Merkle and metadata
+backing. Disk-spill indexes remain stable so file ownership cannot alias.
+Periodic compaction is available but remains off by default because the rebuild
+briefly takes the cache-wide write lock.
 Map, slice, set, and priority queue APIs deep-copy nested JSON-style map/slice
 values at storage and read boundaries so callers cannot mutate cached state
 through shared nested references.
@@ -604,6 +609,23 @@ for missing or non-counter keys, TTL counters, enabled per-key telemetry, active
 snapshot capture or Merkle tracking, and LevelDB spill accounting. The measured
 CPU and fixed-memory tradeoffs are in [BENCHMARK.md](BENCHMARK.md#striped-existing-counter-writes).
 
+Delete-heavy processes can reclaim trie and typed-pool high-water capacity with
+the opt-in memory compactor. `MEMORY_COMPACTION_INTERVAL=0` is the default and
+disables it; a positive Go duration runs compaction only after the trie changed
+since the previous pass:
+
+```
+make monitoring-server MEMORY_COMPACTION_INTERVAL=15m
+```
+
+`CompactMemory` provides the same operation directly to Go callers and returns
+before/after backing estimates. The operation preserves values, TTLs, global
+and per-key statistics, LevelDB references, and Merkle state, but it holds the
+trie write lock while duplicating and swapping the C trie. The measured 100k
+insert/90k delete fixture reclaimed 13.73x backing and 11.13x live heap at a
+8.80 ms one-time pause; see
+[BENCHMARK.md](BENCHMARK.md#delete-churn-memory-compaction).
+
 Long-running daemon options can also live in a JSON config file. Config keys
 match flag names and may use hyphens or underscores; duration values use Go
 duration strings. Explicit CLI flags override file values:
@@ -616,6 +638,7 @@ duration strings. Explicit CLI flags override file values:
   "key_stats_mode": "off",
   "key_stats_capacity": 0,
   "counter_write_stripes": 0,
+  "memory_compaction_interval": "0",
   "db_path": "data/cache.leveldb",
   "snapshot_path": "data/snapshot.hc",
   "snapshot_interval": "30s",
@@ -1424,7 +1447,9 @@ should follow a parent service context. Use `VacuumExpiredOnMemoryPressure` or
 `StartMemoryPressureVacuum` to remove expired keys only when heap allocation is
 above a configured threshold; `StartMemoryPressureVacuumContext` also stops on
 context cancellation. Background cleaners exit cleanly if `Destroy` is called
-before their returned stop function.
+before their returned stop function. `CompactMemory` explicitly reclaims C trie
+and typed-pool high-water capacity after heavy deletion; `StartMemoryCompactor`
+and `StartMemoryCompactorContext` provide opt-in periodic execution.
 
 Use `Keys`, `KeysWithPrefix`, `Entries`, and `EntriesWithPrefix` to iterate
 over non-expired keys and value metadata. Prefix iteration returns full keys and
@@ -1521,6 +1546,7 @@ build files have not been generated.
 - [x] need benchmark which how much faster: `[][]byte` compared to `map[int][]byte` (~170 bytes overhead)
 - [x] replace reusable-index hash maps with a compact bitset-backed stack for typed backing pools
 - [x] trim freed backing-pool tail slots so delete-heavy workloads release references
+- [x] rebuild and densely reindex trie, typed pools, and Merkle state after heavy churn
 - [x] create a web UI for management and monitoring (frontend: Svelte MPA)
 - [x] create backend service using HTTP/2 JSON APIs so it can be accessed from another language
 - [x] add native gRPC protobuf APIs for strongly typed client generation

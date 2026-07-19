@@ -32,6 +32,76 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("UnaryCommand", benchmarkBigWinsUnaryCommand)
 	b.Run("StreamCommand", benchmarkBigWinsStreamCommand)
 	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
+	b.Run("ChurnRetentionBaseline", benchmarkBigWinsChurnRetentionBaseline)
+	b.Run("ChurnRetentionCompacted", benchmarkBigWinsChurnRetentionCompacted)
+}
+
+func benchmarkBigWinsChurnRetentionBaseline(b *testing.B) {
+	benchmarkBigWinsChurnRetention(b, false)
+}
+
+func benchmarkBigWinsChurnRetentionCompacted(b *testing.B) {
+	benchmarkBigWinsChurnRetention(b, true)
+}
+
+func benchmarkBigWinsChurnRetention(b *testing.B, compact bool) {
+	keyCount := bigWinsBenchmarkKeys(100000)
+	survivorCount := (keyCount + 9) / 10
+	var retainedHeap uint64
+	var retainedBacking uint64
+	var compactionTime time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		runtime.GC()
+		var before runtime.MemStats
+		runtime.ReadMemStats(&before)
+		trie := CreateHatTrie()
+		if _, err := trie.replicationMerkleSnapshot(); err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+		for idx := 0; idx < keyCount; idx++ {
+			trie.UpsertString(bigWinsKey(idx), "value")
+		}
+		for idx := 0; idx < keyCount; idx++ {
+			if idx%10 != 0 {
+				trie.Delete(bigWinsKey(idx))
+			}
+		}
+		if compact {
+			started := time.Now()
+			if _, err := trie.CompactMemory(); err != nil {
+				b.Fatal(err)
+			}
+			compactionTime += time.Since(started)
+		}
+		b.StopTimer()
+		runtime.GC()
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
+		if after.HeapAlloc > before.HeapAlloc {
+			retainedHeap += after.HeapAlloc - before.HeapAlloc
+		}
+		trie.mu.RLock()
+		retainedBacking += trie.memoryBackingBytesLocked()
+		trie.mu.RUnlock()
+		if trie.Size() != survivorCount {
+			b.Fatalf("churn trie size = %d, want %d", trie.Size(), survivorCount)
+		}
+		runtime.KeepAlive(trie)
+		trie.Destroy()
+		b.StartTimer()
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(keyCount), "inserted_keys/op")
+	b.ReportMetric(float64(keyCount-survivorCount), "deleted_keys/op")
+	b.ReportMetric(float64(retainedHeap)/float64(b.N), "retained_heap_B/op")
+	b.ReportMetric(float64(retainedBacking)/float64(b.N), "retained_backing_B/op")
+	if compact {
+		b.ReportMetric(float64(compactionTime.Nanoseconds())/float64(b.N), "compaction_ns/op")
+	}
 }
 
 func benchmarkBigWinsGlobalTelemetry(b *testing.B) {

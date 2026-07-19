@@ -310,6 +310,28 @@ func TestParseConfigCounterWriteStripesDefaultsOffAndValidatesOverride(t *testin
 	}
 }
 
+func TestParseConfigMemoryCompactionDefaultsOffAndValidatesOverride(t *testing.T) {
+	defaultCfg, err := parseConfig(nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(defaults) error = %v", err)
+	}
+	if defaultCfg.memoryCompactionInterval != 0 {
+		t.Fatalf("default memory compaction interval = %s, want off", defaultCfg.memoryCompactionInterval)
+	}
+
+	compactingCfg, err := parseConfig([]string{"-memory-compaction-interval", "15m"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(memory compaction) error = %v", err)
+	}
+	if compactingCfg.memoryCompactionInterval != 15*time.Minute {
+		t.Fatalf("memory compaction interval = %s, want 15m", compactingCfg.memoryCompactionInterval)
+	}
+
+	if _, err := parseConfig([]string{"-memory-compaction-interval", "-1ns"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseConfig(negative memory compaction interval) error = nil")
+	}
+}
+
 func TestParseConfigRejectsInvalidKeyStatsPolicy(t *testing.T) {
 	for _, test := range []struct {
 		name string

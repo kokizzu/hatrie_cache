@@ -12,6 +12,7 @@ rate_limit=${RATE_LIMIT:-0}
 key_stats_mode=${KEY_STATS_MODE:-off}
 key_stats_capacity=${KEY_STATS_CAPACITY:-100000}
 counter_write_stripes=${COUNTER_WRITE_STRIPES:-0}
+memory_compaction_interval=${MEMORY_COMPACTION_INTERVAL:-0}
 read_header_timeout=${MONITORING_READ_HEADER_TIMEOUT:-5s}
 idle_timeout=${MONITORING_IDLE_TIMEOUT:-2m}
 node_id=${NODE_ID:-}
@@ -91,6 +92,7 @@ set -- \
 	-key-stats-mode "$key_stats_mode" \
 	-key-stats-capacity "$key_stats_capacity" \
 	-counter-write-stripes "$counter_write_stripes" \
+	-memory-compaction-interval "$memory_compaction_interval" \
 	-monitoring-read-header-timeout "$read_header_timeout" \
 	-monitoring-idle-timeout "$idle_timeout" \
 	-node-id "$node_id" \

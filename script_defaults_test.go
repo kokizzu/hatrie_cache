@@ -161,6 +161,36 @@ func TestMonitoringWrapperDisablesKeyStatsByDefault(t *testing.T) {
 	}
 }
 
+func TestMonitoringWrapperDisablesMemoryCompactionByDefault(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"MEMORY_COMPACTION_INTERVAL ?= 0",
+		"MEMORY_COMPACTION_INTERVAL='$(MEMORY_COMPACTION_INTERVAL)'",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile missing memory compaction token %q", token)
+		}
+	}
+
+	script, err := os.ReadFile("scripts/monitoring-server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/monitoring-server.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"memory_compaction_interval=${MEMORY_COMPACTION_INTERVAL:-0}",
+		`-memory-compaction-interval "$memory_compaction_interval"`,
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("monitoring wrapper missing memory compaction token %q", token)
+		}
+	}
+}
+
 func TestMonitoringWrapperPassesJournalGroupCommitDefaults(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {

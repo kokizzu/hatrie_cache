@@ -61,6 +61,7 @@ type config struct {
 	keyStatsMode                string
 	keyStatsCapacity            int
 	counterWriteStripes         int
+	memoryCompactionInterval    time.Duration
 	monitoringWebDir            string
 	monitoringReadHeaderTimeout time.Duration
 	monitoringIdleTimeout       time.Duration
@@ -254,6 +255,11 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			}
 		}()
 	}
+	stopMemoryCompactor := func() {}
+	if cfg.memoryCompactionInterval > 0 {
+		stopMemoryCompactor = trie.StartMemoryCompactorContext(ctx, cfg.memoryCompactionInterval)
+	}
+	defer stopMemoryCompactor()
 	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, levelDBDirtyTracker, cfg.dbSyncInterval, levelDBSaveOptions(cfg), stderr)
 	defer stopDBSync()
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, snapshotFormat(cfg), stderr)
@@ -479,6 +485,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.keyStatsMode, "key-stats-mode", cfg.keyStatsMode, "per-key telemetry retention: bounded, full, or off")
 	flags.IntVar(&cfg.keyStatsCapacity, "key-stats-capacity", cfg.keyStatsCapacity, "maximum keys with retained telemetry in bounded mode")
 	flags.IntVar(&cfg.counterWriteStripes, "counter-write-stripes", cfg.counterWriteStripes, "existing-counter write lock stripes; use 0 to disable")
+	flags.DurationVar(&cfg.memoryCompactionInterval, "memory-compaction-interval", cfg.memoryCompactionInterval, "optional interval for rebuilding trie and typed pools after churn; use 0 to disable")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
@@ -589,6 +596,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if err := hatriecache.ValidateCounterWriteStripes(cfg.counterWriteStripes); err != nil {
 		return config{}, err
+	}
+	if cfg.memoryCompactionInterval < 0 {
+		return config{}, errors.New("memory compaction interval must be non-negative")
 	}
 	if cfg.dbHotLoadMaxBytes < 0 {
 		return config{}, errors.New("db hot-load max bytes must be non-negative")
@@ -970,6 +980,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"key_stats_mode":                       cfg.keyStatsMode,
 		"key_stats_capacity":                   cfg.keyStatsCapacity,
 		"counter_write_stripes":                cfg.counterWriteStripes,
+		"memory_compaction_interval":           cfg.memoryCompactionInterval.String(),
 		"monitoring_web_dir":                   cfg.monitoringWebDir,
 		"monitoring_read_header_timeout":       cfg.monitoringReadHeaderTimeout.String(),
 		"monitoring_idle_timeout":              cfg.monitoringIdleTimeout.String(),
