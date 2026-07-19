@@ -1523,6 +1523,7 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store persistentReferenceStore,
 		Stats:          cloneKeyStatsPtr(entry.Stats),
 		RecordBytes:    len(data),
 		RecordChecksum: levelDBRecordChecksum(data),
+		Token:          trie.nextLevelDBReferenceTokenLocked(),
 	})
 	hval := HatValue{Index: idx, Flags: DATAVALUE_TYPE_LEVELDB_REF}
 	if entry.ExpiresAt != nil {
@@ -1572,8 +1573,17 @@ func (trie *HatTrie) levelDBReferenceEntryDataForStoreLocked(key string, hval Ha
 	ref.Stats = cloneKeyStatsPtr(stats)
 	ref.RecordBytes = len(patched)
 	ref.RecordChecksum = levelDBRecordChecksum(patched)
+	ref.Token = trie.nextLevelDBReferenceTokenLocked()
 	trie.dbrefs.Set(hval.Index, ref)
 	return patched, true, nil
+}
+
+func (trie *HatTrie) nextLevelDBReferenceTokenLocked() uint64 {
+	trie.nextDBReferenceToken++
+	if trie.nextDBReferenceToken == 0 {
+		trie.nextDBReferenceToken++
+	}
+	return trie.nextDBReferenceToken
 }
 
 func (trie *HatTrie) levelDBReferenceMetadataMatchesLocked(key string, ref LevelDBReference) bool {

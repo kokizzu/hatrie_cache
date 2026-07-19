@@ -2067,6 +2067,19 @@ type LevelDBReference struct {
 	Stats          *KeyStats
 	RecordBytes    int
 	RecordChecksum uint64
+	Token          uint64
+}
+
+type levelDBHydrationKey struct {
+	index int32
+	token uint64
+}
+
+type levelDBHydrationCall struct {
+	done  chan struct{}
+	entry snapshotEntry
+	ok    bool
+	err   error
 }
 
 type LevelDBReferenceStorage struct {
@@ -2146,6 +2159,9 @@ type HatTrie struct {
 	xorFilters              *XorFilterStorage
 	radixTrees              *RadixTreeStorage
 	dbrefs                  *LevelDBReferenceStorage
+	hydrationMu             sync.Mutex
+	hydrations              map[levelDBHydrationKey]*levelDBHydrationCall
+	nextDBReferenceToken    uint64
 	expires                 map[string]uint32
 	expirations             expirationHeap
 	hotKey                  string
@@ -2255,6 +2271,10 @@ func (ht *HatTrie) Destroy() {
 	ht.xorFilters = nil
 	ht.radixTrees = nil
 	ht.dbrefs = nil
+	ht.hydrationMu.Lock()
+	ht.hydrations = nil
+	ht.hydrationMu.Unlock()
+	ht.nextDBReferenceToken = 0
 	ht.expires = nil
 	ht.expirations.Clear()
 	ht.expirations = nil
@@ -4096,40 +4116,89 @@ func (ht *HatTrie) HydrateLevelDBReferences() (int, error) {
 }
 
 func (ht *HatTrie) hydrateLevelDBReferenceLocked(key string, hval HatValue) (HatValue, error) {
-	ref, ok := ht.dbrefs.Get(hval.Index)
-	if !ok || ref.Store == nil {
-		ht.deleteKnownLocked(key, hval)
-		ht.updateReplicationMerkleLocked(key)
-		return HatValue{}, nil
-	}
-
-	entry, ok, err := ref.Store.Entry(ref.Key)
-	if err != nil {
-		return HatValue{}, err
-	}
-	if !ok {
-		ht.deleteKnownLocked(key, hval)
-		ht.updateReplicationMerkleLocked(key)
-		return HatValue{}, nil
-	}
-	if entry.Key != key {
-		return HatValue{}, errors.New("hatriecache: leveldb reference key mismatch")
-	}
-	if entry.ExpiresAt != nil && !ht.currentTime().Before(*entry.ExpiresAt) {
-		if ht.deleteKnownLocked(key, hval) {
-			ht.recordExpirationLocked(key)
+	for hval.IsLevelDBReference() {
+		ref, ok := ht.dbrefs.Get(hval.Index)
+		if !ok || ref.Store == nil {
+			ht.deleteKnownLocked(key, hval)
+			ht.updateReplicationMerkleLocked(key)
+			return HatValue{}, nil
 		}
-		return HatValue{}, nil
+
+		entry, present, err := ht.loadLevelDBReferenceUnlocked(ref, hval)
+		currentPtr := ht.tryLocation(key)
+		if currentPtr == nil {
+			return HatValue{}, nil
+		}
+		current := HatValue{}
+		current.fromValue(*currentPtr)
+		if ht.expireIfNeededLocked(key, current) {
+			return HatValue{}, nil
+		}
+		currentRef, currentRefOK := ht.dbrefs.Get(current.Index)
+		if current != hval || !current.IsLevelDBReference() || !currentRefOK || currentRef.Token != ref.Token {
+			hval = current
+			continue
+		}
+		if err != nil {
+			return HatValue{}, err
+		}
+		if !present {
+			ht.deleteKnownLocked(key, hval)
+			ht.updateReplicationMerkleLocked(key)
+			return HatValue{}, nil
+		}
+		if entry.Key != key {
+			return HatValue{}, errors.New("hatriecache: leveldb reference key mismatch")
+		}
+		if entry.ExpiresAt != nil && !ht.currentTime().Before(*entry.ExpiresAt) {
+			if ht.deleteKnownLocked(key, hval) {
+				ht.recordExpirationLocked(key)
+			}
+			return HatValue{}, nil
+		}
+		operation, operationErr := snapshotOperationForEntry(entry)
+		if operationErr != nil {
+			return HatValue{}, operationErr
+		}
+		updated, applyErr := ht.applySnapshotOperationLocked(operation)
+		if applyErr == nil {
+			ht.updateReplicationMerkleLocked(key)
+		}
+		return updated, applyErr
 	}
-	operation, err := snapshotOperationForEntry(entry)
-	if err != nil {
-		return HatValue{}, err
+	return hval, nil
+}
+
+// loadLevelDBReferenceUnlocked leaves and reacquires ht.mu around backend I/O.
+// The caller must hold ht.mu and receives it held again on return.
+func (ht *HatTrie) loadLevelDBReferenceUnlocked(ref LevelDBReference, hval HatValue) (snapshotEntry, bool, error) {
+	hydrationKey := levelDBHydrationKey{index: hval.Index, token: ref.Token}
+	ht.hydrationMu.Lock()
+	call, waiting := ht.hydrations[hydrationKey]
+	if !waiting {
+		if ht.hydrations == nil {
+			ht.hydrations = make(map[levelDBHydrationKey]*levelDBHydrationCall)
+		}
+		call = &levelDBHydrationCall{done: make(chan struct{})}
+		ht.hydrations[hydrationKey] = call
 	}
-	updated, err := ht.applySnapshotOperationLocked(operation)
-	if err == nil {
-		ht.updateReplicationMerkleLocked(key)
+	ht.hydrationMu.Unlock()
+
+	ht.mu.Unlock()
+	if waiting {
+		<-call.done
+	} else {
+		call.entry, call.ok, call.err = ref.Store.Entry(ref.Key)
+		close(call.done)
 	}
-	return updated, err
+	ht.mu.Lock()
+
+	ht.hydrationMu.Lock()
+	if ht.hydrations[hydrationKey] == call {
+		delete(ht.hydrations, hydrationKey)
+	}
+	ht.hydrationMu.Unlock()
+	return call.entry, call.ok, call.err
 }
 
 // Delete removes key and returns whether it existed.

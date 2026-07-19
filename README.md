@@ -851,6 +851,13 @@ closing it to materialize all references into the trie:
 make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
 ```
 
+Cold backend reads run outside the global trie lock. Concurrent readers of the
+same reference share one backend request, while updates and deletes may proceed;
+a monotonic reference token prevents a stale read from replacing newer state.
+On the 32-key delayed-I/O fixture, parallel hydration completes in 1.174 ms
+versus 33.875 ms serialized, a 28.85x latency improvement. See
+[BENCHMARK.md](BENCHMARK.md#parallel-cold-reference-hydration).
+
 Set `DB_MEMORY_CAP_BYTES` and/or `DB_RSS_CAP_BYTES` with
 `DB_MEMORY_EVICT_INTERVAL` to keep the running hot value set under a soft byte
 cap or to react when process RSS crosses a threshold. The governor estimates

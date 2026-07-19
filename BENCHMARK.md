@@ -166,6 +166,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
+| Current pass | [Parallel cold-reference hydration](#parallel-cold-reference-hydration), 32 delayed reads | Serialized: 33.875 ms; 18,648 heap B | Parallel singleflight: 1.174 ms; 30,166 heap B | 28.85x faster | Cumulative heap is 1.62x higher and allocations are 1.80x higher |
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
 | Earlier | [Replication request batching](#replication-batching-benchmark), 10k keys | Historical: 51,455,645,995 ns; 10,000 requests | First batched baseline: 162,195,812 ns; 1 request | About 317x faster, 10,000x fewer requests | Historical rows came from separate controlled runs |
 | Earlier | [Replication routing and encoding](#replication-batching-benchmark), 10k keys | 162,195,812 ns; 144,227 wire B; 57,035,706 heap B | 18,893,092 ns; 55,795 wire B; 948,495 heap B | 8.58x faster, 2.59x smaller wire, 60.13x lower heap | Compact paths retain legacy materialization fallbacks |
@@ -288,6 +289,30 @@ Auto mode reads `<DB_PATH>.backend`; unmarked non-empty directories remain
 LevelDB for backward compatibility. This benchmark measures one local NVMe
 host and does not claim identical ratios for different filesystems, sync
 latency, value compressibility, or long-running LSM compaction state.
+
+<a id="parallel-cold-reference-hydration"></a>
+### Parallel Cold-Reference Hydration
+
+The fixture creates 32 distinct lazy references backed by a deterministic
+250-microsecond delayed store. `Serialized` reads them one at a time, matching
+the former global-lock behavior; `Parallel` issues simultaneous reads through
+the new lock-free I/O phase. Five samples run five complete batches each:
+
+```sh
+make bench-cold-hydration BENCHTIME=5x COUNT=5
+```
+
+| Mode, median of five | Time/batch | Heap B/batch | Allocs/batch | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Serialized | 33.875 ms | 18,648 | 151 | baseline |
+| Parallel singleflight | 1.174 ms | 30,166 | 272 | 28.85x faster |
+
+Parallel scheduling costs 1.62x cumulative heap and 1.80x allocations in this
+small synthetic batch. Backend latency overlaps instead of serializing under
+the trie mutex, unrelated keys remain writable, and same-reference readers
+share one backend call. Reference-token revalidation makes concurrent update,
+delete, TTL metadata change, and slot reuse win over stale I/O. Raw output is
+written to `build/benchmarks/cold-reference-hydration.txt`.
 
 ### Incremental Anti-Entropy
 
