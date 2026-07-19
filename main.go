@@ -2062,7 +2062,7 @@ func (ss *SetStorage) Del(idx int32) {
 type LevelDBReference struct {
 	Key            string
 	Type           string
-	Store          *LevelDBStore
+	Store          persistentReferenceStore
 	ExpiresAt      *time.Time
 	Stats          *KeyStats
 	RecordBytes    int

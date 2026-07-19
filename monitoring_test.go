@@ -1592,7 +1592,7 @@ func TestMonitoringHandlerReportsLevelDBStorageStatus(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &status); err != nil {
 		t.Fatalf("storage status JSON error = %v", err)
 	}
-	if !status.LevelDBConfigured || status.Store != "leveldb" || status.Path != path || status.Format != string(StorageFormatJSON) {
+	if !status.Configured || !status.LevelDBConfigured || status.Store != "leveldb" || status.Path != path || status.Format != string(StorageFormatJSON) {
 		t.Fatalf("storage status = %#v, want configured leveldb path and JSON format", status)
 	}
 	if !status.Operation.Running || status.Operation.Action != "compact" || status.Operation.StartedAt == nil || status.Operation.AgeMillis < 0 {
@@ -1635,6 +1635,36 @@ func TestMonitoringHandlerReportsLevelDBStorageStatus(t *testing.T) {
 	}
 	if status.LastSpill == nil || status.LastSpill.KeysSpilled != 1 || status.LastSpill.HotBytesAfter != 64 {
 		t.Fatalf("storage last spill = %#v, want remembered spill result", status.LastSpill)
+	}
+}
+
+func TestMonitoringHandlerReportsPebbleStorageStatus(t *testing.T) {
+	ht := newTestTrie(t)
+	path := filepath.Join(t.TempDir(), "cache")
+	store, err := OpenPersistentStoreWithFormat(path, StorageBackendPebble, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("OpenPersistentStoreWithFormat() error = %v", err)
+	}
+	defer store.Close()
+	ht.UpsertString("session", "value")
+	if err := store.Save(ht); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	resp := httptest.NewRecorder()
+	NewMonitoringHandler(ht, MonitoringOptions{LevelDBStore: store}).Handler().ServeHTTP(
+		resp,
+		httptest.NewRequest(http.MethodGet, "/api/storage", nil),
+	)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("storage status = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	var status storageStatus
+	if err := json.Unmarshal(resp.Body.Bytes(), &status); err != nil {
+		t.Fatalf("storage status JSON error = %v", err)
+	}
+	if !status.Configured || !status.LevelDBConfigured || status.Store != "pebble" || status.Path != path || status.Format != string(StorageFormatBinary) || status.SizeBytes <= 0 || status.Properties.Stats == "" {
+		t.Fatalf("Pebble storage status = %#v", status)
 	}
 }
 

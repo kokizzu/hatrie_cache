@@ -45,9 +45,10 @@ type BackupDoctorJournal struct {
 }
 
 type BackupDoctorLevelDB struct {
-	Path string `json:"path"`
-	OK   bool   `json:"ok"`
-	Keys int    `json:"keys"`
+	Path    string `json:"path"`
+	Backend string `json:"backend,omitempty"`
+	OK      bool   `json:"ok"`
+	Keys    int    `json:"keys"`
 }
 
 type BackupPartitionValidation struct {
@@ -213,7 +214,7 @@ func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
 
 	levelDBPath := filepath.Join(path, "cache.leveldb")
 	if fileExists(levelDBPath) {
-		store, err := OpenLevelDBStore(levelDBPath)
+		store, err := OpenPersistentStore(levelDBPath)
 		if err != nil {
 			return BackupDoctorReport{}, err
 		}
@@ -224,14 +225,14 @@ func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
 		if err != nil {
 			return BackupDoctorReport{}, err
 		}
-		report.LevelDB = &BackupDoctorLevelDB{Path: levelDBPath, OK: true, Keys: count}
+		report.LevelDB = &BackupDoctorLevelDB{Path: levelDBPath, Backend: string(store.Backend()), OK: true, Keys: count}
 		if report.RecoveredKeys == 0 {
 			report.RecoveredKeys = loaded.Size()
 		}
 	}
 
 	if report.Snapshot == nil && report.Journal == nil && report.LevelDB == nil {
-		return BackupDoctorReport{}, errors.New("hatriecache: backup directory contains no recognized snapshot, journal, or LevelDB data")
+		return BackupDoctorReport{}, errors.New("hatriecache: backup directory contains no recognized snapshot, journal, or persistent store data")
 	}
 	if report.RecoveredKeys == 0 {
 		report.RecoveredKeys = trie.Size()

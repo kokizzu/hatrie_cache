@@ -285,7 +285,7 @@ send the same token as gRPC metadata.
 
 The server restores data in this order:
 
-1. Load LevelDB when `DB_PATH` is set.
+1. Load the configured persistent store when `DB_PATH` is set.
 2. Load the snapshot when `SNAPSHOT_PATH` is set, replacing the current
    in-memory key set.
 3. Replay journal entries newer than the snapshot checkpoint when
@@ -293,14 +293,14 @@ The server restores data in this order:
 
 That means `SNAPSHOT_PATH + JOURNAL_PATH` is the usual point-in-time recovery
 pair, while `DB_PATH` is a full key/value persistence store. You can enable
-both, but keep in mind the snapshot is loaded after LevelDB and therefore wins
-for overlapping keys.
+both, but keep in mind the snapshot is loaded after the persistent store and
+therefore wins for overlapping keys.
 
 Recommended durability profiles:
 
 | Profile | Configuration | Use case |
 | --- | --- | --- |
-| Fast local persistence | `DB_PATH=data/cache.leveldb DB_FORMAT=binary DB_SYNC_INTERVAL=30s DB_COMPACT_INTERVAL=10m DB_HOT_LOAD=true` | Full persisted key/value store with periodic sync, compaction, and memory-efficient cold starts. |
+| Fast local persistence | `DB_PATH=data/cache.leveldb DB_BACKEND=auto DB_FORMAT=binary DB_SYNC_INTERVAL=30s DB_COMPACT_INTERVAL=10m DB_HOT_LOAD=true` | Pebble for a new path, legacy LevelDB auto-detection, periodic sync, compaction, and memory-efficient cold starts. |
 | Point-in-time recovery | `SNAPSHOT_PATH=data/snapshot.hc SNAPSHOT_INTERVAL=30s JOURNAL_PATH=data/commands.journal` | Compact snapshots plus replayable mutations after the latest snapshot. |
 | Replica catch-up | `JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080` | Pull another node's journal tail during bootstrap or after downtime. |
 
@@ -641,6 +641,7 @@ duration strings. Explicit CLI flags override file values:
   "counter_write_stripes": 0,
   "memory_compaction_interval": "0",
   "db_path": "data/cache.leveldb",
+  "db_backend": "auto",
   "snapshot_path": "data/snapshot.hc",
   "snapshot_interval": "30s",
   "journal_path": "data/commands.journal"
@@ -656,7 +657,7 @@ make print-sane-config CONFIG_PROFILE=bench
 ```
 
 Profiles are explicit opt-ins. `production` enables the monitoring server on
-`0.0.0.0:8080`, LevelDB, snapshot, and journal paths under `data/`, efficient
+`0.0.0.0:8080`, persistent storage, snapshot, and journal paths under `data/`, efficient
 binary/gzip formats, periodic dirty saves, and periodic snapshots. `dev` keeps
 loopback monitoring defaults. `bench` enables loopback monitoring and leaves
 persistence disabled. Override any profile default with normal flags, for
@@ -714,8 +715,16 @@ make monitoring-server GRPC_ADDR=0.0.0.0:9090 GRPC_TLS_CERT=server.pem GRPC_TLS_
 The matching JSON config keys are `grpc_tls_cert`, `grpc_tls_key`, and
 `grpc_client_ca`.
 
-Set `DB_PATH` to load and save cache data through LevelDB with Snappy
-compression. LevelDB records use the binary storage format by default
+Set `DB_PATH` to load and save cache data through the persistent storage
+backend. `DB_BACKEND=auto` is the default: a new empty path uses Pebble, a
+backend marker at `<DB_PATH>.backend` preserves the selected engine, and an
+existing non-empty path without a marker is treated as legacy LevelDB. Use
+`DB_BACKEND=leveldb` for the previous engine or `DB_BACKEND=pebble` to require
+Pebble explicitly. A marker mismatch is rejected before opening the database;
+do not switch an existing directory in place. Migrate through a snapshot or
+backup/restore workflow and keep the adjacent marker in filesystem backups.
+
+Both backends use the binary storage format by default
 (`DB_FORMAT=binary`), which avoids JSON object-field overhead and stores byte
 values as raw bytes instead of base64. Map, slice, set, priority queue, Top-K,
 radix tree, and reservoir sample payloads use the smaller of the compact binary
@@ -733,29 +742,31 @@ tuples. Existing JSON records still load automatically.
 Leaving format variables unset in the Makefile wrapper uses the compiled Go
 defaults; set them only when you want to override the default format.
 Set `DB_FORMAT=json` to keep writing the previous JSON record layout.
-`DB_SYNC_INTERVAL` performs one full LevelDB save at startup, then periodically
-syncs only dirty keys changed by HTTP commands, gRPC commands, and journal pull
-replay while the server is running:
+`DB_SYNC_INTERVAL` performs one full persistent-store save at startup, then
+periodically syncs only dirty keys changed by HTTP commands, gRPC commands, and
+journal pull replay while the server is running:
 
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s
+make monitoring-server DB_PATH=data/cache.leveldb DB_BACKEND=leveldb
 make monitoring-server DB_PATH=data/cache.leveldb DB_FORMAT=json
 make monitoring-server DB_PATH=data/cache.leveldb DB_COMPARE_BEFORE_WRITE=never
 ```
 
 Dirty-key saves use `DB_COMPARE_BEFORE_WRITE=auto` by default. `auto` compares
-small dirty batches against existing LevelDB records to skip unchanged writes,
+small dirty batches against existing records to skip unchanged writes,
 but skips that read-before-write check for large dirty batches where the random
 read I/O is usually worse than rewriting changed records. Use `always` when
 storage write amplification matters more than read CPU/I/O, and
 `DB_COMPARE_BEFORE_WRITE=never` for bulk ingest or replay when you prefer lower
-CPU and fewer LevelDB reads.
+CPU and fewer storage reads.
 
-Run a manual LevelDB flush before planned maintenance when `DB_SYNC_INTERVAL=0`
-or when you want a full current in-memory state write immediately. Run manual
-LevelDB compaction after large delete or rewrite batches to reclaim storage-file
-space and reduce read amplification. Set `DB_COMPACT_INTERVAL` to compact
-LevelDB automatically on a schedule; optional `DB_COMPACT_START_KEY` and
+Run a manual persistent-store flush before planned maintenance when
+`DB_SYNC_INTERVAL=0` or when you want a full current in-memory state write
+immediately. Run manual
+compaction after large delete or rewrite batches to reclaim storage-file space
+and reduce read amplification. Set `DB_COMPACT_INTERVAL` to compact the selected
+backend automatically on a schedule; optional `DB_COMPACT_START_KEY` and
 `DB_COMPACT_LIMIT_KEY` bound the periodic compaction to one key range:
 
 ```
@@ -763,13 +774,14 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s DB_COMPAC
 make monitoring-server DB_PATH=data/cache.leveldb DB_COMPACT_INTERVAL=10m DB_COMPACT_START_KEY=session: DB_COMPACT_LIMIT_KEY=session~
 ```
 
-`GET /api/storage` reports whether LevelDB is configured, the store `path`,
-storage `format`, approximate `size_bytes`, selected engine `properties`, current `operation`,
+`GET /api/storage` reports whether persistent storage is configured, the
+selected backend in `store`, the store `path`, storage `format`, approximate
+`size_bytes`, selected engine `properties`, current `operation`,
 and the `last_flush`/`last_compact` result remembered by the monitoring
 handler. Empty bounds compact all cache-entry records;
 `start-key` is inclusive and `limit-key` is exclusive. The compaction response
 includes `size_bytes_before`, `size_bytes_after`, `size_bytes_delta`, duration,
-and selected LevelDB property snapshots before and after compaction:
+and selected engine property snapshots before and after compaction:
 
 ```
 make storage-status STORAGE_PEER=http://127.0.0.1:8080
@@ -796,12 +808,35 @@ The tradeoff is readability: binary saves are about 2.1x faster, loads are
 about 1.5x faster, and records are about 26% smaller for this workload, while
 JSON remains easier to inspect with standard text tools.
 
-Set `DB_HOT_LOAD=true` to load all non-expired LevelDB keys as compact
+The backend bakeoff uses 10,000 deterministic 256-byte values, then performs
+500 updates, 250 deletes, 250 inserts, a full load, and manual compaction:
+
+```
+make bench-storage-backends BENCHTIME=3x COUNT=5
+```
+
+| Backend | Full cycle | Save/key | Churn/op | Load/key | Heap/cycle | Peak RSS | Disk/key |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| LevelDB | 78.944 ms | 2,160 ns | 2,392 ns | 1,836 ns | 41.53 MB | 82,880 KiB | 265.3 B |
+| Pebble | 73.161 ms | 2,058 ns | 1,869 ns | 1,872 ns | 32.02 MB | 79,104 KiB | 581.5 B |
+
+Pebble is the new-path default because this fixture is 1.08x faster overall,
+1.05x faster to save, 1.28x faster under incremental churn, and allocates 1.30x
+less heap. LevelDB loads 1.02x faster, uses 2.19x less disk, and closes about
+17.1x faster; select it for disk-constrained or frequently opened short-lived
+processes. Pebble peak RSS was 1.05x lower on this run. See
+[BENCHMARK.md](BENCHMARK.md#persistent-storage-backend-bakeoff) for raw medians
+and phase details.
+
+Set `DB_HOT_LOAD=true` to load all non-expired persistent keys as compact
 references while only materializing hot values in memory. By default a hot value
 must be 1024 bytes or smaller, have a last hit within 1 hour, and have more than
-1000 recorded hits. Cold values are hydrated from LevelDB on first value access
-and are still preserved by later LevelDB saves. Keep the `LevelDBStore` open
-while cold references may be accessed, or call `HydrateLevelDBReferences` before
+1000 recorded hits. Cold values are hydrated from the selected backend on first
+value access and are still preserved by later saves. The existing
+`LevelDBStore`, `LevelDBLoadPolicy`, and lazy-reference API names remain for
+source compatibility and work with both engines through `PersistentStore`.
+Keep the store open while cold references may be accessed, or call
+`HydrateLevelDBReferences` before
 closing it to materialize all references into the trie:
 
 ```
@@ -811,8 +846,8 @@ make monitoring-server DB_PATH=data/cache.leveldb DB_HOT_LOAD=true
 Set `DB_MEMORY_CAP_BYTES` and/or `DB_RSS_CAP_BYTES` with
 `DB_MEMORY_EVICT_INTERVAL` to keep the running hot value set under a soft byte
 cap or to react when process RSS crosses a threshold. The governor estimates
-in-memory value payload bytes, writes cold eligible values to LevelDB, and
-replaces them with lazy LevelDB references. Values with no recent hits spill
+in-memory value payload bytes, writes cold eligible values to persistent storage,
+and replaces them with lazy references. Values with no recent hits spill
 first; ties prefer older hits, fewer hits, then larger values.
 `DB_MEMORY_EVICT_MIN_VALUE_BYTES` defaults to 1024 so tiny keys are left in
 memory unless you lower it. `DB_MEMORY_CAP_BYTES` targets estimated hot payload
@@ -822,8 +857,8 @@ With both set, RSS is an extra trigger while `DB_MEMORY_CAP_BYTES` remains the
 hot-byte target. This is a soft cap: keys already stored outside the Go heap,
 such as large byte payloads on disk, are not counted, and the cap may remain
 above target when there are no eligible values to spill. The tradeoff is lower
-heap/RSS pressure in exchange for LevelDB write I/O during spill passes and one
-LevelDB read when a cold value is accessed again:
+heap/RSS pressure in exchange for storage write I/O during spill passes and one
+storage read when a cold value is accessed again:
 
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_MEMORY_CAP_BYTES=1073741824 DB_MEMORY_EVICT_INTERVAL=30s

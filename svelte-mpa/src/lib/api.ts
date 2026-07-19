@@ -80,6 +80,7 @@ export type CommandResponse = {
 };
 
 export type StorageStatus = {
+  configured?: boolean;
   leveldb_configured: boolean;
   store?: string;
   path?: string;
@@ -392,6 +393,7 @@ const sampleEntries: CacheEntry[] = [
 ];
 
 const sampleStorageStatus: StorageStatus = {
+  configured: false,
   leveldb_configured: false,
   operation: {
     running: false

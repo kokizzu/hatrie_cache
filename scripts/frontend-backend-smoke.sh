@@ -168,7 +168,7 @@ if ! "$browser" --headless --disable-gpu --no-sandbox --disable-dev-shm-usage --
 	cat "$browser_log" >&2
 	exit 1
 fi
-grep -q 'LevelDB Storage' "$dom_file"
+grep -q 'Persistent Storage' "$dom_file"
 grep -q 'cache.leveldb' "$dom_file"
 grep -q 'Audit Trail' "$dom_file"
 grep -q 'storage.flush' "$dom_file"

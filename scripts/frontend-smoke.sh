@@ -134,7 +134,7 @@ if [ -n "$browser" ]; then
 		cat "$browser_log" >&2
 		exit 1
 	fi
-	grep -q 'LevelDB Storage' "$dom_file"
+	grep -q 'Persistent Storage' "$dom_file"
 	grep -q 'Replication' "$dom_file"
 	grep -q 'Audit Trail' "$dom_file"
 else

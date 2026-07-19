@@ -1055,7 +1055,15 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 		return LevelDBLoadResult{}, err
 	}
 	defer snapshot.Release()
+	return loadPersistentEntryData(trie, store, policy, func(visit func(snapshotEntry, []byte) error) error {
+		return scanLevelDBSnapshotEntryData(snapshot, visit)
+	})
+}
 
+func loadPersistentEntryData(trie *HatTrie, store persistentReferenceStore, policy LevelDBLoadPolicy, scan func(func(snapshotEntry, []byte) error) error) (LevelDBLoadResult, error) {
+	if trie == nil {
+		return LevelDBLoadResult{}, ErrNilHatTrie
+	}
 	now := trie.currentTime()
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
@@ -1065,7 +1073,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	activeKeys := []string{}
 	result := LevelDBLoadResult{}
 	applied := false
-	if err := scanLevelDBSnapshotEntryData(snapshot, func(entry snapshotEntry, data []byte) error {
+	if err := scan(func(entry snapshotEntry, data []byte) error {
 		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy, true)
 		if err != nil {
 			return err
@@ -1494,7 +1502,7 @@ func newRadixTreeSizeFromSnapshot(snapshot radixTreeSnapshot) (int64, error) {
 	return jsonEncodedSize(snapshot.Items)
 }
 
-func (trie *HatTrie) applyLevelDBReferenceLocked(store *LevelDBStore, entry snapshotEntry, data []byte) (HatValue, error) {
+func (trie *HatTrie) applyLevelDBReferenceLocked(store persistentReferenceStore, entry snapshotEntry, data []byte) (HatValue, error) {
 	if store == nil {
 		return HatValue{}, errors.New("hatriecache: leveldb reference store is required")
 	}

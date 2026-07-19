@@ -210,6 +210,7 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 		"replication_batch_max_bytes": 4096,
 		"replication_max_in_flight_targets": 2,
 		"db_path": "/data/cache.leveldb",
+		"db_backend": "leveldb",
 		"db_hot_load": true,
 		"db_hot_load_max_bytes": 2048,
 		"snapshot_interval": "30s",
@@ -252,11 +253,35 @@ func TestParseConfigLoadsConfigFile(t *testing.T) {
 	if cfg.replicationMaxTargets != 2 {
 		t.Fatalf("replication max in-flight targets = %d, want config file value 2", cfg.replicationMaxTargets)
 	}
-	if cfg.dbPath != "/data/cache.leveldb" || !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 {
+	if cfg.dbPath != "/data/cache.leveldb" || cfg.dbBackend != "leveldb" || !cfg.dbHotLoad || cfg.dbHotLoadMaxBytes != 2048 {
 		t.Fatalf("db config = %#v, want file values", cfg)
 	}
 	if cfg.snapshotInterval != 30*time.Second || cfg.journalPullLimit != 123 {
 		t.Fatalf("snapshot/journal config = %s/%d, want 30s/123", cfg.snapshotInterval, cfg.journalPullLimit)
+	}
+}
+
+func TestParseConfigStorageBackendDefaultsToAutoAndValidatesOverride(t *testing.T) {
+	defaultCfg, err := parseConfig(nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(defaults) error = %v", err)
+	}
+	if defaultCfg.dbBackend != string(hatriecache.StorageBackendAuto) {
+		t.Fatalf("default db backend = %q, want auto", defaultCfg.dbBackend)
+	}
+	if got := redactedConfig(defaultCfg)["db_backend"]; got != string(hatriecache.StorageBackendAuto) {
+		t.Fatalf("redacted default db backend = %#v, want auto", got)
+	}
+
+	pebbleCfg, err := parseConfig([]string{"-db-backend", "PEBBLE"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(pebble) error = %v", err)
+	}
+	if pebbleCfg.dbBackend != string(hatriecache.StorageBackendPebble) {
+		t.Fatalf("pebble db backend = %q", pebbleCfg.dbBackend)
+	}
+	if _, err := parseConfig([]string{"-db-backend", "unknown"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseConfig(unknown db backend) error = nil")
 	}
 }
 

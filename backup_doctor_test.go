@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestVerifyBackupPathChecksPebblePersistentStore(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenPersistentStoreWithFormat(filepath.Join(dir, "cache.leveldb"), StorageBackendPebble, StorageFormatBinary)
+	if err != nil {
+		t.Fatalf("OpenPersistentStoreWithFormat() error = %v", err)
+	}
+	trie := newTestTrie(t)
+	trie.UpsertString("name", "ivi")
+	if err := store.Save(trie); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	report, err := VerifyBackupPath(dir)
+	if err != nil {
+		t.Fatalf("VerifyBackupPath() error = %v", err)
+	}
+	if !report.OK || report.LevelDB == nil || report.LevelDB.Backend != string(StorageBackendPebble) || report.LevelDB.Keys != 1 || report.RecoveredKeys != 1 {
+		t.Fatalf("persistent store doctor report = %#v, want one recovered Pebble key", report)
+	}
+}
+
 func TestVerifyBackupPathChecksAtomicBundle(t *testing.T) {
 	ht := newTestTrie(t)
 	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))

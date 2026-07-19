@@ -98,6 +98,7 @@ type config struct {
 	grpcTLSKey                  string
 	grpcClientCA                string
 	dbPath                      string
+	dbBackend                   string
 	dbFormat                    string
 	dbSyncInterval              time.Duration
 	dbCompareBeforeWrite        string
@@ -197,7 +198,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 
-	dbStore, err := openLevelDBIfConfigured(cfg.dbPath, storageFormat(cfg))
+	dbStore, err := openPersistentStoreIfConfigured(cfg.dbPath, storageBackend(cfg), storageFormat(cfg))
 	if err != nil {
 		return err
 	}
@@ -251,7 +252,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	if dbStore != nil {
 		defer func() {
 			if err := dbStore.Save(trie); err != nil {
-				fmt.Fprintf(stderr, "save leveldb: %v\n", err)
+				fmt.Fprintf(stderr, "save persistent store: %v\n", err)
 			}
 		}()
 	}
@@ -440,6 +441,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
 		journalPullFullSyncFallback: true,
 		dbFormat:                    string(hatriecache.DefaultStorageFormat),
+		dbBackend:                   string(hatriecache.StorageBackendAuto),
 		dbCompareBeforeWrite:        string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
 		snapshotFormat:              string(hatriecache.DefaultSnapshotFormat),
 		journalFormat:               string(hatriecache.DefaultCommandJournalFormat),
@@ -527,21 +529,22 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.grpcTLSCert, "grpc-tls-cert", "", "TLS certificate path for the native gRPC API")
 	flags.StringVar(&cfg.grpcTLSKey, "grpc-tls-key", "", "TLS private key path for the native gRPC API")
 	flags.StringVar(&cfg.grpcClientCA, "grpc-client-ca", "", "optional client CA PEM path; when set, native gRPC requires mTLS client certificates")
-	flags.StringVar(&cfg.dbPath, "db-path", cfg.dbPath, "optional LevelDB path to load on startup and save on shutdown")
-	flags.StringVar(&cfg.dbFormat, "db-format", cfg.dbFormat, "LevelDB record storage format: binary or json")
-	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", cfg.dbSyncInterval, "optional periodic LevelDB save interval")
-	flags.StringVar(&cfg.dbCompareBeforeWrite, "db-compare-before-write", cfg.dbCompareBeforeWrite, "dirty LevelDB save compare mode: auto, always, or never")
-	flags.DurationVar(&cfg.dbCompactInterval, "db-compact-interval", cfg.dbCompactInterval, "optional periodic LevelDB compaction interval")
-	flags.StringVar(&cfg.dbCompactStartKey, "db-compact-start-key", "", "first cache key to include in periodic LevelDB compaction")
-	flags.StringVar(&cfg.dbCompactLimitKey, "db-compact-limit-key", "", "first cache key after the periodic LevelDB compaction range")
-	flags.BoolVar(&cfg.dbHotLoad, "db-hot-load", cfg.dbHotLoad, "load cold LevelDB keys as lazy references and hot small values into memory")
-	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for LevelDB hot-load")
-	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for LevelDB hot-load")
-	flags.Uint64Var(&cfg.dbHotLoadMinHits, "db-hot-load-min-hits", 1000, "minimum hits required for LevelDB hot-load")
-	flags.Int64Var(&cfg.dbMemoryCapBytes, "db-memory-cap-bytes", 0, "estimated hot value bytes cap for periodic LevelDB cold eviction; use 0 to disable")
-	flags.Int64Var(&cfg.dbRSSCapBytes, "db-rss-cap-bytes", 0, "process RSS bytes threshold that triggers periodic LevelDB cold eviction; use 0 to disable")
-	flags.DurationVar(&cfg.dbMemoryEvictInterval, "db-memory-evict-interval", 0, "periodic LevelDB cold eviction interval; use 0 to disable")
-	flags.Int64Var(&cfg.dbMemoryEvictMinValueBytes, "db-memory-evict-min-value-bytes", 1024, "minimum estimated value bytes eligible for LevelDB cold eviction")
+	flags.StringVar(&cfg.dbPath, "db-path", cfg.dbPath, "optional persistent store path to load on startup and save on shutdown")
+	flags.StringVar(&cfg.dbBackend, "db-backend", cfg.dbBackend, "persistent storage backend: auto, pebble, or leveldb")
+	flags.StringVar(&cfg.dbFormat, "db-format", cfg.dbFormat, "persistent record storage format: binary or json")
+	flags.DurationVar(&cfg.dbSyncInterval, "db-sync-interval", cfg.dbSyncInterval, "optional periodic persistent-store save interval")
+	flags.StringVar(&cfg.dbCompareBeforeWrite, "db-compare-before-write", cfg.dbCompareBeforeWrite, "dirty persistent-store save compare mode: auto, always, or never")
+	flags.DurationVar(&cfg.dbCompactInterval, "db-compact-interval", cfg.dbCompactInterval, "optional periodic persistent-store compaction interval")
+	flags.StringVar(&cfg.dbCompactStartKey, "db-compact-start-key", "", "first cache key to include in periodic storage compaction")
+	flags.StringVar(&cfg.dbCompactLimitKey, "db-compact-limit-key", "", "first cache key after the periodic storage compaction range")
+	flags.BoolVar(&cfg.dbHotLoad, "db-hot-load", cfg.dbHotLoad, "load cold persistent keys as lazy references and hot small values into memory")
+	flags.Int64Var(&cfg.dbHotLoadMaxBytes, "db-hot-load-max-bytes", 1024, "maximum value size for persistent-store hot-load")
+	flags.DurationVar(&cfg.dbHotLoadMaxAge, "db-hot-load-max-age", time.Hour, "maximum last-hit age for persistent-store hot-load")
+	flags.Uint64Var(&cfg.dbHotLoadMinHits, "db-hot-load-min-hits", 1000, "minimum hits required for persistent-store hot-load")
+	flags.Int64Var(&cfg.dbMemoryCapBytes, "db-memory-cap-bytes", 0, "estimated hot value bytes cap for periodic persistent-store cold eviction; use 0 to disable")
+	flags.Int64Var(&cfg.dbRSSCapBytes, "db-rss-cap-bytes", 0, "process RSS bytes threshold that triggers periodic persistent-store cold eviction; use 0 to disable")
+	flags.DurationVar(&cfg.dbMemoryEvictInterval, "db-memory-evict-interval", 0, "periodic persistent-store cold eviction interval; use 0 to disable")
+	flags.Int64Var(&cfg.dbMemoryEvictMinValueBytes, "db-memory-evict-min-value-bytes", 1024, "minimum estimated value bytes eligible for persistent-store cold eviction")
 	flags.StringVar(&cfg.snapshotPath, "snapshot-path", cfg.snapshotPath, "optional snapshot path to load on startup and save on shutdown")
 	flags.DurationVar(&cfg.snapshotInterval, "snapshot-interval", cfg.snapshotInterval, "optional periodic snapshot interval")
 	flags.StringVar(&cfg.snapshotFormat, "snapshot-format", cfg.snapshotFormat, "snapshot save format: gzip-best-binary, gzip-binary, binary, gzip-best-json, gzip-json, or json")
@@ -606,6 +609,11 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.memoryCompactionInterval < 0 {
 		return config{}, errors.New("memory compaction interval must be non-negative")
 	}
+	dbBackend, err := hatriecache.ParseStorageBackend(cfg.dbBackend)
+	if err != nil {
+		return config{}, err
+	}
+	cfg.dbBackend = string(dbBackend)
 	if cfg.dbHotLoadMaxBytes < 0 {
 		return config{}, errors.New("db hot-load max bytes must be non-negative")
 	}
@@ -1023,6 +1031,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"grpc_tls_key":                         cfg.grpcTLSKey,
 		"grpc_client_ca":                       cfg.grpcClientCA,
 		"db_path":                              cfg.dbPath,
+		"db_backend":                           cfg.dbBackend,
 		"db_format":                            cfg.dbFormat,
 		"db_sync_interval":                     cfg.dbSyncInterval.String(),
 		"db_compare_before_write":              cfg.dbCompareBeforeWrite,
@@ -1165,6 +1174,14 @@ func storageFormat(cfg config) hatriecache.StorageFormat {
 	return format
 }
 
+func storageBackend(cfg config) hatriecache.StorageBackend {
+	backend, err := hatriecache.ParseStorageBackend(cfg.dbBackend)
+	if err != nil {
+		return hatriecache.StorageBackendAuto
+	}
+	return backend
+}
+
 func levelDBSaveOptions(cfg config) hatriecache.LevelDBSaveOptions {
 	mode, err := hatriecache.ParseLevelDBCompareBeforeWriteMode(cfg.dbCompareBeforeWrite)
 	if err != nil {
@@ -1282,6 +1299,13 @@ func openLevelDBIfConfigured(path string, format hatriecache.StorageFormat) (*ha
 	return hatriecache.OpenLevelDBStoreWithFormat(path, format)
 }
 
+func openPersistentStoreIfConfigured(path string, backend hatriecache.StorageBackend, format hatriecache.StorageFormat) (hatriecache.PersistentStore, error) {
+	if path == "" {
+		return nil, nil
+	}
+	return hatriecache.OpenPersistentStoreWithFormat(path, backend, format)
+}
+
 func levelDBLoadPolicy(cfg config) hatriecache.LevelDBLoadPolicy {
 	if !cfg.dbHotLoad {
 		return hatriecache.LevelDBLoadPolicy{}
@@ -1294,7 +1318,7 @@ func levelDBLoadPolicy(cfg config) hatriecache.LevelDBLoadPolicy {
 	}
 }
 
-func loadLevelDBIfConfigured(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, policy hatriecache.LevelDBLoadPolicy) error {
+func loadLevelDBIfConfigured(trie *hatriecache.HatTrie, store hatriecache.PersistentStore, policy hatriecache.LevelDBLoadPolicy) error {
 	if store == nil {
 		return nil
 	}
@@ -1302,13 +1326,13 @@ func loadLevelDBIfConfigured(trie *hatriecache.HatTrie, store *hatriecache.Level
 	return err
 }
 
-func closeLevelDB(store *hatriecache.LevelDBStore, stderr io.Writer) {
+func closeLevelDB(store hatriecache.PersistentStore, stderr io.Writer) {
 	if store == nil {
 		return
 	}
 	stderr = diagnosticWriter(stderr)
 	if err := store.Close(); err != nil {
-		fmt.Fprintf(stderr, "close leveldb: %v\n", err)
+		fmt.Fprintf(stderr, "close persistent store: %v\n", err)
 	}
 }
 
@@ -1491,7 +1515,7 @@ func stopGRPCServerWithTimeout(server *grpc.Server, timeout time.Duration) {
 	}
 }
 
-func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker, interval time.Duration, options hatriecache.LevelDBSaveOptions, stderr io.Writer) func() {
+func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store hatriecache.PersistentStore, dirty *hatriecache.LevelDBDirtyTracker, interval time.Duration, options hatriecache.LevelDBSaveOptions, stderr io.Writer) func() {
 	ctx = serverContext(ctx)
 	if store == nil || interval <= 0 {
 		return func() {}
@@ -1513,7 +1537,7 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 			return false
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "save leveldb: %v\n", err)
+			fmt.Fprintf(stderr, "save persistent store: %v\n", err)
 			return true
 		}
 		first = false
@@ -1548,12 +1572,12 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store *ha
 	return periodicStopper(done, stopped)
 }
 
-func saveLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore) (err error) {
+func saveLevelDBIfOpen(trie *hatriecache.HatTrie, store hatriecache.PersistentStore) (err error) {
 	defer recoverDestroyedHatTrie(&err)
 	return store.Save(trie)
 }
 
-func saveLevelDBIfOpenAndClearDirty(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker) (err error) {
+func saveLevelDBIfOpenAndClearDirty(trie *hatriecache.HatTrie, store hatriecache.PersistentStore, dirty *hatriecache.LevelDBDirtyTracker) (err error) {
 	defer recoverDestroyedHatTrie(&err)
 	if dirty == nil {
 		return store.Save(trie)
@@ -1566,7 +1590,7 @@ func saveLevelDBIfOpenAndClearDirty(trie *hatriecache.HatTrie, store *hatriecach
 	return nil
 }
 
-func saveDirtyLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, dirty *hatriecache.LevelDBDirtyTracker, options hatriecache.LevelDBSaveOptions) (err error) {
+func saveDirtyLevelDBIfOpen(trie *hatriecache.HatTrie, store hatriecache.PersistentStore, dirty *hatriecache.LevelDBDirtyTracker, options hatriecache.LevelDBSaveOptions) (err error) {
 	defer recoverDestroyedHatTrie(&err)
 	return store.SaveDirtyWithOptions(trie, dirty, options)
 }
@@ -1576,7 +1600,7 @@ type levelDBCompactorOptions struct {
 	LimitKey string
 }
 
-func startLevelDBCompactor(ctx context.Context, store *hatriecache.LevelDBStore, interval time.Duration, options levelDBCompactorOptions, record func(hatriecache.LevelDBCompactionResult), stderr io.Writer) func() {
+func startLevelDBCompactor(ctx context.Context, store hatriecache.PersistentStore, interval time.Duration, options levelDBCompactorOptions, record func(hatriecache.LevelDBCompactionResult), stderr io.Writer) func() {
 	ctx = serverContext(ctx)
 	if store == nil || interval <= 0 {
 		return func() {}
@@ -1595,7 +1619,7 @@ func startLevelDBCompactor(ctx context.Context, store *hatriecache.LevelDBStore,
 			if errors.Is(err, hatriecache.ErrLevelDBStoreClosed) {
 				return false
 			}
-			fmt.Fprintf(stderr, "compact leveldb: %v\n", err)
+			fmt.Fprintf(stderr, "compact persistent store: %v\n", err)
 			return true
 		}
 		if record != nil {
@@ -1628,7 +1652,7 @@ type levelDBMemoryGovernorOptions struct {
 	RSS         func() (uint64, error)
 }
 
-func startLevelDBMemoryGovernor(ctx context.Context, trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, interval time.Duration, options levelDBMemoryGovernorOptions, record func(hatriecache.LevelDBSpillResult), stderr io.Writer) func() {
+func startLevelDBMemoryGovernor(ctx context.Context, trie *hatriecache.HatTrie, store hatriecache.PersistentStore, interval time.Duration, options levelDBMemoryGovernorOptions, record func(hatriecache.LevelDBSpillResult), stderr io.Writer) func() {
 	ctx = serverContext(ctx)
 	if store == nil || interval <= 0 || (options.Spill.MaxHotBytes <= 0 && options.RSSCapBytes == 0) {
 		return func() {}
@@ -1659,7 +1683,7 @@ func startLevelDBMemoryGovernor(ctx context.Context, trie *hatriecache.HatTrie, 
 			return false
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "spill cold leveldb values: %v\n", err)
+			fmt.Fprintf(stderr, "spill cold persistent values: %v\n", err)
 			return true
 		}
 		if record != nil {
@@ -1712,7 +1736,7 @@ func rssBytesFromStatm(data string, pageSize uint64) (uint64, error) {
 	return pages * pageSize, nil
 }
 
-func spillColdLevelDBIfOpen(trie *hatriecache.HatTrie, store *hatriecache.LevelDBStore, options hatriecache.LevelDBSpillOptions) (result hatriecache.LevelDBSpillResult, err error) {
+func spillColdLevelDBIfOpen(trie *hatriecache.HatTrie, store hatriecache.PersistentStore, options hatriecache.LevelDBSpillOptions) (result hatriecache.LevelDBSpillResult, err error) {
 	defer recoverDestroyedHatTrie(&err)
 	return store.SpillCold(trie, options)
 }

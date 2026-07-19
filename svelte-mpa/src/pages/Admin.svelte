@@ -153,10 +153,16 @@
   function compactPropertyText(result: StorageCompactResult | null): string {
     const statusProperties = storage?.properties;
     if (!result) {
-      return statusProperties?.stats || statusProperties?.sstables || statusProperties?.write_delay || statusProperties?.block_pool || 'No LevelDB properties reported.';
+      return statusProperties?.stats || statusProperties?.sstables || statusProperties?.write_delay || statusProperties?.block_pool || 'No storage properties reported.';
     }
     const props = result.properties_after;
-    return props.stats || props.sstables || props.write_delay || props.block_pool || 'No LevelDB properties reported.';
+    return props.stats || props.sstables || props.write_delay || props.block_pool || 'No storage properties reported.';
+  }
+
+  function storageEngineName(store?: string): string {
+    if (store === 'leveldb') return 'LevelDB';
+    if (store === 'pebble') return 'Pebble';
+    return store || 'Persistent';
   }
 
   function auditResult(event: AuditEvent): string {
@@ -191,6 +197,8 @@
 
   $: queue = replication?.queue;
   $: operation = storage?.operation;
+  $: storageConfigured = storage?.configured ?? storage?.leveldb_configured ?? false;
+  $: storageEngine = storageEngineName(storage?.store);
   $: effectiveLastFlush = lastFlush ?? storage?.last_flush ?? null;
   $: effectiveLastCompact = lastCompact ?? storage?.last_compact ?? null;
   $: targets = replication?.targets ?? [];
@@ -214,7 +222,7 @@
   </header>
 
   <section class="stats-grid">
-    <StatTile label="LevelDB" value={storage?.leveldb_configured ? 'enabled' : 'off'} detail={storage?.format ? `${storage.format} format` : 'storage engine'} tone="blue" icon={Database} />
+    <StatTile label="Storage" value={storageConfigured ? storageEngine : 'off'} detail={storage?.format ? `${storage.format} format` : 'storage engine'} tone="blue" icon={Database} />
     <StatTile label="Storage size" value={formatBytes(storage?.size_bytes ?? 0)} detail={operation?.running ? `${operation.action} running` : 'on disk'} tone={operation?.running ? 'amber' : 'green'} icon={HardDrive} />
     <StatTile label="Replication" value={replicationHealthText(replication)} detail={replication?.health_reason ?? 'health score'} tone={replicationTone(replication?.health)} icon={Activity} />
     <StatTile label="Oldest" value={queue?.oldest_queued_age_millis ? formatMillis(queue.oldest_queued_age_millis) : 'none'} detail={queue?.oldest_queued_key ?? 'queued key'} tone="amber" icon={Clock3} />
@@ -224,8 +232,8 @@
     <div class="panel">
       <div class="panel-heading">
         <div>
-          <h2>LevelDB Storage</h2>
-          <p>{storage?.path ?? (storage?.leveldb_configured ? 'Configured' : 'Not configured')}</p>
+          <h2>Persistent Storage</h2>
+          <p>{storage?.path ?? (storageConfigured ? `${storageEngine} configured` : 'Not configured')}</p>
         </div>
         <Database size={18} aria-hidden="true" />
       </div>
@@ -240,10 +248,10 @@
       <div class="action-grid">
         <div class="danger-action">
           <label class="checkbox-row confirm-row">
-            <input type="checkbox" bind:checked={confirmFlush} disabled={!storage?.leveldb_configured || Boolean(storageAction)} />
+            <input type="checkbox" bind:checked={confirmFlush} disabled={!storageConfigured || Boolean(storageAction)} />
             <span>Confirm flush</span>
           </label>
-          <button class="primary-button" type="button" on:click={runFlush} disabled={!storage?.leveldb_configured || Boolean(storageAction) || !confirmFlush}>
+          <button class="primary-button" type="button" on:click={runFlush} disabled={!storageConfigured || Boolean(storageAction) || !confirmFlush}>
             <HardDrive size={17} aria-hidden="true" />
             Flush
           </button>
@@ -252,17 +260,17 @@
         <div class="compact-form">
           <label>
             <span>Start key</span>
-            <input bind:value={compactStartKey} placeholder="alpha" disabled={!storage?.leveldb_configured || Boolean(storageAction)} />
+            <input bind:value={compactStartKey} placeholder="alpha" disabled={!storageConfigured || Boolean(storageAction)} />
           </label>
           <label>
             <span>Limit key</span>
-            <input bind:value={compactLimitKey} placeholder="omega" disabled={!storage?.leveldb_configured || Boolean(storageAction)} />
+            <input bind:value={compactLimitKey} placeholder="omega" disabled={!storageConfigured || Boolean(storageAction)} />
           </label>
           <label class="checkbox-row confirm-row">
-            <input type="checkbox" bind:checked={confirmCompact} disabled={!storage?.leveldb_configured || Boolean(storageAction)} />
+            <input type="checkbox" bind:checked={confirmCompact} disabled={!storageConfigured || Boolean(storageAction)} />
             <span>Confirm compact</span>
           </label>
-          <button class="secondary-button" type="button" on:click={runCompact} disabled={!storage?.leveldb_configured || Boolean(storageAction) || !confirmCompact}>
+          <button class="secondary-button" type="button" on:click={runCompact} disabled={!storageConfigured || Boolean(storageAction) || !confirmCompact}>
             <RefreshCw size={17} class={storageAction === 'compact' ? 'spin' : ''} aria-hidden="true" />
             Compact
           </button>

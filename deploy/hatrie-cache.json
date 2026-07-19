@@ -22,6 +22,7 @@
   "journal_retained_segments": 16,
   "journal_pull_state_path": "data/commands.journal.pull_state.json",
   "db_path": "data/cache.leveldb",
+  "db_backend": "auto",
   "db_format": "binary",
   "db_sync_interval": "30s",
   "db_compact_interval": "10m",

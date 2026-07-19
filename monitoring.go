@@ -43,7 +43,7 @@ type MonitoringOptions struct {
 	Metrics              *APIMetrics
 	StartAt              time.Time
 	Snapshot             func() error
-	LevelDBStore         *LevelDBStore
+	LevelDBStore         PersistentStore
 	LevelDBDirtyTracker  *LevelDBDirtyTracker
 	BackupSnapshotFormat SnapshotFormat
 	Journal              *CommandJournal
@@ -156,6 +156,7 @@ type auditStatus struct {
 }
 
 type storageStatus struct {
+	Configured        bool                     `json:"configured"`
 	LevelDBConfigured bool                     `json:"leveldb_configured"`
 	Store             string                   `json:"store,omitempty"`
 	Path              string                   `json:"path,omitempty"`
@@ -1548,6 +1549,7 @@ func (handler *MonitoringHandler) handleStorage(w http.ResponseWriter, r *http.R
 
 func (handler *MonitoringHandler) storageStatus() storageStatus {
 	status := storageStatus{
+		Configured:        handler.options.LevelDBStore != nil,
 		LevelDBConfigured: handler.options.LevelDBStore != nil,
 		Operation:         handler.storageOperationStatus(time.Now().UTC()),
 	}
@@ -1570,20 +1572,18 @@ func (handler *MonitoringHandler) storageStatus() storageStatus {
 	if store == nil {
 		return status
 	}
-	status.Store = "leveldb"
-	status.Path = store.path
-	status.Format = string(store.format)
-	db, unlock, err := store.lockDB()
-	if err != nil {
-		status.Error = err.Error()
-		return status
-	}
-	defer unlock()
-	status.SizeBytes, err = directorySizeBytes(store.path)
+	status.Store = string(store.Backend())
+	status.Path = store.Path()
+	status.Format = string(store.Format())
+	var err error
+	status.SizeBytes, err = directorySizeBytes(store.Path())
 	if err != nil {
 		status.Error = err.Error()
 	}
-	status.Properties = levelDBProperties(db)
+	status.Properties, err = store.Properties()
+	if err != nil && status.Error == "" {
+		status.Error = err.Error()
+	}
 	return status
 }
 
@@ -1663,10 +1663,11 @@ func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *h
 		return
 	}
 	if handler.options.LevelDBStore == nil {
-		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusConflict, Message: "leveldb store is not configured"})
-		writeJSONStatus(w, http.StatusConflict, commandError("leveldb store is not configured"))
+		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusConflict, Message: "persistent store is not configured"})
+		writeJSONStatus(w, http.StatusConflict, commandError("persistent store is not configured"))
 		return
 	}
+	storeName := string(handler.options.LevelDBStore.Backend())
 	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
 	if !ok {
 		return
@@ -1690,11 +1691,11 @@ func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *h
 	if requestContextDone(w, r) {
 		return
 	}
-	if handler.rejectDangerousHTTP(w, r, "storage.flush", map[string]interface{}{"store": "leveldb"}) {
+	if handler.rejectDangerousHTTP(w, r, "storage.flush", map[string]interface{}{"store": storeName}) {
 		return
 	}
 	if !handler.beginStorageOperation("flush") {
-		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusConflict, Message: "storage operation is already running", Details: map[string]interface{}{"store": "leveldb"}})
+		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusConflict, Message: "storage operation is already running", Details: map[string]interface{}{"store": storeName}})
 		writeJSONStatus(w, http.StatusConflict, commandError("storage operation is already running"))
 		return
 	}
@@ -1702,7 +1703,7 @@ func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *h
 	dirtySnapshot := handler.options.LevelDBDirtyTracker.Snapshot()
 	result, err := handler.options.LevelDBStore.Flush(handler.trie)
 	if err != nil {
-		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"store": "leveldb"}})
+		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"store": storeName}})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
 	}
@@ -1721,10 +1722,11 @@ func (handler *MonitoringHandler) handleStorageCompact(w http.ResponseWriter, r 
 		return
 	}
 	if handler.options.LevelDBStore == nil {
-		handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: false, Status: http.StatusConflict, Message: "leveldb store is not configured"})
-		writeJSONStatus(w, http.StatusConflict, commandError("leveldb store is not configured"))
+		handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: false, Status: http.StatusConflict, Message: "persistent store is not configured"})
+		writeJSONStatus(w, http.StatusConflict, commandError("persistent store is not configured"))
 		return
 	}
+	storeName := string(handler.options.LevelDBStore.Backend())
 	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
 	if !ok {
 		return
@@ -1747,7 +1749,7 @@ func (handler *MonitoringHandler) handleStorageCompact(w http.ResponseWriter, r 
 	}
 	request.StartKey = strings.TrimSpace(request.StartKey)
 	request.LimitKey = strings.TrimSpace(request.LimitKey)
-	details := map[string]interface{}{"store": "leveldb", "start_key": request.StartKey, "limit_key": request.LimitKey}
+	details := map[string]interface{}{"store": storeName, "start_key": request.StartKey, "limit_key": request.LimitKey}
 	if requestContextDone(w, r) {
 		return
 	}

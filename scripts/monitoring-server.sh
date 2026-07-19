@@ -48,6 +48,7 @@ grpc_tls_cert=${GRPC_TLS_CERT:-}
 grpc_tls_key=${GRPC_TLS_KEY:-}
 grpc_client_ca=${GRPC_CLIENT_CA:-}
 db_path=${DB_PATH:-}
+db_backend=${DB_BACKEND:-auto}
 db_format=${DB_FORMAT:-binary}
 db_sync_interval=${DB_SYNC_INTERVAL:-0}
 db_compare_before_write=${DB_COMPARE_BEFORE_WRITE:-auto}
@@ -127,6 +128,7 @@ set -- \
 	-grpc-tls-key "$grpc_tls_key" \
 	-grpc-client-ca "$grpc_client_ca" \
 	-db-path "$db_path" \
+	-db-backend "$db_backend" \
 	-db-sync-interval "$db_sync_interval" \
 	-db-compare-before-write "$db_compare_before_write" \
 	-db-compact-interval "$db_compact_interval" \
