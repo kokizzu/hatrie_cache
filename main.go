@@ -16,6 +16,7 @@ import (
 	mathbits "math/bits"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -2083,24 +2084,37 @@ type levelDBHydrationCall struct {
 }
 
 type LevelDBReferenceStorage struct {
-	array     []LevelDBReference
+	array     []levelDBReferenceRecord
 	reusables reusableIndexes
+	stores    []persistentReferenceStore
 }
 
+type levelDBReferenceRecord struct {
+	key            string
+	stats          *KeyStats
+	recordChecksum uint64
+	token          uint64
+	expiresAtSec   int64
+	recordBytes    uint32
+	expiresAtNsec  uint32
+	storeID        uint32
+	typeID         uint8
+}
+
+const levelDBReferenceNoExpiration = int64(-1 << 63)
+
 func CreateLevelDBReferenceStorage() *LevelDBReferenceStorage {
-	return &LevelDBReferenceStorage{
-		array: []LevelDBReference{},
-	}
+	return &LevelDBReferenceStorage{array: []levelDBReferenceRecord{}}
 }
 
 func (rs *LevelDBReferenceStorage) Append(value LevelDBReference) int32 {
-	rs.array = append(rs.array, value)
+	rs.array = append(rs.array, rs.compact(value))
 	return int32(len(rs.array) - 1)
 }
 
 func (rs *LevelDBReferenceStorage) Add(value LevelDBReference) int32 {
 	if idx, ok := rs.reusables.Take(); ok {
-		rs.array[idx] = value
+		rs.array[idx] = rs.compact(value)
 		return idx
 	}
 	return rs.Append(value)
@@ -2110,14 +2124,17 @@ func (rs *LevelDBReferenceStorage) Get(idx int32) (LevelDBReference, bool) {
 	if rs == nil || idx < 0 || int(idx) >= len(rs.array) {
 		return LevelDBReference{}, false
 	}
-	return rs.array[idx], !rs.reusables.Has(idx)
+	if rs.reusables.Has(idx) {
+		return LevelDBReference{}, false
+	}
+	return rs.expand(rs.array[idx]), true
 }
 
 func (rs *LevelDBReferenceStorage) Set(idx int32, value LevelDBReference) bool {
 	if rs == nil || idx < 0 || int(idx) >= len(rs.array) || rs.reusables.Has(idx) {
 		return false
 	}
-	rs.array[idx] = value
+	rs.array[idx] = rs.compact(value)
 	return true
 }
 
@@ -2125,9 +2142,172 @@ func (rs *LevelDBReferenceStorage) Del(idx int32) {
 	if rs == nil || idx < 0 || int(idx) >= len(rs.array) {
 		return
 	}
-	rs.array[idx] = LevelDBReference{}
+	rs.array[idx] = levelDBReferenceRecord{}
 	rs.reusables.Mark(idx)
 	rs.array = trimReusableTail(rs.array, &rs.reusables)
+}
+
+func (rs *LevelDBReferenceStorage) compact(value LevelDBReference) levelDBReferenceRecord {
+	expiresAtSec := levelDBReferenceNoExpiration
+	expiresAtNsec := uint32(0)
+	if value.ExpiresAt != nil {
+		expiresAtSec = value.ExpiresAt.Unix()
+		expiresAtNsec = uint32(value.ExpiresAt.Nanosecond())
+	}
+	recordBytes := uint32(value.RecordBytes)
+	if value.RecordBytes < 0 || uint64(value.RecordBytes) > uint64(^uint32(0)) {
+		recordBytes = ^uint32(0)
+	}
+	return levelDBReferenceRecord{
+		key:            value.Key,
+		stats:          value.Stats,
+		recordChecksum: value.RecordChecksum,
+		token:          value.Token,
+		expiresAtSec:   expiresAtSec,
+		recordBytes:    recordBytes,
+		expiresAtNsec:  expiresAtNsec,
+		storeID:        rs.storeID(value.Store),
+		typeID:         levelDBReferenceTypeID(value.Type),
+	}
+}
+
+func (rs *LevelDBReferenceStorage) expand(record levelDBReferenceRecord) LevelDBReference {
+	var expiresAt *time.Time
+	if record.expiresAtSec != levelDBReferenceNoExpiration {
+		value := time.Unix(record.expiresAtSec, int64(record.expiresAtNsec)).UTC()
+		expiresAt = &value
+	}
+	var store persistentReferenceStore
+	if record.storeID > 0 && int(record.storeID) <= len(rs.stores) {
+		store = rs.stores[record.storeID-1]
+	}
+	return LevelDBReference{
+		Key:            record.key,
+		Type:           levelDBReferenceType(record.typeID),
+		Store:          store,
+		ExpiresAt:      expiresAt,
+		Stats:          record.stats,
+		RecordBytes:    int(record.recordBytes),
+		RecordChecksum: record.recordChecksum,
+		Token:          record.token,
+	}
+}
+
+func (rs *LevelDBReferenceStorage) storeID(store persistentReferenceStore) uint32 {
+	if store == nil {
+		return 0
+	}
+	for index, existing := range rs.stores {
+		if persistentReferenceStoresEqual(existing, store) {
+			return uint32(index + 1)
+		}
+	}
+	if uint64(len(rs.stores)) >= uint64(^uint32(0)) {
+		panic("hatriecache: too many persistent reference stores")
+	}
+	rs.stores = append(rs.stores, store)
+	return uint32(len(rs.stores))
+}
+
+func persistentReferenceStoresEqual(left persistentReferenceStore, right persistentReferenceStore) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	leftType := reflect.TypeOf(left)
+	if leftType != reflect.TypeOf(right) || !leftType.Comparable() {
+		return false
+	}
+	return left == right
+}
+
+func levelDBReferenceTypeID(value string) uint8 {
+	switch value {
+	case "counter":
+		return 1
+	case "string":
+		return 2
+	case "bytes":
+		return 3
+	case "map":
+		return 4
+	case "slice":
+		return 5
+	case "set":
+		return 6
+	case "priority_queue":
+		return 7
+	case "bloom_filter":
+		return 8
+	case "count_min_sketch":
+		return 9
+	case "hyperloglog":
+		return 10
+	case "top_k":
+		return 11
+	case "cuckoo_filter":
+		return 12
+	case "roaring_bitmap":
+		return 13
+	case "quantile_sketch":
+		return 14
+	case "fenwick_tree":
+		return 15
+	case "sparse_bitset":
+		return 16
+	case "reservoir_sample":
+		return 17
+	case "xor_filter":
+		return 18
+	case "radix_tree":
+		return 19
+	default:
+		return 0
+	}
+}
+
+func levelDBReferenceType(id uint8) string {
+	switch id {
+	case 1:
+		return "counter"
+	case 2:
+		return "string"
+	case 3:
+		return "bytes"
+	case 4:
+		return "map"
+	case 5:
+		return "slice"
+	case 6:
+		return "set"
+	case 7:
+		return "priority_queue"
+	case 8:
+		return "bloom_filter"
+	case 9:
+		return "count_min_sketch"
+	case 10:
+		return "hyperloglog"
+	case 11:
+		return "top_k"
+	case 12:
+		return "cuckoo_filter"
+	case 13:
+		return "roaring_bitmap"
+	case 14:
+		return "quantile_sketch"
+	case 15:
+		return "fenwick_tree"
+	case 16:
+		return "sparse_bitset"
+	case 17:
+		return "reservoir_sample"
+	case 18:
+		return "xor_filter"
+	case 19:
+		return "radix_tree"
+	default:
+		return ""
+	}
 }
 
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing

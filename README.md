@@ -858,6 +858,12 @@ On the 32-key delayed-I/O fixture, parallel hydration completes in 1.174 ms
 versus 33.875 ms serialized, a 28.85x latency improvement. See
 [BENCHMARK.md](BENCHMARK.md#parallel-cold-reference-hydration).
 
+Lazy references use a 64-byte internal record while preserving the exported
+`LevelDBReference` API. Store handles are interned once per trie, type strings
+are encoded as compact IDs, and expiration metadata is stored inline. At 100k
+references this retains 71.6 B/key instead of 90.2 B/key and builds 1.44x
+faster. See [BENCHMARK.md](BENCHMARK.md#compact-lazy-reference-slab).
+
 Set `DB_MEMORY_CAP_BYTES` and/or `DB_RSS_CAP_BYTES` with
 `DB_MEMORY_EVICT_INTERVAL` to keep the running hot value set under a soft byte
 cap or to react when process RSS crosses a threshold. The governor estimates

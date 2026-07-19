@@ -158,8 +158,8 @@ func (ht *HatTrie) buildMemoryCompactionPlanLocked() (memoryCompactionPlan, erro
 	if plan.slices, plan.remaps[DATAVALUE_TYPE_SLICE], err = compactSingleStorage(ht.slices.array, &ht.slices.reusables, func(values []deque) *SliceStorage { return &SliceStorage{array: values} }); err != nil {
 		return memoryCompactionPlan{}, err
 	}
-	if plan.dbrefs, plan.remaps[DATAVALUE_TYPE_LEVELDB_REF], err = compactSingleStorage(ht.dbrefs.array, &ht.dbrefs.reusables, func(values []LevelDBReference) *LevelDBReferenceStorage {
-		return &LevelDBReferenceStorage{array: values}
+	if plan.dbrefs, plan.remaps[DATAVALUE_TYPE_LEVELDB_REF], err = compactSingleStorage(ht.dbrefs.array, &ht.dbrefs.reusables, func(values []levelDBReferenceRecord) *LevelDBReferenceStorage {
+		return &LevelDBReferenceStorage{array: values, stores: cloneStorageSliceExact(ht.dbrefs.stores)}
 	}); err != nil {
 		return memoryCompactionPlan{}, err
 	}

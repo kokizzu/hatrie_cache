@@ -167,6 +167,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Parallel cold-reference hydration](#parallel-cold-reference-hydration), 32 delayed reads | Serialized: 33.875 ms; 18,648 heap B | Parallel singleflight: 1.174 ms; 30,166 heap B | 28.85x faster | Cumulative heap is 1.62x higher and allocations are 1.80x higher |
+| Current pass | [Compact lazy-reference slab](#compact-lazy-reference-slab), 100k references | Public-struct slab: 29.617 ms; 90.2 retained B/ref | Compact slab: 20.513 ms; 71.6 retained B/ref | 1.44x faster, 1.26x lower retained heap | Type IDs are internal; exported references are expanded on access |
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
 | Earlier | [Replication request batching](#replication-batching-benchmark), 10k keys | Historical: 51,455,645,995 ns; 10,000 requests | First batched baseline: 162,195,812 ns; 1 request | About 317x faster, 10,000x fewer requests | Historical rows came from separate controlled runs |
 | Earlier | [Replication routing and encoding](#replication-batching-benchmark), 10k keys | 162,195,812 ns; 144,227 wire B; 57,035,706 heap B | 18,893,092 ns; 55,795 wire B; 948,495 heap B | 8.58x faster, 2.59x smaller wire, 60.13x lower heap | Compact paths retain legacy materialization fallbacks |
@@ -313,6 +314,30 @@ the trie mutex, unrelated keys remain writable, and same-reference readers
 share one backend call. Reference-token revalidation makes concurrent update,
 delete, TTL metadata change, and slot reuse win over stale I/O. Raw output is
 written to `build/benchmarks/cold-reference-hydration.txt`.
+
+<a id="compact-lazy-reference-slab"></a>
+### Compact Lazy-Reference Slab
+
+The former slab retained the exported 88-byte `LevelDBReference` struct for
+every cold key, including a repeated 16-byte store interface and 16-byte type
+string header. The new internal record is 64 bytes, interns each store handle
+once, encodes the finite value type as one byte, and keeps expiration fields
+inline. Public `Get` still expands the same compatibility struct.
+
+```sh
+make bench-reference-slab BENCHTIME=3x COUNT=5
+```
+
+| Slab, median of five | Build 100k | Retained B/ref | Cumulative heap | Allocs | Improvement |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Legacy public struct | 29.617 ms | 90.2 | 43,376,650 B | 30 | baseline |
+| Compact internal record | 20.513 ms | 71.6 | 34,511,514 B | 30 | 1.44x faster, 1.26x lower retained/cumulative heap |
+
+The retained reduction saves about 18.6 MB per million lazy references before
+counting allocator fragmentation. The fixture uses the same shared key/type and
+store in both modes so it isolates slab overhead; real unique key bytes and
+optional key statistics are additional costs common to both. Raw output is in
+`build/benchmarks/lazy-reference-slab.txt`.
 
 ### Incremental Anti-Entropy
 
