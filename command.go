@@ -2622,7 +2622,7 @@ func (ht *HatTrie) commandDumpEntryLocked(key string) (string, bool, error) {
 		ht.recordReadLocked(false, key)
 		return "", false, nil
 	}
-	if hval.IsStringAtRaws() && ht.expires[key].IsZero() {
+	if hval.IsStringAtRaws() && ht.expirationTimeLocked(key).IsZero() {
 		data := commandDumpStringJSON(key, ht.raws.stringValue(hval.Index))
 		ht.recordReadLocked(true, key)
 		return data, true, nil
@@ -2680,7 +2680,7 @@ func (ht *HatTrie) appendCommandDumpScannedEntryBinaryWithoutStatsLocked(destina
 	if entry.Value.Empty() {
 		return destination, false, nil
 	}
-	if entry.Value.IsStringAtRaws() && ht.expires[entry.Key].IsZero() {
+	if entry.Value.IsStringAtRaws() && ht.expirationTimeLocked(entry.Key).IsZero() {
 		data, err := appendReplicationValueBinary(destination, snapshotEntry{Type: "string", String: ht.raws.stringValue(entry.Value.Index)})
 		if err != nil {
 			return destination, false, err
@@ -3013,7 +3013,7 @@ func (ht *HatTrie) ttlLocked(key string) time.Duration {
 		return NoTTL
 	}
 
-	expiresAt, ok := ht.expires[key]
+	expiresAt, ok := ht.expirationAtLocked(key)
 	if !ok {
 		ht.recordReadLocked(false, key)
 		return NoTTL

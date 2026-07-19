@@ -1569,7 +1569,7 @@ func (trie *HatTrie) levelDBReferenceEntryDataForStoreLocked(key string, hval Ha
 }
 
 func (trie *HatTrie) levelDBReferenceMetadataMatchesLocked(key string, ref LevelDBReference) bool {
-	if !timePtrEqual(ref.ExpiresAt, snapshotExpiresAt(trie.expires[key])) {
+	if !timePtrEqual(ref.ExpiresAt, snapshotExpiresAt(trie.expirationTimeLocked(key))) {
 		return false
 	}
 	currentStats := clonedUpdatedKeyStats(trie.keyStats[key])
@@ -1577,7 +1577,7 @@ func (trie *HatTrie) levelDBReferenceMetadataMatchesLocked(key string, ref Level
 }
 
 func (trie *HatTrie) levelDBReferenceMetadataLocked(key string) (*time.Time, *KeyStats) {
-	expiresAt := snapshotExpiresAt(trie.expires[key])
+	expiresAt := snapshotExpiresAt(trie.expirationTimeLocked(key))
 	return expiresAt, clonedUpdatedKeyStats(trie.keyStats[key])
 }
 
@@ -1610,7 +1610,7 @@ func (trie *HatTrie) levelDBReferenceSnapshotEntryForStoreLocked(key string, hva
 		return snapshotEntry{}, errors.New("hatriecache: missing leveldb referenced entry")
 	}
 	entry.Key = key
-	entry.ExpiresAt = snapshotExpiresAt(trie.expires[key])
+	entry.ExpiresAt = snapshotExpiresAt(trie.expirationTimeLocked(key))
 	entry.Stats = clonedUpdatedKeyStats(trie.keyStats[key])
 	return entry, nil
 }
@@ -1702,7 +1702,7 @@ func (trie *HatTrie) levelDBEntryDataForStoreLocked(entry Entry, currentStore *L
 }
 
 func (trie *HatTrie) levelDBDiskBytesEntryDataBinaryLocked(entry Entry) ([]byte, error) {
-	expiresAt := snapshotExpiresAt(trie.expires[entry.Key])
+	expiresAt := snapshotExpiresAt(trie.expirationTimeLocked(entry.Key))
 	stats := clonedUpdatedKeyStats(trie.keyStats[entry.Key])
 	file, size, err := trie.disks.open(entry.Value.Index)
 	if err != nil {

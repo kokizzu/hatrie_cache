@@ -7618,7 +7618,7 @@ func TestVacuumExpiredSkipsStaleExpirationEntries(t *testing.T) {
 	}
 }
 
-func TestExpirationHeapCompactsStaleEntries(t *testing.T) {
+func TestExpirationHeapUpdatesDeadlineInPlace(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(760, 0)
 	ht.now = func() time.Time { return now }
@@ -7629,14 +7629,57 @@ func TestExpirationHeapCompactsStaleEntries(t *testing.T) {
 			t.Fatalf("ExpireAt(hot, %d) = false, want true", i)
 		}
 	}
-	if got := ht.expirations.Len(); got > 64 {
-		t.Fatalf("expiration heap len after repeated updates = %d, want compacted <= 64", got)
+	if got := ht.expirations.Len(); got != 1 {
+		t.Fatalf("expiration heap len after repeated updates = %d, want one indexed entry", got)
 	}
 	if !ht.Persist("hot") {
 		t.Fatal("Persist(hot) = false, want true")
 	}
 	if got := ht.expirations.Len(); got != 0 {
 		t.Fatalf("expiration heap len after Persist() = %d, want 0", got)
+	}
+}
+
+func TestExpirationHeapIndexesStayConsistentAcrossUpdatesAndRemovals(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(770, 0)
+	ht.now = func() time.Time { return now }
+	for index := 0; index < 100; index++ {
+		key := fmt.Sprintf("ttl:%03d", index)
+		ht.UpsertString(key, "value")
+		if !ht.ExpireAt(key, now.Add(time.Duration(100-index)*time.Second)) {
+			t.Fatalf("ExpireAt(%q) = false", key)
+		}
+	}
+	for index := 0; index < 100; index += 2 {
+		key := fmt.Sprintf("ttl:%03d", index)
+		if !ht.ExpireAt(key, now.Add(time.Duration(index+200)*time.Second)) {
+			t.Fatalf("ExpireAt(update %q) = false", key)
+		}
+	}
+	for index := 0; index < 100; index += 3 {
+		key := fmt.Sprintf("ttl:%03d", index)
+		if !ht.Persist(key) {
+			t.Fatalf("Persist(%q) = false", key)
+		}
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	if len(ht.expires) != ht.expirations.Len() {
+		t.Fatalf("expiration index/heap lengths = %d/%d, want equal", len(ht.expires), ht.expirations.Len())
+	}
+	for key, position := range ht.expires {
+		index := int(position)
+		if index >= len(ht.expirations) || ht.expirations[index].key != key {
+			t.Fatalf("expiration index %q=%d does not point to matching heap entry", key, index)
+		}
+	}
+	for index := 1; index < len(ht.expirations); index++ {
+		parent := (index - 1) / 2
+		if ht.expirations[index].before(ht.expirations[parent]) {
+			t.Fatalf("expiration heap child %d sorts before parent %d", index, parent)
+		}
 	}
 }
 

@@ -363,10 +363,10 @@ func compactReplicationMerkleIndex(source *replicationMerkleIndex) *replicationM
 
 func (ht *HatTrie) compactAuxiliaryMemoryLocked() {
 	if len(ht.expires) == 0 {
-		ht.expires = map[string]time.Time{}
+		ht.expires = map[string]uint32{}
 		ht.expirations = nil
 	} else {
-		nextExpires := make(map[string]time.Time, len(ht.expires))
+		nextExpires := make(map[string]uint32, len(ht.expires))
 		for key, at := range ht.expires {
 			nextExpires[key] = at
 		}

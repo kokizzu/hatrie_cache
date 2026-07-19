@@ -188,6 +188,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
+| Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
 | Current pass | [Merkle equal-state preflight](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 18.272 ms; 560,720 heap B | Merkle: 0.993 ms; 233,744 heap B | 18.40x faster, 2.40x lower heap | First activation builds a 29.60 B/key index |
@@ -676,6 +677,30 @@ heap 3.17x, and allocations 2.07x. Initial index construction takes 5.920 ms,
 B/key. Subsequent tracked writes rise from 272.1 to 511.5 ns (1.88x slower)
 with the same 16 B and one allocation per write. The index therefore remains
 dormant until the first eligible anti-entropy sync.
+
+### Indexed Expiration Heap
+
+The expiration map now stores a compact `uint32` heap position instead of a
+second timestamp. Each live TTL key owns exactly one heap node. Updating a
+deadline repairs that node in place; persistence and deletion remove it with a
+swap-and-sift operation. This replaces stale-node accumulation and periodic
+whole-heap rebuilds.
+
+```sh
+make run CMD='go test . -run=none -bench=BenchmarkBigWins/ExpirationDeadlineUpdate -benchtime=100000x -count=5 -benchmem'
+```
+
+| 100k updates, one live TTL key | Median time/update | Heap B/op | Allocs/op | Final heap nodes |
+| --- | ---: | ---: | ---: | ---: |
+| Stale entries + periodic rebuild | 250.0 ns | 91 | 0 (rounded) | 19 |
+| Indexed in-place update | 194.8 ns | 0 | 0 | 1 |
+
+The indexed path is 1.28x faster, eliminates cumulative heap allocation in the
+fixture, and leaves one node instead of 19. More importantly, the heap is now
+strictly bounded by the number of live TTL keys, so repeated `EXPIREAT` calls
+cannot create a temporary 64-entry stale backlog for one key. Multi-key tests
+verify every map index after both upward/downward deadline changes and arbitrary
+removals.
 
 ### Binary Grouped Replication Outbox
 

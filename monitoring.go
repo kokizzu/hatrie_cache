@@ -2327,7 +2327,7 @@ func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, hasAfte
 			response.HasMore = true
 			return errMonitoringEntriesLimitReached
 		}
-		ttl := ttlMillis(ht.expires[entry.Key], now)
+		ttl := ttlMillis(ht.expirationTimeLocked(entry.Key), now)
 		size, preview := ht.monitoringPreviewLocked(entry.Value)
 		response.Entries = append(response.Entries, MonitoringEntry{
 			Key:          entry.Key,

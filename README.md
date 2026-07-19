@@ -38,8 +38,9 @@ Typed backing pools reuse deleted indexes through a compact bitset-backed stack
 and trim freed tail slots, avoiding per-index hash-map overhead while keeping
 reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
 uses a min-heap schedule plus an authoritative key map, so vacuuming pops due
-keys instead of scanning every TTL entry and compacts stale schedule entries
-under churn.
+keys instead of scanning every TTL entry. The map stores a compact heap index;
+deadline updates repair one existing node in O(log n), and `Persist`/delete
+remove it immediately, so stale schedule entries do not accumulate under churn.
 Long-running delete-heavy workloads can call `CompactMemory` to rebuild the C
 trie, densely reindex in-memory typed pools, and shrink Merkle and metadata
 backing. Disk-spill indexes remain stable so file ownership cannot alias.

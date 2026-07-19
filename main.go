@@ -543,26 +543,55 @@ func (heap expirationHeap) Peek() (expirationEntry, bool) {
 	return heap[0], true
 }
 
-func (heap *expirationHeap) Push(entry expirationEntry) {
+func (heap *expirationHeap) Push(entry expirationEntry, indexes map[string]uint32) {
+	if index, ok := indexes[entry.key]; ok {
+		heap.Update(entry.key, entry.at, int(index), indexes)
+		return
+	}
 	*heap = append(*heap, entry)
-	heap.siftUp(len(*heap) - 1)
+	indexes[entry.key] = uint32(len(*heap) - 1)
+	heap.siftUp(len(*heap)-1, indexes)
 }
 
-func (heap *expirationHeap) Pop() (expirationEntry, bool) {
-	if heap == nil || len(*heap) == 0 {
+func (heap *expirationHeap) Remove(key string, indexes map[string]uint32) (expirationEntry, bool) {
+	position, ok := indexes[key]
+	index := int(position)
+	if !ok || heap == nil || index < 0 || index >= len(*heap) || (*heap)[index].key != key {
 		return expirationEntry{}, false
 	}
 	values := *heap
-	root := values[0]
+	removed := values[index]
 	last := len(values) - 1
-	values[0] = values[last]
+	delete(indexes, key)
+	if index != last {
+		values[index] = values[last]
+		indexes[values[index].key] = uint32(index)
+	}
 	values[last] = expirationEntry{}
 	values = values[:last]
 	*heap = values
-	if len(values) > 0 {
-		heap.siftDown(0)
+	if index < len(values) {
+		if index > 0 && values[index].before(values[(index-1)/2]) {
+			heap.siftUp(index, indexes)
+		} else {
+			heap.siftDown(index, indexes)
+		}
 	}
-	return root, true
+	return removed, true
+}
+
+func (heap *expirationHeap) Update(key string, at time.Time, index int, indexes map[string]uint32) bool {
+	if heap == nil || index < 0 || index >= len(*heap) || (*heap)[index].key != key {
+		return false
+	}
+	previous := (*heap)[index].at
+	(*heap)[index].at = at
+	if at.Before(previous) {
+		heap.siftUp(index, indexes)
+	} else if at.After(previous) {
+		heap.siftDown(index, indexes)
+	}
+	return true
 }
 
 func (heap *expirationHeap) Clear() {
@@ -575,18 +604,18 @@ func (heap *expirationHeap) Clear() {
 	*heap = (*heap)[:0]
 }
 
-func (heap expirationHeap) siftUp(idx int) {
+func (heap expirationHeap) siftUp(idx int, indexes map[string]uint32) {
 	for idx > 0 {
 		parent := (idx - 1) / 2
 		if !heap[idx].before(heap[parent]) {
 			return
 		}
-		heap[idx], heap[parent] = heap[parent], heap[idx]
+		heap.swap(idx, parent, indexes)
 		idx = parent
 	}
 }
 
-func (heap expirationHeap) siftDown(idx int) {
+func (heap expirationHeap) siftDown(idx int, indexes map[string]uint32) {
 	for {
 		left := 2*idx + 1
 		if left >= len(heap) {
@@ -600,9 +629,15 @@ func (heap expirationHeap) siftDown(idx int) {
 		if !heap[smallest].before(heap[idx]) {
 			return
 		}
-		heap[idx], heap[smallest] = heap[smallest], heap[idx]
+		heap.swap(idx, smallest, indexes)
 		idx = smallest
 	}
+}
+
+func (heap expirationHeap) swap(left int, right int, indexes map[string]uint32) {
+	heap[left], heap[right] = heap[right], heap[left]
+	indexes[heap[left].key] = uint32(left)
+	indexes[heap[right].key] = uint32(right)
 }
 
 func (entry expirationEntry) before(other expirationEntry) bool {
@@ -2111,7 +2146,7 @@ type HatTrie struct {
 	xorFilters              *XorFilterStorage
 	radixTrees              *RadixTreeStorage
 	dbrefs                  *LevelDBReferenceStorage
-	expires                 map[string]time.Time
+	expires                 map[string]uint32
 	expirations             expirationHeap
 	hotKey                  string
 	hotValue                HatValue
@@ -2174,7 +2209,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		xorFilters:       CreateXorFilterStorage(),
 		radixTrees:       CreateRadixTreeStorage(),
 		dbrefs:           CreateLevelDBReferenceStorage(),
-		expires:          map[string]time.Time{},
+		expires:          map[string]uint32{},
 		keyStats:         map[string]*trackedKeyStats{},
 		keyStatsMode:     DefaultKeyStatsMode,
 		keyStatsCapacity: 0,
@@ -2688,7 +2723,7 @@ func (ht *HatTrie) TTLChecked(key string) (time.Duration, error) {
 		return NoTTL, nil
 	}
 
-	expiresAt, ok := ht.expires[key]
+	expiresAt, ok := ht.expirationAtLocked(key)
 	if !ok {
 		ht.recordReadLocked(false, key)
 		return NoTTL, nil
@@ -3440,13 +3475,15 @@ func (ht *HatTrie) expireAtLocked(key string, at time.Time) (bool, bool) {
 }
 
 func (ht *HatTrie) setExpirationLocked(key string, at time.Time, rawPtr *C.value_t, hval HatValue) HatValue {
-	ht.expires[key] = at
-	ht.expirations.Push(expirationEntry{key: key, at: at})
+	if index, ok := ht.expires[key]; ok {
+		ht.expirations.Update(key, at, int(index), ht.expires)
+	} else {
+		ht.expirations.Push(expirationEntry{key: key, at: at}, ht.expires)
+	}
 	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
 	if rawPtr != nil {
 		*rawPtr = hval.toValue()
 	}
-	ht.compactExpirationHeapLocked()
 	return hval
 }
 
@@ -3454,37 +3491,27 @@ func (ht *HatTrie) clearExpirationLocked(key string) {
 	if _, ok := ht.expires[key]; !ok {
 		return
 	}
-	delete(ht.expires, key)
-	ht.compactExpirationHeapLocked()
+	ht.expirations.Remove(key, ht.expires)
 }
 
 func (ht *HatTrie) compactExpirationHeapLocked() {
-	const minHeapEntries = 64
-	total := ht.expirations.Len()
-	live := len(ht.expires)
-	if total == 0 {
-		return
-	}
-	if live == 0 {
+	if len(ht.expires) == 0 {
 		ht.expirations.Clear()
-		return
 	}
-	if total < minHeapEntries || total <= live*4 {
-		return
-	}
-	ht.rebuildExpirationHeapLocked()
 }
 
 func (ht *HatTrie) rebuildExpirationHeapLocked() {
 	next := make(expirationHeap, 0, len(ht.expires))
-	for key, at := range ht.expires {
-		next.Push(expirationEntry{key: key, at: at})
+	indexes := make(map[string]uint32, len(ht.expires))
+	for _, entry := range ht.expirations {
+		next.Push(entry, indexes)
 	}
 	ht.expirations = next
+	ht.expires = indexes
 }
 
 func (ht *HatTrie) expireIfNeededLocked(key string, hval HatValue) bool {
-	expiresAt, ok := ht.expires[key]
+	expiresAt, ok := ht.expirationAtLocked(key)
 	if !ok {
 		return false
 	}
@@ -3496,6 +3523,20 @@ func (ht *HatTrie) expireIfNeededLocked(key string, hval HatValue) bool {
 		ht.recordExpirationLocked(key)
 	}
 	return deleted
+}
+
+func (ht *HatTrie) expirationAtLocked(key string) (time.Time, bool) {
+	position, ok := ht.expires[key]
+	index := int(position)
+	if !ok || index < 0 || index >= len(ht.expirations) || ht.expirations[index].key != key {
+		return time.Time{}, false
+	}
+	return ht.expirations[index].at, true
+}
+
+func (ht *HatTrie) expirationTimeLocked(key string) time.Time {
+	at, _ := ht.expirationAtLocked(key)
+	return at
 }
 
 func (ht *HatTrie) deleteLocked(key string) bool {
@@ -3543,18 +3584,10 @@ func (ht *HatTrie) vacuumExpiredLocked() int {
 		if !ok || now.Before(entry.at) {
 			break
 		}
-		_, _ = ht.expirations.Pop()
-		expiresAt, ok := ht.expires[entry.key]
-		if !ok || !expiresAt.Equal(entry.at) {
-			continue
-		}
-		if now.Before(expiresAt) {
-			continue
-		}
+		ht.expirations.Remove(entry.key, ht.expires)
 
 		rawPtr := ht.tryLocation(entry.key)
 		if rawPtr == nil {
-			delete(ht.expires, entry.key)
 			continue
 		}
 
@@ -3753,7 +3786,7 @@ func scanKeyFromBytes(prefix string, suffix []byte) string {
 func (cursor *hatTrieScanCursor) currentLiveEntryLocked(ht *HatTrie, now time.Time) (Entry, bool) {
 	for cursor.loadCurrentEntry() {
 		entry := cursor.entry
-		if expiresAt, ok := ht.expires[entry.Key]; ok && !now.Before(expiresAt) {
+		if expiresAt, ok := ht.expirationAtLocked(entry.Key); ok && !now.Before(expiresAt) {
 			cursor.expired = append(cursor.expired, scanExpiredEntry{key: entry.Key, value: entry.Value})
 			cursor.consume()
 			continue
@@ -3946,7 +3979,7 @@ func (ht *HatTrie) readValueNeedsExclusiveLockRLocked(key string, hval HatValue,
 	if !hval.HasTtl() {
 		return false
 	}
-	expiresAt, ok := ht.expires[key]
+	expiresAt, ok := ht.expirationAtLocked(key)
 	return !ok || !ht.currentTime().Before(expiresAt)
 }
 

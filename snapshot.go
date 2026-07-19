@@ -603,7 +603,7 @@ func (ht *HatTrie) writeSnapshotDiskBytesEntryJSONLocked(writer io.Writer, entry
 }
 
 func (ht *HatTrie) writeSnapshotBytesEntryJSONLocked(writer io.Writer, entry Entry, prefix string, reader io.Reader) error {
-	expiresAt := snapshotExpiresAt(ht.expires[entry.Key])
+	expiresAt := snapshotExpiresAt(ht.expirationTimeLocked(entry.Key))
 	stats := clonedUpdatedKeyStats(ht.keyStats[entry.Key])
 
 	if _, err := io.WriteString(writer, prefix+"{\n"); err != nil {
@@ -1188,7 +1188,7 @@ func (ht *HatTrie) captureSnapshotEntryForStoreLocked(entry Entry, currentStore 
 		return snapshotEntry{
 			Key:       entry.Key,
 			Type:      "bytes",
-			ExpiresAt: snapshotExpiresAt(ht.expires[entry.Key]),
+			ExpiresAt: snapshotExpiresAt(ht.expirationTimeLocked(entry.Key)),
 			Stats:     clonedUpdatedKeyStats(ht.keyStats[entry.Key]),
 			rawBytes:  value,
 		}, nil
@@ -1238,7 +1238,7 @@ func (ht *HatTrie) snapshotEntryForStoreLockedWithStats(entry Entry, currentStor
 	out := snapshotEntry{
 		Key:       entry.Key,
 		Type:      monitoringType(entry.Value),
-		ExpiresAt: snapshotExpiresAt(ht.expires[entry.Key]),
+		ExpiresAt: snapshotExpiresAt(ht.expirationTimeLocked(entry.Key)),
 	}
 	if includeStats {
 		out.Stats = clonedUpdatedKeyStats(ht.keyStats[entry.Key])

@@ -34,6 +34,24 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
 	b.Run("ChurnRetentionBaseline", benchmarkBigWinsChurnRetentionBaseline)
 	b.Run("ChurnRetentionCompacted", benchmarkBigWinsChurnRetentionCompacted)
+	b.Run("ExpirationDeadlineUpdate", benchmarkBigWinsExpirationDeadlineUpdate)
+}
+
+func benchmarkBigWinsExpirationDeadlineUpdate(b *testing.B) {
+	trie := CreateHatTrie()
+	defer trie.Destroy()
+	now := time.Unix(1700000000, 0)
+	trie.now = func() time.Time { return now }
+	trie.UpsertString("ttl:hot", "value")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if !trie.ExpireAt("ttl:hot", now.Add(time.Duration(iteration+1)*time.Second)) {
+			b.Fatal("ExpireAt() = false")
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(trie.expirations.Len()), "heap_entries")
 }
 
 func benchmarkBigWinsChurnRetentionBaseline(b *testing.B) {
