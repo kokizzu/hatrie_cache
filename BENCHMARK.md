@@ -187,6 +187,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
+| Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
@@ -597,6 +598,31 @@ durability; a client additionally saves up to 1,000 HTTP/gRPC round trips. A
 journal write or sync failure rolls back journal bytes and in-memory mutations.
 An ordinary failing subcommand preserves prior successful items, matching
 public pipeline semantics.
+
+<a id="native-c-command-batching"></a>
+### Native C Command Batching
+
+The native path packs 4,096 keys and operations into one C call while retaining
+one Go trie lock. The baseline uses the previous locked Go loop and crosses cgo
+once per trie operation. Both modes are prewarmed so trie-owned scratch growth
+is excluded from steady-state allocation metrics.
+
+```sh
+make bench-native-command-batch BENCHTIME=20x COUNT=5
+```
+
+| Family, median of five | Go loop | Native C | Heap B/batch | Allocs/batch | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 4,096 `SETINT` | 1.137 ms | 0.998 ms | 262,147 both | 1 both | 1.14x faster |
+| 4,096 `GET` | 1.123 ms | 0.979 ms | 277,412 both | 3,997 both | 1.15x faster |
+
+The native route activates at 32 commands, where fixed cgo setup begins to
+amortize. It handles read, string-set, counter-set, counter-increment, and
+delete families. Mixed commands, TTL-dependent keys, cold-reference-sensitive
+increments, smaller batches, and journal executor interception retain the Go
+path. Ordered C results are reconciled in Go for backing-store cleanup,
+telemetry, mutation tracking, overflow errors, and response formatting. Raw
+output is in `build/benchmarks/native-c-command-batch.txt`.
 
 ### Segmented WAL Compaction
 

@@ -974,6 +974,14 @@ applied. Three 4,096-item-or-smaller batches completed 10,000 durable writes in 
 individual commands; see
 [BENCHMARK.md](BENCHMARK.md#durable-public-batches).
 
+Without journal interception, same-family scalar batches of at least 32
+commands pack keys and operations into one native HAT-trie call under one Go
+lock. This covers `GET`/`GETSTR`/`EXISTS`, `SET`/`SETSTR`, `SETINT`, `INC`, and
+`DEL`. Smaller, mixed, TTL-sensitive, or cold-reference-sensitive batches use
+the existing Go executor. At 4,096 commands the native path is 1.14x faster for
+counter sets and 1.15x faster for reads with unchanged steady-state heap. See
+[BENCHMARK.md](BENCHMARK.md#native-c-command-batching).
+
 When journaling is enabled, `GET /api/journal?after_sequence=N&limit=1000`
 returns a bounded batch of ordered mutating commands after `N` plus the latest
 journal sequence. Responses include `has_more` when another batch is available.

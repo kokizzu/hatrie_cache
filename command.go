@@ -1036,6 +1036,9 @@ func executePublicCommandBatchRequests(request CacheCommandRequest, execute func
 }
 
 func (ht *HatTrie) executePublicScalarBatchCommand(request CacheCommandRequest) (CacheCommandResponse, bool) {
+	if response, ok := ht.executePublicNativeScalarBatchCommand(request); ok {
+		return response, true
+	}
 	return ht.executePublicScalarBatchCommandWithExecutor(request, nil)
 }
 

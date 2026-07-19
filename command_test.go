@@ -71,6 +71,106 @@ func TestExecuteCommandScalarBatchUsesLowAllocationFastPath(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandScalarBatchUsesSingleNativeCCallPerFamily(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*HatTrie)
+		batch []CacheCommandRequest
+		check func(*testing.T, *HatTrie, CacheCommandResponse)
+	}{
+		{
+			name: "read",
+			setup: func(trie *HatTrie) {
+				trie.UpsertString("name", "ivi")
+				trie.UpsertCounter("views", 7)
+			},
+			batch: []CacheCommandRequest{{Command: "GET", Key: "name"}, {Command: "EXISTS", Key: "views"}, {Command: "GETSTR", Key: "missing"}},
+			check: func(t *testing.T, _ *HatTrie, response CacheCommandResponse) {
+				if !response.OK || response.Responses[0].Value != "ivi" || response.Responses[1].Value != "1" || response.Responses[2].Message != "key not found" {
+					t.Fatalf("read batch response = %#v", response)
+				}
+			},
+		},
+		{
+			name:  "string set",
+			setup: func(trie *HatTrie) { trie.UpsertMap("replace", Map{"old": "value"}) },
+			batch: []CacheCommandRequest{{Command: "SETSTR", Key: "replace", Value: "first"}, {Command: "SET", Key: "replace", Value: "second"}},
+			check: func(t *testing.T, trie *HatTrie, response CacheCommandResponse) {
+				if !response.OK || trie.GetString("replace") != "second" {
+					t.Fatalf("string batch response/value = %#v/%q", response, trie.GetString("replace"))
+				}
+			},
+		},
+		{
+			name:  "counter set",
+			setup: func(trie *HatTrie) { trie.UpsertString("counter", "old") },
+			batch: []CacheCommandRequest{{Command: "SETINT", Key: "counter", Value: "7"}, {Command: "SETINT", Key: "other", Value: "9"}},
+			check: func(t *testing.T, trie *HatTrie, response CacheCommandResponse) {
+				if !response.OK || trie.GetCounter("counter") != 7 || trie.GetCounter("other") != 9 {
+					t.Fatalf("counter batch response/values = %#v/%d/%d", response, trie.GetCounter("counter"), trie.GetCounter("other"))
+				}
+			},
+		},
+		{
+			name:  "increment",
+			setup: func(trie *HatTrie) { trie.UpsertCounter("max", maxCommandInt32) },
+			batch: []CacheCommandRequest{{Command: "INC", Key: "count", Value: "2"}, {Command: "INC", Key: "count", Value: "3"}, {Command: "INC", Key: "max"}},
+			check: func(t *testing.T, trie *HatTrie, response CacheCommandResponse) {
+				if response.OK || response.Responses[0].Value != "2" || response.Responses[1].Value != "5" || response.Responses[2].OK || trie.GetCounter("count") != 5 || trie.GetCounter("max") != maxCommandInt32 {
+					t.Fatalf("increment batch response/values = %#v/%d/%d", response, trie.GetCounter("count"), trie.GetCounter("max"))
+				}
+			},
+		},
+		{
+			name: "delete",
+			setup: func(trie *HatTrie) {
+				trie.UpsertString("one", "1")
+				trie.UpsertMap("two", Map{"value": 2})
+			},
+			batch: []CacheCommandRequest{{Command: "DEL", Key: "one"}, {Command: "DEL", Key: "two"}, {Command: "DEL", Key: "missing"}},
+			check: func(t *testing.T, trie *HatTrie, response CacheCommandResponse) {
+				if !response.OK || response.Responses[0].Message != "deleted" || response.Responses[1].Message != "deleted" || response.Responses[2].Message != "key not found" || trie.Exists("one") || trie.Exists("two") {
+					t.Fatalf("delete batch response = %#v", response)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			trie := newTestTrie(t)
+			test.setup(trie)
+			for len(test.batch) < minNativeCommandBatchSize {
+				test.batch = append(test.batch, test.batch[len(test.batch)-1])
+			}
+			before := trie.nativeCommandBatchCalls
+			response := trie.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Batch: test.batch})
+			if got := trie.nativeCommandBatchCalls - before; got != 1 {
+				t.Fatalf("native C batch calls = %d, want 1", got)
+			}
+			test.check(t, trie, response)
+		})
+	}
+}
+
+func TestExecuteCommandScalarBatchFallsBackForTTLAndMixedFamilies(t *testing.T) {
+	trie := newTestTrie(t)
+	ttl := int64(30)
+	for _, batch := range [][]CacheCommandRequest{
+		{{Command: "SETSTR", Key: "ttl", Value: "value", TTLSeconds: &ttl}, {Command: "SETSTR", Key: "plain", Value: "value"}},
+		{{Command: "SETSTR", Key: "mixed", Value: "value"}, {Command: "GET", Key: "mixed"}},
+	} {
+		before := trie.nativeCommandBatchCalls
+		response := trie.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Batch: batch})
+		if !response.OK {
+			t.Fatalf("fallback batch response = %#v, want ok", response)
+		}
+		if got := trie.nativeCommandBatchCalls - before; got != 0 {
+			t.Fatalf("fallback native C calls = %d, want 0", got)
+		}
+	}
+}
+
 func TestExecuteCommandScalarBatchFastPathKeepsSingleLockExecutor(t *testing.T) {
 	data, err := os.ReadFile("command.go")
 	if err != nil {
