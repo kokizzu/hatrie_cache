@@ -195,6 +195,40 @@ func TestMonitoringWrapperPassesJournalGroupCommitDefaults(t *testing.T) {
 	}
 }
 
+func TestMonitoringWrapperPassesGRPCLiveBatchDefaults(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	makefileText := string(makefile)
+	for _, token := range []string{
+		"REPLICATION_GRPC_BATCH_MAX_COMMANDS ?= 32",
+		"REPLICATION_GRPC_BATCH_WINDOW ?= 0",
+		"REPLICATION_GRPC_BATCH_MAX_COMMANDS='$(REPLICATION_GRPC_BATCH_MAX_COMMANDS)'",
+		"REPLICATION_GRPC_BATCH_WINDOW='$(REPLICATION_GRPC_BATCH_WINDOW)'",
+	} {
+		if !strings.Contains(makefileText, token) {
+			t.Fatalf("Makefile missing live gRPC batch token %q", token)
+		}
+	}
+
+	script, err := os.ReadFile("scripts/monitoring-server.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(scripts/monitoring-server.sh) error = %v", err)
+	}
+	scriptText := string(script)
+	for _, token := range []string{
+		"replication_grpc_batch_max_commands=${REPLICATION_GRPC_BATCH_MAX_COMMANDS:-32}",
+		"replication_grpc_batch_window=${REPLICATION_GRPC_BATCH_WINDOW:-0}",
+		`-replication-grpc-batch-max-commands "$replication_grpc_batch_max_commands"`,
+		`-replication-grpc-batch-window "$replication_grpc_batch_window"`,
+	} {
+		if !strings.Contains(scriptText, token) {
+			t.Fatalf("monitoring wrapper missing live gRPC batch token %q", token)
+		}
+	}
+}
+
 func TestMonitoringWrapperPassesMemoryGovernorOptions(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {

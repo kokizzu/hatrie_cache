@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -30,16 +31,19 @@ type replicationGRPCSyncSession struct {
 }
 
 type replicationGRPCStreamTarget struct {
-	conn       *grpc.ClientConn
-	stream     hatriecachev1.CacheService_ReplicationStreamClient
-	ctx        context.Context
-	cancel     context.CancelFunc
-	jobs       chan *replicationGRPCStreamJob
-	done       chan struct{}
-	window     int
-	timeout    time.Duration
-	replicator *HTTPReplicator
-	closeOnce  sync.Once
+	conn             *grpc.ClientConn
+	stream           hatriecachev1.CacheService_ReplicationStreamClient
+	ctx              context.Context
+	cancel           context.CancelFunc
+	jobs             chan *replicationGRPCStreamJob
+	done             chan struct{}
+	window           int
+	batchMaxCommands int
+	batchMaxBytes    int
+	batchWindow      time.Duration
+	timeout          time.Duration
+	replicator       *HTTPReplicator
+	closeOnce        sync.Once
 }
 
 type replicationGRPCStreamJob struct {
@@ -51,6 +55,13 @@ type replicationGRPCStreamJob struct {
 type replicationGRPCStreamJobResult struct {
 	ack *hatriecachev1.ReplicationStreamAck
 	err error
+}
+
+type replicationGRPCStreamFlight struct {
+	request *hatriecachev1.ReplicationStreamBatch
+	jobs    []*replicationGRPCStreamJob
+	entries int
+	bytes   int
 }
 
 func newReplicationGRPCSyncSession(ctx context.Context, replicator *HTTPReplicator) *replicationGRPCSyncSession {
@@ -118,22 +129,61 @@ func (target *replicationGRPCStreamTarget) run() {
 		}
 	}()
 
-	pending := make(map[uint64]*replicationGRPCStreamJob, target.window)
+	pending := make(map[uint64]*replicationGRPCStreamFlight, target.window)
 	timer := time.NewTimer(time.Hour)
 	if !timer.Stop() {
 		<-timer.C
 	}
 	defer timer.Stop()
 	var timeout <-chan time.Time
+	var carry *replicationGRPCStreamJob
 	terminalErr := context.Canceled
 	defer func() {
-		for _, job := range pending {
-			target.completeJob(job, nil, terminalErr)
+		for _, flight := range pending {
+			target.completeFlight(flight, nil, terminalErr)
+		}
+		if carry != nil {
+			target.completeJob(carry, nil, terminalErr)
 		}
 		target.failQueued(terminalErr)
 	}()
+	sendJob := func(job *replicationGRPCStreamJob) error {
+		if err := job.ctx.Err(); err != nil {
+			target.completeJob(job, nil, err)
+			return nil
+		}
+		flight, next, err := target.collectFlight(job)
+		carry = next
+		if err != nil {
+			return err
+		}
+		sequence := target.replicator.nextReplicationSequence()
+		flight.request.Sequence = sequence
+		for _, groupedJob := range flight.jobs {
+			groupedJob.request.Sequence = sequence
+		}
+		pending[sequence] = flight
+		if err := target.stream.Send(flight.request); err != nil {
+			return target.resolveSendError(err, receives)
+		}
+		target.replicator.grpcStreamBatches.Add(1)
+		if len(pending) == 1 {
+			target.resetTimer(timer)
+			timeout = timer.C
+		}
+		return nil
+	}
 
 	for {
+		if carry != nil && len(pending) < target.window {
+			job := carry
+			carry = nil
+			if err := sendJob(job); err != nil {
+				terminalErr = err
+				return
+			}
+			continue
+		}
 		var jobs <-chan *replicationGRPCStreamJob
 		if len(pending) < target.window {
 			jobs = target.jobs
@@ -146,20 +196,9 @@ func (target *replicationGRPCStreamTarget) run() {
 			terminalErr = context.DeadlineExceeded
 			return
 		case job := <-jobs:
-			if err := job.ctx.Err(); err != nil {
-				target.completeJob(job, nil, err)
-				continue
-			}
-			sequence := target.replicator.nextReplicationSequence()
-			job.request.Sequence = sequence
-			pending[sequence] = job
-			if err := target.stream.Send(job.request); err != nil {
-				terminalErr = target.resolveSendError(err, receives)
+			if err := sendJob(job); err != nil {
+				terminalErr = err
 				return
-			}
-			if len(pending) == 1 {
-				target.resetTimer(timer)
-				timeout = timer.C
 			}
 		case received := <-receives:
 			if received.err != nil {
@@ -167,13 +206,13 @@ func (target *replicationGRPCStreamTarget) run() {
 				return
 			}
 			sequence := received.ack.GetSequence()
-			job := pending[sequence]
-			if job == nil {
+			flight := pending[sequence]
+			if flight == nil {
 				terminalErr = fmt.Errorf("gRPC replication stream acknowledged unknown sequence %d", sequence)
 				return
 			}
 			delete(pending, sequence)
-			target.completeJob(job, received.ack, nil)
+			target.completeFlight(flight, received.ack, nil)
 			if len(pending) == 0 {
 				if !timer.Stop() {
 					select {
@@ -188,6 +227,79 @@ func (target *replicationGRPCStreamTarget) run() {
 			}
 		}
 	}
+}
+
+func (target *replicationGRPCStreamTarget) collectFlight(first *replicationGRPCStreamJob) (*replicationGRPCStreamFlight, *replicationGRPCStreamJob, error) {
+	flight := &replicationGRPCStreamFlight{
+		request: first.request,
+		jobs:    []*replicationGRPCStreamJob{first},
+		entries: len(first.request.GetKeys()),
+		bytes:   replicationGRPCStreamRequestBytes(first.request),
+	}
+	if target.batchMaxCommands <= 1 || flight.entries >= target.batchMaxCommands {
+		return flight, nil, nil
+	}
+
+	var timer *time.Timer
+	if target.batchWindow > 0 {
+		timer = time.NewTimer(target.batchWindow)
+		defer timer.Stop()
+	} else {
+		for yield := 0; yield < defaultReplicationGRPCLiveBatchYields; yield++ {
+			runtime.Gosched()
+		}
+	}
+	for flight.entries < target.batchMaxCommands {
+		var next *replicationGRPCStreamJob
+		if timer == nil {
+			select {
+			case next = <-target.jobs:
+			default:
+				return flight, nil, nil
+			}
+		} else {
+			select {
+			case <-target.ctx.Done():
+				return flight, nil, target.ctx.Err()
+			case <-timer.C:
+				return flight, nil, nil
+			case next = <-target.jobs:
+			}
+		}
+		if err := next.ctx.Err(); err != nil {
+			target.completeJob(next, nil, err)
+			continue
+		}
+		if !replicationGRPCStreamRequestsCompatible(flight.request, next.request) {
+			return flight, next, nil
+		}
+		nextEntries := len(next.request.GetKeys())
+		nextBytes := replicationGRPCStreamRequestBytes(next.request)
+		if flight.entries+nextEntries > target.batchMaxCommands || (target.batchMaxBytes > 0 && flight.bytes+nextBytes > target.batchMaxBytes) {
+			return flight, next, nil
+		}
+		flight.request.Keys = append(flight.request.Keys, next.request.GetKeys()...)
+		flight.request.BinaryValues = append(flight.request.BinaryValues, next.request.GetBinaryValues()...)
+		flight.jobs = append(flight.jobs, next)
+		flight.entries += nextEntries
+		flight.bytes += nextBytes
+	}
+	return flight, nil, nil
+}
+
+func replicationGRPCStreamRequestsCompatible(left *hatriecachev1.ReplicationStreamBatch, right *hatriecachev1.ReplicationStreamBatch) bool {
+	return left.GetSource() == right.GetSource() && left.GetTopologyFingerprint() == right.GetTopologyFingerprint()
+}
+
+func replicationGRPCStreamRequestBytes(request *hatriecachev1.ReplicationStreamBatch) int {
+	bytes := len(request.GetSource()) + len(request.GetTopologyFingerprint())
+	for _, key := range request.GetKeys() {
+		bytes += len(key)
+	}
+	for _, value := range request.GetBinaryValues() {
+		bytes += len(value)
+	}
+	return bytes
 }
 
 func (target *replicationGRPCStreamTarget) resetTimer(timer *time.Timer) {
@@ -222,6 +334,12 @@ func (target *replicationGRPCStreamTarget) completeJob(job *replicationGRPCStrea
 	select {
 	case job.result <- replicationGRPCStreamJobResult{ack: ack, err: err}:
 	default:
+	}
+}
+
+func (target *replicationGRPCStreamTarget) completeFlight(flight *replicationGRPCStreamFlight, ack *hatriecachev1.ReplicationStreamAck, err error) {
+	for _, job := range flight.jobs {
+		target.completeJob(job, ack, err)
 	}
 }
 
@@ -379,7 +497,6 @@ func (session *replicationGRPCSyncSession) sendGroup(ctx context.Context, group 
 			Node: group.target.ID, Address: group.target.GRPCAddress, Error: ack.GetMessage(),
 		}, nil
 	}
-	session.replicator.grpcStreamBatches.Add(1)
 	return ReplicationTargetResult{
 		Node: group.target.ID, Address: group.target.GRPCAddress, OK: true, Status: 200,
 	}, nil
@@ -425,10 +542,17 @@ func (session *replicationGRPCSyncSession) streamTarget(node TopologyNode) (*rep
 	if window <= 0 {
 		window = 1
 	}
+	batchMaxCommands := 1
+	batchWindow := time.Duration(0)
+	if !session.stickyFallback {
+		batchMaxCommands = session.replicator.grpcLiveBatchMaxCommands
+		batchWindow = session.replicator.grpcLiveBatchWindow
+	}
 	target := &replicationGRPCStreamTarget{
 		conn: conn, stream: stream, ctx: streamCtx, cancel: cancelStream,
 		jobs: make(chan *replicationGRPCStreamJob, window*2), done: make(chan struct{}),
-		window: window, timeout: session.replicator.timeout, replicator: session.replicator,
+		window: window, batchMaxCommands: batchMaxCommands, batchMaxBytes: session.replicator.batchMaxBytes,
+		batchWindow: batchWindow, timeout: session.replicator.timeout, replicator: session.replicator,
 	}
 	go target.run()
 

@@ -33,6 +33,8 @@ replication_circuit_breaker_cooldown=${REPLICATION_CIRCUIT_BREAKER_COOLDOWN:-30s
 replication_wire_format=${REPLICATION_WIRE_FORMAT:-protobuf}
 replication_transport=${REPLICATION_TRANSPORT:-http}
 replication_grpc_window=${REPLICATION_GRPC_WINDOW:-32}
+replication_grpc_batch_max_commands=${REPLICATION_GRPC_BATCH_MAX_COMMANDS:-32}
+replication_grpc_batch_window=${REPLICATION_GRPC_BATCH_WINDOW:-0}
 replication_http_fallback=${REPLICATION_HTTP_FALLBACK:-true}
 replication_auth_token=${REPLICATION_AUTH_TOKEN:-}
 replication_batch_max_bytes=${REPLICATION_BATCH_MAX_BYTES:-1048576}
@@ -108,6 +110,8 @@ set -- \
 	-replication-auth-token "$replication_auth_token" \
 	-replication-transport "$replication_transport" \
 	-replication-grpc-window "$replication_grpc_window" \
+	-replication-grpc-batch-max-commands "$replication_grpc_batch_max_commands" \
+	-replication-grpc-batch-window "$replication_grpc_batch_window" \
 	-replication-http-fallback="$replication_http_fallback" \
 	-replication-batch-max-bytes "$replication_batch_max_bytes" \
 	-replication-max-in-flight-targets "$replication_max_in_flight_targets" \

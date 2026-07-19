@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -649,7 +650,30 @@ func BenchmarkReplicationSyncTransport(b *testing.B) {
 
 func BenchmarkReplicationLiveTransport10K(b *testing.B) {
 	const operations = 10_000
-	const callers = 32
+	callers := 32
+	if value := os.Getenv("HATRIE_BENCH_GRPC_LIVE_CALLERS"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 {
+			b.Fatalf("HATRIE_BENCH_GRPC_LIVE_CALLERS=%q must be a positive integer", value)
+		}
+		callers = parsed
+	}
+	batchMaxCommands := 0
+	if value := os.Getenv("HATRIE_BENCH_GRPC_LIVE_BATCH_MAX_COMMANDS"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 {
+			b.Fatalf("HATRIE_BENCH_GRPC_LIVE_BATCH_MAX_COMMANDS=%q must be a positive integer", value)
+		}
+		batchMaxCommands = parsed
+	}
+	batchWindow := time.Duration(0)
+	if value := os.Getenv("HATRIE_BENCH_GRPC_LIVE_BATCH_WINDOW"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed < 0 {
+			b.Fatalf("HATRIE_BENCH_GRPC_LIVE_BATCH_WINDOW=%q must be a non-negative duration", value)
+		}
+		batchWindow = parsed
+	}
 	for _, transport := range []ReplicationTransport{ReplicationTransportHTTP, ReplicationTransportGRPCStream} {
 		b.Run(string(transport), func(b *testing.B) {
 			sourceTrie := CreateHatTrie()
@@ -713,6 +737,8 @@ func BenchmarkReplicationLiveTransport10K(b *testing.B) {
 			if transport == ReplicationTransportGRPCStream {
 				options.DisableHTTPFallback = true
 				options.GRPCStreamWindow = callers
+				options.GRPCLiveBatchMaxCommands = batchMaxCommands
+				options.GRPCLiveBatchWindow = batchWindow
 				options.GRPCDialOptions = []grpc.DialOption{
 					grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return grpcListener.Dial() }),
 					grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -759,6 +785,7 @@ func BenchmarkReplicationLiveTransport10K(b *testing.B) {
 			}
 			iterations := float64(b.N)
 			b.ReportMetric(operations, "commands/op")
+			b.ReportMetric(float64(callers), "callers/op")
 			if transport == ReplicationTransportGRPCStream {
 				b.ReportMetric(float64(replicator.grpcStreamBatches.Load())/iterations, "batches/op")
 				b.ReportMetric(float64(grpcWireStats.outbound.Load())/iterations, "wire_B/op")

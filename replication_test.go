@@ -51,10 +51,23 @@ func TestNewHTTPReplicatorDefaultsReplicationBatchLimit(t *testing.T) {
 	if replicator.grpcStreamWindow != DefaultReplicationGRPCStreamWindow {
 		t.Fatalf("default gRPC stream window = %d, want %d", replicator.grpcStreamWindow, DefaultReplicationGRPCStreamWindow)
 	}
+	if replicator.grpcLiveBatchMaxCommands != DefaultReplicationGRPCLiveBatchMaxCommands {
+		t.Fatalf("default live gRPC batch commands = %d, want %d", replicator.grpcLiveBatchMaxCommands, DefaultReplicationGRPCLiveBatchMaxCommands)
+	}
+	if replicator.grpcLiveBatchWindow != DefaultReplicationGRPCLiveBatchWindow {
+		t.Fatalf("default live gRPC batch window = %s, want %s", replicator.grpcLiveBatchWindow, DefaultReplicationGRPCLiveBatchWindow)
+	}
 
 	unlimited := NewHTTPReplicator(HTTPReplicatorOptions{ReplicationBatchMaxBytes: -1})
 	if unlimited.batchMaxBytes != 0 {
 		t.Fatalf("negative replication batch limit = %d, want unlimited", unlimited.batchMaxBytes)
+	}
+	disabledGrouping := NewHTTPReplicator(HTTPReplicatorOptions{
+		GRPCLiveBatchMaxCommands: -1,
+		GRPCLiveBatchWindow:      -time.Second,
+	})
+	if disabledGrouping.grpcLiveBatchMaxCommands != 1 || disabledGrouping.grpcLiveBatchWindow != 0 {
+		t.Fatalf("negative live batch options = %d/%s, want 1/0", disabledGrouping.grpcLiveBatchMaxCommands, disabledGrouping.grpcLiveBatchWindow)
 	}
 }
 

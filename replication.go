@@ -29,6 +29,10 @@ const DefaultReplicationBatchMaxBytes = 1 << 20
 const DefaultReplicationMaxInFlightTargets = 4
 const DefaultReplicationGRPCStreamWindow = 32
 const MaxReplicationGRPCStreamWindow = 1024
+const DefaultReplicationGRPCLiveBatchMaxCommands = 32
+const MaxReplicationGRPCLiveBatchMaxCommands = 1024
+const DefaultReplicationGRPCLiveBatchWindow = time.Duration(0)
+const defaultReplicationGRPCLiveBatchYields = 16
 const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
 const minCompressedReplicationRequestBytes = 16 << 10
@@ -82,50 +86,54 @@ type HTTPReplicatorOptions struct {
 	MaxInFlightTargets       int
 	Transport                ReplicationTransport
 	GRPCStreamWindow         int
+	GRPCLiveBatchMaxCommands int
+	GRPCLiveBatchWindow      time.Duration
 	DisableHTTPFallback      bool
 	GRPCDialOptions          []grpc.DialOption
 }
 
 type HTTPReplicator struct {
-	mu                  sync.RWMutex
-	self                string
-	topology            *TopologyStore
-	election            *ElectionStore
-	client              *http.Client
-	timeout             time.Duration
-	queue               chan replicationJob
-	retry               time.Duration
-	attempts            uint
-	wireFormat          CommandWireFormat
-	authToken           string
-	outbox              *ReplicationOutboxStore
-	breakerFailures     int
-	breakerCooldown     time.Duration
-	batchMaxBytes       int
-	maxInFlight         int
-	transport           ReplicationTransport
-	grpcStreamWindow    int
-	disableHTTPFallback bool
-	grpcDialOptions     []grpc.DialOption
-	grpcLiveSession     *replicationGRPCSyncSession
-	grpcLiveCancel      context.CancelFunc
-	grpcStreamBatches   atomic.Uint64
-	breakers            map[string]replicationCircuitBreakerState
-	done                chan struct{}
-	stopped             chan struct{}
-	asyncCtx            context.Context
-	cancel              context.CancelFunc
-	close               sync.Once
-	closed              bool
-	sequence            uint64
-	queueSeq            uint64
-	deadSeq             uint64
-	deadLimit           int
-	pending             []replicationQueueMeta
-	deadLetters         []ReplicationDeadLetter
-	queueStats          ReplicationQueueStats
-	last                ReplicationResult
-	metrics             replicationMetrics
+	mu                       sync.RWMutex
+	self                     string
+	topology                 *TopologyStore
+	election                 *ElectionStore
+	client                   *http.Client
+	timeout                  time.Duration
+	queue                    chan replicationJob
+	retry                    time.Duration
+	attempts                 uint
+	wireFormat               CommandWireFormat
+	authToken                string
+	outbox                   *ReplicationOutboxStore
+	breakerFailures          int
+	breakerCooldown          time.Duration
+	batchMaxBytes            int
+	maxInFlight              int
+	transport                ReplicationTransport
+	grpcStreamWindow         int
+	grpcLiveBatchMaxCommands int
+	grpcLiveBatchWindow      time.Duration
+	disableHTTPFallback      bool
+	grpcDialOptions          []grpc.DialOption
+	grpcLiveSession          *replicationGRPCSyncSession
+	grpcLiveCancel           context.CancelFunc
+	grpcStreamBatches        atomic.Uint64
+	breakers                 map[string]replicationCircuitBreakerState
+	done                     chan struct{}
+	stopped                  chan struct{}
+	asyncCtx                 context.Context
+	cancel                   context.CancelFunc
+	close                    sync.Once
+	closed                   bool
+	sequence                 uint64
+	queueSeq                 uint64
+	deadSeq                  uint64
+	deadLimit                int
+	pending                  []replicationQueueMeta
+	deadLetters              []ReplicationDeadLetter
+	queueStats               ReplicationQueueStats
+	last                     ReplicationResult
+	metrics                  replicationMetrics
 }
 
 type ReplicationResult struct {
@@ -370,22 +378,24 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		transport = ReplicationTransportHTTP
 	}
 	replicator := &HTTPReplicator{
-		self:                strings.TrimSpace(options.Self),
-		topology:            options.Topology,
-		election:            options.Election,
-		client:              client,
-		timeout:             timeout,
-		wireFormat:          wireFormat,
-		authToken:           normalizeAuthToken(options.AuthToken),
-		outbox:              options.AsyncOutbox,
-		breakerFailures:     options.CircuitBreakerFailures,
-		breakerCooldown:     options.CircuitBreakerCooldown,
-		batchMaxBytes:       options.ReplicationBatchMaxBytes,
-		maxInFlight:         options.MaxInFlightTargets,
-		transport:           transport,
-		grpcStreamWindow:    options.GRPCStreamWindow,
-		disableHTTPFallback: options.DisableHTTPFallback,
-		grpcDialOptions:     append([]grpc.DialOption(nil), options.GRPCDialOptions...),
+		self:                     strings.TrimSpace(options.Self),
+		topology:                 options.Topology,
+		election:                 options.Election,
+		client:                   client,
+		timeout:                  timeout,
+		wireFormat:               wireFormat,
+		authToken:                normalizeAuthToken(options.AuthToken),
+		outbox:                   options.AsyncOutbox,
+		breakerFailures:          options.CircuitBreakerFailures,
+		breakerCooldown:          options.CircuitBreakerCooldown,
+		batchMaxBytes:            options.ReplicationBatchMaxBytes,
+		maxInFlight:              options.MaxInFlightTargets,
+		transport:                transport,
+		grpcStreamWindow:         options.GRPCStreamWindow,
+		grpcLiveBatchMaxCommands: options.GRPCLiveBatchMaxCommands,
+		grpcLiveBatchWindow:      options.GRPCLiveBatchWindow,
+		disableHTTPFallback:      options.DisableHTTPFallback,
+		grpcDialOptions:          append([]grpc.DialOption(nil), options.GRPCDialOptions...),
 	}
 	if replicator.batchMaxBytes == 0 {
 		replicator.batchMaxBytes = DefaultReplicationBatchMaxBytes
@@ -403,6 +413,16 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		replicator.grpcStreamWindow = 1
 	} else if replicator.grpcStreamWindow > MaxReplicationGRPCStreamWindow {
 		replicator.grpcStreamWindow = MaxReplicationGRPCStreamWindow
+	}
+	if replicator.grpcLiveBatchMaxCommands == 0 {
+		replicator.grpcLiveBatchMaxCommands = DefaultReplicationGRPCLiveBatchMaxCommands
+	} else if replicator.grpcLiveBatchMaxCommands < 0 {
+		replicator.grpcLiveBatchMaxCommands = 1
+	} else if replicator.grpcLiveBatchMaxCommands > MaxReplicationGRPCLiveBatchMaxCommands {
+		replicator.grpcLiveBatchMaxCommands = MaxReplicationGRPCLiveBatchMaxCommands
+	}
+	if replicator.grpcLiveBatchWindow < 0 {
+		replicator.grpcLiveBatchWindow = 0
 	}
 	if replicator.transport == ReplicationTransportGRPCStream {
 		parent := options.Context

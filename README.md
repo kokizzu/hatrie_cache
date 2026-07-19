@@ -984,7 +984,14 @@ repair writes. The default `REPLICATION_GRPC_WINDOW=32` permits up to 32 sent,
 unacknowledged batches per target; set it from 1 through 1,024 to bound
 throughput, memory, and backpressure. A dedicated receiver pairs acknowledgements
 by sequence while per-key replay safety permits independent keys to complete
-out of order. The target node must publish `grpc_address` and run its opt-in
+out of order. Live fanout also groups up to
+`REPLICATION_GRPC_BATCH_MAX_COMMANDS=32` already-queued commands into one wire
+batch and fans its acknowledgement back to each caller. The default
+`REPLICATION_GRPC_BATCH_WINDOW=0` adds no timed wait; set a positive duration
+only to trade latency for fewer bytes. Set the command limit to `1` for the
+previous one-command-per-batch behavior. The existing
+`REPLICATION_BATCH_MAX_BYTES` also bounds each grouped batch. The target node
+must publish `grpc_address` and run its opt-in
 native listener with `GRPC_ADDR`. A bare address or `grpc://` uses an insecure
 internal connection, while `grpcs://` verifies the server with the host trust
 store. `REPLICATION_AUTH_TOKEN` is accepted by the stream without granting
@@ -992,9 +999,10 @@ access to other gRPC methods.
 
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
-closed instead. For 10,000 live writes from 32 callers, gRPC used 1.082 MB of
-wire versus HTTP's 1.869 MB (42.1% less), 10.5% less cumulative heap, and 22.4%
-fewer allocations. See [BENCHMARK.md](BENCHMARK.md#pipelined-live-grpc-replication).
+closed instead. For 10,000 live writes from 32 callers, zero-wait
+micro-batching reduced the valid pipelined gRPC baseline from 10,000 to 2,910
+wire batches, from 1.082 MB to 368 KB, and from 193.3 ms to 149.7 ms. See
+[BENCHMARK.md](BENCHMARK.md#pipelined-live-grpc-replication).
 `POST /api/replication` runs an explicit command-fanout anti-entropy sync. For
 an unfiltered single-shard data set, the source and target first compare an
 incrementally maintained 1,024-bucket Merkle root. Equal replicas stop after one
@@ -1019,6 +1027,8 @@ make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATI
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_WIRE_FORMAT=json
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream REPLICATION_GRPC_WINDOW=64
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream REPLICATION_GRPC_BATCH_MAX_COMMANDS=1
+make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream REPLICATION_GRPC_BATCH_WINDOW=25us
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=command REPLICATION_TRANSPORT=grpc-stream REPLICATION_HTTP_FALLBACK=false
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json REPLICATION=true REPLICATION_MODE=dual JOURNAL_PATH=data/node-a.journal REPLICATION_BATCH_MAX_BYTES=262144
 ```

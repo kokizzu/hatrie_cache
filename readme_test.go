@@ -160,6 +160,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Equal-state anti-entropy](#incremental-anti-entropy)",
 		"[Sequential gRPC stream](#persistent-grpc-command-stream)",
 		"[Pipelined gRPC stream](#persistent-grpc-command-stream)",
+		"[Live gRPC micro-batching](#pipelined-live-grpc-replication)",
 		"73.8% lower",
 		"2.38x faster",
 		"2.42x faster",
@@ -167,6 +168,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"3.71x shorter",
 		"49,971x smaller wire",
 		"18.94x faster",
+		"3.44x fewer batches",
 	} {
 		if !strings.Contains(summary, token) {
 			t.Fatalf("BENCHMARK.md missing final architecture summary token %q", token)

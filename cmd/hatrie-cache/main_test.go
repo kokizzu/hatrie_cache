@@ -623,6 +623,8 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-wire-format", "json",
 		"-replication-transport", "grpc-stream",
 		"-replication-grpc-window", "17",
+		"-replication-grpc-batch-max-commands", "7",
+		"-replication-grpc-batch-window", "250us",
 		"-replication-http-fallback=false",
 		"-replication-auth-token", "replica-secret",
 		"-replication-batch-max-bytes", "2048",
@@ -654,6 +656,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if cfg.replicationGRPCWindow != 17 {
 		t.Fatalf("replication gRPC window = %d, want explicit value 17", cfg.replicationGRPCWindow)
+	}
+	if cfg.replicationGRPCBatchMax != 7 || cfg.replicationGRPCBatchWindow != 250*time.Microsecond {
+		t.Fatalf("replication gRPC batch = %d/%s, want 7/250us", cfg.replicationGRPCBatchMax, cfg.replicationGRPCBatchWindow)
 	}
 	if cfg.replicationAuthToken != "replica-secret" {
 		t.Fatalf("replication auth token = %q, want explicit value", cfg.replicationAuthToken)
@@ -826,6 +831,18 @@ func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
 		{
 			name: "huge gRPC stream window",
 			args: []string{"-replication-grpc-window", strconv.Itoa(hatriecache.MaxReplicationGRPCStreamWindow + 1)},
+		},
+		{
+			name: "zero gRPC batch commands",
+			args: []string{"-replication-grpc-batch-max-commands", "0"},
+		},
+		{
+			name: "huge gRPC batch commands",
+			args: []string{"-replication-grpc-batch-max-commands", strconv.Itoa(hatriecache.MaxReplicationGRPCLiveBatchMaxCommands + 1)},
+		},
+		{
+			name: "negative gRPC batch window",
+			args: []string{"-replication-grpc-batch-window", "-1us"},
 		},
 		{
 			name: "sync without replication",

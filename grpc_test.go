@@ -1628,6 +1628,147 @@ func TestReplicationGRPCStreamLiveSetDeleteReusesConnection(t *testing.T) {
 	}
 }
 
+func TestReplicationGRPCStreamLiveMicroBatchesConcurrentCommands(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		maxCommands int
+		wantBatches uint64
+	}{
+		{name: "groups four commands", maxCommands: 4, wantBatches: 3},
+		{name: "one disables grouping", maxCommands: 1, wantBatches: 12},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			targetTrie := newTestTrie(t)
+			listener := bufconn.Listen(testGRPCBufferSize)
+			server := grpc.NewServer()
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a", Address: "http://node-a"},
+					{ID: "node-b", Address: "http://node-b", GRPCAddress: "bufnet"},
+				},
+				Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			})
+			if err != nil {
+				t.Fatalf("NewTopologyStore() error = %v", err)
+			}
+			RegisterCacheGRPCServer(server, NewCacheGRPCServer(targetTrie, CacheGRPCOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}))
+			go func() {
+				if err := server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
+					t.Errorf("grpc Serve() error = %v", err)
+				}
+			}()
+			t.Cleanup(func() {
+				server.Stop()
+				_ = listener.Close()
+			})
+
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:                     "node-a",
+				Topology:                 topology,
+				Election:                 NewElectionStore(topology, ElectionOptions{}),
+				Transport:                ReplicationTransportGRPCStream,
+				GRPCStreamWindow:         8,
+				GRPCLiveBatchMaxCommands: test.maxCommands,
+				GRPCLiveBatchWindow:      50 * time.Millisecond,
+				DisableHTTPFallback:      true,
+				GRPCDialOptions: []grpc.DialOption{
+					grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+				},
+			})
+			t.Cleanup(replicator.Close)
+			sourceTrie := newTestTrie(t)
+			sourceTrie.UpsertString("warmup", "value")
+			warmup := replicator.ReplicateCommand(context.Background(), sourceTrie,
+				CacheCommandRequest{Command: "SETSTR", Key: "warmup", Value: "value"}, CacheCommandResponse{OK: true})
+			if len(warmup.Targets) != 1 || !warmup.Targets[0].OK {
+				t.Fatalf("warmup replication = %#v, want success", warmup)
+			}
+			replicator.grpcStreamBatches.Store(0)
+
+			const commands = 12
+			for idx := 0; idx < commands; idx++ {
+				sourceTrie.UpsertString(fmt.Sprintf("micro:%02d", idx), "value")
+			}
+			start := make(chan struct{})
+			results := make(chan ReplicationResult, commands)
+			var callers sync.WaitGroup
+			callers.Add(commands)
+			for idx := 0; idx < commands; idx++ {
+				key := fmt.Sprintf("micro:%02d", idx)
+				go func() {
+					defer callers.Done()
+					<-start
+					results <- replicator.ReplicateCommand(context.Background(), sourceTrie,
+						CacheCommandRequest{Command: "SETSTR", Key: key, Value: "value"}, CacheCommandResponse{OK: true})
+				}()
+			}
+			close(start)
+			callers.Wait()
+			close(results)
+			for result := range results {
+				if len(result.Targets) != 1 || !result.Targets[0].OK {
+					t.Fatalf("micro-batched replication result = %#v, want success", result)
+				}
+			}
+			if got := replicator.grpcStreamBatches.Load(); got != test.wantBatches {
+				t.Fatalf("gRPC stream batches = %d, want %d", got, test.wantBatches)
+			}
+			for idx := 0; idx < commands; idx++ {
+				key := fmt.Sprintf("micro:%02d", idx)
+				if got := targetTrie.GetString(key); got != "value" {
+					t.Fatalf("target %s = %q, want value", key, got)
+				}
+			}
+		})
+	}
+}
+
+func TestReplicationGRPCStreamCollectFlightDefersIncompatibleOrOversizedJob(t *testing.T) {
+	newJob := func(source string, key string, valueBytes int) *replicationGRPCStreamJob {
+		return &replicationGRPCStreamJob{
+			ctx: context.Background(),
+			request: &hatriecachev1.ReplicationStreamBatch{
+				Source: source, Keys: []string{key}, BinaryValues: [][]byte{make([]byte, valueBytes)},
+			},
+			result: make(chan replicationGRPCStreamJobResult, 1),
+		}
+	}
+	for _, test := range []struct {
+		name  string
+		first *replicationGRPCStreamJob
+		next  *replicationGRPCStreamJob
+		bytes int
+	}{
+		{name: "metadata", first: newJob("source-a", "one", 1), next: newJob("source-b", "two", 1), bytes: 1024},
+		{name: "bytes", first: newJob("source", "one", 8), next: newJob("source", "two", 8), bytes: 25},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target := &replicationGRPCStreamTarget{
+				ctx: context.Background(), jobs: make(chan *replicationGRPCStreamJob, 1),
+				batchMaxCommands: 4, batchMaxBytes: test.bytes,
+			}
+			target.jobs <- test.next
+			flight, carry, err := target.collectFlight(test.first)
+			if err != nil {
+				t.Fatalf("collectFlight() error = %v", err)
+			}
+			if carry != test.next {
+				t.Fatalf("collectFlight() carry = %p, want next job %p", carry, test.next)
+			}
+			if len(flight.jobs) != 1 || flight.jobs[0] != test.first || len(flight.request.GetKeys()) != 1 {
+				t.Fatalf("collectFlight() = %#v, want first job only", flight)
+			}
+		})
+	}
+}
+
 func TestReplicationGRPCStreamLivePipelinesBoundedAckWindow(t *testing.T) {
 	listener := bufconn.Listen(testGRPCBufferSize)
 	probe := &pipeliningReplicationGRPCServer{pipelined: make(chan struct{}), release: make(chan struct{})}
@@ -1656,12 +1797,13 @@ func TestReplicationGRPCStreamLivePipelinesBoundedAckWindow(t *testing.T) {
 		t.Fatalf("NewTopologyStore() error = %v", err)
 	}
 	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
-		Self:                "node-a",
-		Topology:            topology,
-		Election:            NewElectionStore(topology, ElectionOptions{}),
-		Transport:           ReplicationTransportGRPCStream,
-		GRPCStreamWindow:    8,
-		DisableHTTPFallback: true,
+		Self:                     "node-a",
+		Topology:                 topology,
+		Election:                 NewElectionStore(topology, ElectionOptions{}),
+		Transport:                ReplicationTransportGRPCStream,
+		GRPCStreamWindow:         8,
+		GRPCLiveBatchMaxCommands: 1,
+		DisableHTTPFallback:      true,
 		GRPCDialOptions: []grpc.DialOption{
 			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),

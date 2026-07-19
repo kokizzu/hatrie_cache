@@ -192,6 +192,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Sequential gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 14,914 ns/command | 3.96x faster, 6.73x lower heap | Request/response remains sequential |
 | Final architecture | [Pipelined gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 3,118 ns/command | 18.94x faster, 7.67x lower heap, 6.57x fewer allocations | Requires concurrent sender/receiver with ordered response pairing |
 | Current pass | [Pipelined live gRPC replication](#pipelined-live-grpc-replication), 10k writes | HTTP: 178.079 ms; 1,868,894 wire B | gRPC: 167.797 ms; 1,081,746 wire B | 1.06x faster, 1.73x smaller wire | Requires native gRPC listener; HTTP remains fallback |
+| Current pass | [Live gRPC micro-batching](#pipelined-live-grpc-replication), 10k writes | 193.299 ms; 10,000 batches; 1,081,747 wire B | 149.682 ms; 2,910 batches; 368,252 wire B | 1.29x faster, 3.44x fewer batches, 2.94x smaller wire | One-caller throughput is 1.6% lower; set max commands to 1 for legacy behavior |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
 | Current pass | [Outbox group commit](#binary-grouped-replication-outbox), 32 writers | JSON sync-each: 50.289 ms; 32 syncs | Binary grouped: 3.542 ms; 1 sync | 14.20x faster, 32x fewer syncs | Cumulative heap is 1.49x higher |
@@ -501,6 +502,13 @@ and a configurable acknowledgement window (32 by default). Acknowledgements are
 matched by sequence, while replay safety is scoped per key so unrelated writes
 may complete out of order without being discarded.
 
+Live callers targeting the same node are also coalesced into bounded wire
+batches. The default groups at most 32 commands, uses the existing 1 MiB byte
+limit, and performs no timed wait. Sixteen scheduler yields give concurrent
+callers an allocation-free opportunity to enter the queue; one server ack is
+then fanned out to every grouped caller. Set the command limit to 1 for the
+previous one-command-per-batch path.
+
 ```sh
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationLiveTransport10K -benchtime=1x -count=5 -benchmem'
 ```
@@ -519,6 +527,23 @@ writes, so it has no valid performance row. The new path's main win is complete,
 bounded concurrent delivery; HTTP remains the configurable fallback. Raising
 the window can increase in-flight message memory and should be load-tested
 against the target's latency and HTTP/2 flow-control limits.
+
+The micro-batch comparison starts from the valid pipelined implementation after
+atomic telemetry was enabled. Both sides deliver all 10,000 keys. Values are
+medians from five baseline runs and seven final runs on the Ryzen 9 5950X host.
+
+| Live gRPC mode | Time/10k | Batches/op | Wire B/op | Heap B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| One command/batch | 193,298,572 ns | 10,000 | 1,081,747 | 392,904,432 | 2,827,049 | baseline |
+| Zero-wait micro-batch | 149,681,659 ns | 2,910 | 368,252 | 383,959,736 | 2,051,047 | 1.29x CPU, 3.44x batches, 2.94x wire, 1.38x allocations |
+
+At one caller, where no grouping is possible, the zero-wait yields changed the
+median from 599,117,778 ns to 608,728,390 ns for 10,000 commands, a 1.6%
+throughput cost. A 25 us window reduced the 32-caller median further to 1,332
+batches and 182,533 wire bytes, but slowed execution to 183,434,195 ns and
+raised cumulative heap to 421,507,920 bytes. The default therefore remains
+zero wait. Use a positive window only when bandwidth matters more than latency
+and after measuring the deployment.
 
 ### Hierarchical Merkle Anti-Entropy
 

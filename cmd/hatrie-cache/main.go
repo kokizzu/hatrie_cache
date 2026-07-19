@@ -83,6 +83,8 @@ type config struct {
 	replicationWireFormat       string
 	replicationTransport        string
 	replicationGRPCWindow       int
+	replicationGRPCBatchMax     int
+	replicationGRPCBatchWindow  time.Duration
 	replicationHTTPFallback     bool
 	replicationAuthToken        string
 	replicationBatchMaxBytes    int
@@ -305,6 +307,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 			WireFormat:               replicationWireFormat(cfg),
 			Transport:                replicationTransport(cfg),
 			GRPCStreamWindow:         cfg.replicationGRPCWindow,
+			GRPCLiveBatchMaxCommands: cfg.replicationGRPCBatchMax,
+			GRPCLiveBatchWindow:      cfg.replicationGRPCBatchWindow,
 			DisableHTTPFallback:      !cfg.replicationHTTPFallback,
 			AuthToken:                cfg.replicationAuthToken,
 			ReplicationBatchMaxBytes: replicationBatchLimit(cfg),
@@ -414,6 +418,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		replicationWireFormat:       string(hatriecache.DefaultCommandWireFormat),
 		replicationTransport:        string(hatriecache.ReplicationTransportHTTP),
 		replicationGRPCWindow:       hatriecache.DefaultReplicationGRPCStreamWindow,
+		replicationGRPCBatchMax:     hatriecache.DefaultReplicationGRPCLiveBatchMaxCommands,
+		replicationGRPCBatchWindow:  hatriecache.DefaultReplicationGRPCLiveBatchWindow,
 		replicationHTTPFallback:     true,
 		replicationBatchMaxBytes:    hatriecache.DefaultReplicationBatchMaxBytes,
 		replicationMaxTargets:       hatriecache.DefaultReplicationMaxInFlightTargets,
@@ -491,6 +497,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.replicationWireFormat, "replication-wire-format", cfg.replicationWireFormat, "HTTP replication command wire format: protobuf or json")
 	flags.StringVar(&cfg.replicationTransport, "replication-transport", cfg.replicationTransport, "live and anti-entropy replication transport: http or grpc-stream")
 	flags.IntVar(&cfg.replicationGRPCWindow, "replication-grpc-window", cfg.replicationGRPCWindow, "maximum unacknowledged batches per live gRPC replication target")
+	flags.IntVar(&cfg.replicationGRPCBatchMax, "replication-grpc-batch-max-commands", cfg.replicationGRPCBatchMax, "maximum live commands grouped into one gRPC replication batch; use 1 to disable")
+	flags.DurationVar(&cfg.replicationGRPCBatchWindow, "replication-grpc-batch-window", cfg.replicationGRPCBatchWindow, "optional maximum wait for grouping live gRPC commands; zero only batches already queued callers")
 	flags.BoolVar(&cfg.replicationHTTPFallback, "replication-http-fallback", cfg.replicationHTTPFallback, "fall back to HTTP when a gRPC replication stream cannot be used")
 	flags.StringVar(&cfg.replicationAuthToken, "replication-auth-token", "", "optional bearer token sent on HTTP replication and accepted only for internal replication commands")
 	flags.IntVar(&cfg.replicationBatchMaxBytes, "replication-batch-max-bytes", cfg.replicationBatchMaxBytes, "maximum estimated bytes per HTTP replication batch; use 0 to disable batch splitting")
@@ -677,6 +685,12 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.replicationGRPCWindow < 1 || cfg.replicationGRPCWindow > hatriecache.MaxReplicationGRPCStreamWindow {
 		return config{}, fmt.Errorf("replication gRPC window must be between 1 and %d", hatriecache.MaxReplicationGRPCStreamWindow)
 	}
+	if cfg.replicationGRPCBatchMax < 1 || cfg.replicationGRPCBatchMax > hatriecache.MaxReplicationGRPCLiveBatchMaxCommands {
+		return config{}, fmt.Errorf("replication gRPC batch max commands must be between 1 and %d", hatriecache.MaxReplicationGRPCLiveBatchMaxCommands)
+	}
+	if cfg.replicationGRPCBatchWindow < 0 {
+		return config{}, errors.New("replication gRPC batch window must be non-negative")
+	}
 	if cfg.replicationBatchMaxBytes < 0 {
 		return config{}, errors.New("replication batch max bytes must be non-negative")
 	}
@@ -731,6 +745,8 @@ func applyConfigProfileDefaults(cfg config, profile string) (config, error) {
 		cfg.replicationWireFormat = string(hatriecache.DefaultCommandWireFormat)
 		cfg.replicationTransport = string(hatriecache.ReplicationTransportHTTP)
 		cfg.replicationGRPCWindow = hatriecache.DefaultReplicationGRPCStreamWindow
+		cfg.replicationGRPCBatchMax = hatriecache.DefaultReplicationGRPCLiveBatchMaxCommands
+		cfg.replicationGRPCBatchWindow = hatriecache.DefaultReplicationGRPCLiveBatchWindow
 		cfg.replicationHTTPFallback = true
 		cfg.replicationBatchMaxBytes = hatriecache.DefaultReplicationBatchMaxBytes
 		cfg.replicationMaxTargets = hatriecache.DefaultReplicationMaxInFlightTargets
@@ -961,6 +977,8 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_wire_format":              cfg.replicationWireFormat,
 		"replication_transport":                cfg.replicationTransport,
 		"replication_grpc_window":              cfg.replicationGRPCWindow,
+		"replication_grpc_batch_max_commands":  cfg.replicationGRPCBatchMax,
+		"replication_grpc_batch_window":        cfg.replicationGRPCBatchWindow.String(),
 		"replication_http_fallback":            cfg.replicationHTTPFallback,
 		"replication_auth_token":               redactedSecret(cfg.replicationAuthToken),
 		"replication_batch_max_bytes":          cfg.replicationBatchMaxBytes,
