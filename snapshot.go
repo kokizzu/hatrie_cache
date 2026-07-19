@@ -334,6 +334,7 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
+	ht.invalidateReplicationMerkleLocked()
 	createdKeys := make(map[string]struct{}, len(activeKeys.keys))
 	rollbackOperations := make([]snapshotOperation, 0, len(activeKeys.keys))
 	applied := 0

@@ -2041,6 +2041,7 @@ type HatTrie struct {
 	levelDBHotBytes         int64
 	levelDBHotValues        map[string]int64
 	mutationEpoch           uint64
+	replicationMerkle       *replicationMerkleIndex
 	snapshotMutations       *snapshotMutationTracker
 	snapshotCapturePageHook func(int)
 	now                     func() time.Time
@@ -2145,6 +2146,7 @@ func (ht *HatTrie) Destroy() {
 	ht.levelDBSpillKeys = nil
 	ht.levelDBHotBytes = 0
 	ht.levelDBHotValues = nil
+	ht.replicationMerkle = nil
 	ht.now = nil
 }
 
@@ -2855,6 +2857,7 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 
 func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	ht.trackSnapshotMutationsLocked(keys...)
+	ht.updateReplicationMerkleLocked(keys...)
 	ht.mutationEpoch++
 	now := ht.currentTime()
 	for _, key := range keys {
@@ -2883,6 +2886,7 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 
 func (ht *HatTrie) recordDeleteLocked(key string) {
 	ht.trackSnapshotMutationsLocked(key)
+	ht.updateReplicationMerkleLocked(key)
 	ht.stats.Deletes++
 	ht.recordWriteLocked()
 	ht.deleteLevelDBSpillCandidateLocked(key)
@@ -2892,6 +2896,7 @@ func (ht *HatTrie) recordDeleteLocked(key string) {
 
 func (ht *HatTrie) recordExpirationLocked(keys ...string) {
 	ht.trackSnapshotMutationsLocked(keys...)
+	ht.updateReplicationMerkleLocked(keys...)
 	ht.stats.Expirations++
 	ht.recordWriteLocked()
 	for _, key := range keys {
@@ -3760,6 +3765,7 @@ func (ht *HatTrie) hydrateLevelDBReferenceLocked(key string, hval HatValue) (Hat
 	ref, ok := ht.dbrefs.Get(hval.Index)
 	if !ok || ref.Store == nil {
 		ht.deleteKnownLocked(key, hval)
+		ht.updateReplicationMerkleLocked(key)
 		return HatValue{}, nil
 	}
 
@@ -3769,6 +3775,7 @@ func (ht *HatTrie) hydrateLevelDBReferenceLocked(key string, hval HatValue) (Hat
 	}
 	if !ok {
 		ht.deleteKnownLocked(key, hval)
+		ht.updateReplicationMerkleLocked(key)
 		return HatValue{}, nil
 	}
 	if entry.Key != key {
@@ -3784,7 +3791,11 @@ func (ht *HatTrie) hydrateLevelDBReferenceLocked(key string, hval HatValue) (Hat
 	if err != nil {
 		return HatValue{}, err
 	}
-	return ht.applySnapshotOperationLocked(operation)
+	updated, err := ht.applySnapshotOperationLocked(operation)
+	if err == nil {
+		ht.updateReplicationMerkleLocked(key)
+	}
+	return updated, err
 }
 
 // Delete removes key and returns whether it existed.

@@ -2742,6 +2742,9 @@ func (ht *HatTrie) commandInternalSetOperation(operation snapshotOperation) erro
 	defer ht.mu.Unlock()
 
 	_, err := ht.applySnapshotOperationLocked(operation)
+	if err == nil {
+		ht.recordWriteLocked(operation.entry.Key)
+	}
 	return err
 }
 

@@ -1059,6 +1059,7 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 	now := trie.currentTime()
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
+	trie.invalidateReplicationMerkleLocked()
 	createdKeys := make(map[string]struct{})
 	rollbackOperations := make([]snapshotOperation, 0)
 	activeKeys := []string{}

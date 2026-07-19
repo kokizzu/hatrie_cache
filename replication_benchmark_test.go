@@ -242,6 +242,143 @@ func BenchmarkReplicationDigestIncremental(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationMerkleIndexBuild(b *testing.B) {
+	const keyCount = 10000
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		trie := CreateHatTrie()
+		for idx := 0; idx < keyCount; idx++ {
+			trie.UpsertString("session:"+strconv.Itoa(idx), replicationDigestBenchmarkValue(idx, 1))
+		}
+		b.StartTimer()
+		snapshot, err := trie.replicationMerkleSnapshot()
+		b.StopTimer()
+		if err != nil || snapshot.count != keyCount {
+			trie.Destroy()
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want %d entries", snapshot, err, keyCount)
+		}
+		retained := trie.replicationMerkleRetainedBytes()
+		trie.Destroy()
+		b.ReportMetric(float64(retained)/keyCount, "retained_B/key")
+	}
+	b.ReportAllocs()
+	b.ReportMetric(keyCount, "keys/op")
+}
+
+func BenchmarkReplicationMerkleWriteTracking(b *testing.B) {
+	const keyCount = 10000
+	keys := make([]string, keyCount)
+	for idx := range keys {
+		keys[idx] = "session:" + strconv.Itoa(idx)
+	}
+	for _, active := range []bool{false, true} {
+		name := "Inactive"
+		if active {
+			name = "Active"
+		}
+		b.Run(name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			for idx, key := range keys {
+				trie.UpsertString(key, replicationDigestBenchmarkValue(idx, 1))
+			}
+			if active {
+				if _, err := trie.replicationMerkleSnapshot(); err != nil {
+					b.Fatal(err)
+				}
+				b.ReportMetric(float64(trie.replicationMerkleRetainedBytes())/keyCount, "retained_B/key")
+			}
+			values := [2]string{"updated-a", "updated-b"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				trie.UpsertString(keys[idx%len(keys)], values[idx&1])
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationMerkleIncremental(b *testing.B) {
+	const keyCount = 10000
+	for _, test := range []struct {
+		name          string
+		changedStride int
+	}{
+		{name: "Equal"},
+		{name: "OnePercentChanged", changedStride: 100},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			source := CreateHatTrie()
+			targetTrie := CreateHatTrie()
+			b.Cleanup(source.Destroy)
+			b.Cleanup(targetTrie.Destroy)
+			for idx := 0; idx < keyCount; idx++ {
+				key := "session:" + strconv.Itoa(idx)
+				value := replicationDigestBenchmarkValue(idx, 1)
+				source.UpsertString(key, value)
+				targetTrie.UpsertString(key, value)
+			}
+			if _, err := source.replicationMerkleSnapshot(); err != nil {
+				b.Fatal(err)
+			}
+			if _, err := targetTrie.replicationMerkleSnapshot(); err != nil {
+				b.Fatal(err)
+			}
+
+			var requests atomic.Int64
+			var wireBytes atomic.Int64
+			var targetHandler http.Handler
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &wireBytes}
+				targetHandler.ServeHTTP(benchmarkCountingResponseWriter{ResponseWriter: w, bytes: &wireBytes}, r)
+			}))
+			b.Cleanup(target.Close)
+			topology := replicationTestTopology(b, target.URL)
+			targetHandler = NewMonitoringHandler(targetTrie, MonitoringOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}).Handler()
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: NewElectionStore(topology, ElectionOptions{}),
+				Client:   target.Client(),
+			})
+			b.Cleanup(replicator.Close)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if test.changedStride > 0 {
+					b.StopTimer()
+					for idx := 0; idx < keyCount; idx += test.changedStride {
+						targetTrie.UpsertString("session:"+strconv.Itoa(idx), replicationDigestBenchmarkValue(idx, 0))
+					}
+					b.StartTimer()
+				}
+				result := replicator.SyncAll(context.Background(), source, "")
+				if result.Skipped || len(result.Targets) == 0 {
+					b.Fatalf("SyncAll() = %#v, want successful Merkle sync", result)
+				}
+				wantChanged := 0
+				if test.changedStride > 0 {
+					wantChanged = keyCount / test.changedStride
+				}
+				if !strings.Contains(result.Reason, fmt.Sprintf("transferred %d, deleted 0", wantChanged)) && !(wantChanged == 0 && strings.Contains(result.Reason, "merkle equal")) {
+					b.Fatalf("SyncAll() = %#v, want %d changed", result, wantChanged)
+				}
+			}
+			b.StopTimer()
+			iterations := float64(b.N)
+			b.ReportMetric(float64(requests.Load())/iterations, "requests/op")
+			b.ReportMetric(float64(wireBytes.Load())/iterations, "wire_B/op")
+			b.ReportMetric(float64(source.replicationMerkleRetainedBytes())/keyCount, "retained_B/key")
+		})
+	}
+}
+
 func replicationDigestBenchmarkValue(key int, version int) string {
 	data := make([]byte, 1024)
 	state := uint64(key+1)*0x9e3779b97f4a7c15 + uint64(version+1)

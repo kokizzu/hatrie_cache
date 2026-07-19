@@ -22,8 +22,13 @@ const (
 	replicationDigestPageMessage        = "replication digest page"
 	replicationDigestFinalMessage       = "replication digest final"
 	replicationDigestEqualMessage       = "replication digest equal"
+	replicationMerkleEqualMessage       = "replication merkle equal"
+	replicationMerkleMismatchMessage    = "replication merkle mismatch"
 	replicationDigestRootMetadata       = "digest_root"
 	replicationDigestAfterKeyMetadata   = "after_key"
+	replicationDigestModeMetadata       = "digest_mode"
+	replicationDigestMerkleMode         = "merkle"
+	replicationDigestBucketsMetadata    = "digest_buckets"
 )
 
 type replicationDigest struct {
@@ -38,6 +43,8 @@ type replicationDigestTargetInventory struct {
 	root       *xxhash.Digest
 	rootSum    uint64
 	entryCount uint64
+	buckets    replicationMerkleBucketMask
+	hasBuckets bool
 }
 
 type replicationDigestChange struct {
@@ -121,6 +128,9 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 		result.Reason = "no sync targets"
 		return result
 	}
+	if merkleResult, handled := replicator.syncAllMerkle(ctx, trie, prefix, pageSize, routing); handled {
+		return merkleResult
+	}
 	inventories, entries, err := replicator.replicationDigestInventories(ctx, trie, prefix, pageSize, routing)
 	result.Entries = entries
 	if err != nil {
@@ -190,6 +200,125 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 	}
 	result.Reason = fmt.Sprintf("digest sync compared %d entries, transferred %d, deleted %d, fallbacks %d", entries, changed, deleted, fallbacks)
 	return result
+}
+
+type replicationMerkleTargetPreflight struct {
+	target   TopologyNode
+	result   ReplicationTargetResult
+	snapshot replicationMerkleSnapshot
+	equal    bool
+}
+
+func (replicator *HTTPReplicator) syncAllMerkle(ctx context.Context, trie *HatTrie, prefix string, pageSize int, routing replicationRoutingSnapshot) (ReplicationResult, bool) {
+	result := ReplicationResult{Command: "SYNC", Key: prefix}
+	if prefix != "" || len(routing.shards) != 1 {
+		return result, false
+	}
+	shard := routing.shards[0]
+	if routing.leaders[shard.ID].Leader != replicator.self {
+		return result, false
+	}
+	targets := routing.targets[shard.ID]
+	if len(targets) == 0 {
+		return result, false
+	}
+	sourceSnapshot, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		result.Skipped = true
+		result.Reason = err.Error()
+		return result, true
+	}
+	result.Entries = int(sourceSnapshot.count)
+	preflights := make([]replicationMerkleTargetPreflight, 0, len(targets))
+	for _, target := range targets {
+		pageResult, response := replicator.executeReplicationDigestTargetPage(ctx, target, replicationMerkleRequest(routing, replicator.self, sourceSnapshot))
+		if !pageResult.OK {
+			if pageResult.unsupportedTypedReplication {
+				return ReplicationResult{}, false
+			}
+			result.Targets = append(result.Targets, pageResult)
+			result.Reason = pageResult.Error
+			return result, true
+		}
+		targetSnapshot, equal, supported, decodeErr := decodeReplicationMerkleResponse(response)
+		if !supported {
+			return ReplicationResult{}, false
+		}
+		if decodeErr != nil {
+			pageResult.OK = false
+			pageResult.Error = decodeErr.Error()
+			result.Targets = append(result.Targets, pageResult)
+			result.Reason = decodeErr.Error()
+			return result, true
+		}
+		preflights = append(preflights, replicationMerkleTargetPreflight{target: target, result: pageResult, snapshot: targetSnapshot, equal: equal})
+	}
+
+	var grpcSession *replicationGRPCSyncSession
+	if replicator.transport == ReplicationTransportGRPCStream {
+		grpcSession = newReplicationGRPCSyncSession(ctx, replicator)
+		defer grpcSession.close()
+	}
+	changed := 0
+	deleted := 0
+	for _, preflight := range preflights {
+		if preflight.equal {
+			result.Targets = append(result.Targets, preflight.result)
+			continue
+		}
+		mask := sourceSnapshot.changedBuckets(preflight.snapshot)
+		inventory, inventoryErr := replicator.replicationDigestInventoryForTarget(ctx, trie, pageSize, routing, preflight.target, mask)
+		if inventoryErr != nil {
+			preflight.result.OK = false
+			preflight.result.Error = inventoryErr.Error()
+			result.Targets = append(result.Targets, preflight.result)
+			result.Reason = inventoryErr.Error()
+			return result, true
+		}
+		targetResults, targetChanged, targetDeleted, _ := replicator.syncDigestTarget(ctx, trie, routing, inventory, grpcSession)
+		result.Targets = append(result.Targets, targetResults...)
+		changed += targetChanged
+		deleted += targetDeleted
+	}
+	if err := ctx.Err(); err != nil {
+		result.Reason = err.Error()
+		return result, true
+	}
+	if changed == 0 && deleted == 0 {
+		result.Reason = fmt.Sprintf("merkle equal across %d entries", result.Entries)
+	} else {
+		result.Reason = fmt.Sprintf("merkle digest compared %d entries, transferred %d, deleted %d", result.Entries, changed, deleted)
+	}
+	return result, true
+}
+
+func replicationMerkleRequest(routing replicationRoutingSnapshot, source string, snapshot replicationMerkleSnapshot) CacheCommandRequest {
+	limit := int64(defaultReplicationDigestPageEntries)
+	return CacheCommandRequest{
+		Command:  replicationDigestCommand,
+		Priority: &limit,
+		Pairs: Map{
+			replicationMetaSourceNode:          source,
+			replicationMetaTopologyFingerprint: routing.fingerprint,
+			replicationDigestModeMetadata:      replicationDigestMerkleMode,
+			replicationDigestRootMetadata: encodeReplicationValueDigest(replicationDigest{
+				hash: snapshot.root,
+				size: snapshot.count,
+			}),
+		},
+	}
+}
+
+func decodeReplicationMerkleResponse(response CacheCommandResponse) (replicationMerkleSnapshot, bool, bool, error) {
+	switch response.Message {
+	case replicationMerkleEqualMessage:
+		return replicationMerkleSnapshot{}, true, true, nil
+	case replicationMerkleMismatchMessage:
+		snapshot, err := decodeReplicationMerkleLeaves(response.Value)
+		return snapshot, false, true, err
+	default:
+		return replicationMerkleSnapshot{}, false, false, nil
+	}
 }
 
 func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Context, trie *HatTrie, prefix string, pageSize int, routing replicationRoutingSnapshot) ([]replicationDigestTargetInventory, int, error) {
@@ -264,6 +393,50 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 	return out, entries, nil
 }
 
+func (replicator *HTTPReplicator) replicationDigestInventoryForTarget(ctx context.Context, trie *HatTrie, pageSize int, routing replicationRoutingSnapshot, target TopologyNode, buckets replicationMerkleBucketMask) (replicationDigestTargetInventory, error) {
+	inventory := newReplicationDigestTargetInventory(target, "", pageSize)
+	inventory.buckets = buckets
+	inventory.hasBuckets = true
+	afterKey := ""
+	hasAfterKey := false
+	cursor := &replicationSyncCursor{}
+	defer cursor.close(trie)
+	var scratch []byte
+	for {
+		page, err := replicationSyncEntriesPageWithCursor(trie, "", afterKey, hasAfterKey, pageSize, cursor, func(entry Entry) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if !buckets.containsKey(entry.Key) {
+				return nil
+			}
+			route, ok := routing.routeForKey(entry.Key)
+			if !ok || route.Leader.Leader != replicator.self || !replicationRouteTargetsNode(routing, route, replicator.self, target.ID) {
+				return nil
+			}
+			var dumpErr error
+			scratch, ok, dumpErr = trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(scratch[:0], entry)
+			if dumpErr != nil || !ok {
+				return dumpErr
+			}
+			appendReplicationDigestRoot(inventory.root, entry.Key, replicationValueDigest(scratch))
+			inventory.entryCount++
+			return nil
+		})
+		if err != nil {
+			return replicationDigestTargetInventory{}, err
+		}
+		if !page.hasMore {
+			break
+		}
+		afterKey = page.nextAfterKey
+		hasAfterKey = true
+	}
+	inventory.rootSum = inventory.root.Sum64()
+	inventory.root = nil
+	return *inventory, nil
+}
+
 func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, inventory replicationDigestTargetInventory, grpcSession *replicationGRPCSyncSession) ([]ReplicationTargetResult, int, int, bool) {
 	afterKey := ""
 	hasAfterKey := false
@@ -321,7 +494,7 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		for _, remote := range page.entries {
 			key := remote.Message
 			route, routed := routing.routeForKey(key)
-			if !strings.HasPrefix(key, inventory.prefix) || !routed || route.Leader.Leader != replicator.self || !replicationRouteTargetsNode(routing, route, replicator.self, inventory.target.ID) {
+			if !strings.HasPrefix(key, inventory.prefix) || (inventory.hasBuckets && !inventory.buckets.containsKey(key)) || !routed || route.Leader.Leader != replicator.self || !replicationRouteTargetsNode(routing, route, replicator.self, inventory.target.ID) {
 				pageResult.OK = false
 				pageResult.Error = "hatriecache: key outside replication digest scope"
 				return append(writer.targets, pageResult), writer.changed, writer.deleted, false
@@ -448,6 +621,9 @@ func (iterator *replicationDigestSourceIterator) next() (replicationDigestSource
 			if err := iterator.ctx.Err(); err != nil {
 				return err
 			}
+			if iterator.inventory.hasBuckets && !iterator.inventory.buckets.containsKey(entry.Key) {
+				return nil
+			}
 			route, ok := iterator.routing.routeForKey(entry.Key)
 			if !ok || route.Leader.Leader != iterator.source || !replicationRouteTargetsNode(iterator.routing, route, iterator.source, iterator.inventory.target.ID) {
 				return nil
@@ -534,10 +710,15 @@ func prefixDigestRequest(routing replicationRoutingSnapshot, source string, pref
 			size: inventory.entryCount,
 		})
 	}
+	if inventory.hasBuckets {
+		request.Pairs[replicationDigestBucketsMetadata] = encodeReplicationMerkleBucketMask(inventory.buckets)
+	}
 	return request
 }
 
 func (replicator *HTTPReplicator) syncDigestTargetFallback(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, inventory replicationDigestTargetInventory, grpcSession *replicationGRPCSyncSession) ([]ReplicationTargetResult, int, int, bool) {
+	inventory.hasBuckets = false
+	inventory.buckets = replicationMerkleBucketMask{}
 	source := newReplicationDigestSourceIterator(ctx, trie, routing, replicator.self, inventory)
 	defer source.close()
 	writer := replicator.newReplicationDigestChangeWriter(ctx, trie, routing, inventory.target, inventory.pageSize, grpcSession, true)
@@ -657,18 +838,48 @@ func executeInternalReplicationDigest(ctx context.Context, trie *HatTrie, reques
 	if targetNode == "" || targetNode == source {
 		return commandError("replication digest target node is invalid"), false
 	}
+	if commandPairString(request.Pairs, replicationDigestModeMetadata) == replicationDigestMerkleMode {
+		if request.Key != "" || len(routing.shards) != 1 {
+			return commandError("replication Merkle digest requires a whole-dataset single-shard sync"), false
+		}
+		shard := routing.shards[0]
+		if routing.leaders[shard.ID].Leader != source || !replicationRouteTargetsNode(routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.owners[shard.ID]}}, source, targetNode) {
+			return commandError("replication Merkle digest source is outside target scope"), false
+		}
+		expected, err := decodeReplicationValueDigest(commandPairString(request.Pairs, replicationDigestRootMetadata))
+		if err != nil {
+			return commandError(err.Error()), false
+		}
+		actual, err := trie.replicationMerkleSnapshot()
+		if err != nil {
+			return commandError(err.Error()), false
+		}
+		if actual.root == expected.hash && actual.count == expected.size {
+			return CacheCommandResponse{OK: true, Message: replicationMerkleEqualMessage}, false
+		}
+		return CacheCommandResponse{OK: true, Message: replicationMerkleMismatchMessage, Value: encodeReplicationMerkleLeaves(actual)}, false
+	}
 	limit, err := replicationDigestRequestLimit(request.Priority)
 	if err != nil {
 		return commandError(err.Error()), false
 	}
 	hasAfterKey := commandPairString(request.Pairs, replicationDigestAfterKeyMetadata) == "1"
+	buckets := replicationMerkleBucketMask{}
+	hasBuckets := false
+	if encodedBuckets := commandPairString(request.Pairs, replicationDigestBucketsMetadata); encodedBuckets != "" {
+		buckets, err = decodeReplicationMerkleBucketMask(encodedBuckets)
+		if err != nil {
+			return commandError(err.Error()), false
+		}
+		hasBuckets = true
+	}
 	if !hasAfterKey {
 		if encodedRoot := commandPairString(request.Pairs, replicationDigestRootMetadata); encodedRoot != "" {
 			expected, err := decodeReplicationValueDigest(encodedRoot)
 			if err != nil {
 				return commandError(err.Error()), false
 			}
-			actual, err := trie.replicationDigestRoot(request.Key, routing, source, targetNode)
+			actual, err := trie.replicationDigestRoot(request.Key, routing, source, targetNode, buckets, hasBuckets)
 			if err != nil {
 				return commandError(err.Error()), false
 			}
@@ -677,7 +888,7 @@ func executeInternalReplicationDigest(ctx context.Context, trie *HatTrie, reques
 			}
 		}
 	}
-	page, err := trie.replicationDigestPage(request.Key, request.Subkey, hasAfterKey, limit, routing, source, targetNode)
+	page, err := trie.replicationDigestPage(request.Key, request.Subkey, hasAfterKey, limit, routing, source, targetNode, buckets, hasBuckets)
 	if err != nil {
 		return commandError(err.Error()), false
 	}
@@ -698,7 +909,7 @@ func replicationDigestRequestLimit(priority *int64) (int, error) {
 	return int(*priority), nil
 }
 
-func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAfterKey bool, limit int, routing replicationRoutingSnapshot, source string, targetNode string) (replicationDigestPage, error) {
+func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAfterKey bool, limit int, routing replicationRoutingSnapshot, source string, targetNode string, buckets replicationMerkleBucketMask, hasBuckets bool) (replicationDigestPage, error) {
 	if trie == nil {
 		return replicationDigestPage{}, ErrNilHatTrie
 	}
@@ -727,6 +938,11 @@ func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAf
 			return page, nil
 		}
 		if hasAfterKey && entry.Key <= afterKey {
+			scan.consume()
+			continue
+		}
+		if hasBuckets && !buckets.containsKey(entry.Key) {
+			page.nextAfterKey = entry.Key
 			scan.consume()
 			continue
 		}
@@ -772,7 +988,7 @@ func replicationRouteTargetsNode(routing replicationRoutingSnapshot, route Elect
 	return false
 }
 
-func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRoutingSnapshot, source string, targetNode string) (replicationDigest, error) {
+func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRoutingSnapshot, source string, targetNode string, buckets replicationMerkleBucketMask, hasBuckets bool) (replicationDigest, error) {
 	if trie == nil {
 		return replicationDigest{}, ErrNilHatTrie
 	}
@@ -795,6 +1011,10 @@ func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRou
 		entry, ok := scan.currentLiveEntryLocked(trie, now)
 		if !ok {
 			return replicationDigest{hash: hasher.Sum64(), size: count}, nil
+		}
+		if hasBuckets && !buckets.containsKey(entry.Key) {
+			scan.consume()
+			continue
 		}
 		route, routed := routing.routeForKey(entry.Key)
 		if routed && route.Leader.Leader == source && replicationRouteTargetsNode(routing, route, source, targetNode) {

@@ -2765,12 +2765,15 @@ func TestHTTPReplicatorSyncAllDigestFallsBackToFullPushForOlderTarget(t *testing
 		Client:   target.Client(),
 	})
 
-	result := replicator.SyncAll(context.Background(), source, "session:")
+	result := replicator.SyncAll(context.Background(), source, "")
 	if result.Skipped || result.Entries != 2 || len(result.Targets) != 1 || !result.Targets[0].OK {
 		t.Fatalf("SyncAll(fallback) = %#v, want one successful full-push batch", result)
 	}
 	if got := normalizedCommand((<-requests).Command); got != replicationDigestCommand {
 		t.Fatalf("first sync command = %q, want %s", got, replicationDigestCommand)
+	}
+	if got := normalizedCommand((<-requests).Command); got != replicationDigestCommand {
+		t.Fatalf("legacy fallback command = %q, want %s", got, replicationDigestCommand)
 	}
 	payloads := mustDecodeReplicationBatchValues(t, <-requests)
 	if len(payloads) != 2 {
