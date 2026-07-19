@@ -185,6 +185,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
+| Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
 | Current pass | [Merkle equal-state preflight](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 18.272 ms; 560,720 heap B | Merkle: 0.993 ms; 233,744 heap B | 18.40x faster, 2.40x lower heap | First activation builds a 29.60 B/key index |
@@ -495,6 +496,37 @@ Snapshot bytes and format are unchanged. The added mutation tracker is bounded
 by keys changed during capture rather than total data size; a write-heavy
 capture can therefore retain additional temporary key metadata until the final
 barrier.
+
+### Compact Streaming Snapshot Capture
+
+The snapshot writer now serializes each scanned value immediately into compact
+binary records held in pages bounded by 1 MiB or 4,096 records. It no longer
+retains one wide `snapshotEntry` object for every key. The writer streams those
+records through binary or gzip output after the final journal barrier and merges
+only keys changed during capture. Plain JSON output retains unchanged lazy
+LevelDB JSON records byte-for-byte; other records are decoded only when JSON was
+explicitly selected.
+
+```sh
+make bench-big-wins BIG_WINS_BENCH=BenchmarkBigWins/Snapshot BIG_WINS_KEYS=100000 BIG_WINS_OPS=100000 BENCHTIME=1x COUNT=5
+```
+
+These are five-run medians from `f118fc8` and the compact writer on the same
+Ryzen 9 5950X host.
+
+| Metric | Materialized entries | Compact record pages | Improvement |
+| --- | ---: | ---: | ---: |
+| Total snapshot duration | 182,220,989 ns | 151,347,870 ns | 1.20x faster, 16.9% lower |
+| Heap allocation/snapshot | 47,607,920 B | 24,565,080 B | 1.94x lower, 48.4% lower |
+| Allocations/snapshot | 675,574 | 642,458 | 1.05x fewer, 4.9% lower |
+| Benchmark process peak RSS | 97,152 KiB | 63,104 KiB | 1.54x lower, 35.0% lower |
+| Maximum concurrent read pause | 2,997,292 ns | 3,235,198 ns | 7.9% higher |
+
+Wire bytes, snapshot version, old-format loading, atomic replacement, and
+point-in-time semantics are unchanged. Encoding inside each 256-key scan page
+accounts for the small pause increase. A single value larger than 1 MiB owns a
+dedicated page because its payload cannot be subdivided without changing the
+record format.
 
 ### Pipelined Live gRPC Replication
 

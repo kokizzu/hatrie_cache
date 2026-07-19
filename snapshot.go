@@ -435,11 +435,11 @@ func validateSnapshotLoadEntry(entry snapshotEntry, now time.Time, prepareOperat
 }
 
 func (ht *HatTrie) writeSnapshot(writer io.Writer, journalSequence uint64, format SnapshotFormat) error {
-	capture, err := ht.captureSnapshot()
+	capture, _, err := ht.captureSnapshotStreamForStoreAtBarrier(nil, nil, nil)
 	if err != nil {
 		return err
 	}
-	return writeCapturedSnapshot(writer, journalSequence, format, capture)
+	return writeStreamSnapshot(writer, journalSequence, format, capture)
 }
 
 func writeCapturedSnapshot(writer io.Writer, journalSequence uint64, format SnapshotFormat, capture snapshotCapture) error {

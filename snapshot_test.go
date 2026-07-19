@@ -152,6 +152,91 @@ func TestSnapshotCaptureUsesBoundedPages(t *testing.T) {
 	}
 }
 
+func TestSnapshotStreamCaptureUsesBoundedEncodedPages(t *testing.T) {
+	ht := newTestTrie(t)
+	payload := strings.Repeat("value-", 128)
+	const entries = 4096
+	for idx := 0; idx < entries; idx++ {
+		ht.UpsertString(fmt.Sprintf("key:%05d", idx), payload)
+	}
+
+	capture, _, err := ht.captureSnapshotStreamForStoreAtBarrier(nil, nil, nil)
+	if err != nil {
+		t.Fatalf("captureSnapshotStreamForStoreAtBarrier() error = %v", err)
+	}
+	if capture.count != entries {
+		t.Fatalf("stream capture count = %d, want %d", capture.count, entries)
+	}
+	if len(capture.pages) < 2 {
+		t.Fatalf("stream capture pages = %d, want multiple bounded pages", len(capture.pages))
+	}
+	for idx, page := range capture.pages {
+		if page.bytes > snapshotStreamCapturePageBytes {
+			t.Fatalf("stream capture page %d bytes = %d, want <= %d", idx, page.bytes, snapshotStreamCapturePageBytes)
+		}
+		if len(page.records) > snapshotCapturePageEntries {
+			t.Fatalf("stream capture page %d records = %d, want <= %d", idx, len(page.records), snapshotCapturePageEntries)
+		}
+	}
+}
+
+func TestSnapshotStreamCaptureReconcilesConcurrentMutations(t *testing.T) {
+	ht := newTestTrie(t)
+	for idx := 0; idx < snapshotCaptureScanPageEntries*2; idx++ {
+		ht.UpsertString(fmt.Sprintf("key:%05d", idx), "before")
+	}
+
+	firstPage := make(chan struct{})
+	release := make(chan struct{})
+	ht.snapshotCapturePageHook = func(page int) {
+		if page != 1 {
+			return
+		}
+		close(firstPage)
+		<-release
+	}
+	var snapshot bytes.Buffer
+	written := make(chan error, 1)
+	go func() {
+		written <- ht.writeSnapshot(&snapshot, 0, SnapshotFormatBinary)
+	}()
+	<-firstPage
+
+	ht.UpsertString("key:00000", "after")
+	ht.Delete("key:00001")
+	ht.UpsertString("key:00000:new", "inserted")
+	tailKey := fmt.Sprintf("key:%05d", snapshotCaptureScanPageEntries*2-1)
+	ht.UpsertString(tailKey, "tail-after")
+	close(release)
+	if err := <-written; err != nil {
+		t.Fatalf("writeSnapshot() error = %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "stream-capture.hc")
+	if err := os.WriteFile(path, snapshot.Bytes(), 0o600); err != nil {
+		t.Fatalf("WriteFile(snapshot) error = %v", err)
+	}
+	restored := newTestTrie(t)
+	if err := restored.LoadSnapshot(path); err != nil {
+		t.Fatalf("LoadSnapshot() error = %v", err)
+	}
+	if got := restored.GetString("key:00000"); got != "after" {
+		t.Fatalf("updated key = %q, want after", got)
+	}
+	if got := restored.GetString("key:00001"); got != "" {
+		t.Fatalf("deleted key = %q, want absent", got)
+	}
+	if got := restored.GetString("key:00000:new"); got != "inserted" {
+		t.Fatalf("inserted key = %q, want inserted", got)
+	}
+	if got := restored.GetString(tailKey); got != "tail-after" {
+		t.Fatalf("tail key = %q, want tail-after", got)
+	}
+	if got := restored.Size(); got != snapshotCaptureScanPageEntries*2 {
+		t.Fatalf("restored length = %d, want %d", got, snapshotCaptureScanPageEntries*2)
+	}
+}
+
 func TestSnapshotCaptureReconcilesMutationsBetweenScanPages(t *testing.T) {
 	ht := newTestTrie(t)
 	for idx := 0; idx < snapshotCaptureScanPageEntries*2; idx++ {

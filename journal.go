@@ -650,12 +650,12 @@ func (journal *CommandJournal) SaveSnapshotWithFormat(trie *HatTrie, path string
 	}
 	journal.mu.Unlock()
 
-	capture, sequence, err := trie.captureSnapshotForStoreAtBarrier(nil, nil, journal.snapshotCaptureBarrier())
+	capture, sequence, err := trie.captureSnapshotStreamForStoreAtBarrier(nil, nil, journal.snapshotCaptureBarrier())
 	if err != nil {
 		return err
 	}
 	if err := writeFileAtomicStream(path, func(writer io.Writer) error {
-		return writeCapturedSnapshot(writer, sequence, format, capture)
+		return writeStreamSnapshot(writer, sequence, format, capture)
 	}); err != nil {
 		return err
 	}
@@ -692,11 +692,11 @@ func (journal *CommandJournal) WriteSnapshotWithFormat(trie *HatTrie, writer io.
 	}
 	journal.mu.Unlock()
 
-	capture, sequence, err := trie.captureSnapshotForStoreAtBarrier(nil, nil, journal.snapshotCaptureBarrier())
+	capture, sequence, err := trie.captureSnapshotStreamForStoreAtBarrier(nil, nil, journal.snapshotCaptureBarrier())
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
-	if err := writeCapturedSnapshot(writer, sequence, format, capture); err != nil {
+	if err := writeStreamSnapshot(writer, sequence, format, capture); err != nil {
 		return SnapshotMetadata{}, err
 	}
 	return SnapshotMetadata{JournalSequence: sequence}, nil

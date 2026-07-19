@@ -1435,7 +1435,11 @@ Use `SaveSnapshot` and `LoadSnapshot` for portable data snapshots.
 storage-optimized JSON layout or `SnapshotFormatJSON` for plain JSON. Snapshot
 loads auto-detect gzip, binary, and JSON, replace the current in-memory key set,
 skip expired entries, restore per-key access metadata when present, and re-apply
-the normal disk spill threshold for large byte values.
+the normal disk spill threshold for large byte values. Snapshot capture
+pre-encodes values into compact pages bounded by 1 MiB or 4,096 records and
+merges only keys changed before the final journal barrier. This keeps snapshot
+output point-in-time consistent without retaining a wide materialized entry for
+every key. Existing snapshot wire formats and older files remain compatible.
 
 Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
 disk persistence. LevelDB loads replace the current in-memory key set. The
