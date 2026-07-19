@@ -102,8 +102,9 @@ command benchmark scripts write raw Markdown plus TSV rows and memory summaries.
 in `BENCHMARK.md` from those artifacts.
 [`IMPROVEMENT_REPORT.md`](IMPROVEMENT_REPORT.md) consolidates the shipped
 feature commits, final before/after metrics, and measured tradeoffs.
-The one-table summary for every final architecture improvement is in
-[`BENCHMARK.md`](BENCHMARK.md#final-architecture-improvements).
+The one-table summary for all measured earlier and final architecture
+improvements is in
+[`BENCHMARK.md`](BENCHMARK.md#measured-improvement-summary).
 
 Run the CI benchmark smoke locally:
 
@@ -1100,6 +1101,7 @@ The Svelte MPA dashboard and key browser use bounded entry requests by default.
 `Content-Type`; regular browser/API clients can continue to use JSON.
 Responses are gzip-compressed when clients send `Accept-Encoding: gzip`.
 
+<a id="serialization-tradeoffs"></a>
 Serialization tradeoffs are measured with `make bench-serialization` on an AMD
 Ryzen 9 5950X. The storage and snapshot rows below use `BENCHTIME=20x` to keep
 the slower compression and LevelDB cases bounded. The `Structured` variants

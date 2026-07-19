@@ -116,14 +116,42 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 	}
 }
 
-func TestBenchmarkMarkdownSummarizesFinalArchitectureImprovements(t *testing.T) {
+func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 	data, err := os.ReadFile("BENCHMARK.md")
 	if err != nil {
 		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
 	}
 	doc := string(data)
+	start := strings.Index(doc, "## Measured Improvement Summary")
+	if start < 0 {
+		t.Fatal("BENCHMARK.md missing measured improvement summary")
+	}
+	end := strings.Index(doc[start:], "\n### Incremental Anti-Entropy")
+	if end < 0 {
+		t.Fatal("BENCHMARK.md measured improvement summary has no detail-section boundary")
+	}
+	summary := doc[start : start+end]
 	for _, token := range []string{
-		"## Final Architecture Improvements",
+		"## Measured Improvement Summary",
+		"[HTTP protobuf command wire](README.md#serialization-tradeoffs)",
+		"[Binary journal encode](README.md#serialization-tradeoffs)",
+		"[Binary journal decode](README.md#serialization-tradeoffs)",
+		"[Structured binary journal](README.md#serialization-tradeoffs)",
+		"[Structured gzip-best snapshot](README.md#serialization-tradeoffs)",
+		"[Binary LevelDB scalar records](README.md#serialization-tradeoffs)",
+		"[Binary LevelDB structured records](README.md#serialization-tradeoffs)",
+		"[Replication request batching](#replication-batching-benchmark)",
+		"[Replication routing and encoding](#replication-batching-benchmark)",
+		"[Replication page traversal](#replication-page-traversal)",
+		"[gRPC replication transport](#replication-transport)",
+		"[Bounded gzip writer cache](#replication-compression-tradeoff)",
+		"[Four-target replication fanout](#replication-target-fanout)",
+		"[Journal delta durability](#journal-delta-first-recovery-benchmark)",
+		"[Retained journal catch-up](#journal-delta-first-recovery-benchmark)",
+		"[Two-value small-set read](#collection-allocation-follow-up)",
+		"[Priority queue push+pop](#collection-allocation-follow-up)",
+		"[Radix prefix scan](#collection-allocation-follow-up)",
+		"[Reservoir sample add](#collection-allocation-follow-up)",
 		"[Per-key telemetry](#per-key-telemetry-modes)",
 		"[Concurrent scalar reads](#concurrent-scalar-read-fast-path)",
 		"[Durable journal group commit](#durable-journal-group-commit)",
@@ -138,7 +166,7 @@ func TestBenchmarkMarkdownSummarizesFinalArchitectureImprovements(t *testing.T) 
 		"49,971x smaller wire",
 		"18.94x faster",
 	} {
-		if !strings.Contains(doc, token) {
+		if !strings.Contains(summary, token) {
 			t.Fatalf("BENCHMARK.md missing final architecture summary token %q", token)
 		}
 	}
