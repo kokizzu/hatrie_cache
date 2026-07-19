@@ -595,6 +595,7 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 		"-replication-circuit-breaker-cooldown", "20s",
 		"-replication-wire-format", "json",
 		"-replication-transport", "grpc-stream",
+		"-replication-grpc-window", "17",
 		"-replication-http-fallback=false",
 		"-replication-auth-token", "replica-secret",
 		"-replication-batch-max-bytes", "2048",
@@ -623,6 +624,9 @@ func TestParseConfigTopologyFlags(t *testing.T) {
 	}
 	if cfg.replicationTransport != "grpc-stream" || replicationTransport(cfg) != hatriecache.ReplicationTransportGRPCStream || cfg.replicationHTTPFallback {
 		t.Fatalf("replication transport/fallback = %q/%v, want grpc-stream/false", cfg.replicationTransport, cfg.replicationHTTPFallback)
+	}
+	if cfg.replicationGRPCWindow != 17 {
+		t.Fatalf("replication gRPC window = %d, want explicit value 17", cfg.replicationGRPCWindow)
 	}
 	if cfg.replicationAuthToken != "replica-secret" {
 		t.Fatalf("replication auth token = %q, want explicit value", cfg.replicationAuthToken)
@@ -779,6 +783,14 @@ func TestParseConfigRejectsInvalidAsyncReplicationOptions(t *testing.T) {
 		{
 			name: "zero max in-flight targets",
 			args: []string{"-replication-max-in-flight-targets", "0"},
+		},
+		{
+			name: "zero gRPC stream window",
+			args: []string{"-replication-grpc-window", "0"},
+		},
+		{
+			name: "huge gRPC stream window",
+			args: []string{"-replication-grpc-window", strconv.Itoa(hatriecache.MaxReplicationGRPCStreamWindow + 1)},
 		},
 		{
 			name: "sync without replication",

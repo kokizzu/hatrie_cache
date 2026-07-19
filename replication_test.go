@@ -45,6 +45,9 @@ func TestNewHTTPReplicatorDefaultsReplicationBatchLimit(t *testing.T) {
 	if replicator.batchMaxBytes != DefaultReplicationBatchMaxBytes {
 		t.Fatalf("default replication batch limit = %d, want %d", replicator.batchMaxBytes, DefaultReplicationBatchMaxBytes)
 	}
+	if replicator.grpcStreamWindow != DefaultReplicationGRPCStreamWindow {
+		t.Fatalf("default gRPC stream window = %d, want %d", replicator.grpcStreamWindow, DefaultReplicationGRPCStreamWindow)
+	}
 
 	unlimited := NewHTTPReplicator(HTTPReplicatorOptions{ReplicationBatchMaxBytes: -1})
 	if unlimited.batchMaxBytes != 0 {
@@ -102,6 +105,56 @@ func TestReplicationGRPCStreamHTTPFallbackIsConfigurable(t *testing.T) {
 			}
 			if tt.disableFallback && !strings.Contains(result.Targets[0].Error, "grpc_address") {
 				t.Fatalf("disabled fallback error = %q, want missing grpc_address", result.Targets[0].Error)
+			}
+		})
+	}
+}
+
+func TestReplicationGRPCStreamLiveHTTPFallbackIsConfigurable(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if normalizedCommand(request.Command) != replicationSetCompactCommand {
+			t.Fatalf("live fallback command = %q, want %s", request.Command, replicationSetCompactCommand)
+		}
+		requests.Add(1)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+	topology := replicationTestTopology(t, target.URL)
+
+	for _, tt := range []struct {
+		name            string
+		disableFallback bool
+		wantOK          bool
+		wantRequests    int64
+	}{
+		{name: "fallback enabled", wantOK: true, wantRequests: 1},
+		{name: "fallback disabled", disableFallback: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			requests.Store(0)
+			trie := newTestTrie(t)
+			trie.UpsertString("live:key", "value")
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:                "node-a",
+				Topology:            topology,
+				Election:            NewElectionStore(topology, ElectionOptions{}),
+				Client:              target.Client(),
+				Transport:           ReplicationTransportGRPCStream,
+				DisableHTTPFallback: tt.disableFallback,
+			})
+			t.Cleanup(replicator.Close)
+			result := replicator.ReplicateCommand(context.Background(), trie,
+				CacheCommandRequest{Command: "SETSTR", Key: "live:key", Value: "value"}, CacheCommandResponse{OK: true})
+			if len(result.Targets) != 1 || result.Targets[0].OK != tt.wantOK {
+				t.Fatalf("live replication targets = %#v, want OK=%v", result.Targets, tt.wantOK)
+			}
+			if got := requests.Load(); got != tt.wantRequests {
+				t.Fatalf("live HTTP fallback requests = %d, want %d", got, tt.wantRequests)
+			}
+			if tt.disableFallback && !strings.Contains(result.Targets[0].Error, "grpc_address") {
+				t.Fatalf("disabled live fallback error = %q, want missing grpc_address", result.Targets[0].Error)
 			}
 		})
 	}
@@ -1011,6 +1064,50 @@ func TestExecuteCacheCommandSkipsDuplicateReplicationSequence(t *testing.T) {
 	}
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "session:1"}); !got.OK || got.Value != "replicated" {
 		t.Fatalf("GET after duplicate replication = %#v, want original value", got)
+	}
+}
+
+func TestExecuteCacheCommandAllowsOutOfOrderReplicationForDifferentKeys(t *testing.T) {
+	topology, err := NewTopologyStore(SingleNodeTopology("node-b", ""))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	safety := NewReplicationSafetyStore()
+	target := newTestTrie(t)
+	source := newTestTrie(t)
+	source.UpsertString("key:a", "a")
+	source.UpsertString("key:b", "b")
+
+	for _, item := range []struct {
+		key      string
+		sequence string
+	}{
+		{key: "key:b", sequence: "2"},
+		{key: "key:a", sequence: "1"},
+	} {
+		binaryValue, ok, err := source.commandDumpEntryBinary(item.key)
+		if err != nil || !ok {
+			t.Fatalf("commandDumpEntryBinary(%s) = %v/%v", item.key, ok, err)
+		}
+		response, rejected := executeCacheCommand(context.Background(), target, CacheCommandRequest{
+			Command:     replicationSetCompactCommand,
+			Key:         item.key,
+			BinaryValue: binaryValue,
+			Pairs: Map{
+				replicationMetaSourceNode:          "node-a",
+				replicationMetaSequence:            item.sequence,
+				replicationMetaTopologyFingerprint: topology.Fingerprint(),
+			},
+		}, commandExecutionOptions{Topology: topology, ReplicationSafety: safety})
+		if rejected || !response.OK || response.Message == "duplicate replication command" {
+			t.Fatalf("replication %s sequence %s = %#v rejected=%v, want applied", item.key, item.sequence, response, rejected)
+		}
+	}
+	if got := target.GetString("key:a"); got != "a" {
+		t.Fatalf("target key:a = %q, want a", got)
+	}
+	if got := target.GetString("key:b"); got != "b" {
+		t.Fatalf("target key:b = %q, want b", got)
 	}
 }
 

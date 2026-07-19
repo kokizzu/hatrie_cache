@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -348,6 +349,129 @@ func BenchmarkReplicationSyncTransport(b *testing.B) {
 			b.StopTimer()
 			iterations := float64(b.N)
 			b.ReportMetric(keyCount, "keys/op")
+			if transport == ReplicationTransportGRPCStream {
+				b.ReportMetric(float64(replicator.grpcStreamBatches.Load())/iterations, "batches/op")
+				b.ReportMetric(float64(grpcWireStats.outbound.Load())/iterations, "wire_B/op")
+			} else {
+				b.ReportMetric(float64(httpRequests.Load())/iterations, "batches/op")
+				b.ReportMetric(float64(httpWireBytes.Load())/iterations, "wire_B/op")
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationLiveTransport10K(b *testing.B) {
+	const operations = 10_000
+	const callers = 32
+	for _, transport := range []ReplicationTransport{ReplicationTransportHTTP, ReplicationTransportGRPCStream} {
+		b.Run(string(transport), func(b *testing.B) {
+			sourceTrie := CreateHatTrie()
+			targetTrie := CreateHatTrie()
+			b.Cleanup(sourceTrie.Destroy)
+			b.Cleanup(targetTrie.Destroy)
+			httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				b.Fatalf("HTTP listen: %v", err)
+			}
+			grpcListener := bufconn.Listen(testGRPCBufferSize)
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a", Address: "http://node-a"},
+					{ID: "node-b", Address: "http://" + httpListener.Addr().String(), GRPCAddress: "bufnet"},
+				},
+				Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			})
+			if err != nil {
+				b.Fatalf("NewTopologyStore() error = %v", err)
+			}
+
+			var httpRequests atomic.Int64
+			var httpWireBytes atomic.Int64
+			monitoring := NewMonitoringHandler(targetTrie, MonitoringOptions{
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}).Handler()
+			httpServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				httpRequests.Add(1)
+				r.Body = benchmarkCountingReadCloser{ReadCloser: r.Body, bytes: &httpWireBytes}
+				monitoring.ServeHTTP(w, r)
+			})}
+			go func() { _ = httpServer.Serve(httpListener) }()
+			b.Cleanup(func() {
+				_ = httpServer.Close()
+				_ = httpListener.Close()
+			})
+
+			grpcServer := grpc.NewServer()
+			RegisterCacheGRPCServer(grpcServer, NewCacheGRPCServer(targetTrie, CacheGRPCOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			}))
+			go func() { _ = grpcServer.Serve(grpcListener) }()
+			b.Cleanup(func() {
+				grpcServer.Stop()
+				_ = grpcListener.Close()
+			})
+
+			grpcWireStats := &benchmarkGRPCWireStats{}
+			options := HTTPReplicatorOptions{
+				Self:      "node-a",
+				Topology:  topology,
+				Election:  NewElectionStore(topology, ElectionOptions{}),
+				Transport: transport,
+			}
+			if transport == ReplicationTransportGRPCStream {
+				options.DisableHTTPFallback = true
+				options.GRPCStreamWindow = callers
+				options.GRPCDialOptions = []grpc.DialOption{
+					grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return grpcListener.Dial() }),
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithStatsHandler(grpcWireStats),
+				}
+			}
+			replicator := NewHTTPReplicator(options)
+			b.Cleanup(replicator.Close)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				var next atomic.Int64
+				var failed atomic.Bool
+				var workers sync.WaitGroup
+				workers.Add(callers)
+				for worker := 0; worker < callers; worker++ {
+					go func() {
+						defer workers.Done()
+						for {
+							idx := int(next.Add(1)) - 1
+							if idx >= operations {
+								return
+							}
+							key := fmt.Sprintf("live:%d:%05d", iteration, idx)
+							sourceTrie.UpsertString(key, "replicated-value")
+							result := replicator.ReplicateCommand(context.Background(), sourceTrie,
+								CacheCommandRequest{Command: "SETSTR", Key: key, Value: "replicated-value"}, CacheCommandResponse{OK: true})
+							if len(result.Targets) != 1 || !result.Targets[0].OK {
+								failed.Store(true)
+								return
+							}
+						}
+					}()
+				}
+				workers.Wait()
+				if failed.Load() {
+					b.Fatal("live replication failed")
+				}
+			}
+			b.StopTimer()
+			if got, want := len(targetTrie.EntriesWithPrefix("live:", false)), operations*b.N; got != want {
+				b.Fatalf("target entries = %d, want all %d live writes", got, want)
+			}
+			iterations := float64(b.N)
+			b.ReportMetric(operations, "commands/op")
 			if transport == ReplicationTransportGRPCStream {
 				b.ReportMetric(float64(replicator.grpcStreamBatches.Load())/iterations, "batches/op")
 				b.ReportMetric(float64(grpcWireStats.outbound.Load())/iterations, "wire_B/op")

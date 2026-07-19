@@ -391,10 +391,14 @@ func (server *CacheGRPCServer) applyReplicationStreamBatch(ctx context.Context, 
 
 	payloads := make([]CacheCommandRequest, len(keys))
 	for idx := range keys {
-		payloads[idx] = CacheCommandRequest{
-			Command:     replicationSetCompactCommand,
-			Key:         keys[idx],
-			BinaryValue: values[idx],
+		if len(values[idx]) == 0 {
+			payloads[idx] = CacheCommandRequest{Command: "INTERNALDEL", Key: keys[idx]}
+		} else {
+			payloads[idx] = CacheCommandRequest{
+				Command:     replicationSetCompactCommand,
+				Key:         keys[idx],
+				BinaryValue: values[idx],
+			}
 		}
 	}
 	request := replicationBatchEnvelopePayloadWithMetadata(payloads, batch.GetSource(), batch.GetSequence(), batch.GetTopologyFingerprint())

@@ -20,29 +20,57 @@ import (
 )
 
 type replicationGRPCSyncSession struct {
-	replicator *HTTPReplicator
-	ctx        context.Context
-	mu         sync.Mutex
-	targets    map[string]*replicationGRPCStreamTarget
-	fallback   map[string]bool
+	replicator     *HTTPReplicator
+	ctx            context.Context
+	mu             sync.Mutex
+	targets        map[string]*replicationGRPCStreamTarget
+	fallback       map[string]bool
+	stickyFallback bool
+	closed         bool
 }
 
 type replicationGRPCStreamTarget struct {
-	conn   *grpc.ClientConn
-	stream hatriecachev1.CacheService_ReplicationStreamClient
-	cancel context.CancelFunc
-	mu     sync.Mutex
+	conn       *grpc.ClientConn
+	stream     hatriecachev1.CacheService_ReplicationStreamClient
+	ctx        context.Context
+	cancel     context.CancelFunc
+	jobs       chan *replicationGRPCStreamJob
+	done       chan struct{}
+	window     int
+	timeout    time.Duration
+	replicator *HTTPReplicator
+	closeOnce  sync.Once
+}
+
+type replicationGRPCStreamJob struct {
+	ctx     context.Context
+	request *hatriecachev1.ReplicationStreamBatch
+	result  chan replicationGRPCStreamJobResult
+}
+
+type replicationGRPCStreamJobResult struct {
+	ack *hatriecachev1.ReplicationStreamAck
+	err error
 }
 
 func newReplicationGRPCSyncSession(ctx context.Context, replicator *HTTPReplicator) *replicationGRPCSyncSession {
+	return newReplicationGRPCSession(ctx, replicator, true)
+}
+
+func newReplicationGRPCLiveSession(ctx context.Context, replicator *HTTPReplicator) *replicationGRPCSyncSession {
+	return newReplicationGRPCSession(ctx, replicator, false)
+}
+
+func newReplicationGRPCSession(ctx context.Context, replicator *HTTPReplicator, stickyFallback bool) *replicationGRPCSyncSession {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return &replicationGRPCSyncSession{
-		replicator: replicator,
-		ctx:        ctx,
-		targets:    make(map[string]*replicationGRPCStreamTarget),
-		fallback:   make(map[string]bool),
+		replicator:     replicator,
+		ctx:            ctx,
+		targets:        make(map[string]*replicationGRPCStreamTarget),
+		fallback:       make(map[string]bool),
+		stickyFallback: stickyFallback,
 	}
 }
 
@@ -51,6 +79,7 @@ func (session *replicationGRPCSyncSession) close() {
 		return
 	}
 	session.mu.Lock()
+	session.closed = true
 	targets := session.targets
 	session.targets = make(map[string]*replicationGRPCStreamTarget)
 	session.mu.Unlock()
@@ -63,19 +92,147 @@ func (target *replicationGRPCStreamTarget) close() {
 	if target == nil {
 		return
 	}
-	target.mu.Lock()
-	defer target.mu.Unlock()
-	if target.stream != nil {
-		_ = target.stream.CloseSend()
-		target.stream = nil
-	}
-	if target.cancel != nil {
+	target.closeOnce.Do(func() {
 		target.cancel()
-		target.cancel = nil
+		<-target.done
+	})
+}
+
+func (target *replicationGRPCStreamTarget) run() {
+	defer close(target.done)
+	defer target.conn.Close()
+	defer target.stream.CloseSend()
+	defer target.cancel()
+	receives := make(chan replicationGRPCStreamJobResult, 1)
+	go func() {
+		for {
+			ack, err := target.stream.Recv()
+			select {
+			case receives <- replicationGRPCStreamJobResult{ack: ack, err: err}:
+			case <-target.ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	pending := make(map[uint64]*replicationGRPCStreamJob, target.window)
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
 	}
-	if target.conn != nil {
-		_ = target.conn.Close()
-		target.conn = nil
+	defer timer.Stop()
+	var timeout <-chan time.Time
+	terminalErr := context.Canceled
+	defer func() {
+		for _, job := range pending {
+			target.completeJob(job, nil, terminalErr)
+		}
+		target.failQueued(terminalErr)
+	}()
+
+	for {
+		var jobs <-chan *replicationGRPCStreamJob
+		if len(pending) < target.window {
+			jobs = target.jobs
+		}
+		select {
+		case <-target.ctx.Done():
+			terminalErr = target.ctx.Err()
+			return
+		case <-timeout:
+			terminalErr = context.DeadlineExceeded
+			return
+		case job := <-jobs:
+			if err := job.ctx.Err(); err != nil {
+				target.completeJob(job, nil, err)
+				continue
+			}
+			sequence := target.replicator.nextReplicationSequence()
+			job.request.Sequence = sequence
+			pending[sequence] = job
+			if err := target.stream.Send(job.request); err != nil {
+				terminalErr = target.resolveSendError(err, receives)
+				return
+			}
+			if len(pending) == 1 {
+				target.resetTimer(timer)
+				timeout = timer.C
+			}
+		case received := <-receives:
+			if received.err != nil {
+				terminalErr = received.err
+				return
+			}
+			sequence := received.ack.GetSequence()
+			job := pending[sequence]
+			if job == nil {
+				terminalErr = fmt.Errorf("gRPC replication stream acknowledged unknown sequence %d", sequence)
+				return
+			}
+			delete(pending, sequence)
+			target.completeJob(job, received.ack, nil)
+			if len(pending) == 0 {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timeout = nil
+			} else {
+				target.resetTimer(timer)
+				timeout = timer.C
+			}
+		}
+	}
+}
+
+func (target *replicationGRPCStreamTarget) resetTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(target.timeout)
+}
+
+func (target *replicationGRPCStreamTarget) resolveSendError(err error, receives <-chan replicationGRPCStreamJobResult) error {
+	if !errors.Is(err, io.EOF) {
+		return err
+	}
+	timer := time.NewTimer(target.timeout)
+	defer timer.Stop()
+	select {
+	case received := <-receives:
+		if received.err != nil {
+			return received.err
+		}
+	case <-timer.C:
+	case <-target.ctx.Done():
+		return target.ctx.Err()
+	}
+	return err
+}
+
+func (target *replicationGRPCStreamTarget) completeJob(job *replicationGRPCStreamJob, ack *hatriecachev1.ReplicationStreamAck, err error) {
+	select {
+	case job.result <- replicationGRPCStreamJobResult{ack: ack, err: err}:
+	default:
+	}
+}
+
+func (target *replicationGRPCStreamTarget) failQueued(err error) {
+	for {
+		select {
+		case job := <-target.jobs:
+			job.result <- replicationGRPCStreamJobResult{err: err}
+		default:
+			return
+		}
 	}
 }
 
@@ -130,11 +287,11 @@ func (session *replicationGRPCSyncSession) executeReplicationTaskGroup(ctx conte
 	useFallback := session.fallback[key]
 	session.mu.Unlock()
 	if useFallback {
-		return session.replicator.executeReplicationTaskGroup(ctx, group)
+		return session.replicator.executeReplicationTaskGroupHTTP(ctx, group)
 	}
 
 	startedAt := time.Now()
-	result, err := session.sendGroup(group)
+	result, err := session.sendGroup(ctx, group)
 	session.replicator.recordReplicationTargetLatency(group.target, time.Since(startedAt))
 	if err == nil {
 		return result
@@ -143,19 +300,21 @@ func (session *replicationGRPCSyncSession) executeReplicationTaskGroup(ctx conte
 		return ReplicationTargetResult{Node: group.target.ID, Address: group.target.GRPCAddress, Error: err.Error()}
 	}
 	session.markFallback(key)
-	return session.replicator.executeReplicationTaskGroup(ctx, group)
+	return session.replicator.executeReplicationTaskGroupHTTP(ctx, group)
 }
 
 func (session *replicationGRPCSyncSession) markFallback(key string) {
 	session.mu.Lock()
-	session.fallback[key] = true
+	if session.stickyFallback {
+		session.fallback[key] = true
+	}
 	target := session.targets[key]
 	delete(session.targets, key)
 	session.mu.Unlock()
 	target.close()
 }
 
-func (session *replicationGRPCSyncSession) sendGroup(group replicationTaskGroup) (ReplicationTargetResult, error) {
+func (session *replicationGRPCSyncSession) sendGroup(ctx context.Context, group replicationTaskGroup) (ReplicationTargetResult, error) {
 	payloads := group.replicationSyncPayloadBatch()
 	if payloads.len() == 0 {
 		return ReplicationTargetResult{}, errors.New("hatriecache: gRPC replication stream requires sync payloads")
@@ -172,32 +331,48 @@ func (session *replicationGRPCSyncSession) sendGroup(group replicationTaskGroup)
 		keys[idx] = payload.key
 		values[idx] = payload.binaryValue
 	}
-	target.mu.Lock()
-	defer target.mu.Unlock()
-	sequence := session.replicator.nextReplicationSequence()
 	request := &hatriecachev1.ReplicationStreamBatch{
 		Source:              group.metadataSource,
-		Sequence:            sequence,
 		TopologyFingerprint: group.metadataTopology,
 		Keys:                keys,
 		BinaryValues:        values,
 	}
-	timer := time.AfterFunc(session.replicator.timeout, target.cancel)
-	err = target.stream.Send(request)
-	var ack *hatriecachev1.ReplicationStreamAck
-	if err == nil {
-		ack, err = target.stream.Recv()
-	} else if errors.Is(err, io.EOF) {
-		_, err = target.stream.Recv()
+	jobCtx, cancelJob := context.WithTimeout(replicationContext(ctx), session.replicator.timeout)
+	defer cancelJob()
+	job := &replicationGRPCStreamJob{
+		ctx:     jobCtx,
+		request: request,
+		result:  make(chan replicationGRPCStreamJobResult, 1),
 	}
-	if !timer.Stop() && err == nil {
-		err = context.DeadlineExceeded
+	select {
+	case target.jobs <- job:
+	case <-session.ctx.Done():
+		return ReplicationTargetResult{}, session.ctx.Err()
+	case <-target.done:
+		return ReplicationTargetResult{}, errors.New("gRPC replication stream target is closed")
+	case <-jobCtx.Done():
+		return ReplicationTargetResult{}, jobCtx.Err()
 	}
+	var jobResult replicationGRPCStreamJobResult
+	select {
+	case jobResult = <-job.result:
+	case <-session.ctx.Done():
+		return ReplicationTargetResult{}, session.ctx.Err()
+	case <-target.done:
+		select {
+		case jobResult = <-job.result:
+		default:
+			return ReplicationTargetResult{}, errors.New("gRPC replication stream target closed before acknowledgement")
+		}
+	case <-jobCtx.Done():
+		return ReplicationTargetResult{}, jobCtx.Err()
+	}
+	ack, err := jobResult.ack, jobResult.err
 	if err != nil {
 		return ReplicationTargetResult{}, fmt.Errorf("gRPC replication stream: %w", err)
 	}
-	if ack.GetSequence() != sequence {
-		return ReplicationTargetResult{}, fmt.Errorf("gRPC replication stream acknowledged sequence %d, want %d", ack.GetSequence(), sequence)
+	if ack.GetSequence() != request.GetSequence() {
+		return ReplicationTargetResult{}, fmt.Errorf("gRPC replication stream acknowledged sequence %d, want %d", ack.GetSequence(), request.GetSequence())
 	}
 	if !ack.GetOk() {
 		return ReplicationTargetResult{
@@ -213,6 +388,10 @@ func (session *replicationGRPCSyncSession) sendGroup(group replicationTaskGroup)
 func (session *replicationGRPCSyncSession) streamTarget(node TopologyNode) (*replicationGRPCStreamTarget, error) {
 	key := replicationTaskTargetKey(node)
 	session.mu.Lock()
+	if session.closed {
+		session.mu.Unlock()
+		return nil, errors.New("hatriecache: gRPC replication session is closed")
+	}
 	if target := session.targets[key]; target != nil {
 		session.mu.Unlock()
 		return target, nil
@@ -242,9 +421,23 @@ func (session *replicationGRPCSyncSession) streamTarget(node TopologyNode) (*rep
 		_ = conn.Close()
 		return nil, fmt.Errorf("open gRPC replication stream: %w", err)
 	}
-	target := &replicationGRPCStreamTarget{conn: conn, stream: stream, cancel: cancelStream}
+	window := session.replicator.grpcStreamWindow
+	if window <= 0 {
+		window = 1
+	}
+	target := &replicationGRPCStreamTarget{
+		conn: conn, stream: stream, ctx: streamCtx, cancel: cancelStream,
+		jobs: make(chan *replicationGRPCStreamJob, window*2), done: make(chan struct{}),
+		window: window, timeout: session.replicator.timeout, replicator: session.replicator,
+	}
+	go target.run()
 
 	session.mu.Lock()
+	if session.closed {
+		session.mu.Unlock()
+		target.close()
+		return nil, errors.New("hatriecache: gRPC replication session is closed")
+	}
 	if existing := session.targets[key]; existing != nil {
 		session.mu.Unlock()
 		target.close()

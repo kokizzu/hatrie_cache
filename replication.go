@@ -27,6 +27,8 @@ const DefaultReplicationCircuitBreakerFailures = 5
 const DefaultReplicationCircuitBreakerCooldown = 30 * time.Second
 const DefaultReplicationBatchMaxBytes = 1 << 20
 const DefaultReplicationMaxInFlightTargets = 4
+const DefaultReplicationGRPCStreamWindow = 32
+const MaxReplicationGRPCStreamWindow = 1024
 const maxHTTPReplicationResponseBytes = 1 << 20
 const maxHTTPResponseDrainBytes = 1 << 20
 const minCompressedReplicationRequestBytes = 16 << 10
@@ -79,6 +81,7 @@ type HTTPReplicatorOptions struct {
 	ReplicationBatchMaxBytes int
 	MaxInFlightTargets       int
 	Transport                ReplicationTransport
+	GRPCStreamWindow         int
 	DisableHTTPFallback      bool
 	GRPCDialOptions          []grpc.DialOption
 }
@@ -101,8 +104,11 @@ type HTTPReplicator struct {
 	batchMaxBytes       int
 	maxInFlight         int
 	transport           ReplicationTransport
+	grpcStreamWindow    int
 	disableHTTPFallback bool
 	grpcDialOptions     []grpc.DialOption
+	grpcLiveSession     *replicationGRPCSyncSession
+	grpcLiveCancel      context.CancelFunc
 	grpcStreamBatches   atomic.Uint64
 	breakers            map[string]replicationCircuitBreakerState
 	done                chan struct{}
@@ -298,7 +304,7 @@ type ReplicationSafetyStore struct {
 }
 
 type replicationSafetyToken struct {
-	source   string
+	scope    string
 	sequence uint64
 }
 
@@ -307,23 +313,38 @@ func NewReplicationSafetyStore() *ReplicationSafetyStore {
 }
 
 func (store *ReplicationSafetyStore) Check(source string, sequence uint64) (replicationSafetyToken, bool) {
-	if store == nil || source == "" || sequence == 0 {
+	return store.checkScope("source:"+source, sequence)
+}
+
+func (store *ReplicationSafetyStore) CheckKey(source string, key string, sequence uint64) (replicationSafetyToken, bool) {
+	if source == "" || sequence == 0 {
+		return replicationSafetyToken{}, false
+	}
+	if strings.TrimSpace(key) == "" {
+		return store.Check(source, sequence)
+	}
+	scope := "key:" + strconv.Itoa(len(source)) + ":" + source + key
+	return store.checkScope(scope, sequence)
+}
+
+func (store *ReplicationSafetyStore) checkScope(scope string, sequence uint64) (replicationSafetyToken, bool) {
+	if store == nil || scope == "source:" || sequence == 0 {
 		return replicationSafetyToken{}, false
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	token := replicationSafetyToken{source: source, sequence: sequence}
-	return token, sequence <= store.last[source]
+	token := replicationSafetyToken{scope: scope, sequence: sequence}
+	return token, sequence <= store.last[scope]
 }
 
 func (store *ReplicationSafetyStore) Commit(token replicationSafetyToken) {
-	if store == nil || token.source == "" || token.sequence == 0 {
+	if store == nil || token.scope == "" || token.sequence == 0 {
 		return
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if token.sequence > store.last[token.source] {
-		store.last[token.source] = token.sequence
+	if token.sequence > store.last[token.scope] {
+		store.last[token.scope] = token.sequence
 	}
 }
 
@@ -362,6 +383,7 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		batchMaxBytes:       options.ReplicationBatchMaxBytes,
 		maxInFlight:         options.MaxInFlightTargets,
 		transport:           transport,
+		grpcStreamWindow:    options.GRPCStreamWindow,
 		disableHTTPFallback: options.DisableHTTPFallback,
 		grpcDialOptions:     append([]grpc.DialOption(nil), options.GRPCDialOptions...),
 	}
@@ -374,6 +396,22 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 		replicator.maxInFlight = DefaultReplicationMaxInFlightTargets
 	} else if replicator.maxInFlight < 0 {
 		replicator.maxInFlight = 1
+	}
+	if replicator.grpcStreamWindow == 0 {
+		replicator.grpcStreamWindow = DefaultReplicationGRPCStreamWindow
+	} else if replicator.grpcStreamWindow < 0 {
+		replicator.grpcStreamWindow = 1
+	} else if replicator.grpcStreamWindow > MaxReplicationGRPCStreamWindow {
+		replicator.grpcStreamWindow = MaxReplicationGRPCStreamWindow
+	}
+	if replicator.transport == ReplicationTransportGRPCStream {
+		parent := options.Context
+		if parent == nil {
+			parent = context.Background()
+		}
+		liveCtx, cancel := context.WithCancel(parent)
+		replicator.grpcLiveCancel = cancel
+		replicator.grpcLiveSession = newReplicationGRPCLiveSession(liveCtx, replicator)
 	}
 	if replicator.breakerFailures < 0 {
 		replicator.breakerFailures = 0
@@ -478,17 +516,27 @@ func (replicator *HTTPReplicator) enqueueRestoredAsyncJobs(jobs []replicationJob
 }
 
 func (replicator *HTTPReplicator) Close() {
-	if replicator == nil || replicator.queue == nil {
+	if replicator == nil {
 		return
 	}
 	replicator.close.Do(func() {
 		replicator.mu.Lock()
 		replicator.closed = true
-		replicator.queueStats.Closed = true
+		if replicator.queue != nil {
+			replicator.queueStats.Closed = true
+		}
 		replicator.mu.Unlock()
-		replicator.cancel()
-		close(replicator.done)
-		<-replicator.stopped
+		if replicator.grpcLiveCancel != nil {
+			replicator.grpcLiveCancel()
+		}
+		if replicator.grpcLiveSession != nil {
+			replicator.grpcLiveSession.close()
+		}
+		if replicator.queue != nil {
+			replicator.cancel()
+			close(replicator.done)
+			<-replicator.stopped
+		}
 	})
 }
 
@@ -1170,6 +1218,19 @@ func (replicator *HTTPReplicator) executeReplicationTaskGroups(ctx context.Conte
 }
 
 func (replicator *HTTPReplicator) executeReplicationTaskGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {
+	if replicator.transport == ReplicationTransportGRPCStream && replicator.grpcLiveSession != nil {
+		streamGroup, err := replicator.liveReplicationGRPCGroup(group)
+		if err == nil {
+			return replicator.grpcLiveSession.executeReplicationTaskGroup(ctx, streamGroup)
+		}
+		if replicator.disableHTTPFallback {
+			return ReplicationTargetResult{Node: group.target.ID, Address: group.target.GRPCAddress, Error: err.Error()}
+		}
+	}
+	return replicator.executeReplicationTaskGroupHTTP(ctx, group)
+}
+
+func (replicator *HTTPReplicator) executeReplicationTaskGroupHTTP(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {
 	targetResult := replicator.executeReplicationTargetGroup(ctx, group)
 	if payloads := group.replicationSyncPayloadBatch(); payloads.len() == 1 {
 		targetResult.Key = payloads.payload(0).key
@@ -1177,6 +1238,45 @@ func (replicator *HTTPReplicator) executeReplicationTaskGroup(ctx context.Contex
 		targetResult.Key = group.keys[0]
 	}
 	return targetResult
+}
+
+func (replicator *HTTPReplicator) liveReplicationGRPCGroup(group replicationTaskGroup) (replicationTaskGroup, error) {
+	if group.replicationSyncPayloadBatch().len() > 0 {
+		return group, nil
+	}
+	if len(group.payloads) == 0 {
+		return replicationTaskGroup{}, errors.New("hatriecache: empty live replication group")
+	}
+	streamPayloads := make([]replicationSyncPayload, 0, len(group.payloads))
+	for _, payload := range group.payloads {
+		key := strings.TrimSpace(payload.Key)
+		switch normalizedCommand(payload.Command) {
+		case replicationSetCompactCommand:
+			if key == "" || len(payload.BinaryValue) == 0 {
+				return replicationTaskGroup{}, errors.New("hatriecache: compact live replication value is empty")
+			}
+			streamPayloads = append(streamPayloads, replicationSyncPayload{key: key, binaryValue: payload.BinaryValue})
+		case "INTERNALDEL":
+			if key == "" {
+				return replicationTaskGroup{}, errors.New("hatriecache: live replication delete key is empty")
+			}
+			streamPayloads = append(streamPayloads, replicationSyncPayload{key: key})
+		default:
+			return replicationTaskGroup{}, fmt.Errorf("hatriecache: command %s is not supported by live gRPC replication", payload.Command)
+		}
+	}
+	fingerprint := ""
+	if replicator.topology != nil {
+		fingerprint = replicator.topology.Fingerprint()
+	}
+	group.syncPayloads = streamPayloads
+	group.payloads = nil
+	group.keys = nil
+	group.payloadBytes = nil
+	group.deferredMetadata = true
+	group.metadataSource = replicator.self
+	group.metadataTopology = fingerprint
+	return group, nil
 }
 
 func (replicator *HTTPReplicator) executeReplicationTargetGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {

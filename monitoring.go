@@ -1292,7 +1292,13 @@ func checkReplicationSafety(request CacheCommandRequest, topology *TopologyStore
 			return replicationSafetyToken{}, commandError("replication topology fingerprint mismatch"), true, true
 		}
 	}
-	token, duplicate := safety.Check(source, sequence)
+	var token replicationSafetyToken
+	var duplicate bool
+	if normalizedCommand(request.Command) == replicationBatchEnvelopeCommand {
+		token, duplicate = safety.Check(source, sequence)
+	} else {
+		token, duplicate = safety.CheckKey(source, strings.TrimSpace(request.Key), sequence)
+	}
 	if duplicate {
 		return token, CacheCommandResponse{OK: true, Message: "duplicate replication command"}, true, false
 	}

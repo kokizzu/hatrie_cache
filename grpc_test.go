@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +28,53 @@ import (
 )
 
 const testGRPCBufferSize = 1024 * 1024
+
+type pipeliningReplicationGRPCServer struct {
+	hatriecachev1.UnimplementedCacheServiceServer
+	pipelined chan struct{}
+	release   chan struct{}
+}
+
+func (server *pipeliningReplicationGRPCServer) ReplicationStream(stream hatriecachev1.CacheService_ReplicationStreamServer) error {
+	warmup, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&hatriecachev1.ReplicationStreamAck{Sequence: warmup.GetSequence(), Ok: true, Entries: uint64(len(warmup.GetKeys()))}); err != nil {
+		return err
+	}
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	second, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	close(server.pipelined)
+	select {
+	case <-server.release:
+	case <-stream.Context().Done():
+		return stream.Context().Err()
+	}
+	for _, batch := range []*hatriecachev1.ReplicationStreamBatch{first, second} {
+		if err := stream.Send(&hatriecachev1.ReplicationStreamAck{Sequence: batch.GetSequence(), Ok: true, Entries: uint64(len(batch.GetKeys()))}); err != nil {
+			return err
+		}
+	}
+	for {
+		batch, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(&hatriecachev1.ReplicationStreamAck{Sequence: batch.GetSequence(), Ok: true, Entries: uint64(len(batch.GetKeys()))}); err != nil {
+			return err
+		}
+	}
+}
 
 func TestCacheGRPCServerHealthStatsEntriesAndCommands(t *testing.T) {
 	ht := newTestTrie(t)
@@ -1487,6 +1536,174 @@ func TestReplicationGRPCStreamSyncPreservesPagedOrder(t *testing.T) {
 	unauthorizedResult := unauthorized.syncAllPaged(context.Background(), sourceTrie, "session:", 2)
 	if len(unauthorizedResult.Targets) == 0 || !strings.Contains(strings.ToLower(unauthorizedResult.Targets[0].Error), "unauthenticated") {
 		t.Fatalf("unauthorized stream targets = %#v, want authentication failure", unauthorizedResult.Targets)
+	}
+}
+
+func TestReplicationGRPCStreamLiveSetDeleteReusesConnection(t *testing.T) {
+	targetTrie := newTestTrie(t)
+	listener := bufconn.Listen(testGRPCBufferSize)
+	server := grpc.NewServer()
+	httpRequests := atomic.Int32{}
+	httpFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		httpRequests.Add(1)
+		http.Error(w, "unexpected HTTP fallback", http.StatusServiceUnavailable)
+	}))
+	defer httpFallback.Close()
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: httpFallback.URL, GRPCAddress: "bufnet"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	RegisterCacheGRPCServer(server, NewCacheGRPCServer(targetTrie, CacheGRPCOptions{
+		NodeName:             "node-b",
+		ReplicationAuthToken: "replica-secret",
+		Topology:             topology,
+		ReplicationSafety:    NewReplicationSafetyStore(),
+	}))
+	go func() {
+		if err := server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
+			t.Errorf("grpc Serve() error = %v", err)
+		}
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+	})
+
+	dials := atomic.Int32{}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                "node-a",
+		Topology:            topology,
+		Election:            NewElectionStore(topology, ElectionOptions{}),
+		Transport:           ReplicationTransportGRPCStream,
+		GRPCStreamWindow:    4,
+		DisableHTTPFallback: true,
+		AuthToken:           "replica-secret",
+		GRPCDialOptions: []grpc.DialOption{
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+				dials.Add(1)
+				return listener.Dial()
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		},
+	})
+	t.Cleanup(replicator.Close)
+
+	sourceTrie := newTestTrie(t)
+	sourceTrie.UpsertString("live:key", "value")
+	setResult := replicator.ReplicateCommand(context.Background(), sourceTrie,
+		CacheCommandRequest{Command: "SETSTR", Key: "live:key", Value: "value"},
+		CacheCommandResponse{OK: true})
+	if len(setResult.Targets) != 1 || !setResult.Targets[0].OK {
+		t.Fatalf("live SET replication = %#v, want one successful gRPC target", setResult)
+	}
+	if got := targetTrie.GetString("live:key"); got != "value" {
+		t.Fatalf("target live:key = %q, want value", got)
+	}
+
+	sourceTrie.Delete("live:key")
+	deleteResult := replicator.ReplicateCommand(context.Background(), sourceTrie,
+		CacheCommandRequest{Command: "DEL", Key: "live:key"}, CacheCommandResponse{OK: true})
+	if len(deleteResult.Targets) != 1 || !deleteResult.Targets[0].OK {
+		t.Fatalf("live DEL replication = %#v, want one successful gRPC target", deleteResult)
+	}
+	if targetTrie.Exists("live:key") {
+		t.Fatal("target live:key still exists after streamed delete")
+	}
+	if got := dials.Load(); got != 1 {
+		t.Fatalf("gRPC dials = %d, want one persistent live connection", got)
+	}
+	if got := httpRequests.Load(); got != 0 {
+		t.Fatalf("HTTP fallback requests = %d, want none", got)
+	}
+	if got := replicator.grpcStreamBatches.Load(); got != 2 {
+		t.Fatalf("gRPC stream batches = %d, want SET and DEL batches", got)
+	}
+}
+
+func TestReplicationGRPCStreamLivePipelinesBoundedAckWindow(t *testing.T) {
+	listener := bufconn.Listen(testGRPCBufferSize)
+	probe := &pipeliningReplicationGRPCServer{pipelined: make(chan struct{}), release: make(chan struct{})}
+	server := grpc.NewServer()
+	hatriecachev1.RegisterCacheServiceServer(server, probe)
+	go func() {
+		if err := server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
+			t.Errorf("grpc Serve() error = %v", err)
+		}
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+	})
+
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b", GRPCAddress: "bufnet"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                "node-a",
+		Topology:            topology,
+		Election:            NewElectionStore(topology, ElectionOptions{}),
+		Transport:           ReplicationTransportGRPCStream,
+		GRPCStreamWindow:    8,
+		DisableHTTPFallback: true,
+		GRPCDialOptions: []grpc.DialOption{
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		},
+	})
+	t.Cleanup(replicator.Close)
+	sourceTrie := newTestTrie(t)
+	sourceTrie.UpsertString("warmup", "value")
+	warmup := replicator.ReplicateCommand(context.Background(), sourceTrie,
+		CacheCommandRequest{Command: "SETSTR", Key: "warmup", Value: "value"}, CacheCommandResponse{OK: true})
+	if len(warmup.Targets) != 1 || !warmup.Targets[0].OK {
+		t.Fatalf("warmup replication = %#v, want success", warmup)
+	}
+
+	const commands = 8
+	start := make(chan struct{})
+	results := make(chan ReplicationResult, commands)
+	var callers sync.WaitGroup
+	callers.Add(commands)
+	for idx := 0; idx < commands; idx++ {
+		key := fmt.Sprintf("pipeline:%02d", idx)
+		sourceTrie.UpsertString(key, "value")
+		go func(key string) {
+			defer callers.Done()
+			<-start
+			results <- replicator.ReplicateCommand(context.Background(), sourceTrie,
+				CacheCommandRequest{Command: "SETSTR", Key: key, Value: "value"}, CacheCommandResponse{OK: true})
+		}(key)
+	}
+	close(start)
+	select {
+	case <-probe.pipelined:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not receive a second live batch before acknowledging the first")
+	}
+	close(probe.release)
+	callers.Wait()
+	close(results)
+	for result := range results {
+		if len(result.Targets) != 1 || !result.Targets[0].OK {
+			t.Fatalf("pipelined replication result = %#v, want success", result)
+		}
 	}
 }
 
