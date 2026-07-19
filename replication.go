@@ -130,6 +130,8 @@ type HTTPReplicator struct {
 	deadSeq                  uint64
 	deadLimit                int
 	pending                  []replicationQueueMeta
+	outboxRestoreCursor      uint64
+	outboxRestoreBacklog     bool
 	deadLetters              []ReplicationDeadLetter
 	queueStats               ReplicationQueueStats
 	last                     ReplicationResult
@@ -192,6 +194,7 @@ type ReplicationQueueStats struct {
 	OldestQueuedAgeMillis int64             `json:"oldest_queued_age_millis,omitempty"`
 	OldestQueuedKey       string            `json:"oldest_queued_key,omitempty"`
 	OldestQueuedTargets   []string          `json:"oldest_queued_targets,omitempty"`
+	DurableBacklog        bool              `json:"durable_backlog,omitempty"`
 	InFlightStartedAt     *time.Time        `json:"in_flight_started_at,omitempty"`
 	InFlightAgeMillis     int64             `json:"in_flight_age_millis,omitempty"`
 	InFlightKey           string            `json:"in_flight_key,omitempty"`
@@ -463,11 +466,8 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 			parent = context.Background()
 		}
 		ctx, cancel := context.WithCancel(parent)
-		restoredJobs := replicator.restoreAsyncOutbox()
+		maxOutboxJobID := replicator.restoreAsyncOutbox()
 		queueSize := options.AsyncQueueSize
-		if len(restoredJobs) > queueSize {
-			queueSize = len(restoredJobs)
-		}
 		replicator.queue = make(chan replicationJob, queueSize)
 		replicator.retry = retry
 		replicator.attempts = attempts
@@ -480,7 +480,9 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 			Enabled:  true,
 			Capacity: queueSize,
 		}
-		replicator.enqueueRestoredAsyncJobs(restoredJobs)
+		replicator.queueSeq = maxOutboxJobID
+		replicator.outboxRestoreBacklog = maxOutboxJobID != 0
+		replicator.refillAsyncOutbox(true)
 		go replicator.runAsync(ctx)
 	}
 	return replicator
@@ -503,24 +505,34 @@ func (replicator *HTTPReplicator) LastResult() ReplicationResult {
 	return withReplicationHealth(result)
 }
 
-func (replicator *HTTPReplicator) restoreAsyncOutbox() []replicationJob {
+func (replicator *HTTPReplicator) restoreAsyncOutbox() uint64 {
 	if replicator == nil || replicator.outbox == nil {
-		return nil
+		return 0
 	}
 	deadSeq, deadLetters := replicator.outbox.deadLetters()
 	replicator.deadSeq = deadSeq
 	replicator.deadLetters = cloneReplicationDeadLetters(deadLetters)
-	return replicator.outbox.jobs()
+	return replicator.outbox.maxJobID()
 }
 
-func (replicator *HTTPReplicator) enqueueRestoredAsyncJobs(jobs []replicationJob) {
-	if replicator == nil || replicator.queue == nil {
+func (replicator *HTTPReplicator) refillAsyncOutbox(force bool) {
+	if replicator == nil || replicator.queue == nil || replicator.outbox == nil {
 		return
 	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	if !replicator.outboxRestoreBacklog {
+		return
+	}
+	if !force && len(replicator.queue) > cap(replicator.queue)/2 {
+		return
+	}
+	available := cap(replicator.queue) - len(replicator.queue)
+	if available <= 0 {
+		return
+	}
+	jobs, cursor, hasMore := replicator.outbox.jobPage(replicator.outboxRestoreCursor, available)
 	for _, job := range jobs {
-		if job.id > replicator.queueSeq {
-			replicator.queueSeq = job.id
-		}
 		if job.enqueuedAt.IsZero() {
 			job.enqueuedAt = time.Now().UTC()
 		}
@@ -533,6 +545,8 @@ func (replicator *HTTPReplicator) enqueueRestoredAsyncJobs(jobs []replicationJob
 		replicator.queue <- job
 		replicator.queueStats.Enqueued++
 	}
+	replicator.outboxRestoreCursor = cursor
+	replicator.outboxRestoreBacklog = hasMore
 }
 
 func (replicator *HTTPReplicator) Close() {
@@ -688,6 +702,9 @@ func (replicator *HTTPReplicator) enqueueReplicationTasks(result ReplicationResu
 		replicator.recordAsyncDroppedForTasks(tasks)
 		return result
 	}
+	if replicator.prepareAsyncJobForQueue(job) {
+		return result
+	}
 	select {
 	case replicator.queue <- job:
 		replicator.recordAsyncEnqueued()
@@ -779,24 +796,30 @@ func (replicator *HTTPReplicator) reserveAsyncJob(job *replicationJob) {
 	if replicator == nil || job == nil || replicator.queue == nil {
 		return
 	}
-	targets := make([]string, 0, len(job.tasks))
-	for _, task := range job.tasks {
-		if task.target.ID != "" {
-			targets = append(targets, task.target.ID)
-		}
-	}
 	now := time.Now().UTC()
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
 	replicator.queueSeq++
 	job.id = replicator.queueSeq
 	job.enqueuedAt = now
+}
+
+func (replicator *HTTPReplicator) prepareAsyncJobForQueue(job replicationJob) bool {
+	if replicator == nil || replicator.queue == nil {
+		return false
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	if replicator.outboxRestoreBacklog || job.id <= replicator.outboxRestoreCursor {
+		return true
+	}
 	replicator.pending = append(replicator.pending, replicationQueueMeta{
 		id:         job.id,
 		key:        job.result.Key,
-		targets:    targets,
-		enqueuedAt: now,
+		targets:    replicationJobTargetIDs(job.tasks),
+		enqueuedAt: job.enqueuedAt,
 	})
+	return false
 }
 
 func replicationJobTargetIDs(tasks []replicationTask) []string {
@@ -985,6 +1008,7 @@ func (replicator *HTTPReplicator) queueStatsLocked() ReplicationQueueStats {
 	if replicator.queue != nil {
 		stats.Depth = len(replicator.queue)
 		stats.Capacity = cap(replicator.queue)
+		stats.DurableBacklog = replicator.outboxRestoreBacklog
 	}
 	if len(replicator.pending) > 0 {
 		oldest := replicator.pending[0]
@@ -1566,6 +1590,7 @@ func (replicator *HTTPReplicator) runAsync(ctx context.Context) {
 			return
 		case job := <-replicator.queue:
 			replicator.markAsyncDequeued(job)
+			replicator.refillAsyncOutbox(false)
 			replicator.runAsyncJob(ctx, job)
 			replicator.clearAsyncInFlight(job)
 		}

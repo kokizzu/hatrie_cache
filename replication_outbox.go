@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -189,6 +190,54 @@ func (store *ReplicationOutboxStore) jobs() []replicationJob {
 		jobs = append(jobs, record.replicationJob())
 	}
 	return jobs
+}
+
+func (store *ReplicationOutboxStore) maxJobID() uint64 {
+	if store == nil {
+		return 0
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.levelDB {
+		return store.levelDBMaxJobIDLocked()
+	}
+	var maxID uint64
+	for _, job := range store.snapshot.Jobs {
+		if job.ID > maxID {
+			maxID = job.ID
+		}
+	}
+	return maxID
+}
+
+func (store *ReplicationOutboxStore) jobPage(afterID uint64, limit int) ([]replicationJob, uint64, bool) {
+	if store == nil || limit <= 0 {
+		return nil, afterID, false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.levelDB {
+		return store.levelDBJobPageLocked(afterID, limit)
+	}
+	capacity := limit
+	if len(store.snapshot.Jobs) < capacity {
+		capacity = len(store.snapshot.Jobs)
+	}
+	jobs := make([]replicationJob, 0, capacity)
+	cursor := afterID
+	hasMore := false
+	for _, record := range store.snapshot.Jobs {
+		if record.ID <= afterID {
+			continue
+		}
+		if len(jobs) == limit {
+			hasMore = true
+			break
+		}
+		jobs = append(jobs, record.replicationJob())
+		cursor = record.ID
+	}
+	return jobs, cursor, hasMore
 }
 
 func (store *ReplicationOutboxStore) deadLetters() (uint64, []ReplicationDeadLetter) {
@@ -465,6 +514,45 @@ func (store *ReplicationOutboxStore) levelDBJobsLocked() []replicationJob {
 	return jobs
 }
 
+func (store *ReplicationOutboxStore) levelDBMaxJobIDLocked() uint64 {
+	if store == nil || store.db == nil {
+		return 0
+	}
+	iter := store.db.NewIterator(util.BytesPrefix(replicationOutboxLevelDBJobPrefix), nil)
+	defer iter.Release()
+	if !iter.Last() {
+		return 0
+	}
+	id, _ := replicationOutboxLevelDBJobID(iter.Key())
+	return id
+}
+
+func (store *ReplicationOutboxStore) levelDBJobPageLocked(afterID uint64, limit int) ([]replicationJob, uint64, bool) {
+	if store == nil || store.db == nil || limit <= 0 || afterID == ^uint64(0) {
+		return nil, afterID, false
+	}
+	iter := store.db.NewIterator(util.BytesPrefix(replicationOutboxLevelDBJobPrefix), nil)
+	defer iter.Release()
+	valid := iter.Seek(replicationOutboxLevelDBJobKey(afterID + 1))
+	jobs := make([]replicationJob, 0, limit)
+	cursor := afterID
+	for valid {
+		id, ok := replicationOutboxLevelDBJobID(iter.Key())
+		if ok {
+			cursor = id
+			record, err := unmarshalReplicationOutboxJob(iter.Value())
+			if err == nil {
+				jobs = append(jobs, record.replicationJob())
+			}
+		}
+		valid = iter.Next()
+		if len(jobs) == limit {
+			break
+		}
+	}
+	return jobs, cursor, valid
+}
+
 func (store *ReplicationOutboxStore) levelDBDeadLettersLocked() (uint64, []ReplicationDeadLetter) {
 	if store == nil || store.db == nil {
 		return 0, nil
@@ -485,6 +573,13 @@ func replicationOutboxLevelDBJobKey(id uint64) []byte {
 	copy(key, replicationOutboxLevelDBJobPrefix)
 	binary.BigEndian.PutUint64(key[len(replicationOutboxLevelDBJobPrefix):], id)
 	return key
+}
+
+func replicationOutboxLevelDBJobID(key []byte) (uint64, bool) {
+	if len(key) != len(replicationOutboxLevelDBJobPrefix)+8 || !bytes.HasPrefix(key, replicationOutboxLevelDBJobPrefix) {
+		return 0, false
+	}
+	return binary.BigEndian.Uint64(key[len(replicationOutboxLevelDBJobPrefix):]), true
 }
 
 func newReplicationOutboxJob(job replicationJob) replicationOutboxJob {

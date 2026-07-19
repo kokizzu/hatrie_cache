@@ -577,16 +577,17 @@ func grpcReplicationResponse(result ReplicationResult) *hatriecachev1.Replicatio
 	}
 	if result.Queue != nil {
 		out.Queue = &hatriecachev1.ReplicationQueue{
-			Enabled:   result.Queue.Enabled,
-			Depth:     int64(result.Queue.Depth),
-			Capacity:  int64(result.Queue.Capacity),
-			Enqueued:  result.Queue.Enqueued,
-			Dropped:   result.Queue.Dropped,
-			Attempts:  result.Queue.Attempts,
-			Successes: result.Queue.Successes,
-			Failures:  result.Queue.Failures,
-			Retried:   result.Queue.Retried,
-			Closed:    result.Queue.Closed,
+			Enabled:        result.Queue.Enabled,
+			Depth:          int64(result.Queue.Depth),
+			Capacity:       int64(result.Queue.Capacity),
+			Enqueued:       result.Queue.Enqueued,
+			Dropped:        result.Queue.Dropped,
+			Attempts:       result.Queue.Attempts,
+			Successes:      result.Queue.Successes,
+			Failures:       result.Queue.Failures,
+			Retried:        result.Queue.Retried,
+			Closed:         result.Queue.Closed,
+			DurableBacklog: result.Queue.DurableBacklog,
 		}
 	}
 	for _, target := range result.Targets {

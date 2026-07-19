@@ -316,6 +316,7 @@
         <div><dt>Dead letters</dt><dd>{(replication?.dead_letter_count ?? 0).toLocaleString()}</dd></div>
         <div><dt>Open circuits</dt><dd>{openCircuitBreakers.toLocaleString()}</dd></div>
         <div><dt>Queue fill</dt><dd>{queueFill(queue)}</dd></div>
+        <div><dt>Disk backlog</dt><dd>{queue?.durable_backlog ? 'refilling' : 'loaded'}</dd></div>
         <div><dt>Enqueued</dt><dd>{(queue?.enqueued ?? 0).toLocaleString()}</dd></div>
         <div><dt>Attempts</dt><dd>{(queue?.attempts ?? 0).toLocaleString()}</dd></div>
         <div><dt>Retries</dt><dd>{(queue?.retried ?? 0).toLocaleString()}</dd></div>

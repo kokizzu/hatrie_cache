@@ -140,6 +140,7 @@ message ReplicationQueue {
   uint64 failures = 8;
   uint64 retried = 9;
   bool closed = 10;
+  bool durable_backlog = 11;
 }
 
 message ReplicationTarget {

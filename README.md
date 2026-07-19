@@ -1083,8 +1083,14 @@ outbox. Existing `*.json` paths keep the previous JSON snapshot backend; set
 `REPLICATION_OUTBOX_FORMAT=json` or `REPLICATION_OUTBOX_FORMAT=leveldb` to
 force either backend. LevelDB records use the compact binary codec by default
 and automatically read existing JSON records. Set
-`REPLICATION_OUTBOX_CODEC=json` for new JSON LevelDB records. Concurrent durable
-puts use a 1 ms group-commit window by default; set
+`REPLICATION_OUTBOX_CODEC=json` for new JSON LevelDB records. LevelDB restart
+reads jobs lazily in ordered pages and refills at half capacity, so
+`REPLICATION_QUEUE_SIZE` remains the hard in-memory job and metadata bound even
+when disk contains a much larger backlog. New durable jobs remain behind the
+restore cursor to preserve FIFO delivery. The legacy whole-file JSON backend
+uses the bounded channel too, but still materializes its JSON file when opened.
+Queue status exposes `durable_backlog` while unread disk pages remain.
+Concurrent durable puts use a 1 ms group-commit window by default; set
 `REPLICATION_OUTBOX_BATCH_WINDOW=0` to sync every put independently. Every
 caller still waits for its group sync before success. Keep the outbox on durable
 local storage and do not share the same outbox path between nodes.
@@ -1100,7 +1106,7 @@ lifetime to a parent service context.
 `GET /api/replication` includes the latest replication start/finish timestamps,
 duration, async queue depth, capacity, enqueue/drop counts, delivery attempts,
 successes, failures, retries, oldest queued key/age, in-flight key/age, last
-retry age, per-target drops, per-target failures, closed state,
+retry age, durable backlog state, per-target drops, per-target failures, closed state,
 `dead_letter_count`, recent `dead_letters`, `circuit_breakers`, target-level
 `circuit_open` state, and a `health_score` from `0` to `100` with `health` and
 `health_reason`:

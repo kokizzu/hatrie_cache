@@ -22,6 +22,7 @@ import (
 
 	"hatrie_cache/internal/jsonwire"
 
+	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
@@ -68,6 +69,117 @@ func TestNewHTTPReplicatorDefaultsReplicationBatchLimit(t *testing.T) {
 	})
 	if disabledGrouping.grpcLiveBatchMaxCommands != 1 || disabledGrouping.grpcLiveBatchWindow != 0 {
 		t.Fatalf("negative live batch options = %d/%s, want 1/0", disabledGrouping.grpcLiveBatchMaxCommands, disabledGrouping.grpcLiveBatchWindow)
+	}
+}
+
+func TestHTTPReplicatorRestoresLevelDBOutboxWithinConfiguredQueueCapacity(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	delivered := make(chan string, 100)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		select {
+		case <-started:
+		default:
+			close(started)
+			<-release
+		}
+		delivered <- request.Key
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+	defer releaseOnce.Do(func() { close(release) })
+
+	outbox, err := OpenLevelDBReplicationOutboxWithOptions(filepath.Join(t.TempDir(), "outbox"), ReplicationOutboxOptions{
+		Codec: ReplicationOutboxCodecBinary,
+	})
+	if err != nil {
+		t.Fatalf("OpenLevelDBReplicationOutboxWithOptions() error = %v", err)
+	}
+	t.Cleanup(func() { _ = outbox.Close() })
+	batch := new(leveldb.Batch)
+	for id := uint64(1); id <= 100; id++ {
+		key := fmt.Sprintf("restore:%03d", id)
+		record := newReplicationOutboxJob(replicationJob{
+			id:         id,
+			result:     ReplicationResult{Command: "SETSTR", Key: key},
+			enqueuedAt: time.Unix(int64(id), 0),
+			tasks: []replicationTask{{
+				target:  TopologyNode{ID: "node-b", Address: target.URL},
+				payload: CacheCommandRequest{Command: replicationSetCompactCommand, Key: key, BinaryValue: []byte("value")},
+			}},
+		})
+		data, err := outbox.marshalJob(record)
+		if err != nil {
+			t.Fatalf("marshalJob(%d) error = %v", id, err)
+		}
+		batch.Put(replicationOutboxLevelDBJobKey(id), data)
+	}
+	if err := outbox.db.Write(batch, &opt.WriteOptions{Sync: true}); err != nil {
+		t.Fatalf("outbox batch write error = %v", err)
+	}
+
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		AsyncQueueSize:     8,
+		AsyncMaxAttempts:   1,
+		AsyncOutbox:        outbox,
+		AsyncRetryInterval: time.Millisecond,
+	})
+	t.Cleanup(replicator.Close)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("restored outbox did not start delivery")
+	}
+	replicator.mu.RLock()
+	queueCapacity := cap(replicator.queue)
+	queueDepth := len(replicator.queue)
+	pending := len(replicator.pending)
+	replicator.mu.RUnlock()
+	if queueCapacity != 8 || queueDepth > 8 || pending > 8 {
+		t.Fatalf("restored queue capacity/depth/pending = %d/%d/%d, want all bounded by 8", queueCapacity, queueDepth, pending)
+	}
+	if queue := replicator.LastResult().Queue; queue == nil || !queue.DurableBacklog {
+		t.Fatalf("restored queue stats = %#v, want durable backlog visible", queue)
+	}
+	concurrentKey := "restore:101"
+	concurrentJob := replicationJob{
+		result: ReplicationResult{Command: "SETSTR", Key: concurrentKey},
+		tasks: []replicationTask{{
+			target:  TopologyNode{ID: "node-b", Address: target.URL},
+			payload: CacheCommandRequest{Command: replicationSetCompactCommand, Key: concurrentKey, BinaryValue: []byte("value")},
+		}},
+	}
+	replicator.reserveAsyncJob(&concurrentJob)
+	if err := replicator.persistAsyncJob(concurrentJob); err != nil {
+		t.Fatalf("persistAsyncJob(concurrent) error = %v", err)
+	}
+	if deferred := replicator.prepareAsyncJobForQueue(concurrentJob); !deferred {
+		t.Fatal("concurrent durable job was not deferred behind restored backlog")
+	}
+	releaseOnce.Do(func() { close(release) })
+	for id := 1; id <= 101; id++ {
+		select {
+		case key := <-delivered:
+			want := fmt.Sprintf("restore:%03d", id)
+			if key != want {
+				t.Fatalf("restored delivery %d key = %q, want %q", id, key, want)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for restored delivery %d", id)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(outbox.jobs()) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if jobs := outbox.jobs(); len(jobs) != 0 {
+		t.Fatalf("outbox jobs after replay = %d, want 0", len(jobs))
+	}
+	if queue := replicator.LastResult().Queue; queue == nil || queue.DurableBacklog {
+		t.Fatalf("final queue stats = %#v, want durable backlog cleared", queue)
 	}
 }
 
@@ -2231,6 +2343,14 @@ func TestLevelDBReplicationOutboxSkipsCorruptPartialJobRecords(t *testing.T) {
 	}
 	if jobs := outbox.jobs(); len(jobs) != 1 || jobs[0].id != 2 || jobs[0].result.Key != "session:valid" {
 		t.Fatalf("jobs() with corrupt record = %#v, want only valid job", jobs)
+	}
+	page, cursor, hasMore := outbox.jobPage(0, 1)
+	if len(page) != 1 || page[0].id != 2 || cursor != 2 || !hasMore {
+		t.Fatalf("jobPage(first) = %#v cursor=%d more=%v, want valid job 2 and corrupt suffix", page, cursor, hasMore)
+	}
+	page, cursor, hasMore = outbox.jobPage(cursor, 1)
+	if len(page) != 0 || cursor != 3 || hasMore {
+		t.Fatalf("jobPage(corrupt suffix) = %#v cursor=%d more=%v, want cursor 3 at end", page, cursor, hasMore)
 	}
 	if err := outbox.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)

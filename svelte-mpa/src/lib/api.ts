@@ -142,6 +142,7 @@ export type ReplicationQueueStats = {
   oldest_queued_age_millis?: number;
   oldest_queued_key?: string;
   oldest_queued_targets?: string[];
+  durable_backlog?: boolean;
   in_flight_started_at?: string;
   in_flight_age_millis?: number;
   in_flight_key?: string;

@@ -497,6 +497,48 @@ func BenchmarkReplicationOutboxReplay10k(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationOutboxRestore100k(b *testing.B) {
+	const jobs = 100000
+	store, err := OpenLevelDBReplicationOutboxWithOptions(b.TempDir(), ReplicationOutboxOptions{
+		Codec:       ReplicationOutboxCodecBinary,
+		BatchWindow: 0,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = store.Close() })
+	batch := new(leveldb.Batch)
+	for id := 1; id <= jobs; id++ {
+		data, err := store.marshalJob(newReplicationOutboxJob(replicationOutboxBenchmarkJob(uint64(id), 64)))
+		if err != nil {
+			b.Fatal(err)
+		}
+		batch.Put(replicationOutboxLevelDBJobKey(uint64(id)), data)
+	}
+	if err := store.db.Write(batch, nil); err != nil {
+		b.Fatal(err)
+	}
+	batch.Reset()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+			Context:        ctx,
+			AsyncQueueSize: 1024,
+			AsyncOutbox:    store,
+		})
+		b.ReportMetric(float64(cap(replicator.queue)), "resident_jobs/op")
+		b.StopTimer()
+		replicator.Close()
+		b.StartTimer()
+	}
+	b.StopTimer()
+	b.ReportMetric(jobs, "durable_jobs/op")
+}
+
 func replicationOutboxBenchmarkJob(id uint64, valueBytes int) replicationJob {
 	return replicationJob{
 		id:     id,
