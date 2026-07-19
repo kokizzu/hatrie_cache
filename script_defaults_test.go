@@ -127,14 +127,14 @@ func TestMonitoringWrapperPassesWriteProtectionAndRateLimit(t *testing.T) {
 	}
 }
 
-func TestMonitoringWrapperPassesBoundedKeyStatsDefaults(t *testing.T) {
+func TestMonitoringWrapperDisablesKeyStatsByDefault(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {
 		t.Fatalf("ReadFile(Makefile) error = %v", err)
 	}
 	makefileText := string(makefile)
 	for _, token := range []string{
-		"KEY_STATS_MODE ?= bounded",
+		"KEY_STATS_MODE ?= off",
 		"KEY_STATS_CAPACITY ?= 100000",
 		"KEY_STATS_MODE='$(KEY_STATS_MODE)'",
 		"KEY_STATS_CAPACITY='$(KEY_STATS_CAPACITY)'",
@@ -150,7 +150,7 @@ func TestMonitoringWrapperPassesBoundedKeyStatsDefaults(t *testing.T) {
 	}
 	scriptText := string(script)
 	for _, token := range []string{
-		"key_stats_mode=${KEY_STATS_MODE:-bounded}",
+		"key_stats_mode=${KEY_STATS_MODE:-off}",
 		"key_stats_capacity=${KEY_STATS_CAPACITY:-100000}",
 		`-key-stats-mode "$key_stats_mode"`,
 		`-key-stats-capacity "$key_stats_capacity"`,

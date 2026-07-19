@@ -52,7 +52,7 @@ persistent command transport.
 | `4c869d0` | Ordered gRPC replication stream | Anti-entropy sync can keep one acknowledged HTTP/2 stream per target, with configurable HTTP fallback. |
 | `e5b127d` | Exact delta-first journal recovery | Retained deltas use one durable batch sync; compacted gaps fall back to an authenticated exact snapshot with stale-key deletion and restart-safe persistence. |
 | `532270c` | Architectural bottleneck baselines | Reproducible Makefile/script benchmarks capture per-key memory, contended reads, durable writes, snapshot pause, anti-entropy, and command transport. |
-| `3e79248` | Bounded per-key telemetry | Exact global counters remain while detailed key statistics default to a compact 100,000-key bound with configurable full/off modes. |
+| `3e79248` | Configurable per-key telemetry | Exact global counters remain while detailed key statistics support bounded/full modes and now default to off. |
 | `6d148c2` | Concurrent scalar read fast path | In-memory scalar reads use shared locking and retain exclusive cleanup/hydration fallbacks for expiration and LevelDB. |
 | `c549fb7` | Durable journal group commit | Concurrent mutators share bounded append and `fsync` batches without acknowledging or applying commands before durability succeeds. |
 | `7f4c1e1` | Non-blocking snapshot output | Point-in-time capture remains consistent while encoding, compression, visitors, database diff, and output run after global locks are released. |
@@ -122,7 +122,7 @@ raw rows, and tradeoffs are in `BENCHMARK.md`.
 
 | Feature | Baseline | Final | Improvement / tradeoff |
 | --- | ---: | ---: | --- |
-| Per-key telemetry, 100k keys | 242.5 retained B/key, unbounded | 213.5 retained B/key, 100k bound | 12.0% lower; `off` is 73.8% lower |
+| Per-key telemetry, 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower; opt-in 100k bound is 213.5 B/key |
 | Concurrent scalar reads | 1,528 ns/read | 632.4 ns/read | 2.42x faster |
 | Durable writes, 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster |
 | Snapshot maximum read pause | 528,624,130 ns | 142,374,086 ns | 3.71x shorter; total snapshot time is 5.5% higher and heap is 2.63x higher |

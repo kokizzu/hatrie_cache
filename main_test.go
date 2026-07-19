@@ -29,6 +29,13 @@ func newTestTrie(t *testing.T) *HatTrie {
 	return ht
 }
 
+func enableTestKeyStats(t *testing.T, ht *HatTrie) {
+	t.Helper()
+	if err := ht.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+		t.Fatalf("ConfigureKeyStats(full) error = %v", err)
+	}
+}
+
 func TestScanKeyFromBytesUsesOneAllocation(t *testing.T) {
 	suffix := []byte{'1', '2', 0, '3'}
 	var got string
@@ -1049,6 +1056,7 @@ func TestKeysRespectEmbeddedTrieLengthLimit(t *testing.T) {
 
 func TestCheckedLifecycleAPIsRespectEmbeddedTrieLengthLimit(t *testing.T) {
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	now := time.Unix(275, 0)
 	ht.now = func() time.Time { return now }
 
@@ -1337,6 +1345,7 @@ func TestStringOperationsReuseStorage(t *testing.T) {
 
 func TestEmptyAppendPrependStringDoNotRecordWrites(t *testing.T) {
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	now := time.Unix(330, 0)
 	ht.now = func() time.Time { return now }
 
@@ -2072,6 +2081,7 @@ func TestStatsTrackReadsWritesDeletesAndRates(t *testing.T) {
 
 func TestNoopSetAndBloomAddsDoNotRecordWrites(t *testing.T) {
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	now := time.Unix(920, 0)
 	ht.now = func() time.Time { return now }
 
@@ -2125,6 +2135,7 @@ func TestNoopSetAndBloomAddsDoNotRecordWrites(t *testing.T) {
 
 func TestKeyStatsTrackExistingKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	now := time.Unix(950, 0)
 	ht.now = func() time.Time { return now }
 
@@ -2286,6 +2297,7 @@ func TestScalarReadMethodsCanOverlap(t *testing.T) {
 
 func TestConcurrentStringReadFastPathPreservesValuesAndStats(t *testing.T) {
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	ht.UpsertString("key", "value-a")
 
 	const readers = 16
@@ -2345,12 +2357,22 @@ func TestConcurrentStringReadFastPathPreservesValuesAndStats(t *testing.T) {
 	}
 }
 
-func TestKeyStatsPolicyDefaultsToBounded(t *testing.T) {
+func TestKeyStatsPolicyDefaultsToOff(t *testing.T) {
 	ht := newTestTrie(t)
 
 	policy := ht.KeyStatsPolicy()
-	if policy.Mode != KeyStatsModeBounded || policy.Capacity != DefaultKeyStatsCapacity || policy.Tracked != 0 {
-		t.Fatalf("KeyStatsPolicy() = %#v, want bounded capacity %d with no tracked keys", policy, DefaultKeyStatsCapacity)
+	if policy.Mode != DefaultKeyStatsMode || policy.Capacity != 0 || policy.Tracked != 0 {
+		t.Fatalf("KeyStatsPolicy() = %#v, want off with no tracked keys", policy)
+	}
+	ht.UpsertString("key", "value")
+	if got := ht.GetString("key"); got != "value" {
+		t.Fatalf("GetString(key) = %q, want value", got)
+	}
+	if stats, ok := ht.StatsForKey("key"); ok {
+		t.Fatalf("StatsForKey(key) = %#v, true; want default telemetry disabled", stats)
+	}
+	if stats := ht.Stats(); stats.Reads != 1 || stats.Hits != 1 || stats.Writes != 1 {
+		t.Fatalf("Stats() = %#v, want exact cache-wide counters", stats)
 	}
 }
 
@@ -2485,13 +2507,14 @@ func TestConfigureKeyStatsRejectsInvalidPolicy(t *testing.T) {
 		})
 	}
 
-	if policy := ht.KeyStatsPolicy(); policy.Mode != KeyStatsModeBounded || policy.Capacity != DefaultKeyStatsCapacity {
+	if policy := ht.KeyStatsPolicy(); policy.Mode != DefaultKeyStatsMode || policy.Capacity != 0 {
 		t.Fatalf("KeyStatsPolicy() after rejected changes = %#v, want unchanged default", policy)
 	}
 }
 
 func TestRestoreKeyStatsUpdatesRatesAndClearsStats(t *testing.T) {
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	ht.UpsertString("key", "value")
 
 	restored := KeyStats{
@@ -2525,6 +2548,7 @@ func TestRestoreKeyStatsUpdatesRatesAndClearsStats(t *testing.T) {
 
 func TestKeyStatsTrackEmptyKeyAccessAndAvoidUnknownMissGrowth(t *testing.T) {
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	now := time.Unix(975, 0)
 	ht.now = func() time.Time { return now }
 

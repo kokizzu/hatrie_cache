@@ -2152,6 +2152,7 @@ func TestLevelDBStoreRoundTripRestoresValuesAndTTL(t *testing.T) {
 func TestLevelDBStoreSaveStreamsOnDiskBytesWithMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
+	enableTestKeyStats(t, source)
 	now := time.Unix(4010, 0)
 	expiresAt := now.Add(time.Hour)
 	source.now = func() time.Time { return now }
@@ -2195,6 +2196,7 @@ func TestLevelDBStoreSaveStreamsOnDiskBytesWithMetadata(t *testing.T) {
 	}
 
 	loaded := newTestTrie(t)
+	enableTestKeyStats(t, loaded)
 	loaded.now = func() time.Time { return now }
 	if count, err := store.Load(loaded); err != nil || count != 1 {
 		t.Fatalf("Load() = %d/%v, want one loaded value", count, err)
@@ -2448,6 +2450,7 @@ func TestLevelDBStoreRoundTripPreservesBlankKeys(t *testing.T) {
 func TestLevelDBStoreRoundTripRestoresKeyStats(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
+	enableTestKeyStats(t, source)
 	now := time.Unix(4500, 0)
 	source.now = func() time.Time { return now }
 
@@ -2470,6 +2473,7 @@ func TestLevelDBStoreRoundTripRestoresKeyStats(t *testing.T) {
 	}
 
 	loaded := newTestTrie(t)
+	enableTestKeyStats(t, loaded)
 	loaded.now = func() time.Time { return now.Add(time.Hour) }
 	if _, err := loaded.LoadLevelDB(path); err != nil {
 		t.Fatalf("LoadLevelDB() error = %v", err)
@@ -2856,6 +2860,7 @@ func TestLevelDBShouldHotLoadRejectsNegativeLimits(t *testing.T) {
 func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)
+	enableTestKeyStats(t, source)
 	now := time.Unix(4600, 0)
 	source.now = func() time.Time { return now }
 
@@ -2882,6 +2887,7 @@ func TestLevelDBStoreHotLoadKeepsColdReferencesAndHydratesOnAccess(t *testing.T)
 	defer store.Close()
 
 	loaded := newTestTrie(t)
+	enableTestKeyStats(t, loaded)
 	loaded.now = func() time.Time { return now.Add(30 * time.Minute) }
 	result, err := store.LoadWithPolicy(loaded, policy)
 	if err != nil {
@@ -4762,6 +4768,7 @@ func TestLevelDBStoreSaveRewritesColdReferenceWhenStatsChange(t *testing.T) {
 
 	now := time.Unix(4800, 0)
 	loaded := newTestTrie(t)
+	enableTestKeyStats(t, loaded)
 	loaded.now = func() time.Time { return now }
 	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
@@ -4801,6 +4808,7 @@ func TestLevelDBStoreSavePatchesBinaryColdReferenceMetadata(t *testing.T) {
 	defer store.Close()
 
 	source := newTestTrie(t)
+	enableTestKeyStats(t, source)
 	source.UpsertString("cold", "value")
 	if err := store.Save(source); err != nil {
 		t.Fatalf("Save(source) error = %v", err)
@@ -4819,6 +4827,7 @@ func TestLevelDBStoreSavePatchesBinaryColdReferenceMetadata(t *testing.T) {
 
 	now := time.Unix(5100, 0)
 	loaded := newTestTrie(t)
+	enableTestKeyStats(t, loaded)
 	loaded.now = func() time.Time { return now }
 	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)

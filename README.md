@@ -562,17 +562,17 @@ make monitoring-server WRITE_PROTECTION=true
 make monitoring-server RATE_LIMIT=50 AUDIT_LOG_PATH=data/audit.jsonl
 ```
 
-Per-key monitoring metadata is bounded to 100,000 active keys by default. This
-does not limit or evict cached values: cache-wide counters remain exact, while
-`StatsForKey` reports `false` for keys whose detailed telemetry is not retained.
-The bounded tracker samples five candidates and replaces the least recently
-active candidate in constant time. Use `full` for the previous unlimited
-per-key statistics behavior, or `off` to retain only cache-wide statistics:
+Per-key monitoring metadata is off by default, so high-cardinality workloads
+retain only exact cache-wide counters and `StatsForKey` reports `false`. This
+does not limit or evict cached values. Use `bounded` to retain details for up to
+100,000 active keys by default; its tracker samples five candidates and replaces
+the least recently active candidate in constant time. Use `full` only when
+unlimited per-key statistics are explicitly required:
 
 ```
+make monitoring-server KEY_STATS_MODE=bounded
 make monitoring-server KEY_STATS_MODE=bounded KEY_STATS_CAPACITY=250000
 make monitoring-server KEY_STATS_MODE=full
-make monitoring-server KEY_STATS_MODE=off
 ```
 
 Long-running daemon options can also live in a JSON config file. Config keys
@@ -584,8 +584,8 @@ duration strings. Explicit CLI flags override file values:
   "monitoring_server": true,
   "monitoring_addr": "0.0.0.0:8080",
   "monitoring_web_dir": "svelte-mpa/dist",
-  "key_stats_mode": "bounded",
-  "key_stats_capacity": 100000,
+  "key_stats_mode": "off",
+  "key_stats_capacity": 0,
   "db_path": "data/cache.leveldb",
   "snapshot_path": "data/snapshot.hc",
   "snapshot_interval": "30s",

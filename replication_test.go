@@ -3867,6 +3867,7 @@ func TestHTTPReplicatorSyncDoesNotRecordUserReads(t *testing.T) {
 	defer target.Close()
 
 	trie := newTestTrie(t)
+	enableTestKeyStats(t, trie)
 	trie.UpsertString("session:1", "one")
 	trie.UpsertString("session:2", "two")
 	before := trie.Stats()

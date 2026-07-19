@@ -262,8 +262,8 @@ func TestParseConfigKeyStatsDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseConfig(defaults) error = %v", err)
 	}
-	if defaultCfg.keyStatsMode != string(hatriecache.KeyStatsModeBounded) || defaultCfg.keyStatsCapacity != hatriecache.DefaultKeyStatsCapacity {
-		t.Fatalf("default key stats config = %q/%d, want bounded/%d", defaultCfg.keyStatsMode, defaultCfg.keyStatsCapacity, hatriecache.DefaultKeyStatsCapacity)
+	if defaultCfg.keyStatsMode != string(hatriecache.DefaultKeyStatsMode) || defaultCfg.keyStatsCapacity != 0 {
+		t.Fatalf("default key stats config = %q/%d, want off/0", defaultCfg.keyStatsMode, defaultCfg.keyStatsCapacity)
 	}
 
 	fullCfg, err := parseConfig([]string{"-key-stats-mode", "full"}, &bytes.Buffer{})

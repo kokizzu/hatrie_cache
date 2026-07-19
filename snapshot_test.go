@@ -740,6 +740,7 @@ func TestSnapshotSaveRewritesColdLevelDBReferenceWhenStatsChange(t *testing.T) {
 
 	now := time.Unix(4900, 0)
 	loaded := newTestTrie(t)
+	enableTestKeyStats(t, loaded)
 	loaded.now = func() time.Time { return now }
 	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
 		t.Fatalf("LoadWithPolicy() error = %v", err)
@@ -996,6 +997,7 @@ func TestWriteFileAtomicCleansTemporaryFileOnRenameError(t *testing.T) {
 
 func TestSnapshotRoundTripRestoresKeyStats(t *testing.T) {
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	now := time.Unix(2050, 0)
 	ht.now = func() time.Time { return now }
 
@@ -1019,6 +1021,7 @@ func TestSnapshotRoundTripRestoresKeyStats(t *testing.T) {
 	}
 
 	loaded := newTestTrie(t)
+	enableTestKeyStats(t, loaded)
 	loaded.now = func() time.Time { return now.Add(time.Hour) }
 	if err := loaded.LoadSnapshot(path); err != nil {
 		t.Fatalf("LoadSnapshot() error = %v", err)
@@ -1087,6 +1090,7 @@ func TestSaveSnapshotStreamsOnDiskBytesWithMetadata(t *testing.T) {
 	now := time.Unix(6200, 0)
 	expiresAt := now.Add(time.Hour)
 	ht := newTestTrie(t)
+	enableTestKeyStats(t, ht)
 	ht.now = func() time.Time { return now }
 	payload := testPayload(DiskBytesThreshold + 1)
 
@@ -1104,6 +1108,7 @@ func TestSaveSnapshotStreamsOnDiskBytesWithMetadata(t *testing.T) {
 	}
 
 	loaded := newTestTrie(t)
+	enableTestKeyStats(t, loaded)
 	loaded.now = func() time.Time { return now }
 	if err := loaded.LoadSnapshot(path); err != nil {
 		t.Fatalf("LoadSnapshot() error = %v", err)

@@ -642,6 +642,7 @@ const (
 	KeyStatsModeFull    KeyStatsMode = "full"
 	KeyStatsModeOff     KeyStatsMode = "off"
 
+	DefaultKeyStatsMode     = KeyStatsModeOff
 	DefaultKeyStatsCapacity = 100_000
 	keyStatsEvictionSamples = 5
 )
@@ -2083,8 +2084,8 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		dbrefs:           CreateLevelDBReferenceStorage(),
 		expires:          map[string]time.Time{},
 		keyStats:         map[string]*trackedKeyStats{},
-		keyStatsMode:     KeyStatsModeBounded,
-		keyStatsCapacity: DefaultKeyStatsCapacity,
+		keyStatsMode:     DefaultKeyStatsMode,
+		keyStatsCapacity: 0,
 		now:              time.Now,
 	}
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)

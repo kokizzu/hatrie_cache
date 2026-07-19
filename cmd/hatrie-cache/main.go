@@ -398,7 +398,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		monitoringWebDir:            "svelte-mpa/dist",
 		monitoringReadHeaderTimeout: defaultMonitoringReadHeaderTimeout,
 		monitoringIdleTimeout:       defaultMonitoringIdleTimeout,
-		keyStatsMode:                string(hatriecache.KeyStatsModeBounded),
+		keyStatsMode:                string(hatriecache.DefaultKeyStatsMode),
 		keyStatsCapacity:            hatriecache.DefaultKeyStatsCapacity,
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
 		replicationMode:             replicationModeJournal,
