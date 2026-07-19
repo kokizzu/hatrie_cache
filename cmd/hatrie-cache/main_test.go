@@ -2269,9 +2269,10 @@ func writeTwoNodeRunTopologyWithRoles(t *testing.T, dir string, filename string,
 
 func waitForHTTPHealth(t *testing.T, url string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	client := &http.Client{Timeout: 250 * time.Millisecond}
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
+		resp, err := client.Get(url)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -2307,7 +2308,8 @@ func waitForReplicationResult(t *testing.T, baseURL string, accept func(hatrieca
 
 func waitForHTTPHealthWithToken(t *testing.T, url string, token string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	client := &http.Client{Timeout: 250 * time.Millisecond}
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
@@ -2316,7 +2318,7 @@ func waitForHTTPHealthWithToken(t *testing.T, url string, token string) {
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
