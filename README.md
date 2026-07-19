@@ -742,6 +742,13 @@ tuples. Existing JSON records still load automatically.
 Leaving format variables unset in the Makefile wrapper uses the compiled Go
 defaults; set them only when you want to override the default format.
 Set `DB_FORMAT=json` to keep writing the previous JSON record layout.
+Pebble full saves write a complete generation as an external SST, ingest it,
+and then atomically switch a synced active-generation marker. A crash before
+that marker leaves the previous generation active; a crash after it exposes
+the complete new generation. Startup removes unreferenced generations. Capture
+is page-bounded and serializes outside the trie mutex; under sustained writes it
+falls back to a bounded disk spool so save memory does not grow with the cache.
+LevelDB keeps its existing record-by-record replacement format.
 `DB_SYNC_INTERVAL` performs one full persistent-store save at startup, then
 periodically syncs only dirty keys changed by HTTP commands, gRPC commands, and
 journal pull replay while the server is running:
@@ -817,14 +824,15 @@ make bench-storage-backends BENCHTIME=3x COUNT=5
 
 | Backend | Full cycle | Save/key | Churn/op | Load/key | Heap/cycle | Peak RSS | Disk/key |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| LevelDB | 78.944 ms | 2,160 ns | 2,392 ns | 1,836 ns | 41.53 MB | 82,880 KiB | 265.3 B |
-| Pebble | 73.161 ms | 2,058 ns | 1,869 ns | 1,872 ns | 32.02 MB | 79,104 KiB | 581.5 B |
+| LevelDB | 91.602 ms | 2,197 ns | 2,471 ns | 1,856 ns | 41.52 MB | 81,384 KiB | 265.3 B |
+| Pebble | 98.273 ms | 2,441 ns | 3,312 ns | 2,295 ns | 20.52 MB | 82,684 KiB | 285.7 B |
 
-Pebble is the new-path default because this fixture is 1.08x faster overall,
-1.05x faster to save, 1.28x faster under incremental churn, and allocates 1.30x
-less heap. LevelDB loads 1.02x faster, uses 2.19x less disk, and closes about
-17.1x faster; select it for disk-constrained or frequently opened short-lived
-processes. Pebble peak RSS was 1.05x lower on this run. See
+Pebble remains the new-path default because generation saves allocate 2.02x
+less cumulative heap and reduce its live disk footprint to within 1.08x of
+LevelDB while providing an atomic full-state switch. LevelDB completed this
+mixed fixture 1.07x faster, loaded 1.24x faster, and closed 21.3x faster;
+select it for latency-sensitive or frequently opened short-lived processes.
+Peak RSS was effectively tied on this run. See
 [BENCHMARK.md](BENCHMARK.md#persistent-storage-backend-bakeoff) for raw medians
 and phase details.
 

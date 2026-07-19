@@ -586,6 +586,9 @@ func directorySizeBytes(path string) (int64, error) {
 	var size int64
 	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if info == nil || info.IsDir() {
@@ -594,9 +597,6 @@ func directorySizeBytes(path string) (int64, error) {
 		size += info.Size()
 		return nil
 	})
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
 	return size, err
 }
 

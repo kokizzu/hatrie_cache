@@ -15,10 +15,14 @@ import (
 
 // PebbleStore persists HAT-trie records in a Pebble LSM database.
 type PebbleStore struct {
-	mu     sync.RWMutex
-	path   string
-	db     *pebble.DB
-	format StorageFormat
+	saveMu             sync.RWMutex
+	mu                 sync.RWMutex
+	path               string
+	db                 *pebble.DB
+	format             StorageFormat
+	activeGeneration   uint64
+	nextGeneration     uint64
+	generationSaveHook func(string) error
 }
 
 type pebbleStoredRecord struct {
@@ -48,7 +52,22 @@ func OpenPebbleStoreWithFormat(path string, format StorageFormat) (*PebbleStore,
 	if err != nil {
 		return nil, err
 	}
-	return &PebbleStore{path: path, db: db, format: format}, nil
+	activeGeneration, nextGeneration, err := loadPebbleGenerationState(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := cleanupPebbleGenerations(db, activeGeneration); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &PebbleStore{
+		path:             path,
+		db:               db,
+		format:           format,
+		activeGeneration: activeGeneration,
+		nextGeneration:   nextGeneration,
+	}, nil
 }
 
 func (store *PebbleStore) Backend() StorageBackend {
@@ -82,6 +101,8 @@ func (store *PebbleStore) Close() error {
 	if store == nil {
 		return nil
 	}
+	store.saveMu.Lock()
+	defer store.saveMu.Unlock()
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if store.db == nil {
@@ -93,22 +114,7 @@ func (store *PebbleStore) Close() error {
 }
 
 func (store *PebbleStore) Save(trie *HatTrie) error {
-	if trie == nil {
-		return ErrNilHatTrie
-	}
-	records := make([]pebbleStoredRecord, 0, trie.Size())
-	if err := trie.scanLevelDBEntryDataForStore(nil, nil, store.format, func(key string, data []byte) error {
-		records = append(records, pebbleStoredRecord{key: key, data: data, ok: true})
-		return nil
-	}); err != nil {
-		return err
-	}
-	db, unlock, err := store.lockDB()
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	return pebbleReplaceRecords(db, records)
+	return store.saveGeneration(trie)
 }
 
 func (store *PebbleStore) SaveKeys(trie *HatTrie, keys []string) error {
@@ -116,6 +122,8 @@ func (store *PebbleStore) SaveKeys(trie *HatTrie, keys []string) error {
 }
 
 func (store *PebbleStore) SaveKeysWithOptions(trie *HatTrie, keys []string, options LevelDBSaveOptions) error {
+	store.saveMu.RLock()
+	defer store.saveMu.RUnlock()
 	options, err := normalizeLevelDBSaveOptions(options)
 	if err != nil {
 		return err
@@ -140,11 +148,12 @@ func (store *PebbleStore) SaveKeysWithOptions(trie *HatTrie, keys []string, opti
 		return err
 	}
 	defer unlock()
+	generation := store.activeGeneration
 	compare := levelDBShouldCompareBeforeWrite(options.CompareBeforeWrite, len(records))
 	batch := db.NewBatch()
 	defer batch.Close()
 	for _, record := range records {
-		key := levelDBKey(record.key)
+		key := pebbleGenerationEntryKey(generation, record.key)
 		if !record.ok {
 			if err := batch.Delete(key, nil); err != nil {
 				return err
@@ -152,7 +161,7 @@ func (store *PebbleStore) SaveKeysWithOptions(trie *HatTrie, keys []string, opti
 			continue
 		}
 		if compare {
-			existing, exists, err := pebbleEntryDataFromDB(db, record.key)
+			existing, exists, err := pebbleEntryDataFromDB(db, generation, record.key)
 			if err != nil {
 				return err
 			}
@@ -200,10 +209,11 @@ func (store *PebbleStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolicy
 		return LevelDBLoadResult{}, err
 	}
 	defer unlock()
+	generation := store.activeGeneration
 	snapshot := db.NewSnapshot()
 	defer snapshot.Close()
 	return loadPersistentEntryData(trie, store, policy, func(visit func(snapshotEntry, []byte) error) error {
-		return scanPebbleSnapshotEntryData(snapshot, visit)
+		return scanPebbleSnapshotEntryData(snapshot, generation, visit)
 	})
 }
 
@@ -221,6 +231,8 @@ func (store *PebbleStore) Flush(trie *HatTrie) (LevelDBFlushResult, error) {
 }
 
 func (store *PebbleStore) SpillCold(trie *HatTrie, options LevelDBSpillOptions) (LevelDBSpillResult, error) {
+	store.saveMu.RLock()
+	defer store.saveMu.RUnlock()
 	startedAt := time.Now().UTC()
 	result := LevelDBSpillResult{
 		Store:         string(StorageBackendPebble),
@@ -244,9 +256,10 @@ func (store *PebbleStore) SpillCold(trie *HatTrie, options LevelDBSpillOptions) 
 		return finish(err)
 	}
 	defer unlock()
+	generation := store.activeGeneration
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
-	if err := trie.spillColdPebbleLocked(store, db, options, &result); err != nil {
+	if err := trie.spillColdPebbleLocked(store, db, generation, options, &result); err != nil {
 		return finish(err)
 	}
 	return finish(nil)
@@ -265,11 +278,11 @@ func (store *PebbleStore) Compact(options LevelDBCompactionOptions) (LevelDBComp
 		return result, err
 	}
 	defer unlock()
+	generation := store.activeGeneration
 	result.SizeBytesBefore, err = directorySizeBytes(store.path)
 	if err == nil {
 		result.PropertiesBefore = pebbleProperties(db)
-		rng := levelDBCompactionRange(options)
-		err = db.Compact(rng.Start, rng.Limit, true)
+		err = compactPebbleGenerations(db, generation, options)
 	}
 	if err == nil {
 		result.SizeBytesAfter, err = directorySizeBytes(store.path)
@@ -299,7 +312,7 @@ func (store *PebbleStore) entryData(key string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	defer unlock()
-	return pebbleEntryDataFromDB(db, key)
+	return pebbleEntryDataFromDB(db, store.activeGeneration, key)
 }
 
 func (store *PebbleStore) lockDB() (*pebble.DB, func(), error) {
@@ -360,8 +373,8 @@ func pebbleReplaceRecords(db *pebble.DB, records []pebbleStoredRecord) error {
 	return batch.Commit(pebble.Sync)
 }
 
-func pebbleEntryDataFromDB(db *pebble.DB, key string) ([]byte, bool, error) {
-	data, closer, err := db.Get(levelDBKey(key))
+func pebbleEntryDataFromDB(db *pebble.DB, generation uint64, key string) ([]byte, bool, error) {
+	data, closer, err := db.Get(pebbleGenerationEntryKey(generation, key))
 	if errors.Is(err, pebble.ErrNotFound) {
 		return nil, false, nil
 	}
@@ -372,17 +385,15 @@ func pebbleEntryDataFromDB(db *pebble.DB, key string) ([]byte, bool, error) {
 	return cloneBytes(data), true, nil
 }
 
-func scanPebbleSnapshotEntryData(snapshot *pebble.Snapshot, visit func(snapshotEntry, []byte) error) error {
-	iterator, err := snapshot.NewIter(&pebble.IterOptions{
-		LowerBound: levelDBEntryPrefix,
-		UpperBound: bytesPrefixLimit(levelDBEntryPrefix),
-	})
+func scanPebbleSnapshotEntryData(snapshot *pebble.Snapshot, generation uint64, visit func(snapshotEntry, []byte) error) error {
+	prefix := pebbleGenerationEntryPrefix(generation)
+	iterator, err := snapshot.NewIter(pebblePrefixIterOptions(prefix))
 	if err != nil {
 		return err
 	}
 	defer iterator.Close()
 	for valid := iterator.First(); valid; valid = iterator.Next() {
-		key := string(iterator.Key()[len(levelDBEntryPrefix):])
+		key := string(iterator.Key()[len(prefix):])
 		data := iterator.Value()
 		entry, err := decodeLevelDBEntryForKey(key, data)
 		if err != nil {
@@ -397,7 +408,7 @@ func scanPebbleSnapshotEntryData(snapshot *pebble.Snapshot, visit func(snapshotE
 	return iterator.Error()
 }
 
-func (trie *HatTrie) spillColdPebbleLocked(store *PebbleStore, db *pebble.DB, options LevelDBSpillOptions, result *LevelDBSpillResult) error {
+func (trie *HatTrie) spillColdPebbleLocked(store *PebbleStore, db *pebble.DB, generation uint64, options LevelDBSpillOptions, result *LevelDBSpillResult) error {
 	trie.ensureOpen()
 	now := time.Time{}
 	if len(trie.expires) > 0 {
@@ -437,7 +448,7 @@ func (trie *HatTrie) spillColdPebbleLocked(store *PebbleStore, db *pebble.DB, op
 		if err != nil {
 			return err
 		}
-		if err := batch.Set(levelDBKey(candidate.key), data, nil); err != nil {
+		if err := batch.Set(pebbleGenerationEntryKey(generation, candidate.key), data, nil); err != nil {
 			return err
 		}
 		prepared = append(prepared, levelDBPreparedSpill{candidate: candidate, entry: entry, data: data})

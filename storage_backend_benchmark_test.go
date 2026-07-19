@@ -23,6 +23,80 @@ func BenchmarkPersistentStorageBackend10k(b *testing.B) {
 	}
 }
 
+func BenchmarkPebbleFullSaveArchitecture10k(b *testing.B) {
+	for _, mode := range []struct {
+		name string
+		save func(*PebbleStore, *HatTrie) error
+	}{
+		{name: "LegacyBatch", save: benchmarkPebbleLegacyBatchSave},
+		{name: "GenerationSST", save: func(store *PebbleStore, trie *HatTrie) error { return store.Save(trie) }},
+	} {
+		b.Run(mode.name, func(b *testing.B) {
+			root := b.TempDir()
+			var diskBytes int64
+			var tableBytes int64
+			var walBytes int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				b.StopTimer()
+				path := filepath.Join(root, fmt.Sprintf("run-%06d", iteration))
+				store, err := OpenPebbleStore(path)
+				if err != nil {
+					b.Fatalf("OpenPebbleStore() error = %v", err)
+				}
+				trie := benchmarkStorageTrie(b, benchmarkStorageEntries, uint64(iteration+1))
+				b.StartTimer()
+				if err := mode.save(store, trie); err != nil {
+					b.Fatalf("Save() error = %v", err)
+				}
+				b.StopTimer()
+				restored := CreateHatTrie()
+				if count, err := store.Load(restored); err != nil || count != benchmarkStorageEntries {
+					b.Fatalf("Load() = %d/%v, want %d/nil", count, err, benchmarkStorageEntries)
+				}
+				if err := store.Close(); err != nil {
+					b.Fatalf("Close() error = %v", err)
+				}
+				size, err := directorySizeBytes(path)
+				if err != nil {
+					b.Fatalf("directorySizeBytes() error = %v", err)
+				}
+				tables, wal, err := storageEngineFileBytes(path)
+				if err != nil {
+					b.Fatalf("storageEngineFileBytes() error = %v", err)
+				}
+				diskBytes += size
+				tableBytes += tables
+				walBytes += wal
+				restored.Destroy()
+				trie.Destroy()
+				b.StartTimer()
+			}
+			iterations := float64(b.N * benchmarkStorageEntries)
+			b.ReportMetric(float64(diskBytes)/iterations, "disk_B/key")
+			b.ReportMetric(float64(tableBytes)/iterations, "table_B/key")
+			b.ReportMetric(float64(walBytes)/iterations, "wal_B/key")
+		})
+	}
+}
+
+func benchmarkPebbleLegacyBatchSave(store *PebbleStore, trie *HatTrie) error {
+	records := make([]pebbleStoredRecord, 0, trie.Size())
+	if err := trie.scanLevelDBEntryDataForStore(nil, nil, store.format, func(key string, data []byte) error {
+		records = append(records, pebbleStoredRecord{key: key, data: data, ok: true})
+		return nil
+	}); err != nil {
+		return err
+	}
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return pebbleReplaceRecords(db, records)
+}
+
 func benchmarkPersistentStorageBackend10k(b *testing.B, backend StorageBackend) {
 	root := b.TempDir()
 	var openDuration time.Duration

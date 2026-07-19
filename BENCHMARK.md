@@ -165,7 +165,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Structured gzip-best snapshot](README.md#serialization-tradeoffs) | Gzip JSON: 18,866,057 ns; 6,956 disk B | Gzip binary: 9,847,768 ns; 5,787 disk B | 1.92x faster, 16.8% smaller, 5.94x fewer allocs | Maximum compression remains CPU-intensive |
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
-| Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 78.944 ms cycle; 41.53 MB heap; 265.3 disk B/key | Pebble: 73.161 ms cycle; 32.02 MB heap; 581.5 disk B/key | 1.08x faster, 1.30x lower cumulative heap | LevelDB uses 2.19x less disk and closes 17.1x faster |
+| Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
+| Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
 | Earlier | [Replication request batching](#replication-batching-benchmark), 10k keys | Historical: 51,455,645,995 ns; 10,000 requests | First batched baseline: 162,195,812 ns; 1 request | About 317x faster, 10,000x fewer requests | Historical rows came from separate controlled runs |
 | Earlier | [Replication routing and encoding](#replication-batching-benchmark), 10k keys | 162,195,812 ns; 144,227 wire B; 57,035,706 heap B | 18,893,092 ns; 55,795 wire B; 948,495 heap B | 8.58x faster, 2.59x smaller wire, 60.13x lower heap | Compact paths retain legacy materialization fallbacks |
 | Earlier | [Replication page traversal](#replication-page-traversal), 10 pages | 61,122,327 ns; 1,877,005 heap B; 123,996 allocs | 19,709,083 ns; 999,805 heap B; 11,885 allocs | 3.10x faster, 1.88x lower heap, 10.43x fewer allocs | Mutation invalidates and safely restarts the cursor |
@@ -208,6 +209,31 @@ their detailed sections; they are not assigned invented speedup ratios.
 <a id="persistent-storage-backend-bakeoff"></a>
 ### Persistent Storage Backend Bakeoff
 
+<a id="pebble-generation-full-save"></a>
+#### Generation-Based Full Save
+
+Pebble now streams a page-bounded cache capture into an external SST and
+atomically activates it with one synced generation marker. The legacy baseline
+materializes every encoded row in Go memory and commits it through Pebble's
+WAL. Both paths return crash-durable state; only the generation path gives an
+atomic complete-state switch without retaining a full-data WAL copy. Run:
+
+```sh
+make bench-pebble-generation BENCHTIME=3x COUNT=5
+```
+
+| Path, median of five | Time/op | Heap B/op | Allocs/op | Disk B/key | Table B/key | WAL B/key | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Legacy batch | 18.369 ms | 21,050,818 | 40,283 | 598.0 | 297.8 | 300.1 | baseline |
+| Generation SST | 24.651 ms | 9,607,717 | 40,943 | 299.6 | 299.4 | 0.0281 | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL |
+
+The generation path pays 1.34x latency and 1.02x allocations to build and
+ingest the final table instead of only appending the full payload to a WAL.
+Serialization occurs outside the global trie lock. Two optimistic direct-SST
+captures avoid temporary spool I/O when writes are quiet; sustained concurrent
+mutation uses a bounded disk spool and final mutation reconciliation. Raw output
+is in `build/benchmarks/pebble-full-save-generation.txt`.
+
 The backend contract uses the same binary record codec and exercises a full
 10,000-key save, 1,000 incremental operations (500 updates, 250 deletes, 250
 inserts), a full materialized load, and manual compaction. Values are
@@ -222,19 +248,19 @@ make bench-storage-backends BENCHTIME=3x COUNT=5
 
 | Phase / resource | LevelDB median | Pebble median | Pebble improvement |
 | --- | ---: | ---: | ---: |
-| Full cycle | 78.944 ms | 73.161 ms | 1.08x faster |
-| Open | 7.962 ms | 8.986 ms | 0.89x; LevelDB is 1.13x faster |
-| Full save | 2,160 ns/key | 2,058 ns/key | 1.05x faster |
-| Incremental churn | 2,392 ns/op | 1,869 ns/op | 1.28x faster |
-| Full load | 1,836 ns/key | 1,872 ns/key | 0.98x; LevelDB is 1.02x faster |
-| Manual compact | 30.015 ms | 21.249 ms | 1.41x faster |
-| Close | 43.734 us | 748.437 us | 0.06x; LevelDB is 17.1x faster |
-| Cumulative heap | 41,525,352 B/cycle | 32,024,525 B/cycle | 1.30x lower |
-| Allocations | 97,275/cycle | 96,836/cycle | 1.00x lower |
-| Peak RSS | 82,880 KiB | 79,104 KiB | 1.05x lower |
-| Live directory | 265.3 B/key | 581.5 B/key | 0.46x; LevelDB is 2.19x smaller |
-| Table files | 265.1 B/key | 276.1 B/key | 0.96x; LevelDB is 1.04x smaller |
-| Retained WAL | 0 B/key | 305.2 B/key | Pebble retains the active WAL |
+| Full cycle | 91.602 ms | 98.273 ms | 0.93x; LevelDB is 1.07x faster |
+| Open | 5.381 ms | 13.555 ms | 0.40x; LevelDB is 2.52x faster |
+| Full save | 2,197 ns/key | 2,441 ns/key | 0.90x; LevelDB is 1.11x faster |
+| Incremental churn | 2,471 ns/op | 3,312 ns/op | 0.75x; LevelDB is 1.34x faster |
+| Full load | 1,856 ns/key | 2,295 ns/key | 0.81x; LevelDB is 1.24x faster |
+| Manual compact | 32.867 ms | 19.986 ms | 1.64x faster |
+| Close | 47.521 us | 1.012 ms | 0.05x; LevelDB is 21.3x faster |
+| Cumulative heap | 41,522,003 B/cycle | 20,521,051 B/cycle | 2.02x lower |
+| Allocations | 97,272/cycle | 98,608/cycle | 0.99x; 1.01x higher |
+| Peak RSS | 81,384 KiB | 82,684 KiB | effectively tied; Pebble is 1.02x higher |
+| Live directory | 265.3 B/key | 285.7 B/key | 0.93x; LevelDB is 1.08x smaller |
+| Table files | 265.1 B/key | 278.0 B/key | 0.95x; LevelDB is 1.05x smaller |
+| Retained WAL | 0 B/key | 7.528 B/key | generation saves avoid the full-data WAL copy |
 
 Raw five-sample output is written to
 `build/benchmarks/storage-LevelDB.txt` and
@@ -243,20 +269,21 @@ contain `/usr/bin/time -v` process metrics. The measured samples used above are:
 
 | Engine | Sample | Cycle ms | Save ns/key | Churn ns/op | Load ns/key | Compact ms | Heap B/cycle | Allocs/cycle |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| LevelDB | 1 | 86.091 | 2,546 | 2,829 | 1,742 | 31.778 | 41,525,426 | 97,288 |
-| LevelDB | 2 | 78.563 | 2,125 | 2,369 | 1,693 | 28.595 | 41,525,352 | 97,275 |
-| LevelDB | 3 | 82.314 | 2,160 | 2,392 | 1,977 | 30.539 | 41,528,141 | 97,279 |
-| LevelDB | 4 | 78.944 | 2,447 | 2,475 | 1,836 | 27.912 | 41,515,717 | 97,261 |
-| LevelDB | 5 | 78.324 | 2,042 | 2,358 | 1,953 | 30.015 | 41,517,997 | 97,266 |
-| Pebble | 1 | 75.254 | 2,197 | 1,712 | 1,796 | 21.993 | 30,680,216 | 96,838 |
-| Pebble | 2 | 73.604 | 2,058 | 3,685 | 1,954 | 21.249 | 32,065,861 | 96,869 |
-| Pebble | 3 | 71.598 | 2,225 | 1,744 | 1,872 | 19.172 | 32,069,890 | 96,826 |
-| Pebble | 4 | 67.306 | 1,957 | 1,869 | 1,767 | 19.646 | 30,475,509 | 96,787 |
-| Pebble | 5 | 73.161 | 1,934 | 1,975 | 1,883 | 21.690 | 32,024,525 | 96,836 |
+| LevelDB | 1 | 91.602 | 2,143 | 2,207 | 1,856 | 32.867 | 41,524,649 | 97,282 |
+| LevelDB | 2 | 104.694 | 2,771 | 2,811 | 1,921 | 50.135 | 41,512,316 | 97,266 |
+| LevelDB | 3 | 75.637 | 1,972 | 6,036 | 1,754 | 26.902 | 41,522,625 | 97,278 |
+| LevelDB | 4 | 87.258 | 2,197 | 2,379 | 1,743 | 31.357 | 41,522,003 | 97,272 |
+| LevelDB | 5 | 93.452 | 2,378 | 2,471 | 1,917 | 43.114 | 41,514,169 | 97,264 |
+| Pebble | 1 | 81.037 | 2,441 | 3,248 | 2,601 | 17.820 | 20,459,844 | 98,608 |
+| Pebble | 2 | 104.593 | 2,340 | 3,312 | 2,348 | 20.871 | 20,521,051 | 98,624 |
+| Pebble | 3 | 98.273 | 2,418 | 3,266 | 2,295 | 19.986 | 20,534,888 | 98,601 |
+| Pebble | 4 | 99.542 | 2,494 | 4,314 | 2,192 | 33.908 | 20,535,771 | 98,617 |
+| Pebble | 5 | 80.124 | 2,503 | 4,229 | 2,277 | 19.088 | 20,492,964 | 98,583 |
 
-Pebble is the default for a new `DB_BACKEND=auto` path because the active
-save/churn/load cycle is faster and cumulative heap is lower. LevelDB remains a
-configurable fallback for disk-constrained deployments and short-lived tools.
+Pebble is the default for a new `DB_BACKEND=auto` path because generation saves
+provide atomic replacement, cumulative heap is 2.02x lower, and disk is now
+within 1.08x of LevelDB. LevelDB remains a configurable fallback for
+latency-sensitive deployments and short-lived tools.
 Auto mode reads `<DB_PATH>.backend`; unmarked non-empty directories remain
 LevelDB for backward compatibility. This benchmark measures one local NVMe
 host and does not claim identical ratios for different filesystems, sync
