@@ -2593,6 +2593,42 @@ func TestKeyStatsFullAndOffPolicies(t *testing.T) {
 	})
 }
 
+func TestKeyStatsModeTransitionsPreserveGlobalStats(t *testing.T) {
+	ht := newTestTrie(t)
+	now := time.Unix(980, 0)
+	ht.now = func() time.Time { return now }
+
+	ht.UpsertString("one", "value")
+	if got := ht.GetString("one"); got != "value" {
+		t.Fatalf("GetString(one) = %q, want value", got)
+	}
+	now = now.Add(time.Second)
+	if err := ht.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+		t.Fatalf("ConfigureKeyStats(full) error = %v", err)
+	}
+	ht.UpsertString("two", "value")
+	_ = ht.GetString("missing")
+	if !ht.Delete("one") {
+		t.Fatal("Delete(one) = false, want true")
+	}
+	now = now.Add(time.Second)
+	if err := ht.ConfigureKeyStats(KeyStatsModeOff, 0); err != nil {
+		t.Fatalf("ConfigureKeyStats(off) error = %v", err)
+	}
+	ht.UpsertString("three", "value")
+	if got := ht.GetString("three"); got != "value" {
+		t.Fatalf("GetString(three) = %q, want value", got)
+	}
+
+	stats := ht.Stats()
+	if stats.Reads != 3 || stats.Hits != 2 || stats.Misses != 1 || stats.Writes != 4 || stats.Deletes != 1 {
+		t.Fatalf("Stats() after mode transitions = %#v, want reads/hits/misses/writes/deletes 3/2/1/4/1", stats)
+	}
+	if !stats.LastHit.Equal(now) || !stats.LastWrite.Equal(now) {
+		t.Fatalf("Stats() timestamps after mode transitions = hit %s write %s, want %s", stats.LastHit, stats.LastWrite, now)
+	}
+}
+
 func TestConfigureKeyStatsRejectsInvalidPolicy(t *testing.T) {
 	ht := newTestTrie(t)
 
@@ -2843,6 +2879,49 @@ func TestConcurrentStatsUpdatesAreSynchronized(t *testing.T) {
 	}
 	if stats.Hits != workers*iterations || stats.Misses != workers*iterations {
 		t.Fatalf("hits/misses = %d/%d, want %d/%d", stats.Hits, stats.Misses, workers*iterations, workers*iterations)
+	}
+}
+
+func TestGlobalStatsDoNotDependOnKeyStatsLockWhenKeyStatsAreOff(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+
+	ht.telemetryMu.Lock()
+	done := make(chan string, 1)
+	go func() {
+		done <- ht.GetString("key")
+	}()
+
+	select {
+	case got := <-done:
+		ht.telemetryMu.Unlock()
+		if got != "value" {
+			t.Fatalf("GetString(key) = %q, want value", got)
+		}
+	case <-time.After(time.Second):
+		ht.telemetryMu.Unlock()
+		<-done
+		t.Fatal("global stats update blocked on disabled per-key telemetry")
+	}
+}
+
+func TestGlobalStatsTimestampsNeverMoveBackward(t *testing.T) {
+	ht := newTestTrie(t)
+	times := []time.Time{time.Unix(200, 0), time.Unix(100, 0)}
+	ht.now = func() time.Time {
+		now := times[0]
+		times = times[1:]
+		return now
+	}
+
+	ht.recordReadLocked(true)
+	ht.recordReadLocked(true)
+	stats := ht.Stats()
+	if stats.Reads != 2 || stats.Hits != 2 {
+		t.Fatalf("Stats() = %#v, want two hits", stats)
+	}
+	if want := time.Unix(200, 0); !stats.LastHit.Equal(want) {
+		t.Fatalf("LastHit = %s, want monotonic maximum %s", stats.LastHit, want)
 	}
 }
 

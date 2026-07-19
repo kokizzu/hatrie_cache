@@ -626,6 +626,83 @@ type CacheStats struct {
 	CumulativeHitRate float64   `json:"cumulative_hit_rate"`
 }
 
+const unsetAtomicCacheTime = int64(-1 << 63)
+
+type atomicCacheStats struct {
+	hits        atomic.Uint64
+	misses      atomic.Uint64
+	writes      atomic.Uint64
+	deletes     atomic.Uint64
+	expirations atomic.Uint64
+	lastHit     atomic.Int64
+	lastMiss    atomic.Int64
+	lastWrite   atomic.Int64
+}
+
+func (stats *atomicCacheStats) initialize() {
+	stats.lastHit.Store(unsetAtomicCacheTime)
+	stats.lastMiss.Store(unsetAtomicCacheTime)
+	stats.lastWrite.Store(unsetAtomicCacheTime)
+}
+
+func (stats *atomicCacheStats) snapshot() CacheStats {
+	hits := stats.hits.Load()
+	misses := stats.misses.Load()
+	out := CacheStats{
+		Reads:       hits + misses,
+		Hits:        hits,
+		Misses:      misses,
+		Writes:      stats.writes.Load(),
+		Deletes:     stats.deletes.Load(),
+		Expirations: stats.expirations.Load(),
+		LastHit:     loadAtomicCacheTime(&stats.lastHit),
+		LastMiss:    loadAtomicCacheTime(&stats.lastMiss),
+		LastWrite:   loadAtomicCacheTime(&stats.lastWrite),
+	}
+	out.updateRates()
+	return out
+}
+
+func (stats *atomicCacheStats) restore(value CacheStats) {
+	stats.hits.Store(value.Hits)
+	stats.misses.Store(value.Misses)
+	stats.writes.Store(value.Writes)
+	stats.deletes.Store(value.Deletes)
+	stats.expirations.Store(value.Expirations)
+	storeAtomicCacheTime(&stats.lastHit, value.LastHit)
+	storeAtomicCacheTime(&stats.lastMiss, value.LastMiss)
+	storeAtomicCacheTime(&stats.lastWrite, value.LastWrite)
+}
+
+func updateAtomicCacheTime(target *atomic.Int64, value time.Time) {
+	encoded := value.UnixNano()
+	for {
+		current := target.Load()
+		if current != unsetAtomicCacheTime && current >= encoded {
+			return
+		}
+		if target.CompareAndSwap(current, encoded) {
+			return
+		}
+	}
+}
+
+func loadAtomicCacheTime(source *atomic.Int64) time.Time {
+	encoded := source.Load()
+	if encoded == unsetAtomicCacheTime {
+		return time.Time{}
+	}
+	return time.Unix(0, encoded)
+}
+
+func storeAtomicCacheTime(target *atomic.Int64, value time.Time) {
+	if value.IsZero() {
+		target.Store(unsetAtomicCacheTime)
+		return
+	}
+	target.Store(value.UnixNano())
+}
+
 // KeyStats records access metadata for one stored key.
 type KeyStats struct {
 	Reads             uint64    `json:"reads"`
@@ -2039,7 +2116,8 @@ type HatTrie struct {
 	hotKey                  string
 	hotValue                HatValue
 	hotValid                bool
-	stats                   CacheStats
+	stats                   atomicCacheStats
+	keyStatsGlobal          CacheStats
 	keyStats                map[string]*trackedKeyStats
 	keyStatsMode            KeyStatsMode
 	keyStatsCapacity        int
@@ -2101,6 +2179,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		keyStatsCapacity: 0,
 		now:              time.Now,
 	}
+	ht.stats.initialize()
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
 	return ht, nil
 }
@@ -2236,13 +2315,29 @@ func (ht *HatTrie) Stats() CacheStats {
 	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
+	ht.ensureOpen()
+	if ht.keyStatsMode == KeyStatsModeOff {
+		return ht.stats.snapshot()
+	}
 	ht.telemetryMu.Lock()
 	defer ht.telemetryMu.Unlock()
-
-	ht.ensureOpen()
-	stats := ht.stats
+	stats := ht.keyStatsGlobal
 	stats.updateRates()
 	return stats
+}
+
+func (ht *HatTrie) cacheStatsLocked() CacheStats {
+	if ht.keyStatsMode == KeyStatsModeOff {
+		return ht.stats.snapshot()
+	}
+	stats := ht.keyStatsGlobal
+	stats.updateRates()
+	return stats
+}
+
+func (ht *HatTrie) restoreCacheStatsLocked(stats CacheStats) {
+	ht.stats.restore(stats)
+	ht.keyStatsGlobal = stats
 }
 
 // KeyStatsPolicy returns the active per-key telemetry policy.
@@ -2284,6 +2379,11 @@ func (ht *HatTrie) ConfigureKeyStats(mode KeyStatsMode, capacity int) error {
 }
 
 func (ht *HatTrie) configureKeyStatsLocked(mode KeyStatsMode, capacity int) {
+	if ht.keyStatsMode == KeyStatsModeOff && mode != KeyStatsModeOff {
+		ht.keyStatsGlobal = ht.stats.snapshot()
+	} else if ht.keyStatsMode != KeyStatsModeOff && mode == KeyStatsModeOff {
+		ht.stats.restore(ht.keyStatsGlobal)
+	}
 	if mode == KeyStatsModeOff {
 		ht.keyStats = map[string]*trackedKeyStats{}
 		ht.keyStatsMode = mode
@@ -2420,7 +2520,8 @@ func (ht *HatTrie) LoadStats(path string) error {
 	defer ht.mu.Unlock()
 
 	ht.ensureOpen()
-	ht.stats = stats
+	ht.stats.restore(stats)
+	ht.keyStatsGlobal = stats
 	return nil
 }
 
@@ -2891,16 +2992,14 @@ func (ht *HatTrie) currentTime() time.Time {
 
 func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 	now := ht.currentTime()
+	if ht.keyStatsMode == KeyStatsModeOff {
+		ht.recordGlobalRead(now, hit)
+		return
+	}
+
 	ht.telemetryMu.Lock()
 	defer ht.telemetryMu.Unlock()
-	ht.stats.Reads++
-	if hit {
-		ht.stats.Hits++
-		ht.stats.LastHit = now
-	} else {
-		ht.stats.Misses++
-		ht.stats.LastMiss = now
-	}
+	ht.recordGlobalReadSerialized(now, hit)
 
 	for _, key := range keys {
 		stats, tracked := ht.keyStats[key]
@@ -2924,6 +3023,28 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 	}
 }
 
+func (ht *HatTrie) recordGlobalRead(now time.Time, hit bool) {
+	if hit {
+		updateAtomicCacheTime(&ht.stats.lastHit, now)
+		ht.stats.hits.Add(1)
+		return
+	}
+	updateAtomicCacheTime(&ht.stats.lastMiss, now)
+	ht.stats.misses.Add(1)
+}
+
+func (ht *HatTrie) recordGlobalReadSerialized(now time.Time, hit bool) {
+	if hit {
+		ht.keyStatsGlobal.Hits++
+		ht.keyStatsGlobal.Reads++
+		ht.keyStatsGlobal.LastHit = now
+		return
+	}
+	ht.keyStatsGlobal.Misses++
+	ht.keyStatsGlobal.Reads++
+	ht.keyStatsGlobal.LastMiss = now
+}
+
 func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	ht.trackSnapshotMutationsLocked(keys...)
 	ht.updateReplicationMerkleLocked(keys...)
@@ -2934,11 +3055,14 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 		ht.updateLevelDBSpillCandidateForKeyLocked(key)
 		ht.updateLevelDBHotByteAccountingForKeyLocked(key)
 	}
+	if ht.keyStatsMode == KeyStatsModeOff {
+		ht.recordGlobalWrite(now)
+		return
+	}
 
 	ht.telemetryMu.Lock()
 	defer ht.telemetryMu.Unlock()
-	ht.stats.Writes++
-	ht.stats.LastWrite = now
+	ht.recordGlobalWriteSerialized(now)
 
 	for _, key := range keys {
 		stats := ht.keyStats[key]
@@ -2953,10 +3077,24 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	}
 }
 
+func (ht *HatTrie) recordGlobalWrite(now time.Time) {
+	updateAtomicCacheTime(&ht.stats.lastWrite, now)
+	ht.stats.writes.Add(1)
+}
+
+func (ht *HatTrie) recordGlobalWriteSerialized(now time.Time) {
+	ht.keyStatsGlobal.Writes++
+	ht.keyStatsGlobal.LastWrite = now
+}
+
 func (ht *HatTrie) recordDeleteLocked(key string) {
 	ht.trackSnapshotMutationsLocked(key)
 	ht.updateReplicationMerkleLocked(key)
-	ht.stats.Deletes++
+	if ht.keyStatsMode == KeyStatsModeOff {
+		ht.stats.deletes.Add(1)
+	} else {
+		ht.keyStatsGlobal.Deletes++
+	}
 	ht.recordWriteLocked()
 	ht.deleteLevelDBSpillCandidateLocked(key)
 	ht.deleteLevelDBHotByteAccountingLocked(key)
@@ -2966,7 +3104,11 @@ func (ht *HatTrie) recordDeleteLocked(key string) {
 func (ht *HatTrie) recordExpirationLocked(keys ...string) {
 	ht.trackSnapshotMutationsLocked(keys...)
 	ht.updateReplicationMerkleLocked(keys...)
-	ht.stats.Expirations++
+	if ht.keyStatsMode == KeyStatsModeOff {
+		ht.stats.expirations.Add(1)
+	} else {
+		ht.keyStatsGlobal.Expirations++
+	}
 	ht.recordWriteLocked()
 	for _, key := range keys {
 		ht.deleteLevelDBSpillCandidateLocked(key)
@@ -3886,10 +4028,8 @@ func (ht *HatTrie) tryIncrementCounterStriped(key string, by int32, checkOverflo
 func (ht *HatTrie) recordCounterWriteFastPath() {
 	atomic.AddUint64(&ht.mutationEpoch, 1)
 	now := ht.currentTime()
-	ht.telemetryMu.Lock()
-	ht.stats.Writes++
-	ht.stats.LastWrite = now
-	ht.telemetryMu.Unlock()
+	updateAtomicCacheTime(&ht.stats.lastWrite, now)
+	ht.stats.writes.Add(1)
 	atomic.AddUint64(&ht.counterFastPathWrites, 1)
 }
 

@@ -567,7 +567,11 @@ make monitoring-server RATE_LIMIT=50 AUDIT_LOG_PATH=data/audit.jsonl
 
 Per-key monitoring metadata is off by default, so high-cardinality workloads
 retain only exact cache-wide counters and `StatsForKey` reports `false`. This
-does not limit or evict cached values. Use `bounded` to retain details for up to
+default path updates cache-wide counters and monotonic timestamps atomically,
+without taking the per-key telemetry mutex. It adds 64 fixed bytes per cache
+and no per-operation allocation; the measured 32-reader path is 2.38x faster.
+See [BENCHMARK.md](BENCHMARK.md#atomic-cache-wide-telemetry). This does not
+limit or evict cached values. Use `bounded` to retain details for up to
 100,000 active keys by default; its tracker samples five candidates and replaces
 the least recently active candidate in constant time. Use `full` only when
 unlimited per-key statistics are explicitly required:

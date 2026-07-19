@@ -178,6 +178,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
+| Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
@@ -308,6 +309,45 @@ The 250,000-key bounded fill spends more CPU selecting replacement candidates
 after reaching 100,000 tracked keys. Normal cache reads and values remain
 unchanged; only detailed per-key telemetry is replaced. Cache-wide counters
 remain exact in all three modes.
+
+### Atomic Cache-Wide Telemetry
+
+With per-key telemetry off by default, hits, misses, writes, deletes,
+expirations, and monotonic last-operation timestamps now use cache-wide atomic
+state instead of the per-key telemetry mutex. Reads are derived from exact hit
+and miss counters, so snapshots cannot observe an inconsistent
+`reads != hits + misses` total. Enabling bounded or full key telemetry retains
+the existing serialized plain counters and synchronizes representations when
+the mode changes.
+
+```sh
+make run CMD='BIG_WINS_OPS=100000 go test -run xnomatch -bench BenchmarkBigWins/GlobalTelemetry -benchmem -benchtime 5x -count 7'
+```
+
+Each row performs 100,000 successful `GetString` calls. Baselines are five-run
+medians from the pre-change implementation; final off rows are five-run
+medians, and final full rows are seven-run medians on the same Ryzen 9 5950X
+host.
+
+| Key stats mode | Readers | Baseline ns/read | Final ns/read | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| `off` (default) | 1 | 199.8 | 171.7 | 1.16x |
+| `off` (default) | 2 | 124.1 | 122.7 | 1.01x |
+| `off` (default) | 4 | 121.8 | 100.6 | 1.21x |
+| `off` (default) | 8 | 179.5 | 123.7 | 1.45x |
+| `off` (default) | 16 | 206.7 | 103.3 | 2.00x |
+| `off` (default) | 32 | 222.0 | 93.21 | 2.38x |
+| `full` | 1 | 185.8 | 182.3 | 1.02x |
+| `full` | 2 | 122.8 | 107.2 | 1.15x |
+| `full` | 4 | 115.1 | 97.05 | 1.19x |
+| `full` | 8 | 158.8 | 136.5 | 1.16x |
+| `full` | 16 | 189.0 | 187.3 | 1.01x |
+| `full` | 32 | 241.3 | 227.6 | 1.06x |
+
+The atomic state adds 64 fixed bytes per cache and no per-operation
+allocation. Wire and storage formats are unchanged. `SaveStats`, `LoadStats`,
+failed public-batch rollback, exact counters, and timestamps remain preserved
+across telemetry-mode transitions.
 
 ### Concurrent Scalar Read Fast Path
 

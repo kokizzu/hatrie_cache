@@ -939,7 +939,7 @@ func (rollback *publicCommandBatchRollback) captureLocked(trie *HatTrie, key str
 	rollback.captured[key] = struct{}{}
 	if !rollback.started {
 		rollback.mutationEpoch = trie.mutationEpoch
-		rollback.stats = trie.stats
+		rollback.stats = trie.cacheStatsLocked()
 		rollback.started = true
 	}
 	operation, present, err := trie.restoreRollbackOperationLocked(key)
@@ -965,7 +965,7 @@ func (rollback *publicCommandBatchRollback) restore(trie *HatTrie) error {
 	defer trie.mu.Unlock()
 	err := trie.rollbackRestoreLocked(rollback.created, rollback.operations, trie.currentTime())
 	trie.mutationEpoch = rollback.mutationEpoch
-	trie.stats = rollback.stats
+	trie.restoreCacheStatsLocked(rollback.stats)
 	trie.hotValid = false
 	return err
 }

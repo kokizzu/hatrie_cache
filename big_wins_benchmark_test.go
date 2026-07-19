@@ -19,6 +19,7 @@ import (
 const bigWinsDurableWrites = 100
 
 func BenchmarkBigWins(b *testing.B) {
+	b.Run("GlobalTelemetry", benchmarkBigWinsGlobalTelemetry)
 	b.Run("ConcurrentRead", benchmarkBigWinsConcurrentRead)
 	b.Run("ConcurrentWrite", benchmarkBigWinsConcurrentWrite)
 	b.Run("PerKeyMemory", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeBounded) })
@@ -31,6 +32,47 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("UnaryCommand", benchmarkBigWinsUnaryCommand)
 	b.Run("StreamCommand", benchmarkBigWinsStreamCommand)
 	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
+}
+
+func benchmarkBigWinsGlobalTelemetry(b *testing.B) {
+	operations := bigWinsBenchmarkOperations(100000)
+	for _, mode := range []KeyStatsMode{KeyStatsModeOff, KeyStatsModeFull} {
+		for _, workers := range []int{1, 2, 4, 8, 16, 32} {
+			b.Run(fmt.Sprintf("%s/Workers%d", mode, workers), func(b *testing.B) {
+				trie := CreateHatTrie()
+				b.Cleanup(trie.Destroy)
+				if err := trie.ConfigureKeyStats(mode, 0); err != nil {
+					b.Fatal(err)
+				}
+				trie.UpsertString("telemetry-key", "value")
+
+				var total time.Duration
+				b.ReportAllocs()
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					started := time.Now()
+					var group sync.WaitGroup
+					group.Add(workers)
+					for worker := 0; worker < workers; worker++ {
+						go func(worker int) {
+							defer group.Done()
+							for operation := worker; operation < operations; operation += workers {
+								if got := trie.GetString("telemetry-key"); got != "value" {
+									b.Errorf("GetString() = %q, want value", got)
+									return
+								}
+							}
+						}(worker)
+					}
+					group.Wait()
+					total += time.Since(started)
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(operations), "reads/op")
+				b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/read")
+			})
+		}
+	}
 }
 
 func benchmarkBigWinsConcurrentWrite(b *testing.B) {
