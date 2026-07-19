@@ -286,7 +286,7 @@ func newGRPCBenchmarkExecutorMode(b *testing.B, streaming bool) (benchmarkComman
 	return execute, stop
 }
 
-func newGRPCBenchmarkClient(b *testing.B) (hatriecachev1.CacheServiceClient, func()) {
+func newGRPCBenchmarkClient(b *testing.B, extraDialOptions ...grpc.DialOption) (hatriecachev1.CacheServiceClient, func()) {
 	b.Helper()
 	ht := CreateHatTrie()
 	listener := bufconn.Listen(testGRPCBufferSize)
@@ -297,12 +297,14 @@ func newGRPCBenchmarkClient(b *testing.B) (hatriecachev1.CacheServiceClient, fun
 			b.Errorf("grpc Serve() error = %v", err)
 		}
 	}()
-	conn, err := grpc.DialContext(context.Background(), "bufnet",
+	dialOptions := []grpc.DialOption{
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
 			return listener.Dial()
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	}
+	dialOptions = append(dialOptions, extraDialOptions...)
+	conn, err := grpc.DialContext(context.Background(), "bufnet", dialOptions...)
 	if err != nil {
 		b.Fatalf("DialContext() error = %v", err)
 	}

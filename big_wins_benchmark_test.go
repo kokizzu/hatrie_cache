@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"google.golang.org/grpc"
+	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
 const bigWinsDurableWrites = 100
@@ -32,6 +35,7 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("UnaryCommand", benchmarkBigWinsUnaryCommand)
 	b.Run("StreamCommand", benchmarkBigWinsStreamCommand)
 	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
+	b.Run("NativeBatchStreamCommand", benchmarkBigWinsNativeBatchStreamCommand)
 	b.Run("ChurnRetentionBaseline", benchmarkBigWinsChurnRetentionBaseline)
 	b.Run("ChurnRetentionCompacted", benchmarkBigWinsChurnRetentionCompacted)
 	b.Run("ExpirationDeadlineUpdate", benchmarkBigWinsExpirationDeadlineUpdate)
@@ -500,7 +504,8 @@ func benchmarkBigWinsCommand(b *testing.B, newExecutor func(*testing.B) (benchma
 
 func benchmarkBigWinsPipelinedStreamCommand(b *testing.B) {
 	operations := bigWinsBenchmarkOperations(1000)
-	client, stop := newGRPCBenchmarkClient(b)
+	wire := &benchmarkGRPCWireStats{}
+	client, stop := newGRPCBenchmarkClient(b, grpc.WithStatsHandler(wire))
 	defer stop()
 	stream, err := client.CommandStream(context.Background())
 	if err != nil {
@@ -517,6 +522,8 @@ func benchmarkBigWinsPipelinedStreamCommand(b *testing.B) {
 	if response, err := stream.Recv(); err != nil || !response.GetOk() {
 		b.Fatalf("stream setup response = %#v/%v", response, err)
 	}
+	wire.outbound.Store(0)
+	wire.inbound.Store(0)
 
 	var total time.Duration
 	b.ReportAllocs()
@@ -551,6 +558,79 @@ func benchmarkBigWinsPipelinedStreamCommand(b *testing.B) {
 	b.StopTimer()
 	b.ReportMetric(float64(operations), "commands/op")
 	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/command")
+	b.ReportMetric(float64(wire.outbound.Load()+wire.inbound.Load())/float64(b.N*operations), "wire_B/command")
+}
+
+func benchmarkBigWinsNativeBatchStreamCommand(b *testing.B) {
+	const batchSize = 16
+	operations := bigWinsBenchmarkOperations(1000)
+	wire := &benchmarkGRPCWireStats{}
+	client, stop := newGRPCBenchmarkClient(b, grpc.WithStatsHandler(wire))
+	defer stop()
+	if response, err := client.Command(context.Background(), &hatriecachev1.CommandRequest{Command: "SETSTR", Key: "command:key", Value: "value"}); err != nil || !response.GetOk() {
+		b.Fatalf("batch stream setup = %#v/%v", response, err)
+	}
+	stream, err := client.CommandBatchStream(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer stream.CloseSend()
+	wire.outbound.Store(0)
+	wire.inbound.Store(0)
+	batches := (operations + batchSize - 1) / batchSize
+	requests := make([]*hatriecachev1.CommandBatchRequest, batches)
+	for batch := range requests {
+		count := batchSize
+		if remaining := operations - batch*batchSize; remaining < count {
+			count = remaining
+		}
+		commands := make([]*hatriecachev1.CommandRequest, count)
+		for index := range commands {
+			commands[index] = &hatriecachev1.CommandRequest{Command: "GET", Key: "command:key"}
+		}
+		requests[batch] = &hatriecachev1.CommandBatchRequest{BatchId: uint64(batch + 1), Requests: commands}
+	}
+	var total time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		started := time.Now()
+		sendErr := make(chan error, 1)
+		go func() {
+			for _, request := range requests {
+				if err := stream.Send(request); err != nil {
+					sendErr <- err
+					return
+				}
+			}
+			sendErr <- nil
+		}()
+		received := 0
+		for batch := 0; batch < batches; batch++ {
+			response, err := stream.Recv()
+			if err != nil || !response.GetOk() || response.GetBatchId() != uint64(batch+1) {
+				b.Fatalf("native batch stream response %d = %#v/%v", batch, response, err)
+			}
+			for _, item := range response.GetResponses() {
+				if !item.GetOk() || item.GetValue() != "value" {
+					b.Fatalf("native batch response item = %#v", item)
+				}
+			}
+			received += len(response.GetResponses())
+		}
+		if err := <-sendErr; err != nil {
+			b.Fatalf("native batch stream send error = %v", err)
+		}
+		if received != operations {
+			b.Fatalf("native batch stream responses = %d, want %d", received, operations)
+		}
+		total += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(operations), "commands/op")
+	b.ReportMetric(float64(batches), "messages/op")
+	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/command")
+	b.ReportMetric(float64(wire.outbound.Load()+wire.inbound.Load())/float64(b.N*operations), "wire_B/command")
 }
 
 func bigWinsBenchmarkKeys(fallback int) int {

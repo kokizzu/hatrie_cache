@@ -195,6 +195,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Merkle 1%-changed repair](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 55.401 ms; 240,086 wire B | Merkle: 25.443 ms; 132,820 wire B | 2.18x faster, 1.81x smaller wire | Active write tracking is 1.88x slower |
 | Final architecture | [Sequential gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 14,914 ns/command | 3.96x faster, 6.73x lower heap | Request/response remains sequential |
 | Final architecture | [Pipelined gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 3,118 ns/command | 18.94x faster, 7.67x lower heap, 6.57x fewer allocations | Requires concurrent sender/receiver with ordered response pairing |
+| Current pass | [Native gRPC batch stream](#persistent-grpc-command-stream), 10k commands, batch 16 | Pipelined: 2,638 ns/command; 41.00 wire B/command | Native batch: 1,161 ns/command; 37.04 wire B/command | 2.27x faster, 1.62x lower heap, 2.77x fewer allocations, 1.11x smaller wire, 16x fewer messages | Batching can add queueing latency; client chooses envelope size |
 | Current pass | [Pipelined live gRPC replication](#pipelined-live-grpc-replication), 10k writes | HTTP: 178.079 ms; 1,868,894 wire B | gRPC: 167.797 ms; 1,081,746 wire B | 1.06x faster, 1.73x smaller wire | Requires native gRPC listener; HTTP remains fallback |
 | Current pass | [Live gRPC micro-batching](#pipelined-live-grpc-replication), 10k writes | 193.299 ms; 10,000 batches; 1,081,747 wire B | 149.682 ms; 2,910 batches; 368,252 wire B | 1.29x faster, 3.44x fewer batches, 2.94x smaller wire | One-caller throughput is 1.6% lower; set max commands to 1 for legacy behavior |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
@@ -259,6 +260,7 @@ Run the 10,000-read architectural comparison:
 make bench-big-wins BIG_WINS_BENCH=BenchmarkBigWins/UnaryCommand BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=5
 make bench-big-wins BIG_WINS_BENCH='BenchmarkBigWins/^StreamCommand$' BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=5
 make bench-big-wins BIG_WINS_BENCH='BenchmarkBigWins/^PipelinedStreamCommand$' BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=5
+make run CMD='HATRIE_BIG_WINS_OPS=10000 go test . -run none -bench "BenchmarkBigWins/(PipelinedStreamCommand|NativeBatchStreamCommand)" -benchtime=1x -count=5 -benchmem'
 ```
 
 Sequential stream mode sends one request and receives its response before the
@@ -275,6 +277,22 @@ five-run medians on the AMD Ryzen 9 5950X host.
 Pipelining is another 4.78x faster than sequential streaming. Its peak RSS is
 0.97% below unary in these separate benchmark processes, and cumulative heap
 per 10,000 commands is 7.67x lower.
+
+The native follow-up compares the same pipelined transport against
+`CommandBatchStream` envelopes containing 16 reads. Wire bytes are the gRPC
+stats handler's actual inbound plus outbound payload `WireLength`; values are
+five-run medians from the same process configuration.
+
+| Stream path | Time/10k | ns/command | Heap B/10k | Allocs/10k | Wire B/command | Messages/10k |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| One `CommandRequest` per message | 26.379 ms | 2,638 | 15,635,504 | 299,037 | 41.00 | 10,000 |
+| `CommandBatchRequest`, 16 commands | 11.612 ms | 1,161 | 9,675,288 | 107,876 | 37.04 | 625 |
+
+Native envelopes are 2.27x faster, use 1.62x less cumulative heap and 2.77x
+fewer allocations, send 1.11x fewer measured wire bytes, and reduce stream
+messages 16x. The client-selected batch size is the latency tradeoff: 16 is the
+measured throughput point, while smaller envelopes reduce the time a command
+waits for its batch to fill.
 
 Run the same sequential transport comparison across representative command
 families:

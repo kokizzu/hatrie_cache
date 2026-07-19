@@ -28,6 +28,7 @@ var replicationOutboxBenchmarkData []byte
 
 type benchmarkGRPCWireStats struct {
 	outbound atomic.Int64
+	inbound  atomic.Int64
 }
 
 func (handler *benchmarkGRPCWireStats) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
@@ -37,6 +38,9 @@ func (handler *benchmarkGRPCWireStats) TagRPC(ctx context.Context, _ *stats.RPCT
 func (handler *benchmarkGRPCWireStats) HandleRPC(_ context.Context, rpcStats stats.RPCStats) {
 	if payload, ok := rpcStats.(*stats.OutPayload); ok {
 		handler.outbound.Add(int64(payload.WireLength))
+	}
+	if payload, ok := rpcStats.(*stats.InPayload); ok {
+		handler.inbound.Add(int64(payload.WireLength))
 	}
 }
 

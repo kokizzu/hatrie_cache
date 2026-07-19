@@ -897,6 +897,84 @@ func TestCacheGRPCServerCommandStreamExecutesPipelinedCommandsInOrder(t *testing
 	}
 }
 
+func TestCacheGRPCServerCommandBatchStreamExecutesNativeBatchesInOrder(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.CommandBatchStream(context.Background())
+	if err != nil {
+		t.Fatalf("CommandBatchStream() error = %v", err)
+	}
+	if err := stream.Send(&hatriecachev1.CommandBatchRequest{
+		BatchId: 41,
+		Requests: []*hatriecachev1.CommandRequest{
+			{Command: "SETSTR", Key: "name", Value: "ivi"},
+			{Command: "SETINT", Key: "count", Value: "40"},
+			{Command: "INC", Key: "count", Value: "2"},
+			{Command: "GETSTR", Key: "name"},
+		},
+	}); err != nil {
+		t.Fatalf("CommandBatchStream.Send() error = %v", err)
+	}
+	response, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("CommandBatchStream.Recv() error = %v", err)
+	}
+	if response.GetBatchId() != 41 || len(response.GetResponses()) != 4 {
+		t.Fatalf("batch response = %#v, want ID 41 and four ordered responses", response)
+	}
+	for index, item := range response.GetResponses() {
+		if !item.GetOk() {
+			t.Fatalf("batch response %d = %#v, want success", index, item)
+		}
+	}
+	if response.GetResponses()[2].GetValue() != "42" || response.GetResponses()[3].GetValue() != "ivi" {
+		t.Fatalf("ordered batch values = %#v, want INC=42 and GETSTR=ivi", response.GetResponses())
+	}
+
+	if err := stream.Send(&hatriecachev1.CommandBatchRequest{
+		BatchId: 42,
+		Requests: []*hatriecachev1.CommandRequest{
+			{Command: "NOTACOMMAND", Key: "invalid"},
+			{Command: "GET", Key: "count"},
+		},
+	}); err != nil {
+		t.Fatalf("CommandBatchStream.Send(second) error = %v", err)
+	}
+	response, err = stream.Recv()
+	if err != nil {
+		t.Fatalf("CommandBatchStream.Recv(second) error = %v", err)
+	}
+	if response.GetBatchId() != 42 || len(response.GetResponses()) != 2 || response.GetResponses()[0].GetOk() || !response.GetResponses()[1].GetOk() || response.GetResponses()[1].GetValue() != "42" {
+		t.Fatalf("second batch response = %#v, want command error followed by successful ordered read", response)
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("CommandBatchStream.CloseSend() error = %v", err)
+	}
+	if _, err := stream.Recv(); !errors.Is(err, io.EOF) {
+		t.Fatalf("CommandBatchStream final Recv() error = %v, want EOF", err)
+	}
+}
+
+func TestCacheGRPCServerCommandBatchStreamRequiresAuthentication(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{AuthToken: "secret"})
+	defer stop()
+	stream, err := client.CommandBatchStream(context.Background())
+	if err != nil {
+		t.Fatalf("CommandBatchStream() open error = %v", err)
+	}
+	if err := stream.Send(&hatriecachev1.CommandBatchRequest{
+		BatchId:  1,
+		Requests: []*hatriecachev1.CommandRequest{{Command: "GET", Key: "name"}},
+	}); err != nil {
+		t.Fatalf("CommandBatchStream() send error = %v", err)
+	}
+	if _, err := stream.Recv(); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("CommandBatchStream() recv error = %v, want Unauthenticated", err)
+	}
+}
+
 func TestCacheGRPCServerCommandStreamRequiresAuthentication(t *testing.T) {
 	ht := newTestTrie(t)
 	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{AuthToken: "secret"})

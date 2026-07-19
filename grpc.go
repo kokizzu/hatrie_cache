@@ -269,6 +269,36 @@ func (server *CacheGRPCServer) CommandStream(stream hatriecachev1.CacheService_C
 	}
 }
 
+func (server *CacheGRPCServer) CommandBatchStream(stream hatriecachev1.CacheService_CommandBatchStreamServer) error {
+	ctx, err := server.requestContext(stream.Context())
+	if err != nil {
+		return err
+	}
+	for {
+		batch, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		requests := batch.GetRequests()
+		request := &hatriecachev1.CommandRequest{Command: "BATCH", Batch: requests}
+		response, err := server.executeGRPCCommand(ctx, request, "/hatriecache.v1.CacheService/CommandBatchStream")
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(&hatriecachev1.CommandBatchResponse{
+			BatchId:   batch.GetBatchId(),
+			Responses: response.GetResponses(),
+			Ok:        response.GetOk(),
+			Message:   response.GetMessage(),
+		}); err != nil {
+			return err
+		}
+	}
+}
+
 func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *hatriecachev1.CommandRequest, method string) (*hatriecachev1.CommandResponse, error) {
 	command := cacheCommandRequestFromProto(request)
 	if commandShouldJournal(command) {

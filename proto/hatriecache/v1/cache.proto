@@ -10,6 +10,7 @@ service CacheService {
   rpc Entries(EntriesRequest) returns (EntriesResponse);
   rpc Command(CommandRequest) returns (CommandResponse);
   rpc CommandStream(stream CommandRequest) returns (stream CommandResponse);
+  rpc CommandBatchStream(stream CommandBatchRequest) returns (stream CommandBatchResponse);
   rpc Snapshot(SnapshotRequest) returns (CommandResponse);
   rpc Replication(ReplicationRequest) returns (ReplicationResponse);
   rpc ReplicationStream(stream ReplicationStreamBatch) returns (stream ReplicationStreamAck);
@@ -88,6 +89,18 @@ message CommandResponse {
   string message = 2;
   string value = 3;
   repeated CommandResponse responses = 4;
+}
+
+message CommandBatchRequest {
+  uint64 batch_id = 1;
+  repeated CommandRequest requests = 2;
+}
+
+message CommandBatchResponse {
+  uint64 batch_id = 1;
+  repeated CommandResponse responses = 2;
+  bool ok = 3;
+  string message = 4;
 }
 
 message SnapshotRequest {}

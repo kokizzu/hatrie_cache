@@ -1529,6 +1529,14 @@ returned in stream order with the same authentication, write protection, rate
 limits, journal, replication, leader routing, metrics, and audit behavior.
 Clients may send and receive concurrently to pipeline commands; use one sender
 goroutine and one receiver goroutine per stream and pair responses by order.
+`CacheService.CommandBatchStream` accepts explicit `CommandBatchRequest`
+envelopes with a caller-provided `batch_id` and returns one ordered
+`CommandBatchResponse` with the same ID. Each envelope runs through the native
+`BATCH` executor, so compatible scalar commands share one cache lock and
+durable journal sync while individual application failures remain in their
+matching response positions. A batch of 16 is a measured throughput-oriented
+starting point; clients control envelope size up to the normal 4,096-command
+`BATCH` limit and should use smaller batches when tail latency matters.
 Application-level command failures remain `CommandResponse` values, while
 authentication, rate-limit, write-protection, and transport failures close the
 stream with their normal gRPC status. The stream is available whenever the
