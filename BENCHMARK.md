@@ -146,6 +146,24 @@ The combined benchmark process reached 99,824 KiB maximum RSS. These rows are
 diagnostic workloads rather than CI thresholds; each optimization section
 keeps the same fixture and reports its own before/after ratio.
 
+## Final Architecture Improvements
+
+This table consolidates every measured implementation from the final
+architecture goal. Feature names link to the detailed fixture, run command,
+raw metrics, and tradeoff discussion below. Baseline and final values use the
+same workload within each row.
+
+| Implemented feature | Baseline | Final | Improvement | Main tradeoff |
+| --- | ---: | ---: | ---: | --- |
+| [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
+| [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
+| [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
+| [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
+| [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
+| [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
+| [Sequential gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 14,914 ns/command | 3.96x faster, 6.73x lower heap | Request/response remains sequential |
+| [Pipelined gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 3,118 ns/command | 18.94x faster, 7.67x lower heap, 6.57x fewer allocations | Requires concurrent sender/receiver with ordered response pairing |
+
 ### Incremental Anti-Entropy
 
 Run the focused 10,000-key comparison:
@@ -238,7 +256,7 @@ Both RPCs call the same command executor. The stream removes repeated unary RPC
 setup and permits HTTP/2 flow-control-bounded pipelining; it does not weaken
 command ordering or durability acknowledgements.
 
-### Bounded Per-Key Telemetry
+### Per-Key Telemetry Modes
 
 The bounded telemetry implementation uses compact exact counters/timestamps, a
 fixed key replacement ring, and five-candidate least-recently-active sampling.

@@ -102,6 +102,8 @@ command benchmark scripts write raw Markdown plus TSV rows and memory summaries.
 in `BENCHMARK.md` from those artifacts.
 [`IMPROVEMENT_REPORT.md`](IMPROVEMENT_REPORT.md) consolidates the shipped
 feature commits, final before/after metrics, and measured tradeoffs.
+The one-table summary for every final architecture improvement is in
+[`BENCHMARK.md`](BENCHMARK.md#final-architecture-improvements).
 
 Run the CI benchmark smoke locally:
 

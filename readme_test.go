@@ -116,6 +116,34 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 	}
 }
 
+func TestBenchmarkMarkdownSummarizesFinalArchitectureImprovements(t *testing.T) {
+	data, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	doc := string(data)
+	for _, token := range []string{
+		"## Final Architecture Improvements",
+		"[Per-key telemetry](#per-key-telemetry-modes)",
+		"[Concurrent scalar reads](#concurrent-scalar-read-fast-path)",
+		"[Durable journal group commit](#durable-journal-group-commit)",
+		"[Point-in-time snapshot capture](#point-in-time-snapshot-capture)",
+		"[Equal-state anti-entropy](#incremental-anti-entropy)",
+		"[Sequential gRPC stream](#persistent-grpc-command-stream)",
+		"[Pipelined gRPC stream](#persistent-grpc-command-stream)",
+		"73.8% lower",
+		"2.42x faster",
+		"11.99x faster",
+		"3.71x shorter",
+		"49,971x smaller wire",
+		"18.94x faster",
+	} {
+		if !strings.Contains(doc, token) {
+			t.Fatalf("BENCHMARK.md missing final architecture summary token %q", token)
+		}
+	}
+}
+
 func TestREADMELinksShardingProposal(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
