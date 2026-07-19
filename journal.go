@@ -820,6 +820,13 @@ func (journal *CommandJournal) rollbackFailedAppendLocked(state commandJournalAp
 }
 
 func (journal *CommandJournal) rollbackAppendLocked(state commandJournalAppendState) error {
+	if err := journal.rollbackAppendWithoutSyncLocked(state); err != nil {
+		return err
+	}
+	return journal.syncLocked()
+}
+
+func (journal *CommandJournal) rollbackAppendWithoutSyncLocked(state commandJournalAppendState) error {
 	if journal.file == nil {
 		return ErrCommandJournalClosed
 	}
@@ -827,9 +834,6 @@ func (journal *CommandJournal) rollbackAppendLocked(state commandJournalAppendSt
 		return err
 	}
 	if _, err := journal.file.Seek(state.offset, io.SeekStart); err != nil {
-		return err
-	}
-	if err := journal.syncLocked(); err != nil {
 		return err
 	}
 	journal.nextSequence = state.nextSequence

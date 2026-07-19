@@ -871,92 +871,257 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	if err != nil {
 		return commandError(err.Error()), false
 	}
-	if response, ok := executePublicScalarBatchWithSideEffects(ctx, trie, request, options); ok {
+	effects := newPublicCommandBatchEffects(options)
+	if effects.journal != nil {
+		effects.journal.mu.Lock()
+	}
+
+	response, ok := executePublicScalarBatchWithSideEffects(ctx, trie, request, options, effects)
+	if !ok && publicCommandBatchCanUseTrieFastPath(options) {
+		response = trie.ExecuteCommand(request)
+		ok = true
+	}
+	if !ok {
+		responses := make([]CacheCommandResponse, 0, len(payloads))
+		allOK := true
+		for idx, payload := range payloads {
+			if err := ctx.Err(); err != nil {
+				responses = append(responses, commandError(err.Error()))
+				allOK = false
+				break
+			}
+			if err := validatePublicCommandBatchPayload(payload, idx); err != nil {
+				responses = append(responses, commandError(err.Error()))
+				allOK = false
+				continue
+			}
+			itemResponse, stop := effects.execute(ctx, trie, payload, false, func() CacheCommandResponse {
+				return trie.ExecuteCommand(payload)
+			})
+			if !itemResponse.OK {
+				allOK = false
+			}
+			responses = append(responses, itemResponse)
+			if stop {
+				break
+			}
+		}
+		response = publicCommandBatchResponse(responses, allOK)
+	}
+
+	commitErr := effects.commitLocked(trie)
+	if effects.journal != nil {
+		effects.journal.mu.Unlock()
+	}
+	if commitErr != nil {
+		return commandError(commitErr.Error()), false
+	}
+	effects.publish(ctx)
+	return response, false
+}
+
+type publicCommandBatchRollback struct {
+	captured      map[string]struct{}
+	created       map[string]struct{}
+	operations    []snapshotOperation
+	mutationEpoch uint64
+	stats         CacheStats
+	started       bool
+}
+
+func (rollback *publicCommandBatchRollback) captureLocked(trie *HatTrie, key string) error {
+	if rollback.captured == nil {
+		rollback.captured = make(map[string]struct{})
+	}
+	if _, ok := rollback.captured[key]; ok {
+		return nil
+	}
+	rollback.captured[key] = struct{}{}
+	if !rollback.started {
+		rollback.mutationEpoch = trie.mutationEpoch
+		rollback.stats = trie.stats
+		rollback.started = true
+	}
+	operation, present, err := trie.restoreRollbackOperationLocked(key)
+	if err != nil {
+		return err
+	}
+	if present {
+		rollback.operations = append(rollback.operations, operation)
+		return nil
+	}
+	if rollback.created == nil {
+		rollback.created = make(map[string]struct{})
+	}
+	rollback.created[key] = struct{}{}
+	return nil
+}
+
+func (rollback *publicCommandBatchRollback) restore(trie *HatTrie) error {
+	if !rollback.started {
+		return nil
+	}
+	trie.mu.Lock()
+	defer trie.mu.Unlock()
+	err := trie.rollbackRestoreLocked(rollback.created, rollback.operations, trie.currentTime())
+	trie.mutationEpoch = rollback.mutationEpoch
+	trie.stats = rollback.stats
+	trie.hotValid = false
+	return err
+}
+
+type publicCommandBatchEffects struct {
+	journal           *CommandJournal
+	dirtyTracker      *LevelDBDirtyTracker
+	replicator        *HTTPReplicator
+	nodeName          string
+	election          *ElectionStore
+	enforceLeader     bool
+	appendStarted     bool
+	appended          bool
+	initialAppend     commandJournalAppendState
+	appendOffset      int64
+	rollback          publicCommandBatchRollback
+	dirtyRequests     []CacheCommandRequest
+	planned           plannedReplicationBatch
+	infrastructureErr error
+}
+
+func newPublicCommandBatchEffects(options commandExecutionOptions) *publicCommandBatchEffects {
+	return &publicCommandBatchEffects{
+		journal:       options.Journal,
+		dirtyTracker:  options.DirtyTracker,
+		replicator:    options.Replicator,
+		nodeName:      options.NodeName,
+		election:      options.Election,
+		enforceLeader: options.EnforceLeaderWrites,
+	}
+}
+
+func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *HatTrie, request CacheCommandRequest, trieLocked bool, execute func() CacheCommandResponse) (CacheCommandResponse, bool) {
+	if err := ctx.Err(); err != nil {
+		return commandError(err.Error()), true
+	}
+	if response, rejected := rejectNonLeaderWrite(request, effects.nodeName, effects.election, effects.enforceLeader); rejected {
 		return response, false
 	}
-	if publicCommandBatchCanUseTrieFastPath(options) {
-		return trie.ExecuteCommand(request), false
-	}
-	responses := make([]CacheCommandResponse, 0, len(payloads))
-	allOK := true
-	for idx, payload := range payloads {
-		if err := ctx.Err(); err != nil {
-			responses = append(responses, commandError(err.Error()))
-			allOK = false
-			break
-		}
-		if err := validatePublicCommandBatchPayload(payload, idx); err != nil {
-			responses = append(responses, commandError(err.Error()))
-			allOK = false
-			continue
-		}
-		response, _ := executeCacheCommand(ctx, trie, payload, options)
-		if !response.OK {
-			allOK = false
-		}
-		responses = append(responses, response)
-	}
-	return publicCommandBatchResponse(responses, allOK), false
-}
 
-func executePublicScalarBatchWithSideEffects(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
-	var planned plannedReplicationBatch
-	var plannedPtr *plannedReplicationBatch
-	if options.Replicator != nil {
-		plannedPtr = &planned
-	}
-	executor := publicScalarBatchSideEffectExecutor(ctx, trie, options, plannedPtr)
-	var response CacheCommandResponse
-	var ok bool
-	if options.Journal == nil {
-		response, ok = trie.executePublicScalarBatchCommandWithExecutor(request, executor)
-	} else {
-		options.Journal.mu.Lock()
-		response, ok = trie.executePublicScalarBatchCommandWithExecutor(request, executor)
-		options.Journal.mu.Unlock()
-	}
-	if ok && options.Replicator != nil && planned.seen {
-		options.Replicator.replicatePlannedBatch(ctx, planned)
-	}
-	return response, ok
-}
-
-func publicScalarBatchSideEffectExecutor(ctx context.Context, trie *HatTrie, options commandExecutionOptions, planned *plannedReplicationBatch) publicScalarBatchPayloadExecutor {
-	return func(index int, payload CacheCommandRequest, execute func() CacheCommandResponse) (CacheCommandResponse, bool) {
-		if err := ctx.Err(); err != nil {
+	journaled := effects.journal != nil && commandShouldJournal(request)
+	var appendState commandJournalAppendState
+	if journaled {
+		key := strings.TrimSpace(request.Key)
+		if err := validateKey(key); err == nil {
+			var captureErr error
+			if trieLocked {
+				captureErr = effects.rollback.captureLocked(trie, key)
+			} else {
+				trie.mu.Lock()
+				captureErr = effects.rollback.captureLocked(trie, key)
+				trie.mu.Unlock()
+			}
+			if captureErr != nil {
+				effects.infrastructureErr = captureErr
+				return commandError(captureErr.Error()), true
+			}
+		}
+		journalRequest := normalizeJournalRequest(request, trie.currentTime())
+		if !effects.appendStarted {
+			initial, err := effects.journal.currentAppendStateLocked()
+			if err != nil {
+				effects.infrastructureErr = err
+				return commandError(err.Error()), true
+			}
+			effects.initialAppend = initial
+			effects.appendOffset = initial.offset
+			effects.appendStarted = true
+		}
+		appendState = commandJournalAppendState{
+			offset:            effects.appendOffset,
+			nextSequence:      effects.journal.nextSequence,
+			sequenceExhausted: effects.journal.sequenceExhausted,
+		}
+		n, err := effects.journal.writeWithoutSyncLocked(journalRequest)
+		effects.appendOffset += int64(n)
+		if err != nil {
+			err = effects.journal.rollbackFailedAppendLocked(appendState, err)
+			effects.infrastructureErr = err
 			return commandError(err.Error()), true
 		}
-		if response, rejected := rejectNonLeaderWrite(payload, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
-			return response, false
-		}
+	}
 
-		var appendState commandJournalAppendState
-		journaled := false
-		if options.Journal != nil && commandShouldJournal(payload) {
-			var err error
-			appendState, err = options.Journal.appendLocked(normalizeJournalRequest(payload, trie.currentTime()))
-			if err != nil {
-				return commandError(err.Error()), false
+	response := execute()
+	if !response.OK {
+		if journaled {
+			if err := effects.journal.rollbackAppendWithoutSyncLocked(appendState); err != nil {
+				effects.infrastructureErr = errors.Join(errors.New(response.Message), fmt.Errorf("failed to remove rejected journal entry: %w", err))
+				return commandError(effects.infrastructureErr.Error()), true
 			}
-			journaled = true
-		}
-
-		response := execute()
-		if !response.OK {
-			if journaled {
-				if err := options.Journal.rollbackAppendLocked(appendState); err != nil {
-					return commandError(response.Message + "; failed to remove rejected journal entry: " + err.Error()), false
-				}
-			}
-			return response, false
-		}
-		options.DirtyTracker.markCommand(payload)
-		if options.Replicator != nil && planned != nil {
-			result, tasks := options.Replicator.planReplicationLocked(ctx, trie, payload, response)
-			planned.add(result, tasks)
+			effects.appendOffset = appendState.offset
 		}
 		return response, false
 	}
+	if journaled {
+		effects.appended = true
+	}
+	if effects.dirtyTracker != nil {
+		effects.dirtyRequests = append(effects.dirtyRequests, request)
+	}
+	if effects.replicator != nil {
+		var result ReplicationResult
+		var tasks []replicationTask
+		if trieLocked {
+			result, tasks = effects.replicator.planReplicationLocked(ctx, trie, request, response)
+		} else {
+			result, tasks = effects.replicator.planReplication(ctx, trie, request, response)
+		}
+		effects.planned.add(result, tasks)
+	}
+	return response, false
+}
+
+func (effects *publicCommandBatchEffects) commitLocked(trie *HatTrie) error {
+	if effects.infrastructureErr != nil {
+		return effects.rollbackLocked(trie, effects.infrastructureErr)
+	}
+	if effects.journal == nil || !effects.appended {
+		return nil
+	}
+	if err := effects.journal.syncLocked(); err != nil {
+		return effects.rollbackLocked(trie, err)
+	}
+	return nil
+}
+
+func (effects *publicCommandBatchEffects) rollbackLocked(trie *HatTrie, cause error) error {
+	result := cause
+	if effects.appendStarted {
+		if err := effects.journal.rollbackAppendLocked(effects.initialAppend); err != nil {
+			result = errors.Join(result, fmt.Errorf("journal rollback failed: %w", err))
+		}
+	}
+	if err := effects.rollback.restore(trie); err != nil {
+		result = errors.Join(result, fmt.Errorf("memory rollback failed: %w", err))
+	}
+	return result
+}
+
+func (effects *publicCommandBatchEffects) publish(ctx context.Context) {
+	for _, request := range effects.dirtyRequests {
+		effects.dirtyTracker.markCommand(request)
+	}
+	if effects.replicator != nil && effects.planned.seen {
+		effects.replicator.replicatePlannedBatch(ctx, effects.planned)
+	}
+}
+
+func executePublicScalarBatchWithSideEffects(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions, effects *publicCommandBatchEffects) (CacheCommandResponse, bool) {
+	if publicCommandBatchCanUseTrieFastPath(options) {
+		return trie.executePublicScalarBatchCommand(request)
+	}
+	executor := func(index int, request CacheCommandRequest, execute func() CacheCommandResponse) (CacheCommandResponse, bool) {
+		return effects.execute(ctx, trie, request, true, execute)
+	}
+	return trie.executePublicScalarBatchCommandWithExecutor(request, executor)
 }
 
 func publicCommandBatchCanUseTrieFastPath(options commandExecutionOptions) bool {

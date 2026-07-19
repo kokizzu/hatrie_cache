@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -963,6 +964,128 @@ func TestExecutePublicCommandBatchProductionFastPathPreservesJournalDirtyAndRoll
 	}
 	if len(entries) != 2 || entries[0].Request.Command != "SETSTR" || entries[0].Request.Key != "name" || entries[1].Request.Key != "city" {
 		t.Fatalf("journal entries = %#v, want only successful mutating commands", entries)
+	}
+}
+
+func TestExecutePublicCommandBatchJournalSyncsOnce(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertCounter("max", maxCommandInt32)
+	journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
+	}
+	defer journal.Close()
+	syncs := 0
+	journal.syncHook = func() error {
+		syncs++
+		return nil
+	}
+
+	response, rejected := executeCacheCommand(context.Background(), ht, CacheCommandRequest{
+		Command: "BATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "SETSTR", Key: "name", Value: "ivi"},
+			{Command: "GETSTR", Key: "name"},
+			{Command: "INC", Key: "max", Value: "1"},
+			{Command: "SETSTR", Key: "city", Value: "Singapore"},
+		},
+	}, commandExecutionOptions{Journal: journal})
+	if rejected || response.OK {
+		t.Fatalf("executeCacheCommand(batch) = %#v rejected=%v, want aggregate command failure", response, rejected)
+	}
+	if syncs != 1 {
+		t.Fatalf("journal syncs = %d, want one durable boundary for the public batch", syncs)
+	}
+	entries, err := readCommandJournalEntries(journal.path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 2 || entries[0].Request.Key != "name" || entries[1].Request.Key != "city" {
+		t.Fatalf("journal entries = %#v, want only the two successful writes", entries)
+	}
+}
+
+func TestExecutePublicStructuredCommandBatchJournalSyncsOnceAndReplays(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
+	}
+	defer journal.Close()
+	syncs := 0
+	journal.syncHook = func() error {
+		syncs++
+		return nil
+	}
+
+	response, rejected := executeCacheCommand(context.Background(), ht, CacheCommandRequest{
+		Command: "BATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "PUTMAP", Key: "profile", Pairs: Map{"city": "Singapore", "age": "32"}},
+			{Command: "SETSTR", Key: "name", Value: "ivi"},
+			{Command: "PEEKMAP", Key: "profile", Subkey: "city"},
+		},
+	}, commandExecutionOptions{Journal: journal})
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand(structured batch) = %#v rejected=%v, want success", response, rejected)
+	}
+	if syncs != 1 {
+		t.Fatalf("structured batch journal syncs = %d, want one", syncs)
+	}
+
+	replayed := newTestTrie(t)
+	journal.syncHook = nil
+	if _, err := journal.Replay(replayed, 0); err != nil {
+		t.Fatalf("Replay() error = %v", err)
+	}
+	if got := replayed.GetString("name"); got != "ivi" {
+		t.Fatalf("replayed name = %q, want ivi", got)
+	}
+	profile := replayed.GetMap("profile")
+	if profile["city"] != "Singapore" || profile["age"] != "32" {
+		t.Fatalf("replayed profile = %#v, want structured values", profile)
+	}
+}
+
+func TestExecutePublicCommandBatchSyncFailureRollsBackMemoryAndJournal(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("name", "before")
+	journal, err := OpenCommandJournalWithFormat(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalFormatBinary)
+	if err != nil {
+		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
+	}
+	defer journal.Close()
+	syncs := 0
+	journal.syncHook = func() error {
+		syncs++
+		if syncs == 1 {
+			return errors.New("injected batch sync failure")
+		}
+		return nil
+	}
+
+	response, rejected := executeCacheCommand(context.Background(), ht, CacheCommandRequest{
+		Command: "BATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "SETSTR", Key: "name", Value: "after"},
+			{Command: "SETSTR", Key: "city", Value: "Singapore"},
+		},
+	}, commandExecutionOptions{Journal: journal})
+	if rejected || response.OK || !strings.Contains(response.Message, "injected batch sync failure") {
+		t.Fatalf("executeCacheCommand(batch) = %#v rejected=%v, want injected durability failure", response, rejected)
+	}
+	if got := ht.GetString("name"); got != "before" {
+		t.Fatalf("name after failed sync = %q, want original value", got)
+	}
+	if got := ht.GetString("city"); got != "" {
+		t.Fatalf("city after failed sync = %q, want rolled back creation", got)
+	}
+	entries, err := readCommandJournalEntries(journal.path)
+	if err != nil {
+		t.Fatalf("readCommandJournalEntries() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("journal entries after failed sync = %#v, want none", entries)
 	}
 }
 
