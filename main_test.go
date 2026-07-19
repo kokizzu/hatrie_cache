@@ -2357,6 +2357,111 @@ func TestConcurrentStringReadFastPathPreservesValuesAndStats(t *testing.T) {
 	}
 }
 
+func TestCounterWriteStripingDefaultsToOffAndValidatesConfiguration(t *testing.T) {
+	ht := newTestTrie(t)
+
+	if got := ht.CounterWriteStripingStats(); got.Enabled || got.Stripes != 0 || got.FastPathWrites != 0 {
+		t.Fatalf("CounterWriteStripingStats() = %#v, want disabled", got)
+	}
+	for _, stripes := range []int{-1, 3, MaxCounterWriteStripes + 1} {
+		if err := ht.ConfigureCounterWriteStripes(stripes); err == nil {
+			t.Fatalf("ConfigureCounterWriteStripes(%d) error = nil, want validation error", stripes)
+		}
+	}
+	if err := ht.ConfigureCounterWriteStripes(64); err != nil {
+		t.Fatalf("ConfigureCounterWriteStripes(64) error = %v", err)
+	}
+	if got := ht.CounterWriteStripingStats(); !got.Enabled || got.Stripes != 64 || got.FastPathWrites != 0 {
+		t.Fatalf("CounterWriteStripingStats() = %#v, want 64 enabled stripes", got)
+	}
+}
+
+func TestCounterWriteStripingPreservesConcurrentValuesAndStats(t *testing.T) {
+	ht := newTestTrie(t)
+	const (
+		keys       = 256
+		workers    = 16
+		increments = 2_000
+	)
+	for key := 0; key < keys; key++ {
+		ht.UpsertCounter(fmt.Sprintf("counter:%d", key), 0)
+	}
+	if err := ht.ConfigureCounterWriteStripes(64); err != nil {
+		t.Fatalf("ConfigureCounterWriteStripes(64) error = %v", err)
+	}
+
+	var group sync.WaitGroup
+	group.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func(worker int) {
+			defer group.Done()
+			for increment := 0; increment < increments; increment++ {
+				key := fmt.Sprintf("counter:%d", (worker+increment*workers)%keys)
+				if _, err := ht.IncrementCounterChecked(key, 1); err != nil {
+					t.Errorf("IncrementCounterChecked(%q) error = %v", key, err)
+					return
+				}
+			}
+		}(worker)
+	}
+	group.Wait()
+
+	for key := 0; key < keys; key++ {
+		if got := ht.GetCounter(fmt.Sprintf("counter:%d", key)); got != workers*increments/keys {
+			t.Fatalf("counter:%d = %d, want %d", key, got, workers*increments/keys)
+		}
+	}
+	stats := ht.Stats()
+	if want := uint64(keys + workers*increments); stats.Writes != want {
+		t.Fatalf("Stats().Writes = %d, want %d", stats.Writes, want)
+	}
+	striping := ht.CounterWriteStripingStats()
+	if want := uint64(workers * increments); striping.FastPathWrites != want {
+		t.Fatalf("CounterWriteStripingStats().FastPathWrites = %d, want %d", striping.FastPathWrites, want)
+	}
+}
+
+func TestCounterWriteStripingFallsBackForSemanticWork(t *testing.T) {
+	ht := newTestTrie(t)
+	if err := ht.ConfigureCounterWriteStripes(64); err != nil {
+		t.Fatalf("ConfigureCounterWriteStripes(64) error = %v", err)
+	}
+
+	ht.UpsertString("replace", "value")
+	ht.UpsertCounter("replace", 7)
+	if got := ht.GetCounter("replace"); got != 7 {
+		t.Fatalf("GetCounter(replace) = %d, want 7", got)
+	}
+
+	ht.UpsertCounter("ttl", 1)
+	if !ht.Expire("ttl", time.Hour) {
+		t.Fatal("Expire(ttl) = false, want true")
+	}
+	ht.UpsertCounter("ttl", 2)
+	if got := ht.TTL("ttl"); got != NoTTL {
+		t.Fatalf("TTL(ttl) = %s, want NoTTL", got)
+	}
+
+	ht.UpsertCounter("merkle", 1)
+	before, err := ht.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("replicationMerkleSnapshot(before) error = %v", err)
+	}
+	ht.UpsertCounter("merkle", 2)
+	after, err := ht.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("replicationMerkleSnapshot(after) error = %v", err)
+	}
+	if before.root == after.root {
+		t.Fatal("Merkle root did not change after striped counter update fallback")
+	}
+
+	striping := ht.CounterWriteStripingStats()
+	if striping.FastPathWrites != 0 {
+		t.Fatalf("CounterWriteStripingStats().FastPathWrites = %d, want semantic writes to fall back", striping.FastPathWrites)
+	}
+}
+
 func TestKeyStatsPolicyDefaultsToOff(t *testing.T) {
 	ht := newTestTrie(t)
 

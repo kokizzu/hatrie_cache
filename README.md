@@ -578,6 +578,21 @@ make monitoring-server KEY_STATS_MODE=bounded KEY_STATS_CAPACITY=250000
 make monitoring-server KEY_STATS_MODE=full
 ```
 
+Existing non-TTL counters can opt into striped concurrent updates. The default
+is `0` (off). Use a power of two from 2 through 256; 64 is the measured general
+starting point for independent counter keys:
+
+```
+make monitoring-server COUNTER_WRITE_STRIPES=64
+```
+
+This is not keyspace sharding: the cache still has one HAT-trie, one persistence
+image, and unchanged scan/backup behavior. The fast path applies to `SETINT` and
+`INC` only after a counter key exists. It automatically uses the exclusive path
+for missing or non-counter keys, TTL counters, enabled per-key telemetry, active
+snapshot capture or Merkle tracking, and LevelDB spill accounting. The measured
+CPU and fixed-memory tradeoffs are in [BENCHMARK.md](BENCHMARK.md#striped-existing-counter-writes).
+
 Long-running daemon options can also live in a JSON config file. Config keys
 match flag names and may use hyphens or underscores; duration values use Go
 duration strings. Explicit CLI flags override file values:
@@ -589,6 +604,7 @@ duration strings. Explicit CLI flags override file values:
   "monitoring_web_dir": "svelte-mpa/dist",
   "key_stats_mode": "off",
   "key_stats_capacity": 0,
+  "counter_write_stripes": 0,
   "db_path": "data/cache.leveldb",
   "snapshot_path": "data/snapshot.hc",
   "snapshot_interval": "30s",

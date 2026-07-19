@@ -13,12 +13,14 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 const bigWinsDurableWrites = 100
 
 func BenchmarkBigWins(b *testing.B) {
 	b.Run("ConcurrentRead", benchmarkBigWinsConcurrentRead)
+	b.Run("ConcurrentWrite", benchmarkBigWinsConcurrentWrite)
 	b.Run("PerKeyMemory", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeBounded) })
 	b.Run("PerKeyMemoryFull", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeFull) })
 	b.Run("PerKeyMemoryOff", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeOff) })
@@ -29,6 +31,55 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("UnaryCommand", benchmarkBigWinsUnaryCommand)
 	b.Run("StreamCommand", benchmarkBigWinsStreamCommand)
 	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
+}
+
+func benchmarkBigWinsConcurrentWrite(b *testing.B) {
+	keyCount := bigWinsBenchmarkKeys(65536)
+	operations := bigWinsBenchmarkOperations(100000)
+	for _, config := range []struct {
+		name    string
+		stripes int
+	}{
+		{name: "Off"},
+		{name: "Stripes64", stripes: 64},
+	} {
+		for _, workers := range []int{1, 2, 4, 8, 16} {
+			b.Run(fmt.Sprintf("%s/Workers%d", config.name, workers), func(b *testing.B) {
+				trie := CreateHatTrie()
+				b.Cleanup(trie.Destroy)
+				keys := make([]string, keyCount)
+				for index := range keys {
+					keys[index] = bigWinsKey(index)
+					trie.UpsertCounter(keys[index], 0)
+				}
+				if err := trie.ConfigureCounterWriteStripes(config.stripes); err != nil {
+					b.Fatal(err)
+				}
+				var total time.Duration
+				b.ReportAllocs()
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					started := time.Now()
+					var group sync.WaitGroup
+					group.Add(workers)
+					for worker := 0; worker < workers; worker++ {
+						go func(worker int) {
+							defer group.Done()
+							for operation := worker; operation < operations; operation += workers {
+								trie.UpsertCounter(keys[operation%keyCount], int32(iteration+operation))
+							}
+						}(worker)
+					}
+					group.Wait()
+					total += time.Since(started)
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(operations), "writes/op")
+				b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/write")
+				b.ReportMetric(float64(config.stripes)*float64(unsafe.Sizeof(sync.RWMutex{})), "stripe-B")
+			})
+		}
+	}
 }
 
 func benchmarkBigWinsConcurrentRead(b *testing.B) {

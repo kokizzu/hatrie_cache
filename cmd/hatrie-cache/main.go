@@ -60,6 +60,7 @@ type config struct {
 	rateLimit                   int
 	keyStatsMode                string
 	keyStatsCapacity            int
+	counterWriteStripes         int
 	monitoringWebDir            string
 	monitoringReadHeaderTimeout time.Duration
 	monitoringIdleTimeout       time.Duration
@@ -185,6 +186,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
 	if err := trie.ConfigureKeyStats(hatriecache.KeyStatsMode(cfg.keyStatsMode), cfg.keyStatsCapacity); err != nil {
+		return err
+	}
+	if err := trie.ConfigureCounterWriteStripes(cfg.counterWriteStripes); err != nil {
 		return err
 	}
 
@@ -404,6 +408,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		monitoringIdleTimeout:       defaultMonitoringIdleTimeout,
 		keyStatsMode:                string(hatriecache.DefaultKeyStatsMode),
 		keyStatsCapacity:            hatriecache.DefaultKeyStatsCapacity,
+		counterWriteStripes:         hatriecache.DefaultCounterWriteStripes,
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
 		replicationMode:             replicationModeJournal,
 		replicationWireFormat:       string(hatriecache.DefaultCommandWireFormat),
@@ -463,6 +468,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.rateLimit, "rate-limit", cfg.rateLimit, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
 	flags.StringVar(&cfg.keyStatsMode, "key-stats-mode", cfg.keyStatsMode, "per-key telemetry retention: bounded, full, or off")
 	flags.IntVar(&cfg.keyStatsCapacity, "key-stats-capacity", cfg.keyStatsCapacity, "maximum keys with retained telemetry in bounded mode")
+	flags.IntVar(&cfg.counterWriteStripes, "counter-write-stripes", cfg.counterWriteStripes, "existing-counter write lock stripes; use 0 to disable")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
@@ -566,6 +572,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		cfg.keyStatsCapacity = 0
 	default:
 		return config{}, errors.New("key stats mode must be bounded, full, or off")
+	}
+	if err := hatriecache.ValidateCounterWriteStripes(cfg.counterWriteStripes); err != nil {
+		return config{}, err
 	}
 	if cfg.dbHotLoadMaxBytes < 0 {
 		return config{}, errors.New("db hot-load max bytes must be non-negative")
@@ -929,6 +938,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"rate_limit":                           cfg.rateLimit,
 		"key_stats_mode":                       cfg.keyStatsMode,
 		"key_stats_capacity":                   cfg.keyStatsCapacity,
+		"counter_write_stripes":                cfg.counterWriteStripes,
 		"monitoring_web_dir":                   cfg.monitoringWebDir,
 		"monitoring_read_header_timeout":       cfg.monitoringReadHeaderTimeout.String(),
 		"monitoring_idle_timeout":              cfg.monitoringIdleTimeout.String(),

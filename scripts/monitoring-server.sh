@@ -11,6 +11,7 @@ write_protection=${WRITE_PROTECTION:-false}
 rate_limit=${RATE_LIMIT:-0}
 key_stats_mode=${KEY_STATS_MODE:-off}
 key_stats_capacity=${KEY_STATS_CAPACITY:-100000}
+counter_write_stripes=${COUNTER_WRITE_STRIPES:-0}
 read_header_timeout=${MONITORING_READ_HEADER_TIMEOUT:-5s}
 idle_timeout=${MONITORING_IDLE_TIMEOUT:-2m}
 node_id=${NODE_ID:-}
@@ -85,6 +86,7 @@ set -- \
 	-rate-limit "$rate_limit" \
 	-key-stats-mode "$key_stats_mode" \
 	-key-stats-capacity "$key_stats_capacity" \
+	-counter-write-stripes "$counter_write_stripes" \
 	-monitoring-read-header-timeout "$read_header_timeout" \
 	-monitoring-idle-timeout "$idle_timeout" \
 	-node-id "$node_id" \

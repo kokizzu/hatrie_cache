@@ -7,6 +7,7 @@
   "rate_limit": 100,
   "key_stats_mode": "off",
   "key_stats_capacity": 0,
+  "counter_write_stripes": 0,
   "node_id": "node-a",
   "topology_path": "deploy/topology/full-replica.json",
   "snapshot_path": "data/snapshot.hc",

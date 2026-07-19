@@ -286,6 +286,30 @@ func TestParseConfigKeyStatsDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestParseConfigCounterWriteStripesDefaultsOffAndValidatesOverride(t *testing.T) {
+	defaultCfg, err := parseConfig(nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(defaults) error = %v", err)
+	}
+	if defaultCfg.counterWriteStripes != 0 {
+		t.Fatalf("default counter write stripes = %d, want 0", defaultCfg.counterWriteStripes)
+	}
+
+	stripedCfg, err := parseConfig([]string{"-counter-write-stripes", "64"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(striped) error = %v", err)
+	}
+	if stripedCfg.counterWriteStripes != 64 {
+		t.Fatalf("counter write stripes = %d, want 64", stripedCfg.counterWriteStripes)
+	}
+
+	for _, stripes := range []string{"-1", "1", "3", "512"} {
+		if _, err := parseConfig([]string{"-counter-write-stripes", stripes}, &bytes.Buffer{}); err == nil {
+			t.Fatalf("parseConfig(counter-write-stripes=%s) error = nil, want validation error", stripes)
+		}
+	}
+}
+
 func TestParseConfigRejectsInvalidKeyStatsPolicy(t *testing.T) {
 	for _, test := range []struct {
 		name string

@@ -179,6 +179,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
+| Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
@@ -313,6 +314,38 @@ Telemetry updates use a separate short critical section and remain exact.
 
 The optimized median is from three one-iteration runs with the same 100,000-key
 and 100,000-operation fixture as the architectural baseline.
+
+### Striped Existing Counter Writes
+
+The optional counter write path holds the trie's shared structural lock while a
+key-hashed stripe protects an existing scalar value. This permits independent
+counter updates to overlap without making the C trie or typed value pools
+concurrently mutable. The default remains `0` (off); enable the measured
+64-stripe policy with `COUNTER_WRITE_STRIPES=64` or
+`-counter-write-stripes 64`.
+
+```sh
+make bench-big-wins BIG_WINS_BENCH=BenchmarkBigWins/ConcurrentWrite BIG_WINS_KEYS=65536 BIG_WINS_OPS=100000 BENCHTIME=3x COUNT=5
+```
+
+Each row updates 100,000 preallocated counter keys. Values are five-run medians
+from three timed iterations per run on the Ryzen 9 5950X host.
+
+| Writers | Global lock, ns/write | 64 stripes, ns/write | Improvement | Retained stripe memory |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 281.1 | 267.0 | 1.05x | 1,536 B |
+| 2 | 362.8 | 209.7 | 1.73x | 1,536 B |
+| 4 | 365.2 | 235.2 | 1.55x | 1,536 B |
+| 8 | 386.7 | 262.9 | 1.47x | 1,536 B |
+| 16 | 384.5 | 290.5 | 1.32x | 1,536 B |
+
+The stripe slice is allocated once when enabled; writes add no per-operation
+allocation. Wire bytes and storage bytes are unchanged because only in-memory
+locking changes. Exact cache-wide write statistics remain enabled. Missing or
+non-counter keys, TTL counters, detailed per-key telemetry, active snapshot or
+Merkle tracking, and LevelDB spill accounting use the existing exclusive path.
+This optimization is not keyspace sharding and does not change backup or scan
+semantics.
 
 ### Durable Journal Group Commit
 

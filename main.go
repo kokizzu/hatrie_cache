@@ -20,9 +20,11 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/cespare/xxhash/v2"
 	json "github.com/goccy/go-json"
 )
 
@@ -49,6 +51,10 @@ const (
 const (
 	defaultHatTrieScanBatchEntries  = 256
 	defaultHatTrieScanBatchKeyBytes = 4 << 10
+	// DefaultCounterWriteStripes keeps the constrained counter fast path opt-in.
+	DefaultCounterWriteStripes = 0
+	// MaxCounterWriteStripes bounds retained mutex memory.
+	MaxCounterWriteStripes = 256
 )
 
 const (
@@ -2005,6 +2011,9 @@ type HatTrie struct {
 	mu                      sync.RWMutex
 	telemetryMu             sync.Mutex
 	snapshotCaptureMu       sync.Mutex
+	counterWriteStripes     []sync.RWMutex
+	counterWriteStripeMask  uint64
+	counterFastPathWrites   uint64
 	root                    *C.hattrie_t
 	raws                    *BytesStorage
 	disks                   *DiskStorage
@@ -2147,7 +2156,67 @@ func (ht *HatTrie) Destroy() {
 	ht.levelDBHotBytes = 0
 	ht.levelDBHotValues = nil
 	ht.replicationMerkle = nil
+	ht.counterWriteStripes = nil
+	ht.counterWriteStripeMask = 0
 	ht.now = nil
+}
+
+// CounterWriteStripingStats describes the optional existing-counter write
+// fast path. Stripe count zero means the feature is disabled.
+type CounterWriteStripingStats struct {
+	Enabled        bool   `json:"enabled"`
+	Stripes        int    `json:"stripes"`
+	FastPathWrites uint64 `json:"fast_path_writes"`
+}
+
+// ConfigureCounterWriteStripes enables a striped fast path for updates to
+// existing non-TTL counters. Zero disables it. A power of two from 2 through
+// 256 keeps key routing cheap and bounds retained mutex memory.
+func (ht *HatTrie) ConfigureCounterWriteStripes(stripes int) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if err := ValidateCounterWriteStripes(stripes); err != nil {
+		return err
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	ht.ensureOpen()
+	if stripes == 0 {
+		ht.counterWriteStripes = nil
+		ht.counterWriteStripeMask = 0
+		return nil
+	}
+	ht.counterWriteStripes = make([]sync.RWMutex, stripes)
+	ht.counterWriteStripeMask = uint64(stripes - 1)
+	return nil
+}
+
+// ValidateCounterWriteStripes checks the counter stripe policy without
+// changing a trie.
+func ValidateCounterWriteStripes(stripes int) error {
+	if stripes < 0 || stripes == 1 || stripes > MaxCounterWriteStripes || (stripes != 0 && stripes&(stripes-1) != 0) {
+		return fmt.Errorf("hatriecache: counter write stripes must be zero or a power of two from 2 through %d", MaxCounterWriteStripes)
+	}
+	return nil
+}
+
+// CounterWriteStripingStats returns the active stripe policy and cumulative
+// number of updates completed through the fast path.
+func (ht *HatTrie) CounterWriteStripingStats() CounterWriteStripingStats {
+	if ht == nil {
+		return CounterWriteStripingStats{}
+	}
+	ht.mu.RLock()
+	defer ht.mu.RUnlock()
+	ht.ensureOpen()
+	stripes := len(ht.counterWriteStripes)
+	return CounterWriteStripingStats{
+		Enabled:        stripes != 0,
+		Stripes:        stripes,
+		FastPathWrites: atomic.LoadUint64(&ht.counterFastPathWrites),
+	}
 }
 
 func (ht *HatTrie) Size() int {
@@ -3702,6 +3771,11 @@ func (ht *HatTrie) readValueRLockedChecked(key string, hydrateLevelDB bool) (hva
 		return HatValue{}, false, err
 	}
 	ht.ensureOpen()
+	stripe := ht.counterWriteStripeRLocked(key)
+	if stripe != nil {
+		stripe.RLock()
+		defer stripe.RUnlock()
+	}
 	if cached, ok := ht.cachedValueLocked(key); ok {
 		if ht.readValueNeedsExclusiveLockRLocked(key, cached, hydrateLevelDB) {
 			return HatValue{}, true, nil
@@ -3731,6 +3805,92 @@ func (ht *HatTrie) readValueNeedsExclusiveLockRLocked(key string, hval HatValue,
 	}
 	expiresAt, ok := ht.expires[key]
 	return !ok || !ht.currentTime().Before(expiresAt)
+}
+
+func (ht *HatTrie) counterWriteStripeRLocked(key string) *sync.RWMutex {
+	if len(ht.counterWriteStripes) == 0 {
+		return nil
+	}
+	return &ht.counterWriteStripes[xxhash.Sum64String(key)&ht.counterWriteStripeMask]
+}
+
+func (ht *HatTrie) canUseCounterWriteFastPathRLocked(key string) bool {
+	return len(ht.counterWriteStripes) != 0 &&
+		ht.keyStatsMode == KeyStatsModeOff &&
+		ht.snapshotMutations == nil &&
+		ht.replicationMerkle == nil &&
+		ht.levelDBSpillKeys == nil &&
+		ht.levelDBHotValues == nil &&
+		(!ht.hotValid || ht.hotKey != key)
+}
+
+func (ht *HatTrie) tryUpsertCounterStriped(key string, value int32) bool {
+	ht.mu.RLock()
+	defer ht.mu.RUnlock()
+	ht.ensureOpen()
+	if !ht.canUseCounterWriteFastPathRLocked(key) {
+		return false
+	}
+	stripe := ht.counterWriteStripeRLocked(key)
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		return false
+	}
+	current := HatValue{}
+	current.fromValue(*rawPtr)
+	if !current.IsCounter() || current.HasTtl() {
+		return false
+	}
+	*rawPtr = HatValue{Index: value, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
+	ht.recordCounterWriteFastPath()
+	return true
+}
+
+func (ht *HatTrie) tryIncrementCounterStriped(key string, by int32, checkOverflow bool) (int32, bool, bool) {
+	ht.mu.RLock()
+	defer ht.mu.RUnlock()
+	ht.ensureOpen()
+	if !ht.canUseCounterWriteFastPathRLocked(key) {
+		return 0, false, false
+	}
+	stripe := ht.counterWriteStripeRLocked(key)
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	rawPtr := ht.tryLocation(key)
+	if rawPtr == nil {
+		return 0, false, false
+	}
+	current := HatValue{}
+	current.fromValue(*rawPtr)
+	if !current.IsCounter() || current.HasTtl() {
+		return 0, false, false
+	}
+	if checkOverflow {
+		next := int64(current.Index) + int64(by)
+		if next < minCommandInt32 || next > maxCommandInt32 {
+			return current.Index, false, true
+		}
+		current.Index = int32(next)
+	} else {
+		current.Index += by
+	}
+	*rawPtr = current.toValue()
+	ht.recordCounterWriteFastPath()
+	return current.Index, true, true
+}
+
+func (ht *HatTrie) recordCounterWriteFastPath() {
+	atomic.AddUint64(&ht.mutationEpoch, 1)
+	now := ht.currentTime()
+	ht.telemetryMu.Lock()
+	ht.stats.Writes++
+	ht.stats.LastWrite = now
+	ht.telemetryMu.Unlock()
+	atomic.AddUint64(&ht.counterFastPathWrites, 1)
 }
 
 // HydrateLevelDBReferences materializes all lazy LevelDB-backed values into the
@@ -3838,6 +3998,12 @@ func (ht *HatTrie) UpsertCounterChecked(key string, val int32) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	if ht.tryUpsertCounterStriped(key, val) {
+		return nil
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3868,6 +4034,12 @@ func (ht *HatTrie) IncrementCounterChecked(key string, by int32) (int32, error) 
 func (ht *HatTrie) incrementCounterChecked(key string, by int32, checkOverflow bool) (int32, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
+	}
+	if err := validateKey(key); err != nil {
+		return 0, false, err
+	}
+	if value, updated, handled := ht.tryIncrementCounterStriped(key, by, checkOverflow); handled {
+		return value, updated, nil
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
