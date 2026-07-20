@@ -190,6 +190,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
+| Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; structured commands retain the generic batch path |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
@@ -479,6 +480,7 @@ messages 16x. The client-selected batch size is the latency tradeoff: 16 is the
 measured throughput point, while smaller envelopes reduce the time a command
 waits for its batch to fill.
 
+<a id="compact-typed-protobuf-scalar-batches"></a>
 The direct scalar follow-up replaces repeated request/response messages with
 packed operation, status, and value-kind columns plus one concatenated result
 buffer. Both rows below use 16-command envelopes and are seven-run medians from
@@ -487,8 +489,8 @@ the new path rather than copied from the older run above.
 
 | 10,000 GET commands | Time/10k | ns/command | Heap B/10k | Allocs/10k | Wire B/command | Improvement |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `CommandBatchStream` | 8.877 ms | 887.7 | 9,671,528 | 107,685 | 37.04 | baseline |
-| `ScalarBatchStream` | 3.698 ms | 369.7 | 2,646,720 | 40,491 | 23.72 | 2.40x CPU, 3.65x heap, 2.66x allocations, 1.56x wire |
+| `CommandBatchStream` | 8.657 ms | 865.7 | 9,671,736 | 107,740 | 37.04 | baseline |
+| `ScalarBatchStream` | 3.911 ms | 391.1 | 2,633,784 | 40,493 | 23.72 | 2.21x CPU, 3.67x heap, 2.66x allocations, 1.56x wire |
 
 The direct path supports GET, EXISTS, string/counter set, counter increment,
 and delete. It preserves ordered per-command statuses. Servers configured with
@@ -496,6 +498,8 @@ journaling, dirty persistence, replication, or leader enforcement route typed
 columns through the existing transactional side-effect executor, retaining
 correctness at the cost of some direct-path savings. The existing command batch
 stream remains the fallback for structured commands and older clients.
+Raw output from the final combined branch is generated at
+`build/benchmarks/scalar-protobuf-batch.txt`.
 
 Run the same sequential transport comparison across representative command
 families:
