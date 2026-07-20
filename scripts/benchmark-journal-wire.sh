@@ -2,7 +2,7 @@
 set -eu
 
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-build/benchmarks}
-benchmark=${JOURNAL_WIRE_BENCH:-^BenchmarkCommandJournalTail(Wire|Ownership)10k$}
+benchmark=${JOURNAL_WIRE_BENCH:-^BenchmarkCommandJournalTail(Wire|Ownership|CompactDecode)10k$}
 benchtime=${BENCHTIME:-1x}
 count=${COUNT:-7}
 output="$artifact_dir/journal-tail-wire.txt"

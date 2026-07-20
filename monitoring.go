@@ -2377,7 +2377,7 @@ func fetchCommandJournalTailAuthorizedWithFormat(ctx context.Context, client *ht
 	}
 	var tail CommandJournalTail
 	if strings.EqualFold(contentType, commandJournalTailBinaryContentType) {
-		tail, err = decodeCommandJournalTailBinaryResponse(resp.Body, resp.ContentLength)
+		tail, err = decodeCommandJournalTailBinaryPullResponse(resp.Body, resp.ContentLength)
 	} else {
 		tail, err = decodeCommandJournalTailResponse(resp.Body)
 	}

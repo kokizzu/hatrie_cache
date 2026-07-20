@@ -2,7 +2,7 @@
 set -eu
 
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-build/benchmarks}
-benchmark=${JOURNAL_APPLY_BENCH:-^BenchmarkJournal(PullApplyBatch10K|ScalarApply10K)$}
+benchmark=${JOURNAL_APPLY_BENCH:-^BenchmarkJournal(PullApplyBatch10K|ScalarApply10K|PullRepresentation10K)$}
 benchtime=${BENCHTIME:-1x}
 count=${COUNT:-7}
 output="$artifact_dir/journal-pull-batch-apply.txt"

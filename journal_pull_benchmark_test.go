@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -93,6 +94,63 @@ func BenchmarkJournalScalarApply10K(b *testing.B) {
 		}
 		b.ReportMetric(recordsPerBatch, "records/op")
 	})
+}
+
+func BenchmarkJournalPullRepresentation10K(b *testing.B) {
+	const recordsPerBatch = 10_000
+	tail := CommandJournalTail{
+		LastSequence: recordsPerBatch,
+		Limit:        recordsPerBatch,
+		Entries:      benchmarkJournalScalarRecords(recordsPerBatch),
+	}
+	payload, err := marshalCommandJournalTailBinary(tail)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		decode func() (CommandJournalTail, error)
+	}{
+		{
+			name: "FullRequests",
+			decode: func() (CommandJournalTail, error) {
+				return decodeCommandJournalTailBinaryResponse(bytes.NewReader(payload), int64(len(payload)))
+			},
+		},
+		{
+			name: "CompactScalar",
+			decode: func() (CommandJournalTail, error) {
+				return decodeCommandJournalTailBinaryPullResponse(bytes.NewReader(payload), int64(len(payload)))
+			},
+		},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			journal, err := OpenCommandJournalWithOptions(filepath.Join(b.TempDir(), "commands.journal"), CommandJournalOptions{
+				Format:              CommandJournalFormatBinary,
+				GroupCommitMaxBatch: 1,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(func() { _ = journal.Close() })
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				decoded, err := test.decode()
+				if err != nil {
+					b.Fatal(err)
+				}
+				result, err := applyCommandJournalTail(trie, journal, "benchmark", 0, decoded)
+				if err != nil || result.Applied != recordsPerBatch {
+					b.Fatalf("applyCommandJournalTail() = %#v/%v", result, err)
+				}
+			}
+			b.ReportMetric(recordsPerBatch, "records/op")
+			b.ReportMetric(float64(len(payload)), "wire_B/op")
+		})
+	}
 }
 
 func benchmarkJournalScalarRecords(count int) []CommandJournalRecord {

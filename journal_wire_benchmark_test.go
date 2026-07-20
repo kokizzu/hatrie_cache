@@ -101,6 +101,42 @@ func BenchmarkCommandJournalTailOwnership10k(b *testing.B) {
 	})
 }
 
+func BenchmarkCommandJournalTailCompactDecode10k(b *testing.B) {
+	payload, err := marshalCommandJournalTailBinary(benchmarkCommandJournalTail10k())
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		decode func() (CommandJournalTail, error)
+	}{
+		{
+			name: "FullRequests",
+			decode: func() (CommandJournalTail, error) {
+				return decodeCommandJournalTailBinaryResponse(bytes.NewReader(payload), int64(len(payload)))
+			},
+		},
+		{
+			name: "CompactScalar",
+			decode: func() (CommandJournalTail, error) {
+				return decodeCommandJournalTailBinaryPullResponse(bytes.NewReader(payload), int64(len(payload)))
+			},
+		},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				tail, err := test.decode()
+				if err != nil {
+					b.Fatal(err)
+				}
+				runtime.KeepAlive(tail)
+			}
+		})
+	}
+}
+
 func benchmarkCommandJournalTail10k() CommandJournalTail {
 	tail := CommandJournalTail{LastSequence: 10000, Limit: 10000, Entries: make([]CommandJournalRecord, 10000)}
 	for index := range tail.Entries {

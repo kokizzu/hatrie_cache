@@ -53,6 +53,33 @@ type CommandJournalRecord struct {
 	Request  CacheCommandRequest `json:"request"`
 }
 
+type compactCommandJournalSetCommand uint8
+
+const (
+	compactCommandJournalSetInvalid compactCommandJournalSetCommand = iota
+	compactCommandJournalSetString
+	compactCommandJournalSetStringAlias
+	compactCommandJournalSetCounter
+)
+
+type compactCommandJournalRecord struct {
+	Sequence uint64
+	Key      string
+	Value    string
+	Command  compactCommandJournalSetCommand
+}
+
+func (record compactCommandJournalRecord) request() CacheCommandRequest {
+	command := "SETINT"
+	switch record.Command {
+	case compactCommandJournalSetString:
+		command = "SET"
+	case compactCommandJournalSetStringAlias:
+		command = "SETSTR"
+	}
+	return CacheCommandRequest{Command: command, Key: record.Key, Value: record.Value}
+}
+
 type CommandJournalTail struct {
 	LastSequence     uint64                 `json:"last_sequence"`
 	CompactedThrough uint64                 `json:"compacted_through,omitempty"`
@@ -60,6 +87,7 @@ type CommandJournalTail struct {
 	HasMore          bool                   `json:"has_more,omitempty"`
 	Entries          []CommandJournalRecord `json:"entries"`
 	wireFormat       CommandJournalWireFormat
+	compactEntries   []compactCommandJournalRecord
 }
 
 type CommandJournalPullResult struct {
@@ -619,6 +647,92 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		return idx, response
 	}
 	return len(records), CacheCommandResponse{OK: true}
+}
+
+func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, records []compactCommandJournalRecord) (int, CacheCommandResponse) {
+	if journal == nil {
+		return 0, commandError(ErrNilCommandJournal.Error())
+	}
+	if trie == nil {
+		return 0, commandError(ErrNilHatTrie.Error())
+	}
+	if len(records) == 0 {
+		return 0, CacheCommandResponse{OK: true}
+	}
+
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	batchState, err := journal.currentAppendStateLocked()
+	if err != nil {
+		return 0, commandError(err.Error())
+	}
+	recordSizes := make([]uint32, len(records))
+	encoded := make([]byte, 0, compactCommandJournalRecordBatchInitialCapacity(records))
+	for idx, record := range records {
+		sequence, err := journal.nextAppendSequenceLocked()
+		if err != nil {
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+		}
+		request := record.request()
+		entry := commandJournalEntry{Version: commandJournalVersion, Sequence: sequence, Request: request}
+		if commandJournalRecordBatchShouldFlush(encoded, request) {
+			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+			}
+			encoded = encoded[:0]
+		}
+		start := len(encoded)
+		encoded, err = appendCommandJournalRecord(encoded, entry, journal.format)
+		if err != nil {
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+		}
+		recordBytes := len(encoded) - start
+		if uint64(recordBytes) > uint64(^uint32(0)) {
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, errCommandJournalBinaryRecordTooLarge).Error())
+		}
+		recordSizes[idx] = uint32(recordBytes)
+		journal.markAppendedLocked(sequence)
+		if len(encoded) >= maxCommandJournalRecordBatchInitialBytes {
+			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+			}
+			encoded = encoded[:0]
+		}
+	}
+	if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+	}
+	if err := journal.syncLocked(); err != nil {
+		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+	}
+
+	applied, response := trie.executeCompactJournalSetBatch(records)
+	rollbackOffset := batchState.offset
+	for idx := 0; idx < applied; idx++ {
+		rollbackOffset += int64(recordSizes[idx])
+	}
+	if response.OK {
+		return applied, response
+	}
+	rollbackState := commandJournalAppendState{
+		offset:       rollbackOffset,
+		nextSequence: batchState.nextSequence + uint64(applied),
+	}
+	if rollbackErr := journal.rollbackAppendLocked(rollbackState); rollbackErr != nil {
+		response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
+	}
+	return applied, response
+}
+
+func compactCommandJournalRecordBatchInitialCapacity(records []compactCommandJournalRecord) int {
+	total := 0
+	for _, record := range records {
+		total = addCommandJournalRequestBatchInitialCapacity(total, record.request())
+		if total == maxCommandJournalRecordBatchInitialBytes {
+			return maxCommandJournalRecordBatchInitialBytes
+		}
+	}
+	return total
 }
 
 func (journal *CommandJournal) writeCommandJournalRecordBatchChunkLocked(data []byte) error {

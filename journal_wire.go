@@ -69,38 +69,32 @@ func decodeCommandJournalTailBinaryResponse(body io.Reader, optionalContentLengt
 	if err != nil {
 		return CommandJournalTail{}, err
 	}
-	if !bytes.HasPrefix(data, commandJournalTailBinaryMagic) {
-		return CommandJournalTail{}, errors.New("journal source returned an invalid binary tail")
+	return decodeCommandJournalTailBinaryData(data)
+}
+
+func decodeCommandJournalTailBinaryPullResponse(body io.Reader, optionalContentLength ...int64) (CommandJournalTail, error) {
+	contentLength := int64(-1)
+	if len(optionalContentLength) > 0 {
+		contentLength = optionalContentLength[0]
 	}
-	reader := newBorrowingBinaryFieldReader(data[len(commandJournalTailBinaryMagic):])
-	lastSequence, err := reader.readUvarint()
+	data, err := readCommandJournalTailBinaryBody(body, contentLength)
 	if err != nil {
 		return CommandJournalTail{}, err
 	}
-	compactedThrough, err := reader.readUvarint()
+	if tail, ok, err := decodeCommandJournalTailCompactBinaryData(data); err != nil {
+		return CommandJournalTail{}, err
+	} else if ok {
+		return tail, nil
+	}
+	return decodeCommandJournalTailBinaryData(data)
+}
+
+func decodeCommandJournalTailBinaryData(data []byte) (CommandJournalTail, error) {
+	tail, count, reader, err := commandJournalTailBinaryReader(data)
 	if err != nil {
 		return CommandJournalTail{}, err
 	}
-	limit, err := reader.readUvarint()
-	if err != nil || limit > MaxCommandJournalTailLimit {
-		return CommandJournalTail{}, errors.New("journal source returned an invalid binary tail limit")
-	}
-	hasMore, err := reader.readBool()
-	if err != nil {
-		return CommandJournalTail{}, err
-	}
-	count, err := reader.readUvarint()
-	if err != nil || count > MaxCommandJournalTailLimit || count > limit || count > uint64(int(^uint(0)>>1)) {
-		return CommandJournalTail{}, errors.New("journal source returned an invalid binary tail entry count")
-	}
-	tail := CommandJournalTail{
-		LastSequence:     lastSequence,
-		CompactedThrough: compactedThrough,
-		Limit:            int(limit),
-		HasMore:          hasMore,
-		Entries:          make([]CommandJournalRecord, int(count)),
-		wireFormat:       CommandJournalWireFormatBinary,
-	}
+	tail.Entries = make([]CommandJournalRecord, int(count))
 	for index := uint64(0); index < count; index++ {
 		sequence, err := reader.readUvarint()
 		if err != nil {
@@ -119,6 +113,134 @@ func decodeCommandJournalTailBinaryResponse(body io.Reader, optionalContentLengt
 		return CommandJournalTail{}, errors.New("journal source returned invalid trailing binary tail data")
 	}
 	return tail, nil
+}
+
+func decodeCommandJournalTailCompactBinaryData(data []byte) (CommandJournalTail, bool, error) {
+	tail, count, reader, err := commandJournalTailBinaryReader(data)
+	if err != nil {
+		return CommandJournalTail{}, false, err
+	}
+	var records []compactCommandJournalRecord
+	family := compactCommandJournalSetInvalid
+	for index := uint64(0); index < count; index++ {
+		sequence, err := reader.readUvarint()
+		if err != nil {
+			return CommandJournalTail{}, false, err
+		}
+		if sequence == 0 {
+			return CommandJournalTail{}, false, errors.New("journal source returned an invalid binary tail sequence")
+		}
+		command, candidateFamily, key, value, ok, err := readCompactCommandJournalSetRequest(&reader)
+		if err != nil {
+			return CommandJournalTail{}, false, err
+		}
+		if !ok || (family != compactCommandJournalSetInvalid && family != candidateFamily) {
+			return CommandJournalTail{}, false, nil
+		}
+		if records == nil {
+			records = make([]compactCommandJournalRecord, int(count))
+		}
+		family = candidateFamily
+		records[int(index)] = compactCommandJournalRecord{
+			Sequence: sequence,
+			Key:      key,
+			Value:    value,
+			Command:  command,
+		}
+	}
+	if !reader.done() {
+		return CommandJournalTail{}, false, errors.New("journal source returned invalid trailing binary tail data")
+	}
+	tail.compactEntries = records
+	return tail, true, nil
+}
+
+func readCompactCommandJournalSetRequest(reader *binaryFieldReader) (compactCommandJournalSetCommand, compactCommandJournalSetCommand, string, string, bool, error) {
+	command, err := reader.readString()
+	if err != nil {
+		return 0, 0, "", "", false, err
+	}
+	key, err := reader.readString()
+	if err != nil {
+		return 0, 0, "", "", false, err
+	}
+	value, err := reader.readString()
+	if err != nil {
+		return 0, 0, "", "", false, err
+	}
+	subkey, err := reader.readString()
+	if err != nil {
+		return 0, 0, "", "", false, err
+	}
+	unsupported := subkey != ""
+	for index := 0; index < 3; index++ {
+		present, err := reader.readBool()
+		if err != nil {
+			return 0, 0, "", "", false, err
+		}
+		if present {
+			if _, err := reader.readVarint(); err != nil {
+				return 0, 0, "", "", false, err
+			}
+			unsupported = true
+		}
+	}
+	values, err := reader.readBytes()
+	if err != nil {
+		return 0, 0, "", "", false, err
+	}
+	pairs, err := reader.readBytes()
+	if err != nil {
+		return 0, 0, "", "", false, err
+	}
+	if unsupported || len(values) != 0 || len(pairs) != 0 {
+		return 0, 0, "", "", false, nil
+	}
+	switch command {
+	case "SET":
+		return compactCommandJournalSetString, compactCommandJournalSetString, key, value, true, nil
+	case "SETSTR":
+		return compactCommandJournalSetStringAlias, compactCommandJournalSetString, key, value, true, nil
+	case "SETINT":
+		return compactCommandJournalSetCounter, compactCommandJournalSetCounter, key, value, true, nil
+	default:
+		return 0, 0, "", "", false, nil
+	}
+}
+
+func commandJournalTailBinaryReader(data []byte) (CommandJournalTail, uint64, binaryFieldReader, error) {
+	if !bytes.HasPrefix(data, commandJournalTailBinaryMagic) {
+		return CommandJournalTail{}, 0, binaryFieldReader{}, errors.New("journal source returned an invalid binary tail")
+	}
+	reader := newBorrowingBinaryFieldReader(data[len(commandJournalTailBinaryMagic):])
+	lastSequence, err := reader.readUvarint()
+	if err != nil {
+		return CommandJournalTail{}, 0, binaryFieldReader{}, err
+	}
+	compactedThrough, err := reader.readUvarint()
+	if err != nil {
+		return CommandJournalTail{}, 0, binaryFieldReader{}, err
+	}
+	limit, err := reader.readUvarint()
+	if err != nil || limit > MaxCommandJournalTailLimit {
+		return CommandJournalTail{}, 0, binaryFieldReader{}, errors.New("journal source returned an invalid binary tail limit")
+	}
+	hasMore, err := reader.readBool()
+	if err != nil {
+		return CommandJournalTail{}, 0, binaryFieldReader{}, err
+	}
+	count, err := reader.readUvarint()
+	if err != nil || count > MaxCommandJournalTailLimit || count > limit || count > uint64(int(^uint(0)>>1)) {
+		return CommandJournalTail{}, 0, binaryFieldReader{}, errors.New("journal source returned an invalid binary tail entry count")
+	}
+	tail := CommandJournalTail{
+		LastSequence:     lastSequence,
+		CompactedThrough: compactedThrough,
+		Limit:            int(limit),
+		HasMore:          hasMore,
+		wireFormat:       CommandJournalWireFormatBinary,
+	}
+	return tail, count, reader, nil
 }
 
 func readCommandJournalTailBinaryBody(body io.Reader, contentLength int64) ([]byte, error) {

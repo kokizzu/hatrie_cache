@@ -412,6 +412,19 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 	if err := validateCommandJournalTailSequences(afterSequence, tail); err != nil {
 		return result, err
 	}
+	if len(tail.compactEntries) != 0 {
+		detachCompactCommandJournalTailBorrowedStrings(trie, tail.compactEntries, dirtyTracker)
+		applied, response := journal.executeCompactJournalRecordsBatch(trie, tail.compactEntries)
+		for idx := 0; idx < applied; idx++ {
+			dirtyTracker.Mark(tail.compactEntries[idx].Key)
+			result.Applied++
+			result.AppliedThrough = tail.compactEntries[idx].Sequence
+		}
+		if !response.OK {
+			return result, fmt.Errorf("journal entry %d failed: %s", tail.compactEntries[applied].Sequence, response.Message)
+		}
+		return result, nil
+	}
 	detachCommandJournalTailBorrowedStrings(trie, &tail, dirtyTracker)
 	applied, response := journal.executeJournalRecordsBatch(trie, tail.Entries)
 	for idx := 0; idx < applied; idx++ {
@@ -423,6 +436,19 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 		return result, fmt.Errorf("journal entry %d failed: %s", tail.Entries[applied].Sequence, response.Message)
 	}
 	return result, nil
+}
+
+func detachCompactCommandJournalTailBorrowedStrings(trie *HatTrie, records []compactCommandJournalRecord, dirtyTracker *LevelDBDirtyTracker) {
+	retainKeys := dirtyTracker != nil || trie.commandJournalApplyMayRetainBorrowedKeys()
+	for index := range records {
+		record := &records[index]
+		if retainKeys {
+			record.Key = strings.Clone(record.Key)
+		}
+		if record.Command == compactCommandJournalSetString || record.Command == compactCommandJournalSetStringAlias {
+			record.Value = strings.Clone(record.Value)
+		}
+	}
 }
 
 func detachCommandJournalTailBorrowedStrings(trie *HatTrie, tail *CommandJournalTail, dirtyTracker *LevelDBDirtyTracker) {
@@ -479,21 +505,31 @@ func commandJournalRequestMayRetainBorrowedKey(request *CacheCommandRequest, com
 
 func validateCommandJournalTailSequences(afterSequence uint64, tail CommandJournalTail) error {
 	appliedThrough := afterSequence
-	for _, entry := range tail.Entries {
+	entryCount := len(tail.Entries)
+	if len(tail.compactEntries) != 0 {
+		entryCount = len(tail.compactEntries)
+	}
+	for index := 0; index < entryCount; index++ {
+		sequence := uint64(0)
+		if len(tail.compactEntries) != 0 {
+			sequence = tail.compactEntries[index].Sequence
+		} else {
+			sequence = tail.Entries[index].Sequence
+		}
 		nextSequence, err := nextCommandJournalPullSequence(appliedThrough)
 		if err != nil {
 			return err
 		}
-		if entry.Sequence != nextSequence {
-			return fmt.Errorf("journal tail sequence %d does not continue after %d", entry.Sequence, appliedThrough)
+		if sequence != nextSequence {
+			return fmt.Errorf("journal tail sequence %d does not continue after %d", sequence, appliedThrough)
 		}
-		if entry.Sequence > tail.LastSequence {
-			return fmt.Errorf("journal tail sequence %d exceeds last sequence %d", entry.Sequence, tail.LastSequence)
+		if sequence > tail.LastSequence {
+			return fmt.Errorf("journal tail sequence %d exceeds last sequence %d", sequence, tail.LastSequence)
 		}
-		appliedThrough = entry.Sequence
+		appliedThrough = sequence
 	}
 	if tail.HasMore {
-		if len(tail.Entries) == 0 {
+		if entryCount == 0 {
 			return errors.New("journal tail reported more entries without returning entries")
 		}
 		if tail.LastSequence <= appliedThrough {

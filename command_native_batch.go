@@ -232,6 +232,57 @@ func (ht *HatTrie) executeJournalScalarBatch(records []CommandJournalRecord) (in
 	return len(records), CacheCommandResponse{OK: true}, true
 }
 
+func (ht *HatTrie) executeCompactJournalSetBatch(records []compactCommandJournalRecord) (int, CacheCommandResponse) {
+	if len(records) < minNativeCommandBatchSize || ht.localPartitionSet() != nil {
+		for index, record := range records {
+			response := ht.ExecuteCommand(record.request())
+			if !response.OK {
+				return index, response
+			}
+		}
+		return len(records), CacheCommandResponse{OK: true}
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	ht.journalScalarBatchCalls++
+	applied := 0
+	for index, record := range records {
+		key := strings.TrimSpace(record.Key)
+		if key == "" {
+			ht.recordCompactJournalBatchWritesLocked(records[:applied])
+			return index, commandError("key is required")
+		}
+		if err := validateKey(key); err != nil {
+			ht.recordCompactJournalBatchWritesLocked(records[:applied])
+			return index, commandError(err.Error())
+		}
+		switch record.Command {
+		case compactCommandJournalSetString, compactCommandJournalSetStringAlias:
+			if err := ht.upsertStringValueLocked(key, record.Value); err != nil {
+				ht.recordCompactJournalBatchWritesLocked(records[:applied])
+				return index, commandError(err.Error())
+			}
+		case compactCommandJournalSetCounter:
+			value, ok := parseCommandInt32(record.Value)
+			if !ok {
+				ht.recordCompactJournalBatchWritesLocked(records[:applied])
+				return index, commandError("value must be a 32-bit integer")
+			}
+			if err := ht.upsertCounterValueLocked(key, value); err != nil {
+				ht.recordCompactJournalBatchWritesLocked(records[:applied])
+				return index, commandError(err.Error())
+			}
+		default:
+			ht.recordCompactJournalBatchWritesLocked(records[:applied])
+			return index, commandError("unsupported compact journal command")
+		}
+		applied++
+	}
+	ht.recordCompactJournalBatchWritesLocked(records)
+	return len(records), CacheCommandResponse{OK: true}
+}
+
 func (ht *HatTrie) nativeCommandBatchStateSupportedLocked(payloads []CacheCommandRequest, family nativeCommandBatchFamily) bool {
 	if family == nativeCommandBatchIncrement && (len(ht.expires) != 0 || len(ht.dbrefs.array) != 0) {
 		return false

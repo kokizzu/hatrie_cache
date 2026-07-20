@@ -1159,6 +1159,15 @@ commands, active key stats/snapshots/LevelDB indexes, persistent dirty tracking,
 and local partitions keep conservative ownership clones. See
 [BENCHMARK.md](BENCHMARK.md#selective-journal-wire-ownership).
 
+Homogeneous binary tails of plain string sets or counter sets also decode into
+internal 48-byte scalar records instead of full public command requests. For
+10,000 `SETINT` records, the complete decode + durable WAL + apply path is 1.38x
+faster and uses 1.89x less cumulative heap, with unchanged allocations, wire
+bytes, WAL format, and one-final-fsync durability. TTL, mixed, and structured
+tails automatically use the full decoder, malformed binary is
+rejected, and short runs retain serial application. See
+[BENCHMARK.md](BENCHMARK.md#compact-scalar-journal-tails).
+
 The follower also coalesces pulled records into bounded WAL write chunks before
 one final `fsync`, instead of allocating and writing every record separately.
 For the same 10,000-command tail this makes durable apply 2.84x faster, uses

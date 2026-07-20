@@ -201,6 +201,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
+| Current pass | [Compact scalar journal tails](#compact-scalar-journal-tails), 10k binary `SETINT` records | Full requests: 8.074 ms durable; 2,720,000 heap B | 48-byte records: 5.864 ms durable; 1,442,048 heap B | 1.38x faster, 1.89x lower heap | Six allocations, 349,886 wire B, one fsync, and structured fallback are unchanged |
 | Current pass | [Coalesced journal batch append](#coalesced-journal-batch-append), 10k pulled `SETINT` records | Per-record WAL writes: 20.935 ms; 1,686,384 heap B; 30,004 allocs | Bounded shared append: 7.364 ms; 606,832 heap B; 5 allocs | 2.84x faster, 2.78x lower heap, 6,001x fewer allocs | WAL bytes and one-final-fsync durability are unchanged; buffers flush in bounded chunks |
 | Current pass | [Single-lock journal scalar apply](#single-lock-journal-scalar-apply), 10k pulled `SETINT` records | Serial apply: 4.189 ms CPU; 8.907 ms durable | One-lock run: 2.603 ms CPU; 7.744 ms durable | 1.61x apply CPU; 1.15x durable | Heap, allocations, WAL bytes, and fsync durability are unchanged; unsupported runs stay serial |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
@@ -1103,6 +1104,62 @@ paired ownership benchmark alongside JSON/binary serialization results. With a
 persistent dirty tracker, the median is 0.874 ms with 10,003 allocations and
 2,216,240 cumulative heap bytes: keys remain owned by the tracker, while the
 10,000 parsed textual counter values still avoid cloning.
+
+<a id="compact-scalar-journal-tails"></a>
+### Compact Scalar Journal Tails
+
+The binary pull decoder previously allocated one full `CacheCommandRequest` for
+every record. That public request carries slices, maps, optional pointers, and
+batch fields even when catch-up only needs a command code plus key/value. A
+homogeneous tail of plain `SET`/`SETSTR` or plain `SETINT` records now uses an
+internal 48-byte record containing sequence, borrowed key/value strings, and a
+compact command code. WAL encoding reconstructs one request on the stack, then
+large runs apply under one trie lock using the same prefix bookkeeping and
+rollback boundaries as the full path.
+
+TTL-bearing, mixed-family, and structured tails automatically restart through
+the full decoder; malformed binary input is rejected. Public/direct binary
+decode still returns normal full requests. The compact path owns stored string
+values and keys used by stats, snapshots, persistent dirty tracking, LevelDB
+indexes, or partitions. Runs shorter than 32 retain serial command application.
+If a mixed tail changes family after its first record, the abandoned compact
+candidate arena is a temporary fallback cost; a first-record mismatch avoids
+that arena entirely.
+
+The decoder-only fixture compares full and compact representations of one
+10,000-record binary `SETINT` body. The durable fixture includes binary decode,
+ownership transfer, local sequence assignment, bounded WAL encoding/write, one
+`fsync`, and cache application. Values are seven-run medians on the Ryzen 9
+5950X host.
+
+```sh
+make bench-journal-wire BENCHTIME=1x COUNT=7
+make bench-journal-apply BENCHTIME=1x COUNT=7
+```
+
+| Metric | Full requests | Compact scalar default | Improvement |
+| --- | ---: | ---: | ---: |
+| Decode time | 0.556 ms | 0.522 ms | 1.07x faster |
+| Decode cumulative heap | 2,056,240 B | 778,288 B | 2.64x lower |
+| Durable decode + WAL + apply | 8.074 ms | 5.864 ms | 1.38x faster |
+| Durable cumulative heap | 2,720,000 B | 1,442,048 B | 1.89x lower |
+| Durable allocations | 6 | 6 | unchanged |
+| Wire bytes | 349,886 B | 349,886 B | unchanged |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Full decode | `0.650, 0.442, 0.554, 0.606, 0.832, 0.556, 0.451` |
+| Compact decode | `0.515, 0.511, 0.593, 0.440, 0.539, 0.522, 0.798` |
+| Full durable pull | `8.074, 8.367, 7.359, 8.500, 7.458, 8.110, 7.987` |
+| Compact durable pull | `5.645, 5.864, 5.582, 5.322, 402.709, 202.875, 7.050` |
+
+The two compact durable outliers are included rather than discarded; both are
+filesystem stalls, and the seven-run median remains lower. Full raw output is
+generated at `build/benchmarks/journal-tail-wire.txt` and
+`build/benchmarks/journal-pull-batch-apply.txt`. Compact records do not alter
+wire format, on-disk WAL format, fsync count, or recovery compatibility.
 
 <a id="coalesced-journal-batch-append"></a>
 ### Coalesced Journal Batch Append
