@@ -185,6 +185,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
+| Current pass | [Local HAT-trie partitions](#local-hat-trie-partitions), 100k writes, 16 workers | One trie: 29.147 ms; 291.5 ns/write | 16 tries: 12.992 ms; 129.9 ns/write | 2.24x faster, 1.84x lower timed heap, 1.73x fewer timed allocs | Opt-in; separate-process maximum RSS is 1.05x higher and whole-keyspace operations merge partitions |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
@@ -574,6 +575,49 @@ non-counter keys, TTL counters, detailed per-key telemetry, active snapshot or
 Merkle tracking, and LevelDB spill accounting use the existing exclusive path.
 This optimization is not keyspace sharding and does not change backup or scan
 semantics.
+
+<a id="local-hat-trie-partitions"></a>
+### Local HAT-Trie Partitions
+
+The opt-in `LOCAL_PARTITIONS` setting hashes each key with XXH64 into an
+independent in-process HAT trie. The default is `0` and preserves the original
+single lock and single trie. Counts must be powers of two from 2 through 256;
+power-of-two masking avoids division on each keyed operation. The command
+dispatcher and direct value APIs route keyed work, while scans, monitoring,
+snapshots, persistence, compaction, expiration, statistics, and replication
+merge the child state.
+
+```sh
+make bench-big-wins BIG_WINS_BENCH='^BenchmarkBigWins/LocalPartitions/' BIG_WINS_KEYS=65536 BIG_WINS_OPS=100000 BENCHTIME=1x COUNT=7
+```
+
+Each row preallocates 65,536 counter keys, then 16 workers perform 100,000
+independent writes. Values are paired seven-run medians on the Ryzen 9 5950X
+host. Heap and allocation columns cover the timed write phase. Maximum RSS was
+measured in separate benchmark processes with the same fixture.
+
+| Configuration | Seconds / 100k writes | ns/write | Timed heap B/op | Timed allocs/op | Maximum RSS | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `LOCAL_PARTITIONS=0` | 0.029147 | 291.5 | 12,144 | 78 | 51,588 KiB | baseline |
+| `LOCAL_PARTITIONS=16` | 0.012992 | 129.9 | 6,608 | 45 | 54,096 KiB | 2.24x CPU, 1.84x timed heap, 1.73x timed allocs; RSS costs 1.05x |
+
+Raw paired elapsed times in milliseconds were `32.228, 26.475, 34.555,
+31.504, 27.617, 28.652, 29.147` with partitioning off and `19.322, 12.645,
+12.411, 15.795, 14.764, 12.483, 12.992` with 16 partitions. Raw timed heap
+bytes were `14752, 12816, 13072, 10512, 4256, 12144, 8736` and `6016, 11680,
+9936, 6496, 9376, 1808, 6608`; raw timed allocations were `98, 78, 83, 70,
+47, 78, 64` and `43, 51, 55, 44, 50, 35, 45`.
+
+The gain comes from replacing one contended structural mutex with 16
+independent locks. It is not a single-thread latency optimization. Fixed memory
+increases because each partition owns a C trie and typed storage headers.
+Whole-keyspace operations perform a k-way merge; snapshot and Pebble generation
+capture hold all child write locks for point-in-time consistency but stream
+records without materializing all values twice. Cold-value spilling first
+measures each partition and water-fills the configured global cap across the
+current hot-byte distribution, avoiding unnecessary spills under skew. Wire and
+persistent record formats are unchanged, and snapshots remain portable between
+partitioned and unpartitioned processes.
 
 ### Durable Journal Group Commit
 

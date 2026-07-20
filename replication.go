@@ -1853,6 +1853,31 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 	if cursor == nil {
 		return replicationSyncPage{}, errors.New("hatriecache: replication sync cursor is nil")
 	}
+	if trie.localPartitionSet() != nil {
+		entries, err := trie.EntriesWithPrefixChecked(prefix, true)
+		if err != nil {
+			return replicationSyncPage{}, err
+		}
+		start := 0
+		if hasAfterKey {
+			start = sort.Search(len(entries), func(index int) bool { return entries[index].Key > afterKey })
+		}
+		end := start + limit
+		if end > len(entries) {
+			end = len(entries)
+		}
+		page := replicationSyncPage{scanned: end - start, hasMore: end < len(entries)}
+		for _, entry := range entries[start:end] {
+			page.nextAfterKey = entry.Key
+			if visit != nil {
+				if err := visit(entry); err != nil {
+					return replicationSyncPage{}, err
+				}
+			}
+		}
+		cursor.visited += page.scanned
+		return page, nil
+	}
 
 	trie.mu.Lock()
 	defer trie.mu.Unlock()

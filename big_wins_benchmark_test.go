@@ -25,6 +25,7 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("GlobalTelemetry", benchmarkBigWinsGlobalTelemetry)
 	b.Run("ConcurrentRead", benchmarkBigWinsConcurrentRead)
 	b.Run("ConcurrentWrite", benchmarkBigWinsConcurrentWrite)
+	b.Run("LocalPartitions", benchmarkBigWinsLocalPartitions)
 	b.Run("PerKeyMemory", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeBounded) })
 	b.Run("PerKeyMemoryFull", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeFull) })
 	b.Run("PerKeyMemoryOff", func(b *testing.B) { benchmarkBigWinsPerKeyMemory(b, KeyStatsModeOff) })
@@ -214,6 +215,52 @@ func benchmarkBigWinsConcurrentWrite(b *testing.B) {
 				b.ReportMetric(float64(config.stripes)*float64(unsafe.Sizeof(sync.RWMutex{})), "stripe-B")
 			})
 		}
+	}
+}
+
+func benchmarkBigWinsLocalPartitions(b *testing.B) {
+	keyCount := bigWinsBenchmarkKeys(65536)
+	operations := bigWinsBenchmarkOperations(100000)
+	const workers = 16
+	for _, partitions := range []int{0, 16} {
+		name := "Off"
+		if partitions != 0 {
+			name = fmt.Sprintf("Partitions%d", partitions)
+		}
+		b.Run(name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			if err := trie.ConfigureLocalPartitions(partitions); err != nil {
+				b.Fatal(err)
+			}
+			keys := make([]string, keyCount)
+			for index := range keys {
+				keys[index] = bigWinsKey(index)
+				trie.UpsertCounter(keys[index], 0)
+			}
+			var total time.Duration
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				started := time.Now()
+				var group sync.WaitGroup
+				group.Add(workers)
+				for worker := 0; worker < workers; worker++ {
+					go func(worker int) {
+						defer group.Done()
+						for operation := worker; operation < operations; operation += workers {
+							trie.UpsertCounter(keys[operation%keyCount], int32(iteration+operation))
+						}
+					}(worker)
+				}
+				group.Wait()
+				total += time.Since(started)
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(operations), "writes/op")
+			b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/write")
+			b.ReportMetric(float64(partitions), "partitions")
+		})
 	}
 }
 

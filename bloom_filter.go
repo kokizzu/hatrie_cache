@@ -504,6 +504,9 @@ func (ht *HatTrie) UpsertBloomFilter(key string, expectedItems uint64, falsePosi
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertBloomFilter(key, expectedItems, falsePositiveRate)
+	}
 	data, err := newBloomFilterData(expectedItems, falsePositiveRate)
 	if err != nil {
 		return err
@@ -541,6 +544,9 @@ func (ht *HatTrie) AddBloomFilter(key string, val interface{}, vals ...interface
 func (ht *HatTrie) AddBloomFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddBloomFilterChecked(key, val, vals...)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -586,6 +592,9 @@ func (ht *HatTrie) HasBloomFilterChecked(key string, val interface{}) (bool, err
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.HasBloomFilterChecked(key, val)
+	}
 	valueKey, err := bloomFilterItemKey(val)
 	if err != nil {
 		return false, err
@@ -616,6 +625,9 @@ func (ht *HatTrie) BloomFilterInfo(key string) (BloomFilterInfo, bool) {
 func (ht *HatTrie) BloomFilterInfoChecked(key string) (BloomFilterInfo, bool, error) {
 	if ht == nil {
 		return BloomFilterInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.BloomFilterInfoChecked(key)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()

@@ -595,6 +595,32 @@ make monitoring-server KEY_STATS_MODE=bounded KEY_STATS_CAPACITY=250000
 make monitoring-server KEY_STATS_MODE=full
 ```
 
+Independent in-process HAT-trie partitions are off by default. Enable a power
+of two from 2 through 256 when concurrent writes are contending on the single
+trie lock; 16 is the measured starting point for a 16-writer workload:
+
+```sh
+make monitoring-server LOCAL_PARTITIONS=16
+# Equivalent direct daemon flag: -local-partitions 16
+```
+
+Keys are assigned deterministically with XXH64 and all command families, direct
+Go value APIs, TTLs, scans, snapshots, Pebble/LevelDB persistence, cold-value
+spilling, replication inventory, compaction, and monitoring remain available
+through the parent cache. Cross-partition `BATCH` groups independent keys and
+runs the groups concurrently while preserving response order. Snapshot and
+persistence capture use a sorted k-way cursor merge and one logical backup
+image. This is an in-process lock-partitioning optimization, not topology
+sharding or operator-owned regional partitioning; it does not change ownership,
+failover, or backup boundaries.
+
+The option must be configured before data is loaded and cannot be changed on a
+nonempty cache. It adds one C trie and typed backing set per partition, and
+whole-keyspace operations still visit every partition. The measured 100,000
+write fixture is 2.24x faster at 16 workers, while separate-process maximum RSS
+rose from 51,588 KiB to 54,096 KiB. See
+[BENCHMARK.md](BENCHMARK.md#local-hat-trie-partitions).
+
 Existing non-TTL counters can opt into striped concurrent updates. The default
 is `0` (off). Use a power of two from 2 through 256; 64 is the measured general
 starting point for independent counter keys:
@@ -603,8 +629,9 @@ starting point for independent counter keys:
 make monitoring-server COUNTER_WRITE_STRIPES=64
 ```
 
-This is not keyspace sharding: the cache still has one HAT-trie, one persistence
-image, and unchanged scan/backup behavior. The fast path applies to `SETINT` and
+This is not keyspace sharding. With `LOCAL_PARTITIONS=0`, the cache has one
+HAT-trie; with local partitions enabled, it still exposes one persistence image
+and unchanged scan/backup semantics. The fast path applies to `SETINT` and
 `INC` only after a counter key exists. It automatically uses the exclusive path
 for missing or non-counter keys, TTL counters, enabled per-key telemetry, active
 snapshot capture or Merkle tracking, and LevelDB spill accounting. The measured
@@ -638,6 +665,7 @@ duration strings. Explicit CLI flags override file values:
   "monitoring_web_dir": "svelte-mpa/dist",
   "key_stats_mode": "off",
   "key_stats_capacity": 0,
+  "local_partitions": 0,
   "counter_write_stripes": 0,
   "memory_compaction_interval": "0",
   "db_path": "data/cache.leveldb",

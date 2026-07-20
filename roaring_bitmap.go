@@ -551,6 +551,9 @@ func (ht *HatTrie) UpsertRoaringBitmapChecked(key string) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertRoaringBitmapChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -584,6 +587,9 @@ func (ht *HatTrie) AddRoaringBitmap(key string, value uint32, values ...uint32) 
 func (ht *HatTrie) AddRoaringBitmapChecked(key string, value uint32, values ...uint32) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddRoaringBitmapChecked(key, value, values...)
 	}
 
 	ht.mu.Lock()
@@ -623,6 +629,9 @@ func (ht *HatTrie) RemoveRoaringBitmapChecked(key string, value uint32, values .
 	if ht == nil {
 		return 0, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.RemoveRoaringBitmapChecked(key, value, values...)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -653,6 +662,9 @@ func (ht *HatTrie) HasRoaringBitmapChecked(key string, value uint32) (bool, erro
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.HasRoaringBitmapChecked(key, value)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -680,6 +692,9 @@ func (ht *HatTrie) CountRoaringBitmapChecked(key string) (uint64, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.CountRoaringBitmapChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -706,6 +721,9 @@ func (ht *HatTrie) GetRoaringBitmapChecked(key string) ([]uint32, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetRoaringBitmapChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -731,6 +749,9 @@ func (ht *HatTrie) RoaringBitmapInfo(key string) (RoaringBitmapInfo, bool) {
 func (ht *HatTrie) RoaringBitmapInfoChecked(key string) (RoaringBitmapInfo, bool, error) {
 	if ht == nil {
 		return RoaringBitmapInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.RoaringBitmapInfoChecked(key)
 	}
 
 	ht.mu.Lock()

@@ -555,6 +555,9 @@ func (ht *HatTrie) UpsertSparseBitsetChecked(key string) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertSparseBitsetChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -588,6 +591,9 @@ func (ht *HatTrie) AddSparseBitset(key string, value uint64, values ...uint64) i
 func (ht *HatTrie) AddSparseBitsetChecked(key string, value uint64, values ...uint64) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddSparseBitsetChecked(key, value, values...)
 	}
 
 	ht.mu.Lock()
@@ -627,6 +633,9 @@ func (ht *HatTrie) RemoveSparseBitsetChecked(key string, value uint64, values ..
 	if ht == nil {
 		return 0, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.RemoveSparseBitsetChecked(key, value, values...)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -657,6 +666,9 @@ func (ht *HatTrie) HasSparseBitsetChecked(key string, value uint64) (bool, error
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.HasSparseBitsetChecked(key, value)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -684,6 +696,9 @@ func (ht *HatTrie) CountSparseBitsetChecked(key string) (uint64, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.CountSparseBitsetChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -710,6 +725,9 @@ func (ht *HatTrie) GetSparseBitsetChecked(key string) ([]uint64, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetSparseBitsetChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -735,6 +753,9 @@ func (ht *HatTrie) SparseBitsetInfo(key string) (SparseBitsetInfo, bool) {
 func (ht *HatTrie) SparseBitsetInfoChecked(key string) (SparseBitsetInfo, bool, error) {
 	if ht == nil {
 		return SparseBitsetInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.SparseBitsetInfoChecked(key)
 	}
 
 	ht.mu.Lock()

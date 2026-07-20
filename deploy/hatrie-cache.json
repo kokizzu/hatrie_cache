@@ -7,6 +7,7 @@
   "rate_limit": 100,
   "key_stats_mode": "off",
   "key_stats_capacity": 0,
+  "local_partitions": 0,
   "counter_write_stripes": 0,
   "memory_compaction_interval": "0",
   "node_id": "node-a",

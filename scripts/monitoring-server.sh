@@ -11,6 +11,7 @@ write_protection=${WRITE_PROTECTION:-false}
 rate_limit=${RATE_LIMIT:-0}
 key_stats_mode=${KEY_STATS_MODE:-off}
 key_stats_capacity=${KEY_STATS_CAPACITY:-100000}
+local_partitions=${LOCAL_PARTITIONS:-0}
 counter_write_stripes=${COUNTER_WRITE_STRIPES:-0}
 memory_compaction_interval=${MEMORY_COMPACTION_INTERVAL:-0}
 read_header_timeout=${MONITORING_READ_HEADER_TIMEOUT:-5s}
@@ -92,6 +93,7 @@ set -- \
 	-rate-limit "$rate_limit" \
 	-key-stats-mode "$key_stats_mode" \
 	-key-stats-capacity "$key_stats_capacity" \
+	-local-partitions "$local_partitions" \
 	-counter-write-stripes "$counter_write_stripes" \
 	-memory-compaction-interval "$memory_compaction_interval" \
 	-monitoring-read-header-timeout "$read_header_timeout" \

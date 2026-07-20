@@ -503,6 +503,9 @@ func (ht *HatTrie) UpsertTopK(key string, capacity uint64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertTopK(key, capacity)
+	}
 
 	data, err := newTopKData(capacity)
 	if err != nil {
@@ -541,6 +544,9 @@ func (ht *HatTrie) AddTopK(key string, val interface{}, count uint64, vals ...in
 func (ht *HatTrie) AddTopKChecked(key string, val interface{}, count uint64, vals ...interface{}) (TopKEstimate, error) {
 	if ht == nil {
 		return TopKEstimate{}, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddTopKChecked(key, val, count, vals...)
 	}
 	if count == 0 {
 		return ht.EstimateTopKChecked(key, val)
@@ -588,6 +594,9 @@ func (ht *HatTrie) EstimateTopKChecked(key string, val interface{}) (TopKEstimat
 	if ht == nil {
 		return TopKEstimate{}, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.EstimateTopKChecked(key, val)
+	}
 
 	valueKey, err := topKItemKey(val)
 	if err != nil {
@@ -623,6 +632,9 @@ func (ht *HatTrie) GetTopKChecked(key string) ([]TopKItem, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetTopKChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -648,6 +660,9 @@ func (ht *HatTrie) TopKInfo(key string) (TopKInfo, bool) {
 func (ht *HatTrie) TopKInfoChecked(key string) (TopKInfo, bool, error) {
 	if ht == nil {
 		return TopKInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.TopKInfoChecked(key)
 	}
 
 	ht.mu.Lock()

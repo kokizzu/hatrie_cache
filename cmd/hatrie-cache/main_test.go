@@ -335,6 +335,39 @@ func TestParseConfigCounterWriteStripesDefaultsOffAndValidatesOverride(t *testin
 	}
 }
 
+func TestParseConfigLocalPartitionsDefaultsOffAndValidatesOverride(t *testing.T) {
+	defaultCfg, err := parseConfig(nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(defaults) error = %v", err)
+	}
+	if defaultCfg.localPartitions != 0 {
+		t.Fatalf("default local partitions = %d, want 0", defaultCfg.localPartitions)
+	}
+
+	partitionedCfg, err := parseConfig([]string{"-local-partitions", "16"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(local partitions) error = %v", err)
+	}
+	if partitionedCfg.localPartitions != 16 {
+		t.Fatalf("local partitions = %d, want 16", partitionedCfg.localPartitions)
+	}
+
+	for _, partitions := range []string{"-1", "1", "3", "512"} {
+		if _, err := parseConfig([]string{"-local-partitions", partitions}, &bytes.Buffer{}); err == nil {
+			t.Fatalf("parseConfig(local-partitions=%s) error = nil, want validation error", partitions)
+		}
+	}
+	for _, profile := range []string{"dev", "production", "bench"} {
+		cfg, err := parseConfig([]string{"-profile", profile}, &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("parseConfig(profile=%s) error = %v", profile, err)
+		}
+		if cfg.localPartitions != 0 {
+			t.Fatalf("profile %s local partitions = %d, want off", profile, cfg.localPartitions)
+		}
+	}
+}
+
 func TestParseConfigMemoryCompactionDefaultsOffAndValidatesOverride(t *testing.T) {
 	defaultCfg, err := parseConfig(nil, &bytes.Buffer{})
 	if err != nil {

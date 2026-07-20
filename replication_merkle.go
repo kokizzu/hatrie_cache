@@ -345,6 +345,22 @@ func (ht *HatTrie) replicationMerkleSnapshot() (replicationMerkleSnapshot, error
 	if ht == nil {
 		return replicationMerkleSnapshot{}, ErrNilHatTrie
 	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		var combined replicationMerkleSnapshot
+		for _, child := range partitions.tries {
+			snapshot, err := child.replicationMerkleSnapshot()
+			if err != nil {
+				return replicationMerkleSnapshot{}, err
+			}
+			combined.count += snapshot.count
+			for bucket := range combined.leaves {
+				combined.leaves[bucket].xor ^= snapshot.leaves[bucket].xor
+				combined.leaves[bucket].count += snapshot.leaves[bucket].count
+			}
+		}
+		combined.root = replicationMerkleRoot(combined.leaves, combined.count)
+		return combined, nil
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 	ht.ensureOpen()
@@ -391,6 +407,13 @@ func (ht *HatTrie) rebuildReplicationMerkleLocked() (*replicationMerkleIndex, er
 func (ht *HatTrie) replicationMerkleRetainedBytes() int {
 	if ht == nil {
 		return 0
+	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		total := 0
+		for _, child := range partitions.tries {
+			total += child.replicationMerkleRetainedBytes()
+		}
+		return total
 	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()

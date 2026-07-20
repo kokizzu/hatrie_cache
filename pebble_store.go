@@ -257,6 +257,40 @@ func (store *PebbleStore) SpillCold(trie *HatTrie, options LevelDBSpillOptions) 
 	}
 	defer unlock()
 	generation := store.activeGeneration
+	if partitions := trie.localPartitionSet(); partitions != nil {
+		limits, hotBytes, probe, err := localPartitionSpillPlan(partitions, options)
+		if err != nil {
+			return finish(err)
+		}
+		result.KeysScanned = probe.KeysScanned
+		result.ValuesScanned = probe.ValuesScanned
+		result.HotBytesBefore = probe.HotBytesBefore
+		result.HotBytesAfter = probe.HotBytesBefore
+		if result.HotBytesBefore <= options.MaxHotBytes {
+			return finish(nil)
+		}
+		for index, child := range partitions.tries {
+			if hotBytes[index] <= limits[index] {
+				continue
+			}
+			childOptions := options
+			childOptions.MaxHotBytes = limits[index]
+			childResult := LevelDBSpillResult{}
+			child.mu.Lock()
+			err = child.spillColdPebbleLocked(store, db, generation, childOptions, &childResult)
+			child.mu.Unlock()
+			if err != nil {
+				return finish(err)
+			}
+			result.KeysScanned += childResult.KeysScanned
+			result.ValuesScanned += childResult.ValuesScanned
+			result.KeysSpilled += childResult.KeysSpilled
+			result.WriteBatches += childResult.WriteBatches
+			result.BytesSpilled += childResult.BytesSpilled
+			result.HotBytesAfter -= childResult.HotBytesBefore - childResult.HotBytesAfter
+		}
+		return finish(nil)
+	}
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
 	if err := trie.spillColdPebbleLocked(store, db, generation, options, &result); err != nil {

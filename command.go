@@ -40,6 +40,15 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	if ht == nil {
 		return commandError(ErrNilHatTrie.Error())
 	}
+	if ht.localPartitionSet() != nil {
+		command := strings.ToUpper(strings.TrimSpace(request.Command))
+		if command == "BATCH" {
+			return ht.executePartitionedPublicBatchCommand(request)
+		}
+		if key := strings.TrimSpace(request.Key); key != "" {
+			return ht.localPartitionForKey(key).ExecuteCommand(request)
+		}
+	}
 	if response, ok := ht.executeExactFastCommand(request); ok {
 		return response
 	}
@@ -2613,6 +2622,9 @@ func (ht *HatTrie) commandPutMap(key string, fields Map) error {
 }
 
 func (ht *HatTrie) commandDumpEntry(key string) (string, bool, error) {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.commandDumpEntry(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2645,12 +2657,18 @@ func (ht *HatTrie) commandDumpEntryLocked(key string) (string, bool, error) {
 }
 
 func (ht *HatTrie) commandDumpEntryBinary(key string) ([]byte, bool, error) {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.commandDumpEntryBinary(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 	return ht.commandDumpEntryBinaryLocked(key)
 }
 
 func (ht *HatTrie) commandDumpEntryBinaryWithoutStats(key string) ([]byte, bool, error) {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.commandDumpEntryBinaryWithoutStats(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 	hval := ht.peekCachedLocked(key)
@@ -2741,6 +2759,9 @@ func (ht *HatTrie) commandInternalSet(key string, payload string) error {
 }
 
 func (ht *HatTrie) commandInternalSetOperation(operation snapshotOperation) error {
+	if partition := ht.localPartitionForKey(operation.entry.Key); partition != nil {
+		return partition.commandInternalSetOperation(operation)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2860,6 +2881,9 @@ func validateOptionalCommandExpiration(ttlSeconds *int64, unixSeconds *int64) (C
 }
 
 func (ht *HatTrie) commandValue(key string) (string, bool, error) {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.commandValue(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

@@ -2344,6 +2344,7 @@ type HatTrie struct {
 	nextDBReferenceToken      uint64
 	nativeCommandBatchCalls   uint64
 	nativeCommandBatchScratch nativeCommandBatchScratch
+	localPartitions           atomic.Pointer[localPartitionSet]
 	expires                   map[string]uint32
 	expirations               expirationHeap
 	hotKey                    string
@@ -2422,6 +2423,11 @@ func (ht *HatTrie) Destroy() {
 	if ht == nil {
 		return
 	}
+	if partitions := ht.localPartitions.Swap(nil); partitions != nil {
+		for _, child := range partitions.tries {
+			child.Destroy()
+		}
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2496,6 +2502,14 @@ func (ht *HatTrie) ConfigureCounterWriteStripes(stripes int) error {
 	if err := ValidateCounterWriteStripes(stripes); err != nil {
 		return err
 	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		for _, child := range partitions.tries {
+			if err := child.ConfigureCounterWriteStripes(stripes); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -2525,6 +2539,18 @@ func (ht *HatTrie) CounterWriteStripingStats() CounterWriteStripingStats {
 	if ht == nil {
 		return CounterWriteStripingStats{}
 	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		result := CounterWriteStripingStats{}
+		for _, child := range partitions.tries {
+			stats := child.CounterWriteStripingStats()
+			result.Enabled = result.Enabled || stats.Enabled
+			if result.Stripes == 0 {
+				result.Stripes = stats.Stripes
+			}
+			result.FastPathWrites += stats.FastPathWrites
+		}
+		return result
+	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
 	ht.ensureOpen()
@@ -2540,16 +2566,30 @@ func (ht *HatTrie) Size() int {
 	if ht == nil {
 		return 0
 	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		total := 0
+		for _, child := range partitions.tries {
+			total += child.Size()
+		}
+		return total
+	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
 
 	ht.ensureOpen()
+	return ht.sizeLocked()
+}
+
+func (ht *HatTrie) sizeLocked() int {
 	return int(C.hattrie_size(ht.root))
 }
 
 func (ht *HatTrie) Stats() CacheStats {
 	if ht == nil {
 		return CacheStats{}
+	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		return aggregateLocalPartitionStats(partitions)
 	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
@@ -2583,6 +2623,15 @@ func (ht *HatTrie) KeyStatsPolicy() KeyStatsPolicy {
 	if ht == nil {
 		return KeyStatsPolicy{}
 	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		ht.mu.RLock()
+		policy := KeyStatsPolicy{Mode: ht.keyStatsMode, Capacity: ht.keyStatsCapacity}
+		ht.mu.RUnlock()
+		for _, child := range partitions.tries {
+			policy.Tracked += child.KeyStatsPolicy().Tracked
+		}
+		return policy
+	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
 	ht.telemetryMu.Lock()
@@ -2607,6 +2656,16 @@ func (ht *HatTrie) ConfigureKeyStats(mode KeyStatsMode, capacity int) error {
 	}
 	if mode == KeyStatsModeBounded && capacity <= 0 {
 		return errors.New("hatriecache: bounded key stats capacity must be positive")
+	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		if err := configureLocalPartitionKeyStats(partitions, mode, capacity); err != nil {
+			return err
+		}
+		ht.mu.Lock()
+		defer ht.mu.Unlock()
+		ht.ensureOpen()
+		ht.configureKeyStatsLocked(mode, capacity)
+		return nil
 	}
 
 	ht.mu.Lock()
@@ -2688,6 +2747,9 @@ func (ht *HatTrie) StatsForKeyChecked(key string) (KeyStats, bool, error) {
 	if ht == nil {
 		return KeyStats{}, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.StatsForKeyChecked(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2753,6 +2815,15 @@ func (ht *HatTrie) LoadStats(path string) error {
 	if err != nil {
 		return err
 	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		first := partitions.tries[0]
+		first.mu.Lock()
+		defer first.mu.Unlock()
+		first.ensureOpen()
+		first.stats.restore(stats)
+		first.keyStatsGlobal = stats
+		return nil
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -2798,6 +2869,9 @@ func (ht *HatTrie) ExpireChecked(key string, ttl time.Duration) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.ExpireChecked(key, ttl)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2835,6 +2909,9 @@ func (ht *HatTrie) ExpireAtChecked(key string, at time.Time) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.ExpireAtChecked(key, at)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -2863,6 +2940,9 @@ func (ht *HatTrie) Persist(key string) bool {
 func (ht *HatTrie) PersistChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PersistChecked(key)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -2904,6 +2984,9 @@ func (ht *HatTrie) TTL(key string) time.Duration {
 func (ht *HatTrie) TTLChecked(key string) (time.Duration, error) {
 	if ht == nil {
 		return NoTTL, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.TTLChecked(key)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -2947,6 +3030,13 @@ func (ht *HatTrie) TTLChecked(key string) (time.Duration, error) {
 func (ht *HatTrie) VacuumExpired() int {
 	if ht == nil {
 		return 0
+	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		removed := 0
+		for _, child := range partitions.tries {
+			removed += child.VacuumExpired()
+		}
+		return removed
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -3007,6 +3097,14 @@ func (ht *HatTrie) StartExpirationCleanerContext(ctx context.Context, interval t
 }
 
 func (ht *HatTrie) vacuumExpiredIfOpen() bool {
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		for _, child := range partitions.tries {
+			if !child.vacuumExpiredIfOpen() {
+				return false
+			}
+		}
+		return true
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3095,6 +3193,17 @@ func (ht *HatTrie) StartMemoryPressureVacuumContext(ctx context.Context, interva
 func (ht *HatTrie) vacuumExpiredOnMemoryPressureIfOpen(maxAllocBytes uint64) bool {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		if mem.Alloc < maxAllocBytes {
+			return true
+		}
+		for _, child := range partitions.tries {
+			if !child.vacuumExpiredIfOpen() {
+				return false
+			}
+		}
+		return true
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -3130,6 +3239,9 @@ func (ht *HatTrie) KeysWithPrefix(prefix string, sorted bool) []string {
 func (ht *HatTrie) KeysWithPrefixChecked(prefix string, sorted bool) ([]string, error) {
 	if ht == nil {
 		return nil, ErrNilHatTrie
+	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		return localPartitionKeys(partitions, prefix, sorted)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -3171,6 +3283,9 @@ func (ht *HatTrie) EntriesWithPrefixChecked(prefix string, sorted bool) ([]Entry
 	if ht == nil {
 		return nil, ErrNilHatTrie
 	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		return localPartitionEntries(partitions, prefix, sorted)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -3188,6 +3303,9 @@ func (ht *HatTrie) Exists(key string) bool {
 func (ht *HatTrie) ExistsChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.ExistsChecked(key)
 	}
 	ht.mu.RLock()
 	hval, fallback, err := ht.readValueRLockedChecked(key, false)
@@ -4040,6 +4158,9 @@ func (ht *HatTrie) GetChecked(key string) (HatValue, error) {
 	if ht == nil {
 		return HatValue{}, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetChecked(key)
+	}
 	ht.mu.RLock()
 	hval, fallback, err := ht.readValueRLockedChecked(key, true)
 	if !fallback {
@@ -4394,6 +4515,9 @@ func (ht *HatTrie) DeleteChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.DeleteChecked(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -4422,6 +4546,9 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 func (ht *HatTrie) UpsertCounterChecked(key string, val int32) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertCounterChecked(key, val)
 	}
 	if err := validateKey(key); err != nil {
 		return err
@@ -4459,6 +4586,9 @@ func (ht *HatTrie) IncrementCounterChecked(key string, by int32) (int32, error) 
 func (ht *HatTrie) incrementCounterChecked(key string, by int32, checkOverflow bool) (int32, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.incrementCounterChecked(key, by, checkOverflow)
 	}
 	if err := validateKey(key); err != nil {
 		return 0, false, err
@@ -4507,6 +4637,9 @@ func (ht *HatTrie) GetCounterChecked(key string) (int32, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetCounterChecked(key)
+	}
 	ht.mu.RLock()
 	hval, fallback, err := ht.readValueRLockedChecked(key, true)
 	if !fallback {
@@ -4546,6 +4679,9 @@ func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertStringChecked(key, val)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -4578,6 +4714,9 @@ func (ht *HatTrie) AppendString(key string, str string) {
 func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 	if ht == nil {
 		return "", ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AppendStringChecked(key, str)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -4624,6 +4763,9 @@ func (ht *HatTrie) PrependString(key string, str string) {
 func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) {
 	if ht == nil {
 		return "", ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PrependStringChecked(key, str)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -4672,6 +4814,9 @@ func (ht *HatTrie) GetStringChecked(key string) (string, bool, error) {
 	if ht == nil {
 		return "", false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetStringChecked(key)
+	}
 	ht.mu.RLock()
 	hval, fallback, err := ht.readValueRLockedChecked(key, true)
 	if !fallback {
@@ -4714,6 +4859,9 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 func (ht *HatTrie) UpsertBytesChecked(key string, val []byte) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertBytesChecked(key, val)
 	}
 	if err := validateKey(key); err != nil {
 		return err
@@ -4760,6 +4908,9 @@ func (ht *HatTrie) GetBytes(key string) []byte {
 func (ht *HatTrie) GetBytesChecked(key string) ([]byte, error) {
 	if ht == nil {
 		return nil, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetBytesChecked(key)
 	}
 	ht.mu.RLock()
 	hval, fallback, err := ht.readValueRLockedChecked(key, true)
@@ -4852,6 +5003,10 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 	if ht == nil {
 		return
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		partition.UpsertMap(key, val)
+		return
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -4861,6 +5016,9 @@ func (ht *HatTrie) UpsertMap(key string, val Map) {
 func (ht *HatTrie) UpsertMapChecked(key string, val Map) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertMapChecked(key, val)
 	}
 	if err := validateMapValue(val); err != nil {
 		return err
@@ -4921,6 +5079,10 @@ func (ht *HatTrie) GetMapJSON(key string) ([]byte, bool, error) {
 }
 
 func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		partition.PutMap(key, subkey, val)
+		return
+	}
 	_ = ht.putMapEntries(key, Map{subkey: val})
 }
 
@@ -4931,6 +5093,9 @@ func (ht *HatTrie) PutMapChecked(key string, subkey string, val interface{}) err
 func (ht *HatTrie) PutMapEntriesChecked(key string, fields Map) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PutMapEntriesChecked(key, fields)
 	}
 	if len(fields) == 0 {
 		return nil
@@ -4983,6 +5148,9 @@ func (ht *HatTrie) PeekMapChecked(key, subkey string) (interface{}, bool, error)
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PeekMapChecked(key, subkey)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -5012,6 +5180,9 @@ func (ht *HatTrie) TakeMapChecked(key, subkey string) (interface{}, bool, error)
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.TakeMapChecked(key, subkey)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -5040,6 +5211,9 @@ func (ht *HatTrie) GetMap(key string) Map {
 func (ht *HatTrie) GetMapChecked(key string) (Map, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetMapChecked(key)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -5076,6 +5250,10 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 	if ht == nil {
 		return
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		partition.UpsertSlice(key, val)
+		return
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -5085,6 +5263,9 @@ func (ht *HatTrie) UpsertSlice(key string, val Slice) {
 func (ht *HatTrie) UpsertSliceChecked(key string, val Slice) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertSliceChecked(key, val)
 	}
 	if err := validateSliceValue(val); err != nil {
 		return err
@@ -5119,12 +5300,19 @@ func (ht *HatTrie) upsertSliceLocked(key string, val Slice) error {
 }
 
 func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		partition.PushSlice(key, val, vals...)
+		return
+	}
 	_ = ht.pushSlice(key, val, vals...)
 }
 
 func (ht *HatTrie) PushSliceChecked(key string, val interface{}, vals ...interface{}) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PushSliceChecked(key, val, vals...)
 	}
 	if err := validateSliceValues(val, vals...); err != nil {
 		return err
@@ -5175,6 +5363,9 @@ func (ht *HatTrie) PopSliceChecked(key string) (interface{}, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PopSliceChecked(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -5206,6 +5397,9 @@ func (ht *HatTrie) ShiftSlice(key string) interface{} {
 func (ht *HatTrie) ShiftSliceChecked(key string) (interface{}, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.ShiftSliceChecked(key)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -5239,6 +5433,9 @@ func (ht *HatTrie) HeadSliceChecked(key string) (interface{}, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.HeadSliceChecked(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -5265,6 +5462,9 @@ func (ht *HatTrie) TailSliceChecked(key string) (interface{}, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.TailSliceChecked(key)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -5290,6 +5490,9 @@ func (ht *HatTrie) GetSlice(key string) Slice {
 func (ht *HatTrie) GetSliceChecked(key string) (Slice, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetSliceChecked(key)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -5331,6 +5534,9 @@ func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertSetChecked(key, val)
+	}
 	data, err := newSetDataChecked(val)
 	if err != nil {
 		return err
@@ -5368,6 +5574,9 @@ func (ht *HatTrie) AddSet(key string, val interface{}, vals ...interface{}) int 
 func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddSetChecked(key, val, vals...)
 	}
 	keys, err := setItemKeysOne(val, vals...)
 	if err != nil {
@@ -5412,6 +5621,9 @@ func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interfa
 	if ht == nil {
 		return 0, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.RemoveSetChecked(key, val, vals...)
+	}
 	keys, err := setItemKeysOne(val, vals...)
 	if err != nil {
 		return 0, err
@@ -5447,6 +5659,9 @@ func (ht *HatTrie) HasSetChecked(key string, val interface{}) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.HasSetChecked(key, val)
+	}
 	valueKey, err := setItemKey(val)
 	if err != nil {
 		return false, err
@@ -5477,6 +5692,9 @@ func (ht *HatTrie) GetSet(key string) Set {
 func (ht *HatTrie) GetSetChecked(key string) (Set, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetSetChecked(key)
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()

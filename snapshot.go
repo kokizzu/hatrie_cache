@@ -299,6 +299,9 @@ func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, erro
 	if ht == nil {
 		return SnapshotMetadata{}, ErrNilHatTrie
 	}
+	if ht.localPartitionSet() != nil {
+		return ht.loadPartitionedSnapshot(path)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return SnapshotMetadata{}, err
@@ -995,6 +998,17 @@ type snapshotCaptureBarrier func() (uint64, func(), error)
 func (ht *HatTrie) captureSnapshotForStoreAtBarrier(currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) (snapshotCapture, uint64, error) {
 	if ht == nil {
 		return snapshotCapture{}, 0, ErrNilHatTrie
+	}
+	if ht.localPartitionSet() != nil {
+		entries, sequence, err := ht.captureLocalPartitionEntries(currentStore, currentDB, barrier)
+		if err != nil {
+			return snapshotCapture{}, 0, err
+		}
+		capture := snapshotCapture{}
+		for _, entry := range entries {
+			capture.append(entry)
+		}
+		return capture, sequence, nil
 	}
 	ht.snapshotCaptureMu.Lock()
 	defer ht.snapshotCaptureMu.Unlock()

@@ -546,6 +546,9 @@ func (ht *HatTrie) UpsertRadixTreeChecked(key string) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertRadixTreeChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -572,6 +575,9 @@ func (ht *HatTrie) UpsertRadixTreeChecked(key string) error {
 }
 
 func (ht *HatTrie) PutRadixTree(key string, subkey string, val interface{}) bool {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PutRadixTree(key, subkey, val)
+	}
 	added, _ := ht.putRadixTree(key, subkey, val)
 	return added
 }
@@ -579,6 +585,9 @@ func (ht *HatTrie) PutRadixTree(key string, subkey string, val interface{}) bool
 func (ht *HatTrie) PutRadixTreeChecked(key string, subkey string, val interface{}) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PutRadixTreeChecked(key, subkey, val)
 	}
 	if err := validateRadixTreeValue(val); err != nil {
 		return false, err
@@ -619,6 +628,9 @@ func (ht *HatTrie) putRadixTree(key string, subkey string, val interface{}) (boo
 }
 
 func (ht *HatTrie) PutRadixTreeEntries(key string, entries Map) int {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PutRadixTreeEntries(key, entries)
+	}
 	added, _ := ht.putRadixTreeEntries(key, entries)
 	return added
 }
@@ -626,6 +638,9 @@ func (ht *HatTrie) PutRadixTreeEntries(key string, entries Map) int {
 func (ht *HatTrie) PutRadixTreeEntriesChecked(key string, entries Map) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PutRadixTreeEntriesChecked(key, entries)
 	}
 	if len(entries) == 0 {
 		return 0, nil
@@ -680,6 +695,9 @@ func (ht *HatTrie) GetRadixTreeChecked(key string, subkey string) (interface{}, 
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetRadixTreeChecked(key, subkey)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -706,6 +724,9 @@ func (ht *HatTrie) DeleteRadixTree(key string, subkey string) bool {
 func (ht *HatTrie) DeleteRadixTreeChecked(key string, subkey string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.DeleteRadixTreeChecked(key, subkey)
 	}
 
 	ht.mu.Lock()
@@ -737,6 +758,9 @@ func (ht *HatTrie) HasRadixTreeChecked(key string, subkey string) (bool, error) 
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.HasRadixTreeChecked(key, subkey)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -764,6 +788,9 @@ func (ht *HatTrie) ScanRadixTreeChecked(key string, prefix string) ([]RadixTreeI
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.ScanRadixTreeChecked(key, prefix)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -789,6 +816,9 @@ func (ht *HatTrie) RadixTreeInfo(key string) (RadixTreeInfo, bool) {
 func (ht *HatTrie) RadixTreeInfoChecked(key string) (RadixTreeInfo, bool, error) {
 	if ht == nil {
 		return RadixTreeInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.RadixTreeInfoChecked(key)
 	}
 
 	ht.mu.Lock()

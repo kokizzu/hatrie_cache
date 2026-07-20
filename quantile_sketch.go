@@ -344,6 +344,9 @@ func (ht *HatTrie) UpsertQuantileSketch(key string, epsilon float64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertQuantileSketch(key, epsilon)
+	}
 
 	data, err := newQuantileSketchData(epsilon)
 	if err != nil {
@@ -382,6 +385,9 @@ func (ht *HatTrie) AddQuantileSketch(key string, val float64, vals ...float64) Q
 func (ht *HatTrie) AddQuantileSketchChecked(key string, val float64, vals ...float64) (QuantileEstimate, error) {
 	if ht == nil {
 		return QuantileEstimate{}, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddQuantileSketchChecked(key, val, vals...)
 	}
 	if !validQuantileSketchValues(val, vals...) {
 		return QuantileEstimate{}, errors.New("hatriecache: quantile sketch values must be finite numbers")
@@ -422,6 +428,9 @@ func (ht *HatTrie) EstimateQuantileSketchChecked(key string, quantile float64) (
 	if ht == nil {
 		return QuantileEstimate{}, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.EstimateQuantileSketchChecked(key, quantile)
+	}
 	if math.IsNaN(quantile) || math.IsInf(quantile, 0) || quantile < 0 || quantile > 1 {
 		return QuantileEstimate{}, false, errors.New("hatriecache: quantile must be between 0 and 1")
 	}
@@ -451,6 +460,9 @@ func (ht *HatTrie) QuantileSketchInfo(key string) (QuantileSketchInfo, bool) {
 func (ht *HatTrie) QuantileSketchInfoChecked(key string) (QuantileSketchInfo, bool, error) {
 	if ht == nil {
 		return QuantileSketchInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.QuantileSketchInfoChecked(key)
 	}
 
 	ht.mu.Lock()

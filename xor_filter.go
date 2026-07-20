@@ -549,6 +549,9 @@ func (ht *HatTrie) UpsertXorFilter(key string, expectedItems uint64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertXorFilter(key, expectedItems)
+	}
 
 	data, err := newXorFilterData(expectedItems)
 	if err != nil {
@@ -586,6 +589,9 @@ func (ht *HatTrie) AddXorFilter(key string, val interface{}, vals ...interface{}
 func (ht *HatTrie) AddXorFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddXorFilterChecked(key, val, vals...)
 	}
 
 	ht.mu.Lock()
@@ -627,6 +633,9 @@ func (ht *HatTrie) BuildXorFilter(key string) (XorFilterInfo, bool, error) {
 	if ht == nil {
 		return XorFilterInfo{}, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.BuildXorFilter(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -656,6 +665,9 @@ func (ht *HatTrie) HasXorFilter(key string, val interface{}) (bool, bool) {
 func (ht *HatTrie) HasXorFilterChecked(key string, val interface{}) (bool, bool, error) {
 	if ht == nil {
 		return false, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.HasXorFilterChecked(key, val)
 	}
 
 	valueKey, err := xorFilterItemKey(val)
@@ -688,6 +700,9 @@ func (ht *HatTrie) XorFilterInfo(key string) (XorFilterInfo, bool) {
 func (ht *HatTrie) XorFilterInfoChecked(key string) (XorFilterInfo, bool, error) {
 	if ht == nil {
 		return XorFilterInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.XorFilterInfoChecked(key)
 	}
 
 	ht.mu.Lock()

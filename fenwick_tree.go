@@ -351,6 +351,9 @@ func (ht *HatTrie) UpsertFenwickTree(key string, size uint64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertFenwickTree(key, size)
+	}
 
 	data, err := newFenwickTreeData(size)
 	if err != nil {
@@ -389,6 +392,9 @@ func (ht *HatTrie) AddFenwickTree(key string, index uint64, delta int64) (Fenwic
 func (ht *HatTrie) AddFenwickTreeChecked(key string, index uint64, delta int64) (FenwickTreeUpdate, bool, error) {
 	if ht == nil {
 		return FenwickTreeUpdate{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddFenwickTreeChecked(key, index, delta)
 	}
 	if delta == 0 || index >= maxFenwickTreeSize {
 		return FenwickTreeUpdate{}, false, nil
@@ -436,6 +442,9 @@ func (ht *HatTrie) GetFenwickTreeChecked(key string, index uint64) (int64, bool,
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetFenwickTreeChecked(key, index)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -462,6 +471,9 @@ func (ht *HatTrie) PrefixSumFenwickTree(key string, index uint64) (int64, bool) 
 func (ht *HatTrie) PrefixSumFenwickTreeChecked(key string, index uint64) (int64, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PrefixSumFenwickTreeChecked(key, index)
 	}
 
 	ht.mu.Lock()
@@ -490,6 +502,9 @@ func (ht *HatTrie) RangeSumFenwickTreeChecked(key string, start uint64, end uint
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.RangeSumFenwickTreeChecked(key, start, end)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -516,6 +531,9 @@ func (ht *HatTrie) FenwickTreeInfo(key string) (FenwickTreeInfo, bool) {
 func (ht *HatTrie) FenwickTreeInfoChecked(key string) (FenwickTreeInfo, bool, error) {
 	if ht == nil {
 		return FenwickTreeInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.FenwickTreeInfoChecked(key)
 	}
 
 	ht.mu.Lock()

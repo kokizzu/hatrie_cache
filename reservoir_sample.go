@@ -479,6 +479,9 @@ func (ht *HatTrie) UpsertReservoirSample(key string, capacity uint64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertReservoirSample(key, capacity)
+	}
 
 	data, err := newReservoirSampleData(capacity)
 	if err != nil {
@@ -517,6 +520,9 @@ func (ht *HatTrie) AddReservoirSample(key string, val interface{}, vals ...inter
 func (ht *HatTrie) AddReservoirSampleChecked(key string, val interface{}, vals ...interface{}) (ReservoirSampleUpdate, error) {
 	if ht == nil {
 		return ReservoirSampleUpdate{}, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddReservoirSampleChecked(key, val, vals...)
 	}
 
 	ht.mu.Lock()
@@ -564,6 +570,9 @@ func (ht *HatTrie) GetReservoirSampleChecked(key string) ([]ReservoirSampleItem,
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.GetReservoirSampleChecked(key)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -589,6 +598,9 @@ func (ht *HatTrie) ReservoirSampleInfo(key string) (ReservoirSampleInfo, bool) {
 func (ht *HatTrie) ReservoirSampleInfoChecked(key string) (ReservoirSampleInfo, bool, error) {
 	if ht == nil {
 		return ReservoirSampleInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.ReservoirSampleInfoChecked(key)
 	}
 
 	ht.mu.Lock()

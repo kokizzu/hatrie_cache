@@ -602,6 +602,9 @@ func (ht *HatTrie) UpsertCuckooFilter(key string, capacity uint64, falsePositive
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.UpsertCuckooFilter(key, capacity, falsePositiveRate)
+	}
 
 	data, err := newCuckooFilterData(capacity, falsePositiveRate)
 	if err != nil {
@@ -640,6 +643,9 @@ func (ht *HatTrie) AddCuckooFilter(key string, val interface{}, vals ...interfac
 func (ht *HatTrie) AddCuckooFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.AddCuckooFilterChecked(key, val, vals...)
 	}
 
 	ht.mu.Lock()
@@ -686,6 +692,9 @@ func (ht *HatTrie) HasCuckooFilterChecked(key string, val interface{}) (bool, er
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.HasCuckooFilterChecked(key, val)
+	}
 
 	valueKey, err := cuckooFilterItemKey(val)
 	if err != nil {
@@ -717,6 +726,9 @@ func (ht *HatTrie) DeleteCuckooFilter(key string, val interface{}, vals ...inter
 func (ht *HatTrie) DeleteCuckooFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.DeleteCuckooFilterChecked(key, val, vals...)
 	}
 
 	valueKeys, err := cuckooFilterItemKeys(val, vals...)
@@ -758,6 +770,9 @@ func (ht *HatTrie) CuckooFilterInfo(key string) (CuckooFilterInfo, bool) {
 func (ht *HatTrie) CuckooFilterInfoChecked(key string) (CuckooFilterInfo, bool, error) {
 	if ht == nil {
 		return CuckooFilterInfo{}, false, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.CuckooFilterInfoChecked(key)
 	}
 
 	ht.mu.Lock()

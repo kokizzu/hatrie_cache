@@ -87,6 +87,7 @@ type MonitoringHealth struct {
 	MemoryBytes     uint64 `json:"memory_bytes"`
 	DiskSpillBytes  uint64 `json:"disk_spill_bytes"`
 	CleanersRunning int    `json:"cleaners_running"`
+	LocalPartitions int    `json:"local_partitions"`
 }
 
 type MonitoringEntry struct {
@@ -396,6 +397,7 @@ func (handler *MonitoringHandler) handleHealth(w http.ResponseWriter, r *http.Re
 
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
+	partitioning := handler.trie.LocalPartitioningStats()
 	writeJSON(w, MonitoringHealth{
 		Status:          "online",
 		Node:            handler.options.NodeName,
@@ -403,6 +405,7 @@ func (handler *MonitoringHandler) handleHealth(w http.ResponseWriter, r *http.Re
 		MemoryBytes:     mem.Alloc,
 		DiskSpillBytes:  handler.trie.diskSpillBytes(),
 		CleanersRunning: 0,
+		LocalPartitions: partitioning.Partitions,
 	})
 }
 
@@ -480,6 +483,15 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	writePrometheusHelp(&builder, "hatrie_cache_disk_spill_bytes", "Bytes currently spilled to disk by the cache.")
 	writePrometheusType(&builder, "hatrie_cache_disk_spill_bytes", "gauge")
 	fmt.Fprintf(&builder, "hatrie_cache_disk_spill_bytes{node=\"%s\"} %d\n", node, handler.trie.diskSpillBytes())
+	partitioning := handler.trie.LocalPartitioningStats()
+	writePrometheusGauge(&builder, "hatrie_cache_local_partitions", "Number of enabled in-process HAT-trie partitions; zero means disabled.", node, uint64(partitioning.Partitions))
+	if partitioning.Enabled {
+		writePrometheusHelp(&builder, "hatrie_cache_local_partition_keys", "Current key count in one in-process HAT-trie partition.")
+		writePrometheusType(&builder, "hatrie_cache_local_partition_keys", "gauge")
+		for partition, size := range partitioning.Sizes {
+			fmt.Fprintf(&builder, "hatrie_cache_local_partition_keys{node=\"%s\",partition=\"%d\"} %d\n", node, partition, size)
+		}
+	}
 
 	writePrometheusCounter(&builder, "hatrie_cache_reads_total", "Total cache read operations.", node, stats.Reads)
 	writePrometheusCounter(&builder, "hatrie_cache_hits_total", "Total cache hit operations.", node, stats.Hits)
@@ -889,6 +901,9 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	payloads, err := publicCommandBatchRequests(request)
 	if err != nil {
 		return commandError(err.Error()), false
+	}
+	if trie.localPartitionSet() != nil {
+		return executePartitionedPublicCommandBatch(ctx, trie, request, payloads, options)
 	}
 	effects := newPublicCommandBatchEffects(options)
 	if effects.journal != nil {
@@ -2281,6 +2296,13 @@ func normalizeCommandJournalPullBatches(untilCurrent bool, value uint64) (int, e
 }
 
 func (ht *HatTrie) diskSpillBytes() uint64 {
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		var total uint64
+		for _, child := range partitions.tries {
+			total += child.diskSpillBytes()
+		}
+		return total
+	}
 	ht.mu.RLock()
 	defer ht.mu.RUnlock()
 
@@ -2306,6 +2328,9 @@ func (ht *HatTrie) monitoringEntriesLimited(prefix string, limit int) Monitoring
 }
 
 func (ht *HatTrie) monitoringEntriesPage(prefix string, afterKey string, hasAfterKey bool, limit int) MonitoringEntriesResponse {
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		return localPartitionMonitoringEntriesPage(partitions, prefix, afterKey, hasAfterKey, limit)
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 

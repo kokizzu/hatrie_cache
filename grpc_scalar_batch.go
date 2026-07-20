@@ -123,6 +123,13 @@ func validateScalarBatchColumns(request *hatriecachev1.ScalarBatchRequest) error
 }
 
 func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatriecachev1.ScalarBatchRequest) *hatriecachev1.ScalarBatchResponse {
+	if ht.localPartitionSet() != nil {
+		if err := ctx.Err(); err != nil {
+			return &hatriecachev1.ScalarBatchResponse{BatchId: request.GetBatchId(), Error: err.Error()}
+		}
+		result := ht.executePartitionedPublicBatchCommand(scalarBatchCacheCommand(request))
+		return scalarBatchResponseFromCommand(request, result)
+	}
 	operations := request.GetOperations()
 	response := newScalarBatchResponse(request.GetBatchId(), len(operations))
 	stringIndex := 0
@@ -276,6 +283,10 @@ func (server *CacheGRPCServer) executeScalarBatchCompatibility(ctx context.Conte
 		ReplicationSafety:   server.options.ReplicationSafety,
 		EnforceLeaderWrites: server.options.EnforceLeaderWrites,
 	})
+	return scalarBatchResponseFromCommand(request, result)
+}
+
+func scalarBatchResponseFromCommand(request *hatriecachev1.ScalarBatchRequest, result CacheCommandResponse) *hatriecachev1.ScalarBatchResponse {
 	response := newScalarBatchResponse(request.GetBatchId(), len(request.GetOperations()))
 	if len(result.Responses) != len(request.GetOperations()) {
 		response.Ok = false

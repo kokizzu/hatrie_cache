@@ -60,6 +60,7 @@ type config struct {
 	rateLimit                   int
 	keyStatsMode                string
 	keyStatsCapacity            int
+	localPartitions             int
 	counterWriteStripes         int
 	memoryCompactionInterval    time.Duration
 	monitoringWebDir            string
@@ -191,6 +192,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
+	if err := trie.ConfigureLocalPartitions(cfg.localPartitions); err != nil {
+		return err
+	}
 	if err := trie.ConfigureKeyStats(hatriecache.KeyStatsMode(cfg.keyStatsMode), cfg.keyStatsCapacity); err != nil {
 		return err
 	}
@@ -427,6 +431,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		monitoringIdleTimeout:       defaultMonitoringIdleTimeout,
 		keyStatsMode:                string(hatriecache.DefaultKeyStatsMode),
 		keyStatsCapacity:            hatriecache.DefaultKeyStatsCapacity,
+		localPartitions:             hatriecache.DefaultLocalPartitions,
 		counterWriteStripes:         hatriecache.DefaultCounterWriteStripes,
 		electionTimeout:             hatriecache.DefaultElectionTimeout,
 		replicationMode:             replicationModeJournal,
@@ -492,6 +497,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.rateLimit, "rate-limit", cfg.rateLimit, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
 	flags.StringVar(&cfg.keyStatsMode, "key-stats-mode", cfg.keyStatsMode, "per-key telemetry retention: bounded, full, or off")
 	flags.IntVar(&cfg.keyStatsCapacity, "key-stats-capacity", cfg.keyStatsCapacity, "maximum keys with retained telemetry in bounded mode")
+	flags.IntVar(&cfg.localPartitions, "local-partitions", cfg.localPartitions, "independent in-process HAT tries; use 0 to disable")
 	flags.IntVar(&cfg.counterWriteStripes, "counter-write-stripes", cfg.counterWriteStripes, "existing-counter write lock stripes; use 0 to disable")
 	flags.DurationVar(&cfg.memoryCompactionInterval, "memory-compaction-interval", cfg.memoryCompactionInterval, "optional interval for rebuilding trie and typed pools after churn; use 0 to disable")
 	flags.StringVar(&cfg.monitoringWebDir, "monitoring-web-dir", cfg.monitoringWebDir, "directory containing built web monitoring assets")
@@ -604,6 +610,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		return config{}, errors.New("key stats mode must be bounded, full, or off")
 	}
 	if err := hatriecache.ValidateCounterWriteStripes(cfg.counterWriteStripes); err != nil {
+		return config{}, err
+	}
+	if err := hatriecache.ValidateLocalPartitions(cfg.localPartitions); err != nil {
 		return config{}, err
 	}
 	if cfg.memoryCompactionInterval < 0 {
@@ -993,6 +1002,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"rate_limit":                           cfg.rateLimit,
 		"key_stats_mode":                       cfg.keyStatsMode,
 		"key_stats_capacity":                   cfg.keyStatsCapacity,
+		"local_partitions":                     cfg.localPartitions,
 		"counter_write_stripes":                cfg.counterWriteStripes,
 		"memory_compaction_interval":           cfg.memoryCompactionInterval.String(),
 		"monitoring_web_dir":                   cfg.monitoringWebDir,

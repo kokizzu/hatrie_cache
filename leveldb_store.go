@@ -514,6 +514,40 @@ func (store *LevelDBStore) SpillCold(trie *HatTrie, options LevelDBSpillOptions)
 		return finish(err)
 	}
 	defer unlock()
+	if partitions := trie.localPartitionSet(); partitions != nil {
+		limits, hotBytes, probe, err := localPartitionSpillPlan(partitions, options)
+		if err != nil {
+			return finish(err)
+		}
+		result.KeysScanned = probe.KeysScanned
+		result.ValuesScanned = probe.ValuesScanned
+		result.HotBytesBefore = probe.HotBytesBefore
+		result.HotBytesAfter = probe.HotBytesBefore
+		if result.HotBytesBefore <= options.MaxHotBytes {
+			return finish(nil)
+		}
+		for index, child := range partitions.tries {
+			if hotBytes[index] <= limits[index] {
+				continue
+			}
+			childOptions := options
+			childOptions.MaxHotBytes = limits[index]
+			childResult := LevelDBSpillResult{}
+			child.mu.Lock()
+			err = child.spillColdLevelDBLocked(store, db, childOptions, &childResult)
+			child.mu.Unlock()
+			if err != nil {
+				return finish(err)
+			}
+			result.KeysScanned += childResult.KeysScanned
+			result.ValuesScanned += childResult.ValuesScanned
+			result.KeysSpilled += childResult.KeysSpilled
+			result.WriteBatches += childResult.WriteBatches
+			result.BytesSpilled += childResult.BytesSpilled
+			result.HotBytesAfter -= childResult.HotBytesBefore - childResult.HotBytesAfter
+		}
+		return finish(nil)
+	}
 
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
@@ -521,6 +555,69 @@ func (store *LevelDBStore) SpillCold(trie *HatTrie, options LevelDBSpillOptions)
 		return finish(err)
 	}
 	return finish(nil)
+}
+
+func localPartitionSpillPlan(partitions *localPartitionSet, options LevelDBSpillOptions) ([]int64, []int64, LevelDBSpillResult, error) {
+	hotBytes := make([]int64, len(partitions.tries))
+	probe := LevelDBSpillResult{}
+	for index, child := range partitions.tries {
+		childResult := LevelDBSpillResult{}
+		child.mu.Lock()
+		child.ensureOpen()
+		now := time.Time{}
+		if len(child.expires) > 0 {
+			now = child.currentTime()
+		}
+		_, err := child.levelDBSpillCandidatesLocked(now, options, &childResult)
+		child.mu.Unlock()
+		if err != nil {
+			return nil, nil, LevelDBSpillResult{}, err
+		}
+		hotBytes[index] = childResult.HotBytesBefore
+		probe.KeysScanned += childResult.KeysScanned
+		probe.ValuesScanned += childResult.ValuesScanned
+		probe.HotBytesBefore += childResult.HotBytesBefore
+	}
+	limits := make([]int64, len(hotBytes))
+	if probe.HotBytesBefore <= options.MaxHotBytes {
+		copy(limits, hotBytes)
+		return limits, hotBytes, probe, nil
+	}
+	active := make([]bool, len(hotBytes))
+	for index := range active {
+		active[index] = true
+	}
+	remaining := options.MaxHotBytes
+	activeCount := len(active)
+	for activeCount > 0 {
+		share := remaining / int64(activeCount)
+		removed := false
+		for index, enabled := range active {
+			if enabled && hotBytes[index] <= share {
+				limits[index] = hotBytes[index]
+				remaining -= hotBytes[index]
+				active[index] = false
+				activeCount--
+				removed = true
+			}
+		}
+		if removed {
+			continue
+		}
+		extra := remaining % int64(activeCount)
+		for index, enabled := range active {
+			if !enabled {
+				continue
+			}
+			limits[index] = share
+			if extra > 0 {
+				limits[index]++
+				extra--
+			}
+		}
+		break
+	}
+	return limits, hotBytes, probe, nil
 }
 
 func (store *LevelDBStore) Compact(options LevelDBCompactionOptions) (LevelDBCompactionResult, error) {
@@ -1063,6 +1160,9 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 func loadPersistentEntryData(trie *HatTrie, store persistentReferenceStore, policy LevelDBLoadPolicy, scan func(func(snapshotEntry, []byte) error) error) (LevelDBLoadResult, error) {
 	if trie == nil {
 		return LevelDBLoadResult{}, ErrNilHatTrie
+	}
+	if trie.localPartitionSet() != nil {
+		return loadLocalPartitionPersistentEntryData(trie, store, policy, scan)
 	}
 	now := trie.currentTime()
 	trie.mu.Lock()
@@ -1669,6 +1769,9 @@ func (trie *HatTrie) scanLevelDBEntryDataForStore(currentStore *LevelDBStore, cu
 func (trie *HatTrie) levelDBEntryDataForKeyForStore(currentStore *LevelDBStore, currentDB *leveldb.DB, format StorageFormat, key string) ([]byte, bool, error) {
 	if trie == nil {
 		return nil, false, ErrNilHatTrie
+	}
+	if partition := trie.localPartitionForKey(key); partition != nil {
+		return partition.levelDBEntryDataForKeyForStore(currentStore, currentDB, format, key)
 	}
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
