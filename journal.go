@@ -23,6 +23,7 @@ const (
 
 const maxCommandJournalBinaryRecordBytes = 1 << 30
 const maxCommandJournalJSONRecordBytes = 1 << 30
+const maxCommandJournalRecordBatchInitialBytes = 1 << 20
 const maxCommandJournalReusablePayloadBufferBytes = 1 << 20
 
 const (
@@ -402,22 +403,50 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			completeCommandJournalJobs(pending, commandError(err.Error()))
 			return
 		}
-		states := make([]commandJournalAppendState, len(pending))
-		offset := batchState.offset
+		recordSizes := make([]uint32, len(pending))
+		encoded := make([]byte, 0, commandJournalRequestBatchInitialCapacity(pending))
 		for idx, job := range pending {
-			states[idx] = commandJournalAppendState{
-				offset:            offset,
-				nextSequence:      journal.nextSequence,
-				sequenceExhausted: journal.sequenceExhausted,
+			sequence, nextErr := journal.nextAppendSequenceLocked()
+			if nextErr != nil {
+				err = journal.rollbackPreparedBatchLocked(batchState, nextErr)
+				completeCommandJournalJobs(pending, commandError(err.Error()))
+				return
 			}
-			var written int
-			written, err = journal.writeWithoutSyncLocked(job.journalRequest)
+			entry := commandJournalEntry{
+				Version:  commandJournalVersion,
+				Sequence: sequence,
+				Request:  job.journalRequest,
+			}
+			if commandJournalRecordBatchShouldFlush(encoded, entry.Request) {
+				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+					err = journal.rollbackPreparedBatchLocked(batchState, err)
+					completeCommandJournalJobs(pending, commandError(err.Error()))
+					return
+				}
+				encoded = encoded[:0]
+			}
+			start := len(encoded)
+			encoded, err = appendCommandJournalRecord(encoded, entry, journal.format)
 			if err != nil {
 				err = journal.rollbackPreparedBatchLocked(batchState, err)
 				completeCommandJournalJobs(pending, commandError(err.Error()))
 				return
 			}
-			offset += int64(written)
+			recordSizes[idx] = uint32(len(encoded) - start)
+			journal.markAppendedLocked(sequence)
+			if len(encoded) >= maxCommandJournalRecordBatchInitialBytes {
+				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+					err = journal.rollbackPreparedBatchLocked(batchState, err)
+					completeCommandJournalJobs(pending, commandError(err.Error()))
+					return
+				}
+				encoded = encoded[:0]
+			}
+		}
+		if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+			err = journal.rollbackPreparedBatchLocked(batchState, err)
+			completeCommandJournalJobs(pending, commandError(err.Error()))
+			return
 		}
 		if err := journal.syncLocked(); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
@@ -426,13 +455,19 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 		}
 
 		rejected := -1
+		rollbackOffset := batchState.offset
 		for idx, job := range pending {
 			response := job.execute()
 			if response.OK {
 				job.result <- response
+				rollbackOffset += int64(recordSizes[idx])
 				continue
 			}
-			rollbackErr := journal.rollbackAppendLocked(states[idx])
+			rollbackState := commandJournalAppendState{
+				offset:       rollbackOffset,
+				nextSequence: batchState.nextSequence + uint64(idx),
+			}
+			rollbackErr := journal.rollbackAppendLocked(rollbackState)
 			if rollbackErr != nil {
 				response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
 			}
@@ -497,15 +532,10 @@ func (journal *CommandJournal) executeJournalRecordsBatch(trie *HatTrie, records
 	if err != nil {
 		return 0, commandError(err.Error())
 	}
-	states := make([]commandJournalAppendState, len(records))
-	offset := batchState.offset
+	recordSizes := make([]uint32, len(records))
+	encoded := make([]byte, 0, commandJournalRecordBatchInitialCapacity(records))
 	now := trie.currentTime()
 	for idx, record := range records {
-		states[idx] = commandJournalAppendState{
-			offset:            offset,
-			nextSequence:      journal.nextSequence,
-			sequenceExhausted: journal.sequenceExhausted,
-		}
 		sequence, err := journal.nextAppendSequenceLocked()
 		if err != nil {
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
@@ -515,34 +545,120 @@ func (journal *CommandJournal) executeJournalRecordsBatch(trie *HatTrie, records
 			Sequence: sequence,
 			Request:  normalizeJournalRequest(record.Request, now),
 		}
-		data, err := marshalCommandJournalEntry(entry, journal.format)
+		if commandJournalRecordBatchShouldFlush(encoded, entry.Request) {
+			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+			}
+			encoded = encoded[:0]
+		}
+		start := len(encoded)
+		encoded, err = appendCommandJournalRecord(encoded, entry, journal.format)
 		if err != nil {
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 		}
-		n, err := journal.file.Write(data)
-		if err != nil {
-			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+		recordBytes := len(encoded) - start
+		if uint64(recordBytes) > uint64(^uint32(0)) {
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, errCommandJournalBinaryRecordTooLarge).Error())
 		}
-		if n != len(data) {
-			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, io.ErrShortWrite).Error())
-		}
-		offset += int64(n)
+		recordSizes[idx] = uint32(recordBytes)
 		journal.markAppendedLocked(sequence)
+		if len(encoded) >= maxCommandJournalRecordBatchInitialBytes {
+			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+			}
+			encoded = encoded[:0]
+		}
+	}
+	if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
 	if err := journal.syncLocked(); err != nil {
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
+	rollbackOffset := batchState.offset
 	for idx, record := range records {
 		response := trie.ExecuteCommand(record.Request)
 		if response.OK {
+			rollbackOffset += int64(recordSizes[idx])
 			continue
 		}
-		if rollbackErr := journal.rollbackAppendLocked(states[idx]); rollbackErr != nil {
+		rollbackState := commandJournalAppendState{
+			offset:       rollbackOffset,
+			nextSequence: batchState.nextSequence + uint64(idx),
+		}
+		if rollbackErr := journal.rollbackAppendLocked(rollbackState); rollbackErr != nil {
 			response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
 		}
 		return idx, response
 	}
 	return len(records), CacheCommandResponse{OK: true}
+}
+
+func (journal *CommandJournal) writeCommandJournalRecordBatchChunkLocked(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	n, err := journal.file.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func appendCommandJournalRecord(data []byte, entry commandJournalEntry, format CommandJournalFormat) ([]byte, error) {
+	switch format {
+	case CommandJournalFormatBinary:
+		return appendCommandJournalEntryBinary(data, entry)
+	case CommandJournalFormatJSON:
+		record, err := marshalCommandJournalEntryJSON(entry)
+		if err != nil {
+			return nil, err
+		}
+		return append(data, record...), nil
+	default:
+		return nil, fmt.Errorf("hatriecache: unsupported command journal format %q", format)
+	}
+}
+
+func commandJournalRecordBatchInitialCapacity(records []CommandJournalRecord) int {
+	total := 0
+	for _, record := range records {
+		total = addCommandJournalRequestBatchInitialCapacity(total, record.Request)
+		if total == maxCommandJournalRecordBatchInitialBytes {
+			return maxCommandJournalRecordBatchInitialBytes
+		}
+	}
+	return total
+}
+
+func commandJournalRequestBatchInitialCapacity(jobs []*commandJournalJob) int {
+	total := 0
+	for _, job := range jobs {
+		total = addCommandJournalRequestBatchInitialCapacity(total, job.journalRequest)
+		if total == maxCommandJournalRecordBatchInitialBytes {
+			return maxCommandJournalRecordBatchInitialBytes
+		}
+	}
+	return total
+}
+
+func addCommandJournalRequestBatchInitialCapacity(total int, request CacheCommandRequest) int {
+	estimate := commandJournalRecordSizeEstimate(request)
+	if estimate >= maxCommandJournalRecordBatchInitialBytes-total {
+		return maxCommandJournalRecordBatchInitialBytes
+	}
+	return total + estimate
+}
+
+func commandJournalRecordBatchShouldFlush(data []byte, request CacheCommandRequest) bool {
+	return len(data) > 0 && commandJournalRecordSizeEstimate(request) >= maxCommandJournalRecordBatchInitialBytes-len(data)
+}
+
+func commandJournalRecordSizeEstimate(request CacheCommandRequest) int {
+	return 32 + len(request.Command) + len(request.Key) + len(request.Value) + len(request.Subkey)
 }
 
 func (journal *CommandJournal) rollbackPreparedBatchLocked(state commandJournalAppendState, cause error) error {

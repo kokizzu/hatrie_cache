@@ -71,43 +71,86 @@ func commandJournalRecordIsBinary(data []byte) bool {
 }
 
 func marshalCommandJournalEntryBinary(entry commandJournalEntry) ([]byte, error) {
-	payload, err := marshalCommandJournalEntryBinaryPayload(entry)
+	fields, err := prepareCommandJournalBinaryEntryFields(entry)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateCommandJournalBinaryRecordSize(uint64(len(payload))); err != nil {
+	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, len(fields.values), len(fields.pairs), len(fields.outbox))
+	if err != nil {
 		return nil, err
 	}
-	writer := newBinaryFieldWriter(commandJournalBinaryMagic, commandJournalBinaryRecordCapacity(len(payload)))
-	writer.writeBytes(payload)
-	return writer.bytes(), nil
+	data := make([]byte, 0, commandJournalBinaryRecordCapacity(payloadBytes))
+	return appendPreparedCommandJournalEntryBinary(data, entry, fields, payloadBytes)
 }
 
-func marshalCommandJournalEntryBinaryPayload(entry commandJournalEntry) ([]byte, error) {
+type commandJournalBinaryEntryFields struct {
+	values []byte
+	pairs  []byte
+	outbox []byte
+}
+
+func prepareCommandJournalBinaryEntryFields(entry commandJournalEntry) (commandJournalBinaryEntryFields, error) {
 	values, pairs, err := marshalCommandJournalRequestBinaryDynamicFields(entry.Request)
 	if err != nil {
-		return nil, err
+		return commandJournalBinaryEntryFields{}, err
 	}
 	var outbox []byte
 	if entry.Outbox != nil {
 		outbox, err = marshalReplicationOutboxJobBinary(*entry.Outbox)
 		if err != nil {
-			return nil, err
+			return commandJournalBinaryEntryFields{}, err
 		}
 	}
-	capacity, err := commandJournalEntryBinaryPayloadCapacity(entry, len(values), len(pairs), len(outbox))
+	return commandJournalBinaryEntryFields{values: values, pairs: pairs, outbox: outbox}, nil
+}
+
+func marshalCommandJournalEntryBinaryPayload(entry commandJournalEntry) ([]byte, error) {
+	fields, err := prepareCommandJournalBinaryEntryFields(entry)
 	if err != nil {
 		return nil, err
 	}
-	writer := newBinaryFieldWriter(nil, capacity)
+	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, len(fields.values), len(fields.pairs), len(fields.outbox))
+	if err != nil {
+		return nil, err
+	}
+	writer := newBinaryFieldWriter(nil, payloadBytes)
+	if err := writePreparedCommandJournalEntryBinaryPayload(&writer, entry, fields); err != nil {
+		return nil, err
+	}
+	return writer.bytes(), nil
+}
+
+func appendCommandJournalEntryBinary(data []byte, entry commandJournalEntry) ([]byte, error) {
+	fields, err := prepareCommandJournalBinaryEntryFields(entry)
+	if err != nil {
+		return nil, err
+	}
+	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, len(fields.values), len(fields.pairs), len(fields.outbox))
+	if err != nil {
+		return nil, err
+	}
+	return appendPreparedCommandJournalEntryBinary(data, entry, fields, payloadBytes)
+}
+
+func appendPreparedCommandJournalEntryBinary(data []byte, entry commandJournalEntry, fields commandJournalBinaryEntryFields, payloadBytes int) ([]byte, error) {
+	writer := binaryFieldWriter{buf: data}
+	writer.buf = append(writer.buf, commandJournalBinaryMagic...)
+	writer.writeUvarint(uint64(payloadBytes))
+	if err := writePreparedCommandJournalEntryBinaryPayload(&writer, entry, fields); err != nil {
+		return nil, err
+	}
+	return writer.bytes(), nil
+}
+
+func writePreparedCommandJournalEntryBinaryPayload(writer *binaryFieldWriter, entry commandJournalEntry, fields commandJournalBinaryEntryFields) error {
 	writer.writeUvarint(commandJournalBinaryPayloadVersion)
 	writer.writeUvarint(entry.Sequence)
 	writer.writeBool(entry.Checkpoint)
-	if err := writeCommandJournalRequestBinaryFields(&writer, entry.Request, values, pairs); err != nil {
-		return nil, err
+	if err := writeCommandJournalRequestBinaryFields(writer, entry.Request, fields.values, fields.pairs); err != nil {
+		return err
 	}
-	writer.writeBytes(outbox)
-	return writer.bytes(), nil
+	writer.writeBytes(fields.outbox)
+	return nil
 }
 
 func commandJournalBinaryRecordCapacity(payloadBytes int) int {
@@ -126,11 +169,13 @@ func commandJournalEntryBinaryPayloadCapacity(entry commandJournalEntry, valuesB
 	if err != nil {
 		return 0, err
 	}
-	sizes := []int64{int64(binaryUvarintSize(entry.Sequence)), 1, requestSize}
+	sizes := [4]int64{int64(binaryUvarintSize(entry.Sequence)), 1, requestSize}
+	sizeCount := 3
 	if includeOutbox {
-		sizes = append(sizes, commandJournalBinaryBytesSize(outboxBytes))
+		sizes[sizeCount] = commandJournalBinaryBytesSize(outboxBytes)
+		sizeCount++
 	}
-	for _, size := range sizes {
+	for _, size := range sizes[:sizeCount] {
 		total, err = addCommandJournalBinaryPayloadSize(total, size)
 		if err != nil {
 			return 0, err

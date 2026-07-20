@@ -200,6 +200,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; structured commands retain the generic batch path |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
+| Current pass | [Coalesced journal batch append](#coalesced-journal-batch-append), 10k pulled `SETINT` records | Per-record WAL writes: 20.935 ms; 1,686,384 heap B; 30,004 allocs | Bounded shared append: 7.364 ms; 606,832 heap B; 5 allocs | 2.84x faster, 2.78x lower heap, 6,001x fewer allocs | WAL bytes and one-final-fsync durability are unchanged; buffers flush in bounded chunks |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Current pass | [Bounded partition snapshot locking](#bounded-partition-snapshot-locking), 100k keys, 16 partitions | Whole-set lock: 154.398 ms pause; 241.262 ms total | Tracked 256-key pages: 2.300 ms pause; 259.974 ms total | 67.14x shorter pause | Total time is 7.8% higher and cumulative heap is 1.7% higher |
@@ -1053,6 +1054,51 @@ every sample, is generated at `build/benchmarks/journal-tail-wire.txt`. Binary
 is less convenient to inspect manually and is project-specific; JSON remains
 the compatibility and diagnostics option. `JOURNAL_FORMAT` independently
 controls durable on-disk journal records.
+
+<a id="coalesced-journal-batch-append"></a>
+### Coalesced Journal Batch Append
+
+After receiving a journal tail, the follower previously allocated and wrote
+every durable record separately before its one final `fsync`. Binary records
+now append directly into one reusable arena, and a compact `uint32` size table
+retains each rollback boundary. The same writer coalesces ordinary group-commit
+jobs. The arena starts at no more than one MiB and flushes when it reaches that
+threshold; a large batch therefore remains bounded while all chunks still share
+one final durability sync. Standalone binary records remain byte-for-byte
+identical.
+
+The fixture assigns local journal sequences, encodes and writes 10,000
+`SETINT` records, performs one `fsync`, and applies all commands to the trie.
+Both paths produce the same 439,873-byte WAL. Results are seven-run medians on
+the Ryzen 9 5950X host.
+
+```sh
+make bench-journal-apply BENCHTIME=1x COUNT=7
+```
+
+| Metric | Per-record write baseline | Coalesced default | Improvement |
+| --- | ---: | ---: | ---: |
+| Durable batch apply | 20.935 ms | 7.364 ms | 2.84x faster |
+| Cumulative heap | 1,686,384 B | 606,832 B | 2.78x lower |
+| Allocations | 30,004 | 5 | 6,000.80x fewer |
+| WAL bytes | 439,873 B | 439,873 B | unchanged |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Per-record writes | `24.328, 20.615, 20.281, 20.935, 20.666, 21.617, 21.073` |
+| Coalesced append | `14.211, 7.452, 7.364, 6.817, 6.574, 6.905, 7.466` |
+
+The full current output, including heap, allocation, record-count, and WAL-byte
+metrics, is generated at `build/benchmarks/journal-pull-batch-apply.txt`. In a
+secondary 100-write, 16-caller group-commit run, coalescing moved the median
+from 87.335 to 82.283 microseconds per write (1.06x), reduced heap from 95,352
+to 93,384 B (1.02x), and reduced allocations from 703 to 603 (1.17x). JSON WAL
+mode also coalesces file writes but retains its per-record JSON encoding
+allocations. Encode, write, or sync failure still rolls the complete batch back;
+an apply-time rejection keeps the successful prefix and durably truncates the
+rejected record and suffix.
 
 ### Point-in-Time Snapshot Capture
 

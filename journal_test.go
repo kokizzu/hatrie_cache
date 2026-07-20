@@ -323,6 +323,135 @@ func TestCommandJournalGroupCommitSyncFailureDoesNotApply(t *testing.T) {
 	}
 }
 
+func TestCommandJournalRecordBatchSyncFailureDoesNotApply(t *testing.T) {
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	var syncs int
+	journal.syncHook = func() error {
+		syncs++
+		if syncs == 1 {
+			return errors.New("injected batch fsync failure")
+		}
+		return journal.file.Sync()
+	}
+	trie := newTestTrie(t)
+	records := []CommandJournalRecord{
+		{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "first", Value: "one"}},
+		{Sequence: 2, Request: CacheCommandRequest{Command: "SETINT", Key: "second", Value: "2"}},
+	}
+	applied, response := journal.executeJournalRecordsBatch(trie, records)
+	if applied != 0 || response.OK || !strings.Contains(response.Message, "injected batch fsync failure") {
+		t.Fatalf("executeJournalRecordsBatch() = %d/%#v, want sync failure", applied, response)
+	}
+	if trie.Exists("first") || trie.Exists("second") || journal.Sequence() != 0 {
+		t.Fatal("failed record batch changed cache or journal sequence")
+	}
+	if tail, err := journal.Tail(0, 10); err != nil || len(tail.Entries) != 0 {
+		t.Fatalf("Tail() = %#v/%v, want empty journal", tail, err)
+	}
+}
+
+func TestCommandJournalRecordBatchRejectsAndTruncatesSuffix(t *testing.T) {
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	trie := newTestTrie(t)
+	records := []CommandJournalRecord{
+		{Sequence: 1, Request: CacheCommandRequest{Command: "SETINT", Key: "conflict", Value: "2147483647"}},
+		{Sequence: 2, Request: CacheCommandRequest{Command: "INC", Key: "conflict", Value: "1"}},
+		{Sequence: 3, Request: CacheCommandRequest{Command: "SETSTR", Key: "suffix", Value: "three"}},
+	}
+	applied, response := journal.executeJournalRecordsBatch(trie, records)
+	if applied != 1 || response.OK {
+		t.Fatalf("executeJournalRecordsBatch() = %d/%#v, want one applied then rejection", applied, response)
+	}
+	if got := trie.GetCounter("conflict"); got != 2147483647 {
+		t.Fatalf("GetCounter(conflict) = %d, want max int32", got)
+	}
+	if trie.Exists("suffix") {
+		t.Fatal("suffix command was applied after rejection")
+	}
+	tail, err := journal.Tail(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tail.Entries) != 1 || tail.Entries[0].Request.Key != "conflict" || tail.Entries[0].Sequence != 1 {
+		t.Fatalf("Tail().Entries = %#v, want only successful prefix", tail.Entries)
+	}
+	replayed := newTestTrie(t)
+	if _, err := journal.Replay(replayed, 0); err != nil {
+		t.Fatal(err)
+	}
+	if replayed.GetCounter("conflict") != 2147483647 || replayed.Exists("suffix") {
+		t.Fatal("replay did not preserve the successful prefix")
+	}
+}
+
+func TestCommandJournalRecordBatchSpansBoundedWriteChunks(t *testing.T) {
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	trie := newTestTrie(t)
+	first := strings.Repeat("a", 600<<10)
+	second := strings.Repeat("b", 600<<10)
+	records := []CommandJournalRecord{
+		{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "first", Value: first}},
+		{Sequence: 2, Request: CacheCommandRequest{Command: "SETSTR", Key: "second", Value: second}},
+	}
+	applied, response := journal.executeJournalRecordsBatch(trie, records)
+	if !response.OK || applied != len(records) {
+		t.Fatalf("executeJournalRecordsBatch() = %d/%#v", applied, response)
+	}
+	if trie.GetString("first") != first || trie.GetString("second") != second {
+		t.Fatal("chunked record batch did not apply complete values")
+	}
+	replayed := newTestTrie(t)
+	if _, err := journal.Replay(replayed, 0); err != nil {
+		t.Fatal(err)
+	}
+	if replayed.GetString("first") != first || replayed.GetString("second") != second {
+		t.Fatal("chunked record batch did not replay complete values")
+	}
+}
+
+func TestCommandJournalRecordBatchFormatsReplay(t *testing.T) {
+	for _, format := range []CommandJournalFormat{CommandJournalFormatBinary, CommandJournalFormatJSON} {
+		t.Run(string(format), func(t *testing.T) {
+			journal, err := OpenCommandJournalWithOptions(filepath.Join(t.TempDir(), "commands.journal"), CommandJournalOptions{
+				Format:              format,
+				GroupCommitMaxBatch: 1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer journal.Close()
+			trie := newTestTrie(t)
+			records := []CommandJournalRecord{
+				{Sequence: 1, Request: CacheCommandRequest{Command: "SETSTR", Key: "first", Value: "one"}},
+				{Sequence: 2, Request: CacheCommandRequest{Command: "SETINT", Key: "second", Value: "2"}},
+			}
+			applied, response := journal.executeJournalRecordsBatch(trie, records)
+			if !response.OK || applied != len(records) {
+				t.Fatalf("executeJournalRecordsBatch() = %d/%#v", applied, response)
+			}
+			replayed := newTestTrie(t)
+			if _, err := journal.Replay(replayed, 0); err != nil {
+				t.Fatal(err)
+			}
+			if replayed.GetString("first") != "one" || replayed.GetCounter("second") != 2 {
+				t.Fatal("record batch did not replay exact state")
+			}
+		})
+	}
+}
+
 func TestCommandJournalDefaultWritesBinaryAndReadsLegacyJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.journal")
 	writeCommandJournalTestEntries(t, path, commandJournalEntry{
@@ -580,6 +709,35 @@ func TestCommandJournalBinaryPreallocatesLargeRecord(t *testing.T) {
 	}
 	if _, err := commandJournalEntryBinaryPayloadCapacity(entry, maxCommandJournalBinaryRecordBytes, 0); !errors.Is(err, errCommandJournalBinaryRecordTooLarge) {
 		t.Fatalf("commandJournalEntryBinaryPayloadCapacity(oversized) error = %v, want record too large", err)
+	}
+}
+
+func TestCommandJournalBinaryAppendMatchesStandaloneRecord(t *testing.T) {
+	priority := int64(7)
+	entry := commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 11,
+		Request: CacheCommandRequest{
+			Command:  "PUTMAP",
+			Key:      "profile",
+			Subkey:   "name",
+			Value:    "ivi",
+			Priority: &priority,
+			Values:   Slice{"alpha", json.Number("9")},
+			Pairs:    Map{"city": "Singapore"},
+		},
+	}
+	want, err := marshalCommandJournalEntryBinary(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := []byte("existing-prefix")
+	got, err := appendCommandJournalEntryBinary(append([]byte(nil), prefix...), entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got[:len(prefix)], prefix) || !bytes.Equal(got[len(prefix):], want) {
+		t.Fatal("appended binary journal record differs from standalone encoding")
 	}
 }
 

@@ -17,6 +17,53 @@ func BenchmarkJournalCatchUpDeltaVsFullSnapshot(b *testing.B) {
 	b.Run("FullSnapshot10k", benchmarkJournalCatchUpFullSnapshot10k)
 }
 
+func BenchmarkJournalPullApplyBatch10K(b *testing.B) {
+	const recordsPerBatch = 10_000
+	records := make([]CommandJournalRecord, recordsPerBatch)
+	for index := range records {
+		records[index] = CommandJournalRecord{
+			Sequence: uint64(index + 1),
+			Request: CacheCommandRequest{
+				Command: "SETINT",
+				Key:     fmt.Sprintf("pull-apply:%05d", index),
+				Value:   "42",
+			},
+		}
+	}
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	journal, err := OpenCommandJournalWithOptions(filepath.Join(b.TempDir(), "commands.journal"), CommandJournalOptions{
+		Format:              CommandJournalFormatBinary,
+		GroupCommitMaxBatch: 1,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = journal.Close() })
+
+	var walBytes int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		before, err := journal.file.Stat()
+		if err != nil {
+			b.Fatal(err)
+		}
+		applied, response := journal.executeJournalRecordsBatch(trie, records)
+		if !response.OK || applied != recordsPerBatch {
+			b.Fatalf("executeJournalRecordsBatch() = %d/%#v", applied, response)
+		}
+		after, err := journal.file.Stat()
+		if err != nil {
+			b.Fatal(err)
+		}
+		walBytes += after.Size() - before.Size()
+	}
+	b.StopTimer()
+	b.ReportMetric(recordsPerBatch, "records/op")
+	b.ReportMetric(float64(walBytes)/float64(b.N), "wal_B/op")
+}
+
 func benchmarkJournalCatchUpDelta100(b *testing.B, batched bool) {
 	tail := CommandJournalTail{
 		LastSequence: 100,

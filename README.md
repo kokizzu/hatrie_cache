@@ -1150,6 +1150,13 @@ uses 4.69x less cumulative heap, performs 2,510x fewer allocations, and transfer
 catch-up; JSON remains easier to inspect with generic tools. See
 [BENCHMARK.md](BENCHMARK.md#binary-journal-catch-up-wire).
 
+The follower also coalesces pulled records into bounded WAL write chunks before
+one final `fsync`, instead of allocating and writing every record separately.
+For the same 10,000-command tail this makes durable apply 2.84x faster, uses
+2.78x less cumulative heap, and performs 6,001x fewer allocations without
+changing WAL bytes or rollback semantics. See
+[BENCHMARK.md](BENCHMARK.md#coalesced-journal-batch-append).
+
 Journal pull is delta-first by default. If the requested delta was compacted,
 an existing Pebble follower first requests `/api/journal/recovery`, verifies its
 source-specific content-addressed object cache, downloads only missing
