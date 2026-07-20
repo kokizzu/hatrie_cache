@@ -27,6 +27,8 @@ const (
 	maxMonitoringEntriesLimit                  = 100000
 	snapshotContentType                        = "application/vnd.hatrie-cache.snapshot"
 	checkpointContentType                      = "application/vnd.hatrie-cache.pebble-checkpoint"
+	journalRecoveryManifestContentType         = "application/vnd.hatrie-cache.recovery-manifest+json"
+	journalRecoveryObjectContentType           = "application/vnd.hatrie-cache.recovery-object"
 	truncatedCommandJournalErrorResponseSuffix = "\n... journal source error body truncated"
 )
 
@@ -34,26 +36,28 @@ var errCommandJournalTailResponseTooLarge = errors.New("hatriecache: journal sou
 var errMonitoringEntriesLimitReached = errors.New("hatriecache: monitoring entries limit reached")
 
 type MonitoringOptions struct {
-	NodeName             string
-	WebDir               string
-	AuthToken            string
-	ReplicationAuthToken string
-	AuditLog             *AuditLogger
-	WriteProtected       bool
-	RateLimiter          *RateLimiter
-	Metrics              *APIMetrics
-	StartAt              time.Time
-	Snapshot             func() error
-	LevelDBStore         PersistentStore
-	LevelDBDirtyTracker  *LevelDBDirtyTracker
-	BackupSnapshotFormat SnapshotFormat
-	Journal              *CommandJournal
-	Topology             *TopologyStore
-	Election             *ElectionStore
-	Replicator           *HTTPReplicator
-	ReplicationSafety    *ReplicationSafetyStore
-	EnforceLeaderWrites  bool
-	RuntimeConfig        map[string]interface{}
+	NodeName                        string
+	WebDir                          string
+	AuthToken                       string
+	ReplicationAuthToken            string
+	AuditLog                        *AuditLogger
+	WriteProtected                  bool
+	RateLimiter                     *RateLimiter
+	Metrics                         *APIMetrics
+	StartAt                         time.Time
+	Snapshot                        func() error
+	LevelDBStore                    PersistentStore
+	LevelDBDirtyTracker             *LevelDBDirtyTracker
+	BackupSnapshotFormat            SnapshotFormat
+	Journal                         *CommandJournal
+	JournalRecoveryRepositoryPath   string
+	JournalRecoveryRepositoryRetain int
+	Topology                        *TopologyStore
+	Election                        *ElectionStore
+	Replicator                      *HTTPReplicator
+	ReplicationSafety               *ReplicationSafetyStore
+	EnforceLeaderWrites             bool
+	RuntimeConfig                   map[string]interface{}
 }
 
 type MonitoringHandler struct {
@@ -241,6 +245,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/election", handler.handleElection)
 	mux.HandleFunc("/api/replication", handler.handleReplication)
 	mux.HandleFunc("/api/journal/checkpoint", handler.handleJournalCheckpoint)
+	mux.HandleFunc("/api/journal/recovery", handler.handleJournalRecovery)
 	mux.HandleFunc("/api/journal/snapshot", handler.handleJournalSnapshot)
 	mux.HandleFunc("/api/journal", handler.handleJournal)
 	mux.HandleFunc("/metrics", handler.handleMetrics)
@@ -280,7 +285,7 @@ func monitoringPathAcceptsReplicationAuth(r *http.Request) bool {
 
 func monitoringPathRequiresReplicationAuth(r *http.Request) bool {
 	return r.Method == http.MethodGet &&
-		(r.URL.Path == "/api/journal" || r.URL.Path == "/api/journal/snapshot" || r.URL.Path == "/api/journal/checkpoint")
+		(r.URL.Path == "/api/journal" || r.URL.Path == "/api/journal/snapshot" || r.URL.Path == "/api/journal/checkpoint" || r.URL.Path == "/api/journal/recovery")
 }
 
 func writeMonitoringUnauthorized(w http.ResponseWriter) {
@@ -2137,6 +2142,109 @@ func (handler *MonitoringHandler) handleJournalCheckpoint(w http.ResponseWriter,
 		return
 	}
 	handler.auditHTTP(r, AuditEvent{Action: "journal.checkpoint", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"journal_sequence": manifest.JournalSequence, "bytes": info.Size()}})
+}
+
+func (handler *MonitoringHandler) handleJournalRecovery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if handler.options.Journal == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("journal is not configured"))
+		return
+	}
+	store, ok := handler.options.LevelDBStore.(*PebbleStore)
+	if !ok || handler.options.LevelDBDirtyTracker == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("Pebble storage and a dirty tracker are required for incremental recovery"))
+		return
+	}
+	repositoryPath := strings.TrimSpace(handler.options.JournalRecoveryRepositoryPath)
+	if repositoryPath == "" {
+		writeJSONStatus(w, http.StatusNotFound, commandError("incremental recovery repository is not configured"))
+		return
+	}
+
+	handler.storageMu.Lock()
+	defer handler.storageMu.Unlock()
+	if objectHash := strings.TrimSpace(r.URL.Query().Get("object")); objectHash != "" {
+		handler.serveJournalRecoveryObject(w, r, repositoryPath, strings.TrimSpace(r.URL.Query().Get("backup_id")), objectHash)
+		return
+	}
+	retention := handler.options.JournalRecoveryRepositoryRetain
+	if retention == 0 {
+		retention = DefaultBackupRepositoryRetention
+	}
+	manifest, err := CreateIncrementalBackupRepository(repositoryPath, handler.trie, handler.options.Journal, BackupBundleOptions{
+		Mode:             BackupModePebbleIncremental,
+		PersistentStore:  store,
+		DirtyTracker:     handler.options.LevelDBDirtyTracker,
+		RepositoryRetain: retention,
+	})
+	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "journal.recovery", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	data, err := jsonwire.Marshal(manifest)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", journalRecoveryManifestContentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("X-Hatrie-Journal-Sequence", strconv.FormatUint(manifest.JournalSequence, 10))
+	if _, err := w.Write(data); err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "journal.recovery", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
+		return
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "journal.recovery", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"backup_id": manifest.BackupID, "journal_sequence": manifest.JournalSequence, "new_object_bytes": manifest.NewObjectBytes, "reused_object_bytes": manifest.ReusedObjectBytes}})
+}
+
+func (handler *MonitoringHandler) serveJournalRecoveryObject(w http.ResponseWriter, r *http.Request, repositoryPath string, backupID string, objectHash string) {
+	manifest, err := readBackupRepositoryManifest(repositoryPath, backupID)
+	if err != nil {
+		writeJSONStatus(w, http.StatusNotFound, commandError(err.Error()))
+		return
+	}
+	var declaration *BackupBundleFile
+	for index := range manifest.Files {
+		if manifest.Files[index].SHA256 == objectHash {
+			declaration = &manifest.Files[index]
+			break
+		}
+	}
+	if declaration == nil {
+		writeJSONStatus(w, http.StatusNotFound, commandError("recovery object is not declared by the requested manifest"))
+		return
+	}
+	objectPath, err := backupRepositoryObjectPath(repositoryPath, objectHash)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	file, err := os.Open(objectPath)
+	if err != nil {
+		writeJSONStatus(w, http.StatusNotFound, commandError(err.Error()))
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() != declaration.Size {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError("recovery object size mismatch"))
+		return
+	}
+	w.Header().Set("Cache-Control", "public, immutable")
+	w.Header().Set("Content-Type", journalRecoveryObjectContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(declaration.Size, 10))
+	if _, err := io.Copy(w, file); err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "journal.recovery.object", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"backup_id": manifest.BackupID, "object": objectHash}})
+		return
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "journal.recovery.object", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"backup_id": manifest.BackupID, "object": objectHash, "bytes": declaration.Size}})
 }
 
 func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *http.Request) {

@@ -101,6 +101,9 @@ func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *Command
 		}
 		tail, status, err := fetchCommandJournalTailAuthorized(ctx, client, endpoint, authToken)
 		if err != nil {
+			if status == http.StatusConflict {
+				err = fmt.Errorf("%w: %v", ErrCommandJournalCompacted, err)
+			}
 			return result, commandJournalPullError(status, err)
 		}
 		batchResult, err := applyCommandJournalTail(trie, journal, source, result.AppliedThrough, tail, dirtyTracker)

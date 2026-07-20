@@ -61,15 +61,18 @@ type CommandJournalTail struct {
 }
 
 type CommandJournalPullResult struct {
-	Source           string `json:"source"`
-	AfterSequence    uint64 `json:"after_sequence"`
-	LastSequence     uint64 `json:"last_sequence"`
-	CompactedThrough uint64 `json:"compacted_through,omitempty"`
-	Applied          int    `json:"applied"`
-	AppliedThrough   uint64 `json:"applied_through"`
-	Batches          int    `json:"batches,omitempty"`
-	HasMore          bool   `json:"has_more,omitempty"`
-	FullSyncFallback bool   `json:"full_sync_fallback,omitempty"`
+	Source                  string `json:"source"`
+	AfterSequence           uint64 `json:"after_sequence"`
+	LastSequence            uint64 `json:"last_sequence"`
+	CompactedThrough        uint64 `json:"compacted_through,omitempty"`
+	Applied                 int    `json:"applied"`
+	AppliedThrough          uint64 `json:"applied_through"`
+	Batches                 int    `json:"batches,omitempty"`
+	HasMore                 bool   `json:"has_more,omitempty"`
+	FullSyncFallback        bool   `json:"full_sync_fallback,omitempty"`
+	IncrementalRecovery     bool   `json:"incremental_recovery,omitempty"`
+	RecoveryDownloadedBytes int64  `json:"recovery_downloaded_bytes,omitempty"`
+	RecoveryReusedBytes     int64  `json:"recovery_reused_bytes,omitempty"`
 }
 
 type commandJournalEntry struct {
@@ -777,6 +780,37 @@ func (journal *CommandJournal) ReplaceWithSnapshot(trie *HatTrie, path string) (
 		return SnapshotMetadata{}, err
 	}
 	return metadata, nil
+}
+
+// ReplaceWithPersistentStore replaces the complete in-memory keyspace from an
+// eagerly loaded store, then resets the local journal to the source checkpoint.
+// The caller may close and remove the source store after this method returns.
+func (journal *CommandJournal) ReplaceWithPersistentStore(trie *HatTrie, store PersistentStore, sequence uint64) (int, error) {
+	if journal == nil {
+		return 0, ErrNilCommandJournal
+	}
+	if trie == nil {
+		return 0, ErrNilHatTrie
+	}
+	if store == nil {
+		return 0, errors.New("hatriecache: persistent recovery store is nil")
+	}
+	journal.snapshotMu.Lock()
+	defer journal.snapshotMu.Unlock()
+
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return 0, ErrCommandJournalClosed
+	}
+	loaded, err := store.Load(trie)
+	if err != nil {
+		return 0, err
+	}
+	if err := journal.resetToCheckpointLocked(sequence); err != nil {
+		return 0, err
+	}
+	return loaded, nil
 }
 
 func (journal *CommandJournal) Sequence() uint64 {

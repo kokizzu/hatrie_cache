@@ -1130,18 +1130,33 @@ restart. Journal pull HTTP requests use a 30 second timeout by default; set
 source. Add `JOURNAL_PULL_INTERVAL` to repeat catch-up periodically.
 
 Journal pull is delta-first by default. If the requested delta was compacted,
-the follower automatically downloads `/api/journal/snapshot`, validates it
-before replacing the previous recovery file, replaces its complete key set
-(including stale-key deletion), resets its local journal checkpoint to the
-source snapshot sequence, performs a full LevelDB save when LevelDB is enabled,
-and only then advances `JOURNAL_PULL_STATE_PATH`. The durable snapshot filename
-is derived from the state path and a hash of `JOURNAL_PULL_SOURCE`, preventing a
-snapshot from one source from being reused for another. On restart, the newer
-of this recovery snapshot and `SNAPSHOT_PATH` is loaded before journal replay.
+an existing Pebble follower first requests `/api/journal/recovery`, verifies its
+source-specific content-addressed object cache, downloads only missing
+checkpoint objects, checksum-stages an exact store, replaces the complete key
+set (including stale-key deletion), resets its local journal checkpoint,
+performs a full save to its open Pebble DB, and only then advances `JOURNAL_PULL_STATE_PATH`.
+The leader repository defaults to
+`DB_PATH.journal-recovery-repository`; the follower cache is derived from the
+state path and a hash of `JOURNAL_PULL_SOURCE`. Both are created only when
+recovery is needed. The leader retains 32 manifests and garbage-collects
+unreachable objects; the follower retains the current manifest's objects.
+
+Incremental recovery is enabled by default with
+`JOURNAL_PULL_INCREMENTAL_RECOVERY=true`. It requires Pebble on both nodes and
+matching storage formats. If negotiation, validation, staging, or replacement
+fails, or either node is unsupported, the follower automatically downloads
+`/api/journal/snapshot`, validates it before replacing the previous recovery
+file, and follows the existing exact snapshot path. The durable snapshot
+filename is also source-specific. On restart, the newer of this recovery
+snapshot and `SNAPSHOT_PATH` is loaded before journal replay.
 Set `JOURNAL_PULL_FULL_SYNC_FALLBACK=false` to keep the previous fail-closed
 `409` behavior. Full fallback is intentionally more CPU, disk, and bandwidth
 work than a delta pull, but it runs only when the required deltas no longer
-exist.
+exist. Set `JOURNAL_PULL_INCREMENTAL_RECOVERY=false` to skip repository
+negotiation and use the snapshot fallback directly. On the 10,000-key,
+1%-changed fixture, repository recovery is 1.62x faster, uses 1.05x less heap,
+performs 2.26x fewer allocations, and transfers 56.39x fewer response-body
+bytes. See [BENCHMARK.md](BENCHMARK.md#incremental-existing-replica-recovery).
 
 On a fresh follower whose `DB_PATH` does not exist, Pebble checkpoint bootstrap
 is enabled by default with `JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=true`. Before the
@@ -1150,9 +1165,9 @@ checkpoint, records a crash-recovery marker, atomically installs the store and
 backend marker, resets the local journal to the checkpoint sequence, and only
 then advances pull state. Normal startup opens and semantically loads the
 installed store before any listener starts. An interrupted install resumes from
-the marker; an existing database is never replaced and continues to use normal
-delta or snapshot fallback. Unsupported backends and unavailable checkpoint
-endpoints also retain the snapshot path. Set
+the marker; an existing database is never replaced at startup and continues to
+use normal delta, incremental repository, or snapshot recovery. Unsupported
+backends and unavailable checkpoint endpoints also retain the snapshot path. Set
 `JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=false` to disable this fresh-node fast path.
 For 10,000 256-byte values it was 1.74x faster with 2.72x lower cumulative heap
 and 2.76x fewer allocations than snapshot bootstrap, at the cost of 2.55% more
@@ -1164,6 +1179,7 @@ Examples:
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_INTERVAL=5s
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_TIMEOUT=5s
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_FULL_SYNC_FALLBACK=false
+make monitoring-server DB_PATH=data/cache JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_INCREMENTAL_RECOVERY=false
 make monitoring-server DB_PATH=data/cache JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=false
 ```
 

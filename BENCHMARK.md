@@ -170,6 +170,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Content-addressed incremental backups](#content-addressed-incremental-backups), 10k x 256 B, 1% changed | Full checkpoint bundle: 98.602 ms; 9.81 MB heap; 2,104,489 written B | Incremental repository: 14.659 ms; 0.94 MB heap; 35,020 written B | 6.73x faster, 10.49x lower heap, 60.09x fewer written bytes | Explicit mode; first backup is full and retained history consumes repository storage |
 | Current pass | [Single-pass staged restore](#single-pass-staged-restore), checkpoint 10k x 256 B | Verify then extract: 69.346 ms; 13.18 MB heap; 2 payload passes | Stage, verify, fsync, publish: 56.057 ms; 12.78 MB heap; 1 payload pass | 1.24x faster, 1.03x lower heap, half the payload passes | Repository restore is 1.09x slower because the durable path fsyncs staged files |
 | Current pass | [Checkpoint replica bootstrap](#checkpoint-replica-bootstrap), 10k x 256 B | Snapshot: 146.369 ms; 36.66 MB heap; 172,569 allocs; 2,051,371 wire B | Pebble checkpoint: 84.246 ms; 13.50 MB heap; 62,423 allocs; 2,103,717 wire B | 1.74x faster, 2.72x lower heap, 2.76x fewer allocs | Fresh Pebble databases only; wire size is 2.55% larger |
+| Current pass | [Incremental existing-replica recovery](#incremental-existing-replica-recovery), 10k x 256 B, 1% changed | Full snapshot: 169.906 ms; 38.68 MB heap; 2,047,776 wire B | Cached repository: 104.739 ms; 36.70 MB heap; 36,313 wire B | 1.62x faster, 1.05x lower heap, 2.26x fewer allocs, 56.39x smaller wire | Pebble and a cached base are required; exact restore still performs a full local DB save |
 | Current pass | [Parallel cold-reference hydration](#parallel-cold-reference-hydration), 32 delayed reads | Serialized: 33.875 ms; 18,648 heap B | Parallel singleflight: 1.174 ms; 30,166 heap B | 28.85x faster | Cumulative heap is 1.62x higher and allocations are 1.80x higher |
 | Current pass | [Compact lazy-reference slab](#compact-lazy-reference-slab), 100k references | Public-struct slab: 29.617 ms; 90.2 retained B/ref | Compact slab: 20.513 ms; 71.6 retained B/ref | 1.44x faster, 1.26x lower retained heap | Type IDs are internal; exported references are expanded on access |
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
@@ -431,6 +432,55 @@ for existing databases, non-Pebble backends, incompatible storage formats, or a
 leader without the checkpoint endpoint. The 2.55% wire increase comes from
 transferring native Pebble files and their checksummed manifest instead of the
 compact snapshot representation.
+
+<a id="incremental-existing-replica-recovery"></a>
+#### Incremental Existing-Replica Recovery
+
+When a follower requests journal entries older than the leader retains, an
+existing Pebble replica now negotiates `/api/journal/recovery` before requesting
+the full snapshot. The leader creates a journal-sequenced content-addressed
+checkpoint manifest. The follower checksum-verifies its source-specific local
+object cache, downloads only missing manifest objects, durably stages the
+complete checkpoint, eagerly loads it into the live trie under the journal
+replacement lock, persists its already-open local database, and advances pull
+state last. Corrupt cached objects are removed and downloaded again.
+
+The fixture starts both paths with the same existing 10,001-key follower DB.
+Values are deterministic low-compressibility 256-byte strings, 100 keys change,
+and the repository path starts with the same cached base manifest on every
+iteration. Both paths include leader-side artifact creation, local HTTP body
+transfer, checksum/staging work, exact stale-key deletion, journal checkpoint
+replacement, and a full save to the follower's open Pebble store. Setup of the
+existing DB and cached base is excluded. Results are seven-run medians on the
+Ryzen 9 5950X host.
+
+```sh
+make bench-existing-recovery BACKUP_BENCH_KEYS=10000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Metric | Full snapshot recovery | Incremental repository recovery | Improvement |
+| --- | ---: | ---: | ---: |
+| Time | 169.906 ms | 104.739 ms | 1.62x faster |
+| Cumulative heap | 38,683,024 B | 36,699,752 B | 1.05x lower |
+| Allocations | 192,124 | 84,988 | 2.26x fewer |
+| HTTP response body bytes | 2,047,776 B | 36,313 B | 56.39x smaller |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Full snapshot | `166.608, 169.906, 180.772, 164.741, 178.990, 144.945, 170.911` |
+| Incremental repository | `104.676, 104.739, 110.637, 102.921, 106.768, 106.266, 102.605` |
+
+The raw output is generated at
+`build/benchmarks/existing-replica-recovery.txt`. HTTP headers are excluded, so
+the candidate's manifest plus object request overhead is not represented in the
+wire row. The path requires Pebble on both nodes, matching storage codecs, and a
+cached base to realize delta bandwidth; its first recovery has full checkpoint
+cost. Source and follower repositories consume disk, and staging temporarily
+requires another checkpoint-sized directory. An unavailable endpoint, invalid
+manifest/object, codec mismatch, non-Pebble follower, or disabled option
+automatically retains the exact full-snapshot fallback.
 
 The backend contract uses the same binary record codec and exercises a full
 10,000-key save, 1,000 incremental operations (500 updates, 250 deletes, 250

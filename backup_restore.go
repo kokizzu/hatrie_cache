@@ -194,6 +194,42 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	}, nil
 }
 
+// StageBackupRepository checksum-verifies and durably materializes one
+// repository manifest without opening its Pebble store. Recovery callers can
+// use the subsequent eager load as the single semantic validation pass.
+func StageBackupRepository(repositoryPath string, backupID string, dataDir string) (BackupBundleManifest, error) {
+	repositoryPath = strings.TrimSpace(repositoryPath)
+	dataDir = strings.TrimSpace(dataDir)
+	if repositoryPath == "" {
+		return BackupBundleManifest{}, errors.New("hatriecache: backup repository path is required")
+	}
+	if dataDir == "" {
+		return BackupBundleManifest{}, errors.New("hatriecache: restore data dir is required")
+	}
+	if err := verifyBackupRepositoryDescriptor(repositoryPath); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	manifest, err := readBackupRepositoryManifest(repositoryPath, backupID)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	destination, err := prepareRestoreDestination(repositoryPath, dataDir, false)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	defer os.RemoveAll(destination.staging)
+	if _, err := materializeBackupRepository(repositoryPath, manifest.BackupID, destination.staging); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	if err := syncRestoreTree(destination.staging); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	if err := publishRestoreDestination(destination, false); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	return manifest, nil
+}
+
 // StagePebbleCheckpointBundle checksum-verifies and durably materializes a
 // native checkpoint without loading its records. Callers must open and load the
 // installed store before exposing it to traffic.

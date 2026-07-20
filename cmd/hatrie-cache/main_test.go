@@ -73,6 +73,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if !cfg.journalPullCheckpointBootstrap {
 		t.Fatal("journalPullCheckpointBootstrap = false, want default true")
 	}
+	if !cfg.journalPullIncrementalRecovery {
+		t.Fatal("journalPullIncrementalRecovery = false, want default true")
+	}
 	if cfg.monitoringReadHeaderTimeout != defaultMonitoringReadHeaderTimeout {
 		t.Fatalf("monitoring read header timeout = %s, want %s", cfg.monitoringReadHeaderTimeout, defaultMonitoringReadHeaderTimeout)
 	}
@@ -654,6 +657,7 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 		"-journal-pull-max-batches", "8",
 		"-journal-pull-full-sync-fallback=false",
 		"-journal-pull-checkpoint-bootstrap=false",
+		"-journal-pull-incremental-recovery=false",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
@@ -672,6 +676,9 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 	}
 	if cfg.journalPullCheckpointBootstrap {
 		t.Fatal("cfg journal pull checkpoint bootstrap = true, want explicit false")
+	}
+	if cfg.journalPullIncrementalRecovery {
+		t.Fatal("cfg journal pull incremental recovery = true, want explicit false")
 	}
 }
 
@@ -3520,14 +3527,17 @@ func TestPullJournalOnceFallsBackToFullSyncAfterCompaction(t *testing.T) {
 	defer source.Close()
 
 	result, err := pullJournalOnce(context.Background(), ht, journal, journalPullerConfig{
-		Source:           source.URL,
-		StatePath:        statePath,
-		SnapshotPath:     snapshotPath,
-		Limit:            10,
-		MaxBatches:       1,
-		FullSyncFallback: true,
-		AuthToken:        "replica-secret",
-		Client:           source.Client(),
+		Source:                 source.URL,
+		StatePath:              statePath,
+		SnapshotPath:           snapshotPath,
+		RecoveryRepositoryPath: filepath.Join(t.TempDir(), "recovery-repository"),
+		StorageFormat:          hatriecache.DefaultStorageFormat,
+		Limit:                  10,
+		MaxBatches:             1,
+		FullSyncFallback:       true,
+		IncrementalRecovery:    true,
+		AuthToken:              "replica-secret",
+		Client:                 source.Client(),
 		PersistFullSync: func() error {
 			if _, err := os.Stat(statePath); !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("pull state existed before full persistence: %v", err)
@@ -3539,7 +3549,7 @@ func TestPullJournalOnceFallsBackToFullSyncAfterCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pullJournalOnce() error = %v", err)
 	}
-	if !result.FullSyncFallback || result.AppliedThrough != 1 || result.LastSequence != 1 {
+	if !result.FullSyncFallback || result.IncrementalRecovery || result.AppliedThrough != 1 || result.LastSequence != 1 {
 		t.Fatalf("fallback result = %#v, want full sync through 1", result)
 	}
 	if fullSyncRequests.Load() != 1 || fullSyncPersists.Load() != 1 || ht.GetString("recovered") != "full-sync" || ht.Exists("stale") {
@@ -3551,6 +3561,43 @@ func TestPullJournalOnceFallsBackToFullSyncAfterCompaction(t *testing.T) {
 	}
 	if after != 1 {
 		t.Fatalf("pull state after fallback = %d, want 1", after)
+	}
+}
+
+func TestPullJournalOnceReportsIncrementalAndSnapshotFallbackFailures(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/journal":
+			http.Error(w, "compacted", http.StatusConflict)
+		case "/api/journal/recovery":
+			http.Error(w, "recovery unavailable", http.StatusNotFound)
+		case "/api/journal/snapshot":
+			http.Error(w, "snapshot unavailable", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer source.Close()
+	trie := hatriecache.CreateHatTrie()
+	defer trie.Destroy()
+	journal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "target.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+
+	_, err = pullJournalOnce(context.Background(), trie, journal, journalPullerConfig{
+		Source:                 source.URL,
+		StatePath:              filepath.Join(t.TempDir(), "pull-state.json"),
+		SnapshotPath:           filepath.Join(t.TempDir(), "fallback.snapshot"),
+		RecoveryRepositoryPath: filepath.Join(t.TempDir(), "recovery-repository"),
+		StorageFormat:          hatriecache.DefaultStorageFormat,
+		FullSyncFallback:       true,
+		IncrementalRecovery:    true,
+		Client:                 source.Client(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "incremental recovery:") || !strings.Contains(err.Error(), "full sync fallback:") {
+		t.Fatalf("pullJournalOnce() error = %v, want both fallback failures", err)
 	}
 }
 
@@ -3705,6 +3752,140 @@ func TestPullJournalOnceLeavesCompactedGapWhenFullSyncFallbackIsDisabled(t *test
 	}
 	if snapshotRequests.Load() != 0 {
 		t.Fatalf("snapshot requests = %d, want 0", snapshotRequests.Load())
+	}
+}
+
+func TestPullJournalOnceUsesIncrementalRecoveryForExistingPebbleReplica(t *testing.T) {
+	sourceTrie := hatriecache.CreateHatTrie()
+	defer sourceTrie.Destroy()
+	sourceStore, err := hatriecache.OpenPebbleStore(filepath.Join(t.TempDir(), "source.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sourceStore.Close()
+	sourceJournal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sourceJournal.Close()
+	sourceDirty := hatriecache.NewLevelDBDirtyTracker()
+	for index := 0; index < 512; index++ {
+		key := fmt.Sprintf("existing:%04d", index)
+		sourceTrie.UpsertString(key, strings.Repeat("x", 256))
+		sourceDirty.Mark(key)
+	}
+	if response := sourceJournal.ExecuteCommand(sourceTrie, hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "generation", Value: "base"}); !response.OK {
+		t.Fatal(response.Message)
+	}
+	sourceDirty.Mark("generation")
+
+	sourceRepository := filepath.Join(t.TempDir(), "source-recovery")
+	sourceHandler := hatriecache.NewMonitoringHandler(sourceTrie, hatriecache.MonitoringOptions{
+		Journal:                       sourceJournal,
+		LevelDBStore:                  sourceStore,
+		LevelDBDirtyTracker:           sourceDirty,
+		JournalRecoveryRepositoryPath: sourceRepository,
+	}).Handler()
+	var snapshotRequests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/journal/snapshot" {
+			snapshotRequests.Add(1)
+		}
+		sourceHandler.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	localRepository := filepath.Join(root, "recovery-repository")
+	base, err := hatriecache.PullCommandJournalRecovery(context.Background(), server.URL, "", server.Client(), localRepository, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.Manifest.JournalSequence != 1 {
+		t.Fatalf("base recovery sequence = %d, want 1", base.Manifest.JournalSequence)
+	}
+
+	targetTrie := hatriecache.CreateHatTrie()
+	defer targetTrie.Destroy()
+	for index := 0; index < 512; index++ {
+		targetTrie.UpsertString(fmt.Sprintf("existing:%04d", index), strings.Repeat("x", 256))
+	}
+	targetTrie.UpsertString("generation", "base")
+	targetTrie.UpsertString("stale", "remove")
+	targetStore, err := hatriecache.OpenPebbleStore(filepath.Join(root, "target.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targetStore.Close()
+	if err := targetStore.Save(targetTrie); err != nil {
+		t.Fatal(err)
+	}
+	targetJournalPath := filepath.Join(root, "target.journal")
+	if err := hatriecache.InstallCommandJournalCheckpoint(targetJournalPath, hatriecache.DefaultCommandJournalFormat, 1); err != nil {
+		t.Fatal(err)
+	}
+	targetJournal, err := hatriecache.OpenCommandJournal(targetJournalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targetJournal.Close()
+	statePath := filepath.Join(root, "pull-state.json")
+	if err := saveJournalPullState(statePath, server.URL, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	for index := 0; index < 5; index++ {
+		key := fmt.Sprintf("existing:%04d", index)
+		if response := sourceJournal.ExecuteCommand(sourceTrie, hatriecache.CacheCommandRequest{Command: "SETSTR", Key: key, Value: strings.Repeat("y", 256)}); !response.OK {
+			t.Fatal(response.Message)
+		}
+		sourceDirty.Mark(key)
+	}
+	if response := sourceJournal.ExecuteCommand(sourceTrie, hatriecache.CacheCommandRequest{Command: "DEL", Key: "existing:0511"}); !response.OK {
+		t.Fatal(response.Message)
+	}
+	sourceDirty.Mark("existing:0511")
+	if response := sourceJournal.ExecuteCommand(sourceTrie, hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "generation", Value: "changed"}); !response.OK {
+		t.Fatal(response.Message)
+	}
+	sourceDirty.Mark("generation")
+	if err := sourceJournal.SaveSnapshot(sourceTrie, filepath.Join(root, "source.snapshot")); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := pullJournalOnce(context.Background(), targetTrie, targetJournal, journalPullerConfig{
+		Source:                 server.URL,
+		StatePath:              statePath,
+		SnapshotPath:           filepath.Join(root, "fallback.snapshot"),
+		RecoveryRepositoryPath: localRepository,
+		StorageFormat:          hatriecache.DefaultStorageFormat,
+		Limit:                  10,
+		MaxBatches:             1,
+		FullSyncFallback:       true,
+		IncrementalRecovery:    true,
+		Client:                 server.Client(),
+		PersistFullSync: func() error {
+			return targetStore.Save(targetTrie)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.FullSyncFallback || !result.IncrementalRecovery || result.AppliedThrough != sourceJournal.Sequence() {
+		t.Fatalf("incremental fallback result = %#v", result)
+	}
+	if result.RecoveryReusedBytes <= result.RecoveryDownloadedBytes || snapshotRequests.Load() != 0 {
+		t.Fatalf("recovery bytes/snapshot requests = %d/%d/%d", result.RecoveryDownloadedBytes, result.RecoveryReusedBytes, snapshotRequests.Load())
+	}
+	if targetTrie.Exists("stale") || targetTrie.Exists("existing:0511") || targetTrie.GetString("generation") != "changed" || targetTrie.GetString("existing:0000") != strings.Repeat("y", 256) {
+		t.Fatalf("recovered target entries = %#v", targetTrie.Entries(true)[:3])
+	}
+	if targetJournal.Sequence() != sourceJournal.Sequence() {
+		t.Fatalf("target journal sequence = %d, want %d", targetJournal.Sequence(), sourceJournal.Sequence())
+	}
+	after, err := loadJournalPullState(statePath, server.URL)
+	if err != nil || after != sourceJournal.Sequence() {
+		t.Fatalf("recovery pull state = %d/%v", after, err)
 	}
 }
 

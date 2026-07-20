@@ -2032,6 +2032,7 @@ func TestMonitoringReplicationAuthTokenAllowsOnlyJournalReadAndSnapshot(t *testi
 		{name: "journal read", method: http.MethodGet, path: "/api/journal"},
 		{name: "journal snapshot", method: http.MethodGet, path: "/api/journal/snapshot"},
 		{name: "journal checkpoint", method: http.MethodGet, path: "/api/journal/checkpoint"},
+		{name: "journal recovery", method: http.MethodGet, path: "/api/journal/recovery"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
