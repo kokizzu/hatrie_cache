@@ -28,6 +28,7 @@ type CacheServiceClient interface {
 	Command(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	CommandStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_CommandStreamClient, error)
 	CommandBatchStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_CommandBatchStreamClient, error)
+	ScalarBatchStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ScalarBatchStreamClient, error)
 	Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	Replication(ctx context.Context, in *ReplicationRequest, opts ...grpc.CallOption) (*ReplicationResponse, error)
 	ReplicationStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ReplicationStreamClient, error)
@@ -143,6 +144,37 @@ func (x *cacheServiceCommandBatchStreamClient) Recv() (*CommandBatchResponse, er
 	return m, nil
 }
 
+func (c *cacheServiceClient) ScalarBatchStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ScalarBatchStreamClient, error) {
+	stream, err := c.cc.NewStream(ctx, &CacheService_ServiceDesc.Streams[2], "/hatriecache.v1.CacheService/ScalarBatchStream", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &cacheServiceScalarBatchStreamClient{stream}
+	return x, nil
+}
+
+type CacheService_ScalarBatchStreamClient interface {
+	Send(*ScalarBatchRequest) error
+	Recv() (*ScalarBatchResponse, error)
+	grpc.ClientStream
+}
+
+type cacheServiceScalarBatchStreamClient struct {
+	grpc.ClientStream
+}
+
+func (x *cacheServiceScalarBatchStreamClient) Send(m *ScalarBatchRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *cacheServiceScalarBatchStreamClient) Recv() (*ScalarBatchResponse, error) {
+	m := new(ScalarBatchResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *cacheServiceClient) Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*CommandResponse, error) {
 	out := new(CommandResponse)
 	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/Snapshot", in, out, opts...)
@@ -162,7 +194,7 @@ func (c *cacheServiceClient) Replication(ctx context.Context, in *ReplicationReq
 }
 
 func (c *cacheServiceClient) ReplicationStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ReplicationStreamClient, error) {
-	stream, err := c.cc.NewStream(ctx, &CacheService_ServiceDesc.Streams[2], "/hatriecache.v1.CacheService/ReplicationStream", opts...)
+	stream, err := c.cc.NewStream(ctx, &CacheService_ServiceDesc.Streams[3], "/hatriecache.v1.CacheService/ReplicationStream", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +270,7 @@ type CacheServiceServer interface {
 	Command(context.Context, *CommandRequest) (*CommandResponse, error)
 	CommandStream(CacheService_CommandStreamServer) error
 	CommandBatchStream(CacheService_CommandBatchStreamServer) error
+	ScalarBatchStream(CacheService_ScalarBatchStreamServer) error
 	Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error)
 	Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error)
 	ReplicationStream(CacheService_ReplicationStreamServer) error
@@ -269,6 +302,9 @@ func (UnimplementedCacheServiceServer) CommandStream(CacheService_CommandStreamS
 }
 func (UnimplementedCacheServiceServer) CommandBatchStream(CacheService_CommandBatchStreamServer) error {
 	return status.Errorf(codes.Unimplemented, "method CommandBatchStream not implemented")
+}
+func (UnimplementedCacheServiceServer) ScalarBatchStream(CacheService_ScalarBatchStreamServer) error {
+	return status.Errorf(codes.Unimplemented, "method ScalarBatchStream not implemented")
 }
 func (UnimplementedCacheServiceServer) Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Snapshot not implemented")
@@ -422,6 +458,32 @@ func (x *cacheServiceCommandBatchStreamServer) Send(m *CommandBatchResponse) err
 
 func (x *cacheServiceCommandBatchStreamServer) Recv() (*CommandBatchRequest, error) {
 	m := new(CommandBatchRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _CacheService_ScalarBatchStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(CacheServiceServer).ScalarBatchStream(&cacheServiceScalarBatchStreamServer{stream})
+}
+
+type CacheService_ScalarBatchStreamServer interface {
+	Send(*ScalarBatchResponse) error
+	Recv() (*ScalarBatchRequest, error)
+	grpc.ServerStream
+}
+
+type cacheServiceScalarBatchStreamServer struct {
+	grpc.ServerStream
+}
+
+func (x *cacheServiceScalarBatchStreamServer) Send(m *ScalarBatchResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *cacheServiceScalarBatchStreamServer) Recv() (*ScalarBatchRequest, error) {
+	m := new(ScalarBatchRequest)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -620,6 +682,12 @@ var CacheService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "CommandBatchStream",
 			Handler:       _CacheService_CommandBatchStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ScalarBatchStream",
+			Handler:       _CacheService_ScalarBatchStream_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

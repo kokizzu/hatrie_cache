@@ -956,6 +956,222 @@ func TestCacheGRPCServerCommandBatchStreamExecutesNativeBatchesInOrder(t *testin
 	}
 }
 
+func TestCacheGRPCServerScalarBatchStreamExecutesTypedColumnsInOrder(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.ScalarBatchStream(context.Background())
+	if err != nil {
+		t.Fatalf("ScalarBatchStream() error = %v", err)
+	}
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId: 71,
+		Operations: []hatriecachev1.ScalarCommand{
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_DELETE,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET,
+		},
+		Keys:          []string{"name", "count", "count", "name", "count", "name", "name", "name"},
+		StringValues:  [][]byte{[]byte("ivi")},
+		IntegerValues: []int64{40, 2},
+	}
+	if err := stream.Send(request); err != nil {
+		t.Fatalf("ScalarBatchStream.Send() error = %v", err)
+	}
+	response, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("ScalarBatchStream.Recv() error = %v", err)
+	}
+	if response.GetBatchId() != 71 || !response.GetOk() || response.GetError() != "" {
+		t.Fatalf("scalar response envelope = %#v, want successful batch 71", response)
+	}
+	wantStatuses := []hatriecachev1.ScalarResultStatus{
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND,
+	}
+	if !reflect.DeepEqual(response.GetStatuses(), wantStatuses) {
+		t.Fatalf("scalar statuses = %v, want %v", response.GetStatuses(), wantStatuses)
+	}
+	wantKinds := []hatriecachev1.ScalarValueKind{
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_INTEGER,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BOOLEAN,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+	}
+	if !reflect.DeepEqual(response.GetValueKinds(), wantKinds) {
+		t.Fatalf("scalar value kinds = %v, want %v", response.GetValueKinds(), wantKinds)
+	}
+	if !reflect.DeepEqual(response.GetIntegerValues(), []int64{42, 1}) {
+		t.Fatalf("scalar integer values = %v, want [42 1]", response.GetIntegerValues())
+	}
+	if string(response.GetValues()) != "ivi42" || !reflect.DeepEqual(response.GetValueEnds(), []uint32{3, 5}) {
+		t.Fatalf("scalar byte values = %q/%v, want ivi42/[3 5]", response.GetValues(), response.GetValueEnds())
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("ScalarBatchStream.CloseSend() error = %v", err)
+	}
+	if _, err := stream.Recv(); !errors.Is(err, io.EOF) {
+		t.Fatalf("ScalarBatchStream final Recv() error = %v, want EOF", err)
+	}
+}
+
+func TestCacheGRPCServerScalarBatchStreamRejectsMalformedColumnsAndContinues(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("name", "ivi")
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.ScalarBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.ScalarBatchRequest{
+		BatchId:    1,
+		Operations: []hatriecachev1.ScalarCommand{hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	malformed, err := stream.Recv()
+	if err != nil || malformed.GetOk() || !strings.Contains(malformed.GetError(), "keys must match") {
+		t.Fatalf("malformed scalar batch = %#v/%v, want application error", malformed, err)
+	}
+	if err := stream.Send(&hatriecachev1.ScalarBatchRequest{
+		BatchId:    2,
+		Operations: []hatriecachev1.ScalarCommand{hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET},
+		Keys:       []string{"name"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	valid, err := stream.Recv()
+	if err != nil || !valid.GetOk() || string(valid.GetValues()) != "ivi" {
+		t.Fatalf("valid scalar batch after malformed batch = %#v/%v, want ivi", valid, err)
+	}
+}
+
+func TestCacheGRPCServerScalarBatchStreamReportsPerCommandValidation(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.ScalarBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.ScalarBatchRequest{
+		Operations: []hatriecachev1.ScalarCommand{
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT,
+		},
+		Keys:          []string{"", "too-large", "count", "count"},
+		StringValues:  [][]byte{[]byte("ignored")},
+		IntegerValues: []int64{int64(maxCommandInt32) + 1, int64(maxCommandInt32), 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil || !response.GetOk() {
+		t.Fatalf("validated scalar batch = %#v/%v, want processed envelope", response, err)
+	}
+	want := []hatriecachev1.ScalarResultStatus{
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_INVALID_KEY,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_INVALID_ARGUMENT,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK,
+		hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_COUNTER_OVERFLOW,
+	}
+	if !reflect.DeepEqual(response.GetStatuses(), want) {
+		t.Fatalf("validation statuses = %v, want %v", response.GetStatuses(), want)
+	}
+	if got := ht.GetCounter("count"); got != maxCommandInt32 {
+		t.Fatalf("counter after rejected overflow = %d, want %d", got, maxCommandInt32)
+	}
+	if ht.Exists("too-large") {
+		t.Fatal("out-of-range SET_COUNTER changed the trie")
+	}
+}
+
+func TestCacheGRPCServerScalarBatchStreamPreservesJournalAndDirtyTracking(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	dirty := NewLevelDBDirtyTracker()
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{Journal: journal, DirtyTracker: dirty})
+	defer stop()
+	stream, err := client.ScalarBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.ScalarBatchRequest{
+		BatchId: 3,
+		Operations: []hatriecachev1.ScalarCommand{
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT,
+		},
+		Keys:          []string{"count", "count"},
+		IntegerValues: []int64{40, 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil || !response.GetOk() || !reflect.DeepEqual(response.GetIntegerValues(), []int64{42}) {
+		t.Fatalf("journaled scalar batch = %#v/%v, want increment result 42", response, err)
+	}
+	if journal.Sequence() != 2 {
+		t.Fatalf("journal sequence = %d, want 2", journal.Sequence())
+	}
+	if dirty.Pending() != 1 {
+		t.Fatalf("dirty keys = %d, want one deduplicated key", dirty.Pending())
+	}
+	recovered := newTestTrie(t)
+	sequence, err := journal.Replay(recovered, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sequence != 2 || recovered.GetCounter("count") != 42 {
+		t.Fatalf("journal replay = %d/count=%d, want sequence 2 and 42", sequence, recovered.GetCounter("count"))
+	}
+}
+
+func TestCacheGRPCServerScalarBatchStreamHonorsWriteProtection(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{WriteProtected: true})
+	defer stop()
+	stream, err := client.ScalarBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.ScalarBatchRequest{
+		Operations:   []hatriecachev1.ScalarCommand{hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING},
+		Keys:         []string{"name"},
+		StringValues: [][]byte{[]byte("changed")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("write-protected scalar batch error = %v, want PermissionDenied", err)
+	}
+	if ht.Exists("name") {
+		t.Fatal("write-protected scalar batch changed the trie")
+	}
+}
+
 func TestCacheGRPCServerCommandBatchStreamRequiresAuthentication(t *testing.T) {
 	ht := newTestTrie(t)
 	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{AuthToken: "secret"})

@@ -11,6 +11,7 @@ service CacheService {
   rpc Command(CommandRequest) returns (CommandResponse);
   rpc CommandStream(stream CommandRequest) returns (stream CommandResponse);
   rpc CommandBatchStream(stream CommandBatchRequest) returns (stream CommandBatchResponse);
+  rpc ScalarBatchStream(stream ScalarBatchRequest) returns (stream ScalarBatchResponse);
   rpc Snapshot(SnapshotRequest) returns (CommandResponse);
   rpc Replication(ReplicationRequest) returns (ReplicationResponse);
   rpc ReplicationStream(stream ReplicationStreamBatch) returns (stream ReplicationStreamAck);
@@ -101,6 +102,35 @@ message CommandBatchResponse {
   repeated CommandResponse responses = 2;
   bool ok = 3;
   string message = 4;
+}
+
+// Scalar batches use columnar fields so one protobuf message can carry many
+// commands without allocating one request and response object per operation.
+enum ScalarCommand {
+  SCALAR_COMMAND_UNSPECIFIED = 0;
+  SCALAR_COMMAND_GET = 1;
+  SCALAR_COMMAND_EXISTS = 2;
+  SCALAR_COMMAND_SET_STRING = 3;
+  SCALAR_COMMAND_SET_COUNTER = 4;
+  SCALAR_COMMAND_INCREMENT = 5;
+  SCALAR_COMMAND_DELETE = 6;
+}
+
+enum ScalarResultStatus {
+  SCALAR_RESULT_STATUS_UNSPECIFIED = 0;
+  SCALAR_RESULT_STATUS_OK = 1;
+  SCALAR_RESULT_STATUS_NOT_FOUND = 2;
+  SCALAR_RESULT_STATUS_INVALID_KEY = 3;
+  SCALAR_RESULT_STATUS_INVALID_ARGUMENT = 4;
+  SCALAR_RESULT_STATUS_COUNTER_OVERFLOW = 5;
+  SCALAR_RESULT_STATUS_INTERNAL_ERROR = 6;
+}
+
+enum ScalarValueKind {
+  SCALAR_VALUE_KIND_NONE = 0;
+  SCALAR_VALUE_KIND_BYTES = 1;
+  SCALAR_VALUE_KIND_INTEGER = 2;
+  SCALAR_VALUE_KIND_BOOLEAN = 3;
 }
 
 message SnapshotRequest {}
@@ -258,4 +288,30 @@ message ElectionKeyRoute {
   string key = 1;
   TopologyRoute route = 2;
   ElectionLeader leader = 3;
+}
+
+message ScalarBatchRequest {
+  uint64 batch_id = 1;
+  repeated ScalarCommand operations = 2;
+  repeated string keys = 3;
+  // One value for every SET_STRING operation, in operation order.
+  repeated bytes string_values = 4;
+  // One value for every SET_COUNTER or INCREMENT operation, in operation order.
+  repeated sint64 integer_values = 5;
+}
+
+message ScalarBatchResponse {
+  uint64 batch_id = 1;
+  bool ok = 2;
+  string error = 3;
+  repeated ScalarResultStatus statuses = 4;
+  repeated ScalarValueKind value_kinds = 5;
+  // Integer and boolean results, in operation order for their corresponding kind.
+  repeated sint64 integer_values = 6;
+  // Byte results are concatenated; value_ends contains cumulative end offsets.
+  bytes values = 7;
+  repeated uint32 value_ends = 8;
+  // Unexpected per-command errors are sparse and paired by position.
+  repeated uint32 error_indexes = 9;
+  repeated string errors = 10;
 }

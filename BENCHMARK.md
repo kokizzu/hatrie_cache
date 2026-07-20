@@ -397,6 +397,7 @@ make bench-big-wins BIG_WINS_BENCH=BenchmarkBigWins/UnaryCommand BIG_WINS_OPS=10
 make bench-big-wins BIG_WINS_BENCH='BenchmarkBigWins/^StreamCommand$' BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=5
 make bench-big-wins BIG_WINS_BENCH='BenchmarkBigWins/^PipelinedStreamCommand$' BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=5
 make run CMD='HATRIE_BIG_WINS_OPS=10000 go test . -run none -bench "BenchmarkBigWins/(PipelinedStreamCommand|NativeBatchStreamCommand)" -benchtime=1x -count=5 -benchmem'
+make bench-scalar-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7
 ```
 
 Sequential stream mode sends one request and receives its response before the
@@ -429,6 +430,24 @@ fewer allocations, send 1.11x fewer measured wire bytes, and reduce stream
 messages 16x. The client-selected batch size is the latency tradeoff: 16 is the
 measured throughput point, while smaller envelopes reduce the time a command
 waits for its batch to fill.
+
+The direct scalar follow-up replaces repeated request/response messages with
+packed operation, status, and value-kind columns plus one concatenated result
+buffer. Both rows below use 16-command envelopes and are seven-run medians from
+the same Ryzen 9 5950X checkout. The generic row is measured again alongside
+the new path rather than copied from the older run above.
+
+| 10,000 GET commands | Time/10k | ns/command | Heap B/10k | Allocs/10k | Wire B/command | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `CommandBatchStream` | 8.877 ms | 887.7 | 9,671,528 | 107,685 | 37.04 | baseline |
+| `ScalarBatchStream` | 3.698 ms | 369.7 | 2,646,720 | 40,491 | 23.72 | 2.40x CPU, 3.65x heap, 2.66x allocations, 1.56x wire |
+
+The direct path supports GET, EXISTS, string/counter set, counter increment,
+and delete. It preserves ordered per-command statuses. Servers configured with
+journaling, dirty persistence, replication, or leader enforcement route typed
+columns through the existing transactional side-effect executor, retaining
+correctness at the cost of some direct-path savings. The existing command batch
+stream remains the fallback for structured commands and older clients.
 
 Run the same sequential transport comparison across representative command
 families:

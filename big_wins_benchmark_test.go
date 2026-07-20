@@ -36,6 +36,7 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("StreamCommand", benchmarkBigWinsStreamCommand)
 	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
 	b.Run("NativeBatchStreamCommand", benchmarkBigWinsNativeBatchStreamCommand)
+	b.Run("ScalarBatchStreamCommand", benchmarkBigWinsScalarBatchStreamCommand)
 	b.Run("ChurnRetentionBaseline", benchmarkBigWinsChurnRetentionBaseline)
 	b.Run("ChurnRetentionCompacted", benchmarkBigWinsChurnRetentionCompacted)
 	b.Run("ExpirationDeadlineUpdate", benchmarkBigWinsExpirationDeadlineUpdate)
@@ -623,6 +624,94 @@ func benchmarkBigWinsNativeBatchStreamCommand(b *testing.B) {
 		}
 		if received != operations {
 			b.Fatalf("native batch stream responses = %d, want %d", received, operations)
+		}
+		total += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(operations), "commands/op")
+	b.ReportMetric(float64(batches), "messages/op")
+	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/command")
+	b.ReportMetric(float64(wire.outbound.Load()+wire.inbound.Load())/float64(b.N*operations), "wire_B/command")
+}
+
+func benchmarkBigWinsScalarBatchStreamCommand(b *testing.B) {
+	const batchSize = 16
+	operations := bigWinsBenchmarkOperations(1000)
+	wire := &benchmarkGRPCWireStats{}
+	client, stop := newGRPCBenchmarkClient(b, grpc.WithStatsHandler(wire))
+	defer stop()
+	stream, err := client.ScalarBatchStream(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer stream.CloseSend()
+	if err := stream.Send(&hatriecachev1.ScalarBatchRequest{
+		BatchId:      1,
+		Operations:   []hatriecachev1.ScalarCommand{hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING},
+		Keys:         []string{"command:key"},
+		StringValues: [][]byte{[]byte("value")},
+	}); err != nil {
+		b.Fatal(err)
+	}
+	if response, err := stream.Recv(); err != nil || !response.GetOk() || len(response.GetStatuses()) != 1 || response.GetStatuses()[0] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK {
+		b.Fatalf("scalar batch setup response = %#v/%v", response, err)
+	}
+	wire.outbound.Store(0)
+	wire.inbound.Store(0)
+	batches := (operations + batchSize - 1) / batchSize
+	requests := make([]*hatriecachev1.ScalarBatchRequest, batches)
+	for batch := range requests {
+		count := batchSize
+		if remaining := operations - batch*batchSize; remaining < count {
+			count = remaining
+		}
+		operationsColumn := make([]hatriecachev1.ScalarCommand, count)
+		keys := make([]string, count)
+		for index := range operationsColumn {
+			operationsColumn[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
+			keys[index] = "command:key"
+		}
+		requests[batch] = &hatriecachev1.ScalarBatchRequest{BatchId: uint64(batch + 2), Operations: operationsColumn, Keys: keys}
+	}
+	var total time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		started := time.Now()
+		sendErr := make(chan error, 1)
+		go func() {
+			for _, request := range requests {
+				if err := stream.Send(request); err != nil {
+					sendErr <- err
+					return
+				}
+			}
+			sendErr <- nil
+		}()
+		received := 0
+		for batch := 0; batch < batches; batch++ {
+			response, err := stream.Recv()
+			if err != nil || !response.GetOk() || response.GetBatchId() != uint64(batch+2) {
+				b.Fatalf("scalar batch stream response %d = %#v/%v", batch, response, err)
+			}
+			if len(response.GetStatuses()) != len(requests[batch].GetOperations()) || len(response.GetValueEnds()) != len(requests[batch].GetOperations()) {
+				b.Fatalf("scalar batch response columns = %#v", response)
+			}
+			start := uint32(0)
+			for index, status := range response.GetStatuses() {
+				end := response.GetValueEnds()[index]
+				if status != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK || response.GetValueKinds()[index] != hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES || string(response.GetValues()[start:end]) != "value" {
+					b.Fatalf("scalar batch response item %d = status %v kind %v value %q", index, status, response.GetValueKinds()[index], response.GetValues()[start:end])
+				}
+				start = end
+			}
+			received += len(response.GetStatuses())
+		}
+		if err := <-sendErr; err != nil {
+			b.Fatalf("scalar batch stream send error = %v", err)
+		}
+		if received != operations {
+			b.Fatalf("scalar batch stream responses = %d, want %d", received, operations)
 		}
 		total += time.Since(started)
 	}
