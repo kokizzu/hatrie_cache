@@ -167,6 +167,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
+| Current pass | [Content-addressed incremental backups](#content-addressed-incremental-backups), 10k x 256 B, 1% changed | Full checkpoint bundle: 98.602 ms; 9.81 MB heap; 2,104,489 written B | Incremental repository: 14.659 ms; 0.94 MB heap; 35,020 written B | 6.73x faster, 10.49x lower heap, 60.09x fewer written bytes | Explicit mode; first backup is full and retained history consumes repository storage |
 | Current pass | [Parallel cold-reference hydration](#parallel-cold-reference-hydration), 32 delayed reads | Serialized: 33.875 ms; 18,648 heap B | Parallel singleflight: 1.174 ms; 30,166 heap B | 28.85x faster | Cumulative heap is 1.62x higher and allocations are 1.80x higher |
 | Current pass | [Compact lazy-reference slab](#compact-lazy-reference-slab), 100k references | Public-struct slab: 29.617 ms; 90.2 retained B/ref | Compact slab: 20.513 ms; 71.6 retained B/ref | 1.44x faster, 1.26x lower retained heap | Type IDs are internal; exported references are expanded on access |
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
@@ -285,6 +286,50 @@ at `build/benchmarks/backup-snapshot/pebble-checkpoint-backup.txt` and
 `build/benchmarks/backup-checkpoint/pebble-checkpoint-backup.txt`. Pebble log
 replay diagnostics in the raw output are emitted while verification opens the
 extracted checkpoint and are not benchmark failures.
+
+<a id="content-addressed-incremental-backups"></a>
+#### Content-Addressed Incremental Backups
+
+The explicit `pebble-incremental` mode stores checkpoint files by SHA-256 and
+publishes a content-derived manifest plus an atomic `latest` pointer. The first
+backup is a full base. Later backups on the same Pebble storage generation save
+only the dirty keys, checkpoint without full compaction, and reuse unchanged
+SST objects. A generation or source-store identity change safely starts another
+full base. Manifests and objects are checksum-verified during `doctor` and
+restore; the default retention is 32 manifests.
+
+The benchmark starts with 10,000 deterministic low-compressibility 256-byte
+values, changes 100 keys, and compares the existing full `pebble-checkpoint`
+tar.gz path with a subsequent repository backup. Written bytes include the full
+bundle for the baseline and new objects, manifest, and `latest` pointer for the
+repository. Results are seven-run medians on the Ryzen 9 5950X host.
+
+```sh
+make bench-incremental-backup BACKUP_BENCH_KEYS=10000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Metric, 1% changed | Full checkpoint bundle | Incremental repository | Improvement |
+| --- | ---: | ---: | ---: |
+| Time | 98.602 ms | 14.659 ms | 6.73x faster |
+| Timed heap | 9,810,048 B | 935,224 B | 10.49x lower |
+| Allocations | 32,852 | 1,375 | 23.89x fewer |
+| Bytes written / transferable delta | 2,104,489 B | 35,020 B | 60.09x fewer |
+| Logical checkpoint bytes reused | 0% | 98.92% | 98.92 percentage points |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Full checkpoint bundle | `98.901, 100.787, 97.505, 96.340, 98.602, 104.923, 96.742` |
+| Incremental repository | `14.659, 16.752, 15.183, 17.964, 13.520, 13.785, 13.786` |
+
+The raw Go benchmark, including per-sample heap, allocation, logical-byte,
+written-byte, and reuse metrics, is generated at
+`build/benchmarks/incremental-backup-repository.txt`. The tradeoff is a
+multi-file repository rather than one portable archive. Repository growth is
+bounded by retention and content garbage collection, but retained checkpoints
+can keep old SST objects live. The mode requires Pebble and an accurate dirty
+tracker; `auto` intentionally remains the portable snapshot mode.
 
 The backend contract uses the same binary record codec and exercises a full
 10,000-key save, 1,000 incremental operations (500 updates, 250 deletes, 250

@@ -1743,6 +1743,7 @@ func TestRunBackupPostsToBackupEndpoint(t *testing.T) {
 	var gotRequest struct {
 		Path           string `json:"path"`
 		Mode           string `json:"mode"`
+		Retain         int    `json:"retain"`
 		SnapshotFormat string `json:"snapshot_format"`
 		Partition      struct {
 			Mode                string   `json:"mode"`
@@ -1768,7 +1769,8 @@ func TestRunBackupPostsToBackupEndpoint(t *testing.T) {
 		"-addr", server.URL,
 		"backup",
 		"-path", "/tmp/backup.tar.gz",
-		"-mode", "snapshot",
+		"-mode", "pebble-incremental",
+		"-retain", "7",
 		"-snapshot-format", "gzip-binary",
 		"-partition-mode", "partitioned",
 		"-partitions", "sg",
@@ -1782,7 +1784,7 @@ func TestRunBackupPostsToBackupEndpoint(t *testing.T) {
 	if gotPath != "/api/backup" || gotMethod != http.MethodPost {
 		t.Fatalf("request = %s %s, want POST /api/backup", gotMethod, gotPath)
 	}
-	if gotRequest.Path != "/tmp/backup.tar.gz" || gotRequest.Mode != "snapshot" || gotRequest.SnapshotFormat != "gzip-binary" {
+	if gotRequest.Path != "/tmp/backup.tar.gz" || gotRequest.Mode != "pebble-incremental" || gotRequest.Retain != 7 || gotRequest.SnapshotFormat != "gzip-binary" {
 		t.Fatalf("backup request = %#v, want path and snapshot format", gotRequest)
 	}
 	if gotRequest.Partition.Mode != "partitioned" || !reflect.DeepEqual(gotRequest.Partition.Partitions, []string{"sg"}) || gotRequest.Partition.NodeID != "node-sg-a" || gotRequest.Partition.TopologyEpoch != 42 || gotRequest.Partition.TopologyFingerprint != "topology-v1" || !reflect.DeepEqual(gotRequest.Partition.KeyPrefixes, []string{"sg:"}) {

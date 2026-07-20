@@ -147,6 +147,7 @@ type journalPullRequest struct {
 type backupBundleRequest struct {
 	Path           string                  `json:"path"`
 	Mode           string                  `json:"mode,omitempty"`
+	Retain         int                     `json:"retain,omitempty"`
 	SnapshotFormat string                  `json:"snapshot_format,omitempty"`
 	Partition      BackupPartitionMetadata `json:"partition,omitempty"`
 }
@@ -1513,10 +1514,12 @@ func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Re
 		return
 	}
 	manifest, err := CreateBackupBundle(request.Path, handler.trie, handler.options.Journal, BackupBundleOptions{
-		SnapshotFormat:  format,
-		Partition:       request.Partition,
-		Mode:            mode,
-		PersistentStore: handler.options.LevelDBStore,
+		SnapshotFormat:   format,
+		Partition:        request.Partition,
+		Mode:             mode,
+		PersistentStore:  handler.options.LevelDBStore,
+		DirtyTracker:     handler.options.LevelDBDirtyTracker,
+		RepositoryRetain: request.Retain,
 	})
 	if err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "backup", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"path": request.Path}})

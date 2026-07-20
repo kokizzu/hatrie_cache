@@ -1844,6 +1844,36 @@ func TestMonitoringHandlerCreatesRequestedPebbleCheckpoint(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerCreatesIncrementalBackupRepository(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("name", "ivi")
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "live.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	dirty := NewLevelDBDirtyTracker()
+	dirty.Mark("name")
+	handler := NewMonitoringHandler(trie, MonitoringOptions{LevelDBStore: store, LevelDBDirtyTracker: dirty}).Handler()
+	repository := filepath.Join(t.TempDir(), "repository")
+	response := httptest.NewRecorder()
+	body := `{"path":` + strconv.Quote(repository) + `,"mode":"pebble-incremental","retain":2}`
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/backup", strings.NewReader(body)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("backup status = %d: %s", response.Code, response.Body.String())
+	}
+	var manifest BackupBundleManifest
+	if err := json.Unmarshal(response.Body.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Mode != BackupModePebbleIncremental || manifest.BackupID == "" || manifest.Store != backupBundleStorePath {
+		t.Fatalf("incremental backup manifest = %#v", manifest)
+	}
+	if _, err := VerifyBackupPath(repository); err != nil {
+		t.Fatalf("VerifyBackupPath(repository) error = %v", err)
+	}
+}
+
 func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{AuthToken: "secret"}).Handler()

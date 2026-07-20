@@ -143,6 +143,47 @@ func (store *PebbleStore) SaveCheckpoint(trie *HatTrie, destination string) erro
 	return db.Checkpoint(destination, pebble.WithFlushedWAL())
 }
 
+// SaveIncrementalCheckpoint persists one stable dirty-key snapshot and creates
+// a checkpoint without rewriting or compacting unchanged SST files. The caller
+// clears the returned dirty snapshot only after publishing its backup manifest.
+func (store *PebbleStore) SaveIncrementalCheckpoint(trie *HatTrie, tracker *LevelDBDirtyTracker, destination string) (LevelDBDirtySnapshot, uint64, error) {
+	if trie == nil {
+		return LevelDBDirtySnapshot{}, 0, ErrNilHatTrie
+	}
+	if tracker == nil {
+		return LevelDBDirtySnapshot{}, 0, errors.New("hatriecache: incremental Pebble checkpoint requires a dirty tracker")
+	}
+	if strings.TrimSpace(destination) == "" {
+		return LevelDBDirtySnapshot{}, 0, errors.New("hatriecache: pebble checkpoint path is required")
+	}
+	dirty := tracker.Snapshot()
+	store.saveMu.Lock()
+	defer store.saveMu.Unlock()
+	if len(dirty.keys) > 0 {
+		if err := store.saveKeysWithOptionsLocked(trie, dirty.keys, LevelDBSaveOptions{}); err != nil {
+			return LevelDBDirtySnapshot{}, 0, err
+		}
+	}
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return LevelDBDirtySnapshot{}, 0, err
+	}
+	defer unlock()
+	if err := db.Checkpoint(destination, pebble.WithFlushedWAL()); err != nil {
+		return LevelDBDirtySnapshot{}, 0, err
+	}
+	return dirty, store.activeGeneration, nil
+}
+
+func (store *PebbleStore) ActiveGeneration() uint64 {
+	if store == nil {
+		return 0
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.activeGeneration
+}
+
 func (store *PebbleStore) SaveKeys(trie *HatTrie, keys []string) error {
 	return store.SaveKeysWithOptions(trie, keys, LevelDBSaveOptions{})
 }
@@ -150,6 +191,10 @@ func (store *PebbleStore) SaveKeys(trie *HatTrie, keys []string) error {
 func (store *PebbleStore) SaveKeysWithOptions(trie *HatTrie, keys []string, options LevelDBSaveOptions) error {
 	store.saveMu.RLock()
 	defer store.saveMu.RUnlock()
+	return store.saveKeysWithOptionsLocked(trie, keys, options)
+}
+
+func (store *PebbleStore) saveKeysWithOptionsLocked(trie *HatTrie, keys []string, options LevelDBSaveOptions) error {
 	options, err := normalizeLevelDBSaveOptions(options)
 	if err != nil {
 		return err

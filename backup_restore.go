@@ -17,6 +17,7 @@ type BackupBundleRestoreReport struct {
 	OK                  bool                       `json:"ok"`
 	Bundle              string                     `json:"bundle"`
 	DataDir             string                     `json:"data_dir"`
+	BackupID            string                     `json:"backup_id,omitempty"`
 	Mode                BackupMode                 `json:"mode,omitempty"`
 	Snapshot            string                     `json:"snapshot"`
 	Store               string                     `json:"store,omitempty"`
@@ -72,6 +73,11 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if dataDir == "" {
 		return BackupBundleRestoreReport{}, errors.New("hatriecache: restore data dir is required")
 	}
+	if info, err := os.Stat(bundlePath); err == nil && info.IsDir() && fileExists(filepath.Join(bundlePath, backupRepositoryDescriptorPath)) {
+		return RestoreBackupRepository(bundlePath, "", dataDir, options)
+	} else if err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
 	manifest, err := readBackupBundleManifest(bundlePath)
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
@@ -100,6 +106,42 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		DataDir:             dataDir,
 		Mode:                backupBundleManifestMode(manifest),
 		Snapshot:            snapshotPath,
+		Journal:             journalPath,
+		Partition:           cloneBackupPartitionMetadata(manifest.Partition),
+		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),
+		JournalSequence:     manifest.JournalSequence,
+		RecoveredKeys:       doctor.RecoveredKeys,
+	}, nil
+}
+
+func RestoreBackupRepository(repositoryPath string, backupID string, dataDir string, options BackupBundleRestoreOptions) (BackupBundleRestoreReport, error) {
+	doctor, err := VerifyBackupRepository(repositoryPath, backupID)
+	if err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	manifest, err := readBackupRepositoryManifest(repositoryPath, doctor.BackupID)
+	if err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	if err := ensureRestoreDataDir(dataDir, options.Overwrite); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	if _, err := materializeBackupRepository(repositoryPath, manifest.BackupID, dataDir); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	storePath := filepath.Join(dataDir, filepath.FromSlash(manifest.Store))
+	journalPath := ""
+	if manifest.Journal != "" {
+		journalPath = filepath.Join(dataDir, filepath.FromSlash(manifest.Journal))
+	}
+	return BackupBundleRestoreReport{
+		OK:                  true,
+		Bundle:              repositoryPath,
+		DataDir:             dataDir,
+		BackupID:            manifest.BackupID,
+		Mode:                BackupModePebbleIncremental,
+		Store:               storePath,
+		StorageBackend:      manifest.StorageBackend,
 		Journal:             journalPath,
 		Partition:           cloneBackupPartitionMetadata(manifest.Partition),
 		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),

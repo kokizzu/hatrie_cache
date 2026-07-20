@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+set -eu
+
+artifact_dir=${BENCHMARK_ARTIFACT_DIR:-build/benchmarks}
+benchmark=${INCREMENTAL_BACKUP_BENCH:-^BenchmarkIncrementalBackupRepository10k$}
+keys=${BACKUP_BENCH_KEYS:-10000}
+benchtime=${BENCHTIME:-1x}
+count=${COUNT:-7}
+output="$artifact_dir/incremental-backup-repository.txt"
+
+mkdir -p "$artifact_dir"
+echo "Incremental backup benchmark: bench=$benchmark keys=$keys benchtime=$benchtime count=$count"
+echo
+HATRIE_BACKUP_BENCH_KEYS="$keys" go test . \
+	-run '^$' \
+	-bench "$benchmark" \
+	-benchmem \
+	-benchtime "$benchtime" \
+	-count "$count" | tee "$output"
+
+echo
+echo "Raw result: $output"

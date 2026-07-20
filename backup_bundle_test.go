@@ -163,7 +163,7 @@ func TestCreateBackupBundleCreatesPebbleCheckpointAndRestores(t *testing.T) {
 }
 
 func TestCreateBackupBundleValidatesBackupModeAndCheckpointStore(t *testing.T) {
-	for _, value := range []string{"", "auto", "snapshot", "pebble-checkpoint"} {
+	for _, value := range []string{"", "auto", "snapshot", "pebble-checkpoint", "pebble-incremental"} {
 		if _, err := ParseBackupMode(value); err != nil {
 			t.Fatalf("ParseBackupMode(%q) error = %v", value, err)
 		}

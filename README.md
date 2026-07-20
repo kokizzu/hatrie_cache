@@ -459,6 +459,31 @@ snapshot bundles remain readable. Snapshot stays the default because the local
 1.06x smaller; checkpoint restore uses 1.60x less timed heap and 1.62x fewer
 allocations. See [BENCHMARK.md](BENCHMARK.md#pebble-checkpoint-backup-bundles).
 
+For recurring Pebble backups, `pebble-incremental` writes a content-addressed
+repository directory. The first run creates a full base; subsequent runs on the
+same store generation persist dirty keys and reuse unchanged checkpoint files.
+Retention defaults to 32 manifests and can be changed per backup with
+`-retain`. This is explicit opt-in: `auto` remains `snapshot`.
+
+```sh
+make cli ARGS='backup -path backup/pebble-repository -mode pebble-incremental'
+make cli ARGS='backup -path backup/pebble-repository -mode pebble-incremental -retain 14'
+make cli ARGS='doctor -path backup/pebble-repository'
+make restore-bundle RESTORE_BUNDLE_PATH=backup/pebble-repository DATA_DIR=data
+make monitoring-server DB_PATH=data/cache.leveldb DB_BACKEND=auto
+```
+
+Keep one writer per repository and let each backup command finish before an
+external copy or object-store sync. Copy `repository.json`, `latest`,
+`manifests/`, and `objects/` together. A changed Pebble generation or source
+store identity automatically starts a new full base; manifests and objects are
+verified by content hash before restore. On the measured 10,000-key, 1%-changed
+fixture, an incremental backup is 6.73x faster, uses 10.49x less timed heap and
+23.89x fewer allocations, and writes 60.09x fewer transferable bytes than a
+fresh checkpoint bundle. The first backup has full-backup cost and retained
+history consumes disk. See
+[BENCHMARK.md](BENCHMARK.md#content-addressed-incremental-backups).
+
 Partition metadata is intentionally descriptive today. It records which
 operator-defined partition ids, key prefixes, node id, topology epoch, and
 topology fingerprint a backup covered, and `doctor`/`restore-bundle` echo it

@@ -20,6 +20,7 @@ type BackupDoctorReport struct {
 	OK                  bool                       `json:"ok"`
 	Kind                string                     `json:"kind"`
 	Path                string                     `json:"path"`
+	BackupID            string                     `json:"backup_id,omitempty"`
 	Snapshot            *BackupDoctorSnapshot      `json:"snapshot,omitempty"`
 	Journal             *BackupDoctorJournal       `json:"journal,omitempty"`
 	LevelDB             *BackupDoctorLevelDB       `json:"leveldb,omitempty"`
@@ -75,6 +76,9 @@ func VerifyBackupPath(path string) (BackupDoctorReport, error) {
 		return BackupDoctorReport{}, err
 	}
 	if info.IsDir() {
+		if fileExists(filepath.Join(path, backupRepositoryDescriptorPath)) {
+			return VerifyBackupRepository(path, "")
+		}
 		return VerifyBackupDirectory(path)
 	}
 	return VerifyBackupBundle(path)
@@ -200,10 +204,6 @@ func verifyPebbleCheckpointBundle(bundlePath string, manifest BackupBundleManife
 	if manifest.Store != backupBundleStorePath || manifest.StorageBackend != string(StorageBackendPebble) {
 		return BackupDoctorReport{}, errors.New("hatriecache: invalid Pebble checkpoint manifest")
 	}
-	format, err := ParseStorageFormat(manifest.StorageFormat)
-	if err != nil {
-		return BackupDoctorReport{}, err
-	}
 	tmpDir, err := os.MkdirTemp(filepath.Dir(bundlePath), filepath.Base(bundlePath)+".verify-*")
 	if err != nil {
 		return BackupDoctorReport{}, err
@@ -212,7 +212,37 @@ func verifyPebbleCheckpointBundle(bundlePath string, manifest BackupBundleManife
 	if err := extractBackupBundleFiles(bundlePath, tmpDir, manifest.Files); err != nil {
 		return BackupDoctorReport{}, err
 	}
-	storePath := filepath.Join(tmpDir, filepath.FromSlash(manifest.Store))
+	return verifyPebbleBackupRoot(bundlePath, "bundle", manifest, tmpDir)
+}
+
+func VerifyBackupRepository(path string, backupID string) (BackupDoctorReport, error) {
+	if err := verifyBackupRepositoryDescriptor(path); err != nil {
+		return BackupDoctorReport{}, err
+	}
+	manifest, err := readBackupRepositoryManifest(path, backupID)
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
+	tmpDir, err := os.MkdirTemp(path, ".verify-*")
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
+	defer os.RemoveAll(tmpDir)
+	if _, err := materializeBackupRepository(path, manifest.BackupID, tmpDir); err != nil {
+		return BackupDoctorReport{}, err
+	}
+	return verifyPebbleBackupRoot(path, "repository", manifest, tmpDir)
+}
+
+func verifyPebbleBackupRoot(displayPath string, kind string, manifest BackupBundleManifest, root string) (BackupDoctorReport, error) {
+	if manifest.Store != backupBundleStorePath || manifest.StorageBackend != string(StorageBackendPebble) {
+		return BackupDoctorReport{}, errors.New("hatriecache: invalid Pebble backup manifest")
+	}
+	format, err := ParseStorageFormat(manifest.StorageFormat)
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
+	storePath := filepath.Join(root, filepath.FromSlash(manifest.Store))
 	store, err := OpenPersistentStoreWithFormat(storePath, StorageBackendPebble, format)
 	if err != nil {
 		return BackupDoctorReport{}, err
@@ -226,8 +256,9 @@ func verifyPebbleCheckpointBundle(bundlePath string, manifest BackupBundleManife
 	}
 	report := BackupDoctorReport{
 		OK:              true,
-		Kind:            "bundle",
-		Path:            bundlePath,
+		Kind:            kind,
+		Path:            displayPath,
+		BackupID:        manifest.BackupID,
 		LevelDB:         &BackupDoctorLevelDB{Path: manifest.Store, Backend: manifest.StorageBackend, OK: true, Keys: count},
 		Files:           manifest.Files,
 		Partition:       cloneBackupPartitionMetadata(manifest.Partition),
@@ -243,7 +274,7 @@ func verifyPebbleCheckpointBundle(bundlePath string, manifest BackupBundleManife
 		return report, err
 	}
 	if manifest.Journal != "" {
-		journalPath := filepath.Join(tmpDir, filepath.FromSlash(manifest.Journal))
+		journalPath := filepath.Join(root, filepath.FromSlash(manifest.Journal))
 		journalReport, entries, err := verifyJournalFileWithEntries(manifest.Journal, journalPath)
 		if err != nil {
 			return BackupDoctorReport{}, err

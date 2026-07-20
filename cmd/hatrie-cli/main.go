@@ -382,7 +382,8 @@ func runBackup(ctx context.Context, client *http.Client, addr string, args []str
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
 	flags.SetOutput(cliWriter(stderr))
 	path := flags.String("path", "", "server-side backup bundle output path")
-	mode := flags.String("mode", "auto", "backup mode: auto, snapshot, or pebble-checkpoint")
+	mode := flags.String("mode", "auto", "backup mode: auto, snapshot, pebble-checkpoint, or pebble-incremental")
+	retain := flags.Int("retain", 0, "incremental repository manifests to retain; default 32")
 	snapshotFormat := flags.String("snapshot-format", "", "optional snapshot format override for the backup bundle")
 	partitionMode := flags.String("partition-mode", "", "optional backup partition mode metadata")
 	partitions := flags.String("partitions", "", "comma-separated partition ids covered by the backup")
@@ -400,11 +401,13 @@ func runBackup(ctx context.Context, client *http.Client, addr string, args []str
 	body, err := jsonwire.Marshal(struct {
 		Path           string                               `json:"path"`
 		Mode           string                               `json:"mode,omitempty"`
+		Retain         int                                  `json:"retain,omitempty"`
 		SnapshotFormat string                               `json:"snapshot_format,omitempty"`
 		Partition      *hatriecache.BackupPartitionMetadata `json:"partition,omitempty"`
 	}{
 		Path:           strings.TrimSpace(*path),
 		Mode:           strings.TrimSpace(*mode),
+		Retain:         *retain,
 		SnapshotFormat: strings.TrimSpace(*snapshotFormat),
 		Partition:      partition,
 	})
