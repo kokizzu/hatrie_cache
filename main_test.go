@@ -36,17 +36,71 @@ func enableTestKeyStats(t *testing.T, ht *HatTrie) {
 	}
 }
 
-func TestScanKeyFromBytesUsesOneAllocation(t *testing.T) {
-	suffix := []byte{'1', '2', 0, '3'}
-	var got string
-	allocations := testing.AllocsPerRun(100, func() {
-		got = scanKeyFromBytes("session:", suffix)
-	})
-	if want := "session:12\x003"; got != want {
-		t.Fatalf("scanKeyFromBytes() = %q, want %q", got, want)
+func TestScanCursorRetainsPackedPrefixKeysByBatch(t *testing.T) {
+	ht := newTestTrie(t)
+	for index := 0; index < 300; index++ {
+		ht.UpsertString(fmt.Sprintf("session:%03d", index), "value")
 	}
-	if allocations > 1 {
-		t.Fatalf("scanKeyFromBytes() allocations = %.1f, want at most 1", allocations)
+
+	ht.mu.Lock()
+	cursor, err := ht.newScanCursorLocked("session:", true)
+	if err != nil {
+		ht.mu.Unlock()
+		t.Fatal(err)
+	}
+	keys := make([]string, 0, 300)
+	for {
+		entry, ok := cursor.currentLiveEntryLocked(ht, time.Time{})
+		if !ok {
+			break
+		}
+		keys = append(keys, entry.Key)
+		cursor.consume()
+	}
+	arenaAllocs := cursor.keyArenaAllocs
+	cursor.closeLocked(ht)
+	ht.mu.Unlock()
+
+	if len(keys) != 300 || keys[0] != "session:000" || keys[299] != "session:299" {
+		t.Fatalf("retained packed keys = %d/%q/%q", len(keys), keys[0], keys[len(keys)-1])
+	}
+	if arenaAllocs != 2 {
+		t.Fatalf("packed key arena allocations = %d, want one per native batch", arenaAllocs)
+	}
+}
+
+func TestPackedScanCursorReusesEphemeralPrefixArena(t *testing.T) {
+	ht := newTestTrie(t)
+	for index := 0; index < 300; index++ {
+		ht.UpsertString(fmt.Sprintf("packed:%03d", index), "value")
+	}
+
+	ht.mu.Lock()
+	cursor, err := ht.newPackedScanCursorLocked("packed:", true)
+	if err != nil {
+		ht.mu.Unlock()
+		t.Fatal(err)
+	}
+	count := 0
+	for {
+		entry, ok := cursor.currentLiveEntryLocked(ht, time.Time{})
+		if !ok {
+			break
+		}
+		if want := fmt.Sprintf("packed:%03d", count); entry.Key != want {
+			cursor.closeLocked(ht)
+			ht.mu.Unlock()
+			t.Fatalf("packed key %d = %q, want %q", count, entry.Key, want)
+		}
+		count++
+		cursor.consume()
+	}
+	arenaAllocs := cursor.keyArenaAllocs
+	cursor.closeLocked(ht)
+	ht.mu.Unlock()
+
+	if count != 300 || arenaAllocs != 1 {
+		t.Fatalf("packed scan count/arena allocations = %d/%d, want 300/1", count, arenaAllocs)
 	}
 }
 

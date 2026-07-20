@@ -192,6 +192,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Local HAT-trie partitions](#local-hat-trie-partitions), 100k writes, 16 workers | One trie: 29.147 ms; 291.5 ns/write | 16 tries: 12.992 ms; 129.9 ns/write | 2.24x faster, 1.84x lower timed heap, 1.73x fewer timed allocs | Opt-in; separate-process maximum RSS is 1.05x higher and whole-keyspace operations merge partitions |
 | Current pass | [Partition-parallel whole-keyspace scans](#partition-parallel-whole-keyspace), 100k keys, 16 partitions | Serial merge: keys 36.990 ms/18.43 MB; entries 49.800 ms/24.50 MB | Parallel k-way merge: keys 8.722 ms/12.21 MB; entries 9.346 ms/15.62 MB | Keys 4.24x faster/1.51x lower heap; entries 5.33x faster/1.57x lower heap | Opt-in partition mode only; worker coordination adds 13/9 allocations |
 | Current pass | [Persistent partition replication cursors](#persistent-partition-replication-cursors), 100k keys, 100 pages | Full materialize/sort per page: 1.076 s; 1.394 GB heap; 10,069,862 allocs | 16 retained cursors plus k-way heap: 56.721 ms; 9.78 MB heap; 300,538 allocs | 18.97x faster, 142.52x lower heap, 33.51x fewer allocs | Cursor restarts after a partition mutation; local partitions remain opt-in |
+| Current pass | [Packed internal scan arenas](#packed-internal-scan-arenas), 100k keys, 100 pages | Prior persistent cursor: 56.721 ms; 9.78 MB heap; 300,538 allocs | Reusable arenas plus typed heap: 49.752 ms; 0.357 MB heap; 669 allocs | 1.14x faster, 27.41x lower heap, 449.23x fewer allocs | Borrowed keys are internal-only; durable scans retain one immutable arena per 256-key batch |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
@@ -1478,6 +1479,49 @@ and bounded by the configured local partition count. No wire, storage, routing,
 or page-response format changes. `LOCAL_PARTITIONS=0` retains the existing
 single-trie cursor path, while mutation tests verify ordered restart behavior
 and end-to-end compact-binary replication from child tries.
+
+<a id="packed-internal-scan-arenas"></a>
+#### Packed Internal Scan Arenas
+
+The next scan pass removes the remaining per-key Go allocation from synchronous
+internal traversal. Native iterator batches expose key offsets into one reusable
+arena, prefix scans expand a complete batch into one reusable buffer, and the
+partition merge uses a typed in-place heap instead of `container/heap` interface
+boxing. Digest inventories and roots, Merkle rebuilds, snapshot stream capture,
+and compact replication consume each borrowed key before advancing the native
+batch. Only the page boundary key is cloned so a later page or generation
+restart has a stable resume token.
+
+Public `Keys`/`Entries`, persistence captures, and other callers that retain
+entries use one immutable arena per native batch instead. Their strings remain
+valid after the cursor advances or closes. This durable mode can keep the rest
+of a batch arena alive while one returned key remains referenced; each arena is
+bounded to at most 256 iterator records. No wire, snapshot, or storage encoding
+changed.
+
+The same 100,000-key, 16-partition, 100-page fixture and command from the
+previous section now includes `PersistentCursor` and `PackedCursor` rows. The
+baseline is the committed persistent-cursor result above; medians use seven
+single-traversal samples.
+
+| Metric | Prior per-key cursor | Immutable batch arenas | Reusable internal arenas | Internal improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Complete traversal | 56.721 ms | 48.183 ms | 49.752 ms | 1.14x faster |
+| Cumulative heap | 9,779,040 B | 2,801,008 B | 356,816 B | 27.41x lower |
+| Allocations | 300,538 | 937 | 669 | 449.23x fewer |
+| Pages / keys | 100 / 100,000 | 100 / 100,000 | 100 / 100,000 | unchanged |
+
+The immutable mode was 1.03x faster than borrowed mode in this noisy
+single-traversal fixture, but borrowed mode used 7.85x less cumulative heap and
+1.40x fewer allocations. Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Immutable batch arenas | `48.900, 47.874, 47.920, 49.112, 48.183, 49.235, 45.903` |
+| Reusable internal arenas | `48.069, 49.752, 51.534, 43.828, 48.117, 56.524, 54.411` |
+
+The raw benchmark output remains at
+`build/benchmarks/partition-replication-cursor.txt`.
 
 ### Replication Transport
 

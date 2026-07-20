@@ -4337,7 +4337,7 @@ func TestReplicationSyncCursorVisitsEachEntryOnceAcrossPages(t *testing.T) {
 		trie.UpsertString("session:"+strconv.Itoa(idx), "value")
 	}
 
-	cursor := &replicationSyncCursor{}
+	cursor := &replicationSyncCursor{packedKeys: true}
 	defer cursor.close(trie)
 	afterKey := ""
 	hasAfterKey := false
@@ -4370,7 +4370,7 @@ func TestReplicationSyncCursorRestartsAfterMutation(t *testing.T) {
 		trie.UpsertString(key, "value")
 	}
 
-	cursor := &replicationSyncCursor{}
+	cursor := &replicationSyncCursor{packedKeys: true}
 	defer cursor.close(trie)
 	var keys []string
 	page, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, 2, cursor, func(entry Entry) error {
@@ -4405,7 +4405,7 @@ func TestPartitionReplicationSyncCursorVisitsOnceAndRestartsAfterMutation(t *tes
 		trie.UpsertString(fmt.Sprintf("partition-sync:%04d", index), "value")
 	}
 
-	cursor := &replicationSyncCursor{}
+	cursor := &replicationSyncCursor{packedKeys: true}
 	defer cursor.close(trie)
 	afterKey := ""
 	hasAfterKey := false

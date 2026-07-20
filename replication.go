@@ -1,7 +1,6 @@
 package hatriecache
 
 import (
-	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -1820,6 +1819,7 @@ type replicationSyncPage struct {
 type replicationSyncCursor struct {
 	scan       *hatTrieScanCursor
 	partitions *replicationPartitionSyncCursor
+	packedKeys bool
 	prefix     string
 	visited    int
 	restarts   int
@@ -1847,15 +1847,36 @@ func (items replicationPartitionSyncHeap) Less(left int, right int) bool {
 func (items replicationPartitionSyncHeap) Swap(left int, right int) {
 	items[left], items[right] = items[right], items[left]
 }
-func (items *replicationPartitionSyncHeap) Push(value interface{}) {
-	*items = append(*items, value.(replicationPartitionSyncItem))
+func (items *replicationPartitionSyncHeap) push(item replicationPartitionSyncItem) {
+	*items = append(*items, item)
+	index := len(*items) - 1
+	for index > 0 {
+		parent := (index - 1) / 2
+		if !items.Less(index, parent) {
+			return
+		}
+		items.Swap(index, parent)
+		index = parent
+	}
 }
-func (items *replicationPartitionSyncHeap) Pop() interface{} {
-	old := *items
-	last := len(old) - 1
-	value := old[last]
-	*items = old[:last]
-	return value
+
+func (items *replicationPartitionSyncHeap) down(index int) {
+	for {
+		left := index*2 + 1
+		if left >= len(*items) {
+			return
+		}
+		smallest := left
+		right := left + 1
+		if right < len(*items) && items.Less(right, left) {
+			smallest = right
+		}
+		if !items.Less(smallest, index) {
+			return
+		}
+		items.Swap(index, smallest)
+		index = smallest
+	}
 }
 
 func (cursor *replicationSyncCursor) close(trie *HatTrie) {
@@ -1941,7 +1962,13 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 	if cursor.scan == nil || cursor.prefix != prefix || cursor.scan.generation != trie.mutationEpoch {
 		restarting := cursor.scan != nil
 		cursor.closeLocked(trie)
-		scan, err := trie.newScanCursorLocked(prefix, true)
+		var scan *hatTrieScanCursor
+		var err error
+		if cursor.packedKeys {
+			scan, err = trie.newPackedScanCursorLocked(prefix, true)
+		} else {
+			scan, err = trie.newScanCursorLocked(prefix, true)
+		}
 		if err != nil {
 			return replicationSyncPage{}, err
 		}
@@ -1982,6 +2009,9 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 		}
 		page.scanned++
 		page.nextAfterKey = entry.Key
+		if cursor.packedKeys && (page.scanned == limit || cursor.scan.currentEntryEndsScan()) {
+			page.nextAfterKey = strings.Clone(entry.Key)
+		}
 		if visit != nil {
 			if err := visit(entry); err != nil {
 				cursor.visited += cursor.scan.visited - visitedBefore
@@ -2010,7 +2040,7 @@ func replicationSyncPartitionEntriesPageWithCursor(trie *HatTrie, set *localPart
 	if !valid {
 		restarting := cursor.partitions != nil
 		cursor.closePartitionsLocked(set)
-		partitionCursor, err := newReplicationPartitionSyncCursorLocked(trie, set, prefix)
+		partitionCursor, err := newReplicationPartitionSyncCursorLocked(trie, set, prefix, cursor.packedKeys)
 		if err != nil {
 			return replicationSyncPage{}, err
 		}
@@ -2038,6 +2068,10 @@ func replicationSyncPartitionEntriesPageWithCursor(trie *HatTrie, set *localPart
 		}
 		page.scanned++
 		page.nextAfterKey = item.entry.Key
+		scan := cursor.partitions.scans[item.partition]
+		if cursor.packedKeys && (page.scanned == limit || scan.currentEntryEndsScan()) {
+			page.nextAfterKey = strings.Clone(item.entry.Key)
+		}
 		if visit != nil {
 			if err := visit(item.entry); err != nil {
 				cursor.closePartitionsLocked(set)
@@ -2053,7 +2087,7 @@ func replicationSyncPartitionEntriesPageWithCursor(trie *HatTrie, set *localPart
 	return page, nil
 }
 
-func newReplicationPartitionSyncCursorLocked(trie *HatTrie, set *localPartitionSet, prefix string) (*replicationPartitionSyncCursor, error) {
+func newReplicationPartitionSyncCursorLocked(trie *HatTrie, set *localPartitionSet, prefix string, packedKeys bool) (*replicationPartitionSyncCursor, error) {
 	cursor := &replicationPartitionSyncCursor{
 		set:         set,
 		scans:       make([]*hatTrieScanCursor, len(set.tries)),
@@ -2064,7 +2098,13 @@ func newReplicationPartitionSyncCursorLocked(trie *HatTrie, set *localPartitionS
 	now := trie.currentTime()
 	for index, child := range set.tries {
 		child.ensureOpen()
-		scan, err := child.newScanCursorLocked(prefix, true)
+		var scan *hatTrieScanCursor
+		var err error
+		if packedKeys {
+			scan, err = child.newPackedScanCursorLocked(prefix, true)
+		} else {
+			scan, err = child.newScanCursorLocked(prefix, true)
+		}
 		if err != nil {
 			for closeIndex, opened := range cursor.scans {
 				if opened != nil {
@@ -2075,7 +2115,7 @@ func newReplicationPartitionSyncCursorLocked(trie *HatTrie, set *localPartitionS
 		}
 		cursor.scans[index] = scan
 		if entry, ok := scan.currentLiveEntryLocked(child, now); ok {
-			heap.Push(&cursor.heads, replicationPartitionSyncItem{partition: index, entry: entry})
+			cursor.heads.push(replicationPartitionSyncItem{partition: index, entry: entry})
 		}
 		cursor.generations[index] = child.mutationEpoch
 	}
@@ -2083,15 +2123,22 @@ func newReplicationPartitionSyncCursorLocked(trie *HatTrie, set *localPartitionS
 }
 
 func (cursor *replicationSyncCursor) advancePartitionHeadLocked(trie *HatTrie, set *localPartitionSet) error {
-	item := heap.Pop(&cursor.partitions.heads).(replicationPartitionSyncItem)
+	item := cursor.partitions.heads[0]
 	scan := cursor.partitions.scans[item.partition]
 	child := set.tries[item.partition]
 	scan.consume()
 	entry, ok := scan.currentLiveEntryLocked(child, trie.currentTime())
 	cursor.partitions.generations[item.partition] = child.mutationEpoch
 	if ok {
-		heap.Push(&cursor.partitions.heads, replicationPartitionSyncItem{partition: item.partition, entry: entry})
+		cursor.partitions.heads[0] = replicationPartitionSyncItem{partition: item.partition, entry: entry}
+		cursor.partitions.heads.down(0)
 		return nil
+	}
+	last := len(cursor.partitions.heads) - 1
+	cursor.partitions.heads[0] = cursor.partitions.heads[last]
+	cursor.partitions.heads = cursor.partitions.heads[:last]
+	if len(cursor.partitions.heads) != 0 {
+		cursor.partitions.heads.down(0)
 	}
 	scan.closeLocked(child)
 	cursor.visited += scan.visited - cursor.partitions.accounted[item.partition]

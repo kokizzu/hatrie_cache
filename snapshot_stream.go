@@ -163,7 +163,7 @@ func (ht *HatTrie) captureSnapshotStreamForStoreAtBarrier(currentStore *LevelDBS
 	}()
 
 	capture := snapshotStreamCapture{}
-	cursor := &replicationSyncCursor{}
+	cursor := &replicationSyncCursor{packedKeys: true}
 	afterKey := ""
 	hasAfterKey := false
 	pageNumber := 0

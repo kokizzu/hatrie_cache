@@ -692,6 +692,15 @@ the merged cursor and safely restarts after the caller's last key. The
 heap, and performs 33.51x fewer allocations. See
 [BENCHMARK.md](BENCHMARK.md#persistent-partition-replication-cursors).
 
+Internal digest, Merkle, snapshot-stream, and compact-replication scans borrow
+keys from reusable native-batch arenas and use a typed partition heap. Public
+and persistence scans instead retain one immutable arena per batch so returned
+keys remain valid. On the same 100,000-key traversal, the internal path is
+1.14x faster than the prior persistent cursor, uses 27.41x less cumulative
+heap, and performs 449.23x fewer allocations. The durable batch-arena path was
+1.03x faster than the borrowed path in this run but used 7.85x more heap. See
+[BENCHMARK.md](BENCHMARK.md#packed-internal-scan-arenas).
+
 The measured 100,000-write fixture is 2.24x faster at 16 workers, while
 separate-process maximum RSS rose from 51,588 KiB to 54,096 KiB. On a 100,000-key
 whole-keyspace fixture, parallel sorted-key collection is 4.24x faster with

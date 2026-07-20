@@ -378,7 +378,7 @@ func (ht *HatTrie) replicationMerkleSnapshot() (replicationMerkleSnapshot, error
 
 func (ht *HatTrie) rebuildReplicationMerkleLocked() (*replicationMerkleIndex, error) {
 	index := newReplicationMerkleIndex()
-	scan, err := ht.newScanCursorLocked("", false)
+	scan, err := ht.newPackedScanCursorLocked("", false)
 	if err != nil {
 		return nil, err
 	}

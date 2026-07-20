@@ -170,8 +170,9 @@ func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
 	}
 
 	for _, test := range []struct {
-		name string
-		page func(*replicationSyncCursor, string, bool, func(Entry) error) (replicationSyncPage, error)
+		name   string
+		packed bool
+		page   func(*replicationSyncCursor, string, bool, func(Entry) error) (replicationSyncPage, error)
 	}{
 		{
 			name: "LegacyFullMaterialize",
@@ -185,11 +186,18 @@ func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
 				return replicationSyncEntriesPageWithCursor(trie, "partition-cursor:", afterKey, hasAfterKey, pageSize, cursor, visit)
 			},
 		},
+		{
+			name:   "PackedCursor",
+			packed: true,
+			page: func(cursor *replicationSyncCursor, afterKey string, hasAfterKey bool, visit func(Entry) error) (replicationSyncPage, error) {
+				return replicationSyncEntriesPageWithCursor(trie, "partition-cursor:", afterKey, hasAfterKey, pageSize, cursor, visit)
+			},
+		},
 	} {
 		b.Run(test.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for iteration := 0; iteration < b.N; iteration++ {
-				cursor := &replicationSyncCursor{}
+				cursor := &replicationSyncCursor{packedKeys: test.packed}
 				afterKey := ""
 				hasAfterKey := false
 				visited := 0

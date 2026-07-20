@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -3993,6 +3994,7 @@ type scanExpiredEntry struct {
 type hatTrieScanCursor struct {
 	iter              *C.hattrie_iter_t
 	prefix            string
+	packedKeys        bool
 	generation        uint64
 	loaded            bool
 	finished          bool
@@ -4001,14 +4003,27 @@ type hatTrieScanCursor struct {
 	visited           int
 	batchRecords      [defaultHatTrieScanBatchEntries]C.hattrie_iter_record_t
 	batchKeys         []byte
+	batchKeyArena     []byte
+	batchExpandedKeys []byte
+	batchKeyOffsets   [defaultHatTrieScanBatchEntries]int
+	batchKeyLengths   [defaultHatTrieScanBatchEntries]int
 	batchCount        int
 	batchIndex        int
 	batchRequiredKeys int
 	batchFinished     bool
 	nativeBatchReads  int
+	keyArenaAllocs    int
 }
 
 func (ht *HatTrie) newScanCursorLocked(prefix string, sorted bool) (*hatTrieScanCursor, error) {
+	return ht.newScanCursorLockedMode(prefix, sorted, false)
+}
+
+func (ht *HatTrie) newPackedScanCursorLocked(prefix string, sorted bool) (*hatTrieScanCursor, error) {
+	return ht.newScanCursorLockedMode(prefix, sorted, true)
+}
+
+func (ht *HatTrie) newScanCursorLockedMode(prefix string, sorted bool, packedKeys bool) (*hatTrieScanCursor, error) {
 	ht.ensureOpen()
 	if err := validateKey(prefix); err != nil {
 		return nil, err
@@ -4025,6 +4040,7 @@ func (ht *HatTrie) newScanCursorLocked(prefix string, sorted bool) (*hatTrieScan
 	return &hatTrieScanCursor{
 		iter:       iter,
 		prefix:     prefix,
+		packedKeys: packedKeys,
 		generation: ht.mutationEpoch,
 		batchKeys:  make([]byte, defaultHatTrieScanBatchKeyBytes),
 	}, nil
@@ -4041,12 +4057,15 @@ func (cursor *hatTrieScanCursor) loadCurrentEntry() bool {
 	if !cursor.loadNativeBatch() {
 		return false
 	}
-	record := cursor.batchRecords[cursor.batchIndex]
+	recordIndex := cursor.batchIndex
+	record := cursor.batchRecords[recordIndex]
 	cursor.batchIndex++
-	keyOffset := int(record.key_offset)
-	keyLength := int(record.key_len)
-	suffix := cursor.batchKeys[keyOffset : keyOffset+keyLength]
-	key := scanKeyFromBytes(cursor.prefix, suffix)
+	keyOffset := cursor.batchKeyOffsets[recordIndex]
+	keyLength := cursor.batchKeyLengths[recordIndex]
+	key := ""
+	if keyLength != 0 {
+		key = unsafe.String(unsafe.SliceData(cursor.batchKeyArena[keyOffset:keyOffset+keyLength]), keyLength)
+	}
 	hval := HatValue{}
 	hval.fromValue(record.value)
 	cursor.entry = Entry{Key: key, Value: hval}
@@ -4091,6 +4110,7 @@ func (cursor *hatTrieScanCursor) loadNativeBatch() bool {
 		cursor.batchRequiredKeys = int(required)
 		cursor.batchFinished = bool(finished)
 		if cursor.batchCount > 0 {
+			cursor.prepareBatchKeyArena()
 			return true
 		}
 		if cursor.batchRequiredKeys > len(cursor.batchKeys) {
@@ -4101,21 +4121,70 @@ func (cursor *hatTrieScanCursor) loadNativeBatch() bool {
 	}
 }
 
-func scanKeyFromBytes(prefix string, suffix []byte) string {
-	length := len(prefix) + len(suffix)
-	if length == 0 {
-		return ""
+func (cursor *hatTrieScanCursor) prepareBatchKeyArena() {
+	if cursor == nil || cursor.batchCount == 0 {
+		return
 	}
-	key := make([]byte, length)
-	copy(key, prefix)
-	copy(key[len(prefix):], suffix)
-	return unsafe.String(unsafe.SliceData(key), len(key))
+	used := 0
+	for index := 0; index < cursor.batchCount; index++ {
+		record := cursor.batchRecords[index]
+		end := int(record.key_offset) + int(record.key_len)
+		if end > used {
+			used = end
+		}
+	}
+	if cursor.prefix == "" {
+		if cursor.packedKeys {
+			cursor.batchKeyArena = cursor.batchKeys[:used]
+		} else {
+			cursor.batchKeyArena = append([]byte(nil), cursor.batchKeys[:used]...)
+			cursor.keyArenaAllocs++
+		}
+		for index := 0; index < cursor.batchCount; index++ {
+			record := cursor.batchRecords[index]
+			cursor.batchKeyOffsets[index] = int(record.key_offset)
+			cursor.batchKeyLengths[index] = int(record.key_len)
+		}
+		return
+	}
+
+	total := 0
+	for index := 0; index < cursor.batchCount; index++ {
+		total += len(cursor.prefix) + int(cursor.batchRecords[index].key_len)
+	}
+	var arena []byte
+	if cursor.packedKeys {
+		if cap(cursor.batchExpandedKeys) < total {
+			cursor.batchExpandedKeys = make([]byte, total)
+			cursor.keyArenaAllocs++
+		} else {
+			cursor.batchExpandedKeys = cursor.batchExpandedKeys[:total]
+		}
+		arena = cursor.batchExpandedKeys
+	} else {
+		arena = make([]byte, total)
+		cursor.keyArenaAllocs++
+	}
+	offset := 0
+	for index := 0; index < cursor.batchCount; index++ {
+		record := cursor.batchRecords[index]
+		suffixStart := int(record.key_offset)
+		suffixEnd := suffixStart + int(record.key_len)
+		cursor.batchKeyOffsets[index] = offset
+		cursor.batchKeyLengths[index] = len(cursor.prefix) + int(record.key_len)
+		offset += copy(arena[offset:], cursor.prefix)
+		offset += copy(arena[offset:], cursor.batchKeys[suffixStart:suffixEnd])
+	}
+	cursor.batchKeyArena = arena
 }
 
 func (cursor *hatTrieScanCursor) currentLiveEntryLocked(ht *HatTrie, now time.Time) (Entry, bool) {
 	for cursor.loadCurrentEntry() {
 		entry := cursor.entry
 		if expiresAt, ok := ht.expirationAtLocked(entry.Key); ok && !now.Before(expiresAt) {
+			if cursor.packedKeys {
+				entry.Key = strings.Clone(entry.Key)
+			}
 			cursor.expired = append(cursor.expired, scanExpiredEntry{key: entry.Key, value: entry.Value})
 			cursor.consume()
 			continue
@@ -4133,6 +4202,10 @@ func (cursor *hatTrieScanCursor) consume() {
 	cursor.entry = Entry{}
 }
 
+func (cursor *hatTrieScanCursor) currentEntryEndsScan() bool {
+	return cursor != nil && cursor.loaded && cursor.batchIndex == cursor.batchCount && cursor.batchFinished
+}
+
 func (cursor *hatTrieScanCursor) closeLocked(ht *HatTrie) {
 	if cursor == nil {
 		return
@@ -4147,6 +4220,8 @@ func (cursor *hatTrieScanCursor) closeLocked(ht *HatTrie) {
 	cursor.finished = true
 	cursor.entry = Entry{}
 	cursor.batchKeys = nil
+	cursor.batchKeyArena = nil
+	cursor.batchExpandedKeys = nil
 	cursor.batchCount = 0
 	cursor.batchIndex = 0
 	cursor.batchRequiredKeys = 0

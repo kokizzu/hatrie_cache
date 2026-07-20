@@ -336,7 +336,7 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 
 	afterKey := ""
 	hasAfterKey := false
-	cursor := &replicationSyncCursor{}
+	cursor := &replicationSyncCursor{packedKeys: true}
 	defer cursor.close(trie)
 	entries := 0
 	var scratch []byte
@@ -995,7 +995,7 @@ func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRou
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
 	trie.ensureOpen()
-	scan, err := trie.newScanCursorLocked(prefix, true)
+	scan, err := trie.newPackedScanCursorLocked(prefix, true)
 	if err != nil {
 		return replicationDigest{}, err
 	}
