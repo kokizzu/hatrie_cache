@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -151,6 +152,111 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 			b.ReportMetric(keyCount, "keys/op")
 		})
 	}
+}
+
+func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
+	keyCount := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_KEYS", 100000)
+	pageSize := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_PAGE_SIZE", 1000)
+	trie, err := CreateHatTrieWithDiskDir(b.TempDir(), false)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(trie.Destroy)
+	if err := trie.ConfigureLocalPartitions(16); err != nil {
+		b.Fatal(err)
+	}
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("partition-cursor:%08d", index), "value")
+	}
+
+	for _, test := range []struct {
+		name string
+		page func(*replicationSyncCursor, string, bool, func(Entry) error) (replicationSyncPage, error)
+	}{
+		{
+			name: "LegacyFullMaterialize",
+			page: func(_ *replicationSyncCursor, afterKey string, hasAfterKey bool, visit func(Entry) error) (replicationSyncPage, error) {
+				return legacyPartitionReplicationSyncEntriesPage(trie, "partition-cursor:", afterKey, hasAfterKey, pageSize, visit)
+			},
+		},
+		{
+			name: "PersistentCursor",
+			page: func(cursor *replicationSyncCursor, afterKey string, hasAfterKey bool, visit func(Entry) error) (replicationSyncPage, error) {
+				return replicationSyncEntriesPageWithCursor(trie, "partition-cursor:", afterKey, hasAfterKey, pageSize, cursor, visit)
+			},
+		},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				cursor := &replicationSyncCursor{}
+				afterKey := ""
+				hasAfterKey := false
+				visited := 0
+				pages := 0
+				for {
+					page, err := test.page(cursor, afterKey, hasAfterKey, func(Entry) error {
+						visited++
+						return nil
+					})
+					if err != nil {
+						cursor.close(trie)
+						b.Fatal(err)
+					}
+					pages++
+					if !page.hasMore {
+						break
+					}
+					afterKey = page.nextAfterKey
+					hasAfterKey = true
+				}
+				cursor.close(trie)
+				if visited != keyCount {
+					b.Fatalf("visited %d keys, want %d", visited, keyCount)
+				}
+				b.ReportMetric(float64(pages), "pages/op")
+			}
+			b.ReportMetric(float64(keyCount), "keys/op")
+		})
+	}
+}
+
+func legacyPartitionReplicationSyncEntriesPage(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int, visit func(Entry) error) (replicationSyncPage, error) {
+	entries, err := trie.EntriesWithPrefixChecked(prefix, true)
+	if err != nil {
+		return replicationSyncPage{}, err
+	}
+	start := 0
+	if hasAfterKey {
+		start = sort.Search(len(entries), func(index int) bool { return entries[index].Key > afterKey })
+	}
+	end := start + limit
+	if end > len(entries) {
+		end = len(entries)
+	}
+	page := replicationSyncPage{scanned: end - start, hasMore: end < len(entries)}
+	for _, entry := range entries[start:end] {
+		page.nextAfterKey = entry.Key
+		if visit != nil {
+			if err := visit(entry); err != nil {
+				return replicationSyncPage{}, err
+			}
+		}
+	}
+	return page, nil
+}
+
+func benchmarkPositiveEnvInt(b *testing.B, name string, fallback int) int {
+	b.Helper()
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		b.Fatalf("invalid %s %q", name, raw)
+	}
+	return value
 }
 
 func BenchmarkReplicationDigestIncremental(b *testing.B) {

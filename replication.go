@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -1817,19 +1818,97 @@ type replicationSyncPage struct {
 }
 
 type replicationSyncCursor struct {
-	scan     *hatTrieScanCursor
-	prefix   string
-	visited  int
-	restarts int
+	scan       *hatTrieScanCursor
+	partitions *replicationPartitionSyncCursor
+	prefix     string
+	visited    int
+	restarts   int
+}
+
+type replicationPartitionSyncCursor struct {
+	set         *localPartitionSet
+	scans       []*hatTrieScanCursor
+	accounted   []int
+	generations []uint64
+	heads       replicationPartitionSyncHeap
+}
+
+type replicationPartitionSyncItem struct {
+	partition int
+	entry     Entry
+}
+
+type replicationPartitionSyncHeap []replicationPartitionSyncItem
+
+func (items replicationPartitionSyncHeap) Len() int { return len(items) }
+func (items replicationPartitionSyncHeap) Less(left int, right int) bool {
+	return items[left].entry.Key < items[right].entry.Key
+}
+func (items replicationPartitionSyncHeap) Swap(left int, right int) {
+	items[left], items[right] = items[right], items[left]
+}
+func (items *replicationPartitionSyncHeap) Push(value interface{}) {
+	*items = append(*items, value.(replicationPartitionSyncItem))
+}
+func (items *replicationPartitionSyncHeap) Pop() interface{} {
+	old := *items
+	last := len(old) - 1
+	value := old[last]
+	*items = old[:last]
+	return value
 }
 
 func (cursor *replicationSyncCursor) close(trie *HatTrie) {
 	if cursor == nil || trie == nil {
 		return
 	}
+	if partitions := trie.localPartitionSet(); partitions != nil {
+		lockLocalPartitionSet(partitions)
+		defer unlockLocalPartitionSet(partitions)
+		cursor.closePartitionsLocked(partitions)
+		return
+	}
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
 	cursor.closeLocked(trie)
+}
+
+func lockLocalPartitionSet(set *localPartitionSet) {
+	for _, child := range set.tries {
+		child.mu.Lock()
+	}
+}
+
+func unlockLocalPartitionSet(set *localPartitionSet) {
+	for index := len(set.tries) - 1; index >= 0; index-- {
+		set.tries[index].mu.Unlock()
+	}
+}
+
+func (cursor *replicationSyncCursor) accountPartitionVisits() {
+	if cursor == nil || cursor.partitions == nil {
+		return
+	}
+	for index, scan := range cursor.partitions.scans {
+		if scan == nil {
+			continue
+		}
+		cursor.visited += scan.visited - cursor.partitions.accounted[index]
+		cursor.partitions.accounted[index] = scan.visited
+	}
+}
+
+func (cursor *replicationSyncCursor) closePartitionsLocked(set *localPartitionSet) {
+	if cursor == nil || cursor.partitions == nil {
+		return
+	}
+	cursor.accountPartitionVisits()
+	for index, scan := range cursor.partitions.scans {
+		if scan != nil {
+			scan.closeLocked(set.tries[index])
+		}
+	}
+	cursor.partitions = nil
 }
 
 func (cursor *replicationSyncCursor) closeLocked(trie *HatTrie) {
@@ -1853,30 +1932,8 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 	if cursor == nil {
 		return replicationSyncPage{}, errors.New("hatriecache: replication sync cursor is nil")
 	}
-	if trie.localPartitionSet() != nil {
-		entries, err := trie.EntriesWithPrefixChecked(prefix, true)
-		if err != nil {
-			return replicationSyncPage{}, err
-		}
-		start := 0
-		if hasAfterKey {
-			start = sort.Search(len(entries), func(index int) bool { return entries[index].Key > afterKey })
-		}
-		end := start + limit
-		if end > len(entries) {
-			end = len(entries)
-		}
-		page := replicationSyncPage{scanned: end - start, hasMore: end < len(entries)}
-		for _, entry := range entries[start:end] {
-			page.nextAfterKey = entry.Key
-			if visit != nil {
-				if err := visit(entry); err != nil {
-					return replicationSyncPage{}, err
-				}
-			}
-		}
-		cursor.visited += page.scanned
-		return page, nil
+	if partitions := trie.localPartitionSet(); partitions != nil {
+		return replicationSyncPartitionEntriesPageWithCursor(trie, partitions, prefix, afterKey, hasAfterKey, limit, cursor, visit)
 	}
 
 	trie.mu.Lock()
@@ -1935,6 +1992,112 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 		}
 		cursor.scan.consume()
 	}
+}
+
+func replicationSyncPartitionEntriesPageWithCursor(trie *HatTrie, set *localPartitionSet, prefix string, afterKey string, hasAfterKey bool, limit int, cursor *replicationSyncCursor, visit func(Entry) error) (replicationSyncPage, error) {
+	lockLocalPartitionSet(set)
+	defer unlockLocalPartitionSet(set)
+
+	valid := cursor.partitions != nil && cursor.partitions.set == set && cursor.prefix == prefix
+	if valid {
+		for index, child := range set.tries {
+			if cursor.partitions.generations[index] != child.mutationEpoch {
+				valid = false
+				break
+			}
+		}
+	}
+	if !valid {
+		restarting := cursor.partitions != nil
+		cursor.closePartitionsLocked(set)
+		partitionCursor, err := newReplicationPartitionSyncCursorLocked(trie, set, prefix)
+		if err != nil {
+			return replicationSyncPage{}, err
+		}
+		cursor.partitions = partitionCursor
+		cursor.prefix = prefix
+		if restarting {
+			cursor.restarts++
+		}
+	}
+	defer cursor.accountPartitionVisits()
+
+	page := replicationSyncPage{}
+	for cursor.partitions != nil && len(cursor.partitions.heads) != 0 {
+		item := cursor.partitions.heads[0]
+		if hasAfterKey && item.entry.Key <= afterKey {
+			if err := cursor.advancePartitionHeadLocked(trie, set); err != nil {
+				cursor.closePartitionsLocked(set)
+				return replicationSyncPage{}, err
+			}
+			continue
+		}
+		if page.scanned >= limit {
+			page.hasMore = true
+			return page, nil
+		}
+		page.scanned++
+		page.nextAfterKey = item.entry.Key
+		if visit != nil {
+			if err := visit(item.entry); err != nil {
+				cursor.closePartitionsLocked(set)
+				return replicationSyncPage{}, err
+			}
+		}
+		if err := cursor.advancePartitionHeadLocked(trie, set); err != nil {
+			cursor.closePartitionsLocked(set)
+			return replicationSyncPage{}, err
+		}
+	}
+	cursor.closePartitionsLocked(set)
+	return page, nil
+}
+
+func newReplicationPartitionSyncCursorLocked(trie *HatTrie, set *localPartitionSet, prefix string) (*replicationPartitionSyncCursor, error) {
+	cursor := &replicationPartitionSyncCursor{
+		set:         set,
+		scans:       make([]*hatTrieScanCursor, len(set.tries)),
+		accounted:   make([]int, len(set.tries)),
+		generations: make([]uint64, len(set.tries)),
+		heads:       make(replicationPartitionSyncHeap, 0, len(set.tries)),
+	}
+	now := trie.currentTime()
+	for index, child := range set.tries {
+		child.ensureOpen()
+		scan, err := child.newScanCursorLocked(prefix, true)
+		if err != nil {
+			for closeIndex, opened := range cursor.scans {
+				if opened != nil {
+					opened.closeLocked(set.tries[closeIndex])
+				}
+			}
+			return nil, err
+		}
+		cursor.scans[index] = scan
+		if entry, ok := scan.currentLiveEntryLocked(child, now); ok {
+			heap.Push(&cursor.heads, replicationPartitionSyncItem{partition: index, entry: entry})
+		}
+		cursor.generations[index] = child.mutationEpoch
+	}
+	return cursor, nil
+}
+
+func (cursor *replicationSyncCursor) advancePartitionHeadLocked(trie *HatTrie, set *localPartitionSet) error {
+	item := heap.Pop(&cursor.partitions.heads).(replicationPartitionSyncItem)
+	scan := cursor.partitions.scans[item.partition]
+	child := set.tries[item.partition]
+	scan.consume()
+	entry, ok := scan.currentLiveEntryLocked(child, trie.currentTime())
+	cursor.partitions.generations[item.partition] = child.mutationEpoch
+	if ok {
+		heap.Push(&cursor.partitions.heads, replicationPartitionSyncItem{partition: item.partition, entry: entry})
+		return nil
+	}
+	scan.closeLocked(child)
+	cursor.visited += scan.visited - cursor.partitions.accounted[item.partition]
+	cursor.partitions.accounted[item.partition] = scan.visited
+	cursor.partitions.scans[item.partition] = nil
+	return nil
 }
 
 func (replicator *HTTPReplicator) storeLastResult(result ReplicationResult) {

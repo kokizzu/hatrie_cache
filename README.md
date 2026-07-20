@@ -684,6 +684,14 @@ keep all child locks for one point-in-time image but use one bounded producer pe
 partition, with capture work limited to `GOMAXPROCS` and one buffered entry per
 partition.
 
+Multi-page replication retains one generation-checked iterator per partition
+and a k-way merge heap across pages. It no longer rescans and globally sorts the
+complete keyspace for every 1,000-key page; a mutation in any child invalidates
+the merged cursor and safely restarts after the caller's last key. The
+100,000-key, 100-page fixture is 18.97x faster, uses 142.52x less cumulative
+heap, and performs 33.51x fewer allocations. See
+[BENCHMARK.md](BENCHMARK.md#persistent-partition-replication-cursors).
+
 The measured 100,000-write fixture is 2.24x faster at 16 workers, while
 separate-process maximum RSS rose from 51,588 KiB to 54,096 KiB. On a 100,000-key
 whole-keyspace fixture, parallel sorted-key collection is 4.24x faster with

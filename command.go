@@ -2698,6 +2698,9 @@ func (ht *HatTrie) commandDumpScannedEntryBinaryWithoutStatsLocked(entry Entry) 
 }
 
 func (ht *HatTrie) appendCommandDumpScannedEntryBinaryWithoutStatsLocked(destination []byte, entry Entry) ([]byte, bool, error) {
+	if partition := ht.localPartitionForKey(entry.Key); partition != nil {
+		return partition.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(destination, entry)
+	}
 	if entry.Value.Empty() {
 		return destination, false, nil
 	}

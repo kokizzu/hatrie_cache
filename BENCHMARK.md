@@ -191,6 +191,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
 | Current pass | [Local HAT-trie partitions](#local-hat-trie-partitions), 100k writes, 16 workers | One trie: 29.147 ms; 291.5 ns/write | 16 tries: 12.992 ms; 129.9 ns/write | 2.24x faster, 1.84x lower timed heap, 1.73x fewer timed allocs | Opt-in; separate-process maximum RSS is 1.05x higher and whole-keyspace operations merge partitions |
 | Current pass | [Partition-parallel whole-keyspace scans](#partition-parallel-whole-keyspace), 100k keys, 16 partitions | Serial merge: keys 36.990 ms/18.43 MB; entries 49.800 ms/24.50 MB | Parallel k-way merge: keys 8.722 ms/12.21 MB; entries 9.346 ms/15.62 MB | Keys 4.24x faster/1.51x lower heap; entries 5.33x faster/1.57x lower heap | Opt-in partition mode only; worker coordination adds 13/9 allocations |
+| Current pass | [Persistent partition replication cursors](#persistent-partition-replication-cursors), 100k keys, 100 pages | Full materialize/sort per page: 1.076 s; 1.394 GB heap; 10,069,862 allocs | 16 retained cursors plus k-way heap: 56.721 ms; 9.78 MB heap; 300,538 allocs | 18.97x faster, 142.52x lower heap, 33.51x fewer allocs | Cursor restarts after a partition mutation; local partitions remain opt-in |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
@@ -1434,6 +1435,49 @@ Medians use `-benchtime=20x`; the current row is a seven-run median.
 The current default-page path uses 1.88x less cumulative heap and 10.43x fewer
 allocations. The native iterator returns up to 256 records per cgo crossing, so
 a 10,000-key scan needs about 40 batch calls instead of one crossing per key.
+
+<a id="persistent-partition-replication-cursors"></a>
+#### Persistent Partition Replication Cursors
+
+The original local-partition branch ignored the reusable replication cursor.
+Every page collected all child entries, globally sorted the full keyspace,
+selected one page, and discarded the result. A 100-page traversal therefore
+performed 100 complete scans and sorts. The current path retains one native
+iterator and generation value per child plus a k-way key heap between pages.
+Any child mutation closes all retained iterators, increments the restart count,
+and rebuilds the heap; the caller's `after_key` prevents duplicates when the
+scan resumes.
+
+The benchmark preloads 100,000 deterministic strings into 16 local partitions
+and traverses all keys in 1,000-key pages. The legacy control preserves the old
+materialize/sort implementation. Both paths invoke the same visitor and return
+the same 100 ordered pages. Results are seven-run medians on the Ryzen 9 5950X
+host.
+
+```sh
+make bench-partition-cursor PARTITION_CURSOR_BENCH_KEYS=100000 PARTITION_CURSOR_BENCH_PAGE_SIZE=1000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Metric | Full materialize per page | Persistent partition cursor | Improvement |
+| --- | ---: | ---: | ---: |
+| Complete traversal | 1,076.176 ms | 56.721 ms | 18.97x faster |
+| Cumulative heap | 1,393,738,984 B | 9,779,040 B | 142.52x lower |
+| Allocations | 10,069,862 | 300,538 | 33.51x fewer |
+| Pages / keys | 100 / 100,000 | 100 / 100,000 | unchanged |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Full materialize per page | `1111.398, 1088.821, 1064.783, 1076.176, 1087.228, 1066.507, 1072.552` |
+| Persistent partition cursor | `56.721, 52.879, 52.217, 56.881, 58.437, 54.422, 57.736` |
+
+The complete output is generated at
+`build/benchmarks/partition-replication-cursor.txt`. Cursor state is transient
+and bounded by the configured local partition count. No wire, storage, routing,
+or page-response format changes. `LOCAL_PARTITIONS=0` retains the existing
+single-trie cursor path, while mutation tests verify ordered restart behavior
+and end-to-end compact-binary replication from child tries.
 
 ### Replication Transport
 

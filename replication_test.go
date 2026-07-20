@@ -4396,6 +4396,134 @@ func TestReplicationSyncCursorRestartsAfterMutation(t *testing.T) {
 	}
 }
 
+func TestPartitionReplicationSyncCursorVisitsOnceAndRestartsAfterMutation(t *testing.T) {
+	trie := newTestTrie(t)
+	if err := trie.ConfigureLocalPartitions(16); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 257; index++ {
+		trie.UpsertString(fmt.Sprintf("partition-sync:%04d", index), "value")
+	}
+
+	cursor := &replicationSyncCursor{}
+	defer cursor.close(trie)
+	afterKey := ""
+	hasAfterKey := false
+	keys := make([]string, 0, 258)
+	for pageIndex := 0; ; pageIndex++ {
+		page, err := replicationSyncEntriesPageWithCursor(trie, "partition-sync:", afterKey, hasAfterKey, 31, cursor, func(entry Entry) error {
+			keys = append(keys, entry.Key)
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pageIndex == 0 {
+			trie.UpsertString("partition-sync:0031a", "inserted")
+		}
+		if !page.hasMore {
+			break
+		}
+		afterKey = page.nextAfterKey
+		hasAfterKey = true
+	}
+	if len(keys) != 258 {
+		t.Fatalf("partition cursor returned %d keys, want 258", len(keys))
+	}
+	for index := 1; index < len(keys); index++ {
+		if keys[index-1] >= keys[index] {
+			t.Fatalf("partition cursor order at %d = %q then %q", index, keys[index-1], keys[index])
+		}
+	}
+	if cursor.restarts != 1 {
+		t.Fatalf("partition cursor restarts = %d, want 1", cursor.restarts)
+	}
+	if cursor.visited < len(keys) {
+		t.Fatalf("partition cursor visits = %d, want at least %d", cursor.visited, len(keys))
+	}
+}
+
+func TestPartitionReplicationSyncCursorEncodesChildValues(t *testing.T) {
+	source := newTestTrie(t)
+	if err := source.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	source.UpsertString("partition-sync:string", "value")
+	source.UpsertCounter("partition-sync:counter", 42)
+
+	var payloads []CacheCommandRequest
+	cursor := &replicationSyncCursor{}
+	page, err := replicationSyncEntriesPageWithCursor(source, "partition-sync:", "", false, 10, cursor, func(entry Entry) error {
+		data, ok, err := source.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(nil, entry)
+		if err != nil {
+			return err
+		}
+		if ok {
+			payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: entry.Key, BinaryValue: data})
+		}
+		return nil
+	})
+	cursor.close(source)
+	if err != nil || page.hasMore || len(payloads) != 2 {
+		t.Fatalf("partition payload page = %#v/%v, payloads=%d", page, err, len(payloads))
+	}
+
+	target := newTestTrie(t)
+	for index, payload := range payloads {
+		operation, err := commandReplicationValueOperation(payload.Key, payload.BinaryValue)
+		if err != nil {
+			t.Fatalf("decode payload %d: %v", index, err)
+		}
+		response := executePreparedInternalReplicationCommand(target, payload, &operation)
+		if !response.OK {
+			t.Fatalf("apply payload %q = %#v", payload.Key, response)
+		}
+	}
+	if target.GetString("partition-sync:string") != "value" || target.GetCounter("partition-sync:counter") != 42 {
+		t.Fatalf("replicated values = %q/%d", target.GetString("partition-sync:string"), target.GetCounter("partition-sync:counter"))
+	}
+}
+
+func TestPartitionReplicationSyncAllPagedRoundTrip(t *testing.T) {
+	source := newTestTrie(t)
+	if err := source.ConfigureLocalPartitions(16); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 257; index++ {
+		source.UpsertString(fmt.Sprintf("partition-roundtrip:%04d", index), "value-"+strconv.Itoa(index))
+	}
+	targetTrie := newTestTrie(t)
+	var targetHandler http.Handler
+	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		targetHandler.ServeHTTP(writer, request)
+	}))
+	defer target.Close()
+	topology := replicationTestTopology(t, target.URL)
+	targetHandler = NewMonitoringHandler(targetTrie, MonitoringOptions{
+		NodeName:          "node-b",
+		Topology:          topology,
+		ReplicationSafety: NewReplicationSafetyStore(),
+	}).Handler()
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+	defer replicator.Close()
+
+	result := replicator.syncAllPaged(context.Background(), source, "partition-roundtrip:", 31)
+	if result.Skipped || result.Entries != 257 || len(result.Targets) == 0 {
+		t.Fatalf("partition sync result = %#v", result)
+	}
+	for index := 0; index < 257; index++ {
+		key := fmt.Sprintf("partition-roundtrip:%04d", index)
+		if got := targetTrie.GetString(key); got != "value-"+strconv.Itoa(index) {
+			t.Fatalf("target %q = %q", key, got)
+		}
+	}
+}
+
 func TestReplicationSyncEntriesPageCapturesPointInTimeValues(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("session:1", "one")
