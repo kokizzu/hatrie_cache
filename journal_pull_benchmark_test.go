@@ -153,6 +153,62 @@ func BenchmarkJournalPullRepresentation10K(b *testing.B) {
 	}
 }
 
+func BenchmarkJournalWALChunkSize10K(b *testing.B) {
+	const recordsPerBatch = 10_000
+	records := make([]compactCommandJournalRecord, recordsPerBatch)
+	for index := range records {
+		records[index] = compactCommandJournalRecord{
+			Sequence: uint64(index + 1),
+			Key:      fmt.Sprintf("wal-chunk:%05d", index),
+			Value:    "42",
+			Command:  compactCommandJournalSetCounter,
+		}
+	}
+	for _, chunkBytes := range []int{64 << 10, 128 << 10, 256 << 10, 1 << 20} {
+		b.Run(fmt.Sprintf("%dKiB", chunkBytes>>10), func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			journal, err := OpenCommandJournalWithOptions(filepath.Join(b.TempDir(), "commands.journal"), CommandJournalOptions{
+				Format:              CommandJournalFormatBinary,
+				GroupCommitMaxBatch: 1,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(func() { _ = journal.Close() })
+			journal.recordBatchChunkBytes = chunkBytes
+			var writes int
+			journal.writeHook = func(data []byte) (int, error) {
+				writes++
+				return journal.file.Write(data)
+			}
+
+			var walBytes int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				before, err := journal.file.Stat()
+				if err != nil {
+					b.Fatal(err)
+				}
+				applied, response := journal.executeCompactJournalRecordsBatch(trie, records)
+				if !response.OK || applied != recordsPerBatch {
+					b.Fatalf("executeCompactJournalRecordsBatch() = %d/%#v", applied, response)
+				}
+				after, err := journal.file.Stat()
+				if err != nil {
+					b.Fatal(err)
+				}
+				walBytes += after.Size() - before.Size()
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(recordsPerBatch), "records/op")
+			b.ReportMetric(float64(walBytes)/float64(b.N), "wal_B/op")
+			b.ReportMetric(float64(writes)/float64(b.N), "writes/op")
+		})
+	}
+}
+
 func benchmarkJournalScalarRecords(count int) []CommandJournalRecord {
 	records := make([]CommandJournalRecord, count)
 	for index := range records {

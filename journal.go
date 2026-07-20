@@ -23,7 +23,7 @@ const (
 
 const maxCommandJournalBinaryRecordBytes = 1 << 30
 const maxCommandJournalJSONRecordBytes = 1 << 30
-const maxCommandJournalRecordBatchInitialBytes = 1 << 20
+const defaultCommandJournalRecordBatchChunkBytes = 128 << 10
 const maxCommandJournalReusablePayloadBufferBytes = 1 << 20
 
 const (
@@ -137,28 +137,30 @@ type commandJournalJob struct {
 }
 
 type CommandJournal struct {
-	mu                  sync.Mutex
-	snapshotMu          sync.Mutex
-	submitMu            sync.RWMutex
-	closeOnce           sync.Once
-	path                string
-	format              CommandJournalFormat
-	file                *os.File
-	closed              bool
-	accepting           bool
-	nextSequence        uint64
-	sequenceExhausted   bool
-	groupCommitWindow   time.Duration
-	groupCommitMaxBatch int
-	segmentMaxBytes     int64
-	retainedSegments    int
-	activeSegmentStart  uint64
-	groupCommitJobs     chan *commandJournalJob
-	groupCommitDone     chan struct{}
-	closeDone           chan struct{}
-	closeErr            error
-	syncHook            func() error
-	outboxRetainFrom    uint64
+	mu                    sync.Mutex
+	snapshotMu            sync.Mutex
+	submitMu              sync.RWMutex
+	closeOnce             sync.Once
+	path                  string
+	format                CommandJournalFormat
+	file                  *os.File
+	closed                bool
+	accepting             bool
+	nextSequence          uint64
+	sequenceExhausted     bool
+	groupCommitWindow     time.Duration
+	groupCommitMaxBatch   int
+	segmentMaxBytes       int64
+	retainedSegments      int
+	activeSegmentStart    uint64
+	groupCommitJobs       chan *commandJournalJob
+	groupCommitDone       chan struct{}
+	closeDone             chan struct{}
+	closeErr              error
+	syncHook              func() error
+	writeHook             func([]byte) (int, error)
+	recordBatchChunkBytes int
+	outboxRetainFrom      uint64
 }
 
 type commandJournalAppendState struct {
@@ -248,16 +250,17 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		return nil, err
 	}
 	journal := &CommandJournal{
-		path:                path,
-		format:              format,
-		file:                file,
-		accepting:           true,
-		groupCommitWindow:   options.GroupCommitWindow,
-		groupCommitMaxBatch: options.GroupCommitMaxBatch,
-		segmentMaxBytes:     options.SegmentMaxBytes,
-		retainedSegments:    options.RetainedSegments,
-		outboxRetainFrom:    earliestOutboxSequence,
-		closeDone:           make(chan struct{}),
+		path:                  path,
+		format:                format,
+		file:                  file,
+		accepting:             true,
+		groupCommitWindow:     options.GroupCommitWindow,
+		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
+		segmentMaxBytes:       options.SegmentMaxBytes,
+		retainedSegments:      options.RetainedSegments,
+		recordBatchChunkBytes: defaultCommandJournalRecordBatchChunkBytes,
+		outboxRetainFrom:      earliestOutboxSequence,
+		closeDone:             make(chan struct{}),
 	}
 	journal.advanceSequenceLocked(maxSequence)
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {
@@ -426,13 +429,14 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 
 	pending := batch
 	for len(pending) > 0 {
+		chunkBytes := journal.recordBatchChunkLimit()
 		batchState, err := journal.currentAppendStateLocked()
 		if err != nil {
 			completeCommandJournalJobs(pending, commandError(err.Error()))
 			return
 		}
 		recordSizes := make([]uint32, len(pending))
-		encoded := make([]byte, 0, commandJournalRequestBatchInitialCapacity(pending))
+		encoded := make([]byte, 0, commandJournalRequestBatchInitialCapacity(pending, chunkBytes))
 		for idx, job := range pending {
 			sequence, nextErr := journal.nextAppendSequenceLocked()
 			if nextErr != nil {
@@ -445,7 +449,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 				Sequence: sequence,
 				Request:  job.journalRequest,
 			}
-			if commandJournalRecordBatchShouldFlush(encoded, entry.Request) {
+			if commandJournalRecordBatchShouldFlush(encoded, entry.Request, chunkBytes) {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
 					completeCommandJournalJobs(pending, commandError(err.Error()))
@@ -462,7 +466,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			}
 			recordSizes[idx] = uint32(len(encoded) - start)
 			journal.markAppendedLocked(sequence)
-			if len(encoded) >= maxCommandJournalRecordBatchInitialBytes {
+			if len(encoded) >= chunkBytes {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
 					completeCommandJournalJobs(pending, commandError(err.Error()))
@@ -565,7 +569,8 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		return 0, commandError(err.Error())
 	}
 	recordSizes := make([]uint32, len(records))
-	encoded := make([]byte, 0, commandJournalRecordBatchInitialCapacity(records))
+	chunkBytes := journal.recordBatchChunkLimit()
+	encoded := make([]byte, 0, commandJournalRecordBatchInitialCapacity(records, chunkBytes))
 	now := trie.currentTime()
 	for idx, record := range records {
 		sequence, err := journal.nextAppendSequenceLocked()
@@ -577,7 +582,7 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 			Sequence: sequence,
 			Request:  normalizeJournalRequest(record.Request, now),
 		}
-		if commandJournalRecordBatchShouldFlush(encoded, entry.Request) {
+		if commandJournalRecordBatchShouldFlush(encoded, entry.Request, chunkBytes) {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
@@ -594,7 +599,7 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		}
 		recordSizes[idx] = uint32(recordBytes)
 		journal.markAppendedLocked(sequence)
-		if len(encoded) >= maxCommandJournalRecordBatchInitialBytes {
+		if len(encoded) >= chunkBytes {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
@@ -667,7 +672,8 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 		return 0, commandError(err.Error())
 	}
 	recordSizes := make([]uint32, len(records))
-	encoded := make([]byte, 0, compactCommandJournalRecordBatchInitialCapacity(records))
+	chunkBytes := journal.recordBatchChunkLimit()
+	encoded := make([]byte, 0, compactCommandJournalRecordBatchInitialCapacity(records, chunkBytes))
 	for idx, record := range records {
 		sequence, err := journal.nextAppendSequenceLocked()
 		if err != nil {
@@ -675,7 +681,7 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 		}
 		request := record.request()
 		entry := commandJournalEntry{Version: commandJournalVersion, Sequence: sequence, Request: request}
-		if commandJournalRecordBatchShouldFlush(encoded, request) {
+		if commandJournalRecordBatchShouldFlush(encoded, request, chunkBytes) {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
@@ -692,7 +698,7 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 		}
 		recordSizes[idx] = uint32(recordBytes)
 		journal.markAppendedLocked(sequence)
-		if len(encoded) >= maxCommandJournalRecordBatchInitialBytes {
+		if len(encoded) >= chunkBytes {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
@@ -724,12 +730,12 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 	return applied, response
 }
 
-func compactCommandJournalRecordBatchInitialCapacity(records []compactCommandJournalRecord) int {
+func compactCommandJournalRecordBatchInitialCapacity(records []compactCommandJournalRecord, chunkBytes int) int {
 	total := 0
 	for _, record := range records {
-		total = addCommandJournalRequestBatchInitialCapacity(total, record.request())
-		if total == maxCommandJournalRecordBatchInitialBytes {
-			return maxCommandJournalRecordBatchInitialBytes
+		total = addCommandJournalRequestBatchInitialCapacity(total, record.request(), chunkBytes)
+		if total == chunkBytes {
+			return chunkBytes
 		}
 	}
 	return total
@@ -739,7 +745,11 @@ func (journal *CommandJournal) writeCommandJournalRecordBatchChunkLocked(data []
 	if len(data) == 0 {
 		return nil
 	}
-	n, err := journal.file.Write(data)
+	write := journal.file.Write
+	if journal.writeHook != nil {
+		write = journal.writeHook
+	}
+	n, err := write(data)
 	if err != nil {
 		return err
 	}
@@ -764,38 +774,45 @@ func appendCommandJournalRecord(data []byte, entry commandJournalEntry, format C
 	}
 }
 
-func commandJournalRecordBatchInitialCapacity(records []CommandJournalRecord) int {
+func commandJournalRecordBatchInitialCapacity(records []CommandJournalRecord, chunkBytes int) int {
 	total := 0
 	for _, record := range records {
-		total = addCommandJournalRequestBatchInitialCapacity(total, record.Request)
-		if total == maxCommandJournalRecordBatchInitialBytes {
-			return maxCommandJournalRecordBatchInitialBytes
+		total = addCommandJournalRequestBatchInitialCapacity(total, record.Request, chunkBytes)
+		if total == chunkBytes {
+			return chunkBytes
 		}
 	}
 	return total
 }
 
-func commandJournalRequestBatchInitialCapacity(jobs []*commandJournalJob) int {
+func commandJournalRequestBatchInitialCapacity(jobs []*commandJournalJob, chunkBytes int) int {
 	total := 0
 	for _, job := range jobs {
-		total = addCommandJournalRequestBatchInitialCapacity(total, job.journalRequest)
-		if total == maxCommandJournalRecordBatchInitialBytes {
-			return maxCommandJournalRecordBatchInitialBytes
+		total = addCommandJournalRequestBatchInitialCapacity(total, job.journalRequest, chunkBytes)
+		if total == chunkBytes {
+			return chunkBytes
 		}
 	}
 	return total
 }
 
-func addCommandJournalRequestBatchInitialCapacity(total int, request CacheCommandRequest) int {
+func addCommandJournalRequestBatchInitialCapacity(total int, request CacheCommandRequest, chunkBytes int) int {
 	estimate := commandJournalRecordSizeEstimate(request)
-	if estimate >= maxCommandJournalRecordBatchInitialBytes-total {
-		return maxCommandJournalRecordBatchInitialBytes
+	if estimate >= chunkBytes-total {
+		return chunkBytes
 	}
 	return total + estimate
 }
 
-func commandJournalRecordBatchShouldFlush(data []byte, request CacheCommandRequest) bool {
-	return len(data) > 0 && commandJournalRecordSizeEstimate(request) >= maxCommandJournalRecordBatchInitialBytes-len(data)
+func commandJournalRecordBatchShouldFlush(data []byte, request CacheCommandRequest, chunkBytes int) bool {
+	return len(data) > 0 && commandJournalRecordSizeEstimate(request) >= chunkBytes-len(data)
+}
+
+func (journal *CommandJournal) recordBatchChunkLimit() int {
+	if journal.recordBatchChunkBytes > 0 {
+		return journal.recordBatchChunkBytes
+	}
+	return defaultCommandJournalRecordBatchChunkBytes
 }
 
 func commandJournalRecordSizeEstimate(request CacheCommandRequest) int {

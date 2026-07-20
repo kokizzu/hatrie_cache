@@ -202,6 +202,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
 | Current pass | [Compact scalar journal tails](#compact-scalar-journal-tails), 10k binary `SETINT` records | Full requests: 8.074 ms durable; 2,720,000 heap B | 48-byte records: 5.864 ms durable; 1,442,048 heap B | 1.38x faster, 1.89x lower heap | Six allocations, 349,886 wire B, one fsync, and structured fallback are unchanged |
+| Current pass | [Bounded WAL staging arena](#bounded-wal-staging-arena), 10k compact `SETINT` records | 1 MiB limit: 5.705 ms; 598,640 heap B; 1 write | 128 KiB limit: 5.416 ms; 172,656 heap B; 4 writes | 1.05x faster, 3.47x lower staging heap | More `write` syscalls before the same single final fsync; oversized records remain valid |
 | Current pass | [Coalesced journal batch append](#coalesced-journal-batch-append), 10k pulled `SETINT` records | Per-record WAL writes: 20.935 ms; 1,686,384 heap B; 30,004 allocs | Bounded shared append: 7.364 ms; 606,832 heap B; 5 allocs | 2.84x faster, 2.78x lower heap, 6,001x fewer allocs | WAL bytes and one-final-fsync durability are unchanged; buffers flush in bounded chunks |
 | Current pass | [Single-lock journal scalar apply](#single-lock-journal-scalar-apply), 10k pulled `SETINT` records | Serial apply: 4.189 ms CPU; 8.907 ms durable | One-lock run: 2.603 ms CPU; 7.744 ms durable | 1.61x apply CPU; 1.15x durable | Heap, allocations, WAL bytes, and fsync durability are unchanged; unsupported runs stay serial |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
@@ -1161,6 +1162,55 @@ generated at `build/benchmarks/journal-tail-wire.txt` and
 `build/benchmarks/journal-pull-batch-apply.txt`. Compact records do not alter
 wire format, on-disk WAL format, fsync count, or recovery compatibility.
 
+<a id="bounded-wal-staging-arena"></a>
+### Bounded WAL Staging Arena
+
+The coalesced batch writer previously allowed up to a 1 MiB staging arena. A
+10,000-record compact pull therefore reserved enough capacity for its complete
+429,873-byte WAL even though only one chunk is needed at a time. Full-request,
+compact-scalar, and group-commit batch writers now share a 128 KiB default.
+Ordinary records flush before crossing that boundary; an individual record
+larger than the boundary is still written intact. Every chunk remains part of
+one append transaction with one final `fsync`.
+
+The focused fixture applies 10,000 predecoded compact `SETINT` records while
+varying only the internal chunk limit. It reports cumulative Go heap, write
+calls, and identical WAL bytes. Results are seven-run medians on the Ryzen 9
+5950X host.
+
+```sh
+make bench-journal-apply JOURNAL_APPLY_BENCH='^BenchmarkJournalWALChunkSize10K$' BENCHTIME=1x COUNT=7
+```
+
+| Chunk limit | Time / 10k | Cumulative heap | Writes | WAL bytes | Relative to old 1 MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 64 KiB | 5.788 ms | 107,120 B | 7 | 429,873 B | 5.59x lower heap, 1.01x slower |
+| **128 KiB default** | **5.416 ms** | **172,656 B** | **4** | **429,873 B** | **1.05x faster, 3.47x lower heap** |
+| 256 KiB | 5.413 ms | 303,728 B | 2 | 429,873 B | 1.05x faster, 1.97x lower heap |
+| Previous 1 MiB | 5.705 ms | 598,640 B | 1 | 429,873 B | baseline |
+
+The 256 KiB median is within 0.1% of 128 KiB but uses 1.76x more cumulative
+heap. The 64 KiB candidate saves another 65,536 bytes but is 1.07x slower than
+128 KiB. This makes 128 KiB the measured latency/memory balance rather than an
+arbitrary minimum.
+
+The complete binary decode + durable WAL + apply fixture also improved from a
+fresh 7.191 ms, 1,442,048 B/op baseline to 5.920 ms and 1,007,872 B/op: 1.21x
+faster and 1.43x lower cumulative heap. Both sides perform six allocations,
+transfer 349,886 wire bytes, and use one final sync. Raw elapsed samples were:
+
+| Path | Seven samples |
+| --- | --- |
+| Previous 1 MiB pull | `6.674, 7.003, 7.176, 7.269, 7.191, 7.457, 7.718` |
+| 128 KiB pull | `5.888, 5.842, 5.920, 6.532, 12.684, 7.006, 5.775` |
+
+`build/benchmarks/journal-pull-batch-apply.txt` contains the reproducible
+chunk-size rows and current full-path rows. Filesystem sync variance affects
+elapsed time, so the exact heap reduction and interleaved chunk-size fixture
+are the stronger sizing signals. Tests inject a failure after an earlier chunk
+has reached the file and verify that the journal truncates to its original
+offset, resets its sequence, and applies no cache mutation.
+
 <a id="coalesced-journal-batch-append"></a>
 ### Coalesced Journal Batch Append
 
@@ -1168,7 +1218,7 @@ After receiving a journal tail, the follower previously allocated and wrote
 every durable record separately before its one final `fsync`. Binary records
 now append directly into one reusable arena, and a compact `uint32` size table
 retains each rollback boundary. The same writer coalesces ordinary group-commit
-jobs. The arena starts at no more than one MiB and flushes when it reaches that
+jobs. The arena starts at no more than 128 KiB and flushes when it reaches that
 threshold; a large batch therefore remains bounded while all chunks still share
 one final durability sync. Standalone binary records remain byte-for-byte
 identical.

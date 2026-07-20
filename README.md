@@ -1168,6 +1168,15 @@ tails automatically use the full decoder, malformed binary is
 rejected, and short runs retain serial application. See
 [BENCHMARK.md](BENCHMARK.md#compact-scalar-journal-tails).
 
+Coalesced WAL staging for full, compact, and group-commit batches is bounded to
+128 KiB by default instead of reserving up to 1 MiB. On the 10,000-record
+compact fixture, this reduced staging heap 3.47x and improved the median 1.05x,
+at the cost of four writes instead of one before the unchanged final `fsync`.
+The full binary decode + durable WAL + apply path used 1.43x less cumulative
+heap and was 1.21x faster in the fresh paired run. Oversized individual records
+remain valid, and a later-chunk failure rolls the complete unapplied batch back.
+See [BENCHMARK.md](BENCHMARK.md#bounded-wal-staging-arena).
+
 The follower also coalesces pulled records into bounded WAL write chunks before
 one final `fsync`, instead of allocating and writing every record separately.
 For the same 10,000-command tail this makes durable apply 2.84x faster, uses

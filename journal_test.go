@@ -566,6 +566,105 @@ func TestCommandJournalRecordBatchSpansBoundedWriteChunks(t *testing.T) {
 	}
 }
 
+func TestCompactCommandJournalRecordBatchBoundsOrdinaryWriteChunks(t *testing.T) {
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+
+	const recordCount = 10_000
+	records := make([]compactCommandJournalRecord, recordCount)
+	for idx := range records {
+		records[idx] = compactCommandJournalRecord{
+			Sequence: uint64(idx + 1),
+			Key:      "bounded:" + strconv.Itoa(idx),
+			Value:    "42",
+			Command:  compactCommandJournalSetCounter,
+		}
+	}
+	var writeSizes []int
+	journal.writeHook = func(data []byte) (int, error) {
+		writeSizes = append(writeSizes, len(data))
+		return journal.file.Write(data)
+	}
+	var syncs int
+	journal.syncHook = func() error {
+		syncs++
+		return journal.file.Sync()
+	}
+
+	trie := newTestTrie(t)
+	applied, response := journal.executeCompactJournalRecordsBatch(trie, records)
+	if !response.OK || applied != len(records) {
+		t.Fatalf("executeCompactJournalRecordsBatch() = %d/%#v", applied, response)
+	}
+	if len(writeSizes) < 2 {
+		t.Fatalf("journal writes = %d, want multiple bounded chunks", len(writeSizes))
+	}
+	for idx, size := range writeSizes {
+		if size > defaultCommandJournalRecordBatchChunkBytes {
+			t.Fatalf("journal write %d size = %d, want <= %d", idx, size, defaultCommandJournalRecordBatchChunkBytes)
+		}
+	}
+	if syncs != 1 {
+		t.Fatalf("journal syncs = %d, want 1", syncs)
+	}
+	if got := trie.GetCounter(records[len(records)-1].Key); got != 42 {
+		t.Fatalf("last live counter = %d, want 42", got)
+	}
+
+	replayed := newTestTrie(t)
+	if _, err := journal.Replay(replayed, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := replayed.GetCounter(records[len(records)-1].Key); got != 42 {
+		t.Fatalf("last replayed counter = %d, want 42", got)
+	}
+}
+
+func TestCompactCommandJournalRecordBatchLaterChunkFailureRollsBack(t *testing.T) {
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+
+	const recordCount = 10_000
+	records := make([]compactCommandJournalRecord, recordCount)
+	for idx := range records {
+		records[idx] = compactCommandJournalRecord{
+			Sequence: uint64(idx + 1),
+			Key:      "rollback:" + strconv.Itoa(idx),
+			Value:    "42",
+			Command:  compactCommandJournalSetCounter,
+		}
+	}
+	writes := 0
+	journal.writeHook = func(data []byte) (int, error) {
+		writes++
+		if writes == 2 {
+			return 0, errors.New("injected later chunk failure")
+		}
+		return journal.file.Write(data)
+	}
+
+	trie := newTestTrie(t)
+	applied, response := journal.executeCompactJournalRecordsBatch(trie, records)
+	if applied != 0 || response.OK || !strings.Contains(response.Message, "injected later chunk failure") {
+		t.Fatalf("executeCompactJournalRecordsBatch() = %d/%#v, want later chunk failure", applied, response)
+	}
+	if writes != 2 {
+		t.Fatalf("journal writes = %d, want 2", writes)
+	}
+	if journal.Sequence() != 0 || trie.Exists(records[0].Key) {
+		t.Fatal("failed compact batch changed journal sequence or cache")
+	}
+	if info, err := journal.file.Stat(); err != nil || info.Size() != 0 {
+		t.Fatalf("journal size after rollback = %v/%v, want 0", info, err)
+	}
+}
+
 func TestCommandJournalRecordBatchFormatsReplay(t *testing.T) {
 	for _, format := range []CommandJournalFormat{CommandJournalFormatBinary, CommandJournalFormatJSON} {
 		t.Run(string(format), func(t *testing.T) {
