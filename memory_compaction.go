@@ -59,18 +59,17 @@ func (ht *HatTrie) CompactMemory() (MemoryCompactionResult, error) {
 	}
 	if partitions := ht.localPartitionSet(); partitions != nil {
 		var total MemoryCompactionResult
-		for _, child := range partitions.tries {
-			result, err := child.CompactMemory()
-			if err != nil {
-				return total, err
-			}
+		results, err := runLocalPartitionTasks(partitions, func(child *HatTrie) (MemoryCompactionResult, error) {
+			return child.CompactMemory()
+		})
+		for _, result := range results {
 			total.Entries += result.Entries
 			total.BackingBytesBefore += result.BackingBytesBefore
 			total.BackingBytesAfter += result.BackingBytesAfter
 			total.MerkleBytesBefore += result.MerkleBytesBefore
 			total.MerkleBytesAfter += result.MerkleBytesAfter
 		}
-		return total, nil
+		return total, err
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
@@ -565,13 +564,15 @@ func (ht *HatTrie) StartMemoryCompactorContext(ctx context.Context, interval tim
 
 func (ht *HatTrie) compactMemoryIfChangedAndOpen() bool {
 	if partitions := ht.localPartitionSet(); partitions != nil {
-		open := true
-		for _, child := range partitions.tries {
-			if !child.compactMemoryIfChangedAndOpen() {
-				open = false
+		results, _ := runLocalPartitionTasks(partitions, func(child *HatTrie) (bool, error) {
+			return child.compactMemoryIfChangedAndOpen(), nil
+		})
+		for _, open := range results {
+			if !open {
+				return false
 			}
 		}
-		return open
+		return true
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()

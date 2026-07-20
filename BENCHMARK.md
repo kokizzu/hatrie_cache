@@ -190,6 +190,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
 | Current pass | [Local HAT-trie partitions](#local-hat-trie-partitions), 100k writes, 16 workers | One trie: 29.147 ms; 291.5 ns/write | 16 tries: 12.992 ms; 129.9 ns/write | 2.24x faster, 1.84x lower timed heap, 1.73x fewer timed allocs | Opt-in; separate-process maximum RSS is 1.05x higher and whole-keyspace operations merge partitions |
+| Current pass | [Partition-parallel whole-keyspace scans](#partition-parallel-whole-keyspace), 100k keys, 16 partitions | Serial merge: keys 36.990 ms/18.43 MB; entries 49.800 ms/24.50 MB | Parallel k-way merge: keys 8.722 ms/12.21 MB; entries 9.346 ms/15.62 MB | Keys 4.24x faster/1.51x lower heap; entries 5.33x faster/1.57x lower heap | Opt-in partition mode only; worker coordination adds 13/9 allocations |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
@@ -811,6 +812,53 @@ measures each partition and water-fills the configured global cap across the
 current hot-byte distribution, avoiding unnecessary spills under skew. Wire and
 persistent record formats are unchanged, and snapshots remain portable between
 partitioned and unpartitioned processes.
+
+<a id="partition-parallel-whole-keyspace"></a>
+#### Partition-Parallel Whole-Keyspace Operations
+
+The original partition implementation scanned all 16 child tries serially,
+concatenated their output, and globally sorted the complete result. The current
+path scans children concurrently up to `GOMAXPROCS`, requests sorted child
+results, preallocates the exact output size, and performs a deterministic k-way
+merge. Monitoring inventory and replication pages inherit the entry path.
+Independent Merkle rebuild, expiration cleanup, and memory compaction tasks use
+the same CPU-bounded worker. Snapshot and persistence capture use per-partition
+producers with one buffered entry each while retaining the all-partition lock
+barrier required for a point-in-time image.
+
+The fixture preloads 100,000 deterministic string keys across 16 local
+partitions. The serial controls reproduce the old child-scan plus global-sort
+implementation in the benchmark file; candidate rows call the public
+`Keys(true)` and `Entries(true)` paths. Results are seven-run medians on the
+Ryzen 9 5950X host.
+
+```sh
+make bench-partition-whole-keyspace PARTITION_SCAN_BENCH_KEYS=100000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Operation | Serial merge | Parallel k-way merge | Relative result |
+| --- | ---: | ---: | --- |
+| Sorted keys time | 36.990 ms | 8.722 ms | 4.24x faster |
+| Sorted keys cumulative heap | 18,432,704 B | 12,206,272 B | 1.51x lower |
+| Sorted keys allocations | 101,330 | 101,343 | 13 more (0.013%) |
+| Sorted entries time | 49.800 ms | 9.346 ms | 5.33x faster |
+| Sorted entries cumulative heap | 24,496,800 B | 15,616,048 B | 1.57x lower |
+| Sorted entries allocations | 101,333 | 101,342 | 9 more (0.009%) |
+
+Raw elapsed samples in milliseconds were:
+
+| Operation | Serial | Parallel |
+| --- | --- | --- |
+| Sorted keys | `35.694, 39.600, 36.819, 38.492, 36.990, 34.815, 37.191` | `11.347, 10.804, 8.568, 8.770, 8.592, 8.411, 8.722` |
+| Sorted entries | `41.913, 49.197, 48.966, 49.800, 50.500, 50.911, 50.031` | `9.783, 10.478, 9.346, 8.925, 9.293, 9.566, 9.237` |
+
+The full output is generated at
+`build/benchmarks/partition-whole-keyspace.txt`. Parallelism activates only when
+local partitions are explicitly enabled; `LOCAL_PARTITIONS=0` remains the sane
+default and has no worker overhead. The result ordering, snapshot bytes, wire
+encoding, and persistent layout are unchanged. The tradeoff is a transient
+worker/result slice per enabled partition and a negligible allocation-count
+increase in exchange for lower total allocation volume and much shorter scans.
 
 ### Durable Journal Group Commit
 

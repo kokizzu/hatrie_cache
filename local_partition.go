@@ -8,9 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -204,42 +206,151 @@ func laterTime(left time.Time, right time.Time) time.Time {
 	return left
 }
 
-func localPartitionKeys(set *localPartitionSet, prefix string, sortedKeys bool) ([]string, error) {
-	result := make([]string, 0)
-	for _, child := range set.tries {
-		keys, err := child.KeysWithPrefixChecked(prefix, false)
-		if err != nil {
-			return nil, err
+func runLocalPartitionTasks[T any](set *localPartitionSet, task func(*HatTrie) (T, error)) ([]T, error) {
+	results := make([]T, len(set.tries))
+	errs := make([]error, len(set.tries))
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(set.tries) {
+		workers = len(set.tries)
+	}
+	if workers <= 1 {
+		for index, child := range set.tries {
+			results[index], errs[index] = task(child)
 		}
-		result = append(result, keys...)
+	} else {
+		var next atomic.Uint32
+		var group sync.WaitGroup
+		work := func() {
+			defer group.Done()
+			for {
+				index := int(next.Add(1)) - 1
+				if index >= len(set.tries) {
+					return
+				}
+				results[index], errs[index] = task(set.tries[index])
+			}
+		}
+		group.Add(workers)
+		for worker := 1; worker < workers; worker++ {
+			go work()
+		}
+		work()
+		group.Wait()
+	}
+	for _, err := range errs {
+		if err != nil {
+			return results, err
+		}
+	}
+	return results, nil
+}
+
+func flattenLocalPartitionSlices[T any](partitions [][]T) []T {
+	total := 0
+	for _, values := range partitions {
+		total += len(values)
+	}
+	result := make([]T, 0, total)
+	for _, values := range partitions {
+		result = append(result, values...)
+	}
+	return result
+}
+
+type localPartitionMergeCursor struct {
+	partition int
+	offset    int
+	key       string
+}
+
+func mergeSortedLocalPartitionSlices[T any](partitions [][]T, key func(T) string) []T {
+	total := 0
+	cursors := make([]localPartitionMergeCursor, 0, len(partitions))
+	for partition, values := range partitions {
+		total += len(values)
+		if len(values) != 0 {
+			cursors = append(cursors, localPartitionMergeCursor{partition: partition, key: key(values[0])})
+		}
+	}
+	less := func(left int, right int) bool { return cursors[left].key < cursors[right].key }
+	swap := func(left int, right int) { cursors[left], cursors[right] = cursors[right], cursors[left] }
+	down := func(root int) {
+		for {
+			left := root*2 + 1
+			if left >= len(cursors) {
+				return
+			}
+			smallest := left
+			right := left + 1
+			if right < len(cursors) && less(right, left) {
+				smallest = right
+			}
+			if !less(smallest, root) {
+				return
+			}
+			swap(root, smallest)
+			root = smallest
+		}
+	}
+	for index := len(cursors)/2 - 1; index >= 0; index-- {
+		down(index)
+	}
+
+	result := make([]T, 0, total)
+	for len(cursors) != 0 {
+		cursor := cursors[0]
+		values := partitions[cursor.partition]
+		result = append(result, values[cursor.offset])
+		cursor.offset++
+		if cursor.offset < len(values) {
+			cursor.key = key(values[cursor.offset])
+			cursors[0] = cursor
+		} else {
+			last := len(cursors) - 1
+			cursors[0] = cursors[last]
+			cursors = cursors[:last]
+		}
+		if len(cursors) != 0 {
+			down(0)
+		}
+	}
+	return result
+}
+
+func localPartitionKeys(set *localPartitionSet, prefix string, sortedKeys bool) ([]string, error) {
+	partitions, err := runLocalPartitionTasks(set, func(child *HatTrie) ([]string, error) {
+		return child.KeysWithPrefixChecked(prefix, sortedKeys)
+	})
+	if err != nil {
+		return nil, err
 	}
 	if sortedKeys {
-		sort.Strings(result)
+		return mergeSortedLocalPartitionSlices(partitions, func(value string) string { return value }), nil
 	}
-	return result, nil
+	return flattenLocalPartitionSlices(partitions), nil
 }
 
 func localPartitionEntries(set *localPartitionSet, prefix string, sortedEntries bool) ([]Entry, error) {
-	result := make([]Entry, 0)
-	for _, child := range set.tries {
-		entries, err := child.EntriesWithPrefixChecked(prefix, false)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, entries...)
+	partitions, err := runLocalPartitionTasks(set, func(child *HatTrie) ([]Entry, error) {
+		return child.EntriesWithPrefixChecked(prefix, sortedEntries)
+	})
+	if err != nil {
+		return nil, err
 	}
 	if sortedEntries {
-		sort.Slice(result, func(left int, right int) bool { return result[left].Key < result[right].Key })
+		return mergeSortedLocalPartitionSlices(partitions, func(entry Entry) string { return entry.Key }), nil
 	}
-	return result, nil
+	return flattenLocalPartitionSlices(partitions), nil
 }
 
 func localPartitionMonitoringEntriesPage(set *localPartitionSet, prefix string, afterKey string, hasAfterKey bool, limit int) MonitoringEntriesResponse {
-	all := make([]MonitoringEntry, 0)
-	for _, child := range set.tries {
-		all = append(all, child.monitoringEntries(prefix)...)
+	partitions, err := runLocalPartitionTasks(set, func(child *HatTrie) ([]MonitoringEntry, error) {
+		return child.monitoringEntries(prefix), nil
+	})
+	if err != nil {
+		return MonitoringEntriesResponse{Entries: []MonitoringEntry{}}
 	}
-	sort.Slice(all, func(left int, right int) bool { return all[left].Key < all[right].Key })
+	all := mergeSortedLocalPartitionSlices(partitions, func(entry MonitoringEntry) string { return entry.Key })
 	response := MonitoringEntriesResponse{}
 	if limit > 0 {
 		response.Limit = uint64(limit)
@@ -373,29 +484,34 @@ func (ht *HatTrie) captureLocalPartitionEntries(currentStore *LevelDBStore, curr
 	return entries, sequence, err
 }
 
-type localPartitionScanItem struct {
+type localPartitionCapturedItem struct {
 	partition int
-	entry     Entry
+	entry     snapshotEntry
 }
 
-type localPartitionScanHeap []localPartitionScanItem
+type localPartitionCaptureHeap []localPartitionCapturedItem
 
-func (items localPartitionScanHeap) Len() int { return len(items) }
-func (items localPartitionScanHeap) Less(left int, right int) bool {
+func (items localPartitionCaptureHeap) Len() int { return len(items) }
+func (items localPartitionCaptureHeap) Less(left int, right int) bool {
 	return items[left].entry.Key < items[right].entry.Key
 }
-func (items localPartitionScanHeap) Swap(left int, right int) {
+func (items localPartitionCaptureHeap) Swap(left int, right int) {
 	items[left], items[right] = items[right], items[left]
 }
-func (items *localPartitionScanHeap) Push(value interface{}) {
-	*items = append(*items, value.(localPartitionScanItem))
+func (items *localPartitionCaptureHeap) Push(value interface{}) {
+	*items = append(*items, value.(localPartitionCapturedItem))
 }
-func (items *localPartitionScanHeap) Pop() interface{} {
+func (items *localPartitionCaptureHeap) Pop() interface{} {
 	old := *items
 	last := len(old) - 1
 	value := old[last]
 	*items = old[:last]
 	return value
+}
+
+type localPartitionCaptureResult struct {
+	entry snapshotEntry
+	err   error
 }
 
 func (ht *HatTrie) visitCapturedLocalPartitionEntries(currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier, visit func(snapshotEntry) error) (uint64, error) {
@@ -428,41 +544,93 @@ func (ht *HatTrie) visitCapturedLocalPartitionEntries(currentStore *LevelDBStore
 	}()
 
 	now := ht.currentTime()
-	scans := make([]*hatTrieScanCursor, len(set.tries))
-	defer func() {
-		for index, scan := range scans {
-			if scan != nil {
-				scan.closeLocked(set.tries[index])
-			}
-		}
-	}()
-	items := make(localPartitionScanHeap, 0, len(set.tries))
+	done := make(chan struct{})
+	concurrency := runtime.GOMAXPROCS(0)
+	if concurrency > len(set.tries) {
+		concurrency = len(set.tries)
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	tokens := make(chan struct{}, concurrency)
+	results := make([]chan localPartitionCaptureResult, len(set.tries))
+	var workers sync.WaitGroup
 	for index, child := range set.tries {
-		child.ensureOpen()
-		scan, err := child.newScanCursorLocked("", true)
-		if err != nil {
-			return 0, err
+		results[index] = make(chan localPartitionCaptureResult, 1)
+		workers.Add(1)
+		go func(child *HatTrie, output chan<- localPartitionCaptureResult) {
+			defer workers.Done()
+			defer close(output)
+			child.ensureOpen()
+			scan, err := child.newScanCursorLocked("", true)
+			if err != nil {
+				select {
+				case output <- localPartitionCaptureResult{err: err}:
+				case <-done:
+				}
+				return
+			}
+			defer scan.closeLocked(child)
+			for {
+				select {
+				case tokens <- struct{}{}:
+				case <-done:
+					return
+				}
+				entry, ok := scan.currentLiveEntryLocked(child, now)
+				var captured snapshotEntry
+				if ok {
+					captured, err = child.captureSnapshotEntryForStoreLocked(entry, currentStore, currentDB)
+				}
+				<-tokens
+				if err != nil {
+					select {
+					case output <- localPartitionCaptureResult{err: err}:
+					case <-done:
+					}
+					return
+				}
+				if !ok {
+					return
+				}
+				select {
+				case output <- localPartitionCaptureResult{entry: captured}:
+					scan.consume()
+				case <-done:
+					return
+				}
+			}
+		}(child, results[index])
+	}
+	defer func() {
+		close(done)
+		workers.Wait()
+	}()
+
+	items := make(localPartitionCaptureHeap, 0, len(set.tries))
+	for index, output := range results {
+		result, ok := <-output
+		if !ok {
+			continue
 		}
-		scans[index] = scan
-		if entry, ok := scan.currentLiveEntryLocked(child, now); ok {
-			heap.Push(&items, localPartitionScanItem{partition: index, entry: entry})
+		if result.err != nil {
+			return 0, result.err
 		}
+		heap.Push(&items, localPartitionCapturedItem{partition: index, entry: result.entry})
 	}
 	for len(items) > 0 {
-		item := heap.Pop(&items).(localPartitionScanItem)
-		child := set.tries[item.partition]
-		captured, err := child.captureSnapshotEntryForStoreLocked(item.entry, currentStore, currentDB)
-		if err != nil {
+		item := heap.Pop(&items).(localPartitionCapturedItem)
+		if err := visit(item.entry); err != nil {
 			return 0, err
 		}
-		if err := visit(captured); err != nil {
-			return 0, err
+		result, ok := <-results[item.partition]
+		if !ok {
+			continue
 		}
-		scan := scans[item.partition]
-		scan.consume()
-		if entry, ok := scan.currentLiveEntryLocked(child, now); ok {
-			heap.Push(&items, localPartitionScanItem{partition: item.partition, entry: entry})
+		if result.err != nil {
+			return 0, result.err
 		}
+		heap.Push(&items, localPartitionCapturedItem{partition: item.partition, entry: result.entry})
 	}
 	return sequence, nil
 }

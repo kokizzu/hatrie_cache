@@ -3032,9 +3032,12 @@ func (ht *HatTrie) VacuumExpired() int {
 		return 0
 	}
 	if partitions := ht.localPartitionSet(); partitions != nil {
+		results, _ := runLocalPartitionTasks(partitions, func(child *HatTrie) (int, error) {
+			return child.VacuumExpired(), nil
+		})
 		removed := 0
-		for _, child := range partitions.tries {
-			removed += child.VacuumExpired()
+		for _, count := range results {
+			removed += count
 		}
 		return removed
 	}
@@ -3098,8 +3101,11 @@ func (ht *HatTrie) StartExpirationCleanerContext(ctx context.Context, interval t
 
 func (ht *HatTrie) vacuumExpiredIfOpen() bool {
 	if partitions := ht.localPartitionSet(); partitions != nil {
-		for _, child := range partitions.tries {
-			if !child.vacuumExpiredIfOpen() {
+		results, _ := runLocalPartitionTasks(partitions, func(child *HatTrie) (bool, error) {
+			return child.vacuumExpiredIfOpen(), nil
+		})
+		for _, open := range results {
+			if !open {
 				return false
 			}
 		}
@@ -3197,8 +3203,11 @@ func (ht *HatTrie) vacuumExpiredOnMemoryPressureIfOpen(maxAllocBytes uint64) boo
 		if mem.Alloc < maxAllocBytes {
 			return true
 		}
-		for _, child := range partitions.tries {
-			if !child.vacuumExpiredIfOpen() {
+		results, _ := runLocalPartitionTasks(partitions, func(child *HatTrie) (bool, error) {
+			return child.vacuumExpiredIfOpen(), nil
+		})
+		for _, open := range results {
+			if !open {
 				return false
 			}
 		}

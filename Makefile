@@ -112,7 +112,9 @@ PEBBLE_BACKUP_BENCH ?= ^BenchmarkPebbleCheckpointBackup10k$$
 INCREMENTAL_BACKUP_BENCH ?= ^BenchmarkIncrementalBackupRepository10k$$
 ATOMIC_RESTORE_BENCH ?= ^BenchmarkSinglePassAtomicRestore10k$$
 CHECKPOINT_BOOTSTRAP_BENCH ?= ^BenchmarkCheckpointReplicaBootstrap10k$$
+PARTITION_WHOLE_KEYSPACE_BENCH ?= ^BenchmarkLocalPartitionWholeKeyspace100k$$
 BACKUP_BENCH_KEYS ?= 10000
+PARTITION_SCAN_BENCH_KEYS ?= 100000
 COLD_HYDRATION_BENCH ?= ^BenchmarkColdReferenceParallelHydration32$$
 REFERENCE_SLAB_BENCH ?= ^BenchmarkLevelDBReferenceRetainedMemory100k$$
 NATIVE_COMMAND_BATCH_BENCH ?= ^BenchmarkNativeCScalarBatch4096$$
@@ -167,7 +169,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-cold-hydration bench-reference-slab bench-native-command-batch bench-scalar-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-partition-whole-keyspace bench-cold-hydration bench-reference-slab bench-native-command-batch bench-scalar-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -257,6 +259,9 @@ bench-atomic-restore:
 
 bench-checkpoint-bootstrap:
 	CHECKPOINT_BOOTSTRAP_BENCH='$(CHECKPOINT_BOOTSTRAP_BENCH)' BACKUP_BENCH_KEYS='$(BACKUP_BENCH_KEYS)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-checkpoint-bootstrap.sh
+
+bench-partition-whole-keyspace:
+	PARTITION_WHOLE_KEYSPACE_BENCH='$(PARTITION_WHOLE_KEYSPACE_BENCH)' PARTITION_SCAN_BENCH_KEYS='$(PARTITION_SCAN_BENCH_KEYS)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-partition-whole-keyspace.sh
 
 bench-cold-hydration:
 	COLD_HYDRATION_BENCH='$(COLD_HYDRATION_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-cold-hydration.sh

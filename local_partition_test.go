@@ -1,12 +1,17 @@
 package hatriecache
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -89,6 +94,67 @@ func TestLocalPartitionsRouteBasicOperationsAndMergeScans(t *testing.T) {
 	}
 }
 
+func TestRunLocalPartitionTasksRunsConcurrentlyAndPreservesOrder(t *testing.T) {
+	previousProcs := runtime.GOMAXPROCS(8)
+	defer runtime.GOMAXPROCS(previousProcs)
+
+	trie := newTestTrie(t)
+	if err := trie.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	set := trie.localPartitionSet()
+	indexes := make(map[*HatTrie]int, len(set.tries))
+	for index, child := range set.tries {
+		indexes[child] = index
+	}
+	started := make(chan struct{}, len(set.tries))
+	release := make(chan struct{})
+	type taskResult struct {
+		values []int
+		err    error
+	}
+	done := make(chan taskResult, 1)
+	go func() {
+		values, err := runLocalPartitionTasks(set, func(child *HatTrie) (int, error) {
+			started <- struct{}{}
+			<-release
+			return indexes[child], nil
+		})
+		done <- taskResult{values: values, err: err}
+	}()
+	for range set.tries {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatal("partition tasks did not run concurrently")
+		}
+	}
+	close(release)
+	result := <-done
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	for index, value := range result.values {
+		if value != index {
+			t.Fatalf("result %d = %d, want stable partition order", index, value)
+		}
+	}
+
+	wantErr := fmt.Errorf("partition task failed")
+	var calls atomic.Int32
+	_, err := runLocalPartitionTasks(set, func(child *HatTrie) (int, error) {
+		calls.Add(1)
+		if indexes[child] == 3 {
+			return 0, wantErr
+		}
+		return indexes[child], nil
+	})
+	if err != wantErr || calls.Load() != int32(len(set.tries)) {
+		t.Fatalf("task error/calls = %v/%d", err, calls.Load())
+	}
+}
+
 func TestLocalPartitionsExecuteCommandsAndCrossPartitionBatchInOrder(t *testing.T) {
 	trie := newTestTrie(t)
 	if err := trie.ConfigureLocalPartitions(16); err != nil {
@@ -148,6 +214,85 @@ func TestLocalPartitionsSnapshotRoundTripRemainsPortable(t *testing.T) {
 		t.Fatalf("plain LoadSnapshot() error = %v", err)
 	}
 	assertLocalPartitionSnapshotValues(t, plain)
+}
+
+func TestLocalPartitionWholeKeyspaceOperationsRemainDeterministic(t *testing.T) {
+	trie := newTestTrie(t)
+	if err := trie.ConfigureLocalPartitions(16); err != nil {
+		t.Fatal(err)
+	}
+
+	wantKeys := make([]string, 0, 4096)
+	wantValues := make(map[string]string, 4096)
+	for index := 0; index < 4096; index++ {
+		key := fmt.Sprintf("whole:%06d", index)
+		value := "value-" + strconv.Itoa(index)
+		trie.UpsertString(key, value)
+		wantKeys = append(wantKeys, key)
+		wantValues[key] = value
+	}
+
+	if got := trie.Keys(true); !reflect.DeepEqual(got, wantKeys) {
+		t.Fatalf("Keys(true) mismatch: got %d keys, want %d", len(got), len(wantKeys))
+	}
+	entries := trie.Entries(true)
+	if len(entries) != len(wantKeys) {
+		t.Fatalf("Entries(true) returned %d entries, want %d", len(entries), len(wantKeys))
+	}
+	for index, entry := range entries {
+		if entry.Key != wantKeys[index] || trie.GetString(entry.Key) != wantValues[entry.Key] {
+			t.Fatalf("entry %d = %#v", index, entry)
+		}
+	}
+	prefixed, err := trie.KeysWithPrefixChecked("whole:001", true)
+	if err != nil || len(prefixed) != 1000 || prefixed[0] != "whole:001000" || prefixed[len(prefixed)-1] != "whole:001999" {
+		t.Fatalf("prefixed keys = %d/%v", len(prefixed), err)
+	}
+
+	var monitored []string
+	afterKey := ""
+	hasAfterKey := false
+	for {
+		page := trie.monitoringEntriesPage("whole:", afterKey, hasAfterKey, 127)
+		for _, entry := range page.Entries {
+			monitored = append(monitored, entry.Key)
+		}
+		if !page.HasMore {
+			break
+		}
+		afterKey = page.NextAfterKey
+		hasAfterKey = true
+	}
+	if !reflect.DeepEqual(monitored, wantKeys) {
+		t.Fatalf("monitoring pagination returned %d keys, want %d", len(monitored), len(wantKeys))
+	}
+
+	firstPath := filepath.Join(t.TempDir(), "first.snapshot")
+	secondPath := filepath.Join(t.TempDir(), "second.snapshot")
+	if err := trie.SaveSnapshotWithFormat(firstPath, SnapshotFormatBinary); err != nil {
+		t.Fatal(err)
+	}
+	if err := trie.SaveSnapshotWithFormat(secondPath, SnapshotFormatBinary); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(secondPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("unchanged partitioned snapshots are not byte-stable")
+	}
+	restored := newTestTrie(t)
+	if err := restored.LoadSnapshot(firstPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := restored.Keys(true); !reflect.DeepEqual(got, wantKeys) {
+		t.Fatalf("portable snapshot restored %d keys, want %d", len(got), len(wantKeys))
+	}
 }
 
 func TestLocalPartitionsPebbleRoundTrip(t *testing.T) {

@@ -347,11 +347,13 @@ func (ht *HatTrie) replicationMerkleSnapshot() (replicationMerkleSnapshot, error
 	}
 	if partitions := ht.localPartitionSet(); partitions != nil {
 		var combined replicationMerkleSnapshot
-		for _, child := range partitions.tries {
-			snapshot, err := child.replicationMerkleSnapshot()
-			if err != nil {
-				return replicationMerkleSnapshot{}, err
-			}
+		snapshots, err := runLocalPartitionTasks(partitions, func(child *HatTrie) (replicationMerkleSnapshot, error) {
+			return child.replicationMerkleSnapshot()
+		})
+		if err != nil {
+			return replicationMerkleSnapshot{}, err
+		}
+		for _, snapshot := range snapshots {
 			combined.count += snapshot.count
 			for bucket := range combined.leaves {
 				combined.leaves[bucket].xor ^= snapshot.leaves[bucket].xor

@@ -675,10 +675,23 @@ failover, or backup boundaries.
 
 The option must be configured before data is loaded and cannot be changed on a
 nonempty cache. It adds one C trie and typed backing set per partition, and
-whole-keyspace operations still visit every partition. The measured 100,000
-write fixture is 2.24x faster at 16 workers, while separate-process maximum RSS
-rose from 51,588 KiB to 54,096 KiB. See
-[BENCHMARK.md](BENCHMARK.md#local-hat-trie-partitions).
+whole-keyspace operations still visit every partition. When enabled, key and
+entry scans collect partitions concurrently up to `GOMAXPROCS`, sort each child
+locally, and perform a deterministic k-way merge. Monitoring inventory,
+replication scans, Merkle rebuilds, expiration cleanup, and memory compaction use
+the same independent partition parallelism. Snapshot and persistence capture
+keep all child locks for one point-in-time image but use one bounded producer per
+partition, with capture work limited to `GOMAXPROCS` and one buffered entry per
+partition.
+
+The measured 100,000-write fixture is 2.24x faster at 16 workers, while
+separate-process maximum RSS rose from 51,588 KiB to 54,096 KiB. On a 100,000-key
+whole-keyspace fixture, parallel sorted-key collection is 4.24x faster with
+1.51x lower cumulative heap, and sorted-entry collection is 5.33x faster with
+1.57x lower cumulative heap. Allocation counts are effectively flat and wire
+and storage formats do not change. See
+[BENCHMARK.md](BENCHMARK.md#local-hat-trie-partitions) and
+[BENCHMARK.md](BENCHMARK.md#partition-parallel-whole-keyspace).
 
 Existing non-TTL counters can opt into striped concurrent updates. The default
 is `0` (off). Use a power of two from 2 through 256; 64 is the measured general
