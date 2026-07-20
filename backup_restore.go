@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	json "github.com/goccy/go-json"
 )
 
 type BackupBundleRestoreOptions struct {
@@ -19,7 +17,10 @@ type BackupBundleRestoreReport struct {
 	OK                  bool                       `json:"ok"`
 	Bundle              string                     `json:"bundle"`
 	DataDir             string                     `json:"data_dir"`
+	Mode                BackupMode                 `json:"mode,omitempty"`
 	Snapshot            string                     `json:"snapshot"`
+	Store               string                     `json:"store,omitempty"`
+	StorageBackend      string                     `json:"storage_backend,omitempty"`
 	Journal             string                     `json:"journal,omitempty"`
 	Partition           *BackupPartitionMetadata   `json:"partition,omitempty"`
 	PartitionValidation *BackupPartitionValidation `json:"partition_validation,omitempty"`
@@ -71,29 +72,12 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if dataDir == "" {
 		return BackupBundleRestoreReport{}, errors.New("hatriecache: restore data dir is required")
 	}
-	files, err := readBackupBundle(bundlePath)
+	manifest, err := readBackupBundleManifest(bundlePath)
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	manifestData, ok := files[backupBundleManifestPath]
-	if !ok {
-		return BackupBundleRestoreReport{}, errors.New("hatriecache: backup bundle missing manifest.json")
-	}
-	var manifest BackupBundleManifest
-	if err := json.Unmarshal(manifestData, &manifest); err != nil {
-		return BackupBundleRestoreReport{}, err
-	}
-	if manifest.Version != BackupBundleVersion {
-		return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: unsupported backup bundle version %d", manifest.Version)
-	}
-	for _, file := range manifest.Files {
-		data, ok := files[file.Path]
-		if !ok {
-			return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: backup bundle missing %s", file.Path)
-		}
-		if err := verifyBackupFileChecksum(file, data); err != nil {
-			return BackupBundleRestoreReport{}, err
-		}
+	if backupBundleManifestMode(manifest) == BackupModePebbleCheckpoint {
+		return restorePebbleCheckpointBundle(bundlePath, dataDir, options, manifest)
 	}
 	doctor, err := VerifyBackupBundle(bundlePath)
 	if err != nil {
@@ -102,30 +86,51 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if err := ensureRestoreDataDir(dataDir, options.Overwrite); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	snapshotData, ok := files[manifest.Snapshot]
-	if !ok {
-		return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: backup bundle missing %s", manifest.Snapshot)
-	}
-	snapshotPath := filepath.Join(dataDir, backupBundleSnapshotPath)
-	if err := os.WriteFile(snapshotPath, snapshotData, 0o600); err != nil {
+	if err := extractBackupBundleFiles(bundlePath, dataDir, manifest.Files); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
+	snapshotPath := filepath.Join(dataDir, filepath.FromSlash(manifest.Snapshot))
 	journalPath := ""
 	if manifest.Journal != "" {
-		journalData, ok := files[manifest.Journal]
-		if !ok {
-			return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: backup bundle missing %s", manifest.Journal)
-		}
-		journalPath = filepath.Join(dataDir, backupBundleJournalPath)
-		if err := os.WriteFile(journalPath, journalData, 0o600); err != nil {
-			return BackupBundleRestoreReport{}, err
-		}
+		journalPath = filepath.Join(dataDir, filepath.FromSlash(manifest.Journal))
 	}
 	return BackupBundleRestoreReport{
 		OK:                  true,
 		Bundle:              bundlePath,
 		DataDir:             dataDir,
+		Mode:                backupBundleManifestMode(manifest),
 		Snapshot:            snapshotPath,
+		Journal:             journalPath,
+		Partition:           cloneBackupPartitionMetadata(manifest.Partition),
+		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),
+		JournalSequence:     manifest.JournalSequence,
+		RecoveredKeys:       doctor.RecoveredKeys,
+	}, nil
+}
+
+func restorePebbleCheckpointBundle(bundlePath string, dataDir string, options BackupBundleRestoreOptions, manifest BackupBundleManifest) (BackupBundleRestoreReport, error) {
+	doctor, err := VerifyBackupBundle(bundlePath)
+	if err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	if err := ensureRestoreDataDir(dataDir, options.Overwrite); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	if err := extractBackupBundleFiles(bundlePath, dataDir, manifest.Files); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	storePath := filepath.Join(dataDir, filepath.FromSlash(manifest.Store))
+	journalPath := ""
+	if manifest.Journal != "" {
+		journalPath = filepath.Join(dataDir, filepath.FromSlash(manifest.Journal))
+	}
+	return BackupBundleRestoreReport{
+		OK:                  true,
+		Bundle:              bundlePath,
+		DataDir:             dataDir,
+		Mode:                BackupModePebbleCheckpoint,
+		Store:               storePath,
+		StorageBackend:      manifest.StorageBackend,
 		Journal:             journalPath,
 		Partition:           cloneBackupPartitionMetadata(manifest.Partition),
 		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),
@@ -203,6 +208,13 @@ func ensureRestoreDataDir(path string, overwrite bool) error {
 	}
 	if len(entries) > 0 && !overwrite {
 		return fmt.Errorf("hatriecache: restore data dir is not empty: %s", path)
+	}
+	if overwrite {
+		for _, entry := range entries {
+			if err := os.RemoveAll(filepath.Join(path, entry.Name())); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

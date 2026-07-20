@@ -2,7 +2,6 @@ package hatriecache
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 
@@ -63,6 +63,7 @@ type BackupPartitionValidation struct {
 }
 
 const backupPartitionInvalidKeySampleLimit = 8
+const maxBackupBundleManifestBytes = 1 << 20
 
 func VerifyBackupPath(path string) (BackupDoctorReport, error) {
 	path = strings.TrimSpace(path)
@@ -80,31 +81,28 @@ func VerifyBackupPath(path string) (BackupDoctorReport, error) {
 }
 
 func VerifyBackupBundle(path string) (BackupDoctorReport, error) {
-	files, err := readBackupBundle(path)
+	manifest, err := readBackupBundleManifest(path)
 	if err != nil {
 		return BackupDoctorReport{}, err
 	}
-	manifestData, ok := files[backupBundleManifestPath]
-	if !ok {
-		return BackupDoctorReport{}, errors.New("hatriecache: backup bundle missing manifest.json")
+	if backupBundleManifestMode(manifest) == BackupModePebbleCheckpoint {
+		return verifyPebbleCheckpointBundle(path, manifest)
 	}
-	var manifest BackupBundleManifest
-	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+	return verifySnapshotBackupBundle(path, manifest)
+}
+
+func verifySnapshotBackupBundle(path string, manifest BackupBundleManifest) (BackupDoctorReport, error) {
+	if manifest.Snapshot == "" {
+		return BackupDoctorReport{}, errors.New("hatriecache: backup bundle manifest missing snapshot")
+	}
+	tmpDir, err := os.MkdirTemp(filepath.Dir(path), filepath.Base(path)+".verify-*")
+	if err != nil {
 		return BackupDoctorReport{}, err
 	}
-	if manifest.Version != BackupBundleVersion {
-		return BackupDoctorReport{}, fmt.Errorf("hatriecache: unsupported backup bundle version %d", manifest.Version)
+	defer os.RemoveAll(tmpDir)
+	if err := extractBackupBundleFiles(path, tmpDir, manifest.Files); err != nil {
+		return BackupDoctorReport{}, err
 	}
-	for _, file := range manifest.Files {
-		data, ok := files[file.Path]
-		if !ok {
-			return BackupDoctorReport{}, fmt.Errorf("hatriecache: backup bundle missing %s", file.Path)
-		}
-		if err := verifyBackupFileChecksum(file, data); err != nil {
-			return BackupDoctorReport{}, err
-		}
-	}
-
 	report := BackupDoctorReport{
 		OK:              true,
 		Kind:            "bundle",
@@ -115,18 +113,12 @@ func VerifyBackupBundle(path string) (BackupDoctorReport, error) {
 	}
 	trie := CreateHatTrie()
 	defer trie.Destroy()
-	if manifest.Snapshot == "" {
-		return BackupDoctorReport{}, errors.New("hatriecache: backup bundle manifest missing snapshot")
-	}
-	snapshotData, ok := files[manifest.Snapshot]
-	if !ok {
-		return BackupDoctorReport{}, fmt.Errorf("hatriecache: backup bundle missing %s", manifest.Snapshot)
-	}
-	snapshotReport, err := verifySnapshotBytes(trie, manifest.Snapshot, snapshotData)
+	snapshotPath := filepath.Join(tmpDir, filepath.FromSlash(manifest.Snapshot))
+	metadata, err := trie.LoadSnapshotWithMetadata(snapshotPath)
 	if err != nil {
 		return BackupDoctorReport{}, err
 	}
-	report.Snapshot = &snapshotReport
+	report.Snapshot = &BackupDoctorSnapshot{Path: manifest.Snapshot, OK: true, Keys: trie.Size(), JournalSequence: metadata.JournalSequence}
 	report.RecoveredKeys = trie.Size()
 	partitionValidation, err := validateBackupPartitionMetadataAgainstTrie(trie, manifest.Partition)
 	if partitionValidation != nil {
@@ -138,11 +130,8 @@ func VerifyBackupBundle(path string) (BackupDoctorReport, error) {
 	}
 
 	if manifest.Journal != "" {
-		journalData, ok := files[manifest.Journal]
-		if !ok {
-			return BackupDoctorReport{}, fmt.Errorf("hatriecache: backup bundle missing %s", manifest.Journal)
-		}
-		journalReport, entries, err := verifyJournalBytes(manifest.Journal, journalData)
+		journalPath := filepath.Join(tmpDir, filepath.FromSlash(manifest.Journal))
+		journalReport, entries, err := verifyJournalFileWithEntries(manifest.Journal, journalPath)
 		if err != nil {
 			return BackupDoctorReport{}, err
 		}
@@ -157,6 +146,215 @@ func VerifyBackupBundle(path string) (BackupDoctorReport, error) {
 		}
 	}
 	return report, nil
+}
+
+func backupBundleManifestMode(manifest BackupBundleManifest) BackupMode {
+	if manifest.Mode == "" {
+		return BackupModeSnapshot
+	}
+	return manifest.Mode
+}
+
+func readBackupBundleManifest(bundlePath string) (BackupBundleManifest, error) {
+	file, err := os.Open(bundlePath)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	defer gzipReader.Close()
+	tarReader := tar.NewReader(gzipReader)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			return BackupBundleManifest{}, errors.New("hatriecache: backup bundle missing manifest.json")
+		}
+		if err != nil {
+			return BackupBundleManifest{}, err
+		}
+		if header.Name != backupBundleManifestPath || header.Typeflag != tar.TypeReg {
+			continue
+		}
+		if header.Size < 0 || header.Size > maxBackupBundleManifestBytes {
+			return BackupBundleManifest{}, errors.New("hatriecache: backup bundle manifest is too large")
+		}
+		data, err := io.ReadAll(io.LimitReader(tarReader, maxBackupBundleManifestBytes+1))
+		if err != nil {
+			return BackupBundleManifest{}, err
+		}
+		var manifest BackupBundleManifest
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return BackupBundleManifest{}, err
+		}
+		if manifest.Version != BackupBundleVersion {
+			return BackupBundleManifest{}, fmt.Errorf("hatriecache: unsupported backup bundle version %d", manifest.Version)
+		}
+		return manifest, nil
+	}
+}
+
+func verifyPebbleCheckpointBundle(bundlePath string, manifest BackupBundleManifest) (BackupDoctorReport, error) {
+	if manifest.Store != backupBundleStorePath || manifest.StorageBackend != string(StorageBackendPebble) {
+		return BackupDoctorReport{}, errors.New("hatriecache: invalid Pebble checkpoint manifest")
+	}
+	format, err := ParseStorageFormat(manifest.StorageFormat)
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
+	tmpDir, err := os.MkdirTemp(filepath.Dir(bundlePath), filepath.Base(bundlePath)+".verify-*")
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := extractBackupBundleFiles(bundlePath, tmpDir, manifest.Files); err != nil {
+		return BackupDoctorReport{}, err
+	}
+	storePath := filepath.Join(tmpDir, filepath.FromSlash(manifest.Store))
+	store, err := OpenPersistentStoreWithFormat(storePath, StorageBackendPebble, format)
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
+	defer store.Close()
+	trie := CreateHatTrie()
+	defer trie.Destroy()
+	count, err := store.Load(trie)
+	if err != nil {
+		return BackupDoctorReport{}, err
+	}
+	report := BackupDoctorReport{
+		OK:              true,
+		Kind:            "bundle",
+		Path:            bundlePath,
+		LevelDB:         &BackupDoctorLevelDB{Path: manifest.Store, Backend: manifest.StorageBackend, OK: true, Keys: count},
+		Files:           manifest.Files,
+		Partition:       cloneBackupPartitionMetadata(manifest.Partition),
+		RecoveredKeys:   trie.Size(),
+		JournalSequence: manifest.JournalSequence,
+	}
+	partitionValidation, err := validateBackupPartitionMetadataAgainstTrie(trie, manifest.Partition)
+	if partitionValidation != nil {
+		report.PartitionValidation = partitionValidation
+	}
+	if err != nil {
+		report.OK = false
+		return report, err
+	}
+	if manifest.Journal != "" {
+		journalPath := filepath.Join(tmpDir, filepath.FromSlash(manifest.Journal))
+		journalReport, entries, err := verifyJournalFileWithEntries(manifest.Journal, journalPath)
+		if err != nil {
+			return BackupDoctorReport{}, err
+		}
+		report.Journal = &journalReport
+		partitionValidation, err = validateBackupPartitionMetadataAgainstJournalEntries(report.PartitionValidation, entries, manifest.Partition)
+		if partitionValidation != nil {
+			report.PartitionValidation = partitionValidation
+		}
+		if err != nil {
+			report.OK = false
+			return report, err
+		}
+	}
+	return report, nil
+}
+
+func extractBackupBundleFiles(bundlePath string, destination string, declared []BackupBundleFile) error {
+	expected := make(map[string]BackupBundleFile, len(declared))
+	for _, file := range declared {
+		clean, err := cleanBackupBundlePath(file.Path)
+		if err != nil {
+			return err
+		}
+		if clean == backupBundleManifestPath {
+			return errors.New("hatriecache: backup manifest must not declare itself as a payload")
+		}
+		if _, exists := expected[clean]; exists {
+			return fmt.Errorf("hatriecache: duplicate backup file declaration %s", clean)
+		}
+		expected[clean] = file
+	}
+	if err := os.MkdirAll(destination, 0o700); err != nil {
+		return err
+	}
+	archive, err := os.Open(bundlePath)
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	gzipReader, err := gzip.NewReader(archive)
+	if err != nil {
+		return err
+	}
+	defer gzipReader.Close()
+	tarReader := tar.NewReader(gzipReader)
+	seen := make(map[string]struct{}, len(expected))
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		clean, err := cleanBackupBundlePath(header.Name)
+		if err != nil {
+			return err
+		}
+		if clean == backupBundleManifestPath {
+			continue
+		}
+		declaration, ok := expected[clean]
+		if !ok {
+			return fmt.Errorf("hatriecache: backup bundle contains undeclared file %s", clean)
+		}
+		if header.Typeflag != tar.TypeReg {
+			return fmt.Errorf("hatriecache: backup bundle payload %s is not a regular file", clean)
+		}
+		if _, duplicate := seen[clean]; duplicate {
+			return fmt.Errorf("hatriecache: backup bundle contains duplicate file %s", clean)
+		}
+		seen[clean] = struct{}{}
+		target := filepath.Join(destination, filepath.FromSlash(clean))
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		hash := sha256.New()
+		size, copyErr := io.Copy(io.MultiWriter(output, hash), tarReader)
+		closeErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if size != declaration.Size || hex.EncodeToString(hash.Sum(nil)) != declaration.SHA256 {
+			return fmt.Errorf("hatriecache: backup file checksum mismatch for %s", clean)
+		}
+	}
+	for name := range expected {
+		if _, ok := seen[name]; !ok {
+			return fmt.Errorf("hatriecache: backup bundle missing %s", name)
+		}
+	}
+	return nil
+}
+
+func cleanBackupBundlePath(name string) (string, error) {
+	if strings.Contains(name, "\\") {
+		return "", fmt.Errorf("hatriecache: invalid backup bundle path %q", name)
+	}
+	clean := pathpkg.Clean(name)
+	if clean == "." || clean != name || strings.HasPrefix(clean, "/") || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("hatriecache: invalid backup bundle path %q", name)
+	}
+	return clean, nil
 }
 
 func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
@@ -238,47 +436,6 @@ func VerifyBackupDirectory(path string) (BackupDoctorReport, error) {
 		report.RecoveredKeys = trie.Size()
 	}
 	return report, nil
-}
-
-func readBackupBundle(path string) (map[string][]byte, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	gzipReader, err := gzip.NewReader(file)
-	if err != nil {
-		return nil, err
-	}
-	defer gzipReader.Close()
-	tarReader := tar.NewReader(gzipReader)
-	files := map[string][]byte{}
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		if header.Typeflag != tar.TypeReg {
-			continue
-		}
-		data, err := io.ReadAll(tarReader)
-		if err != nil {
-			return nil, err
-		}
-		files[header.Name] = data
-	}
-	return files, nil
-}
-
-func verifyBackupFileChecksum(file BackupBundleFile, data []byte) error {
-	sum := sha256.Sum256(data)
-	if file.Size != int64(len(data)) || file.SHA256 != hex.EncodeToString(sum[:]) {
-		return fmt.Errorf("hatriecache: backup file checksum mismatch for %s", file.Path)
-	}
-	return nil
 }
 
 func validateBackupPartitionMetadataAgainstTrie(trie *HatTrie, partition *BackupPartitionMetadata) (*BackupPartitionValidation, error) {
@@ -375,46 +532,6 @@ func cloneBackupPartitionValidation(input *BackupPartitionValidation) *BackupPar
 	out.InvalidKeySamples = append([]string(nil), input.InvalidKeySamples...)
 	out.InvalidJournalKeySamples = append([]string(nil), input.InvalidJournalKeySamples...)
 	return &out
-}
-
-func verifySnapshotBytes(trie *HatTrie, name string, data []byte) (BackupDoctorSnapshot, error) {
-	path := filepath.Join(os.TempDir(), "hatrie-cache-doctor-snapshot-*")
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path))
-	if err != nil {
-		return BackupDoctorSnapshot{}, err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return BackupDoctorSnapshot{}, err
-	}
-	if err := tmp.Close(); err != nil {
-		return BackupDoctorSnapshot{}, err
-	}
-	metadata, err := trie.LoadSnapshotWithMetadata(tmpPath)
-	if err != nil {
-		return BackupDoctorSnapshot{}, err
-	}
-	return BackupDoctorSnapshot{Path: name, OK: true, Keys: trie.Size(), JournalSequence: metadata.JournalSequence}, nil
-}
-
-func verifyJournalBytes(name string, data []byte) (BackupDoctorJournal, []commandJournalEntry, error) {
-	tmp, err := os.CreateTemp("", "hatrie-cache-doctor-journal-*")
-	if err != nil {
-		return BackupDoctorJournal{}, nil, err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := io.Copy(tmp, bytes.NewReader(data)); err != nil {
-		_ = tmp.Close()
-		return BackupDoctorJournal{}, nil, err
-	}
-	if err := tmp.Close(); err != nil {
-		return BackupDoctorJournal{}, nil, err
-	}
-	report, entries, err := verifyJournalFileWithEntries(name, tmpPath)
-	return report, entries, err
 }
 
 func verifyJournalFile(displayPath string, path string) (BackupDoctorJournal, error) {

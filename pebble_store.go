@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -115,6 +116,31 @@ func (store *PebbleStore) Close() error {
 
 func (store *PebbleStore) Save(trie *HatTrie) error {
 	return store.saveGeneration(trie)
+}
+
+// SaveCheckpoint atomically persists the current trie as a complete Pebble
+// generation and creates a self-contained file-level checkpoint directory.
+func (store *PebbleStore) SaveCheckpoint(trie *HatTrie, destination string) error {
+	if trie == nil {
+		return ErrNilHatTrie
+	}
+	if strings.TrimSpace(destination) == "" {
+		return errors.New("hatriecache: pebble checkpoint path is required")
+	}
+	store.saveMu.Lock()
+	defer store.saveMu.Unlock()
+	if err := store.saveGenerationLocked(trie); err != nil {
+		return err
+	}
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := compactPebbleGenerations(db, store.activeGeneration, LevelDBCompactionOptions{}); err != nil {
+		return err
+	}
+	return db.Checkpoint(destination, pebble.WithFlushedWAL())
 }
 
 func (store *PebbleStore) SaveKeys(trie *HatTrie, keys []string) error {

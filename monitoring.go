@@ -146,6 +146,7 @@ type journalPullRequest struct {
 
 type backupBundleRequest struct {
 	Path           string                  `json:"path"`
+	Mode           string                  `json:"mode,omitempty"`
 	SnapshotFormat string                  `json:"snapshot_format,omitempty"`
 	Partition      BackupPartitionMetadata `json:"partition,omitempty"`
 }
@@ -1506,16 +1507,23 @@ func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Re
 		}
 		format = parsed
 	}
+	mode, err := ParseBackupMode(request.Mode)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
 	manifest, err := CreateBackupBundle(request.Path, handler.trie, handler.options.Journal, BackupBundleOptions{
-		SnapshotFormat: format,
-		Partition:      request.Partition,
+		SnapshotFormat:  format,
+		Partition:       request.Partition,
+		Mode:            mode,
+		PersistentStore: handler.options.LevelDBStore,
 	})
 	if err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "backup", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"path": request.Path}})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
 	}
-	handler.auditHTTP(r, AuditEvent{Action: "backup", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"path": request.Path, "snapshot_format": manifest.SnapshotFormat, "journal_sequence": manifest.JournalSequence}})
+	handler.auditHTTP(r, AuditEvent{Action: "backup", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"path": request.Path, "mode": manifest.Mode, "snapshot_format": manifest.SnapshotFormat, "journal_sequence": manifest.JournalSequence}})
 	writeJSON(w, manifest)
 }
 

@@ -92,6 +92,112 @@ func TestCreateBackupBundleRejectsMissingPath(t *testing.T) {
 	}
 }
 
+func TestCreateBackupBundleCreatesPebbleCheckpointAndRestores(t *testing.T) {
+	trie := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	if response := journal.ExecuteCommand(trie, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !response.OK {
+		t.Fatalf("SETSTR response = %#v", response)
+	}
+	if response := journal.ExecuteCommand(trie, CacheCommandRequest{Command: "SETINT", Key: "count", Value: "42"}); !response.OK {
+		t.Fatalf("SETINT response = %#v", response)
+	}
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "live.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	manifest, err := CreateBackupBundle(bundlePath, trie, journal, BackupBundleOptions{
+		Mode:            BackupModePebbleCheckpoint,
+		PersistentStore: store,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackupBundle() error = %v", err)
+	}
+	if manifest.Mode != BackupModePebbleCheckpoint || manifest.Snapshot != "" || manifest.Store != backupBundleStorePath || manifest.StorageBackend != string(StorageBackendPebble) || manifest.JournalSequence != 2 || manifest.Journal != backupBundleJournalPath {
+		t.Fatalf("checkpoint manifest = %#v", manifest)
+	}
+	foundCurrent := false
+	for _, file := range manifest.Files {
+		if file.Path == filepath.ToSlash(filepath.Join(backupBundleStorePath, "CURRENT")) {
+			foundCurrent = true
+		}
+	}
+	if !foundCurrent {
+		t.Fatalf("checkpoint manifest files = %#v, want CURRENT", manifest.Files)
+	}
+
+	doctor, err := VerifyBackupBundle(bundlePath)
+	if err != nil {
+		t.Fatalf("VerifyBackupBundle() error = %v", err)
+	}
+	if doctor.LevelDB == nil || doctor.LevelDB.Backend != string(StorageBackendPebble) || doctor.RecoveredKeys != 2 {
+		t.Fatalf("checkpoint doctor = %#v", doctor)
+	}
+
+	dataDir := filepath.Join(t.TempDir(), "restored")
+	report, err := RestoreBackupBundle(bundlePath, dataDir, BackupBundleRestoreOptions{})
+	if err != nil {
+		t.Fatalf("RestoreBackupBundle() error = %v", err)
+	}
+	if report.Store != filepath.Join(dataDir, backupBundleStorePath) || report.Snapshot != "" || report.RecoveredKeys != 2 {
+		t.Fatalf("checkpoint restore report = %#v", report)
+	}
+	restoredStore, err := OpenPersistentStore(report.Store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restoredStore.Close()
+	restored := newTestTrie(t)
+	if _, err := restoredStore.Load(restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.GetString("name") != "ivi" || restored.GetCounter("count") != 42 {
+		t.Fatalf("restored checkpoint values = %q/%d", restored.GetString("name"), restored.GetCounter("count"))
+	}
+}
+
+func TestCreateBackupBundleValidatesBackupModeAndCheckpointStore(t *testing.T) {
+	for _, value := range []string{"", "auto", "snapshot", "pebble-checkpoint"} {
+		if _, err := ParseBackupMode(value); err != nil {
+			t.Fatalf("ParseBackupMode(%q) error = %v", value, err)
+		}
+	}
+	if _, err := ParseBackupMode("unknown"); err == nil {
+		t.Fatal("ParseBackupMode(unknown) error = nil")
+	}
+	_, err := CreateBackupBundle(filepath.Join(t.TempDir(), "backup.tar.gz"), newTestTrie(t), nil, BackupBundleOptions{Mode: BackupModePebbleCheckpoint})
+	if err == nil || !strings.Contains(err.Error(), "requires a Pebble persistent store") {
+		t.Fatalf("CreateBackupBundle(checkpoint without store) error = %v", err)
+	}
+}
+
+func TestCreateBackupBundleAutoDefaultsToSnapshotWithPebble(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("name", "ivi")
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "live.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	manifest, err := CreateBackupBundle(filepath.Join(t.TempDir(), "backup.tar.gz"), trie, nil, BackupBundleOptions{
+		SnapshotFormat:  SnapshotFormatBinary,
+		PersistentStore: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Mode != BackupModeSnapshot || manifest.Snapshot != backupBundleSnapshotPath || manifest.Store != "" {
+		t.Fatalf("snapshot fallback manifest = %#v", manifest)
+	}
+}
+
 func TestCreateBackupBundleCarriesPartitionMetadataToDoctorAndRestore(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: "sg:session:1", Value: "ivi"}); !got.OK {

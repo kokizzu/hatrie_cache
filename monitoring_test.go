@@ -1820,6 +1820,30 @@ func TestMonitoringHandlerWritesBackupBundle(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerCreatesRequestedPebbleCheckpoint(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("name", "ivi")
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "live.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	handler := NewMonitoringHandler(trie, MonitoringOptions{LevelDBStore: store}).Handler()
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/backup", strings.NewReader(`{"path":`+strconv.Quote(bundlePath)+`,"mode":"pebble-checkpoint"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("backup status = %d: %s", response.Code, response.Body.String())
+	}
+	var manifest BackupBundleManifest
+	if err := json.Unmarshal(response.Body.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Mode != BackupModePebbleCheckpoint || manifest.Store != backupBundleStorePath {
+		t.Fatalf("backup manifest = %#v", manifest)
+	}
+}
+
 func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{AuthToken: "secret"}).Handler()

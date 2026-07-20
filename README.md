@@ -316,8 +316,9 @@ The active journal and `<JOURNAL_PATH>.segments/` are one WAL set. `make backup`
 copies the containing data directory, so keep both below `DATA_DIR`. For a raw
 copy outside the supplied workflow, stop the process or use one filesystem
 snapshot so rotation cannot move a segment between the two copies. Server-side
-atomic backup bundles do not need archived segments: they contain a
-point-in-time snapshot plus a journal checkpoint at the same sequence.
+atomic backup bundles do not need archived segments: they contain either a
+point-in-time snapshot or a native Pebble checkpoint plus a journal checkpoint
+at the same sequence.
 
 ```
 make cli ARGS='snapshot'
@@ -426,15 +427,37 @@ make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data REST
 ```
 
 For a server-side atomic backup bundle, ask the monitoring API to write a
-tar.gz bundle containing `manifest.json`, `snapshot.hc`, and a compacted
-`commands.journal` checkpoint. The manifest records file sizes, SHA-256
-checksums, snapshot format, journal sequence, and optional partition metadata:
+tar.gz bundle. The sane `auto` default is `snapshot`, which contains
+`manifest.json`, `snapshot.hc`, and a compacted `commands.journal` checkpoint.
+The manifest records the selected mode, file sizes, SHA-256 checksums, storage
+or snapshot format, journal sequence, and optional partition metadata:
 
 ```
 make cli ARGS='backup -path backup/run-001.tar.gz'
 make cli ARGS='backup -path backup/run-001.tar.gz -snapshot-format gzip-binary'
+make cli ARGS='backup -path backup/run-001.tar.gz -mode snapshot'
 make cli ARGS='backup -path backup/sg.tar.gz -partitions sg -partition-mode partitioned -partition-node node-sg-a -partition-epoch 42 -partition-fingerprint topology-v1 -partition-prefixes sg:'
 ```
+
+When the server is running with a Pebble `DB_PATH`, explicitly request a
+file-level checkpoint bundle when lower restore heap and a ready-to-open native
+store matter more than elapsed time and transfer size:
+
+```
+make cli ARGS='backup -path backup/run-001.tar.gz -mode pebble-checkpoint'
+make cli ARGS='doctor -path backup/run-001.tar.gz'
+make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data
+make monitoring-server DB_PATH=data/cache.leveldb DB_BACKEND=auto
+```
+
+Checkpoint creation first saves a complete generation, compacts obsolete
+generations, and then uses Pebble's file checkpoint API. Bundle verification
+and restore stream files to disk while checking declared sizes and SHA-256
+digests, so neither mode reads the complete archive into Go memory. Existing
+snapshot bundles remain readable. Snapshot stays the default because the local
+10,000-key benchmark is 1.34x faster to create, 1.37x faster to restore, and
+1.06x smaller; checkpoint restore uses 1.60x less timed heap and 1.62x fewer
+allocations. See [BENCHMARK.md](BENCHMARK.md#pebble-checkpoint-backup-bundles).
 
 Partition metadata is intentionally descriptive today. It records which
 operator-defined partition ids, key prefixes, node id, topology epoch, and

@@ -52,7 +52,10 @@ func (store *PebbleStore) saveGeneration(trie *HatTrie) error {
 	}
 	store.saveMu.Lock()
 	defer store.saveMu.Unlock()
+	return store.saveGenerationLocked(trie)
+}
 
+func (store *PebbleStore) saveGenerationLocked(trie *HatTrie) error {
 	store.mu.Lock()
 	if store.db == nil {
 		store.mu.Unlock()

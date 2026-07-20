@@ -166,6 +166,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
+| Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
 | Current pass | [Parallel cold-reference hydration](#parallel-cold-reference-hydration), 32 delayed reads | Serialized: 33.875 ms; 18,648 heap B | Parallel singleflight: 1.174 ms; 30,166 heap B | 28.85x faster | Cumulative heap is 1.62x higher and allocations are 1.80x higher |
 | Current pass | [Compact lazy-reference slab](#compact-lazy-reference-slab), 100k references | Public-struct slab: 29.617 ms; 90.2 retained B/ref | Compact slab: 20.513 ms; 71.6 retained B/ref | 1.44x faster, 1.26x lower retained heap | Type IDs are internal; exported references are expanded on access |
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
@@ -237,6 +238,52 @@ Serialization occurs outside the global trie lock. Two optimistic direct-SST
 captures avoid temporary spool I/O when writes are quiet; sustained concurrent
 mutation uses a bounded disk spool and final mutation reconciliation. Raw output
 is in `build/benchmarks/pebble-full-save-generation.txt`.
+
+<a id="pebble-checkpoint-backup-bundles"></a>
+#### Pebble Checkpoint Backup Bundles
+
+The optional `pebble-checkpoint` backup mode saves an atomic complete
+generation, compacts generation tombstones, and packages Pebble's native
+checkpoint files. Snapshot remains the `auto` default because it has the better
+CPU and bandwidth result. Checkpoint mode is intended for operators prioritizing
+lower restore allocation and a directly reusable Pebble directory.
+
+The fixture contains 10,000 keys with deterministic low-compressibility
+256-byte values. Create includes point-in-time persistence, checksums, and the
+tar.gz bundle. Restore includes streamed checksum verification, semantic store
+validation, and extraction. Results are seven-run medians on the Ryzen 9 5950X
+host; heap and allocations cover the complete timed operation.
+
+```sh
+make bench-pebble-backup BACKUP_BENCH_KEYS=10000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Operation / metric | Snapshot default | Pebble checkpoint | Relative result |
+| --- | ---: | ---: | --- |
+| Create 10k keys | 76.885 ms | 103.100 ms | Snapshot is 1.34x faster |
+| Create heap | 5,873,160 B | 9,807,928 B | Snapshot uses 1.67x less heap |
+| Create allocations | 40,201 | 32,855 | Checkpoint uses 1.22x fewer allocations |
+| Bundle size | 198.7 B/key | 210.5 B/key | Snapshot is 1.06x smaller |
+| Restore 10k keys | 61.219 ms | 83.666 ms | Snapshot is 1.37x faster |
+| Restore heap | 21,352,888 B | 13,352,912 B | Checkpoint uses 1.60x less heap |
+| Restore allocations | 101,064 | 62,406 | Checkpoint uses 1.62x fewer allocations |
+| Separate-process maximum RSS | 356,500 KiB | 357,172 KiB | Effectively tied; checkpoint is 1.002x higher |
+
+Raw elapsed samples in milliseconds were:
+
+| Operation | Seven samples |
+| --- | --- |
+| Snapshot create | `84.020, 83.170, 76.781, 76.885, 68.651, 65.555, 78.456` |
+| Checkpoint create | `102.159, 119.602, 98.709, 103.100, 105.810, 113.213, 101.341` |
+| Snapshot restore | `61.219, 57.184, 62.797, 67.518, 54.989, 58.396, 65.600` |
+| Checkpoint restore | `102.694, 124.540, 127.511, 75.009, 79.085, 83.666, 76.773` |
+
+The combined raw Go benchmark and process memory output is generated at
+`build/benchmarks/pebble-checkpoint-backup.txt`. Separate RSS runs are generated
+at `build/benchmarks/backup-snapshot/pebble-checkpoint-backup.txt` and
+`build/benchmarks/backup-checkpoint/pebble-checkpoint-backup.txt`. Pebble log
+replay diagnostics in the raw output are emitted while verification opens the
+extracted checkpoint and are not benchmark failures.
 
 The backend contract uses the same binary record codec and exercises a full
 10,000-key save, 1,000 incremental operations (500 updates, 250 deletes, 250
