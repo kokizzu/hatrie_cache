@@ -200,6 +200,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; structured commands retain the generic batch path |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
+| Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
 | Current pass | [Coalesced journal batch append](#coalesced-journal-batch-append), 10k pulled `SETINT` records | Per-record WAL writes: 20.935 ms; 1,686,384 heap B; 30,004 allocs | Bounded shared append: 7.364 ms; 606,832 heap B; 5 allocs | 2.84x faster, 2.78x lower heap, 6,001x fewer allocs | WAL bytes and one-final-fsync durability are unchanged; buffers flush in bounded chunks |
 | Current pass | [Single-lock journal scalar apply](#single-lock-journal-scalar-apply), 10k pulled `SETINT` records | Serial apply: 4.189 ms CPU; 8.907 ms durable | One-lock run: 2.603 ms CPU; 7.744 ms durable | 1.61x apply CPU; 1.15x durable | Heap, allocations, WAL bytes, and fsync durability are unchanged; unsupported runs stay serial |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
@@ -1055,6 +1056,53 @@ every sample, is generated at `build/benchmarks/journal-tail-wire.txt`. Binary
 is less convenient to inspect manually and is project-specific; JSON remains
 the compatibility and diagnostics option. `JOURNAL_FORMAT` independently
 controls durable on-disk journal records.
+
+<a id="selective-journal-wire-ownership"></a>
+### Selective Journal Wire Ownership
+
+Binary decoding intentionally borrows scalar strings from the response body.
+The follower previously cloned every key, value, and subkey before applying the
+tail, even when a command only parsed an integer and the HAT-trie copied its key
+into native storage. Plain `SETINT` and `INC` records now borrow those fields
+through synchronous WAL append and apply, after which the response body can be
+released. Plain deletes and persists receive the same treatment. `SETSTR`
+continues to clone its stored value.
+
+The ownership policy remains conservative. TTL-bearing writes, structured or
+unknown commands, local partitions, active snapshot mutation tracking, enabled
+per-key stats, persistent dirty-key tracking, and active LevelDB spill/hot-byte
+indexes clone any key they may retain. Stored or potentially retained
+value/subkey strings are also cloned. JSON input is unchanged because its
+decoder already owns its strings.
+
+The paired fixture decodes the same 10,000-record binary `SETINT` response and
+then either applies the previous clone-all ownership policy or the selective
+default. It measures decode and ownership transfer but excludes WAL and command
+application. Values are seven-run medians on the Ryzen 9 5950X host.
+
+```sh
+make bench-journal-wire BENCHTIME=1x COUNT=7
+```
+
+| Metric | Clone all fields | Selective default | Improvement |
+| --- | ---: | ---: | ---: |
+| Decode + ownership | 0.956 ms | 0.696 ms | 1.37x faster |
+| Cumulative heap | 2,216,240 B | 2,056,240 B | 1.08x lower |
+| Allocations | 20,003 | 3 | 6,667.67x fewer |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Clone all fields | `1.281, 0.826, 1.028, 0.952, 0.956, 0.996, 0.861` |
+| Selective ownership | `0.731, 0.693, 0.572, 1.070, 0.896, 0.684, 0.696` |
+| Selective plus dirty keys | `0.929, 1.369, 0.638, 0.764, 0.742, 0.874, 1.440` |
+
+The same `build/benchmarks/journal-tail-wire.txt` artifact now includes this
+paired ownership benchmark alongside JSON/binary serialization results. With a
+persistent dirty tracker, the median is 0.874 ms with 10,003 allocations and
+2,216,240 cumulative heap bytes: keys remain owned by the tracker, while the
+10,000 parsed textual counter values still avoid cloning.
 
 <a id="coalesced-journal-batch-append"></a>
 ### Coalesced Journal Batch Append

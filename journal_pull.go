@@ -412,7 +412,7 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 	if err := validateCommandJournalTailSequences(afterSequence, tail); err != nil {
 		return result, err
 	}
-	detachCommandJournalTailBorrowedStrings(&tail)
+	detachCommandJournalTailBorrowedStrings(trie, &tail, dirtyTracker)
 	applied, response := journal.executeJournalRecordsBatch(trie, tail.Entries)
 	for idx := 0; idx < applied; idx++ {
 		dirtyTracker.markCommand(tail.Entries[idx].Request)
@@ -425,15 +425,55 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 	return result, nil
 }
 
-func detachCommandJournalTailBorrowedStrings(tail *CommandJournalTail) {
+func detachCommandJournalTailBorrowedStrings(trie *HatTrie, tail *CommandJournalTail, dirtyTracker *LevelDBDirtyTracker) {
 	if tail == nil || tail.wireFormat != CommandJournalWireFormatBinary {
 		return
 	}
+	retainAllKeys := dirtyTracker != nil || trie.commandJournalApplyMayRetainBorrowedKeys()
 	for index := range tail.Entries {
 		request := &tail.Entries[index].Request
-		request.Key = strings.Clone(request.Key)
-		request.Value = strings.Clone(request.Value)
-		request.Subkey = strings.Clone(request.Subkey)
+		command := request.Command
+		if retainAllKeys || commandJournalRequestMayRetainBorrowedKey(request, command) {
+			request.Key = strings.Clone(request.Key)
+		}
+		switch command {
+		case "SET", "SETSTR", "SETX", "SETSTRX":
+			request.Value = strings.Clone(request.Value)
+		case "SETINT", "SETINTX", "INC", "DEL", "EXPIRE", "EXPIREAT", "PERSIST":
+		default:
+			request.Value = strings.Clone(request.Value)
+			request.Subkey = strings.Clone(request.Subkey)
+		}
+	}
+}
+
+func (ht *HatTrie) commandJournalApplyMayRetainBorrowedKeys() bool {
+	if ht == nil {
+		return false
+	}
+	if ht.localPartitionSet() != nil {
+		return true
+	}
+	ht.mu.RLock()
+	defer ht.mu.RUnlock()
+	return ht.keyStatsMode != KeyStatsModeOff ||
+		ht.snapshotMutations != nil ||
+		ht.levelDBSpillKeys != nil ||
+		ht.levelDBHotValues != nil
+}
+
+func commandJournalRequestMayRetainBorrowedKey(request *CacheCommandRequest, command string) bool {
+	if request == nil {
+		return false
+	}
+	if request.TTLSeconds != nil || request.UnixSeconds != nil {
+		return true
+	}
+	switch command {
+	case "SET", "SETSTR", "SETINT", "INC", "DEL", "PERSIST":
+		return false
+	default:
+		return true
 	}
 }
 

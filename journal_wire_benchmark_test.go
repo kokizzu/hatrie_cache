@@ -3,19 +3,15 @@ package hatriecache
 import (
 	"bytes"
 	"fmt"
+	"runtime"
+	"strings"
 	"testing"
 
 	"hatrie_cache/internal/jsonwire"
 )
 
 func BenchmarkCommandJournalTailWire10k(b *testing.B) {
-	tail := CommandJournalTail{LastSequence: 10000, Limit: 10000, Entries: make([]CommandJournalRecord, 10000)}
-	for index := range tail.Entries {
-		tail.Entries[index] = CommandJournalRecord{
-			Sequence: uint64(index + 1),
-			Request:  CacheCommandRequest{Command: "SETINT", Key: fmt.Sprintf("wire:%05d", index), Value: "42"},
-		}
-	}
+	tail := benchmarkCommandJournalTail10k()
 	for _, test := range []struct {
 		name   string
 		encode func() ([]byte, error)
@@ -50,4 +46,68 @@ func BenchmarkCommandJournalTailWire10k(b *testing.B) {
 			b.ReportMetric(float64(len(payload)), "wire_B/op")
 		})
 	}
+}
+
+func BenchmarkCommandJournalTailOwnership10k(b *testing.B) {
+	payload, err := marshalCommandJournalTailBinary(benchmarkCommandJournalTail10k())
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Run("CloneAll", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			tail, err := decodeCommandJournalTailBinaryResponse(bytes.NewReader(payload), int64(len(payload)))
+			if err != nil {
+				b.Fatal(err)
+			}
+			for index := range tail.Entries {
+				request := &tail.Entries[index].Request
+				request.Key = strings.Clone(request.Key)
+				request.Value = strings.Clone(request.Value)
+				request.Subkey = strings.Clone(request.Subkey)
+			}
+			runtime.KeepAlive(tail)
+		}
+	})
+	b.Run("Selective", func(b *testing.B) {
+		trie := CreateHatTrie()
+		b.Cleanup(trie.Destroy)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			tail, err := decodeCommandJournalTailBinaryResponse(bytes.NewReader(payload), int64(len(payload)))
+			if err != nil {
+				b.Fatal(err)
+			}
+			detachCommandJournalTailBorrowedStrings(trie, &tail, nil)
+			runtime.KeepAlive(tail)
+		}
+	})
+	b.Run("SelectiveDirtyKeys", func(b *testing.B) {
+		trie := CreateHatTrie()
+		b.Cleanup(trie.Destroy)
+		dirtyTracker := NewLevelDBDirtyTracker()
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			tail, err := decodeCommandJournalTailBinaryResponse(bytes.NewReader(payload), int64(len(payload)))
+			if err != nil {
+				b.Fatal(err)
+			}
+			detachCommandJournalTailBorrowedStrings(trie, &tail, dirtyTracker)
+			runtime.KeepAlive(tail)
+		}
+	})
+}
+
+func benchmarkCommandJournalTail10k() CommandJournalTail {
+	tail := CommandJournalTail{LastSequence: 10000, Limit: 10000, Entries: make([]CommandJournalRecord, 10000)}
+	for index := range tail.Entries {
+		tail.Entries[index] = CommandJournalRecord{
+			Sequence: uint64(index + 1),
+			Request:  CacheCommandRequest{Command: "SETINT", Key: fmt.Sprintf("wire:%05d", index), Value: "42"},
+		}
+	}
+	return tail
 }

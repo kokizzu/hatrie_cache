@@ -85,29 +85,89 @@ func TestCommandJournalTailBinaryRoundTripAndRejectsTrailingData(t *testing.T) {
 }
 
 func TestDetachCommandJournalTailBorrowedStrings(t *testing.T) {
+	trie := newTestTrie(t)
 	tail := CommandJournalTail{
 		wireFormat: CommandJournalWireFormatBinary,
 		Entries: []CommandJournalRecord{{
-			Request: CacheCommandRequest{Key: "key", Value: "value", Subkey: "subkey"},
+			Request: CacheCommandRequest{Command: "SETINT", Key: "key", Value: "42"},
 		}},
 	}
 	before := tail.Entries[0].Request
-	detachCommandJournalTailBorrowedStrings(&tail)
+	detachCommandJournalTailBorrowedStrings(trie, &tail, nil)
 	after := tail.Entries[0].Request
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("detached request changed from %#v to %#v", before, after)
 	}
-	if unsafe.StringData(before.Key) == unsafe.StringData(after.Key) ||
-		unsafe.StringData(before.Value) == unsafe.StringData(after.Value) ||
-		unsafe.StringData(before.Subkey) == unsafe.StringData(after.Subkey) {
-		t.Fatal("retained binary request strings still share the response buffer")
+	if unsafe.StringData(before.Key) != unsafe.StringData(after.Key) ||
+		unsafe.StringData(before.Value) != unsafe.StringData(after.Value) {
+		t.Fatal("plain SETINT fields were unnecessarily cloned")
 	}
 
 	jsonTail := CommandJournalTail{wireFormat: CommandJournalWireFormatJSON, Entries: tail.Entries}
 	before = jsonTail.Entries[0].Request
-	detachCommandJournalTailBorrowedStrings(&jsonTail)
+	detachCommandJournalTailBorrowedStrings(trie, &jsonTail, nil)
 	if unsafe.StringData(before.Key) != unsafe.StringData(jsonTail.Entries[0].Request.Key) {
 		t.Fatal("JSON request strings were unnecessarily cloned")
+	}
+
+	stringTail := CommandJournalTail{
+		wireFormat: CommandJournalWireFormatBinary,
+		Entries: []CommandJournalRecord{{
+			Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "value"},
+		}},
+	}
+	before = stringTail.Entries[0].Request
+	detachCommandJournalTailBorrowedStrings(trie, &stringTail, nil)
+	after = stringTail.Entries[0].Request
+	if unsafe.StringData(before.Key) != unsafe.StringData(after.Key) ||
+		unsafe.StringData(before.Value) == unsafe.StringData(after.Value) {
+		t.Fatal("SETSTR must own only its retained value under default state")
+	}
+
+	expiresAt := int64(1 << 62)
+	ttlTail := CommandJournalTail{
+		wireFormat: CommandJournalWireFormatBinary,
+		Entries: []CommandJournalRecord{{
+			Request: CacheCommandRequest{Command: "SETINT", Key: "ttl", Value: "7", UnixSeconds: &expiresAt},
+		}},
+	}
+	before = ttlTail.Entries[0].Request
+	detachCommandJournalTailBorrowedStrings(trie, &ttlTail, nil)
+	after = ttlTail.Entries[0].Request
+	if unsafe.StringData(before.Key) == unsafe.StringData(after.Key) ||
+		unsafe.StringData(before.Value) != unsafe.StringData(after.Value) {
+		t.Fatal("TTL SETINT must own only its retained expiration key")
+	}
+
+	if err := trie.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+		t.Fatal(err)
+	}
+	statsTail := CommandJournalTail{
+		wireFormat: CommandJournalWireFormatBinary,
+		Entries: []CommandJournalRecord{{
+			Request: CacheCommandRequest{Command: "SETINT", Key: "tracked", Value: "9"},
+		}},
+	}
+	before = statsTail.Entries[0].Request
+	detachCommandJournalTailBorrowedStrings(trie, &statsTail, nil)
+	after = statsTail.Entries[0].Request
+	if unsafe.StringData(before.Key) == unsafe.StringData(after.Key) ||
+		unsafe.StringData(before.Value) != unsafe.StringData(after.Value) {
+		t.Fatal("key stats SETINT must own only its retained telemetry key")
+	}
+
+	dirtyTail := CommandJournalTail{
+		wireFormat: CommandJournalWireFormatBinary,
+		Entries: []CommandJournalRecord{{
+			Request: CacheCommandRequest{Command: "SETINT", Key: "dirty", Value: "11"},
+		}},
+	}
+	before = dirtyTail.Entries[0].Request
+	detachCommandJournalTailBorrowedStrings(newTestTrie(t), &dirtyTail, NewLevelDBDirtyTracker())
+	after = dirtyTail.Entries[0].Request
+	if unsafe.StringData(before.Key) == unsafe.StringData(after.Key) ||
+		unsafe.StringData(before.Value) != unsafe.StringData(after.Value) {
+		t.Fatal("dirty tracking SETINT must own only its retained dirty key")
 	}
 }
 

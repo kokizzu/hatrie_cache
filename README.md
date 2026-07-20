@@ -1150,6 +1150,15 @@ uses 4.69x less cumulative heap, performs 2,510x fewer allocations, and transfer
 catch-up; JSON remains easier to inspect with generic tools. See
 [BENCHMARK.md](BENCHMARK.md#binary-journal-catch-up-wire).
 
+For the default binary `SETINT` catch-up path, decoded keys and textual integer
+values now remain borrowed only until synchronous WAL append and application
+finish instead of being cloned per record. Decode plus ownership transfer is
+1.37x faster, performs 6,667.67x fewer allocations, and uses 1.08x less
+cumulative heap for 10,000 records. Stored strings, TTL keys, structured
+commands, active key stats/snapshots/LevelDB indexes, persistent dirty tracking,
+and local partitions keep conservative ownership clones. See
+[BENCHMARK.md](BENCHMARK.md#selective-journal-wire-ownership).
+
 The follower also coalesces pulled records into bounded WAL write chunks before
 one final `fsync`, instead of allocating and writing every record separately.
 For the same 10,000-command tail this makes durable apply 2.84x faster, uses
