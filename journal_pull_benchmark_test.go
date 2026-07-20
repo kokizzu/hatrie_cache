@@ -18,18 +18,17 @@ func BenchmarkJournalCatchUpDeltaVsFullSnapshot(b *testing.B) {
 }
 
 func BenchmarkJournalPullApplyBatch10K(b *testing.B) {
+	b.Run("SerialApply", func(b *testing.B) {
+		benchmarkJournalPullApplyBatch10K(b, false)
+	})
+	b.Run("SingleLockApply", func(b *testing.B) {
+		benchmarkJournalPullApplyBatch10K(b, true)
+	})
+}
+
+func benchmarkJournalPullApplyBatch10K(b *testing.B, scalarBatch bool) {
 	const recordsPerBatch = 10_000
-	records := make([]CommandJournalRecord, recordsPerBatch)
-	for index := range records {
-		records[index] = CommandJournalRecord{
-			Sequence: uint64(index + 1),
-			Request: CacheCommandRequest{
-				Command: "SETINT",
-				Key:     fmt.Sprintf("pull-apply:%05d", index),
-				Value:   "42",
-			},
-		}
-	}
+	records := benchmarkJournalScalarRecords(recordsPerBatch)
 	trie := CreateHatTrie()
 	b.Cleanup(trie.Destroy)
 	journal, err := OpenCommandJournalWithOptions(filepath.Join(b.TempDir(), "commands.journal"), CommandJournalOptions{
@@ -49,7 +48,7 @@ func BenchmarkJournalPullApplyBatch10K(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		applied, response := journal.executeJournalRecordsBatch(trie, records)
+		applied, response := journal.executeJournalRecordsBatchWithScalarBatch(trie, records, scalarBatch)
 		if !response.OK || applied != recordsPerBatch {
 			b.Fatalf("executeJournalRecordsBatch() = %d/%#v", applied, response)
 		}
@@ -62,6 +61,53 @@ func BenchmarkJournalPullApplyBatch10K(b *testing.B) {
 	b.StopTimer()
 	b.ReportMetric(recordsPerBatch, "records/op")
 	b.ReportMetric(float64(walBytes)/float64(b.N), "wal_B/op")
+}
+
+func BenchmarkJournalScalarApply10K(b *testing.B) {
+	const recordsPerBatch = 10_000
+	records := benchmarkJournalScalarRecords(recordsPerBatch)
+	b.Run("Serial", func(b *testing.B) {
+		trie := CreateHatTrie()
+		b.Cleanup(trie.Destroy)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			for index, record := range records {
+				if response := trie.ExecuteCommand(record.Request); !response.OK {
+					b.Fatalf("ExecuteCommand(record %d) = %#v", index, response)
+				}
+			}
+		}
+		b.ReportMetric(recordsPerBatch, "records/op")
+	})
+	b.Run("SingleLockBatch", func(b *testing.B) {
+		trie := CreateHatTrie()
+		b.Cleanup(trie.Destroy)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			applied, response, used := trie.executeJournalScalarBatch(records)
+			if !used || !response.OK || applied != recordsPerBatch {
+				b.Fatalf("executeJournalScalarBatch() = %d/%#v/%t", applied, response, used)
+			}
+		}
+		b.ReportMetric(recordsPerBatch, "records/op")
+	})
+}
+
+func benchmarkJournalScalarRecords(count int) []CommandJournalRecord {
+	records := make([]CommandJournalRecord, count)
+	for index := range records {
+		records[index] = CommandJournalRecord{
+			Sequence: uint64(index + 1),
+			Request: CacheCommandRequest{
+				Command: "SETINT",
+				Key:     fmt.Sprintf("pull-apply:%05d", index),
+				Value:   "42",
+			},
+		}
+	}
+	return records
 }
 
 func benchmarkJournalCatchUpDelta100(b *testing.B, batched bool) {

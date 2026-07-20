@@ -500,6 +500,10 @@ func completeCommandJournalJobs(jobs []*commandJournalJob, response CacheCommand
 }
 
 func (journal *CommandJournal) executeJournalRecordsBatch(trie *HatTrie, records []CommandJournalRecord) (int, CacheCommandResponse) {
+	return journal.executeJournalRecordsBatchWithScalarBatch(trie, records, true)
+}
+
+func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *HatTrie, records []CommandJournalRecord, scalarBatch bool) (int, CacheCommandResponse) {
 	if journal == nil {
 		return 0, commandError(ErrNilCommandJournal.Error())
 	}
@@ -576,10 +580,33 @@ func (journal *CommandJournal) executeJournalRecordsBatch(trie *HatTrie, records
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
 	rollbackOffset := batchState.offset
-	for idx, record := range records {
-		response := trie.ExecuteCommand(record.Request)
+	useScalarBatch := scalarBatch && trie.localPartitionSet() == nil
+	for idx := 0; idx < len(records); {
+		if useScalarBatch {
+			if end, ok := journalScalarCommandBatchRun(records, idx); ok {
+				applied, response, used := trie.executeJournalScalarBatch(records[idx:end])
+				for batchEnd := idx + applied; used && idx < batchEnd; idx++ {
+					rollbackOffset += int64(recordSizes[idx])
+				}
+				if used {
+					if response.OK {
+						continue
+					}
+					rollbackState := commandJournalAppendState{
+						offset:       rollbackOffset,
+						nextSequence: batchState.nextSequence + uint64(idx),
+					}
+					if rollbackErr := journal.rollbackAppendLocked(rollbackState); rollbackErr != nil {
+						response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
+					}
+					return idx, response
+				}
+			}
+		}
+		response := trie.ExecuteCommand(records[idx].Request)
 		if response.OK {
 			rollbackOffset += int64(recordSizes[idx])
+			idx++
 			continue
 		}
 		rollbackState := commandJournalAppendState{

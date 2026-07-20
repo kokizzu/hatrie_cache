@@ -121,33 +121,115 @@ func (ht *HatTrie) executePublicNativeScalarBatchCommand(request CacheCommandReq
 func nativePublicCommandBatchFamily(payloads []CacheCommandRequest) nativeCommandBatchFamily {
 	family := nativeCommandBatchUnsupported
 	for _, payload := range payloads {
-		command, validationMessage, supported := publicScalarBatchCommandCode(payload.Command)
-		if !supported || validationMessage != "" {
-			return nativeCommandBatchUnsupported
-		}
-		candidate := nativeCommandBatchUnsupported
-		switch command {
-		case publicScalarBatchGet, publicScalarBatchExists:
-			candidate = nativeCommandBatchRead
-		case publicScalarBatchSetString:
-			if payload.TTLSeconds == nil && payload.UnixSeconds == nil {
-				candidate = nativeCommandBatchSetString
-			}
-		case publicScalarBatchSetCounter:
-			if payload.TTLSeconds == nil && payload.UnixSeconds == nil {
-				candidate = nativeCommandBatchSetCounter
-			}
-		case publicScalarBatchIncrement:
-			candidate = nativeCommandBatchIncrement
-		case publicScalarBatchDelete:
-			candidate = nativeCommandBatchDelete
-		}
+		candidate := nativePublicCommandBatchRequestFamily(payload)
 		if candidate == nativeCommandBatchUnsupported || (family != nativeCommandBatchUnsupported && candidate != family) {
 			return nativeCommandBatchUnsupported
 		}
 		family = candidate
 	}
 	return family
+}
+
+func nativePublicCommandBatchRequestFamily(payload CacheCommandRequest) nativeCommandBatchFamily {
+	command, validationMessage, supported := publicScalarBatchCommandCode(payload.Command)
+	if !supported || validationMessage != "" {
+		return nativeCommandBatchUnsupported
+	}
+	switch command {
+	case publicScalarBatchGet, publicScalarBatchExists:
+		return nativeCommandBatchRead
+	case publicScalarBatchSetString:
+		if payload.TTLSeconds == nil && payload.UnixSeconds == nil {
+			return nativeCommandBatchSetString
+		}
+	case publicScalarBatchSetCounter:
+		if payload.TTLSeconds == nil && payload.UnixSeconds == nil {
+			return nativeCommandBatchSetCounter
+		}
+	case publicScalarBatchIncrement:
+		return nativeCommandBatchIncrement
+	case publicScalarBatchDelete:
+		return nativeCommandBatchDelete
+	}
+	return nativeCommandBatchUnsupported
+}
+
+func journalScalarCommandBatchFamily(request CacheCommandRequest) nativeCommandBatchFamily {
+	request.Command = normalizedCommand(request.Command)
+	family := nativePublicCommandBatchRequestFamily(request)
+	switch family {
+	case nativeCommandBatchSetString, nativeCommandBatchSetCounter:
+		return family
+	default:
+		return nativeCommandBatchUnsupported
+	}
+}
+
+func journalScalarCommandBatchRun(records []CommandJournalRecord, start int) (int, bool) {
+	if start < 0 || start >= len(records) {
+		return start, false
+	}
+	family := journalScalarCommandBatchFamily(records[start].Request)
+	if family == nativeCommandBatchUnsupported {
+		return start, false
+	}
+	end := start + 1
+	for end < len(records) && journalScalarCommandBatchFamily(records[end].Request) == family {
+		end++
+	}
+	return end, true
+}
+
+func (ht *HatTrie) executeJournalScalarBatch(records []CommandJournalRecord) (int, CacheCommandResponse, bool) {
+	if ht == nil || len(records) < minNativeCommandBatchSize || ht.localPartitionSet() != nil {
+		return 0, CacheCommandResponse{}, false
+	}
+	family := journalScalarCommandBatchFamily(records[0].Request)
+	if family == nativeCommandBatchUnsupported {
+		return 0, CacheCommandResponse{}, false
+	}
+	for _, record := range records[1:] {
+		if journalScalarCommandBatchFamily(record.Request) != family {
+			return 0, CacheCommandResponse{}, false
+		}
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	ht.journalScalarBatchCalls++
+	applied := 0
+	for index, record := range records {
+		request := record.Request
+		key := strings.TrimSpace(request.Key)
+		if key == "" {
+			ht.recordJournalScalarBatchWritesLocked(records[:applied])
+			return index, commandError("key is required"), true
+		}
+		if err := validateKey(key); err != nil {
+			ht.recordJournalScalarBatchWritesLocked(records[:applied])
+			return index, commandError(err.Error()), true
+		}
+		switch family {
+		case nativeCommandBatchSetString:
+			if err := ht.upsertStringValueLocked(key, request.Value); err != nil {
+				ht.recordJournalScalarBatchWritesLocked(records[:applied])
+				return index, commandError(err.Error()), true
+			}
+		case nativeCommandBatchSetCounter:
+			value, ok := parseCommandInt32(request.Value)
+			if !ok {
+				ht.recordJournalScalarBatchWritesLocked(records[:applied])
+				return index, commandError("value must be a 32-bit integer"), true
+			}
+			if err := ht.upsertCounterValueLocked(key, value); err != nil {
+				ht.recordJournalScalarBatchWritesLocked(records[:applied])
+				return index, commandError(err.Error()), true
+			}
+		}
+		applied++
+	}
+	ht.recordJournalScalarBatchWritesLocked(records)
+	return len(records), CacheCommandResponse{OK: true}, true
 }
 
 func (ht *HatTrie) nativeCommandBatchStateSupportedLocked(payloads []CacheCommandRequest, family nativeCommandBatchFamily) bool {

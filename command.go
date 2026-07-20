@@ -2914,6 +2914,14 @@ func (ht *HatTrie) commandValueLockedForKey(key string) (string, bool, error) {
 }
 
 func (ht *HatTrie) upsertStringLocked(key string, value string) error {
+	if err := ht.upsertStringValueLocked(key, value); err != nil {
+		return err
+	}
+	ht.recordWriteLocked(key)
+	return nil
+}
+
+func (ht *HatTrie) upsertStringValueLocked(key string, value string) error {
 	rawPtr, hval, err := ht.upsertReplacementLocation(key)
 	if err != nil {
 		return err
@@ -2923,7 +2931,6 @@ func (ht *HatTrie) upsertStringLocked(key string, value string) error {
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
-		ht.recordWriteLocked(key)
 		return nil
 	}
 
@@ -2931,11 +2938,18 @@ func (ht *HatTrie) upsertStringLocked(key string, value string) error {
 	ht.clearExpirationLocked(key)
 	idx := ht.raws.addStringOwned(value)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
-	ht.recordWriteLocked(key)
 	return nil
 }
 
 func (ht *HatTrie) upsertCounterLocked(key string, value int32) error {
+	if err := ht.upsertCounterValueLocked(key, value); err != nil {
+		return err
+	}
+	ht.recordWriteLocked(key)
+	return nil
+}
+
+func (ht *HatTrie) upsertCounterValueLocked(key string, value int32) error {
 	rawPtr, hval, err := ht.upsertReplacementLocation(key)
 	if err != nil {
 		return err
@@ -2945,7 +2959,6 @@ func (ht *HatTrie) upsertCounterLocked(key string, value int32) error {
 	}
 	ht.clearExpirationLocked(key)
 	*rawPtr = HatValue{Index: value, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
-	ht.recordWriteLocked(key)
 	return nil
 }
 

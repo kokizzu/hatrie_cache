@@ -2344,6 +2344,7 @@ type HatTrie struct {
 	hydrations                map[levelDBHydrationKey]*levelDBHydrationCall
 	nextDBReferenceToken      uint64
 	nativeCommandBatchCalls   uint64
+	journalScalarBatchCalls   uint64
 	nativeCommandBatchScratch nativeCommandBatchScratch
 	localPartitions           atomic.Pointer[localPartitionSet]
 	expires                   map[string]uint32
@@ -3431,6 +3432,44 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 	ht.recordGlobalWriteSerialized(now)
 
 	for _, key := range keys {
+		stats := ht.keyStats[key]
+		if stats == nil {
+			stats = ht.ensureKeyStatsLocked(key)
+			if stats == nil {
+				continue
+			}
+		}
+		stats.Writes++
+		stats.setLastWrite(now)
+	}
+}
+
+func (ht *HatTrie) recordJournalScalarBatchWritesLocked(records []CommandJournalRecord) {
+	if len(records) == 0 {
+		return
+	}
+	for _, record := range records {
+		key := strings.TrimSpace(record.Request.Key)
+		ht.trackSnapshotMutationsLocked(key)
+		ht.updateReplicationMerkleLocked(key)
+		ht.mutationEpoch++
+		ht.clearHotKeyLocked(key)
+		ht.updateLevelDBSpillCandidateForKeyLocked(key)
+		ht.updateLevelDBHotByteAccountingForKeyLocked(key)
+	}
+	now := ht.currentTime()
+	if ht.keyStatsMode == KeyStatsModeOff {
+		updateAtomicCacheTime(&ht.stats.lastWrite, now)
+		ht.stats.writes.Add(uint64(len(records)))
+		return
+	}
+
+	ht.telemetryMu.Lock()
+	defer ht.telemetryMu.Unlock()
+	ht.keyStatsGlobal.Writes += uint64(len(records))
+	ht.keyStatsGlobal.LastWrite = now
+	for _, record := range records {
+		key := strings.TrimSpace(record.Request.Key)
 		stats := ht.keyStats[key]
 		if stats == nil {
 			stats = ht.ensureKeyStatsLocked(key)

@@ -1157,6 +1157,14 @@ For the same 10,000-command tail this makes durable apply 2.84x faster, uses
 changing WAL bytes or rollback semantics. See
 [BENCHMARK.md](BENCHMARK.md#coalesced-journal-batch-append).
 
+After that WAL is durable, homogeneous runs of at least 32 plain string or
+counter sets are also applied under one trie lock with coalesced stats
+bookkeeping. The 10,000-command application phase is 1.61x faster, and the
+fsync-inclusive durable path is 1.15x faster, with unchanged heap, allocation,
+and WAL-byte measurements. TTL writes, increments, mixed/short runs, and local
+partitions automatically keep the serial correctness path. See
+[BENCHMARK.md](BENCHMARK.md#single-lock-journal-scalar-apply).
+
 Journal pull is delta-first by default. If the requested delta was compacted,
 an existing Pebble follower first requests `/api/journal/recovery`, verifies its
 source-specific content-addressed object cache, downloads only missing

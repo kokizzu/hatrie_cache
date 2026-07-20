@@ -201,6 +201,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Coalesced journal batch append](#coalesced-journal-batch-append), 10k pulled `SETINT` records | Per-record WAL writes: 20.935 ms; 1,686,384 heap B; 30,004 allocs | Bounded shared append: 7.364 ms; 606,832 heap B; 5 allocs | 2.84x faster, 2.78x lower heap, 6,001x fewer allocs | WAL bytes and one-final-fsync durability are unchanged; buffers flush in bounded chunks |
+| Current pass | [Single-lock journal scalar apply](#single-lock-journal-scalar-apply), 10k pulled `SETINT` records | Serial apply: 4.189 ms CPU; 8.907 ms durable | One-lock run: 2.603 ms CPU; 7.744 ms durable | 1.61x apply CPU; 1.15x durable | Heap, allocations, WAL bytes, and fsync durability are unchanged; unsupported runs stay serial |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Current pass | [Bounded partition snapshot locking](#bounded-partition-snapshot-locking), 100k keys, 16 partitions | Whole-set lock: 154.398 ms pause; 241.262 ms total | Tracked 256-key pages: 2.300 ms pause; 259.974 ms total | 67.14x shorter pause | Total time is 7.8% higher and cumulative heap is 1.7% higher |
@@ -1099,6 +1100,57 @@ mode also coalesces file writes but retains its per-record JSON encoding
 allocations. Encode, write, or sync failure still rolls the complete batch back;
 an apply-time rejection keeps the successful prefix and durably truncates the
 rejected record and suffix.
+
+<a id="single-lock-journal-scalar-apply"></a>
+### Single-Lock Journal Scalar Apply
+
+After the pulled WAL batch is durable, the follower previously called the
+public command parser separately for every record. Homogeneous runs of at least
+32 plain `SET`/`SETSTR` or `SETINT` records now validate and mutate under one
+trie lock. Cache-wide write counts use one additive update, detailed key stats
+share one telemetry lock, and snapshot/Merkle/storage bookkeeping still visits
+every successful key before releasing the trie lock. A rejected record records
+the exact successful prefix before the journal truncates the rejected entry and
+suffix.
+
+TTL-bearing writes, `INC` (which may overflow), mixed command families, short
+runs, and opt-in local partitions retain the existing serial path. This avoids
+speculative suffix mutation and leaves partition routing unchanged. An existing
+native-C batch adapter was measured but not selected for this path: its bridge
+operation/result arenas raised the 10k fixture to 1,663,600 cumulative heap
+bytes and did not improve durable latency.
+
+The paired durable fixture assigns local sequences, encodes and writes 10,000
+`SETINT` records, performs one `fsync`, and then selects either serial or
+single-lock apply. The application-only fixture excludes WAL and setup so the
+CPU effect is visible independently of filesystem latency. Values are seven-run
+medians on the Ryzen 9 5950X host.
+
+```sh
+make bench-journal-apply BENCHTIME=1x COUNT=7
+```
+
+| Metric | Serial apply | Single-lock default | Improvement |
+| --- | ---: | ---: | ---: |
+| Application CPU | 4.189 ms | 2.603 ms | 1.61x faster |
+| Durable WAL + apply | 8.907 ms | 7.744 ms | 1.15x faster |
+| Durable cumulative heap | 606,832 B | 606,832 B | unchanged |
+| Durable allocations | 5 | 5 | unchanged |
+| WAL bytes | 439,873 B | 439,873 B | unchanged |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Durable serial apply | `19.266, 9.664, 8.417, 7.451, 8.081, 8.907, 9.666` |
+| Durable single-lock apply | `7.744, 7.892, 7.410, 7.563, 8.048, 8.196, 6.925` |
+| Application-only serial | `4.189, 5.229, 4.015, 3.622, 4.316, 4.036, 4.304` |
+| Application-only single-lock | `2.603, 2.204, 2.853, 2.713, 2.518, 2.500, 2.620` |
+
+The complete paired output is generated at
+`build/benchmarks/journal-pull-batch-apply.txt`. The durable improvement is
+smaller because the required final `fsync` dominates on this host; durability
+is not relaxed or made configurable by this optimization.
 
 ### Point-in-Time Snapshot Capture
 

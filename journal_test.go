@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -389,6 +390,150 @@ func TestCommandJournalRecordBatchRejectsAndTruncatesSuffix(t *testing.T) {
 	}
 	if replayed.GetCounter("conflict") != 2147483647 || replayed.Exists("suffix") {
 		t.Fatal("replay did not preserve the successful prefix")
+	}
+}
+
+func TestCommandJournalRecordBatchUsesSingleLockScalarRun(t *testing.T) {
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	trie := newTestTrie(t)
+	records := make([]CommandJournalRecord, minNativeCommandBatchSize)
+	for idx := range records {
+		records[idx] = CommandJournalRecord{
+			Sequence: uint64(idx + 1),
+			Request: CacheCommandRequest{
+				Command: "SETINT",
+				Key:     "native:" + strconv.Itoa(idx),
+				Value:   strconv.Itoa(idx),
+			},
+		}
+	}
+
+	before := trie.journalScalarBatchCalls
+	applied, response := journal.executeJournalRecordsBatch(trie, records)
+	if !response.OK || applied != len(records) {
+		t.Fatalf("executeJournalRecordsBatch() = %d/%#v", applied, response)
+	}
+	if got := trie.journalScalarBatchCalls - before; got != 1 {
+		t.Fatalf("single-lock journal batch calls = %d, want 1", got)
+	}
+	if got := trie.Stats().Writes; got != uint64(len(records)) {
+		t.Fatalf("Stats().Writes = %d, want %d", got, len(records))
+	}
+	for idx, record := range records {
+		if got := trie.GetCounter(record.Request.Key); got != int32(idx) {
+			t.Fatalf("GetCounter(%q) = %d, want %d", record.Request.Key, got, idx)
+		}
+	}
+	replayed := newTestTrie(t)
+	if _, err := journal.Replay(replayed, 0); err != nil {
+		t.Fatal(err)
+	}
+	for idx, record := range records {
+		if got := replayed.GetCounter(record.Request.Key); got != int32(idx) {
+			t.Fatalf("replayed GetCounter(%q) = %d, want %d", record.Request.Key, got, idx)
+		}
+	}
+}
+
+func TestExecuteJournalScalarBatchPreservesKeyStats(t *testing.T) {
+	trie := newTestTrie(t)
+	if err := trie.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+		t.Fatal(err)
+	}
+	records := make([]CommandJournalRecord, minNativeCommandBatchSize)
+	for idx := range records {
+		records[idx] = CommandJournalRecord{
+			Sequence: uint64(idx + 1),
+			Request:  CacheCommandRequest{Command: "SETINT", Key: "tracked", Value: strconv.Itoa(idx)},
+		}
+	}
+	applied, response, used := trie.executeJournalScalarBatch(records)
+	if !used || !response.OK || applied != len(records) {
+		t.Fatalf("executeJournalScalarBatch() = %d/%#v/%t", applied, response, used)
+	}
+	stats, ok := trie.StatsForKey("tracked")
+	if !ok || stats.Writes != uint64(len(records)) {
+		t.Fatalf("StatsForKey(tracked) = %#v/%t, want %d writes", stats, ok, len(records))
+	}
+	if got := trie.Stats().Writes; got != uint64(len(records)) {
+		t.Fatalf("Stats().Writes = %d, want %d", got, len(records))
+	}
+}
+
+func TestCommandJournalRecordBatchKeepsFailureSensitiveRunsSerial(t *testing.T) {
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	trie := newTestTrie(t)
+	records := make([]CommandJournalRecord, minNativeCommandBatchSize)
+	for idx := range records {
+		records[idx] = CommandJournalRecord{
+			Sequence: uint64(idx + 1),
+			Request: CacheCommandRequest{
+				Command: "INC",
+				Key:     "counter",
+				Value:   "1",
+			},
+		}
+	}
+	records[0].Request = CacheCommandRequest{Command: "SETINT", Key: "counter", Value: "2147483647"}
+
+	before := trie.nativeCommandBatchCalls
+	applied, response := journal.executeJournalRecordsBatch(trie, records)
+	if response.OK || applied != 1 || !strings.Contains(response.Message, "counter overflow") {
+		t.Fatalf("executeJournalRecordsBatch() = %d/%#v, want overflow after one record", applied, response)
+	}
+	if got := trie.nativeCommandBatchCalls - before; got != 0 {
+		t.Fatalf("native C batch calls = %d, want serial fallback", got)
+	}
+	if got := trie.GetCounter("counter"); got != maxCommandInt32 {
+		t.Fatalf("GetCounter(counter) = %d, want %d", got, maxCommandInt32)
+	}
+	tail, err := journal.Tail(0, len(records))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tail.Entries) != 1 || tail.Entries[0].Request.Command != "SETINT" {
+		t.Fatalf("Tail().Entries = %#v, want only successful SETINT", tail.Entries)
+	}
+}
+
+func TestExecuteJournalScalarBatchStopsAtInvalidValue(t *testing.T) {
+	trie := newTestTrie(t)
+	records := make([]CommandJournalRecord, minNativeCommandBatchSize)
+	for idx := range records {
+		records[idx] = CommandJournalRecord{
+			Sequence: uint64(idx + 1),
+			Request: CacheCommandRequest{
+				Command: "SETINT",
+				Key:     "partial:" + strconv.Itoa(idx),
+				Value:   strconv.Itoa(idx),
+			},
+		}
+	}
+	const rejected = 10
+	records[rejected].Request.Value = "invalid"
+
+	applied, response, used := trie.executeJournalScalarBatch(records)
+	if !used || response.OK || applied != rejected || !strings.Contains(response.Message, "32-bit integer") {
+		t.Fatalf("executeJournalScalarBatch() = %d/%#v/%t, want invalid value at %d", applied, response, used, rejected)
+	}
+	if trie.journalScalarBatchCalls != 1 {
+		t.Fatalf("single-lock journal batch calls = %d, want 1", trie.journalScalarBatchCalls)
+	}
+	for idx, record := range records {
+		if got := trie.Exists(record.Request.Key); got != (idx < rejected) {
+			t.Fatalf("Exists(%q) = %t, want %t", record.Request.Key, got, idx < rejected)
+		}
+	}
+	if got := trie.Stats().Writes; got != rejected {
+		t.Fatalf("Stats().Writes = %d, want %d", got, rejected)
 	}
 }
 
