@@ -138,6 +138,50 @@ func TestPullCommandJournalSnapshotKeepsPreviousFileWhenSequenceRegresses(t *tes
 	}
 }
 
+func TestPullCommandJournalCheckpointDownloadsAndVerifiesBundle(t *testing.T) {
+	trie := newTestTrie(t)
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "live.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	if response := journal.ExecuteCommand(trie, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !response.OK {
+		t.Fatalf("SETSTR response = %#v", response)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "source.tar.gz")
+	if _, err := CreateBackupBundle(bundlePath, trie, journal, BackupBundleOptions{Mode: BackupModePebbleCheckpoint, PersistentStore: store}); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/journal/checkpoint" || r.Header.Get("X-Hatrie-Replication-Token") != "replica-secret" {
+			t.Fatalf("checkpoint request = %s token=%q", r.URL.Path, r.Header.Get("X-Hatrie-Replication-Token"))
+		}
+		w.Header().Set("Content-Type", checkpointContentType)
+		_, _ = w.Write(bundle)
+	}))
+	defer server.Close()
+	target := filepath.Join(t.TempDir(), "download.tar.gz")
+	manifest, err := PullCommandJournalCheckpoint(context.Background(), server.URL, "replica-secret", server.Client(), target, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Mode != BackupModePebbleCheckpoint || manifest.JournalSequence != 1 || manifest.StorageBackend != string(StorageBackendPebble) {
+		t.Fatalf("downloaded manifest = %#v", manifest)
+	}
+	if _, err := VerifyBackupBundle(target); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPullCommandJournalAcceptsNilContext(t *testing.T) {
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := CommandJournalTail{

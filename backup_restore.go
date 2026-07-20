@@ -194,6 +194,42 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	}, nil
 }
 
+// StagePebbleCheckpointBundle checksum-verifies and durably materializes a
+// native checkpoint without loading its records. Callers must open and load the
+// installed store before exposing it to traffic.
+func StagePebbleCheckpointBundle(bundlePath string, dataDir string) (BackupBundleManifest, error) {
+	bundlePath = strings.TrimSpace(bundlePath)
+	dataDir = strings.TrimSpace(dataDir)
+	if bundlePath == "" {
+		return BackupBundleManifest{}, errors.New("hatriecache: backup bundle path is required")
+	}
+	if dataDir == "" {
+		return BackupBundleManifest{}, errors.New("hatriecache: restore data dir is required")
+	}
+	manifest, err := readBackupBundleManifest(bundlePath)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	if backupBundleManifestMode(manifest) != BackupModePebbleCheckpoint || manifest.Store != backupBundleStorePath || manifest.StorageBackend != string(StorageBackendPebble) {
+		return BackupBundleManifest{}, errors.New("hatriecache: bundle is not a Pebble checkpoint")
+	}
+	destination, err := prepareRestoreDestination(bundlePath, dataDir, false)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	defer os.RemoveAll(destination.staging)
+	if err := extractBackupBundleFiles(bundlePath, destination.staging, manifest.Files); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	if err := syncRestoreTree(destination.staging); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	if err := publishRestoreDestination(destination, false); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	return manifest, nil
+}
+
 type restoreDestination struct {
 	target  string
 	staging string

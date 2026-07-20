@@ -169,6 +169,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
 | Current pass | [Content-addressed incremental backups](#content-addressed-incremental-backups), 10k x 256 B, 1% changed | Full checkpoint bundle: 98.602 ms; 9.81 MB heap; 2,104,489 written B | Incremental repository: 14.659 ms; 0.94 MB heap; 35,020 written B | 6.73x faster, 10.49x lower heap, 60.09x fewer written bytes | Explicit mode; first backup is full and retained history consumes repository storage |
 | Current pass | [Single-pass staged restore](#single-pass-staged-restore), checkpoint 10k x 256 B | Verify then extract: 69.346 ms; 13.18 MB heap; 2 payload passes | Stage, verify, fsync, publish: 56.057 ms; 12.78 MB heap; 1 payload pass | 1.24x faster, 1.03x lower heap, half the payload passes | Repository restore is 1.09x slower because the durable path fsyncs staged files |
+| Current pass | [Checkpoint replica bootstrap](#checkpoint-replica-bootstrap), 10k x 256 B | Snapshot: 146.369 ms; 36.66 MB heap; 172,569 allocs; 2,051,371 wire B | Pebble checkpoint: 84.246 ms; 13.50 MB heap; 62,423 allocs; 2,103,717 wire B | 1.74x faster, 2.72x lower heap, 2.76x fewer allocs | Fresh Pebble databases only; wire size is 2.55% larger |
 | Current pass | [Parallel cold-reference hydration](#parallel-cold-reference-hydration), 32 delayed reads | Serialized: 33.875 ms; 18,648 heap B | Parallel singleflight: 1.174 ms; 30,166 heap B | 28.85x faster | Cumulative heap is 1.62x higher and allocations are 1.80x higher |
 | Current pass | [Compact lazy-reference slab](#compact-lazy-reference-slab), 100k references | Public-struct slab: 29.617 ms; 90.2 retained B/ref | Compact slab: 20.513 ms; 71.6 retained B/ref | 1.44x faster, 1.26x lower retained heap | Type IDs are internal; exported references are expanded on access |
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
@@ -379,6 +380,53 @@ generated at `build/benchmarks/single-pass-atomic-restore.txt`. Small repository
 checkpoints can lose elapsed time because one avoided local copy is cheaper than
 the newly guaranteed fsyncs; the safety improvement and lower cumulative heap
 still apply.
+
+<a id="checkpoint-replica-bootstrap"></a>
+#### Checkpoint Replica Bootstrap
+
+A fresh Pebble follower now requests the leader's native checkpoint before it
+opens its database. It checksum-stages the bundle once, durably publishes the
+store and backend marker under a crash-recovery marker, installs the journal
+checkpoint, persists pull state, and then opens and loads the store before it is
+ready. Existing databases are not replaced and retain delta-first replication
+with snapshot fallback.
+
+The benchmark builds one 10,001-key source containing deterministic
+low-compressibility 256-byte values. Both paths include local HTTP transfer,
+durable follower storage, journal and pull-state persistence, and the final
+store open/load. The snapshot baseline downloads the compressed snapshot,
+replaces the complete trie, and performs a full Pebble save. The checkpoint path
+downloads the native bundle and installs its already-built store. Leader-side
+artifact generation is excluded from both paths. Results are seven-run medians
+on the Ryzen 9 5950X host.
+
+```sh
+make bench-checkpoint-bootstrap BACKUP_BENCH_KEYS=10000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Metric | Snapshot fallback | Pebble checkpoint | Relative result |
+| --- | ---: | ---: | --- |
+| Time | 146.369 ms | 84.246 ms | 1.74x faster |
+| Cumulative heap | 36,662,200 B | 13,500,104 B | 2.72x lower |
+| Allocations | 172,569 | 62,423 | 2.76x fewer |
+| Wire bytes | 2,051,371 B | 2,103,717 B | Checkpoint is 2.55% larger |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Snapshot fallback | `148.576, 143.758, 146.369, 132.732, 185.331, 165.725, 139.255` |
+| Pebble checkpoint | `84.246, 80.441, 84.483, 84.347, 77.442, 85.241, 81.993` |
+
+The complete benchmark output, including each sample's heap, allocation, and
+wire metrics, is generated at
+`build/benchmarks/checkpoint-replica-bootstrap.txt`. The checkpoint path is the
+default only for a missing Pebble database and can be disabled with
+`JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=false`. Snapshot fallback remains necessary
+for existing databases, non-Pebble backends, incompatible storage formats, or a
+leader without the checkpoint endpoint. The 2.55% wire increase comes from
+transferring native Pebble files and their checksummed manifest instead of the
+compact snapshot representation.
 
 The backend contract uses the same binary record codec and exercises a full
 10,000-key save, 1,000 incremental operations (500 updates, 250 deletes, 250

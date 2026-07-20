@@ -26,6 +26,7 @@ const (
 	maxMonitoringJSONRequestBytes              = 1 << 20
 	maxMonitoringEntriesLimit                  = 100000
 	snapshotContentType                        = "application/vnd.hatrie-cache.snapshot"
+	checkpointContentType                      = "application/vnd.hatrie-cache.pebble-checkpoint"
 	truncatedCommandJournalErrorResponseSuffix = "\n... journal source error body truncated"
 )
 
@@ -239,6 +240,7 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/topology", handler.handleTopology)
 	mux.HandleFunc("/api/election", handler.handleElection)
 	mux.HandleFunc("/api/replication", handler.handleReplication)
+	mux.HandleFunc("/api/journal/checkpoint", handler.handleJournalCheckpoint)
 	mux.HandleFunc("/api/journal/snapshot", handler.handleJournalSnapshot)
 	mux.HandleFunc("/api/journal", handler.handleJournal)
 	mux.HandleFunc("/metrics", handler.handleMetrics)
@@ -278,7 +280,7 @@ func monitoringPathAcceptsReplicationAuth(r *http.Request) bool {
 
 func monitoringPathRequiresReplicationAuth(r *http.Request) bool {
 	return r.Method == http.MethodGet &&
-		(r.URL.Path == "/api/journal" || r.URL.Path == "/api/journal/snapshot")
+		(r.URL.Path == "/api/journal" || r.URL.Path == "/api/journal/snapshot" || r.URL.Path == "/api/journal/checkpoint")
 }
 
 func writeMonitoringUnauthorized(w http.ResponseWriter) {
@@ -2075,6 +2077,66 @@ func (handler *MonitoringHandler) handleJournalSnapshot(w http.ResponseWriter, r
 		return
 	}
 	handler.auditHTTP(r, AuditEvent{Action: "journal.snapshot", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"journal_sequence": metadata.JournalSequence, "bytes": info.Size()}})
+}
+
+func (handler *MonitoringHandler) handleJournalCheckpoint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	if handler.options.Journal == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("journal is not configured"))
+		return
+	}
+	store, ok := handler.options.LevelDBStore.(*PebbleStore)
+	if !ok {
+		writeJSONStatus(w, http.StatusConflict, commandError("Pebble storage is required for checkpoint bootstrap"))
+		return
+	}
+	file, err := os.CreateTemp("", "hatrie-journal-checkpoint-*.tar.gz")
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	defer os.Remove(path)
+	manifest, err := CreateBackupBundle(path, handler.trie, handler.options.Journal, BackupBundleOptions{
+		Mode:            BackupModePebbleCheckpoint,
+		PersistentStore: store,
+	})
+	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "journal.checkpoint", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	file, err = os.Open(path)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", checkpointContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	w.Header().Set("X-Hatrie-Journal-Sequence", strconv.FormatUint(manifest.JournalSequence, 10))
+	if _, err := io.Copy(w, file); err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "journal.checkpoint", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
+		return
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "journal.checkpoint", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"journal_sequence": manifest.JournalSequence, "bytes": info.Size()}})
 }
 
 func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *http.Request) {

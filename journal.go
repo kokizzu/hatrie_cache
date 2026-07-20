@@ -1043,6 +1043,23 @@ func writeCommandJournalCheckpointWithFormat(path string, sequence uint64, forma
 	})
 }
 
+// InstallCommandJournalCheckpoint resets an offline journal file and removes
+// any retained segment sidecars before the journal is opened.
+func InstallCommandJournalCheckpoint(path string, format CommandJournalFormat, sequence uint64) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return errors.New("hatriecache: command journal path is required")
+	}
+	format, err := ParseCommandJournalFormat(string(format))
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(commandJournalSegmentDir(path)); err != nil {
+		return err
+	}
+	return writeCommandJournalCheckpointWithFormat(path, sequence, format)
+}
+
 func writeCommandJournalCompacted(path string, throughSequence uint64) error {
 	return writeCommandJournalCompactedWithFormat(path, throughSequence, DefaultCommandJournalFormat)
 }

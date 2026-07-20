@@ -1219,6 +1219,43 @@ func TestMonitoringHandlerStreamsJournalSnapshotForReplication(t *testing.T) {
 	}
 }
 
+func TestMonitoringHandlerStreamsPebbleJournalCheckpoint(t *testing.T) {
+	trie := newTestTrie(t)
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "live.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	if response := journal.ExecuteCommand(trie, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !response.OK {
+		t.Fatalf("SETSTR response = %#v", response)
+	}
+	handler := NewMonitoringHandler(trie, MonitoringOptions{Journal: journal, LevelDBStore: store}).Handler()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/journal/checkpoint", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("checkpoint status = %d: %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Content-Type"); got != checkpointContentType {
+		t.Fatalf("checkpoint content type = %q", got)
+	}
+	path := filepath.Join(t.TempDir(), "checkpoint.tar.gz")
+	if err := os.WriteFile(path, response.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := VerifyBackupBundle(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.RecoveredKeys != 1 || report.JournalSequence != 1 || report.LevelDB == nil {
+		t.Fatalf("checkpoint report = %#v", report)
+	}
+}
+
 func TestMonitoringHandlerPullsJournalTail(t *testing.T) {
 	var gotSourcePath string
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1994,6 +2031,7 @@ func TestMonitoringReplicationAuthTokenAllowsOnlyJournalReadAndSnapshot(t *testi
 	}{
 		{name: "journal read", method: http.MethodGet, path: "/api/journal"},
 		{name: "journal snapshot", method: http.MethodGet, path: "/api/journal/snapshot"},
+		{name: "journal checkpoint", method: http.MethodGet, path: "/api/journal/checkpoint"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

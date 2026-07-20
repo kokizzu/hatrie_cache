@@ -70,6 +70,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if !cfg.journalPullFullSyncFallback {
 		t.Fatal("journalPullFullSyncFallback = false, want default true")
 	}
+	if !cfg.journalPullCheckpointBootstrap {
+		t.Fatal("journalPullCheckpointBootstrap = false, want default true")
+	}
 	if cfg.monitoringReadHeaderTimeout != defaultMonitoringReadHeaderTimeout {
 		t.Fatalf("monitoring read header timeout = %s, want %s", cfg.monitoringReadHeaderTimeout, defaultMonitoringReadHeaderTimeout)
 	}
@@ -650,6 +653,7 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 		"-journal-pull-limit", "250",
 		"-journal-pull-max-batches", "8",
 		"-journal-pull-full-sync-fallback=false",
+		"-journal-pull-checkpoint-bootstrap=false",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
@@ -665,6 +669,9 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 	}
 	if cfg.journalPullFullSyncFallback {
 		t.Fatal("cfg journal pull full sync fallback = true, want explicit false")
+	}
+	if cfg.journalPullCheckpointBootstrap {
+		t.Fatal("cfg journal pull checkpoint bootstrap = true, want explicit false")
 	}
 }
 
@@ -3544,6 +3551,127 @@ func TestPullJournalOnceFallsBackToFullSyncAfterCompaction(t *testing.T) {
 	}
 	if after != 1 {
 		t.Fatalf("pull state after fallback = %d, want 1", after)
+	}
+}
+
+func TestBootstrapReplicaCheckpointInstallsFreshPebbleStore(t *testing.T) {
+	sourceTrie := hatriecache.CreateHatTrie()
+	defer sourceTrie.Destroy()
+	sourceStore, err := hatriecache.OpenPebbleStore(filepath.Join(t.TempDir(), "source.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sourceStore.Close()
+	sourceJournal, err := hatriecache.OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sourceJournal.Close()
+	if response := sourceJournal.ExecuteCommand(sourceTrie, hatriecache.CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "checkpoint"}); !response.OK {
+		t.Fatalf("SETSTR response = %#v", response)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "checkpoint.tar.gz")
+	if _, err := hatriecache.CreateBackupBundle(bundlePath, sourceTrie, sourceJournal, hatriecache.BackupBundleOptions{
+		Mode:            hatriecache.BackupModePebbleCheckpoint,
+		PersistentStore: sourceStore,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/journal/checkpoint" || r.Header.Get("X-Hatrie-Replication-Token") != "replica-secret" {
+			t.Fatalf("bootstrap request = %s token=%q", r.URL.Path, r.Header.Get("X-Hatrie-Replication-Token"))
+		}
+		w.Header().Set("Content-Type", "application/vnd.hatrie-cache.pebble-checkpoint")
+		_, _ = w.Write(bundle)
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	cfg := config{
+		dbPath:                         filepath.Join(root, "cache.leveldb"),
+		dbBackend:                      string(hatriecache.StorageBackendAuto),
+		dbFormat:                       string(hatriecache.DefaultStorageFormat),
+		journalPath:                    filepath.Join(root, "commands.journal"),
+		journalFormat:                  string(hatriecache.DefaultCommandJournalFormat),
+		journalPullSource:              server.URL,
+		journalPullStatePath:           filepath.Join(root, "pull-state.json"),
+		journalPullTimeout:             time.Second,
+		journalPullFullSyncFallback:    true,
+		journalPullCheckpointBootstrap: true,
+		replicationAuthToken:           "replica-secret",
+	}
+	sequence, installed, err := bootstrapReplicaCheckpoint(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !installed || sequence != 1 {
+		t.Fatalf("bootstrap = sequence:%d installed:%v", sequence, installed)
+	}
+	store, err := hatriecache.OpenPersistentStore(cfg.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Backend() != hatriecache.StorageBackendPebble {
+		t.Fatalf("bootstrap backend = %q", store.Backend())
+	}
+	restored := hatriecache.CreateHatTrie()
+	defer restored.Destroy()
+	if _, err := store.Load(restored); err != nil {
+		t.Fatal(err)
+	}
+	if got := restored.GetString("name"); got != "checkpoint" {
+		t.Fatalf("restored name = %q", got)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := hatriecache.OpenCommandJournal(cfg.journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.Sequence() != 1 {
+		t.Fatalf("journal sequence = %d", journal.Sequence())
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := loadJournalPullState(cfg.journalPullStatePath, cfg.journalPullSource)
+	if err != nil || after != 1 {
+		t.Fatalf("pull state = %d/%v", after, err)
+	}
+	if _, err := os.Stat(checkpointBootstrapMarkerPath(cfg.journalPullStatePath)); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap marker stat = %v, want not exist", err)
+	}
+	if err := hatriecache.InstallCommandJournalCheckpoint(cfg.journalPath, hatriecache.DefaultCommandJournalFormat, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(cfg.journalPullStatePath); err != nil {
+		t.Fatal(err)
+	}
+	stagingRoot := filepath.Join(root, "interrupted-staging")
+	marker := checkpointBootstrapMarker{
+		Version:              checkpointBootstrapVersion,
+		Source:               cfg.journalPullSource,
+		Sequence:             1,
+		DBPath:               cfg.dbPath,
+		JournalPath:          cfg.journalPath,
+		StatePath:            cfg.journalPullStatePath,
+		StagingRoot:          stagingRoot,
+		StagingStore:         filepath.Join(stagingRoot, "cache.leveldb"),
+		StagingBackendMarker: filepath.Join(stagingRoot, "cache.leveldb.backend"),
+		StorageFormat:        string(hatriecache.DefaultStorageFormat),
+		CreatedAt:            time.Now().UTC(),
+	}
+	if err := writeJSONFileAtomic(checkpointBootstrapMarkerPath(cfg.journalPullStatePath), marker); err != nil {
+		t.Fatal(err)
+	}
+	sequence, installed, err = bootstrapReplicaCheckpoint(context.Background(), cfg)
+	if err != nil || !installed || sequence != 1 {
+		t.Fatalf("recovered bootstrap = sequence:%d installed:%v error:%v", sequence, installed, err)
 	}
 }
 

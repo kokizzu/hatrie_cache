@@ -179,6 +179,113 @@ func PullCommandJournalSnapshot(ctx context.Context, source string, authToken st
 	return writeCommandJournalSnapshotAtomic(path, response.Body, minimumSequence)
 }
 
+func PullCommandJournalCheckpoint(ctx context.Context, source string, authToken string, client *http.Client, path string, minimumSequences ...uint64) (BackupBundleManifest, error) {
+	return pullCommandJournalCheckpoint(ctx, source, authToken, client, path, true, minimumSequences...)
+}
+
+// DownloadCommandJournalCheckpoint validates checkpoint metadata while leaving
+// payload checksum and semantic validation to the caller's staging/startup path.
+func DownloadCommandJournalCheckpoint(ctx context.Context, source string, authToken string, client *http.Client, path string, minimumSequences ...uint64) (BackupBundleManifest, error) {
+	return pullCommandJournalCheckpoint(ctx, source, authToken, client, path, false, minimumSequences...)
+}
+
+func pullCommandJournalCheckpoint(ctx context.Context, source string, authToken string, client *http.Client, path string, semanticVerify bool, minimumSequences ...uint64) (BackupBundleManifest, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	if strings.TrimSpace(path) == "" {
+		return BackupBundleManifest{}, errors.New("journal pull checkpoint path is required")
+	}
+	endpoint, err := journalCheckpointEndpoint(source)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	request.Header.Set("Accept", checkpointContentType)
+	request.Header.Set("Accept-Encoding", "identity")
+	setReplicationAuthHeaders(request, authToken)
+	response, err := client.Do(request)
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	defer drainAndClose(response.Body)
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		body, readErr := readCommandJournalErrorResponseBody(response.Body)
+		if readErr != nil {
+			return BackupBundleManifest{}, readErr
+		}
+		return BackupBundleManifest{}, fmt.Errorf("journal checkpoint source returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if contentType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]); contentType != "" && contentType != checkpointContentType {
+		return BackupBundleManifest{}, fmt.Errorf("journal checkpoint source returned content type %q", contentType)
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	if _, err := io.Copy(tmp, response.Body); err != nil {
+		cleanup()
+		return BackupBundleManifest{}, err
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return BackupBundleManifest{}, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return BackupBundleManifest{}, err
+	}
+	manifest, err := readBackupBundleManifest(tmpPath)
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return BackupBundleManifest{}, err
+	}
+	if backupBundleManifestMode(manifest) != BackupModePebbleCheckpoint || manifest.StorageBackend != string(StorageBackendPebble) {
+		_ = os.Remove(tmpPath)
+		return BackupBundleManifest{}, errors.New("journal checkpoint source did not return a Pebble checkpoint bundle")
+	}
+	minimumSequence := uint64(0)
+	if len(minimumSequences) > 0 {
+		minimumSequence = minimumSequences[0]
+	}
+	journalSequence := manifest.JournalSequence
+	if semanticVerify {
+		report, err := VerifyBackupBundle(tmpPath)
+		if err != nil {
+			_ = os.Remove(tmpPath)
+			return BackupBundleManifest{}, err
+		}
+		journalSequence = report.JournalSequence
+	}
+	if journalSequence < minimumSequence {
+		_ = os.Remove(tmpPath)
+		return BackupBundleManifest{}, fmt.Errorf("journal checkpoint sequence %d is older than required sequence %d", journalSequence, minimumSequence)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return BackupBundleManifest{}, err
+	}
+	if err := syncDirectory(dir); err != nil {
+		return BackupBundleManifest{}, err
+	}
+	return manifest, nil
+}
+
 func writeCommandJournalSnapshotAtomic(path string, body io.Reader, minimumSequence uint64) (SnapshotMetadata, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -240,6 +347,27 @@ func journalSnapshotEndpoint(source string) (string, error) {
 		return "", errors.New("journal source is invalid")
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/journal/snapshot"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func journalCheckpointEndpoint(source string) (string, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "", errors.New("journal source is required")
+	}
+	if !strings.Contains(source, "://") {
+		source = "http://" + source
+	}
+	parsed, err := url.Parse(source)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("journal source is invalid")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/journal/checkpoint"
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String(), nil

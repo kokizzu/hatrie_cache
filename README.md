@@ -1074,9 +1074,12 @@ returns a bounded batch of ordered mutating commands after `N` plus the latest
 journal sequence. Responses include `has_more` when another batch is available.
 If `N` is older than the compacted snapshot checkpoint, the endpoint returns
 `409`. `GET /api/journal/snapshot` streams a fast-gzip binary point-in-time
-snapshot with its journal sequence. The source captures state and sequence under
-the journal write barrier, releases that barrier before streaming, and retains
-writes after that sequence as ordered delta records.
+snapshot with its journal sequence. For a Pebble-backed source,
+`GET /api/journal/checkpoint` streams a checksummed native Pebble checkpoint
+bundle. Both full-state endpoints require the replication authentication token.
+The source captures state and sequence under the journal write barrier, releases
+that barrier before streaming, and retains writes after that sequence as ordered
+delta records.
 `POST /api/journal` accepts `source`, optional `after_sequence`, and optional
 `limit`, pulls that source node's journal tail, and applies the returned
 mutating commands locally through the configured journal. Set `until_current`
@@ -1101,12 +1104,30 @@ of this recovery snapshot and `SNAPSHOT_PATH` is loaded before journal replay.
 Set `JOURNAL_PULL_FULL_SYNC_FALLBACK=false` to keep the previous fail-closed
 `409` behavior. Full fallback is intentionally more CPU, disk, and bandwidth
 work than a delta pull, but it runs only when the required deltas no longer
-exist:
+exist.
+
+On a fresh follower whose `DB_PATH` does not exist, Pebble checkpoint bootstrap
+is enabled by default with `JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=true`. Before the
+database opens, the follower downloads and checksum-stages the leader's native
+checkpoint, records a crash-recovery marker, atomically installs the store and
+backend marker, resets the local journal to the checkpoint sequence, and only
+then advances pull state. Normal startup opens and semantically loads the
+installed store before any listener starts. An interrupted install resumes from
+the marker; an existing database is never replaced and continues to use normal
+delta or snapshot fallback. Unsupported backends and unavailable checkpoint
+endpoints also retain the snapshot path. Set
+`JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=false` to disable this fresh-node fast path.
+For 10,000 256-byte values it was 1.74x faster with 2.72x lower cumulative heap
+and 2.76x fewer allocations than snapshot bootstrap, at the cost of 2.55% more
+wire bytes; see [BENCHMARK.md](BENCHMARK.md#checkpoint-replica-bootstrap).
+
+Examples:
 
 ```
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_INTERVAL=5s
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_TIMEOUT=5s
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_FULL_SYNC_FALLBACK=false
+make monitoring-server DB_PATH=data/cache JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=false
 ```
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.

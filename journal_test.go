@@ -1885,6 +1885,31 @@ func TestCommandJournalSnapshotCheckpointPreventsDoubleReplay(t *testing.T) {
 	}
 }
 
+func TestInstallCommandJournalCheckpointRemovesSegmentsAndSetsSequence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.journal")
+	segmentDir := commandJournalSegmentDir(path)
+	if err := os.MkdirAll(segmentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(segmentDir, "stale.segment"), []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallCommandJournalCheckpoint(path, CommandJournalFormatBinary, 7); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(segmentDir); !os.IsNotExist(err) {
+		t.Fatalf("segment directory stat = %v, want not exist", err)
+	}
+	journal, err := OpenCommandJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	if journal.Sequence() != 7 {
+		t.Fatalf("journal sequence = %d, want 7", journal.Sequence())
+	}
+}
+
 func TestCommandJournalSnapshotAllowsWritesBetweenPagesAndCapturesFinalSequence(t *testing.T) {
 	dir := t.TempDir()
 	journalPath := filepath.Join(dir, "commands.journal")

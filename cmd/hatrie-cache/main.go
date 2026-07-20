@@ -41,95 +41,97 @@ const (
 	configProfileDev                   = "dev"
 	configProfileProduction            = "production"
 	configProfileBench                 = "bench"
+	checkpointBootstrapVersion         = 1
 )
 
 var errHatTrieDestroyed = errors.New("hatrie-cache: trie is destroyed")
 
 type config struct {
-	configPath                  string
-	configProfile               string
-	checkConfig                 bool
-	printConfig                 bool
-	monitoringServer            bool
-	monitoringAddr              string
-	monitoringTLSCert           string
-	monitoringTLSKey            string
-	monitoringAuthToken         string
-	auditLogPath                string
-	writeProtection             bool
-	rateLimit                   int
-	keyStatsMode                string
-	keyStatsCapacity            int
-	localPartitions             int
-	counterWriteStripes         int
-	memoryCompactionInterval    time.Duration
-	monitoringWebDir            string
-	monitoringReadHeaderTimeout time.Duration
-	monitoringIdleTimeout       time.Duration
-	nodeID                      string
-	topologyPath                string
-	electionTimeout             time.Duration
-	replication                 bool
-	replicationMode             string
-	replicationAsync            bool
-	replicationQueueSize        int
-	replicationRetry            time.Duration
-	replicationAttempts         uint
-	replicationDeadLetterLimit  int
-	replicationOutboxPath       string
-	replicationOutboxFormat     string
-	replicationOutboxCodec      string
-	replicationOutboxBatch      time.Duration
-	replicationCircuitFailures  int
-	replicationCircuitCooldown  time.Duration
-	replicationWireFormat       string
-	replicationTransport        string
-	replicationGRPCWindow       int
-	replicationGRPCBatchMax     int
-	replicationGRPCBatchWindow  time.Duration
-	replicationHTTPFallback     bool
-	replicationAuthToken        string
-	replicationBatchMaxBytes    int
-	replicationMaxTargets       int
-	replicationSyncInterval     time.Duration
-	replicationSyncPrefix       string
-	enforceLeaderWrites         bool
-	grpcAddr                    string
-	grpcTLSCert                 string
-	grpcTLSKey                  string
-	grpcClientCA                string
-	dbPath                      string
-	dbBackend                   string
-	dbFormat                    string
-	dbSyncInterval              time.Duration
-	dbCompareBeforeWrite        string
-	dbCompactInterval           time.Duration
-	dbCompactStartKey           string
-	dbCompactLimitKey           string
-	dbHotLoad                   bool
-	dbHotLoadMaxBytes           int64
-	dbHotLoadMaxAge             time.Duration
-	dbHotLoadMinHits            uint64
-	dbMemoryCapBytes            int64
-	dbRSSCapBytes               int64
-	dbMemoryEvictInterval       time.Duration
-	dbMemoryEvictMinValueBytes  int64
-	snapshotPath                string
-	snapshotInterval            time.Duration
-	snapshotFormat              string
-	journalPath                 string
-	journalFormat               string
-	journalGroupCommitWindow    time.Duration
-	journalGroupCommitMaxBatch  int
-	journalSegmentMaxBytes      int64
-	journalRetainedSegments     int
-	journalPullSource           string
-	journalPullStatePath        string
-	journalPullInterval         time.Duration
-	journalPullTimeout          time.Duration
-	journalPullLimit            uint64
-	journalPullMaxBatches       uint64
-	journalPullFullSyncFallback bool
+	configPath                     string
+	configProfile                  string
+	checkConfig                    bool
+	printConfig                    bool
+	monitoringServer               bool
+	monitoringAddr                 string
+	monitoringTLSCert              string
+	monitoringTLSKey               string
+	monitoringAuthToken            string
+	auditLogPath                   string
+	writeProtection                bool
+	rateLimit                      int
+	keyStatsMode                   string
+	keyStatsCapacity               int
+	localPartitions                int
+	counterWriteStripes            int
+	memoryCompactionInterval       time.Duration
+	monitoringWebDir               string
+	monitoringReadHeaderTimeout    time.Duration
+	monitoringIdleTimeout          time.Duration
+	nodeID                         string
+	topologyPath                   string
+	electionTimeout                time.Duration
+	replication                    bool
+	replicationMode                string
+	replicationAsync               bool
+	replicationQueueSize           int
+	replicationRetry               time.Duration
+	replicationAttempts            uint
+	replicationDeadLetterLimit     int
+	replicationOutboxPath          string
+	replicationOutboxFormat        string
+	replicationOutboxCodec         string
+	replicationOutboxBatch         time.Duration
+	replicationCircuitFailures     int
+	replicationCircuitCooldown     time.Duration
+	replicationWireFormat          string
+	replicationTransport           string
+	replicationGRPCWindow          int
+	replicationGRPCBatchMax        int
+	replicationGRPCBatchWindow     time.Duration
+	replicationHTTPFallback        bool
+	replicationAuthToken           string
+	replicationBatchMaxBytes       int
+	replicationMaxTargets          int
+	replicationSyncInterval        time.Duration
+	replicationSyncPrefix          string
+	enforceLeaderWrites            bool
+	grpcAddr                       string
+	grpcTLSCert                    string
+	grpcTLSKey                     string
+	grpcClientCA                   string
+	dbPath                         string
+	dbBackend                      string
+	dbFormat                       string
+	dbSyncInterval                 time.Duration
+	dbCompareBeforeWrite           string
+	dbCompactInterval              time.Duration
+	dbCompactStartKey              string
+	dbCompactLimitKey              string
+	dbHotLoad                      bool
+	dbHotLoadMaxBytes              int64
+	dbHotLoadMaxAge                time.Duration
+	dbHotLoadMinHits               uint64
+	dbMemoryCapBytes               int64
+	dbRSSCapBytes                  int64
+	dbMemoryEvictInterval          time.Duration
+	dbMemoryEvictMinValueBytes     int64
+	snapshotPath                   string
+	snapshotInterval               time.Duration
+	snapshotFormat                 string
+	journalPath                    string
+	journalFormat                  string
+	journalGroupCommitWindow       time.Duration
+	journalGroupCommitMaxBatch     int
+	journalSegmentMaxBytes         int64
+	journalRetainedSegments        int
+	journalPullSource              string
+	journalPullStatePath           string
+	journalPullInterval            time.Duration
+	journalPullTimeout             time.Duration
+	journalPullLimit               uint64
+	journalPullMaxBatches          uint64
+	journalPullFullSyncFallback    bool
+	journalPullCheckpointBootstrap bool
 }
 
 func main() {
@@ -189,6 +191,26 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	rateLimiter := hatriecache.NewRateLimiter(cfg.rateLimit, time.Second)
 	apiMetrics := hatriecache.NewAPIMetrics()
 	replicationSafety := hatriecache.NewReplicationSafetyStore()
+	if cfg.journalPullSource != "" && cfg.journalPath == "" {
+		return errors.New("journal pull requires -journal-path")
+	}
+	if cfg.journalPullSource != "" && cfg.journalPullStatePath == "" {
+		cfg.journalPullStatePath = cfg.journalPath + ".pull_state.json"
+	}
+	if cfg.journalPullSource != "" {
+		if _, err := loadJournalPullState(cfg.journalPullStatePath, cfg.journalPullSource); err != nil {
+			return err
+		}
+		sequence, installed, bootstrapErr := bootstrapReplicaCheckpoint(ctx, cfg)
+		if bootstrapErr != nil {
+			if checkpointBootstrapMarkerExists(cfg.journalPullStatePath) {
+				return fmt.Errorf("recover checkpoint bootstrap: %w", bootstrapErr)
+			}
+			fmt.Fprintf(stderr, "checkpoint bootstrap: %v\n", bootstrapErr)
+		} else if installed {
+			fmt.Fprintf(stdout, "checkpoint bootstrap installed through sequence %d\n", sequence)
+		}
+	}
 
 	trie := hatriecache.CreateHatTrie()
 	defer trie.Destroy()
@@ -220,17 +242,6 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 	defer closeJournal(journal, stderr)
-	if cfg.journalPullSource != "" && journal == nil {
-		return errors.New("journal pull requires -journal-path")
-	}
-	if cfg.journalPullSource != "" && cfg.journalPullStatePath == "" {
-		cfg.journalPullStatePath = cfg.journalPath + ".pull_state.json"
-	}
-	if cfg.journalPullSource != "" {
-		if _, err := loadJournalPullState(cfg.journalPullStatePath, cfg.journalPullSource); err != nil {
-			return err
-		}
-	}
 	pullSnapshotPath := journalPullSnapshotPath(cfg.journalPullStatePath, cfg.journalPullSource)
 	snapshotMetadata, err := loadStartupSnapshot(trie, journal, cfg.snapshotPath, pullSnapshotPath)
 	if err != nil {
@@ -425,35 +436,36 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 
 func parseConfig(args []string, output io.Writer) (config, error) {
 	cfg := config{
-		monitoringAddr:              "127.0.0.1:8080",
-		monitoringWebDir:            "svelte-mpa/dist",
-		monitoringReadHeaderTimeout: defaultMonitoringReadHeaderTimeout,
-		monitoringIdleTimeout:       defaultMonitoringIdleTimeout,
-		keyStatsMode:                string(hatriecache.DefaultKeyStatsMode),
-		keyStatsCapacity:            hatriecache.DefaultKeyStatsCapacity,
-		localPartitions:             hatriecache.DefaultLocalPartitions,
-		counterWriteStripes:         hatriecache.DefaultCounterWriteStripes,
-		electionTimeout:             hatriecache.DefaultElectionTimeout,
-		replicationMode:             replicationModeJournal,
-		replicationWireFormat:       string(hatriecache.DefaultCommandWireFormat),
-		replicationTransport:        string(hatriecache.ReplicationTransportHTTP),
-		replicationGRPCWindow:       hatriecache.DefaultReplicationGRPCStreamWindow,
-		replicationGRPCBatchMax:     hatriecache.DefaultReplicationGRPCLiveBatchMaxCommands,
-		replicationGRPCBatchWindow:  hatriecache.DefaultReplicationGRPCLiveBatchWindow,
-		replicationHTTPFallback:     true,
-		replicationBatchMaxBytes:    hatriecache.DefaultReplicationBatchMaxBytes,
-		replicationMaxTargets:       hatriecache.DefaultReplicationMaxInFlightTargets,
-		journalPullTimeout:          hatriecache.DefaultCommandJournalPullTimeout,
-		journalPullFullSyncFallback: true,
-		dbFormat:                    string(hatriecache.DefaultStorageFormat),
-		dbBackend:                   string(hatriecache.StorageBackendAuto),
-		dbCompareBeforeWrite:        string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
-		snapshotFormat:              string(hatriecache.DefaultSnapshotFormat),
-		journalFormat:               string(hatriecache.DefaultCommandJournalFormat),
-		journalGroupCommitWindow:    hatriecache.DefaultJournalGroupCommitWindow,
-		journalGroupCommitMaxBatch:  hatriecache.DefaultJournalGroupCommitMaxBatch,
-		journalSegmentMaxBytes:      hatriecache.DefaultCommandJournalSegmentMaxBytes,
-		journalRetainedSegments:     hatriecache.DefaultCommandJournalRetainedSegments,
+		monitoringAddr:                 "127.0.0.1:8080",
+		monitoringWebDir:               "svelte-mpa/dist",
+		monitoringReadHeaderTimeout:    defaultMonitoringReadHeaderTimeout,
+		monitoringIdleTimeout:          defaultMonitoringIdleTimeout,
+		keyStatsMode:                   string(hatriecache.DefaultKeyStatsMode),
+		keyStatsCapacity:               hatriecache.DefaultKeyStatsCapacity,
+		localPartitions:                hatriecache.DefaultLocalPartitions,
+		counterWriteStripes:            hatriecache.DefaultCounterWriteStripes,
+		electionTimeout:                hatriecache.DefaultElectionTimeout,
+		replicationMode:                replicationModeJournal,
+		replicationWireFormat:          string(hatriecache.DefaultCommandWireFormat),
+		replicationTransport:           string(hatriecache.ReplicationTransportHTTP),
+		replicationGRPCWindow:          hatriecache.DefaultReplicationGRPCStreamWindow,
+		replicationGRPCBatchMax:        hatriecache.DefaultReplicationGRPCLiveBatchMaxCommands,
+		replicationGRPCBatchWindow:     hatriecache.DefaultReplicationGRPCLiveBatchWindow,
+		replicationHTTPFallback:        true,
+		replicationBatchMaxBytes:       hatriecache.DefaultReplicationBatchMaxBytes,
+		replicationMaxTargets:          hatriecache.DefaultReplicationMaxInFlightTargets,
+		journalPullTimeout:             hatriecache.DefaultCommandJournalPullTimeout,
+		journalPullFullSyncFallback:    true,
+		journalPullCheckpointBootstrap: true,
+		dbFormat:                       string(hatriecache.DefaultStorageFormat),
+		dbBackend:                      string(hatriecache.StorageBackendAuto),
+		dbCompareBeforeWrite:           string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
+		snapshotFormat:                 string(hatriecache.DefaultSnapshotFormat),
+		journalFormat:                  string(hatriecache.DefaultCommandJournalFormat),
+		journalGroupCommitWindow:       hatriecache.DefaultJournalGroupCommitWindow,
+		journalGroupCommitMaxBatch:     hatriecache.DefaultJournalGroupCommitMaxBatch,
+		journalSegmentMaxBytes:         hatriecache.DefaultCommandJournalSegmentMaxBytes,
+		journalRetainedSegments:        hatriecache.DefaultCommandJournalRetainedSegments,
 	}
 	configPath, err := configPathFromArgs(args)
 	if err != nil {
@@ -567,6 +579,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.Uint64Var(&cfg.journalPullLimit, "journal-pull-limit", 0, "maximum entries per journal pull batch")
 	flags.Uint64Var(&cfg.journalPullMaxBatches, "journal-pull-max-batches", 0, "maximum batches per journal pull attempt")
 	flags.BoolVar(&cfg.journalPullFullSyncFallback, "journal-pull-full-sync-fallback", cfg.journalPullFullSyncFallback, "request an exact full snapshot when journal deltas were compacted")
+	flags.BoolVar(&cfg.journalPullCheckpointBootstrap, "journal-pull-checkpoint-bootstrap", cfg.journalPullCheckpointBootstrap, "clone a native Pebble checkpoint before opening a fresh replica store")
 	if configPath != "" {
 		if err := applyConfigFile(configPath, flags); err != nil {
 			return config{}, err
@@ -1072,6 +1085,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"journal_pull_limit":                   cfg.journalPullLimit,
 		"journal_pull_max_batches":             cfg.journalPullMaxBatches,
 		"journal_pull_full_sync_fallback":      cfg.journalPullFullSyncFallback,
+		"journal_pull_checkpoint_bootstrap":    cfg.journalPullCheckpointBootstrap,
 	}
 }
 
@@ -1833,6 +1847,247 @@ func journalPullSnapshotPath(statePath string, source string) string {
 	}
 	sum := sha256.Sum256([]byte(source))
 	return fmt.Sprintf("%s.%x.snapshot.hc", statePath, sum[:8])
+}
+
+type checkpointBootstrapMarker struct {
+	Version              int       `json:"version"`
+	Source               string    `json:"source"`
+	Sequence             uint64    `json:"sequence"`
+	DBPath               string    `json:"db_path"`
+	JournalPath          string    `json:"journal_path"`
+	StatePath            string    `json:"state_path"`
+	StagingRoot          string    `json:"staging_root"`
+	StagingStore         string    `json:"staging_store"`
+	StagingBackendMarker string    `json:"staging_backend_marker"`
+	StorageFormat        string    `json:"storage_format"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
+func checkpointBootstrapMarkerPath(statePath string) string {
+	statePath = strings.TrimSpace(statePath)
+	if statePath == "" {
+		return ""
+	}
+	return statePath + ".checkpoint-bootstrap.json"
+}
+
+func checkpointBootstrapMarkerExists(statePath string) bool {
+	path := checkpointBootstrapMarkerPath(statePath)
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func bootstrapReplicaCheckpoint(ctx context.Context, cfg config) (uint64, bool, error) {
+	markerPath := checkpointBootstrapMarkerPath(cfg.journalPullStatePath)
+	if markerPath != "" {
+		marker, err := loadCheckpointBootstrapMarker(markerPath)
+		if err == nil {
+			if err := completeCheckpointBootstrap(markerPath, marker, cfg); err != nil {
+				return marker.Sequence, false, err
+			}
+			return marker.Sequence, true, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return 0, false, err
+		}
+	}
+	if !cfg.journalPullCheckpointBootstrap || !cfg.journalPullFullSyncFallback || strings.TrimSpace(cfg.journalPullSource) == "" || strings.TrimSpace(cfg.dbPath) == "" || strings.TrimSpace(cfg.journalPath) == "" || markerPath == "" {
+		return 0, false, nil
+	}
+	backend := storageBackend(cfg)
+	if backend != hatriecache.StorageBackendAuto && backend != hatriecache.StorageBackendPebble {
+		return 0, false, nil
+	}
+	dbPath, err := filepath.Abs(cfg.dbPath)
+	if err != nil {
+		return 0, false, err
+	}
+	if _, err := os.Lstat(dbPath); err == nil {
+		return 0, false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return 0, false, err
+	}
+	afterSequence, err := loadJournalPullState(cfg.journalPullStatePath, cfg.journalPullSource)
+	if err != nil {
+		return 0, false, err
+	}
+	parent := filepath.Dir(dbPath)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return 0, false, err
+	}
+	download, err := os.CreateTemp(parent, "."+filepath.Base(dbPath)+".checkpoint-download-*.tar.gz")
+	if err != nil {
+		return 0, false, err
+	}
+	downloadPath := download.Name()
+	if err := download.Close(); err != nil {
+		_ = os.Remove(downloadPath)
+		return 0, false, err
+	}
+	defer os.Remove(downloadPath)
+	client := http.DefaultClient
+	if cfg.journalPullTimeout > 0 {
+		client = &http.Client{Timeout: cfg.journalPullTimeout}
+	}
+	manifest, err := hatriecache.DownloadCommandJournalCheckpoint(ctx, cfg.journalPullSource, cfg.replicationAuthToken, client, downloadPath, afterSequence)
+	if err != nil {
+		return 0, false, err
+	}
+	if manifest.StorageFormat != string(storageFormat(cfg)) {
+		return 0, false, fmt.Errorf("checkpoint storage format %q does not match configured format %q", manifest.StorageFormat, storageFormat(cfg))
+	}
+	stagingRoot, err := os.MkdirTemp(parent, "."+filepath.Base(dbPath)+".checkpoint-bootstrap-*")
+	if err != nil {
+		return 0, false, err
+	}
+	cleanupStaging := true
+	defer func() {
+		if cleanupStaging {
+			_ = os.RemoveAll(stagingRoot)
+		}
+	}()
+	restoredRoot := filepath.Join(stagingRoot, "data")
+	stagedManifest, err := hatriecache.StagePebbleCheckpointBundle(downloadPath, restoredRoot)
+	if err != nil {
+		return 0, false, err
+	}
+	if stagedManifest.JournalSequence != manifest.JournalSequence {
+		return 0, false, errors.New("checkpoint bootstrap restore metadata mismatch")
+	}
+	journalPath, err := filepath.Abs(cfg.journalPath)
+	if err != nil {
+		return 0, false, err
+	}
+	statePath, err := filepath.Abs(cfg.journalPullStatePath)
+	if err != nil {
+		return 0, false, err
+	}
+	marker := checkpointBootstrapMarker{
+		Version:              checkpointBootstrapVersion,
+		Source:               cfg.journalPullSource,
+		Sequence:             manifest.JournalSequence,
+		DBPath:               dbPath,
+		JournalPath:          journalPath,
+		StatePath:            statePath,
+		StagingRoot:          stagingRoot,
+		StagingStore:         filepath.Join(restoredRoot, "cache.leveldb"),
+		StagingBackendMarker: filepath.Join(restoredRoot, "cache.leveldb.backend"),
+		StorageFormat:        manifest.StorageFormat,
+		CreatedAt:            time.Now().UTC(),
+	}
+	if err := writeJSONFileAtomic(markerPath, marker); err != nil {
+		return 0, false, err
+	}
+	cleanupStaging = false
+	if err := completeCheckpointBootstrap(markerPath, marker, cfg); err != nil {
+		return marker.Sequence, false, err
+	}
+	return marker.Sequence, true, nil
+}
+
+func loadCheckpointBootstrapMarker(path string) (checkpointBootstrapMarker, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return checkpointBootstrapMarker{}, err
+	}
+	defer file.Close()
+	var marker checkpointBootstrapMarker
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&marker); err != nil {
+		return checkpointBootstrapMarker{}, err
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return checkpointBootstrapMarker{}, errors.New("invalid checkpoint bootstrap marker JSON")
+	}
+	if marker.Version != checkpointBootstrapVersion || marker.Source == "" || marker.DBPath == "" || marker.JournalPath == "" || marker.StatePath == "" || marker.StagingRoot == "" || marker.StagingStore == "" || marker.StagingBackendMarker == "" || marker.StorageFormat == "" {
+		return checkpointBootstrapMarker{}, errors.New("invalid checkpoint bootstrap marker")
+	}
+	return marker, nil
+}
+
+func completeCheckpointBootstrap(markerPath string, marker checkpointBootstrapMarker, cfg config) error {
+	dbPath, err := filepath.Abs(cfg.dbPath)
+	if err != nil {
+		return err
+	}
+	journalPath, err := filepath.Abs(cfg.journalPath)
+	if err != nil {
+		return err
+	}
+	statePath, err := filepath.Abs(cfg.journalPullStatePath)
+	if err != nil {
+		return err
+	}
+	if marker.Source != cfg.journalPullSource || filepath.Clean(marker.DBPath) != filepath.Clean(dbPath) || filepath.Clean(marker.JournalPath) != filepath.Clean(journalPath) || filepath.Clean(marker.StatePath) != filepath.Clean(statePath) {
+		return errors.New("checkpoint bootstrap marker does not match current configuration")
+	}
+	targetExists, err := pathPresence(marker.DBPath)
+	if err != nil {
+		return err
+	}
+	stagingExists, err := pathPresence(marker.StagingStore)
+	if err != nil {
+		return err
+	}
+	switch {
+	case targetExists && stagingExists:
+		return errors.New("checkpoint bootstrap target and staging store both exist")
+	case !targetExists && !stagingExists:
+		return errors.New("checkpoint bootstrap store is missing")
+	case !targetExists:
+		if err := os.Rename(marker.StagingStore, marker.DBPath); err != nil {
+			return err
+		}
+	}
+	targetMarker := marker.DBPath + ".backend"
+	stagingMarkerExists, err := pathPresence(marker.StagingBackendMarker)
+	if err != nil {
+		return err
+	}
+	if stagingMarkerExists {
+		if err := os.Rename(marker.StagingBackendMarker, targetMarker); err != nil {
+			return err
+		}
+	} else {
+		data, err := os.ReadFile(targetMarker)
+		if err != nil || strings.TrimSpace(string(data)) != string(hatriecache.StorageBackendPebble) {
+			return errors.New("checkpoint bootstrap Pebble backend marker is missing")
+		}
+	}
+	if err := syncJSONDirectory(filepath.Dir(marker.DBPath)); err != nil {
+		return err
+	}
+	if err := hatriecache.InstallCommandJournalCheckpoint(marker.JournalPath, journalFormat(cfg), marker.Sequence); err != nil {
+		return err
+	}
+	if err := saveJournalPullState(marker.StatePath, marker.Source, marker.Sequence); err != nil {
+		return err
+	}
+	if snapshotPath := journalPullSnapshotPath(marker.StatePath, marker.Source); snapshotPath != "" {
+		if err := os.Remove(snapshotPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if err := os.RemoveAll(marker.StagingRoot); err != nil {
+		return err
+	}
+	if err := os.Remove(markerPath); err != nil {
+		return err
+	}
+	return syncJSONDirectory(filepath.Dir(markerPath))
+}
+
+func pathPresence(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func saveSnapshotIfConfigured(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, path string, format hatriecache.SnapshotFormat) (err error) {
