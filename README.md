@@ -680,9 +680,10 @@ entry scans collect partitions concurrently up to `GOMAXPROCS`, sort each child
 locally, and perform a deterministic k-way merge. Monitoring inventory,
 replication scans, Merkle rebuilds, expiration cleanup, and memory compaction use
 the same independent partition parallelism. Snapshot and persistence capture
-keep all child locks for one point-in-time image but use one bounded producer per
-partition, with capture work limited to `GOMAXPROCS` and one buffered entry per
-partition.
+install one shared mutation tracker, scan generation-checked 256-entry child
+pages with work limited to `GOMAXPROCS`, and reconcile dirty keys at one short
+journal barrier. They retain one point-in-time image without holding every child
+lock for the complete scan.
 
 Multi-page replication retains one generation-checked iterator per partition
 and a k-way merge heap across pages. It no longer rescans and globally sorts the
@@ -700,6 +701,12 @@ keys remain valid. On the same 100,000-key traversal, the internal path is
 heap, and performs 449.23x fewer allocations. The durable batch-arena path was
 1.03x faster than the borrowed path in this run but used 7.85x more heap. See
 [BENCHMARK.md](BENCHMARK.md#packed-internal-scan-arenas).
+
+For 100,000 keys across 16 partitions, bounded snapshot pages reduce median
+maximum read pause from 154.40 ms to 2.30 ms (67.14x) while total snapshot time
+rises 7.8%, cumulative heap rises 1.7%, and allocation count is effectively
+unchanged. Snapshot and storage formats do not change. See
+[BENCHMARK.md](BENCHMARK.md#bounded-partition-snapshot-locking).
 
 The measured 100,000-write fixture is 2.24x faster at 16 workers, while
 separate-process maximum RSS rose from 51,588 KiB to 54,096 KiB. On a 100,000-key

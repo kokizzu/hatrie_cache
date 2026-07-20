@@ -186,6 +186,57 @@ func TestPebbleStoreGenerationSaveReconcilesConcurrentMutations(t *testing.T) {
 	}
 }
 
+func TestPebbleStoreGenerationSaveReconcilesConcurrentPartitionMutations(t *testing.T) {
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	trie := newTestTrie(t)
+	if err := trie.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < snapshotCaptureScanPageEntries*2; index++ {
+		trie.UpsertString(fmt.Sprintf("partition-pebble:%05d", index), "before")
+	}
+
+	firstPage := make(chan struct{})
+	release := make(chan struct{})
+	var firstPageOnce sync.Once
+	trie.snapshotCapturePageHook = func(page int) {
+		if page == 1 {
+			firstPageOnce.Do(func() {
+				close(firstPage)
+				<-release
+			})
+		}
+	}
+	saved := make(chan error, 1)
+	go func() { saved <- store.Save(trie) }()
+	<-firstPage
+	trie.UpsertString("partition-pebble:00000", "after")
+	trie.Delete("partition-pebble:00001")
+	trie.UpsertString("partition-pebble:00000:new", "inserted")
+	close(release)
+	if err := <-saved; err != nil {
+		t.Fatal(err)
+	}
+
+	restored := newTestTrie(t)
+	if _, err := store.Load(restored); err != nil {
+		t.Fatal(err)
+	}
+	if got := restored.GetString("partition-pebble:00000"); got != "after" {
+		t.Fatalf("updated partition value = %q, want after", got)
+	}
+	if restored.Exists("partition-pebble:00001") {
+		t.Fatal("deleted partition value remained in Pebble generation")
+	}
+	if got := restored.GetString("partition-pebble:00000:new"); got != "inserted" {
+		t.Fatalf("inserted partition value = %q, want inserted", got)
+	}
+}
+
 func TestPebbleStoreGenerationSaveSupportsEmptyJSONAndLazyReferences(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache")
 	store, err := OpenPebbleStoreWithFormat(path, StorageFormatJSON)

@@ -476,12 +476,20 @@ func executePartitionedPublicCommandBatch(ctx context.Context, trie *HatTrie, re
 }
 
 func (ht *HatTrie) captureLocalPartitionEntries(currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) ([]snapshotEntry, uint64, error) {
-	entries := make([]snapshotEntry, 0)
-	sequence, err := ht.visitCapturedLocalPartitionEntries(currentStore, currentDB, barrier, func(entry snapshotEntry) error {
-		entries = append(entries, entry)
+	capture := snapshotCapture{}
+	replacements, sequence, err := ht.visitCapturedLocalPartitionEntries(currentStore, currentDB, barrier, func(entry snapshotEntry) error {
+		capture.append(entry)
 		return nil
 	})
-	return entries, sequence, err
+	if err != nil {
+		return nil, 0, err
+	}
+	capture = reconcileSnapshotCapture(capture, replacements)
+	entries := make([]snapshotEntry, 0, capture.count)
+	for _, page := range capture.pages {
+		entries = append(entries, page...)
+	}
+	return entries, sequence, nil
 }
 
 type localPartitionCapturedItem struct {
@@ -514,36 +522,35 @@ type localPartitionCaptureResult struct {
 	err   error
 }
 
-func (ht *HatTrie) visitCapturedLocalPartitionEntries(currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier, visit func(snapshotEntry) error) (uint64, error) {
+func (ht *HatTrie) visitCapturedLocalPartitionEntries(currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier, visit func(snapshotEntry) error) (map[string]snapshotCaptureReplacement, uint64, error) {
 	set := ht.localPartitionSet()
 	if set == nil {
-		return 0, errors.New("hatriecache: local partitions are not configured")
+		return nil, 0, errors.New("hatriecache: local partitions are not configured")
 	}
 	ht.snapshotCaptureMu.Lock()
 	defer ht.snapshotCaptureMu.Unlock()
 
-	var sequence uint64
-	var release func()
-	if barrier != nil {
-		var err error
-		sequence, release, err = barrier()
-		if err != nil {
-			return 0, err
+	tracker := &snapshotMutationTracker{dirty: make(map[string]struct{})}
+	lockLocalPartitionSet(set)
+	for _, child := range set.tries {
+		child.ensureOpen()
+		if child.snapshotMutations != nil {
+			unlockLocalPartitionSet(set)
+			return nil, 0, errors.New("hatriecache: local partition snapshot capture already active")
 		}
-	}
-	if release != nil {
-		defer release()
 	}
 	for _, child := range set.tries {
-		child.mu.Lock()
+		child.snapshotMutations = tracker
 	}
+	unlockLocalPartitionSet(set)
+	active := true
 	defer func() {
-		for index := len(set.tries) - 1; index >= 0; index-- {
-			set.tries[index].mu.Unlock()
+		if !active {
+			return
 		}
+		clearLocalPartitionSnapshotTracker(set, tracker)
 	}()
 
-	now := ht.currentTime()
 	done := make(chan struct{})
 	concurrency := runtime.GOMAXPROCS(0)
 	if concurrency > len(set.tries) {
@@ -561,27 +568,26 @@ func (ht *HatTrie) visitCapturedLocalPartitionEntries(currentStore *LevelDBStore
 		go func(child *HatTrie, output chan<- localPartitionCaptureResult) {
 			defer workers.Done()
 			defer close(output)
-			child.ensureOpen()
-			scan, err := child.newScanCursorLocked("", true)
-			if err != nil {
-				select {
-				case output <- localPartitionCaptureResult{err: err}:
-				case <-done:
-				}
-				return
-			}
-			defer scan.closeLocked(child)
+			cursor := &replicationSyncCursor{}
+			defer cursor.close(child)
+			afterKey := ""
+			hasAfterKey := false
+			entries := make([]snapshotEntry, 0, snapshotCaptureScanPageEntries)
 			for {
 				select {
 				case tokens <- struct{}{}:
 				case <-done:
 					return
 				}
-				entry, ok := scan.currentLiveEntryLocked(child, now)
-				var captured snapshotEntry
-				if ok {
-					captured, err = child.captureSnapshotEntryForStoreLocked(entry, currentStore, currentDB)
-				}
+				entries = entries[:0]
+				page, err := replicationSyncEntriesPageWithCursor(child, "", afterKey, hasAfterKey, snapshotCaptureScanPageEntries, cursor, func(entry Entry) error {
+					captured, captureErr := child.captureSnapshotEntryForStoreLocked(entry, currentStore, currentDB)
+					if captureErr != nil {
+						return captureErr
+					}
+					entries = append(entries, captured)
+					return nil
+				})
 				<-tokens
 				if err != nil {
 					select {
@@ -590,15 +596,19 @@ func (ht *HatTrie) visitCapturedLocalPartitionEntries(currentStore *LevelDBStore
 					}
 					return
 				}
-				if !ok {
+				for _, captured := range entries {
+					select {
+					case output <- localPartitionCaptureResult{entry: captured}:
+					case <-done:
+						return
+					}
+				}
+				if !page.hasMore {
 					return
 				}
-				select {
-				case output <- localPartitionCaptureResult{entry: captured}:
-					scan.consume()
-				case <-done:
-					return
-				}
+				afterKey = page.nextAfterKey
+				hasAfterKey = true
+				runtime.Gosched()
 			}
 		}(child, results[index])
 	}
@@ -614,25 +624,138 @@ func (ht *HatTrie) visitCapturedLocalPartitionEntries(currentStore *LevelDBStore
 			continue
 		}
 		if result.err != nil {
-			return 0, result.err
+			return nil, 0, result.err
 		}
 		heap.Push(&items, localPartitionCapturedItem{partition: index, entry: result.entry})
 	}
+	pageEntries := 0
+	pageNumber := 0
 	for len(items) > 0 {
 		item := heap.Pop(&items).(localPartitionCapturedItem)
 		if err := visit(item.entry); err != nil {
-			return 0, err
+			return nil, 0, err
+		}
+		pageEntries++
+		if pageEntries == snapshotCaptureScanPageEntries {
+			pageEntries = 0
+			pageNumber++
+			if hook := ht.snapshotCapturePageHook; hook != nil {
+				hook(pageNumber)
+			}
+			runtime.Gosched()
 		}
 		result, ok := <-results[item.partition]
 		if !ok {
 			continue
 		}
 		if result.err != nil {
-			return 0, result.err
+			return nil, 0, result.err
 		}
 		heap.Push(&items, localPartitionCapturedItem{partition: item.partition, entry: result.entry})
 	}
-	return sequence, nil
+	if pageEntries != 0 || pageNumber == 0 {
+		pageNumber++
+		if hook := ht.snapshotCapturePageHook; hook != nil {
+			hook(pageNumber)
+		}
+	}
+	replacements, sequence, err := ht.captureLocalPartitionMutationReplacements(set, tracker, currentStore, currentDB, barrier)
+	if err != nil {
+		return nil, 0, err
+	}
+	active = false
+	return replacements, sequence, nil
+}
+
+func clearLocalPartitionSnapshotTracker(set *localPartitionSet, tracker *snapshotMutationTracker) {
+	if set == nil || tracker == nil {
+		return
+	}
+	lockLocalPartitionSet(set)
+	for _, child := range set.tries {
+		if child.snapshotMutations == tracker {
+			child.snapshotMutations = nil
+		}
+	}
+	unlockLocalPartitionSet(set)
+}
+
+func (ht *HatTrie) captureLocalPartitionMutationReplacements(set *localPartitionSet, tracker *snapshotMutationTracker, currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) (map[string]snapshotCaptureReplacement, uint64, error) {
+	replacements := make(map[string]snapshotCaptureReplacement)
+	for {
+		var sequence uint64
+		var releaseBarrier func()
+		if barrier != nil {
+			var err error
+			sequence, releaseBarrier, err = barrier()
+			if err != nil {
+				return nil, 0, err
+			}
+		}
+		lockLocalPartitionSet(set)
+		valid := true
+		for _, child := range set.tries {
+			if child.snapshotMutations != tracker {
+				valid = false
+				break
+			}
+		}
+		dirty := tracker.take()
+		if !valid {
+			unlockLocalPartitionSet(set)
+			if releaseBarrier != nil {
+				releaseBarrier()
+			}
+			return nil, 0, errors.New("hatriecache: local partition snapshot mutation tracker changed during capture")
+		}
+		if len(dirty) == 0 {
+			for _, child := range set.tries {
+				child.snapshotMutations = nil
+			}
+			unlockLocalPartitionSet(set)
+			if releaseBarrier != nil {
+				releaseBarrier()
+			}
+			return replacements, sequence, nil
+		}
+		unlockLocalPartitionSet(set)
+		if releaseBarrier != nil {
+			releaseBarrier()
+		}
+		keys := make([]string, 0, len(dirty))
+		for key := range dirty {
+			keys = append(keys, key)
+		}
+
+		for first := 0; first < len(keys); first += snapshotCaptureScanPageEntries {
+			last := first + snapshotCaptureScanPageEntries
+			if last > len(keys) {
+				last = len(keys)
+			}
+			groups := make([][]string, len(set.tries))
+			for _, key := range keys[first:last] {
+				partition := int(xxhash.Sum64String(key) & set.mask)
+				groups[partition] = append(groups[partition], key)
+			}
+			for partition, partitionKeys := range groups {
+				if len(partitionKeys) == 0 {
+					continue
+				}
+				child := set.tries[partition]
+				child.mu.Lock()
+				for _, key := range partitionKeys {
+					replacement, err := child.captureSnapshotReplacementLocked(key, currentStore, currentDB)
+					if err != nil {
+						child.mu.Unlock()
+						return nil, 0, err
+					}
+					replacements[key] = replacement
+				}
+				child.mu.Unlock()
+			}
+			runtime.Gosched()
+		}
+	}
 }
 
 func (ht *HatTrie) loadPartitionedSnapshot(path string) (SnapshotMetadata, error) {

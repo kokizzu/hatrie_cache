@@ -417,9 +417,14 @@ func benchmarkBigWinsSnapshot(b *testing.B) {
 	keyCount := bigWinsBenchmarkKeys(25000)
 	trie := CreateHatTrie()
 	b.Cleanup(trie.Destroy)
+	partitions := bigWinsBenchmarkSnapshotPartitions()
+	if err := trie.ConfigureLocalPartitions(partitions); err != nil {
+		b.Fatal(err)
+	}
 	for idx := 0; idx < keyCount; idx++ {
 		trie.UpsertString(bigWinsKey(idx), "snapshot-value")
 	}
+	probeKey := bigWinsKey(0)
 	var total time.Duration
 	var maxPause atomic.Int64
 	b.ReportAllocs()
@@ -438,7 +443,7 @@ func benchmarkBigWinsSnapshot(b *testing.B) {
 				default:
 				}
 				started := time.Now()
-				_ = trie.GetString(bigWinsKey(0))
+				_ = trie.GetString(probeKey)
 				updateAtomicMax(&maxPause, time.Since(started).Nanoseconds())
 			}
 		}()
@@ -456,6 +461,7 @@ func benchmarkBigWinsSnapshot(b *testing.B) {
 	}
 	b.StopTimer()
 	b.ReportMetric(float64(keyCount), "keys/op")
+	b.ReportMetric(float64(partitions), "partitions/op")
 	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N), "snapshot_ns/op")
 	b.ReportMetric(float64(maxPause.Load()), "max_read_pause_ns/op")
 }
@@ -775,6 +781,14 @@ func bigWinsBenchmarkKeys(fallback int) int {
 
 func bigWinsBenchmarkOperations(fallback int) int {
 	return bigWinsBenchmarkInt("HATRIE_BIG_WINS_OPS", fallback)
+}
+
+func bigWinsBenchmarkSnapshotPartitions() int {
+	value, err := strconv.Atoi(os.Getenv("HATRIE_BIG_WINS_SNAPSHOT_PARTITIONS"))
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
 }
 
 func bigWinsBenchmarkInt(name string, fallback int) int {

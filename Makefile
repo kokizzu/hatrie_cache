@@ -118,6 +118,9 @@ BACKUP_BENCH_KEYS ?= 10000
 PARTITION_SCAN_BENCH_KEYS ?= 100000
 PARTITION_CURSOR_BENCH_KEYS ?= 100000
 PARTITION_CURSOR_BENCH_PAGE_SIZE ?= 1000
+PARTITION_SNAPSHOT_BENCH ?= ^BenchmarkBigWins/Snapshot$$
+PARTITION_SNAPSHOT_BENCH_KEYS ?= 100000
+PARTITION_SNAPSHOT_COUNT ?= 16
 COLD_HYDRATION_BENCH ?= ^BenchmarkColdReferenceParallelHydration32$$
 REFERENCE_SLAB_BENCH ?= ^BenchmarkLevelDBReferenceRetainedMemory100k$$
 NATIVE_COMMAND_BATCH_BENCH ?= ^BenchmarkNativeCScalarBatch4096$$
@@ -172,7 +175,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-partition-whole-keyspace bench-partition-cursor bench-cold-hydration bench-reference-slab bench-native-command-batch bench-scalar-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-native-command-batch bench-scalar-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -268,6 +271,9 @@ bench-partition-whole-keyspace:
 
 bench-partition-cursor:
 	PARTITION_CURSOR_BENCH='$(PARTITION_CURSOR_BENCH)' PARTITION_CURSOR_BENCH_KEYS='$(PARTITION_CURSOR_BENCH_KEYS)' PARTITION_CURSOR_BENCH_PAGE_SIZE='$(PARTITION_CURSOR_BENCH_PAGE_SIZE)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-partition-cursor.sh
+
+bench-partition-snapshot:
+	PARTITION_SNAPSHOT_BENCH='$(PARTITION_SNAPSHOT_BENCH)' PARTITION_SNAPSHOT_BENCH_KEYS='$(PARTITION_SNAPSHOT_BENCH_KEYS)' PARTITION_SNAPSHOT_COUNT='$(PARTITION_SNAPSHOT_COUNT)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-partition-snapshot.sh
 
 bench-cold-hydration:
 	COLD_HYDRATION_BENCH='$(COLD_HYDRATION_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-cold-hydration.sh

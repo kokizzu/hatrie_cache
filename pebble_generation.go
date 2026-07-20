@@ -356,7 +356,7 @@ func capturePebbleGenerationSST(trie *HatTrie, dbPath string, generation uint64,
 
 func capturePebbleRecords(trie *HatTrie, format StorageFormat, visitRecord func(string, []byte) error) (map[string]snapshotCaptureReplacement, error) {
 	if trie.localPartitionSet() != nil {
-		_, err := trie.visitCapturedLocalPartitionEntries(nil, nil, nil, func(entry snapshotEntry) error {
+		replacements, _, err := trie.visitCapturedLocalPartitionEntries(nil, nil, nil, func(entry snapshotEntry) error {
 			data, err := pebbleSnapshotEntryData(entry, format)
 			if err != nil {
 				return err
@@ -366,7 +366,7 @@ func capturePebbleRecords(trie *HatTrie, format StorageFormat, visitRecord func(
 			}
 			return nil
 		})
-		return nil, err
+		return replacements, err
 	}
 	trie.snapshotCaptureMu.Lock()
 	defer trie.snapshotCaptureMu.Unlock()

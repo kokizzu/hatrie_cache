@@ -216,6 +216,156 @@ func TestLocalPartitionsSnapshotRoundTripRemainsPortable(t *testing.T) {
 	assertLocalPartitionSnapshotValues(t, plain)
 }
 
+func TestLocalPartitionSnapshotCaptureReconcilesMutationsBetweenPages(t *testing.T) {
+	trie := newTestTrie(t)
+	if err := trie.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < snapshotCaptureScanPageEntries*4; index++ {
+		trie.UpsertString(fmt.Sprintf("key:%05d", index), "before")
+	}
+	trie.UpsertString("", "blank-before")
+
+	firstPage := make(chan struct{})
+	release := make(chan struct{})
+	trie.snapshotCapturePageHook = func(page int) {
+		if page != 1 {
+			return
+		}
+		close(firstPage)
+		<-release
+	}
+	captured := make(chan snapshotCapture, 1)
+	captureErrors := make(chan error, 1)
+	go func() {
+		capture, err := trie.captureSnapshot()
+		captured <- capture
+		captureErrors <- err
+	}()
+
+	select {
+	case <-firstPage:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("partition snapshot did not expose a bounded scan page")
+	}
+
+	mutated := make(chan struct{})
+	go func() {
+		trie.UpsertString("", "blank-after")
+		trie.UpsertString("key:00000", "after")
+		trie.Delete("key:00001")
+		trie.UpsertMap("key:00002", Map{"state": "structured-after"})
+		trie.UpsertString("key:00000:new", "inserted-behind-cursor")
+		trie.UpsertString(fmt.Sprintf("key:%05d", snapshotCaptureScanPageEntries*4-1), "tail-after")
+		close(mutated)
+	}()
+	select {
+	case <-mutated:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("writer could not complete between partition snapshot pages")
+	}
+	close(release)
+	if err := <-captureErrors; err != nil {
+		t.Fatal(err)
+	}
+	capture := <-captured
+
+	entries := make(map[string]snapshotEntry, capture.count)
+	for _, page := range capture.pages {
+		for _, entry := range page {
+			entries[entry.Key] = entry
+		}
+	}
+	if got := entries["key:00000"].String; got != "after" {
+		t.Fatalf("updated value = %q, want after", got)
+	}
+	if got := entries[""].String; got != "blank-after" {
+		t.Fatalf("updated blank-key value = %q, want blank-after", got)
+	}
+	if _, exists := entries["key:00001"]; exists {
+		t.Fatal("deleted key remained in partition snapshot")
+	}
+	if got := entries["key:00002"].Map["state"]; got != "structured-after" {
+		t.Fatalf("structured value = %#v, want structured-after", got)
+	}
+	if got := entries["key:00000:new"].String; got != "inserted-behind-cursor" {
+		t.Fatalf("inserted value = %q, want inserted-behind-cursor", got)
+	}
+	tailKey := fmt.Sprintf("key:%05d", snapshotCaptureScanPageEntries*4-1)
+	if got := entries[tailKey].String; got != "tail-after" {
+		t.Fatalf("tail value = %q, want tail-after", got)
+	}
+	if capture.count != snapshotCaptureScanPageEntries*4+1 {
+		t.Fatalf("capture count = %d, want %d", capture.count, snapshotCaptureScanPageEntries*4+1)
+	}
+}
+
+func TestLocalPartitionSnapshotStreamReconcilesMutationsBetweenPages(t *testing.T) {
+	trie := newTestTrie(t)
+	if err := trie.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < snapshotCaptureScanPageEntries*2; index++ {
+		trie.UpsertString(fmt.Sprintf("stream:%05d", index), "before")
+	}
+
+	firstPage := make(chan struct{})
+	release := make(chan struct{})
+	trie.snapshotCapturePageHook = func(page int) {
+		if page == 1 {
+			close(firstPage)
+			<-release
+		}
+	}
+	var snapshot bytes.Buffer
+	written := make(chan error, 1)
+	go func() {
+		written <- trie.writeSnapshot(&snapshot, 0, SnapshotFormatBinary)
+	}()
+	select {
+	case <-firstPage:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("partition stream snapshot did not expose a bounded scan page")
+	}
+
+	trie.UpsertString("stream:00000", "after")
+	trie.Delete("stream:00001")
+	trie.UpsertString("stream:00000:new", "inserted")
+	tailKey := fmt.Sprintf("stream:%05d", snapshotCaptureScanPageEntries*2-1)
+	trie.UpsertString(tailKey, "tail-after")
+	close(release)
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(t.TempDir(), "partition-stream.snapshot")
+	if err := os.WriteFile(path, snapshot.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restored := newTestTrie(t)
+	if err := restored.LoadSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := restored.GetString("stream:00000"); got != "after" {
+		t.Fatalf("updated stream value = %q, want after", got)
+	}
+	if restored.Exists("stream:00001") {
+		t.Fatal("deleted stream key remained in snapshot")
+	}
+	if got := restored.GetString("stream:00000:new"); got != "inserted" {
+		t.Fatalf("inserted stream value = %q, want inserted", got)
+	}
+	if got := restored.GetString(tailKey); got != "tail-after" {
+		t.Fatalf("tail stream value = %q, want tail-after", got)
+	}
+	if got := restored.Size(); got != snapshotCaptureScanPageEntries*2 {
+		t.Fatalf("restored stream size = %d, want %d", got, snapshotCaptureScanPageEntries*2)
+	}
+}
+
 func TestLocalPartitionWholeKeyspaceOperationsRemainDeterministic(t *testing.T) {
 	trie := newTestTrie(t)
 	if err := trie.ConfigureLocalPartitions(16); err != nil {

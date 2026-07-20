@@ -134,10 +134,11 @@ func (ht *HatTrie) captureSnapshotStreamForStoreAtBarrier(currentStore *LevelDBS
 	}
 	if ht.localPartitionSet() != nil {
 		capture := snapshotStreamCapture{}
-		sequence, err := ht.visitCapturedLocalPartitionEntries(currentStore, currentDB, barrier, capture.append)
+		replacements, sequence, err := ht.visitCapturedLocalPartitionEntries(currentStore, currentDB, barrier, capture.append)
 		if err != nil {
 			return snapshotStreamCapture{}, 0, err
 		}
+		capture.replacements = replacements
 		return capture, sequence, nil
 	}
 	ht.snapshotCaptureMu.Lock()

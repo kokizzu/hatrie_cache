@@ -200,6 +200,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
+| Current pass | [Bounded partition snapshot locking](#bounded-partition-snapshot-locking), 100k keys, 16 partitions | Whole-set lock: 154.398 ms pause; 241.262 ms total | Tracked 256-key pages: 2.300 ms pause; 259.974 ms total | 67.14x shorter pause | Total time is 7.8% higher and cumulative heap is 1.7% higher |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
@@ -1013,6 +1014,50 @@ Snapshot bytes and format are unchanged. The added mutation tracker is bounded
 by keys changed during capture rather than total data size; a write-heavy
 capture can therefore retain additional temporary key metadata until the final
 barrier.
+
+<a id="bounded-partition-snapshot-locking"></a>
+### Bounded Partition Snapshot Locking
+
+Local partition snapshots previously acquired every child write lock before
+capture and held all of them through the complete sorted scan. The bounded path
+briefly installs one shared mutation tracker on all children, scans each child
+in generation-checked 256-entry pages, and k-way merges those pages without
+holding the other child locks. Dirty keys are recaptured in bounded chunks. The
+tracker's dirty map is swapped in constant time while the final journal and
+child-lock barrier is held, then processed after releasing that barrier.
+
+The fixture writes the same default gzip-best-binary snapshot for 100,000
+strings across 16 local partitions while a concurrent reader measures its
+longest blocked call. The probe key is precomputed so its own allocations do
+not distort the available path. Both rows are seven-run medians from the same
+Ryzen 9 5950X host; the baseline is commit `df83747` with the corrected probe.
+
+```sh
+make bench-partition-snapshot PARTITION_SNAPSHOT_BENCH_KEYS=100000 PARTITION_SNAPSHOT_COUNT=16 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Metric | Whole partition-set lock | Bounded child pages | Change |
+| --- | ---: | ---: | ---: |
+| Maximum concurrent read pause | 154,398,310 ns | 2,299,512 ns | 67.14x shorter, 98.5% lower |
+| Total snapshot duration | 241,261,897 ns | 259,973,634 ns | 7.8% higher |
+| Cumulative heap | 77,707,496 B | 79,021,848 B | 1.7% higher |
+| Allocations | 501,031 | 501,067 | 36 more, below 0.01% |
+
+Raw total-duration samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Whole partition-set lock | `240.785, 238.869, 239.128, 241.262, 270.915, 255.158, 262.435` |
+| Bounded child pages | `225.688, 281.117, 264.527, 245.527, 275.626, 259.974, 249.562` |
+
+The candidate output is written to
+`build/benchmarks/partition-snapshot-capture.txt`. Materialized snapshots,
+compact streamed snapshots, and Pebble generation capture share this path.
+Concurrent update, delete, insert, structured-value, tail-key, and empty-key
+tests verify reconciliation for both materialized and streamed restores. The
+snapshot version, wire/storage bytes, ordering, and journal checkpoint contract
+are unchanged. Temporary dirty-key memory scales with writes during capture;
+the page buffers scale with the configured local partition count.
 
 ### Compact Streaming Snapshot Capture
 

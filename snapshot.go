@@ -172,9 +172,7 @@ func (tracker *snapshotMutationTracker) mark(keys ...string) {
 		tracker.dirty = make(map[string]struct{})
 	}
 	for _, key := range keys {
-		if key != "" {
-			tracker.dirty[key] = struct{}{}
-		}
+		tracker.dirty[key] = struct{}{}
 	}
 	tracker.mu.Unlock()
 }
@@ -192,6 +190,17 @@ func (tracker *snapshotMutationTracker) drain() []string {
 	tracker.mu.Unlock()
 	sort.Strings(keys)
 	return keys
+}
+
+func (tracker *snapshotMutationTracker) take() map[string]struct{} {
+	if tracker == nil {
+		return nil
+	}
+	tracker.mu.Lock()
+	dirty := tracker.dirty
+	tracker.dirty = make(map[string]struct{})
+	tracker.mu.Unlock()
+	return dirty
 }
 
 func (ht *HatTrie) trackSnapshotMutationsLocked(keys ...string) {

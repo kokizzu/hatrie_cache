@@ -1968,6 +1968,59 @@ func TestCommandJournalSnapshotAllowsWritesBetweenPagesAndCapturesFinalSequence(
 	}
 }
 
+func TestPartitionedCommandJournalSnapshotCapturesFinalSequence(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := OpenCommandJournal(filepath.Join(dir, "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	trie := newTestTrie(t)
+	if err := trie.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < snapshotCaptureScanPageEntries*2; index++ {
+		trie.UpsertString(fmt.Sprintf("partition-journal:%05d", index), "before")
+	}
+
+	firstPage := make(chan struct{})
+	release := make(chan struct{})
+	trie.snapshotCapturePageHook = func(page int) {
+		if page == 1 {
+			close(firstPage)
+			<-release
+		}
+	}
+	snapshotPath := filepath.Join(dir, "snapshot.hc")
+	saved := make(chan error, 1)
+	go func() { saved <- journal.SaveSnapshot(trie, snapshotPath) }()
+	<-firstPage
+	response := journal.ExecuteCommand(trie, CacheCommandRequest{
+		Command: "SETSTR",
+		Key:     "partition-journal:00000",
+		Value:   "after",
+	})
+	if !response.OK {
+		t.Fatalf("ExecuteCommand() = %#v", response)
+	}
+	close(release)
+	if err := <-saved; err != nil {
+		t.Fatal(err)
+	}
+
+	restored := newTestTrie(t)
+	metadata, err := restored.LoadSnapshotWithMetadata(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.JournalSequence != 1 {
+		t.Fatalf("partition snapshot journal sequence = %d, want 1", metadata.JournalSequence)
+	}
+	if got := restored.GetString("partition-journal:00000"); got != "after" {
+		t.Fatalf("partition snapshot value = %q, want after", got)
+	}
+}
+
 func TestCommandJournalStreamsAndReplacesFromExactSnapshot(t *testing.T) {
 	sourceTrie := newTestTrie(t)
 	sourceJournal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "source.journal"))
