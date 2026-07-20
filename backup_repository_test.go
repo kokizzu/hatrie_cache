@@ -254,6 +254,31 @@ func TestIncrementalBackupRepositoryRequiresDirtyTracker(t *testing.T) {
 	}
 }
 
+func TestRehearseRestoreRestoresIncrementalRepository(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("name", "ivi")
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "live.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	repository := filepath.Join(t.TempDir(), "repository")
+	if _, err := CreateBackupBundle(repository, trie, nil, BackupBundleOptions{
+		Mode:            BackupModePebbleIncremental,
+		PersistentStore: store,
+		DirtyTracker:    NewLevelDBDirtyTracker(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := RehearseRestore(repository, RestoreRehearsalOptions{WorkDir: filepath.Join(t.TempDir(), "rehearsal")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK || report.SourceKind != "repository" || report.RecoveredKeys != 1 {
+		t.Fatalf("repository rehearsal = %#v", report)
+	}
+}
+
 func backupRepositoryTestKey(index int) string {
 	return "backup:key:" + strconv.Itoa(index)
 }

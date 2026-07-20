@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,129 @@ func TestRestoreBackupBundleRejectsNonEmptyDataDirByDefault(t *testing.T) {
 	}
 	if _, err := RestoreBackupBundle(bundlePath, dataDir, BackupBundleRestoreOptions{Overwrite: true}); err != nil {
 		t.Fatalf("RestoreBackupBundle(overwrite) error = %v", err)
+	}
+}
+
+func TestRestoreBackupBundleAtomicallyReplacesDestination(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("name", "new")
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if _, err := CreateBackupBundle(bundlePath, ht, nil, BackupBundleOptions{SnapshotFormat: SnapshotFormatJSON}); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(t.TempDir(), "data")
+	if err := os.Mkdir(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dataDir, "old-only"), "keep until commit")
+	before, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreBackupBundle(bundlePath, dataDir, BackupBundleRestoreOptions{Overwrite: true}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(before, after) {
+		t.Fatal("restore reused destination directory instead of publishing staged data")
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "old-only")); !os.IsNotExist(err) {
+		t.Fatalf("old-only file stat error = %v, want not exist", err)
+	}
+}
+
+func TestRestoreBackupBundleSemanticFailurePreservesDestination(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("us:name", "wrong partition")
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if _, err := CreateBackupBundle(bundlePath, ht, nil, BackupBundleOptions{
+		SnapshotFormat: SnapshotFormatJSON,
+		Partition: BackupPartitionMetadata{
+			Mode:        "partitioned",
+			Partitions:  []string{"sg"},
+			KeyPrefixes: []string{"sg:"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	dataDir := filepath.Join(parent, "data")
+	if err := os.Mkdir(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dataDir, "old-only"), "preserve")
+	if _, err := RestoreBackupBundle(bundlePath, dataDir, BackupBundleRestoreOptions{Overwrite: true}); err == nil || !strings.Contains(err.Error(), "partition metadata") {
+		t.Fatalf("RestoreBackupBundle(invalid partition) error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dataDir, "old-only"))
+	if err != nil || string(data) != "preserve" {
+		t.Fatalf("preserved file = %q/%v", data, err)
+	}
+	assertNoRestoreStagingDirectories(t, parent)
+}
+
+func TestRestoreBackupBundleRejectsSymlinkDestination(t *testing.T) {
+	ht := newTestTrie(t)
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if _, err := CreateBackupBundle(bundlePath, ht, nil, BackupBundleOptions{SnapshotFormat: SnapshotFormatJSON}); err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	target := filepath.Join(parent, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(target, "old-only"), "preserve")
+	dataDir := filepath.Join(parent, "data")
+	if err := os.Symlink(target, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreBackupBundle(bundlePath, dataDir, BackupBundleRestoreOptions{Overwrite: true}); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("RestoreBackupBundle(symlink destination) error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(target, "old-only"))
+	if err != nil || string(data) != "preserve" {
+		t.Fatalf("symlink target file = %q/%v", data, err)
+	}
+}
+
+func TestRestoreBackupBundleRejectsSymlinkParent(t *testing.T) {
+	ht := newTestTrie(t)
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if _, err := CreateBackupBundle(bundlePath, ht, nil, BackupBundleOptions{SnapshotFormat: SnapshotFormatJSON}); err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	targetParent := filepath.Join(parent, "target")
+	if err := os.Mkdir(targetParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkedParent := filepath.Join(parent, "linked")
+	if err := os.Symlink(targetParent, linkedParent); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(linkedParent, "data")
+	if _, err := RestoreBackupBundle(bundlePath, dataDir, BackupBundleRestoreOptions{}); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("RestoreBackupBundle(symlink parent) error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetParent, "data")); !os.IsNotExist(err) {
+		t.Fatalf("redirected restore target stat error = %v, want not exist", err)
+	}
+}
+
+func assertNoRestoreStagingDirectories(t *testing.T, parent string) {
+	t.Helper()
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".restore-") {
+			t.Fatalf("restore staging directory remains: %s", entry.Name())
+		}
 	}
 }
 

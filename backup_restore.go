@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -82,20 +83,42 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	if backupBundleManifestMode(manifest) == BackupModePebbleCheckpoint {
-		return restorePebbleCheckpointBundle(bundlePath, dataDir, options, manifest)
+	mode := backupBundleManifestMode(manifest)
+	if mode != BackupModeSnapshot && mode != BackupModePebbleCheckpoint {
+		return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: unsupported backup bundle restore mode %q", mode)
 	}
-	doctor, err := VerifyBackupBundle(bundlePath)
+	destination, err := prepareRestoreDestination(bundlePath, dataDir, options.Overwrite)
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	if err := ensureRestoreDataDir(dataDir, options.Overwrite); err != nil {
+	defer os.RemoveAll(destination.staging)
+	if err := extractBackupBundleFiles(bundlePath, destination.staging, manifest.Files); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	if err := extractBackupBundleFiles(bundlePath, dataDir, manifest.Files); err != nil {
+	var doctor BackupDoctorReport
+	switch mode {
+	case BackupModeSnapshot:
+		doctor, err = verifySnapshotBackupRoot(bundlePath, "bundle", manifest, destination.staging)
+	case BackupModePebbleCheckpoint:
+		doctor, err = verifyPebbleBackupRoot(bundlePath, "bundle", manifest, destination.staging)
+	}
+	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	snapshotPath := filepath.Join(dataDir, filepath.FromSlash(manifest.Snapshot))
+	if err := syncRestoreTree(destination.staging); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	if err := publishRestoreDestination(destination, options.Overwrite); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	snapshotPath := ""
+	if manifest.Snapshot != "" {
+		snapshotPath = filepath.Join(dataDir, filepath.FromSlash(manifest.Snapshot))
+	}
+	storePath := ""
+	if manifest.Store != "" {
+		storePath = filepath.Join(dataDir, filepath.FromSlash(manifest.Store))
+	}
 	journalPath := ""
 	if manifest.Journal != "" {
 		journalPath = filepath.Join(dataDir, filepath.FromSlash(manifest.Journal))
@@ -104,8 +127,10 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		OK:                  true,
 		Bundle:              bundlePath,
 		DataDir:             dataDir,
-		Mode:                backupBundleManifestMode(manifest),
+		Mode:                mode,
 		Snapshot:            snapshotPath,
+		Store:               storePath,
+		StorageBackend:      manifest.StorageBackend,
 		Journal:             journalPath,
 		Partition:           cloneBackupPartitionMetadata(manifest.Partition),
 		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),
@@ -115,18 +140,37 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 }
 
 func RestoreBackupRepository(repositoryPath string, backupID string, dataDir string, options BackupBundleRestoreOptions) (BackupBundleRestoreReport, error) {
-	doctor, err := VerifyBackupRepository(repositoryPath, backupID)
+	repositoryPath = strings.TrimSpace(repositoryPath)
+	dataDir = strings.TrimSpace(dataDir)
+	if repositoryPath == "" {
+		return BackupBundleRestoreReport{}, errors.New("hatriecache: backup repository path is required")
+	}
+	if dataDir == "" {
+		return BackupBundleRestoreReport{}, errors.New("hatriecache: restore data dir is required")
+	}
+	if err := verifyBackupRepositoryDescriptor(repositoryPath); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	manifest, err := readBackupRepositoryManifest(repositoryPath, backupID)
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	manifest, err := readBackupRepositoryManifest(repositoryPath, doctor.BackupID)
+	destination, err := prepareRestoreDestination(repositoryPath, dataDir, options.Overwrite)
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	if err := ensureRestoreDataDir(dataDir, options.Overwrite); err != nil {
+	defer os.RemoveAll(destination.staging)
+	if _, err := materializeBackupRepository(repositoryPath, manifest.BackupID, destination.staging); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
-	if _, err := materializeBackupRepository(repositoryPath, manifest.BackupID, dataDir); err != nil {
+	doctor, err := verifyPebbleBackupRoot(repositoryPath, "repository", manifest, destination.staging)
+	if err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	if err := syncRestoreTree(destination.staging); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
+	if err := publishRestoreDestination(destination, options.Overwrite); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
 	storePath := filepath.Join(dataDir, filepath.FromSlash(manifest.Store))
@@ -150,35 +194,215 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	}, nil
 }
 
-func restorePebbleCheckpointBundle(bundlePath string, dataDir string, options BackupBundleRestoreOptions, manifest BackupBundleManifest) (BackupBundleRestoreReport, error) {
-	doctor, err := VerifyBackupBundle(bundlePath)
+type restoreDestination struct {
+	target  string
+	staging string
+}
+
+func prepareRestoreDestination(source string, dataDir string, overwrite bool) (restoreDestination, error) {
+	target, err := filepath.Abs(dataDir)
 	if err != nil {
-		return BackupBundleRestoreReport{}, err
+		return restoreDestination{}, err
 	}
-	if err := ensureRestoreDataDir(dataDir, options.Overwrite); err != nil {
-		return BackupBundleRestoreReport{}, err
+	target = filepath.Clean(target)
+	parent := filepath.Dir(target)
+	if target == parent {
+		return restoreDestination{}, errors.New("hatriecache: restore data dir must not be a filesystem root")
 	}
-	if err := extractBackupBundleFiles(bundlePath, dataDir, manifest.Files); err != nil {
-		return BackupBundleRestoreReport{}, err
+	if err := validateRestorePathSeparation(source, target); err != nil {
+		return restoreDestination{}, err
 	}
-	storePath := filepath.Join(dataDir, filepath.FromSlash(manifest.Store))
-	journalPath := ""
-	if manifest.Journal != "" {
-		journalPath = filepath.Join(dataDir, filepath.FromSlash(manifest.Journal))
+	if err := rejectRestoreSymlinkComponents(parent); err != nil {
+		return restoreDestination{}, err
 	}
-	return BackupBundleRestoreReport{
-		OK:                  true,
-		Bundle:              bundlePath,
-		DataDir:             dataDir,
-		Mode:                BackupModePebbleCheckpoint,
-		Store:               storePath,
-		StorageBackend:      manifest.StorageBackend,
-		Journal:             journalPath,
-		Partition:           cloneBackupPartitionMetadata(manifest.Partition),
-		PartitionValidation: cloneBackupPartitionValidation(doctor.PartitionValidation),
-		JournalSequence:     manifest.JournalSequence,
-		RecoveredKeys:       doctor.RecoveredKeys,
-	}, nil
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return restoreDestination{}, err
+	}
+	if err := rejectRestoreSymlinkComponents(parent); err != nil {
+		return restoreDestination{}, err
+	}
+	if _, err := validateRestoreTarget(target, overwrite); err != nil {
+		return restoreDestination{}, err
+	}
+	staging, err := os.MkdirTemp(parent, "."+filepath.Base(target)+".restore-stage-*")
+	if err != nil {
+		return restoreDestination{}, err
+	}
+	return restoreDestination{target: target, staging: staging}, nil
+}
+
+func rejectRestoreSymlinkComponents(path string) error {
+	volume := filepath.VolumeName(path)
+	root := volume + string(os.PathSeparator)
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return err
+	}
+	current := root
+	for _, component := range strings.Split(relative, string(os.PathSeparator)) {
+		if component == "" || component == "." {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("hatriecache: restore data dir path contains symlink: %s", current)
+		}
+	}
+	return nil
+}
+
+func validateRestorePathSeparation(source string, target string) error {
+	sourceAbs, err := filepath.Abs(source)
+	if err != nil {
+		return err
+	}
+	sourceAbs = filepath.Clean(sourceAbs)
+	if evaluated, err := filepath.EvalSymlinks(sourceAbs); err == nil {
+		sourceAbs = filepath.Clean(evaluated)
+	}
+	if sameOrChildPath(target, sourceAbs) || sameOrChildPath(sourceAbs, target) {
+		return fmt.Errorf("hatriecache: restore source and data dir must not overlap: %s", target)
+	}
+	return nil
+}
+
+func validateRestoreTarget(target string, overwrite bool) (bool, error) {
+	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("hatriecache: restore data dir must not be a symlink: %s", target)
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("hatriecache: restore data dir is not a directory: %s", target)
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return false, err
+	}
+	if len(entries) > 0 && !overwrite {
+		return false, fmt.Errorf("hatriecache: restore data dir is not empty: %s", target)
+	}
+	return true, nil
+}
+
+func publishRestoreDestination(destination restoreDestination, overwrite bool) error {
+	exists, err := validateRestoreTarget(destination.target, overwrite)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(destination.target)
+	if !exists {
+		if err := os.Rename(destination.staging, destination.target); err != nil {
+			return err
+		}
+		if err := syncDirectory(parent); err != nil {
+			rollbackErr := os.Rename(destination.target, destination.staging)
+			if rollbackErr != nil {
+				return fmt.Errorf("hatriecache: sync published restore: %w; rollback failed: %v", err, rollbackErr)
+			}
+			return err
+		}
+		return nil
+	}
+	oldPath, err := os.MkdirTemp(parent, "."+filepath.Base(destination.target)+".restore-old-*")
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(oldPath); err != nil {
+		return err
+	}
+	if err := os.Rename(destination.target, oldPath); err != nil {
+		return err
+	}
+	if err := os.Rename(destination.staging, destination.target); err != nil {
+		rollbackErr := os.Rename(oldPath, destination.target)
+		if rollbackErr != nil {
+			return fmt.Errorf("hatriecache: publish restore: %w; rollback failed: %v", err, rollbackErr)
+		}
+		return err
+	}
+	if err := syncDirectory(parent); err != nil {
+		rollbackErr := rollbackPublishedRestore(destination, oldPath)
+		if rollbackErr != nil {
+			return fmt.Errorf("hatriecache: sync published restore: %w; rollback failed: %v", err, rollbackErr)
+		}
+		return err
+	}
+	if err := os.RemoveAll(oldPath); err != nil {
+		return err
+	}
+	return syncDirectory(parent)
+}
+
+func rollbackPublishedRestore(destination restoreDestination, oldPath string) error {
+	if err := os.Rename(destination.target, destination.staging); err != nil {
+		return err
+	}
+	if err := os.Rename(oldPath, destination.target); err != nil {
+		restoreErr := os.Rename(destination.staging, destination.target)
+		if restoreErr != nil {
+			return fmt.Errorf("restore old directory: %w; restoring new directory also failed: %v", err, restoreErr)
+		}
+		return err
+	}
+	return syncDirectory(filepath.Dir(destination.target))
+}
+
+func syncRestoreTree(root string) error {
+	directories := make([]string, 0, 8)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("hatriecache: restore staging contains symlink: %s", path)
+		}
+		if entry.IsDir() {
+			directories = append(directories, path)
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("hatriecache: restore staging contains non-regular file: %s", path)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		syncErr := file.Sync()
+		closeErr := file.Close()
+		if syncErr != nil {
+			return syncErr
+		}
+		return closeErr
+	})
+	if err != nil {
+		return err
+	}
+	sort.Slice(directories, func(left int, right int) bool {
+		return strings.Count(directories[left], string(os.PathSeparator)) > strings.Count(directories[right], string(os.PathSeparator))
+	})
+	for _, directory := range directories {
+		if err := syncDirectory(directory); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func RehearseRestore(path string, options RestoreRehearsalOptions) (RestoreRehearsalReport, error) {
@@ -207,7 +431,7 @@ func RehearseRestore(path string, options RestoreRehearsalOptions) (RestoreRehea
 
 	restoredDir := filepath.Join(workDir, "data")
 	switch backup.Kind {
-	case "bundle":
+	case "bundle", "repository":
 		if _, err := RestoreBackupBundle(path, restoredDir, BackupBundleRestoreOptions{}); err != nil {
 			return RestoreRehearsalReport{}, err
 		}

@@ -168,6 +168,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
 | Current pass | [Content-addressed incremental backups](#content-addressed-incremental-backups), 10k x 256 B, 1% changed | Full checkpoint bundle: 98.602 ms; 9.81 MB heap; 2,104,489 written B | Incremental repository: 14.659 ms; 0.94 MB heap; 35,020 written B | 6.73x faster, 10.49x lower heap, 60.09x fewer written bytes | Explicit mode; first backup is full and retained history consumes repository storage |
+| Current pass | [Single-pass staged restore](#single-pass-staged-restore), checkpoint 10k x 256 B | Verify then extract: 69.346 ms; 13.18 MB heap; 2 payload passes | Stage, verify, fsync, publish: 56.057 ms; 12.78 MB heap; 1 payload pass | 1.24x faster, 1.03x lower heap, half the payload passes | Repository restore is 1.09x slower because the durable path fsyncs staged files |
 | Current pass | [Parallel cold-reference hydration](#parallel-cold-reference-hydration), 32 delayed reads | Serialized: 33.875 ms; 18,648 heap B | Parallel singleflight: 1.174 ms; 30,166 heap B | 28.85x faster | Cumulative heap is 1.62x higher and allocations are 1.80x higher |
 | Current pass | [Compact lazy-reference slab](#compact-lazy-reference-slab), 100k references | Public-struct slab: 29.617 ms; 90.2 retained B/ref | Compact slab: 20.513 ms; 71.6 retained B/ref | 1.44x faster, 1.26x lower retained heap | Type IDs are internal; exported references are expanded on access |
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
@@ -330,6 +331,54 @@ multi-file repository rather than one portable archive. Repository growth is
 bounded by retention and content garbage collection, but retained checkpoints
 can keep old SST objects live. The mode requires Pebble and an accurate dirty
 tracker; `auto` intentionally remains the portable snapshot mode.
+
+<a id="single-pass-staged-restore"></a>
+#### Single-Pass Staged Restore
+
+Bundle restore now extracts payload files once into a sibling staging
+directory, verifies checksums and snapshot/Pebble semantics there, fsyncs files
+and directories, then publishes the complete directory. Overwrite keeps the old
+directory under a rollback name until the new directory rename and parent sync
+succeed. Source/destination overlap, final symlinks, and symlinked parent path
+components are rejected. Pebble validation is read-only, so verification does
+not mutate the staged checkpoint.
+
+The legacy baseline reproduces the previous verify-to-temporary-directory plus
+second extraction/materialization. The candidate includes durability syncs and
+publication, so this is not a relaxed durability comparison. The fixture has
+10,000 deterministic low-compressibility 256-byte values. Results are seven-run
+medians on the Ryzen 9 5950X host.
+
+```sh
+make bench-atomic-restore BACKUP_BENCH_KEYS=10000 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Restore path | Legacy | Staged single pass | Relative result |
+| --- | ---: | ---: | --- |
+| Snapshot time | 60.796 ms | 54.445 ms | 1.12x faster |
+| Snapshot heap | 21,350,216 B | 21,213,376 B | 1.006x lower |
+| Snapshot allocations | 101,063 | 101,020 | 43 fewer |
+| Checkpoint time | 69.346 ms | 56.057 ms | 1.24x faster |
+| Checkpoint heap | 13,176,560 B | 12,782,720 B | 1.03x lower |
+| Checkpoint allocations | 62,234 | 61,790 | 444 fewer |
+| Repository time | 30.892 ms | 33.623 ms | Legacy is 1.09x faster |
+| Repository heap | 12,909,360 B | 12,651,624 B | 1.02x lower |
+| Repository allocations | 61,640 | 61,558 | 82 fewer |
+| Payload/materialization passes | 2 | 1 | 2x fewer |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Legacy | Staged single pass |
+| --- | --- | --- |
+| Snapshot | `70.384, 61.184, 58.647, 57.678, 59.325, 60.796, 65.346` | `56.701, 52.806, 54.445, 61.410, 52.399, 50.350, 55.976` |
+| Checkpoint | `58.702, 68.016, 72.196, 74.766, 69.346, 78.855, 68.548` | `56.057, 56.566, 56.818, 52.374, 53.261, 55.948, 65.854` |
+| Repository | `35.744, 30.892, 29.960, 30.349, 36.572, 35.553, 30.843` | `34.426, 32.890, 34.458, 33.623, 33.603, 32.240, 34.061` |
+
+The raw benchmark with heap, allocation, source-byte, and pass-count metrics is
+generated at `build/benchmarks/single-pass-atomic-restore.txt`. Small repository
+checkpoints can lose elapsed time because one avoided local copy is cheaper than
+the newly guaranteed fsyncs; the safety improvement and lower cumulative heap
+still apply.
 
 The backend contract uses the same binary record codec and exercises a full
 10,000-key save, 1,000 incremental operations (500 updates, 250 deletes, 250

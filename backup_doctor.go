@@ -107,17 +107,24 @@ func verifySnapshotBackupBundle(path string, manifest BackupBundleManifest) (Bac
 	if err := extractBackupBundleFiles(path, tmpDir, manifest.Files); err != nil {
 		return BackupDoctorReport{}, err
 	}
+	return verifySnapshotBackupRoot(path, "bundle", manifest, tmpDir)
+}
+
+func verifySnapshotBackupRoot(displayPath string, kind string, manifest BackupBundleManifest, root string) (BackupDoctorReport, error) {
+	if manifest.Snapshot == "" {
+		return BackupDoctorReport{}, errors.New("hatriecache: backup manifest missing snapshot")
+	}
 	report := BackupDoctorReport{
 		OK:              true,
-		Kind:            "bundle",
-		Path:            path,
+		Kind:            kind,
+		Path:            displayPath,
 		Files:           manifest.Files,
 		Partition:       cloneBackupPartitionMetadata(manifest.Partition),
 		JournalSequence: manifest.JournalSequence,
 	}
 	trie := CreateHatTrie()
 	defer trie.Destroy()
-	snapshotPath := filepath.Join(tmpDir, filepath.FromSlash(manifest.Snapshot))
+	snapshotPath := filepath.Join(root, filepath.FromSlash(manifest.Snapshot))
 	metadata, err := trie.LoadSnapshotWithMetadata(snapshotPath)
 	if err != nil {
 		return BackupDoctorReport{}, err
@@ -134,7 +141,7 @@ func verifySnapshotBackupBundle(path string, manifest BackupBundleManifest) (Bac
 	}
 
 	if manifest.Journal != "" {
-		journalPath := filepath.Join(tmpDir, filepath.FromSlash(manifest.Journal))
+		journalPath := filepath.Join(root, filepath.FromSlash(manifest.Journal))
 		journalReport, entries, err := verifyJournalFileWithEntries(manifest.Journal, journalPath)
 		if err != nil {
 			return BackupDoctorReport{}, err
@@ -243,7 +250,7 @@ func verifyPebbleBackupRoot(displayPath string, kind string, manifest BackupBund
 		return BackupDoctorReport{}, err
 	}
 	storePath := filepath.Join(root, filepath.FromSlash(manifest.Store))
-	store, err := OpenPersistentStoreWithFormat(storePath, StorageBackendPebble, format)
+	store, err := openPebbleStoreReadOnlyWithFormat(storePath, format)
 	if err != nil {
 		return BackupDoctorReport{}, err
 	}

@@ -426,6 +426,17 @@ make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data
 make restore-bundle RESTORE_BUNDLE_PATH=backup/run-001.tar.gz DATA_DIR=data RESTORE_BUNDLE_OVERWRITE=true
 ```
 
+Bundle and incremental-repository restore use a sibling staging directory.
+Payload files are streamed and checksum-verified once, semantically loaded from
+staging, fsynced, and only then published to `DATA_DIR`. With overwrite enabled,
+the old directory is retained under a rollback name until the new directory and
+its parent entry are synced. A failed extraction or semantic check leaves the
+old directory untouched. Restore rejects a symlink destination, symlinked parent
+components, and source/destination overlap. The measured checkpoint restore is
+1.24x faster with half the payload passes and 1.03x less timed heap; small local
+repository restore is 1.09x slower because durability now includes staged-file
+fsync. See [BENCHMARK.md](BENCHMARK.md#single-pass-staged-restore).
+
 For a server-side atomic backup bundle, ask the monitoring API to write a
 tar.gz bundle. The sane `auto` default is `snapshot`, which contains
 `manifest.json`, `snapshot.hc`, and a compacted `commands.journal` checkpoint.

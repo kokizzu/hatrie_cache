@@ -71,6 +71,32 @@ func OpenPebbleStoreWithFormat(path string, format StorageFormat) (*PebbleStore,
 	}, nil
 }
 
+func openPebbleStoreReadOnlyWithFormat(path string, format StorageFormat) (*PebbleStore, error) {
+	if path == "" {
+		return nil, errors.New("hatriecache: pebble path is required")
+	}
+	format, err := ParseStorageFormat(string(format))
+	if err != nil {
+		return nil, err
+	}
+	db, err := pebble.Open(path, &pebble.Options{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	activeGeneration, nextGeneration, err := loadPebbleGenerationState(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &PebbleStore{
+		path:             path,
+		db:               db,
+		format:           format,
+		activeGeneration: activeGeneration,
+		nextGeneration:   nextGeneration,
+	}, nil
+}
+
 func (store *PebbleStore) Backend() StorageBackend {
 	return StorageBackendPebble
 }
