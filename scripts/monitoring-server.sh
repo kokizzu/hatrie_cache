@@ -82,6 +82,7 @@ journal_pull_max_batches=${JOURNAL_PULL_MAX_BATCHES:-0}
 journal_pull_full_sync_fallback=${JOURNAL_PULL_FULL_SYNC_FALLBACK:-true}
 journal_pull_checkpoint_bootstrap=${JOURNAL_PULL_CHECKPOINT_BOOTSTRAP:-true}
 journal_pull_incremental_recovery=${JOURNAL_PULL_INCREMENTAL_RECOVERY:-true}
+journal_pull_wire_format=${JOURNAL_PULL_WIRE_FORMAT:-binary}
 
 set -- \
 	-monitoring-server \
@@ -161,7 +162,8 @@ set -- \
 	-journal-pull-max-batches "$journal_pull_max_batches" \
 	-journal-pull-full-sync-fallback="$journal_pull_full_sync_fallback" \
 	-journal-pull-checkpoint-bootstrap="$journal_pull_checkpoint_bootstrap" \
-	-journal-pull-incremental-recovery="$journal_pull_incremental_recovery"
+	-journal-pull-incremental-recovery="$journal_pull_incremental_recovery" \
+	-journal-pull-wire-format "$journal_pull_wire_format"
 
 if [ -n "$replication_wire_format" ]; then
 	set -- "$@" -replication-wire-format "$replication_wire_format"

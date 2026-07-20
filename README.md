@@ -1135,7 +1135,20 @@ catch-up batches from another node at startup; `JOURNAL_PULL_STATE_PATH`
 persists the source sequence so non-idempotent commands are not replayed after
 restart. Journal pull HTTP requests use a 30 second timeout by default; set
 `JOURNAL_PULL_TIMEOUT=0` to disable that bound for a deliberate long-running
-source. Add `JOURNAL_PULL_INTERVAL` to repeat catch-up periodically.
+source. Add `JOURNAL_PULL_INTERVAL` to repeat catch-up periodically. Catch-up
+uses the compact binary journal-tail wire format by default. A new follower
+requests binary with JSON as an acceptable fallback, so it can pull from an
+older source that only returns JSON. Set `JOURNAL_PULL_WIRE_FORMAT=json` to
+force the previous wire format. This setting is independent of
+`JOURNAL_FORMAT`, which controls durable journal records on disk. Direct
+`GET /api/journal` clients continue to receive JSON unless they explicitly
+request `application/vnd.hatrie-cache.journal-tail`.
+
+For a 10,000-command `SETINT` tail, binary encode plus decode is 5.16x faster,
+uses 4.69x less cumulative heap, performs 2,510x fewer allocations, and transfers
+2.79x fewer body bytes than JSON. Binary is intended for service-to-service
+catch-up; JSON remains easier to inspect with generic tools. See
+[BENCHMARK.md](BENCHMARK.md#binary-journal-catch-up-wire).
 
 Journal pull is delta-first by default. If the requested delta was compacted,
 an existing Pebble follower first requests `/api/journal/recovery`, verifies its
@@ -1186,9 +1199,11 @@ Examples:
 ```
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_INTERVAL=5s
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_TIMEOUT=5s
+make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_WIRE_FORMAT=json
 make monitoring-server JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_FULL_SYNC_FALLBACK=false
 make monitoring-server DB_PATH=data/cache JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_INCREMENTAL_RECOVERY=false
 make monitoring-server DB_PATH=data/cache JOURNAL_PATH=data/commands.journal JOURNAL_PULL_SOURCE=http://leader:8080 JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=false
+make cli ARGS='journal -pull-from http://leader:8080 -until-current -wire-format json'
 ```
 
 Set `NODE_ID` and `TOPOLOGY_PATH` to expose and persist cluster topology JSON.

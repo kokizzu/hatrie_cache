@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"unsafe"
 )
 
 const binaryFieldMaxVarintLen64 = binary.MaxVarintLen64
@@ -82,12 +83,19 @@ func binaryVarintSize(value int64) int {
 }
 
 type binaryFieldReader struct {
-	data []byte
-	off  int
+	data          []byte
+	off           int
+	borrowStrings bool
 }
 
 func newBinaryFieldReader(data []byte) binaryFieldReader {
 	return binaryFieldReader{data: data}
+}
+
+// newBorrowingBinaryFieldReader is only safe when data is immutable for the
+// lifetime of every decoded string.
+func newBorrowingBinaryFieldReader(data []byte) binaryFieldReader {
+	return binaryFieldReader{data: data, borrowStrings: true}
 }
 
 func (reader *binaryFieldReader) done() bool {
@@ -151,6 +159,9 @@ func (reader *binaryFieldReader) readString() (string, error) {
 	value, err := reader.readBytes()
 	if err != nil {
 		return "", err
+	}
+	if reader.borrowStrings && len(value) > 0 {
+		return unsafe.String(unsafe.SliceData(value), len(value)), nil
 	}
 	return string(value), nil
 }

@@ -133,6 +133,7 @@ type config struct {
 	journalPullFullSyncFallback    bool
 	journalPullCheckpointBootstrap bool
 	journalPullIncrementalRecovery bool
+	journalPullWireFormat          string
 }
 
 func main() {
@@ -299,6 +300,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		SnapshotPath:           pullSnapshotPath,
 		RecoveryRepositoryPath: journalPullRecoveryRepositoryPath(cfg.journalPullStatePath, cfg.journalPullSource),
 		StorageFormat:          storageFormat(cfg),
+		WireFormat:             hatriecache.CommandJournalWireFormat(cfg.journalPullWireFormat),
 		PersistFullSync:        persistFullSync,
 	}, stderr)
 	defer stopJournalPuller()
@@ -463,6 +465,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		journalPullFullSyncFallback:    true,
 		journalPullCheckpointBootstrap: true,
 		journalPullIncrementalRecovery: true,
+		journalPullWireFormat:          string(hatriecache.DefaultCommandJournalWireFormat),
 		dbFormat:                       string(hatriecache.DefaultStorageFormat),
 		dbBackend:                      string(hatriecache.StorageBackendAuto),
 		dbCompareBeforeWrite:           string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
@@ -587,6 +590,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.BoolVar(&cfg.journalPullFullSyncFallback, "journal-pull-full-sync-fallback", cfg.journalPullFullSyncFallback, "request an exact full snapshot when journal deltas were compacted")
 	flags.BoolVar(&cfg.journalPullCheckpointBootstrap, "journal-pull-checkpoint-bootstrap", cfg.journalPullCheckpointBootstrap, "clone a native Pebble checkpoint before opening a fresh replica store")
 	flags.BoolVar(&cfg.journalPullIncrementalRecovery, "journal-pull-incremental-recovery", cfg.journalPullIncrementalRecovery, "reuse content-addressed Pebble checkpoint objects before full snapshot fallback")
+	flags.StringVar(&cfg.journalPullWireFormat, "journal-pull-wire-format", cfg.journalPullWireFormat, "journal catch-up wire format: binary or json")
 	if configPath != "" {
 		if err := applyConfigFile(configPath, flags); err != nil {
 			return config{}, err
@@ -777,6 +781,11 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if _, err := hatriecache.ParseCommandJournalFormat(cfg.journalFormat); err != nil {
 		return config{}, err
 	}
+	journalPullWireFormat, err := hatriecache.ParseCommandJournalWireFormat(cfg.journalPullWireFormat)
+	if err != nil {
+		return config{}, err
+	}
+	cfg.journalPullWireFormat = string(journalPullWireFormat)
 	return cfg, nil
 }
 
@@ -1094,6 +1103,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"journal_pull_full_sync_fallback":      cfg.journalPullFullSyncFallback,
 		"journal_pull_checkpoint_bootstrap":    cfg.journalPullCheckpointBootstrap,
 		"journal_pull_incremental_recovery":    cfg.journalPullIncrementalRecovery,
+		"journal_pull_wire_format":             cfg.journalPullWireFormat,
 	}
 }
 
@@ -2333,6 +2343,7 @@ type journalPullerConfig struct {
 	SnapshotPath           string
 	RecoveryRepositoryPath string
 	StorageFormat          hatriecache.StorageFormat
+	WireFormat             hatriecache.CommandJournalWireFormat
 	PersistFullSync        func() error
 }
 
@@ -2407,6 +2418,7 @@ func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *ha
 		DirtyTracker:  cfg.Dirty,
 		AuthToken:     cfg.AuthToken,
 		Client:        cfg.Client,
+		WireFormat:    cfg.WireFormat,
 	})
 	if err != nil {
 		if cfg.FullSyncFallback && errors.Is(err, hatriecache.ErrCommandJournalCompacted) {

@@ -199,6 +199,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; structured commands retain the generic batch path |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
+| Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Current pass | [Bounded partition snapshot locking](#bounded-partition-snapshot-locking), 100k keys, 16 partitions | Whole-set lock: 154.398 ms pause; 241.262 ms total | Tracked 256-key pages: 2.300 ms pause; 259.974 ms total | 67.14x shorter pause | Total time is 7.8% higher and cumulative heap is 1.7% higher |
@@ -1009,6 +1010,49 @@ use to roughly 1 GiB plus the active file. A batch may cross the byte target,
 and rotation pays file rename, checkpoint `fsync`, and directory metadata
 `fsync`; those fixed costs explain the run-to-run latency variance. Setting
 `JOURNAL_SEGMENT_MAX_BYTES=0` restores the prior single-file rewrite path.
+
+<a id="binary-journal-catch-up-wire"></a>
+### Binary Journal Catch-up Wire
+
+Journal pull now negotiates a native binary tail envelope by default. Records
+are encoded directly into one response buffer and decoded into their final
+preallocated slice. Immutable response bytes back scalar strings during apply,
+avoiding per-record payload and string allocations. The source still returns
+JSON to ordinary `GET /api/journal` clients, and a binary-preferring follower
+automatically accepts JSON from older sources. Operators can force JSON with
+`JOURNAL_PULL_WIRE_FORMAT=json` or CLI `journal -wire-format json`.
+
+The fixture encodes and decodes 10,000 `SETINT` records with deterministic
+keys. It measures both sides of serialization and the complete response body,
+but excludes HTTP framing and command application. Before application, fields
+that cache structures may retain are cloned away from the shared response
+buffer; that command-specific ownership transfer is outside this serialization
+fixture. Values are seven-run medians from one complete encode/decode per sample
+on the Ryzen 9 5950X host.
+
+```sh
+make bench-journal-wire BENCHTIME=1x COUNT=7
+```
+
+| Metric | JSON | Binary default | Improvement |
+| --- | ---: | ---: | ---: |
+| Encode + decode time | 6.182 ms | 1.197 ms | 5.16x faster |
+| Cumulative heap | 11,178,528 B | 2,383,920 B | 4.69x lower |
+| Allocations | 10,042 | 4 | 2,510.50x fewer |
+| Response body | 808,943 B | 289,886 B | 2.79x smaller |
+
+Raw elapsed samples in milliseconds were:
+
+| Format | Seven samples |
+| --- | --- |
+| JSON | `10.678, 6.182, 9.885, 8.171, 5.599, 5.341, 5.650` |
+| Binary | `1.291, 1.823, 1.399, 1.195, 1.134, 1.002, 1.197` |
+
+The full raw output, including heap, allocation, and `wire_B/op` metrics for
+every sample, is generated at `build/benchmarks/journal-tail-wire.txt`. Binary
+is less convenient to inspect manually and is project-specific; JSON remains
+the compatibility and diagnostics option. `JOURNAL_FORMAT` independently
+controls durable on-disk journal records.
 
 ### Point-in-Time Snapshot Capture
 

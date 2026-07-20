@@ -297,7 +297,12 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 	pullFrom := flags.String("pull-from", "", "source monitoring server base URL to pull and apply journal entries from")
 	untilCurrent := flags.Bool("until-current", false, "keep pulling batches until the source has no more entries")
 	maxBatches := flags.Uint64("max-batches", 0, "maximum journal batches to pull with -until-current")
+	wireFormat := flags.String("wire-format", string(hatriecache.DefaultCommandJournalWireFormat), "journal pull wire format: binary or json")
 	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	parsedWireFormat, err := hatriecache.ParseCommandJournalWireFormat(*wireFormat)
+	if err != nil {
 		return err
 	}
 	if *maxBatches > 0 && !*untilCurrent {
@@ -314,12 +319,14 @@ func runJournal(ctx context.Context, client *http.Client, addr string, args []st
 			Limit         uint64 `json:"limit,omitempty"`
 			UntilCurrent  bool   `json:"until_current,omitempty"`
 			MaxBatches    uint64 `json:"max_batches,omitempty"`
+			WireFormat    string `json:"wire_format,omitempty"`
 		}{
 			Source:        strings.TrimSpace(*pullFrom),
 			AfterSequence: *afterSequence,
 			Limit:         *limit,
 			UntilCurrent:  *untilCurrent,
 			MaxBatches:    *maxBatches,
+			WireFormat:    string(parsedWireFormat),
 		})
 		if err != nil {
 			return err

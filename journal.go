@@ -58,6 +58,7 @@ type CommandJournalTail struct {
 	Limit            int                    `json:"limit,omitempty"`
 	HasMore          bool                   `json:"has_more,omitempty"`
 	Entries          []CommandJournalRecord `json:"entries"`
+	wireFormat       CommandJournalWireFormat
 }
 
 type CommandJournalPullResult struct {
@@ -73,6 +74,7 @@ type CommandJournalPullResult struct {
 	IncrementalRecovery     bool   `json:"incremental_recovery,omitempty"`
 	RecoveryDownloadedBytes int64  `json:"recovery_downloaded_bytes,omitempty"`
 	RecoveryReusedBytes     int64  `json:"recovery_reused_bytes,omitempty"`
+	WireFormat              string `json:"wire_format,omitempty"`
 }
 
 type commandJournalEntry struct {

@@ -25,6 +25,7 @@ type CommandJournalPullOptions struct {
 	Client        *http.Client
 	DirtyTracker  *LevelDBDirtyTracker
 	AuthToken     string
+	WireFormat    CommandJournalWireFormat
 }
 
 type CommandJournalPullError struct {
@@ -68,7 +69,11 @@ func PullCommandJournal(ctx context.Context, trie *HatTrie, journal *CommandJour
 	if err != nil {
 		return CommandJournalPullResult{}, commandJournalPullError(http.StatusBadRequest, err)
 	}
-	return pullCommandJournalTail(ctx, trie, journal, options.Source, options.AfterSequence, limit, options.UntilCurrent, maxBatches, client, options.DirtyTracker, options.AuthToken)
+	wireFormat, err := ParseCommandJournalWireFormat(string(options.WireFormat))
+	if err != nil {
+		return CommandJournalPullResult{}, commandJournalPullError(http.StatusBadRequest, err)
+	}
+	return pullCommandJournalTail(ctx, trie, journal, options.Source, options.AfterSequence, limit, options.UntilCurrent, maxBatches, client, options.DirtyTracker, options.AuthToken, wireFormat)
 }
 
 func commandJournalPullError(status int, err error) error {
@@ -88,7 +93,7 @@ func commandJournalPullHTTPClient(client *http.Client, timeout time.Duration) (*
 	return &http.Client{Timeout: timeout}, nil
 }
 
-func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int, client *http.Client, dirtyTracker *LevelDBDirtyTracker, authToken string) (CommandJournalPullResult, error) {
+func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *CommandJournal, source string, afterSequence uint64, limit int, untilCurrent bool, maxBatches int, client *http.Client, dirtyTracker *LevelDBDirtyTracker, authToken string, wireFormat CommandJournalWireFormat) (CommandJournalPullResult, error) {
 	result := CommandJournalPullResult{
 		Source:         source,
 		AfterSequence:  afterSequence,
@@ -99,7 +104,7 @@ func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *Command
 		if err != nil {
 			return result, commandJournalPullError(http.StatusBadRequest, err)
 		}
-		tail, status, err := fetchCommandJournalTailAuthorized(ctx, client, endpoint, authToken)
+		tail, status, err := fetchCommandJournalTailAuthorizedWithFormat(ctx, client, endpoint, authToken, wireFormat)
 		if err != nil {
 			if status == http.StatusConflict {
 				err = fmt.Errorf("%w: %v", ErrCommandJournalCompacted, err)
@@ -113,6 +118,7 @@ func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *Command
 			result.Applied += batchResult.Applied
 			result.AppliedThrough = batchResult.AppliedThrough
 			result.HasMore = batchResult.HasMore
+			result.WireFormat = batchResult.WireFormat
 			result.Batches++
 			status := http.StatusBadGateway
 			if errors.Is(err, ErrCommandJournalCompacted) {
@@ -125,6 +131,7 @@ func pullCommandJournalTail(ctx context.Context, trie *HatTrie, journal *Command
 		result.Applied += batchResult.Applied
 		result.AppliedThrough = batchResult.AppliedThrough
 		result.HasMore = batchResult.HasMore
+		result.WireFormat = batchResult.WireFormat
 		result.Batches++
 		if !untilCurrent || !result.HasMore {
 			return result, nil
@@ -397,6 +404,7 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 		CompactedThrough: tail.CompactedThrough,
 		AppliedThrough:   afterSequence,
 		HasMore:          tail.HasMore,
+		WireFormat:       string(tail.wireFormat),
 	}
 	if afterSequence < tail.CompactedThrough {
 		return result, fmt.Errorf("%w: requested sequence %d is before compacted sequence %d", ErrCommandJournalCompacted, afterSequence, tail.CompactedThrough)
@@ -404,6 +412,7 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 	if err := validateCommandJournalTailSequences(afterSequence, tail); err != nil {
 		return result, err
 	}
+	detachCommandJournalTailBorrowedStrings(&tail)
 	applied, response := journal.executeJournalRecordsBatch(trie, tail.Entries)
 	for idx := 0; idx < applied; idx++ {
 		dirtyTracker.markCommand(tail.Entries[idx].Request)
@@ -414,6 +423,18 @@ func applyCommandJournalTail(trie *HatTrie, journal *CommandJournal, source stri
 		return result, fmt.Errorf("journal entry %d failed: %s", tail.Entries[applied].Sequence, response.Message)
 	}
 	return result, nil
+}
+
+func detachCommandJournalTailBorrowedStrings(tail *CommandJournalTail) {
+	if tail == nil || tail.wireFormat != CommandJournalWireFormatBinary {
+		return
+	}
+	for index := range tail.Entries {
+		request := &tail.Entries[index].Request
+		request.Key = strings.Clone(request.Key)
+		request.Value = strings.Clone(request.Value)
+		request.Subkey = strings.Clone(request.Subkey)
+	}
 }
 
 func validateCommandJournalTailSequences(afterSequence uint64, tail CommandJournalTail) error {

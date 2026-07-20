@@ -392,47 +392,55 @@ func readCommandJournalOptionalInt64Binary(reader *binaryFieldReader) (*int64, e
 
 func readCommandJournalRequestBinary(reader *binaryFieldReader, version uint64) (CacheCommandRequest, error) {
 	var request CacheCommandRequest
+	if err := readCommandJournalRequestBinaryInto(reader, version, &request); err != nil {
+		return CacheCommandRequest{}, err
+	}
+	return request, nil
+}
+
+func readCommandJournalRequestBinaryInto(reader *binaryFieldReader, version uint64, request *CacheCommandRequest) error {
+	*request = CacheCommandRequest{}
 	var err error
 	if request.Command, err = reader.readString(); err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	if request.Key, err = reader.readString(); err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	if request.Value, err = reader.readString(); err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	if request.Subkey, err = reader.readString(); err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	if request.Priority, err = readCommandJournalOptionalInt64Binary(reader); err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	if request.TTLSeconds, err = readCommandJournalOptionalInt64Binary(reader); err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	if request.UnixSeconds, err = readCommandJournalOptionalInt64Binary(reader); err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	values, err := reader.readBytes()
 	if err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	pairs, err := reader.readBytes()
 	if err != nil {
-		return CacheCommandRequest{}, err
+		return err
 	}
 	if len(values) > 0 {
 		if err := decodeJournalDynamicValues(values, version, &request.Values); err != nil {
-			return CacheCommandRequest{}, err
+			return err
 		}
 	}
 	if len(pairs) > 0 {
 		if err := decodeJournalDynamicPairs(pairs, version, &request.Pairs); err != nil {
-			return CacheCommandRequest{}, err
+			return err
 		}
 	}
-	return request, nil
+	return nil
 }
 
 func decodeJournalDynamicValues(data []byte, version uint64, values *Slice) error {

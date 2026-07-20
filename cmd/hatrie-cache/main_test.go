@@ -76,6 +76,9 @@ func TestParseConfigDefaultsMonitoringServerOff(t *testing.T) {
 	if !cfg.journalPullIncrementalRecovery {
 		t.Fatal("journalPullIncrementalRecovery = false, want default true")
 	}
+	if cfg.journalPullWireFormat != string(hatriecache.DefaultCommandJournalWireFormat) {
+		t.Fatalf("journalPullWireFormat = %q, want binary", cfg.journalPullWireFormat)
+	}
 	if cfg.monitoringReadHeaderTimeout != defaultMonitoringReadHeaderTimeout {
 		t.Fatalf("monitoring read header timeout = %s, want %s", cfg.monitoringReadHeaderTimeout, defaultMonitoringReadHeaderTimeout)
 	}
@@ -658,6 +661,7 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 		"-journal-pull-full-sync-fallback=false",
 		"-journal-pull-checkpoint-bootstrap=false",
 		"-journal-pull-incremental-recovery=false",
+		"-journal-pull-wire-format", "json",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v", err)
@@ -679,6 +683,15 @@ func TestParseConfigJournalPullFlags(t *testing.T) {
 	}
 	if cfg.journalPullIncrementalRecovery {
 		t.Fatal("cfg journal pull incremental recovery = true, want explicit false")
+	}
+	if cfg.journalPullWireFormat != string(hatriecache.CommandJournalWireFormatJSON) {
+		t.Fatalf("cfg journal pull wire format = %q, want json", cfg.journalPullWireFormat)
+	}
+}
+
+func TestParseConfigRejectsInvalidJournalPullWireFormat(t *testing.T) {
+	if _, err := parseConfig([]string{"-journal-pull-wire-format", "protobuf"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("invalid journal pull wire format was accepted")
 	}
 }
 

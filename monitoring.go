@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -29,6 +30,7 @@ const (
 	checkpointContentType                      = "application/vnd.hatrie-cache.pebble-checkpoint"
 	journalRecoveryManifestContentType         = "application/vnd.hatrie-cache.recovery-manifest+json"
 	journalRecoveryObjectContentType           = "application/vnd.hatrie-cache.recovery-object"
+	commandJournalTailBinaryContentType        = "application/vnd.hatrie-cache.journal-tail"
 	truncatedCommandJournalErrorResponseSuffix = "\n... journal source error body truncated"
 )
 
@@ -147,6 +149,7 @@ type journalPullRequest struct {
 	Limit         uint64 `json:"limit,omitempty"`
 	UntilCurrent  bool   `json:"until_current,omitempty"`
 	MaxBatches    uint64 `json:"max_batches,omitempty"`
+	WireFormat    string `json:"wire_format,omitempty"`
 }
 
 type backupBundleRequest struct {
@@ -2031,7 +2034,37 @@ func (handler *MonitoringHandler) handleJournal(w http.ResponseWriter, r *http.R
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
 		return
 	}
+	if commandJournalRequestAcceptsBinary(r.Header.Get("Accept")) {
+		data, err := marshalCommandJournalTailBinary(tail)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+			return
+		}
+		w.Header().Set("Content-Type", commandJournalTailBinaryContentType)
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.Header().Set("Vary", "Accept")
+		_, _ = w.Write(data)
+		return
+	}
+	w.Header().Set("Vary", "Accept")
 	writeJSON(w, tail)
+}
+
+func commandJournalRequestAcceptsBinary(accept string) bool {
+	for _, item := range strings.Split(accept, ",") {
+		mediaType, parameters, err := mime.ParseMediaType(strings.TrimSpace(item))
+		if err != nil || !strings.EqualFold(mediaType, commandJournalTailBinaryContentType) {
+			continue
+		}
+		if quality, ok := parameters["q"]; ok {
+			value, err := strconv.ParseFloat(quality, 64)
+			if err != nil || value <= 0 {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func (handler *MonitoringHandler) handleJournalSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -2283,15 +2316,16 @@ func (handler *MonitoringHandler) handleJournalPull(w http.ResponseWriter, r *ht
 		MaxBatches:    request.MaxBatches,
 		Timeout:       DefaultCommandJournalPullTimeout,
 		DirtyTracker:  handler.options.LevelDBDirtyTracker,
+		WireFormat:    CommandJournalWireFormat(request.WireFormat),
 	})
 	if err != nil {
-		handler.auditHTTP(r, AuditEvent{Action: "journal.pull", OK: false, Status: http.StatusBadGateway, Message: err.Error(), Details: map[string]interface{}{"source": source, "after_sequence": request.AfterSequence}})
+		status := http.StatusBadGateway
 		var pullErr *CommandJournalPullError
 		if errors.As(err, &pullErr) && pullErr.Status > 0 {
-			writeJSONStatus(w, pullErr.Status, commandError(pullErr.Error()))
-			return
+			status = pullErr.Status
 		}
-		writeJSONStatus(w, http.StatusBadGateway, commandError(err.Error()))
+		handler.auditHTTP(r, AuditEvent{Action: "journal.pull", OK: false, Status: status, Message: err.Error(), Details: map[string]interface{}{"source": source, "after_sequence": request.AfterSequence}})
+		writeJSONStatus(w, status, commandError(err.Error()))
 		return
 	}
 	handler.auditHTTP(r, AuditEvent{Action: "journal.pull", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"source": source, "after_sequence": request.AfterSequence, "applied": result.Applied, "applied_through": result.AppliedThrough}})
@@ -2303,6 +2337,10 @@ func fetchCommandJournalTail(ctx context.Context, client *http.Client, endpoint 
 }
 
 func fetchCommandJournalTailAuthorized(ctx context.Context, client *http.Client, endpoint string, authToken string) (CommandJournalTail, int, error) {
+	return fetchCommandJournalTailAuthorizedWithFormat(ctx, client, endpoint, authToken, DefaultCommandJournalWireFormat)
+}
+
+func fetchCommandJournalTailAuthorizedWithFormat(ctx context.Context, client *http.Client, endpoint string, authToken string, wireFormat CommandJournalWireFormat) (CommandJournalTail, int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -2313,7 +2351,12 @@ func fetchCommandJournalTailAuthorized(ctx context.Context, client *http.Client,
 	if err != nil {
 		return CommandJournalTail{}, 0, err
 	}
-	req.Header.Set("Accept", "application/json")
+	if wireFormat == CommandJournalWireFormatBinary {
+		req.Header.Set("Accept", commandJournalTailBinaryContentType+", application/json;q=0.9")
+	} else {
+		req.Header.Set("Accept", "application/json")
+	}
+	req.Header.Set("Accept-Encoding", "identity")
 	setReplicationAuthHeaders(req, authToken)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -2328,7 +2371,16 @@ func fetchCommandJournalTailAuthorized(ctx context.Context, client *http.Client,
 		}
 		return CommandJournalTail{}, resp.StatusCode, fmt.Errorf("journal source returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
-	tail, err := decodeCommandJournalTailResponse(resp.Body)
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if parsed, _, parseErr := mime.ParseMediaType(contentType); parseErr == nil {
+		contentType = parsed
+	}
+	var tail CommandJournalTail
+	if strings.EqualFold(contentType, commandJournalTailBinaryContentType) {
+		tail, err = decodeCommandJournalTailBinaryResponse(resp.Body, resp.ContentLength)
+	} else {
+		tail, err = decodeCommandJournalTailResponse(resp.Body)
+	}
 	if err != nil {
 		return CommandJournalTail{}, resp.StatusCode, err
 	}
@@ -2362,6 +2414,7 @@ func decodeCommandJournalTailResponse(body io.Reader) (CommandJournalTail, error
 	if tail.Entries == nil {
 		tail.Entries = []CommandJournalRecord{}
 	}
+	tail.wireFormat = CommandJournalWireFormatJSON
 	return tail, nil
 }
 
