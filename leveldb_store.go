@@ -1603,6 +1603,10 @@ func newRadixTreeSizeFromSnapshot(snapshot radixTreeSnapshot) (int64, error) {
 }
 
 func (trie *HatTrie) applyLevelDBReferenceLocked(store persistentReferenceStore, entry snapshotEntry, data []byte) (HatValue, error) {
+	return trie.applyLevelDBReferenceMetadataLocked(store, entry, len(data), levelDBRecordChecksum(data))
+}
+
+func (trie *HatTrie) applyLevelDBReferenceMetadataLocked(store persistentReferenceStore, entry snapshotEntry, recordBytes int, recordChecksum uint64) (HatValue, error) {
 	if store == nil {
 		return HatValue{}, errors.New("hatriecache: leveldb reference store is required")
 	}
@@ -1621,8 +1625,8 @@ func (trie *HatTrie) applyLevelDBReferenceLocked(store persistentReferenceStore,
 		Store:          store,
 		ExpiresAt:      cloneTimePtr(entry.ExpiresAt),
 		Stats:          cloneKeyStatsPtr(entry.Stats),
-		RecordBytes:    len(data),
-		RecordChecksum: levelDBRecordChecksum(data),
+		RecordBytes:    recordBytes,
+		RecordChecksum: recordChecksum,
 		Token:          trie.nextLevelDBReferenceTokenLocked(),
 	})
 	hval := HatValue{Index: idx, Flags: DATAVALUE_TYPE_LEVELDB_REF}

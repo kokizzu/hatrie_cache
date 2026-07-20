@@ -805,12 +805,10 @@ func (ht *HatTrie) applyPartitionedSnapshotFile(file *os.File, metadata snapshot
 		}
 	}()
 
-	created := make([]map[string]struct{}, len(set.tries))
-	rollbacks := make([][]snapshotOperation, len(set.tries))
-	for index := range created {
-		created[index] = make(map[string]struct{})
-	}
-	applied := 0
+	states := newLocalPartitionRestoreStates(len(set.tries))
+	pool := newLocalPartitionRestorePool(set, func(partition int, operation snapshotOperation) error {
+		return applyLocalPartitionSnapshotRestore(set.tries[partition], &states[partition], operation, now)
+	})
 	applyMetadata, applyErr := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
 		operation, active, err := validateSnapshotLoadEntry(entry, now, true)
 		if err != nil || !active {
@@ -820,37 +818,23 @@ func (ht *HatTrie) applyPartitionedSnapshotFile(file *os.File, metadata snapshot
 			return err
 		}
 		partition := int(xxhash.Sum64String(operation.entry.Key) & set.mask)
-		child := set.tries[partition]
-		rollback, existed, err := child.restoreRollbackOperationLocked(operation.entry.Key)
-		if err != nil {
-			return err
-		}
-		if _, err := child.applySnapshotOperationAtLocked(operation, now); err != nil {
-			if existed {
-				rollbacks[partition] = append(rollbacks[partition], rollback)
-			}
-			return err
-		}
-		if existed {
-			rollbacks[partition] = append(rollbacks[partition], rollback)
-		} else {
-			created[partition][operation.entry.Key] = struct{}{}
-		}
-		applied++
-		return nil
+		return pool.dispatch(partition, detachLocalPartitionRestoreOperation(operation))
 	})
+	applyErr = pool.finish(applyErr)
+	applied := localPartitionRestoreApplied(states)
 	if applyErr != nil || applyMetadata.Version != snapshotVersion || applyMetadata.JournalSequence != metadata.JournalSequence || applied != len(activeKeys.keys) {
 		if applyErr == nil {
 			applyErr = errSnapshotChangedDuringLoad
 		}
-		for index, child := range set.tries {
-			_ = child.rollbackRestoreLocked(created[index], rollbacks[index], now)
+		if rollbackErr := rollbackLocalPartitionRestore(set, states, now); rollbackErr != nil {
+			applyErr = errors.Join(applyErr, fmt.Errorf("hatriecache: partition restore rollback failed: %w", rollbackErr))
 		}
 		return SnapshotMetadata{}, applyErr
 	}
-	for _, child := range set.tries {
+	_ = visitLocalPartitionsInParallel(set, func(_ int, child *HatTrie) error {
 		child.deleteKeysNotInSortedLocked(activeKeys.keys, now)
-	}
+		return nil
+	})
 	return SnapshotMetadata{JournalSequence: metadata.JournalSequence}, nil
 }
 
@@ -867,14 +851,33 @@ func loadLocalPartitionPersistentEntryData(trie *HatTrie, store persistentRefere
 		}
 	}()
 
-	created := make([]map[string]struct{}, len(set.tries))
-	rollbacks := make([][]snapshotOperation, len(set.tries))
-	for index := range created {
-		created[index] = make(map[string]struct{})
-	}
+	states := newLocalPartitionRestoreStates(len(set.tries))
+	pool := newLocalPartitionRestorePool(set, func(partition int, work localPartitionPersistentRestoreWork) error {
+		child := set.tries[partition]
+		state := &states[partition]
+		rollback, existed, err := child.restoreRollbackOperationLocked(work.load.entry.Key)
+		if err != nil {
+			return err
+		}
+		if work.load.reference {
+			_, err = child.applyLevelDBReferenceMetadataLocked(store, work.load.entry, work.recordBytes, work.recordChecksum)
+		} else {
+			_, err = child.applySnapshotOperationAtLocked(work.load.operation, now)
+			if err == nil {
+				state.valuesLoaded++
+			}
+		}
+		if err != nil {
+			if existed {
+				state.rollbacks = append(state.rollbacks, rollback)
+			}
+			return err
+		}
+		state.recordApplied(work.load.entry.Key, rollback, existed)
+		return nil
+	})
 	activeKeys := make([]string, 0)
 	result := LevelDBLoadResult{}
-	applied := false
 	loadErr := scan(func(entry snapshotEntry, data []byte) error {
 		loadEntry, active, err := prepareLevelDBLoadEntry(entry, now, policy, true)
 		if err != nil || !active {
@@ -883,44 +886,229 @@ func loadLocalPartitionPersistentEntryData(trie *HatTrie, store persistentRefere
 		activeKeys = append(activeKeys, loadEntry.entry.Key)
 		result.KeysLoaded++
 		partition := int(xxhash.Sum64String(loadEntry.entry.Key) & set.mask)
-		child := set.tries[partition]
-		rollback, existed, err := child.restoreRollbackOperationLocked(loadEntry.entry.Key)
-		if err != nil {
-			return err
-		}
+		work := localPartitionPersistentRestoreWork{load: loadEntry}
 		if loadEntry.reference {
-			_, err = child.applyLevelDBReferenceLocked(store, loadEntry.entry, data)
+			work.recordBytes = len(data)
+			work.recordChecksum = levelDBRecordChecksum(data)
 		} else {
-			_, err = child.applySnapshotOperationAtLocked(loadEntry.operation, now)
-			if err == nil {
-				result.ValuesLoaded++
-			}
+			work.load.operation = detachLocalPartitionRestoreOperation(work.load.operation)
 		}
-		if err != nil {
-			if existed {
-				rollbacks[partition] = append(rollbacks[partition], rollback)
-			}
-			return err
-		}
-		applied = true
-		if existed {
-			rollbacks[partition] = append(rollbacks[partition], rollback)
-		} else {
-			created[partition][loadEntry.entry.Key] = struct{}{}
-		}
-		return nil
+		work.load.entry.rawBytes = nil
+		return pool.dispatch(partition, work)
 	})
+	loadErr = pool.finish(loadErr)
 	if loadErr != nil {
-		if applied {
-			for index, child := range set.tries {
-				_ = child.rollbackRestoreLocked(created[index], rollbacks[index], now)
-			}
+		if rollbackErr := rollbackLocalPartitionRestore(set, states, now); rollbackErr != nil {
+			loadErr = errors.Join(loadErr, fmt.Errorf("hatriecache: partition restore rollback failed: %w", rollbackErr))
 		}
 		return LevelDBLoadResult{}, loadErr
 	}
-	sort.Strings(activeKeys)
-	for _, child := range set.tries {
-		child.deleteKeysNotInSortedLocked(activeKeys, now)
+	for index := range states {
+		result.ValuesLoaded += states[index].valuesLoaded
 	}
+	sort.Strings(activeKeys)
+	_ = visitLocalPartitionsInParallel(set, func(_ int, child *HatTrie) error {
+		child.deleteKeysNotInSortedLocked(activeKeys, now)
+		return nil
+	})
 	return result, nil
+}
+
+const localPartitionRestoreQueueDepth = 8
+
+type localPartitionRestoreState struct {
+	created      map[string]struct{}
+	rollbacks    []snapshotOperation
+	applied      int
+	valuesLoaded int
+}
+
+func newLocalPartitionRestoreStates(count int) []localPartitionRestoreState {
+	states := make([]localPartitionRestoreState, count)
+	for index := range states {
+		states[index].created = make(map[string]struct{})
+	}
+	return states
+}
+
+func (state *localPartitionRestoreState) recordApplied(key string, rollback snapshotOperation, existed bool) {
+	if existed {
+		state.rollbacks = append(state.rollbacks, rollback)
+	} else {
+		state.created[key] = struct{}{}
+	}
+	state.applied++
+}
+
+func applyLocalPartitionSnapshotRestore(child *HatTrie, state *localPartitionRestoreState, operation snapshotOperation, now time.Time) error {
+	rollback, existed, err := child.restoreRollbackOperationLocked(operation.entry.Key)
+	if err != nil {
+		return err
+	}
+	if _, err := child.applySnapshotOperationAtLocked(operation, now); err != nil {
+		if existed {
+			state.rollbacks = append(state.rollbacks, rollback)
+		}
+		return err
+	}
+	state.recordApplied(operation.entry.Key, rollback, existed)
+	return nil
+}
+
+func detachLocalPartitionRestoreOperation(operation snapshotOperation) snapshotOperation {
+	if operation.entry.rawBytes == nil {
+		return operation
+	}
+	operation.bytes = cloneBytes(operation.bytes)
+	operation.entry.rawBytes = nil
+	return operation
+}
+
+func localPartitionRestoreApplied(states []localPartitionRestoreState) int {
+	total := 0
+	for index := range states {
+		total += states[index].applied
+	}
+	return total
+}
+
+func rollbackLocalPartitionRestore(set *localPartitionSet, states []localPartitionRestoreState, now time.Time) error {
+	return visitLocalPartitionsInParallel(set, func(index int, child *HatTrie) error {
+		return child.rollbackRestoreLocked(states[index].created, states[index].rollbacks, now)
+	})
+}
+
+type localPartitionPersistentRestoreWork struct {
+	load           levelDBLoadEntry
+	recordBytes    int
+	recordChecksum uint64
+}
+
+type localPartitionRestoreWork[T any] struct {
+	partition int
+	value     T
+}
+
+type localPartitionRestorePool[T any] struct {
+	queues   []chan localPartitionRestoreWork[T]
+	done     chan struct{}
+	workers  sync.WaitGroup
+	failOnce sync.Once
+	firstErr error
+	apply    func(int, T) error
+}
+
+func newLocalPartitionRestorePool[T any](set *localPartitionSet, apply func(int, T) error) *localPartitionRestorePool[T] {
+	workerCount := localPartitionRestoreWorkerCount(len(set.tries))
+	pool := &localPartitionRestorePool[T]{
+		done:  make(chan struct{}),
+		apply: apply,
+	}
+	if workerCount == 1 {
+		return pool
+	}
+	pool.queues = make([]chan localPartitionRestoreWork[T], workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		queue := make(chan localPartitionRestoreWork[T], localPartitionRestoreQueueDepth)
+		pool.queues[worker] = queue
+		pool.workers.Add(1)
+		go func() {
+			defer pool.workers.Done()
+			for {
+				select {
+				case <-pool.done:
+					return
+				case work, ok := <-queue:
+					if !ok {
+						return
+					}
+					if err := apply(work.partition, work.value); err != nil {
+						pool.fail(err)
+						return
+					}
+				}
+			}
+		}()
+	}
+	return pool
+}
+
+func (pool *localPartitionRestorePool[T]) dispatch(partition int, value T) error {
+	if len(pool.queues) == 0 {
+		if err := pool.apply(partition, value); err != nil {
+			pool.fail(err)
+			return err
+		}
+		return nil
+	}
+	select {
+	case <-pool.done:
+		return pool.firstErr
+	default:
+	}
+	work := localPartitionRestoreWork[T]{partition: partition, value: value}
+	select {
+	case <-pool.done:
+		return pool.firstErr
+	case pool.queues[partition%len(pool.queues)] <- work:
+		return nil
+	}
+}
+
+func (pool *localPartitionRestorePool[T]) finish(scanErr error) error {
+	if scanErr != nil {
+		pool.fail(scanErr)
+	}
+	if len(pool.queues) == 0 {
+		return pool.firstErr
+	}
+	for _, queue := range pool.queues {
+		close(queue)
+	}
+	pool.workers.Wait()
+	return pool.firstErr
+}
+
+func (pool *localPartitionRestorePool[T]) fail(err error) {
+	if err == nil {
+		return
+	}
+	pool.failOnce.Do(func() {
+		pool.firstErr = err
+		close(pool.done)
+	})
+}
+
+func localPartitionRestoreWorkerCount(partitions int) int {
+	workers := runtime.GOMAXPROCS(0)
+	if workers > partitions {
+		workers = partitions
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	return workers
+}
+
+func visitLocalPartitionsInParallel(set *localPartitionSet, visit func(int, *HatTrie) error) error {
+	workerCount := localPartitionRestoreWorkerCount(len(set.tries))
+	errs := make([]error, len(set.tries))
+	if workerCount == 1 {
+		for index := range set.tries {
+			errs[index] = visit(index, set.tries[index])
+		}
+		return errors.Join(errs...)
+	}
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		go func(first int) {
+			defer workers.Done()
+			for index := first; index < len(set.tries); index += workerCount {
+				errs[index] = visit(index, set.tries[index])
+			}
+		}(worker)
+	}
+	workers.Wait()
+	return errors.Join(errs...)
 }

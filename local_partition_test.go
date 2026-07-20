@@ -3,7 +3,9 @@ package hatriecache
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -474,6 +476,122 @@ func TestLocalPartitionsPebbleRoundTrip(t *testing.T) {
 	assertLocalPartitionScalarValues(t, restored)
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLocalPartitionsPebbleRestoreIsExactForMixedValuesAndColdReferences(t *testing.T) {
+	source := newTestTrie(t)
+	for index := 0; index < 4096; index++ {
+		key := fmt.Sprintf("restore:%05d", index)
+		switch index % 4 {
+		case 0:
+			source.UpsertString(key, strings.Repeat("s", 128))
+		case 1:
+			source.UpsertBytes(key, bytes.Repeat([]byte{byte(index)}, 192))
+		case 2:
+			source.UpsertCounter(key, int32(index))
+		case 3:
+			source.UpsertMap(key, Map{"index": index, "state": "current"})
+		}
+	}
+	store, err := OpenPebbleStore(filepath.Join(t.TempDir(), "source.pebble"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Save(source); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, policy := range []LevelDBLoadPolicy{{}, {HotValuesOnly: true}} {
+		target := newTestTrie(t)
+		if err := target.ConfigureLocalPartitions(16); err != nil {
+			t.Fatal(err)
+		}
+		target.UpsertString("stale", "remove")
+		target.UpsertString("restore:00002", "replace-type")
+		result, err := store.LoadWithPolicy(target, policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.KeysLoaded != 4096 || target.Size() != 4096 || target.Exists("stale") {
+			t.Fatalf("restore result/size/stale = %#v/%d/%v", result, target.Size(), target.Exists("stale"))
+		}
+		if target.GetString("restore:00000") != strings.Repeat("s", 128) || target.GetCounter("restore:00002") != 2 {
+			t.Fatal("restored scalar values do not match")
+		}
+		if got := target.GetBytes("restore:00001"); !bytes.Equal(got, bytes.Repeat([]byte{1}, 192)) {
+			t.Fatalf("restored bytes = %v", got)
+		}
+		if got := target.GetMap("restore:00003"); got["state"] != "current" {
+			t.Fatalf("restored map = %#v", got)
+		}
+	}
+}
+
+func TestLocalPartitionPersistentRestoreRollsBackAllPartitionsOnError(t *testing.T) {
+	target := newTestTrie(t)
+	if err := target.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	target.UpsertString("existing:a", "original-a")
+	target.UpsertString("existing:b", "original-b")
+
+	_, err := loadLocalPartitionPersistentEntryData(target, nil, LevelDBLoadPolicy{}, func(visit func(snapshotEntry, []byte) error) error {
+		for _, entry := range []snapshotEntry{
+			{Key: "existing:a", Type: "string", String: "changed-a"},
+			{Key: "created:a", Type: "string", String: "created"},
+			{Key: "existing:b", Type: "string", String: "changed-b"},
+			{Key: "invalid", Type: "unsupported"},
+		} {
+			if err := visit(entry, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("partition restore error = nil, want invalid entry error")
+	}
+	if target.GetString("existing:a") != "original-a" || target.GetString("existing:b") != "original-b" || target.Exists("created:a") {
+		t.Fatalf("partition rollback entries = %#v", target.Entries(true))
+	}
+}
+
+func TestLocalPartitionSnapshotRestoreRollsBackAllPartitionsOnMismatch(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("a", "changed")
+	source.UpsertString("b", "created")
+	path := filepath.Join(t.TempDir(), "source.snapshot")
+	if err := source.SaveSnapshotWithFormat(path, SnapshotFormatBinary); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	metadata, err := scanSnapshotFileReader(file, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	activeKeys, err := newSnapshotActiveKeys([]string{"a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := newTestTrie(t)
+	if err := target.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	target.UpsertString("a", "original")
+	if _, err := target.applyPartitionedSnapshotFile(file, metadata, activeKeys, target.currentTime()); !errors.Is(err, errSnapshotChangedDuringLoad) {
+		t.Fatalf("partition snapshot restore error = %v, want changed-during-load", err)
+	}
+	if target.GetString("a") != "original" || target.Exists("b") {
+		t.Fatalf("partition snapshot rollback entries = %#v", target.Entries(true))
 	}
 }
 

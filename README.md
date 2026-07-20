@@ -708,6 +708,14 @@ rises 7.8%, cumulative heap rises 1.7%, and allocation count is effectively
 unchanged. Snapshot and storage formats do not change. See
 [BENCHMARK.md](BENCHMARK.md#bounded-partition-snapshot-locking).
 
+Partitioned restore and startup apply decoded records through partition-stable
+workers bounded by `GOMAXPROCS`, while retaining the complete partition-lock
+barrier for exact replacement and rollback. On 100,000 256-byte values across
+16 partitions, binary snapshot restore is 1.28x faster and Pebble startup is
+1.18x faster; cumulative heap and allocation changes remain within 0.1%.
+Single-trie startup is unchanged. See
+[BENCHMARK.md](BENCHMARK.md#parallel-partition-restore).
+
 The measured 100,000-write fixture is 2.24x faster at 16 workers, while
 separate-process maximum RSS rose from 51,588 KiB to 54,096 KiB. On a 100,000-key
 whole-keyspace fixture, parallel sorted-key collection is 4.24x faster with

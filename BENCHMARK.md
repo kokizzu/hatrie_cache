@@ -202,6 +202,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Point-in-time snapshot capture](#point-in-time-snapshot-capture), 100k keys | 528,624,130 ns maximum read pause | 142,374,086 ns | 3.71x shorter pause | Total snapshot time is 5.5% higher and cumulative heap is 2.63x higher |
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Current pass | [Bounded partition snapshot locking](#bounded-partition-snapshot-locking), 100k keys, 16 partitions | Whole-set lock: 154.398 ms pause; 241.262 ms total | Tracked 256-key pages: 2.300 ms pause; 259.974 ms total | 67.14x shorter pause | Total time is 7.8% higher and cumulative heap is 1.7% higher |
+| Current pass | [Parallel partition restore](#parallel-partition-restore), 100k x 256 B, 16 partitions | Serial: snapshot 258.183 ms; Pebble 213.948 ms | Bounded parallel: snapshot 202.398 ms; Pebble 181.435 ms | 1.28x faster snapshot restore; 1.18x faster Pebble startup | Heap and allocations rise by at most 0.1%; local partitions must be enabled |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
@@ -1108,6 +1109,49 @@ tests verify reconciliation for both materialized and streamed restores. The
 snapshot version, wire/storage bytes, ordering, and journal checkpoint contract
 are unchanged. Temporary dirty-key memory scales with writes during capture;
 the page buffers scale with the configured local partition count.
+
+<a id="parallel-partition-restore"></a>
+### Parallel Partition Restore
+
+Snapshot replay and persistent-store startup previously held every local
+partition lock for atomic visibility but decoded and applied all records on one
+goroutine. The current path retains that all-partition barrier while routing
+prepared records through partition-stable FIFO workers. Concurrency is bounded
+by the smaller of `GOMAXPROCS` and the configured partition count, with eight
+queued records per worker. Stale-key cleanup and error rollback also run across
+independent children in parallel. Iterator-backed binary byte values are
+detached before dispatch, while cold references pass only their precomputed
+record length and checksum instead of copying the full encoded record.
+
+The fixture restores 100,000 identical 256-byte strings into a 16-partition
+cache containing one stale key. Snapshot and Pebble inputs are built once and
+excluded from timed work; restore includes decoding, per-partition application,
+and exact stale-key deletion. Results are seven-run medians on the Ryzen 9
+5950X host. The serial baseline is commit `dab6490`.
+
+```sh
+make bench-partition-restore PARTITION_RESTORE_BENCH_KEYS=100000 PARTITION_RESTORE_COUNT=16 BENCHTIME=1x COUNT=7 BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Input | Serial restore | Bounded parallel restore | Improvement | Heap change | Allocation change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Binary snapshot | 258.183 ms | 202.398 ms | 1.28x faster | 181,088,464 B to 181,158,640 B (+0.04%) | 902,664 to 902,813 (+0.02%) |
+| Pebble store | 213.948 ms | 181.435 ms | 1.18x faster | 120,322,480 B to 120,440,400 B (+0.10%) | 502,703 to 502,875 (+0.03%) |
+
+Raw elapsed samples in milliseconds were:
+
+| Input | Serial samples | Bounded parallel samples |
+| --- | --- | --- |
+| Binary snapshot | `261.572, 262.279, 258.183, 240.788, 287.909, 246.711, 233.910` | `205.431, 208.462, 199.254, 202.398, 204.957, 202.284, 196.342` |
+| Pebble store | `210.970, 192.237, 220.928, 213.948, 216.138, 214.704, 205.143` | `181.435, 181.995, 182.816, 183.244, 177.557, 170.405, 181.300` |
+
+The current output is generated at `build/benchmarks/partition-restore.txt`;
+the serial run used the same script before the implementation change. Mixed
+scalar/structured/byte values, lazy cold references, stale-key deletion,
+snapshot mismatch, and invalid persistent records have correctness and race
+coverage. A worker error cancels dispatch and restores every changed partition.
+The optimization applies only when local partitions are enabled; the default
+single-trie restore path and all snapshot/storage formats remain unchanged.
 
 ### Compact Streaming Snapshot Capture
 
