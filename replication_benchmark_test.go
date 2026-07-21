@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/syndtr/goleveldb/leveldb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -417,6 +418,144 @@ func BenchmarkReplicationMerkleWriteTracking(b *testing.B) {
 			b.ResetTimer()
 			for idx := 0; idx < b.N; idx++ {
 				trie.UpsertString(keys[idx%len(keys)], values[idx&1])
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationMerkleChurnSnapshotCycle(b *testing.B) {
+	const (
+		keyCount      = 10000
+		mutationCount = 100000
+	)
+	keys := make([]string, keyCount)
+	for idx := range keys {
+		keys[idx] = "session:" + strconv.Itoa(idx)
+	}
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		trie := CreateHatTrie()
+		for idx, key := range keys {
+			trie.UpsertString(key, replicationDigestBenchmarkValue(idx, 1))
+		}
+		if _, err := trie.replicationMerkleSnapshot(); err != nil {
+			trie.Destroy()
+			b.Fatal(err)
+		}
+
+		b.StartTimer()
+		for idx := 0; idx < mutationCount; idx++ {
+			trie.UpsertString(keys[idx%keyCount], "updated")
+		}
+		snapshot, err := trie.replicationMerkleSnapshot()
+		b.StopTimer()
+		if err != nil || snapshot.count != keyCount {
+			trie.Destroy()
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want %d entries", snapshot, err, keyCount)
+		}
+		trie.Destroy()
+	}
+	b.ReportAllocs()
+	b.ReportMetric(mutationCount, "writes/op")
+}
+
+func BenchmarkReplicationMerkleSnapshotAfterChurn(b *testing.B) {
+	const keyCount = 10000
+	keys := make([]string, keyCount)
+	for idx := range keys {
+		keys[idx] = "session:" + strconv.Itoa(idx)
+	}
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		trie := CreateHatTrie()
+		for idx, key := range keys {
+			trie.UpsertString(key, replicationDigestBenchmarkValue(idx, 1))
+		}
+		if _, err := trie.replicationMerkleSnapshot(); err != nil {
+			trie.Destroy()
+			b.Fatal(err)
+		}
+		for idx := 0; idx < keyCount; idx++ {
+			trie.UpsertString(keys[idx], "updated")
+		}
+
+		b.StartTimer()
+		snapshot, err := trie.replicationMerkleSnapshot()
+		b.StopTimer()
+		if err != nil || snapshot.count != keyCount {
+			trie.Destroy()
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want %d entries", snapshot, err, keyCount)
+		}
+		trie.Destroy()
+	}
+	b.ReportAllocs()
+	b.ReportMetric(keyCount, "dirty_keys/op")
+}
+
+type replicationMerklePendingBenchmarkKey struct {
+	hash uint64
+	key  string
+}
+
+func BenchmarkReplicationMerklePendingDedup(b *testing.B) {
+	for _, cardinality := range []int{1, 4, 8, 16, 32, 64} {
+		keys := make([]string, cardinality)
+		hashes := make([]uint64, cardinality)
+		for idx := range keys {
+			keys[idx] = "session:" + strconv.Itoa(idx)
+			hashes[idx] = xxhash.Sum64String(keys[idx])
+		}
+		b.Run("Inline"+strconv.Itoa(cardinality), func(b *testing.B) {
+			pending := make([]replicationMerklePendingBenchmarkKey, cardinality)
+			for idx := range pending {
+				pending[idx] = replicationMerklePendingBenchmarkKey{hash: hashes[idx], key: keys[idx]}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				hash := hashes[idx%cardinality]
+				for pendingIdx := range pending {
+					if pending[pendingIdx].hash == hash {
+						pending[pendingIdx].key = keys[idx%cardinality]
+						break
+					}
+				}
+			}
+		})
+		b.Run("Map"+strconv.Itoa(cardinality), func(b *testing.B) {
+			pending := make(map[uint64]string, cardinality)
+			for idx := range keys {
+				pending[hashes[idx]] = keys[idx]
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				pending[hashes[idx%cardinality]] = keys[idx%cardinality]
+			}
+		})
+		b.Run("InlineString"+strconv.Itoa(cardinality), func(b *testing.B) {
+			pending := append([]string(nil), keys...)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				key := keys[idx%cardinality]
+				for pendingIdx := range pending {
+					if pending[pendingIdx] == key {
+						pending[pendingIdx] = key
+						break
+					}
+				}
+			}
+		})
+		b.Run("MapString"+strconv.Itoa(cardinality), func(b *testing.B) {
+			pending := make(map[string]struct{}, cardinality)
+			for idx := range keys {
+				pending[keys[idx]] = struct{}{}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				pending[keys[idx%cardinality]] = struct{}{}
 			}
 		})
 	}

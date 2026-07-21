@@ -12,6 +12,8 @@ import (
 
 const replicationMerkleBucketCount = 1024
 const replicationMerkleInitialTableCapacity = 1024
+const replicationMerklePendingInlineLimit = 32
+const replicationMerkleMaxPendingKeys = 1024
 
 type replicationMerkleLeaf struct {
 	xor   uint64
@@ -244,11 +246,18 @@ func (table *replicationMerkleTable) retainedBytes() int {
 }
 
 type replicationMerkleIndex struct {
-	table   replicationMerkleTable
-	leaves  [replicationMerkleBucketCount]replicationMerkleLeaf
-	count   uint64
-	valid   bool
-	scratch []byte
+	table         replicationMerkleTable
+	leaves        [replicationMerkleBucketCount]replicationMerkleLeaf
+	count         uint64
+	valid         bool
+	scratch       []byte
+	pendingInline []replicationMerklePendingKey
+	pending       map[uint64]string
+}
+
+type replicationMerklePendingKey struct {
+	hash uint64
+	key  string
 }
 
 func newReplicationMerkleIndex() *replicationMerkleIndex {
@@ -284,6 +293,75 @@ func (index *replicationMerkleIndex) snapshot() replicationMerkleSnapshot {
 	return snapshot
 }
 
+func (index *replicationMerkleIndex) deferUpdate(key string) {
+	if index == nil || !index.valid {
+		return
+	}
+	keyHash := xxhash.Sum64String(key)
+	if index.pending != nil {
+		index.pending[keyHash] = key
+		if len(index.pending) > replicationMerkleMaxPendingKeys {
+			index.invalidate()
+		}
+		return
+	}
+	for idx := range index.pendingInline {
+		if index.pendingInline[idx].hash == keyHash {
+			index.pendingInline[idx].key = key
+			return
+		}
+	}
+	if len(index.pendingInline) < replicationMerklePendingInlineLimit {
+		index.pendingInline = append(index.pendingInline, replicationMerklePendingKey{hash: keyHash, key: key})
+		return
+	}
+	index.pending = make(map[uint64]string, len(index.pendingInline)+1)
+	for _, pending := range index.pendingInline {
+		index.pending[pending.hash] = pending.key
+	}
+	index.pendingInline = nil
+	index.pending[keyHash] = key
+}
+
+func (index *replicationMerkleIndex) pendingCount() int {
+	if index == nil {
+		return 0
+	}
+	if index.pending != nil {
+		return len(index.pending)
+	}
+	return len(index.pendingInline)
+}
+
+func (index *replicationMerkleIndex) clearPending() {
+	if index == nil {
+		return
+	}
+	for idx := range index.pendingInline {
+		index.pendingInline[idx] = replicationMerklePendingKey{}
+	}
+	index.pendingInline = index.pendingInline[:0]
+	index.pending = nil
+}
+
+func (index *replicationMerkleIndex) invalidate() {
+	if index == nil {
+		return
+	}
+	index.valid = false
+	index.clearPending()
+}
+
+func (index *replicationMerkleIndex) retainedBytes() int {
+	if index == nil {
+		return 0
+	}
+	retained := index.table.retainedBytes() + replicationMerkleBucketCount*16 + cap(index.scratch)
+	retained += cap(index.pendingInline) * 24
+	retained += len(index.pending) * 24
+	return retained
+}
+
 func replicationMerkleBucket(keyHash uint64) int {
 	return int(keyHash >> (64 - 10))
 }
@@ -314,30 +392,55 @@ func (ht *HatTrie) updateReplicationMerkleLocked(keys ...string) {
 		return
 	}
 	for _, key := range keys {
-		if key == "" {
-			continue
-		}
-		keyHash := xxhash.Sum64String(key)
+		ht.replicationMerkle.deferUpdate(key)
+	}
+}
+
+func (ht *HatTrie) flushReplicationMerkleLocked(index *replicationMerkleIndex) error {
+	if index == nil || !index.valid || index.pendingCount() == 0 {
+		return nil
+	}
+	apply := func(keyHash uint64, key string) error {
 		rawPtr := ht.tryLocation(key)
 		if rawPtr == nil {
-			ht.replicationMerkle.delete(keyHash)
-			continue
+			index.delete(keyHash)
+			return nil
 		}
 		hval := HatValue{}
 		hval.fromValue(*rawPtr)
-		encoded, ok, err := ht.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(ht.replicationMerkle.scratch[:0], Entry{Key: key, Value: hval})
-		ht.replicationMerkle.scratch = encoded
-		if err != nil || !ok {
-			ht.replicationMerkle.valid = false
-			return
+		encoded, ok, err := ht.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(index.scratch[:0], Entry{Key: key, Value: hval})
+		index.scratch = encoded
+		if err != nil {
+			return err
 		}
-		ht.replicationMerkle.set(keyHash, replicationMerkleContribution(keyHash, replicationValueDigest(encoded)))
+		if !ok {
+			return errors.New("hatriecache: Merkle index could not encode live entry")
+		}
+		index.set(keyHash, replicationMerkleContribution(keyHash, replicationValueDigest(encoded)))
+		return nil
 	}
+	if index.pending != nil {
+		for keyHash, key := range index.pending {
+			if err := apply(keyHash, key); err != nil {
+				index.invalidate()
+				return err
+			}
+		}
+	} else {
+		for _, pending := range index.pendingInline {
+			if err := apply(pending.hash, pending.key); err != nil {
+				index.invalidate()
+				return err
+			}
+		}
+	}
+	index.clearPending()
+	return nil
 }
 
 func (ht *HatTrie) invalidateReplicationMerkleLocked() {
 	if ht != nil && ht.replicationMerkle != nil {
-		ht.replicationMerkle.valid = false
+		ht.replicationMerkle.invalidate()
 	}
 }
 
@@ -366,6 +469,10 @@ func (ht *HatTrie) replicationMerkleSnapshot() (replicationMerkleSnapshot, error
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 	ht.ensureOpen()
+	if ht.replicationMerkle != nil && ht.replicationMerkle.valid {
+		// A failed flush invalidates the index; rebuilding below retries from live data.
+		_ = ht.flushReplicationMerkleLocked(ht.replicationMerkle)
+	}
 	if ht.replicationMerkle == nil || !ht.replicationMerkle.valid {
 		index, err := ht.rebuildReplicationMerkleLocked()
 		if err != nil {
@@ -422,5 +529,5 @@ func (ht *HatTrie) replicationMerkleRetainedBytes() int {
 	if ht.replicationMerkle == nil {
 		return 0
 	}
-	return ht.replicationMerkle.table.retainedBytes() + replicationMerkleBucketCount*16 + cap(ht.replicationMerkle.scratch)
+	return ht.replicationMerkle.retainedBytes()
 }

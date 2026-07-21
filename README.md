@@ -88,6 +88,7 @@ make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Struc
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 make bench-startup-persistence BENCHTIME=1x COUNT=7
 make bench-live-replication BENCHTIME=1x COUNT=7
+make bench-merkle-maintenance BENCHTIME=1x COUNT=7
 make bench-native-ahtable-allocator NATIVE_AHTABLE_KEYS=100000 NATIVE_AHTABLE_SLOTS=4096 COUNT=7
 ```
 
@@ -1382,11 +1383,14 @@ Reproduce it with `make bench-live-replication BENCHTIME=1x COUNT=7`. See
 [BENCHMARK.md](BENCHMARK.md#pipelined-live-grpc-replication).
 `POST /api/replication` runs an explicit command-fanout anti-entropy sync. For
 an unfiltered single-shard data set, the source and target first compare an
-incrementally maintained 1,024-bucket Merkle root. Equal replicas stop after one
+maintained 1,024-bucket Merkle root. Equal replicas stop after one
 small request. A mismatch fetches only differing bucket digest pages, then sends
 changed or missing values plus deletes for target-only stale keys. The index is
-dormant until the first unfiltered sync, then retains about 29.6 B/key. Prefix
-sync and multi-shard routing use the compatible bounded, sorted digest path.
+dormant until the first unfiltered sync, then retains about 29.6 B/key. Active
+writes coalesce up to 1,024 unique pending keys; the next sync applies each final
+value once, while broader churn triggers one linear index rebuild. This reduced
+the measured 100,000-write-plus-sync cycle from 45.5 ms to 25.8 ms. Prefix sync
+and multi-shard routing use the compatible bounded, sorted digest path.
 Write batches retain at most 1,024 keys and are also split by
 `REPLICATION_BATCH_MAX_BYTES`.
 

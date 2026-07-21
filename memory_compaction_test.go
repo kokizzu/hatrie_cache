@@ -52,6 +52,46 @@ func TestCompactMemoryPackedStringRemainsValidAfterReplacement(t *testing.T) {
 	}
 }
 
+func TestCompactMemoryPreservesPendingMerkleUpdates(t *testing.T) {
+	const keys = 64
+	trie := newTestTrie(t)
+	for idx := 0; idx < keys; idx++ {
+		trie.UpsertString(fmt.Sprintf("session:%02d", idx), "before")
+	}
+	if _, err := trie.replicationMerkleSnapshot(); err != nil {
+		t.Fatalf("initial replicationMerkleSnapshot() error = %v", err)
+	}
+	for idx := 0; idx < keys; idx++ {
+		trie.UpsertString(fmt.Sprintf("session:%02d", idx), "changed")
+	}
+
+	if _, err := trie.CompactMemory(); err != nil {
+		t.Fatalf("CompactMemory() error = %v", err)
+	}
+	trie.mu.RLock()
+	pending := trie.replicationMerkle.pendingCount()
+	trie.mu.RUnlock()
+	if pending != keys {
+		t.Fatalf("pending Merkle keys after compaction = %d, want %d", pending, keys)
+	}
+
+	got, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("replicationMerkleSnapshot() after compaction error = %v", err)
+	}
+	wantTrie := newTestTrie(t)
+	for idx := 0; idx < keys; idx++ {
+		wantTrie.UpsertString(fmt.Sprintf("session:%02d", idx), "changed")
+	}
+	want, err := wantTrie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("expected replicationMerkleSnapshot() error = %v", err)
+	}
+	if !got.equal(want) {
+		t.Fatalf("compacted deferred Merkle root/count = %x/%d, want %x/%d", got.root, got.count, want.root, want.count)
+	}
+}
+
 func TestCompactMemoryPreservesTypedValuesAndReclaimsBacking(t *testing.T) {
 	trie, _ := benchmarkStructuredSnapshotTrie(t)
 	t.Cleanup(trie.Destroy)

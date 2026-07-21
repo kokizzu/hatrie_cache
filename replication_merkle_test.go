@@ -60,6 +60,111 @@ func TestReplicationMerkleIndexTracksMutationsWithinCompactBudget(t *testing.T) 
 	}
 }
 
+func TestReplicationMerkleDefersAndCoalescesMutationsUntilSnapshot(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+	trie.UpsertString("session:2", "two")
+	initial, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("initial replicationMerkleSnapshot() error = %v", err)
+	}
+
+	trie.UpsertString("session:1", "changed-once")
+	trie.UpsertString("session:1", "changed-final")
+	trie.Delete("session:2")
+
+	trie.mu.RLock()
+	pending := trie.replicationMerkle.pendingCount()
+	stale := trie.replicationMerkle.snapshot()
+	trie.mu.RUnlock()
+	if pending != 2 {
+		t.Fatalf("pending Merkle keys = %d, want 2 unique keys", pending)
+	}
+	if !stale.equal(initial) {
+		t.Fatal("Merkle leaves changed before the snapshot flush")
+	}
+
+	got, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("flushed replicationMerkleSnapshot() error = %v", err)
+	}
+	if got.equal(initial) || got.count != 1 {
+		t.Fatalf("flushed Merkle root/count = %x/%d, want one changed entry", got.root, got.count)
+	}
+	trie.mu.RLock()
+	pending = trie.replicationMerkle.pendingCount()
+	trie.mu.RUnlock()
+	if pending != 0 {
+		t.Fatalf("pending Merkle keys after snapshot = %d, want 0", pending)
+	}
+
+	wantTrie := newTestTrie(t)
+	wantTrie.UpsertString("session:1", "changed-final")
+	want, err := wantTrie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("expected replicationMerkleSnapshot() error = %v", err)
+	}
+	if !got.equal(want) {
+		t.Fatalf("deferred/rebuilt Merkle root/count = %x/%d and %x/%d, want equal", got.root, got.count, want.root, want.count)
+	}
+}
+
+func TestReplicationMerklePendingOverflowFallsBackToRebuild(t *testing.T) {
+	trie := newTestTrie(t)
+	wantTrie := newTestTrie(t)
+	for idx := 0; idx <= replicationMerkleMaxPendingKeys; idx++ {
+		key := fmt.Sprintf("session:%05d", idx)
+		trie.UpsertString(key, "before")
+		wantTrie.UpsertString(key, "after")
+	}
+	if _, err := trie.replicationMerkleSnapshot(); err != nil {
+		t.Fatalf("initial replicationMerkleSnapshot() error = %v", err)
+	}
+	for idx := 0; idx <= replicationMerkleMaxPendingKeys; idx++ {
+		trie.UpsertString(fmt.Sprintf("session:%05d", idx), "after")
+	}
+	trie.mu.RLock()
+	valid := trie.replicationMerkle.valid
+	pending := trie.replicationMerkle.pendingCount()
+	trie.mu.RUnlock()
+	if valid {
+		t.Fatal("Merkle index remained valid after pending-key limit")
+	}
+	if pending != 0 {
+		t.Fatalf("pending Merkle keys after overflow = %d, want 0", pending)
+	}
+
+	got, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("rebuilt replicationMerkleSnapshot() error = %v", err)
+	}
+	want, err := wantTrie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("expected replicationMerkleSnapshot() error = %v", err)
+	}
+	if !got.equal(want) {
+		t.Fatalf("overflow/rebuilt Merkle root/count = %x/%d and %x/%d, want equal", got.root, got.count, want.root, want.count)
+	}
+}
+
+func TestReplicationMerkleTracksEmptyKeyMutation(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("", "before")
+	before, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("initial replicationMerkleSnapshot() error = %v", err)
+	}
+
+	trie.UpsertString("", "after")
+	after, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("updated replicationMerkleSnapshot() error = %v", err)
+	}
+	if after.equal(before) || after.count != 1 {
+		t.Fatalf("empty-key Merkle root/count = %x/%d -> %x/%d, want changed one-entry root", before.root, before.count, after.root, after.count)
+	}
+}
+
 func TestReplicationMerkleTableDeletePreservesCollisionChain(t *testing.T) {
 	table := newReplicationMerkleTable()
 	mask := uint64(len(table.keys) - 1)

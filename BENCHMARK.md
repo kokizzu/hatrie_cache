@@ -224,6 +224,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
 | Current pass | [Merkle equal-state preflight](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 18.272 ms; 560,720 heap B | Merkle: 0.993 ms; 233,744 heap B | 18.40x faster, 2.40x lower heap | First activation builds a 29.60 B/key index |
 | Current pass | [Merkle 1%-changed repair](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 55.401 ms; 240,086 wire B | Merkle: 25.443 ms; 132,820 wire B | 2.18x faster, 1.81x smaller wire | Active write tracking is 1.88x slower |
+| Current pass | [Deferred Merkle maintenance](#hierarchical-merkle-anti-entropy), 100k writes plus root | Immediate update: 45.523 ms; 323,840 heap B | Coalesced/rebuild: 25.807 ms; 1,006,632 heap B | 1.76x faster cycle; active writes 2.04x faster | Root after broad churn is 6.00x slower; cycle heap is 3.11x higher |
 | Final architecture | [Sequential gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 14,914 ns/command | 3.96x faster, 6.73x lower heap | Request/response remains sequential |
 | Final architecture | [Pipelined gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 3,118 ns/command | 18.94x faster, 7.67x lower heap, 6.57x fewer allocations | Requires concurrent sender/receiver with ordered response pairing |
 | Current pass | [Native gRPC batch stream](#persistent-grpc-command-stream), 10k commands, batch 16 | Pipelined: 2,638 ns/command; 41.00 wire B/command | Native batch: 1,161 ns/command; 37.04 wire B/command | 2.27x faster, 1.62x lower heap, 2.77x fewer allocations, 1.11x smaller wire, 16x fewer messages | Batching can add queueing latency; client chooses envelope size |
@@ -1967,6 +1968,7 @@ retain the compatible sorted-digest implementation.
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIncremental -benchtime=1x -count=5 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIndexBuild -benchtime=1x -count=5 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleWriteTracking -benchtime=100000x -count=5 -benchmem'
+make bench-merkle-maintenance BENCHTIME=1x COUNT=7
 ```
 
 Both replicas contain 10,000 deterministic incompressible 1 KiB values. Sparse
@@ -1986,6 +1988,31 @@ heap 3.17x, and allocations 2.07x. Initial index construction takes 5.920 ms,
 B/key. Subsequent tracked writes rise from 272.1 to 511.5 ns (1.88x slower)
 with the same 16 B and one allocation per write. The index therefore remains
 dormant until the first eligible anti-entropy sync.
+
+Active indexes now defer value encoding until a root is requested. Up to 32
+unique key hashes stay in an inline slice; a lookup microbenchmark measured
+8.13 ns at 32 entries versus 16.16 ns for a map, with the map reaching parity
+at 64. The pending set therefore promotes after 32 entries. Repeated writes
+coalesce by key, and more than 1,024 unique keys invalidate the old index so the
+next root performs one bounded linear rebuild. The cap prevents dirty-key
+memory from growing with an unbounded write interval.
+
+The following seven-run medians use 10,000 keys. The cycle changes 100,000
+values across the full keyspace, so it exercises the rebuild fallback. Heap is
+cumulative allocation, not peak RSS.
+
+| Merkle maintenance | Immediate update baseline | Deferred/coalesced | Improvement/tradeoff |
+| --- | ---: | ---: | --- |
+| Active write | 486.6 ns; 0 heap B/op | 238.3 ns; 1 heap B/op | 2.04x faster; 6.1% over inactive writes |
+| 100k writes plus root | 45,522,676 ns; 323,840 heap B; 19,901 allocs | 25,806,681 ns; 1,006,632 heap B; 19,983 allocs | 1.76x faster; 3.11x heap; 82 more allocations |
+| Root after 10k dirty keys | 537,914 ns; 323,840 heap B | 3,226,957 ns; 897,560 heap B | 6.00x slower sync; 2.77x heap |
+
+This deliberately shifts work from every mutation to anti-entropy. Sparse
+churn flushes only final unique values; broad churn rebuilds once. A tested
+string-keyed map variant slowed the 16,384-key candidate cycle from 29.294 ms
+to 33.070 ms without reducing measured heap, so the hash-keyed map was retained.
+Pending updates survive memory compaction, and snapshots flush them while
+holding the same trie lock used by mutations.
 
 ### Indexed Expiration Heap
 

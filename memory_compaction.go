@@ -424,6 +424,14 @@ func compactReplicationMerkleIndex(source *replicationMerkleIndex) *replicationM
 		count:  source.count,
 		valid:  true,
 	}
+	if source.pending != nil {
+		next.pending = make(map[uint64]string, len(source.pending))
+		for keyHash, key := range source.pending {
+			next.pending[keyHash] = key
+		}
+	} else if len(source.pendingInline) > 0 {
+		next.pendingInline = append([]replicationMerklePendingKey(nil), source.pendingInline...)
+	}
 	for slot, used := range source.table.used {
 		if used != 0 {
 			next.table.setWithoutResize(source.table.keys[slot], source.table.values[slot])
@@ -529,7 +537,7 @@ func memoryMerkleBytes(index *replicationMerkleIndex) uint64 {
 	if index == nil {
 		return 0
 	}
-	return uint64(index.table.retainedBytes() + replicationMerkleBucketCount*16 + cap(index.scratch))
+	return uint64(index.retainedBytes())
 }
 
 func (ht *HatTrie) memoryBackingBytesLocked() uint64 {
