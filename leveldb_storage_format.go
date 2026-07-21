@@ -389,19 +389,7 @@ func prepareLevelDBBinaryEntryValue(entry snapshotEntry) (levelDBBinaryPreparedV
 		}
 		return prepareLevelDBBinaryReservoirSampleValue(*entry.ReservoirSample)
 	default:
-		payload, err := marshalSnapshotEntryValueJSON(entry)
-		if err != nil {
-			return levelDBBinaryPreparedValue{}, err
-		}
-		size, err := binaryLengthPrefixedSize(int64(len(payload)))
-		if err != nil {
-			return levelDBBinaryPreparedValue{}, err
-		}
-		return levelDBBinaryPreparedValue{
-			kind:        levelDBBinaryPreparedBytes,
-			bytes:       payload,
-			encodedSize: size,
-		}, nil
+		return levelDBBinaryPreparedValue{}, fmt.Errorf("hatriecache: unsupported binary storage value type %q", entry.Type)
 	}
 }
 
@@ -563,33 +551,14 @@ func prepareLevelDBBinaryReservoirSampleValue(snapshot reservoirSampleSnapshot) 
 	return prepareLevelDBBinaryPayloadValue(snapshot, payload, ok, err)
 }
 
-func prepareLevelDBBinaryPayloadValue(value interface{}, binaryPayload []byte, binaryOK bool, binaryErr error) (levelDBBinaryPreparedValue, error) {
+func prepareLevelDBBinaryPayloadValue(_ interface{}, binaryPayload []byte, binaryOK bool, binaryErr error) (levelDBBinaryPreparedValue, error) {
 	if binaryErr != nil {
 		return levelDBBinaryPreparedValue{}, binaryErr
 	}
 	if !binaryOK {
-		return prepareLevelDBJSONPayloadValue(value)
+		return levelDBBinaryPreparedValue{}, errors.New("hatriecache: unsupported binary snapshot value")
 	}
-	payload := binaryPayload
-	_, within, err := jsonEncodedSizeWithin(value, int64(len(binaryPayload)))
-	if err == nil && within {
-		jsonPayload, marshalErr := json.Marshal(value)
-		if marshalErr != nil {
-			return levelDBBinaryPreparedValue{}, marshalErr
-		}
-		if len(jsonPayload) <= len(binaryPayload) {
-			payload = jsonPayload
-		}
-	}
-	return prepareLevelDBBytesPayload(payload)
-}
-
-func prepareLevelDBJSONPayloadValue(value interface{}) (levelDBBinaryPreparedValue, error) {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return levelDBBinaryPreparedValue{}, err
-	}
-	return prepareLevelDBBytesPayload(payload)
+	return prepareLevelDBBytesPayload(binaryPayload)
 }
 
 func prepareLevelDBBytesPayload(payload []byte) (levelDBBinaryPreparedValue, error) {

@@ -165,6 +165,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Structured gzip-best snapshot](README.md#serialization-tradeoffs) | Gzip JSON: 18,866,057 ns; 6,956 disk B | Gzip binary: 9,847,768 ns; 5,787 disk B | 1.92x faster, 16.8% smaller, 5.94x fewer allocs | Maximum compression remains CPU-intensive |
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
+| Current pass | [Complete tagged structured storage](#complete-tagged-structured-storage), fallback-heavy seven-record cycle | Inner JSON: 3,846/11,651 ns encode/decode; 674 record B | Tagged binary: 2,551/5,743 ns; 410 record B | Encode 1.51x, decode 2.03x faster; 1.64x smaller; 2.42x/1.92x lower heap | Uncommon concrete Go values normalize once to JSON-compatible types; version-1 binary and inner JSON remain readable |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
 | Current pass | [Content-addressed incremental backups](#content-addressed-incremental-backups), 10k x 256 B, 1% changed | Full checkpoint bundle: 98.602 ms; 9.81 MB heap; 2,104,489 written B | Incremental repository: 14.659 ms; 0.94 MB heap; 35,020 written B | 6.73x faster, 10.49x lower heap, 60.09x fewer written bytes | Explicit mode; first backup is full and retained history consumes repository storage |
@@ -801,6 +802,49 @@ make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTr
 Both RPCs call the same command executor. The stream removes repeated unary RPC
 setup and permits HTTP/2 flow-control-bounded pipelining; it does not weaken
 command ordering or durability acknowledgements.
+
+<a id="complete-tagged-structured-storage"></a>
+### Complete Tagged Structured Storage
+
+Binary database, snapshot, replication-value, and binary-journal records now
+always use the version-2 tagged value tree for dynamic structured fields. The
+codec adds direct varints for signed and unsigned integers, raw byte payloads,
+a staged-XOR representation, and direct JSON-equivalent encoding for the public
+priority-queue value type. Other JSON-marshalable concrete Go values normalize
+once before tagged encoding. Version-1 tagged values and legacy inner-JSON
+payloads remain readable; selecting the top-level JSON formats remains the
+operator-controlled fallback.
+
+The focused fixture encodes and decodes seven records covering a small map,
+nested public priority queues inside map/queue/Top-K/radix/reservoir values, and
+an unbuilt XOR filter with a staged value. Values are seven-run medians on the
+Ryzen 9 5950X host.
+
+```sh
+make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
+```
+
+| Seven-record cycle | Inner-JSON selection | Complete tagged binary | Improvement |
+| --- | ---: | ---: | ---: |
+| Encode time | 3,846 ns | 2,551 ns | 1.51x faster |
+| Encode heap | 1,856 B | 768 B | 2.42x lower |
+| Encode allocations | 24 | 14 | 1.71x fewer |
+| Decode time | 11,651 ns | 5,743 ns | 2.03x faster |
+| Decode heap | 11,352 B | 5,904 B | 1.92x lower |
+| Decode allocations | 139 | 91 | 1.53x fewer |
+| Stored record bytes | 674 B | 410 B | 1.64x smaller (39.2%) |
+
+Raw nanosecond samples were:
+
+| Path | Seven samples |
+| --- | --- |
+| Inner-JSON encode | `4468, 4673, 4317, 3724, 3846, 3750, 3826` |
+| Tagged encode | `2690, 2524, 2316, 2597, 3349, 2551, 2284` |
+| Inner-JSON decode | `11651, 12030, 11390, 11780, 11052, 11440, 12900` |
+| Tagged decode | `7303, 5743, 5719, 8061, 5395, 6097, 5254` |
+
+The reproducible command writes the current raw output to
+`build/benchmarks/structured-storage-codec.txt`.
 
 <a id="single-representation-string-storage"></a>
 ### Single-Representation String Storage

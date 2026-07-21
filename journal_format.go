@@ -294,16 +294,10 @@ func marshalJournalDynamicBinary(value interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if ok {
-		jsonSize, within, err := jsonEncodedSizeWithin(value, int64(len(binaryPayload)))
-		if err != nil {
-			return binaryPayload, nil
-		}
-		if !within || int64(len(binaryPayload)) < jsonSize {
-			return binaryPayload, nil
-		}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary journal value")
 	}
-	return json.Marshal(value)
+	return binaryPayload, nil
 }
 
 func marshalJournalDynamicJSON(value interface{}) ([]byte, error) {

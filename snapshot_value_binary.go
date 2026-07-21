@@ -7,11 +7,16 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 
 	json "github.com/goccy/go-json"
 )
 
-var snapshotValueBinaryMagic = []byte{'h', 'c', 'v', 'b', 1}
+var (
+	snapshotValueBinaryPrefix  = []byte{'h', 'c', 'v', 'b'}
+	snapshotValueBinaryMagicV1 = []byte{'h', 'c', 'v', 'b', 1}
+	snapshotValueBinaryMagic   = []byte{'h', 'c', 'v', 'b', 2}
+)
 
 const (
 	snapshotValueBinaryNull byte = iota
@@ -34,6 +39,10 @@ const (
 	snapshotValueBinaryQuantileSketch
 	snapshotValueBinaryTopK
 	snapshotValueBinaryReservoirSample
+	snapshotValueBinarySigned
+	snapshotValueBinaryUnsigned
+	snapshotValueBinaryBytes
+	snapshotValueBinaryStagedXorFilter
 )
 
 var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot value is too large")
@@ -41,10 +50,28 @@ var errSnapshotValueBinaryTooLarge = errors.New("hatriecache: binary snapshot va
 const snapshotValueBinaryMaxInitialCapacity = 4096
 
 func snapshotValueDataIsBinary(data []byte) bool {
-	return bytes.HasPrefix(data, snapshotValueBinaryMagic)
+	_, ok := snapshotValueBinaryPayload(data)
+	return ok
+}
+
+func snapshotValueBinaryPayload(data []byte) ([]byte, bool) {
+	if len(data) < len(snapshotValueBinaryPrefix)+1 || !bytes.Equal(data[:len(snapshotValueBinaryPrefix)], snapshotValueBinaryPrefix) {
+		return nil, false
+	}
+	switch data[len(snapshotValueBinaryPrefix)] {
+	case snapshotValueBinaryMagicV1[len(snapshotValueBinaryPrefix)], snapshotValueBinaryMagic[len(snapshotValueBinaryPrefix)]:
+		return data[len(snapshotValueBinaryPrefix)+1:], true
+	default:
+		return nil, false
+	}
 }
 
 func marshalSnapshotCollectionValueBinary(value interface{}) ([]byte, bool, error) {
+	prepared, _, err := prepareSnapshotDynamicValueBinary(value)
+	if err != nil {
+		return nil, true, err
+	}
+	value = prepared
 	size, ok, err := snapshotValueBinarySize(value)
 	if err != nil || !ok {
 		return nil, ok, err
@@ -57,6 +84,11 @@ func marshalSnapshotCollectionValueBinary(value interface{}) ([]byte, bool, erro
 }
 
 func marshalSnapshotPriorityQueueValueBinary(items []priorityQueueItem) ([]byte, bool, error) {
+	prepared, err := prepareSnapshotPriorityQueueItemsBinary(items)
+	if err != nil {
+		return nil, true, err
+	}
+	items = prepared
 	size, ok, err := snapshotValueBinaryPriorityQueueSize(items)
 	if err != nil || !ok {
 		return nil, ok, err
@@ -69,6 +101,11 @@ func marshalSnapshotPriorityQueueValueBinary(items []priorityQueueItem) ([]byte,
 }
 
 func marshalSnapshotTopKValueBinary(snapshot topKSnapshot) ([]byte, bool, error) {
+	prepared, err := prepareSnapshotTopKBinary(snapshot)
+	if err != nil {
+		return nil, true, err
+	}
+	snapshot = prepared
 	size, ok, err := snapshotValueBinaryTopKSize(snapshot)
 	if err != nil || !ok {
 		return nil, ok, err
@@ -81,6 +118,11 @@ func marshalSnapshotTopKValueBinary(snapshot topKSnapshot) ([]byte, bool, error)
 }
 
 func marshalSnapshotReservoirSampleValueBinary(snapshot reservoirSampleSnapshot) ([]byte, bool, error) {
+	prepared, err := prepareSnapshotReservoirSampleBinary(snapshot)
+	if err != nil {
+		return nil, true, err
+	}
+	snapshot = prepared
 	size, ok, err := snapshotValueBinaryReservoirSampleSize(snapshot)
 	if err != nil || !ok {
 		return nil, ok, err
@@ -93,6 +135,11 @@ func marshalSnapshotReservoirSampleValueBinary(snapshot reservoirSampleSnapshot)
 }
 
 func marshalSnapshotRadixTreeValueBinary(snapshot radixTreeSnapshot) ([]byte, bool, error) {
+	prepared, err := prepareSnapshotRadixTreeBinary(snapshot)
+	if err != nil {
+		return nil, true, err
+	}
+	snapshot = prepared
 	size, ok, err := snapshotValueBinaryRadixTreeSize(snapshot)
 	if err != nil || !ok {
 		return nil, ok, err
@@ -190,7 +237,19 @@ func snapshotCuckooFilterRawFingerprints(snapshot cuckooFilterSnapshot) ([]byte,
 
 func marshalSnapshotXorFilterValueBinary(snapshot xorFilterSnapshot) ([]byte, bool, error) {
 	if !snapshot.Built {
-		return nil, false, nil
+		prepared, err := prepareSnapshotStagedXorFilterBinary(snapshot)
+		if err != nil {
+			return nil, true, err
+		}
+		size, ok, err := snapshotValueBinaryStagedXorFilterSize(prepared)
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		writer := newBinaryFieldWriter(snapshotValueBinaryMagic, len(snapshotValueBinaryMagic)+size)
+		if ok := writeSnapshotValueBinaryStagedXorFilter(&writer, prepared); !ok {
+			return nil, false, nil
+		}
+		return writer.bytes(), true, nil
 	}
 	fingerprints, err := snapshotXorFilterRawFingerprints(snapshot)
 	if err != nil {
@@ -232,6 +291,131 @@ func marshalSnapshotQuantileSketchValueBinary(snapshot quantileSketchSnapshot) (
 	return writer.bytes(), nil
 }
 
+func prepareSnapshotDynamicValueBinary(value interface{}) (interface{}, bool, error) {
+	_, ok, err := snapshotValueBinarySize(value)
+	if err != nil || ok {
+		return value, false, err
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, false, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var normalized interface{}
+	if err := decoder.Decode(&normalized); err != nil {
+		return nil, false, err
+	}
+	if _, ok, err := snapshotValueBinarySize(normalized); err != nil {
+		return nil, false, err
+	} else if !ok {
+		return nil, false, errors.New("hatriecache: unsupported normalized binary snapshot value")
+	}
+	return normalized, true, nil
+}
+
+func prepareSnapshotPriorityQueueItemsBinary(items []priorityQueueItem) ([]priorityQueueItem, error) {
+	prepared := items
+	copied := false
+	for idx := range items {
+		value, changed, err := prepareSnapshotDynamicValueBinary(items[idx].Value)
+		if err != nil {
+			return nil, err
+		}
+		if !changed {
+			continue
+		}
+		if !copied {
+			prepared = append([]priorityQueueItem(nil), items...)
+			copied = true
+		}
+		prepared[idx].Value = value
+		prepared[idx].stringValue = ""
+		prepared[idx].hasString = false
+	}
+	return prepared, nil
+}
+
+func prepareSnapshotTopKBinary(snapshot topKSnapshot) (topKSnapshot, error) {
+	prepared := snapshot
+	copied := false
+	for idx := range snapshot.Items {
+		value, changed, err := prepareSnapshotDynamicValueBinary(snapshot.Items[idx].Value)
+		if err != nil {
+			return topKSnapshot{}, err
+		}
+		if !changed {
+			continue
+		}
+		if !copied {
+			prepared.Items = append([]topKItem(nil), snapshot.Items...)
+			copied = true
+		}
+		prepared.Items[idx].Value = value
+	}
+	return prepared, nil
+}
+
+func prepareSnapshotReservoirSampleBinary(snapshot reservoirSampleSnapshot) (reservoirSampleSnapshot, error) {
+	prepared := snapshot
+	copied := false
+	for idx := range snapshot.Items {
+		value, changed, err := prepareSnapshotDynamicValueBinary(snapshot.Items[idx].Value)
+		if err != nil {
+			return reservoirSampleSnapshot{}, err
+		}
+		if !changed {
+			continue
+		}
+		if !copied {
+			prepared.Items = append([]reservoirSampleItem(nil), snapshot.Items...)
+			copied = true
+		}
+		prepared.Items[idx].Value = value
+	}
+	return prepared, nil
+}
+
+func prepareSnapshotRadixTreeBinary(snapshot radixTreeSnapshot) (radixTreeSnapshot, error) {
+	prepared := snapshot
+	copied := false
+	for idx := range snapshot.Items {
+		value, changed, err := prepareSnapshotDynamicValueBinary(snapshot.Items[idx].Value)
+		if err != nil {
+			return radixTreeSnapshot{}, err
+		}
+		if !changed {
+			continue
+		}
+		if !copied {
+			prepared.Items = append([]RadixTreeItem(nil), snapshot.Items...)
+			copied = true
+		}
+		prepared.Items[idx].Value = value
+	}
+	return prepared, nil
+}
+
+func prepareSnapshotStagedXorFilterBinary(snapshot xorFilterSnapshot) (xorFilterSnapshot, error) {
+	prepared := snapshot
+	copied := false
+	for idx := range snapshot.Staged {
+		value, changed, err := prepareSnapshotDynamicValueBinary(snapshot.Staged[idx].Value)
+		if err != nil {
+			return xorFilterSnapshot{}, err
+		}
+		if !changed {
+			continue
+		}
+		if !copied {
+			prepared.Staged = append([]xorFilterStagedItem(nil), snapshot.Staged...)
+			copied = true
+		}
+		prepared.Staged[idx].Value = value
+	}
+	return prepared, nil
+}
+
 func snapshotValueBinarySize(value interface{}) (int, bool, error) {
 	switch v := value.(type) {
 	case nil:
@@ -246,7 +430,7 @@ func snapshotValueBinarySize(value interface{}) (int, bool, error) {
 		total, err := snapshotValueBinaryAdd(1, size)
 		return total, true, err
 	case []byte:
-		size, err := snapshotValueBinaryBytesSize(base64.StdEncoding.EncodedLen(len(v)))
+		size, err := snapshotValueBinaryBytesSize(len(v))
 		if err != nil {
 			return 0, true, err
 		}
@@ -262,7 +446,27 @@ func snapshotValueBinarySize(value interface{}) (int, bool, error) {
 		}
 		total, err := snapshotValueBinaryAdd(1, size)
 		return total, true, err
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+	case int:
+		return 1 + binaryVarintSize(int64(v)), true, nil
+	case int8:
+		return 1 + binaryVarintSize(int64(v)), true, nil
+	case int16:
+		return 1 + binaryVarintSize(int64(v)), true, nil
+	case int32:
+		return 1 + binaryVarintSize(int64(v)), true, nil
+	case int64:
+		return 1 + binaryVarintSize(v), true, nil
+	case uint:
+		return 1 + binaryUvarintSize(uint64(v)), true, nil
+	case uint8:
+		return 1 + binaryUvarintSize(uint64(v)), true, nil
+	case uint16:
+		return 1 + binaryUvarintSize(uint64(v)), true, nil
+	case uint32:
+		return 1 + binaryUvarintSize(uint64(v)), true, nil
+	case uint64:
+		return 1 + binaryUvarintSize(v), true, nil
+	case float32, float64:
 		number, err := jsonEncodedString(v)
 		if err != nil {
 			return 0, false, nil
@@ -277,6 +481,8 @@ func snapshotValueBinarySize(value interface{}) (int, bool, error) {
 		return snapshotValueBinaryMapSize(v)
 	case []interface{}:
 		return snapshotValueBinaryArraySize(v)
+	case PriorityQueue:
+		return snapshotValueBinaryPublicPriorityQueueSize(v)
 	default:
 		return 0, false, nil
 	}
@@ -293,6 +499,37 @@ func snapshotValueBinaryArraySize(values []interface{}) (int, bool, error) {
 			return 0, ok, err
 		}
 		total, err = snapshotValueBinaryAdd(total, size)
+		if err != nil {
+			return 0, true, err
+		}
+	}
+	return total, true, nil
+}
+
+func snapshotValueBinaryPublicPriorityQueueSize(items PriorityQueue) (int, bool, error) {
+	total, err := snapshotValueBinaryAdd(1, binaryUvarintSize(uint64(len(items))))
+	if err != nil {
+		return 0, true, err
+	}
+	priorityKeySize, err := snapshotValueBinaryBytesSize(len("priority"))
+	if err != nil {
+		return 0, true, err
+	}
+	valueKeySize, err := snapshotValueBinaryBytesSize(len("value"))
+	if err != nil {
+		return 0, true, err
+	}
+	for _, item := range items {
+		itemSize := 1 + binaryUvarintSize(2) + priorityKeySize + 1 + binaryVarintSize(item.Priority) + valueKeySize
+		valueSize, ok, err := snapshotValueBinarySize(item.Value)
+		if err != nil || !ok {
+			return 0, ok, err
+		}
+		itemSize, err = snapshotValueBinaryAdd(itemSize, valueSize)
+		if err != nil {
+			return 0, true, err
+		}
+		total, err = snapshotValueBinaryAdd(total, itemSize)
 		if err != nil {
 			return 0, true, err
 		}
@@ -408,6 +645,32 @@ func snapshotValueBinaryRadixTreeSize(snapshot radixTreeSnapshot) (int, bool, er
 		return 0, true, err
 	}
 	for _, item := range snapshot.Items {
+		keySize, err := snapshotValueBinaryBytesSize(len(item.Key))
+		if err != nil {
+			return 0, true, err
+		}
+		total, err = snapshotValueBinaryAdd(total, keySize)
+		if err != nil {
+			return 0, true, err
+		}
+		valueSize, ok, err := snapshotValueBinarySize(item.Value)
+		if err != nil || !ok {
+			return 0, ok, err
+		}
+		total, err = snapshotValueBinaryAdd(total, valueSize)
+		if err != nil {
+			return 0, true, err
+		}
+	}
+	return total, true, nil
+}
+
+func snapshotValueBinaryStagedXorFilterSize(snapshot xorFilterSnapshot) (int, bool, error) {
+	total := 1 +
+		binaryUvarintSize(snapshot.ExpectedItems) +
+		binaryUvarintSize(snapshot.Items) +
+		binaryUvarintSize(uint64(len(snapshot.Staged)))
+	for _, item := range snapshot.Staged {
 		keySize, err := snapshotValueBinaryBytesSize(len(item.Key))
 		if err != nil {
 			return 0, true, err
@@ -561,13 +824,42 @@ func writeSnapshotValueBinary(writer *binaryFieldWriter, value interface{}) bool
 		writer.buf = append(writer.buf, snapshotValueBinaryString)
 		writer.writeString(v)
 	case []byte:
-		writer.buf = append(writer.buf, snapshotValueBinaryString)
-		writer.writeUvarint(uint64(base64.StdEncoding.EncodedLen(len(v))))
-		writer.buf = base64.StdEncoding.AppendEncode(writer.buf, v)
+		writer.buf = append(writer.buf, snapshotValueBinaryBytes)
+		writer.writeBytes(v)
 	case json.Number:
 		writer.buf = append(writer.buf, snapshotValueBinaryNumber)
 		writer.writeString(v.String())
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+	case int:
+		writer.buf = append(writer.buf, snapshotValueBinarySigned)
+		writer.writeVarint(int64(v))
+	case int8:
+		writer.buf = append(writer.buf, snapshotValueBinarySigned)
+		writer.writeVarint(int64(v))
+	case int16:
+		writer.buf = append(writer.buf, snapshotValueBinarySigned)
+		writer.writeVarint(int64(v))
+	case int32:
+		writer.buf = append(writer.buf, snapshotValueBinarySigned)
+		writer.writeVarint(int64(v))
+	case int64:
+		writer.buf = append(writer.buf, snapshotValueBinarySigned)
+		writer.writeVarint(v)
+	case uint:
+		writer.buf = append(writer.buf, snapshotValueBinaryUnsigned)
+		writer.writeUvarint(uint64(v))
+	case uint8:
+		writer.buf = append(writer.buf, snapshotValueBinaryUnsigned)
+		writer.writeUvarint(uint64(v))
+	case uint16:
+		writer.buf = append(writer.buf, snapshotValueBinaryUnsigned)
+		writer.writeUvarint(uint64(v))
+	case uint32:
+		writer.buf = append(writer.buf, snapshotValueBinaryUnsigned)
+		writer.writeUvarint(uint64(v))
+	case uint64:
+		writer.buf = append(writer.buf, snapshotValueBinaryUnsigned)
+		writer.writeUvarint(v)
+	case float32, float64:
 		number, err := jsonEncodedString(v)
 		if err != nil {
 			return false
@@ -578,6 +870,8 @@ func writeSnapshotValueBinary(writer *binaryFieldWriter, value interface{}) bool
 		return writeSnapshotValueBinaryMap(writer, v)
 	case []interface{}:
 		return writeSnapshotValueBinaryArray(writer, v)
+	case PriorityQueue:
+		return writeSnapshotValueBinaryPublicPriorityQueue(writer, v)
 	default:
 		return false
 	}
@@ -589,6 +883,23 @@ func writeSnapshotValueBinaryArray(writer *binaryFieldWriter, values []interface
 	writer.writeUvarint(uint64(len(values)))
 	for _, value := range values {
 		if ok := writeSnapshotValueBinary(writer, value); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func writeSnapshotValueBinaryPublicPriorityQueue(writer *binaryFieldWriter, items PriorityQueue) bool {
+	writer.buf = append(writer.buf, snapshotValueBinaryArray)
+	writer.writeUvarint(uint64(len(items)))
+	for _, item := range items {
+		writer.buf = append(writer.buf, snapshotValueBinaryObject)
+		writer.writeUvarint(2)
+		writer.writeString("priority")
+		writer.buf = append(writer.buf, snapshotValueBinarySigned)
+		writer.writeVarint(item.Priority)
+		writer.writeString("value")
+		if ok := writeSnapshotValueBinary(writer, item.Value); !ok {
 			return false
 		}
 	}
@@ -709,6 +1020,20 @@ func writeSnapshotValueBinaryXorFilter(writer *binaryFieldWriter, snapshot xorFi
 	writer.writeBytes(fingerprints)
 }
 
+func writeSnapshotValueBinaryStagedXorFilter(writer *binaryFieldWriter, snapshot xorFilterSnapshot) bool {
+	writer.buf = append(writer.buf, snapshotValueBinaryStagedXorFilter)
+	writer.writeUvarint(snapshot.ExpectedItems)
+	writer.writeUvarint(snapshot.Items)
+	writer.writeUvarint(uint64(len(snapshot.Staged)))
+	for _, item := range snapshot.Staged {
+		writer.writeString(item.Key)
+		if ok := writeSnapshotValueBinary(writer, item.Value); !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func writeSnapshotValueBinaryFenwickTree(writer *binaryFieldWriter, snapshot fenwickTreeSnapshot) {
 	writer.buf = append(writer.buf, snapshotValueBinaryFenwickTree)
 	writer.writeUvarint(snapshot.Size)
@@ -733,10 +1058,11 @@ func writeSnapshotValueBinaryQuantileSketch(writer *binaryFieldWriter, snapshot 
 }
 
 func unmarshalSnapshotValueBinary(data []byte) (interface{}, error) {
-	if !snapshotValueDataIsBinary(data) {
+	payload, ok := snapshotValueBinaryPayload(data)
+	if !ok {
 		return nil, errors.New("hatriecache: invalid binary snapshot value")
 	}
-	reader := newBinaryFieldReader(data[len(snapshotValueBinaryMagic):])
+	reader := newBinaryFieldReader(payload)
 	value, err := readSnapshotValueBinary(&reader)
 	if err != nil {
 		return nil, err
@@ -768,6 +1094,24 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			return nil, err
 		}
 		return jsonNumberValue(value)
+	case snapshotValueBinarySigned:
+		value, err := reader.readVarint()
+		if err != nil {
+			return nil, err
+		}
+		return json.Number(strconv.FormatInt(value, 10)), nil
+	case snapshotValueBinaryUnsigned:
+		value, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		return json.Number(strconv.FormatUint(value, 10)), nil
+	case snapshotValueBinaryBytes:
+		value, err := reader.readBytes()
+		if err != nil {
+			return nil, err
+		}
+		return base64.StdEncoding.EncodeToString(value), nil
 	case snapshotValueBinaryArray:
 		count, err := reader.readUvarint()
 		if err != nil {
@@ -1108,6 +1452,45 @@ func readSnapshotValueBinary(reader *binaryFieldReader) (interface{}, error) {
 			Seed:          seed,
 			BlockLength:   uint32(blockLength),
 			Fingerprints:  base64.StdEncoding.EncodeToString(fingerprints),
+		}, nil
+	case snapshotValueBinaryStagedXorFilter:
+		expectedItems, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		items, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		count, err := reader.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		capacity, err := snapshotValueBinaryInitialCapacity(count, len(reader.data)-reader.off, 2)
+		if err != nil {
+			return nil, err
+		}
+		staged := make([]xorFilterStagedItem, 0, capacity)
+		seen := make(map[string]struct{}, capacity)
+		for idx := 0; idx < int(count); idx++ {
+			key, err := reader.readString()
+			if err != nil {
+				return nil, err
+			}
+			if _, exists := seen[key]; exists {
+				return nil, errors.New("hatriecache: duplicate binary staged xor filter key")
+			}
+			seen[key] = struct{}{}
+			value, err := readSnapshotValueBinary(reader)
+			if err != nil {
+				return nil, err
+			}
+			staged = append(staged, xorFilterStagedItem{Key: key, Value: value})
+		}
+		return xorFilterSnapshot{
+			ExpectedItems: expectedItems,
+			Items:         items,
+			Staged:        staged,
 		}, nil
 	case snapshotValueBinaryRoaringBitmap:
 		return readSnapshotValueBinaryRoaringBitmap(reader)

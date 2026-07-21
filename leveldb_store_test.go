@@ -474,7 +474,7 @@ func TestLevelDBBinaryCollectionPayloadCanBeSmallerThanJSON(t *testing.T) {
 	}
 }
 
-func TestLevelDBBinaryCollectionUsesJSONPayloadWhenSmaller(t *testing.T) {
+func TestLevelDBBinaryCollectionUsesBinaryPayloadEvenWhenJSONIsSmaller(t *testing.T) {
 	entry := snapshotEntry{
 		Key:  "profile",
 		Type: "map",
@@ -485,19 +485,12 @@ func TestLevelDBBinaryCollectionUsesJSONPayloadWhenSmaller(t *testing.T) {
 		t.Fatalf("marshalLevelDBEntry(binary map) error = %v", err)
 	}
 	_, payload := levelDBBinaryValuePayloadForTest(t, data)
-	if snapshotValueDataIsBinary(payload) {
-		t.Fatalf("small map payload header = % x, want JSON payload", payload[:shortHeaderLen(payload)])
-	}
-	jsonPayload, err := marshalSnapshotEntryValueJSON(entry)
-	if err != nil {
-		t.Fatalf("marshalSnapshotEntryValueJSON(map) error = %v", err)
-	}
-	if !bytes.Equal(payload, jsonPayload) {
-		t.Fatalf("small map payload = %q, want JSON payload %q", payload, jsonPayload)
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("small map payload header = % x, want binary payload", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {
-		t.Fatalf("decodeLevelDBEntry(small JSON payload map) error = %v", err)
+		t.Fatalf("decodeLevelDBEntry(small binary payload map) error = %v", err)
 	}
 	if !reflect.DeepEqual(decoded.Map, entry.Map) {
 		t.Fatalf("decoded small map = %#v, want %#v", decoded.Map, entry.Map)
@@ -523,7 +516,7 @@ func TestLevelDBBinaryCollectionEncodesBytesAsBase64String(t *testing.T) {
 	}
 }
 
-func TestLevelDBBinaryCollectionFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+func TestLevelDBBinaryCollectionNormalizesUnsupportedConcreteValue(t *testing.T) {
 	entry := snapshotEntry{
 		Key:  "payload",
 		Type: "map",
@@ -534,12 +527,12 @@ func TestLevelDBBinaryCollectionFallsBackToJSONForUnsupportedBinaryValue(t *test
 		t.Fatalf("marshalLevelDBEntry(binary map with priority queue) error = %v", err)
 	}
 	_, payload := levelDBBinaryValuePayloadForTest(t, data)
-	if snapshotValueDataIsBinary(payload) {
-		t.Fatalf("map with priority queue payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("map with priority queue payload header = % x, want normalized binary payload", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {
-		t.Fatalf("decodeLevelDBEntry(JSON fallback map) error = %v", err)
+		t.Fatalf("decodeLevelDBEntry(normalized binary map) error = %v", err)
 	}
 	queue, ok := decoded.Map["queue"].([]interface{})
 	if !ok || len(queue) != 1 {
@@ -585,6 +578,22 @@ func TestLevelDBBinaryCollectionStillReadsLegacyJSONPayload(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryCollectionStillReadsVersionOneBinaryPayload(t *testing.T) {
+	legacyMagic := []byte{'h', 'c', 'v', 'b', 1}
+	writer := newBinaryFieldWriter(legacyMagic, 64)
+	if ok := writeSnapshotValueBinary(&writer, Map{"name": "ivi", "age": json.Number("32")}); !ok {
+		t.Fatal("writeSnapshotValueBinary(version 1 map) = false")
+	}
+	decoded, err := unmarshalSnapshotValueBinary(writer.bytes())
+	if err != nil {
+		t.Fatalf("unmarshalSnapshotValueBinary(version 1 map) error = %v", err)
+	}
+	want := Map{"name": "ivi", "age": json.Number("32")}
+	if !reflect.DeepEqual(decoded, want) {
+		t.Fatalf("decoded version 1 map = %#v, want %#v", decoded, want)
+	}
+}
+
 func TestLevelDBBinaryPriorityQueueUsesBinaryValuePayload(t *testing.T) {
 	entry := snapshotEntry{
 		Key:  "jobs",
@@ -618,7 +627,7 @@ func TestLevelDBBinaryPriorityQueueUsesBinaryValuePayload(t *testing.T) {
 	}
 }
 
-func TestLevelDBBinaryPriorityQueueFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+func TestLevelDBBinaryPriorityQueueNormalizesUnsupportedConcreteValue(t *testing.T) {
 	entry := snapshotEntry{
 		Key:  "jobs",
 		Type: "priority_queue",
@@ -631,8 +640,8 @@ func TestLevelDBBinaryPriorityQueueFallsBackToJSONForUnsupportedBinaryValue(t *t
 		t.Fatalf("marshalLevelDBEntry(priority queue fallback) error = %v", err)
 	}
 	_, payload := levelDBBinaryValuePayloadForTest(t, data)
-	if snapshotValueDataIsBinary(payload) {
-		t.Fatalf("priority queue fallback payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("priority queue payload header = % x, want normalized binary payload", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {
@@ -728,7 +737,7 @@ func TestLevelDBBinaryTopKUsesBinaryValuePayload(t *testing.T) {
 	}
 }
 
-func TestLevelDBBinaryTopKFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+func TestLevelDBBinaryTopKNormalizesUnsupportedConcreteValue(t *testing.T) {
 	top, err := newTopKData(2)
 	if err != nil {
 		t.Fatalf("newTopKData() error = %v", err)
@@ -746,8 +755,8 @@ func TestLevelDBBinaryTopKFallsBackToJSONForUnsupportedBinaryValue(t *testing.T)
 		t.Fatalf("marshalLevelDBEntry(top-k fallback) error = %v", err)
 	}
 	_, payload := levelDBBinaryValuePayloadForTest(t, data)
-	if snapshotValueDataIsBinary(payload) {
-		t.Fatalf("top-k fallback payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("top-k payload header = % x, want normalized binary payload", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {
@@ -846,7 +855,7 @@ func TestLevelDBBinaryRadixTreeUsesBinaryValuePayload(t *testing.T) {
 	}
 }
 
-func TestLevelDBBinaryRadixTreeFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+func TestLevelDBBinaryRadixTreeNormalizesUnsupportedConcreteValue(t *testing.T) {
 	entry := snapshotEntry{
 		Key:  "radix",
 		Type: "radix_tree",
@@ -862,8 +871,8 @@ func TestLevelDBBinaryRadixTreeFallsBackToJSONForUnsupportedBinaryValue(t *testi
 		t.Fatalf("marshalLevelDBEntry(radix tree fallback) error = %v", err)
 	}
 	_, payload := levelDBBinaryValuePayloadForTest(t, data)
-	if snapshotValueDataIsBinary(payload) {
-		t.Fatalf("radix tree fallback payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("radix tree payload header = % x, want normalized binary payload", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {
@@ -1341,7 +1350,7 @@ func TestLevelDBBinaryXorFilterUsesBinaryValuePayload(t *testing.T) {
 	}
 }
 
-func TestLevelDBBinaryXorFilterFallsBackToJSONForStagedValues(t *testing.T) {
+func TestLevelDBBinaryXorFilterEncodesStagedValues(t *testing.T) {
 	filter, err := newXorFilterData(8)
 	if err != nil {
 		t.Fatalf("newXorFilterData() error = %v", err)
@@ -1360,8 +1369,8 @@ func TestLevelDBBinaryXorFilterFallsBackToJSONForStagedValues(t *testing.T) {
 		t.Fatalf("marshalLevelDBEntry(staged xor filter) error = %v", err)
 	}
 	_, payload := levelDBBinaryValuePayloadForTest(t, data)
-	if snapshotValueDataIsBinary(payload) {
-		t.Fatalf("staged xor filter payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("staged xor filter payload header = % x, want binary payload", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {
@@ -1782,7 +1791,7 @@ func TestLevelDBBinaryReservoirSampleUsesBinaryValuePayload(t *testing.T) {
 	}
 }
 
-func TestLevelDBBinaryReservoirSampleFallsBackToJSONForUnsupportedBinaryValue(t *testing.T) {
+func TestLevelDBBinaryReservoirSampleNormalizesUnsupportedConcreteValue(t *testing.T) {
 	sample, err := newReservoirSampleData(1)
 	if err != nil {
 		t.Fatalf("newReservoirSampleData() error = %v", err)
@@ -1800,8 +1809,8 @@ func TestLevelDBBinaryReservoirSampleFallsBackToJSONForUnsupportedBinaryValue(t 
 		t.Fatalf("marshalLevelDBEntry(reservoir sample fallback) error = %v", err)
 	}
 	_, payload := levelDBBinaryValuePayloadForTest(t, data)
-	if snapshotValueDataIsBinary(payload) {
-		t.Fatalf("reservoir sample fallback payload header = % x, want JSON fallback", payload[:shortHeaderLen(payload)])
+	if !snapshotValueDataIsBinary(payload) {
+		t.Fatalf("reservoir sample payload header = % x, want normalized binary payload", payload[:shortHeaderLen(payload)])
 	}
 	decoded, err := decodeLevelDBEntry(data)
 	if err != nil {

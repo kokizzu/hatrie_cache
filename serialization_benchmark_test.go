@@ -426,6 +426,65 @@ func BenchmarkLevelDBLoadStructuredMaterializedJSON(b *testing.B) {
 	benchmarkLevelDBLoadEntries(b, store, LevelDBLoadPolicy{}, entries, entries)
 }
 
+func BenchmarkStructuredStorageFallbackEncode(b *testing.B) {
+	entries := benchmarkStructuredFallbackEntries()
+	recordBytes := 0
+	for _, entry := range entries {
+		data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+		if err != nil {
+			b.Fatal(err)
+		}
+		recordBytes += len(data)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "record_B/op")
+	for i := 0; i < b.N; i++ {
+		for _, entry := range entries {
+			if _, err := marshalLevelDBEntry(entry, StorageFormatBinary); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkStructuredStorageFallbackDecode(b *testing.B) {
+	entries := benchmarkStructuredFallbackEntries()
+	records := make([][]byte, len(entries))
+	recordBytes := 0
+	for idx, entry := range entries {
+		data, err := marshalLevelDBEntry(entry, StorageFormatBinary)
+		if err != nil {
+			b.Fatal(err)
+		}
+		records[idx] = data
+		recordBytes += len(data)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "record_B/op")
+	for i := 0; i < b.N; i++ {
+		for _, data := range records {
+			if _, err := decodeLevelDBEntry(data); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func benchmarkStructuredFallbackEntries() []snapshotEntry {
+	nested := PriorityQueue{{Priority: 9, Value: "nested"}}
+	return []snapshotEntry{
+		{Key: "small", Type: "map", Map: Map{"a": "b"}},
+		{Key: "map", Type: "map", Map: Map{"queue": nested}},
+		{Key: "queue", Type: "priority_queue", PriorityQueue: []priorityQueueItem{{Priority: 1, Sequence: 1, Value: nested}}},
+		{Key: "top-k", Type: "top_k", TopK: &topKSnapshot{Capacity: 2, Total: 1, Items: []topKItem{{Key: "nested", Value: nested, Count: 1}}}},
+		{Key: "radix", Type: "radix_tree", RadixTree: &radixTreeSnapshot{Count: 1, Items: []RadixTreeItem{{Key: "queue", Value: nested}}}},
+		{Key: "sample", Type: "reservoir_sample", ReservoirSample: &reservoirSampleSnapshot{Capacity: 1, Seen: 1, Items: []reservoirSampleItem{{Value: nested, Priority: 1, Sequence: 1}}}},
+		{Key: "xor", Type: "xor_filter", XorFilter: &xorFilterSnapshot{ExpectedItems: 8, Items: 1, Staged: []xorFilterStagedItem{{Key: `"staged"`, Value: "staged"}}}},
+	}
+}
+
 func BenchmarkLevelDBLoadColdReferences(b *testing.B) {
 	store := benchmarkPopulatedLevelDBStore(b)
 	benchmarkLevelDBLoad(b, store, DefaultLevelDBHotLoadPolicy(), 0)

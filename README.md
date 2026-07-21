@@ -79,6 +79,7 @@ Run the serialization, snapshot, and LevelDB storage tradeoff benchmarks:
 make bench-serialization
 make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
+make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 ```
 
 Run the architectural baseline for concurrent reads, retained per-key memory,
@@ -873,18 +874,19 @@ backup/restore workflow and keep the adjacent marker in filesystem backups.
 Both backends use the binary storage format by default
 (`DB_FORMAT=binary`), which avoids JSON object-field overhead and stores byte
 values as raw bytes instead of base64. Map, slice, set, priority queue, Top-K,
-radix tree, and reservoir sample payloads use the smaller of the compact binary
-codec and JSON when both are supported, with automatic JSON fallback for values
-outside the recursive JSON-compatible codec. Bloom filter, Count-Min Sketch, and
-HyperLogLog values use compact binary payload codecs. Cuckoo filter values also
-store packed fingerprints directly in binary records; built XOR filter values do
-the same when that is smaller than JSON, while staged XOR filters keep JSON
-fallback for pending values. Roaring bitmap
+radix tree, and reservoir sample payloads always use the versioned tagged
+binary value codec. Signed and unsigned integers use varints, byte slices use
+raw length-prefixed bytes, and JSON-marshalable concrete values are normalized
+into the same recursive binary tree instead of being embedded as inner JSON.
+Bloom filter, Count-Min Sketch, and HyperLogLog values use compact binary
+payload codecs. Cuckoo filter values store packed fingerprints directly; both
+built and staged XOR filters have binary representations. Roaring bitmap
 and sparse-bitset containers store their array or bitset payloads directly too.
 Fenwick tree snapshots store their numeric tree vector as binary varints.
 Quantile sketches store summary samples as binary float/varint tuples, and
 reservoir samples store retained stream items as binary priority/sequence/value
-tuples. Existing JSON records still load automatically.
+tuples. Version-1 binary values and existing inner-JSON records still load
+automatically; new binary writes use value codec version 2.
 Leaving format variables unset in the Makefile wrapper uses the compiled Go
 defaults; set them only when you want to override the default format.
 Set `DB_FORMAT=json` to keep writing the previous JSON record layout.
@@ -1569,18 +1571,16 @@ samples, XOR filters, and radix trees.
 For the benchmark payload, protobuf command wire is about 1.2x faster with a
 small byte reduction and equivalent allocation count. Binary journal records are
 about 2.3x faster to encode, about 1.5x faster to decode, about 2% smaller, and
-use less heap; structured journal `values` and `pairs` also use the compact
-binary value codec when it is smaller than JSON. In the structured journal
-payload above that is 17% smaller and about 1.6x faster to decode, while encode
-is about 1.6x slower because the writer compares JSON and binary payload sizes.
-JSON remains easier to inspect manually. Snapshot and LevelDB
+use less heap; binary structured journal `values` and `pairs` now always use the
+compact tagged value codec instead of measuring and embedding inner JSON. JSON
+remains an explicitly configurable, easier-to-inspect journal format. Snapshot
+and LevelDB
 records omit unrelated null fields before compression, so scalar entries do not
 carry empty collection fields. Binary snapshots reuse the compact LevelDB
-record codec, avoid base64 for byte values, and use the same size-aware
-collection, priority-queue, Top-K, radix-tree, built XOR filter, and
-reservoir-sample payload choices. Bloom filter, Count-Min Sketch, and
-HyperLogLog snapshots use direct compact binary codecs; staged XOR filters keep
-JSON fallback for pending values. Cuckoo filter fingerprints, roaring bitmap
+record codec, avoid base64 for byte values, and use the same tagged collection,
+priority-queue, Top-K, radix-tree, XOR-filter, and reservoir-sample payloads.
+Bloom filter, Count-Min Sketch, and HyperLogLog snapshots use direct compact
+binary codecs. Cuckoo filter fingerprints, roaring bitmap
 containers, and sparse-bitset containers store their raw payloads directly, and
 Fenwick trees store numeric vectors as varints. Quantile-sketch summaries use
 compact binary float/varint tuples.
