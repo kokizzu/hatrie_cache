@@ -77,6 +77,68 @@ func BenchmarkStringStorageLayout100k(b *testing.B) {
 	})
 }
 
+func BenchmarkPackedStringCompaction100k(b *testing.B) {
+	keys := stringStorageBenchmarkInt("HATRIE_STRING_STORAGE_KEYS", 100000)
+	keyValues := make([]string, keys)
+	for index := range keyValues {
+		keyValues[index] = fmt.Sprintf("packed-string:%09d", index)
+	}
+
+	var retainedHeapBefore uint64
+	var retainedHeapAfter uint64
+	var retainedObjectsBefore uint64
+	var retainedObjectsAfter uint64
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		runtime.GC()
+		var baseline runtime.MemStats
+		runtime.ReadMemStats(&baseline)
+		trie := CreateHatTrie()
+		for index, key := range keyValues {
+			prefix := fmt.Sprintf("%09d:", index)
+			valueBytes := 33 + index%480
+			trie.UpsertString(key, prefix+strings.Repeat("x", valueBytes-len(prefix)))
+		}
+		runtime.GC()
+		var loaded runtime.MemStats
+		runtime.ReadMemStats(&loaded)
+		if loaded.HeapAlloc > baseline.HeapAlloc {
+			retainedHeapBefore += loaded.HeapAlloc - baseline.HeapAlloc
+		}
+		if loaded.HeapObjects > baseline.HeapObjects {
+			retainedObjectsBefore += loaded.HeapObjects - baseline.HeapObjects
+		}
+		b.StartTimer()
+		if _, err := trie.CompactMemory(); err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+		runtime.GC()
+		var compacted runtime.MemStats
+		runtime.ReadMemStats(&compacted)
+		if compacted.HeapAlloc > baseline.HeapAlloc {
+			retainedHeapAfter += compacted.HeapAlloc - baseline.HeapAlloc
+		}
+		if compacted.HeapObjects > baseline.HeapObjects {
+			retainedObjectsAfter += compacted.HeapObjects - baseline.HeapObjects
+		}
+		if trie.Size() != keys || trie.GetString(keyValues[keys-1]) == "" {
+			trie.Destroy()
+			b.Fatal("compacted string state mismatch")
+		}
+		trie.Destroy()
+		b.StartTimer()
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(keys), "keys/op")
+	b.ReportMetric(float64(retainedHeapBefore)/float64(b.N), "retained_before_B/op")
+	b.ReportMetric(float64(retainedHeapAfter)/float64(b.N), "retained_after_B/op")
+	b.ReportMetric(float64(retainedObjectsBefore)/float64(b.N), "objects_before/op")
+	b.ReportMetric(float64(retainedObjectsAfter)/float64(b.N), "objects_after/op")
+}
+
 func stringStorageBenchmarkInt(name string, fallback int) int {
 	raw := os.Getenv(name)
 	if raw == "" {

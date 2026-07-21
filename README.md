@@ -42,8 +42,10 @@ keys instead of scanning every TTL entry. The map stores a compact heap index;
 deadline updates repair one existing node in O(log n), and `Persist`/delete
 remove it immediately, so stale schedule entries do not accumulate under churn.
 Long-running delete-heavy workloads can call `CompactMemory` to rebuild the C
-trie, densely reindex in-memory typed pools, and shrink Merkle and metadata
-backing. Disk-spill indexes remain stable so file ownership cannot alias.
+trie, densely reindex in-memory typed pools, pack live strings into 256 KiB
+chunks, and shrink Merkle and metadata backing. Normal string writes remain
+zero-copy; packing occurs only during explicit compaction. Disk-spill indexes
+remain stable so file ownership cannot alias.
 Periodic compaction is available but remains off by default because the rebuild
 briefly takes the cache-wide write lock.
 Map, slice, set, and priority queue APIs deep-copy nested JSON-style map/slice
@@ -758,10 +760,14 @@ make monitoring-server MEMORY_COMPACTION_INTERVAL=15m
 `CompactMemory` provides the same operation directly to Go callers and returns
 before/after backing estimates. The operation preserves values, TTLs, global
 and per-key statistics, LevelDB references, and Merkle state, but it holds the
-trie write lock while duplicating and swapping the C trie. The measured 100k
+trie write lock while duplicating and swapping the C trie. It also consolidates
+live small-string backing into 256 KiB chunks; oversized values remain
+standalone and normal writes are unchanged. The measured 100k
 insert/90k delete fixture reclaimed 13.73x backing and 11.13x live heap at a
 8.80 ms one-time pause; see
-[BENCHMARK.md](BENCHMARK.md#delete-churn-memory-compaction).
+[BENCHMARK.md](BENCHMARK.md#delete-churn-memory-compaction). The separate 100k
+live-string fixture cuts retained heap objects 800x and retained heap 3.79%; see
+[packed string compaction](BENCHMARK.md#packed-string-compaction-arena).
 
 Long-running daemon options can also live in a JSON config file. Config keys
 match flag names and may use hyphens or underscores; duration values use Go
