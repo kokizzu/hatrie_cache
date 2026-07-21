@@ -1036,7 +1036,7 @@ func (trie *HatTrie) levelDBPotentialSpillCandidateLocked(hval HatValue) bool {
 	case DATAVALUE_TYPE_COUNTER:
 		return true
 	case DATAVALUE_TYPE_RAW_STRING:
-		return hval.Index >= 0 && int(hval.Index) < len(trie.raws.array) && len(trie.raws.array[hval.Index]) > 0
+		return hval.Index >= 0 && int(hval.Index) < len(trie.strings.array) && len(trie.strings.array[hval.Index]) > 0
 	case DATAVALUE_TYPE_RAW_BYTES:
 		return !hval.OnDisk() && hval.Index >= 0 && int(hval.Index) < len(trie.raws.array) && len(trie.raws.array[hval.Index]) > 0
 	case DATAVALUE_TYPE_LEVELDB_REF:
@@ -1084,7 +1084,7 @@ func (trie *HatTrie) levelDBHotValueBytesLocked(entry Entry) (int64, error) {
 	case DATAVALUE_TYPE_COUNTER:
 		return 4, nil
 	case DATAVALUE_TYPE_RAW_STRING:
-		return int64(len(trie.raws.array[entry.Value.Index])), nil
+		return int64(len(trie.strings.array[entry.Value.Index])), nil
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if entry.Value.OnDisk() {
 			return 0, nil

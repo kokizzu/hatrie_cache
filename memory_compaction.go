@@ -27,6 +27,7 @@ type MemoryCompactionResult struct {
 }
 
 type memoryCompactionPlan struct {
+	strings           *StringStorage
 	raws              *BytesStorage
 	disks             *DiskStorage
 	maps              *MapStorage
@@ -99,6 +100,7 @@ func (ht *HatTrie) compactMemoryLocked() (MemoryCompactionResult, error) {
 
 	oldRoot := ht.root
 	ht.root = nextRoot
+	ht.strings = plan.strings
 	ht.raws = plan.raws
 	ht.disks = plan.disks
 	ht.maps = plan.maps
@@ -135,9 +137,6 @@ func (ht *HatTrie) compactMemoryLocked() (MemoryCompactionResult, error) {
 func (ht *HatTrie) buildMemoryCompactionPlanLocked() (memoryCompactionPlan, error) {
 	plan := memoryCompactionPlan{}
 	var err error
-	if len(ht.raws.strings) != len(ht.raws.array) || len(ht.raws.stringValid) != len(ht.raws.array) {
-		return plan, errors.New("hatriecache: raw backing arrays have inconsistent lengths")
-	}
 	if len(ht.maps.deleted) != len(ht.maps.array) {
 		return plan, errors.New("hatriecache: map backing arrays have inconsistent lengths")
 	}
@@ -146,13 +145,15 @@ func (ht *HatTrie) buildMemoryCompactionPlanLocked() (memoryCompactionPlan, erro
 	if err != nil {
 		return plan, fmt.Errorf("hatriecache: compact raw values: %w", err)
 	}
-	plan.raws = &BytesStorage{
-		array:       rawArray,
-		strings:     compactParallelSlice(ht.raws.strings, rawRemap),
-		stringValid: compactParallelSlice(ht.raws.stringValid, rawRemap),
-	}
+	plan.raws = &BytesStorage{array: rawArray}
 	plan.remaps[DATAVALUE_TYPE_RAW_BYTES] = rawRemap
-	plan.remaps[DATAVALUE_TYPE_RAW_STRING] = rawRemap
+
+	stringArray, stringRemap, err := compactStorageSlice(ht.strings.array, &ht.strings.reusables)
+	if err != nil {
+		return plan, fmt.Errorf("hatriecache: compact string values: %w", err)
+	}
+	plan.strings = &StringStorage{array: stringArray}
+	plan.remaps[DATAVALUE_TYPE_RAW_STRING] = stringRemap
 
 	plan.disks = &DiskStorage{
 		dir:           ht.disks.dir,
@@ -482,7 +483,8 @@ func (ht *HatTrie) memoryBackingBytesLocked() uint64 {
 		return 0
 	}
 	var total uint64
-	total += storageSliceBytes(ht.raws.array) + storageSliceBytes(ht.raws.strings) + storageSliceBytes(ht.raws.stringValid) + reusableBackingBytes(&ht.raws.reusables)
+	total += storageSliceBytes(ht.strings.array) + reusableBackingBytes(&ht.strings.reusables)
+	total += storageSliceBytes(ht.raws.array) + reusableBackingBytes(&ht.raws.reusables)
 	total += storageSliceBytes(ht.disks.paths) + reusableBackingBytes(&ht.disks.reusables)
 	total += storageSliceBytes(ht.maps.array) + storageSliceBytes(ht.maps.deleted) + reusableBackingBytes(&ht.maps.reusables)
 	total += storageSliceBytes(ht.slices.array) + reusableBackingBytes(&ht.slices.reusables)

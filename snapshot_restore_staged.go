@@ -236,6 +236,7 @@ func adoptSnapshotDiskOwnership(live *DiskStorage, staged *DiskStorage) {
 
 func swapSnapshotOwnedDataLocked(live *HatTrie, staged *HatTrie) {
 	live.root, staged.root = staged.root, live.root
+	live.strings, staged.strings = staged.strings, live.strings
 	live.raws, staged.raws = staged.raws, live.raws
 	live.disks, staged.disks = staged.disks, live.disks
 	live.maps, staged.maps = staged.maps, live.maps

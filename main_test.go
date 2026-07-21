@@ -1386,8 +1386,11 @@ func TestStringOperationsReuseStorage(t *testing.T) {
 	if got := ht.Get("key").Index; got != idx {
 		t.Fatalf("string update moved storage index: got %d, want %d", got, idx)
 	}
-	if got := len(ht.raws.array); got != 1 {
-		t.Fatalf("raw storage grew during same-type string updates: len=%d", got)
+	if got := len(ht.strings.array); got != 1 {
+		t.Fatalf("string storage grew during same-type updates: len=%d", got)
+	}
+	if got := len(ht.raws.array); got != 0 {
+		t.Fatalf("byte storage contains mirrored string values: len=%d", got)
 	}
 	if got, err := ht.AppendStringChecked("created-append", "tail"); err != nil || got != "tail" {
 		t.Fatalf("AppendStringChecked(created-append) = %q/%v, want tail/nil", got, err)
@@ -7508,7 +7511,7 @@ func TestScanEntriesWithPrefixPreservesCursorContract(t *testing.T) {
 	ht.mu.Lock()
 	err := ht.scanEntriesWithPrefixAtLockedChecked("app", true, time.Time{}, func(entry Entry) error {
 		keys = append(keys, entry.Key)
-		values = append(values, ht.raws.stringValue(entry.Value.Index))
+		values = append(values, ht.strings.Get(entry.Value.Index))
 		if entry.Key == "apple" {
 			return stop
 		}

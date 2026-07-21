@@ -1766,6 +1766,14 @@ calls use concurrent shared locking; exact command `GET` uses the same path for
 HTTP/gRPC command traffic. Reads that must remove an expired value or hydrate a
 lazy LevelDB reference automatically retry under the exclusive lock.
 
+Strings and byte slices use independent compact backing pools. String writes do
+not retain a mirrored byte copy, so ordinary `SETSTR` replacement and
+`GetString` are allocation-free. On the 100,000-key 256-byte fixture this makes
+insertion 1.26x faster, reduces incremental retained heap 16.08x, and removes
+100,052 of 100,080 allocations. Requesting bytes from a string still returns a
+caller-owned conversion. See
+[BENCHMARK.md](BENCHMARK.md#single-representation-string-storage).
+
 Use `MarshalMapJSON`, `UnmarshalMapJSON`, `UpsertMapJSON`, and `GetMapJSON`
 for JSON serialization of Go map values. The JSON decoder preserves numbers as
 `json.Number`.

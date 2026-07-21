@@ -1100,12 +1100,58 @@ func (hval *HatValue) fromValue(value C.value_t) {
 	hval.FromUlong(C.ulong(value))
 }
 
-// BytesStorage stores byte and string values outside the trie.
+// StringStorage stores immutable strings outside the trie without retaining a
+// mirrored byte slice.
+type StringStorage struct {
+	array     []string
+	reusables reusableIndexes
+}
+
+func CreateStringStorage() *StringStorage {
+	return &StringStorage{array: []string{}}
+}
+
+func (ss *StringStorage) Put(idx int32, value string) {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return
+	}
+	ss.array[idx] = value
+	ss.reusables.Use(idx)
+}
+
+func (ss *StringStorage) Append(value string) int32 {
+	ss.array = append(ss.array, value)
+	return int32(len(ss.array) - 1)
+}
+
+func (ss *StringStorage) Add(value string) int32 {
+	if idx, ok := ss.reusables.Take(); ok {
+		ss.array[idx] = value
+		return idx
+	}
+	return ss.Append(value)
+}
+
+func (ss *StringStorage) Del(idx int32) {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return
+	}
+	ss.array[idx] = ""
+	ss.reusables.Mark(idx)
+	ss.array = trimReusableTail(ss.array, &ss.reusables)
+}
+
+func (ss *StringStorage) Get(idx int32) string {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return ""
+	}
+	return ss.array[idx]
+}
+
+// BytesStorage stores byte values outside the trie.
 type BytesStorage struct {
-	array       [][]byte
-	strings     []string
-	stringValid []bool
-	reusables   reusableIndexes
+	array     [][]byte
+	reusables reusableIndexes
 }
 
 func CreateBytesStorage() *BytesStorage {
@@ -1119,8 +1165,6 @@ func (bs *BytesStorage) Put(idx int32, value []byte) {
 		return
 	}
 	bs.array[idx] = cloneBytes(value)
-	bs.strings[idx] = ""
-	bs.stringValid[idx] = false
 	bs.reusables.Use(idx)
 }
 
@@ -1129,47 +1173,22 @@ func (bs *BytesStorage) putOwned(idx int32, value []byte) {
 		return
 	}
 	bs.array[idx] = value
-	bs.strings[idx] = ""
-	bs.stringValid[idx] = false
-	bs.reusables.Use(idx)
-}
-
-func (bs *BytesStorage) putStringOwned(idx int32, value string) {
-	if idx < 0 || int(idx) >= len(bs.array) {
-		return
-	}
-	bs.array[idx] = []byte(value)
-	bs.strings[idx] = value
-	bs.stringValid[idx] = true
 	bs.reusables.Use(idx)
 }
 
 func (bs *BytesStorage) Append(value []byte) int32 {
 	bs.array = append(bs.array, cloneBytes(value))
-	bs.strings = append(bs.strings, "")
-	bs.stringValid = append(bs.stringValid, false)
 	return int32(len(bs.array) - 1)
 }
 
 func (bs *BytesStorage) appendOwned(value []byte) int32 {
 	bs.array = append(bs.array, value)
-	bs.strings = append(bs.strings, "")
-	bs.stringValid = append(bs.stringValid, false)
-	return int32(len(bs.array) - 1)
-}
-
-func (bs *BytesStorage) appendStringOwned(value string) int32 {
-	bs.array = append(bs.array, []byte(value))
-	bs.strings = append(bs.strings, value)
-	bs.stringValid = append(bs.stringValid, true)
 	return int32(len(bs.array) - 1)
 }
 
 func (bs *BytesStorage) Add(value []byte) int32 {
 	if idx, ok := bs.reusables.Take(); ok {
 		bs.array[idx] = cloneBytes(value)
-		bs.strings[idx] = ""
-		bs.stringValid[idx] = false
 		return idx
 	}
 	return bs.Append(value)
@@ -1178,21 +1197,9 @@ func (bs *BytesStorage) Add(value []byte) int32 {
 func (bs *BytesStorage) addOwned(value []byte) int32 {
 	if idx, ok := bs.reusables.Take(); ok {
 		bs.array[idx] = value
-		bs.strings[idx] = ""
-		bs.stringValid[idx] = false
 		return idx
 	}
 	return bs.appendOwned(value)
-}
-
-func (bs *BytesStorage) addStringOwned(value string) int32 {
-	if idx, ok := bs.reusables.Take(); ok {
-		bs.array[idx] = []byte(value)
-		bs.strings[idx] = value
-		bs.stringValid[idx] = true
-		return idx
-	}
-	return bs.appendStringOwned(value)
 }
 
 func (bs *BytesStorage) Del(idx int32) {
@@ -1200,25 +1207,8 @@ func (bs *BytesStorage) Del(idx int32) {
 		return
 	}
 	bs.array[idx] = nil
-	bs.strings[idx] = ""
-	bs.stringValid[idx] = false
 	bs.reusables.Mark(idx)
 	bs.array = trimReusableTail(bs.array, &bs.reusables)
-	bs.strings = bs.strings[:len(bs.array)]
-	bs.stringValid = bs.stringValid[:len(bs.array)]
-}
-
-func (bs *BytesStorage) stringValue(idx int32) string {
-	if idx < 0 || int(idx) >= len(bs.array) {
-		return ""
-	}
-	if bs.stringValid[idx] {
-		return bs.strings[idx]
-	}
-	value := string(bs.array[idx])
-	bs.strings[idx] = value
-	bs.stringValid[idx] = true
-	return value
 }
 
 // DiskStorage stores large byte values outside the Go heap.
@@ -2337,6 +2327,7 @@ type HatTrie struct {
 	counterWriteStripeMask     uint64
 	counterFastPathWrites      uint64
 	root                       *C.hattrie_t
+	strings                    *StringStorage
 	raws                       *BytesStorage
 	disks                      *DiskStorage
 	maps                       *MapStorage
@@ -2409,6 +2400,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 	}
 	ht := &HatTrie{
 		root:             C.hattrie_create(),
+		strings:          CreateStringStorage(),
 		raws:             CreateBytesStorage(),
 		disks:            disks,
 		maps:             CreateMapStorage(),
@@ -2460,6 +2452,7 @@ func (ht *HatTrie) Destroy() {
 		ht.disks.Destroy()
 	}
 	ht.root = nil
+	ht.strings = nil
 	ht.raws = nil
 	ht.disks = nil
 	ht.maps = nil
@@ -3827,7 +3820,7 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 			ht.raws.Del(hval.Index)
 		}
 	case DATAVALUE_TYPE_RAW_STRING:
-		ht.raws.Del(hval.Index)
+		ht.strings.Del(hval.Index)
 	}
 }
 
@@ -4869,7 +4862,7 @@ func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
 		return err
 	}
 	if hval.IsStringAtRaws() {
-		ht.raws.putStringOwned(hval.Index, val)
+		ht.strings.Put(hval.Index, val)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
@@ -4879,7 +4872,7 @@ func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.addStringOwned(val)
+	idx := ht.strings.Add(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 	return nil
@@ -4905,7 +4898,7 @@ func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 		return "", err
 	}
 	if hval.IsStringAtRaws() {
-		old := ht.raws.stringValue(hval.Index)
+		old := ht.strings.Get(hval.Index)
 		if str == "" {
 			return old, nil
 		}
@@ -4917,7 +4910,7 @@ func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 		if len(next) != capacity {
 			return "", errRawValueCapacityTooLarge
 		}
-		ht.raws.putStringOwned(hval.Index, next)
+		ht.strings.Put(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return next, nil
@@ -4928,7 +4921,7 @@ func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.addStringOwned(str)
+	idx := ht.strings.Add(str)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 	return str, nil
@@ -4954,7 +4947,7 @@ func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) 
 		return "", err
 	}
 	if hval.IsStringAtRaws() {
-		old := ht.raws.stringValue(hval.Index)
+		old := ht.strings.Get(hval.Index)
 		if str == "" {
 			return old, nil
 		}
@@ -4966,7 +4959,7 @@ func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) 
 		if len(next) != capacity {
 			return "", errRawValueCapacityTooLarge
 		}
-		ht.raws.putStringOwned(hval.Index, next)
+		ht.strings.Put(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return next, nil
@@ -4977,7 +4970,7 @@ func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) 
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.addStringOwned(str)
+	idx := ht.strings.Add(str)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	ht.recordWriteLocked(key)
 	return str, nil
@@ -5002,7 +4995,7 @@ func (ht *HatTrie) GetStringChecked(key string) (string, bool, error) {
 		hit := err == nil && (hval.IsStringAtRaws() || hval.IsCounter())
 		var value string
 		if hval.IsStringAtRaws() {
-			value = ht.raws.stringValue(hval.Index)
+			value = ht.strings.Get(hval.Index)
 		} else if hval.IsCounter() {
 			value = strconv.FormatInt(int64(hval.Index), 10)
 		}
@@ -5022,7 +5015,7 @@ func (ht *HatTrie) GetStringChecked(key string) (string, bool, error) {
 	}
 	ht.recordReadLocked(hval.IsStringAtRaws() || hval.IsCounter(), key)
 	if hval.IsStringAtRaws() {
-		return ht.raws.stringValue(hval.Index), true, nil
+		return ht.strings.Get(hval.Index), true, nil
 	}
 	if hval.IsCounter() {
 		return strconv.FormatInt(int64(hval.Index), 10), true, nil
@@ -5097,7 +5090,7 @@ func (ht *HatTrie) GetBytesChecked(key string) ([]byte, error) {
 		var value []byte
 		hit := false
 		if err == nil && hval.IsStringAtRaws() {
-			value = cloneBytes(ht.raws.array[hval.Index])
+			value = []byte(ht.strings.Get(hval.Index))
 			hit = true
 		} else if err == nil && hval.IsBytesAtRaws() {
 			if hval.OnDisk() {
@@ -5123,7 +5116,7 @@ func (ht *HatTrie) GetBytesChecked(key string) ([]byte, error) {
 	}
 	if hval.IsStringAtRaws() {
 		ht.recordReadLocked(true, key)
-		return cloneBytes(ht.raws.array[hval.Index]), nil
+		return []byte(ht.strings.Get(hval.Index)), nil
 	}
 	if hval.IsBytesAtRaws() {
 		if hval.OnDisk() {

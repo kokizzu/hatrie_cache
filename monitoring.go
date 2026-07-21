@@ -2629,10 +2629,10 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 	case DATAVALUE_TYPE_COUNTER:
 		return 4, strconv.FormatInt(int64(hval.Index), 10)
 	case DATAVALUE_TYPE_RAW_STRING:
-		if int(hval.Index) >= len(ht.raws.array) || hval.Index < 0 {
+		if int(hval.Index) >= len(ht.strings.array) || hval.Index < 0 {
 			return 0, ""
 		}
-		value := ht.raws.stringValue(hval.Index)
+		value := ht.strings.Get(hval.Index)
 		return int64(len(value)), truncatePreview(value)
 	case DATAVALUE_TYPE_RAW_BYTES:
 		if hval.OnDisk() {

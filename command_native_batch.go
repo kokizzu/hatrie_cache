@@ -84,7 +84,7 @@ func (ht *HatTrie) executePublicNativeScalarBatchCommand(request CacheCommandReq
 		item := nativeCommandBatchItem{responseIndex: index, key: key, command: command}
 		switch family {
 		case nativeCommandBatchSetString:
-			valueIndex := ht.raws.addStringOwned(payload.Value)
+			valueIndex := ht.strings.Add(payload.Value)
 			item.input = HatValue{Index: valueIndex, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 		case nativeCommandBatchSetCounter:
 			value, ok := parseCommandInt32(payload.Value)

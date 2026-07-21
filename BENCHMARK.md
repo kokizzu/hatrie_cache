@@ -187,6 +187,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
+| Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
@@ -723,6 +724,56 @@ make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTr
 Both RPCs call the same command executor. The stream removes repeated unary RPC
 setup and permits HTTP/2 flow-control-bounded pipelining; it does not weaken
 command ordering or durability acknowledgements.
+
+<a id="single-representation-string-storage"></a>
+### Single-Representation String Storage
+
+String values previously shared `BytesStorage` with raw bytes. Every occupied
+string slot retained a `[]byte` copy, the original `string`, both parallel slice
+descriptors, and a validity byte. Every insertion or replacement therefore
+copied the complete payload and allocated a byte backing array even though
+ordinary reads returned the stored string.
+
+Strings and bytes now have independent reusable-index pools selected by the
+existing `HatValue` type. A string slot retains only the immutable string;
+`GetString` remains zero-allocation. `GetBytes` intentionally materializes the
+same caller-owned clone it returned before. Memory compaction has independent
+string and byte remap tables, and snapshot generation swaps transfer both pools.
+
+The dedicated fixture inserts or replaces 100,000 unique 256-byte strings whose
+input backing is allocated before measurement. Values are seven-run medians on
+the Ryzen 9 5950X host.
+
+```sh
+make bench-string-storage STRING_STORAGE_BENCH_KEYS=100000 BENCHTIME=1x COUNT=7
+```
+
+| Operation | Mirrored string/bytes | Dedicated string pool | Improvement |
+| --- | ---: | ---: | ---: |
+| Insert 100k x 256 B | 236.169 ms | 187.566 ms | 1.26x faster |
+| Incremental retained heap | 303.5 B/key | 18.87 B/key | 16.08x lower |
+| Insert cumulative heap | 48,008,280 B | 8,923,504 B | 5.38x lower |
+| Insert allocations | 100,080 | 28 | 3,574x fewer |
+| Replace 100k x 256 B | 43.317 ms | 24.978 ms | 1.73x faster |
+| Replace cumulative heap | 25,600,000 B | 0 B | eliminated |
+| Replace allocations | 100,000 | 0 | eliminated |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Mirrored insert | `239.665, 229.609, 235.570, 246.151, 226.826, 236.169, 241.039` |
+| Dedicated insert | `187.572, 186.007, 186.056, 183.112, 188.237, 193.496, 187.566` |
+| Mirrored replace | `40.692, 43.317, 38.757, 48.597, 47.551, 48.366, 41.749` |
+| Dedicated replace | `25.219, 25.539, 24.839, 24.874, 24.098, 30.694, 24.978` |
+
+The existing tiny-value fixture also falls from 63.57 to 18.92 retained
+B/key (3.36x lower), while short `SETSTR` improves from 413.2 to 393.0 ns and
+drops from one allocation to zero. On atomic restore of 100,000 256-byte
+strings, cumulative heap falls from 108,816,416 to 69,731,720 B (1.56x lower),
+allocations fall from 500,117 to 400,067 (1.25x fewer), and median time improves
+from 273.039 to 243.218 ms (1.12x faster). Raw dedicated-fixture output is
+generated at `build/benchmarks/string-storage.txt`.
 
 ### Per-Key Telemetry Modes
 

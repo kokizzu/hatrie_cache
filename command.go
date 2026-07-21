@@ -2521,7 +2521,7 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 	}
 	switch {
 	case hval.IsStringAtRaws():
-		value := ht.raws.stringValue(hval.Index)
+		value := ht.strings.Get(hval.Index)
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
 		return CacheCommandResponse{OK: true, Message: "ok", Value: value}, true
@@ -2638,7 +2638,7 @@ func (ht *HatTrie) commandDumpEntryLocked(key string) (string, bool, error) {
 		return "", false, nil
 	}
 	if hval.IsStringAtRaws() && ht.expirationTimeLocked(key).IsZero() {
-		data := commandDumpStringJSON(key, ht.raws.stringValue(hval.Index))
+		data := commandDumpStringJSON(key, ht.strings.Get(hval.Index))
 		ht.recordReadLocked(true, key)
 		return data, true, nil
 	}
@@ -2705,7 +2705,7 @@ func (ht *HatTrie) appendCommandDumpScannedEntryBinaryWithoutStatsLocked(destina
 		return destination, false, nil
 	}
 	if entry.Value.IsStringAtRaws() && ht.expirationTimeLocked(entry.Key).IsZero() {
-		data, err := appendReplicationValueBinary(destination, snapshotEntry{Type: "string", String: ht.raws.stringValue(entry.Value.Index)})
+		data, err := appendReplicationValueBinary(destination, snapshotEntry{Type: "string", String: ht.strings.Get(entry.Value.Index)})
 		if err != nil {
 			return destination, false, err
 		}
@@ -2927,7 +2927,7 @@ func (ht *HatTrie) upsertStringValueLocked(key string, value string) error {
 		return err
 	}
 	if hval.IsStringAtRaws() {
-		ht.raws.putStringOwned(hval.Index, value)
+		ht.strings.Put(hval.Index, value)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
@@ -2936,7 +2936,7 @@ func (ht *HatTrie) upsertStringValueLocked(key string, value string) error {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.raws.addStringOwned(value)
+	idx := ht.strings.Add(value)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
 	return nil
 }
@@ -3101,7 +3101,7 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 	case DATAVALUE_TYPE_COUNTER:
 		return strconv.FormatInt(int64(hval.Index), 10), nil
 	case DATAVALUE_TYPE_RAW_STRING:
-		return ht.raws.stringValue(hval.Index), nil
+		return ht.strings.Get(hval.Index), nil
 	case DATAVALUE_TYPE_RAW_BYTES:
 		var value []byte
 		if hval.OnDisk() {
