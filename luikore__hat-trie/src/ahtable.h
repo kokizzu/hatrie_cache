@@ -42,7 +42,9 @@ typedef struct ahtable_t_
     size_t max_m;    // number of stored keys before we resize
 
     size_t*  slot_sizes;
+    size_t*  slot_capacities;
     slot_t*  slots;
+    size_t   slot_reallocations;
 } ahtable_t;
 
 extern const double ahtable_max_load_factor;
@@ -56,6 +58,9 @@ ahtable_t* ahtable_create_n (size_t n);     // Create an empty hash table, with
 void       ahtable_free   (ahtable_t*);       // Free all memory used by a table.
 void       ahtable_clear  (ahtable_t*);       // Remove all entries.
 size_t     ahtable_size   (const ahtable_t*); // Number of stored keys.
+size_t     ahtable_slot_used_bytes(const ahtable_t*);
+size_t     ahtable_slot_capacity_bytes(const ahtable_t*);
+size_t     ahtable_slot_reallocations(const ahtable_t*);
 
 
 /** Find the given key in the table, inserting it if it does not exist, and

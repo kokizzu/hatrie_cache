@@ -613,6 +613,69 @@ void test_ahtable_clear_resets_size()
     fprintf(stderr, "done.\n");
 }
 
+void test_ahtable_amortized_slot_growth()
+{
+    fprintf(stderr, "checking amortized slot growth... \n");
+
+    const size_t keys = 63;
+    ahtable_t* T = ahtable_create_n(1);
+    size_t i;
+    char key[32];
+    for (i = 0; i < keys; ++i) {
+        int len = snprintf(key, sizeof(key), "slot-growth-%04zu", i);
+        value_t* value = ahtable_get(T, key, (size_t) len);
+        if (value == NULL) {
+            fprintf(stderr, "[error] amortized growth insert %zu failed\n", i);
+            have_error = 1;
+            break;
+        }
+        *value = i + 1;
+    }
+
+    size_t used = ahtable_slot_used_bytes(T);
+    size_t capacity = ahtable_slot_capacity_bytes(T);
+    size_t reallocations = ahtable_slot_reallocations(T);
+    if (capacity <= used) {
+        fprintf(stderr, "[error] slot capacity %zu did not retain bounded growth room above %zu used bytes\n", capacity, used);
+        have_error = 1;
+    }
+    if (capacity > used + used / 3 + 64) {
+        fprintf(stderr, "[error] slot capacity %zu exceeds bounded growth room for %zu used bytes\n", capacity, used);
+        have_error = 1;
+    }
+    if (reallocations >= keys * 3 / 4) {
+        fprintf(stderr, "[error] slot used %zu reallocations for %zu inserts, expected amortized growth\n", reallocations, keys);
+        have_error = 1;
+    }
+
+    for (i = 0; i < keys - 5; ++i) {
+        int len = snprintf(key, sizeof(key), "slot-growth-%04zu", i);
+        if (ahtable_del(T, key, (size_t) len) != 0) {
+            fprintf(stderr, "[error] amortized growth delete %zu failed\n", i);
+            have_error = 1;
+        }
+    }
+    used = ahtable_slot_used_bytes(T);
+    capacity = ahtable_slot_capacity_bytes(T);
+    if (capacity > used + used / 3 + 64) {
+        fprintf(stderr, "[error] sparse slot capacity %zu did not shrink near %zu used bytes\n", capacity, used);
+        have_error = 1;
+    }
+    for (; i < keys; ++i) {
+        int len = snprintf(key, sizeof(key), "slot-growth-%04zu", i);
+        if (ahtable_del(T, key, (size_t) len) != 0) {
+            fprintf(stderr, "[error] amortized growth tail delete %zu failed\n", i);
+            have_error = 1;
+        }
+    }
+    if (ahtable_slot_used_bytes(T) != 0 || ahtable_slot_capacity_bytes(T) != 0) {
+        fprintf(stderr, "[error] empty slot retained used/capacity bytes after delete\n");
+        have_error = 1;
+    }
+    ahtable_free(T);
+    fprintf(stderr, "done.\n");
+}
+
 
 void test_checked_array_size()
 {
@@ -648,6 +711,7 @@ int main()
     test_ahtable_delete_releases_empty_slot();
     test_ahtable_delete_compacts_nonempty_slot();
     test_ahtable_clear_resets_size();
+    test_ahtable_amortized_slot_growth();
     test_ahtable_key_length_limit();
 
     setup();

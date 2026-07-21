@@ -11,6 +11,32 @@
 #include <assert.h>
 #include <string.h>
 
+static void resize_slot(ahtable_t* T, size_t index, size_t capacity)
+{
+    if (capacity == 0) {
+        free(T->slots[index]);
+        T->slots[index] = NULL;
+        T->slot_capacities[index] = 0;
+        return;
+    }
+    T->slots[index] = realloc_or_die(T->slots[index], capacity);
+    T->slot_capacities[index] = capacity;
+    T->slot_reallocations++;
+}
+
+static size_t slot_growth_capacity(size_t required, size_t reserve)
+{
+    return size_add_or_die(required, reserve);
+}
+
+static void ensure_slot_capacity(ahtable_t* T, size_t index, size_t required)
+{
+    size_t capacity = T->slot_capacities[index];
+    if (capacity >= required) return;
+    size_t appended = required - T->slot_sizes[index];
+    resize_slot(T, index, slot_growth_capacity(required, appended));
+}
+
 
 
 const double ahtable_max_load_factor = 100000.0; /* arbitrary large number => don't resize */
@@ -45,6 +71,7 @@ ahtable_t* ahtable_create_n(size_t n)
 
     T->n = n;
     T->m = 0;
+    T->slot_reallocations = 0;
     T->max_m = (size_t) (ahtable_max_load_factor * (double) T->n);
     size_t slots_bytes = array_bytes_or_die(n, sizeof(slot_t));
     T->slots = malloc_or_die(slots_bytes);
@@ -53,6 +80,8 @@ ahtable_t* ahtable_create_n(size_t n)
     size_t slot_sizes_bytes = array_bytes_or_die(n, sizeof(size_t));
     T->slot_sizes = malloc_or_die(slot_sizes_bytes);
     memset(T->slot_sizes, 0, slot_sizes_bytes);
+    T->slot_capacities = malloc_or_die(slot_sizes_bytes);
+    memset(T->slot_capacities, 0, slot_sizes_bytes);
 
     return T;
 }
@@ -65,6 +94,7 @@ void ahtable_free(ahtable_t* T)
     for (i = 0; i < T->n; ++i) free(T->slots[i]);
     free(T->slots);
     free(T->slot_sizes);
+    free(T->slot_capacities);
     free(T);
 }
 
@@ -73,6 +103,29 @@ size_t ahtable_size(const ahtable_t* T)
 {
     if (T == NULL) return 0;
     return T->m;
+}
+
+size_t ahtable_slot_used_bytes(const ahtable_t* T)
+{
+    if (T == NULL) return 0;
+    size_t total = 0;
+    size_t i;
+    for (i = 0; i < T->n; ++i) total = size_add_or_die(total, T->slot_sizes[i]);
+    return total;
+}
+
+size_t ahtable_slot_capacity_bytes(const ahtable_t* T)
+{
+    if (T == NULL) return 0;
+    size_t total = 0;
+    size_t i;
+    for (i = 0; i < T->n; ++i) total = size_add_or_die(total, T->slot_capacities[i]);
+    return total;
+}
+
+size_t ahtable_slot_reallocations(const ahtable_t* T)
+{
+    return T == NULL ? 0 : T->slot_reallocations;
 }
 
 
@@ -91,17 +144,25 @@ void ahtable_clear(ahtable_t* T)
     size_t slot_sizes_bytes = array_bytes_or_die(T->n, sizeof(size_t));
     T->slot_sizes = realloc_or_die(T->slot_sizes, slot_sizes_bytes);
     memset(T->slot_sizes, 0, slot_sizes_bytes);
+    T->slot_capacities = realloc_or_die(T->slot_capacities, slot_sizes_bytes);
+    memset(T->slot_capacities, 0, slot_sizes_bytes);
+    T->slot_reallocations = 0;
 }
 
 
 static void compact_slot_after_delete(ahtable_t* T, size_t i)
 {
     if (T->slot_sizes[i] == 0) {
-        free(T->slots[i]);
-        T->slots[i] = NULL;
+        resize_slot(T, i, 0);
         return;
     }
-    T->slots[i] = realloc_or_die(T->slots[i], T->slot_sizes[i]);
+    size_t capacity = T->slot_capacities[i];
+    if (capacity >= 256 && T->slot_sizes[i] <= capacity / 3) {
+        size_t reserve = T->slot_sizes[i] / 16;
+        if (reserve < 16) reserve = 16;
+        size_t target = slot_growth_capacity(T->slot_sizes[i], reserve);
+        if (target < capacity) resize_slot(T, i, target);
+    }
 }
 
 
@@ -165,10 +226,14 @@ static void ahtable_expand(ahtable_t* T)
 
     /* allocate slots */
     slot_t* slots = malloc_array_or_die(new_n, sizeof(slot_t));
+    size_t* slot_capacities = malloc_or_die(slot_sizes_bytes);
+    memset(slot_capacities, 0, slot_sizes_bytes);
     size_t j;
     for (j = 0; j < new_n; ++j) {
         if (slot_sizes[j] > 0) {
             slots[j] = malloc_or_die(slot_sizes[j]);
+            slot_capacities[j] = slot_sizes[j];
+            T->slot_reallocations++;
         }
         else slots[j] = NULL;
     }
@@ -209,6 +274,9 @@ static void ahtable_expand(ahtable_t* T)
 
     free(T->slot_sizes);
     T->slot_sizes = slot_sizes;
+
+    free(T->slot_capacities);
+    T->slot_capacities = slot_capacities;
 
     T->n = new_n;
     T->max_m = (size_t) (ahtable_max_load_factor * (double) T->n);
@@ -270,7 +338,7 @@ static value_t* get_key(ahtable_t* T, const char* key, size_t len, bool insert_m
         new_size = size_add_or_die(new_size, len * sizeof(unsigned char)); // key
         new_size = size_add_or_die(new_size, sizeof(value_t));             // value
 
-        T->slots[i] = realloc_or_die(T->slots[i], new_size);
+        ensure_slot_capacity(T, i, new_size);
 
         ++T->m;
         ins_key(T->slots[i] + T->slot_sizes[i], key, len, &val);

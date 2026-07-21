@@ -41,6 +41,12 @@ uses a min-heap schedule plus an authoritative key map, so vacuuming pops due
 keys instead of scanning every TTL entry. The map stores a compact heap index;
 deadline updates repair one existing node in O(log n), and `Persist`/delete
 remove it immediately, so stale schedule entries do not accumulate under churn.
+Native HAT-trie hash buckets retain one additional append-sized capacity class
+instead of reallocating their contiguous slot on every insertion. Empty slots
+are released immediately and nonempty slots shrink below one-third utilization,
+keeping churn fast without unbounded high-water retention. The isolated and
+full-cache measurements are in
+[BENCHMARK.md](BENCHMARK.md#adaptive-native-bucket-size-classes).
 Long-running delete-heavy workloads can call `CompactMemory` to rebuild the C
 trie, densely reindex in-memory typed pools, pack live strings into 256 KiB
 chunks, and shrink Merkle and metadata backing. Normal string writes remain
@@ -80,6 +86,7 @@ make bench-serialization
 make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
+make bench-native-ahtable-allocator NATIVE_AHTABLE_KEYS=100000 NATIVE_AHTABLE_SLOTS=4096 COUNT=7
 ```
 
 Run the architectural baseline for concurrent reads, retained per-key memory,

@@ -23,6 +23,34 @@ func TestBenchmarkSerializationScriptIncludesDocumentedStructuredJournalBenches(
 	}
 }
 
+func TestNativeAhtableAllocatorBenchmarkIsReproducible(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-native-ahtable-allocator.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-native-ahtable-allocator.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"NATIVE_AHTABLE_KEYS",
+		"NATIVE_AHTABLE_SLOTS",
+		"bench_ahtable_allocator.c",
+		"native-ahtable-allocator.txt",
+		"-O3",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("native ahtable allocator benchmark script missing token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	for _, token := range []string{"bench-native-ahtable-allocator:", "./scripts/benchmark-native-ahtable-allocator.sh"} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("Makefile missing native ahtable allocator benchmark token %q", token)
+		}
+	}
+}
+
 func TestHatTrieTransportFeatureBenchmarkScriptReportsRSS(t *testing.T) {
 	data, err := os.ReadFile("scripts/benchmark-hatrie-transport-features.sh")
 	if err != nil {

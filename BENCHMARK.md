@@ -201,6 +201,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
+| Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
@@ -845,6 +846,63 @@ Raw nanosecond samples were:
 
 The reproducible command writes the current raw output to
 `build/benchmarks/structured-storage-codec.txt`.
+
+<a id="adaptive-native-bucket-size-classes"></a>
+### Adaptive Native Bucket Size Classes
+
+The native `ahtable` previously called `realloc` to the exact used size for
+every insertion and every deletion from a nonempty hash slot. Slots now keep a
+contiguous capacity side array. A growth reserves exactly one additional record
+of the size just appended, avoiding broad percentage slack when keys are large
+or uneven. Empty slots are freed immediately; a nonempty slot shrinks with a
+6.25% reserve after utilization falls below one third.
+
+The isolated fixture inserts 100,000 deterministic keys into 4,096 slots,
+deletes half, inserts 50,000 replacements, verifies every retained value, and
+reports native used/capacity bytes plus process RSS. Values are seven-run
+medians on the Ryzen 9 5950X host.
+
+```sh
+make bench-native-ahtable-allocator NATIVE_AHTABLE_KEYS=100000 NATIVE_AHTABLE_SLOTS=4096 COUNT=7
+```
+
+| Isolated native table | Exact resize | Adaptive class | Improvement |
+| --- | ---: | ---: | ---: |
+| Insert 100k | 24.458 ms | 23.711 ms | 1.03x faster |
+| Delete/reinsert 50k | 21.053 ms | 17.460 ms | 1.21x faster |
+| Insert resizes | 100,000 | 51,021 | 1.96x fewer |
+| Total resizes | 200,000 | 58,925 | 3.39x fewer |
+| Live slot bytes | 3,900,000 B | 3,900,000 B | unchanged |
+| Retained slot capacity | 3,900,000 B | 4,172,719 B | 7.0% higher |
+| Maximum RSS | 5,684 KiB | 5,940 KiB | 4.5% higher |
+
+Raw isolated milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Exact insert | `24.292, 23.668, 28.229, 26.489, 24.458, 19.431, 25.565` |
+| Adaptive insert | `22.144, 24.618, 23.807, 23.782, 22.193, 21.717, 23.711` |
+| Exact churn | `21.053, 20.232, 24.110, 22.775, 20.885, 17.806, 26.004` |
+| Adaptive churn | `20.320, 16.278, 16.394, 17.460, 21.249, 18.566, 15.718` |
+
+The end-to-end guard uses the existing 100,000 insert/90,000 delete cache
+fixture, including Go backing pools, Merkle tracking, cgo calls, and GC. Fifteen
+sequential samples compare commit `a119dfd` with the final allocator:
+
+```sh
+make bench-big-wins BIG_WINS_BENCH='^BenchmarkBigWins/ChurnRetentionBaseline$' BIG_WINS_KEYS=100000 BENCHTIME=1x COUNT=15
+```
+
+| Full cache cycle | Exact resize | Adaptive class | Change |
+| --- | ---: | ---: | ---: |
+| Median time | 255.777 ms | 247.534 ms | 1.03x faster |
+| Maximum process RSS | 75,816 KiB | 76,336 KiB | 0.7% higher |
+| Go heap/allocations | 34.71 MB / 381.2k | 34.71 MB / 381.2k | unchanged |
+
+The isolated raw output is written to
+`build/benchmarks/native-ahtable-allocator.txt`. The capacity side array and
+bounded slack are the explicit memory cost; the full-process run shows their
+impact after the Go runtime and backing pools are included.
 
 <a id="single-representation-string-storage"></a>
 ### Single-Representation String Storage
