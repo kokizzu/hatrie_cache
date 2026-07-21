@@ -4,51 +4,27 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 	"unsafe"
 )
 
-func TestCompactStringStoragePacksLiveValuesAndPreservesRemap(t *testing.T) {
-	storage := CreateStringStorage()
-	first := storage.Add(strings.Repeat("a", 257))
-	deleted := storage.Add(strings.Repeat("b", 129))
-	last := storage.Add(strings.Repeat("c", 511))
-	oversized := storage.Add(strings.Repeat("d", packedStringChunkBytes+1))
-	storage.Del(deleted)
-
-	packed, remap, err := compactStringStorage(storage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first != 0 || last != 2 || oversized != 3 || !reflect.DeepEqual(remap, []int32{0, -1, 1, 2}) {
-		t.Fatalf("indexes/remap = %d/%d/%d/%v", first, last, oversized, remap)
-	}
-	if packed.Get(0) != strings.Repeat("a", 257) || packed.Get(1) != strings.Repeat("c", 511) || packed.Get(2) != strings.Repeat("d", packedStringChunkBytes+1) {
-		t.Fatal("packed values changed")
-	}
-	firstPointer := uintptr(unsafe.Pointer(unsafe.StringData(packed.Get(0))))
-	lastPointer := uintptr(unsafe.Pointer(unsafe.StringData(packed.Get(1))))
-	if lastPointer-firstPointer != uintptr(len(packed.Get(0))) {
-		t.Fatalf("packed value pointers differ by %d, want %d", lastPointer-firstPointer, len(packed.Get(0)))
-	}
-}
-
-func TestCompactMemoryPackedStringRemainsValidAfterReplacement(t *testing.T) {
+func TestCompactMemoryReusesLiveStringBacking(t *testing.T) {
 	trie := newTestTrie(t)
-	want := strings.Repeat("packed", 128)
-	trie.UpsertString("key", want)
+	value := strings.Repeat("live-string", 128)
+	trie.UpsertString("key", value)
+	before := trie.GetString("key")
+
 	if _, err := trie.CompactMemory(); err != nil {
 		t.Fatal(err)
 	}
-	borrowed := trie.GetString("key")
-	trie.UpsertString("key", "replacement")
-	runtime.GC()
-	if borrowed != want || trie.GetString("key") != "replacement" {
-		t.Fatalf("packed/replacement values = %q/%q", borrowed, trie.GetString("key"))
+	after := trie.GetString("key")
+	if after != value {
+		t.Fatalf("compacted string changed")
+	}
+	if unsafe.StringData(before) != unsafe.StringData(after) {
+		t.Fatal("compaction copied live string backing")
 	}
 }
 

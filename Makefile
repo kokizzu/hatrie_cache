@@ -131,8 +131,11 @@ PARTITION_RESTORE_BENCH_KEYS ?= 100000
 PARTITION_RESTORE_COUNT ?= 16
 COLD_HYDRATION_BENCH ?= ^BenchmarkColdReferenceParallelHydration32$$
 REFERENCE_SLAB_BENCH ?= ^BenchmarkLevelDBReferenceRetainedMemory100k$$
-STRING_STORAGE_BENCH ?= ^Benchmark(StringStorageLayout100k|PackedStringCompaction100k)$$
+STRING_STORAGE_BENCH ?= ^BenchmarkStringStorageLayout100k$$
 STRING_STORAGE_BENCH_KEYS ?= 100000
+STRING_COMPACTION_BENCH ?= ^BenchmarkStringCompaction100k$$
+STRING_COMPACTION_GC_BENCH ?= ^BenchmarkStringCompactionPostGC100k$$
+STRING_COMPACTION_GC_BENCHTIME ?= 20x
 LIVE_REPLICATION_BENCH ?= ^BenchmarkReplicationLiveTransport10K/grpc-stream$$
 MERKLE_MAINTENANCE_BENCH ?= ^BenchmarkReplicationMerkle(ChurnSnapshotCycle|SnapshotAfterChurn)$$
 MERKLE_WRITE_BENCHTIME ?= 100000x
@@ -190,7 +193,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-merkle-maintenance bench-native-ahtable-allocator bench-native-command-batch bench-scalar-batch bench-structured-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-string-compaction bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-merkle-maintenance bench-native-ahtable-allocator bench-native-command-batch bench-scalar-batch bench-structured-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -312,6 +315,9 @@ bench-reference-slab:
 
 bench-string-storage:
 	STRING_STORAGE_BENCH='$(STRING_STORAGE_BENCH)' STRING_STORAGE_BENCH_KEYS='$(STRING_STORAGE_BENCH_KEYS)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-string-storage.sh
+
+bench-string-compaction:
+	STRING_COMPACTION_BENCH='$(STRING_COMPACTION_BENCH)' STRING_COMPACTION_GC_BENCH='$(STRING_COMPACTION_GC_BENCH)' STRING_COMPACTION_GC_BENCHTIME='$(STRING_COMPACTION_GC_BENCHTIME)' STRING_STORAGE_BENCH_KEYS='$(STRING_STORAGE_BENCH_KEYS)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-string-compaction.sh
 
 bench-structured-storage-codec:
 	STRUCTURED_STORAGE_CODEC_BENCH='$(STRUCTURED_STORAGE_CODEC_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-structured-storage-codec.sh

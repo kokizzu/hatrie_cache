@@ -77,11 +77,11 @@ func BenchmarkStringStorageLayout100k(b *testing.B) {
 	})
 }
 
-func BenchmarkPackedStringCompaction100k(b *testing.B) {
+func BenchmarkStringCompaction100k(b *testing.B) {
 	keys := stringStorageBenchmarkInt("HATRIE_STRING_STORAGE_KEYS", 100000)
 	keyValues := make([]string, keys)
 	for index := range keyValues {
-		keyValues[index] = fmt.Sprintf("packed-string:%09d", index)
+		keyValues[index] = fmt.Sprintf("string-compaction:%09d", index)
 	}
 
 	var retainedHeapBefore uint64
@@ -137,6 +137,25 @@ func BenchmarkPackedStringCompaction100k(b *testing.B) {
 	b.ReportMetric(float64(retainedHeapAfter)/float64(b.N), "retained_after_B/op")
 	b.ReportMetric(float64(retainedObjectsBefore)/float64(b.N), "objects_before/op")
 	b.ReportMetric(float64(retainedObjectsAfter)/float64(b.N), "objects_after/op")
+}
+
+func BenchmarkStringCompactionPostGC100k(b *testing.B) {
+	keys := stringStorageBenchmarkInt("HATRIE_STRING_STORAGE_KEYS", 100000)
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keys; index++ {
+		prefix := fmt.Sprintf("%09d:", index)
+		valueBytes := 33 + index%480
+		trie.UpsertString(fmt.Sprintf("string-compaction-gc:%09d", index), prefix+strings.Repeat("x", valueBytes-len(prefix)))
+	}
+	if _, err := trie.CompactMemory(); err != nil {
+		b.Fatal(err)
+	}
+	runtime.GC()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		runtime.GC()
+	}
 }
 
 func stringStorageBenchmarkInt(name string, fallback int) int {

@@ -72,6 +72,34 @@ func TestStartupPersistenceBenchmarkIsReproducible(t *testing.T) {
 	}
 }
 
+func TestStringCompactionBenchmarkIsReproducible(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-string-compaction.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-string-compaction.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkStringCompaction100k",
+		"BenchmarkStringCompactionPostGC100k",
+		"STRING_COMPACTION_GC_BENCHTIME",
+		"string-compaction.txt",
+		"-benchmem",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("string compaction benchmark script missing token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	for _, token := range []string{"bench-string-compaction:", "./scripts/benchmark-string-compaction.sh"} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("Makefile missing string compaction benchmark token %q", token)
+		}
+	}
+}
+
 func TestHatTrieTransportFeatureBenchmarkScriptReportsRSS(t *testing.T) {
 	data, err := os.ReadFile("scripts/benchmark-hatrie-transport-features.sh")
 	if err != nil {

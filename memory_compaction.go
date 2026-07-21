@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -149,11 +148,11 @@ func (ht *HatTrie) buildMemoryCompactionPlanLocked() (memoryCompactionPlan, erro
 	plan.raws = &BytesStorage{array: rawArray}
 	plan.remaps[DATAVALUE_TYPE_RAW_BYTES] = rawRemap
 
-	var stringRemap []int32
-	plan.strings, stringRemap, err = compactStringStorage(ht.strings)
+	stringArray, stringRemap, err := compactStorageSlice(ht.strings.array, &ht.strings.reusables)
 	if err != nil {
 		return plan, fmt.Errorf("hatriecache: compact string values: %w", err)
 	}
+	plan.strings = &StringStorage{array: stringArray}
 	plan.remaps[DATAVALUE_TYPE_RAW_STRING] = stringRemap
 
 	plan.disks = &DiskStorage{
@@ -258,59 +257,6 @@ func compactStorageSlice[T any](source []T, reusables *reusableIndexes) ([]T, []
 		return nil, nil, errors.New("reusable-index count does not match storage holes")
 	}
 	return compactParallelSlice(source, remap), remap, nil
-}
-
-const packedStringChunkBytes = 256 << 10
-
-type packedStringBuilder struct {
-	chunk []byte
-}
-
-func (builder *packedStringBuilder) append(value string) string {
-	if value == "" {
-		return ""
-	}
-	if len(value) > packedStringChunkBytes {
-		return strings.Clone(value)
-	}
-	if cap(builder.chunk)-len(builder.chunk) < len(value) {
-		builder.chunk = make([]byte, 0, packedStringChunkBytes)
-	}
-	start := len(builder.chunk)
-	builder.chunk = append(builder.chunk, value...)
-	return unsafe.String(unsafe.SliceData(builder.chunk[start:]), len(value))
-}
-
-func compactStringStorage(source *StringStorage) (*StringStorage, []int32, error) {
-	if source == nil {
-		return nil, nil, errors.New("missing string storage")
-	}
-	remap := make([]int32, len(source.array))
-	live := 0
-	for idx := range source.array {
-		if source.reusables.Has(int32(idx)) {
-			remap[idx] = -1
-			continue
-		}
-		if live > int(^uint32(0)>>1) {
-			return nil, nil, errors.New("compacted string storage index exceeds int32")
-		}
-		remap[idx] = int32(live)
-		live++
-	}
-	if len(source.array)-live != source.reusables.Len() {
-		return nil, nil, errors.New("reusable-index count does not match string storage holes")
-	}
-
-	result := &StringStorage{array: make([]string, live)}
-	builder := packedStringBuilder{}
-	for oldIndex, newIndex := range remap {
-		if newIndex < 0 {
-			continue
-		}
-		result.array[newIndex] = builder.append(source.array[oldIndex])
-	}
-	return result, remap, nil
 }
 
 func stableStorageRemap(length int, reusables *reusableIndexes) []int32 {

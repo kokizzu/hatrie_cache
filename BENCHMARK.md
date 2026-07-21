@@ -191,7 +191,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
-| Current pass | [Packed string compaction arena](#packed-string-compaction-arena), 100k varied 33-512 B strings | Individual backing: 232.047 ms; 30.00 MB retained; 100,022 objects | 256 KiB chunks: 226.440 ms; 28.87 MB retained; 125 objects | 1.02x faster, 3.79% lower retained heap, 800x fewer retained objects | Explicit compaction copies payloads once, raising cumulative compaction heap from 2.81 MB to 30.07 MB |
+| Reverted | [Packed-string compaction](#string-compaction-allocation-rollback), 100k varied 33-512 B strings | Packed copy: 30.07 MB cumulative heap; 121,848 KiB peak RSS | Dense remap: 2.81 MB cumulative heap; 93,516 KiB peak RSS | 10.71x lower cumulative heap, 1.30x lower peak RSS | Retains 3.79% more heap and forced GC is 1.81x slower; packing was not worth its immediate memory spike |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
@@ -994,37 +994,41 @@ allocations fall from 500,117 to 400,067 (1.25x fewer), and median time improves
 from 273.039 to 243.218 ms (1.12x faster). Raw dedicated-fixture output is
 generated at `build/benchmarks/string-storage.txt`.
 
-<a id="packed-string-compaction-arena"></a>
-### Packed String Compaction Arena
+<a id="string-compaction-allocation-rollback"></a>
+### String Compaction Allocation Rollback
 
-`CompactMemory` now copies live strings into fixed 256 KiB chunks while it
-already rebuilds and remaps typed storage. Normal insertion and replacement
-continue to retain the supplied immutable string directly, so hot write paths
-do not pay an arena copy and replacement churn does not leave append-only
-garbage. Values larger than one chunk receive an independent clone.
-
-The fixture stores 100,000 transient strings with deterministic lengths from 33
-through 512 bytes, then compacts a fully live trie. The range exposes allocator
-size-class padding instead of favoring one exact string size. Rows are seven-run
-medians on the Ryzen 9 5950X host.
+The packed-string compactor copied every live payload into 256 KiB arenas while
+rebuilding typed storage. That reduced allocator object count, but made a
+memory-reclamation operation temporarily allocate approximately the complete
+live string payload again. The current compactor only densifies the string
+header/index slice and preserves immutable live string backing.
 
 ```sh
-make bench-string-storage STRING_STORAGE_BENCH='^BenchmarkPackedStringCompaction100k$' STRING_STORAGE_BENCH_KEYS=100000 BENCHTIME=1x COUNT=7
+make bench-string-compaction STRING_STORAGE_BENCH_KEYS=100000 BENCHTIME=1x STRING_COMPACTION_GC_BENCHTIME=20x COUNT=7
 ```
 
-| Metric | Individual string backing | Packed 256 KiB chunks | Change |
-| --- | ---: | ---: | ---: |
-| Compaction time | 232.047 ms | 226.440 ms | 1.02x faster |
-| Retained heap after GC | 30,003,512 B | 28,866,248 B | 3.79% lower |
-| Retained heap objects | 100,022 | 125 | 800x fewer |
-| Cumulative compaction heap | 2,808,864 B | 30,071,840 B | 10.71x higher |
-| Compaction allocations | 100,024 | 100,128 | 104 more (0.10%) |
+The audit uses 100,000 strings varying from 33 through 512 bytes. Cumulative
+heap and retained values are seven-run medians. Peak RSS is one isolated process
+sample per implementation; forced-GC time is the median of seven runs with 20
+collections per run. Packed results use commit `c3085d2`; dense-remap results
+use the implementation before `b8a7375`, which the current rollback restores.
 
-The retained-object reduction lowers future GC bookkeeping, while the one-time
-copy accounts for the higher cumulative heap. Compaction remains explicit and
-off by default for the daemon, so deployments choose when to pay its existing
-cache-wide write-lock pause. The reproducible repository command writes raw
-output to `build/benchmarks/string-storage.txt`.
+| Metric | Packed live payloads | Dense remap | Rollback result |
+| --- | ---: | ---: | ---: |
+| Cumulative compaction heap | 30,071,824 B | 2,808,848 B | 10.71x lower |
+| Peak process RSS | 121,848 KiB | 93,516 KiB | 1.30x lower, 28,332 KiB reclaimed |
+| Retained heap after GC | 28,866,344 B | 30,003,640 B | 3.94% higher |
+| Retained heap objects | 127 | 100,021 | allocator objects no longer collapsed |
+| Subsequent forced GC | 1,012,367 ns | 1,830,839 ns | 1.81x slower |
+| Compaction allocations | 100,128 | 100,024 | 104 fewer |
+
+The paired audit measured 235.4 ms for packing and 213.9 ms for dense remapping,
+but subsequent wall-clock samples varied enough with host load that CPU is not
+used as the rollback criterion. At those paired medians, packing needed roughly
+26 future forced collections to repay its extra compaction CPU. The immediate
+10.71x cumulative allocation and 30% peak-RSS increase were paid on every run,
+which conflicts with invoking compaction under memory pressure. Current raw
+output is written to `build/benchmarks/string-compaction.txt`.
 
 ### Per-Key Telemetry Modes
 
