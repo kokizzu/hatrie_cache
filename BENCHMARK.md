@@ -171,6 +171,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-pass staged restore](#single-pass-staged-restore), checkpoint 10k x 256 B | Verify then extract: 69.346 ms; 13.18 MB heap; 2 payload passes | Stage, verify, fsync, publish: 56.057 ms; 12.78 MB heap; 1 payload pass | 1.24x faster, 1.03x lower heap, half the payload passes | Repository restore is 1.09x slower because the durable path fsyncs staged files |
 | Current pass | [Checkpoint replica bootstrap](#checkpoint-replica-bootstrap), 10k x 256 B | Snapshot: 146.369 ms; 36.66 MB heap; 172,569 allocs; 2,051,371 wire B | Pebble checkpoint: 84.246 ms; 13.50 MB heap; 62,423 allocs; 2,103,717 wire B | 1.74x faster, 2.72x lower heap, 2.76x fewer allocs | Fresh Pebble databases only; wire size is 2.55% larger |
 | Current pass | [Incremental existing-replica recovery](#incremental-existing-replica-recovery), 10k x 256 B, 1% changed | Full snapshot: 169.906 ms; 38.68 MB heap; 2,047,776 wire B | Cached repository: 104.739 ms; 36.70 MB heap; 36,313 wire B | 1.62x faster, 1.05x lower heap, 2.26x fewer allocs, 56.39x smaller wire | Pebble and a cached base are required; exact restore still performs a full local DB save |
+| Current pass | [Active recovered Pebble generation](#active-recovered-pebble-generation), 10k x 256 B, 1% changed | Incremental recovery plus full local save: 112.016 ms; 34.16 MB heap; 75,000 allocs | Stable-handle checkpoint adoption: 107.014 ms; 27.52 MB heap; 56,080 allocs | 1.05x faster, 1.24x lower heap, 1.34x fewer allocs; full-record rewrite eliminated | Temporarily retains old and staged DB directories; directory publication requires same-filesystem staging |
 | Current pass | [Parallel cold-reference hydration](#parallel-cold-reference-hydration), 32 delayed reads | Serialized: 33.875 ms; 18,648 heap B | Parallel singleflight: 1.174 ms; 30,166 heap B | 28.85x faster | Cumulative heap is 1.62x higher and allocations are 1.80x higher |
 | Current pass | [Compact lazy-reference slab](#compact-lazy-reference-slab), 100k references | Public-struct slab: 29.617 ms; 90.2 retained B/ref | Compact slab: 20.513 ms; 71.6 retained B/ref | 1.44x faster, 1.26x lower retained heap | Type IDs are internal; exported references are expanded on access |
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
@@ -446,13 +447,13 @@ compact snapshot representation.
 #### Incremental Existing-Replica Recovery
 
 When a follower requests journal entries older than the leader retains, an
-existing Pebble replica now negotiates `/api/journal/recovery` before requesting
+existing Pebble replica negotiates `/api/journal/recovery` before requesting
 the full snapshot. The leader creates a journal-sequenced content-addressed
 checkpoint manifest. The follower checksum-verifies its source-specific local
 object cache, downloads only missing manifest objects, durably stages the
 complete checkpoint, eagerly loads it into the live trie under the journal
-replacement lock, persists its already-open local database, and advances pull
-state last. Corrupt cached objects are removed and downloaded again.
+replacement lock, and advances pull state last. Corrupt cached objects are
+removed and downloaded again.
 
 The fixture starts both paths with the same existing 10,001-key follower DB.
 Values are deterministic low-compressibility 256-byte strings, 100 keys change,
@@ -490,6 +491,51 @@ cost. Source and follower repositories consume disk, and staging temporarily
 requires another checkpoint-sized directory. An unavailable endpoint, invalid
 manifest/object, codec mismatch, non-Pebble follower, or disabled option
 automatically retains the exact full-snapshot fallback.
+
+<a id="active-recovered-pebble-generation"></a>
+##### Active Recovered Pebble Generation
+
+The first incremental-recovery implementation rewrote the complete restored
+trie into the follower's already-open Pebble database after staging and loading
+the native checkpoint. The current path stages on the active database
+filesystem, closes the old Pebble handle under its existing save/database
+locks, publishes the verified checkpoint at the stable configured path, and
+reopens it through the same `PebbleStore` object. Background saving, compaction,
+monitoring, memory spill, and shutdown therefore keep a stable store handle.
+
+A deterministic `.recovery-old` directory makes publication recoverable. A
+runtime validation/open failure moves the checkpoint back, restores the old
+directory, and reopens it before returning. If a crash leaves the configured
+path absent, startup restores `.recovery-old`; if the new path opens
+successfully, startup removes the old directory. Pull results expose
+`recovery_checkpoint_adopted` for operational confirmation.
+
+The paired fixture is the same 10,000-key, 1%-changed workload above, rerun
+after the single-representation string layout so both rows share the same
+in-memory implementation. Seven-run medians are:
+
+| Metric | Full local Pebble save | Checkpoint adoption | Improvement |
+| --- | ---: | ---: | ---: |
+| Recovery time | 112.016 ms | 107.014 ms | 1.05x faster |
+| Cumulative heap | 34,157,368 B | 27,517,744 B | 1.24x lower |
+| Allocations | 75,000 | 56,080 | 1.34x fewer |
+| HTTP response body | 36,313 B | 36,313 B | unchanged |
+| Local persistence | rewrite 10,001 records | directory metadata publication | full-record rewrite eliminated |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Full local save | `108.406, 140.600, 111.609, 111.449, 118.201, 112.016, 124.913` |
+| Checkpoint adoption | `112.502, 107.014, 101.462, 104.427, 98.987, 107.320, 110.089` |
+
+The downloaded and logical checkpoint size is unchanged. The active and staged
+directories coexist until publication, and the old directory remains until the
+new DB opens, so temporary disk capacity must cover both generations. Recovery
+stages beneath the active DB parent; when the content-addressed repository is on
+another filesystem, materialization copies its objects before the same atomic
+directory publication. Non-Pebble stores and disabled incremental recovery keep
+the existing full-save/snapshot paths.
 
 The backend contract uses the same binary record codec and exercises a full
 10,000-key save, 1,000 incremental operations (500 updates, 250 deletes, 250

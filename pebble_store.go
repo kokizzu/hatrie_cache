@@ -16,14 +16,15 @@ import (
 
 // PebbleStore persists HAT-trie records in a Pebble LSM database.
 type PebbleStore struct {
-	saveMu             sync.RWMutex
-	mu                 sync.RWMutex
-	path               string
-	db                 *pebble.DB
-	format             StorageFormat
-	activeGeneration   uint64
-	nextGeneration     uint64
-	generationSaveHook func(string) error
+	saveMu              sync.RWMutex
+	mu                  sync.RWMutex
+	path                string
+	db                  *pebble.DB
+	format              StorageFormat
+	activeGeneration    uint64
+	nextGeneration      uint64
+	generationSaveHook  func(string) error
+	checkpointAdoptHook func(string) error
 }
 
 type pebbleStoredRecord struct {
@@ -49,6 +50,9 @@ func OpenPebbleStoreWithFormat(path string, format StorageFormat) (*PebbleStore,
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
+	if err := recoverInterruptedPebbleCheckpointAdoption(path); err != nil {
+		return nil, err
+	}
 	db, err := pebble.Open(path, &pebble.Options{})
 	if err != nil {
 		return nil, err
@@ -62,6 +66,10 @@ func OpenPebbleStoreWithFormat(path string, format StorageFormat) (*PebbleStore,
 		_ = db.Close()
 		return nil, err
 	}
+	if err := cleanupAdoptedPebbleCheckpoint(path); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &PebbleStore{
 		path:             path,
 		db:               db,
@@ -69,6 +77,164 @@ func OpenPebbleStoreWithFormat(path string, format StorageFormat) (*PebbleStore,
 		activeGeneration: activeGeneration,
 		nextGeneration:   nextGeneration,
 	}, nil
+}
+
+// AdoptCheckpoint replaces the open database with a verified native Pebble
+// checkpoint while preserving this store handle and its configured path.
+func (store *PebbleStore) AdoptCheckpoint(checkpointPath string) error {
+	if store == nil {
+		return ErrLevelDBStoreClosed
+	}
+	checkpointPath = strings.TrimSpace(checkpointPath)
+	if checkpointPath == "" {
+		return errors.New("hatriecache: pebble checkpoint path is required")
+	}
+	checkpointPath, err := filepath.Abs(checkpointPath)
+	if err != nil {
+		return err
+	}
+	targetPath, err := filepath.Abs(store.path)
+	if err != nil {
+		return err
+	}
+	if sameOrChildPath(checkpointPath, targetPath) || sameOrChildPath(targetPath, checkpointPath) {
+		return errors.New("hatriecache: pebble checkpoint and active store paths must not overlap")
+	}
+	if err := validatePebbleCheckpointForAdoption(checkpointPath, store.format); err != nil {
+		return err
+	}
+
+	store.saveMu.Lock()
+	defer store.saveMu.Unlock()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.db == nil {
+		return ErrLevelDBStoreClosed
+	}
+	oldPath := pebbleCheckpointAdoptionOldPath(targetPath)
+	if _, err := os.Lstat(oldPath); err == nil {
+		return fmt.Errorf("hatriecache: unfinished Pebble checkpoint adoption exists at %s", oldPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := store.db.Close(); err != nil {
+		return err
+	}
+	store.db = nil
+	if err := store.runCheckpointAdoptHook("after-close"); err != nil {
+		reopenErr := store.reopenPebbleLocked(targetPath)
+		return errors.Join(err, reopenErr)
+	}
+	if err := os.Rename(targetPath, oldPath); err != nil {
+		reopenErr := store.reopenPebbleLocked(targetPath)
+		return errors.Join(err, reopenErr)
+	}
+	if err := os.Rename(checkpointPath, targetPath); err != nil {
+		rollbackErr := os.Rename(oldPath, targetPath)
+		reopenErr := store.reopenPebbleLocked(targetPath)
+		return errors.Join(err, rollbackErr, reopenErr)
+	}
+	if err := syncDirectory(filepath.Dir(targetPath)); err != nil {
+		return store.rollbackPebbleCheckpointAdoptionLocked(checkpointPath, targetPath, oldPath, err)
+	}
+	if err := store.runCheckpointAdoptHook("after-publish"); err != nil {
+		return store.rollbackPebbleCheckpointAdoptionLocked(checkpointPath, targetPath, oldPath, err)
+	}
+	if err := store.reopenPebbleLocked(targetPath); err != nil {
+		return store.rollbackPebbleCheckpointAdoptionLocked(checkpointPath, targetPath, oldPath, err)
+	}
+	if err := store.runCheckpointAdoptHook("after-open"); err != nil {
+		_ = store.db.Close()
+		store.db = nil
+		return store.rollbackPebbleCheckpointAdoptionLocked(checkpointPath, targetPath, oldPath, err)
+	}
+	if err := os.RemoveAll(oldPath); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(targetPath))
+}
+
+func validatePebbleCheckpointForAdoption(path string, format StorageFormat) error {
+	store, err := openPebbleStoreReadOnlyWithFormat(path, format)
+	if err != nil {
+		return fmt.Errorf("hatriecache: validate Pebble checkpoint: %w", err)
+	}
+	return store.Close()
+}
+
+func (store *PebbleStore) runCheckpointAdoptHook(stage string) error {
+	if store.checkpointAdoptHook == nil {
+		return nil
+	}
+	return store.checkpointAdoptHook(stage)
+}
+
+func (store *PebbleStore) reopenPebbleLocked(path string) error {
+	db, err := pebble.Open(path, &pebble.Options{})
+	if err != nil {
+		return err
+	}
+	activeGeneration, nextGeneration, err := loadPebbleGenerationState(db)
+	if err != nil {
+		_ = db.Close()
+		return err
+	}
+	if err := cleanupPebbleGenerations(db, activeGeneration); err != nil {
+		_ = db.Close()
+		return err
+	}
+	store.db = db
+	store.activeGeneration = activeGeneration
+	store.nextGeneration = nextGeneration
+	return nil
+}
+
+func (store *PebbleStore) rollbackPebbleCheckpointAdoptionLocked(checkpointPath string, targetPath string, oldPath string, cause error) error {
+	if store.db != nil {
+		_ = store.db.Close()
+		store.db = nil
+	}
+	moveNewErr := os.Rename(targetPath, checkpointPath)
+	restoreOldErr := os.Rename(oldPath, targetPath)
+	syncErr := syncDirectory(filepath.Dir(targetPath))
+	reopenErr := store.reopenPebbleLocked(targetPath)
+	return errors.Join(cause, moveNewErr, restoreOldErr, syncErr, reopenErr)
+}
+
+func pebbleCheckpointAdoptionOldPath(path string) string {
+	return path + ".recovery-old"
+}
+
+func recoverInterruptedPebbleCheckpointAdoption(path string) error {
+	oldPath := pebbleCheckpointAdoptionOldPath(path)
+	_, targetErr := os.Lstat(path)
+	_, oldErr := os.Lstat(oldPath)
+	if errors.Is(oldErr, os.ErrNotExist) || targetErr == nil {
+		return nil
+	}
+	if oldErr != nil {
+		return oldErr
+	}
+	if !errors.Is(targetErr, os.ErrNotExist) {
+		return targetErr
+	}
+	if err := os.Rename(oldPath, path); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
+}
+
+func cleanupAdoptedPebbleCheckpoint(path string) error {
+	oldPath := pebbleCheckpointAdoptionOldPath(path)
+	if _, err := os.Lstat(oldPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(oldPath); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
 }
 
 func openPebbleStoreReadOnlyWithFormat(path string, format StorageFormat) (*PebbleStore, error) {

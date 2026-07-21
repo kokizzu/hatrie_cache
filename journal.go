@@ -91,19 +91,20 @@ type CommandJournalTail struct {
 }
 
 type CommandJournalPullResult struct {
-	Source                  string `json:"source"`
-	AfterSequence           uint64 `json:"after_sequence"`
-	LastSequence            uint64 `json:"last_sequence"`
-	CompactedThrough        uint64 `json:"compacted_through,omitempty"`
-	Applied                 int    `json:"applied"`
-	AppliedThrough          uint64 `json:"applied_through"`
-	Batches                 int    `json:"batches,omitempty"`
-	HasMore                 bool   `json:"has_more,omitempty"`
-	FullSyncFallback        bool   `json:"full_sync_fallback,omitempty"`
-	IncrementalRecovery     bool   `json:"incremental_recovery,omitempty"`
-	RecoveryDownloadedBytes int64  `json:"recovery_downloaded_bytes,omitempty"`
-	RecoveryReusedBytes     int64  `json:"recovery_reused_bytes,omitempty"`
-	WireFormat              string `json:"wire_format,omitempty"`
+	Source                    string `json:"source"`
+	AfterSequence             uint64 `json:"after_sequence"`
+	LastSequence              uint64 `json:"last_sequence"`
+	CompactedThrough          uint64 `json:"compacted_through,omitempty"`
+	Applied                   int    `json:"applied"`
+	AppliedThrough            uint64 `json:"applied_through"`
+	Batches                   int    `json:"batches,omitempty"`
+	HasMore                   bool   `json:"has_more,omitempty"`
+	FullSyncFallback          bool   `json:"full_sync_fallback,omitempty"`
+	IncrementalRecovery       bool   `json:"incremental_recovery,omitempty"`
+	RecoveryCheckpointAdopted bool   `json:"recovery_checkpoint_adopted,omitempty"`
+	RecoveryDownloadedBytes   int64  `json:"recovery_downloaded_bytes,omitempty"`
+	RecoveryReusedBytes       int64  `json:"recovery_reused_bytes,omitempty"`
+	WireFormat                string `json:"wire_format,omitempty"`
 }
 
 type commandJournalEntry struct {

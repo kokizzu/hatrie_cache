@@ -125,13 +125,12 @@ func BenchmarkExistingReplicaRecovery10k(b *testing.B) {
 				b.StartTimer()
 				if test.incremental {
 					_, err = pullJournalIncrementalRecovery(context.Background(), targetTrie, targetJournal, journalPullerConfig{
-						Source:                 server.URL,
-						RecoveryRepositoryPath: localRepository,
-						StorageFormat:          hatriecache.DefaultStorageFormat,
-						Client:                 server.Client(),
-						PersistFullSync: func() error {
-							return targetStore.Save(targetTrie)
-						},
+						Source:                  server.URL,
+						RecoveryRepositoryPath:  localRepository,
+						RecoveryStageParent:     filepath.Dir(targetStore.Path()),
+						StorageFormat:           hatriecache.DefaultStorageFormat,
+						Client:                  server.Client(),
+						AdoptRecoveryCheckpoint: targetStore.AdoptCheckpoint,
 					}, baseRecovery.Manifest.JournalSequence)
 				} else {
 					snapshotPath := filepath.Join(iterationRoot, "recovery.snapshot")

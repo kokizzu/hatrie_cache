@@ -283,25 +283,33 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, snapshotFormat(cfg), stderr)
 	defer stopSnapshots()
 	var persistFullSync func() error
+	var adoptRecoveryCheckpoint func(string) error
+	var recoveryStageParent string
 	if dbStore != nil {
 		persistFullSync = func() error { return dbStore.Save(trie) }
+		if pebbleStore, ok := dbStore.(*hatriecache.PebbleStore); ok {
+			adoptRecoveryCheckpoint = pebbleStore.AdoptCheckpoint
+			recoveryStageParent = filepath.Dir(pebbleStore.Path())
+		}
 	}
 	stopJournalPuller := startJournalPuller(ctx, trie, journal, journalPullerConfig{
-		Source:                 cfg.journalPullSource,
-		StatePath:              cfg.journalPullStatePath,
-		Interval:               cfg.journalPullInterval,
-		Timeout:                cfg.journalPullTimeout,
-		Limit:                  cfg.journalPullLimit,
-		MaxBatches:             cfg.journalPullMaxBatches,
-		Dirty:                  levelDBDirtyTracker,
-		FullSyncFallback:       cfg.journalPullFullSyncFallback,
-		IncrementalRecovery:    cfg.journalPullIncrementalRecovery && dbStore != nil && dbStore.Backend() == hatriecache.StorageBackendPebble,
-		AuthToken:              cfg.replicationAuthToken,
-		SnapshotPath:           pullSnapshotPath,
-		RecoveryRepositoryPath: journalPullRecoveryRepositoryPath(cfg.journalPullStatePath, cfg.journalPullSource),
-		StorageFormat:          storageFormat(cfg),
-		WireFormat:             hatriecache.CommandJournalWireFormat(cfg.journalPullWireFormat),
-		PersistFullSync:        persistFullSync,
+		Source:                  cfg.journalPullSource,
+		StatePath:               cfg.journalPullStatePath,
+		Interval:                cfg.journalPullInterval,
+		Timeout:                 cfg.journalPullTimeout,
+		Limit:                   cfg.journalPullLimit,
+		MaxBatches:              cfg.journalPullMaxBatches,
+		Dirty:                   levelDBDirtyTracker,
+		FullSyncFallback:        cfg.journalPullFullSyncFallback,
+		IncrementalRecovery:     cfg.journalPullIncrementalRecovery && dbStore != nil && dbStore.Backend() == hatriecache.StorageBackendPebble,
+		AuthToken:               cfg.replicationAuthToken,
+		SnapshotPath:            pullSnapshotPath,
+		RecoveryRepositoryPath:  journalPullRecoveryRepositoryPath(cfg.journalPullStatePath, cfg.journalPullSource),
+		RecoveryStageParent:     recoveryStageParent,
+		StorageFormat:           storageFormat(cfg),
+		WireFormat:              hatriecache.CommandJournalWireFormat(cfg.journalPullWireFormat),
+		PersistFullSync:         persistFullSync,
+		AdoptRecoveryCheckpoint: adoptRecoveryCheckpoint,
 	}, stderr)
 	defer stopJournalPuller()
 
@@ -2329,22 +2337,24 @@ func replicationSyncResultLogMessage(result hatriecache.ReplicationResult) strin
 }
 
 type journalPullerConfig struct {
-	Source                 string
-	StatePath              string
-	Interval               time.Duration
-	Timeout                time.Duration
-	Limit                  uint64
-	MaxBatches             uint64
-	Dirty                  *hatriecache.LevelDBDirtyTracker
-	FullSyncFallback       bool
-	IncrementalRecovery    bool
-	AuthToken              string
-	Client                 *http.Client
-	SnapshotPath           string
-	RecoveryRepositoryPath string
-	StorageFormat          hatriecache.StorageFormat
-	WireFormat             hatriecache.CommandJournalWireFormat
-	PersistFullSync        func() error
+	Source                  string
+	StatePath               string
+	Interval                time.Duration
+	Timeout                 time.Duration
+	Limit                   uint64
+	MaxBatches              uint64
+	Dirty                   *hatriecache.LevelDBDirtyTracker
+	FullSyncFallback        bool
+	IncrementalRecovery     bool
+	AuthToken               string
+	Client                  *http.Client
+	SnapshotPath            string
+	RecoveryRepositoryPath  string
+	RecoveryStageParent     string
+	StorageFormat           hatriecache.StorageFormat
+	WireFormat              hatriecache.CommandJournalWireFormat
+	PersistFullSync         func() error
+	AdoptRecoveryCheckpoint func(string) error
 }
 
 type journalPullState struct {
@@ -2428,6 +2438,7 @@ func pullJournalOnce(ctx context.Context, trie *hatriecache.HatTrie, journal *ha
 				if recoveryErr == nil {
 					result.FullSyncFallback = true
 					result.IncrementalRecovery = true
+					result.RecoveryCheckpointAdopted = cfg.AdoptRecoveryCheckpoint != nil
 					result.LastSequence = recovery.Manifest.JournalSequence
 					result.AppliedThrough = recovery.Manifest.JournalSequence
 					result.RecoveryDownloadedBytes = recovery.DownloadedBytes
@@ -2497,7 +2508,10 @@ func pullJournalIncrementalRecovery(ctx context.Context, trie *hatriecache.HatTr
 	if format != configuredFormat {
 		return hatriecache.CommandJournalRecoveryResult{}, fmt.Errorf("incremental recovery storage format %q does not match configured format %q", format, configuredFormat)
 	}
-	parent := filepath.Dir(cfg.RecoveryRepositoryPath)
+	parent := cfg.RecoveryStageParent
+	if parent == "" {
+		parent = filepath.Dir(cfg.RecoveryRepositoryPath)
+	}
 	stagingRoot, err := os.MkdirTemp(parent, ".journal-recovery-stage-*")
 	if err != nil {
 		return hatriecache.CommandJournalRecoveryResult{}, err
@@ -2516,6 +2530,7 @@ func pullJournalIncrementalRecovery(ctx context.Context, trie *hatriecache.HatTr
 	if err != nil {
 		return hatriecache.CommandJournalRecoveryResult{}, err
 	}
+	dirty := cfg.Dirty.Snapshot()
 	_, replaceErr := journal.ReplaceWithPersistentStore(trie, stagedStore, recovery.Manifest.JournalSequence)
 	closeErr := stagedStore.Close()
 	if replaceErr != nil {
@@ -2524,10 +2539,16 @@ func pullJournalIncrementalRecovery(ctx context.Context, trie *hatriecache.HatTr
 	if closeErr != nil {
 		return hatriecache.CommandJournalRecoveryResult{}, closeErr
 	}
-	if cfg.PersistFullSync != nil {
+	if cfg.AdoptRecoveryCheckpoint != nil {
+		if err := cfg.AdoptRecoveryCheckpoint(stagedStorePath); err != nil {
+			return hatriecache.CommandJournalRecoveryResult{}, fmt.Errorf("incremental recovery checkpoint adoption: %w", err)
+		}
+		cfg.Dirty.Clear(dirty)
+	} else if cfg.PersistFullSync != nil {
 		if err := cfg.PersistFullSync(); err != nil {
 			return hatriecache.CommandJournalRecoveryResult{}, fmt.Errorf("incremental recovery persistence: %w", err)
 		}
+		cfg.Dirty.Clear(dirty)
 	}
 	return recovery, nil
 }

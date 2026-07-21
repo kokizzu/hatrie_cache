@@ -1202,7 +1202,9 @@ an existing Pebble follower first requests `/api/journal/recovery`, verifies its
 source-specific content-addressed object cache, downloads only missing
 checkpoint objects, checksum-stages an exact store, replaces the complete key
 set (including stale-key deletion), resets its local journal checkpoint,
-performs a full save to its open Pebble DB, and only then advances `JOURNAL_PULL_STATE_PATH`.
+atomically adopts the verified checkpoint as its active Pebble generation, and
+only then advances `JOURNAL_PULL_STATE_PATH`. The configured DB path and shared
+store handle remain stable for background persistence and monitoring.
 The leader repository defaults to
 `DB_PATH.journal-recovery-repository`; the follower cache is derived from the
 state path and a hash of `JOURNAL_PULL_SOURCE`. Both are created only when
@@ -1224,7 +1226,13 @@ exist. Set `JOURNAL_PULL_INCREMENTAL_RECOVERY=false` to skip repository
 negotiation and use the snapshot fallback directly. On the 10,000-key,
 1%-changed fixture, repository recovery is 1.62x faster, uses 1.05x less heap,
 performs 2.26x fewer allocations, and transfers 56.39x fewer response-body
-bytes. See [BENCHMARK.md](BENCHMARK.md#incremental-existing-replica-recovery).
+bytes than full snapshot recovery. Direct checkpoint adoption then removes the
+remaining full local record rewrite, reducing incremental recovery heap 1.24x
+and allocations 1.34x while improving latency 1.05x. Pull status reports
+`recovery_checkpoint_adopted=true` when this path succeeds. Runtime publication
+failure rolls back and reopens the old database; startup repairs an interrupted
+`.recovery-old` exchange. See
+[BENCHMARK.md](BENCHMARK.md#active-recovered-pebble-generation).
 
 On a fresh follower whose `DB_PATH` does not exist, Pebble checkpoint bootstrap
 is enabled by default with `JOURNAL_PULL_CHECKPOINT_BOOTSTRAP=true`. Before the

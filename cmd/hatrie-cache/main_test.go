@@ -3866,11 +3866,13 @@ func TestPullJournalOnceUsesIncrementalRecoveryForExistingPebbleReplica(t *testi
 		t.Fatal(err)
 	}
 
+	var persistCalls atomic.Int64
 	result, err := pullJournalOnce(context.Background(), targetTrie, targetJournal, journalPullerConfig{
 		Source:                 server.URL,
 		StatePath:              statePath,
 		SnapshotPath:           filepath.Join(root, "fallback.snapshot"),
 		RecoveryRepositoryPath: localRepository,
+		RecoveryStageParent:    filepath.Dir(targetStore.Path()),
 		StorageFormat:          hatriecache.DefaultStorageFormat,
 		Limit:                  10,
 		MaxBatches:             1,
@@ -3878,23 +3880,36 @@ func TestPullJournalOnceUsesIncrementalRecoveryForExistingPebbleReplica(t *testi
 		IncrementalRecovery:    true,
 		Client:                 server.Client(),
 		PersistFullSync: func() error {
+			persistCalls.Add(1)
 			return targetStore.Save(targetTrie)
 		},
+		AdoptRecoveryCheckpoint: targetStore.AdoptCheckpoint,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.FullSyncFallback || !result.IncrementalRecovery || result.AppliedThrough != sourceJournal.Sequence() {
+	if !result.FullSyncFallback || !result.IncrementalRecovery || !result.RecoveryCheckpointAdopted || result.AppliedThrough != sourceJournal.Sequence() {
 		t.Fatalf("incremental fallback result = %#v", result)
 	}
 	if result.RecoveryReusedBytes <= result.RecoveryDownloadedBytes || snapshotRequests.Load() != 0 {
 		t.Fatalf("recovery bytes/snapshot requests = %d/%d/%d", result.RecoveryDownloadedBytes, result.RecoveryReusedBytes, snapshotRequests.Load())
+	}
+	if persistCalls.Load() != 0 {
+		t.Fatalf("full persistence calls = %d, want checkpoint adoption", persistCalls.Load())
 	}
 	if targetTrie.Exists("stale") || targetTrie.Exists("existing:0511") || targetTrie.GetString("generation") != "changed" || targetTrie.GetString("existing:0000") != strings.Repeat("y", 256) {
 		t.Fatalf("recovered target entries = %#v", targetTrie.Entries(true)[:3])
 	}
 	if targetJournal.Sequence() != sourceJournal.Sequence() {
 		t.Fatalf("target journal sequence = %d, want %d", targetJournal.Sequence(), sourceJournal.Sequence())
+	}
+	persisted := hatriecache.CreateHatTrie()
+	defer persisted.Destroy()
+	if _, err := targetStore.Load(persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Exists("stale") || persisted.Exists("existing:0511") || persisted.GetString("generation") != "changed" {
+		t.Fatalf("adopted persistent entries = %#v", persisted.Entries(true)[:3])
 	}
 	after, err := loadJournalPullState(statePath, server.URL)
 	if err != nil || after != sourceJournal.Sequence() {
