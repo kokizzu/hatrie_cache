@@ -157,22 +157,23 @@ TARANTOOL_WORK_DIR ?=
 HATRIE_COMMAND_BENCH ?= ^BenchmarkCommandFeature$$
 HATRIE_TRANSPORT_BENCH ?= ^BenchmarkCommandTransportFeature$$
 HATRIE_PIPELINE_OPS ?= 16
-BENCH_CI_SMOKE_BENCHTIME ?= 5x
-BENCH_CI_SMOKE_COUNT ?= 1
-BENCH_CI_SMOKE_COMMAND_BENCH ?= ^BenchmarkCommandFeature/(StringGet|ReservoirSampleAdd)$$
-BENCH_CI_SMOKE_TRANSPORT_BENCH ?= ^BenchmarkCommandTransportFeature/InProcess/(StringSet|StringGet)$$
-BENCH_CI_SMOKE_SERIALIZATION_BENCH ?= Benchmark(CommandWireJSON|CommandWireProtobuf)$$
-BENCH_CI_SMOKE_CHECK_THRESHOLDS ?= 0
-BENCH_CI_SMOKE_MAX_COMMAND_NS_OP ?= 250000
-BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP ?= 500000
-BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP ?= 250000
-BENCH_CI_SMOKE_MAX_B_OP ?= 1048576
-BENCH_CI_SMOKE_MAX_ALLOCS_OP ?= 512
-BENCH_CI_SMOKE_ARTIFACT_DIR ?=
-BENCH_CI_SMOKE_BASELINE_JSON ?=
-BENCH_CI_SMOKE_MAX_REGRESSION_PCT ?= 20
-BENCH_CI_SMOKE_COMPARE_MEMORY ?= 0
-BENCH_CI_SMOKE_RUN_ID ?=
+BENCH_SMOKE_BENCHTIME ?= 5x
+BENCH_SMOKE_COUNT ?= 1
+BENCH_SMOKE_COMMAND_BENCH ?= ^BenchmarkCommandFeature/(StringGet|ReservoirSampleAdd)$$
+BENCH_SMOKE_TRANSPORT_BENCH ?= ^BenchmarkCommandTransportFeature/InProcess/(StringSet|StringGet)$$
+BENCH_SMOKE_SERIALIZATION_BENCH ?= Benchmark(CommandWireJSON|CommandWireProtobuf)$$
+BENCH_SMOKE_CHECK_THRESHOLDS ?= 0
+BENCH_SMOKE_MAX_COMMAND_NS_OP ?= 250000
+BENCH_SMOKE_MAX_TRANSPORT_NS_OP ?= 500000
+BENCH_SMOKE_MAX_SERIALIZATION_NS_OP ?= 250000
+BENCH_SMOKE_MAX_B_OP ?= 1048576
+BENCH_SMOKE_MAX_ALLOCS_OP ?= 512
+BENCH_SMOKE_ARTIFACT_DIR ?=
+BENCH_SMOKE_BASELINE_JSON ?=
+BENCH_SMOKE_MAX_REGRESSION_PCT ?= 20
+BENCH_SMOKE_COMPARE_MEMORY ?= 0
+BENCH_SMOKE_RUN_ID ?=
+VERIFY_LOCAL_DOCKER_COMPOSE ?= 0
 BENCHMARK_MD_PATH ?= BENCHMARK.md
 CONFIG_PATH ?=
 CONFIG_PROFILE ?= production
@@ -186,11 +187,16 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-go verify-race verify-c verify-frontend verify-ops verify-ci verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-native-command-batch bench-scalar-batch bench-structured-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-ci-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-native-command-batch bench-scalar-batch bench-structured-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
-verify: verify-go verify-c verify-frontend verify-ops
+verify: verify-local
+
+verify-local: verify-local-contract verify-go verify-c verify-frontend verify-ops verify-benchmark-md-update
+
+verify-local-contract:
+	VERIFY_LOCAL_DOCKER_COMPOSE='$(VERIFY_LOCAL_DOCKER_COMPOSE)' ./scripts/verify-local.sh
 
 verify-go:
 	./scripts/verify-go.sh
@@ -207,9 +213,6 @@ verify-frontend:
 
 verify-ops:
 	./scripts/verify-ops.sh
-
-verify-ci:
-	./scripts/verify-ci.sh
 
 verify-benchmark-md-update:
 	./scripts/verify-benchmark-md-update.sh
@@ -340,8 +343,8 @@ bench-tarantool-command-features:
 bench-command-comparison:
 	BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-command-comparison.sh
 
-bench-ci-smoke:
-	BENCH_CI_SMOKE_BENCHTIME='$(BENCH_CI_SMOKE_BENCHTIME)' BENCH_CI_SMOKE_COUNT='$(BENCH_CI_SMOKE_COUNT)' BENCH_CI_SMOKE_COMMAND_BENCH='$(BENCH_CI_SMOKE_COMMAND_BENCH)' BENCH_CI_SMOKE_TRANSPORT_BENCH='$(BENCH_CI_SMOKE_TRANSPORT_BENCH)' BENCH_CI_SMOKE_SERIALIZATION_BENCH='$(BENCH_CI_SMOKE_SERIALIZATION_BENCH)' BENCH_CI_SMOKE_CHECK_THRESHOLDS='$(BENCH_CI_SMOKE_CHECK_THRESHOLDS)' BENCH_CI_SMOKE_MAX_COMMAND_NS_OP='$(BENCH_CI_SMOKE_MAX_COMMAND_NS_OP)' BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP='$(BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP)' BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP='$(BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP)' BENCH_CI_SMOKE_MAX_B_OP='$(BENCH_CI_SMOKE_MAX_B_OP)' BENCH_CI_SMOKE_MAX_ALLOCS_OP='$(BENCH_CI_SMOKE_MAX_ALLOCS_OP)' BENCH_CI_SMOKE_ARTIFACT_DIR='$(BENCH_CI_SMOKE_ARTIFACT_DIR)' BENCH_CI_SMOKE_BASELINE_JSON='$(BENCH_CI_SMOKE_BASELINE_JSON)' BENCH_CI_SMOKE_MAX_REGRESSION_PCT='$(BENCH_CI_SMOKE_MAX_REGRESSION_PCT)' BENCH_CI_SMOKE_COMPARE_MEMORY='$(BENCH_CI_SMOKE_COMPARE_MEMORY)' BENCH_CI_SMOKE_RUN_ID='$(BENCH_CI_SMOKE_RUN_ID)' ./scripts/benchmark-ci-smoke.sh
+bench-smoke:
+	BENCH_SMOKE_BENCHTIME='$(BENCH_SMOKE_BENCHTIME)' BENCH_SMOKE_COUNT='$(BENCH_SMOKE_COUNT)' BENCH_SMOKE_COMMAND_BENCH='$(BENCH_SMOKE_COMMAND_BENCH)' BENCH_SMOKE_TRANSPORT_BENCH='$(BENCH_SMOKE_TRANSPORT_BENCH)' BENCH_SMOKE_SERIALIZATION_BENCH='$(BENCH_SMOKE_SERIALIZATION_BENCH)' BENCH_SMOKE_CHECK_THRESHOLDS='$(BENCH_SMOKE_CHECK_THRESHOLDS)' BENCH_SMOKE_MAX_COMMAND_NS_OP='$(BENCH_SMOKE_MAX_COMMAND_NS_OP)' BENCH_SMOKE_MAX_TRANSPORT_NS_OP='$(BENCH_SMOKE_MAX_TRANSPORT_NS_OP)' BENCH_SMOKE_MAX_SERIALIZATION_NS_OP='$(BENCH_SMOKE_MAX_SERIALIZATION_NS_OP)' BENCH_SMOKE_MAX_B_OP='$(BENCH_SMOKE_MAX_B_OP)' BENCH_SMOKE_MAX_ALLOCS_OP='$(BENCH_SMOKE_MAX_ALLOCS_OP)' BENCH_SMOKE_ARTIFACT_DIR='$(BENCH_SMOKE_ARTIFACT_DIR)' BENCH_SMOKE_BASELINE_JSON='$(BENCH_SMOKE_BASELINE_JSON)' BENCH_SMOKE_MAX_REGRESSION_PCT='$(BENCH_SMOKE_MAX_REGRESSION_PCT)' BENCH_SMOKE_COMPARE_MEMORY='$(BENCH_SMOKE_COMPARE_MEMORY)' BENCH_SMOKE_RUN_ID='$(BENCH_SMOKE_RUN_ID)' ./scripts/benchmark-smoke.sh
 
 benchmark-md:
 	BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' BENCHMARK_MD_PATH='$(BENCHMARK_MD_PATH)' ./scripts/update-benchmark-md.sh

@@ -43,33 +43,33 @@ func TestHatTrieTransportFeatureBenchmarkScriptReportsRSS(t *testing.T) {
 	}
 }
 
-func TestBenchmarkCISmokeScriptSupportsRegressionThresholds(t *testing.T) {
-	data, err := os.ReadFile("scripts/benchmark-ci-smoke.sh")
+func TestBenchmarkSmokeScriptSupportsRegressionThresholds(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-smoke.sh")
 	if err != nil {
-		t.Fatalf("ReadFile(benchmark-ci-smoke.sh) error = %v", err)
+		t.Fatalf("ReadFile(benchmark-smoke.sh) error = %v", err)
 	}
 	script := string(data)
 	for _, token := range []string{
-		"BENCH_CI_SMOKE_CHECK_THRESHOLDS",
-		"BENCH_CI_SMOKE_MAX_COMMAND_NS_OP",
-		"BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP",
-		"BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP",
-		"BENCH_CI_SMOKE_MAX_B_OP",
-		"BENCH_CI_SMOKE_MAX_ALLOCS_OP",
-		"BENCH_CI_SMOKE_ARTIFACT_DIR",
-		"BENCH_CI_SMOKE_BASELINE_JSON",
-		"BENCH_CI_SMOKE_MAX_REGRESSION_PCT",
-		"BENCH_CI_SMOKE_COMPARE_MEMORY",
+		"BENCH_SMOKE_CHECK_THRESHOLDS",
+		"BENCH_SMOKE_MAX_COMMAND_NS_OP",
+		"BENCH_SMOKE_MAX_TRANSPORT_NS_OP",
+		"BENCH_SMOKE_MAX_SERIALIZATION_NS_OP",
+		"BENCH_SMOKE_MAX_B_OP",
+		"BENCH_SMOKE_MAX_ALLOCS_OP",
+		"BENCH_SMOKE_ARTIFACT_DIR",
+		"BENCH_SMOKE_BASELINE_JSON",
+		"BENCH_SMOKE_MAX_REGRESSION_PCT",
+		"BENCH_SMOKE_COMPARE_MEMORY",
 		"ns/op",
 		"B/op",
 		"allocs/op",
-		"benchmark-ci-smoke.json",
-		"benchmark-ci-smoke.md",
+		"benchmark-smoke.json",
+		"benchmark-smoke.md",
 		"go run ./cmd/hatrie-benchcmp",
-		"Benchmark CI smoke regression guard failed",
+		"Benchmark smoke regression guard failed",
 	} {
 		if !strings.Contains(script, token) {
-			t.Fatalf("benchmark-ci-smoke.sh missing threshold token %q", token)
+			t.Fatalf("benchmark-smoke.sh missing threshold token %q", token)
 		}
 	}
 
@@ -79,19 +79,19 @@ func TestBenchmarkCISmokeScriptSupportsRegressionThresholds(t *testing.T) {
 	}
 	makefile := string(data)
 	for _, token := range []string{
-		"BENCH_CI_SMOKE_CHECK_THRESHOLDS ?= 0",
-		"BENCH_CI_SMOKE_MAX_COMMAND_NS_OP ?=",
-		"BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP ?=",
-		"BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP ?=",
-		"BENCH_CI_SMOKE_MAX_B_OP ?=",
-		"BENCH_CI_SMOKE_MAX_ALLOCS_OP ?=",
-		"BENCH_CI_SMOKE_ARTIFACT_DIR ?=",
-		"BENCH_CI_SMOKE_BASELINE_JSON ?=",
-		"BENCH_CI_SMOKE_MAX_REGRESSION_PCT ?= 20",
-		"BENCH_CI_SMOKE_COMPARE_MEMORY ?= 0",
+		"BENCH_SMOKE_CHECK_THRESHOLDS ?= 0",
+		"BENCH_SMOKE_MAX_COMMAND_NS_OP ?=",
+		"BENCH_SMOKE_MAX_TRANSPORT_NS_OP ?=",
+		"BENCH_SMOKE_MAX_SERIALIZATION_NS_OP ?=",
+		"BENCH_SMOKE_MAX_B_OP ?=",
+		"BENCH_SMOKE_MAX_ALLOCS_OP ?=",
+		"BENCH_SMOKE_ARTIFACT_DIR ?=",
+		"BENCH_SMOKE_BASELINE_JSON ?=",
+		"BENCH_SMOKE_MAX_REGRESSION_PCT ?= 20",
+		"BENCH_SMOKE_COMPARE_MEMORY ?= 0",
 	} {
 		if !strings.Contains(makefile, token) {
-			t.Fatalf("Makefile missing benchmark CI smoke threshold token %q", token)
+			t.Fatalf("Makefile missing benchmark smoke threshold token %q", token)
 		}
 	}
 }

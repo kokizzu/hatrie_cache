@@ -19,7 +19,7 @@ persistent command transport.
 | `6c5dc30` | Dirty-key LevelDB sync | Periodic LevelDB persistence can write only changed keys after the initial full save, reducing repeated write work. |
 | `9aff288` | Ops-state Prometheus metrics | Storage operations, replication queue state, retries, failures, and circuit-breaker state are visible in `/metrics`. |
 | `f3dca88` | Multi-node replication integration test | Two real monitoring servers now verify end-to-end leader write replication. |
-| `a2f93d9` | Benchmark artifact CI publishing | CI writes benchmark smoke JSON/Markdown/TSV/raw files and uploads them as workflow artifacts. |
+| `a2f93d9` | Benchmark artifact generation | Benchmark smoke writes JSON/Markdown/TSV/raw files locally; the later local-verification pass removed hosted workflow publishing. |
 | `e36d412` | Artifact-driven benchmark docs | `make benchmark-md` regenerates generated `BENCHMARK.md` regions from benchmark artifacts. |
 | `96ed123` | Narrow replication auth token | `REPLICATION_AUTH_TOKEN` authenticates outbound HTTP replication and only permits inbound internal replication commands. |
 | `a2ca705` | LevelDB replication outbox backend | Async replication can use a low-overhead LevelDB outbox by default, with JSON retained as a configurable fallback. |
@@ -65,9 +65,9 @@ persistent command transport.
   changing the command API.
 - LevelDB periodic sync has lower expected write amplification for mostly idle
   datasets because unchanged keys are skipped after the first full save.
-- Benchmark evidence is easier to preserve and reproduce: CI uploads artifacts,
-  and `BENCHMARK.md` can be refreshed from those artifacts instead of manually
-  copying tables.
+- Benchmark evidence is easier to preserve and reproduce: `make bench-smoke`
+  writes local artifacts, and `BENCHMARK.md` can be refreshed from artifacts
+  instead of manually copying tables.
 - The replication token is intentionally narrower than `MONITORING_AUTH_TOKEN`;
   it is not accepted for health, metrics, config, or normal client commands.
 - Target-local replication batching reduces anti-entropy and async replay
@@ -220,9 +220,9 @@ make run CMD='go test . -run=NONE -bench="BenchmarkHTTPReplicatorSyncAllBatching
 make run CMD='go test . -run=NONE -bench=BenchmarkReplicationSyncTransport -benchmem -benchtime=10x -count=7'
 make bench-journal-catchup BENCHTIME=5x COUNT=7
 make run CMD='go test ./...'
-make verify-ci
+make verify-local
 make verify-benchmark-md-update
-make bench-ci-smoke BENCH_CI_SMOKE_ARTIFACT_DIR=/tmp/hatrie-bench-ci-smoke-feature BENCH_CI_SMOKE_RUN_ID=feature
+make bench-smoke BENCH_SMOKE_ARTIFACT_DIR=/tmp/hatrie-bench-smoke-feature BENCH_SMOKE_RUN_ID=feature
 ```
 
 All commits listed above were pushed to `master`.

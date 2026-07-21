@@ -114,31 +114,31 @@ The one-table summary for all measured earlier and final architecture
 improvements is in
 [`BENCHMARK.md`](BENCHMARK.md#measured-improvement-summary).
 
-Run the CI benchmark smoke locally:
+Run the benchmark smoke locally:
 
 ```
-make bench-ci-smoke
-make bench-ci-smoke BENCH_CI_SMOKE_CHECK_THRESHOLDS=1
-make bench-ci-smoke BENCH_CI_SMOKE_CHECK_THRESHOLDS=1 BENCH_CI_SMOKE_MAX_COMMAND_NS_OP=100000 BENCH_CI_SMOKE_MAX_B_OP=262144
-make bench-ci-smoke BENCH_CI_SMOKE_ARTIFACT_DIR=build/benchmarks
-make bench-ci-smoke BENCH_CI_SMOKE_ARTIFACT_DIR=build/current BENCH_CI_SMOKE_BASELINE_JSON=build/main/benchmark-ci-smoke.json
+make bench-smoke
+make bench-smoke BENCH_SMOKE_CHECK_THRESHOLDS=1
+make bench-smoke BENCH_SMOKE_CHECK_THRESHOLDS=1 BENCH_SMOKE_MAX_COMMAND_NS_OP=100000 BENCH_SMOKE_MAX_B_OP=262144
+make bench-smoke BENCH_SMOKE_ARTIFACT_DIR=build/benchmarks
+make bench-smoke BENCH_SMOKE_ARTIFACT_DIR=build/current BENCH_SMOKE_BASELINE_JSON=build/main/benchmark-smoke.json
 ```
 
-`BENCH_CI_SMOKE_CHECK_THRESHOLDS=1` turns the smoke run into an optional
+`BENCH_SMOKE_CHECK_THRESHOLDS=1` turns the smoke run into an optional
 regression guard. It checks representative command, transport, and
-serialization benchmark rows against `BENCH_CI_SMOKE_MAX_COMMAND_NS_OP`,
-`BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP`,
-`BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP`, `BENCH_CI_SMOKE_MAX_B_OP`, and
-`BENCH_CI_SMOKE_MAX_ALLOCS_OP`. Set any max to `0` to disable that specific
+serialization benchmark rows against `BENCH_SMOKE_MAX_COMMAND_NS_OP`,
+`BENCH_SMOKE_MAX_TRANSPORT_NS_OP`,
+`BENCH_SMOKE_MAX_SERIALIZATION_NS_OP`, `BENCH_SMOKE_MAX_B_OP`, and
+`BENCH_SMOKE_MAX_ALLOCS_OP`. Set any max to `0` to disable that specific
 limit.
-Set `BENCH_CI_SMOKE_ARTIFACT_DIR` to write raw output plus
-`benchmark-ci-smoke.json`, `benchmark-ci-smoke.md`, and timestamped history
-copies. Set `BENCH_CI_SMOKE_BASELINE_JSON` to compare the current artifact
+Set `BENCH_SMOKE_ARTIFACT_DIR` to write raw output plus
+`benchmark-smoke.json`, `benchmark-smoke.md`, and timestamped history
+copies. Set `BENCH_SMOKE_BASELINE_JSON` to compare the current artifact
 against a baseline from `origin/master` or a checked-in/downloaded artifact;
-`BENCH_CI_SMOKE_MAX_REGRESSION_PCT` controls the allowed `ns/op` regression,
-and `BENCH_CI_SMOKE_COMPARE_MEMORY=1` also compares `B/op` and `allocs/op`.
-GitHub Actions writes these files to `build/benchmark-ci-smoke` and uploads
-them as the `benchmark-ci-smoke-<run>-<attempt>` workflow artifact.
+`BENCH_SMOKE_MAX_REGRESSION_PCT` controls the allowed `ns/op` regression,
+and `BENCH_SMOKE_COMPARE_MEMORY=1` also compares `B/op` and `allocs/op`.
+Artifacts remain in the selected local directory; timestamped copies make it
+possible to retain and compare runs without a hosted workflow.
 
 The Svelte MPA management UI lives in `svelte-mpa/`. Install and run it with:
 
@@ -162,7 +162,11 @@ MPA. It verifies real `/api/health`, `/api/storage`, `/api/storage/flush`,
 The Admin page at `/admin.html` exposes LevelDB flush/compact controls and
 replication queue/sync status.
 
-Run the full local verification suite with `make verify`.
+Run the full local verification suite with `make verify` or the explicit alias
+`make verify-local`. It checks deploy configuration, Go tests/race/coverage, C
+tests, the Svelte MPA, operations smoke tests, and benchmark-document freshness.
+Set `VERIFY_LOCAL_DOCKER_COMPOSE=1` to include Docker Compose config validation;
+run `make docker-build` separately when an image build is required.
 The C verifier automatically runs AddressSanitizer/UBSan leak and undefined
 behavior checks when the local compiler supports them; use
 `make verify-c SANITIZE_C=0` to skip that pass or `SANITIZE_C=1` to require it.
@@ -189,13 +193,12 @@ make run CMD='go env GOMOD'
 
 This section is the operator runbook for installing, running, backing up,
 recovering, and joining nodes to a cluster. The examples use the Makefile
-wrappers so the same flags and defaults are used in development, CI, and local
+wrappers so the same flags and defaults are used in development and local
 operations.
 
-CI is defined in `.github/workflows/ci.yml` and runs config guardrails, Go
-verification, C checks, ops smoke tests, frontend verification, and a
-production Docker image build on pushes and pull requests. `make verify-ci`
-checks the workflow guardrails plus deploy config/topology examples locally.
+No hosted GitHub Actions workflow is checked in. Before pushing, run
+`make verify-local`; use `make bench-smoke BENCH_SMOKE_CHECK_THRESHOLDS=1` for
+the optional performance guard and `make docker-build` for the production image.
 
 ### Install And Build
 

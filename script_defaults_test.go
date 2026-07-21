@@ -474,7 +474,8 @@ func TestVerifyOpsScriptExercisesRestoreAndJournalPull(t *testing.T) {
 	}
 	makefileText := string(makefile)
 	for _, token := range []string{
-		"verify: verify-go verify-c verify-frontend verify-ops",
+		"verify: verify-local",
+		"verify-local: verify-local-contract verify-go verify-c verify-frontend verify-ops verify-benchmark-md-update",
 		"verify-ops:",
 		"./scripts/verify-ops.sh",
 	} {

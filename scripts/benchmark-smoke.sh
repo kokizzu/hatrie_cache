@@ -1,30 +1,30 @@
 #!/usr/bin/env sh
 set -eu
 
-benchtime=${BENCH_CI_SMOKE_BENCHTIME:-${BENCHTIME:-5x}}
-count=${BENCH_CI_SMOKE_COUNT:-${COUNT:-1}}
-command_bench=${BENCH_CI_SMOKE_COMMAND_BENCH:-^BenchmarkCommandFeature/(StringGet|ReservoirSampleAdd)$}
-transport_bench=${BENCH_CI_SMOKE_TRANSPORT_BENCH:-^BenchmarkCommandTransportFeature/InProcess/(StringSet|StringGet)$}
-serialization_bench=${BENCH_CI_SMOKE_SERIALIZATION_BENCH:-Benchmark(CommandWireJSON|CommandWireProtobuf)$}
-check_thresholds=${BENCH_CI_SMOKE_CHECK_THRESHOLDS:-0}
-max_command_ns=${BENCH_CI_SMOKE_MAX_COMMAND_NS_OP:-250000}
-max_transport_ns=${BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP:-500000}
-max_serialization_ns=${BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP:-250000}
-max_b_op=${BENCH_CI_SMOKE_MAX_B_OP:-1048576}
-max_allocs_op=${BENCH_CI_SMOKE_MAX_ALLOCS_OP:-512}
-artifact_dir=${BENCH_CI_SMOKE_ARTIFACT_DIR:-}
-baseline_json=${BENCH_CI_SMOKE_BASELINE_JSON:-}
-max_regression_pct=${BENCH_CI_SMOKE_MAX_REGRESSION_PCT:-20}
-compare_memory=${BENCH_CI_SMOKE_COMPARE_MEMORY:-0}
-run_id=${BENCH_CI_SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
+benchtime=${BENCH_SMOKE_BENCHTIME:-${BENCHTIME:-5x}}
+count=${BENCH_SMOKE_COUNT:-${COUNT:-1}}
+command_bench=${BENCH_SMOKE_COMMAND_BENCH:-^BenchmarkCommandFeature/(StringGet|ReservoirSampleAdd)$}
+transport_bench=${BENCH_SMOKE_TRANSPORT_BENCH:-^BenchmarkCommandTransportFeature/InProcess/(StringSet|StringGet)$}
+serialization_bench=${BENCH_SMOKE_SERIALIZATION_BENCH:-Benchmark(CommandWireJSON|CommandWireProtobuf)$}
+check_thresholds=${BENCH_SMOKE_CHECK_THRESHOLDS:-0}
+max_command_ns=${BENCH_SMOKE_MAX_COMMAND_NS_OP:-250000}
+max_transport_ns=${BENCH_SMOKE_MAX_TRANSPORT_NS_OP:-500000}
+max_serialization_ns=${BENCH_SMOKE_MAX_SERIALIZATION_NS_OP:-250000}
+max_b_op=${BENCH_SMOKE_MAX_B_OP:-1048576}
+max_allocs_op=${BENCH_SMOKE_MAX_ALLOCS_OP:-512}
+artifact_dir=${BENCH_SMOKE_ARTIFACT_DIR:-}
+baseline_json=${BENCH_SMOKE_BASELINE_JSON:-}
+max_regression_pct=${BENCH_SMOKE_MAX_REGRESSION_PCT:-20}
+compare_memory=${BENCH_SMOKE_COMPARE_MEMORY:-0}
+run_id=${BENCH_SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/hatrie-bench-ci-smoke.XXXXXX")
+tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/hatrie-benchmark-smoke.XXXXXX")
 command_output="$tmp_dir/command.txt"
 transport_output="$tmp_dir/transport.txt"
 serialization_output="$tmp_dir/serialization.txt"
 rows_file="$tmp_dir/rows.tsv"
-current_json="$tmp_dir/benchmark-ci-smoke.json"
-current_md="$tmp_dir/benchmark-ci-smoke.md"
+current_json="$tmp_dir/benchmark-smoke.json"
+current_md="$tmp_dir/benchmark-smoke.md"
 
 cleanup() {
 	rm -rf "$tmp_dir"
@@ -142,7 +142,7 @@ write_json_artifact() {
 	output_file=$1
 	{
 		printf '{\n'
-		printf '  "schema": "hatrie-cache-benchmark-ci-smoke/v1",\n'
+		printf '  "schema": "hatrie-cache-benchmark-smoke/v1",\n'
 		printf '  "run_id": "%s",\n' "$run_id"
 		printf '  "created_at": "%s",\n' "$created_at"
 		printf '  "benchtime": "%s",\n' "$benchtime"
@@ -183,7 +183,7 @@ json_escape() {
 write_markdown_artifact() {
 	output_file=$1
 	{
-		printf '%s\n\n' '# Benchmark CI Smoke'
+		printf '%s\n\n' '# Benchmark Smoke'
 		printf '%s\n' "- Run ID: \`$run_id\`"
 		printf '%s\n' "- Created at: \`$created_at\`"
 		printf '%s\n' "- Benchtime: \`$benchtime\`"
@@ -206,11 +206,11 @@ write_artifacts() {
 		cp "$command_output" "$artifact_dir/raw/command.txt"
 		cp "$transport_output" "$artifact_dir/raw/transport.txt"
 		cp "$serialization_output" "$artifact_dir/raw/serialization.txt"
-		cp "$rows_file" "$artifact_dir/benchmark-ci-smoke.tsv"
-		cp "$current_json" "$artifact_dir/benchmark-ci-smoke.json"
-		cp "$current_md" "$artifact_dir/benchmark-ci-smoke.md"
-		cp "$current_json" "$artifact_dir/benchmark-ci-smoke-$run_id.json"
-		cp "$current_md" "$artifact_dir/benchmark-ci-smoke-$run_id.md"
+		cp "$rows_file" "$artifact_dir/benchmark-smoke.tsv"
+		cp "$current_json" "$artifact_dir/benchmark-smoke.json"
+		cp "$current_md" "$artifact_dir/benchmark-smoke.md"
+		cp "$current_json" "$artifact_dir/benchmark-smoke-$run_id.json"
+		cp "$current_md" "$artifact_dir/benchmark-smoke-$run_id.md"
 		printf '\nBenchmark artifacts written to %s\n' "$artifact_dir"
 	fi
 }
@@ -231,7 +231,7 @@ compare_baseline() {
 		-compare-memory="$compare_memory_flag"
 }
 
-printf 'Benchmark CI smoke: benchtime=%s count=%s\n\n' "$benchtime" "$count"
+printf 'Benchmark smoke: benchtime=%s count=%s\n\n' "$benchtime" "$count"
 
 printf '== Command feature benchmarks ==\n'
 run_capture "$command_output" env HATRIE_BENCH="$command_bench" BENCHTIME="$benchtime" COUNT="$count" ./scripts/benchmark-hatrie-command-features.sh
@@ -250,10 +250,10 @@ if bool_true "$check_thresholds"; then
 	check_benchmark_file "Transport feature" "$transport_output" "$max_transport_ns" || threshold_status=1
 	check_benchmark_file "Serialization" "$serialization_output" "$max_serialization_ns" || threshold_status=1
 	if [ "$threshold_status" -ne 0 ]; then
-		echo "Benchmark CI smoke regression guard failed" >&2
+		echo "Benchmark smoke regression guard failed" >&2
 		exit 1
 	fi
-	echo "Benchmark CI smoke regression guard passed"
+	echo "Benchmark smoke regression guard passed"
 fi
 
 if [ -n "$artifact_dir" ] || [ -n "$baseline_json" ]; then

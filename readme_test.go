@@ -301,19 +301,19 @@ func TestREADMEListsBenchmarkRegressionGuard(t *testing.T) {
 	}
 	readme := string(data)
 	for _, token := range []string{
-		"make bench-ci-smoke BENCH_CI_SMOKE_CHECK_THRESHOLDS=1",
-		"`BENCH_CI_SMOKE_CHECK_THRESHOLDS=1`",
-		"`BENCH_CI_SMOKE_MAX_COMMAND_NS_OP`",
-		"`BENCH_CI_SMOKE_MAX_TRANSPORT_NS_OP`",
-		"`BENCH_CI_SMOKE_MAX_SERIALIZATION_NS_OP`",
-		"`BENCH_CI_SMOKE_MAX_B_OP`",
-		"`BENCH_CI_SMOKE_MAX_ALLOCS_OP`",
-		"`BENCH_CI_SMOKE_ARTIFACT_DIR`",
-		"`benchmark-ci-smoke.json`",
-		"`benchmark-ci-smoke.md`",
-		"`BENCH_CI_SMOKE_BASELINE_JSON`",
-		"`BENCH_CI_SMOKE_MAX_REGRESSION_PCT`",
-		"`BENCH_CI_SMOKE_COMPARE_MEMORY=1`",
+		"make bench-smoke BENCH_SMOKE_CHECK_THRESHOLDS=1",
+		"`BENCH_SMOKE_CHECK_THRESHOLDS=1`",
+		"`BENCH_SMOKE_MAX_COMMAND_NS_OP`",
+		"`BENCH_SMOKE_MAX_TRANSPORT_NS_OP`",
+		"`BENCH_SMOKE_MAX_SERIALIZATION_NS_OP`",
+		"`BENCH_SMOKE_MAX_B_OP`",
+		"`BENCH_SMOKE_MAX_ALLOCS_OP`",
+		"`BENCH_SMOKE_ARTIFACT_DIR`",
+		"`benchmark-smoke.json`",
+		"`benchmark-smoke.md`",
+		"`BENCH_SMOKE_BASELINE_JSON`",
+		"`BENCH_SMOKE_MAX_REGRESSION_PCT`",
+		"`BENCH_SMOKE_COMPARE_MEMORY=1`",
 		"Set any max to `0` to disable that specific",
 	} {
 		if !strings.Contains(readme, token) {

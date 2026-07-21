@@ -5,7 +5,7 @@ resource limits, and network controls before using them outside a local test
 environment.
 
 - `systemd/hatrie-cache.service` runs one durable node from an installed binary.
-- `hatrie-cache.json` is a checked daemon config used by `make verify-ci`. It
+- `hatrie-cache.json` is a checked daemon config used by `make verify-local`. It
   uses localhost binding, audited/write-protected admin operations, binary
   LevelDB/journal records, protobuf replication payloads, periodic LevelDB sync
   and compaction, hot-load for cold starts, and a durable async replication
