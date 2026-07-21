@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,6 +56,144 @@ func TestPersistentStorageBackendsShareSaveLoadAndChurnContract(t *testing.T) {
 			}
 			if loaded != 3 || restored.GetString("name") != "updated" || restored.GetCounter("new") != 7 || restored.GetBytes("blob") == nil || restored.Exists("count") {
 				t.Fatalf("restored state = count=%d name=%q new=%d blob=%q count_exists=%v", loaded, restored.GetString("name"), restored.GetCounter("new"), restored.GetBytes("blob"), restored.Exists("count"))
+			}
+		})
+	}
+}
+
+func TestPersistentStorageBackendsCommitAppliedJournalSequenceWithState(t *testing.T) {
+	for _, backend := range []StorageBackend{StorageBackendLevelDB, StorageBackendPebble} {
+		t.Run(string(backend), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "cache")
+			store, err := OpenPersistentStoreWithFormat(path, backend, StorageFormatBinary)
+			if err != nil {
+				t.Fatalf("OpenPersistentStoreWithFormat() error = %v", err)
+			}
+			trie := newTestTrie(t)
+			trie.UpsertCounter("counter", 1)
+			if err := store.SaveWithJournalSequence(trie, 41); err != nil {
+				t.Fatalf("SaveWithJournalSequence() error = %v", err)
+			}
+			if sequence, ok, err := store.AppliedJournalSequence(); err != nil || !ok || sequence != 41 {
+				t.Fatalf("AppliedJournalSequence() = %d/%v/%v, want 41/true/nil", sequence, ok, err)
+			}
+
+			tracker := NewLevelDBDirtyTracker()
+			trie.IncrementCounter("counter", 1)
+			tracker.Mark("counter")
+			if err := store.SaveDirtyWithJournalSequence(trie, tracker, LevelDBSaveOptions{}, 42); err != nil {
+				t.Fatalf("SaveDirtyWithJournalSequence() error = %v", err)
+			}
+			if tracker.Pending() != 0 {
+				t.Fatalf("dirty tracker pending = %d, want 0", tracker.Pending())
+			}
+			if err := store.SaveDirtyWithJournalSequence(trie, tracker, LevelDBSaveOptions{}, 43); err != nil {
+				t.Fatalf("SaveDirtyWithJournalSequence(metadata only) error = %v", err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
+
+			reopened, err := OpenPersistentStoreWithFormat(path, backend, StorageFormatBinary)
+			if err != nil {
+				t.Fatalf("OpenPersistentStoreWithFormat(reopen) error = %v", err)
+			}
+			defer reopened.Close()
+			if sequence, ok, err := reopened.AppliedJournalSequence(); err != nil || !ok || sequence != 43 {
+				t.Fatalf("reopened AppliedJournalSequence() = %d/%v/%v, want 43/true/nil", sequence, ok, err)
+			}
+			restored := newTestTrie(t)
+			if count, err := reopened.Load(restored); err != nil || count != 1 || restored.GetCounter("counter") != 2 {
+				t.Fatalf("reopened Load() = %d/%v counter=%d, want 1/nil/2", count, err, restored.GetCounter("counter"))
+			}
+		})
+	}
+}
+
+func TestPersistentDirtyTrackerObservesDirectAndPartitionedMutations(t *testing.T) {
+	for _, partitions := range []int{0, 4} {
+		t.Run(fmt.Sprintf("partitions-%d", partitions), func(t *testing.T) {
+			trie := newTestTrie(t)
+			if err := trie.ConfigureLocalPartitions(partitions); err != nil {
+				t.Fatalf("ConfigureLocalPartitions() error = %v", err)
+			}
+			tracker := NewLevelDBDirtyTracker()
+			if err := trie.SetPersistentDirtyTracker(tracker); err != nil {
+				t.Fatalf("SetPersistentDirtyTracker() error = %v", err)
+			}
+			trie.UpsertString("alpha", "one")
+			trie.UpsertCounter("counter", 1)
+			trie.IncrementCounter("counter", 1)
+			trie.Delete("alpha")
+			if got := tracker.Snapshot().keys; len(got) != 2 || got[0] != "alpha" || got[1] != "counter" {
+				t.Fatalf("tracked keys = %v, want [alpha counter]", got)
+			}
+		})
+	}
+}
+
+func TestPersistentAppliedJournalSequencePreventsCounterDoubleReplay(t *testing.T) {
+	for _, backend := range []StorageBackend{StorageBackendLevelDB, StorageBackendPebble} {
+		t.Run(string(backend), func(t *testing.T) {
+			root := t.TempDir()
+			storePath := filepath.Join(root, "cache")
+			journalPath := filepath.Join(root, "commands.journal")
+			store, err := OpenPersistentStoreWithFormat(storePath, backend, StorageFormatBinary)
+			if err != nil {
+				t.Fatalf("OpenPersistentStoreWithFormat() error = %v", err)
+			}
+			journal, err := OpenCommandJournal(journalPath)
+			if err != nil {
+				t.Fatalf("OpenCommandJournal() error = %v", err)
+			}
+			trie := newTestTrie(t)
+			tracker := NewLevelDBDirtyTracker()
+			if err := trie.SetPersistentDirtyTracker(tracker); err != nil {
+				t.Fatalf("SetPersistentDirtyTracker() error = %v", err)
+			}
+			trie.UpsertCounter("counter", 0)
+			if err := store.SaveWithJournalSequence(trie, 0); err != nil {
+				t.Fatalf("SaveWithJournalSequence(0) error = %v", err)
+			}
+			tracker.Clear(tracker.Snapshot())
+			if response := journal.ExecuteCommand(trie, CacheCommandRequest{Command: "INC", Key: "counter"}); !response.OK {
+				t.Fatalf("INC response = %#v", response)
+			}
+			if err := journal.WithPersistenceBarrier(func(sequence uint64) error {
+				return store.SaveDirtyWithJournalSequence(trie, tracker, LevelDBSaveOptions{}, sequence)
+			}); err != nil {
+				t.Fatalf("persistent barrier error = %v", err)
+			}
+			if err := journal.Close(); err != nil {
+				t.Fatalf("journal Close() error = %v", err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatalf("store Close() error = %v", err)
+			}
+
+			reopenedStore, err := OpenPersistentStoreWithFormat(storePath, backend, StorageFormatBinary)
+			if err != nil {
+				t.Fatalf("OpenPersistentStoreWithFormat(reopen) error = %v", err)
+			}
+			defer reopenedStore.Close()
+			restored := newTestTrie(t)
+			if _, err := reopenedStore.Load(restored); err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			sequence, ok, err := reopenedStore.AppliedJournalSequence()
+			if err != nil || !ok || sequence != 1 {
+				t.Fatalf("AppliedJournalSequence() = %d/%v/%v, want 1/true/nil", sequence, ok, err)
+			}
+			reopenedJournal, err := OpenCommandJournal(journalPath)
+			if err != nil {
+				t.Fatalf("OpenCommandJournal(reopen) error = %v", err)
+			}
+			defer reopenedJournal.Close()
+			if _, err := reopenedJournal.Replay(restored, sequence); err != nil {
+				t.Fatalf("Replay(after applied) error = %v", err)
+			}
+			if got := restored.GetCounter("counter"); got != 1 {
+				t.Fatalf("restored counter = %d, want 1 without double replay", got)
 			}
 		})
 	}

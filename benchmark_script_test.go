@@ -51,6 +51,27 @@ func TestNativeAhtableAllocatorBenchmarkIsReproducible(t *testing.T) {
 	}
 }
 
+func TestStartupPersistenceBenchmarkIsReproducible(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-startup-persistence.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-startup-persistence.sh) error = %v", err)
+	}
+	for _, token := range []string{"STARTUP_PERSISTENCE_BENCH", "BenchmarkStartupPersistence10k", "startup-persistence.txt", "-benchmem"} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("startup persistence benchmark script missing token %q", token)
+		}
+	}
+	data, err = os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	for _, token := range []string{"bench-startup-persistence:", "./scripts/benchmark-startup-persistence.sh"} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("Makefile missing startup persistence benchmark token %q", token)
+		}
+	}
+}
+
 func TestHatTrieTransportFeatureBenchmarkScriptReportsRSS(t *testing.T) {
 	data, err := os.ReadFile("scripts/benchmark-hatrie-transport-features.sh")
 	if err != nil {

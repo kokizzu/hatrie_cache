@@ -166,6 +166,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
 | Current pass | [Complete tagged structured storage](#complete-tagged-structured-storage), fallback-heavy seven-record cycle | Inner JSON: 3,846/11,651 ns encode/decode; 674 record B | Tagged binary: 2,551/5,743 ns; 410 record B | Encode 1.51x, decode 2.03x faster; 1.64x smaller; 2.42x/1.92x lower heap | Uncommon concrete Go values normalize once to JSON-compatible types; version-1 binary and inner JSON remain readable |
+| Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
 | Current pass | [Content-addressed incremental backups](#content-addressed-incremental-backups), 10k x 256 B, 1% changed | Full checkpoint bundle: 98.602 ms; 9.81 MB heap; 2,104,489 written B | Incremental repository: 14.659 ms; 0.94 MB heap; 35,020 written B | 6.73x faster, 10.49x lower heap, 60.09x fewer written bytes | Explicit mode; first backup is full and retained history consumes repository storage |
@@ -233,6 +234,43 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Bounded lazy outbox restore](#binary-grouped-replication-outbox), 100k jobs | 466.884 ms; 100,000 resident jobs; 415.1 MB heap | 5.019 ms; 1,024 resident jobs; 3.52 MB heap | 93.03x faster, 97.66x fewer resident jobs, 118.0x lower heap | LevelDB pages are lazy; legacy whole-file JSON still loads its file snapshot |
 | Current pass | [Outbox group commit](#binary-grouped-replication-outbox), 32 writers | JSON sync-each: 50.289 ms; 32 syncs | Binary grouped: 3.542 ms; 1 sync | 14.20x faster, 32x fewer syncs | Cumulative heap is 1.49x higher |
 | Current pass | [Journal-backed outbox](#journal-backed-replication-outbox), 10k durable 4 KiB mutations | Full LevelDB jobs: 136.854 s; 20,993 heap B/op; 2 syncs/op | Journal references: 7.845 s; 26,094 heap B/op; 1 sync/op | 17.44x faster, 2x fewer syncs | Total encoded/disk bytes are effectively unchanged; cumulative heap is 1.24x higher |
+
+<a id="delta-only-startup-persistence"></a>
+### Delta-Only Startup Persistence
+
+Persistent stores now commit an applied journal sequence in the same synced
+LevelDB batch or Pebble generation-activation batch as the corresponding cache
+state. On restart, journal replay starts after that sequence and the immediate
+periodic-store pass writes only tracked changes. If the loaded database is
+already current, it performs one metadata read and writes no records. Direct
+trie mutations feed the same bounded dirty tracker used by HTTP, gRPC, journal
+replay, TTL deletion, and local partitions.
+
+Stores without sequence metadata retain the previous full-save migration path.
+Loading an authoritative snapshot also forces a complete exact save so stale
+database keys are removed. During sequence-aware persistence the journal barrier
+prevents a sequence from advancing past data not represented by the commit;
+this is required for non-idempotent commands such as `INC`.
+
+The fixture first creates and reloads an exact 10,000-key Pebble generation.
+Setup is outside the timer. The baseline performs the former second full
+generation save; the final path checks an unchanged sequence and dirty set.
+
+```sh
+make bench-startup-persistence BENCHTIME=1x COUNT=7
+```
+
+| Seven-run median | Full startup rewrite | Delta-only checkpoint | Improvement |
+| --- | ---: | ---: | ---: |
+| Time | 16.285 ms | 16.460 us | 989x faster |
+| Heap allocation | 4,635,616 B | 12,912 B | 359x lower |
+| Allocations | 21,085 | 7 | 3,012x fewer |
+| Persistent data writes | complete generation | none | eliminated when unchanged |
+
+Baseline milliseconds were `14.460, 20.531, 17.039, 15.102, 16.285,
+13.324, 76.895`; final reproducible microseconds were `10.031, 14.922,
+16.460, 23.201, 17.210, 17.560, 8.411`. Raw current output is written to
+`build/benchmarks/startup-persistence.txt`.
 
 <a id="persistent-storage-backend-bakeoff"></a>
 ### Persistent Storage Backend Bakeoff

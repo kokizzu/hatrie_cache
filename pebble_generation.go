@@ -47,15 +47,23 @@ type pebbleGenerationSSTBuilder struct {
 }
 
 func (store *PebbleStore) saveGeneration(trie *HatTrie) error {
+	return store.saveGenerationWithJournalSequence(trie, nil)
+}
+
+func (store *PebbleStore) saveGenerationWithJournalSequence(trie *HatTrie, sequence *uint64) error {
 	if trie == nil {
 		return ErrNilHatTrie
 	}
 	store.saveMu.Lock()
 	defer store.saveMu.Unlock()
-	return store.saveGenerationLocked(trie)
+	return store.saveGenerationLockedWithJournalSequence(trie, sequence)
 }
 
 func (store *PebbleStore) saveGenerationLocked(trie *HatTrie) error {
+	return store.saveGenerationLockedWithJournalSequence(trie, nil)
+}
+
+func (store *PebbleStore) saveGenerationLockedWithJournalSequence(trie *HatTrie, sequence *uint64) error {
 	store.mu.Lock()
 	if store.db == nil {
 		store.mu.Unlock()
@@ -118,7 +126,19 @@ func (store *PebbleStore) saveGenerationLocked(trie *HatTrie) error {
 			return err
 		}
 	}
-	if err := store.db.Set(pebbleActiveGenerationKey, encodePebbleGeneration(generation), pebble.Sync); err != nil {
+	activation := store.db.NewBatch()
+	defer activation.Close()
+	if err := activation.Set(pebbleActiveGenerationKey, encodePebbleGeneration(generation), nil); err != nil {
+		return err
+	}
+	if sequence != nil {
+		if err := activation.Set(persistentAppliedJournalSequenceKey, encodePersistentJournalSequence(*sequence), nil); err != nil {
+			return err
+		}
+	} else if err := activation.Delete(persistentAppliedJournalSequenceKey, nil); err != nil {
+		return err
+	}
+	if err := activation.Commit(pebble.Sync); err != nil {
 		return err
 	}
 	store.activeGeneration = generation

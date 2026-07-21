@@ -116,9 +116,9 @@ func createIncrementalBackupRepositoryLocked(path string, trie *HatTrie, store *
 	dirty := tracker.Snapshot()
 	generation := uint64(0)
 	if canIncrement {
-		dirty, generation, err = store.SaveIncrementalCheckpoint(trie, tracker, checkpointPath)
+		dirty, generation, err = store.SaveIncrementalCheckpointWithJournalSequence(trie, tracker, checkpointPath, journalSequence)
 	} else {
-		err = store.SaveCheckpoint(trie, checkpointPath)
+		err = store.SaveCheckpointWithJournalSequence(trie, checkpointPath, journalSequence)
 		generation = store.ActiveGeneration()
 	}
 	if err != nil {

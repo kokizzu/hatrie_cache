@@ -251,7 +251,7 @@ func createBackupBundleLocked(path string, tmpDir string, trie *HatTrie, journal
 	case BackupModePebbleCheckpoint:
 		store := persistentStore.(*PebbleStore)
 		checkpointPath := filepath.Join(tmpDir, backupBundleStorePath)
-		if err := store.SaveCheckpoint(trie, checkpointPath); err != nil {
+		if err := store.SaveCheckpointWithJournalSequence(trie, checkpointPath, journalSequence); err != nil {
 			return BackupBundleManifest{}, err
 		}
 		checkpointFiles, checkpointPayloads, err := backupBundleDirectoryPayloads(backupBundleStorePath, checkpointPath)

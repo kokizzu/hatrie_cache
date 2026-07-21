@@ -93,6 +93,7 @@ func (ht *HatTrie) ConfigureLocalPartitions(count int) error {
 			return err
 		}
 		child.now = func() time.Time { return ht.currentTime() }
+		child.persistentDirtyTracker = ht.persistentDirtyTracker
 		if len(ht.counterWriteStripes) != 0 {
 			if err := child.ConfigureCounterWriteStripes(len(ht.counterWriteStripes)); err != nil {
 				child.Destroy()

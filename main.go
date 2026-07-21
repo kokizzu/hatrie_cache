@@ -2373,6 +2373,7 @@ type HatTrie struct {
 	mutationEpoch              uint64
 	memoryCompactionEpoch      uint64
 	replicationMerkle          *replicationMerkleIndex
+	persistentDirtyTracker     *LevelDBDirtyTracker
 	snapshotMutations          *snapshotMutationTracker
 	snapshotCapturePageHook    func(int)
 	snapshotRestoreStageHook   func(*HatTrie) error
@@ -2492,9 +2493,31 @@ func (ht *HatTrie) Destroy() {
 	ht.levelDBHotBytes = 0
 	ht.levelDBHotValues = nil
 	ht.replicationMerkle = nil
+	ht.persistentDirtyTracker = nil
 	ht.counterWriteStripes = nil
 	ht.counterWriteStripeMask = 0
 	ht.now = nil
+}
+
+// SetPersistentDirtyTracker connects successful in-memory mutations to an
+// incremental persistent-store saver. Passing nil disables tracking.
+func (ht *HatTrie) SetPersistentDirtyTracker(tracker *LevelDBDirtyTracker) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if partitions := ht.localPartitionSet(); partitions != nil {
+		for _, child := range partitions.tries {
+			if err := child.SetPersistentDirtyTracker(tracker); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	ht.ensureOpen()
+	ht.persistentDirtyTracker = tracker
+	return nil
 }
 
 // CounterWriteStripingStats describes the optional existing-counter write
@@ -3424,6 +3447,11 @@ func (ht *HatTrie) recordGlobalReadSerialized(now time.Time, hit bool) {
 }
 
 func (ht *HatTrie) recordWriteLocked(keys ...string) {
+	if ht.persistentDirtyTracker != nil {
+		for _, key := range keys {
+			ht.persistentDirtyTracker.Mark(key)
+		}
+	}
 	ht.trackSnapshotMutationsLocked(keys...)
 	ht.updateReplicationMerkleLocked(keys...)
 	ht.mutationEpoch++
@@ -3461,6 +3489,9 @@ func (ht *HatTrie) recordJournalScalarBatchWritesLocked(records []CommandJournal
 	}
 	for _, record := range records {
 		key := strings.TrimSpace(record.Request.Key)
+		if ht.persistentDirtyTracker != nil {
+			ht.persistentDirtyTracker.Mark(key)
+		}
 		ht.trackSnapshotMutationsLocked(key)
 		ht.updateReplicationMerkleLocked(key)
 		ht.mutationEpoch++
@@ -3499,6 +3530,9 @@ func (ht *HatTrie) recordCompactJournalBatchWritesLocked(records []compactComman
 	}
 	for _, record := range records {
 		key := strings.TrimSpace(record.Key)
+		if ht.persistentDirtyTracker != nil {
+			ht.persistentDirtyTracker.Mark(key)
+		}
 		ht.trackSnapshotMutationsLocked(key)
 		ht.updateReplicationMerkleLocked(key)
 		ht.mutationEpoch++
@@ -3542,6 +3576,9 @@ func (ht *HatTrie) recordGlobalWriteSerialized(now time.Time) {
 }
 
 func (ht *HatTrie) recordDeleteLocked(key string) {
+	if ht.persistentDirtyTracker != nil {
+		ht.persistentDirtyTracker.Mark(key)
+	}
 	ht.trackSnapshotMutationsLocked(key)
 	ht.updateReplicationMerkleLocked(key)
 	if ht.keyStatsMode == KeyStatsModeOff {
@@ -3556,6 +3593,11 @@ func (ht *HatTrie) recordDeleteLocked(key string) {
 }
 
 func (ht *HatTrie) recordExpirationLocked(keys ...string) {
+	if ht.persistentDirtyTracker != nil {
+		for _, key := range keys {
+			ht.persistentDirtyTracker.Mark(key)
+		}
+	}
 	ht.trackSnapshotMutationsLocked(keys...)
 	ht.updateReplicationMerkleLocked(keys...)
 	if ht.keyStatsMode == KeyStatsModeOff {
@@ -4516,7 +4558,7 @@ func (ht *HatTrie) tryUpsertCounterStriped(key string, value int32) bool {
 		return false
 	}
 	*rawPtr = HatValue{Index: value, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
-	ht.recordCounterWriteFastPath()
+	ht.recordCounterWriteFastPath(key)
 	return true
 }
 
@@ -4550,11 +4592,14 @@ func (ht *HatTrie) tryIncrementCounterStriped(key string, by int32, checkOverflo
 		current.Index += by
 	}
 	*rawPtr = current.toValue()
-	ht.recordCounterWriteFastPath()
+	ht.recordCounterWriteFastPath(key)
 	return current.Index, true, true
 }
 
-func (ht *HatTrie) recordCounterWriteFastPath() {
+func (ht *HatTrie) recordCounterWriteFastPath(key string) {
+	if ht.persistentDirtyTracker != nil {
+		ht.persistentDirtyTracker.Mark(key)
+	}
 	atomic.AddUint64(&ht.mutationEpoch, 1)
 	now := ht.currentTime()
 	updateAtomicCacheTime(&ht.stats.lastWrite, now)

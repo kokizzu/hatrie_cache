@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/crc64"
@@ -20,6 +21,7 @@ import (
 )
 
 var levelDBEntryPrefix = []byte("entry:")
+var persistentAppliedJournalSequenceKey = []byte("\x00hatrie-cache:applied-journal-sequence")
 var levelDBRecordChecksumTable = crc64.MakeTable(crc64.ISO)
 
 var ErrLevelDBStoreClosed = errors.New("hatriecache: leveldb store is closed")
@@ -350,6 +352,14 @@ func (store *LevelDBStore) Close() error {
 }
 
 func (store *LevelDBStore) Save(trie *HatTrie) error {
+	return store.saveWithJournalSequence(trie, nil)
+}
+
+func (store *LevelDBStore) SaveWithJournalSequence(trie *HatTrie, sequence uint64) error {
+	return store.saveWithJournalSequence(trie, &sequence)
+}
+
+func (store *LevelDBStore) saveWithJournalSequence(trie *HatTrie, sequence *uint64) error {
 	db, unlock, err := store.lockDB()
 	if err != nil {
 		return err
@@ -362,6 +372,11 @@ func (store *LevelDBStore) Save(trie *HatTrie) error {
 	batch, err := levelDBDiffBatch(store, db, trie)
 	if err != nil {
 		return err
+	}
+	if sequence != nil {
+		batch.Put(persistentAppliedJournalSequenceKey, encodePersistentJournalSequence(*sequence))
+	} else if batch.Len() > 0 {
+		batch.Delete(persistentAppliedJournalSequenceKey)
 	}
 	if batch.Len() == 0 {
 		return nil
@@ -415,6 +430,9 @@ func (store *LevelDBStore) SaveKeysWithOptions(trie *HatTrie, keys []string, opt
 			batch.Put(dbKey, data)
 		}
 	}
+	if batch.Len() > 0 {
+		batch.Delete(persistentAppliedJournalSequenceKey)
+	}
 	if batch.Len() == 0 {
 		return nil
 	}
@@ -438,6 +456,105 @@ func (store *LevelDBStore) SaveDirtyWithOptions(trie *HatTrie, tracker *LevelDBD
 	}
 	tracker.Clear(snapshot)
 	return nil
+}
+
+func (store *LevelDBStore) SaveDirtyWithJournalSequence(trie *HatTrie, tracker *LevelDBDirtyTracker, options LevelDBSaveOptions, sequence uint64) error {
+	if tracker == nil {
+		return store.SaveWithJournalSequence(trie, sequence)
+	}
+	snapshot := tracker.Snapshot()
+	if err := store.saveKeysAndJournalSequence(trie, snapshot.keys, options, sequence); err != nil {
+		return err
+	}
+	tracker.Clear(snapshot)
+	return nil
+}
+
+func (store *LevelDBStore) saveKeysAndJournalSequence(trie *HatTrie, keys []string, options LevelDBSaveOptions, sequence uint64) error {
+	options, err := normalizeLevelDBSaveOptions(options)
+	if err != nil {
+		return err
+	}
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if trie == nil {
+		return ErrNilHatTrie
+	}
+
+	keys = normalizeLevelDBDirtyKeys(keys)
+	if len(keys) == 0 {
+		data, getErr := db.Get(persistentAppliedJournalSequenceKey, nil)
+		if getErr == nil {
+			current, decodeErr := decodePersistentJournalSequence(data)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			if current == sequence {
+				return nil
+			}
+		} else if !errors.Is(getErr, leveldb.ErrNotFound) {
+			return getErr
+		}
+	}
+	compareBeforeWrite := levelDBShouldCompareBeforeWrite(options.CompareBeforeWrite, len(keys))
+	batch := new(leveldb.Batch)
+	for _, key := range keys {
+		data, ok, err := trie.levelDBEntryDataForKeyForStore(store, db, store.format, key)
+		if err != nil {
+			return err
+		}
+		dbKey := levelDBKey(key)
+		if !ok {
+			batch.Delete(dbKey)
+			continue
+		}
+		if !compareBeforeWrite {
+			batch.Put(dbKey, data)
+			continue
+		}
+		existing, exists, err := store.entryDataFromDB(db, key)
+		if err != nil {
+			return err
+		}
+		if !exists || !bytes.Equal(existing, data) {
+			batch.Put(dbKey, data)
+		}
+	}
+	batch.Put(persistentAppliedJournalSequenceKey, encodePersistentJournalSequence(sequence))
+	return db.Write(batch, &opt.WriteOptions{Sync: true})
+}
+
+func (store *LevelDBStore) AppliedJournalSequence() (uint64, bool, error) {
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return 0, false, err
+	}
+	defer unlock()
+	data, err := db.Get(persistentAppliedJournalSequenceKey, nil)
+	if errors.Is(err, leveldb.ErrNotFound) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	sequence, err := decodePersistentJournalSequence(data)
+	return sequence, err == nil, err
+}
+
+func encodePersistentJournalSequence(sequence uint64) []byte {
+	var data [8]byte
+	binary.BigEndian.PutUint64(data[:], sequence)
+	return data[:]
+}
+
+func decodePersistentJournalSequence(data []byte) (uint64, error) {
+	if len(data) != 8 {
+		return 0, errors.New("hatriecache: invalid applied journal sequence metadata")
+	}
+	return binary.BigEndian.Uint64(data), nil
 }
 
 func levelDBShouldCompareBeforeWrite(mode LevelDBCompareBeforeWriteMode, keys int) bool {

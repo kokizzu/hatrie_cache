@@ -86,6 +86,7 @@ make bench-serialization
 make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
+make bench-startup-persistence BENCHTIME=1x COUNT=7
 make bench-native-ahtable-allocator NATIVE_AHTABLE_KEYS=100000 NATIVE_AHTABLE_SLOTS=4096 COUNT=7
 ```
 
@@ -904,9 +905,13 @@ the complete new generation. Startup removes unreferenced generations. Capture
 is page-bounded and serializes outside the trie mutex; under sustained writes it
 falls back to a bounded disk spool so save memory does not grow with the cache.
 LevelDB keeps its existing record-by-record replacement format.
-`DB_SYNC_INTERVAL` performs one full persistent-store save at startup, then
-periodically syncs only dirty keys changed by HTTP commands, gRPC commands, and
-journal pull replay while the server is running:
+`DB_SYNC_INTERVAL` uses an atomic applied-journal sequence to skip the former
+full rewrite when the loaded database is already current, then periodically
+syncs only dirty keys changed by direct APIs, HTTP commands, gRPC commands,
+journal replay, TTL expiration, and local partitions. Legacy databases without
+the sequence metadata and authoritative snapshot replacement perform one exact
+full migration save. See
+[BENCHMARK.md](BENCHMARK.md#delta-only-startup-persistence):
 
 ```
 make monitoring-server DB_PATH=data/cache.leveldb DB_SYNC_INTERVAL=30s

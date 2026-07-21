@@ -35,10 +35,13 @@ type PersistentStore interface {
 	Properties() (LevelDBProperties, error)
 	Close() error
 	Save(*HatTrie) error
+	SaveWithJournalSequence(*HatTrie, uint64) error
 	SaveKeys(*HatTrie, []string) error
 	SaveKeysWithOptions(*HatTrie, []string, LevelDBSaveOptions) error
 	SaveDirty(*HatTrie, *LevelDBDirtyTracker) error
 	SaveDirtyWithOptions(*HatTrie, *LevelDBDirtyTracker, LevelDBSaveOptions) error
+	SaveDirtyWithJournalSequence(*HatTrie, *LevelDBDirtyTracker, LevelDBSaveOptions, uint64) error
+	AppliedJournalSequence() (uint64, bool, error)
 	Load(*HatTrie) (int, error)
 	LoadWithPolicy(*HatTrie, LevelDBLoadPolicy) (LevelDBLoadResult, error)
 	Flush(*HatTrie) (LevelDBFlushResult, error)

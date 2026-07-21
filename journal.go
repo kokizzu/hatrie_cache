@@ -1100,6 +1100,24 @@ func (journal *CommandJournal) Sequence() uint64 {
 	return journal.lastSequenceLocked()
 }
 
+// WithPersistenceBarrier runs persist while journal appends and applications
+// are paused. The callback receives the latest fully applied sequence, allowing
+// persistent data and its replay watermark to be committed atomically.
+func (journal *CommandJournal) WithPersistenceBarrier(persist func(uint64) error) error {
+	if journal == nil {
+		return ErrNilCommandJournal
+	}
+	if persist == nil {
+		return errors.New("hatriecache: persistence barrier callback is nil")
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return ErrCommandJournalClosed
+	}
+	return persist(journal.lastSequenceLocked())
+}
+
 func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (commandJournalAppendState, error) {
 	appendState, err := journal.appendWithoutSyncLocked(request)
 	if err != nil {

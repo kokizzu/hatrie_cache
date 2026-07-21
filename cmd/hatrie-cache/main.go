@@ -232,11 +232,22 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 	defer closeLevelDB(dbStore, stderr)
 	var levelDBDirtyTracker *hatriecache.LevelDBDirtyTracker
+	var appliedJournalSequence uint64
+	var hasAppliedJournalSequence bool
 	if dbStore != nil {
 		levelDBDirtyTracker = hatriecache.NewLevelDBDirtyTracker()
+		appliedJournalSequence, hasAppliedJournalSequence, err = dbStore.AppliedJournalSequence()
+		if err != nil {
+			return err
+		}
 	}
 	if err := loadLevelDBIfConfigured(trie, dbStore, levelDBLoadPolicy(cfg)); err != nil {
 		return err
+	}
+	if levelDBDirtyTracker != nil {
+		if err := trie.SetPersistentDirtyTracker(levelDBDirtyTracker); err != nil {
+			return err
+		}
 	}
 
 	journal, err := openJournalIfConfiguredWithOptions(cfg.journalPath, journalOptions(cfg))
@@ -245,12 +256,23 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 	defer closeJournal(journal, stderr)
 	pullSnapshotPath := journalPullSnapshotPath(cfg.journalPullStatePath, cfg.journalPullSource)
-	snapshotMetadata, err := loadStartupSnapshot(trie, journal, cfg.snapshotPath, pullSnapshotPath)
+	snapshotMetadata, snapshotLoaded, err := loadStartupSnapshotSelection(trie, journal, cfg.snapshotPath, pullSnapshotPath)
 	if err != nil {
 		return err
 	}
+	startupFullSave := dbStore != nil && snapshotLoaded
+	replayAfter := snapshotMetadata.JournalSequence
+	if dbStore != nil && !snapshotLoaded && hasAppliedJournalSequence {
+		if journal == nil || appliedJournalSequence <= journal.Sequence() {
+			replayAfter = appliedJournalSequence
+		} else {
+			startupFullSave = true
+		}
+	} else if dbStore != nil && journal != nil && !snapshotLoaded {
+		startupFullSave = true
+	}
 	if journal != nil {
-		if _, err := journal.Replay(trie, snapshotMetadata.JournalSequence); err != nil {
+		if _, err := journal.Replay(trie, replayAfter); err != nil {
 			return err
 		}
 		if cfg.snapshotPath != "" {
@@ -268,7 +290,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	}
 	if dbStore != nil {
 		defer func() {
-			if err := dbStore.Save(trie); err != nil {
+			if err := savePersistentStoreAtJournalBarrier(trie, dbStore, journal); err != nil {
 				fmt.Fprintf(stderr, "save persistent store: %v\n", err)
 			}
 		}()
@@ -278,7 +300,11 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		stopMemoryCompactor = trie.StartMemoryCompactorContext(ctx, cfg.memoryCompactionInterval)
 	}
 	defer stopMemoryCompactor()
-	stopDBSync := startLevelDBSaver(ctx, trie, dbStore, levelDBDirtyTracker, cfg.dbSyncInterval, levelDBSaveOptions(cfg), stderr)
+	stopDBSync := startPersistentStoreSaver(ctx, trie, dbStore, levelDBDirtyTracker, cfg.dbSyncInterval, levelDBSaveOptions(cfg), stderr, persistentStoreSaverOptions{
+		Journal:         journal,
+		FullInitialSave: startupFullSave,
+		InitialSequence: appliedJournalSequence,
+	})
 	defer stopDBSync()
 	stopSnapshots := startSnapshotSaver(ctx, trie, journal, cfg.snapshotPath, cfg.snapshotInterval, snapshotFormat(cfg), stderr)
 	defer stopSnapshots()
@@ -286,7 +312,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	var adoptRecoveryCheckpoint func(string) error
 	var recoveryStageParent string
 	if dbStore != nil {
-		persistFullSync = func() error { return dbStore.Save(trie) }
+		persistFullSync = func() error { return savePersistentStoreAtJournalBarrier(trie, dbStore, journal) }
 		if pebbleStore, ok := dbStore.(*hatriecache.PebbleStore); ok {
 			adoptRecoveryCheckpoint = pebbleStore.AdoptCheckpoint
 			recoveryStageParent = filepath.Dir(pebbleStore.Path())
@@ -1565,7 +1591,23 @@ func stopGRPCServerWithTimeout(server *grpc.Server, timeout time.Duration) {
 	}
 }
 
+type persistentStoreSaverOptions struct {
+	Journal         *hatriecache.CommandJournal
+	FullInitialSave bool
+	InitialSequence uint64
+}
+
 func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store hatriecache.PersistentStore, dirty *hatriecache.LevelDBDirtyTracker, interval time.Duration, options hatriecache.LevelDBSaveOptions, stderr io.Writer) func() {
+	cleanCheckpoint := false
+	if store != nil {
+		_, cleanCheckpoint, _ = store.AppliedJournalSequence()
+	}
+	return startPersistentStoreSaver(ctx, trie, store, dirty, interval, options, stderr, persistentStoreSaverOptions{
+		FullInitialSave: dirty == nil || !cleanCheckpoint,
+	})
+}
+
+func startPersistentStoreSaver(ctx context.Context, trie *hatriecache.HatTrie, store hatriecache.PersistentStore, dirty *hatriecache.LevelDBDirtyTracker, interval time.Duration, options hatriecache.LevelDBSaveOptions, stderr io.Writer, saverOptions persistentStoreSaverOptions) func() {
 	ctx = serverContext(ctx)
 	if store == nil || interval <= 0 {
 		return func() {}
@@ -1577,12 +1619,7 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store hat
 	stopped := make(chan struct{})
 	first := true
 	save := func() bool {
-		var err error
-		if first || dirty == nil {
-			err = saveLevelDBIfOpenAndClearDirty(trie, store, dirty)
-		} else {
-			err = saveDirtyLevelDBIfOpen(trie, store, dirty, options)
-		}
+		err := savePersistentStoreIncrementAtBarrier(trie, store, dirty, options, saverOptions, first)
 		if errors.Is(err, errHatTrieDestroyed) {
 			return false
 		}
@@ -1620,6 +1657,44 @@ func startLevelDBSaver(ctx context.Context, trie *hatriecache.HatTrie, store hat
 		}
 	}()
 	return periodicStopper(done, stopped)
+}
+
+func savePersistentStoreIncrementAtBarrier(trie *hatriecache.HatTrie, store hatriecache.PersistentStore, dirty *hatriecache.LevelDBDirtyTracker, options hatriecache.LevelDBSaveOptions, saverOptions persistentStoreSaverOptions, first bool) (err error) {
+	defer recoverDestroyedHatTrie(&err)
+	persist := func(sequence uint64) error {
+		if first && saverOptions.FullInitialSave {
+			snapshot := dirty.Snapshot()
+			if err := store.SaveWithJournalSequence(trie, sequence); err != nil {
+				return err
+			}
+			dirty.Clear(snapshot)
+			return nil
+		}
+		return store.SaveDirtyWithJournalSequence(trie, dirty, options, sequence)
+	}
+	if saverOptions.Journal != nil {
+		return saverOptions.Journal.WithPersistenceBarrier(persist)
+	}
+	if first && saverOptions.FullInitialSave {
+		return saveLevelDBIfOpenAndClearDirty(trie, store, dirty)
+	}
+	if dirty == nil {
+		return nil
+	}
+	if saverOptions.InitialSequence == 0 {
+		return saveDirtyLevelDBIfOpen(trie, store, dirty, options)
+	}
+	return persist(saverOptions.InitialSequence)
+}
+
+func savePersistentStoreAtJournalBarrier(trie *hatriecache.HatTrie, store hatriecache.PersistentStore, journal *hatriecache.CommandJournal) (err error) {
+	defer recoverDestroyedHatTrie(&err)
+	if journal == nil {
+		return store.Save(trie)
+	}
+	return journal.WithPersistenceBarrier(func(sequence uint64) error {
+		return store.SaveWithJournalSequence(trie, sequence)
+	})
 }
 
 func saveLevelDBIfOpen(trie *hatriecache.HatTrie, store hatriecache.PersistentStore) (err error) {
@@ -1830,6 +1905,11 @@ func loadSnapshotIfConfigured(trie *hatriecache.HatTrie, path string) (hatriecac
 }
 
 func loadStartupSnapshot(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, configuredPath string, pullPath string) (hatriecache.SnapshotMetadata, error) {
+	metadata, _, err := loadStartupSnapshotSelection(trie, journal, configuredPath, pullPath)
+	return metadata, err
+}
+
+func loadStartupSnapshotSelection(trie *hatriecache.HatTrie, journal *hatriecache.CommandJournal, configuredPath string, pullPath string) (hatriecache.SnapshotMetadata, bool, error) {
 	selectedPath := ""
 	selectedPull := false
 	var selectedMetadata hatriecache.SnapshotMetadata
@@ -1845,7 +1925,7 @@ func loadStartupSnapshot(trie *hatriecache.HatTrie, journal *hatriecache.Command
 			continue
 		}
 		if err != nil {
-			return hatriecache.SnapshotMetadata{}, err
+			return hatriecache.SnapshotMetadata{}, false, err
 		}
 		if selectedPath == "" || metadata.JournalSequence > selectedMetadata.JournalSequence {
 			selectedPath = candidate.path
@@ -1854,15 +1934,17 @@ func loadStartupSnapshot(trie *hatriecache.HatTrie, journal *hatriecache.Command
 		}
 	}
 	if selectedPath == "" {
-		return hatriecache.SnapshotMetadata{}, nil
+		return hatriecache.SnapshotMetadata{}, false, nil
 	}
 	if selectedPull {
 		if journal == nil {
-			return hatriecache.SnapshotMetadata{}, errors.New("journal pull snapshot requires a journal")
+			return hatriecache.SnapshotMetadata{}, false, errors.New("journal pull snapshot requires a journal")
 		}
-		return journal.ReplaceWithSnapshot(trie, selectedPath)
+		metadata, err := journal.ReplaceWithSnapshot(trie, selectedPath)
+		return metadata, err == nil, err
 	}
-	return trie.LoadSnapshotWithMetadata(selectedPath)
+	metadata, err := trie.LoadSnapshotWithMetadata(selectedPath)
+	return metadata, err == nil, err
 }
 
 func journalPullSnapshotPath(statePath string, source string) string {

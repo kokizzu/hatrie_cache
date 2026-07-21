@@ -1737,7 +1737,24 @@ func (handler *MonitoringHandler) handleStorageFlush(w http.ResponseWriter, r *h
 	}
 	defer handler.finishStorageOperation()
 	dirtySnapshot := handler.options.LevelDBDirtyTracker.Snapshot()
-	result, err := handler.options.LevelDBStore.Flush(handler.trie)
+	startedAt := time.Now().UTC()
+	persist := func(sequence uint64) error {
+		return handler.options.LevelDBStore.SaveWithJournalSequence(handler.trie, sequence)
+	}
+	var err error
+	if handler.options.Journal != nil {
+		err = handler.options.Journal.WithPersistenceBarrier(persist)
+	} else {
+		err = handler.options.LevelDBStore.Save(handler.trie)
+	}
+	finishedAt := time.Now().UTC()
+	result := LevelDBFlushResult{
+		Store:          storeName,
+		Keys:           handler.trie.Size(),
+		StartedAt:      startedAt,
+		FinishedAt:     finishedAt,
+		DurationMillis: finishedAt.Sub(startedAt).Milliseconds(),
+	}
 	if err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "storage.flush", OK: false, Status: http.StatusInternalServerError, Message: err.Error(), Details: map[string]interface{}{"store": storeName}})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
