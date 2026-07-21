@@ -1172,6 +1172,223 @@ func TestCacheGRPCServerScalarBatchStreamHonorsWriteProtection(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerStructuredBatchStreamExecutesCollectionColumnsInOrder(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testStructuredBatchRequest(91)
+	if err := stream.Send(request); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetBatchId() != 91 || !response.GetOk() || response.GetError() != "" {
+		t.Fatalf("structured response envelope = %#v, want successful batch 91", response)
+	}
+	if len(response.GetStatuses()) != len(request.GetOperations()) || len(response.GetValueKinds()) != len(request.GetOperations()) {
+		t.Fatalf("structured response columns = %#v", response)
+	}
+	for index, status := range response.GetStatuses() {
+		want := hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
+		if index == 3 || index == 8 || index == 17 {
+			want = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND
+		}
+		if status != want {
+			t.Fatalf("structured status %d = %v, want %v", index, status, want)
+		}
+	}
+	wantKinds := []hatriecachev1.ScalarValueKind{
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_INTEGER,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BOOLEAN,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_INTEGER,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BOOLEAN,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_INTEGER,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES,
+		hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE,
+	}
+	if !reflect.DeepEqual(response.GetValueKinds(), wantKinds) {
+		t.Fatalf("structured value kinds = %v, want %v", response.GetValueKinds(), wantKinds)
+	}
+	if !reflect.DeepEqual(response.GetIntegerValues(), []int64{1, 1, 1, 0, 1}) {
+		t.Fatalf("structured integer values = %v, want [1 1 1 0 1]", response.GetIntegerValues())
+	}
+	wantValues := []string{
+		"Singapore",
+		"Singapore",
+		"first",
+		"first",
+		"first",
+		`["go"]`,
+		`{"priority":1,"value":"urgent"}`,
+		`{"priority":1,"value":"urgent"}`,
+	}
+	if got := structuredBatchResponseValues(response); !reflect.DeepEqual(got, wantValues) {
+		t.Fatalf("structured byte values = %q, want %q", got, wantValues)
+	}
+}
+
+func TestCacheGRPCServerStructuredBatchStreamRejectsMalformedColumnsAndContinues(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.StructuredBatchRequest{
+		BatchId:    1,
+		Operations: []hatriecachev1.StructuredCommand{hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_SLICE},
+		Keys:       []string{"queue"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	malformed, err := stream.Recv()
+	if err != nil || malformed.GetOk() || !strings.Contains(malformed.GetError(), "values do not match") {
+		t.Fatalf("malformed structured batch = %#v/%v, want application error", malformed, err)
+	}
+	if err := stream.Send(&hatriecachev1.StructuredBatchRequest{
+		BatchId:    2,
+		Operations: []hatriecachev1.StructuredCommand{hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_SLICE},
+		Keys:       []string{"queue"},
+		Values:     [][]byte{[]byte("value")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	valid, err := stream.Recv()
+	if err != nil || !valid.GetOk() || valid.GetStatuses()[0] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK {
+		t.Fatalf("valid structured batch after malformed batch = %#v/%v", valid, err)
+	}
+}
+
+func TestCacheGRPCServerStructuredBatchStreamPreservesJournalAndDirtyTracking(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	dirty := NewLevelDBDirtyTracker()
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{Journal: journal, DirtyTracker: dirty})
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.StructuredBatchRequest{
+		Operations: []hatriecachev1.StructuredCommand{
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_PRIORITY,
+		},
+		Keys:       []string{"profile", "queue", "tags", "jobs"},
+		Subkeys:    []string{"city"},
+		Values:     [][]byte{[]byte("Singapore"), []byte("first"), []byte("go"), []byte("urgent")},
+		Priorities: []int64{1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil || !response.GetOk() {
+		t.Fatalf("journaled structured batch = %#v/%v", response, err)
+	}
+	if journal.Sequence() != 4 || dirty.Pending() != 4 {
+		t.Fatalf("journal/dirty = %d/%d, want 4/4", journal.Sequence(), dirty.Pending())
+	}
+	recovered := newTestTrie(t)
+	if sequence, err := journal.Replay(recovered, 0); err != nil || sequence != 4 {
+		t.Fatalf("journal replay = %d/%v, want 4/nil", sequence, err)
+	}
+	if value, ok, err := recovered.PeekMapChecked("profile", "city"); err != nil || !ok || value != "Singapore" {
+		t.Fatalf("recovered profile city = %#v/%v/%v", value, ok, err)
+	}
+}
+
+func TestCacheGRPCServerStructuredBatchStreamHonorsWriteProtection(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{WriteProtected: true})
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.StructuredBatchRequest{
+		Operations: []hatriecachev1.StructuredCommand{hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET},
+		Keys:       []string{"tags"},
+		Values:     [][]byte{[]byte("go")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("write-protected structured batch error = %v, want PermissionDenied", err)
+	}
+	if ht.Exists("tags") {
+		t.Fatal("write-protected structured batch changed the trie")
+	}
+}
+
+func testStructuredBatchRequest(batchID uint64) *hatriecachev1.StructuredBatchRequest {
+	return &hatriecachev1.StructuredBatchRequest{
+		BatchId: batchID,
+		Operations: []hatriecachev1.StructuredCommand{
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_MAP,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_TAKE_MAP,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_MAP,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HEAD_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_TAIL_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_GET_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_REMOVE_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_PRIORITY,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_PRIORITY,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_PRIORITY,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_PRIORITY,
+		},
+		Keys: []string{
+			"profile", "profile", "profile", "profile",
+			"queue", "queue", "queue", "queue", "queue",
+			"tags", "tags", "tags", "tags", "tags",
+			"jobs", "jobs", "jobs", "jobs",
+		},
+		Subkeys:    []string{"city", "city", "city", "city"},
+		Values:     [][]byte{[]byte("Singapore"), []byte("first"), []byte("go"), []byte("go"), []byte("go"), []byte("go"), []byte("urgent")},
+		Priorities: []int64{1},
+	}
+}
+
+func structuredBatchResponseValues(response *hatriecachev1.StructuredBatchResponse) []string {
+	values := make([]string, len(response.GetValueEnds()))
+	start := uint32(0)
+	for index, end := range response.GetValueEnds() {
+		values[index] = string(response.GetValues()[start:end])
+		start = end
+	}
+	return values
+}
+
 func TestCacheGRPCServerCommandBatchStreamRequiresAuthentication(t *testing.T) {
 	ht := newTestTrie(t)
 	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{AuthToken: "secret"})

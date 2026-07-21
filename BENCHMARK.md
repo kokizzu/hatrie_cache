@@ -199,7 +199,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
-| Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; structured commands retain the generic batch path |
+| Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
+| Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
@@ -748,9 +749,38 @@ and delete. It preserves ordered per-command statuses. Servers configured with
 journaling, dirty persistence, replication, or leader enforcement route typed
 columns through the existing transactional side-effect executor, retaining
 correctness at the cost of some direct-path savings. The existing command batch
-stream remains the fallback for structured commands and older clients.
+stream remains the fallback for non-scalar commands and older clients.
 Raw output from the final combined branch is generated at
 `build/benchmarks/scalar-protobuf-batch.txt`.
+
+<a id="compact-typed-protobuf-structured-batches"></a>
+### Compact Typed Protobuf Structured Batches
+
+The structured follow-up applies the same columnar envelope to map, slice, set,
+and priority-queue commands. The workload repeats `PUTMAP`/`PEEKMAP`,
+`PUSHSLICE`/`POPSLICE`, `ADDSET`/`HASSET`, and `PUSHPQ`/`POPPQ` in 16-command
+envelopes. Both rows are seven-run medians from one combined run on the Ryzen 9
+5950X host.
+
+```sh
+make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7
+```
+
+| 10,000 mixed structured commands | Time/10k | ns/command | Heap B/10k | Allocs/10k | Wire B/command | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `CommandBatchStream` | 27.743 ms | 2,774 | 10,610,848 | 119,693 | 60.41 | baseline |
+| `StructuredBatchStream` | 19.909 ms | 1,991 | 3,586,800 | 77,686 | 33.22 | 1.39x CPU, 2.96x heap, 1.54x allocations, 1.82x wire |
+
+The typed stream supports `PUT_MAP`, `PEEK_MAP`, `TAKE_MAP`, `PUSH_SLICE`,
+`POP_SLICE`, `SHIFT_SLICE`, `HEAD_SLICE`, `TAIL_SLICE`, `ADD_SET`,
+`REMOVE_SET`, `HAS_SET`, `GET_SET`, `PUSH_PRIORITY`, `PEEK_PRIORITY`,
+`POP_PRIORITY`, and `GET_PRIORITY`. Requests carry one value per consuming
+operation; clients can express a multi-value mutation as adjacent operations,
+or use `CommandBatchStream` to retain the existing multi-value request shape.
+Responses retain ordered statuses while packing byte results into one buffer.
+Journaling, dirty persistence, replication, and leader enforcement use the
+existing side-effect executor. Raw output is generated at
+`build/benchmarks/structured-protobuf-batch.txt`.
 
 Run the same sequential transport comparison across representative command
 families:

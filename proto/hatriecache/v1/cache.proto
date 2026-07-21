@@ -12,6 +12,7 @@ service CacheService {
   rpc CommandStream(stream CommandRequest) returns (stream CommandResponse);
   rpc CommandBatchStream(stream CommandBatchRequest) returns (stream CommandBatchResponse);
   rpc ScalarBatchStream(stream ScalarBatchRequest) returns (stream ScalarBatchResponse);
+  rpc StructuredBatchStream(stream StructuredBatchRequest) returns (stream StructuredBatchResponse);
   rpc Snapshot(SnapshotRequest) returns (CommandResponse);
   rpc Replication(ReplicationRequest) returns (ReplicationResponse);
   rpc ReplicationStream(stream ReplicationStreamBatch) returns (stream ReplicationStreamAck);
@@ -131,6 +132,28 @@ enum ScalarValueKind {
   SCALAR_VALUE_KIND_BYTES = 1;
   SCALAR_VALUE_KIND_INTEGER = 2;
   SCALAR_VALUE_KIND_BOOLEAN = 3;
+}
+
+// Structured batches cover collection operations without allocating one
+// CommandRequest and CommandResponse protobuf object per operation.
+enum StructuredCommand {
+  STRUCTURED_COMMAND_UNSPECIFIED = 0;
+  STRUCTURED_COMMAND_PUT_MAP = 1;
+  STRUCTURED_COMMAND_PEEK_MAP = 2;
+  STRUCTURED_COMMAND_TAKE_MAP = 3;
+  STRUCTURED_COMMAND_PUSH_SLICE = 4;
+  STRUCTURED_COMMAND_POP_SLICE = 5;
+  STRUCTURED_COMMAND_SHIFT_SLICE = 6;
+  STRUCTURED_COMMAND_HEAD_SLICE = 7;
+  STRUCTURED_COMMAND_TAIL_SLICE = 8;
+  STRUCTURED_COMMAND_ADD_SET = 9;
+  STRUCTURED_COMMAND_REMOVE_SET = 10;
+  STRUCTURED_COMMAND_HAS_SET = 11;
+  STRUCTURED_COMMAND_GET_SET = 12;
+  STRUCTURED_COMMAND_PUSH_PRIORITY = 13;
+  STRUCTURED_COMMAND_PEEK_PRIORITY = 14;
+  STRUCTURED_COMMAND_POP_PRIORITY = 15;
+  STRUCTURED_COMMAND_GET_PRIORITY = 16;
 }
 
 message SnapshotRequest {}
@@ -301,6 +324,34 @@ message ScalarBatchRequest {
 }
 
 message ScalarBatchResponse {
+  uint64 batch_id = 1;
+  bool ok = 2;
+  string error = 3;
+  repeated ScalarResultStatus statuses = 4;
+  repeated ScalarValueKind value_kinds = 5;
+  // Integer and boolean results, in operation order for their corresponding kind.
+  repeated sint64 integer_values = 6;
+  // Byte results are concatenated; value_ends contains cumulative end offsets.
+  bytes values = 7;
+  repeated uint32 value_ends = 8;
+  // Unexpected per-command errors are sparse and paired by position.
+  repeated uint32 error_indexes = 9;
+  repeated string errors = 10;
+}
+
+message StructuredBatchRequest {
+  uint64 batch_id = 1;
+  repeated StructuredCommand operations = 2;
+  repeated string keys = 3;
+  // One subkey for every map operation, in operation order.
+  repeated string subkeys = 4;
+  // One value for every operation that consumes a value, in operation order.
+  repeated bytes values = 5;
+  // One priority for every PUSH_PRIORITY operation, in operation order.
+  repeated sint64 priorities = 6;
+}
+
+message StructuredBatchResponse {
   uint64 batch_id = 1;
   bool ok = 2;
   string error = 3;

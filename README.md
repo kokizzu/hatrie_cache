@@ -1872,12 +1872,33 @@ protection, and rate limits retain normal gRPC status errors. When journaling,
 dirty persistence, replication, or leader-write enforcement is configured, the
 server automatically uses the established transactional side-effect executor;
 otherwise it executes the validated scalar columns directly under one trie
-lock. `CommandBatchStream` remains the configurable compatibility path for all
-other commands. Reproduce the comparison with:
+lock. Reproduce the comparison with:
 
 ```sh
 make bench-scalar-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7
 ```
+
+For collection-heavy clients, `CacheService.StructuredBatchStream` provides the
+same columnar layout for maps, slices, sets, and priority queues. It supports
+`PUT_MAP`, `PEEK_MAP`, `TAKE_MAP`, `PUSH_SLICE`, `POP_SLICE`, `SHIFT_SLICE`,
+`HEAD_SLICE`, `TAIL_SLICE`, `ADD_SET`, `REMOVE_SET`, `HAS_SET`, `GET_SET`,
+`PUSH_PRIORITY`, `PEEK_PRIORITY`, `POP_PRIORITY`, and `GET_PRIORITY`.
+`operations` and `keys` are positional; `subkeys`, `values`, and `priorities`
+contain only the entries consumed by their corresponding operations, in order.
+Each consuming operation accepts one value, so clients should send adjacent
+operations for multiple values or use `CommandBatchStream` for the existing
+multi-value request shape. Responses reuse scalar status/value-kind enums and
+pack byte results into `values` plus cumulative `value_ends`. The server uses
+the established side-effect executor whenever journaling, dirty persistence,
+replication, or leader enforcement is enabled. Other commands and older clients
+retain `CommandBatchStream`. Reproduce the mixed-command comparison with:
+
+```sh
+make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7
+```
+
+See [BENCHMARK.md](BENCHMARK.md#compact-typed-protobuf-structured-batches) for
+CPU, heap, allocation, and measured wire tradeoffs.
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with
 `next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
 page. Empty keys are valid, so Go clients should set the optional `AfterKey`

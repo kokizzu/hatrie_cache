@@ -38,6 +38,8 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
 	b.Run("NativeBatchStreamCommand", benchmarkBigWinsNativeBatchStreamCommand)
 	b.Run("ScalarBatchStreamCommand", benchmarkBigWinsScalarBatchStreamCommand)
+	b.Run("NativeStructuredBatchStreamCommand", benchmarkBigWinsNativeStructuredBatchStreamCommand)
+	b.Run("StructuredBatchStreamCommand", benchmarkBigWinsStructuredBatchStreamCommand)
 	b.Run("ChurnRetentionBaseline", benchmarkBigWinsChurnRetentionBaseline)
 	b.Run("ChurnRetentionCompacted", benchmarkBigWinsChurnRetentionCompacted)
 	b.Run("ExpirationDeadlineUpdate", benchmarkBigWinsExpirationDeadlineUpdate)
@@ -773,6 +775,177 @@ func benchmarkBigWinsScalarBatchStreamCommand(b *testing.B) {
 	b.ReportMetric(float64(batches), "messages/op")
 	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/command")
 	b.ReportMetric(float64(wire.outbound.Load()+wire.inbound.Load())/float64(b.N*operations), "wire_B/command")
+}
+
+func benchmarkBigWinsNativeStructuredBatchStreamCommand(b *testing.B) {
+	const batchSize = 16
+	operations := bigWinsBenchmarkOperations(1000)
+	wire := &benchmarkGRPCWireStats{}
+	client, stop := newGRPCBenchmarkClient(b, grpc.WithStatsHandler(wire))
+	defer stop()
+	stream, err := client.CommandBatchStream(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer stream.CloseSend()
+	wire.outbound.Store(0)
+	wire.inbound.Store(0)
+	batches := (operations + batchSize - 1) / batchSize
+	requests := make([]*hatriecachev1.CommandBatchRequest, batches)
+	for batch := range requests {
+		count := batchSize
+		if remaining := operations - batch*batchSize; remaining < count {
+			count = remaining
+		}
+		commands := make([]*hatriecachev1.CommandRequest, count)
+		for index := range commands {
+			commands[index] = structuredBenchmarkCommand((batch*batchSize + index) % 8)
+		}
+		requests[batch] = &hatriecachev1.CommandBatchRequest{BatchId: uint64(batch + 1), Requests: commands}
+	}
+	var total time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		started := time.Now()
+		for batch, request := range requests {
+			if err := stream.Send(request); err != nil {
+				b.Fatalf("native structured batch send %d = %v", batch, err)
+			}
+			response, err := stream.Recv()
+			if err != nil || !response.GetOk() || len(response.GetResponses()) != len(request.GetRequests()) {
+				b.Fatalf("native structured batch response %d = %#v/%v", batch, response, err)
+			}
+			for index, item := range response.GetResponses() {
+				if !item.GetOk() {
+					b.Fatalf("native structured batch item %d/%d = %#v", batch, index, item)
+				}
+			}
+		}
+		total += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(operations), "commands/op")
+	b.ReportMetric(float64(batches), "messages/op")
+	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/command")
+	b.ReportMetric(float64(wire.outbound.Load()+wire.inbound.Load())/float64(b.N*operations), "wire_B/command")
+}
+
+func structuredBenchmarkCommand(index int) *hatriecachev1.CommandRequest {
+	priority := int64(7)
+	switch index {
+	case 0:
+		return &hatriecachev1.CommandRequest{Command: "PUTMAP", Key: "structured:map", Subkey: "field", Value: "value"}
+	case 1:
+		return &hatriecachev1.CommandRequest{Command: "PEEKMAP", Key: "structured:map", Subkey: "field"}
+	case 2:
+		return &hatriecachev1.CommandRequest{Command: "PUSHSLICE", Key: "structured:slice", Value: "value"}
+	case 3:
+		return &hatriecachev1.CommandRequest{Command: "POPSLICE", Key: "structured:slice"}
+	case 4:
+		return &hatriecachev1.CommandRequest{Command: "ADDSET", Key: "structured:set", Value: "value"}
+	case 5:
+		return &hatriecachev1.CommandRequest{Command: "HASSET", Key: "structured:set", Value: "value"}
+	case 6:
+		return &hatriecachev1.CommandRequest{Command: "PUSHPQ", Key: "structured:pq", Value: "value", Priority: &priority}
+	default:
+		return &hatriecachev1.CommandRequest{Command: "POPPQ", Key: "structured:pq"}
+	}
+}
+
+func benchmarkBigWinsStructuredBatchStreamCommand(b *testing.B) {
+	const batchSize = 16
+	operations := bigWinsBenchmarkOperations(1000)
+	wire := &benchmarkGRPCWireStats{}
+	client, stop := newGRPCBenchmarkClient(b, grpc.WithStatsHandler(wire))
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer stream.CloseSend()
+	wire.outbound.Store(0)
+	wire.inbound.Store(0)
+	batches := (operations + batchSize - 1) / batchSize
+	requests := make([]*hatriecachev1.StructuredBatchRequest, batches)
+	for batch := range requests {
+		count := batchSize
+		if remaining := operations - batch*batchSize; remaining < count {
+			count = remaining
+		}
+		requests[batch] = structuredBenchmarkRequest(uint64(batch+1), batch*batchSize, count)
+	}
+	var total time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		started := time.Now()
+		for batch, request := range requests {
+			if err := stream.Send(request); err != nil {
+				b.Fatalf("structured batch send %d = %v", batch, err)
+			}
+			response, err := stream.Recv()
+			if err != nil || !response.GetOk() || len(response.GetStatuses()) != len(request.GetOperations()) {
+				b.Fatalf("structured batch response %d = %#v/%v", batch, response, err)
+			}
+			for index, status := range response.GetStatuses() {
+				if status != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK {
+					b.Fatalf("structured batch item %d/%d = %v", batch, index, status)
+				}
+			}
+		}
+		total += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(operations), "commands/op")
+	b.ReportMetric(float64(batches), "messages/op")
+	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/command")
+	b.ReportMetric(float64(wire.outbound.Load()+wire.inbound.Load())/float64(b.N*operations), "wire_B/command")
+}
+
+func structuredBenchmarkRequest(batchID uint64, start int, count int) *hatriecachev1.StructuredBatchRequest {
+	request := &hatriecachev1.StructuredBatchRequest{
+		BatchId:    batchID,
+		Operations: make([]hatriecachev1.StructuredCommand, count),
+		Keys:       make([]string, count),
+	}
+	for index := 0; index < count; index++ {
+		switch (start + index) % 8 {
+		case 0:
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP
+			request.Keys[index] = "structured:map"
+			request.Subkeys = append(request.Subkeys, "field")
+			request.Values = append(request.Values, []byte("value"))
+		case 1:
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_MAP
+			request.Keys[index] = "structured:map"
+			request.Subkeys = append(request.Subkeys, "field")
+		case 2:
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_SLICE
+			request.Keys[index] = "structured:slice"
+			request.Values = append(request.Values, []byte("value"))
+		case 3:
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_SLICE
+			request.Keys[index] = "structured:slice"
+		case 4:
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET
+			request.Keys[index] = "structured:set"
+			request.Values = append(request.Values, []byte("value"))
+		case 5:
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET
+			request.Keys[index] = "structured:set"
+			request.Values = append(request.Values, []byte("value"))
+		case 6:
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_PRIORITY
+			request.Keys[index] = "structured:pq"
+			request.Values = append(request.Values, []byte("value"))
+			request.Priorities = append(request.Priorities, 7)
+		default:
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_PRIORITY
+			request.Keys[index] = "structured:pq"
+		}
+	}
+	return request
 }
 
 func bigWinsBenchmarkKeys(fallback int) int {
