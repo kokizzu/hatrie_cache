@@ -130,6 +130,88 @@ func benchmarkBigWinsChurnRetention(b *testing.B, compact bool) {
 	}
 }
 
+func BenchmarkMemoryCompactionReadPause10k(b *testing.B) {
+	const (
+		insertedKeys = 100000
+		survivorStep = 10
+	)
+	var totalCompaction time.Duration
+	var totalCutoverNanos int64
+	var totalReplayedKeys int
+	var maximumCatchUpRounds int
+	var maximumReadPause atomic.Int64
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		trie := CreateHatTrie()
+		for idx := 0; idx < insertedKeys; idx++ {
+			trie.UpsertString(bigWinsKey(idx), "value")
+		}
+		for idx := 0; idx < insertedKeys; idx++ {
+			if idx%survivorStep != 0 {
+				trie.Delete(bigWinsKey(idx))
+			}
+		}
+		runtime.GC()
+
+		stop := make(chan struct{})
+		ready := make(chan struct{})
+		var reader sync.WaitGroup
+		reader.Add(1)
+		go func() {
+			defer reader.Done()
+			first := true
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				started := time.Now()
+				if value := trie.GetString(bigWinsKey(0)); value != "value" {
+					b.Errorf("GetString() during compaction = %q, want value", value)
+					return
+				}
+				pause := time.Since(started).Nanoseconds()
+				for previous := maximumReadPause.Load(); pause > previous && !maximumReadPause.CompareAndSwap(previous, pause); previous = maximumReadPause.Load() {
+				}
+				if first {
+					close(ready)
+					first = false
+				}
+			}
+		}()
+		<-ready
+
+		b.StartTimer()
+		started := time.Now()
+		result, err := trie.CompactMemory()
+		totalCompaction += time.Since(started)
+		totalCutoverNanos += result.CutoverNanos
+		totalReplayedKeys += result.ReplayedKeys
+		if result.CatchUpRounds > maximumCatchUpRounds {
+			maximumCatchUpRounds = result.CatchUpRounds
+		}
+		b.StopTimer()
+		close(stop)
+		reader.Wait()
+		if err != nil {
+			trie.Destroy()
+			b.Fatal(err)
+		}
+		if result.Entries != insertedKeys/survivorStep {
+			trie.Destroy()
+			b.Fatalf("CompactMemory().Entries = %d, want %d", result.Entries, insertedKeys/survivorStep)
+		}
+		trie.Destroy()
+	}
+	b.ReportAllocs()
+	b.ReportMetric(float64(maximumCatchUpRounds), "catch_up_rounds")
+	b.ReportMetric(float64(totalCompaction.Nanoseconds())/float64(b.N), "compaction_ns/op")
+	b.ReportMetric(float64(totalCutoverNanos)/float64(b.N), "cutover_ns/op")
+	b.ReportMetric(float64(maximumReadPause.Load()), "max_read_pause_ns")
+	b.ReportMetric(float64(totalReplayedKeys)/float64(b.N), "replayed_keys/op")
+}
+
 func benchmarkBigWinsGlobalTelemetry(b *testing.B) {
 	operations := bigWinsBenchmarkOperations(100000)
 	for _, mode := range []KeyStatsMode{KeyStatsModeOff, KeyStatsModeFull} {

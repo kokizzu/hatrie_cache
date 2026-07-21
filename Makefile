@@ -136,6 +136,8 @@ STRING_STORAGE_BENCH_KEYS ?= 100000
 LIVE_REPLICATION_BENCH ?= ^BenchmarkReplicationLiveTransport10K/grpc-stream$$
 MERKLE_MAINTENANCE_BENCH ?= ^BenchmarkReplicationMerkle(ChurnSnapshotCycle|SnapshotAfterChurn)$$
 MERKLE_WRITE_BENCHTIME ?= 100000x
+ONLINE_COMPACTION_PAUSE_BENCH ?= ^BenchmarkMemoryCompactionReadPause10k$$
+ONLINE_COMPACTION_CHURN_BENCH ?= ^BenchmarkBigWins/(ChurnRetentionBaseline|ChurnRetentionCompacted)$$
 NATIVE_COMMAND_BATCH_BENCH ?= ^BenchmarkNativeCScalarBatch4096$$
 SCALAR_BATCH_BENCH ?= ^BenchmarkBigWins/(NativeBatchStreamCommand|ScalarBatchStreamCommand)$$
 STRUCTURED_BATCH_BENCH ?= ^BenchmarkBigWins/(NativeStructuredBatchStreamCommand|StructuredBatchStreamCommand)$$
@@ -190,7 +192,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-merkle-maintenance bench-native-ahtable-allocator bench-native-command-batch bench-scalar-batch bench-structured-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-merkle-maintenance bench-online-compaction bench-native-ahtable-allocator bench-native-command-batch bench-scalar-batch bench-structured-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -324,6 +326,9 @@ bench-live-replication:
 
 bench-merkle-maintenance:
 	MERKLE_MAINTENANCE_BENCH='$(MERKLE_MAINTENANCE_BENCH)' MERKLE_WRITE_BENCHTIME='$(MERKLE_WRITE_BENCHTIME)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-merkle-maintenance.sh
+
+bench-online-compaction:
+	ONLINE_COMPACTION_PAUSE_BENCH='$(ONLINE_COMPACTION_PAUSE_BENCH)' ONLINE_COMPACTION_CHURN_BENCH='$(ONLINE_COMPACTION_CHURN_BENCH)' BIG_WINS_KEYS='$(BIG_WINS_KEYS)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-online-compaction.sh
 
 bench-native-ahtable-allocator:
 	NATIVE_AHTABLE_KEYS='$(NATIVE_AHTABLE_KEYS)' NATIVE_AHTABLE_SLOTS='$(NATIVE_AHTABLE_SLOTS)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-native-ahtable-allocator.sh

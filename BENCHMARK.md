@@ -218,7 +218,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Parallel partition restore](#parallel-partition-restore), 100k x 256 B, 16 partitions | Serial: snapshot 258.183 ms; Pebble 213.948 ms | Bounded parallel: snapshot 202.398 ms; Pebble 181.435 ms | 1.28x faster snapshot restore; 1.18x faster Pebble startup | Heap and allocations rise by at most 0.1%; local partitions must be enabled |
 | Current pass | [Atomic generation snapshot restore](#atomic-generation-snapshot-restore), 100k x 256 B | Two-pass live mutation: 385.364 ms; 217.69 MB heap; 901,188 allocs | One-pass staged swap: 234.900 ms; 108.82 MB heap; 500,117 allocs | 1.64x faster, 2.00x lower heap, 1.80x fewer allocs | Restore temporarily retains old and staged generations; measured cutover is 1.72 us |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
-| Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
+| Current pass | [Online generational memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | Exclusive rebuild: 10.258 ms maximum reader pause | Staged rebuild: 1.091 ms maximum reader pause | 9.40x shorter maximum pause | Total compaction is 1.54x slower and transient heap is 6.80x higher |
+| Current pass | [Delete-churn retention](#delete-churn-memory-compaction), 100k insert/90k delete | No compaction: 2,372,824 retained backing B; 2,384,040 retained heap B | Online compaction: 180,224 retained backing B; 445,168 retained heap B | 13.17x lower backing, 5.36x lower heap | Full churn cycle is 8.7% slower and allocates 22.8% more cumulative heap |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
@@ -1854,39 +1855,58 @@ record format.
 ### Delete-Churn Memory Compaction
 
 Deleted typed values leave reusable holes when survivors occupy later indexes,
-and Go slice capacity plus the activated Merkle table retain their prior high
-water marks. `CompactMemory` prepares dense in-memory typed pools, duplicates
-the C trie, rewrites every compact index in the duplicate, and atomically swaps
-the complete state under the trie write lock. Disk-spill indexes stay stable to
-preserve unique file ownership. It also rebuilds TTL and bounded key-stat
-metadata without changing values, expiration, statistics, or Merkle roots.
+and Go slice capacity retains prior high-water marks. `CompactMemory` now scans
+the live trie under bounded 256-key page locks and builds a dense replacement
+generation off-lock. A deduplicated mutation tracker replays concurrent inserts,
+updates, and deletes between scan and cutover. Catch-up runs off-lock while more
+than 64 dirty keys remain, for at most eight rounds; the final replay and pointer
+swap run under the write lock so sustained writers cannot starve compaction.
+
+Lazy LevelDB references remain lazy, disk-spilled values move into a separately
+owned generation, live strings are packed into 256 KiB chunks, and TTL, global
+and per-key statistics, and pending Merkle state are preserved. A failed staged
+build destroys only the new generation and leaves the live trie untouched.
 
 ```sh
-make bench-big-wins BIG_WINS_BENCH='^BenchmarkBigWins/(ChurnRetentionBaseline|ChurnRetentionCompacted)$' BIG_WINS_KEYS=100000 BENCHTIME=1x COUNT=5
+make bench-online-compaction BIG_WINS_KEYS=100000 BENCHTIME=1x COUNT=7
 ```
 
-The fixture activates Merkle tracking, inserts 100,000 string keys, deletes
-90,000, retains every tenth key, forces a Go collection, and measures live heap
-and deterministic outer backing. Backing bytes include typed pool slices,
-reusable-index metadata, and Merkle table/leaves/scratch; they exclude nested
-payloads, allocator metadata, and C allocator pages. Values are five-run medians
-on the Ryzen 9 5950X host.
+The command writes raw output to
+`build/benchmarks/online-memory-compaction.txt`. The pause fixture compares the
+previous exclusive implementation at commit `0a7f582` with the staged
+implementation on the same 100,000 insert/90,000 delete workload and keeps a
+reader active throughout compaction. Values are seven-run medians on the Ryzen
+9 5950X host. The final cutover metric starts after acquiring the final write
+lock; maximum reader pause also includes bounded scan-page locks and scheduling.
+
+| Compaction metric | Exclusive rebuild | Online generation | Improvement / cost |
+| --- | ---: | ---: | ---: |
+| Maximum reader pause | 10,257,679 ns | 1,091,339 ns | 9.40x shorter, 89.4% lower |
+| Total compaction | 10,236,288 ns | 15,785,538 ns | 1.54x slower |
+| Final replay and swap | not isolated | 1,120 ns | final lock-held cutover only |
+| Cumulative heap | 909,472 B | 6,180,888 B | 6.80x higher |
+| Allocations | 10,030 | 26,753 | 2.67x higher |
+
+The retention fixture retains every tenth key, forces a Go collection, and
+measures live heap and deterministic outer backing. Backing bytes include typed
+pool slices and reusable-index metadata; they exclude nested payloads, allocator
+metadata, and C allocator pages.
 
 | Metric | No compaction | Compacted | Improvement / cost |
 | --- | ---: | ---: | ---: |
-| Retained backing | 9,679,075 B | 704,912 B | 13.73x lower, 92.7% reclaimed |
-| Retained Go heap | 9,850,096 B | 884,600 B | 11.13x lower, 91.0% reclaimed |
-| Full insert/delete cycle | 226,957,849 ns | 239,289,284 ns | 5.4% slower with compaction |
-| Compaction pause | 0 | 8,801,699 ns | one exclusive rebuild |
-| Cumulative heap/cycle | 49,003,944 B | 50,204,120 B | 2.4% more transient allocation |
-| Allocations/cycle | 481,254 | 491,287 | 2.1% more transient allocations |
+| Retained backing | 2,372,824 B | 180,224 B | 13.17x lower, 92.4% reclaimed |
+| Retained Go heap | 2,384,040 B | 445,168 B | 5.36x lower, 81.3% reclaimed |
+| Full insert/delete cycle | 182,920,827 ns | 198,806,579 ns | 8.7% slower with compaction |
+| Compaction work | 0 | 14,160,274 ns | staged rebuild plus cutover |
+| Cumulative heap/cycle | 25,950,648 B | 31,859,928 B | 22.8% more transient allocation |
+| Allocations/cycle | 381,205 | 391,376 | 2.7% more transient allocations |
 
 The daemon keeps periodic compaction off by default. Set
 `MEMORY_COMPACTION_INTERVAL` to a positive duration to opt in; unchanged ticks
-are skipped. The peak during a rebuild temporarily includes both C tries,
-compaction remap arrays, and both generations of outer pool slices, so operators
-should schedule it with enough memory headroom and outside latency-sensitive
-windows.
+are skipped. The peak during a rebuild temporarily includes both generations,
+captured page values, and mutation replay state. Operators should retain enough
+memory headroom; the online design targets availability and tail latency, not
+minimum compaction CPU or transient memory.
 
 ### Pipelined Live gRPC Replication
 

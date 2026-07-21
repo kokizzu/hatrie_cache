@@ -17,14 +17,17 @@ import (
 	"unsafe"
 )
 
-// MemoryCompactionResult reports deterministic backing-storage estimates. It
-// excludes allocator metadata, nested value payloads, and C allocator pages.
+// MemoryCompactionResult reports the dense-generation outcome. Its backing
+// estimates exclude allocator metadata, nested payloads, and C allocator pages.
 type MemoryCompactionResult struct {
 	Entries            int    `json:"entries"`
 	BackingBytesBefore uint64 `json:"backing_bytes_before"`
 	BackingBytesAfter  uint64 `json:"backing_bytes_after"`
 	MerkleBytesBefore  uint64 `json:"merkle_bytes_before"`
 	MerkleBytesAfter   uint64 `json:"merkle_bytes_after"`
+	CutoverNanos       int64  `json:"cutover_nanos"`
+	ReplayedKeys       int    `json:"replayed_keys"`
+	CatchUpRounds      int    `json:"catch_up_rounds"`
 }
 
 type memoryCompactionPlan struct {
@@ -54,7 +57,7 @@ type memoryCompactionPlan struct {
 }
 
 // CompactMemory rebuilds the C trie and densely packs in-memory typed backing
-// pools. It preserves values and metadata while briefly blocking operations.
+// pools in a staged generation, then atomically swaps it into service.
 func (ht *HatTrie) CompactMemory() (MemoryCompactionResult, error) {
 	if ht == nil {
 		return MemoryCompactionResult{}, ErrNilHatTrie
@@ -70,13 +73,17 @@ func (ht *HatTrie) CompactMemory() (MemoryCompactionResult, error) {
 			total.BackingBytesAfter += result.BackingBytesAfter
 			total.MerkleBytesBefore += result.MerkleBytesBefore
 			total.MerkleBytesAfter += result.MerkleBytesAfter
+			total.ReplayedKeys += result.ReplayedKeys
+			if result.CutoverNanos > total.CutoverNanos {
+				total.CutoverNanos = result.CutoverNanos
+			}
+			if result.CatchUpRounds > total.CatchUpRounds {
+				total.CatchUpRounds = result.CatchUpRounds
+			}
 		}
 		return total, err
 	}
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-	ht.ensureOpen()
-	return ht.compactMemoryLocked()
+	return ht.compactMemoryOnline()
 }
 
 func (ht *HatTrie) compactMemoryLocked() (MemoryCompactionResult, error) {
@@ -640,14 +647,22 @@ func (ht *HatTrie) compactMemoryIfChangedAndOpen() bool {
 		}
 		return true
 	}
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
+	ht.mu.RLock()
 	if ht.root == nil {
+		ht.mu.RUnlock()
 		return false
 	}
 	if ht.memoryCompactionEpoch == ht.mutationEpoch {
+		ht.mu.RUnlock()
 		return true
 	}
-	_, _ = ht.compactMemoryLocked()
+	ht.mu.RUnlock()
+	_, err := ht.CompactMemory()
+	if err != nil {
+		ht.mu.RLock()
+		open := ht.root != nil
+		ht.mu.RUnlock()
+		return open
+	}
 	return true
 }

@@ -53,7 +53,7 @@ chunks, and shrink Merkle and metadata backing. Normal string writes remain
 zero-copy; packing occurs only during explicit compaction. Disk-spill indexes
 remain stable so file ownership cannot alias.
 Periodic compaction is available but remains off by default because the rebuild
-briefly takes the cache-wide write lock.
+temporarily retains a second generation and adds bounded scan-page pauses.
 Map, slice, set, and priority queue APIs deep-copy nested JSON-style map/slice
 values at storage and read boundaries so callers cannot mutate cached state
 through shared nested references.
@@ -89,6 +89,7 @@ make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 make bench-startup-persistence BENCHTIME=1x COUNT=7
 make bench-live-replication BENCHTIME=1x COUNT=7
 make bench-merkle-maintenance BENCHTIME=1x COUNT=7
+make bench-online-compaction BENCHTIME=1x COUNT=7
 make bench-native-ahtable-allocator NATIVE_AHTABLE_KEYS=100000 NATIVE_AHTABLE_SLOTS=4096 COUNT=7
 ```
 
@@ -773,12 +774,14 @@ make monitoring-server MEMORY_COMPACTION_INTERVAL=15m
 
 `CompactMemory` provides the same operation directly to Go callers and returns
 before/after backing estimates. The operation preserves values, TTLs, global
-and per-key statistics, LevelDB references, and Merkle state, but it holds the
-trie write lock while duplicating and swapping the C trie. It also consolidates
-live small-string backing into 256 KiB chunks; oversized values remain
-standalone and normal writes are unchanged. The measured 100k
-insert/90k delete fixture reclaimed 13.73x backing and 11.13x live heap at a
-8.80 ms one-time pause; see
+and per-key statistics, lazy LevelDB references, and Merkle state. It scans the
+live trie in bounded 256-key pages, builds a dense generation off-lock, replays
+coalesced concurrent mutations, and atomically swaps generations. The measured
+100k insert/90k delete fixture reduced the maximum reader pause 9.40x, retained
+backing 13.17x, and retained heap 5.36x. Total compaction was 1.54x slower and
+used 6.80x more transient heap than the previous exclusive rebuild, so periodic
+compaction remains off by default. Reproduce the result and retain its raw output
+with `make bench-online-compaction BENCHTIME=1x COUNT=7`; see
 [BENCHMARK.md](BENCHMARK.md#delete-churn-memory-compaction). The separate 100k
 live-string fixture cuts retained heap objects 800x and retained heap 3.79%; see
 [packed string compaction](BENCHMARK.md#packed-string-compaction-arena).
