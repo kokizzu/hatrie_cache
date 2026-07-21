@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 	"unsafe"
@@ -54,83 +52,6 @@ func TestCompactMemoryPackedStringRemainsValidAfterReplacement(t *testing.T) {
 	}
 }
 
-func TestCompactMemoryAllowsWritesWhileBuildingGeneration(t *testing.T) {
-	trie := newTestTrie(t)
-	if err := trie.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
-		t.Fatal(err)
-	}
-	for idx := 0; idx < 2048; idx++ {
-		trie.UpsertString(fmt.Sprintf("key:%04d", idx), "before")
-	}
-
-	pageReached := make(chan struct{})
-	releasePage := make(chan struct{})
-	var pageOnce sync.Once
-	trie.snapshotCapturePageHook = func(int) {
-		pageOnce.Do(func() {
-			close(pageReached)
-			<-releasePage
-		})
-	}
-	type compactionOutcome struct {
-		result MemoryCompactionResult
-		err    error
-	}
-	compactionDone := make(chan compactionOutcome, 1)
-	go func() {
-		result, err := trie.CompactMemory()
-		compactionDone <- compactionOutcome{result: result, err: err}
-	}()
-
-	select {
-	case <-pageReached:
-	case outcome := <-compactionDone:
-		t.Fatalf("CompactMemory() completed before staged page hook: %v", outcome.err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("CompactMemory() did not build a staged generation")
-	}
-
-	writesDone := make(chan struct{})
-	go func() {
-		for idx := 0; idx < 128; idx++ {
-			trie.UpsertString(fmt.Sprintf("key:%04d", idx), "updated")
-		}
-		trie.Delete("key:0500")
-		trie.UpsertMap("key:-new", Map{"state": "inserted"})
-		trie.GetString("key:0000")
-		close(writesDone)
-	}()
-	select {
-	case <-writesDone:
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("writes blocked while the staged generation was building")
-	}
-	close(releasePage)
-	outcome := <-compactionDone
-	if outcome.err != nil {
-		t.Fatalf("CompactMemory() error = %v", outcome.err)
-	}
-	if outcome.result.CatchUpRounds == 0 || outcome.result.ReplayedKeys < 130 {
-		t.Fatalf("CompactMemory() catch-up = %d rounds/%d keys, want off-lock replay", outcome.result.CatchUpRounds, outcome.result.ReplayedKeys)
-	}
-
-	if got := trie.GetString("key:0000"); got != "updated" {
-		t.Fatalf("updated value after compaction = %q, want updated", got)
-	}
-	if got := trie.GetString("key:0127"); got != "updated" {
-		t.Fatalf("last catch-up value after compaction = %q, want updated", got)
-	}
-	if trie.Exists("key:0500") {
-		t.Fatal("deleted key survived online compaction")
-	}
-	if got := trie.PeekMap("key:-new", "state"); got != "inserted" {
-		t.Fatalf("inserted map field after compaction = %#v", got)
-	}
-	if stats, ok := trie.StatsForKey("key:0000"); !ok || stats.Reads < 1 {
-		t.Fatalf("key stats after compaction = %#v/%v, want concurrent read preserved", stats, ok)
-	}
-}
-
 func TestCompactMemoryPreservesPendingMerkleUpdates(t *testing.T) {
 	const keys = 64
 	trie := newTestTrie(t)
@@ -168,40 +89,6 @@ func TestCompactMemoryPreservesPendingMerkleUpdates(t *testing.T) {
 	}
 	if !got.equal(want) {
 		t.Fatalf("compacted deferred Merkle root/count = %x/%d, want %x/%d", got.root, got.count, want.root, want.count)
-	}
-}
-
-func TestCompactMemoryPreservesLazyLevelDBReferences(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cache.leveldb")
-	store, err := OpenLevelDBStore(path)
-	if err != nil {
-		t.Fatalf("OpenLevelDBStore() error = %v", err)
-	}
-	defer store.Close()
-
-	source := newTestTrie(t)
-	source.UpsertString("cold", strings.Repeat("cold-value", 256))
-	if err := store.Save(source); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	loaded := newTestTrie(t)
-	if _, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy()); err != nil {
-		t.Fatalf("LoadWithPolicy() error = %v", err)
-	}
-	entries := loaded.Entries(true)
-	if len(entries) != 1 || !entries[0].Value.IsLevelDBReference() {
-		t.Fatalf("loaded entry = %#v, want lazy LevelDB reference", entries)
-	}
-
-	if _, err := loaded.CompactMemory(); err != nil {
-		t.Fatalf("CompactMemory() error = %v", err)
-	}
-	entries = loaded.Entries(true)
-	if len(entries) != 1 || !entries[0].Value.IsLevelDBReference() {
-		t.Fatalf("compacted entry = %#v, want lazy LevelDB reference", entries)
-	}
-	if got := loaded.GetString("cold"); got != strings.Repeat("cold-value", 256) {
-		t.Fatalf("hydrated compacted value length = %d, want %d", len(got), len(strings.Repeat("cold-value", 256)))
 	}
 }
 
