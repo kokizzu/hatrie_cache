@@ -133,6 +133,7 @@ COLD_HYDRATION_BENCH ?= ^BenchmarkColdReferenceParallelHydration32$$
 REFERENCE_SLAB_BENCH ?= ^BenchmarkLevelDBReferenceRetainedMemory100k$$
 STRING_STORAGE_BENCH ?= ^Benchmark(StringStorageLayout100k|PackedStringCompaction100k)$$
 STRING_STORAGE_BENCH_KEYS ?= 100000
+LIVE_REPLICATION_BENCH ?= ^BenchmarkReplicationLiveTransport10K/grpc-stream$$
 NATIVE_COMMAND_BATCH_BENCH ?= ^BenchmarkNativeCScalarBatch4096$$
 SCALAR_BATCH_BENCH ?= ^BenchmarkBigWins/(NativeBatchStreamCommand|ScalarBatchStreamCommand)$$
 STRUCTURED_BATCH_BENCH ?= ^BenchmarkBigWins/(NativeStructuredBatchStreamCommand|StructuredBatchStreamCommand)$$
@@ -187,7 +188,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-structured-storage-codec bench-startup-persistence bench-native-ahtable-allocator bench-native-command-batch bench-scalar-batch bench-structured-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-native-ahtable-allocator bench-native-command-batch bench-scalar-batch bench-structured-batch bench-big-wins bench-storage-backends bench-command-features bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -315,6 +316,9 @@ bench-structured-storage-codec:
 
 bench-startup-persistence:
 	STARTUP_PERSISTENCE_BENCH='$(STARTUP_PERSISTENCE_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-startup-persistence.sh
+
+bench-live-replication:
+	LIVE_REPLICATION_BENCH='$(LIVE_REPLICATION_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-live-replication.sh
 
 bench-native-ahtable-allocator:
 	NATIVE_AHTABLE_KEYS='$(NATIVE_AHTABLE_KEYS)' NATIVE_AHTABLE_SLOTS='$(NATIVE_AHTABLE_SLOTS)' COUNT='$(COUNT)' BENCHMARK_ARTIFACT_DIR='$(BENCHMARK_ARTIFACT_DIR)' ./scripts/benchmark-native-ahtable-allocator.sh

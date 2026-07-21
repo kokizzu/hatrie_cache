@@ -229,6 +229,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Native gRPC batch stream](#persistent-grpc-command-stream), 10k commands, batch 16 | Pipelined: 2,638 ns/command; 41.00 wire B/command | Native batch: 1,161 ns/command; 37.04 wire B/command | 2.27x faster, 1.62x lower heap, 2.77x fewer allocations, 1.11x smaller wire, 16x fewer messages | Batching can add queueing latency; client chooses envelope size |
 | Current pass | [Pipelined live gRPC replication](#pipelined-live-grpc-replication), 10k writes | HTTP: 178.079 ms; 1,868,894 wire B | gRPC: 167.797 ms; 1,081,746 wire B | 1.06x faster, 1.73x smaller wire | Requires native gRPC listener; HTTP remains fallback |
 | Current pass | [Live gRPC micro-batching](#pipelined-live-grpc-replication), 10k writes | 193.299 ms; 10,000 batches; 1,081,747 wire B | 149.682 ms; 2,910 batches; 368,252 wire B | 1.29x faster, 3.44x fewer batches, 2.94x smaller wire | One-caller throughput is 1.6% lower; set max commands to 1 for legacy behavior |
+| Current pass | [Allocate-after-grouping live gRPC](#pipelined-live-grpc-replication), 10k writes | 154.265 ms; 2,959 batches; 353.63 MB heap; 2,037,671 allocs | 126.893 ms; 2,305 batches; 303.23 MB heap; 940,900 allocs | 1.22x faster, 1.28x fewer batches, 1.17x lower heap, 2.17x fewer allocs | Topology updates compute their fingerprint once; requests retain payload references until ack |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
 | Current pass | [Bounded lazy outbox restore](#binary-grouped-replication-outbox), 100k jobs | 466.884 ms; 100,000 resident jobs; 415.1 MB heap | 5.019 ms; 1,024 resident jobs; 3.52 MB heap | 93.03x faster, 97.66x fewer resident jobs, 118.0x lower heap | LevelDB pages are lazy; legacy whole-file JSON still loads its file snapshot |
@@ -1902,6 +1903,7 @@ previous one-command-per-batch path.
 
 ```sh
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationLiveTransport10K -benchtime=1x -count=5 -benchmem'
+make bench-live-replication BENCHTIME=1x COUNT=7
 ```
 
 The fixture replicates 10,000 unique writes from 32 callers to one local target.
@@ -1935,6 +1937,24 @@ batches and 182,533 wire bytes, but slowed execution to 183,434,195 ns and
 raised cumulative heap to 421,507,920 bytes. The default therefore remains
 zero wait. Use a positive window only when bandwidth matters more than latency
 and after measuring the deployment.
+
+The next pass keeps that zero-wait behavior but delays protobuf request and
+key/value-slice allocation until compatible queued jobs have been grouped.
+Topology fingerprints and the fingerprint-verification decision are also
+cached when a validated topology is installed instead of cloning, normalizing,
+and sorting the topology for every live command. Both sides delivered all
+10,000 keys. Values are seven-run medians from the same 32-caller fixture.
+
+| Live gRPC allocation path | Time/10k | Batches/op | Wire B/op | Heap B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Request per caller before grouping | 154,264,762 ns | 2,959 | 374,858 | 353,626,600 | 2,037,671 | baseline |
+| Group payload views, then allocate | 126,892,996 ns | 2,305 | 298,577 | 303,233,152 | 940,900 | 1.22x CPU, 1.28x batches, 1.26x wire, 1.17x heap, 2.17x allocations |
+
+The request owns its key/value slice headers while referencing immutable job
+payload bytes until the acknowledgement is delivered. This removes duplicate
+per-caller protobuf envelopes without copying values. Topology reloads pay the
+fingerprint cost once in `Set`; ordinary reads remain protected by the store's
+read lock.
 
 ### Hierarchical Merkle Anti-Entropy
 

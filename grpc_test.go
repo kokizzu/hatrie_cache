@@ -2244,10 +2244,11 @@ func TestReplicationGRPCStreamLiveMicroBatchesConcurrentCommands(t *testing.T) {
 func TestReplicationGRPCStreamCollectFlightDefersIncompatibleOrOversizedJob(t *testing.T) {
 	newJob := func(source string, key string, valueBytes int) *replicationGRPCStreamJob {
 		return &replicationGRPCStreamJob{
-			ctx: context.Background(),
-			request: &hatriecachev1.ReplicationStreamBatch{
-				Source: source, Keys: []string{key}, BinaryValues: [][]byte{make([]byte, valueBytes)},
-			},
+			ctx:    context.Background(),
+			source: source,
+			payloads: replicationSyncPayloadBatch{inline: []replicationSyncPayload{{
+				key: key, binaryValue: make([]byte, valueBytes),
+			}}},
 			result: make(chan replicationGRPCStreamJobResult, 1),
 		}
 	}
@@ -2273,7 +2274,8 @@ func TestReplicationGRPCStreamCollectFlightDefersIncompatibleOrOversizedJob(t *t
 			if carry != test.next {
 				t.Fatalf("collectFlight() carry = %p, want next job %p", carry, test.next)
 			}
-			if len(flight.jobs) != 1 || flight.jobs[0] != test.first || len(flight.request.GetKeys()) != 1 {
+			flight.buildRequest(1)
+			if len(flight.jobs) != 1 || flight.jobs[0] != test.first || len(flight.request.GetKeys()) != 1 || flight.request.GetKeys()[0] != test.first.payloads.payload(0).key {
 				t.Fatalf("collectFlight() = %#v, want first job only", flight)
 			}
 		})

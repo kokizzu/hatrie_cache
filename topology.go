@@ -64,9 +64,11 @@ type TopologyRoute struct {
 
 // TopologyStore stores a validated topology and optionally persists updates.
 type TopologyStore struct {
-	mu       sync.RWMutex
-	path     string
-	topology ClusterTopology
+	mu                  sync.RWMutex
+	path                string
+	topology            ClusterTopology
+	fingerprint         string
+	verifiesFingerprint bool
 }
 
 // SingleNodeTopology returns a valid one-node topology with sharding disabled.
@@ -103,7 +105,7 @@ func OpenTopologyStore(path string, fallback ClusterTopology) (*TopologyStore, e
 	if err != nil {
 		return nil, err
 	}
-	return &TopologyStore{path: path, topology: normalized}, nil
+	return newTopologyStore(path, normalized), nil
 }
 
 // NewTopologyStore validates and stores topology in memory.
@@ -112,7 +114,16 @@ func NewTopologyStore(topology ClusterTopology) (*TopologyStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TopologyStore{topology: normalized}, nil
+	return newTopologyStore("", normalized), nil
+}
+
+func newTopologyStore(path string, topology ClusterTopology) *TopologyStore {
+	return &TopologyStore{
+		path:                path,
+		topology:            topology,
+		fingerprint:         topology.Fingerprint(),
+		verifiesFingerprint: normalizedTopologyVerifiesReplicationFingerprint(topology),
+	}
 }
 
 // LoadTopology reads and validates topology JSON from disk.
@@ -155,7 +166,9 @@ func (store *TopologyStore) Fingerprint() string {
 	if store == nil {
 		return ""
 	}
-	return store.Get().Fingerprint()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.fingerprint
 }
 
 // VerifiesReplicationFingerprint reports whether the store has enough cluster
@@ -164,7 +177,9 @@ func (store *TopologyStore) VerifiesReplicationFingerprint() bool {
 	if store == nil {
 		return false
 	}
-	return store.Get().verifiesReplicationFingerprint()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.verifiesFingerprint
 }
 
 // Set validates and stores topology, persisting it when the store has a path.
@@ -176,6 +191,8 @@ func (store *TopologyStore) Set(topology ClusterTopology) error {
 	if err != nil {
 		return err
 	}
+	fingerprint := normalized.Fingerprint()
+	verifiesFingerprint := normalizedTopologyVerifiesReplicationFingerprint(normalized)
 	if store.path != "" {
 		if err := SaveTopology(store.path, normalized); err != nil {
 			return err
@@ -185,6 +202,8 @@ func (store *TopologyStore) Set(topology ClusterTopology) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.topology = normalized
+	store.fingerprint = fingerprint
+	store.verifiesFingerprint = verifiesFingerprint
 	return nil
 }
 
@@ -259,7 +278,11 @@ func (topology ClusterTopology) verifiesReplicationFingerprint() bool {
 	if err != nil {
 		return false
 	}
-	return len(normalized.Nodes) > 1 || len(normalized.Shards) > 1 || len(normalized.BucketRanges) > 0
+	return normalizedTopologyVerifiesReplicationFingerprint(normalized)
+}
+
+func normalizedTopologyVerifiesReplicationFingerprint(topology ClusterTopology) bool {
+	return len(topology.Nodes) > 1 || len(topology.Shards) > 1 || len(topology.BucketRanges) > 0
 }
 
 // ShardForKey returns the shard selected for key.

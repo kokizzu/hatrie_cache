@@ -87,6 +87,7 @@ make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 make bench-startup-persistence BENCHTIME=1x COUNT=7
+make bench-live-replication BENCHTIME=1x COUNT=7
 make bench-native-ahtable-allocator NATIVE_AHTABLE_KEYS=100000 NATIVE_AHTABLE_SLOTS=4096 COUNT=7
 ```
 
@@ -1374,7 +1375,10 @@ If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
 closed instead. For 10,000 live writes from 32 callers, zero-wait
 micro-batching reduced the valid pipelined gRPC baseline from 10,000 to 2,910
-wire batches, from 1.082 MB to 368 KB, and from 193.3 ms to 149.7 ms. See
+wire batches. Grouping jobs before allocating protobuf requests and caching
+immutable topology metadata then reduced the median from 154.3 ms to 126.9 ms,
+from 2,959 to 2,305 batches, and from 353.6 MB to 303.2 MB of cumulative heap.
+Reproduce it with `make bench-live-replication BENCHTIME=1x COUNT=7`. See
 [BENCHMARK.md](BENCHMARK.md#pipelined-live-grpc-replication).
 `POST /api/replication` runs an explicit command-fanout anti-entropy sync. For
 an unfiltered single-shard data set, the source and target first compare an

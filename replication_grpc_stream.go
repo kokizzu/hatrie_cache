@@ -47,9 +47,12 @@ type replicationGRPCStreamTarget struct {
 }
 
 type replicationGRPCStreamJob struct {
-	ctx     context.Context
-	request *hatriecachev1.ReplicationStreamBatch
-	result  chan replicationGRPCStreamJobResult
+	ctx                 context.Context
+	source              string
+	topologyFingerprint string
+	payloads            replicationSyncPayloadBatch
+	sequence            uint64
+	result              chan replicationGRPCStreamJobResult
 }
 
 type replicationGRPCStreamJobResult struct {
@@ -158,9 +161,9 @@ func (target *replicationGRPCStreamTarget) run() {
 			return err
 		}
 		sequence := target.replicator.nextReplicationSequence()
-		flight.request.Sequence = sequence
+		flight.buildRequest(sequence)
 		for _, groupedJob := range flight.jobs {
-			groupedJob.request.Sequence = sequence
+			groupedJob.sequence = sequence
 		}
 		pending[sequence] = flight
 		if err := target.stream.Send(flight.request); err != nil {
@@ -231,10 +234,9 @@ func (target *replicationGRPCStreamTarget) run() {
 
 func (target *replicationGRPCStreamTarget) collectFlight(first *replicationGRPCStreamJob) (*replicationGRPCStreamFlight, *replicationGRPCStreamJob, error) {
 	flight := &replicationGRPCStreamFlight{
-		request: first.request,
 		jobs:    []*replicationGRPCStreamJob{first},
-		entries: len(first.request.GetKeys()),
-		bytes:   replicationGRPCStreamRequestBytes(first.request),
+		entries: first.payloads.len(),
+		bytes:   replicationGRPCStreamJobBytes(first),
 	}
 	if target.batchMaxCommands <= 1 || flight.entries >= target.batchMaxCommands {
 		return flight, nil, nil
@@ -270,16 +272,14 @@ func (target *replicationGRPCStreamTarget) collectFlight(first *replicationGRPCS
 			target.completeJob(next, nil, err)
 			continue
 		}
-		if !replicationGRPCStreamRequestsCompatible(flight.request, next.request) {
+		if !replicationGRPCStreamJobsCompatible(first, next) {
 			return flight, next, nil
 		}
-		nextEntries := len(next.request.GetKeys())
-		nextBytes := replicationGRPCStreamRequestBytes(next.request)
+		nextEntries := next.payloads.len()
+		nextBytes := replicationGRPCStreamJobBytes(next)
 		if flight.entries+nextEntries > target.batchMaxCommands || (target.batchMaxBytes > 0 && flight.bytes+nextBytes > target.batchMaxBytes) {
 			return flight, next, nil
 		}
-		flight.request.Keys = append(flight.request.Keys, next.request.GetKeys()...)
-		flight.request.BinaryValues = append(flight.request.BinaryValues, next.request.GetBinaryValues()...)
 		flight.jobs = append(flight.jobs, next)
 		flight.entries += nextEntries
 		flight.bytes += nextBytes
@@ -287,19 +287,36 @@ func (target *replicationGRPCStreamTarget) collectFlight(first *replicationGRPCS
 	return flight, nil, nil
 }
 
-func replicationGRPCStreamRequestsCompatible(left *hatriecachev1.ReplicationStreamBatch, right *hatriecachev1.ReplicationStreamBatch) bool {
-	return left.GetSource() == right.GetSource() && left.GetTopologyFingerprint() == right.GetTopologyFingerprint()
+func replicationGRPCStreamJobsCompatible(left *replicationGRPCStreamJob, right *replicationGRPCStreamJob) bool {
+	return left.source == right.source && left.topologyFingerprint == right.topologyFingerprint
 }
 
-func replicationGRPCStreamRequestBytes(request *hatriecachev1.ReplicationStreamBatch) int {
-	bytes := len(request.GetSource()) + len(request.GetTopologyFingerprint())
-	for _, key := range request.GetKeys() {
-		bytes += len(key)
-	}
-	for _, value := range request.GetBinaryValues() {
-		bytes += len(value)
+func replicationGRPCStreamJobBytes(job *replicationGRPCStreamJob) int {
+	bytes := len(job.source) + len(job.topologyFingerprint)
+	for idx := 0; idx < job.payloads.len(); idx++ {
+		payload := job.payloads.payload(idx)
+		bytes += len(payload.key) + len(payload.binaryValue)
 	}
 	return bytes
+}
+
+func (flight *replicationGRPCStreamFlight) buildRequest(sequence uint64) {
+	first := flight.jobs[0]
+	request := &hatriecachev1.ReplicationStreamBatch{
+		Source:              first.source,
+		Sequence:            sequence,
+		TopologyFingerprint: first.topologyFingerprint,
+		Keys:                make([]string, 0, flight.entries),
+		BinaryValues:        make([][]byte, 0, flight.entries),
+	}
+	for _, job := range flight.jobs {
+		for idx := 0; idx < job.payloads.len(); idx++ {
+			payload := job.payloads.payload(idx)
+			request.Keys = append(request.Keys, payload.key)
+			request.BinaryValues = append(request.BinaryValues, payload.binaryValue)
+		}
+	}
+	flight.request = request
 }
 
 func (target *replicationGRPCStreamTarget) resetTimer(timer *time.Timer) {
@@ -442,25 +459,14 @@ func (session *replicationGRPCSyncSession) sendGroup(ctx context.Context, group 
 		return ReplicationTargetResult{}, err
 	}
 
-	keys := make([]string, payloads.len())
-	values := make([][]byte, payloads.len())
-	for idx := 0; idx < payloads.len(); idx++ {
-		payload := payloads.payload(idx)
-		keys[idx] = payload.key
-		values[idx] = payload.binaryValue
-	}
-	request := &hatriecachev1.ReplicationStreamBatch{
-		Source:              group.metadataSource,
-		TopologyFingerprint: group.metadataTopology,
-		Keys:                keys,
-		BinaryValues:        values,
-	}
 	jobCtx, cancelJob := context.WithTimeout(replicationContext(ctx), session.replicator.timeout)
 	defer cancelJob()
 	job := &replicationGRPCStreamJob{
-		ctx:     jobCtx,
-		request: request,
-		result:  make(chan replicationGRPCStreamJobResult, 1),
+		ctx:                 jobCtx,
+		source:              group.metadataSource,
+		topologyFingerprint: group.metadataTopology,
+		payloads:            payloads,
+		result:              make(chan replicationGRPCStreamJobResult, 1),
 	}
 	select {
 	case target.jobs <- job:
@@ -489,8 +495,8 @@ func (session *replicationGRPCSyncSession) sendGroup(ctx context.Context, group 
 	if err != nil {
 		return ReplicationTargetResult{}, fmt.Errorf("gRPC replication stream: %w", err)
 	}
-	if ack.GetSequence() != request.GetSequence() {
-		return ReplicationTargetResult{}, fmt.Errorf("gRPC replication stream acknowledged sequence %d, want %d", ack.GetSequence(), request.GetSequence())
+	if ack.GetSequence() != job.sequence {
+		return ReplicationTargetResult{}, fmt.Errorf("gRPC replication stream acknowledged sequence %d, want %d", ack.GetSequence(), job.sequence)
 	}
 	if !ack.GetOk() {
 		return ReplicationTargetResult{

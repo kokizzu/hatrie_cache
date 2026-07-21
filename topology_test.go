@@ -101,6 +101,48 @@ func TestTopologyStoreVerifiesReplicationFingerprintOnlyForClusterRoutes(t *test
 	}
 }
 
+func TestTopologyStoreFingerprintTracksTopologyUpdates(t *testing.T) {
+	initial := SingleNodeTopology("node-a", "http://node-a:8080")
+	store, err := NewTopologyStore(initial)
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	if got, want := store.Fingerprint(), initial.Fingerprint(); got != want {
+		t.Fatalf("initial fingerprint = %q, want %q", got, want)
+	}
+	if store.VerifiesReplicationFingerprint() {
+		t.Fatal("single-node topology verifies replication fingerprint, want false")
+	}
+
+	updated := ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Self:    "node-b",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080"},
+			{ID: "node-b", Address: "http://node-b:8080"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-b", Replicas: []string{"node-a"}}},
+	}
+	if err := store.Set(updated); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+	if got, want := store.Fingerprint(), updated.Fingerprint(); got != want {
+		t.Fatalf("updated fingerprint = %q, want %q", got, want)
+	}
+	if !store.VerifiesReplicationFingerprint() {
+		t.Fatal("updated cluster topology does not verify replication fingerprint")
+	}
+
+	updated.Self = "node-a"
+	if err := store.Set(updated); err != nil {
+		t.Fatalf("Set(self) error = %v", err)
+	}
+	if got, want := store.Fingerprint(), updated.Fingerprint(); got != want {
+		t.Fatalf("self-only update fingerprint = %q, want %q", got, want)
+	}
+}
+
 func TestTopologyStoreRoutesVirtualBucketRanges(t *testing.T) {
 	topology := ClusterTopology{
 		Version:     1,
