@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
@@ -216,6 +217,44 @@ func TestLocalPartitionsSnapshotRoundTripRemainsPortable(t *testing.T) {
 		t.Fatalf("plain LoadSnapshot() error = %v", err)
 	}
 	assertLocalPartitionSnapshotValues(t, plain)
+}
+
+func TestLocalPartitionSnapshotAtomicallySwapsStagedChildren(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("fresh", "value")
+	path := filepath.Join(t.TempDir(), "snapshot.hc")
+	if err := source.SaveSnapshotWithFormat(path, SnapshotFormatBinary); err != nil {
+		t.Fatal(err)
+	}
+
+	target := newTestTrie(t)
+	if err := target.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	target.UpsertString("stale", "old")
+	oldSet := target.localPartitions.Load()
+	oldRoots := make([]unsafe.Pointer, len(oldSet.tries))
+	for idx, child := range oldSet.tries {
+		oldRoots[idx] = unsafe.Pointer(child.root)
+	}
+	if err := target.LoadSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	newSet := target.localPartitions.Load()
+	if newSet != oldSet {
+		t.Fatal("LoadSnapshot() replaced partition routing objects instead of their owned generations")
+	}
+	if len(newSet.tries) != len(oldSet.tries) {
+		t.Fatalf("partition count after restore = %d, want %d", len(newSet.tries), len(oldSet.tries))
+	}
+	for idx := range newSet.tries {
+		if unsafe.Pointer(newSet.tries[idx].root) == oldRoots[idx] {
+			t.Fatalf("partition %d retained its live C trie instead of swapping a staged generation", idx)
+		}
+	}
+	if target.GetString("fresh") != "value" || target.Exists("stale") {
+		t.Fatal("staged partition generation did not replace the exact key set")
+	}
 }
 
 func TestLocalPartitionSnapshotCaptureReconcilesMutationsBetweenPages(t *testing.T) {

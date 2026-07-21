@@ -708,12 +708,17 @@ rises 7.8%, cumulative heap rises 1.7%, and allocation count is effectively
 unchanged. Snapshot and storage formats do not change. See
 [BENCHMARK.md](BENCHMARK.md#bounded-partition-snapshot-locking).
 
-Partitioned restore and startup apply decoded records through partition-stable
-workers bounded by `GOMAXPROCS`, while retaining the complete partition-lock
-barrier for exact replacement and rollback. On 100,000 256-byte values across
-16 partitions, binary snapshot restore is 1.28x faster and Pebble startup is
-1.18x faster; cumulative heap and allocation changes remain within 0.1%.
-Single-trie startup is unchanged. See
+Portable snapshot restore now decodes once into an isolated data generation,
+validates that generation completely, and atomically swaps it into the existing
+trie. On 100,000 256-byte values, the default single-trie restore is 1.64x
+faster, uses 2.00x less cumulative heap, and performs 1.80x fewer allocations;
+the 16-partition restore is 1.46x faster with 1.80x less heap and 1.80x fewer
+allocations. Malformed or failed restores leave the live generation unchanged.
+See [BENCHMARK.md](BENCHMARK.md#atomic-generation-snapshot-restore).
+
+Partitioned restore and Pebble startup also use partition-stable workers bounded
+by `GOMAXPROCS`. The historical 100,000-record comparison measured Pebble
+startup at 1.18x faster. See
 [BENCHMARK.md](BENCHMARK.md#parallel-partition-restore).
 
 The measured 100,000-write fixture is 2.24x faster at 16 workers, while
@@ -1788,7 +1793,12 @@ the normal disk spill threshold for large byte values. Snapshot capture
 pre-encodes values into compact pages bounded by 1 MiB or 4,096 records and
 merges only keys changed before the final journal barrier. This keeps snapshot
 output point-in-time consistent without retaining a wide materialized entry for
-every key. Existing snapshot wire formats and older files remain compatible.
+every key. Restore decodes once into a private generation and publishes it only
+after full validation, so readers never observe a partial restore and a failed
+restore does not require live-data rollback. Disk-spilled values are staged in
+temporary generation directories beneath the configured spill root and old
+generation files are removed after cutover. Existing snapshot wire formats and
+older files remain compatible.
 
 Use `OpenLevelDBStore`, `SaveLevelDB`, and `LoadLevelDB` for LevelDB-backed
 disk persistence. LevelDB loads replace the current in-memory key set. The

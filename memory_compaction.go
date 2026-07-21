@@ -155,10 +155,12 @@ func (ht *HatTrie) buildMemoryCompactionPlanLocked() (memoryCompactionPlan, erro
 	plan.remaps[DATAVALUE_TYPE_RAW_STRING] = rawRemap
 
 	plan.disks = &DiskStorage{
-		dir:       ht.disks.dir,
-		ownedDir:  ht.disks.ownedDir,
-		paths:     cloneStorageSliceExact(ht.disks.paths),
-		reusables: cloneReusableIndexes(&ht.disks.reusables),
+		dir:           ht.disks.dir,
+		rootDir:       ht.disks.rootDir,
+		ownedDir:      ht.disks.ownedDir,
+		generationDir: ht.disks.generationDir,
+		paths:         cloneStorageSliceExact(ht.disks.paths),
+		reusables:     cloneReusableIndexes(&ht.disks.reusables),
 	}
 	plan.diskRemap = stableStorageRemap(len(ht.disks.paths), &ht.disks.reusables)
 

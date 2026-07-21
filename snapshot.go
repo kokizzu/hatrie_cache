@@ -305,6 +305,10 @@ func (ht *HatTrie) LoadSnapshot(path string) error {
 }
 
 func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, error) {
+	return ht.loadSnapshotStaged(path)
+}
+
+func (ht *HatTrie) loadSnapshotLegacy(path string) (SnapshotMetadata, error) {
 	if ht == nil {
 		return SnapshotMetadata{}, ErrNilHatTrie
 	}

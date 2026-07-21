@@ -1486,6 +1486,153 @@ func TestLoadSnapshotRemovesKeysMissingFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotAtomicallySwapsStagedGeneration(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("fresh", "value")
+	path := filepath.Join(t.TempDir(), "snapshot.hc")
+	if err := source.SaveSnapshotWithFormat(path, SnapshotFormatBinary); err != nil {
+		t.Fatal(err)
+	}
+
+	target := newTestTrie(t)
+	if err := target.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.ConfigureCounterWriteStripes(8); err != nil {
+		t.Fatal(err)
+	}
+	target.UpsertString("stale", "old")
+	oldRoot := target.root
+	if err := target.LoadSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	if target.root == oldRoot {
+		t.Fatal("LoadSnapshot() retained the live C trie instead of swapping a staged generation")
+	}
+	if target.GetString("fresh") != "value" || target.Exists("stale") {
+		t.Fatal("staged generation did not replace the exact key set")
+	}
+	if policy := target.KeyStatsPolicy(); policy.Mode != KeyStatsModeFull {
+		t.Fatalf("key stats policy after restore = %#v, want full", policy)
+	}
+	if stats := target.CounterWriteStripingStats(); !stats.Enabled || stats.Stripes != 8 {
+		t.Fatalf("counter stripe policy after restore = %#v, want 8 enabled stripes", stats)
+	}
+}
+
+func TestLoadSnapshotStagedDiskGenerationStaysUnderConfiguredRoot(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertBytes("large", testPayload(DiskBytesThreshold+1024))
+	path := filepath.Join(t.TempDir(), "snapshot.hc")
+	if err := source.SaveSnapshotWithFormat(path, SnapshotFormatBinary); err != nil {
+		t.Fatal(err)
+	}
+
+	root := filepath.Join(t.TempDir(), "target-bytes")
+	target, err := CreateHatTrieWithDiskDir(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(target.Destroy)
+	target.UpsertBytes("stale-large", testPayload(DiskBytesThreshold+2048))
+	old := target.Get("stale-large")
+	oldPath := target.disks.paths[old.Index]
+
+	if err := target.LoadSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	value := target.Get("large")
+	newPath := target.disks.paths[value.Index]
+	if newPath == oldPath {
+		t.Fatalf("staged disk path = old path %q, want a new generation", newPath)
+	}
+	if rel, err := filepath.Rel(root, newPath); err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		t.Fatalf("staged disk path %q is outside configured root %q", newPath, root)
+	}
+	if !target.disks.generationDir || target.disks.configuredRoot() != root {
+		t.Fatalf("staged disk storage = %#v, want generation below %q", target.disks, root)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old disk path Stat() error = %v, want removed", err)
+	}
+	if got := target.GetBytes("large"); !bytes.Equal(got, testPayload(DiskBytesThreshold+1024)) {
+		t.Fatalf("restored large value length = %d, want %d", len(got), DiskBytesThreshold+1024)
+	}
+	firstGeneration := target.disks.dir
+	if err := target.LoadSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	if target.disks.dir == firstGeneration {
+		t.Fatal("repeated restore reused the prior disk generation")
+	}
+	if _, err := os.Stat(firstGeneration); !os.IsNotExist(err) {
+		t.Fatalf("prior generation Stat() error = %v, want removed", err)
+	}
+	target.Destroy()
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("external configured root Stat() error = %v, want retained", err)
+	}
+	if generations, err := filepath.Glob(filepath.Join(root, ".snapshot-restore-*")); err != nil || len(generations) != 0 {
+		t.Fatalf("restore generations after Destroy() = %#v/%v, want none", generations, err)
+	}
+}
+
+func TestLoadSnapshotRejectedStageCleansGenerationAndKeepsLiveRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid.snapshot")
+	payload := []byte(`{"version":1,"entries":[{"key":"fresh","type":"string","string":"value"},{"key":"bad","type":"map"}]}`)
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "target")
+	target, err := CreateHatTrieWithDiskDir(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Destroy()
+	target.UpsertString("existing", "keep")
+	liveRoot := target.root
+	if err := target.LoadSnapshot(path); err == nil {
+		t.Fatal("LoadSnapshot() error = nil, want invalid map rejection")
+	}
+	if target.root != liveRoot || target.GetString("existing") != "keep" || target.Exists("fresh") {
+		t.Fatal("rejected staged restore changed live state")
+	}
+	if generations, err := filepath.Glob(filepath.Join(root, ".snapshot-restore-*")); err != nil || len(generations) != 0 {
+		t.Fatalf("restore generations after rejection = %#v/%v, want none", generations, err)
+	}
+}
+
+func TestLoadSnapshotRejectsKeyStatsPolicyChangeBeforeCutover(t *testing.T) {
+	source := newTestTrie(t)
+	if err := source.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+		t.Fatal(err)
+	}
+	source.UpsertString("fresh", "value")
+	path := filepath.Join(t.TempDir(), "snapshot.hc")
+	if err := source.SaveSnapshotWithFormat(path, SnapshotFormatBinary); err != nil {
+		t.Fatal(err)
+	}
+
+	target := newTestTrie(t)
+	if err := target.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+		t.Fatal(err)
+	}
+	target.UpsertString("existing", "keep")
+	liveRoot := target.root
+	target.snapshotRestoreStageHook = func(*HatTrie) error {
+		return target.ConfigureKeyStats(KeyStatsModeOff, 0)
+	}
+	if err := target.LoadSnapshot(path); err == nil {
+		t.Fatal("LoadSnapshot() error = nil, want key-stats policy change rejection")
+	}
+	if target.root != liveRoot || target.GetString("existing") != "keep" || target.Exists("fresh") {
+		t.Fatal("rejected staged restore changed live state")
+	}
+	if policy := target.KeyStatsPolicy(); policy.Mode != KeyStatsModeOff || policy.Tracked != 0 {
+		t.Fatalf("key stats policy after rejection = %#v, want off and empty", policy)
+	}
+}
+
 func TestLoadSnapshotStreamsMissingKeyCleanup(t *testing.T) {
 	const keepEntries = 16
 	large := strings.Repeat("x", 70*1024)
@@ -1574,10 +1721,10 @@ func TestLoadSnapshotCleansCreatedKeysAfterApplyFailure(t *testing.T) {
 
 	ht := newTestTrie(t)
 	ht.UpsertString("existing", "keep")
-	firstPath := ht.disks.pathFor(0)
-	blockedPath := ht.disks.pathFor(1)
-	if err := os.Mkdir(blockedPath, 0o700); err != nil {
-		t.Fatalf("Mkdir(blocked path) error = %v", err)
+	var firstPath string
+	ht.snapshotRestoreStageHook = func(stage *HatTrie) error {
+		firstPath = stage.disks.pathFor(0)
+		return os.Mkdir(stage.disks.pathFor(1), 0o700)
 	}
 
 	if err := ht.LoadSnapshot(path); err == nil {
@@ -1621,10 +1768,10 @@ func TestLoadSnapshotRollsBackExistingKeysAfterApplyFailure(t *testing.T) {
 
 	ht := newTestTrie(t)
 	ht.UpsertString("a-existing", "keep")
-	firstPath := ht.disks.pathFor(0)
-	blockedPath := ht.disks.pathFor(1)
-	if err := os.Mkdir(blockedPath, 0o700); err != nil {
-		t.Fatalf("Mkdir(blocked path) error = %v", err)
+	var firstPath string
+	ht.snapshotRestoreStageHook = func(stage *HatTrie) error {
+		firstPath = stage.disks.pathFor(0)
+		return os.Mkdir(stage.disks.pathFor(1), 0o700)
 	}
 
 	if err := ht.LoadSnapshot(path); err == nil {
@@ -1672,9 +1819,8 @@ func TestLoadSnapshotStreamsOperationsWithRollbackOnApplyFailure(t *testing.T) {
 
 	ht := newTestTrie(t)
 	ht.UpsertString("existing", "keep")
-	blockedPath := ht.disks.pathFor(0)
-	if err := os.Mkdir(blockedPath, 0o700); err != nil {
-		t.Fatalf("Mkdir(blocked path) error = %v", err)
+	ht.snapshotRestoreStageHook = func(stage *HatTrie) error {
+		return os.Mkdir(stage.disks.pathFor(0), 0o700)
 	}
 
 	if err := ht.LoadSnapshot(path); err == nil {

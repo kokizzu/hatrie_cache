@@ -2,7 +2,7 @@
 set -eu
 
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-build/benchmarks}
-benchmark=${PARTITION_RESTORE_BENCH:-^BenchmarkLocalPartitionRestore100k$}
+benchmark=${PARTITION_RESTORE_BENCH:-^Benchmark(LocalPartitionRestore100k|SnapshotRestoreGeneration100k)$}
 keys=${PARTITION_RESTORE_BENCH_KEYS:-100000}
 partitions=${PARTITION_RESTORE_COUNT:-16}
 benchtime=${BENCHTIME:-1x}

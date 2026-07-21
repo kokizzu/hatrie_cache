@@ -1223,10 +1223,12 @@ func (bs *BytesStorage) stringValue(idx int32) string {
 
 // DiskStorage stores large byte values outside the Go heap.
 type DiskStorage struct {
-	dir       string
-	ownedDir  bool
-	paths     []string
-	reusables reusableIndexes
+	dir           string
+	rootDir       string
+	ownedDir      bool
+	generationDir bool
+	paths         []string
+	reusables     reusableIndexes
 }
 
 func CreateDiskStorage(dir string, ownedDir bool) (*DiskStorage, error) {
@@ -1235,6 +1237,7 @@ func CreateDiskStorage(dir string, ownedDir bool) (*DiskStorage, error) {
 	}
 	return &DiskStorage{
 		dir:      dir,
+		rootDir:  dir,
 		ownedDir: ownedDir,
 		paths:    []string{},
 	}, nil
@@ -1375,7 +1378,7 @@ func (ds *DiskStorage) Destroy() {
 		ds.reusables.Compact(0)
 	}()
 	if ds.ownedDir {
-		_ = os.RemoveAll(ds.dir)
+		_ = os.RemoveAll(ds.configuredRoot())
 		return
 	}
 	for _, path := range ds.paths {
@@ -1383,6 +1386,19 @@ func (ds *DiskStorage) Destroy() {
 			_ = os.Remove(path)
 		}
 	}
+	if ds.generationDir {
+		_ = os.RemoveAll(ds.dir)
+	}
+}
+
+func (ds *DiskStorage) configuredRoot() string {
+	if ds == nil || ds.rootDir == "" {
+		if ds == nil {
+			return ""
+		}
+		return ds.dir
+	}
+	return ds.rootDir
 }
 
 func (ds *DiskStorage) writePath(idx int32) (string, bool) {
@@ -2314,61 +2330,63 @@ func levelDBReferenceType(id uint8) string {
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing
 // pools referenced by compact HatValue records.
 type HatTrie struct {
-	mu                        sync.RWMutex
-	telemetryMu               sync.Mutex
-	snapshotCaptureMu         sync.Mutex
-	counterWriteStripes       []sync.RWMutex
-	counterWriteStripeMask    uint64
-	counterFastPathWrites     uint64
-	root                      *C.hattrie_t
-	raws                      *BytesStorage
-	disks                     *DiskStorage
-	maps                      *MapStorage
-	slices                    *SliceStorage
-	sets                      *SetStorage
-	priorityQueues            *PriorityQueueStorage
-	bloomFilters              *BloomFilterStorage
-	countMinSketches          *CountMinSketchStorage
-	hyperLogLogs              *HyperLogLogStorage
-	topKs                     *TopKStorage
-	cuckooFilters             *CuckooFilterStorage
-	roaringBitmaps            *RoaringBitmapStorage
-	quantileSketches          *QuantileSketchStorage
-	fenwickTrees              *FenwickTreeStorage
-	sparseBitsets             *SparseBitsetStorage
-	reservoirSamples          *ReservoirSampleStorage
-	xorFilters                *XorFilterStorage
-	radixTrees                *RadixTreeStorage
-	dbrefs                    *LevelDBReferenceStorage
-	hydrationMu               sync.Mutex
-	hydrations                map[levelDBHydrationKey]*levelDBHydrationCall
-	nextDBReferenceToken      uint64
-	nativeCommandBatchCalls   uint64
-	journalScalarBatchCalls   uint64
-	nativeCommandBatchScratch nativeCommandBatchScratch
-	localPartitions           atomic.Pointer[localPartitionSet]
-	expires                   map[string]uint32
-	expirations               expirationHeap
-	hotKey                    string
-	hotValue                  HatValue
-	hotValid                  bool
-	stats                     atomicCacheStats
-	keyStatsGlobal            CacheStats
-	keyStats                  map[string]*trackedKeyStats
-	keyStatsMode              KeyStatsMode
-	keyStatsCapacity          int
-	keyStatsSlots             []string
-	keyStatsFree              []uint32
-	keyStatsHand              int
-	levelDBSpillKeys          map[string]struct{}
-	levelDBHotBytes           int64
-	levelDBHotValues          map[string]int64
-	mutationEpoch             uint64
-	memoryCompactionEpoch     uint64
-	replicationMerkle         *replicationMerkleIndex
-	snapshotMutations         *snapshotMutationTracker
-	snapshotCapturePageHook   func(int)
-	now                       func() time.Time
+	mu                         sync.RWMutex
+	telemetryMu                sync.Mutex
+	snapshotCaptureMu          sync.Mutex
+	counterWriteStripes        []sync.RWMutex
+	counterWriteStripeMask     uint64
+	counterFastPathWrites      uint64
+	root                       *C.hattrie_t
+	raws                       *BytesStorage
+	disks                      *DiskStorage
+	maps                       *MapStorage
+	slices                     *SliceStorage
+	sets                       *SetStorage
+	priorityQueues             *PriorityQueueStorage
+	bloomFilters               *BloomFilterStorage
+	countMinSketches           *CountMinSketchStorage
+	hyperLogLogs               *HyperLogLogStorage
+	topKs                      *TopKStorage
+	cuckooFilters              *CuckooFilterStorage
+	roaringBitmaps             *RoaringBitmapStorage
+	quantileSketches           *QuantileSketchStorage
+	fenwickTrees               *FenwickTreeStorage
+	sparseBitsets              *SparseBitsetStorage
+	reservoirSamples           *ReservoirSampleStorage
+	xorFilters                 *XorFilterStorage
+	radixTrees                 *RadixTreeStorage
+	dbrefs                     *LevelDBReferenceStorage
+	hydrationMu                sync.Mutex
+	hydrations                 map[levelDBHydrationKey]*levelDBHydrationCall
+	nextDBReferenceToken       uint64
+	nativeCommandBatchCalls    uint64
+	journalScalarBatchCalls    uint64
+	nativeCommandBatchScratch  nativeCommandBatchScratch
+	localPartitions            atomic.Pointer[localPartitionSet]
+	expires                    map[string]uint32
+	expirations                expirationHeap
+	hotKey                     string
+	hotValue                   HatValue
+	hotValid                   bool
+	stats                      atomicCacheStats
+	keyStatsGlobal             CacheStats
+	keyStats                   map[string]*trackedKeyStats
+	keyStatsMode               KeyStatsMode
+	keyStatsCapacity           int
+	keyStatsSlots              []string
+	keyStatsFree               []uint32
+	keyStatsHand               int
+	levelDBSpillKeys           map[string]struct{}
+	levelDBHotBytes            int64
+	levelDBHotValues           map[string]int64
+	mutationEpoch              uint64
+	memoryCompactionEpoch      uint64
+	replicationMerkle          *replicationMerkleIndex
+	snapshotMutations          *snapshotMutationTracker
+	snapshotCapturePageHook    func(int)
+	snapshotRestoreStageHook   func(*HatTrie) error
+	snapshotRestoreCutoverHook func(time.Duration)
+	now                        func() time.Time
 }
 
 func CreateHatTrie() *HatTrie {

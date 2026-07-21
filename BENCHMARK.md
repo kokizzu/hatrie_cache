@@ -209,6 +209,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Bounded-page snapshot capture](#bounded-page-snapshot-capture), 100k keys | 61.740 ms maximum read pause | 2.822 ms | 21.88x shorter pause | Total time and heap remain within 1% |
 | Current pass | [Bounded partition snapshot locking](#bounded-partition-snapshot-locking), 100k keys, 16 partitions | Whole-set lock: 154.398 ms pause; 241.262 ms total | Tracked 256-key pages: 2.300 ms pause; 259.974 ms total | 67.14x shorter pause | Total time is 7.8% higher and cumulative heap is 1.7% higher |
 | Current pass | [Parallel partition restore](#parallel-partition-restore), 100k x 256 B, 16 partitions | Serial: snapshot 258.183 ms; Pebble 213.948 ms | Bounded parallel: snapshot 202.398 ms; Pebble 181.435 ms | 1.28x faster snapshot restore; 1.18x faster Pebble startup | Heap and allocations rise by at most 0.1%; local partitions must be enabled |
+| Current pass | [Atomic generation snapshot restore](#atomic-generation-snapshot-restore), 100k x 256 B | Two-pass live mutation: 385.364 ms; 217.69 MB heap; 901,188 allocs | One-pass staged swap: 234.900 ms; 108.82 MB heap; 500,117 allocs | 1.64x faster, 2.00x lower heap, 1.80x fewer allocs | Restore temporarily retains old and staged generations; measured cutover is 1.72 us |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
@@ -1442,13 +1443,80 @@ Raw elapsed samples in milliseconds were:
 | Binary snapshot | `261.572, 262.279, 258.183, 240.788, 287.909, 246.711, 233.910` | `205.431, 208.462, 199.254, 202.398, 204.957, 202.284, 196.342` |
 | Pebble store | `210.970, 192.237, 220.928, 213.948, 216.138, 214.704, 205.143` | `181.435, 181.995, 182.816, 183.244, 177.557, 170.405, 181.300` |
 
-The current output is generated at `build/benchmarks/partition-restore.txt`;
-the serial run used the same script before the implementation change. Mixed
+The bounded-parallel result is retained as the legacy two-pass control in the
+current `build/benchmarks/partition-restore.txt` output. Mixed
 scalar/structured/byte values, lazy cold references, stale-key deletion,
 snapshot mismatch, and invalid persistent records have correctness and race
 coverage. A worker error cancels dispatch and restores every changed partition.
-The optimization applies only when local partitions are enabled; the default
-single-trie restore path and all snapshot/storage formats remain unchanged.
+This historical optimization applies only when local partitions are enabled;
+the generation restore below replaces its rollback phase for snapshot input.
+Pebble startup still uses the bounded parallel path described here.
+
+<a id="atomic-generation-snapshot-restore"></a>
+### Atomic Generation Snapshot Restore
+
+Portable snapshot restore previously decoded the complete file twice. The first
+pass retained and sorted every active key. The second pass decoded values again,
+mutated the live trie while holding its write lock, retained old values for
+rollback, tracked newly created keys, and finally scanned for stale-key
+deletion. A late validation or disk error replayed that rollback state.
+
+The default path now decodes once into an isolated trie generation with the
+same key-stat, counter-stripe, disk-spill, and local-partition configuration.
+Partitioned staging retains the existing partition-stable workers, but they
+write only private children and therefore need no live partition barrier or
+rollback records. Complete EOF, metadata, duplicate-key, TTL, and value
+validation finishes before cutover. The live object then exchanges C roots,
+typed backing pools, expiration metadata, key-stat slots, spill indexes, and
+Merkle state while holding its existing write locks. Runtime locks,
+configuration, global telemetry, and routing objects remain stable.
+
+Disk-spilled values are written below the configured disk root in a private
+`.snapshot-restore-*` generation. Failure removes that generation without
+touching live files. Success transfers ownership during cutover and removes the
+old generation afterward. Repeated restore therefore remains beneath the same
+backup boundary. Snapshot version, binary/JSON/gzip formats, journal sequence,
+and public APIs are unchanged.
+
+The fixture restores 100,000 identical 256-byte strings into a target containing
+one stale key. Inputs and target construction are excluded. The unpartitioned
+fixture is the default configuration; the second fixture uses 16 local
+partitions. Legacy controls execute the previous two-pass implementation in the
+same binary. Values are seven-run medians on the Ryzen 9 5950X host.
+
+```sh
+make bench-partition-restore PARTITION_RESTORE_BENCH_KEYS=100000 PARTITION_RESTORE_COUNT=16 BENCHTIME=1x COUNT=7
+```
+
+| Default single trie | Legacy two pass | Staged single pass | Improvement |
+| --- | ---: | ---: | ---: |
+| Restore time | 385.364 ms | 234.900 ms | 1.64x faster |
+| Cumulative heap | 217,686,896 B | 108,816,416 B | 2.00x lower |
+| Allocations | 901,188 | 500,117 | 1.80x fewer |
+| Cutover lock | full live apply | 1.720 us | staged work stays outside live lock |
+
+| 16 local partitions | Legacy two pass | Staged single pass | Improvement |
+| --- | ---: | ---: | ---: |
+| Restore time | 190.590 ms | 130.342 ms | 1.46x faster |
+| Cumulative heap | 181,155,840 B | 100,628,976 B | 1.80x lower |
+| Allocations | 902,806 | 501,351 | 1.80x fewer |
+| Cutover lock | full live apply | 5.630 us | all child roots exchange under one barrier |
+
+Raw elapsed samples in milliseconds were:
+
+| Path | Seven samples |
+| --- | --- |
+| Default legacy | `380.682, 388.597, 382.380, 381.792, 385.364, 385.685, 396.974` |
+| Default staged | `253.439, 226.548, 224.750, 231.660, 234.900, 255.946, 249.795` |
+| 16-partition legacy | `189.585, 193.450, 187.956, 197.735, 205.121, 190.590, 185.895` |
+| 16-partition staged | `124.467, 122.650, 127.362, 130.342, 133.837, 135.903, 133.651` |
+
+`build/benchmarks/partition-restore.txt` contains the current raw rows,
+including `cutover_ns/op`. Cumulative allocation falls because active-key
+materialization, the second decode, rollback snapshots, and created-key maps
+are removed. Peak resident state can still include both complete generations
+until cutover; that is the cost of leaving live readers on an unchanged state
+while staging and of rejecting failures atomically.
 
 ### Compact Streaming Snapshot Capture
 
