@@ -2242,14 +2242,19 @@ In this run HAT-trie is faster on all 16 measured Tarantool-comparable rows.
 Run:
 
 ```sh
-make run CMD='go test -run=NONE -bench=BenchmarkHTTPReplicatorSyncAllBatching/Batched10k -benchmem -benchtime=20x -count=10'
+make bench-replication-optimizations \
+  BENCHTIME=20x COUNT=10 \
+  REPLICATION_OPTIMIZATION_OUTPUT=replication-final.txt
 ```
 
-`BenchmarkHTTPReplicatorSyncAllBatching` syncs 10,000 leader-owned keys to one
-local HTTP target. `Batched10k` uses one SyncAll page and native protobuf
-replication. The latest start and final rows are medians from identical ten-run
-commands on the same AMD Ryzen 9 5950X host. Older rows are retained from their
-original controlled runs.
+The Make target runs the splitter, 10,000-key end-to-end sync, digest repair,
+and fallback iterator benchmarks. Raw output is written to
+`build/benchmarks/replication-final.txt`. `Batched10k` uses one SyncAll page,
+native protobuf replication, and one local HTTP target. The latest final row is
+the median of ten runs with `-benchtime=20x` on the same AMD Ryzen 9 5950X host.
+The three feature rows use the paired seven-run commands recorded during each
+change. Older rows are retained from their original controlled runs and are not
+directly comparable to the latest pass.
 
 | Mode | Time/op | requests/op | wire_B/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -2259,24 +2264,36 @@ original controlled runs.
 | Start of latest pass (`84325af`) | 28,554,528 ns | 1 | 55,794 | 5,781,645 | 50,756 |
 | Final optimized (`69a6018`) | 18,893,092 ns | 1 | 55,795 | 948,495 | 30,197 |
 | Current optimized (`e5b127d`) | 15,698,676 ns | 1 | 55,794 | 847,763 | 10,241 |
+| Before descriptor optimization (`0f4adc3`) | 24,269,975 ns | 3 | 56,041 | 16,386,600 | 14,277 |
+| Zero-copy split (`20cdd2f`) | 21,743,638 ns | 3 | 56,038 | 4,888,410 | 10,743 |
+| Compact default digest payloads (`8cb0e0d`) | 19,835,164 ns | 3 | 56,045 | 2,752,297 | 10,639 |
+| Current combined (`375635e`) | 19,370,011 ns | 3 | 56,045 | 2,749,032 | 10,635 |
 | Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
-The latest five-feature pass is 1.51x faster, uses 6.10x less cumulative allocated heap,
-and performs 1.68x fewer allocations while keeping request-body
-bytes effectively unchanged. From `10cf4c8`, the cumulative result is 2.06x
-faster, 1.56x fewer body bytes, 12.63x less allocated heap, and 4.35x fewer
-allocations. Against the earlier `b897b64` batched baseline, it is 8.58x faster,
-sends 2.59x fewer body bytes, uses 60.13x less allocated heap, and performs
-34.45x fewer allocations. The historical batching request reduction is 10,000x
-for this single-target sync. Header bytes are not included in `wire_B/op`, so the real
-network savings from batching are larger than the body-only metric. `B/op`
-measures bytes allocated during one operation, not peak process RSS.
+Against `0f4adc3`, the current three-feature result is 1.25x faster, uses 5.96x
+less cumulative allocated heap, and performs 1.34x fewer allocations. Request
+count and request-body bytes are unchanged. The historical batching request
+reduction is 10,000x for this single-target sync. Header bytes are not included
+in `wire_B/op`, and `B/op` measures cumulative bytes allocated during one
+operation rather than peak process RSS.
 
-The current row adds persistent generation-checked page cursors, packed page
-arenas, and 256-record native iterator batches. Against `69a6018`, it is 1.20x
-faster, uses 1.12x less cumulative heap, and performs 2.95x fewer allocations.
-Against `10cf4c8`, the cumulative result is 2.49x faster, 1.56x smaller on wire,
-14.14x lower in allocated heap, and 12.82x lower in allocations.
+### Replication Descriptor Optimizations
+
+Each row below reports the median from the raw paired runs used to accept the
+feature. Improvements are ratios where larger is better.
+
+| Feature benchmark | Before | After | Speed | Heap improvement | Allocation improvement | Tradeoff |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Carried-size splitter, 4,096 payloads | 1,069,489 ns; 2,945,587 B; 882 allocs | 38,888 ns; 30,720 B; 4 allocs | 27.50x | 95.89x | 220.50x | Immutable subslices retain the already-live source page until synchronous execution finishes |
+| Default protobuf digest repair, 1,024 sets | 1,356,945 ns; 300,286 B; 1,197 allocs | 1,105,669 ns; 107,288 B; 1,157 allocs | 1.23x | 2.80x | 1.03x | None on all-set pages; wire bytes and compatibility fallback are unchanged |
+| Mixed digest repair, 512 sets plus 512 deletes | 1,105,516 ns; 282,637 B; 684 allocs | 1,151,193 ns; 281,936 B; 685 allocs | 0.96x | 1.00x | 1.00x | 4.13% slower in the short run; a `100x`, ten-run confirmation narrowed this to 0.95%, so this is treated as neutral noise rather than a win |
+| Fallback source scan, 10,000 1 KiB values | 6,309,581 ns; 210,240 B; 85 allocs | 4,480,362 ns; 209,088 B; 84 allocs | 1.41x | 1.01x | 1.01x | Key-only mode is restricted to full-push fallback; normal digest comparison still hashes values |
+
+The mixed-page implementation carries the delete intent already discovered by
+digest comparison. This selects generic compatibility storage before allocating
+compact descriptors and removes the 17% transient-heap regression observed in
+the first implementation. A concurrent state change can still force the old
+dynamic conversion path, preserving the previous repair semantics.
 
 ### Replication Page Traversal
 
