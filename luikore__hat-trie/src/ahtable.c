@@ -417,11 +417,8 @@ int ahtable_del(ahtable_t* T, const char* key, size_t len)
 
 
 
-static int cmpkey(const void* a_, const void* b_)
+static int slot_key_compare(slot_t a, slot_t b)
 {
-    slot_t a = *(slot_t*) a_;
-    slot_t b = *(slot_t*) b_;
-
     size_t ka = keylen(a), kb = keylen(b);
 
     a += ka < 128 ? 1 : 2;
@@ -429,6 +426,122 @@ static int cmpkey(const void* a_, const void* b_)
 
     int c = memcmp(a, b, ka < kb ? ka : kb);
     return c == 0 ? (int) ka - (int) kb : c;
+}
+
+
+static void insertion_sort_slots(slot_t* slots, size_t count)
+{
+    size_t i;
+    for (i = 1; i < count; ++i) {
+        slot_t value = slots[i];
+        size_t j = i;
+        while (j > 0 && slot_key_compare(slots[j - 1], value) > 0) {
+            slots[j] = slots[j - 1];
+            --j;
+        }
+        slots[j] = value;
+    }
+}
+
+
+static unsigned int slot_radix_symbol(slot_t slot, size_t depth)
+{
+    size_t len = keylen(slot);
+    if (depth >= len) return 0;
+    slot += len < 128 ? 1 : 2;
+    return (unsigned int) slot[depth] + 1;
+}
+
+
+static size_t shared_slot_prefix_end(slot_t* slots, size_t count, size_t depth)
+{
+    size_t first_len = keylen(slots[0]);
+    slot_t first = slots[0] + (first_len < 128 ? 1 : 2);
+    size_t common_end = first_len;
+    size_t i;
+
+    for (i = 1; i < count && common_end > depth; ++i) {
+        size_t len = keylen(slots[i]);
+        slot_t key = slots[i] + (len < 128 ? 1 : 2);
+        size_t limit = len < common_end ? len : common_end;
+        size_t position = depth;
+        while (position < limit && first[position] == key[position]) {
+            ++position;
+        }
+        common_end = position;
+    }
+    return common_end;
+}
+
+
+static void radix_sort_slots_from(slot_t* slots, size_t count, size_t depth)
+{
+    const size_t insertion_threshold = 24;
+
+    while (count > insertion_threshold) {
+        size_t starts[258] = {0};
+        size_t next[257];
+        size_t i;
+        unsigned int symbol;
+
+        for (i = 0; i < count; ++i) {
+            symbol = slot_radix_symbol(slots[i], depth);
+            ++starts[symbol + 1];
+        }
+        for (i = 1; i < 258; ++i) {
+            starts[i] += starts[i - 1];
+        }
+
+        unsigned int only_symbol = 0;
+        size_t populated_buckets = 0;
+        for (symbol = 0; symbol < 257; ++symbol) {
+            if (starts[symbol + 1] == starts[symbol]) continue;
+            only_symbol = symbol;
+            ++populated_buckets;
+            if (populated_buckets > 1) break;
+        }
+        if (populated_buckets == 1) {
+            if (only_symbol == 0) return;
+            depth = shared_slot_prefix_end(slots, count, depth + 1);
+            continue;
+        }
+        memcpy(next, starts, sizeof(next));
+
+        for (symbol = 0; symbol < 257; ++symbol) {
+            while (next[symbol] < starts[symbol + 1]) {
+                unsigned int destination = slot_radix_symbol(slots[next[symbol]], depth);
+                if (destination == symbol) {
+                    ++next[symbol];
+                    continue;
+                }
+                slot_t swap = slots[next[destination]];
+                slots[next[destination]] = slots[next[symbol]];
+                slots[next[symbol]] = swap;
+                ++next[destination];
+            }
+        }
+
+        unsigned int largest_symbol = 0;
+        size_t largest_count = 0;
+        for (symbol = 1; symbol < 257; ++symbol) {
+            size_t bucket_count = starts[symbol + 1] - starts[symbol];
+            if (bucket_count > largest_count) {
+                largest_count = bucket_count;
+                largest_symbol = symbol;
+            }
+        }
+        for (symbol = 1; symbol < 257; ++symbol) {
+            size_t bucket_count = starts[symbol + 1] - starts[symbol];
+            if (symbol == largest_symbol || bucket_count <= 1) continue;
+            radix_sort_slots_from(slots + starts[symbol], bucket_count, depth + 1);
+        }
+        if (largest_count <= 1) return;
+        slots += starts[largest_symbol];
+        count = largest_count;
+        ++depth;
+    }
+
+    insertion_sort_slots(slots, count);
 }
 
 
@@ -464,7 +577,7 @@ static ahtable_sorted_iter_t* ahtable_sorted_iter_begin(const ahtable_t* T)
         }
     }
 
-    qsort(i->xs, T->m, sizeof(slot_t), cmpkey);
+    radix_sort_slots_from(i->xs, T->m, 0);
 
     return i;
 }

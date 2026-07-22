@@ -396,6 +396,31 @@ func BenchmarkReplicationScanRouteModes(b *testing.B) {
 	}
 }
 
+func BenchmarkHatTrieScanOrderModes(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+	for _, sorted := range []bool{false, true} {
+		name := "Unordered"
+		if sorted {
+			name = "Ordered"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ReportMetric(keyCount, "keys/op")
+			for iteration := 0; iteration < b.N; iteration++ {
+				keys, err := trie.KeysWithPrefixChecked("session:", sorted)
+				if err != nil || len(keys) != keyCount {
+					b.Fatalf("KeysWithPrefixChecked(sorted=%v) = %d/%v, want %d", sorted, len(keys), err, keyCount)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
 	keyCount := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_KEYS", 100000)
 	pageSize := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_PAGE_SIZE", 1000)

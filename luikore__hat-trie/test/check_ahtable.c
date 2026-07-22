@@ -442,6 +442,127 @@ void test_ahtable_empty_slot_operations()
 }
 
 
+void test_ahtable_sorted_binary_boundaries()
+{
+    fprintf(stderr, "checking sorted binary key boundaries... \n");
+
+    unsigned char zero[] = {0x00};
+    unsigned char zero_zero[] = {0x00, 0x00};
+    unsigned char zero_high[] = {0x00, 0xff};
+    unsigned char ascii[] = {'a'};
+    unsigned char ascii_zero[] = {'a', 0x00};
+    unsigned char ascii_next[] = {'a', 'a'};
+    unsigned char high[] = {0x80};
+    unsigned char highest[] = {0xff};
+    unsigned char length127[127];
+    unsigned char length128[128];
+    unsigned char length129[129];
+    memset(length127, 'z', sizeof(length127));
+    memset(length128, 'z', sizeof(length128));
+    memset(length129, 'z', sizeof(length129));
+
+    struct binary_key {
+        const unsigned char* data;
+        size_t len;
+    } keys[] = {
+        {length128, sizeof(length128)},
+        {highest, sizeof(highest)},
+        {zero_high, sizeof(zero_high)},
+        {ascii_next, sizeof(ascii_next)},
+        {length127, sizeof(length127)},
+        {zero, sizeof(zero)},
+        {high, sizeof(high)},
+        {ascii_zero, sizeof(ascii_zero)},
+        {length129, sizeof(length129)},
+        {zero_zero, sizeof(zero_zero)},
+        {ascii, sizeof(ascii)},
+    };
+    const size_t key_count = sizeof(keys) / sizeof(keys[0]);
+    ahtable_t* table = ahtable_create_n(1);
+    size_t index;
+    for (index = 0; index < key_count; ++index) {
+        value_t* value = ahtable_get(table, (const char*) keys[index].data, keys[index].len);
+        if (value == NULL) {
+            fprintf(stderr, "[error] binary boundary insert %zu failed\n", index);
+            have_error = 1;
+            continue;
+        }
+        *value = index + 1;
+    }
+
+    ahtable_iter_t* iterator = ahtable_iter_begin(table, true);
+    const char* previous = NULL;
+    size_t previous_len = 0;
+    size_t count = 0;
+    while (!ahtable_iter_finished(iterator)) {
+        size_t len = 0;
+        const char* key = ahtable_iter_key(iterator, &len);
+        if (previous != NULL && cmpkey(previous, previous_len, key, len) >= 0) {
+            fprintf(stderr, "[error] binary boundary iteration is not strictly ordered at %zu\n", count);
+            have_error = 1;
+        }
+        previous = key;
+        previous_len = len;
+        ++count;
+        ahtable_iter_next(iterator);
+    }
+    if (count != key_count) {
+        fprintf(stderr, "[error] binary boundary iteration count %zu, expected %zu\n", count, key_count);
+        have_error = 1;
+    }
+    ahtable_iter_free(iterator);
+    ahtable_free(table);
+    fprintf(stderr, "done.\n");
+}
+
+
+void test_ahtable_sorted_long_prefix()
+{
+    fprintf(stderr, "checking sorted long shared prefix... \n");
+
+    const size_t key_count = 64;
+    const size_t key_len = 1024;
+    unsigned char key[1024];
+    memset(key, 'p', sizeof(key));
+    ahtable_t* table = ahtable_create_n(1);
+    size_t index;
+    for (index = key_count; index > 0; --index) {
+        key[key_len - 1] = (unsigned char) (index - 1);
+        value_t* value = ahtable_get(table, (const char*) key, key_len);
+        if (value == NULL) {
+            fprintf(stderr, "[error] long-prefix insert %zu failed\n", index - 1);
+            have_error = 1;
+            continue;
+        }
+        *value = index;
+    }
+
+    ahtable_iter_t* iterator = ahtable_iter_begin(table, true);
+    const char* previous = NULL;
+    size_t previous_len = 0;
+    size_t count = 0;
+    while (!ahtable_iter_finished(iterator)) {
+        size_t len = 0;
+        const char* current = ahtable_iter_key(iterator, &len);
+        if (previous != NULL && cmpkey(previous, previous_len, current, len) >= 0) {
+            fprintf(stderr, "[error] long-prefix iteration is not strictly ordered at %zu\n", count);
+            have_error = 1;
+        }
+        previous = current;
+        previous_len = len;
+        ++count;
+        ahtable_iter_next(iterator);
+    }
+    if (count != key_count) {
+        fprintf(stderr, "[error] long-prefix iteration count %zu, expected %zu\n", count, key_count);
+        have_error = 1;
+    }
+    ahtable_iter_free(iterator);
+    ahtable_free(table);
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_ahtable_delete_releases_empty_slot()
 {
     fprintf(stderr, "checking delete empty slot release... \n");
@@ -708,6 +829,8 @@ int main()
     test_ahtable_zero_slot_create();
     test_ahtable_null_api();
     test_ahtable_empty_slot_operations();
+    test_ahtable_sorted_binary_boundaries();
+    test_ahtable_sorted_long_prefix();
     test_ahtable_delete_releases_empty_slot();
     test_ahtable_delete_compacts_nonempty_slot();
     test_ahtable_clear_resets_size();
