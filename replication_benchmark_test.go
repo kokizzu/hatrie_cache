@@ -1,10 +1,13 @@
 package hatriecache
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -153,6 +156,84 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 			b.ReportMetric(float64(requests.Load())/iterations, "requests/op")
 			b.ReportMetric(float64(wireBytes.Load())/iterations, "wire_B/op")
 			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationCompactBatchReceiver(b *testing.B) {
+	const keyCount = 10000
+	payloads := make([]replicationSyncPayload, keyCount)
+	for index := range payloads {
+		value, err := appendReplicationValueBinary(nil, snapshotEntry{Type: "string", String: "value-" + strconv.Itoa(index)})
+		if err != nil {
+			b.Fatalf("encode value %d: %v", index, err)
+		}
+		payloads[index] = replicationSyncPayload{key: fmt.Sprintf("session:%08d", index), binaryValue: value}
+	}
+
+	for _, tt := range []struct {
+		name   string
+		ranges [][2]int
+	}{
+		{name: "OneRequest", ranges: [][2]int{{0, keyCount}}},
+		{name: "TwoRequests", ranges: [][2]int{{0, keyCount / 2}, {keyCount / 2, keyCount}}},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			compressed := make([][]byte, 0, len(tt.ranges))
+			totalWireBytes := 0
+			largestProtoBytes := 0
+			for _, bounds := range tt.ranges {
+				batch := replicationSyncPayloadBatch{inline: payloads[bounds[0]:bounds[1]]}
+				protoBytes := replicationSyncBatchProtoSizeBatch(batch, replicationSetCompactCommand, "node-a", math.MaxUint64, "fingerprint-a")
+				if protoBytes > largestProtoBytes {
+					largestProtoBytes = protoBytes
+				}
+				body, contentType, contentEncoding, err := replicationSyncBatchRequestBodyBatch(
+					batch, replicationSetCompactCommand, "node-a", math.MaxUint64, "fingerprint-a", 1,
+				)
+				if err != nil {
+					b.Fatalf("encode bounds %v: %v", bounds, err)
+				}
+				if contentType != commandWireContentTypeProtobuf || contentEncoding != "gzip" {
+					b.Fatalf("bounds %v content type/encoding = %q/%q, want protobuf/gzip", bounds, contentType, contentEncoding)
+				}
+				data, err := io.ReadAll(body)
+				if err != nil {
+					b.Fatalf("read bounds %v: %v", bounds, err)
+				}
+				compressed = append(compressed, data)
+				totalWireBytes += len(data)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				decoded := 0
+				for _, data := range compressed {
+					reader, err := gzip.NewReader(bytes.NewReader(data))
+					if err != nil {
+						b.Fatalf("open gzip body: %v", err)
+					}
+					request, err := decodeCommandRequestProto(reader, maxMonitoringJSONRequestBytes)
+					closeErr := reader.Close()
+					if err != nil {
+						b.Fatalf("decode compact request: %v", err)
+					}
+					if closeErr != nil {
+						b.Fatalf("close gzip body: %v", closeErr)
+					}
+					if normalizedCommand(request.Command) != replicationBatchEnvelopeCommand {
+						b.Fatalf("decoded command = %q, want %s", request.Command, replicationBatchEnvelopeCommand)
+					}
+					decoded += len(request.Batch)
+				}
+				if decoded != keyCount {
+					b.Fatalf("decoded commands = %d, want %d", decoded, keyCount)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(totalWireBytes), "wire_B/op")
+			b.ReportMetric(float64(largestProtoBytes), "largest_proto_B")
 		})
 	}
 }

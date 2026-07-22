@@ -187,6 +187,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Known-legacy Merkle bypass](#replication-descriptor-optimizations), 10k-key full sync | 11.403 ms; 3 steady requests; 1,002,881 heap B; 557 allocs | 11.070 ms; 2 steady requests; 959,672 heap B; 417 allocs | 1.03x faster, 1.04x lower heap, 1.34x fewer allocs | An in-place target upgrade at the same address can wait up to the existing five-minute capability TTL for a Merkle retry |
 | Current pass | [In-place native radix ordering](#replication-descriptor-optimizations), 10k-key ordered scan | Comparator sort: 3.744 ms; 841,584 heap B; 100 allocs | MSD radix sort: 3.507 ms; 841,584 heap B; 100 allocs | 1.07x faster with unchanged heap and allocations | Uses fixed stack histograms with logarithmically bounded recursion; no per-key sort allocation |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
+| Reverted | [Exact protobuf batch coalescing](#replication-descriptor-optimizations), 10k-key legacy fallback | Two requests: sender 10.422 ms; receiver decode 4.066 ms; largest protobuf 305,156 B | One request: sender 10.215 ms; receiver decode 4.444 ms; largest protobuf 609,046 B | Sender 1.02x faster and 1.44x fewer allocs, but receiver 1.09x slower and combined CPU 1.012x slower | Rolled back; halving requests did not offset receiver decode cost and doubled the largest request |
 | Earlier | [Replication page traversal](#replication-page-traversal), 10 pages | 61,122,327 ns; 1,877,005 heap B; 123,996 allocs | 19,709,083 ns; 999,805 heap B; 11,885 allocs | 3.10x faster, 1.88x lower heap, 10.43x fewer allocs | Mutation invalidates and safely restarts the cursor |
 | Earlier | [gRPC replication transport](#replication-transport), 10k keys | HTTP: 44,957,163 ns; 57,479 wire B | gRPC: 37,765,365 ns; 52,006 wire B | 1.19x faster, 9.52% smaller wire, 24.41% fewer allocs | Cumulative heap is 16.18% higher; HTTP remains fallback |
 | Earlier | [Bounded gzip writer cache](#replication-compression-tradeoff), 50 syncs | 15.23 MB compressor allocation | 1.14 MB | 13.4x less compressor allocation | Retains at most four initialized writers |
@@ -2322,6 +2323,7 @@ feature. Improvements are ratios where larger is better.
 | Known-legacy full-keyspace sync, 10,000 keys | 11,402,903 ns; 3 steady requests; 56,059 wire B; 1,002,881 B; 557 allocs | 11,070,085 ns; 2 steady requests; 55,886 wire B; 959,672 B; 417 allocs | 1.03x | 1.04x | 1.34x | Same-address in-place upgrades can wait at most the existing five-minute capability TTL; address and topology changes invalidate immediately |
 | Ordered native HAT-trie scan, 10,000 keys | 3,744,034 ns; 841,584 B; 100 allocs | 3,506,797 ns; 841,584 B; 100 allocs | 1.07x | 1.00x | 1.00x | Fixed 257-symbol stack histograms replace libc `qsort`; ordering and wire representation are unchanged |
 | Single-pass legacy repair, 10,000 keys (rejected) | 11,459,282 ns; 55,892 wire B; 977,706 B; 433 allocs | Unordered: 10,675,192 ns; 64,258 wire B; 948,316 B; 392 allocs | 1.07x | 1.03x | 1.11x | Rejected: unordered transfer was 1.15x larger; restoring deterministic order took 12,316,337 ns, 1.075x slower than baseline |
+| Exact protobuf batch coalescing, 10,000 keys (rejected) | Sender: 10,422,384 ns; 2.004 requests; 949,539 B; 413 allocs. Receiver: 4,066,159 ns; 305,156 largest protobuf B | Sender: 10,214,713 ns; 1.004 requests; 928,371 B; 286 allocs. Receiver: 4,444,227 ns; 609,046 largest protobuf B | Sender 1.02x; combined 0.99x | Sender 1.02x; receiver 1.00x | Sender 1.44x; receiver 1.00x | Rejected: receiver decode was 1.09x slower, the largest request was 2.00x larger, and combined sender-plus-decode CPU was 1.012x slower |
 
 The mixed-page implementation carries the delete intent already discovered by
 digest comparison. This selects generic compatibility storage before allocating
@@ -2404,6 +2406,24 @@ deterministically ordered variant restored the previous wire size but was
 1.075x slower. Both implementations and their feature-specific tests were
 removed; only the reusable reader-pause benchmark remains.
 
+An exact-size splitter experiment replaced the compact protobuf path's
+conservative JSON-oriented byte estimate. The 10,000-key receiver fixture
+encoded to 609,046 B (about 595 KiB) and therefore fit beneath the existing 1
+MiB limit as one request. The candidate included exact-boundary tests using the
+worst-case 20-digit sequence
+and an end-to-end batching test before implementation. On the sender it halved
+steady request count, improved the paired `500x` median by 1.02x, lowered heap
+1.02x, and reduced allocations 1.44x.
+
+The receiver benchmark then decompressed and protobuf-decoded the same 10,000
+commands as either one request or two. One request increased median decode time
+from 4.066 ms to 4.444 ms and doubled the largest uncompressed protobuf body
+from 305,156 B to 609,046 B. Receiver heap was also slightly higher. Adding the
+paired sender and receiver medians made the candidate 1.012x slower overall,
+before identical command-apply work. The exact splitter and its feature tests
+were therefore rolled back. `BenchmarkReplicationCompactBatchReceiver` remains
+as a gate for any future streaming-decoder or batch-coalescing proposal.
+
 Raw local output is retained in:
 
 - `build/benchmarks/replication-fallback-collector.txt`
@@ -2438,6 +2458,11 @@ Raw local output is retained in:
 - `build/benchmarks/pre-merkle-cache-full-confirm.txt`
 - `build/benchmarks/pre-merkle-cache-modern-before-final.txt`
 - `build/benchmarks/pre-merkle-cache-modern-final.txt`
+- `build/benchmarks/protobuf-size-before-final.txt`
+- `build/benchmarks/protobuf-size-after-confirm.txt`
+- `build/benchmarks/protobuf-receiver-two-requests.txt`
+- `build/benchmarks/protobuf-receiver-one-request.txt`
+- `build/benchmarks/protobuf-receiver-two-confirm.txt`
 
 Reproduce the stable end-to-end row with:
 
@@ -2494,6 +2519,22 @@ make bench-replication-optimizations \
   REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
   BENCHTIME=20x COUNT=10 \
   REPLICATION_OPTIMIZATION_OUTPUT=prevalidated-scope-pause-after.txt
+
+make bench-replication-optimizations \
+  REPLICATION_SPLIT_BENCH=NoSplitBenchmark \
+  REPLICATION_SYNC_BENCH=BenchmarkReplicationCompactBatchReceiver/TwoRequests \
+  REPLICATION_DIGEST_BENCH=NoDigestBenchmark \
+  REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
+  BENCHTIME=100x COUNT=5 \
+  REPLICATION_OPTIMIZATION_OUTPUT=protobuf-receiver-two-requests.txt
+
+make bench-replication-optimizations \
+  REPLICATION_SPLIT_BENCH=NoSplitBenchmark \
+  REPLICATION_SYNC_BENCH=BenchmarkReplicationCompactBatchReceiver/OneRequest \
+  REPLICATION_DIGEST_BENCH=NoDigestBenchmark \
+  REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
+  BENCHTIME=100x COUNT=5 \
+  REPLICATION_OPTIMIZATION_OUTPUT=protobuf-receiver-one-request.txt
 ```
 
 ### Replication Page Traversal
