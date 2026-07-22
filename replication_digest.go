@@ -66,6 +66,13 @@ type replicationDigestSourceEntry struct {
 	digest replicationDigest
 }
 
+type replicationDigestSourceMode uint8
+
+const (
+	replicationDigestSourceKeysOnly replicationDigestSourceMode = 1 << iota
+	replicationDigestSourceInvariantScope
+)
+
 type replicationDigestSourceIterator struct {
 	ctx         context.Context
 	trie        *HatTrie
@@ -79,7 +86,7 @@ type replicationDigestSourceIterator struct {
 	entries     []replicationDigestSourceEntry
 	index       int
 	scratch     []byte
-	keysOnly    bool
+	mode        replicationDigestSourceMode
 }
 
 type replicationDigestChangeWriter struct {
@@ -521,6 +528,7 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		}
 		if source == nil {
 			source = newReplicationDigestSourceIterator(ctx, trie, routing, replicator.self, inventory)
+			source.prevalidateScope()
 			writer = replicator.newReplicationDigestChangeWriter(ctx, trie, routing, inventory.target, inventory.pageSize, grpcSession, false)
 			local, localOK, err = source.next()
 			if err != nil {
@@ -709,6 +717,10 @@ func newReplicationDigestSourceIteratorMode(ctx context.Context, trie *HatTrie, 
 	if !keysOnly {
 		entries = make([]replicationDigestSourceEntry, 0, capacity)
 	}
+	mode := replicationDigestSourceMode(0)
+	if keysOnly {
+		mode = replicationDigestSourceKeysOnly
+	}
 	return &replicationDigestSourceIterator{
 		ctx:       ctx,
 		trie:      trie,
@@ -716,8 +728,30 @@ func newReplicationDigestSourceIteratorMode(ctx context.Context, trie *HatTrie, 
 		source:    source,
 		inventory: inventory,
 		entries:   entries,
-		keysOnly:  keysOnly,
+		mode:      mode,
 	}
+}
+
+func (iterator *replicationDigestSourceIterator) prevalidateScope() {
+	if iterator != nil && replicationDigestSourceScopeIsInvariant(iterator.routing, iterator.source, iterator.inventory) {
+		iterator.mode |= replicationDigestSourceInvariantScope
+	}
+}
+
+func replicationDigestSourceScopeIsInvariant(routing replicationRoutingSnapshot, source string, inventory replicationDigestTargetInventory) bool {
+	if inventory.hasBuckets || len(routing.shards) != 1 || source != routing.self {
+		return false
+	}
+	shard := routing.shards[0]
+	if routing.leaders[shard.ID].Leader != source {
+		return false
+	}
+	for _, target := range routing.targets[shard.ID] {
+		if target.ID == inventory.target.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func (iterator *replicationDigestSourceIterator) close() {
@@ -744,7 +778,7 @@ func (iterator *replicationDigestSourceIterator) next() (replicationDigestSource
 			}
 			var ok bool
 			digest := replicationDigest{}
-			if !iterator.keysOnly {
+			if iterator.mode&replicationDigestSourceKeysOnly == 0 {
 				var dumpErr error
 				iterator.scratch, ok, dumpErr = iterator.trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(iterator.scratch[:0], entry)
 				if dumpErr != nil || !ok {
@@ -790,6 +824,9 @@ func (iterator *replicationDigestSourceIterator) appendFallbackChanges(changes [
 func (iterator *replicationDigestSourceIterator) includes(entry Entry) (bool, error) {
 	if err := iterator.ctx.Err(); err != nil {
 		return false, err
+	}
+	if iterator.mode&replicationDigestSourceInvariantScope != 0 {
+		return true, nil
 	}
 	if iterator.inventory.hasBuckets && !iterator.inventory.buckets.containsKey(entry.Key) {
 		return false, nil
@@ -887,6 +924,7 @@ func (replicator *HTTPReplicator) syncDigestTargetFallback(ctx context.Context, 
 	inventory.hasBuckets = false
 	inventory.buckets = replicationMerkleBucketMask{}
 	source := newReplicationDigestKeySourceIterator(ctx, trie, routing, replicator.self, inventory)
+	source.prevalidateScope()
 	defer source.close()
 	writer := replicator.newReplicationDigestChangeWriter(ctx, trie, routing, inventory.target, inventory.pageSize, grpcSession, true)
 	done := false

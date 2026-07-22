@@ -155,6 +155,66 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 	}
 }
 
+func BenchmarkHTTPReplicatorLegacyFallbackReaderPause(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	b.Cleanup(target.Close)
+	topology := replicationTestTopology(b, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	replicator.markReplicationDigestUnsupported(routing.nodes["node-b"], routing.fingerprint)
+
+	var maxPause atomic.Int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		stop := make(chan struct{})
+		ready := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			close(ready)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				started := time.Now()
+				_ = trie.GetString("session:00000000")
+				updateAtomicMax(&maxPause, time.Since(started).Nanoseconds())
+			}
+		}()
+		<-ready
+		result := replicator.syncAllPaged(context.Background(), trie, "session:", keyCount)
+		close(stop)
+		<-done
+		if result.Skipped || result.Entries != keyCount || len(result.Targets) == 0 || !result.Targets[len(result.Targets)-1].OK {
+			b.Fatalf("syncAllPaged() = %#v, want successful legacy repair", result)
+		}
+	}
+	b.ReportMetric(keyCount, "keys/op")
+	b.ReportMetric(float64(maxPause.Load()), "max_read_pause_ns/op")
+}
+
 func BenchmarkReplicationDigestChangesDefaultWire(b *testing.B) {
 	const keyCount = 1024
 	for _, tt := range []struct {
@@ -242,13 +302,17 @@ func BenchmarkReplicationDigestSourceIteratorModes(b *testing.B) {
 		{
 			name: "DigestValues",
 			new: func() *replicationDigestSourceIterator {
-				return newReplicationDigestSourceIterator(context.Background(), trie, routing, "node-a", inventory)
+				iterator := newReplicationDigestSourceIterator(context.Background(), trie, routing, "node-a", inventory)
+				iterator.prevalidateScope()
+				return iterator
 			},
 		},
 		{
 			name: "KeysOnly",
 			new: func() *replicationDigestSourceIterator {
-				return newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+				iterator := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+				iterator.prevalidateScope()
+				return iterator
 			},
 		},
 	} {
@@ -307,6 +371,7 @@ func BenchmarkReplicationDigestFallbackCollectionModes(b *testing.B) {
 		b.ReportAllocs()
 		for iteration := 0; iteration < b.N; iteration++ {
 			source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			source.prevalidateScope()
 			source.entries = make([]replicationDigestSourceEntry, 0, replicationDigestInitialPageEntries)
 			changes := make([]replicationDigestChange, 0, keyCount)
 			for {
@@ -332,6 +397,7 @@ func BenchmarkReplicationDigestFallbackCollectionModes(b *testing.B) {
 		b.ReportAllocs()
 		for iteration := 0; iteration < b.N; iteration++ {
 			source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			source.prevalidateScope()
 			changes := make([]replicationDigestChange, 0, keyCount)
 			done := false
 			for !done {

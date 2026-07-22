@@ -4571,6 +4571,102 @@ func TestReplicationDigestKeySourceAppendsFallbackChangesDirectly(t *testing.T) 
 	}
 }
 
+func TestReplicationDigestSourceIteratorPrevalidatesInvariantScope(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+	oneShardTopology := replicationTestTopology(t, "http://node-b")
+	oneShardReplicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: oneShardTopology,
+		Election: NewElectionStore(oneShardTopology, ElectionOptions{}),
+	})
+	t.Cleanup(oneShardReplicator.Close)
+	oneShardRouting, ok := oneShardReplicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("one-shard snapshotReplicationRouting() ok = false")
+	}
+
+	for _, test := range []struct {
+		name      string
+		inventory replicationDigestTargetInventory
+		wantMode  bool
+		wantEntry bool
+	}{
+		{
+			name: "entire one-shard scope",
+			inventory: replicationDigestTargetInventory{
+				target: oneShardRouting.nodes["node-b"], prefix: "session:", pageSize: 10,
+			},
+			wantMode: true, wantEntry: true,
+		},
+		{
+			name: "bucket-filtered scope",
+			inventory: replicationDigestTargetInventory{
+				target: oneShardRouting.nodes["node-b"], prefix: "session:", pageSize: 10, hasBuckets: true,
+			},
+		},
+		{
+			name: "different target",
+			inventory: replicationDigestTargetInventory{
+				target: TopologyNode{ID: "node-c", Address: "http://node-c"}, prefix: "session:", pageSize: 10,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			iterator := newReplicationDigestKeySourceIterator(context.Background(), trie, oneShardRouting, "node-a", test.inventory)
+			defer iterator.close()
+			iterator.prevalidateScope()
+			got := iterator.mode&replicationDigestSourceInvariantScope != 0
+			if got != test.wantMode {
+				t.Fatalf("invariant scope mode = %v, want %v", got, test.wantMode)
+			}
+			entry, found, err := iterator.next()
+			if err != nil || found != test.wantEntry {
+				t.Fatalf("iterator.next() = %#v/%v/%v, want found %v", entry, found, err, test.wantEntry)
+			}
+		})
+	}
+
+	multiShardTopology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b"},
+		},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+			{ID: 1, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore(multi-shard): %v", err)
+	}
+	multiShardReplicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: multiShardTopology,
+		Election: NewElectionStore(multiShardTopology, ElectionOptions{}),
+	})
+	t.Cleanup(multiShardReplicator.Close)
+	multiShardRouting, ok := multiShardReplicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("multi-shard snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target: multiShardRouting.nodes["node-b"], prefix: "session:", pageSize: 10,
+	}
+	iterator := newReplicationDigestKeySourceIterator(context.Background(), trie, multiShardRouting, "node-a", inventory)
+	defer iterator.close()
+	iterator.prevalidateScope()
+	if iterator.mode&replicationDigestSourceInvariantScope != 0 {
+		t.Fatal("multi-shard scopeIsInvariant = true, want dynamic per-key routing")
+	}
+	entry, found, err := iterator.next()
+	if err != nil || !found || entry.key != "session:1" {
+		t.Fatalf("multi-shard iterator.next() = %#v/%v/%v, want session:1/true/nil", entry, found, err)
+	}
+}
+
 func replicationDigestChangeKeys(changes []replicationDigestChange) []string {
 	keys := make([]string, len(changes))
 	for index := range changes {
