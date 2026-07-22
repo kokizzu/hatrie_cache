@@ -2247,8 +2247,9 @@ make bench-replication-optimizations \
   REPLICATION_OPTIMIZATION_OUTPUT=replication-final.txt
 ```
 
-The Make target runs the splitter, 10,000-key end-to-end sync, digest repair,
-and fallback iterator benchmarks. Raw output is written to
+The Make target runs the splitter, the
+`BenchmarkHTTPReplicatorSyncAllBatching` 10,000-key end-to-end sync, digest
+repair, and fallback iterator benchmarks. Raw output is written to
 `build/benchmarks/replication-final.txt`. `Batched10k` uses one SyncAll page,
 native protobuf replication, and one local HTTP target. The latest final row is
 the median of ten runs with `-benchtime=20x` on the same AMD Ryzen 9 5950X host.
@@ -2272,10 +2273,13 @@ directly comparable to the latest pass.
 
 Against `0f4adc3`, the current three-feature result is 1.25x faster, uses 5.96x
 less cumulative allocated heap, and performs 1.34x fewer allocations. Request
-count and request-body bytes are unchanged. The historical batching request
-reduction is 10,000x for this single-target sync. Header bytes are not included
+count and request-body bytes are unchanged. The historical batching request reduction
+is 10,000x for this single-target sync. Header bytes are not included
 in `wire_B/op`, and `B/op` measures cumulative bytes allocated during one
 operation rather than peak process RSS.
+
+The historical five-feature pass ending at `e5b127d` was 1.51x faster and used
+6.10x less cumulative allocated heap than its recorded start.
 
 ### Replication Descriptor Optimizations
 
