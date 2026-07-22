@@ -70,6 +70,7 @@ type replicationDigestSourceIterator struct {
 	entries     []replicationDigestSourceEntry
 	index       int
 	scratch     []byte
+	keysOnly    bool
 }
 
 type replicationDigestChangeWriter struct {
@@ -601,6 +602,12 @@ func newReplicationDigestSourceIterator(ctx context.Context, trie *HatTrie, rout
 	}
 }
 
+func newReplicationDigestKeySourceIterator(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, source string, inventory replicationDigestTargetInventory) *replicationDigestSourceIterator {
+	iterator := newReplicationDigestSourceIterator(ctx, trie, routing, source, inventory)
+	iterator.keysOnly = true
+	return iterator
+}
+
 func (iterator *replicationDigestSourceIterator) close() {
 	if iterator == nil {
 		return
@@ -629,12 +636,16 @@ func (iterator *replicationDigestSourceIterator) next() (replicationDigestSource
 			if !ok || route.Leader.Leader != iterator.source || !replicationRouteTargetsNode(iterator.routing, route, iterator.source, iterator.inventory.target.ID) {
 				return nil
 			}
-			var dumpErr error
-			iterator.scratch, ok, dumpErr = iterator.trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(iterator.scratch[:0], entry)
-			if dumpErr != nil || !ok {
-				return dumpErr
+			digest := replicationDigest{}
+			if !iterator.keysOnly {
+				var dumpErr error
+				iterator.scratch, ok, dumpErr = iterator.trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(iterator.scratch[:0], entry)
+				if dumpErr != nil || !ok {
+					return dumpErr
+				}
+				digest = replicationValueDigest(iterator.scratch)
 			}
-			iterator.entries = append(iterator.entries, replicationDigestSourceEntry{key: entry.Key, digest: replicationValueDigest(iterator.scratch)})
+			iterator.entries = append(iterator.entries, replicationDigestSourceEntry{key: entry.Key, digest: digest})
 			return nil
 		})
 		if err != nil {
@@ -728,7 +739,7 @@ func prefixDigestRequest(routing replicationRoutingSnapshot, source string, pref
 func (replicator *HTTPReplicator) syncDigestTargetFallback(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, inventory replicationDigestTargetInventory, grpcSession *replicationGRPCSyncSession) ([]ReplicationTargetResult, int, int, bool) {
 	inventory.hasBuckets = false
 	inventory.buckets = replicationMerkleBucketMask{}
-	source := newReplicationDigestSourceIterator(ctx, trie, routing, replicator.self, inventory)
+	source := newReplicationDigestKeySourceIterator(ctx, trie, routing, replicator.self, inventory)
 	defer source.close()
 	writer := replicator.newReplicationDigestChangeWriter(ctx, trie, routing, inventory.target, inventory.pageSize, grpcSession, true)
 	for {

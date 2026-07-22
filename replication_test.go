@@ -4245,6 +4245,47 @@ func TestPrepareReplicationDigestTaskGroupSelectsCompactRepresentation(t *testin
 	}
 }
 
+func TestReplicationDigestKeySourceIteratorSkipsValueDigest(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+	topology := replicationTestTopology(t, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	t.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "session:",
+		pageSize: 10,
+	}
+
+	keySource := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+	keyEntry, ok, err := keySource.next()
+	keySource.close()
+	if err != nil || !ok || keyEntry.key != "session:1" {
+		t.Fatalf("key source entry = %#v/%v/%v, want session:1", keyEntry, ok, err)
+	}
+	if keyEntry.digest != (replicationDigest{}) {
+		t.Fatalf("key source digest = %#v, want zero digest without value serialization", keyEntry.digest)
+	}
+
+	digestSource := newReplicationDigestSourceIterator(context.Background(), trie, routing, "node-a", inventory)
+	digestEntry, ok, err := digestSource.next()
+	digestSource.close()
+	if err != nil || !ok || digestEntry.key != keyEntry.key {
+		t.Fatalf("digest source entry = %#v/%v/%v, want session:1", digestEntry, ok, err)
+	}
+	if digestEntry.digest == (replicationDigest{}) {
+		t.Fatal("digest source returned zero digest, want serialized value digest")
+	}
+}
+
 func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 	topology, err := NewTopologyStore(ClusterTopology{
 		Version:     1,

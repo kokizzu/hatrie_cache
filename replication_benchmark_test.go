@@ -210,6 +210,75 @@ func BenchmarkReplicationDigestChangesDefaultWire(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationDigestSourceIteratorModes(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	value := strings.Repeat("v", 1024)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), value)
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "session:",
+		pageSize: defaultReplicationSyncKeyPageSize,
+	}
+
+	for _, tt := range []struct {
+		name string
+		new  func() *replicationDigestSourceIterator
+	}{
+		{
+			name: "DigestValues",
+			new: func() *replicationDigestSourceIterator {
+				return newReplicationDigestSourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			},
+		},
+		{
+			name: "KeysOnly",
+			new: func() *replicationDigestSourceIterator {
+				return newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			},
+		},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				iterator := tt.new()
+				entries := 0
+				for {
+					_, ok, err := iterator.next()
+					if err != nil {
+						iterator.close()
+						b.Fatal(err)
+					}
+					if !ok {
+						break
+					}
+					entries++
+				}
+				iterator.close()
+				if entries != keyCount {
+					b.Fatalf("iterator entries = %d, want %d", entries, keyCount)
+				}
+			}
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
 func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
 	keyCount := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_KEYS", 100000)
 	pageSize := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_PAGE_SIZE", 1000)
