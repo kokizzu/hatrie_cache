@@ -1993,7 +1993,8 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 		canUseSharedLock := len(trie.expires) == 0 && (cursor.scan == nil || len(cursor.scan.expired) == 0)
 		if canUseSharedLock {
 			defer trie.mu.RUnlock()
-			return replicationSyncEntriesPageLocked(trie, prefix, afterKey, hasAfterKey, limit, cursor, visit, time.Time{})
+			keysOnly := cursor.packedKeys && len(trie.counterWriteStripes) > 0
+			return replicationSyncEntriesPageLocked(trie, prefix, afterKey, hasAfterKey, limit, cursor, visit, time.Time{}, keysOnly)
 		}
 		trie.mu.RUnlock()
 	}
@@ -2004,16 +2005,19 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 	if len(trie.expires) > 0 {
 		now = trie.currentTime()
 	}
-	return replicationSyncEntriesPageLocked(trie, prefix, afterKey, hasAfterKey, limit, cursor, visit, now)
+	return replicationSyncEntriesPageLocked(trie, prefix, afterKey, hasAfterKey, limit, cursor, visit, now, false)
 }
 
-func replicationSyncEntriesPageLocked(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int, cursor *replicationSyncCursor, visit func(Entry) error, now time.Time) (replicationSyncPage, error) {
-	if cursor.scan == nil || cursor.prefix != prefix || cursor.scan.generation != trie.mutationEpoch {
+func replicationSyncEntriesPageLocked(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int, cursor *replicationSyncCursor, visit func(Entry) error, now time.Time, keysOnly bool) (replicationSyncPage, error) {
+	generation := atomic.LoadUint64(&trie.mutationEpoch)
+	if cursor.scan == nil || cursor.prefix != prefix || cursor.scan.generation != generation || cursor.scan.keysOnly != keysOnly {
 		restarting := cursor.scan != nil
 		cursor.closeLocked(trie)
 		var scan *hatTrieScanCursor
 		var err error
-		if cursor.packedKeys {
+		if keysOnly {
+			scan, err = trie.newPackedKeyOnlyScanCursorLocked(prefix, true)
+		} else if cursor.packedKeys {
 			scan, err = trie.newPackedScanCursorLocked(prefix, true)
 		} else {
 			scan, err = trie.newScanCursorLocked(prefix, true)

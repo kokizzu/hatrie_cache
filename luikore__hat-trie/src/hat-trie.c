@@ -616,6 +616,7 @@ struct hattrie_iter_t_
 
     const hattrie_t* T;
     bool sorted;
+    bool keys_only;
     ahtable_iter_t* i;
     hattrie_node_stack_t* stack;
 
@@ -636,6 +637,7 @@ static hattrie_iter_t* hattrie_iter_empty(const hattrie_t* T, bool sorted)
     i->nil_val = 0;
     i->T = T;
     i->sorted = sorted;
+    i->keys_only = false;
     i->i = NULL;
     i->stack = NULL;
     i->prefix = NULL;
@@ -698,7 +700,7 @@ static void hattrie_iter_nextnode(hattrie_iter_t* i)
 
         if(node.t->flag & NODE_HAS_VAL) {
             i->has_nil_key = true;
-            i->nil_val = node.t->val;
+            if (!i->keys_only) i->nil_val = node.t->val;
         }
 
         /* push all child nodes from right to left */
@@ -777,10 +779,20 @@ hattrie_iter_t* hattrie_iter_begin(const hattrie_t* T, bool sorted)
 }
 
 
-hattrie_iter_t* hattrie_iter_with_prefix(const hattrie_t* T, bool sorted, const char* prefix, size_t prefix_len)
+hattrie_iter_t* hattrie_iter_keys_begin(const hattrie_t* T, bool sorted)
+{
+    return hattrie_iter_keys_with_prefix(T, sorted, NULL, 0);
+}
+
+
+static hattrie_iter_t* hattrie_iter_with_prefix_mode(const hattrie_t* T, bool sorted,
+                                                      const char* prefix, size_t prefix_len,
+                                                      bool keys_only)
 {
     if (T == NULL || (prefix == NULL && prefix_len > 0)) {
-        return hattrie_iter_empty(T, sorted);
+        hattrie_iter_t* empty = hattrie_iter_empty(T, sorted);
+        empty->keys_only = keys_only;
+        return empty;
     }
 
     int found;
@@ -789,6 +801,7 @@ hattrie_iter_t* hattrie_iter_with_prefix(const hattrie_t* T, bool sorted, const 
     hattrie_iter_t* i = malloc_or_die(sizeof(hattrie_iter_t));
     i->T = T;
     i->sorted = sorted;
+    i->keys_only = keys_only;
     i->i = NULL;
     i->keysize = 16;
     i->key = malloc_array_or_die(i->keysize, sizeof(char));
@@ -816,6 +829,18 @@ hattrie_iter_t* hattrie_iter_with_prefix(const hattrie_t* T, bool sorted, const 
     }
 
     return i;
+}
+
+
+hattrie_iter_t* hattrie_iter_with_prefix(const hattrie_t* T, bool sorted, const char* prefix, size_t prefix_len)
+{
+    return hattrie_iter_with_prefix_mode(T, sorted, prefix, prefix_len, false);
+}
+
+
+hattrie_iter_t* hattrie_iter_keys_with_prefix(const hattrie_t* T, bool sorted, const char* prefix, size_t prefix_len)
+{
+    return hattrie_iter_with_prefix_mode(T, sorted, prefix, prefix_len, true);
 }
 
 
@@ -957,6 +982,42 @@ size_t hattrie_iter_read_batch(hattrie_iter_t* i, char* keys, size_t keys_size,
         records[count].key_offset = keys_used;
         records[count].key_len = key_len;
         records[count].value = *value;
+        keys_used += key_len;
+        count++;
+        hattrie_iter_next(i);
+    }
+    if (finished != NULL) *finished = hattrie_iter_finished(i);
+    return count;
+}
+
+
+size_t hattrie_iter_read_keys_batch(hattrie_iter_t* i, char* keys, size_t keys_size,
+                                    hattrie_iter_record_t* records, size_t records_size,
+                                    size_t* required_keys_size, bool* finished)
+{
+    if (required_keys_size != NULL) *required_keys_size = 0;
+    if (finished != NULL) *finished = hattrie_iter_finished(i);
+    if (i == NULL || records_size == 0 || records == NULL || (keys_size > 0 && keys == NULL)) {
+        return 0;
+    }
+
+    size_t count = 0;
+    size_t keys_used = 0;
+    while (count < records_size && !hattrie_iter_finished(i)) {
+        size_t key_len = 0;
+        const char* key = hattrie_iter_key(i, &key_len);
+        if (key == NULL) break;
+
+        if (key_len > keys_size - keys_used) {
+            if (required_keys_size != NULL) {
+                *required_keys_size = size_add_or_die(keys_used, key_len);
+            }
+            break;
+        }
+        if (key_len > 0) memcpy(keys + keys_used, key, key_len);
+        records[count].key_offset = keys_used;
+        records[count].key_len = key_len;
+        records[count].value = 0;
         keys_used += key_len;
         count++;
         hattrie_iter_next(i);

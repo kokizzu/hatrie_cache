@@ -5283,6 +5283,78 @@ func TestReplicationSyncReadOnlyCursorCleansExpiredEntries(t *testing.T) {
 	}
 }
 
+func TestReplicationSyncReadOnlyCursorUsesKeyOnlyScanWithCounterStripes(t *testing.T) {
+	trie := newTestTrie(t)
+	if err := trie.ConfigureCounterWriteStripes(64); err != nil {
+		t.Fatalf("ConfigureCounterWriteStripes() error = %v", err)
+	}
+	for index := 0; index < 3; index++ {
+		trie.UpsertCounter(fmt.Sprintf("counter:%d", index), int32(index+1))
+	}
+
+	cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+	defer cursor.close(trie)
+	var keys []string
+	page, err := replicationSyncEntriesPageWithCursor(trie, "counter:", "", false, 3, cursor, func(entry Entry) error {
+		if !entry.Value.Empty() {
+			t.Fatalf("key-only scan value for %q = %+v, want empty", entry.Key, entry.Value)
+		}
+		keys = append(keys, strings.Clone(entry.Key))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("key-only replication scan error = %v", err)
+	}
+	if page.hasMore || !reflect.DeepEqual(keys, []string{"counter:0", "counter:1", "counter:2"}) {
+		t.Fatalf("key-only replication scan = %#v keys=%#v", page, keys)
+	}
+}
+
+func TestReplicationSyncKeyOnlyScanWithConcurrentStripedCounterWrites(t *testing.T) {
+	const keyCount = 1000
+	trie := newTestTrie(t)
+	if err := trie.ConfigureCounterWriteStripes(64); err != nil {
+		t.Fatalf("ConfigureCounterWriteStripes() error = %v", err)
+	}
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertCounter(fmt.Sprintf("counter:%04d", index), int32(index))
+	}
+
+	stop := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				trie.IncrementCounter("counter:0500", 1)
+			}
+		}
+	}()
+	for iteration := 0; iteration < 20; iteration++ {
+		cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+		page, err := replicationSyncEntriesPageWithCursor(trie, "counter:", "", false, keyCount, cursor, func(entry Entry) error {
+			if !entry.Value.Empty() {
+				t.Fatalf("concurrent key-only scan value for %q = %+v, want empty", entry.Key, entry.Value)
+			}
+			return nil
+		})
+		cursor.close(trie)
+		if err != nil || page.hasMore || page.scanned != keyCount {
+			close(stop)
+			<-writerDone
+			t.Fatalf("concurrent key-only scan = %#v/%v, want %d entries", page, err, keyCount)
+		}
+	}
+	close(stop)
+	<-writerDone
+	if writes := trie.CounterWriteStripingStats().FastPathWrites; writes == 0 {
+		t.Fatal("concurrent scan completed without a striped counter fast-path write")
+	}
+}
+
 func TestReplicationSyncCursorRestartsAfterMutation(t *testing.T) {
 	trie := newTestTrie(t)
 	for _, key := range []string{"session:1", "session:3", "session:5"} {

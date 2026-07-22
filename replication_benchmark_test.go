@@ -406,6 +406,81 @@ func BenchmarkReplicationFallbackScanWriterPause(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationFallbackStripedCounterScan(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	if err := trie.ConfigureCounterWriteStripes(64); err != nil {
+		b.Fatalf("ConfigureCounterWriteStripes() error = %v", err)
+	}
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertCounter(fmt.Sprintf("counter:%08d", index), int32(index))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+		page, err := replicationSyncEntriesPageWithCursor(trie, "counter:", "", false, keyCount, cursor, nil)
+		cursor.close(trie)
+		if err != nil || page.hasMore || page.scanned != keyCount {
+			b.Fatalf("striped counter scan = %#v/%v, want %d entries", page, err, keyCount)
+		}
+	}
+	b.ReportMetric(keyCount, "keys/op")
+}
+
+func BenchmarkHatTriePackedScanModes(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertCounter(fmt.Sprintf("counter:%08d", index), int32(index))
+	}
+
+	for _, test := range []struct {
+		name     string
+		keysOnly bool
+	}{
+		{name: "Values"},
+		{name: "KeysOnly", keysOnly: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				trie.mu.RLock()
+				var cursor *hatTrieScanCursor
+				var err error
+				if test.keysOnly {
+					cursor, err = trie.newPackedKeyOnlyScanCursorLocked("counter:", true)
+				} else {
+					cursor, err = trie.newPackedScanCursorLocked("counter:", true)
+				}
+				if err != nil {
+					trie.mu.RUnlock()
+					b.Fatal(err)
+				}
+				count := 0
+				for {
+					_, ok := cursor.currentLiveEntryLocked(trie, time.Time{})
+					if !ok {
+						break
+					}
+					count++
+					cursor.consume()
+				}
+				cursor.closeLocked(trie)
+				trie.mu.RUnlock()
+				if count != keyCount {
+					b.Fatalf("packed scan count = %d, want %d", count, keyCount)
+				}
+			}
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
 func BenchmarkReplicationDigestChangesDefaultWire(b *testing.B) {
 	const keyCount = 1024
 	for _, tt := range []struct {

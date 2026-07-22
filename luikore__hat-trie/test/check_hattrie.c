@@ -547,11 +547,81 @@ void test_hattrie_batch_iteration()
         have_error = 1;
     }
     hattrie_iter_free(iter);
+
+    iter = hattrie_iter_keys_begin(trie, true);
+    seen = 0;
+    finished = false;
+    while (!hattrie_iter_finished(iter)) {
+        records[0].value = 99;
+        records[1].value = 99;
+        count = hattrie_iter_read_keys_batch(iter, keys, sizeof(keys), records, 2, &required, &finished);
+        if (count == 0) {
+            fprintf(stderr, "[error] key-only batched iterator made no progress\n");
+            have_error = 1;
+            break;
+        }
+        for (i = 0; i < count; ++i) {
+            size_t expected = seen + i;
+            if (expected >= 4 || records[i].key_len != expected_lengths[expected] ||
+                memcmp(keys + records[i].key_offset, expected_keys[expected], records[i].key_len) != 0 ||
+                records[i].value != 0) {
+                fprintf(stderr, "[error] key-only batched iterator returned an unexpected entry at %zu\n", expected);
+                have_error = 1;
+            }
+        }
+        seen += count;
+    }
+    if (seen != 4 || !finished || hattrie_iter_read_keys_batch(iter, keys, sizeof(keys), records, 2, &required, &finished) != 0) {
+        fprintf(stderr, "[error] key-only batched iterator exhaustion state is invalid\n");
+        have_error = 1;
+    }
+    hattrie_iter_free(iter);
+    hattrie_free(trie);
+
+    trie = hattrie_create();
+    value_t* prefix_value = hattrie_get(trie, "prefix", 6);
+    if (prefix_value != NULL) *prefix_value = 7;
+    char generated_key[32];
+    for (i = 0; i < 2000; ++i) {
+        int generated_len = snprintf(generated_key, sizeof(generated_key), "prefix-%04zu", i);
+        value_t* value = hattrie_get(trie, generated_key, (size_t) generated_len);
+        if (value != NULL) *value = (value_t)(i + 10);
+    }
+    iter = hattrie_iter_keys_begin(trie, true);
+    bool saw_prefix_terminal = false;
+    while (!hattrie_iter_finished(iter)) {
+        count = hattrie_iter_read_keys_batch(iter, keys, sizeof(keys), records, 2, &required, &finished);
+        if (count == 0) {
+            fprintf(stderr, "[error] key-only burst iterator made no progress\n");
+            have_error = 1;
+            break;
+        }
+        for (i = 0; i < count; ++i) {
+            if (records[i].value != 0) {
+                fprintf(stderr, "[error] key-only burst iterator copied a value\n");
+                have_error = 1;
+            }
+            if (records[i].key_len == 6 && memcmp(keys + records[i].key_offset, "prefix", 6) == 0) {
+                saw_prefix_terminal = true;
+            }
+        }
+    }
+    if (!saw_prefix_terminal) {
+        fprintf(stderr, "[error] key-only burst iterator omitted the prefix terminal\n");
+        have_error = 1;
+    }
+    hattrie_iter_free(iter);
     hattrie_free(trie);
 
     required = 99;
     if (hattrie_iter_read_batch(NULL, keys, sizeof(keys), records, 2, &required, &finished) != 0 || required != 0 || !finished) {
         fprintf(stderr, "[error] batched iterator accepted a null iterator\n");
+        have_error = 1;
+    }
+    required = 99;
+    finished = false;
+    if (hattrie_iter_read_keys_batch(NULL, keys, sizeof(keys), records, 2, &required, &finished) != 0 || required != 0 || !finished) {
+        fprintf(stderr, "[error] key-only batched iterator accepted a null iterator\n");
         have_error = 1;
     }
 

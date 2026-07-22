@@ -187,6 +187,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Known-legacy Merkle bypass](#replication-descriptor-optimizations), 10k-key full sync | 11.403 ms; 3 steady requests; 1,002,881 heap B; 557 allocs | 11.070 ms; 2 steady requests; 959,672 heap B; 417 allocs | 1.03x faster, 1.04x lower heap, 1.34x fewer allocs | An in-place target upgrade at the same address can wait up to the existing five-minute capability TTL for a Merkle retry |
 | Current pass | [Packed fallback batch lookup](#replication-descriptor-optimizations), 10k-key known-legacy full sync | 10.688 ms; 951,616 heap B; 413 allocs; 4.583 ms reader pause | 9.209 ms; 652,898 heap B; 369 allocs; 3.438 ms reader pause | 1.16x faster, 1.46x lower heap, 1.12x fewer allocs, 1.33x shorter reader pause | No measured runtime tradeoff; JSON compatibility and local partitions retain the scalar path |
 | Current pass | [Shared-lock fallback key scan](#replication-descriptor-optimizations), 10k-key known-legacy sync under reader load | Exclusive scan: 10.075 ms; 4.121 ms reader pause; 1,064,766 heap B; 394 allocs | Shared scan: 8.966 ms; 0.215 ms reader pause; 1,049,238 heap B; 391 allocs | 1.12x faster, 19.19x shorter reader pause, 1.01x lower heap and allocations | One fixed mutex per trie; TTL, local-partition, snapshot, digest-value, and value-materialization paths remain exclusive |
+| Current pass | [Native key-only striped-counter scan](#replication-descriptor-optimizations), 10k keys | Value-copy iterator: 2.612 ms; 19,712 heap B; 43 allocs | Key-only iterator: 2.164 ms; 19,712 heap B; 43 allocs | 1.21x faster with unchanged heap and allocations | Used only by shared fallback scans when opt-in striped counter writes are enabled; value-producing scans are unchanged |
 | Current pass | [In-place native radix ordering](#replication-descriptor-optimizations), 10k-key ordered scan | Comparator sort: 3.744 ms; 841,584 heap B; 100 allocs | MSD radix sort: 3.507 ms; 841,584 heap B; 100 allocs | 1.07x faster with unchanged heap and allocations | Uses fixed stack histograms with logarithmically bounded recursion; no per-key sort allocation |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
 | Reverted | [Exact protobuf batch coalescing](#replication-descriptor-optimizations), 10k-key legacy fallback | Two requests: sender 10.422 ms; receiver decode 4.066 ms; largest protobuf 305,156 B | One request: sender 10.215 ms; receiver decode 4.444 ms; largest protobuf 609,046 B | Sender 1.02x faster and 1.44x fewer allocs, but receiver 1.09x slower and combined CPU 1.012x slower | Rolled back; halving requests did not offset receiver decode cost and doubled the largest request |
@@ -2326,6 +2327,7 @@ feature. Improvements are ratios where larger is better.
 | Packed fallback batch lookup, 10,000 keys | 10,688,124 ns; 2.004 requests; 55,877 wire B; 951,616 B; 413 allocs | 9,209,489 ns; 2.004 requests; 55,879 wire B; 652,898 B; 369 allocs | 1.16x | 1.46x | 1.12x | No measured regression: fixed-sequence protobuf is byte-identical and median maximum reader pause improved 1.33x; JSON and local partitions retain scalar lookup |
 | Shared-lock fallback key scan under reader load, 10,000 keys | 10,074,975 ns; 4,120,711 ns reader pause; 1,064,766 B; 394 allocs | 8,965,740 ns; 214,766 ns reader pause; 1,049,238 B; 391 allocs | 1.12x; reader pause 19.19x shorter | 1.01x | 1.01x | One fixed mutex serializes fallback key scans; writers remain blocked, and any active/deferred TTL cleanup retains the exclusive path |
 | Paired fallback scan lock scope, 10,000 keys | Exclusive: 2,925,823 ns; 3,511,665 ns reader pause; 20,112 B; 48 allocs | Shared: 2,927,976 ns; 178,865 ns reader pause; 20,118 B; 48 allocs | CPU neutral within 0.07%; reader pause 19.63x shorter | Neutral within 0.03% | 1.00x | Same-binary control isolates lock scope from HTTP and encoding noise; writer pause improved slightly from 1,345,226 ns to 1,337,389 ns |
+| Native striped-counter fallback scan, 10,000 keys | Copy keys and mutable values: 2,612,095 ns; 19,712 B; 43 allocs | Copy keys only: 2,163,909 ns; 19,712 B; 43 allocs | 1.21x | 1.00x | 1.00x | Shared scans avoid reading value slots that striped counter writers may update concurrently; ordinary value scans keep the prior iterator |
 | Ordered native HAT-trie scan, 10,000 keys | 3,744,034 ns; 841,584 B; 100 allocs | 3,506,797 ns; 841,584 B; 100 allocs | 1.07x | 1.00x | 1.00x | Fixed 257-symbol stack histograms replace libc `qsort`; ordering and wire representation are unchanged |
 | Single-pass legacy repair, 10,000 keys (rejected) | 11,459,282 ns; 55,892 wire B; 977,706 B; 433 allocs | Unordered: 10,675,192 ns; 64,258 wire B; 948,316 B; 392 allocs | 1.07x | 1.03x | 1.11x | Rejected: unordered transfer was 1.15x larger; restoring deterministic order took 12,316,337 ns, 1.075x slower than baseline |
 | Exact protobuf batch coalescing, 10,000 keys (rejected) | Sender: 10,422,384 ns; 2.004 requests; 949,539 B; 413 allocs. Receiver: 4,066,159 ns; 305,156 largest protobuf B | Sender: 10,214,713 ns; 1.004 requests; 928,371 B; 286 allocs. Receiver: 4,444,227 ns; 609,046 largest protobuf B | Sender 1.02x; combined 0.99x | Sender 1.02x; receiver 1.00x | Sender 1.44x; receiver 1.00x | Rejected: receiver decode was 1.09x slower, the largest request was 2.00x larger, and combined sender-plus-decode CPU was 1.012x slower |
@@ -2423,6 +2425,22 @@ end-to-end run retained 2.040 requests per operation and effectively unchanged
 compressed wire bytes; sequence metadata accounts for the measured 55,896 B
 versus 55,893 B difference.
 
+Opt-in striped counter writes share the trie read lock and update existing
+native value slots under per-key stripes. The fallback scanner only needs keys,
+but the former batched iterator copied every value and could therefore read a
+slot concurrently with a striped update. A dedicated native key-only iterator
+now avoids value access from construction through batch reads, including keys
+stored as trie-node terminals after bucket bursting. It is selected only for
+shared packed-key fallback scans when stripes are enabled. Mutation epochs are
+loaded atomically on the shared path; TTL cleanup still selects the value-aware
+exclusive iterator.
+
+Native and Go tests cover buffer exhaustion, null and exhausted iterators,
+sorted ordering, burst prefix terminals, empty returned values, and repeated
+scans concurrent with striped counter writes. The paired 10k native benchmark
+improved from 2.612 ms to 2.164 ms, or 1.21x, with the same 19,712 cumulative
+heap bytes and 43 allocations.
+
 The native sorted iterator now partitions its existing slot-pointer array with
 an in-place MSD radix sort. Prefix skipping avoids repeatedly building byte
 histograms for long shared prefixes; insertion sort handles groups of 24 or
@@ -2518,6 +2536,9 @@ Raw local output is retained in:
 - `build/benchmarks/replication-shared-scan-e2e-after.txt`
 - `build/benchmarks/replication-shared-scan-reader-before.txt`
 - `build/benchmarks/replication-shared-scan-reader-after.txt`
+- `build/benchmarks/replication-key-only-before.txt`
+- `build/benchmarks/replication-key-only-after.txt`
+- `build/benchmarks/replication-key-only-paired.txt`
 
 Reproduce the stable end-to-end row with:
 

@@ -4207,6 +4207,7 @@ type hatTrieScanCursor struct {
 	iter              *C.hattrie_iter_t
 	prefix            string
 	packedKeys        bool
+	keysOnly          bool
 	generation        uint64
 	loaded            bool
 	finished          bool
@@ -4235,7 +4236,15 @@ func (ht *HatTrie) newPackedScanCursorLocked(prefix string, sorted bool) (*hatTr
 	return ht.newScanCursorLockedMode(prefix, sorted, true)
 }
 
+func (ht *HatTrie) newPackedKeyOnlyScanCursorLocked(prefix string, sorted bool) (*hatTrieScanCursor, error) {
+	return ht.newScanCursorLockedOptions(prefix, sorted, true, true)
+}
+
 func (ht *HatTrie) newScanCursorLockedMode(prefix string, sorted bool, packedKeys bool) (*hatTrieScanCursor, error) {
+	return ht.newScanCursorLockedOptions(prefix, sorted, packedKeys, false)
+}
+
+func (ht *HatTrie) newScanCursorLockedOptions(prefix string, sorted bool, packedKeys bool, keysOnly bool) (*hatTrieScanCursor, error) {
 	ht.ensureOpen()
 	if err := validateKey(prefix); err != nil {
 		return nil, err
@@ -4243,17 +4252,26 @@ func (ht *HatTrie) newScanCursorLockedMode(prefix string, sorted bool, packedKey
 
 	var iter *C.hattrie_iter_t
 	if prefix == "" {
-		iter = C.hattrie_iter_begin(ht.root, C.bool(sorted))
+		if keysOnly {
+			iter = C.hattrie_iter_keys_begin(ht.root, C.bool(sorted))
+		} else {
+			iter = C.hattrie_iter_begin(ht.root, C.bool(sorted))
+		}
 	} else {
 		cprefix, prefixLen := cKey(prefix)
-		iter = C.hattrie_iter_with_prefix(ht.root, C.bool(sorted), cprefix, prefixLen)
+		if keysOnly {
+			iter = C.hattrie_iter_keys_with_prefix(ht.root, C.bool(sorted), cprefix, prefixLen)
+		} else {
+			iter = C.hattrie_iter_with_prefix(ht.root, C.bool(sorted), cprefix, prefixLen)
+		}
 		runtime.KeepAlive(prefix)
 	}
 	return &hatTrieScanCursor{
 		iter:       iter,
 		prefix:     prefix,
 		packedKeys: packedKeys,
-		generation: ht.mutationEpoch,
+		keysOnly:   keysOnly,
+		generation: atomic.LoadUint64(&ht.mutationEpoch),
 		batchKeys:  make([]byte, defaultHatTrieScanBatchKeyBytes),
 	}, nil
 }
@@ -4307,15 +4325,28 @@ func (cursor *hatTrieScanCursor) loadNativeBatch() bool {
 		cursor.batchIndex = 0
 		var required C.size_t
 		var finished C.bool
-		count := C.hattrie_iter_read_batch(
-			cursor.iter,
-			(*C.char)(unsafe.Pointer(unsafe.SliceData(cursor.batchKeys))),
-			C.size_t(len(cursor.batchKeys)),
-			&cursor.batchRecords[0],
-			C.size_t(len(cursor.batchRecords)),
-			&required,
-			&finished,
-		)
+		var count C.size_t
+		if cursor.keysOnly {
+			count = C.hattrie_iter_read_keys_batch(
+				cursor.iter,
+				(*C.char)(unsafe.Pointer(unsafe.SliceData(cursor.batchKeys))),
+				C.size_t(len(cursor.batchKeys)),
+				&cursor.batchRecords[0],
+				C.size_t(len(cursor.batchRecords)),
+				&required,
+				&finished,
+			)
+		} else {
+			count = C.hattrie_iter_read_batch(
+				cursor.iter,
+				(*C.char)(unsafe.Pointer(unsafe.SliceData(cursor.batchKeys))),
+				C.size_t(len(cursor.batchKeys)),
+				&cursor.batchRecords[0],
+				C.size_t(len(cursor.batchRecords)),
+				&required,
+				&finished,
+			)
+		}
 		runtime.KeepAlive(cursor)
 		cursor.nativeBatchReads++
 		cursor.batchCount = int(count)
