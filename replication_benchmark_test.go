@@ -279,6 +279,78 @@ func BenchmarkReplicationDigestSourceIteratorModes(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationDigestFallbackCollectionModes(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "session:",
+		pageSize: keyCount,
+	}
+
+	b.Run("BufferedEntries", func(b *testing.B) {
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			source.entries = make([]replicationDigestSourceEntry, 0, replicationDigestInitialPageEntries)
+			changes := make([]replicationDigestChange, 0, keyCount)
+			for {
+				entry, ok, err := source.next()
+				if err != nil {
+					source.close()
+					b.Fatal(err)
+				}
+				if !ok {
+					break
+				}
+				changes = append(changes, replicationDigestChange{key: entry.key})
+			}
+			source.close()
+			if len(changes) != keyCount {
+				b.Fatalf("buffered changes = %d, want %d", len(changes), keyCount)
+			}
+		}
+		b.ReportMetric(keyCount, "keys/op")
+	})
+
+	b.Run("DirectChanges", func(b *testing.B) {
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			changes := make([]replicationDigestChange, 0, keyCount)
+			done := false
+			for !done {
+				var err error
+				changes, done, err = source.appendFallbackChanges(changes, keyCount)
+				if err != nil {
+					source.close()
+					b.Fatal(err)
+				}
+			}
+			source.close()
+			if len(changes) != keyCount {
+				b.Fatalf("direct changes = %d, want %d", len(changes), keyCount)
+			}
+		}
+		b.ReportMetric(keyCount, "keys/op")
+	})
+}
+
 func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
 	keyCount := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_KEYS", 100000)
 	pageSize := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_PAGE_SIZE", 1000)

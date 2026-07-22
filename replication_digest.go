@@ -583,6 +583,14 @@ func newReplicationDigestTargetInventory(target TopologyNode, prefix string, pag
 }
 
 func newReplicationDigestSourceIterator(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, source string, inventory replicationDigestTargetInventory) *replicationDigestSourceIterator {
+	return newReplicationDigestSourceIteratorMode(ctx, trie, routing, source, inventory, false)
+}
+
+func newReplicationDigestKeySourceIterator(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, source string, inventory replicationDigestTargetInventory) *replicationDigestSourceIterator {
+	return newReplicationDigestSourceIteratorMode(ctx, trie, routing, source, inventory, true)
+}
+
+func newReplicationDigestSourceIteratorMode(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, source string, inventory replicationDigestTargetInventory, keysOnly bool) *replicationDigestSourceIterator {
 	pageSize := inventory.pageSize
 	if pageSize <= 0 {
 		pageSize = defaultReplicationSyncKeyPageSize
@@ -592,20 +600,19 @@ func newReplicationDigestSourceIterator(ctx context.Context, trie *HatTrie, rout
 	if capacity > replicationDigestInitialPageEntries {
 		capacity = replicationDigestInitialPageEntries
 	}
+	var entries []replicationDigestSourceEntry
+	if !keysOnly {
+		entries = make([]replicationDigestSourceEntry, 0, capacity)
+	}
 	return &replicationDigestSourceIterator{
 		ctx:       ctx,
 		trie:      trie,
 		routing:   routing,
 		source:    source,
 		inventory: inventory,
-		entries:   make([]replicationDigestSourceEntry, 0, capacity),
+		entries:   entries,
+		keysOnly:  keysOnly,
 	}
-}
-
-func newReplicationDigestKeySourceIterator(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, source string, inventory replicationDigestTargetInventory) *replicationDigestSourceIterator {
-	iterator := newReplicationDigestSourceIterator(ctx, trie, routing, source, inventory)
-	iterator.keysOnly = true
-	return iterator
 }
 
 func (iterator *replicationDigestSourceIterator) close() {
@@ -626,16 +633,11 @@ func (iterator *replicationDigestSourceIterator) next() (replicationDigestSource
 		iterator.entries = iterator.entries[:0]
 		iterator.index = 0
 		page, err := replicationSyncEntriesPageWithCursor(iterator.trie, iterator.inventory.prefix, iterator.afterKey, iterator.hasAfterKey, iterator.inventory.pageSize, &iterator.cursor, func(entry Entry) error {
-			if err := iterator.ctx.Err(); err != nil {
+			included, err := iterator.includes(entry)
+			if err != nil || !included {
 				return err
 			}
-			if iterator.inventory.hasBuckets && !iterator.inventory.buckets.containsKey(entry.Key) {
-				return nil
-			}
-			route, ok := iterator.routing.routeForKey(entry.Key)
-			if !ok || route.Leader.Leader != iterator.source || !replicationRouteTargetsNode(iterator.routing, route, iterator.source, iterator.inventory.target.ID) {
-				return nil
-			}
+			var ok bool
 			digest := replicationDigest{}
 			if !iterator.keysOnly {
 				var dumpErr error
@@ -651,16 +653,56 @@ func (iterator *replicationDigestSourceIterator) next() (replicationDigestSource
 		if err != nil {
 			return replicationDigestSourceEntry{}, false, err
 		}
-		if page.hasMore {
-			iterator.afterKey = page.nextAfterKey
-			iterator.hasAfterKey = true
-		} else {
-			iterator.done = true
-		}
+		iterator.finishPage(page)
 	}
 	entry := iterator.entries[iterator.index]
 	iterator.index++
 	return entry, true, nil
+}
+
+func (iterator *replicationDigestSourceIterator) appendFallbackChanges(changes []replicationDigestChange, limit int) ([]replicationDigestChange, bool, error) {
+	if iterator == nil || iterator.done {
+		return changes, true, nil
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	page, err := replicationSyncEntriesPageWithCursor(iterator.trie, iterator.inventory.prefix, iterator.afterKey, iterator.hasAfterKey, limit, &iterator.cursor, func(entry Entry) error {
+		included, err := iterator.includes(entry)
+		if err != nil || !included {
+			return err
+		}
+		changes = append(changes, replicationDigestChange{key: entry.Key})
+		return nil
+	})
+	if err != nil {
+		return changes, false, err
+	}
+	iterator.finishPage(page)
+	return changes, iterator.done, nil
+}
+
+func (iterator *replicationDigestSourceIterator) includes(entry Entry) (bool, error) {
+	if err := iterator.ctx.Err(); err != nil {
+		return false, err
+	}
+	if iterator.inventory.hasBuckets && !iterator.inventory.buckets.containsKey(entry.Key) {
+		return false, nil
+	}
+	route, ok := iterator.routing.routeForKey(entry.Key)
+	if !ok || route.Leader.Leader != iterator.source || !replicationRouteTargetsNode(iterator.routing, route, iterator.source, iterator.inventory.target.ID) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (iterator *replicationDigestSourceIterator) finishPage(page replicationSyncPage) {
+	if page.hasMore {
+		iterator.afterKey = page.nextAfterKey
+		iterator.hasAfterKey = true
+		return
+	}
+	iterator.done = true
 }
 
 func (replicator *HTTPReplicator) newReplicationDigestChangeWriter(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, target TopologyNode, limit int, grpcSession *replicationGRPCSyncSession, fallback bool) *replicationDigestChangeWriter {
@@ -742,21 +784,31 @@ func (replicator *HTTPReplicator) syncDigestTargetFallback(ctx context.Context, 
 	source := newReplicationDigestKeySourceIterator(ctx, trie, routing, replicator.self, inventory)
 	defer source.close()
 	writer := replicator.newReplicationDigestChangeWriter(ctx, trie, routing, inventory.target, inventory.pageSize, grpcSession, true)
-	for {
-		entry, ok, err := source.next()
+	done := false
+	for !done {
+		remaining := writer.limit - len(writer.changes)
+		if remaining <= 0 {
+			if !writer.flush() {
+				return writer.targets, writer.changed, writer.deleted, true
+			}
+			remaining = writer.limit
+		}
+		scanLimit := inventory.pageSize
+		if scanLimit <= 0 {
+			scanLimit = defaultReplicationSyncKeyPageSize
+		}
+		if scanLimit > remaining {
+			scanLimit = remaining
+		}
+		var err error
+		writer.changes, done, err = source.appendFallbackChanges(writer.changes, scanLimit)
 		if err != nil {
 			failure := ReplicationTargetResult{Node: inventory.target.ID, Address: inventory.target.Address, Error: err.Error()}
 			return append(writer.targets, failure), writer.changed, writer.deleted, true
 		}
-		if !ok {
-			break
-		}
-		if !writer.add(entry.key) {
+		if (len(writer.changes) >= writer.limit || done) && !writer.flush() {
 			return writer.targets, writer.changed, writer.deleted, true
 		}
-	}
-	if !writer.flush() {
-		return writer.targets, writer.changed, writer.deleted, true
 	}
 	if len(writer.targets) == 0 {
 		writer.targets = append(writer.targets, ReplicationTargetResult{Node: inventory.target.ID, Address: inventory.target.Address, OK: true})

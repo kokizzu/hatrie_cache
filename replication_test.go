@@ -4286,6 +4286,61 @@ func TestReplicationDigestKeySourceIteratorSkipsValueDigest(t *testing.T) {
 	}
 }
 
+func TestReplicationDigestKeySourceAppendsFallbackChangesDirectly(t *testing.T) {
+	trie := newTestTrie(t)
+	for _, key := range []string{"other:1", "session:1", "session:2", "session:3"} {
+		trie.UpsertString(key, "value-"+key)
+	}
+	topology := replicationTestTopology(t, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	t.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "session:",
+		pageSize: 2,
+	}
+	source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+	defer source.close()
+
+	changes, done, err := source.appendFallbackChanges(nil, 2)
+	if err != nil || done {
+		t.Fatalf("first appendFallbackChanges() done/error = %v/%v, want false/nil", done, err)
+	}
+	if got := replicationDigestChangeKeys(changes); !reflect.DeepEqual(got, []string{"session:1", "session:2"}) {
+		t.Fatalf("first fallback changes = %#v, want session:1/session:2", got)
+	}
+	if cap(source.entries) != 0 {
+		t.Fatalf("source intermediate entry capacity = %d, want no intermediate allocation", cap(source.entries))
+	}
+
+	changes, done, err = source.appendFallbackChanges(changes, 2)
+	if err != nil || !done {
+		t.Fatalf("second appendFallbackChanges() done/error = %v/%v, want true/nil", done, err)
+	}
+	if got := replicationDigestChangeKeys(changes); !reflect.DeepEqual(got, []string{"session:1", "session:2", "session:3"}) {
+		t.Fatalf("all fallback changes = %#v, want three ordered session keys", got)
+	}
+	if cap(source.entries) != 0 {
+		t.Fatalf("source intermediate entry capacity after completion = %d, want zero", cap(source.entries))
+	}
+}
+
+func replicationDigestChangeKeys(changes []replicationDigestChange) []string {
+	keys := make([]string, len(changes))
+	for index := range changes {
+		keys[index] = changes[index].key
+	}
+	return keys
+}
+
 func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 	topology, err := NewTopologyStore(ClusterTopology{
 		Version:     1,
