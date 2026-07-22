@@ -559,6 +559,56 @@ void test_hattrie_batch_iteration()
 }
 
 
+void test_hattrie_batch_lookup()
+{
+    fprintf(stderr, "checking batched trie lookups... \n");
+
+    hattrie_t* trie = hattrie_create();
+    value_t* value = hattrie_get(trie, "", 0);
+    if (value != NULL) *value = 3;
+    value = hattrie_get(trie, "alpha", 5);
+    if (value != NULL) *value = 5;
+    value = hattrie_get(trie, "beta", 4);
+    if (value != NULL) *value = 7;
+
+    const char keys[] = "alphamissingbeta";
+    const hattrie_key_record_t records[] = {
+        {0, 5},
+        {5, 7},
+        {12, 4},
+        {0, 0},
+    };
+    value_t values[] = {99, 99, 99, 99};
+    size_t count = hattrie_tryget_batch(trie, keys, sizeof(keys) - 1, records, 4, values);
+    if (count != 4 || values[0] != 5 || values[1] != 0 || values[2] != 7 || values[3] != 3) {
+        fprintf(stderr, "[error] batched trie lookup returned unexpected values\n");
+        have_error = 1;
+    }
+
+    const hattrie_key_record_t invalid_records[] = {
+        {0, 5},
+        {sizeof(keys), 1},
+        {12, 4},
+    };
+    value_t invalid_values[] = {99, 99, 99};
+    count = hattrie_tryget_batch(trie, keys, sizeof(keys) - 1, invalid_records, 3, invalid_values);
+    if (count != 1 || invalid_values[0] != 5 || invalid_values[1] != 0 || invalid_values[2] != 0) {
+        fprintf(stderr, "[error] batched trie lookup did not stop safely at an invalid range\n");
+        have_error = 1;
+    }
+    if (hattrie_tryget_batch(NULL, keys, sizeof(keys) - 1, records, 4, values) != 0 ||
+        hattrie_tryget_batch(trie, NULL, 1, records, 4, values) != 0 ||
+        hattrie_tryget_batch(trie, keys, sizeof(keys) - 1, NULL, 4, values) != 0 ||
+        hattrie_tryget_batch(trie, keys, sizeof(keys) - 1, records, 4, NULL) != 0) {
+        fprintf(stderr, "[error] batched trie lookup accepted invalid arguments\n");
+        have_error = 1;
+    }
+
+    hattrie_free(trie);
+    fprintf(stderr, "done.\n");
+}
+
+
 void test_hattrie_clear_resets_root()
 {
     fprintf(stderr, "checking trie clear reset... \n");
@@ -854,6 +904,7 @@ int main()
     test_hattrie_key_length_limit();
     test_hattrie_fused_iteration();
     test_hattrie_batch_iteration();
+    test_hattrie_batch_lookup();
 
     setup();
     test_hattrie_insert();

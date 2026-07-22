@@ -24,6 +24,7 @@ extern "C" {
 
 #include "common.h"
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdbool.h>
 
 typedef struct hattrie_t_ hattrie_t;
@@ -49,6 +50,16 @@ value_t* hattrie_get (hattrie_t*, const char* key, size_t len);
 /** Find a given key in the table, returning a NULL pointer if it does not
  * exist. */
 value_t* hattrie_tryget (hattrie_t*, const char* key, size_t len);
+
+typedef struct hattrie_key_record_t_
+{
+    uint32_t key_offset;
+    uint32_t key_len;
+} hattrie_key_record_t;
+
+size_t hattrie_tryget_batch(hattrie_t*, const char* keys, size_t keys_size,
+                            const hattrie_key_record_t* records, size_t records_size,
+                            value_t* values);
 
 /** hattrie_walk callback signature */
 typedef int (*hattrie_walk_cb)(const char* key, size_t len, value_t* val, void* user_data);

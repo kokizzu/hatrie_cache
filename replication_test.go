@@ -4508,6 +4508,78 @@ func TestPrepareReplicationDigestTaskGroupSelectsCompactRepresentation(t *testin
 	}
 }
 
+func TestPrepareReplicationDigestPackedTaskGroupMatchesScalarWire(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+	trie.UpsertString("session:2", "two")
+	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
+	t.Cleanup(replicator.Close)
+
+	changes := []replicationDigestChange{{key: "session:1"}, {key: "session:2"}}
+	scalar, scalarChanged, scalarDeleted, err := replicator.prepareReplicationDigestTaskGroup(
+		trie, target, changes, false, "fingerprint-a",
+	)
+	if err != nil {
+		t.Fatalf("prepare scalar task group: %v", err)
+	}
+	arena := newReplicationSyncPayloadArena(len(changes))
+	for _, change := range changes {
+		if err := arena.appendKey(change.key); err != nil {
+			t.Fatalf("append packed key: %v", err)
+		}
+	}
+	packed, packedChanged, packedDeleted, nativeBatches, err := replicator.prepareReplicationDigestPackedTaskGroup(
+		trie, target, arena, "fingerprint-a",
+	)
+	if err != nil {
+		t.Fatalf("prepare packed task group: %v", err)
+	}
+	if scalarChanged != packedChanged || scalarDeleted != packedDeleted || nativeBatches != 1 {
+		t.Fatalf("scalar/packed changed/deleted/batches = %d/%d and %d/%d/%d", scalarChanged, scalarDeleted, packedChanged, packedDeleted, nativeBatches)
+	}
+	scalarWire := appendReplicationSyncBatchProtoBatch(nil, scalar.replicationSyncPayloadBatch(), replicationSetCompactCommand, "node-a", 42, "fingerprint-a")
+	packedWire := appendReplicationSyncBatchProtoBatch(nil, packed.replicationSyncPayloadBatch(), replicationSetCompactCommand, "node-a", 42, "fingerprint-a")
+	if !bytes.Equal(packedWire, scalarWire) {
+		t.Fatalf("packed wire differs from scalar\npacked: %x\nscalar: %x", packedWire, scalarWire)
+	}
+}
+
+func TestPrepareReplicationDigestPackedTaskGroupMatchesScalarDeleteFallback(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+	trie.UpsertString("session:2", "two")
+	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
+	t.Cleanup(replicator.Close)
+	arena := newReplicationSyncPayloadArena(2)
+	for _, key := range []string{"session:1", "session:2"} {
+		if err := arena.appendKey(key); err != nil {
+			t.Fatalf("append packed key: %v", err)
+		}
+	}
+	trie.Delete("session:2")
+
+	packed, packedChanged, packedDeleted, _, err := replicator.prepareReplicationDigestPackedTaskGroup(
+		trie, target, arena, "fingerprint-a",
+	)
+	if err != nil {
+		t.Fatalf("prepare packed task group: %v", err)
+	}
+	scalar, scalarChanged, scalarDeleted, err := replicator.prepareReplicationDigestTaskGroup(
+		trie, target, []replicationDigestChange{{key: "session:1"}, {key: "session:2"}}, false, "fingerprint-a",
+	)
+	if err != nil {
+		t.Fatalf("prepare scalar task group: %v", err)
+	}
+	if scalarChanged != packedChanged || scalarDeleted != packedDeleted {
+		t.Fatalf("scalar/packed changed/deleted = %d/%d and %d/%d", scalarChanged, scalarDeleted, packedChanged, packedDeleted)
+	}
+	if !reflect.DeepEqual(packed.payloads, scalar.payloads) || !reflect.DeepEqual(packed.keys, scalar.keys) {
+		t.Fatalf("packed delete fallback = %#v/%#v, want scalar %#v/%#v", packed.payloads, packed.keys, scalar.payloads, scalar.keys)
+	}
+}
+
 func TestReplicationDigestKeySourceIteratorSkipsValueDigest(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("session:1", "one")

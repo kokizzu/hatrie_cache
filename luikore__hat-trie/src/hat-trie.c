@@ -464,6 +464,36 @@ value_t* hattrie_tryget(hattrie_t* T, const char* key, size_t len)
 }
 
 
+size_t hattrie_tryget_batch(hattrie_t* T, const char* keys, size_t keys_size,
+                            const hattrie_key_record_t* records, size_t records_size,
+                            value_t* values)
+{
+    if (records_size > ((size_t) -1) / sizeof(value_t)) {
+        return 0;
+    }
+    if (values != NULL) {
+        memset(values, 0, records_size * sizeof(value_t));
+    }
+    if (T == NULL || records == NULL || values == NULL || (keys == NULL && keys_size > 0)) {
+        return 0;
+    }
+
+    size_t count = 0;
+    while (count < records_size) {
+        size_t offset = records[count].key_offset;
+        size_t len = records[count].key_len;
+        if (offset > keys_size || len > keys_size - offset) {
+            break;
+        }
+        const char* key = len == 0 ? NULL : keys + offset;
+        value_t* value = hattrie_tryget(T, key, len);
+        if (value != NULL) values[count] = *value;
+        count++;
+    }
+    return count;
+}
+
+
 void hattrie_walk (hattrie_t* T, const char* key, size_t len, void* user_data, hattrie_walk_cb cb) {
     if (T == NULL || cb == NULL || (key == NULL && len > 0)) return;
 

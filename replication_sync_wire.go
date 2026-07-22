@@ -29,8 +29,6 @@ type replicationSyncPayload struct {
 }
 
 type replicationSyncPayloadArenaRecord struct {
-	keyOffset    uint32
-	keyLength    uint32
 	valueOffset  uint32
 	valueLength  uint32
 	payloadBytes uint32
@@ -44,6 +42,7 @@ type replicationSyncPayloadDirectRecord struct {
 
 type replicationSyncPayloadArena struct {
 	keys          []byte
+	keyRecords    []hatTriePackedKeyRecord
 	values        []byte
 	records       []replicationSyncPayloadArenaRecord
 	directRecords []replicationSyncPayloadDirectRecord
@@ -57,9 +56,10 @@ func newReplicationSyncPayloadArena(capacity int) *replicationSyncPayloadArena {
 		capacity = maxReplicationSyncArenaInitialEntries
 	}
 	return &replicationSyncPayloadArena{
-		keys:    make([]byte, 0, boundedReplicationSyncArenaCapacity(capacity, 12)),
-		values:  make([]byte, 0, boundedReplicationSyncArenaCapacity(capacity, 24)),
-		records: make([]replicationSyncPayloadArenaRecord, 0, capacity),
+		keys:       make([]byte, 0, boundedReplicationSyncArenaCapacity(capacity, 12)),
+		keyRecords: make([]hatTriePackedKeyRecord, 0, capacity),
+		values:     make([]byte, 0, boundedReplicationSyncArenaCapacity(capacity, 24)),
+		records:    make([]replicationSyncPayloadArenaRecord, 0, capacity),
 	}
 }
 
@@ -108,14 +108,34 @@ func (arena *replicationSyncPayloadArena) appendRecord(key string, valueOffset i
 	}
 	arena.keys = append(arena.keys, key...)
 	recordIndex := uint32(len(arena.records))
+	arena.keyRecords = append(arena.keyRecords, hatTriePackedKeyRecord{
+		keyOffset: uint32(keyOffset),
+		keyLength: uint32(len(key)),
+	})
 	arena.records = append(arena.records, replicationSyncPayloadArenaRecord{
-		keyOffset:    uint32(keyOffset),
-		keyLength:    uint32(len(key)),
 		valueOffset:  uint32(valueOffset),
 		valueLength:  uint32(valueLength),
 		payloadBytes: uint32(payloadBytes),
 	})
 	return recordIndex, nil
+}
+
+func (arena *replicationSyncPayloadArena) appendKey(key string) error {
+	if arena == nil {
+		return errors.New("hatriecache: replication sync payload arena is nil")
+	}
+	keyOffset := len(arena.keys)
+	if uint64(len(arena.records)) >= uint64(math.MaxUint32) ||
+		uint64(keyOffset)+uint64(len(key)) > uint64(math.MaxUint32) {
+		return errors.New("hatriecache: replication sync payload arena exceeds 4 GiB")
+	}
+	arena.keys = append(arena.keys, key...)
+	arena.keyRecords = append(arena.keyRecords, hatTriePackedKeyRecord{
+		keyOffset: uint32(keyOffset),
+		keyLength: uint32(len(key)),
+	})
+	arena.records = append(arena.records, replicationSyncPayloadArenaRecord{})
+	return nil
 }
 
 func (arena *replicationSyncPayloadArena) appendDirectRecord(key string, valueOffset int, valueLength int) error {
@@ -142,7 +162,8 @@ func (arena *replicationSyncPayloadArena) payload(index uint32) replicationSyncP
 		return replicationSyncPayload{}
 	}
 	record := arena.records[index]
-	keyBytes := arena.keys[int(record.keyOffset):int(record.keyOffset+record.keyLength)]
+	keyRecord := arena.keyRecords[index]
+	keyBytes := arena.keys[int(keyRecord.keyOffset):int(keyRecord.keyOffset+keyRecord.keyLength)]
 	value := arena.values[int(record.valueOffset):int(record.valueOffset+record.valueLength)]
 	key := ""
 	if len(keyBytes) > 0 {

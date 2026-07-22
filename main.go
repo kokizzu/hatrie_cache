@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	mathbits "math/bits"
 	"os"
 	"path/filepath"
@@ -58,6 +59,11 @@ const (
 	// MaxCounterWriteStripes bounds retained mutex memory.
 	MaxCounterWriteStripes = 256
 )
+
+type hatTriePackedKeyRecord struct {
+	keyOffset uint32
+	keyLength uint32
+}
 
 const (
 	DATAVALUE_TYPE_NULL uint8 = iota
@@ -3807,6 +3813,81 @@ func (ht *HatTrie) tryLocation(key string) *C.value_t {
 	value := C.hattrie_tryget(ht.root, cstr, keyLen)
 	runtime.KeepAlive(key)
 	return value
+}
+
+func (ht *HatTrie) visitPackedValuesWithoutStats(keys []byte, records []hatTriePackedKeyRecord, visit func(index int, key string, value HatValue) error) (int, error) {
+	if ht == nil {
+		return 0, ErrNilHatTrie
+	}
+	if len(records) == 0 {
+		return 0, nil
+	}
+	if unsafe.Sizeof(hatTriePackedKeyRecord{}) != unsafe.Sizeof(C.hattrie_key_record_t{}) {
+		return 0, errors.New("hatriecache: packed trie key record layout mismatch")
+	}
+	if uint64(len(keys)) > uint64(math.MaxUint32) {
+		return 0, errors.New("hatriecache: packed trie key arena exceeds 4 GiB")
+	}
+	for _, record := range records {
+		offset := uint64(record.keyOffset)
+		length := uint64(record.keyLength)
+		if offset > uint64(len(keys)) || length > uint64(len(keys))-offset || length > uint64(maxHATTrieKeyLength) {
+			return 0, errors.New("hatriecache: packed trie key is outside arena")
+		}
+	}
+
+	nativeBatches := 0
+	nativeValues := make([]C.value_t, defaultHatTrieScanBatchEntries)
+	for start := 0; start < len(records); start += defaultHatTrieScanBatchEntries {
+		end := start + defaultHatTrieScanBatchEntries
+		if end > len(records) {
+			end = len(records)
+		}
+		ht.mu.Lock()
+		ht.ensureOpen()
+		count := C.hattrie_tryget_batch(
+			ht.root,
+			(*C.char)(unsafe.Pointer(unsafe.SliceData(keys))),
+			C.size_t(len(keys)),
+			(*C.hattrie_key_record_t)(unsafe.Pointer(&records[start])),
+			C.size_t(end-start),
+			unsafe.SliceData(nativeValues),
+		)
+		runtime.KeepAlive(keys)
+		nativeBatches++
+		if int(count) != end-start {
+			ht.mu.Unlock()
+			return nativeBatches, errors.New("hatriecache: native packed trie lookup stopped early")
+		}
+		for index := start; index < end; index++ {
+			record := records[index]
+			keyStart := int(record.keyOffset)
+			keyBytes := keys[keyStart : keyStart+int(record.keyLength)]
+			key := ""
+			if len(keyBytes) > 0 {
+				key = unsafe.String(unsafe.SliceData(keyBytes), len(keyBytes))
+			}
+			hval := HatValue{}
+			hval.fromValue(nativeValues[index-start])
+			if hval.Empty() {
+				ht.clearExpirationLocked(key)
+				ht.clearHotKeyLocked(key)
+			} else if ht.expireIfNeededLocked(key, hval) {
+				hval = HatValue{}
+				ht.clearHotKeyLocked(key)
+			} else {
+				ht.cacheValueLocked(key, hval)
+			}
+			if visit != nil {
+				if err := visit(index, key, hval); err != nil {
+					ht.mu.Unlock()
+					return nativeBatches, err
+				}
+			}
+		}
+		ht.mu.Unlock()
+	}
+	return nativeBatches, nil
 }
 
 func cKey(key string) (*C.char, C.size_t) {

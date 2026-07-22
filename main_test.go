@@ -266,6 +266,75 @@ func TestExpirationAPIsRejectNilTrie(t *testing.T) {
 	stop()
 }
 
+func TestVisitPackedValuesWithoutStatsPreservesOrderAndExpiration(t *testing.T) {
+	ht := CreateHatTrie()
+	t.Cleanup(ht.Destroy)
+	now := time.Unix(1700000000, 0)
+	ht.now = func() time.Time { return now }
+	ht.UpsertString("alpha", "one")
+	ht.UpsertString("beta", "two")
+	ht.UpsertString("expired", "gone")
+	if !ht.ExpireAt("expired", now.Add(time.Second)) {
+		t.Fatal("ExpireAt(expired) = false")
+	}
+	now = now.Add(2 * time.Second)
+
+	keys := make([]byte, 0, 4096)
+	records := make([]hatTriePackedKeyRecord, 0, defaultHatTrieScanBatchEntries+4)
+	wantKeys := make([]string, 0, defaultHatTrieScanBatchEntries+4)
+	for index := 0; index < defaultHatTrieScanBatchEntries+4; index++ {
+		key := "missing"
+		switch index {
+		case 0:
+			key = "beta"
+		case 1:
+			key = "expired"
+		case defaultHatTrieScanBatchEntries + 3:
+			key = "alpha"
+		}
+		offset := len(keys)
+		keys = append(keys, key...)
+		records = append(records, hatTriePackedKeyRecord{keyOffset: uint32(offset), keyLength: uint32(len(key))})
+		wantKeys = append(wantKeys, key)
+	}
+
+	seenKeys := make([]string, 0, len(records))
+	seenValues := make([]HatValue, 0, len(records))
+	batches, err := ht.visitPackedValuesWithoutStats(keys, records, func(_ int, key string, value HatValue) error {
+		seenKeys = append(seenKeys, key)
+		seenValues = append(seenValues, value)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("visitPackedValuesWithoutStats() error = %v", err)
+	}
+	if batches != 2 {
+		t.Fatalf("native batches = %d, want 2", batches)
+	}
+	if !reflect.DeepEqual(seenKeys, wantKeys) {
+		t.Fatalf("visited keys = %#v, want input order", seenKeys)
+	}
+	if seenValues[0].Empty() || seenValues[len(seenValues)-1].Empty() {
+		t.Fatal("live packed values are empty")
+	}
+	if !seenValues[1].Empty() {
+		t.Fatalf("expired packed value = %#v, want empty", seenValues[1])
+	}
+	for index := 2; index < len(seenValues)-1; index++ {
+		if !seenValues[index].Empty() {
+			t.Fatalf("missing packed value %d = %#v, want empty", index, seenValues[index])
+		}
+	}
+	if ht.Size() != 2 {
+		t.Fatalf("size after packed expiration = %d, want 2", ht.Size())
+	}
+
+	bad := []hatTriePackedKeyRecord{{keyOffset: uint32(len(keys)), keyLength: 1}}
+	if _, err := ht.visitPackedValuesWithoutStats(keys, bad, nil); err == nil {
+		t.Fatal("visitPackedValuesWithoutStats() invalid range error = nil")
+	}
+}
+
 func TestScalarAPIsRejectNilTrie(t *testing.T) {
 	var ht *HatTrie
 

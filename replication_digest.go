@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -823,6 +824,31 @@ func (iterator *replicationDigestSourceIterator) appendFallbackChanges(changes [
 	return changes, iterator.done, nil
 }
 
+func (iterator *replicationDigestSourceIterator) appendFallbackKeys(arena *replicationSyncPayloadArena, limit int) (bool, error) {
+	if iterator == nil || iterator.done {
+		return true, nil
+	}
+	if arena == nil {
+		return false, errors.New("hatriecache: replication fallback arena is nil")
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	iterator.cursor.packedKeys = true
+	page, err := replicationSyncEntriesPageWithCursor(iterator.trie, iterator.inventory.prefix, iterator.afterKey, iterator.hasAfterKey, limit, &iterator.cursor, func(entry Entry) error {
+		included, err := iterator.includes(entry)
+		if err != nil || !included {
+			return err
+		}
+		return arena.appendKey(entry.Key)
+	})
+	if err != nil {
+		return false, err
+	}
+	iterator.finishPage(page)
+	return iterator.done, nil
+}
+
 func (iterator *replicationDigestSourceIterator) includes(entry Entry) (bool, error) {
 	if err := iterator.ctx.Err(); err != nil {
 		return false, err
@@ -925,6 +951,9 @@ func prefixDigestRequest(routing replicationRoutingSnapshot, source string, pref
 func (replicator *HTTPReplicator) syncDigestTargetFallback(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, inventory replicationDigestTargetInventory, grpcSession *replicationGRPCSyncSession) ([]ReplicationTargetResult, int, int, bool) {
 	inventory.hasBuckets = false
 	inventory.buckets = replicationMerkleBucketMask{}
+	if trie.localPartitionSet() == nil && (grpcSession != nil || replicator.wireFormat != CommandWireFormatJSON) {
+		return replicator.syncDigestTargetPackedFallback(ctx, trie, routing, inventory, grpcSession)
+	}
 	source := newReplicationDigestKeySourceIterator(ctx, trie, routing, replicator.self, inventory)
 	source.prevalidateScope()
 	defer source.close()
@@ -959,6 +988,69 @@ func (replicator *HTTPReplicator) syncDigestTargetFallback(ctx context.Context, 
 		writer.targets = append(writer.targets, ReplicationTargetResult{Node: inventory.target.ID, Address: inventory.target.Address, OK: true})
 	}
 	return writer.targets, writer.changed, writer.deleted, true
+}
+
+func (replicator *HTTPReplicator) syncDigestTargetPackedFallback(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, inventory replicationDigestTargetInventory, grpcSession *replicationGRPCSyncSession) ([]ReplicationTargetResult, int, int, bool) {
+	source := newReplicationDigestKeySourceIterator(ctx, trie, routing, replicator.self, inventory)
+	source.prevalidateScope()
+	defer source.close()
+	limit := inventory.pageSize
+	if limit < defaultReplicationSyncKeyPageSize {
+		limit = defaultReplicationSyncKeyPageSize
+	}
+	targets := make([]ReplicationTargetResult, 0, 1)
+	changed := 0
+	deleted := 0
+	done := false
+	for !done {
+		arena := newReplicationSyncPayloadArena(limit)
+		for len(arena.records) < limit && !done {
+			remaining := limit - len(arena.records)
+			scanLimit := inventory.pageSize
+			if scanLimit <= 0 {
+				scanLimit = defaultReplicationSyncKeyPageSize
+			}
+			if scanLimit > remaining {
+				scanLimit = remaining
+			}
+			var err error
+			done, err = source.appendFallbackKeys(arena, scanLimit)
+			if err != nil {
+				failure := ReplicationTargetResult{Node: inventory.target.ID, Address: inventory.target.Address, Error: err.Error()}
+				return append(targets, failure), changed, deleted, true
+			}
+		}
+		if len(arena.records) == 0 {
+			continue
+		}
+		group, pageChanged, pageDeleted, _, err := replicator.prepareReplicationDigestPackedTaskGroup(trie, inventory.target, arena, routing.fingerprint)
+		changed += pageChanged
+		deleted += pageDeleted
+		if err != nil {
+			failure := ReplicationTargetResult{Node: inventory.target.ID, Address: inventory.target.Address, Error: err.Error()}
+			return append(targets, failure), changed, deleted, true
+		}
+		groups := []replicationTaskGroup{group}
+		if replicator.batchMaxBytes > 0 {
+			groups = splitReplicationTaskGroupsByMaxBytes(groups, replicator.batchMaxBytes)
+		}
+		pageResult := ReplicationResult{}
+		if grpcSession != nil {
+			pageResult = grpcSession.executeReplicationTaskGroups(ctx, pageResult, groups)
+		} else {
+			pageResult = replicator.executeReplicationTaskGroups(ctx, pageResult, groups)
+		}
+		targets = append(targets, pageResult.Targets...)
+		for _, target := range pageResult.Targets {
+			if !target.OK {
+				return targets, changed, deleted, true
+			}
+		}
+	}
+	if len(targets) == 0 {
+		targets = append(targets, ReplicationTargetResult{Node: inventory.target.ID, Address: inventory.target.Address, OK: true})
+	}
+	return targets, changed, deleted, true
 }
 
 func (replicator *HTTPReplicator) executeReplicationDigestChanges(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, target TopologyNode, changes []replicationDigestChange, grpcSession *replicationGRPCSyncSession, fallback bool) ([]ReplicationTargetResult, int, int, bool) {
@@ -1059,6 +1151,73 @@ func (replicator *HTTPReplicator) prepareReplicationDigestTaskGroup(trie *HatTri
 		group.keys[index] = payloads[index].Key
 	}
 	return group, changed, deleted, nil
+}
+
+func (replicator *HTTPReplicator) prepareReplicationDigestPackedTaskGroup(trie *HatTrie, target TopologyNode, arena *replicationSyncPayloadArena, topologyFingerprint string) (replicationTaskGroup, int, int, int, error) {
+	if arena == nil || len(arena.keyRecords) != len(arena.records) {
+		return replicationTaskGroup{}, 0, 0, 0, errors.New("hatriecache: invalid packed replication fallback arena")
+	}
+	arena.values = arena.values[:0]
+	var payloads []CacheCommandRequest
+	compact := true
+	changed := 0
+	deleted := 0
+	nativeBatches, err := trie.visitPackedValuesWithoutStats(arena.keys, arena.keyRecords, func(index int, key string, hval HatValue) error {
+		if !hval.Empty() {
+			valueOffset := len(arena.values)
+			var exists bool
+			var appendErr error
+			arena.values, exists, appendErr = trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(arena.values, Entry{Key: key, Value: hval})
+			if appendErr != nil {
+				return appendErr
+			}
+			if exists {
+				valueLength := len(arena.values) - valueOffset
+				if uint64(valueOffset)+uint64(valueLength) > uint64(math.MaxUint32) {
+					return errors.New("hatriecache: replication sync payload arena exceeds 4 GiB")
+				}
+				record := &arena.records[index]
+				record.valueOffset = uint32(valueOffset)
+				record.valueLength = uint32(valueLength)
+				if !compact {
+					payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: key, BinaryValue: arena.values[valueOffset:]})
+				}
+				changed++
+				return nil
+			}
+		}
+		if compact {
+			payloads = make([]CacheCommandRequest, 0, len(arena.records))
+			for previous := 0; previous < index; previous++ {
+				payload := arena.payload(uint32(previous))
+				payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: payload.key, BinaryValue: payload.binaryValue})
+			}
+			compact = false
+		}
+		payloads = append(payloads, CacheCommandRequest{Command: "INTERNALDEL", Key: key})
+		deleted++
+		return nil
+	})
+	if err != nil {
+		return replicationTaskGroup{}, changed, deleted, nativeBatches, err
+	}
+	group := replicationTaskGroup{
+		target:           target,
+		deferredMetadata: true,
+		metadataSource:   replicator.self,
+		metadataTopology: topologyFingerprint,
+	}
+	if compact {
+		group.syncPayloadArena = arena
+		group.syncPayloadRecordCount = uint32(len(arena.records))
+		return group, changed, deleted, nativeBatches, nil
+	}
+	group.payloads = payloads
+	group.keys = make([]string, len(payloads))
+	for index := range payloads {
+		group.keys[index] = payloads[index].Key
+	}
+	return group, changed, deleted, nativeBatches, nil
 }
 
 func (replicator *HTTPReplicator) executeReplicationDigestTargetPage(ctx context.Context, target TopologyNode, request CacheCommandRequest) (ReplicationTargetResult, CacheCommandResponse) {

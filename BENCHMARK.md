@@ -185,6 +185,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-shard replication scan routing](#replication-descriptor-optimizations), 10k routes | Generic routing: 718,882 ns | Direct one-shard scope: 588,964 ns | 1.22x faster; zero heap and allocations in both | Applies only to the default one-shard scan; multi-shard and public routing remain unchanged |
 | Current pass | [Prevalidated invariant scan scope](#replication-descriptor-optimizations), 10k-key legacy fallback | Per-key scope validation: 3.418 ms; 421,376 heap B; 83 allocs | One prevalidation: 2.873 ms; 421,376 heap B; 83 allocs | 1.19x faster; reader pause 1.46x shorter; heap and allocations unchanged | Applies only to one-shard, unfiltered leader scans with a known target; all other scans retain dynamic routing |
 | Current pass | [Known-legacy Merkle bypass](#replication-descriptor-optimizations), 10k-key full sync | 11.403 ms; 3 steady requests; 1,002,881 heap B; 557 allocs | 11.070 ms; 2 steady requests; 959,672 heap B; 417 allocs | 1.03x faster, 1.04x lower heap, 1.34x fewer allocs | An in-place target upgrade at the same address can wait up to the existing five-minute capability TTL for a Merkle retry |
+| Current pass | [Packed fallback batch lookup](#replication-descriptor-optimizations), 10k-key known-legacy full sync | 10.688 ms; 951,616 heap B; 413 allocs; 4.583 ms reader pause | 9.209 ms; 652,898 heap B; 369 allocs; 3.438 ms reader pause | 1.16x faster, 1.46x lower heap, 1.12x fewer allocs, 1.33x shorter reader pause | No measured runtime tradeoff; JSON compatibility and local partitions retain the scalar path |
 | Current pass | [In-place native radix ordering](#replication-descriptor-optimizations), 10k-key ordered scan | Comparator sort: 3.744 ms; 841,584 heap B; 100 allocs | MSD radix sort: 3.507 ms; 841,584 heap B; 100 allocs | 1.07x faster with unchanged heap and allocations | Uses fixed stack histograms with logarithmically bounded recursion; no per-key sort allocation |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
 | Reverted | [Exact protobuf batch coalescing](#replication-descriptor-optimizations), 10k-key legacy fallback | Two requests: sender 10.422 ms; receiver decode 4.066 ms; largest protobuf 305,156 B | One request: sender 10.215 ms; receiver decode 4.444 ms; largest protobuf 609,046 B | Sender 1.02x faster and 1.44x fewer allocs, but receiver 1.09x slower and combined CPU 1.012x slower | Rolled back; halving requests did not offset receiver decode cost and doubled the largest request |
@@ -2321,6 +2322,7 @@ feature. Improvements are ratios where larger is better.
 | Single-shard scan routing, 10,000 routes | 718,882 ns; 0 B; 0 allocs | 588,964 ns; 0 B; 0 allocs | 1.22x | 1.00x | 1.00x | Internal scan consumers omit unused bucket lookup; multi-shard routing delegates to the existing path |
 | Prevalidated invariant fallback scan, 10,000 keys | 3,418,121 ns; 421,376 B; 83 allocs | 2,872,609 ns; 421,376 B; 83 allocs | 1.19x | 1.00x | 1.00x | Restricted to an unfiltered one-shard leader scan whose target is already in that shard's replication set |
 | Known-legacy full-keyspace sync, 10,000 keys | 11,402,903 ns; 3 steady requests; 56,059 wire B; 1,002,881 B; 557 allocs | 11,070,085 ns; 2 steady requests; 55,886 wire B; 959,672 B; 417 allocs | 1.03x | 1.04x | 1.34x | Same-address in-place upgrades can wait at most the existing five-minute capability TTL; address and topology changes invalidate immediately |
+| Packed fallback batch lookup, 10,000 keys | 10,688,124 ns; 2.004 requests; 55,877 wire B; 951,616 B; 413 allocs | 9,209,489 ns; 2.004 requests; 55,879 wire B; 652,898 B; 369 allocs | 1.16x | 1.46x | 1.12x | No measured regression: fixed-sequence protobuf is byte-identical and median maximum reader pause improved 1.33x; JSON and local partitions retain scalar lookup |
 | Ordered native HAT-trie scan, 10,000 keys | 3,744,034 ns; 841,584 B; 100 allocs | 3,506,797 ns; 841,584 B; 100 allocs | 1.07x | 1.00x | 1.00x | Fixed 257-symbol stack histograms replace libc `qsort`; ordering and wire representation are unchanged |
 | Single-pass legacy repair, 10,000 keys (rejected) | 11,459,282 ns; 55,892 wire B; 977,706 B; 433 allocs | Unordered: 10,675,192 ns; 64,258 wire B; 948,316 B; 392 allocs | 1.07x | 1.03x | 1.11x | Rejected: unordered transfer was 1.15x larger; restoring deterministic order took 12,316,337 ns, 1.075x slower than baseline |
 | Exact protobuf batch coalescing, 10,000 keys (rejected) | Sender: 10,422,384 ns; 2.004 requests; 949,539 B; 413 allocs. Receiver: 4,066,159 ns; 305,156 largest protobuf B | Sender: 10,214,713 ns; 1.004 requests; 928,371 B; 286 allocs. Receiver: 4,444,227 ns; 609,046 largest protobuf B | Sender 1.02x; combined 0.99x | Sender 1.02x; receiver 1.00x | Sender 1.44x; receiver 1.00x | Rejected: receiver decode was 1.09x slower, the largest request was 2.00x larger, and combined sender-plus-decode CPU was 1.012x slower |
@@ -2376,6 +2378,23 @@ heap fell from 1,002,881 B to 959,672 B, and allocations fell from 557 to 417.
 Steady request count fell from three to two. A digest-capable control retained
 one request, 215 wire B, and 414 allocations; opposing run order changed the
 small timing difference, so no modern-target speedup is claimed.
+
+The known-legacy compact fallback now copies sorted scan keys once into the
+existing payload arena and resolves values through bounded 256-key native
+lookups. A 10,000-key repair therefore uses 40 lookup cgo calls instead of
+10,000 scalar calls. Key and value metadata remain 20 bytes per entry in two
+compact slices, so batching adds no per-key descriptor memory. Protobuf order,
+request splitting, expiration, and concurrent-delete conversion are unchanged;
+tests compare fixed-sequence wire bytes directly. JSON compatibility and local
+partitions retain the prior scalar implementation.
+
+The paired `500x` median improved from 10.688 ms to 9.209 ms, cumulative heap
+fell from 951,616 B to 652,898 B, and allocations fell from 413 to 369. Request
+count stayed at 2.004 per operation. Compressed wire medians differed by two
+bytes (55,877 versus 55,879 B) because benchmark sequence metadata varies;
+fixed-sequence output is byte-identical. In a separate ten-run contention gate,
+median maximum reader pause shortened from 4.583 ms to 3.438 ms, so the bounded
+lock chunks introduced no measured reader cost.
 
 The native sorted iterator now partitions its existing slot-pointer array with
 an in-place MSD radix sort. Prefix skipping avoids repeatedly building byte
@@ -2463,6 +2482,10 @@ Raw local output is retained in:
 - `build/benchmarks/protobuf-receiver-two-requests.txt`
 - `build/benchmarks/protobuf-receiver-one-request.txt`
 - `build/benchmarks/protobuf-receiver-two-confirm.txt`
+- `build/benchmarks/packed-lookup-before.txt`
+- `build/benchmarks/packed-lookup-after.txt`
+- `build/benchmarks/packed-lookup-pause-before.txt`
+- `build/benchmarks/packed-lookup-pause-after.txt`
 
 Reproduce the stable end-to-end row with:
 
