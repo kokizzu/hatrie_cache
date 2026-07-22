@@ -14,6 +14,15 @@ import (
 	"github.com/cespare/xxhash/v2"
 )
 
+const replicationDigestCapabilityTTL = 5 * time.Minute
+const maxReplicationDigestCapabilities = 1024
+
+type replicationDigestCapability struct {
+	address     string
+	fingerprint string
+	expiresAt   time.Time
+}
+
 const (
 	defaultReplicationDigestPageEntries = 16384
 	maxReplicationDigestPageEntries     = 16384
@@ -132,6 +141,30 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 	}
 	if merkleResult, handled := replicator.syncAllMerkle(ctx, trie, prefix, pageSize, routing); handled {
 		return merkleResult
+	}
+	if target, single := singleReplicationDigestTarget(routing, replicator.self); single && replicator.replicationDigestUnsupported(target, routing.fingerprint) {
+		var grpcSession *replicationGRPCSyncSession
+		if replicator.transport == ReplicationTransportGRPCStream {
+			grpcSession = newReplicationGRPCSyncSession(ctx, replicator)
+			defer grpcSession.close()
+		}
+		inventory := newReplicationDigestTargetInventory(target, prefix, pageSize)
+		targets, changed, deleted, fallback := replicator.syncDigestTargetFallback(ctx, trie, routing, *inventory, grpcSession)
+		result.Entries = changed
+		result.Targets = targets
+		fallbacks := 0
+		if fallback {
+			fallbacks = 1
+		}
+		if err := ctx.Err(); err != nil {
+			if len(result.Targets) == 0 {
+				result.Skipped = true
+			}
+			result.Reason = err.Error()
+			return result
+		}
+		result.Reason = fmt.Sprintf("digest sync compared %d entries, transferred %d, deleted %d, fallbacks %d", result.Entries, changed, deleted, fallbacks)
+		return result
 	}
 	inventories, entries, err := replicator.replicationDigestInventories(ctx, trie, prefix, pageSize, routing)
 	result.Entries = entries
@@ -459,6 +492,7 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		lastDigestResult = pageResult
 		if !pageResult.OK {
 			if pageResult.unsupportedTypedReplication {
+				replicator.markReplicationDigestUnsupported(inventory.target, routing.fingerprint)
 				return replicator.syncDigestTargetFallback(ctx, trie, routing, inventory, grpcSession)
 			}
 			if writer != nil {
@@ -468,8 +502,10 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		}
 		page, supported, err := decodeReplicationDigestResponse(response)
 		if !supported {
+			replicator.markReplicationDigestUnsupported(inventory.target, routing.fingerprint)
 			return replicator.syncDigestTargetFallback(ctx, trie, routing, inventory, grpcSession)
 		}
+		replicator.markReplicationDigestSupported(inventory.target, routing.fingerprint)
 		if err != nil {
 			pageResult.OK = false
 			pageResult.Error = err.Error()
@@ -571,6 +607,75 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		return []ReplicationTargetResult{lastDigestResult}, 0, 0, false
 	}
 	return writer.targets, writer.changed, writer.deleted, false
+}
+
+func singleReplicationDigestTarget(routing replicationRoutingSnapshot, source string) (TopologyNode, bool) {
+	var target TopologyNode
+	found := false
+	for _, shard := range routing.shards {
+		if routing.leaders[shard.ID].Leader != source {
+			continue
+		}
+		for _, candidate := range routing.targets[shard.ID] {
+			if !found {
+				target = candidate
+				found = true
+				continue
+			}
+			if candidate != target {
+				return TopologyNode{}, false
+			}
+		}
+	}
+	return target, found
+}
+
+func (replicator *HTTPReplicator) replicationDigestCapabilityNow() time.Time {
+	if replicator != nil && replicator.capabilityNow != nil {
+		return replicator.capabilityNow()
+	}
+	return time.Now()
+}
+
+func (replicator *HTTPReplicator) replicationDigestUnsupported(target TopologyNode, fingerprint string) bool {
+	if replicator == nil {
+		return false
+	}
+	now := replicator.replicationDigestCapabilityNow()
+	replicator.mu.RLock()
+	capability, ok := replicator.digestUnsupported[target.ID]
+	replicator.mu.RUnlock()
+	return ok && capability.address == target.Address && capability.fingerprint == fingerprint && now.Before(capability.expiresAt)
+}
+
+func (replicator *HTTPReplicator) markReplicationDigestUnsupported(target TopologyNode, fingerprint string) {
+	if replicator == nil || strings.TrimSpace(target.ID) == "" {
+		return
+	}
+	capability := replicationDigestCapability{
+		address:     target.Address,
+		fingerprint: fingerprint,
+		expiresAt:   replicator.replicationDigestCapabilityNow().Add(replicationDigestCapabilityTTL),
+	}
+	replicator.mu.Lock()
+	_, exists := replicator.digestUnsupported[target.ID]
+	if replicator.digestUnsupported == nil || (len(replicator.digestUnsupported) >= maxReplicationDigestCapabilities && !exists) {
+		replicator.digestUnsupported = make(map[string]replicationDigestCapability)
+	}
+	replicator.digestUnsupported[target.ID] = capability
+	replicator.mu.Unlock()
+}
+
+func (replicator *HTTPReplicator) markReplicationDigestSupported(target TopologyNode, fingerprint string) {
+	if replicator == nil {
+		return
+	}
+	replicator.mu.Lock()
+	capability, ok := replicator.digestUnsupported[target.ID]
+	if ok && capability.address == target.Address && capability.fingerprint == fingerprint {
+		delete(replicator.digestUnsupported, target.ID)
+	}
+	replicator.mu.Unlock()
 }
 
 func newReplicationDigestTargetInventory(target TopologyNode, prefix string, pageSize int) *replicationDigestTargetInventory {

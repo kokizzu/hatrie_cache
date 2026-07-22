@@ -121,6 +121,8 @@ type HTTPReplicator struct {
 	grpcLiveCancel           context.CancelFunc
 	grpcStreamBatches        atomic.Uint64
 	breakers                 map[string]replicationCircuitBreakerState
+	digestUnsupported        map[string]replicationDigestCapability
+	capabilityNow            func() time.Time
 	done                     chan struct{}
 	stopped                  chan struct{}
 	asyncCtx                 context.Context

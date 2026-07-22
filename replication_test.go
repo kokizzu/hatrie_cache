@@ -3224,9 +3224,11 @@ func TestHTTPReplicatorSyncAllDigestFallsBackToFullPushForOlderTarget(t *testing
 	source := newTestTrie(t)
 	source.UpsertString("session:1", "one")
 	source.UpsertString("session:2", "two")
-	requests := make(chan CacheCommandRequest, 3)
+	requests := make(chan CacheCommandRequest, 6)
+	var requestCount atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := mustDecodeReplicationTestCommand(t, w, r)
+		requestCount.Add(1)
 		requests <- request
 		if normalizedCommand(request.Command) == replicationDigestCommand {
 			format, _ := commandWireFormatFromContentType(r.Header.Get("Content-Type"))
@@ -3262,6 +3264,51 @@ func TestHTTPReplicatorSyncAllDigestFallsBackToFullPushForOlderTarget(t *testing
 		if normalizedCommand(payload.Command) != replicationSetCompactCommand {
 			t.Fatalf("fallback payload = %#v, want compact set", payload)
 		}
+	}
+	if got := requestCount.Load(); got != 3 {
+		t.Fatalf("first fallback sync requests = %d, want two probes plus one repair", got)
+	}
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	learnedTarget, single := singleReplicationDigestTarget(routing, "node-a")
+	if !single {
+		t.Fatalf("singleReplicationDigestTarget() = %#v/false, want node-b", learnedTarget)
+	}
+	if !replicator.replicationDigestUnsupported(learnedTarget, routing.fingerprint) {
+		t.Fatal("first fallback did not retain unsupported digest capability")
+	}
+
+	second := replicator.SyncAll(context.Background(), source, "")
+	if second.Skipped || second.Entries != 2 || len(second.Targets) != 1 || !second.Targets[0].OK {
+		t.Fatalf("second SyncAll(fallback) = %#v, want direct successful full push", second)
+	}
+	if got := requestCount.Load(); got != 5 {
+		t.Fatalf("two fallback sync requests = %d, want first 3 plus cached compact/legacy repair", got)
+	}
+}
+
+func TestReplicationDigestUnsupportedCapabilityExpiresAndMatchesTarget(t *testing.T) {
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
+	t.Cleanup(replicator.Close)
+	now := time.Unix(1_700_000_000, 0)
+	replicator.capabilityNow = func() time.Time { return now }
+	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	replicator.markReplicationDigestUnsupported(target, "fingerprint-a")
+
+	if !replicator.replicationDigestUnsupported(target, "fingerprint-a") {
+		t.Fatal("replicationDigestUnsupported() = false, want learned capability")
+	}
+	if replicator.replicationDigestUnsupported(TopologyNode{ID: target.ID, Address: "http://replacement"}, "fingerprint-a") {
+		t.Fatal("replacement address reused stale digest capability")
+	}
+	if replicator.replicationDigestUnsupported(target, "fingerprint-b") {
+		t.Fatal("new topology fingerprint reused stale digest capability")
+	}
+	now = now.Add(replicationDigestCapabilityTTL + time.Nanosecond)
+	if replicator.replicationDigestUnsupported(target, "fingerprint-a") {
+		t.Fatal("expired digest capability remained active")
 	}
 }
 
