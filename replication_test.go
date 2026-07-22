@@ -4181,6 +4181,70 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestPrepareReplicationDigestTaskGroupSelectsCompactRepresentation(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:1", "one")
+	trie.UpsertString("session:2", "two")
+	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	allSet := []replicationDigestChange{{key: "session:1"}, {key: "session:2"}}
+	mixed := []replicationDigestChange{{key: "session:1"}, {key: "session:stale", delete: true}}
+
+	for _, tt := range []struct {
+		name          string
+		wireFormat    CommandWireFormat
+		grpcAvailable bool
+		changes       []replicationDigestChange
+		wantCompact   bool
+		wantDeleted   int
+	}{
+		{name: "default protobuf", changes: allSet, wantCompact: true},
+		{name: "grpc with json fallback", wireFormat: CommandWireFormatJSON, grpcAvailable: true, changes: allSet, wantCompact: true},
+		{name: "json compatibility", wireFormat: CommandWireFormatJSON, changes: allSet},
+		{name: "mixed delete compatibility", changes: mixed, wantDeleted: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", WireFormat: tt.wireFormat})
+			t.Cleanup(replicator.Close)
+			group, changed, deleted, err := replicator.prepareReplicationDigestTaskGroup(
+				trie, target, tt.changes, tt.grpcAvailable, "fingerprint-a",
+			)
+			if err != nil {
+				t.Fatalf("prepareReplicationDigestTaskGroup() error = %v", err)
+			}
+			if changed != len(tt.changes)-tt.wantDeleted || deleted != tt.wantDeleted {
+				t.Fatalf("changed/deleted = %d/%d, want %d/%d", changed, deleted, len(tt.changes)-tt.wantDeleted, tt.wantDeleted)
+			}
+			if !group.deferredMetadata || group.metadataSource != "node-a" || group.metadataTopology != "fingerprint-a" {
+				t.Fatalf("group metadata = %#v, want deferred source metadata", group)
+			}
+			if tt.wantCompact {
+				if len(group.syncPayloads) != len(tt.changes) || len(group.payloads) != 0 || len(group.keys) != 0 {
+					t.Fatalf("compact group storage = %d/%d/%d, want %d/0/0", len(group.syncPayloads), len(group.payloads), len(group.keys), len(tt.changes))
+				}
+				for index, payload := range group.syncPayloads {
+					if payload.key != tt.changes[index].key || len(payload.binaryValue) == 0 {
+						t.Fatalf("compact payload %d = %#v, want populated %q", index, payload, tt.changes[index].key)
+					}
+				}
+				return
+			}
+			if len(group.syncPayloads) != 0 || len(group.payloads) != len(tt.changes) || len(group.keys) != len(tt.changes) {
+				t.Fatalf("generic group storage = %d/%d/%d, want 0/%d/%d", len(group.syncPayloads), len(group.payloads), len(group.keys), len(tt.changes), len(tt.changes))
+			}
+			commands := make(map[string]string, len(group.payloads))
+			for _, payload := range group.payloads {
+				commands[payload.Key] = normalizedCommand(payload.Command)
+			}
+			if commands["session:1"] != replicationSetCompactCommand {
+				t.Fatalf("session:1 command = %q, want compact set", commands["session:1"])
+			}
+			if tt.wantDeleted == 1 && commands["session:stale"] != "INTERNALDEL" {
+				t.Fatalf("stale command = %q, want INTERNALDEL", commands["session:stale"])
+			}
+		})
+	}
+}
+
 func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 	topology, err := NewTopologyStore(ClusterTopology{
 		Version:     1,

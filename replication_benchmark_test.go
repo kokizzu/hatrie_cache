@@ -155,6 +155,61 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationDigestChangesDefaultWire(b *testing.B) {
+	const keyCount = 1024
+	for _, tt := range []struct {
+		name        string
+		existingKey func(int) bool
+	}{
+		{name: "AllSet", existingKey: func(int) bool { return true }},
+		{name: "HalfDelete", existingKey: func(index int) bool { return index%2 == 0 }},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			changes := make([]replicationDigestChange, 0, keyCount)
+			for index := 0; index < keyCount; index++ {
+				key := fmt.Sprintf("session:%08d", index)
+				changes = append(changes, replicationDigestChange{key: key, delete: !tt.existingKey(index)})
+				if tt.existingKey(index) {
+					trie.UpsertString(key, "value-"+strconv.Itoa(index))
+				}
+			}
+
+			targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				_ = r.Body.Close()
+				writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+			}))
+			b.Cleanup(targetServer.Close)
+			topology := replicationTestTopology(b, targetServer.URL)
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: NewElectionStore(topology, ElectionOptions{}),
+				Client:   targetServer.Client(),
+			})
+			b.Cleanup(replicator.Close)
+			routing, ok := replicator.snapshotReplicationRouting()
+			if !ok {
+				b.Fatal("snapshotReplicationRouting() ok = false")
+			}
+			target := routing.nodes["node-b"]
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				targets, changed, deleted, _ := replicator.executeReplicationDigestChanges(
+					context.Background(), trie, routing, target, changes, nil, false,
+				)
+				if len(targets) != 1 || !targets[0].OK || changed+deleted != keyCount {
+					b.Fatalf("digest changes = %#v changed/deleted %d/%d", targets, changed, deleted)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
 	keyCount := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_KEYS", 100000)
 	pageSize := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_PAGE_SIZE", 1000)

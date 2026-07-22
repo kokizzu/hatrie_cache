@@ -48,7 +48,8 @@ type replicationDigestTargetInventory struct {
 }
 
 type replicationDigestChange struct {
-	key string
+	key    string
+	delete bool
 }
 
 type replicationDigestSourceEntry struct {
@@ -524,7 +525,7 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 				}
 			}
 			if !localOK || local.key > key {
-				if !writer.add(key) {
+				if !writer.addDelete(key) {
 					return writer.targets, writer.changed, writer.deleted, false
 				}
 				continue
@@ -669,7 +670,15 @@ func (replicator *HTTPReplicator) newReplicationDigestChangeWriter(ctx context.C
 }
 
 func (writer *replicationDigestChangeWriter) add(key string) bool {
-	writer.changes = append(writer.changes, replicationDigestChange{key: key})
+	return writer.addChange(replicationDigestChange{key: key})
+}
+
+func (writer *replicationDigestChangeWriter) addDelete(key string) bool {
+	return writer.addChange(replicationDigestChange{key: key, delete: true})
+}
+
+func (writer *replicationDigestChangeWriter) addChange(change replicationDigestChange) bool {
+	writer.changes = append(writer.changes, change)
 	return len(writer.changes) < writer.limit || writer.flush()
 }
 
@@ -746,47 +755,12 @@ func (replicator *HTTPReplicator) syncDigestTargetFallback(ctx context.Context, 
 
 func (replicator *HTTPReplicator) executeReplicationDigestChanges(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, target TopologyNode, changes []replicationDigestChange, grpcSession *replicationGRPCSyncSession, fallback bool) ([]ReplicationTargetResult, int, int, bool) {
 	sort.Slice(changes, func(i, j int) bool { return changes[i].key < changes[j].key })
-	payloads := make([]CacheCommandRequest, 0, len(changes))
-	var syncPayloads []replicationSyncPayload
-	streamCompatible := grpcSession != nil
-	if streamCompatible {
-		syncPayloads = make([]replicationSyncPayload, 0, len(changes))
+	group, changed, deleted, err := replicator.prepareReplicationDigestTaskGroup(trie, target, changes, grpcSession != nil, routing.fingerprint)
+	if err != nil {
+		return []ReplicationTargetResult{{Node: target.ID, Address: target.Address, Error: err.Error()}}, changed, deleted, fallback
 	}
-	changed := 0
-	deleted := 0
-	for _, change := range changes {
-		data, exists, err := trie.commandDumpEntryBinaryWithoutStats(change.key)
-		if err != nil {
-			return []ReplicationTargetResult{{Node: target.ID, Address: target.Address, Error: err.Error()}}, changed, deleted, fallback
-		}
-		if exists {
-			payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: change.key, BinaryValue: data})
-			if streamCompatible {
-				syncPayloads = append(syncPayloads, replicationSyncPayload{key: change.key, binaryValue: data})
-			}
-			changed++
-			continue
-		}
-		streamCompatible = false
-		payloads = append(payloads, CacheCommandRequest{Command: "INTERNALDEL", Key: change.key})
-		deleted++
-	}
-	if len(payloads) == 0 {
+	if group.replicationSyncPayloadBatch().len() == 0 && len(group.payloads) == 0 {
 		return []ReplicationTargetResult{{Node: target.ID, Address: target.Address, OK: true}}, changed, deleted, fallback
-	}
-	group := replicationTaskGroup{
-		target:           target,
-		payloads:         payloads,
-		keys:             make([]string, len(payloads)),
-		deferredMetadata: true,
-		metadataSource:   replicator.self,
-		metadataTopology: routing.fingerprint,
-	}
-	if streamCompatible {
-		group.syncPayloads = syncPayloads
-	}
-	for idx := range payloads {
-		group.keys[idx] = payloads[idx].Key
 	}
 	groups := []replicationTaskGroup{group}
 	if replicator.batchMaxBytes > 0 {
@@ -799,6 +773,69 @@ func (replicator *HTTPReplicator) executeReplicationDigestChanges(ctx context.Co
 		pageResult = replicator.executeReplicationTaskGroups(ctx, pageResult, groups)
 	}
 	return pageResult.Targets, changed, deleted, fallback
+}
+
+func (replicator *HTTPReplicator) prepareReplicationDigestTaskGroup(trie *HatTrie, target TopologyNode, changes []replicationDigestChange, grpcAvailable bool, topologyFingerprint string) (replicationTaskGroup, int, int, error) {
+	compact := grpcAvailable || replicator.wireFormat != CommandWireFormatJSON
+	if compact {
+		for _, change := range changes {
+			if change.delete {
+				compact = false
+				break
+			}
+		}
+	}
+	var payloads []CacheCommandRequest
+	var syncPayloads []replicationSyncPayload
+	if compact {
+		syncPayloads = make([]replicationSyncPayload, 0, len(changes))
+	} else {
+		payloads = make([]CacheCommandRequest, 0, len(changes))
+	}
+	changed := 0
+	deleted := 0
+	for _, change := range changes {
+		data, exists, err := trie.commandDumpEntryBinaryWithoutStats(change.key)
+		if err != nil {
+			return replicationTaskGroup{}, changed, deleted, err
+		}
+		if exists {
+			if compact {
+				syncPayloads = append(syncPayloads, replicationSyncPayload{key: change.key, binaryValue: data})
+			} else {
+				payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: change.key, BinaryValue: data})
+			}
+			changed++
+			continue
+		}
+		if compact {
+			payloads = make([]CacheCommandRequest, 0, len(changes))
+			for _, payload := range syncPayloads {
+				payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: payload.key, BinaryValue: payload.binaryValue})
+			}
+			syncPayloads = nil
+			compact = false
+		}
+		payloads = append(payloads, CacheCommandRequest{Command: "INTERNALDEL", Key: change.key})
+		deleted++
+	}
+
+	group := replicationTaskGroup{
+		target:           target,
+		deferredMetadata: true,
+		metadataSource:   replicator.self,
+		metadataTopology: topologyFingerprint,
+	}
+	if compact {
+		group.syncPayloads = syncPayloads
+		return group, changed, deleted, nil
+	}
+	group.payloads = payloads
+	group.keys = make([]string, len(payloads))
+	for index := range payloads {
+		group.keys[index] = payloads[index].Key
+	}
+	return group, changed, deleted, nil
 }
 
 func (replicator *HTTPReplicator) executeReplicationDigestTargetPage(ctx context.Context, target TopologyNode, request CacheCommandRequest) (ReplicationTargetResult, CacheCommandResponse) {
