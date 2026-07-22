@@ -249,16 +249,18 @@ type plannedReplicationBatch struct {
 }
 
 type replicationTaskGroup struct {
-	target             TopologyNode
-	payloads           []CacheCommandRequest
-	syncPayloads       []replicationSyncPayload
-	syncPayloadArena   *replicationSyncPayloadArena
-	syncPayloadIndexes []uint32
-	keys               []string
-	payloadBytes       []int
-	deferredMetadata   bool
-	metadataSource     string
-	metadataTopology   string
+	target                 TopologyNode
+	payloads               []CacheCommandRequest
+	syncPayloads           []replicationSyncPayload
+	syncPayloadArena       *replicationSyncPayloadArena
+	syncPayloadIndexes     []uint32
+	syncPayloadRecordStart uint32
+	syncPayloadRecordCount uint32
+	keys                   []string
+	payloadBytes           []int
+	deferredMetadata       bool
+	metadataSource         string
+	metadataTopology       string
 }
 
 func (group replicationTaskGroup) replicationSyncPayloadBatch() replicationSyncPayloadBatch {
@@ -266,6 +268,8 @@ func (group replicationTaskGroup) replicationSyncPayloadBatch() replicationSyncP
 		inline:  group.syncPayloads,
 		arena:   group.syncPayloadArena,
 		indexes: group.syncPayloadIndexes,
+		start:   group.syncPayloadRecordStart,
+		count:   group.syncPayloadRecordCount,
 	}
 }
 
@@ -1606,7 +1610,12 @@ func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxByte
 		}
 		if group.syncPayloadArena != nil {
 			current.syncPayloadArena = group.syncPayloadArena
-			current.syncPayloadIndexes = group.syncPayloadIndexes[start:end]
+			if group.syncPayloadIndexes != nil {
+				current.syncPayloadIndexes = group.syncPayloadIndexes[start:end]
+			} else {
+				current.syncPayloadRecordStart = group.syncPayloadRecordStart + uint32(start)
+				current.syncPayloadRecordCount = uint32(end - start)
+			}
 		} else {
 			current.syncPayloads = group.syncPayloads[start:end]
 		}

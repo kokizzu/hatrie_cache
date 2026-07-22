@@ -36,10 +36,17 @@ type replicationSyncPayloadArenaRecord struct {
 	payloadBytes uint32
 }
 
+type replicationSyncPayloadDirectRecord struct {
+	key         string
+	valueOffset uint32
+	valueLength uint32
+}
+
 type replicationSyncPayloadArena struct {
-	keys    []byte
-	values  []byte
-	records []replicationSyncPayloadArenaRecord
+	keys          []byte
+	values        []byte
+	records       []replicationSyncPayloadArenaRecord
+	directRecords []replicationSyncPayloadDirectRecord
 }
 
 func newReplicationSyncPayloadArena(capacity int) *replicationSyncPayloadArena {
@@ -53,6 +60,19 @@ func newReplicationSyncPayloadArena(capacity int) *replicationSyncPayloadArena {
 		keys:    make([]byte, 0, boundedReplicationSyncArenaCapacity(capacity, 12)),
 		values:  make([]byte, 0, boundedReplicationSyncArenaCapacity(capacity, 24)),
 		records: make([]replicationSyncPayloadArenaRecord, 0, capacity),
+	}
+}
+
+func newReplicationSyncPayloadDirectArena(capacity int) *replicationSyncPayloadArena {
+	if capacity < 0 {
+		capacity = 0
+	}
+	if capacity > maxReplicationSyncArenaInitialEntries {
+		capacity = maxReplicationSyncArenaInitialEntries
+	}
+	return &replicationSyncPayloadArena{
+		values:        make([]byte, 0, boundedReplicationSyncArenaCapacity(capacity, 24)),
+		directRecords: make([]replicationSyncPayloadDirectRecord, 0, capacity),
 	}
 }
 
@@ -98,6 +118,25 @@ func (arena *replicationSyncPayloadArena) appendRecord(key string, valueOffset i
 	return recordIndex, nil
 }
 
+func (arena *replicationSyncPayloadArena) appendDirectRecord(key string, valueOffset int, valueLength int) error {
+	if arena == nil {
+		return errors.New("hatriecache: replication sync payload arena is nil")
+	}
+	if valueOffset < 0 || valueOffset > len(arena.values) || valueLength < 0 || valueLength > len(arena.values)-valueOffset {
+		return errors.New("hatriecache: replication sync payload value is outside arena")
+	}
+	if uint64(len(arena.directRecords)) >= uint64(math.MaxUint32) ||
+		uint64(valueOffset)+uint64(valueLength) > uint64(math.MaxUint32) {
+		return errors.New("hatriecache: replication sync payload arena exceeds 4 GiB")
+	}
+	arena.directRecords = append(arena.directRecords, replicationSyncPayloadDirectRecord{
+		key:         key,
+		valueOffset: uint32(valueOffset),
+		valueLength: uint32(valueLength),
+	})
+	return nil
+}
+
 func (arena *replicationSyncPayloadArena) payload(index uint32) replicationSyncPayload {
 	if arena == nil || uint64(index) >= uint64(len(arena.records)) {
 		return replicationSyncPayload{}
@@ -112,14 +151,28 @@ func (arena *replicationSyncPayloadArena) payload(index uint32) replicationSyncP
 	return replicationSyncPayload{key: key, binaryValue: value, payloadBytes: int(record.payloadBytes)}
 }
 
+func (arena *replicationSyncPayloadArena) directPayload(index uint32) replicationSyncPayload {
+	if arena == nil || uint64(index) >= uint64(len(arena.directRecords)) {
+		return replicationSyncPayload{}
+	}
+	record := arena.directRecords[index]
+	value := arena.values[int(record.valueOffset):int(record.valueOffset+record.valueLength)]
+	return replicationSyncPayload{key: record.key, binaryValue: value}
+}
+
 type replicationSyncPayloadBatch struct {
 	inline  []replicationSyncPayload
 	arena   *replicationSyncPayloadArena
 	indexes []uint32
+	start   uint32
+	count   uint32
 }
 
 func (batch replicationSyncPayloadBatch) len() int {
 	if batch.arena != nil {
+		if batch.indexes == nil {
+			return int(batch.count)
+		}
 		return len(batch.indexes)
 	}
 	return len(batch.inline)
@@ -127,6 +180,12 @@ func (batch replicationSyncPayloadBatch) len() int {
 
 func (batch replicationSyncPayloadBatch) payload(index int) replicationSyncPayload {
 	if batch.arena != nil {
+		if batch.indexes == nil {
+			if batch.arena.directRecords != nil {
+				return batch.arena.directPayload(batch.start + uint32(index))
+			}
+			return batch.arena.payload(batch.start + uint32(index))
+		}
 		return batch.arena.payload(batch.indexes[index])
 	}
 	return batch.inline[index]

@@ -2678,6 +2678,19 @@ func (ht *HatTrie) commandDumpEntryBinaryWithoutStats(key string) ([]byte, bool,
 	return ht.commandDumpScannedEntryBinaryWithoutStatsLocked(Entry{Key: key, Value: hval})
 }
 
+func (ht *HatTrie) appendCommandDumpEntryBinaryWithoutStats(destination []byte, key string) ([]byte, bool, error) {
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.appendCommandDumpEntryBinaryWithoutStats(destination, key)
+	}
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	hval := ht.peekCachedLocked(key)
+	if hval.Empty() {
+		return destination, false, nil
+	}
+	return ht.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(destination, Entry{Key: key, Value: hval})
+}
+
 func (ht *HatTrie) commandDumpEntryBinaryLocked(key string) ([]byte, bool, error) {
 	hval := ht.peekCachedLocked(key)
 	if hval.Empty() {

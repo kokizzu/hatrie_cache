@@ -4024,6 +4024,73 @@ func TestSplitReplicationTaskGroupByMaxBytesReusesArenaIndexBacking(t *testing.T
 	}
 }
 
+func TestSplitReplicationTaskGroupByMaxBytesReusesArenaRecordRange(t *testing.T) {
+	arena := newReplicationSyncPayloadArena(3)
+	for idx, key := range []string{"session:1", "session:2", "session:3"} {
+		if _, err := arena.append(key, []byte("binary-"+key), 90); err != nil {
+			t.Fatalf("arena append %d: %v", idx, err)
+		}
+	}
+	group := replicationTaskGroup{
+		target:                 TopologyNode{ID: "node-b", Address: "http://node-b"},
+		syncPayloadArena:       arena,
+		syncPayloadRecordCount: 3,
+		deferredMetadata:       true,
+		metadataSource:         "node-a",
+		metadataTopology:       "fingerprint-a",
+	}
+
+	groups := splitReplicationTaskGroupByMaxBytes(group, 160)
+	if len(groups) != len(arena.records) {
+		t.Fatalf("split groups len = %d, want %d", len(groups), len(arena.records))
+	}
+	for idx := range groups {
+		split := groups[idx]
+		if split.syncPayloadArena != arena || split.syncPayloadRecordStart != uint32(idx) || split.syncPayloadRecordCount != 1 || len(split.syncPayloadIndexes) != 0 {
+			t.Fatalf("split group %d range = %#v, want shared arena record %d", idx, split, idx)
+		}
+		payload := split.replicationSyncPayloadBatch().payload(0)
+		if payload.key != "session:"+strconv.Itoa(idx+1) {
+			t.Fatalf("split group %d key = %q, want session:%d", idx, payload.key, idx+1)
+		}
+	}
+}
+
+func TestSplitReplicationTaskGroupByMaxBytesReusesDirectArenaRecordRange(t *testing.T) {
+	arena := newReplicationSyncPayloadDirectArena(3)
+	for idx, key := range []string{"session:1", "session:2", "session:3"} {
+		valueOffset := len(arena.values)
+		value := "binary-" + key
+		arena.values = append(arena.values, value...)
+		if err := arena.appendDirectRecord(key, valueOffset, len(arena.values)-valueOffset); err != nil {
+			t.Fatalf("direct arena append %d: %v", idx, err)
+		}
+	}
+	group := replicationTaskGroup{
+		target:                 TopologyNode{ID: "node-b", Address: "http://node-b"},
+		syncPayloadArena:       arena,
+		syncPayloadRecordCount: 3,
+		deferredMetadata:       true,
+		metadataSource:         "node-a",
+		metadataTopology:       "fingerprint-a",
+	}
+
+	groups := splitReplicationTaskGroupByMaxBytes(group, 40)
+	if len(groups) != len(arena.directRecords) {
+		t.Fatalf("split groups len = %d, want %d", len(groups), len(arena.directRecords))
+	}
+	for idx := range groups {
+		split := groups[idx]
+		if split.syncPayloadArena != arena || split.syncPayloadRecordStart != uint32(idx) || split.syncPayloadRecordCount != 1 || len(split.syncPayloadIndexes) != 0 {
+			t.Fatalf("split group %d range = %#v, want shared direct arena record %d", idx, split, idx)
+		}
+		payload := split.replicationSyncPayloadBatch().payload(0)
+		if payload.key != "session:"+strconv.Itoa(idx+1) || string(payload.binaryValue) != "binary-"+payload.key {
+			t.Fatalf("split group %d payload = %#v, want matching direct arena value", idx, payload)
+		}
+	}
+}
+
 func TestHTTPReplicatorSyncAllFullReplicaReplicatesToRemoteOwners(t *testing.T) {
 	type targetRequest struct {
 		node    string
@@ -4181,6 +4248,49 @@ func TestHTTPReplicatorSyncAllPagesLeaderOwnedEntries(t *testing.T) {
 	}
 }
 
+func TestAppendCommandDumpEntryBinaryWithoutStatsUsesDestination(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		partitions int
+	}{
+		{name: "root trie"},
+		{name: "local partitions", partitions: 8},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			trie := newTestTrie(t)
+			if tt.partitions > 0 {
+				if err := trie.ConfigureLocalPartitions(tt.partitions); err != nil {
+					t.Fatalf("ConfigureLocalPartitions() error = %v", err)
+				}
+			}
+			trie.UpsertString("session:1", "one")
+			want, exists, err := trie.commandDumpEntryBinaryWithoutStats("session:1")
+			if err != nil || !exists {
+				t.Fatalf("commandDumpEntryBinaryWithoutStats() = %v/%v, want value", exists, err)
+			}
+
+			prefix := []byte("existing:")
+			destination := make([]byte, len(prefix), len(prefix)+len(want)+64)
+			copy(destination, prefix)
+			got, exists, err := trie.appendCommandDumpEntryBinaryWithoutStats(destination, "session:1")
+			if err != nil || !exists {
+				t.Fatalf("appendCommandDumpEntryBinaryWithoutStats() = %v/%v, want value", exists, err)
+			}
+			if !bytes.Equal(got[:len(prefix)], prefix) || !bytes.Equal(got[len(prefix):], want) {
+				t.Fatalf("appended dump = %x, want prefix %x and value %x", got, prefix, want)
+			}
+
+			missing, exists, err := trie.appendCommandDumpEntryBinaryWithoutStats(destination, "session:missing")
+			if err != nil || exists {
+				t.Fatalf("missing append = %v/%v, want false/nil", exists, err)
+			}
+			if !bytes.Equal(missing, destination) {
+				t.Fatalf("missing append changed destination = %x, want %x", missing, destination)
+			}
+		})
+	}
+}
+
 func TestPrepareReplicationDigestTaskGroupSelectsCompactRepresentation(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("session:1", "one")
@@ -4201,6 +4311,7 @@ func TestPrepareReplicationDigestTaskGroupSelectsCompactRepresentation(t *testin
 		{name: "grpc with json fallback", wireFormat: CommandWireFormatJSON, grpcAvailable: true, changes: allSet, wantCompact: true},
 		{name: "json compatibility", wireFormat: CommandWireFormatJSON, changes: allSet},
 		{name: "mixed delete compatibility", changes: mixed, wantDeleted: 1},
+		{name: "unexpected missing key compatibility", changes: []replicationDigestChange{{key: "session:1"}, {key: "session:stale"}}, wantDeleted: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a", WireFormat: tt.wireFormat})
@@ -4218,10 +4329,18 @@ func TestPrepareReplicationDigestTaskGroupSelectsCompactRepresentation(t *testin
 				t.Fatalf("group metadata = %#v, want deferred source metadata", group)
 			}
 			if tt.wantCompact {
-				if len(group.syncPayloads) != len(tt.changes) || len(group.payloads) != 0 || len(group.keys) != 0 {
-					t.Fatalf("compact group storage = %d/%d/%d, want %d/0/0", len(group.syncPayloads), len(group.payloads), len(group.keys), len(tt.changes))
+				batch := group.replicationSyncPayloadBatch()
+				if group.syncPayloadArena == nil || group.syncPayloadRecordStart != 0 || group.syncPayloadRecordCount != uint32(len(tt.changes)) || len(group.syncPayloadIndexes) != 0 || len(group.syncPayloads) != 0 || len(group.payloads) != 0 || len(group.keys) != 0 {
+					t.Fatalf("compact group storage = %v/%d/%d/%d/%d/%d/%d, want arena/0/%d/0/0/0/0", group.syncPayloadArena != nil, group.syncPayloadRecordStart, group.syncPayloadRecordCount, len(group.syncPayloadIndexes), len(group.syncPayloads), len(group.payloads), len(group.keys), len(tt.changes))
 				}
-				for index, payload := range group.syncPayloads {
+				if batch.len() != len(tt.changes) {
+					t.Fatalf("compact batch length = %d, want %d", batch.len(), len(tt.changes))
+				}
+				if len(group.syncPayloadArena.directRecords) != len(tt.changes) || len(group.syncPayloadArena.keys) != 0 || len(group.syncPayloadArena.records) != 0 {
+					t.Fatalf("compact arena storage = %d direct/%d keys/%d indexed, want %d/0/0", len(group.syncPayloadArena.directRecords), len(group.syncPayloadArena.keys), len(group.syncPayloadArena.records), len(tt.changes))
+				}
+				for index := 0; index < batch.len(); index++ {
+					payload := batch.payload(index)
 					if payload.key != tt.changes[index].key || len(payload.binaryValue) == 0 {
 						t.Fatalf("compact payload %d = %#v, want populated %q", index, payload, tt.changes[index].key)
 					}
@@ -4557,6 +4676,14 @@ func TestReplicationSyncArenaCapsEagerAllocation(t *testing.T) {
 	}
 	if cap(arena.keys) != maxReplicationSyncArenaInitialEntries*12 || cap(arena.values) != maxReplicationSyncArenaInitialEntries*24 {
 		t.Fatalf("key/value capacity = %d/%d, want bounded estimates", cap(arena.keys), cap(arena.values))
+	}
+
+	directArena := newReplicationSyncPayloadDirectArena(math.MaxInt)
+	if cap(directArena.directRecords) != maxReplicationSyncArenaInitialEntries || cap(directArena.values) != maxReplicationSyncArenaInitialEntries*24 {
+		t.Fatalf("direct record/value capacity = %d/%d, want bounded estimates", cap(directArena.directRecords), cap(directArena.values))
+	}
+	if directArena.keys != nil || directArena.records != nil {
+		t.Fatalf("direct arena allocated copied-key/indexed-record storage: %#v", directArena)
 	}
 }
 

@@ -849,22 +849,34 @@ func (replicator *HTTPReplicator) prepareReplicationDigestTaskGroup(trie *HatTri
 		}
 	}
 	var payloads []CacheCommandRequest
-	var syncPayloads []replicationSyncPayload
+	var syncPayloadArena *replicationSyncPayloadArena
 	if compact {
-		syncPayloads = make([]replicationSyncPayload, 0, len(changes))
+		syncPayloadArena = newReplicationSyncPayloadDirectArena(len(changes))
 	} else {
 		payloads = make([]CacheCommandRequest, 0, len(changes))
 	}
 	changed := 0
 	deleted := 0
 	for _, change := range changes {
-		data, exists, err := trie.commandDumpEntryBinaryWithoutStats(change.key)
+		valueOffset := 0
+		var data []byte
+		var exists bool
+		var err error
+		if compact {
+			valueOffset = len(syncPayloadArena.values)
+			syncPayloadArena.values, exists, err = trie.appendCommandDumpEntryBinaryWithoutStats(syncPayloadArena.values, change.key)
+		} else {
+			data, exists, err = trie.commandDumpEntryBinaryWithoutStats(change.key)
+		}
 		if err != nil {
 			return replicationTaskGroup{}, changed, deleted, err
 		}
 		if exists {
 			if compact {
-				syncPayloads = append(syncPayloads, replicationSyncPayload{key: change.key, binaryValue: data})
+				appendErr := syncPayloadArena.appendDirectRecord(change.key, valueOffset, len(syncPayloadArena.values)-valueOffset)
+				if appendErr != nil {
+					return replicationTaskGroup{}, changed, deleted, appendErr
+				}
 			} else {
 				payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: change.key, BinaryValue: data})
 			}
@@ -873,10 +885,12 @@ func (replicator *HTTPReplicator) prepareReplicationDigestTaskGroup(trie *HatTri
 		}
 		if compact {
 			payloads = make([]CacheCommandRequest, 0, len(changes))
-			for _, payload := range syncPayloads {
+			batch := replicationSyncPayloadBatch{arena: syncPayloadArena, count: uint32(len(syncPayloadArena.directRecords))}
+			for index := 0; index < batch.len(); index++ {
+				payload := batch.payload(index)
 				payloads = append(payloads, CacheCommandRequest{Command: replicationSetCompactCommand, Key: payload.key, BinaryValue: payload.binaryValue})
 			}
-			syncPayloads = nil
+			syncPayloadArena = nil
 			compact = false
 		}
 		payloads = append(payloads, CacheCommandRequest{Command: "INTERNALDEL", Key: change.key})
@@ -890,7 +904,8 @@ func (replicator *HTTPReplicator) prepareReplicationDigestTaskGroup(trie *HatTri
 		metadataTopology: topologyFingerprint,
 	}
 	if compact {
-		group.syncPayloads = syncPayloads
+		group.syncPayloadArena = syncPayloadArena
+		group.syncPayloadRecordCount = uint32(len(syncPayloadArena.directRecords))
 		return group, changed, deleted, nil
 	}
 	group.payloads = payloads
