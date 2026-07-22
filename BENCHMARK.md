@@ -181,6 +181,9 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Replication routing and encoding](#replication-batching-benchmark), 10k keys | 162,195,812 ns; 144,227 wire B; 57,035,706 heap B | 18,893,092 ns; 55,795 wire B; 948,495 heap B | 8.58x faster, 2.59x smaller wire, 60.13x lower heap | Compact paths retain legacy materialization fallbacks |
 | Current pass | [Direct fallback repair collection](#replication-descriptor-optimizations), 10k keys | Buffered entries: 4.939 ms; 1,854,982 heap B; 92 allocs | Direct changes: 4.544 ms; 421,376 heap B; 83 allocs | 1.09x faster, 4.40x lower heap, 1.11x fewer allocs | No measured regression; applies only after an older target rejects digest comparison |
 | Current pass | [Direct digest value arena](#replication-descriptor-optimizations), 1,024 sets | Per-value buffers: 1.089 ms; 108,878 heap B; 1,158 allocs | Direct records: 1.050 ms; 87,235 heap B; 136 allocs | 1.04x faster, 1.25x lower heap, 8.51x fewer allocs | No measured wire/CPU regression; JSON and mixed-delete compatibility paths are unchanged |
+| Current pass | [Legacy-target capability cache](#replication-descriptor-optimizations), 10k-key full sync | Probe every sync: 26.379 ms; 3 requests; 1,003,978 heap B; 608 allocs | Cached fallback: 13.148 ms; 2 steady requests; 979,718 heap B; 432 allocs | 2.01x faster, 1.02x lower heap, 1.41x fewer allocs | At most 1,024 small entries are retained for five minutes; address or topology changes invalidate them |
+| Current pass | [Single-shard replication scan routing](#replication-descriptor-optimizations), 10k routes | Generic routing: 718,882 ns | Direct one-shard scope: 588,964 ns | 1.22x faster; zero heap and allocations in both | Applies only to the default one-shard scan; multi-shard and public routing remain unchanged |
+| Current pass | [In-place native radix ordering](#replication-descriptor-optimizations), 10k-key ordered scan | Comparator sort: 3.744 ms; 841,584 heap B; 100 allocs | MSD radix sort: 3.507 ms; 841,584 heap B; 100 allocs | 1.07x faster with unchanged heap and allocations | Uses fixed stack histograms with logarithmically bounded recursion; no per-key sort allocation |
 | Earlier | [Replication page traversal](#replication-page-traversal), 10 pages | 61,122,327 ns; 1,877,005 heap B; 123,996 allocs | 19,709,083 ns; 999,805 heap B; 11,885 allocs | 3.10x faster, 1.88x lower heap, 10.43x fewer allocs | Mutation invalidates and safely restarts the cursor |
 | Earlier | [gRPC replication transport](#replication-transport), 10k keys | HTTP: 44,957,163 ns; 57,479 wire B | gRPC: 37,765,365 ns; 52,006 wire B | 1.19x faster, 9.52% smaller wire, 24.41% fewer allocs | Cumulative heap is 16.18% higher; HTTP remains fallback |
 | Earlier | [Bounded gzip writer cache](#replication-compression-tradeoff), 50 syncs | 15.23 MB compressor allocation | 1.14 MB | 13.4x less compressor allocation | Retains at most four initialized writers |
@@ -2273,6 +2276,7 @@ directly comparable to the latest pass.
 | Current combined (`375635e`) | 19,370,011 ns | 3 | 56,045 | 2,749,032 | 10,635 |
 | Direct fallback repair collection (`3562273`) | 18,557,453 ns | 3 | 56,046 | 1,260,223 | 10,609 |
 | Direct digest value arena (`fe06238`) | 18,562,257 ns | 3 | 56,046 | 1,019,337 | 610 |
+| Capability cache, one-shard route, native radix (`5ef34af`) | 12,909,866 ns | 2.05 | 55,894 | 972,342 | 430 |
 | Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
 Against `0f4adc3`, the current final result is 1.31x faster, uses 16.08x less
@@ -2287,6 +2291,14 @@ operation rather than peak process RSS.
 The historical five-feature pass ending at `e5b127d` was 1.51x faster and used
 6.10x less cumulative allocated heap than its recorded start.
 
+The latest three-feature pass started from a fresh paired median of 26,378,608
+ns, 3 requests, 56,046 wire B, 1,003,978 heap B, and 608 allocations. Its final
+end-to-end median is 2.04x faster, uses 1.03x less cumulative heap, and performs
+1.41x fewer allocations. The measured 2.05 requests/op includes the first
+unsupported-digest probe across each 20-iteration sample; steady state is two
+requests. Modern digest-capable targets remained at one request and 215 wire B,
+with a neutral 14.916 ms before versus 14.909 ms after capability caching.
+
 ### Replication Descriptor Optimizations
 
 Each row below reports the median from the raw paired runs used to accept the
@@ -2300,6 +2312,9 @@ feature. Improvements are ratios where larger is better.
 | Fallback source scan, 10,000 1 KiB values | 6,309,581 ns; 210,240 B; 85 allocs | 4,480,362 ns; 209,088 B; 84 allocs | 1.41x | 1.01x | 1.01x | Key-only mode is restricted to full-push fallback; normal digest comparison still hashes values |
 | Fallback repair collection, 10,000 keys | 4,939,194 ns; 1,854,982 B; 92 allocs | 4,544,286 ns; 421,376 B; 83 allocs | 1.09x | 4.40x | 1.11x | No wire or lock-scope change; collection is direct only after digest rejection |
 | Direct default-wire digest serialization, 1,024 sets | 1,088,848 ns; 108,878 B; 1,158 allocs | 1,049,957 ns; 87,235 B; 136 allocs | 1.04x | 1.25x | 8.51x | Values share a bounded arena; keys remain direct immutable references for the synchronous group lifetime |
+| Legacy-target full sync, 10,000 keys | 26,378,608 ns; 3 requests; 56,046 wire B; 1,003,978 B; 608 allocs | 13,147,784 ns; 2 steady requests; 55,893 wire B; 979,718 B; 432 allocs | 2.01x | 1.02x | 1.41x | Capability entries expire after five minutes, are capped at 1,024, and must match node address and topology fingerprint |
+| Single-shard scan routing, 10,000 routes | 718,882 ns; 0 B; 0 allocs | 588,964 ns; 0 B; 0 allocs | 1.22x | 1.00x | 1.00x | Internal scan consumers omit unused bucket lookup; multi-shard routing delegates to the existing path |
+| Ordered native HAT-trie scan, 10,000 keys | 3,744,034 ns; 841,584 B; 100 allocs | 3,506,797 ns; 841,584 B; 100 allocs | 1.07x | 1.00x | 1.00x | Fixed 257-symbol stack histograms replace libc `qsort`; ordering and wire representation are unchanged |
 
 The mixed-page implementation carries the delete intent already discovered by
 digest comparison. This selects generic compatibility storage before allocating
@@ -2315,6 +2330,36 @@ into one bounded byte arena and stores compact key/value-range records. Planned
 mixed deletes and JSON compatibility continue to use the generic request path;
 an unexpected concurrent deletion converts already-built direct records before
 adding `INTERNALDEL`.
+
+Older targets that accept a command envelope but do not implement digest
+comparison previously paid for one rejected digest request and a separate
+inventory scan on every synchronization. The replicator now remembers that
+capability by node ID for five minutes and sends the full repair directly on
+subsequent syncs. The cache is bounded, and entries are ignored after an
+address or topology change. The first sync still probes, so upgrades are
+detected without configuration. A digest-capable control benchmark kept the
+same one request, 215 wire B, and allocation count.
+
+Replication scans normally use one shard. Their internal route only needs the
+shard, leader, owners, and replication targets, so the one-shard path now
+constructs that scope directly instead of hashing every key and searching the
+bucket table. The public route API still returns the exact bucket, and the
+multi-shard path is byte-for-byte the previous generic decision path. The
+10,000-key fallback collector improved 1.04x in the initial paired run and
+1.05x for buffered collection in the final `100x` confirmation, with unchanged
+heap and allocations.
+
+The native sorted iterator now partitions its existing slot-pointer array with
+an in-place MSD radix sort. Prefix skipping avoids repeatedly building byte
+histograms for long shared prefixes; insertion sort handles groups of 24 or
+fewer; and the largest partition is processed as a tail call so active
+recursion remains logarithmically bounded. Tests cover embedded zero and high
+bytes, prefix ordering, 127/128-byte length encoding boundaries, and a 1 KiB
+shared prefix. The focused ordered scan improved 1.07x. In the final paired
+replication collector, buffered collection improved 1.05x and direct
+collection was neutral at 1.006x; cumulative heap and allocations were
+identical. The end-to-end sync improved 1.008x over the immediately preceding
+commit, so the sorter introduced no measured CPU, memory, or wire regression.
 
 The first arena candidate copied every key and reconstructed strings while
 sizing and writing protobuf. Its paired 10k end-to-end median was about 9%
@@ -2334,6 +2379,17 @@ Raw local output is retained in:
 - `build/benchmarks/replication-direct-record-e2e.txt`
 - `build/benchmarks/replication-direct-record-e2e-stable-baseline.txt`
 - `build/benchmarks/replication-direct-record-e2e-stable.txt`
+- `build/benchmarks/replication-capability-before.txt`
+- `build/benchmarks/replication-capability-after.txt`
+- `build/benchmarks/replication-capability-modern-before.txt`
+- `build/benchmarks/replication-capability-modern-after.txt`
+- `build/benchmarks/replication-single-route-paired.txt`
+- `build/benchmarks/replication-single-route-before.txt`
+- `build/benchmarks/replication-single-route-after.txt`
+- `build/benchmarks/native-radix-before.txt`
+- `build/benchmarks/native-radix-final-scan.txt`
+- `build/benchmarks/native-radix-final-paired.txt`
+- `build/benchmarks/native-radix-e2e-after.txt`
 
 Reproduce the stable end-to-end row with:
 
@@ -2345,6 +2401,27 @@ make bench-replication-optimizations \
   REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
   BENCHTIME=100x COUNT=1 \
   REPLICATION_OPTIMIZATION_OUTPUT=replication-direct-record-e2e-stable.txt
+```
+
+Reproduce the latest focused measurements through the same Makefile and
+benchmark script:
+
+```sh
+make bench-replication-optimizations \
+  REPLICATION_SPLIT_BENCH=NoSplitBenchmark \
+  REPLICATION_SYNC_BENCH=BenchmarkHTTPReplicatorSyncAllBatching/Batched10k \
+  REPLICATION_DIGEST_BENCH=NoDigestBenchmark \
+  REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
+  BENCHTIME=20x COUNT=10 \
+  REPLICATION_OPTIMIZATION_OUTPUT=replication-capability-after.txt
+
+make bench-replication-optimizations \
+  REPLICATION_SPLIT_BENCH=NoSplitBenchmark \
+  REPLICATION_SYNC_BENCH=NoSyncBenchmark \
+  REPLICATION_DIGEST_BENCH='BenchmarkReplicationScanRouteModes|BenchmarkHatTrieScanOrderModes' \
+  REPLICATION_ITERATOR_BENCH=BenchmarkReplicationDigestFallbackCollectionModes \
+  BENCHTIME=20x COUNT=10 \
+  REPLICATION_OPTIMIZATION_OUTPUT=replication-route-radix.txt
 ```
 
 ### Replication Page Traversal
