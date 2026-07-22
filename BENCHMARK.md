@@ -192,6 +192,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [In-place native radix ordering](#replication-descriptor-optimizations), 10k-key ordered scan | Comparator sort: 3.744 ms; 841,584 heap B; 100 allocs | MSD radix sort: 3.507 ms; 841,584 heap B; 100 allocs | 1.07x faster with unchanged heap and allocations | Uses fixed stack histograms with logarithmically bounded recursion; no per-key sort allocation |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
 | Reverted | [Exact protobuf batch coalescing](#replication-descriptor-optimizations), 10k-key legacy fallback | Two requests: sender 10.422 ms; receiver decode 4.066 ms; largest protobuf 305,156 B | One request: sender 10.215 ms; receiver decode 4.444 ms; largest protobuf 609,046 B | Sender 1.02x faster and 1.44x fewer allocs, but receiver 1.09x slower and combined CPU 1.012x slower | Rolled back; halving requests did not offset receiver decode cost and doubled the largest request |
+| Reverted | [Carried compact payload estimates](#replication-descriptor-optimizations), 10k-key scan, preparation, and split | Estimate during split: 4.215 ms | Carry from serialization: 4.230 ms | 0.996x; 0.36% slower with identical allocations | Rolled back; the isolated splitter was 4.37x faster, but moving the estimate made the complete CPU path slower |
+| Reverted | [Specialized compact payload estimator](#replication-descriptor-optimizations), 10k-key known-legacy sync | Generic estimator: 8.118 ms; 2.004 requests; 55,880 wire B | Specialized estimator: 8.159 ms; 2.004 requests; 55,878 wire B | 0.995x end to end despite a 1.92x faster focused splitter | Rolled back; no memory, request, or wire gain justified the 0.50% complete-path loss |
 | Earlier | [Replication page traversal](#replication-page-traversal), 10 pages | 61,122,327 ns; 1,877,005 heap B; 123,996 allocs | 19,709,083 ns; 999,805 heap B; 11,885 allocs | 3.10x faster, 1.88x lower heap, 10.43x fewer allocs | Mutation invalidates and safely restarts the cursor |
 | Earlier | [gRPC replication transport](#replication-transport), 10k keys | HTTP: 44,957,163 ns; 57,479 wire B | gRPC: 37,765,365 ns; 52,006 wire B | 1.19x faster, 9.52% smaller wire, 24.41% fewer allocs | Cumulative heap is 16.18% higher; HTTP remains fallback |
 | Earlier | [Bounded gzip writer cache](#replication-compression-tradeoff), 50 syncs | 15.23 MB compressor allocation | 1.14 MB | 13.4x less compressor allocation | Retains at most four initialized writers |
@@ -2333,6 +2335,8 @@ feature. Improvements are ratios where larger is better.
 | Ordered native HAT-trie scan, 10,000 keys | 3,744,034 ns; 841,584 B; 100 allocs | 3,506,797 ns; 841,584 B; 100 allocs | 1.07x | 1.00x | 1.00x | Fixed 257-symbol stack histograms replace libc `qsort`; ordering and wire representation are unchanged |
 | Single-pass legacy repair, 10,000 keys (rejected) | 11,459,282 ns; 55,892 wire B; 977,706 B; 433 allocs | Unordered: 10,675,192 ns; 64,258 wire B; 948,316 B; 392 allocs | 1.07x | 1.03x | 1.11x | Rejected: unordered transfer was 1.15x larger; restoring deterministic order took 12,316,337 ns, 1.075x slower than baseline |
 | Exact protobuf batch coalescing, 10,000 keys (rejected) | Sender: 10,422,384 ns; 2.004 requests; 949,539 B; 413 allocs. Receiver: 4,066,159 ns; 305,156 largest protobuf B | Sender: 10,214,713 ns; 1.004 requests; 928,371 B; 286 allocs. Receiver: 4,444,227 ns; 609,046 largest protobuf B | Sender 1.02x; combined 0.99x | Sender 1.02x; receiver 1.00x | Sender 1.44x; receiver 1.00x | Rejected: receiver decode was 1.09x slower, the largest request was 2.00x larger, and combined sender-plus-decode CPU was 1.012x slower |
+| Carried compact payload estimates, 10,000 keys (rejected) | Estimate during split: 4,214,771 ns | Carry from serialization: 4,230,028 ns | 0.996x | 1.00x | 1.00x | Rejected: a same-binary alternating-order control showed that moving the work into serialization was 0.36% slower overall |
+| Specialized compact payload estimator, 10,000 keys (rejected) | Generic: 8,117,717 ns; 650,825 B; 367 allocs | Specialized: 8,158,718 ns; 652,457 B; 369 allocs | 0.995x | 0.997x | 0.995x | Rejected: the focused splitter improved 1.92x, but equal-length end-to-end confirmation was 0.50% slower |
 
 The mixed-page implementation carries the delete intent already discovered by
 digest comparison. This selects generic compatibility storage before allocating
@@ -2508,6 +2512,21 @@ before identical command-apply work. The exact splitter and its feature tests
 were therefore rolled back. `BenchmarkReplicationCompactBatchReceiver` remains
 as a gate for any future streaming-decoder or batch-coalescing proposal.
 
+Two payload-estimation variants were also rejected. Carrying each compact
+payload's conservative size in the existing arena record made the isolated
+4,096-item split 4.37x faster, but an alternating-order benchmark that included
+scan, value serialization, and splitting measured 4.215 ms for the previous
+path and 4.230 ms for the candidate. Moving the same work earlier was therefore
+0.36% slower despite unchanged allocations.
+
+A second variant kept estimation in the splitter and replaced the generic
+request estimator with an exact specialized formula. Differential tests first
+proved identical estimates, escaped-key split boundaries, and protobuf bytes.
+The focused split improved from 0.443 ms to 0.231 ms, or 1.92x. Equal-length
+`500x` end-to-end confirmation nevertheless measured 8.118 ms before and 8.159
+ms after, a 0.50% loss with no request or wire reduction. Both variants and
+their feature-specific code were rolled back, leaving no runtime tradeoff.
+
 Raw local output is retained in:
 
 - `build/benchmarks/replication-fallback-collector.txt`
@@ -2563,6 +2582,12 @@ Raw local output is retained in:
 - `build/benchmarks/replication-scanned-values-after.txt`
 - `build/benchmarks/replication-scanned-values-mutation-paired.txt`
 - `build/benchmarks/replication-scanned-values-reader-after.txt`
+- `build/benchmarks/replication-packed-estimates-focused.txt`
+- `build/benchmarks/replication-packed-estimates-after.txt`
+- `build/benchmarks/replication-packed-estimates-paired.txt`
+- `build/benchmarks/replication-compact-estimator-after.txt`
+- `build/benchmarks/replication-compact-estimator-e2e-before-confirm.txt`
+- `build/benchmarks/replication-compact-estimator-e2e-confirm.txt`
 
 Reproduce the stable end-to-end row with:
 
