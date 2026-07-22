@@ -1524,6 +1524,9 @@ func splitReplicationTaskGroupsByMaxBytes(groups []replicationTaskGroup, maxByte
 	if maxBytes <= 0 || len(groups) == 0 {
 		return groups
 	}
+	if len(groups) == 1 {
+		return splitReplicationTaskGroupByMaxBytes(groups[0], maxBytes)
+	}
 	out := make([]replicationTaskGroup, 0, len(groups))
 	for _, group := range groups {
 		out = append(out, splitReplicationTaskGroupByMaxBytes(group, maxBytes)...)
@@ -1539,39 +1542,53 @@ func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes in
 		return []replicationTaskGroup{group}
 	}
 	threshold := maxBytes + 1
-	current := replicationTaskGroup{
+	estimatedBytes := group.payloadBytes
+	if len(estimatedBytes) != len(group.payloads) {
+		estimatedBytes = make([]int, len(group.payloads))
+		copy(estimatedBytes, group.payloadBytes)
+	}
+	keys := group.keys
+	if len(keys) != len(group.payloads) {
+		keys = make([]string, len(group.payloads))
+		copy(keys, group.keys)
+		for idx := len(group.keys); idx < len(group.payloads); idx++ {
+			keys[idx] = strings.TrimSpace(group.payloads[idx].Key)
+		}
+	}
+	out := make([]replicationTaskGroup, 0, replicationSplitInitialCapacity(len(group.payloads)))
+	start := 0
+	currentBytes := estimatedReplicationBatchEnvelopeBytes(threshold)
+	for idx, payload := range group.payloads {
+		itemBytes := replicationTaskPayloadBytes(group, idx, payload, threshold)
+		if idx > start && currentBytes+itemBytes+2 > maxBytes {
+			out = append(out, replicationTaskGroupRange(group, keys, estimatedBytes, start, idx))
+			start = idx
+			currentBytes = estimatedReplicationBatchEnvelopeBytes(threshold)
+		}
+		estimatedBytes[idx] = itemBytes
+		currentBytes = jsonwire.AddEstimate(currentBytes, itemBytes+2, threshold)
+	}
+	out = append(out, replicationTaskGroupRange(group, keys, estimatedBytes, start, len(group.payloads)))
+	return out
+}
+
+func replicationTaskGroupRange(group replicationTaskGroup, keys []string, payloadBytes []int, start int, end int) replicationTaskGroup {
+	return replicationTaskGroup{
 		target:           group.target,
+		payloads:         group.payloads[start:end],
+		keys:             keys[start:end],
+		payloadBytes:     payloadBytes[start:end],
 		deferredMetadata: group.deferredMetadata,
 		metadataSource:   group.metadataSource,
 		metadataTopology: group.metadataTopology,
 	}
-	currentBytes := estimatedReplicationBatchEnvelopeBytes(threshold)
-	out := make([]replicationTaskGroup, 0, len(group.payloads))
-	for idx, payload := range group.payloads {
-		payloadBytes := replicationTaskPayloadBytes(group, idx, payload, threshold)
-		if len(current.payloads) > 0 && currentBytes+payloadBytes+2 > maxBytes {
-			out = append(out, current)
-			current = replicationTaskGroup{
-				target:           group.target,
-				deferredMetadata: group.deferredMetadata,
-				metadataSource:   group.metadataSource,
-				metadataTopology: group.metadataTopology,
-			}
-			currentBytes = estimatedReplicationBatchEnvelopeBytes(threshold)
-		}
-		current.payloads = append(current.payloads, payload)
-		key := strings.TrimSpace(payload.Key)
-		if idx < len(group.keys) {
-			key = group.keys[idx]
-		}
-		current.keys = append(current.keys, key)
-		current.payloadBytes = append(current.payloadBytes, payloadBytes)
-		currentBytes = jsonwire.AddEstimate(currentBytes, payloadBytes+2, threshold)
+}
+
+func replicationSplitInitialCapacity(payloads int) int {
+	if payloads > 8 {
+		return 8
 	}
-	if len(current.payloads) > 0 {
-		out = append(out, current)
-	}
-	return out
+	return payloads
 }
 
 func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes int) []replicationTaskGroup {
@@ -1580,18 +1597,24 @@ func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxByte
 		return []replicationTaskGroup{group}
 	}
 	threshold := maxBytes + 1
-	newGroup := func() replicationTaskGroup {
-		return replicationTaskGroup{
+	newGroup := func(start int, end int) replicationTaskGroup {
+		current := replicationTaskGroup{
 			target:           group.target,
-			syncPayloadArena: group.syncPayloadArena,
 			deferredMetadata: group.deferredMetadata,
 			metadataSource:   group.metadataSource,
 			metadataTopology: group.metadataTopology,
 		}
+		if group.syncPayloadArena != nil {
+			current.syncPayloadArena = group.syncPayloadArena
+			current.syncPayloadIndexes = group.syncPayloadIndexes[start:end]
+		} else {
+			current.syncPayloads = group.syncPayloads[start:end]
+		}
+		return current
 	}
-	current := newGroup()
+	start := 0
 	currentBytes := estimatedReplicationBatchEnvelopeBytes(threshold)
-	out := make([]replicationTaskGroup, 0, payloads.len())
+	out := make([]replicationTaskGroup, 0, replicationSplitInitialCapacity(payloads.len()))
 	for idx := 0; idx < payloads.len(); idx++ {
 		payload := payloads.payload(idx)
 		payloadBytes := payload.payloadBytes
@@ -1600,22 +1623,14 @@ func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxByte
 				Command: replicationSetCompactCommand, Key: payload.key, BinaryValue: payload.binaryValue,
 			}, threshold)
 		}
-		if current.replicationSyncPayloadBatch().len() > 0 && currentBytes+payloadBytes+2 > maxBytes {
-			out = append(out, current)
-			current = newGroup()
+		if idx > start && currentBytes+payloadBytes+2 > maxBytes {
+			out = append(out, newGroup(start, idx))
+			start = idx
 			currentBytes = estimatedReplicationBatchEnvelopeBytes(threshold)
-		}
-		if group.syncPayloadArena != nil {
-			current.syncPayloadIndexes = append(current.syncPayloadIndexes, group.syncPayloadIndexes[idx])
-		} else {
-			payload.payloadBytes = payloadBytes
-			current.syncPayloads = append(current.syncPayloads, payload)
 		}
 		currentBytes = jsonwire.AddEstimate(currentBytes, payloadBytes+2, threshold)
 	}
-	if current.replicationSyncPayloadBatch().len() > 0 {
-		out = append(out, current)
-	}
+	out = append(out, newGroup(start, payloads.len()))
 	return out
 }
 

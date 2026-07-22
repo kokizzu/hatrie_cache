@@ -3925,6 +3925,105 @@ func TestSplitReplicationTaskGroupByMaxBytesUsesCarriedPayloadBytes(t *testing.T
 	}
 }
 
+func TestSplitReplicationTaskGroupByMaxBytesReusesGenericBacking(t *testing.T) {
+	payloads := []CacheCommandRequest{
+		{Command: "INTERNALSET", Key: "session:1", Value: "one"},
+		{Command: "INTERNALSET", Key: "session:2", Value: "two"},
+		{Command: "INTERNALSET", Key: "session:3", Value: "three"},
+	}
+	keys := []string{"session:1", "session:2", "session:3"}
+	payloadBytes := []int{90, 90, 90}
+	group := replicationTaskGroup{
+		target:           TopologyNode{ID: "node-b", Address: "http://node-b"},
+		payloads:         payloads,
+		keys:             keys,
+		payloadBytes:     payloadBytes,
+		deferredMetadata: true,
+		metadataSource:   "node-a",
+		metadataTopology: "fingerprint-a",
+	}
+
+	groups := splitReplicationTaskGroupByMaxBytes(group, 160)
+	if len(groups) != len(payloads) {
+		t.Fatalf("split groups len = %d, want %d", len(groups), len(payloads))
+	}
+	for idx := range groups {
+		split := groups[idx]
+		if len(split.payloads) != 1 || len(split.keys) != 1 || len(split.payloadBytes) != 1 {
+			t.Fatalf("split group %d lengths = %d/%d/%d, want 1/1/1", idx, len(split.payloads), len(split.keys), len(split.payloadBytes))
+		}
+		if &split.payloads[0] != &payloads[idx] || &split.keys[0] != &keys[idx] || &split.payloadBytes[0] != &payloadBytes[idx] {
+			t.Fatalf("split group %d copied generic backing storage", idx)
+		}
+		if !split.deferredMetadata || split.metadataSource != group.metadataSource || split.metadataTopology != group.metadataTopology {
+			t.Fatalf("split group %d metadata = %#v, want source metadata preserved", idx, split)
+		}
+	}
+}
+
+func TestSplitReplicationTaskGroupByMaxBytesReusesCompactBacking(t *testing.T) {
+	payloads := []replicationSyncPayload{
+		{key: "session:1", binaryValue: []byte("binary-one"), payloadBytes: 90},
+		{key: "session:2", binaryValue: []byte("binary-two"), payloadBytes: 90},
+		{key: "session:3", binaryValue: []byte("binary-three"), payloadBytes: 90},
+	}
+	group := replicationTaskGroup{
+		target:           TopologyNode{ID: "node-b", Address: "http://node-b"},
+		syncPayloads:     payloads,
+		deferredMetadata: true,
+		metadataSource:   "node-a",
+		metadataTopology: "fingerprint-a",
+	}
+
+	groups := splitReplicationTaskGroupByMaxBytes(group, 160)
+	if len(groups) != len(payloads) {
+		t.Fatalf("split groups len = %d, want %d", len(groups), len(payloads))
+	}
+	for idx := range groups {
+		split := groups[idx]
+		if len(split.syncPayloads) != 1 || &split.syncPayloads[0] != &payloads[idx] {
+			t.Fatalf("split group %d copied compact backing storage", idx)
+		}
+		if !split.deferredMetadata || split.metadataSource != group.metadataSource || split.metadataTopology != group.metadataTopology {
+			t.Fatalf("split group %d metadata = %#v, want source metadata preserved", idx, split)
+		}
+	}
+}
+
+func TestSplitReplicationTaskGroupByMaxBytesReusesArenaIndexBacking(t *testing.T) {
+	arena := newReplicationSyncPayloadArena(3)
+	indexes := make([]uint32, 0, 3)
+	for idx, key := range []string{"session:1", "session:2", "session:3"} {
+		record, err := arena.append(key, []byte("binary-"+key), 90)
+		if err != nil {
+			t.Fatalf("arena append %d: %v", idx, err)
+		}
+		indexes = append(indexes, record)
+	}
+	group := replicationTaskGroup{
+		target:             TopologyNode{ID: "node-b", Address: "http://node-b"},
+		syncPayloadArena:   arena,
+		syncPayloadIndexes: indexes,
+		deferredMetadata:   true,
+		metadataSource:     "node-a",
+		metadataTopology:   "fingerprint-a",
+	}
+
+	groups := splitReplicationTaskGroupByMaxBytes(group, 160)
+	if len(groups) != len(indexes) {
+		t.Fatalf("split groups len = %d, want %d", len(groups), len(indexes))
+	}
+	for idx := range groups {
+		split := groups[idx]
+		if split.syncPayloadArena != arena || len(split.syncPayloadIndexes) != 1 || &split.syncPayloadIndexes[0] != &indexes[idx] {
+			t.Fatalf("split group %d copied arena index backing storage", idx)
+		}
+		if !split.deferredMetadata || split.metadataSource != group.metadataSource || split.metadataTopology != group.metadataTopology {
+			t.Fatalf("split group %d metadata = %#v, want source metadata preserved", idx, split)
+		}
+	}
+}
+
 func TestHTTPReplicatorSyncAllFullReplicaReplicatesToRemoteOwners(t *testing.T) {
 	type targetRequest struct {
 		node    string
