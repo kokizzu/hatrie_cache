@@ -1848,10 +1848,12 @@ type replicationSyncCursor struct {
 	packedKeys bool
 	// sharedReadOnly requires a callback that does not read or mutate trie-owned
 	// value storage. The fallback key collector is the only production caller.
-	sharedReadOnly bool
-	prefix         string
-	visited        int
-	restarts       int
+	sharedReadOnly    bool
+	carryValues       bool
+	disableValueCarry bool
+	prefix            string
+	visited           int
+	restarts          int
 }
 
 type replicationPartitionSyncCursor struct {
@@ -1982,6 +1984,7 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 	if cursor == nil {
 		return replicationSyncPage{}, errors.New("hatriecache: replication sync cursor is nil")
 	}
+	cursor.carryValues = false
 	if partitions := trie.localPartitionSet(); partitions != nil {
 		return replicationSyncPartitionEntriesPageWithCursor(trie, partitions, prefix, afterKey, hasAfterKey, limit, cursor, visit)
 	}
@@ -1994,6 +1997,7 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 		if canUseSharedLock {
 			defer trie.mu.RUnlock()
 			keysOnly := cursor.packedKeys && len(trie.counterWriteStripes) > 0
+			cursor.carryValues = cursor.packedKeys && !keysOnly && !cursor.disableValueCarry
 			return replicationSyncEntriesPageLocked(trie, prefix, afterKey, hasAfterKey, limit, cursor, visit, time.Time{}, keysOnly)
 		}
 		trie.mu.RUnlock()

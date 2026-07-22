@@ -4580,6 +4580,272 @@ func TestPrepareReplicationDigestPackedTaskGroupMatchesScalarDeleteFallback(t *t
 	}
 }
 
+func TestPrepareReplicationDigestPackedTaskGroupReusesScannedValuesAndFallsBackAfterMutation(t *testing.T) {
+	topology := replicationTestTopology(t, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	t.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "session:",
+		pageSize: 10,
+	}
+
+	for _, test := range []struct {
+		name              string
+		beforeScan        func(*HatTrie)
+		mutate            func(*HatTrie)
+		wantNativeBatches int
+	}{
+		{name: "unchanged", wantNativeBatches: 0},
+		{
+			name: "TTL fallback",
+			beforeScan: func(trie *HatTrie) {
+				if !trie.Expire("session:1", time.Hour) {
+					t.Fatal("Expire(session:1) = false")
+				}
+			},
+			wantNativeBatches: 1,
+		},
+		{
+			name: "striped counter fallback",
+			beforeScan: func(trie *HatTrie) {
+				if err := trie.ConfigureCounterWriteStripes(64); err != nil {
+					t.Fatalf("ConfigureCounterWriteStripes() error = %v", err)
+				}
+			},
+			wantNativeBatches: 1,
+		},
+		{
+			name: "mutation fallback",
+			mutate: func(trie *HatTrie) {
+				trie.UpsertString("session:1", "updated")
+				trie.Delete("session:2")
+			},
+			wantNativeBatches: 1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			trie := newTestTrie(t)
+			trie.UpsertString("session:1", "one")
+			trie.UpsertString("session:2", "two")
+			if test.beforeScan != nil {
+				test.beforeScan(trie)
+			}
+			source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+			source.prevalidateScope()
+			arena := newReplicationSyncPayloadArena(2)
+			done, err := source.appendFallbackKeys(arena, 2)
+			source.close()
+			if err != nil || !done {
+				t.Fatalf("appendFallbackKeys() = %v/%v, want done", done, err)
+			}
+			if test.mutate != nil {
+				test.mutate(trie)
+			}
+
+			packed, packedChanged, packedDeleted, nativeBatches, err := replicator.prepareReplicationDigestPackedTaskGroup(
+				trie, inventory.target, arena, routing.fingerprint,
+			)
+			if err != nil {
+				t.Fatalf("prepare packed task group: %v", err)
+			}
+			if nativeBatches != test.wantNativeBatches {
+				t.Fatalf("native lookup batches = %d, want %d", nativeBatches, test.wantNativeBatches)
+			}
+			scalar, scalarChanged, scalarDeleted, err := replicator.prepareReplicationDigestTaskGroup(
+				trie,
+				inventory.target,
+				[]replicationDigestChange{{key: "session:1"}, {key: "session:2"}},
+				false,
+				routing.fingerprint,
+			)
+			if err != nil {
+				t.Fatalf("prepare scalar task group: %v", err)
+			}
+			if packedChanged != scalarChanged || packedDeleted != scalarDeleted {
+				t.Fatalf("packed/scalar changed/deleted = %d/%d and %d/%d", packedChanged, packedDeleted, scalarChanged, scalarDeleted)
+			}
+			if test.mutate != nil {
+				if !reflect.DeepEqual(packed.payloads, scalar.payloads) || !reflect.DeepEqual(packed.keys, scalar.keys) {
+					t.Fatalf("mutation fallback = %#v/%#v, want %#v/%#v", packed.payloads, packed.keys, scalar.payloads, scalar.keys)
+				}
+				return
+			}
+			packedWire := appendReplicationSyncBatchProtoBatch(nil, packed.replicationSyncPayloadBatch(), replicationSetCompactCommand, "node-a", 42, routing.fingerprint)
+			scalarWire := appendReplicationSyncBatchProtoBatch(nil, scalar.replicationSyncPayloadBatch(), replicationSetCompactCommand, "node-a", 42, routing.fingerprint)
+			if !bytes.Equal(packedWire, scalarWire) {
+				t.Fatalf("scanned-value wire differs from scalar\npacked: %x\nscalar: %x", packedWire, scalarWire)
+			}
+		})
+	}
+}
+
+func TestReplicationScannedValuesFallBackAfterMutationBetweenChunks(t *testing.T) {
+	const keyCount = defaultHatTrieScanBatchEntries + 44
+	trie := newTestTrie(t)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertCounter(fmt.Sprintf("counter:%03d", index), int32(index))
+	}
+	topology := replicationTestTopology(t, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	t.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "counter:",
+		pageSize: keyCount,
+	}
+	source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+	source.prevalidateScope()
+	arena := newReplicationSyncPayloadArena(keyCount)
+	done, err := source.appendFallbackKeys(arena, keyCount)
+	source.close()
+	if err != nil || !done {
+		t.Fatalf("appendFallbackKeys() = %v/%v, want done", done, err)
+	}
+
+	values := make([]int32, keyCount)
+	nativeBatches, err := trie.visitReplicationScannedValuesWithoutStats(arena, func(index int, _ string, hval HatValue) error {
+		values[index] = hval.Index
+		return nil
+	}, func(end int) {
+		if end == defaultHatTrieScanBatchEntries {
+			trie.UpsertCounter("counter:280", 9999)
+		}
+	})
+	if err != nil {
+		t.Fatalf("visitReplicationScannedValuesWithoutStats() error = %v", err)
+	}
+	if nativeBatches != 1 {
+		t.Fatalf("native lookup batches after between-chunk mutation = %d, want 1", nativeBatches)
+	}
+	if values[255] != 255 || values[280] != 9999 {
+		t.Fatalf("values across mutation boundary = %d/%d, want 255/9999", values[255], values[280])
+	}
+}
+
+func TestReplicationScannedValuesMatchScalarWireForInMemoryTypes(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertCounter("type:counter", 42)
+	trie.UpsertString("type:string", "value")
+	trie.UpsertBytes("type:bytes", []byte("payload"))
+	trie.UpsertMap("type:map", Map{"name": "ivi", "age": json.Number("32")})
+	trie.UpsertSlice("type:slice", Slice{"a", json.Number("2")})
+	trie.UpsertSet("type:set", Set{"a", json.Number("2")})
+	trie.UpsertPriorityQueue("type:priority", PriorityQueue{{Priority: 5, Value: "later"}, {Priority: 1, Value: "urgent"}})
+	if err := trie.UpsertBloomFilter("type:bloom", 1000, 0.001); err != nil {
+		t.Fatal(err)
+	}
+	trie.AddBloomFilter("type:bloom", "alpha", "beta")
+	if err := trie.UpsertCountMinSketch("type:count-min", 128, 4); err != nil {
+		t.Fatal(err)
+	}
+	trie.IncrementCountMinSketch("type:count-min", "alpha", 5)
+	if err := trie.UpsertHyperLogLog("type:hll", 10); err != nil {
+		t.Fatal(err)
+	}
+	trie.AddHyperLogLog("type:hll", "alpha", "beta")
+	if err := trie.UpsertTopK("type:top-k", 3); err != nil {
+		t.Fatal(err)
+	}
+	trie.AddTopK("type:top-k", "alpha", 5)
+	if err := trie.UpsertQuantileSketch("type:quantile", 0.01); err != nil {
+		t.Fatal(err)
+	}
+	trie.AddQuantileSketch("type:quantile", 10, 20, 30)
+	if err := trie.UpsertFenwickTree("type:fenwick", 8); err != nil {
+		t.Fatal(err)
+	}
+	trie.AddFenwickTree("type:fenwick", 2, 5)
+	if err := trie.UpsertCuckooFilter("type:cuckoo", 128, 0.001); err != nil {
+		t.Fatal(err)
+	}
+	trie.AddCuckooFilter("type:cuckoo", "alpha", "beta")
+	if err := trie.UpsertXorFilter("type:xor", 8); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trie.AddXorFilter("type:xor", "alpha", "beta"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := trie.BuildXorFilter("type:xor"); err != nil || !ok {
+		t.Fatalf("BuildXorFilter() = %v/%v", ok, err)
+	}
+	trie.UpsertRadixTree("type:radix")
+	trie.PutRadixTree("type:radix", "user:100/profile", Map{"status": "active"})
+	trie.UpsertRoaringBitmap("type:bitmap")
+	trie.AddRoaringBitmap("type:bitmap", 1, 1<<16+7)
+	trie.UpsertSparseBitset("type:bitset")
+	trie.AddSparseBitset("type:bitset", 1, 1<<32+7)
+	if err := trie.UpsertReservoirSample("type:sample", 3); err != nil {
+		t.Fatal(err)
+	}
+	trie.AddReservoirSample("type:sample", "alpha", "beta", "gamma")
+
+	topology := replicationTestTopology(t, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	t.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "type:",
+		pageSize: 32,
+	}
+	source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+	source.prevalidateScope()
+	arena := newReplicationSyncPayloadArena(32)
+	done, err := source.appendFallbackKeys(arena, 32)
+	source.close()
+	if err != nil || !done {
+		t.Fatalf("appendFallbackKeys() = %v/%v, want done", done, err)
+	}
+	packed, packedChanged, packedDeleted, nativeBatches, err := replicator.prepareReplicationDigestPackedTaskGroup(
+		trie, inventory.target, arena, routing.fingerprint,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := make([]replicationDigestChange, len(arena.records))
+	for index := range changes {
+		changes[index].key = arena.key(uint32(index))
+	}
+	scalar, scalarChanged, scalarDeleted, err := replicator.prepareReplicationDigestTaskGroup(
+		trie, inventory.target, changes, false, routing.fingerprint,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nativeBatches != 0 || packedChanged != scalarChanged || packedDeleted != scalarDeleted {
+		t.Fatalf("packed/scalar batches/changed/deleted = %d %d/%d %d/%d", nativeBatches, packedChanged, packedDeleted, scalarChanged, scalarDeleted)
+	}
+	packedWire := appendReplicationSyncBatchProtoBatch(nil, packed.replicationSyncPayloadBatch(), replicationSetCompactCommand, "node-a", 42, routing.fingerprint)
+	scalarWire := appendReplicationSyncBatchProtoBatch(nil, scalar.replicationSyncPayloadBatch(), replicationSetCompactCommand, "node-a", 42, routing.fingerprint)
+	if !bytes.Equal(packedWire, scalarWire) {
+		t.Fatalf("scanned-value all-type wire differs from scalar\npacked: %x\nscalar: %x", packedWire, scalarWire)
+	}
+}
+
 func TestReplicationDigestKeySourceIteratorSkipsValueDigest(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("session:1", "one")

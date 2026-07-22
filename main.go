@@ -3817,10 +3817,17 @@ func (ht *HatTrie) tryLocation(key string) *C.value_t {
 }
 
 func (ht *HatTrie) visitPackedValuesWithoutStats(keys []byte, records []hatTriePackedKeyRecord, visit func(index int, key string, value HatValue) error) (int, error) {
+	return ht.visitPackedValuesWithoutStatsFrom(keys, records, 0, visit)
+}
+
+func (ht *HatTrie) visitPackedValuesWithoutStatsFrom(keys []byte, records []hatTriePackedKeyRecord, startIndex int, visit func(index int, key string, value HatValue) error) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
 	}
-	if len(records) == 0 {
+	if startIndex < 0 || startIndex > len(records) {
+		return 0, errors.New("hatriecache: packed trie key start is outside records")
+	}
+	if startIndex == len(records) {
 		return 0, nil
 	}
 	if unsafe.Sizeof(hatTriePackedKeyRecord{}) != unsafe.Sizeof(C.hattrie_key_record_t{}) {
@@ -3829,7 +3836,7 @@ func (ht *HatTrie) visitPackedValuesWithoutStats(keys []byte, records []hatTrieP
 	if uint64(len(keys)) > uint64(math.MaxUint32) {
 		return 0, errors.New("hatriecache: packed trie key arena exceeds 4 GiB")
 	}
-	for _, record := range records {
+	for _, record := range records[startIndex:] {
 		offset := uint64(record.keyOffset)
 		length := uint64(record.keyLength)
 		if offset > uint64(len(keys)) || length > uint64(len(keys))-offset || length > uint64(maxHATTrieKeyLength) {
@@ -3839,7 +3846,7 @@ func (ht *HatTrie) visitPackedValuesWithoutStats(keys []byte, records []hatTrieP
 
 	nativeBatches := 0
 	nativeValues := make([]C.value_t, defaultHatTrieScanBatchEntries)
-	for start := 0; start < len(records); start += defaultHatTrieScanBatchEntries {
+	for start := startIndex; start < len(records); start += defaultHatTrieScanBatchEntries {
 		end := start + defaultHatTrieScanBatchEntries
 		if end > len(records) {
 			end = len(records)

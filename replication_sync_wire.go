@@ -41,11 +41,13 @@ type replicationSyncPayloadDirectRecord struct {
 }
 
 type replicationSyncPayloadArena struct {
-	keys          []byte
-	keyRecords    []hatTriePackedKeyRecord
-	values        []byte
-	records       []replicationSyncPayloadArenaRecord
-	directRecords []replicationSyncPayloadDirectRecord
+	keys               []byte
+	keyRecords         []hatTriePackedKeyRecord
+	values             []byte
+	records            []replicationSyncPayloadArenaRecord
+	directRecords      []replicationSyncPayloadDirectRecord
+	scannedValueEpoch  uint64
+	scannedValuesValid bool
 }
 
 func newReplicationSyncPayloadArena(capacity int) *replicationSyncPayloadArena {
@@ -138,6 +140,40 @@ func (arena *replicationSyncPayloadArena) appendKey(key string) error {
 	return nil
 }
 
+func (arena *replicationSyncPayloadArena) beginScannedValues(epoch uint64) {
+	if len(arena.records) == 0 {
+		arena.scannedValueEpoch = epoch
+		arena.scannedValuesValid = true
+	} else if arena.scannedValueEpoch != epoch {
+		arena.scannedValuesValid = false
+	}
+}
+
+func (arena *replicationSyncPayloadArena) appendScannedKey(key string, value HatValue) error {
+	if arena == nil {
+		return errors.New("hatriecache: replication sync payload arena is nil")
+	}
+	keyOffset := len(arena.keys)
+	if uint64(len(arena.records)) >= uint64(math.MaxUint32) ||
+		uint64(keyOffset)+uint64(len(key)) > uint64(math.MaxUint32) {
+		return errors.New("hatriecache: replication sync payload arena exceeds 4 GiB")
+	}
+	arena.keys = append(arena.keys, key...)
+	arena.keyRecords = append(arena.keyRecords, hatTriePackedKeyRecord{
+		keyOffset: uint32(keyOffset),
+		keyLength: uint32(len(key)),
+	})
+	arena.records = append(arena.records, replicationSyncPayloadArenaRecord{
+		valueOffset: uint32(value.Index),
+		valueLength: uint32(value.Flags),
+	})
+	return nil
+}
+
+func (record replicationSyncPayloadArenaRecord) scannedValue() HatValue {
+	return HatValue{Index: int32(record.valueOffset), Flags: uint8(record.valueLength)}
+}
+
 func (arena *replicationSyncPayloadArena) appendDirectRecord(key string, valueOffset int, valueLength int) error {
 	if arena == nil {
 		return errors.New("hatriecache: replication sync payload arena is nil")
@@ -162,14 +198,20 @@ func (arena *replicationSyncPayloadArena) payload(index uint32) replicationSyncP
 		return replicationSyncPayload{}
 	}
 	record := arena.records[index]
-	keyRecord := arena.keyRecords[index]
-	keyBytes := arena.keys[int(keyRecord.keyOffset):int(keyRecord.keyOffset+keyRecord.keyLength)]
 	value := arena.values[int(record.valueOffset):int(record.valueOffset+record.valueLength)]
-	key := ""
-	if len(keyBytes) > 0 {
-		key = unsafe.String(unsafe.SliceData(keyBytes), len(keyBytes))
+	return replicationSyncPayload{key: arena.key(index), binaryValue: value, payloadBytes: int(record.payloadBytes)}
+}
+
+func (arena *replicationSyncPayloadArena) key(index uint32) string {
+	if arena == nil || uint64(index) >= uint64(len(arena.keyRecords)) {
+		return ""
 	}
-	return replicationSyncPayload{key: key, binaryValue: value, payloadBytes: int(record.payloadBytes)}
+	record := arena.keyRecords[index]
+	keyBytes := arena.keys[int(record.keyOffset):int(record.keyOffset+record.keyLength)]
+	if len(keyBytes) == 0 {
+		return ""
+	}
+	return unsafe.String(unsafe.SliceData(keyBytes), len(keyBytes))
 }
 
 func (arena *replicationSyncPayloadArena) directPayload(index uint32) replicationSyncPayload {

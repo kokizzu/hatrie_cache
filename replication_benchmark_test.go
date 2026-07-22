@@ -683,6 +683,136 @@ func BenchmarkReplicationDigestFallbackCollectionModes(b *testing.B) {
 	})
 }
 
+func BenchmarkReplicationPackedFallbackPreparation(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value-a")
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "session:",
+		pageSize: keyCount,
+	}
+
+	for _, test := range []struct {
+		name         string
+		mutate       bool
+		disableCarry bool
+	}{
+		{name: "LegacyLookup", disableCarry: true},
+		{name: "Unchanged"},
+		{name: "LegacyMutation", mutate: true, disableCarry: true},
+		{name: "MutationFallback", mutate: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			totalNativeBatches := 0
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+				source.prevalidateScope()
+				source.cursor.disableValueCarry = test.disableCarry
+				arena := newReplicationSyncPayloadArena(keyCount)
+				done, err := source.appendFallbackKeys(arena, keyCount)
+				source.close()
+				if err != nil || !done {
+					b.Fatalf("appendFallbackKeys() = %v/%v, want done", done, err)
+				}
+				if test.mutate {
+					trie.UpsertString("session:00000000", fmt.Sprintf("value-%d", iteration&1))
+				}
+				group, changed, deleted, nativeBatches, err := replicator.prepareReplicationDigestPackedTaskGroup(
+					trie, inventory.target, arena, routing.fingerprint,
+				)
+				if err != nil || changed != keyCount || deleted != 0 {
+					b.Fatalf("prepare packed fallback = %d/%d/%v", changed, deleted, err)
+				}
+				totalNativeBatches += nativeBatches
+				runtime.KeepAlive(group)
+			}
+			b.ReportMetric(float64(totalNativeBatches)/float64(b.N), "native_batches/op")
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationPackedFallbackMutationPair(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value-a")
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	inventory := replicationDigestTargetInventory{
+		target:   routing.nodes["node-b"],
+		prefix:   "session:",
+		pageSize: keyCount,
+	}
+	run := func(disableCarry bool, value string) time.Duration {
+		started := time.Now()
+		source := newReplicationDigestKeySourceIterator(context.Background(), trie, routing, "node-a", inventory)
+		source.prevalidateScope()
+		source.cursor.disableValueCarry = disableCarry
+		arena := newReplicationSyncPayloadArena(keyCount)
+		done, err := source.appendFallbackKeys(arena, keyCount)
+		source.close()
+		if err != nil || !done {
+			b.Fatalf("appendFallbackKeys() = %v/%v, want done", done, err)
+		}
+		trie.UpsertString("session:00000000", value)
+		group, changed, deleted, nativeBatches, err := replicator.prepareReplicationDigestPackedTaskGroup(
+			trie, inventory.target, arena, routing.fingerprint,
+		)
+		if err != nil || changed != keyCount || deleted != 0 || nativeBatches != 40 {
+			b.Fatalf("prepare packed fallback = %d/%d/%d/%v", changed, deleted, nativeBatches, err)
+		}
+		runtime.KeepAlive(group)
+		return time.Since(started)
+	}
+
+	var legacyTime time.Duration
+	var carryTime time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if iteration&1 == 0 {
+			legacyTime += run(true, "legacy")
+			carryTime += run(false, "carry")
+		} else {
+			carryTime += run(false, "carry")
+			legacyTime += run(true, "legacy")
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(legacyTime.Nanoseconds())/float64(b.N), "legacy_ns/op")
+	b.ReportMetric(float64(carryTime.Nanoseconds())/float64(b.N), "carry_ns/op")
+	b.ReportMetric(keyCount, "keys/path")
+}
+
 var benchmarkReplicationRouteSink uint32
 
 func BenchmarkReplicationScanRouteModes(b *testing.B) {

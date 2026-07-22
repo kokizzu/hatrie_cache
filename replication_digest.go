@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -836,10 +837,18 @@ func (iterator *replicationDigestSourceIterator) appendFallbackKeys(arena *repli
 	}
 	iterator.cursor.packedKeys = true
 	iterator.cursor.sharedReadOnly = true
+	startedScannedPage := false
 	page, err := replicationSyncEntriesPageWithCursor(iterator.trie, iterator.inventory.prefix, iterator.afterKey, iterator.hasAfterKey, limit, &iterator.cursor, func(entry Entry) error {
 		included, err := iterator.includes(entry)
 		if err != nil || !included {
 			return err
+		}
+		if iterator.cursor.carryValues && iterator.cursor.scan != nil {
+			if !startedScannedPage {
+				arena.beginScannedValues(iterator.cursor.scan.generation)
+				startedScannedPage = true
+			}
+			return arena.appendScannedKey(entry.Key, entry.Value)
 		}
 		return arena.appendKey(entry.Key)
 	})
@@ -1163,7 +1172,7 @@ func (replicator *HTTPReplicator) prepareReplicationDigestPackedTaskGroup(trie *
 	compact := true
 	changed := 0
 	deleted := 0
-	nativeBatches, err := trie.visitPackedValuesWithoutStats(arena.keys, arena.keyRecords, func(index int, key string, hval HatValue) error {
+	visit := func(index int, key string, hval HatValue) error {
 		if !hval.Empty() {
 			valueOffset := len(arena.values)
 			var exists bool
@@ -1198,7 +1207,8 @@ func (replicator *HTTPReplicator) prepareReplicationDigestPackedTaskGroup(trie *
 		payloads = append(payloads, CacheCommandRequest{Command: "INTERNALDEL", Key: key})
 		deleted++
 		return nil
-	})
+	}
+	nativeBatches, err := trie.visitReplicationScannedValuesWithoutStats(arena, visit, nil)
 	if err != nil {
 		return replicationTaskGroup{}, changed, deleted, nativeBatches, err
 	}
@@ -1219,6 +1229,38 @@ func (replicator *HTTPReplicator) prepareReplicationDigestPackedTaskGroup(trie *
 		group.keys[index] = payloads[index].Key
 	}
 	return group, changed, deleted, nativeBatches, nil
+}
+
+func (trie *HatTrie) visitReplicationScannedValuesWithoutStats(arena *replicationSyncPayloadArena, visit func(index int, key string, hval HatValue) error, afterChunk func(int)) (int, error) {
+	if arena == nil {
+		return 0, errors.New("hatriecache: replication fallback arena is nil")
+	}
+	if !arena.scannedValuesValid {
+		return trie.visitPackedValuesWithoutStats(arena.keys, arena.keyRecords, visit)
+	}
+	for start := 0; start < len(arena.records); start += defaultHatTrieScanBatchEntries {
+		end := start + defaultHatTrieScanBatchEntries
+		if end > len(arena.records) {
+			end = len(arena.records)
+		}
+		trie.mu.RLock()
+		canReuse := len(trie.counterWriteStripes) == 0 && len(trie.expires) == 0 && trie.localPartitionSet() == nil && atomic.LoadUint64(&trie.mutationEpoch) == arena.scannedValueEpoch
+		if !canReuse {
+			trie.mu.RUnlock()
+			return trie.visitPackedValuesWithoutStatsFrom(arena.keys, arena.keyRecords, start, visit)
+		}
+		for index := start; index < end; index++ {
+			if err := visit(index, arena.key(uint32(index)), arena.records[index].scannedValue()); err != nil {
+				trie.mu.RUnlock()
+				return 0, err
+			}
+		}
+		trie.mu.RUnlock()
+		if afterChunk != nil {
+			afterChunk(end)
+		}
+	}
+	return 0, nil
 }
 
 func (replicator *HTTPReplicator) executeReplicationDigestTargetPage(ctx context.Context, target TopologyNode, request CacheCommandRequest) (ReplicationTargetResult, CacheCommandResponse) {
