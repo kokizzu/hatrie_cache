@@ -179,6 +179,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
 | Earlier | [Replication request batching](#replication-batching-benchmark), 10k keys | Historical: 51,455,645,995 ns; 10,000 requests | First batched baseline: 162,195,812 ns; 1 request | About 317x faster, 10,000x fewer requests | Historical rows came from separate controlled runs |
 | Earlier | [Replication routing and encoding](#replication-batching-benchmark), 10k keys | 162,195,812 ns; 144,227 wire B; 57,035,706 heap B | 18,893,092 ns; 55,795 wire B; 948,495 heap B | 8.58x faster, 2.59x smaller wire, 60.13x lower heap | Compact paths retain legacy materialization fallbacks |
+| Current pass | [Direct fallback repair collection](#replication-descriptor-optimizations), 10k keys | Buffered entries: 4.939 ms; 1,854,982 heap B; 92 allocs | Direct changes: 4.544 ms; 421,376 heap B; 83 allocs | 1.09x faster, 4.40x lower heap, 1.11x fewer allocs | No measured regression; applies only after an older target rejects digest comparison |
+| Current pass | [Direct digest value arena](#replication-descriptor-optimizations), 1,024 sets | Per-value buffers: 1.089 ms; 108,878 heap B; 1,158 allocs | Direct records: 1.050 ms; 87,235 heap B; 136 allocs | 1.04x faster, 1.25x lower heap, 8.51x fewer allocs | No measured wire/CPU regression; JSON and mixed-delete compatibility paths are unchanged |
 | Earlier | [Replication page traversal](#replication-page-traversal), 10 pages | 61,122,327 ns; 1,877,005 heap B; 123,996 allocs | 19,709,083 ns; 999,805 heap B; 11,885 allocs | 3.10x faster, 1.88x lower heap, 10.43x fewer allocs | Mutation invalidates and safely restarts the cursor |
 | Earlier | [gRPC replication transport](#replication-transport), 10k keys | HTTP: 44,957,163 ns; 57,479 wire B | gRPC: 37,765,365 ns; 52,006 wire B | 1.19x faster, 9.52% smaller wire, 24.41% fewer allocs | Cumulative heap is 16.18% higher; HTTP remains fallback |
 | Earlier | [Bounded gzip writer cache](#replication-compression-tradeoff), 50 syncs | 15.23 MB compressor allocation | 1.14 MB | 13.4x less compressor allocation | Retains at most four initialized writers |
@@ -2269,12 +2271,16 @@ directly comparable to the latest pass.
 | Zero-copy split (`20cdd2f`) | 21,743,638 ns | 3 | 56,038 | 4,888,410 | 10,743 |
 | Compact default digest payloads (`8cb0e0d`) | 19,835,164 ns | 3 | 56,045 | 2,752,297 | 10,639 |
 | Current combined (`375635e`) | 19,370,011 ns | 3 | 56,045 | 2,749,032 | 10,635 |
+| Direct fallback repair collection (`3562273`) | 18,557,453 ns | 3 | 56,046 | 1,260,223 | 10,609 |
+| Direct digest value arena (`fe06238`) | 18,562,257 ns | 3 | 56,046 | 1,019,337 | 610 |
 | Historical unbatched 10k | 51,455,645,995 ns | 10,000 | 2,135,564 | 1,794,046,848 | 202,050,916 |
 
-Against `0f4adc3`, the current three-feature result is 1.25x faster, uses 5.96x
-less cumulative allocated heap, and performs 1.34x fewer allocations. Request
-count and request-body bytes are unchanged. The historical batching request reduction
-is 10,000x for this single-target sync. Header bytes are not included
+Against `0f4adc3`, the current final result is 1.31x faster, uses 16.08x less
+cumulative allocated heap, and performs 23.40x fewer allocations. Against
+`375635e`, the two latest changes are 1.04x faster, use 2.70x less heap, and
+perform 17.43x fewer allocations. Request count and request-body bytes are
+unchanged. The historical batching request reduction is 10,000x for this
+single-target sync. Header bytes are not included
 in `wire_B/op`, and `B/op` measures cumulative bytes allocated during one
 operation rather than peak process RSS.
 
@@ -2292,12 +2298,54 @@ feature. Improvements are ratios where larger is better.
 | Default protobuf digest repair, 1,024 sets | 1,356,945 ns; 300,286 B; 1,197 allocs | 1,105,669 ns; 107,288 B; 1,157 allocs | 1.23x | 2.80x | 1.03x | None on all-set pages; wire bytes and compatibility fallback are unchanged |
 | Mixed digest repair, 512 sets plus 512 deletes | 1,105,516 ns; 282,637 B; 684 allocs | 1,151,193 ns; 281,936 B; 685 allocs | 0.96x | 1.00x | 1.00x | 4.13% slower in the short run; a `100x`, ten-run confirmation narrowed this to 0.95%, so this is treated as neutral noise rather than a win |
 | Fallback source scan, 10,000 1 KiB values | 6,309,581 ns; 210,240 B; 85 allocs | 4,480,362 ns; 209,088 B; 84 allocs | 1.41x | 1.01x | 1.01x | Key-only mode is restricted to full-push fallback; normal digest comparison still hashes values |
+| Fallback repair collection, 10,000 keys | 4,939,194 ns; 1,854,982 B; 92 allocs | 4,544,286 ns; 421,376 B; 83 allocs | 1.09x | 4.40x | 1.11x | No wire or lock-scope change; collection is direct only after digest rejection |
+| Direct default-wire digest serialization, 1,024 sets | 1,088,848 ns; 108,878 B; 1,158 allocs | 1,049,957 ns; 87,235 B; 136 allocs | 1.04x | 1.25x | 8.51x | Values share a bounded arena; keys remain direct immutable references for the synchronous group lifetime |
 
 The mixed-page implementation carries the delete intent already discovered by
 digest comparison. This selects generic compatibility storage before allocating
 compact descriptors and removes the 17% transient-heap regression observed in
 the first implementation. A concurrent state change can still force the old
 dynamic conversion path, preserving the previous repair semantics.
+
+The fallback collector now appends ordered, prefix-filtered repair changes
+directly during the source scan instead of retaining an intermediate entry
+page. It still releases the trie lock before splitting, network I/O, or flush.
+The default protobuf/gRPC all-set repair path serializes each value directly
+into one bounded byte arena and stores compact key/value-range records. Planned
+mixed deletes and JSON compatibility continue to use the generic request path;
+an unexpected concurrent deletion converts already-built direct records before
+adding `INTERNALDEL`.
+
+The first arena candidate copied every key and reconstructed strings while
+sizing and writing protobuf. Its paired 10k end-to-end median was about 9%
+slower, so it was rejected before commit. Direct immutable key references
+removed that loss. The final paired `100x` gate measured 18,030,151 ns,
+1,248,561 B, and 10,606 allocations before versus 18,050,084 ns, 1,009,376 B,
+and 604 allocations after: CPU was neutral within 0.11%, heap improved 1.24x,
+and allocations improved 17.56x. A second profiled pair measured the final path
+0.22% faster, confirming there is no repeatable CPU regression.
+
+Raw local output is retained in:
+
+- `build/benchmarks/replication-fallback-collector.txt`
+- `build/benchmarks/replication-fallback-direct-e2e.txt`
+- `build/benchmarks/replication-arena-before.txt`
+- `build/benchmarks/replication-direct-record-after.txt`
+- `build/benchmarks/replication-direct-record-e2e.txt`
+- `build/benchmarks/replication-direct-record-e2e-stable-baseline.txt`
+- `build/benchmarks/replication-direct-record-e2e-stable.txt`
+
+Reproduce the stable end-to-end row with:
+
+```sh
+make bench-replication-optimizations \
+  REPLICATION_SPLIT_BENCH=NoSplitBenchmark \
+  REPLICATION_SYNC_BENCH=NoSyncBenchmark \
+  REPLICATION_DIGEST_BENCH=BenchmarkHTTPReplicatorSyncAllBatching/Batched10k \
+  REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
+  BENCHTIME=100x COUNT=1 \
+  REPLICATION_OPTIMIZATION_OUTPUT=replication-direct-record-e2e-stable.txt
+```
 
 ### Replication Page Traversal
 
