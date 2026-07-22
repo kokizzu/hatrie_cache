@@ -3284,8 +3284,17 @@ func TestHTTPReplicatorSyncAllDigestFallsBackToFullPushForOlderTarget(t *testing
 	if second.Skipped || second.Entries != 2 || len(second.Targets) != 1 || !second.Targets[0].OK {
 		t.Fatalf("second SyncAll(fallback) = %#v, want direct successful full push", second)
 	}
-	if got := requestCount.Load(); got != 5 {
-		t.Fatalf("two fallback sync requests = %d, want first 3 plus cached compact/legacy repair", got)
+	secondPayloads := mustDecodeReplicationBatchValues(t, <-requests)
+	if len(secondPayloads) != 2 {
+		t.Fatalf("cached fallback payloads = %#v, want both source values", secondPayloads)
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("cached fallback sent redundant request = %#v", request)
+	default:
+	}
+	if got := requestCount.Load(); got != 4 {
+		t.Fatalf("two fallback sync requests = %d, want first 3 plus one cached repair", got)
 	}
 }
 
@@ -3309,6 +3318,22 @@ func TestReplicationDigestUnsupportedCapabilityExpiresAndMatchesTarget(t *testin
 	now = now.Add(replicationDigestCapabilityTTL + time.Nanosecond)
 	if replicator.replicationDigestUnsupported(target, "fingerprint-a") {
 		t.Fatal("expired digest capability remained active")
+	}
+}
+
+func TestReplicationDigestUnsupportedSkipsClockWithoutCapability(t *testing.T) {
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
+	t.Cleanup(replicator.Close)
+	clockReads := 0
+	replicator.capabilityNow = func() time.Time {
+		clockReads++
+		return time.Unix(1_700_000_000, 0)
+	}
+	if replicator.replicationDigestUnsupported(TopologyNode{ID: "node-b", Address: "http://node-b"}, "fingerprint-a") {
+		t.Fatal("missing replication digest capability reported unsupported")
+	}
+	if clockReads != 0 {
+		t.Fatalf("missing capability clock reads = %d, want 0", clockReads)
 	}
 }
 

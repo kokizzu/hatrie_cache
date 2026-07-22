@@ -78,11 +78,13 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 	const keyCount = 10000
 	for _, tt := range []struct {
 		name     string
+		prefix   string
 		pageSize int
 	}{
-		{name: "Batched10k", pageSize: keyCount},
-		{name: "Default1k", pageSize: defaultReplicationSyncKeyPageSize},
-		{name: "Unbatched10k", pageSize: 1},
+		{name: "Batched10k", prefix: "session:", pageSize: keyCount},
+		{name: "FullKeyspace10k", pageSize: keyCount},
+		{name: "Default1k", prefix: "session:", pageSize: defaultReplicationSyncKeyPageSize},
+		{name: "Unbatched10k", prefix: "session:", pageSize: 1},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
 			trie := CreateHatTrie()
@@ -136,7 +138,7 @@ func BenchmarkHTTPReplicatorSyncAllBatching(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				result := replicator.syncAllPaged(context.Background(), trie, "session:", tt.pageSize)
+				result := replicator.syncAllPaged(context.Background(), trie, tt.prefix, tt.pageSize)
 				if result.Skipped || result.Entries != keyCount || len(result.Targets) == 0 {
 					b.Fatalf("syncAllPaged() = %#v, want %d synced entries", result, keyCount)
 				}

@@ -146,9 +146,6 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 		result.Reason = "no sync targets"
 		return result
 	}
-	if merkleResult, handled := replicator.syncAllMerkle(ctx, trie, prefix, pageSize, routing); handled {
-		return merkleResult
-	}
 	if target, single := singleReplicationDigestTarget(routing, replicator.self); single && replicator.replicationDigestUnsupported(target, routing.fingerprint) {
 		var grpcSession *replicationGRPCSyncSession
 		if replicator.transport == ReplicationTransportGRPCStream {
@@ -172,6 +169,9 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 		}
 		result.Reason = fmt.Sprintf("digest sync compared %d entries, transferred %d, deleted %d, fallbacks %d", result.Entries, changed, deleted, fallbacks)
 		return result
+	}
+	if merkleResult, handled := replicator.syncAllMerkle(ctx, trie, prefix, pageSize, routing); handled {
+		return merkleResult
 	}
 	inventories, entries, err := replicator.replicationDigestInventories(ctx, trie, prefix, pageSize, routing)
 	result.Entries = entries
@@ -649,11 +649,13 @@ func (replicator *HTTPReplicator) replicationDigestUnsupported(target TopologyNo
 	if replicator == nil {
 		return false
 	}
-	now := replicator.replicationDigestCapabilityNow()
 	replicator.mu.RLock()
 	capability, ok := replicator.digestUnsupported[target.ID]
 	replicator.mu.RUnlock()
-	return ok && capability.address == target.Address && capability.fingerprint == fingerprint && now.Before(capability.expiresAt)
+	if !ok || capability.address != target.Address || capability.fingerprint != fingerprint {
+		return false
+	}
+	return replicator.replicationDigestCapabilityNow().Before(capability.expiresAt)
 }
 
 func (replicator *HTTPReplicator) markReplicationDigestUnsupported(target TopologyNode, fingerprint string) {
