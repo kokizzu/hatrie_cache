@@ -2453,6 +2453,21 @@ func (snapshot replicationRoutingSnapshot) routeForKey(key string) (ElectionKeyR
 	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[shard.ID]}, true
 }
 
+func (snapshot replicationRoutingSnapshot) replicationScanRouteForKey(key string) (ElectionKeyRoute, bool) {
+	if len(snapshot.shards) != 1 {
+		return snapshot.routeForKey(key)
+	}
+	shard := snapshot.shards[0]
+	owners := snapshot.owners[shard.ID]
+	route := TopologyRoute{
+		Key:    key,
+		Mode:   topologyMode(snapshot.topology.Mode),
+		Shard:  shard,
+		Owners: owners,
+	}
+	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[shard.ID]}, true
+}
+
 func (snapshot replicationRoutingSnapshot) replicationTargets(route ElectionKeyRoute, self string) []TopologyNode {
 	if self == snapshot.self {
 		if targets, ok := snapshot.targets[route.Route.Shard.ID]; ok {

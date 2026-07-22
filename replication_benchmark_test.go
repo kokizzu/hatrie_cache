@@ -351,6 +351,51 @@ func BenchmarkReplicationDigestFallbackCollectionModes(b *testing.B) {
 	})
 }
 
+var benchmarkReplicationRouteSink uint32
+
+func BenchmarkReplicationScanRouteModes(b *testing.B) {
+	const keyCount = 10000
+	topology := replicationTestTopology(b, "http://node-b")
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+	})
+	b.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		b.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	keys := make([]string, keyCount)
+	for index := range keys {
+		keys[index] = "session:" + strconv.Itoa(index)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		route func(string) (ElectionKeyRoute, bool)
+	}{
+		{name: "Generic", route: routing.routeForKey},
+		{name: "SingleShard", route: routing.replicationScanRouteForKey},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ReportMetric(keyCount, "routes/op")
+			var checksum uint32
+			for iteration := 0; iteration < b.N; iteration++ {
+				for _, key := range keys {
+					route, routed := tt.route(key)
+					if !routed {
+						b.Fatalf("route(%q) ok = false", key)
+					}
+					checksum += route.Route.Shard.ID + uint32(len(route.Route.Owners))
+				}
+			}
+			benchmarkReplicationRouteSink = checksum
+		})
+	}
+}
+
 func BenchmarkPartitionReplicationPageTraversal100k(b *testing.B) {
 	keyCount := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_KEYS", 100000)
 	pageSize := benchmarkPositiveEnvInt(b, "HATRIE_PARTITION_CURSOR_BENCH_PAGE_SIZE", 1000)

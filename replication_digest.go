@@ -380,7 +380,7 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			route, ok := routing.routeForKey(entry.Key)
+			route, ok := routing.replicationScanRouteForKey(entry.Key)
 			if !ok || route.Leader.Leader != replicator.self {
 				return nil
 			}
@@ -445,7 +445,7 @@ func (replicator *HTTPReplicator) replicationDigestInventoryForTarget(ctx contex
 			if !buckets.containsKey(entry.Key) {
 				return nil
 			}
-			route, ok := routing.routeForKey(entry.Key)
+			route, ok := routing.replicationScanRouteForKey(entry.Key)
 			if !ok || route.Leader.Leader != replicator.self || !replicationRouteTargetsNode(routing, route, replicator.self, target.ID) {
 				return nil
 			}
@@ -531,7 +531,7 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 		}
 		for _, remote := range page.entries {
 			key := remote.Message
-			route, routed := routing.routeForKey(key)
+			route, routed := routing.replicationScanRouteForKey(key)
 			if !strings.HasPrefix(key, inventory.prefix) || (inventory.hasBuckets && !inventory.buckets.containsKey(key)) || !routed || route.Leader.Leader != replicator.self || !replicationRouteTargetsNode(routing, route, replicator.self, inventory.target.ID) {
 				pageResult.OK = false
 				pageResult.Error = "hatriecache: key outside replication digest scope"
@@ -794,7 +794,7 @@ func (iterator *replicationDigestSourceIterator) includes(entry Entry) (bool, er
 	if iterator.inventory.hasBuckets && !iterator.inventory.buckets.containsKey(entry.Key) {
 		return false, nil
 	}
-	route, ok := iterator.routing.routeForKey(entry.Key)
+	route, ok := iterator.routing.replicationScanRouteForKey(entry.Key)
 	if !ok || route.Leader.Leader != iterator.source || !replicationRouteTargetsNode(iterator.routing, route, iterator.source, iterator.inventory.target.ID) {
 		return false, nil
 	}
@@ -1166,7 +1166,7 @@ func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAf
 			scan.consume()
 			continue
 		}
-		route, routed := routing.routeForKey(entry.Key)
+		route, routed := routing.replicationScanRouteForKey(entry.Key)
 		if !routed || route.Leader.Leader != source || !replicationRouteTargetsNode(routing, route, source, targetNode) {
 			page.nextAfterKey = entry.Key
 			scan.consume()
@@ -1236,7 +1236,7 @@ func (trie *HatTrie) replicationDigestRoot(prefix string, routing replicationRou
 			scan.consume()
 			continue
 		}
-		route, routed := routing.routeForKey(entry.Key)
+		route, routed := routing.replicationScanRouteForKey(entry.Key)
 		if routed && route.Leader.Leader == source && replicationRouteTargetsNode(routing, route, source, targetNode) {
 			var dumpErr error
 			scratch, ok, dumpErr = trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(scratch[:0], entry)

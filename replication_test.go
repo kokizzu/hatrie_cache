@@ -3312,6 +3312,78 @@ func TestReplicationDigestUnsupportedCapabilityExpiresAndMatchesTarget(t *testin
 	}
 }
 
+func TestReplicationScanRouteForKeyMatchesGenericRouting(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		topology ClusterTopology
+	}{
+		{
+			name: "single shard",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes:   []TopologyNode{{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}},
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			},
+		},
+		{
+			name: "single bucket range",
+			topology: ClusterTopology{
+				Version:      1,
+				Self:         "node-a",
+				BucketCount:  16,
+				BucketRanges: []TopologyBucketRange{{Start: 0, End: 15, Shard: 7}},
+				Nodes:        []TopologyNode{{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}},
+				Shards:       []TopologyShard{{ID: 7, Primary: "node-a", Replicas: []string{"node-b"}}},
+			},
+		},
+		{
+			name: "multiple shards",
+			topology: ClusterTopology{
+				Version:      1,
+				Self:         "node-a",
+				BucketCount:  16,
+				BucketRanges: []TopologyBucketRange{{Start: 0, End: 7, Shard: 1}, {Start: 8, End: 15, Shard: 2}},
+				Nodes:        []TopologyNode{{ID: "node-a"}, {ID: "node-b"}, {ID: "node-c"}},
+				Shards: []TopologyShard{
+					{ID: 1, Primary: "node-a", Replicas: []string{"node-b"}},
+					{ID: 2, Primary: "node-c", Replicas: []string{"node-a"}},
+				},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			topology, err := NewTopologyStore(tt.topology)
+			if err != nil {
+				t.Fatalf("NewTopologyStore() error = %v", err)
+			}
+			replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+				Self:     "node-a",
+				Topology: topology,
+				Election: NewElectionStore(topology, ElectionOptions{}),
+			})
+			t.Cleanup(replicator.Close)
+			routing, ok := replicator.snapshotReplicationRouting()
+			if !ok {
+				t.Fatal("snapshotReplicationRouting() ok = false")
+			}
+			for _, key := range []string{"", "session:1", "session:999", "other:value"} {
+				want, wantOK := routing.routeForKey(key)
+				got, gotOK := routing.replicationScanRouteForKey(key)
+				if gotOK != wantOK {
+					t.Fatalf("replicationScanRouteForKey(%q) ok = %v, want %v", key, gotOK, wantOK)
+				}
+				if !gotOK {
+					continue
+				}
+				if got.Route.Shard.ID != want.Route.Shard.ID || !reflect.DeepEqual(got.Leader, want.Leader) || !reflect.DeepEqual(got.Route.Owners, want.Route.Owners) || !reflect.DeepEqual(routing.replicationTargets(got, "node-a"), routing.replicationTargets(want, "node-a")) {
+					t.Fatalf("replication scan route(%q) = %#v, want routing scope %#v", key, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestReplicationValueDigestEncodingRoundTrip(t *testing.T) {
 	want := replicationDigest{hash: math.MaxUint64 - 7, size: math.MaxUint64 - 11}
 	encoded := encodeReplicationValueDigest(want)
