@@ -1846,9 +1846,12 @@ type replicationSyncCursor struct {
 	scan       *hatTrieScanCursor
 	partitions *replicationPartitionSyncCursor
 	packedKeys bool
-	prefix     string
-	visited    int
-	restarts   int
+	// sharedReadOnly requires a callback that does not read or mutate trie-owned
+	// value storage. The fallback key collector is the only production caller.
+	sharedReadOnly bool
+	prefix         string
+	visited        int
+	restarts       int
 }
 
 type replicationPartitionSyncCursor struct {
@@ -1982,9 +1985,29 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 	if partitions := trie.localPartitionSet(); partitions != nil {
 		return replicationSyncPartitionEntriesPageWithCursor(trie, partitions, prefix, afterKey, hasAfterKey, limit, cursor, visit)
 	}
+	if cursor.sharedReadOnly {
+		trie.replicationReadOnlyScanMu.Lock()
+		defer trie.replicationReadOnlyScanMu.Unlock()
+
+		trie.mu.RLock()
+		canUseSharedLock := len(trie.expires) == 0 && (cursor.scan == nil || len(cursor.scan.expired) == 0)
+		if canUseSharedLock {
+			defer trie.mu.RUnlock()
+			return replicationSyncEntriesPageLocked(trie, prefix, afterKey, hasAfterKey, limit, cursor, visit, time.Time{})
+		}
+		trie.mu.RUnlock()
+	}
 
 	trie.mu.Lock()
 	defer trie.mu.Unlock()
+	now := time.Time{}
+	if len(trie.expires) > 0 {
+		now = trie.currentTime()
+	}
+	return replicationSyncEntriesPageLocked(trie, prefix, afterKey, hasAfterKey, limit, cursor, visit, now)
+}
+
+func replicationSyncEntriesPageLocked(trie *HatTrie, prefix string, afterKey string, hasAfterKey bool, limit int, cursor *replicationSyncCursor, visit func(Entry) error, now time.Time) (replicationSyncPage, error) {
 	if cursor.scan == nil || cursor.prefix != prefix || cursor.scan.generation != trie.mutationEpoch {
 		restarting := cursor.scan != nil
 		cursor.closeLocked(trie)
@@ -2003,11 +2026,6 @@ func replicationSyncEntriesPageWithCursor(trie *HatTrie, prefix string, afterKey
 		if restarting {
 			cursor.restarts++
 		}
-	}
-
-	now := time.Time{}
-	if len(trie.expires) > 0 {
-		now = trie.currentTime()
 	}
 
 	page := replicationSyncPage{}

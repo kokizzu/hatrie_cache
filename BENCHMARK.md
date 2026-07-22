@@ -186,6 +186,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Prevalidated invariant scan scope](#replication-descriptor-optimizations), 10k-key legacy fallback | Per-key scope validation: 3.418 ms; 421,376 heap B; 83 allocs | One prevalidation: 2.873 ms; 421,376 heap B; 83 allocs | 1.19x faster; reader pause 1.46x shorter; heap and allocations unchanged | Applies only to one-shard, unfiltered leader scans with a known target; all other scans retain dynamic routing |
 | Current pass | [Known-legacy Merkle bypass](#replication-descriptor-optimizations), 10k-key full sync | 11.403 ms; 3 steady requests; 1,002,881 heap B; 557 allocs | 11.070 ms; 2 steady requests; 959,672 heap B; 417 allocs | 1.03x faster, 1.04x lower heap, 1.34x fewer allocs | An in-place target upgrade at the same address can wait up to the existing five-minute capability TTL for a Merkle retry |
 | Current pass | [Packed fallback batch lookup](#replication-descriptor-optimizations), 10k-key known-legacy full sync | 10.688 ms; 951,616 heap B; 413 allocs; 4.583 ms reader pause | 9.209 ms; 652,898 heap B; 369 allocs; 3.438 ms reader pause | 1.16x faster, 1.46x lower heap, 1.12x fewer allocs, 1.33x shorter reader pause | No measured runtime tradeoff; JSON compatibility and local partitions retain the scalar path |
+| Current pass | [Shared-lock fallback key scan](#replication-descriptor-optimizations), 10k-key known-legacy sync under reader load | Exclusive scan: 10.075 ms; 4.121 ms reader pause; 1,064,766 heap B; 394 allocs | Shared scan: 8.966 ms; 0.215 ms reader pause; 1,049,238 heap B; 391 allocs | 1.12x faster, 19.19x shorter reader pause, 1.01x lower heap and allocations | One fixed mutex per trie; TTL, local-partition, snapshot, digest-value, and value-materialization paths remain exclusive |
 | Current pass | [In-place native radix ordering](#replication-descriptor-optimizations), 10k-key ordered scan | Comparator sort: 3.744 ms; 841,584 heap B; 100 allocs | MSD radix sort: 3.507 ms; 841,584 heap B; 100 allocs | 1.07x faster with unchanged heap and allocations | Uses fixed stack histograms with logarithmically bounded recursion; no per-key sort allocation |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
 | Reverted | [Exact protobuf batch coalescing](#replication-descriptor-optimizations), 10k-key legacy fallback | Two requests: sender 10.422 ms; receiver decode 4.066 ms; largest protobuf 305,156 B | One request: sender 10.215 ms; receiver decode 4.444 ms; largest protobuf 609,046 B | Sender 1.02x faster and 1.44x fewer allocs, but receiver 1.09x slower and combined CPU 1.012x slower | Rolled back; halving requests did not offset receiver decode cost and doubled the largest request |
@@ -2323,6 +2324,8 @@ feature. Improvements are ratios where larger is better.
 | Prevalidated invariant fallback scan, 10,000 keys | 3,418,121 ns; 421,376 B; 83 allocs | 2,872,609 ns; 421,376 B; 83 allocs | 1.19x | 1.00x | 1.00x | Restricted to an unfiltered one-shard leader scan whose target is already in that shard's replication set |
 | Known-legacy full-keyspace sync, 10,000 keys | 11,402,903 ns; 3 steady requests; 56,059 wire B; 1,002,881 B; 557 allocs | 11,070,085 ns; 2 steady requests; 55,886 wire B; 959,672 B; 417 allocs | 1.03x | 1.04x | 1.34x | Same-address in-place upgrades can wait at most the existing five-minute capability TTL; address and topology changes invalidate immediately |
 | Packed fallback batch lookup, 10,000 keys | 10,688,124 ns; 2.004 requests; 55,877 wire B; 951,616 B; 413 allocs | 9,209,489 ns; 2.004 requests; 55,879 wire B; 652,898 B; 369 allocs | 1.16x | 1.46x | 1.12x | No measured regression: fixed-sequence protobuf is byte-identical and median maximum reader pause improved 1.33x; JSON and local partitions retain scalar lookup |
+| Shared-lock fallback key scan under reader load, 10,000 keys | 10,074,975 ns; 4,120,711 ns reader pause; 1,064,766 B; 394 allocs | 8,965,740 ns; 214,766 ns reader pause; 1,049,238 B; 391 allocs | 1.12x; reader pause 19.19x shorter | 1.01x | 1.01x | One fixed mutex serializes fallback key scans; writers remain blocked, and any active/deferred TTL cleanup retains the exclusive path |
+| Paired fallback scan lock scope, 10,000 keys | Exclusive: 2,925,823 ns; 3,511,665 ns reader pause; 20,112 B; 48 allocs | Shared: 2,927,976 ns; 178,865 ns reader pause; 20,118 B; 48 allocs | CPU neutral within 0.07%; reader pause 19.63x shorter | Neutral within 0.03% | 1.00x | Same-binary control isolates lock scope from HTTP and encoding noise; writer pause improved slightly from 1,345,226 ns to 1,337,389 ns |
 | Ordered native HAT-trie scan, 10,000 keys | 3,744,034 ns; 841,584 B; 100 allocs | 3,506,797 ns; 841,584 B; 100 allocs | 1.07x | 1.00x | 1.00x | Fixed 257-symbol stack histograms replace libc `qsort`; ordering and wire representation are unchanged |
 | Single-pass legacy repair, 10,000 keys (rejected) | 11,459,282 ns; 55,892 wire B; 977,706 B; 433 allocs | Unordered: 10,675,192 ns; 64,258 wire B; 948,316 B; 392 allocs | 1.07x | 1.03x | 1.11x | Rejected: unordered transfer was 1.15x larger; restoring deterministic order took 12,316,337 ns, 1.075x slower than baseline |
 | Exact protobuf batch coalescing, 10,000 keys (rejected) | Sender: 10,422,384 ns; 2.004 requests; 949,539 B; 413 allocs. Receiver: 4,066,159 ns; 305,156 largest protobuf B | Sender: 10,214,713 ns; 1.004 requests; 928,371 B; 286 allocs. Receiver: 4,444,227 ns; 609,046 largest protobuf B | Sender 1.02x; combined 0.99x | Sender 1.02x; receiver 1.00x | Sender 1.44x; receiver 1.00x | Rejected: receiver decode was 1.09x slower, the largest request was 2.00x larger, and combined sender-plus-decode CPU was 1.012x slower |
@@ -2395,6 +2398,30 @@ bytes (55,877 versus 55,879 B) because benchmark sequence metadata varies;
 fixed-sequence output is byte-identical. In a separate ten-run contention gate,
 median maximum reader pause shortened from 4.583 ms to 3.438 ms, so the bounded
 lock chunks introduced no measured reader cost.
+
+The legacy fallback key collector now uses a shared trie lock while collecting
+ordered keys when the trie has neither active expirations nor deferred expired
+cursor entries. The callback only copies keys and evaluates an immutable
+routing snapshot; value storage is still resolved later in bounded exclusive
+chunks. A dedicated mutex preserves the former one-scan-at-a-time behavior, so
+multiple repairs cannot create a new concurrent sort or scan load spike.
+Writers therefore wait for the same consistent scan boundary as before.
+
+Any TTL metadata, deferred expiration cleanup, local partitions, snapshots,
+value-producing digest scans, and value materialization take the previous
+exclusive path. Generation checks still restart a cursor after writes between
+pages. Tests coordinate blocked callbacks to prove that ordinary reads proceed,
+writers remain blocked, read-only scans remain serialized, and TTL cleanup is
+not moved under a shared lock.
+
+In the final reader-stress pair, median maximum pause fell from 4.121 ms to
+0.215 ms, or 19.19x, while the full sync improved from 10.075 ms to 8.966 ms.
+The same-binary lock-only control measured 2.926 ms exclusive versus 2.928 ms
+shared, a neutral 0.07% difference, with 48 allocations in both modes. Its
+reader pause improved 19.63x and writer pause was 0.6% shorter. A separate 10k
+end-to-end run retained 2.040 requests per operation and effectively unchanged
+compressed wire bytes; sequence metadata accounts for the measured 55,896 B
+versus 55,893 B difference.
 
 The native sorted iterator now partitions its existing slot-pointer array with
 an in-place MSD radix sort. Prefix skipping avoids repeatedly building byte
@@ -2486,6 +2513,11 @@ Raw local output is retained in:
 - `build/benchmarks/packed-lookup-after.txt`
 - `build/benchmarks/packed-lookup-pause-before.txt`
 - `build/benchmarks/packed-lookup-pause-after.txt`
+- `build/benchmarks/replication-shared-scan-paired.txt`
+- `build/benchmarks/replication-shared-scan-e2e-before.txt`
+- `build/benchmarks/replication-shared-scan-e2e-after.txt`
+- `build/benchmarks/replication-shared-scan-reader-before.txt`
+- `build/benchmarks/replication-shared-scan-reader-after.txt`
 
 Reproduce the stable end-to-end row with:
 

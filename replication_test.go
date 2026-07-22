@@ -5062,6 +5062,227 @@ func TestReplicationSyncCursorVisitsEachEntryOnceAcrossPages(t *testing.T) {
 	}
 }
 
+func TestReplicationSyncReadOnlyCursorAllowsConcurrentReads(t *testing.T) {
+	trie := newTestTrie(t)
+	for index := 0; index < 300; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%03d", index), "value")
+	}
+
+	cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+	defer cursor.close(trie)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	scanDone := make(chan error, 1)
+	go func() {
+		first := true
+		_, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, 300, cursor, func(Entry) error {
+			if first {
+				first = false
+				close(entered)
+				<-release
+			}
+			return nil
+		})
+		scanDone <- err
+	}()
+	<-entered
+
+	readDone := make(chan string, 1)
+	go func() { readDone <- trie.GetString("session:000") }()
+	select {
+	case got := <-readDone:
+		if got != "value" {
+			t.Fatalf("concurrent read = %q, want value", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		releaseOnce.Do(func() { close(release) })
+		<-scanDone
+		t.Fatal("concurrent read blocked behind read-only replication scan")
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := <-scanDone; err != nil {
+		t.Fatalf("read-only replication scan error = %v", err)
+	}
+}
+
+func TestReplicationSyncReadOnlyCursorStillBlocksWriters(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:scan", "value")
+
+	cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+	defer cursor.close(trie)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	scanDone := make(chan error, 1)
+	go func() {
+		_, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, 1, cursor, func(Entry) error {
+			close(entered)
+			<-release
+			return nil
+		})
+		scanDone <- err
+	}()
+	<-entered
+
+	writeDone := make(chan struct{})
+	go func() {
+		trie.UpsertString("writer:key", "value")
+		close(writeDone)
+	}()
+	select {
+	case <-writeDone:
+		close(release)
+		<-scanDone
+		t.Fatal("writer completed before the consistent replication scan released its lock")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	if err := <-scanDone; err != nil {
+		t.Fatalf("read-only replication scan error = %v", err)
+	}
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("writer remained blocked after the replication scan completed")
+	}
+}
+
+func TestReplicationSyncReadOnlyCursorWithTTLRetainsExclusivePath(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:scan", "value")
+	trie.UpsertString("session:read", "value")
+	if !trie.Expire("session:scan", time.Hour) {
+		t.Fatal("Expire(session:scan) = false")
+	}
+
+	cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+	defer cursor.close(trie)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	scanDone := make(chan error, 1)
+	go func() {
+		_, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, 2, cursor, func(Entry) error {
+			select {
+			case <-entered:
+			default:
+				close(entered)
+				<-release
+			}
+			return nil
+		})
+		scanDone <- err
+	}()
+	<-entered
+
+	readDone := make(chan struct{})
+	go func() {
+		_ = trie.GetString("session:read")
+		close(readDone)
+	}()
+	select {
+	case <-readDone:
+		close(release)
+		<-scanDone
+		t.Fatal("read bypassed replication scan while TTL cleanup was active")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	if err := <-scanDone; err != nil {
+		t.Fatalf("TTL replication scan error = %v", err)
+	}
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("read remained blocked after TTL replication scan completed")
+	}
+}
+
+func TestReplicationSyncReadOnlyCursorSerializesScans(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("session:scan", "value")
+
+	firstCursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+	secondCursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+	defer firstCursor.close(trie)
+	defer secondCursor.close(trie)
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, 1, firstCursor, func(Entry) error {
+			close(firstEntered)
+			<-releaseFirst
+			return nil
+		})
+		firstDone <- err
+	}()
+	<-firstEntered
+
+	secondEntered := make(chan struct{})
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, 1, secondCursor, func(Entry) error {
+			close(secondEntered)
+			return nil
+		})
+		secondDone <- err
+	}()
+	select {
+	case <-secondEntered:
+		close(releaseFirst)
+		<-firstDone
+		<-secondDone
+		t.Fatal("second read-only replication scan overlapped the first scan")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first read-only replication scan error = %v", err)
+	}
+	select {
+	case <-secondEntered:
+	case <-time.After(time.Second):
+		t.Fatal("second read-only replication scan remained blocked after the first completed")
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second read-only replication scan error = %v", err)
+	}
+}
+
+func TestReplicationSyncReadOnlyCursorCleansExpiredEntries(t *testing.T) {
+	trie := newTestTrie(t)
+	now := time.Unix(1700000000, 0)
+	trie.now = func() time.Time { return now }
+	trie.UpsertString("session:expired", "expired")
+	trie.UpsertString("session:live", "live")
+	if !trie.ExpireAt("session:expired", now.Add(time.Hour)) {
+		t.Fatal("ExpireAt(session:expired) = false")
+	}
+	now = now.Add(2 * time.Hour)
+
+	cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: true}
+	defer cursor.close(trie)
+	var keys []string
+	page, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, 2, cursor, func(entry Entry) error {
+		keys = append(keys, strings.Clone(entry.Key))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("read-only replication scan error = %v", err)
+	}
+	if page.hasMore || !reflect.DeepEqual(keys, []string{"session:live"}) {
+		t.Fatalf("read-only replication scan = %#v keys=%#v, want only live entry", page, keys)
+	}
+	trie.mu.RLock()
+	_, tracked := trie.expires["session:expired"]
+	trie.mu.RUnlock()
+	if tracked {
+		t.Fatal("expired replication entry remained tracked after scan cleanup")
+	}
+}
+
 func TestReplicationSyncCursorRestartsAfterMutation(t *testing.T) {
 	trie := newTestTrie(t)
 	for _, key := range []string{"session:1", "session:3", "session:5"} {

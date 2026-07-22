@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -296,6 +297,113 @@ func BenchmarkHTTPReplicatorLegacyFallbackReaderPause(b *testing.B) {
 	}
 	b.ReportMetric(keyCount, "keys/op")
 	b.ReportMetric(float64(maxPause.Load()), "max_read_pause_ns/op")
+}
+
+func BenchmarkReplicationFallbackScanReaderPause(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+
+	for _, test := range []struct {
+		name   string
+		shared bool
+	}{
+		{name: "Exclusive"},
+		{name: "Shared", shared: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			var maxPause atomic.Int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				stop := make(chan struct{})
+				ready := make(chan struct{})
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					close(ready)
+					for {
+						select {
+						case <-stop:
+							return
+						default:
+						}
+						started := time.Now()
+						_ = trie.GetString("session:00000000")
+						updateAtomicMax(&maxPause, time.Since(started).Nanoseconds())
+					}
+				}()
+				<-ready
+				cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: test.shared}
+				page, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, keyCount, cursor, nil)
+				cursor.close(trie)
+				close(stop)
+				<-done
+				if err != nil || page.hasMore || page.scanned != keyCount {
+					b.Fatalf("fallback scan = %#v/%v, want %d entries", page, err, keyCount)
+				}
+			}
+			b.ReportMetric(float64(maxPause.Load()), "max_read_pause_ns/op")
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
+}
+
+func BenchmarkReplicationFallbackScanWriterPause(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for index := 0; index < keyCount; index++ {
+		trie.UpsertString(fmt.Sprintf("session:%08d", index), "value")
+	}
+
+	for _, test := range []struct {
+		name   string
+		shared bool
+	}{
+		{name: "Exclusive"},
+		{name: "Shared", shared: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			var totalPause int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				cursor := &replicationSyncCursor{packedKeys: true, sharedReadOnly: test.shared}
+				scanStarted := make(chan struct{})
+				writerStarted := make(chan struct{})
+				writerPause := make(chan int64, 1)
+				go func() {
+					<-scanStarted
+					started := time.Now()
+					close(writerStarted)
+					trie.UpsertString("writer:key", "value")
+					writerPause <- time.Since(started).Nanoseconds()
+				}()
+				first := true
+				page, err := replicationSyncEntriesPageWithCursor(trie, "session:", "", false, keyCount, cursor, func(Entry) error {
+					if first {
+						first = false
+						close(scanStarted)
+						<-writerStarted
+						runtime.Gosched()
+					}
+					return nil
+				})
+				cursor.close(trie)
+				if err != nil || page.hasMore || page.scanned != keyCount {
+					b.Fatalf("fallback scan = %#v/%v, want %d entries", page, err, keyCount)
+				}
+				totalPause += <-writerPause
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(totalPause)/float64(b.N), "writer_pause_ns/op")
+			b.ReportMetric(keyCount, "keys/op")
+		})
+	}
 }
 
 func BenchmarkReplicationDigestChangesDefaultWire(b *testing.B) {

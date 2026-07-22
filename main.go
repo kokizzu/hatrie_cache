@@ -2329,6 +2329,7 @@ type HatTrie struct {
 	mu                         sync.RWMutex
 	telemetryMu                sync.Mutex
 	snapshotCaptureMu          sync.Mutex
+	replicationReadOnlyScanMu  sync.Mutex
 	counterWriteStripes        []sync.RWMutex
 	counterWriteStripeMask     uint64
 	counterFastPathWrites      uint64

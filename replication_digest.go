@@ -835,6 +835,7 @@ func (iterator *replicationDigestSourceIterator) appendFallbackKeys(arena *repli
 		limit = 1
 	}
 	iterator.cursor.packedKeys = true
+	iterator.cursor.sharedReadOnly = true
 	page, err := replicationSyncEntriesPageWithCursor(iterator.trie, iterator.inventory.prefix, iterator.afterKey, iterator.hasAfterKey, limit, &iterator.cursor, func(entry Entry) error {
 		included, err := iterator.includes(entry)
 		if err != nil || !included {
