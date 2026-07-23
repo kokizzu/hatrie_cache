@@ -2006,6 +2006,68 @@ func TestClusterJoinTopologyAddsReplica(t *testing.T) {
 	if changed || !reflect.DeepEqual(again, updated) {
 		t.Fatalf("existing join changed topology = %v %#v, want unchanged", changed, again)
 	}
+	if _, _, err := clusterJoinTopology(updated, "node-b", "http://node-b-new:8080", "replica"); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("clusterJoinTopology(identity collision) error = %v, want explicit replacement requirement", err)
+	}
+}
+
+func TestClusterAddReplicaTopologyRejectsIdentityConflicts(t *testing.T) {
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+			{ID: "node-b", Address: "http://node-b-old:8080", Role: "replica"},
+			{ID: "node-c", Address: "http://node-c:8080", Role: "replica"},
+		},
+	}
+
+	if _, _, _, err := clusterAddReplicaTopology(topology, "node-b", "http://node-b-new:8080", false); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("clusterAddReplicaTopology(id collision) error = %v, want existing-id rejection", err)
+	}
+	updated, changed, replaced, err := clusterAddReplicaTopology(topology, "node-b", "http://node-b-new:8080", true)
+	if err != nil {
+		t.Fatalf("clusterAddReplicaTopology(replace) error = %v", err)
+	}
+	if !changed || !replaced {
+		t.Fatalf("clusterAddReplicaTopology(replace) changed/replaced = %v/%v, want true/true", changed, replaced)
+	}
+	for _, node := range updated.Nodes {
+		if node.ID == "node-b" && node.Address != "http://node-b-new:8080" {
+			t.Fatalf("replacement node address = %q, want new address", node.Address)
+		}
+	}
+
+	if _, _, _, err := clusterAddReplicaTopology(topology, "node-d", "http://node-c:8080", true); err == nil || !strings.Contains(err.Error(), "already belongs") {
+		t.Fatalf("clusterAddReplicaTopology(address collision) error = %v, want address-owner rejection", err)
+	}
+	if _, _, _, err := clusterAddReplicaTopology(topology, "node-a", "http://node-a:8080", true); err == nil || !strings.Contains(err.Error(), "primary") {
+		t.Fatalf("clusterAddReplicaTopology(primary) error = %v, want primary rejection", err)
+	}
+}
+
+func TestClusterAddReplicaTopologyIsIdempotent(t *testing.T) {
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeSharded,
+		Self:    "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+			{ID: "node-b", Address: "http://node-b:8080", Role: "replica"},
+		},
+		Shards: []hatriecache.TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	}
+	updated, changed, replaced, err := clusterAddReplicaTopology(topology, "node-b", "http://node-b:8080/", false)
+	if err != nil {
+		t.Fatalf("clusterAddReplicaTopology(idempotent) error = %v", err)
+	}
+	if changed || replaced {
+		t.Fatalf("clusterAddReplicaTopology(idempotent) changed/replaced = %v/%v, want false/false", changed, replaced)
+	}
+	if !reflect.DeepEqual(updated, topology) {
+		t.Fatalf("clusterAddReplicaTopology(idempotent) = %#v, want %#v", updated, topology)
+	}
 }
 
 func TestClusterRemoveTopologyRemovesReplica(t *testing.T) {
@@ -2397,6 +2459,127 @@ func TestRunClusterJoinRequiresNodeAndAddress(t *testing.T) {
 	err = run(context.Background(), []string{"cluster", "join", "-node", "node-b"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
 	if err == nil || !strings.Contains(err.Error(), "cluster join -address is required") {
 		t.Fatalf("run(cluster join without address) error = %v, want address requirement", err)
+	}
+}
+
+func TestRunClusterAddReplicaStagesCatchupBeforeActivation(t *testing.T) {
+	var peerURL string
+	var targetURL string
+	initial := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeSharded,
+			Self:    "node-a",
+			Nodes:   []hatriecache.TopologyNode{{ID: "node-a", Address: peerURL, Role: "primary"}},
+			Shards:  []hatriecache.TopologyShard{{ID: 0, Primary: "node-a"}},
+		}
+	}
+	var sequence []string
+	var peerTopology hatriecache.ClusterTopology
+	var targetTopology hatriecache.ClusterTopology
+	var topologyReads int
+	var finalSync bool
+
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a", APIVersion: hatriecache.MonitoringAPIVersion})
+		case "GET /api/topology":
+			topologyReads++
+			if len(peerTopology.Nodes) == 0 {
+				json.NewEncoder(w).Encode(initial())
+			} else {
+				json.NewEncoder(w).Encode(peerTopology)
+			}
+		case "PUT /api/topology":
+			sequence = append(sequence, "activate-peer")
+			if err := json.NewDecoder(r.Body).Decode(&peerTopology); err != nil {
+				t.Fatalf("Decode(peer topology) error = %v", err)
+			}
+			json.NewEncoder(w).Encode(peerTopology)
+		case "POST /api/replication":
+			sequence = append(sequence, "final-sync")
+			finalSync = true
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{Health: "healthy", HealthScore: 100})
+		default:
+			t.Fatalf("unexpected peer request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer peer.Close()
+	peerURL = peer.URL
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-b", APIVersion: hatriecache.MonitoringAPIVersion})
+		case "GET /api/storage":
+			w.Write([]byte(`{"configured":true,"store":"pebble"}`))
+		case "POST /api/journal":
+			sequence = append(sequence, "catch-up")
+			var request struct {
+				Source       string `json:"source"`
+				UntilCurrent bool   `json:"until_current"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("Decode(journal request) error = %v", err)
+			}
+			if request.Source != peerURL || !request.UntilCurrent {
+				t.Fatalf("journal request = %#v, want peer until current", request)
+			}
+			w.Write([]byte(`{"applied":3,"applied_through":3}`))
+		case "PUT /api/topology":
+			sequence = append(sequence, "activate-target")
+			if err := json.NewDecoder(r.Body).Decode(&targetTopology); err != nil {
+				t.Fatalf("Decode(target topology) error = %v", err)
+			}
+			json.NewEncoder(w).Encode(targetTopology)
+		case "GET /api/topology":
+			json.NewEncoder(w).Encode(targetTopology)
+		default:
+			t.Fatalf("unexpected target request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer target.Close()
+	targetURL = target.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", peerURL,
+		"cluster", "add-replica",
+		"-address", targetURL,
+	}, stdout, &bytes.Buffer{}, peer.Client()); err != nil {
+		t.Fatalf("run(cluster add-replica) error = %v", err)
+	}
+	if topologyReads < 3 {
+		t.Fatalf("topology reads = %d, want initial, post-catch-up, and verification reads", topologyReads)
+	}
+	if len(sequence) < 4 || sequence[0] != "catch-up" || sequence[1] != "activate-peer" || sequence[2] != "activate-target" || sequence[3] != "final-sync" {
+		t.Fatalf("operation sequence = %#v, want catch-up before activation and final sync", sequence)
+	}
+	if !finalSync || peerTopology.Self != "node-a" || targetTopology.Self != "node-b" {
+		t.Fatalf("final state sync=%v peer-self=%q target-self=%q", finalSync, peerTopology.Self, targetTopology.Self)
+	}
+	var result clusterAddReplicaResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster add-replica result) error = %v", err)
+	}
+	if !result.OK || result.Node != "node-b" || !result.JournalPulled || !result.FinalSync || !result.TopologyVerified || !reflect.DeepEqual(result.NodesUpdated, []string{"node-a", "node-b"}) {
+		t.Fatalf("cluster add-replica result = %#v, want complete staged workflow", result)
+	}
+}
+
+func TestRunClusterAddReplicaRejectsTargetIdentityMismatch(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-other"})
+	}))
+	defer target.Close()
+	err := run(context.Background(), []string{
+		"cluster", "add-replica",
+		"-address", target.URL,
+		"-node", "node-b",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, target.Client())
+	if err == nil || !strings.Contains(err.Error(), "reports node") {
+		t.Fatalf("run(cluster add-replica identity mismatch) error = %v, want mismatch", err)
 	}
 }
 

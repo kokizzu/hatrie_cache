@@ -536,16 +536,34 @@ make cli ARGS='replication -sync -prefix session:'
 
 ### Joining A Cluster
 
-Use the CLI join workflow to add a running node as a replica, upload a
-node-local copy of the new topology to every member, and pull the peer journal
-into the joining node:
+Use the staged `add-replica` workflow for normal operation. The joining node id
+is discovered from its health endpoint, so only the existing peer and new node
+addresses are required:
+
+```sh
+make cli ARGS='cluster add-replica -peer http://node-a:8080 -address http://node-c:8080'
+make cli ARGS='cluster add-replica -peer http://node-a:8080 -address http://node-c-new:8080 -node node-c -replace'
+```
+
+The command checks target identity, online state, persistent storage, bearer
+authentication, and monitoring API compatibility. It rejects an existing node
+id at another address unless `-replace` is explicit and always rejects an
+address already owned by a different id. It pulls the journal before membership
+activation, fetches topology again after catch-up, uploads a recipient-local
+topology to every member, runs final anti-entropy sync, and verifies topology
+agreement. Use `-allow-memory-only` only for a deliberately volatile replica;
+use `-pull-journal=false` or `-final-sync=false` only when those stages are
+performed externally.
+
+The older `cluster join` workflow remains available as a lower-level operation
+for custom sequencing:
 
 ```
 make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080'
 make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080 -pull-journal=false'
 ```
 
-The default command performs a peer health check, fetches and validates the
+The lower-level command performs a peer health check, fetches and validates the
 topology, adds the node as a replica of every shard in sharded mode, propagates
 the topology to all members, and asks the new node to pull journal entries until
 current. Each upload sets `self` to the receiving node id. The JSON result lists
@@ -1799,6 +1817,7 @@ make cli ARGS='storage compact -start-key session: -limit-key session;'
 make cli ARGS='journal -after-sequence 42 -limit 1000'
 make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000'
 make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000 -until-current -max-batches 100'
+make cli ARGS='cluster add-replica -peer http://node-a:8080 -address http://node-c:8080'
 make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080'
 make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster doctor -peer http://node-a:8080'

@@ -850,6 +850,20 @@ type clusterJoinResult struct {
 	NodesUpdated    []string `json:"nodes_updated,omitempty"`
 }
 
+type clusterAddReplicaResult struct {
+	OK               bool     `json:"ok"`
+	Message          string   `json:"message"`
+	Peer             string   `json:"peer"`
+	Node             string   `json:"node"`
+	Address          string   `json:"address"`
+	Replaced         bool     `json:"replaced"`
+	TopologyUpdated  bool     `json:"topology_updated"`
+	JournalPulled    bool     `json:"journal_pulled"`
+	FinalSync        bool     `json:"final_sync"`
+	TopologyVerified bool     `json:"topology_verified"`
+	NodesUpdated     []string `json:"nodes_updated,omitempty"`
+}
+
 type clusterRemoveResult struct {
 	OK              bool     `json:"ok"`
 	Message         string   `json:"message"`
@@ -888,9 +902,11 @@ type clusterNodeStatus struct {
 
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("cluster subcommand is required: join, remove, status, doctor")
+		return errors.New("cluster subcommand is required: add-replica, join, remove, status, doctor")
 	}
 	switch args[0] {
+	case "add-replica":
+		return runClusterAddReplica(ctx, client, addr, args[1:], stdout, stderr)
 	case "join":
 		return runClusterJoin(ctx, client, addr, args[1:], stdout, stderr)
 	case "remove":
@@ -1066,6 +1082,135 @@ func clusterNodeErrors(node clusterNodeStatus) []string {
 	return out
 }
 
+func runClusterAddReplica(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cluster add-replica", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	peer := flags.String("peer", addr, "existing cluster node monitoring API base URL")
+	nodeAddress := flags.String("address", "", "joining node monitoring API base URL")
+	nodeID := flags.String("node", "", "expected joining node id; defaults to the target health identity")
+	replace := flags.Bool("replace", false, "allow the same replica id to move to a new address")
+	pullJournal := flags.Bool("pull-journal", true, "catch the joining node up before activating membership")
+	finalSync := flags.Bool("final-sync", true, "run anti-entropy replication after activating membership")
+	allowMemoryOnly := flags.Bool("allow-memory-only", false, "allow a joining node without persistent storage")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*peer = strings.TrimSpace(*peer)
+	*nodeAddress = strings.TrimRight(strings.TrimSpace(*nodeAddress), "/")
+	*nodeID = strings.TrimSpace(*nodeID)
+	if *peer == "" {
+		return errors.New("cluster add-replica -peer is required")
+	}
+	if *nodeAddress == "" {
+		return errors.New("cluster add-replica -address is required")
+	}
+
+	targetHealth, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, *nodeAddress, "/api/health")
+	if err != nil {
+		return fmt.Errorf("joining node health: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(targetHealth.Status), "online") {
+		return fmt.Errorf("joining node is not online: %q", targetHealth.Status)
+	}
+	targetNodeID := strings.TrimSpace(targetHealth.Node)
+	if targetNodeID == "" {
+		return errors.New("joining node health did not report a node id")
+	}
+	if *nodeID != "" && *nodeID != targetNodeID {
+		return fmt.Errorf("joining endpoint reports node %q, not requested node %q", targetNodeID, *nodeID)
+	}
+	*nodeID = targetNodeID
+
+	var targetStorage struct {
+		Configured bool `json:"configured"`
+	}
+	targetStorage, err = getJSONValue[struct {
+		Configured bool `json:"configured"`
+	}](ctx, client, *nodeAddress, "/api/storage")
+	if err != nil {
+		return fmt.Errorf("joining node storage: %w", err)
+	}
+	if !targetStorage.Configured && !*allowMemoryOnly {
+		return errors.New("joining node has no persistent storage; configure storage or pass -allow-memory-only")
+	}
+
+	peerHealth, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, *peer, "/api/health")
+	if err != nil {
+		return fmt.Errorf("peer health: %w", err)
+	}
+	if peerHealth.APIVersion != 0 && targetHealth.APIVersion != 0 && peerHealth.APIVersion != targetHealth.APIVersion {
+		return fmt.Errorf("monitoring API version mismatch: peer %d, joining node %d", peerHealth.APIVersion, targetHealth.APIVersion)
+	}
+
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("peer topology: %w", err)
+	}
+	if _, _, _, err := clusterAddReplicaTopology(topology, *nodeID, *nodeAddress, *replace); err != nil {
+		return err
+	}
+
+	journalPulled := false
+	if *pullJournal {
+		body, err := jsonwire.Marshal(struct {
+			Source       string `json:"source"`
+			UntilCurrent bool   `json:"until_current"`
+		}{Source: *peer, UntilCurrent: true})
+		if err != nil {
+			return err
+		}
+		if err := postJSON(ctx, client, *nodeAddress, "/api/journal", body, io.Discard); err != nil {
+			return fmt.Errorf("catch up joining node journal: %w", err)
+		}
+		journalPulled = true
+	}
+
+	latest, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("refresh peer topology after catch-up: %w", err)
+	}
+	updated, topologyChanged, replaced, err := clusterAddReplicaTopology(latest, *nodeID, *nodeAddress, *replace)
+	if err != nil {
+		return fmt.Errorf("refreshed topology: %w", err)
+	}
+	peerNode := clusterPeerNodeID(latest, *peer)
+	nodesUpdated, err := putTopologyToNodes(ctx, client, updated, *peer, peerNode, nil)
+	if err != nil {
+		return fmt.Errorf("activate replica topology: %w", err)
+	}
+
+	finalSyncRan := false
+	if *finalSync {
+		if err := postJSON(ctx, client, *peer, "/api/replication", []byte("{}"), io.Discard); err != nil {
+			return fmt.Errorf("final anti-entropy sync: %w", err)
+		}
+		finalSyncRan = true
+	}
+	if err := verifyTopologyOnNodes(ctx, client, updated, *peer, peerNode); err != nil {
+		return fmt.Errorf("verify activated topology: %w", err)
+	}
+
+	result := clusterAddReplicaResult{
+		OK:               true,
+		Message:          "cluster replica added and verified",
+		Peer:             *peer,
+		Node:             *nodeID,
+		Address:          *nodeAddress,
+		Replaced:         replaced,
+		TopologyUpdated:  topologyChanged,
+		JournalPulled:    journalPulled,
+		FinalSync:        finalSyncRan,
+		TopologyVerified: true,
+		NodesUpdated:     nodesUpdated,
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
 func runClusterJoin(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("cluster join", flag.ContinueOnError)
 	flags.SetOutput(cliWriter(stderr))
@@ -1073,6 +1218,7 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 	nodeAddress := flags.String("address", "", "joining node monitoring API base URL")
 	peer := flags.String("peer", addr, "existing cluster node monitoring API base URL")
 	role := flags.String("role", "replica", "topology role for the joining node: primary or replica")
+	replace := flags.Bool("replace", false, "allow the same node id to move to a new address")
 	updateTarget := flags.Bool("update-target", true, "upload the updated topology to the joining node")
 	updateNodes := flags.Bool("update-nodes", true, "upload the updated topology to every reachable cluster node")
 	pullJournal := flags.Bool("pull-journal", true, "pull the peer journal into the joining node after topology update")
@@ -1100,7 +1246,7 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 	if err != nil {
 		return fmt.Errorf("peer topology: %w", err)
 	}
-	updated, topologyChanged, err := clusterJoinTopology(topology, *nodeID, *nodeAddress, *role)
+	updated, topologyChanged, err := clusterJoinTopologyWithReplace(topology, *nodeID, *nodeAddress, *role, *replace)
 	if err != nil {
 		return err
 	}
@@ -1236,8 +1382,12 @@ func runClusterRemove(ctx context.Context, client *http.Client, addr string, arg
 }
 
 func clusterJoinTopology(topology hatriecache.ClusterTopology, nodeID string, address string, role string) (hatriecache.ClusterTopology, bool, error) {
+	return clusterJoinTopologyWithReplace(topology, nodeID, address, role, false)
+}
+
+func clusterJoinTopologyWithReplace(topology hatriecache.ClusterTopology, nodeID string, address string, role string, replace bool) (hatriecache.ClusterTopology, bool, error) {
 	nodeID = strings.TrimSpace(nodeID)
-	address = strings.TrimSpace(address)
+	address = strings.TrimRight(strings.TrimSpace(address), "/")
 	role = strings.TrimSpace(role)
 	if nodeID == "" {
 		return hatriecache.ClusterTopology{}, false, errors.New("cluster join node id is required")
@@ -1250,6 +1400,15 @@ func clusterJoinTopology(topology hatriecache.ClusterTopology, nodeID string, ad
 	}
 	if role != "primary" && role != "replica" {
 		return hatriecache.ClusterTopology{}, false, errors.New("cluster join role must be primary or replica")
+	}
+	for _, node := range topology.Nodes {
+		nodeAddress := strings.TrimRight(strings.TrimSpace(node.Address), "/")
+		if nodeAddress == address && strings.TrimSpace(node.ID) != nodeID {
+			return hatriecache.ClusterTopology{}, false, fmt.Errorf("cluster node address %q already belongs to node %q", address, node.ID)
+		}
+		if strings.TrimSpace(node.ID) == nodeID && nodeAddress != address && !replace {
+			return hatriecache.ClusterTopology{}, false, fmt.Errorf("cluster node %q already exists at %q; use -replace to move it", nodeID, node.Address)
+		}
 	}
 
 	changed := false
@@ -1287,6 +1446,75 @@ func clusterJoinTopology(topology hatriecache.ClusterTopology, nodeID string, ad
 		return hatriecache.ClusterTopology{}, false, err
 	}
 	return store.Get(), changed, nil
+}
+
+func clusterAddReplicaTopology(topology hatriecache.ClusterTopology, nodeID string, address string, replace bool) (hatriecache.ClusterTopology, bool, bool, error) {
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return hatriecache.ClusterTopology{}, false, false, err
+	}
+	normalized := store.Get()
+	nodeID = strings.TrimSpace(nodeID)
+	address = strings.TrimRight(strings.TrimSpace(address), "/")
+	if nodeID == "" {
+		return hatriecache.ClusterTopology{}, false, false, errors.New("cluster add-replica node id is required")
+	}
+	if address == "" {
+		return hatriecache.ClusterTopology{}, false, false, errors.New("cluster add-replica node address is required")
+	}
+
+	replaced := false
+	for _, node := range normalized.Nodes {
+		nodeAddress := strings.TrimRight(strings.TrimSpace(node.Address), "/")
+		if nodeAddress == address && node.ID != nodeID {
+			return hatriecache.ClusterTopology{}, false, false, fmt.Errorf("cluster node address %q already belongs to node %q", address, node.ID)
+		}
+		if node.ID != nodeID {
+			continue
+		}
+		if strings.TrimSpace(node.Role) == "primary" {
+			return hatriecache.ClusterTopology{}, false, false, fmt.Errorf("cluster node %q is primary and cannot be added as a replica", nodeID)
+		}
+		if nodeAddress != address {
+			if !replace {
+				return hatriecache.ClusterTopology{}, false, false, fmt.Errorf("cluster node %q already exists at %q; use -replace to move it", nodeID, node.Address)
+			}
+			replaced = true
+		}
+	}
+
+	updated, changed, err := clusterJoinTopologyWithReplace(normalized, nodeID, address, "replica", replace)
+	if err != nil {
+		return hatriecache.ClusterTopology{}, false, false, err
+	}
+	return updated, changed, replaced, nil
+}
+
+func verifyTopologyOnNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, peer string, peerNode string) error {
+	for _, node := range topology.Nodes {
+		address := strings.TrimSpace(node.Address)
+		if node.ID == peerNode {
+			address = strings.TrimSpace(peer)
+		}
+		if address == "" {
+			return fmt.Errorf("node %q has no monitoring address", node.ID)
+		}
+		observed, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, address, "/api/topology")
+		if err != nil {
+			return fmt.Errorf("node %q: %w", node.ID, err)
+		}
+		if observed.Self != node.ID {
+			return fmt.Errorf("node %q reports topology self %q", node.ID, observed.Self)
+		}
+		consistent, err := clusterTopologiesConsistent(topology, observed)
+		if err != nil {
+			return fmt.Errorf("node %q: %w", node.ID, err)
+		}
+		if !consistent {
+			return fmt.Errorf("node %q topology differs after update", node.ID)
+		}
+	}
+	return nil
 }
 
 func clusterRemoveTopology(topology hatriecache.ClusterTopology, nodeID string) (hatriecache.ClusterTopology, bool, error) {

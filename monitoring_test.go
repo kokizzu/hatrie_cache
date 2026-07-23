@@ -209,7 +209,7 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(healthResp.Body.Bytes(), &health); err != nil {
 		t.Fatalf("health JSON error = %v", err)
 	}
-	if health.Node != "test-node" || health.Status != "online" {
+	if health.Node != "test-node" || health.Status != "online" || health.APIVersion != MonitoringAPIVersion {
 		t.Fatalf("health = %#v, want test-node online", health)
 	}
 

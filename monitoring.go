@@ -22,6 +22,7 @@ import (
 )
 
 const (
+	MonitoringAPIVersion                       = 1
 	maxCommandJournalTailResponseBytes         = 1 << 20
 	maxCommandJournalErrorResponseBytes        = 1 << 20
 	maxMonitoringJSONRequestBytes              = 1 << 20
@@ -90,6 +91,7 @@ type preparedInternalReplicationPayload struct {
 type MonitoringHealth struct {
 	Status          string `json:"status"`
 	Node            string `json:"node"`
+	APIVersion      int    `json:"api_version"`
 	UptimeSeconds   int64  `json:"uptime_seconds"`
 	MemoryBytes     uint64 `json:"memory_bytes"`
 	DiskSpillBytes  uint64 `json:"disk_spill_bytes"`
@@ -413,6 +415,7 @@ func (handler *MonitoringHandler) handleHealth(w http.ResponseWriter, r *http.Re
 	writeJSON(w, MonitoringHealth{
 		Status:          "online",
 		Node:            handler.options.NodeName,
+		APIVersion:      MonitoringAPIVersion,
 		UptimeSeconds:   int64(time.Since(handler.options.StartAt).Seconds()),
 		MemoryBytes:     mem.Alloc,
 		DiskSpillBytes:  handler.trie.diskSpillBytes(),
