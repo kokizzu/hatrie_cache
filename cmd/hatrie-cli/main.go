@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"hatrie_cache/internal/jsonwire"
@@ -57,11 +58,22 @@ type supportBundleResult struct {
 	Generated string `json:"generated_at"`
 }
 
+type profileCaptureResult struct {
+	OK             bool   `json:"ok"`
+	Path           string `json:"path"`
+	Type           string `json:"type"`
+	Bytes          int64  `json:"bytes"`
+	SHA256         string `json:"sha256"`
+	DurationMillis int64  `json:"duration_millis,omitempty"`
+}
+
 type supportBundleManifest struct {
-	Version     int                         `json:"version"`
-	GeneratedAt string                      `json:"generated_at"`
-	Peer        string                      `json:"peer"`
-	Nodes       []supportBundleManifestNode `json:"nodes"`
+	Version               int                         `json:"version"`
+	GeneratedAt           string                      `json:"generated_at"`
+	Peer                  string                      `json:"peer"`
+	Profiles              []string                    `json:"profiles,omitempty"`
+	ProfileDurationMillis int64                       `json:"profile_duration_millis,omitempty"`
+	Nodes                 []supportBundleManifestNode `json:"nodes"`
 }
 
 type supportBundleManifestNode struct {
@@ -84,6 +96,11 @@ const truncatedErrorBodySuffix = "\n... response body truncated"
 const minCompressedJSONRequestBytes = 16 << 10
 const defaultCommandWireFormat = "auto"
 const defaultRequestTimeout = 30 * time.Second
+const minCLIProfileDuration = time.Second
+const maxCLIProfileDuration = 30 * time.Second
+const defaultCLIProfileDuration = 10 * time.Second
+const maxCLIProfileBytes = 256 << 20
+const profileErrorTrailer = "X-Hatrie-Profile-Error"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, http.DefaultClient); err != nil {
@@ -131,7 +148,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, snapshot, backup, backup-and-verify, restore-bundle, restore-rehearsal, support-bundle, cluster, doctor")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, snapshot, backup, backup-and-verify, restore-bundle, restore-rehearsal, support-bundle, profile, cluster, doctor")
 	}
 
 	switch remaining[0] {
@@ -161,6 +178,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runBackupAndVerify(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "support-bundle":
 		return runSupportBundle(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "profile":
+		return runProfile(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "restore-bundle":
 		return runRestoreBundle(remaining[1:], stdout, stderr)
 	case "restore-rehearsal":
@@ -606,6 +625,213 @@ type backupPathRequestCLI struct {
 
 const maxSupportBundleEndpointBytes = 4 << 20
 
+type profileCaptureRequestCLI struct {
+	Type           string `json:"type"`
+	DurationMillis int64  `json:"duration_millis,omitempty"`
+}
+
+type profileSpool struct {
+	path   string
+	bytes  int64
+	sha256 string
+}
+
+type supportBundleProfileResult struct {
+	spool profileSpool
+	err   error
+}
+
+func runProfile(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	if len(args) == 0 || args[0] != "capture" {
+		return errors.New("profile subcommand is required: capture")
+	}
+	flags := flag.NewFlagSet("profile capture", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	profileType := flags.String("type", "cpu", "profile type: cpu, heap, or goroutine")
+	duration := flags.Duration("duration", 0, "CPU capture duration; defaults to 10s")
+	outputPath := flags.String("path", "", "output .pprof path")
+	overwrite := flags.Bool("overwrite", false, "replace an existing regular output file")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected profile capture arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	types, err := parseProfileTypes(*profileType)
+	if err != nil || len(types) != 1 {
+		if err != nil {
+			return err
+		}
+		return errors.New("profile capture accepts exactly one type")
+	}
+	*outputPath = strings.TrimSpace(*outputPath)
+	if *outputPath == "" {
+		return errors.New("profile capture -path is required")
+	}
+	requestedDuration, err := normalizedProfileDuration(types[0], *duration)
+	if err != nil {
+		return err
+	}
+	if err := validateAtomicOutputPath(*outputPath, *overwrite, "profile capture"); err != nil {
+		return err
+	}
+	parent := filepath.Dir(*outputPath)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return err
+	}
+	spool, err := fetchProfileToTemp(ctx, client, addr, types[0], requestedDuration, parent)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(spool.path)
+	if err := commitProfileSpool(spool.path, *outputPath, *overwrite); err != nil {
+		return err
+	}
+	spool.path = *outputPath
+	result := profileCaptureResult{
+		OK:             true,
+		Path:           *outputPath,
+		Type:           types[0],
+		Bytes:          spool.bytes,
+		SHA256:         spool.sha256,
+		DurationMillis: requestedDuration.Milliseconds(),
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+func parseProfileTypes(value string) ([]string, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, 3)
+	out := make([]string, 0, 3)
+	for _, raw := range strings.Split(value, ",") {
+		profileType := strings.ToLower(strings.TrimSpace(raw))
+		switch profileType {
+		case "cpu", "heap", "goroutine":
+		default:
+			return nil, fmt.Errorf("profile type %q must be cpu, heap, or goroutine", raw)
+		}
+		if _, ok := seen[profileType]; ok {
+			continue
+		}
+		seen[profileType] = struct{}{}
+		out = append(out, profileType)
+	}
+	return out, nil
+}
+
+func normalizedProfileDuration(profileType string, duration time.Duration) (time.Duration, error) {
+	if profileType != "cpu" {
+		if duration != 0 {
+			return 0, fmt.Errorf("%s profile does not accept -duration", profileType)
+		}
+		return 0, nil
+	}
+	if duration == 0 {
+		duration = defaultCLIProfileDuration
+	}
+	if duration < minCLIProfileDuration || duration > maxCLIProfileDuration {
+		return 0, errors.New("CPU profile duration must be between 1s and 30s")
+	}
+	return duration, nil
+}
+
+func validateAtomicOutputPath(path string, overwrite bool, action string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("%s output path must be a regular file", action)
+	}
+	if !overwrite {
+		return fmt.Errorf("%s output already exists; pass -overwrite to replace it", action)
+	}
+	return nil
+}
+
+func fetchProfileToTemp(ctx context.Context, client *http.Client, addr string, profileType string, duration time.Duration, dir string) (spool profileSpool, returnErr error) {
+	requestBody, err := jsonwire.Marshal(profileCaptureRequestCLI{Type: profileType, DurationMillis: duration.Milliseconds()})
+	if err != nil {
+		return profileSpool{}, err
+	}
+	request, err := http.NewRequestWithContext(cliContext(ctx), http.MethodPost, endpoint(addr, "/api/profile"), bytes.NewReader(requestBody))
+	if err != nil {
+		return profileSpool{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept-Encoding", "identity")
+	response, err := cliHTTPClient(client).Do(request)
+	if err != nil {
+		return profileSpool{}, err
+	}
+	defer drainAndCloseResponse(response.Body)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, readErr := readErrorBody(response.Body)
+		if readErr != nil {
+			return profileSpool{}, readErr
+		}
+		return profileSpool{}, &commandHTTPError{status: response.Status, statusCode: response.StatusCode, message: strings.TrimSpace(string(body))}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return profileSpool{}, err
+	}
+	temp, err := os.CreateTemp(dir, ".hatrie-profile-*.pprof")
+	if err != nil {
+		return profileSpool{}, err
+	}
+	tempPath := temp.Name()
+	spool.path = tempPath
+	defer func() {
+		if returnErr != nil {
+			temp.Close()
+			os.Remove(tempPath)
+		}
+	}()
+	if err := temp.Chmod(0o600); err != nil {
+		return profileSpool{}, err
+	}
+	hash := sha256.New()
+	limited := &io.LimitedReader{R: response.Body, N: maxCLIProfileBytes + 1}
+	spool.bytes, err = io.Copy(io.MultiWriter(temp, hash), limited)
+	if err != nil {
+		return profileSpool{}, err
+	}
+	if profileErr := strings.TrimSpace(response.Trailer.Get(profileErrorTrailer)); profileErr != "" {
+		return profileSpool{}, fmt.Errorf("profile capture failed: %s", profileErr)
+	}
+	if spool.bytes > maxCLIProfileBytes {
+		return profileSpool{}, errors.New("profile exceeds 256 MiB client limit")
+	}
+	if err := temp.Sync(); err != nil {
+		return profileSpool{}, err
+	}
+	if err := temp.Close(); err != nil {
+		return profileSpool{}, err
+	}
+	spool.sha256 = hex.EncodeToString(hash.Sum(nil))
+	return spool, nil
+}
+
+func commitProfileSpool(tempPath string, outputPath string, overwrite bool) error {
+	if err := validateAtomicOutputPath(outputPath, overwrite, "profile capture"); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, outputPath); err != nil {
+		return err
+	}
+	return os.Chmod(outputPath, 0o600)
+}
+
 func runSupportBundle(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) (returnErr error) {
 	flags := flag.NewFlagSet("support-bundle", flag.ContinueOnError)
 	flags.SetOutput(cliWriter(stderr))
@@ -613,6 +839,8 @@ func runSupportBundle(ctx context.Context, client *http.Client, addr string, arg
 	outputPath := flags.String("path", "", "output .tar.gz path")
 	auditLimit := flags.Int("audit-limit", 128, "recent audit events per node")
 	includeMetrics := flags.Bool("metrics", true, "include Prometheus metrics from every node")
+	profileValues := flags.String("profiles", "", "comma-separated profiles to include: cpu, heap, goroutine")
+	profileDuration := flags.Duration("profile-duration", defaultCLIProfileDuration, "CPU profile duration per node")
 	overwrite := flags.Bool("overwrite", false, "replace an existing regular output file")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -627,6 +855,20 @@ func runSupportBundle(ctx context.Context, client *http.Client, addr string, arg
 	}
 	if *auditLimit < 0 || *auditLimit > 128 {
 		return errors.New("support-bundle -audit-limit must be between 0 and 128")
+	}
+	profiles, err := parseProfileTypes(*profileValues)
+	if err != nil {
+		return err
+	}
+	cpuProfileDuration := time.Duration(0)
+	for _, profileType := range profiles {
+		if profileType == "cpu" {
+			cpuProfileDuration, err = normalizedProfileDuration(profileType, *profileDuration)
+			if err != nil {
+				return err
+			}
+			break
+		}
 	}
 	if info, err := os.Lstat(*outputPath); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
@@ -653,6 +895,22 @@ func runSupportBundle(ctx context.Context, client *http.Client, addr string, arg
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return err
 	}
+	profileTempDir := ""
+	if len(profiles) > 0 {
+		profileTempDir, err = os.MkdirTemp(parent, ".hatrie-support-profiles-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(profileTempDir)
+	}
+	nodeAddresses := make([]string, len(topology.Nodes))
+	for idx, node := range topology.Nodes {
+		nodeAddresses[idx] = strings.TrimSpace(node.Address)
+		if node.ID == peerNode {
+			nodeAddresses[idx] = *peer
+		}
+	}
+	profileResults := fetchSupportBundleProfiles(ctx, client, nodeAddresses, profiles, cpuProfileDuration, profileTempDir)
 	temp, err := os.CreateTemp(parent, ".hatrie-support-*.tar.gz")
 	if err != nil {
 		return err
@@ -672,10 +930,12 @@ func runSupportBundle(ctx context.Context, client *http.Client, addr string, arg
 	tarWriter := tar.NewWriter(gzipWriter)
 	generatedAt := time.Now().UTC()
 	manifest := supportBundleManifest{
-		Version:     1,
-		GeneratedAt: generatedAt.Format(time.RFC3339Nano),
-		Peer:        *peer,
-		Nodes:       make([]supportBundleManifestNode, 0, len(topology.Nodes)),
+		Version:               1,
+		GeneratedAt:           generatedAt.Format(time.RFC3339Nano),
+		Peer:                  *peer,
+		Profiles:              profiles,
+		ProfileDurationMillis: cpuProfileDuration.Milliseconds(),
+		Nodes:                 make([]supportBundleManifestNode, 0, len(topology.Nodes)),
 	}
 	errorCount := 0
 	jsonEndpoints := []struct {
@@ -691,10 +951,7 @@ func runSupportBundle(ctx context.Context, client *http.Client, addr string, arg
 		{Path: "/api/audit?limit=" + strconv.Itoa(*auditLimit), File: "audit.json"},
 	}
 	for idx, node := range topology.Nodes {
-		address := strings.TrimSpace(node.Address)
-		if node.ID == peerNode {
-			address = *peer
-		}
+		address := nodeAddresses[idx]
 		dir := fmt.Sprintf("nodes/%03d-%s", idx+1, supportBundleSlug(node.ID))
 		nodeManifest := supportBundleManifestNode{ID: node.ID, Address: address, Dir: dir, Errors: map[string]string{}}
 		for _, endpoint := range jsonEndpoints {
@@ -729,6 +986,21 @@ func runSupportBundle(ctx context.Context, client *http.Client, addr string, arg
 				}
 				nodeManifest.Entries = append(nodeManifest.Entries, entry)
 			}
+		}
+		for profileIdx, profileType := range profiles {
+			profileFile := "profiles/" + profileType + ".pprof"
+			profileResult := profileResults[idx][profileIdx]
+			if profileResult.err != nil {
+				nodeManifest.Errors[profileFile] = profileResult.err.Error()
+				errorCount++
+				continue
+			}
+			entry, writeErr := writeSupportBundleSpoolEntry(tarWriter, dir+"/"+profileFile, profileResult.spool, generatedAt)
+			os.Remove(profileResult.spool.path)
+			if writeErr != nil {
+				return writeErr
+			}
+			nodeManifest.Entries = append(nodeManifest.Entries, entry)
 		}
 		if len(nodeManifest.Errors) == 0 {
 			nodeManifest.Errors = nil
@@ -785,6 +1057,31 @@ func runSupportBundle(ctx context.Context, client *http.Client, addr string, arg
 	}
 	_, err = stdout.Write(append(data, '\n'))
 	return err
+}
+
+func fetchSupportBundleProfiles(ctx context.Context, client *http.Client, addresses []string, profiles []string, cpuDuration time.Duration, tempDir string) [][]supportBundleProfileResult {
+	results := make([][]supportBundleProfileResult, len(addresses))
+	if len(profiles) == 0 {
+		return results
+	}
+	var wait sync.WaitGroup
+	wait.Add(len(addresses))
+	for nodeIdx, address := range addresses {
+		results[nodeIdx] = make([]supportBundleProfileResult, len(profiles))
+		go func(nodeIdx int, address string) {
+			defer wait.Done()
+			for profileIdx, profileType := range profiles {
+				duration := time.Duration(0)
+				if profileType == "cpu" {
+					duration = cpuDuration
+				}
+				spool, err := fetchProfileToTemp(ctx, client, address, profileType, duration, tempDir)
+				results[nodeIdx][profileIdx] = supportBundleProfileResult{spool: spool, err: err}
+			}
+		}(nodeIdx, address)
+	}
+	wait.Wait()
+	return results
 }
 
 func supportBundleSlug(value string) string {
@@ -847,6 +1144,26 @@ func writeSupportBundleEntry(writer *tar.Writer, name string, data []byte, modif
 	}
 	digest := sha256.Sum256(data)
 	return supportBundleManifestEntry{Name: name, Bytes: int64(len(data)), SHA256: hex.EncodeToString(digest[:])}, nil
+}
+
+func writeSupportBundleSpoolEntry(writer *tar.Writer, name string, spool profileSpool, modified time.Time) (supportBundleManifestEntry, error) {
+	file, err := os.Open(spool.path)
+	if err != nil {
+		return supportBundleManifestEntry{}, err
+	}
+	defer file.Close()
+	header := &tar.Header{Name: name, Mode: 0o600, Size: spool.bytes, ModTime: modified}
+	if err := writer.WriteHeader(header); err != nil {
+		return supportBundleManifestEntry{}, err
+	}
+	written, err := io.Copy(writer, file)
+	if err != nil {
+		return supportBundleManifestEntry{}, err
+	}
+	if written != spool.bytes {
+		return supportBundleManifestEntry{}, fmt.Errorf("profile spool %s changed while archiving", spool.path)
+	}
+	return supportBundleManifestEntry{Name: name, Bytes: spool.bytes, SHA256: spool.sha256}, nil
 }
 
 func getLimitedHTTPBody(ctx context.Context, client *http.Client, addr string, path string, limit int64) ([]byte, error) {

@@ -488,6 +488,8 @@ whole cluster:
 ```sh
 make cli ARGS='support-bundle -path support/incident-001.tar.gz'
 make cli ARGS='support-bundle -path support/incident-001.tar.gz -audit-limit 64 -metrics=false -overwrite'
+make cli ARGS='support-bundle -path support/incident-001.tar.gz -profiles heap,goroutine'
+make cli ARGS='-timeout 45s support-bundle -path support/incident-001.tar.gz -profiles cpu,heap,goroutine -profile-duration 10s'
 ```
 
 The CLI discovers every node from cluster topology and collects health,
@@ -501,6 +503,43 @@ through a mode-`0600` temporary file and atomically renamed, each archive entry
 has a SHA-256 checksum in the manifest, and the command returns the compressed
 bundle checksum. Metrics responses are capped at 4 MiB per node. Treat the
 archive as sensitive operational data despite redaction.
+
+Runtime profiles are more sensitive than the redacted JSON status files, so
+they are never included by default. Profile capture is disabled by default and
+`/api/profile` is not installed while disabled. Enable it only on authenticated
+monitoring servers:
+
+```sh
+make monitoring-server MONITORING_AUTH_TOKEN='replace-with-a-secret' DIAGNOSTICS_PROFILING=true
+
+HATRIE_CACHE_AUTH_TOKEN='replace-with-a-secret' \
+  make cli ARGS='profile capture -type cpu -duration 10s -path support/node-cpu.pprof'
+HATRIE_CACHE_AUTH_TOKEN='replace-with-a-secret' \
+  make cli ARGS='profile capture -type heap -path support/node-heap.pprof'
+HATRIE_CACHE_AUTH_TOKEN='replace-with-a-secret' \
+  make cli ARGS='profile capture -type goroutine -path support/node-goroutine.pprof'
+
+go tool pprof support/node-cpu.pprof
+```
+
+CPU duration defaults to 10 seconds and must be between 1 and 30 seconds. Use a
+global CLI timeout longer than the requested duration for a 30-second capture.
+Heap and goroutine profiles are immediate and do not enable continuous runtime
+profiling. Only one capture may run per node; another request receives `409`.
+The existing dangerous-action rate limit also bounds capture requests when it
+is configured. Server and CLI streams are capped at 256 MiB. Direct output is
+written through a mode-`0600` temporary file, synced, checksummed, and atomically
+renamed; use `-overwrite` to explicitly replace a regular file.
+
+Support bundles start captures concurrently across nodes so a 10-second CPU
+profile takes about 10 seconds for the cluster rather than 10 seconds per node.
+Selected profile types run sequentially within each node. A failed or disabled
+node profile is recorded under that node's `errors` in `manifest.json`; the
+remaining status and profile entries are still collected. The measured
+disabled path had unchanged allocation and no measurable latency regression;
+active CPU profiling added about 1.3% median GET latency in the local fixture.
+Capture-time CPU, memory, and output-size measurements are in
+[BENCHMARK.md](BENCHMARK.md#on-demand-runtime-profiling).
 
 When the server is running with a Pebble `DB_PATH`, explicitly request a
 file-level checkpoint bundle when lower restore heap and a ready-to-open native

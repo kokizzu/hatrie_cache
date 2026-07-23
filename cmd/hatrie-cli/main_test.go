@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -2084,6 +2087,8 @@ func TestRunSupportBundleRecordsEndpointFailuresAndContinues(t *testing.T) {
 			json.NewEncoder(w).Encode(topology)
 		case "/api/replication":
 			http.Error(w, "replication unavailable", http.StatusServiceUnavailable)
+		case "/api/profile":
+			http.Error(w, "profiling unavailable", http.StatusServiceUnavailable)
 		case "/metrics":
 			w.Write([]byte("hatrie_cache_up 1\n"))
 		default:
@@ -2099,6 +2104,7 @@ func TestRunSupportBundleRecordsEndpointFailuresAndContinues(t *testing.T) {
 		"-addr", server.URL,
 		"support-bundle",
 		"-path", bundlePath,
+		"-profiles", "heap",
 	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
 		t.Fatalf("run(support-bundle) error = %v", err)
 	}
@@ -2106,8 +2112,8 @@ func TestRunSupportBundleRecordsEndpointFailuresAndContinues(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("Unmarshal(support bundle result) error = %v", err)
 	}
-	if result.OK || result.Errors != 1 {
-		t.Fatalf("support bundle result = %#v, want one recorded error", result)
+	if result.OK || result.Errors != 2 {
+		t.Fatalf("support bundle result = %#v, want two recorded errors", result)
 	}
 
 	file, err := os.Open(bundlePath)
@@ -2144,8 +2150,221 @@ func TestRunSupportBundleRecordsEndpointFailuresAndContinues(t *testing.T) {
 			seenMetrics = true
 		}
 	}
-	if !seenMetrics || len(manifest.Nodes) != 1 || !strings.Contains(manifest.Nodes[0].Errors["replication.json"], "503") {
+	if !seenMetrics || len(manifest.Nodes) != 1 || !strings.Contains(manifest.Nodes[0].Errors["replication.json"], "503") || !strings.Contains(manifest.Nodes[0].Errors["profiles/heap.pprof"], "503") {
 		t.Fatalf("support bundle manifest = %#v, seen metrics = %t", manifest, seenMetrics)
+	}
+}
+
+func TestRunProfileCaptureStreamsAtomicPrivateOutput(t *testing.T) {
+	profileData := bytes.Repeat([]byte("compressed-pprof-data"), 1024)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/profile" {
+			http.NotFound(w, r)
+			return
+		}
+		var request struct {
+			Type           string `json:"type"`
+			DurationMillis int64  `json:"duration_millis"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode(profile request) error = %v", err)
+		}
+		if request.Type != "heap" || request.DurationMillis != 0 {
+			t.Fatalf("profile request = %#v, want immediate heap profile", request)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		for offset := 0; offset < len(profileData); offset += 257 {
+			end := offset + 257
+			if end > len(profileData) {
+				end = len(profileData)
+			}
+			if _, err := w.Write(profileData[offset:end]); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "heap.pprof")
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"profile", "capture",
+		"-type", "heap",
+		"-path", path,
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(profile capture) error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, profileData) {
+		t.Fatalf("profile bytes = %d, want %d exact streamed bytes", len(data), len(profileData))
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("profile mode = %o, want 600", info.Mode().Perm())
+	}
+	var result profileCaptureResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(profile result) error = %v", err)
+	}
+	expectedDigest := sha256.Sum256(profileData)
+	if !result.OK || result.Type != "heap" || result.Bytes != int64(len(profileData)) || result.SHA256 != hex.EncodeToString(expectedDigest[:]) {
+		t.Fatalf("profile result = %#v", result)
+	}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"profile", "capture",
+		"-type", "heap",
+		"-path", path,
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client()); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("second profile capture error = %v, want overwrite protection", err)
+	}
+}
+
+func TestRunProfileCaptureRejectsStreamTrailerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Trailer", profileErrorTrailer)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("partial-profile"))
+		w.Header().Set(profileErrorTrailer, "profile exceeds server limit")
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cpu.pprof")
+	err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"profile", "capture",
+		"-type", "cpu",
+		"-duration", "1s",
+		"-path", path,
+	}, &bytes.Buffer{}, &bytes.Buffer{}, server.Client())
+	if err == nil || !strings.Contains(err.Error(), "server limit") {
+		t.Fatalf("run(profile with error trailer) error = %v, want trailer error", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("partial profile stat error = %v, want no published file", statErr)
+	}
+	temps, globErr := filepath.Glob(filepath.Join(dir, ".hatrie-profile-*"))
+	if globErr != nil {
+		t.Fatal(globErr)
+	}
+	if len(temps) != 0 {
+		t.Fatalf("partial profile temp files = %v, want none", temps)
+	}
+}
+
+func TestRunSupportBundleIncludesProfilesFromEveryNode(t *testing.T) {
+	var topology hatriecache.ClusterTopology
+	var profileRequests atomic.Int64
+	firstProfileWave := make(chan struct{})
+	newNodeServer := func(node string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/topology":
+				json.NewEncoder(w).Encode(topology)
+			case "/api/profile":
+				requestNumber := profileRequests.Add(1)
+				if requestNumber == 2 {
+					close(firstProfileWave)
+				}
+				if requestNumber <= 2 {
+					select {
+					case <-firstProfileWave:
+					case <-time.After(500 * time.Millisecond):
+						http.Error(w, "profile captures were not started concurrently", http.StatusGatewayTimeout)
+						return
+					}
+				}
+				var request struct {
+					Type           string `json:"type"`
+					DurationMillis int64  `json:"duration_millis"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatalf("Decode(profile request) error = %v", err)
+				}
+				if request.Type == "cpu" && request.DurationMillis != 2000 {
+					t.Errorf("CPU duration_millis = %d, want 2000", request.DurationMillis)
+				}
+				if request.Type != "cpu" && request.DurationMillis != 0 {
+					t.Errorf("%s duration_millis = %d, want 0", request.Type, request.DurationMillis)
+				}
+				w.Write([]byte(node + ":" + request.Type))
+			case "/metrics":
+				w.Write([]byte("hatrie_cache_up 1\n"))
+			default:
+				json.NewEncoder(w).Encode(map[string]interface{}{"node": node})
+			}
+		}))
+	}
+	nodeA := newNodeServer("node-a")
+	defer nodeA.Close()
+	nodeB := newNodeServer("node-b")
+	defer nodeB.Close()
+	topology = hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: nodeA.URL, Role: "primary"},
+			{ID: "node-b", Address: nodeB.URL, Role: "replica"},
+		},
+	}
+
+	bundlePath := filepath.Join(t.TempDir(), "profiles.tar.gz")
+	if err := run(context.Background(), []string{
+		"-addr", nodeA.URL,
+		"support-bundle",
+		"-path", bundlePath,
+		"-profiles", "cpu,heap,goroutine",
+		"-profile-duration", "2s",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, nodeA.Client()); err != nil {
+		t.Fatalf("run(support-bundle profiles) error = %v", err)
+	}
+	if got := profileRequests.Load(); got != 6 {
+		t.Fatalf("profile requests = %d, want 6", got)
+	}
+	file, err := os.Open(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+	wanted := map[string]bool{
+		"nodes/001-node-a/profiles/cpu.pprof":       false,
+		"nodes/001-node-a/profiles/heap.pprof":      false,
+		"nodes/001-node-a/profiles/goroutine.pprof": false,
+		"nodes/002-node-b/profiles/cpu.pprof":       false,
+		"nodes/002-node-b/profiles/heap.pprof":      false,
+		"nodes/002-node-b/profiles/goroutine.pprof": false,
+	}
+	tarReader := tar.NewReader(gzipReader)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := wanted[header.Name]; ok {
+			wanted[header.Name] = true
+		}
+	}
+	for name, seen := range wanted {
+		if !seen {
+			t.Errorf("support bundle missing %s", name)
+		}
 	}
 }
 

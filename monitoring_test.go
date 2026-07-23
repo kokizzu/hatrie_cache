@@ -85,6 +85,222 @@ func TestMonitoringHandlerRejectsNilTrieRoutes(t *testing.T) {
 	}
 }
 
+func TestMonitoringProfileRouteDisabledByDefault(t *testing.T) {
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/profile", strings.NewReader(`{"type":"heap"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("POST /api/profile status = %d, want 404 while diagnostics profiling is disabled", response.Code)
+	}
+}
+
+func TestMonitoringProfileRequiresConfiguredOperatorAuth(t *testing.T) {
+	unsecured := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{DiagnosticsProfiling: true}).Handler()
+	response := httptest.NewRecorder()
+	unsecured.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/profile", strings.NewReader(`{"type":"heap"}`)))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("profile without configured operator auth status = %d, want 503", response.Code)
+	}
+
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{
+		DiagnosticsProfiling: true,
+		AuthToken:            "operator-secret",
+		ReplicationAuthToken: "replica-secret",
+	}).Handler()
+	for _, token := range []string{"", "replica-secret"} {
+		response = httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/profile", strings.NewReader(`{"type":"heap"}`))
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("profile with token %q status = %d, want 401", token, response.Code)
+		}
+	}
+
+	response = httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/profile", strings.NewReader(`{"type":"heap"}`))
+	request.Header.Set("Authorization", "Bearer operator-secret")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept-Encoding", "gzip")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("authenticated heap profile status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Content-Type"); got != monitoringProfileContentType {
+		t.Fatalf("profile Content-Type = %q, want %q", got, monitoringProfileContentType)
+	}
+	if got := response.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("profile Content-Encoding = %q, want no second compression", got)
+	}
+	data := response.Body.Bytes()
+	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
+		preview := len(data)
+		if preview > 8 {
+			preview = 8
+		}
+		t.Fatalf("heap profile does not contain compressed pprof data: %x", data[:preview])
+	}
+}
+
+func TestMonitoringProfileLimitedWriterStopsAtLimit(t *testing.T) {
+	var output bytes.Buffer
+	writer := &monitoringProfileLimitedWriter{writer: &output, remaining: 4}
+	written, err := writer.Write([]byte("123456"))
+	if !errors.Is(err, errMonitoringProfileTooLarge) {
+		t.Fatalf("Write() error = %v, want profile too large", err)
+	}
+	if written != 4 || output.String() != "1234" || writer.remaining != 0 {
+		t.Fatalf("Write() = %d bytes, output %q, remaining %d", written, output.String(), writer.remaining)
+	}
+}
+
+func TestMonitoringProfileValidatesMethodTypeAndDuration(t *testing.T) {
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{
+		DiagnosticsProfiling: true,
+		AuthToken:            "secret",
+	}).Handler()
+	tests := []struct {
+		name   string
+		method string
+		body   string
+		status int
+	}{
+		{name: "method", method: http.MethodGet, body: `{}`, status: http.StatusMethodNotAllowed},
+		{name: "malformed", method: http.MethodPost, body: `{`, status: http.StatusBadRequest},
+		{name: "unknown type", method: http.MethodPost, body: `{"type":"mutex"}`, status: http.StatusBadRequest},
+		{name: "cpu duration missing", method: http.MethodPost, body: `{"type":"cpu"}`, status: http.StatusBadRequest},
+		{name: "cpu duration below minimum", method: http.MethodPost, body: `{"type":"cpu","duration_millis":999}`, status: http.StatusBadRequest},
+		{name: "cpu duration above maximum", method: http.MethodPost, body: `{"type":"cpu","duration_millis":30001}`, status: http.StatusBadRequest},
+		{name: "instant profile duration", method: http.MethodPost, body: `{"type":"goroutine","duration_millis":1}`, status: http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(tt.method, "/api/profile", strings.NewReader(tt.body))
+			request.Header.Set("Authorization", "Bearer secret")
+			request.Header.Set("Content-Type", "application/json")
+			handler.ServeHTTP(response, request)
+			if response.Code != tt.status {
+				t.Fatalf("status = %d, want %d: %s", response.Code, tt.status, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestMonitoringCPUProfileRejectsConcurrencyAndReleasesOnCancellation(t *testing.T) {
+	monitoring := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{
+		DiagnosticsProfiling: true,
+		AuthToken:            "secret",
+	})
+	server := httptest.NewServer(monitoring.Handler())
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/api/profile", strings.NewReader(`{"type":"cpu","duration_millis":1000}`))
+		if err == nil {
+			request.Header.Set("Authorization", "Bearer secret")
+			request.Header.Set("Content-Type", "application/json")
+			var response *http.Response
+			response, err = server.Client().Do(request)
+			if err == nil {
+				_, err = io.Copy(io.Discard, response.Body)
+				response.Body.Close()
+			}
+		}
+		firstDone <- err
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for !monitoring.profileCapture.active.Load() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !monitoring.profileCapture.active.Load() {
+		cancel()
+		t.Fatal("CPU profile did not become active")
+	}
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/profile", strings.NewReader(`{"type":"heap"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("concurrent profile status = %d, want 409", response.StatusCode)
+	}
+
+	cancel()
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled CPU profile did not return")
+	}
+	deadline = time.Now().Add(time.Second)
+	for monitoring.profileCapture.active.Load() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if monitoring.profileCapture.active.Load() {
+		t.Fatal("cancelled CPU profile did not release capture guard")
+	}
+
+	request, err = http.NewRequest(http.MethodPost, server.URL+"/api/profile", strings.NewReader(`{"type":"goroutine"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Content-Type", "application/json")
+	response, err = server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("profile after cancellation status = %d, want 200", response.StatusCode)
+	}
+}
+
+func TestMonitoringCPUProfileCompletesWithCompressedPprof(t *testing.T) {
+	handler := NewMonitoringHandler(newTestTrie(t), MonitoringOptions{
+		DiagnosticsProfiling: true,
+		AuthToken:            "secret",
+	}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/profile", strings.NewReader(`{"type":"cpu","duration_millis":1000}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Content-Type", "application/json")
+	started := time.Now()
+	handler.ServeHTTP(response, request)
+	elapsed := time.Since(started)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("CPU profile status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if elapsed < 900*time.Millisecond || elapsed > 3*time.Second {
+		t.Fatalf("CPU profile elapsed = %s, want bounded 1s capture", elapsed)
+	}
+	data := response.Body.Bytes()
+	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
+		t.Fatalf("CPU profile does not contain compressed pprof data")
+	}
+	if got := response.Header().Get(monitoringProfileErrorTrailer); got != "" {
+		t.Fatalf("CPU profile error trailer = %q, want empty", got)
+	}
+}
+
 func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	ht := newTestTrie(t)
 	now := time.Unix(1000, 0)

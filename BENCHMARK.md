@@ -2212,6 +2212,48 @@ make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeatur
 | --- | --- | ---: | ---: | ---: |
 | Reservoir sample add | `BenchmarkCommandFeature/ReservoirSampleAdd` | 956.7 ns, 168 B, 6 allocs | 465.3 ns, 64 B, 1 alloc | 2.06x faster, 2.63x less memory, 6.00x fewer allocs |
 
+### On-Demand Runtime Profiling
+
+Runtime profiling is an operator-only diagnostic feature and defaults off. The
+disabled handler does not register or dispatch `/api/profile`; CPU, heap, and
+goroutine work begins only after an authenticated request. Measurements were
+taken on the same Ryzen 9 5950X host with Go's benchmark harness:
+
+```sh
+make run CMD="go test -run=NONE -bench=BenchmarkMonitoringProfilingDisabled -benchmem -benchtime=500000x -count=30 ."
+make run CMD="go test -run=NONE -bench=BenchmarkCommandTransportFeature/InProcess/StringGet -benchmem -benchtime=100000x -count=10 ."
+make run CMD="env GOMAXPROCS=1 go test -run=NONE -bench=BenchmarkMonitoringCPUProfileCommandOverhead -benchmem -benchtime=3s -count=5 ."
+make run CMD="go test -run=NONE -bench=BenchmarkMonitoringProfileCapture -benchmem -benchtime=1x -count=5 ."
+```
+
+Disabled-mode medians stayed within benchmark noise and retained the exact
+allocation counts:
+
+| Guard | Before | After | Change | Before alloc | After alloc |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Disabled profile route | 434.2 ns/op | 434.6 ns/op | 1.00x, 0.08% slower | 48 B, 3 allocs/op | 48 B, 3 allocs/op |
+| In-process `GET` command | 386.3 ns/op | 385.7 ns/op | 1.00x, 0.17% faster | 0 B, 0 allocs/op | 0 B, 0 allocs/op |
+
+During an active CPU profile, the single-core in-process `GET` median moved
+from 203.6 ns/op to 206.2 ns/op, a 1.3% capture-window cost, while remaining at
+0 B/op and 0 allocs/op. That cost ends when `StopCPUProfile` completes.
+
+The following one-shot figures describe capture cost, not retained idle heap.
+Profile bytes are already in Go's compressed pprof representation and vary with
+live heap size, goroutine count, stack diversity, and sampled workload:
+
+| Capture | Median elapsed | Cumulative allocation | Allocations | Output |
+| --- | ---: | ---: | ---: | ---: |
+| CPU, 1 second idle fixture | 1.001 s | 2.32 MiB | 151 | 438 B |
+| Heap, small fixture | 0.642 ms | 1.30 MiB | 542 | 3,102 B |
+| Goroutine, small fixture | 0.416 ms | 1.23 MiB | 381 | 1,518 B |
+
+The operational bounds are one capture per node, 1-30 seconds for CPU, and a
+256 MiB server/client stream cap. Support-bundle capture runs nodes concurrently
+but profile types sequentially per node, avoiding both cluster-duration growth
+and same-node profiler contention. Block and mutex profiling remain disabled
+because their continuous instrumentation would impose standing cost.
+
 <!-- BEGIN GENERATED COMMAND BENCHMARK COMPARISON -->
 ## Memory Summary
 

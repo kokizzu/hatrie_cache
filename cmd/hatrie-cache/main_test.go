@@ -158,6 +158,23 @@ func TestRunMonitoringDisabledAcceptsNilWriters(t *testing.T) {
 	}
 }
 
+func TestParseConfigDefaultsDiagnosticsProfilingOff(t *testing.T) {
+	cfg, err := parseConfig(nil, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(defaults) error = %v", err)
+	}
+	if cfg.diagnosticsProfiling {
+		t.Fatal("diagnosticsProfiling = true, want default off")
+	}
+}
+
+func TestParseConfigRejectsDiagnosticsProfilingWithoutOperatorAuth(t *testing.T) {
+	_, err := parseConfig([]string{"-diagnostics-profiling"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "monitoring-auth-token") {
+		t.Fatalf("parseConfig(unsecured diagnostics profiling) error = %v, want auth requirement", err)
+	}
+}
+
 func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	cfg, err := parseConfig([]string{
 		"-check-config",
@@ -165,6 +182,7 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 		"-monitoring-addr", "127.0.0.1:9090",
 		"-monitoring-web-dir", "/tmp/web",
 		"-monitoring-auth-token", "secret",
+		"-diagnostics-profiling",
 		"-audit-log-path", "/tmp/audit.jsonl",
 		"-write-protection",
 		"-rate-limit", "7",
@@ -176,6 +194,9 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	}
 	if !cfg.monitoringServer {
 		t.Fatal("monitoringServer = false, want true")
+	}
+	if !cfg.diagnosticsProfiling {
+		t.Fatal("diagnosticsProfiling = false, want explicitly enabled")
 	}
 	if !cfg.checkConfig {
 		t.Fatal("checkConfig = false, want true")

@@ -8,6 +8,7 @@ tls_key=${MONITORING_TLS_KEY:-}
 auth_token=${MONITORING_AUTH_TOKEN:-}
 auth_previous_token=${MONITORING_AUTH_PREVIOUS_TOKEN:-}
 auth_previous_token_expires_at=${MONITORING_AUTH_PREVIOUS_TOKEN_EXPIRES_AT:-}
+diagnostics_profiling=${DIAGNOSTICS_PROFILING:-false}
 audit_log_path=${AUDIT_LOG_PATH:-}
 write_protection=${WRITE_PROTECTION:-false}
 rate_limit=${RATE_LIMIT:-0}
@@ -97,6 +98,7 @@ set -- \
 	-monitoring-auth-token "$auth_token" \
 	-monitoring-auth-previous-token "$auth_previous_token" \
 	-monitoring-auth-previous-token-expires-at "$auth_previous_token_expires_at" \
+	-diagnostics-profiling="$diagnostics_profiling" \
 	-audit-log-path "$audit_log_path" \
 	-write-protection="$write_protection" \
 	-rate-limit "$rate_limit" \

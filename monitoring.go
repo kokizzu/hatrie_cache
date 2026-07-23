@@ -46,6 +46,7 @@ type MonitoringOptions struct {
 	AuthToken                        string
 	AuthPreviousToken                string
 	AuthPreviousExpiresAt            time.Time
+	DiagnosticsProfiling             bool
 	ReplicationAuthToken             string
 	ReplicationAuthPreviousToken     string
 	ReplicationAuthPreviousExpiresAt time.Time
@@ -74,6 +75,7 @@ type MonitoringHandler struct {
 	options               MonitoringOptions
 	authTokens            authTokenSet
 	replicationAuthTokens authTokenSet
+	profileCapture        *monitoringProfileCaptureState
 	storageMu             sync.Mutex
 	storage               monitoringStorageState
 }
@@ -246,12 +248,16 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	if options.ReplicationSafety == nil {
 		options.ReplicationSafety = NewReplicationSafetyStore()
 	}
-	return &MonitoringHandler{
+	handler := &MonitoringHandler{
 		trie:                  trie,
 		options:               options,
 		authTokens:            newAuthTokenSet(options.AuthToken, options.AuthPreviousToken, options.AuthPreviousExpiresAt),
 		replicationAuthTokens: newAuthTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
 	}
+	if options.DiagnosticsProfiling {
+		handler.profileCapture = &monitoringProfileCaptureState{}
+	}
+	return handler
 }
 
 func monitoringBuildVersion() string {
@@ -314,7 +320,21 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	if handler.authTokens.configured() || handler.replicationAuthTokens.configured() {
 		out = monitoringAuthHandler(handler.authTokens, handler.replicationAuthTokens, out)
 	}
-	return gzipHTTPHandler(out)
+	out = gzipHTTPHandler(out)
+	if handler.profileCapture == nil {
+		return out
+	}
+	var profileHandler http.Handler = http.HandlerFunc(handler.handleProfile)
+	if handler.authTokens.configured() || handler.replicationAuthTokens.configured() {
+		profileHandler = monitoringAuthHandler(handler.authTokens, handler.replicationAuthTokens, profileHandler)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/profile" {
+			profileHandler.ServeHTTP(w, r)
+			return
+		}
+		out.ServeHTTP(w, r)
+	})
 }
 
 func monitoringAuthHandler(tokens authTokenSet, replicationTokens authTokenSet, next http.Handler) http.Handler {

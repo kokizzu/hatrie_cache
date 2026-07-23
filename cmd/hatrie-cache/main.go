@@ -58,6 +58,7 @@ type config struct {
 	monitoringAuthToken            string
 	monitoringAuthPreviousToken    string
 	monitoringAuthPreviousExpiry   time.Time
+	diagnosticsProfiling           bool
 	auditLogPath                   string
 	writeProtection                bool
 	rateLimit                      int
@@ -399,6 +400,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		AuthToken:                        cfg.monitoringAuthToken,
 		AuthPreviousToken:                cfg.monitoringAuthPreviousToken,
 		AuthPreviousExpiresAt:            cfg.monitoringAuthPreviousExpiry,
+		DiagnosticsProfiling:             cfg.diagnosticsProfiling,
 		ReplicationAuthToken:             cfg.replicationAuthToken,
 		ReplicationAuthPreviousToken:     cfg.replicationAuthPreviousToken,
 		ReplicationAuthPreviousExpiresAt: cfg.replicationAuthPreviousExpiry,
@@ -557,6 +559,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
 	flags.StringVar(&cfg.monitoringAuthPreviousToken, "monitoring-auth-previous-token", "", "previous monitoring bearer token accepted only until its expiry")
 	flags.Func("monitoring-auth-previous-token-expires-at", "absolute RFC3339 expiry for the previous monitoring bearer token", rfc3339TimeFlag(&cfg.monitoringAuthPreviousExpiry))
+	flags.BoolVar(&cfg.diagnosticsProfiling, "diagnostics-profiling", cfg.diagnosticsProfiling, "enable authenticated bounded runtime profile capture")
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
 	flags.BoolVar(&cfg.writeProtection, "write-protection", cfg.writeProtection, "reject dangerous monitoring API writes")
 	flags.IntVar(&cfg.rateLimit, "rate-limit", cfg.rateLimit, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
@@ -652,6 +655,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	now := time.Now()
 	if err := validatePreviousAuthToken("monitoring", cfg.monitoringAuthToken, cfg.monitoringAuthPreviousToken, cfg.monitoringAuthPreviousExpiry, now); err != nil {
 		return config{}, err
+	}
+	if cfg.diagnosticsProfiling && cfg.monitoringAuthToken == "" {
+		return config{}, errors.New("diagnostics profiling requires -monitoring-auth-token")
 	}
 	if err := validatePreviousAuthToken("replication", cfg.replicationAuthToken, cfg.replicationAuthPreviousToken, cfg.replicationAuthPreviousExpiry, now); err != nil {
 		return config{}, err
@@ -1084,6 +1090,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"monitoring_tls_key":                   cfg.monitoringTLSKey,
 		"monitoring_auth_token":                redactedSecret(cfg.monitoringAuthToken),
 		"monitoring_auth_previous_token":       redactedSecret(cfg.monitoringAuthPreviousToken),
+		"diagnostics_profiling":                cfg.diagnosticsProfiling,
 		"audit_log_path":                       cfg.auditLogPath,
 		"write_protection":                     cfg.writeProtection,
 		"rate_limit":                           cfg.rateLimit,
