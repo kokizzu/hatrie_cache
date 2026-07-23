@@ -49,6 +49,42 @@ func TestTopologyStoreValidatesNormalizesAndRoutes(t *testing.T) {
 	}
 }
 
+func TestTopologyMaintenanceMetadataPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "topology.json")
+	topology := ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+			{
+				ID:                "node-b",
+				Address:           "http://node-b:8080",
+				Role:              "replica",
+				Maintenance:       true,
+				MaintenanceReason: "kernel upgrade",
+				MaintenanceSince:  "2026-07-23T12:00:00Z",
+			},
+		},
+	}
+	if err := SaveTopology(path, topology); err != nil {
+		t.Fatalf("SaveTopology() error = %v", err)
+	}
+	loaded, err := LoadTopology(path)
+	if err != nil {
+		t.Fatalf("LoadTopology() error = %v", err)
+	}
+	var nodeB TopologyNode
+	for _, node := range loaded.Nodes {
+		if node.ID == "node-b" {
+			nodeB = node
+		}
+	}
+	if !nodeB.Maintenance || nodeB.MaintenanceReason != "kernel upgrade" || nodeB.MaintenanceSince != "2026-07-23T12:00:00Z" {
+		t.Fatalf("loaded maintenance node = %#v", nodeB)
+	}
+}
+
 func TestTopologyFingerprintIgnoresSelfAndChangesOnRoutes(t *testing.T) {
 	base := ClusterTopology{
 		Version: 1,

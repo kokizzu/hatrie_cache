@@ -930,6 +930,22 @@ type clusterConfigDifference struct {
 	Node      interface{} `json:"node,omitempty"`
 }
 
+type clusterMaintenanceResult struct {
+	OK               bool                         `json:"ok"`
+	Message          string                       `json:"message"`
+	Peer             string                       `json:"peer"`
+	Node             string                       `json:"node"`
+	Maintenance      bool                         `json:"maintenance"`
+	Reason           string                       `json:"reason,omitempty"`
+	Since            string                       `json:"since,omitempty"`
+	TopologyUpdated  bool                         `json:"topology_updated"`
+	TopologyVerified bool                         `json:"topology_verified"`
+	ElectionVerified bool                         `json:"election_verified"`
+	NodesUpdated     []string                     `json:"nodes_updated,omitempty"`
+	LeaderBefore     []hatriecache.ElectionLeader `json:"leaders_before,omitempty"`
+	LeaderAfter      []hatriecache.ElectionLeader `json:"leaders_after,omitempty"`
+}
+
 type clusterNodeStatus struct {
 	ID                 string                        `json:"id"`
 	Role               string                        `json:"role,omitempty"`
@@ -947,7 +963,7 @@ type clusterNodeStatus struct {
 
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor, config-diff")
+		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor, config-diff, maintenance")
 	}
 	switch args[0] {
 	case "add-replica":
@@ -964,6 +980,8 @@ func runCluster(ctx context.Context, client *http.Client, addr string, args []st
 		return runClusterStatus(ctx, client, addr, args[1:], true, stdout, stderr)
 	case "config-diff":
 		return runClusterConfigDiff(ctx, client, addr, args[1:], stdout, stderr)
+	case "maintenance":
+		return runClusterMaintenance(ctx, client, addr, args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown cluster subcommand %q", args[0])
 	}
@@ -1198,6 +1216,204 @@ func uniqueSortedStrings(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func runClusterMaintenance(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	if len(args) == 0 || (args[0] != "begin" && args[0] != "end") {
+		return errors.New("cluster maintenance subcommand is required: begin or end")
+	}
+	operation := args[0]
+	flags := flag.NewFlagSet("cluster maintenance "+operation, flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	peer := flags.String("peer", addr, "existing cluster node monitoring API base URL")
+	nodeID := flags.String("node", "", "node id entering or leaving maintenance")
+	reason := flags.String("reason", "", "operator reason recorded with maintenance state")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	*peer = strings.TrimSpace(*peer)
+	*nodeID = strings.TrimSpace(*nodeID)
+	*reason = strings.TrimSpace(*reason)
+	if *peer == "" {
+		return errors.New("cluster maintenance -peer is required")
+	}
+	if *nodeID == "" {
+		return errors.New("cluster maintenance -node is required")
+	}
+	enable := operation == "begin"
+
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	electionBefore, err := getJSONValue[hatriecache.ElectionStatus](ctx, client, *peer, "/api/election")
+	if err != nil {
+		return fmt.Errorf("cluster election: %w", err)
+	}
+	if enable {
+		if err := validateClusterMaintenanceBegin(topology, electionBefore, *nodeID); err != nil {
+			return err
+		}
+	}
+	updated, topologyChanged, err := clusterMaintenanceTopology(topology, *nodeID, enable, *reason, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	peerNode := clusterPeerNodeID(topology, *peer)
+	nodesUpdated, err := putTopologyToNodes(ctx, client, updated, *peer, peerNode, nil)
+	if err != nil {
+		return fmt.Errorf("upload maintenance topology: %w", err)
+	}
+	if err := verifyTopologyOnNodes(ctx, client, updated, *peer, peerNode); err != nil {
+		return fmt.Errorf("verify maintenance topology: %w", err)
+	}
+	electionAfter, err := verifyMaintenanceElection(ctx, client, updated, *peer, peerNode, *nodeID, enable)
+	if err != nil {
+		return fmt.Errorf("verify maintenance election: %w", err)
+	}
+
+	var maintained hatriecache.TopologyNode
+	for _, node := range updated.Nodes {
+		if node.ID == *nodeID {
+			maintained = node
+			break
+		}
+	}
+	result := clusterMaintenanceResult{
+		OK:               true,
+		Message:          "cluster maintenance state updated and verified",
+		Peer:             *peer,
+		Node:             *nodeID,
+		Maintenance:      enable,
+		Reason:           maintained.MaintenanceReason,
+		Since:            maintained.MaintenanceSince,
+		TopologyUpdated:  topologyChanged,
+		TopologyVerified: true,
+		ElectionVerified: true,
+		NodesUpdated:     nodesUpdated,
+		LeaderBefore:     electionBefore.Leaders,
+		LeaderAfter:      electionAfter.Leaders,
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+func clusterMaintenanceTopology(topology hatriecache.ClusterTopology, nodeID string, enable bool, reason string, now time.Time) (hatriecache.ClusterTopology, bool, error) {
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return hatriecache.ClusterTopology{}, false, err
+	}
+	updated := store.Get()
+	nodeID = strings.TrimSpace(nodeID)
+	reason = strings.TrimSpace(reason)
+	for idx := range updated.Nodes {
+		node := &updated.Nodes[idx]
+		if node.ID != nodeID {
+			continue
+		}
+		if enable {
+			if node.Maintenance && node.MaintenanceReason == reason {
+				return updated, false, nil
+			}
+			wasMaintenance := node.Maintenance
+			node.Maintenance = true
+			node.MaintenanceReason = reason
+			if !wasMaintenance || node.MaintenanceSince == "" {
+				node.MaintenanceSince = now.UTC().Format(time.RFC3339)
+			}
+		} else {
+			if !node.Maintenance && node.MaintenanceReason == "" && node.MaintenanceSince == "" {
+				return updated, false, nil
+			}
+			node.Maintenance = false
+			node.MaintenanceReason = ""
+			node.MaintenanceSince = ""
+		}
+		validated, err := hatriecache.NewTopologyStore(updated)
+		if err != nil {
+			return hatriecache.ClusterTopology{}, false, err
+		}
+		return validated.Get(), true, nil
+	}
+	return hatriecache.ClusterTopology{}, false, fmt.Errorf("cluster maintenance node %q is not registered", nodeID)
+}
+
+func validateClusterMaintenanceBegin(topology hatriecache.ClusterTopology, election hatriecache.ElectionStatus, nodeID string) error {
+	registered := false
+	for _, node := range topology.Nodes {
+		if node.ID == nodeID {
+			registered = true
+			break
+		}
+	}
+	if !registered {
+		return fmt.Errorf("cluster maintenance node %q is not registered", nodeID)
+	}
+	online := make(map[string]bool, len(election.Nodes))
+	for _, node := range election.Nodes {
+		online[node.ID] = node.Online
+	}
+	for _, leader := range election.Leaders {
+		if leader.Leader != nodeID {
+			continue
+		}
+		alternative := ""
+		for _, candidate := range leader.Candidates {
+			if candidate != nodeID && online[candidate] {
+				alternative = candidate
+				break
+			}
+		}
+		if alternative == "" {
+			return fmt.Errorf("shard %d has no online failover candidate for maintenance node %q", leader.Shard, nodeID)
+		}
+	}
+	return nil
+}
+
+func verifyMaintenanceElection(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, peer string, peerNode string, nodeID string, maintenance bool) (hatriecache.ElectionStatus, error) {
+	var reference hatriecache.ElectionStatus
+	for idx, node := range topology.Nodes {
+		address := strings.TrimSpace(node.Address)
+		if node.ID == peerNode {
+			address = strings.TrimSpace(peer)
+		}
+		status, err := getJSONValue[hatriecache.ElectionStatus](ctx, client, address, "/api/election")
+		if err != nil {
+			return hatriecache.ElectionStatus{}, fmt.Errorf("node %q: %w", node.ID, err)
+		}
+		var target *hatriecache.ElectionNodeStatus
+		for statusIdx := range status.Nodes {
+			if status.Nodes[statusIdx].ID == nodeID {
+				target = &status.Nodes[statusIdx]
+				break
+			}
+		}
+		if target == nil {
+			return hatriecache.ElectionStatus{}, fmt.Errorf("node %q election omits maintenance node %q", node.ID, nodeID)
+		}
+		if maintenance && (target.Online || target.Reason != "maintenance") {
+			return hatriecache.ElectionStatus{}, fmt.Errorf("node %q reports maintenance node online or with reason %q", node.ID, target.Reason)
+		}
+		if !maintenance && !target.Online {
+			return hatriecache.ElectionStatus{}, fmt.Errorf("node %q still reports restored node offline with reason %q", node.ID, target.Reason)
+		}
+		for _, leader := range status.Leaders {
+			if maintenance && leader.Leader == nodeID {
+				return hatriecache.ElectionStatus{}, fmt.Errorf("node %q still elects maintenance node for shard %d", node.ID, leader.Shard)
+			}
+		}
+		if idx == 0 {
+			reference = status
+		} else if !clusterElectionLeadersConsistent(reference, status) {
+			return hatriecache.ElectionStatus{}, fmt.Errorf("node %q elected leaders differ after maintenance update", node.ID)
+		}
+	}
+	return reference, nil
 }
 
 func probeClusterNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, election hatriecache.ElectionStatus) []clusterNodeStatus {

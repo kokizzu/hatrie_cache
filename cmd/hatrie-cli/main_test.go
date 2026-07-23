@@ -2587,6 +2587,165 @@ func TestRunClusterConfigDiffCanIncludeNodeLocalFields(t *testing.T) {
 	}
 }
 
+func TestClusterMaintenanceTopologyIsIdempotent(t *testing.T) {
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Role: "primary"},
+			{ID: "node-b", Role: "replica"},
+		},
+	}
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	maintained, changed, err := clusterMaintenanceTopology(topology, "node-a", true, "kernel upgrade", now)
+	if err != nil || !changed {
+		t.Fatalf("clusterMaintenanceTopology(begin) changed/error = %v/%v", changed, err)
+	}
+	if !maintained.Nodes[0].Maintenance || maintained.Nodes[0].MaintenanceReason != "kernel upgrade" || maintained.Nodes[0].MaintenanceSince != now.Format(time.RFC3339) {
+		t.Fatalf("maintenance node = %#v", maintained.Nodes[0])
+	}
+	again, changed, err := clusterMaintenanceTopology(maintained, "node-a", true, "kernel upgrade", now.Add(time.Hour))
+	if err != nil || changed || !reflect.DeepEqual(again, maintained) {
+		t.Fatalf("clusterMaintenanceTopology(retry) changed/error/topology = %v/%v/%#v", changed, err, again)
+	}
+	restored, changed, err := clusterMaintenanceTopology(maintained, "node-a", false, "", now.Add(time.Hour))
+	if err != nil || !changed || restored.Nodes[0].Maintenance || restored.Nodes[0].MaintenanceReason != "" || restored.Nodes[0].MaintenanceSince != "" {
+		t.Fatalf("clusterMaintenanceTopology(end) changed/error/node = %v/%v/%#v", changed, err, restored.Nodes[0])
+	}
+}
+
+func TestValidateClusterMaintenanceBeginRejectsMissingFailover(t *testing.T) {
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeSharded,
+		Nodes:   []hatriecache.TopologyNode{{ID: "node-a", Role: "primary"}},
+		Shards:  []hatriecache.TopologyShard{{ID: 0, Primary: "node-a"}},
+	}
+	election := hatriecache.ElectionStatus{
+		Nodes:   []hatriecache.ElectionNodeStatus{{ID: "node-a", Online: true}},
+		Leaders: []hatriecache.ElectionLeader{{Shard: 0, Leader: "node-a", Available: true, Candidates: []string{"node-a"}}},
+	}
+	if err := validateClusterMaintenanceBegin(topology, election, "node-a"); err == nil || !strings.Contains(err.Error(), "no online failover") {
+		t.Fatalf("validateClusterMaintenanceBegin() error = %v, want failover refusal", err)
+	}
+}
+
+func TestRunClusterMaintenanceBeginAndEndPersistAndVerify(t *testing.T) {
+	var nodeAURL string
+	var nodeBURL string
+	initial := func(self string) hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeSharded,
+			Self:    self,
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: nodeAURL, Role: "primary"},
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+			Shards: []hatriecache.TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+		}
+	}
+	var nodeATopology hatriecache.ClusterTopology
+	var nodeBTopology hatriecache.ClusterTopology
+	electionFor := func(topology hatriecache.ClusterTopology) hatriecache.ElectionStatus {
+		maintained := false
+		for _, node := range topology.Nodes {
+			if node.ID == "node-a" {
+				maintained = node.Maintenance
+			}
+		}
+		leader := "node-a"
+		reason := "healthy"
+		if maintained {
+			leader = "node-b"
+			reason = "maintenance"
+		}
+		return hatriecache.ElectionStatus{
+			Nodes: []hatriecache.ElectionNodeStatus{
+				{ID: "node-a", Online: !maintained, Reason: reason},
+				{ID: "node-b", Online: true, Reason: "healthy"},
+			},
+			Leaders: []hatriecache.ElectionLeader{{Shard: 0, Leader: leader, Available: true, Primary: "node-a", Candidates: []string{"node-a", "node-b"}}},
+		}
+	}
+
+	nodeB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "PUT /api/topology":
+			nodeBTopology = hatriecache.ClusterTopology{}
+			json.NewDecoder(r.Body).Decode(&nodeBTopology)
+			json.NewEncoder(w).Encode(nodeBTopology)
+		case "GET /api/topology":
+			if len(nodeBTopology.Nodes) == 0 {
+				json.NewEncoder(w).Encode(initial("node-b"))
+			} else {
+				json.NewEncoder(w).Encode(nodeBTopology)
+			}
+		case "GET /api/election":
+			if len(nodeBTopology.Nodes) == 0 {
+				json.NewEncoder(w).Encode(electionFor(initial("node-b")))
+			} else {
+				json.NewEncoder(w).Encode(electionFor(nodeBTopology))
+			}
+		default:
+			t.Fatalf("unexpected node-b request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeB.Close()
+	nodeBURL = nodeB.URL
+
+	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/topology":
+			if len(nodeATopology.Nodes) == 0 {
+				json.NewEncoder(w).Encode(initial("node-a"))
+			} else {
+				json.NewEncoder(w).Encode(nodeATopology)
+			}
+		case "PUT /api/topology":
+			nodeATopology = hatriecache.ClusterTopology{}
+			json.NewDecoder(r.Body).Decode(&nodeATopology)
+			json.NewEncoder(w).Encode(nodeATopology)
+		case "GET /api/election":
+			if len(nodeATopology.Nodes) == 0 {
+				json.NewEncoder(w).Encode(electionFor(initial("node-a")))
+			} else {
+				json.NewEncoder(w).Encode(electionFor(nodeATopology))
+			}
+		default:
+			t.Fatalf("unexpected node-a request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeA.Close()
+	nodeAURL = nodeA.URL
+
+	for _, operation := range []struct {
+		name       string
+		enabled    bool
+		wantLeader string
+	}{
+		{name: "begin", enabled: true, wantLeader: "node-b"},
+		{name: "end", enabled: false, wantLeader: "node-a"},
+	} {
+		stdout := &bytes.Buffer{}
+		args := []string{"-addr", nodeA.URL, "cluster", "maintenance", operation.name, "-node", "node-a"}
+		if operation.enabled {
+			args = append(args, "-reason", "kernel upgrade")
+		}
+		if err := run(context.Background(), args, stdout, &bytes.Buffer{}, nodeA.Client()); err != nil {
+			t.Fatalf("run(cluster maintenance %s) error = %v", operation.name, err)
+		}
+		var result clusterMaintenanceResult
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatalf("Unmarshal(cluster maintenance %s) error = %v", operation.name, err)
+		}
+		if !result.OK || result.Maintenance != operation.enabled || !result.TopologyVerified || !result.ElectionVerified || result.LeaderAfter[0].Leader != operation.wantLeader {
+			t.Fatalf("maintenance %s result = %#v", operation.name, result)
+		}
+	}
+}
+
 func TestRunClusterJoinUpdatesPeerTargetAndPullsJournal(t *testing.T) {
 	initialTopology := hatriecache.ClusterTopology{
 		Version: 1,

@@ -1700,6 +1700,20 @@ func TestCacheGRPCServerAuthTokenProtectsRPCs(t *testing.T) {
 	}
 }
 
+func TestGRPCTopologyNodeMaintenanceRoundTrip(t *testing.T) {
+	node := TopologyNode{
+		ID:                "node-a",
+		Address:           "https://node-a.example",
+		Role:              "primary",
+		Maintenance:       true,
+		MaintenanceReason: "kernel upgrade",
+		MaintenanceSince:  "2026-07-23T12:00:00Z",
+	}
+	if got := topologyNodeFromProto(grpcTopologyNode(node)); !reflect.DeepEqual(got, node) {
+		t.Fatalf("topology node round trip = %#v, want %#v", got, node)
+	}
+}
+
 func TestCacheGRPCServerAuditLogRecordsDangerousRPCs(t *testing.T) {
 	ht := newTestTrie(t)
 	var audit bytes.Buffer

@@ -92,6 +92,10 @@ func (store *ElectionStore) Status() ElectionStatus {
 	nodes := make([]ElectionNodeStatus, 0, len(topology.Nodes))
 	for _, node := range topology.Nodes {
 		online, reason, lastSeen := store.nodeStatusLocked(node.ID, active)
+		if node.Maintenance {
+			online = false
+			reason = "maintenance"
+		}
 		nodes = append(nodes, ElectionNodeStatus{
 			ID:       node.ID,
 			Online:   online,
@@ -165,6 +169,10 @@ func (store *ElectionStore) activeNodesLocked(topology ClusterTopology) map[stri
 	active := make(map[string]bool, len(topology.Nodes))
 	now := store.now()
 	for _, node := range topology.Nodes {
+		if node.Maintenance {
+			active[node.ID] = false
+			continue
+		}
 		record, tracked := store.nodes[node.ID]
 		switch {
 		case !tracked:

@@ -98,6 +98,36 @@ func TestElectionStoreFullReplicaLeaderUsesSelfThenReplica(t *testing.T) {
 	}
 }
 
+func TestElectionStoreExcludesPersistedMaintenanceNode(t *testing.T) {
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Role: "primary", Maintenance: true, MaintenanceReason: "upgrade", MaintenanceSince: "2026-07-23T12:00:00Z"},
+			{ID: "node-b", Role: "replica"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	store := NewElectionStore(topology, ElectionOptions{})
+	status := store.Status()
+	if got := leaderByShard(status, 0); got.Leader != "node-b" || !got.Available {
+		t.Fatalf("maintenance leader = %#v, want node-b", got)
+	}
+	if got := nodeStatusByID(status, "node-a"); got.Online || got.Reason != "maintenance" {
+		t.Fatalf("maintenance node status = %#v, want offline maintenance", got)
+	}
+	if err := store.Heartbeat("node-a"); err != nil {
+		t.Fatalf("Heartbeat(maintenance node) error = %v", err)
+	}
+	if got := nodeStatusByID(store.Status(), "node-a"); got.Online || got.Reason != "maintenance" {
+		t.Fatalf("maintenance node after heartbeat = %#v, want still offline", got)
+	}
+}
+
 func TestElectionStoreRejectsUnknownNode(t *testing.T) {
 	store := NewElectionStore(electionTestTopology(t), ElectionOptions{})
 	if err := store.Heartbeat("missing"); err == nil {

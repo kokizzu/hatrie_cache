@@ -248,6 +248,9 @@ message TopologyNode {
   string address = 2;
   string role = 3;
   string grpc_address = 4;
+  bool maintenance = 5;
+  string maintenance_reason = 6;
+  string maintenance_since = 7;
 }
 
 message TopologyShard {

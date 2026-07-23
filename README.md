@@ -703,6 +703,25 @@ leader errors. Internal replication commands are still accepted on followers.
 6. Wait for journal pull or replication sync to finish before restarting the
    next node.
 
+For an orchestrated single-node maintenance window, persist the state in
+topology before stopping the process:
+
+```sh
+make cli ARGS='cluster maintenance begin -peer http://node-a:8080 -node node-b -reason "kernel upgrade"'
+make cli ARGS='cluster status -peer http://node-a:8080'
+# restart or service node-b here
+make cli ARGS='cluster maintenance end -peer http://node-a:8080 -node node-b'
+```
+
+`begin` refuses to take a current leader out when no online failover candidate
+exists. Maintenance state, reason, and UTC start time are topology metadata, so
+they survive process and host restarts and are also represented by the native
+gRPC topology API. Election always treats a maintained node as offline even if
+it sends heartbeats. Both `begin` and `end` propagate recipient-local topology,
+verify every topology copy, compare elected leaders across members, and are
+idempotent. Do not stop the node until `begin` returns a verified result; do not
+return it to client traffic until `end` does.
+
 Regenerate native gRPC/protobuf stubs after editing
 `proto/hatriecache/v1/cache.proto`:
 
@@ -1862,6 +1881,8 @@ make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster doctor -peer http://node-a:8080'
 make cli ARGS='cluster doctor -peer http://node-a:8080 -repair-topology -yes'
 make cli ARGS='cluster config-diff -peer http://node-a:8080'
+make cli ARGS='cluster maintenance begin -peer http://node-a:8080 -node node-b -reason "kernel upgrade"'
+make cli ARGS='cluster maintenance end -peer http://node-a:8080 -node node-b'
 make cli ARGS='snapshot'
 ```
 

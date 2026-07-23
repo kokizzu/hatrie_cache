@@ -33,10 +33,13 @@ type ClusterTopology struct {
 
 // TopologyNode describes one cache node address and optional role.
 type TopologyNode struct {
-	ID          string `json:"id"`
-	Address     string `json:"address"`
-	GRPCAddress string `json:"grpc_address,omitempty"`
-	Role        string `json:"role,omitempty"`
+	ID                string `json:"id"`
+	Address           string `json:"address"`
+	GRPCAddress       string `json:"grpc_address,omitempty"`
+	Role              string `json:"role,omitempty"`
+	Maintenance       bool   `json:"maintenance,omitempty"`
+	MaintenanceReason string `json:"maintenance_reason,omitempty"`
+	MaintenanceSince  string `json:"maintenance_since,omitempty"`
 }
 
 // TopologyShard describes one shard primary and optional replicas.
@@ -387,6 +390,12 @@ func normalizeTopology(topology ClusterTopology) (ClusterTopology, error) {
 		out.Nodes[idx].Address = strings.TrimSpace(out.Nodes[idx].Address)
 		out.Nodes[idx].GRPCAddress = strings.TrimSpace(out.Nodes[idx].GRPCAddress)
 		out.Nodes[idx].Role = strings.TrimSpace(out.Nodes[idx].Role)
+		out.Nodes[idx].MaintenanceReason = strings.TrimSpace(out.Nodes[idx].MaintenanceReason)
+		out.Nodes[idx].MaintenanceSince = strings.TrimSpace(out.Nodes[idx].MaintenanceSince)
+		if !out.Nodes[idx].Maintenance {
+			out.Nodes[idx].MaintenanceReason = ""
+			out.Nodes[idx].MaintenanceSince = ""
+		}
 		if out.Nodes[idx].ID == "" {
 			return ClusterTopology{}, errors.New("hatriecache: topology node id is required")
 		}

@@ -657,10 +657,13 @@ func grpcClusterTopology(topology ClusterTopology) *hatriecachev1.ClusterTopolog
 
 func grpcTopologyNode(node TopologyNode) *hatriecachev1.TopologyNode {
 	return &hatriecachev1.TopologyNode{
-		Id:          node.ID,
-		Address:     node.Address,
-		GrpcAddress: node.GRPCAddress,
-		Role:        node.Role,
+		Id:                node.ID,
+		Address:           node.Address,
+		GrpcAddress:       node.GRPCAddress,
+		Role:              node.Role,
+		Maintenance:       node.Maintenance,
+		MaintenanceReason: node.MaintenanceReason,
+		MaintenanceSince:  node.MaintenanceSince,
 	}
 }
 
@@ -724,10 +727,13 @@ func topologyNodeFromProto(node *hatriecachev1.TopologyNode) TopologyNode {
 		return TopologyNode{}
 	}
 	return TopologyNode{
-		ID:          node.GetId(),
-		Address:     node.GetAddress(),
-		GRPCAddress: node.GetGrpcAddress(),
-		Role:        node.GetRole(),
+		ID:                node.GetId(),
+		Address:           node.GetAddress(),
+		GRPCAddress:       node.GetGrpcAddress(),
+		Role:              node.GetRole(),
+		Maintenance:       node.GetMaintenance(),
+		MaintenanceReason: node.GetMaintenanceReason(),
+		MaintenanceSince:  node.GetMaintenanceSince(),
 	}
 }
 
