@@ -60,6 +60,11 @@ func BenchmarkCommandFeature(b *testing.B) {
 		}, run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PEEKMAP", Key: "map:key", Subkey: "field"})
 		}},
+		{name: "MapGet", setup: func(b *testing.B, ht *HatTrie) {
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PUTMAP", Key: "map:key", Subkey: "field", Value: "value"})
+		}, run: func(b *testing.B, ht *HatTrie, i int) {
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "GET", Key: "map:key"})
+		}},
 		{name: "SlicePushPop", run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PUSHSLICE", Key: "slice:key", Value: "value"})
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "POPSLICE", Key: "slice:key"})

@@ -2815,11 +2815,11 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		size := len(ht.raws.array[hval.Index])
 		return int64(size), strconv.Itoa(size) + " bytes"
 	case DATAVALUE_TYPE_MAP:
-		if int(hval.Index) >= len(ht.maps.array) || hval.Index < 0 {
+		length, ok := ht.maps.length(hval.Index)
+		if !ok {
 			return 0, ""
 		}
-		value := ht.maps.array[hval.Index]
-		return int64(len(value)), strconv.Itoa(len(value)) + " fields"
+		return int64(length), strconv.Itoa(length) + " fields"
 	case DATAVALUE_TYPE_SLICE:
 		if int(hval.Index) >= len(ht.slices.array) || hval.Index < 0 {
 			return 0, ""

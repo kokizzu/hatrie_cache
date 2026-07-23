@@ -1282,7 +1282,11 @@ func (ht *HatTrie) snapshotEntryForStoreLockedWithStats(entry Entry, currentStor
 		}
 		out.Bytes = base64.StdEncoding.EncodeToString(value)
 	case DATAVALUE_TYPE_MAP:
-		out.Map = cloneMap(ht.maps.array[entry.Value.Index])
+		value, ok := ht.maps.clone(entry.Value.Index)
+		if !ok {
+			return snapshotEntry{}, errors.New("hatriecache: map backing index is missing")
+		}
+		out.Map = value
 	case DATAVALUE_TYPE_SLICE:
 		out.Slice = ht.slices.array[entry.Value.Index].Slice()
 	case DATAVALUE_TYPE_LEVELDB_REF:
@@ -1918,7 +1922,7 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 		hval = next
 		oldBytesStorageHandled = handled
 	case "map":
-		idx := ht.maps.Add(entry.Map)
+		idx := ht.maps.addAdaptive(entry.Map)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}
 	case "slice":
 		idx := ht.slices.Add(entry.Slice)

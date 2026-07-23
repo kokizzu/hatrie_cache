@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/cespare/xxhash/v2"
@@ -1408,11 +1409,286 @@ func (ds *DiskStorage) pathFor(idx int32) string {
 	return filepath.Join(ds.dir, "bytes-"+strconv.FormatInt(int64(idx), 10)+".bin")
 }
 
-// MapStorage stores map values outside the trie.
+const smallMapEntryLimit = 2
+
+type smallMapEntry struct {
+	key   string
+	value interface{}
+}
+
+type smallMapData struct {
+	entries [smallMapEntryLimit]smallMapEntry
+	length  uint8
+}
+
+func newSmallMapData(value Map) smallMapData {
+	var out smallMapData
+	for key, item := range value {
+		out.entries[out.length] = smallMapEntry{key: key, value: cloneValue(item)}
+		out.length++
+	}
+	return out
+}
+
+func newSmallMapEntry(subkey string, value interface{}) smallMapData {
+	return smallMapData{
+		entries: [smallMapEntryLimit]smallMapEntry{{key: subkey, value: cloneValue(value)}},
+		length:  1,
+	}
+}
+
+func (data *smallMapData) index(subkey string) int {
+	if data == nil {
+		return -1
+	}
+	for index := 0; index < int(data.length); index++ {
+		if data.entries[index].key == subkey {
+			return index
+		}
+	}
+	return -1
+}
+
+func (data *smallMapData) peek(subkey string) (interface{}, bool) {
+	index := data.index(subkey)
+	if index < 0 {
+		return nil, false
+	}
+	return data.entries[index].value, true
+}
+
+func (data *smallMapData) putEntry(subkey string, value interface{}) bool {
+	if index := data.index(subkey); index >= 0 {
+		data.entries[index].value = cloneValue(value)
+		return true
+	}
+	if int(data.length) >= smallMapEntryLimit {
+		return false
+	}
+	data.entries[data.length] = smallMapEntry{key: subkey, value: cloneValue(value)}
+	data.length++
+	return true
+}
+
+func (data *smallMapData) putEntries(fields Map) bool {
+	additional := 0
+	for subkey := range fields {
+		if data.index(subkey) < 0 {
+			additional++
+		}
+	}
+	if int(data.length)+additional > smallMapEntryLimit {
+		return false
+	}
+	for subkey, value := range fields {
+		data.putEntry(subkey, value)
+	}
+	return true
+}
+
+func (data *smallMapData) takeEntry(subkey string) (interface{}, bool) {
+	index := data.index(subkey)
+	if index < 0 {
+		return nil, false
+	}
+	value := data.entries[index].value
+	last := int(data.length) - 1
+	if index != last {
+		data.entries[index] = data.entries[last]
+	}
+	data.entries[last] = smallMapEntry{}
+	data.length--
+	return value, true
+}
+
+func (data *smallMapData) materialize(cloneValues bool) Map {
+	if data == nil {
+		return nil
+	}
+	out := make(Map, int(data.length))
+	for index := 0; index < int(data.length); index++ {
+		entry := data.entries[index]
+		if cloneValues {
+			out[entry.key] = cloneValue(entry.value)
+		} else {
+			out[entry.key] = entry.value
+		}
+	}
+	return out
+}
+
+func (data *smallMapData) jsonString() (string, error) {
+	if data == nil {
+		return "null", nil
+	}
+	var builder strings.Builder
+	estimated := 2
+	for index := 0; index < int(data.length); index++ {
+		estimated += len(data.entries[index].key) + 4
+		if value, ok := data.entries[index].value.(string); ok {
+			estimated += len(value) + 2
+		}
+	}
+	builder.Grow(estimated)
+	builder.WriteByte('{')
+	first := &data.entries[0]
+	var second *smallMapEntry
+	if data.length == 2 {
+		second = &data.entries[1]
+		if second.key < first.key {
+			first, second = second, first
+		}
+	}
+	if data.length > 0 {
+		if err := writeSmallMapJSONEntry(&builder, first); err != nil {
+			return "", err
+		}
+	}
+	if second != nil {
+		builder.WriteByte(',')
+		if err := writeSmallMapJSONEntry(&builder, second); err != nil {
+			return "", err
+		}
+	}
+	builder.WriteByte('}')
+	return builder.String(), nil
+}
+
+func writeSmallMapJSONEntry(builder *strings.Builder, entry *smallMapEntry) error {
+	writeJSONString(builder, entry.key)
+	builder.WriteByte(':')
+	return writeSmallMapJSONValue(builder, entry.value)
+}
+
+func writeSmallMapJSONValue(builder *strings.Builder, value interface{}) error {
+	switch typed := value.(type) {
+	case nil:
+		builder.WriteString("null")
+	case string:
+		writeJSONString(builder, typed)
+	case bool:
+		if typed {
+			builder.WriteString("true")
+		} else {
+			builder.WriteString("false")
+		}
+	case int:
+		writeJSONInt(builder, int64(typed))
+	case int8:
+		writeJSONInt(builder, int64(typed))
+	case int16:
+		writeJSONInt(builder, int64(typed))
+	case int32:
+		writeJSONInt(builder, int64(typed))
+	case int64:
+		writeJSONInt(builder, typed)
+	case uint:
+		writeJSONUint(builder, uint64(typed))
+	case uint8:
+		writeJSONUint(builder, uint64(typed))
+	case uint16:
+		writeJSONUint(builder, uint64(typed))
+	case uint32:
+		writeJSONUint(builder, uint64(typed))
+	case uint64:
+		writeJSONUint(builder, typed)
+	default:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		builder.Write(encoded)
+	}
+	return nil
+}
+
+func writeJSONInt(builder *strings.Builder, value int64) {
+	var buffer [20]byte
+	builder.Write(strconv.AppendInt(buffer[:0], value, 10))
+}
+
+func writeJSONUint(builder *strings.Builder, value uint64) {
+	var buffer [20]byte
+	builder.Write(strconv.AppendUint(buffer[:0], value, 10))
+}
+
+func writeJSONString(builder *strings.Builder, value string) {
+	const hex = "0123456789abcdef"
+	builder.WriteByte('"')
+	start := 0
+	for index := 0; index < len(value); {
+		character := value[index]
+		if character < utf8.RuneSelf {
+			if character >= 0x20 && character != '\\' && character != '"' && character != '<' && character != '>' && character != '&' {
+				index++
+				continue
+			}
+			builder.WriteString(value[start:index])
+			switch character {
+			case '\\', '"':
+				builder.WriteByte('\\')
+				builder.WriteByte(character)
+			case '\b':
+				builder.WriteString("\\b")
+			case '\f':
+				builder.WriteString("\\f")
+			case '\n':
+				builder.WriteString("\\n")
+			case '\r':
+				builder.WriteString("\\r")
+			case '\t':
+				builder.WriteString("\\t")
+			default:
+				builder.WriteString("\\u00")
+				builder.WriteByte(hex[character>>4])
+				builder.WriteByte(hex[character&0x0f])
+			}
+			index++
+			start = index
+			continue
+		}
+
+		runeValue, size := utf8.DecodeRuneInString(value[index:])
+		if runeValue == utf8.RuneError && size == 1 {
+			builder.WriteString(value[start:index])
+			builder.WriteString("\\ufffd")
+			index++
+			start = index
+			continue
+		}
+		if runeValue == '\u2028' || runeValue == '\u2029' {
+			builder.WriteString(value[start:index])
+			builder.WriteString("\\u202")
+			builder.WriteByte(hex[byte(runeValue-'\u2020')])
+			index += size
+			start = index
+			continue
+		}
+		index += size
+	}
+	builder.WriteString(value[start:])
+	builder.WriteByte('"')
+}
+
+func encodeSmallMapIndex(index int32) int32 {
+	return ^index
+}
+
+func decodeSmallMapIndex(index int32) (int32, bool) {
+	if index >= 0 {
+		return 0, false
+	}
+	return ^index, true
+}
+
+// MapStorage stores map values outside the trie. One- and two-field maps use
+// a packed pool; negative indexes encode that internal representation.
 type MapStorage struct {
-	array     []Map
-	deleted   []int
-	reusables reusableIndexes
+	array          []Map
+	deleted        []int
+	reusables      reusableIndexes
+	small          []smallMapData
+	smallReusables reusableIndexes
 }
 
 func CreateMapStorage() *MapStorage {
@@ -1442,6 +1718,42 @@ func (ms *MapStorage) PutEntry(idx int32, subkey string, value interface{}) {
 	ms.reusables.Use(idx)
 }
 
+func (ms *MapStorage) putAdaptive(idx int32, value Map) int32 {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if len(value) > 0 && len(value) <= smallMapEntryLimit && int(smallIndex) < len(ms.small) && !ms.smallReusables.Has(smallIndex) {
+			ms.small[smallIndex] = newSmallMapData(value)
+			return idx
+		}
+		ms.delSmall(smallIndex)
+		return ms.Add(value)
+	}
+	if len(value) > 0 && len(value) <= smallMapEntryLimit {
+		ms.Del(idx)
+		return ms.addSmall(value)
+	}
+	ms.Put(idx, value)
+	return idx
+}
+
+func (ms *MapStorage) putEntryAdaptive(idx int32, subkey string, value interface{}) int32 {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if int(smallIndex) >= len(ms.small) || ms.smallReusables.Has(smallIndex) {
+			return idx
+		}
+		data := &ms.small[smallIndex]
+		if data.putEntry(subkey, value) {
+			return idx
+		}
+		promoted := data.materialize(false)
+		promoted[subkey] = cloneValue(value)
+		next := ms.addOwned(promoted)
+		ms.delSmall(smallIndex)
+		return next
+	}
+	ms.PutEntry(idx, subkey, value)
+	return idx
+}
+
 func (ms *MapStorage) PutEntries(idx int32, fields Map) {
 	if idx < 0 || int(idx) >= len(ms.array) || len(fields) == 0 {
 		return
@@ -1454,6 +1766,27 @@ func (ms *MapStorage) PutEntries(idx int32, fields Map) {
 		ms.array[idx][subkey] = cloneValue(value)
 	}
 	ms.reusables.Use(idx)
+}
+
+func (ms *MapStorage) putEntriesAdaptive(idx int32, fields Map) int32 {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if int(smallIndex) >= len(ms.small) || ms.smallReusables.Has(smallIndex) || len(fields) == 0 {
+			return idx
+		}
+		data := &ms.small[smallIndex]
+		if data.putEntries(fields) {
+			return idx
+		}
+		promoted := data.materialize(false)
+		for subkey, value := range fields {
+			promoted[subkey] = cloneValue(value)
+		}
+		next := ms.addOwned(promoted)
+		ms.delSmall(smallIndex)
+		return next
+	}
+	ms.PutEntries(idx, fields)
+	return idx
 }
 
 func (ms *MapStorage) Append(value Map) int32 {
@@ -1477,6 +1810,34 @@ func (ms *MapStorage) Add(value Map) int32 {
 	return ms.Append(value)
 }
 
+func (ms *MapStorage) addAdaptive(value Map) int32 {
+	if len(value) > 0 && len(value) <= smallMapEntryLimit {
+		return ms.addSmall(value)
+	}
+	return ms.Add(value)
+}
+
+func (ms *MapStorage) addOwned(value Map) int32 {
+	if idx, ok := ms.reusables.Take(); ok {
+		ms.array[idx] = value
+		ms.deleted[idx] = 0
+		return idx
+	}
+	ms.array = append(ms.array, value)
+	ms.deleted = append(ms.deleted, 0)
+	return int32(len(ms.array) - 1)
+}
+
+func (ms *MapStorage) addSmall(value Map) int32 {
+	data := newSmallMapData(value)
+	if idx, ok := ms.smallReusables.Take(); ok {
+		ms.small[idx] = data
+		return encodeSmallMapIndex(idx)
+	}
+	ms.small = append(ms.small, data)
+	return encodeSmallMapIndex(int32(len(ms.small) - 1))
+}
+
 func (ms *MapStorage) AddEntry(subkey string, value interface{}) int32 {
 	if idx, ok := ms.reusables.Take(); ok {
 		ms.array[idx] = Map{subkey: cloneValue(value)}
@@ -1486,7 +1847,23 @@ func (ms *MapStorage) AddEntry(subkey string, value interface{}) int32 {
 	return ms.AppendEntry(subkey, value)
 }
 
+func (ms *MapStorage) addEntryAdaptive(subkey string, value interface{}) int32 {
+	data := newSmallMapEntry(subkey, value)
+	if idx, ok := ms.smallReusables.Take(); ok {
+		ms.small[idx] = data
+		return encodeSmallMapIndex(idx)
+	}
+	ms.small = append(ms.small, data)
+	return encodeSmallMapIndex(int32(len(ms.small) - 1))
+}
+
 func (ms *MapStorage) TakeEntry(idx int32, subkey string) (interface{}, bool) {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if int(smallIndex) >= len(ms.small) || ms.smallReusables.Has(smallIndex) {
+			return nil, false
+		}
+		return ms.small[smallIndex].takeEntry(subkey)
+	}
 	if idx < 0 || int(idx) >= len(ms.array) {
 		return nil, false
 	}
@@ -1502,14 +1879,100 @@ func (ms *MapStorage) TakeEntry(idx int32, subkey string) (interface{}, bool) {
 }
 
 func (ms *MapStorage) Del(idx int32) {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		ms.delSmall(smallIndex)
+		return
+	}
 	if idx < 0 || int(idx) >= len(ms.array) {
 		return
 	}
 	ms.array[idx] = nil
 	ms.deleted[idx] = 0
+	if int(idx) == len(ms.array)-1 {
+		ms.array = ms.array[:idx]
+		ms.deleted = ms.deleted[:idx]
+		ms.array = trimReusableTail(ms.array, &ms.reusables)
+		ms.deleted = ms.deleted[:len(ms.array)]
+		return
+	}
 	ms.reusables.Mark(idx)
 	ms.array = trimReusableTail(ms.array, &ms.reusables)
 	ms.deleted = ms.deleted[:len(ms.array)]
+}
+
+func (ms *MapStorage) delSmall(idx int32) {
+	if idx < 0 || int(idx) >= len(ms.small) {
+		return
+	}
+	ms.small[idx] = smallMapData{}
+	if int(idx) == len(ms.small)-1 {
+		ms.small = ms.small[:idx]
+		ms.small = trimReusableTail(ms.small, &ms.smallReusables)
+		return
+	}
+	ms.smallReusables.Mark(idx)
+	ms.small = trimReusableTail(ms.small, &ms.smallReusables)
+}
+
+func (ms *MapStorage) peek(idx int32, subkey string) (interface{}, bool) {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		return ms.small[smallIndex].peek(subkey)
+	}
+	value, ok := ms.array[idx][subkey]
+	return value, ok
+}
+
+func (ms *MapStorage) jsonString(idx int32) (string, error) {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if int(smallIndex) >= len(ms.small) || ms.smallReusables.Has(smallIndex) {
+			return "", errors.New("hatriecache: map backing index is missing")
+		}
+		return ms.small[smallIndex].jsonString()
+	}
+	if idx < 0 || int(idx) >= len(ms.array) || ms.reusables.Has(idx) {
+		return "", errors.New("hatriecache: map backing index is missing")
+	}
+	return jsonEncodedString(ms.array[idx])
+}
+
+func (ms *MapStorage) jsonSize(idx int32) (int64, error) {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if int(smallIndex) >= len(ms.small) || ms.smallReusables.Has(smallIndex) {
+			return 0, errors.New("hatriecache: map backing index is missing")
+		}
+		encoded, err := ms.small[smallIndex].jsonString()
+		return int64(len(encoded)), err
+	}
+	if idx < 0 || int(idx) >= len(ms.array) || ms.reusables.Has(idx) {
+		return 0, errors.New("hatriecache: map backing index is missing")
+	}
+	return jsonEncodedSize(ms.array[idx])
+}
+
+func (ms *MapStorage) clone(idx int32) (Map, bool) {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if int(smallIndex) >= len(ms.small) || ms.smallReusables.Has(smallIndex) {
+			return nil, false
+		}
+		return ms.small[smallIndex].materialize(true), true
+	}
+	if idx < 0 || int(idx) >= len(ms.array) || ms.reusables.Has(idx) {
+		return nil, false
+	}
+	return cloneMap(ms.array[idx]), true
+}
+
+func (ms *MapStorage) length(idx int32) (int, bool) {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if int(smallIndex) >= len(ms.small) || ms.smallReusables.Has(smallIndex) {
+			return 0, false
+		}
+		return int(ms.small[smallIndex].length), true
+	}
+	if idx < 0 || int(idx) >= len(ms.array) || ms.reusables.Has(idx) {
+		return 0, false
+	}
+	return len(ms.array[idx]), true
 }
 
 func (ms *MapStorage) compactIfSparse(idx int32) {
@@ -5373,7 +5836,7 @@ func (ht *HatTrie) upsertMapLocked(key string, val Map) error {
 		return err
 	}
 	if hval.IsMap() {
-		ht.maps.Put(hval.Index, val)
+		hval.Index = ht.maps.putAdaptive(hval.Index, val)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
@@ -5383,7 +5846,7 @@ func (ht *HatTrie) upsertMapLocked(key string, val Map) error {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.maps.Add(val)
+	idx := ht.maps.addAdaptive(val)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)
 	return nil
@@ -5420,11 +5883,20 @@ func (ht *HatTrie) PutMap(key string, subkey string, val interface{}) {
 		partition.PutMap(key, subkey, val)
 		return
 	}
-	_ = ht.putMapEntries(key, Map{subkey: val})
+	_ = ht.putMapEntry(key, subkey, val)
 }
 
 func (ht *HatTrie) PutMapChecked(key string, subkey string, val interface{}) error {
-	return ht.PutMapEntriesChecked(key, Map{subkey: val})
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.PutMapChecked(key, subkey, val)
+	}
+	if err := validateMapValue(Map{subkey: val}); err != nil {
+		return err
+	}
+	return ht.putMapEntry(key, subkey, val)
 }
 
 func (ht *HatTrie) PutMapEntriesChecked(key string, fields Map) error {
@@ -5443,6 +5915,36 @@ func (ht *HatTrie) PutMapEntriesChecked(key string, fields Map) error {
 	return ht.putMapEntries(key, fields)
 }
 
+func (ht *HatTrie) putMapEntry(key string, subkey string, value interface{}) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return err
+	}
+	if hval.IsMap() {
+		hval.Index = ht.maps.putEntryAdaptive(hval.Index, subkey, value)
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked(key)
+		return nil
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.maps.addEntryAdaptive(subkey, value)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
+	ht.recordWriteLocked(key)
+	return nil
+}
+
 func (ht *HatTrie) putMapEntries(key string, fields Map) error {
 	if ht == nil {
 		return ErrNilHatTrie
@@ -5459,7 +5961,7 @@ func (ht *HatTrie) putMapEntries(key string, fields Map) error {
 		return err
 	}
 	if hval.IsMap() {
-		ht.maps.PutEntries(hval.Index, fields)
+		hval.Index = ht.maps.putEntriesAdaptive(hval.Index, fields)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return nil
@@ -5470,7 +5972,7 @@ func (ht *HatTrie) putMapEntries(key string, fields Map) error {
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.maps.Add(fields)
+	idx := ht.maps.addAdaptive(fields)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}.toValue()
 	ht.recordWriteLocked(key)
 	return nil
@@ -5491,16 +5993,16 @@ func (ht *HatTrie) PeekMapChecked(key, subkey string) (interface{}, bool, error)
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	m, ok, err := ht.mapRefLockedChecked(key)
+	hval, err := ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return nil, false, err
 	}
-	if !ok {
+	if !hval.IsMap() {
 		ht.recordReadLocked(false, key)
 		return nil, false, nil
 	}
-	val, exists := m[subkey]
+	val, exists := ht.maps.peek(hval.Index, subkey)
 	ht.recordReadLocked(exists, key)
 	if !exists {
 		return nil, false, nil
@@ -5555,32 +6057,21 @@ func (ht *HatTrie) GetMapChecked(key string) (Map, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	m, ok, err := ht.mapRefLockedChecked(key)
+	hval, err := ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return nil, false, err
 	}
+	if !hval.IsMap() {
+		ht.recordReadLocked(false, key)
+		return nil, false, nil
+	}
+	value, ok := ht.maps.clone(hval.Index)
 	ht.recordReadLocked(ok, key)
 	if !ok {
 		return nil, false, nil
 	}
-	return cloneMap(m), true, nil
-}
-
-func (ht *HatTrie) mapRefLocked(key string) (Map, bool) {
-	m, ok, _ := ht.mapRefLockedChecked(key)
-	return m, ok
-}
-
-func (ht *HatTrie) mapRefLockedChecked(key string) (Map, bool, error) {
-	hval, err := ht.getLockedChecked(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if hval.IsMap() {
-		return ht.maps.array[hval.Index], true, nil
-	}
-	return nil, false, nil
+	return value, true, nil
 }
 
 func (ht *HatTrie) UpsertSlice(key string, val Slice) {

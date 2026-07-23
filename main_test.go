@@ -948,6 +948,9 @@ func diskIndexReleased(ht *HatTrie, idx int32) bool {
 }
 
 func mapIndexReleased(ht *HatTrie, idx int32) bool {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		return int(smallIndex) >= len(ht.maps.small) || ht.maps.smallReusables.Has(smallIndex)
+	}
 	return int(idx) >= len(ht.maps.array) || ht.maps.reusables.Has(idx)
 }
 

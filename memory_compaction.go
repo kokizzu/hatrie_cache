@@ -48,6 +48,7 @@ type memoryCompactionPlan struct {
 	radixTrees        *RadixTreeStorage
 	dbrefs            *LevelDBReferenceStorage
 	remaps            [DATAVALUE_TYPE_RADIX_TREE + 1][]int32
+	mapSmallRemap     []int32
 	diskRemap         []int32
 	replicationMerkle *replicationMerkleIndex
 }
@@ -169,8 +170,17 @@ func (ht *HatTrie) buildMemoryCompactionPlanLocked() (memoryCompactionPlan, erro
 	if err != nil {
 		return memoryCompactionPlan{}, fmt.Errorf("hatriecache: compact maps: %w", err)
 	}
-	plan.maps = &MapStorage{array: mapArray, deleted: compactParallelSlice(ht.maps.deleted, mapRemap)}
+	mapSmall, mapSmallRemap, err := compactStorageSlice(ht.maps.small, &ht.maps.smallReusables)
+	if err != nil {
+		return memoryCompactionPlan{}, fmt.Errorf("hatriecache: compact small maps: %w", err)
+	}
+	plan.maps = &MapStorage{
+		array:   mapArray,
+		deleted: compactParallelSlice(ht.maps.deleted, mapRemap),
+		small:   mapSmall,
+	}
 	plan.remaps[DATAVALUE_TYPE_MAP] = mapRemap
+	plan.mapSmallRemap = mapSmallRemap
 
 	if plan.slices, plan.remaps[DATAVALUE_TYPE_SLICE], err = compactSingleStorage(ht.slices.array, &ht.slices.reusables, func(values []deque) *SliceStorage { return &SliceStorage{array: values} }); err != nil {
 		return memoryCompactionPlan{}, err
@@ -335,6 +345,15 @@ func (plan *memoryCompactionPlan) remapValue(value *HatValue) error {
 	if value == nil || value.Empty() || value.IsCounter() {
 		return nil
 	}
+	if value.IsMap() {
+		if oldIndex, ok := decodeSmallMapIndex(value.Index); ok {
+			if int(oldIndex) >= len(plan.mapSmallRemap) || plan.mapSmallRemap[oldIndex] < 0 {
+				return fmt.Errorf("hatriecache: live %s references missing backing index %d", value.String(), oldIndex)
+			}
+			value.Index = encodeSmallMapIndex(plan.mapSmallRemap[oldIndex])
+			return nil
+		}
+	}
 	var remap []int32
 	if value.IsBytesAtRaws() && value.OnDisk() {
 		remap = plan.diskRemap
@@ -495,6 +514,7 @@ func (ht *HatTrie) memoryBackingBytesLocked() uint64 {
 	total += storageSliceBytes(ht.raws.array) + reusableBackingBytes(&ht.raws.reusables)
 	total += storageSliceBytes(ht.disks.paths) + reusableBackingBytes(&ht.disks.reusables)
 	total += storageSliceBytes(ht.maps.array) + storageSliceBytes(ht.maps.deleted) + reusableBackingBytes(&ht.maps.reusables)
+	total += storageSliceBytes(ht.maps.small) + reusableBackingBytes(&ht.maps.smallReusables)
 	total += storageSliceBytes(ht.slices.array) + reusableBackingBytes(&ht.slices.reusables)
 	total += storageSliceBytes(ht.sets.array) + reusableBackingBytes(&ht.sets.reusables)
 	total += storageSliceBytes(ht.priorityQueues.array) + reusableBackingBytes(&ht.priorityQueues.reusables)

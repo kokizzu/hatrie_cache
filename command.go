@@ -1554,7 +1554,13 @@ func (ht *HatTrie) executeFastPutMapCommand(key string, subkey string, value str
 		if ht.expireIfNeededLocked(key, hval) {
 			ht.clearHotKeyLocked(key)
 		} else if hval.IsMap() {
-			ht.maps.PutEntry(hval.Index, subkey, value)
+			nextIndex := ht.maps.putEntryAdaptive(hval.Index, subkey, value)
+			if nextIndex != hval.Index {
+				hval.Index = nextIndex
+				if rawPtr := ht.tryLocation(key); rawPtr != nil {
+					*rawPtr = hval.toValue()
+				}
+			}
 			ht.recordWriteLocked(key)
 			ht.cacheValueLocked(key, hval)
 			return CacheCommandResponse{OK: true, Message: "stored map fields"}, true
@@ -1566,7 +1572,7 @@ func (ht *HatTrie) executeFastPutMapCommand(key string, subkey string, value str
 		return commandError(err.Error()), true
 	}
 	if hval.IsMap() {
-		ht.maps.PutEntry(hval.Index, subkey, value)
+		hval.Index = ht.maps.putEntryAdaptive(hval.Index, subkey, value)
 		if rawPtr != nil {
 			*rawPtr = hval.toValue()
 		}
@@ -1580,7 +1586,7 @@ func (ht *HatTrie) executeFastPutMapCommand(key string, subkey string, value str
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.maps.AddEntry(subkey, value)
+	idx := ht.maps.addEntryAdaptive(subkey, value)
 	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}
 	*rawPtr = hval.toValue()
 	ht.recordWriteLocked(key)
@@ -2553,7 +2559,7 @@ func (ht *HatTrie) executeFastPeekMapCommand(key string, subkey string) (CacheCo
 		ht.recordReadLocked(false, key)
 		return CacheCommandResponse{OK: true, Message: "value not found"}, true
 	}
-	value, ok := ht.maps.array[hval.Index][subkey]
+	value, ok := ht.maps.peek(hval.Index, subkey)
 	ht.recordReadLocked(ok, key)
 	if !ok {
 		return CacheCommandResponse{OK: true, Message: "value not found"}, true
@@ -3128,7 +3134,7 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		}
 		return string(value), nil
 	case DATAVALUE_TYPE_MAP:
-		return jsonEncodedString(ht.maps.array[hval.Index])
+		return ht.maps.jsonString(hval.Index)
 	case DATAVALUE_TYPE_SLICE:
 		return jsonEncodedString(ht.slices.array[hval.Index].Slice())
 	case DATAVALUE_TYPE_SET:

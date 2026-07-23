@@ -49,7 +49,7 @@ Large HAT-trie comparable command rows, including the public `BATCH` pipeline
 row:
 
 ```
-make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/(StringSet|PipelineBatch16|StringGet|CounterInc|TTLExpire|MapPut|MapPeek|SlicePushPop|SetAddHas|PriorityQueuePushPop|RoaringAdd|RoaringHas|SparseBitsetAdd|SparseBitsetHas|RadixPut|RadixPrefix|ReplicationDump)$' BENCHTIME=1000000x
+make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/(StringSet|PipelineBatch16|StringGet|CounterInc|TTLExpire|MapPut|MapPeek|MapGet|SlicePushPop|SetAddHas|PriorityQueuePushPop|RoaringAdd|RoaringHas|SparseBitsetAdd|SparseBitsetHas|RadixPut|RadixPrefix|ReplicationDump)$' BENCHTIME=1000000x
 ```
 
 HAT-trie HyperLogLog rows used by the Redis comparison:
@@ -211,6 +211,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
+| Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
 | Reverted | [Packed-string compaction](#string-compaction-allocation-rollback), 100k varied 33-512 B strings | Packed copy: 30.07 MB cumulative heap; 121,848 KiB peak RSS | Dense remap: 2.81 MB cumulative heap; 93,516 KiB peak RSS | 10.71x lower cumulative heap, 1.30x lower peak RSS | Retains 3.79% more heap and forced GC is 1.81x slower; packing was not worth its immediate memory spike |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
@@ -1013,6 +1014,69 @@ strings, cumulative heap falls from 108,816,416 to 69,731,720 B (1.56x lower),
 allocations fall from 500,117 to 400,067 (1.25x fewer), and median time improves
 from 273.039 to 243.218 ms (1.12x faster). Raw dedicated-fixture output is
 generated at `build/benchmarks/string-storage.txt`.
+
+<a id="packed-small-map-storage"></a>
+### Packed Small-Map Storage
+
+The previous map pool allocated a Go map header and first bucket for every map
+key, so one through eight fields retained the same approximately 354.5 B/map.
+One- and two-field maps now live in a packed two-entry pool. The existing
+`HatValue` map type is unchanged; a private negative backing index selects the
+packed pool, and the third distinct field promotes once to the unchanged Go-map
+pool. Full replacement can move a map back to the packed representation.
+
+Correctness coverage exercises nested-value ownership, update/take/reinsert,
+promotion, full replacement, sparse packed-pool compaction, JSON escaping,
+snapshot round-trip, and the existing command, LevelDB, monitoring, and memory
+compaction paths. Wire, snapshot, journal, and persistent record formats remain
+logical maps and do not expose packed indexes.
+
+The retained-memory fixture inserts 100,000 maps. Input keys and field maps are
+created before measurement. Each result is the median of three one-pass runs on
+the Ryzen 9 5950X host.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkMapStorageLayout100k -benchtime=1x -count=3 -benchmem'
+```
+
+| Fields/map | Baseline ns/map | Packed ns/map | Baseline retained B/map | Final retained B/map | Result |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 2,749 | 2,625 | 354.5 | 84.00 | 1.05x faster, 4.22x lower retained heap |
+| 2 | 3,108 | 2,715 | 354.5 | 84.00 | 1.14x faster, 4.22x lower retained heap |
+| 4 | 3,280 | 2,948 | 354.5 | 354.5 | Large-map representation and retention unchanged |
+| 8 | 3,079 | 3,026 | 354.5 | 354.5 | Large-map representation and retention unchanged |
+| 16 | 5,053 | 4,491 | 1,258 | 1,258 | Large-map representation and retention unchanged |
+
+For one-field maps, retained objects fall from 2.000 to 0.00025/map.
+Timed insertion allocation falls from 42,203,568 B and 200,064 allocations to
+40,478,848 B and 29 allocations: 1.04x lower cumulative heap and 6,899x fewer
+allocations. Two-field results are equivalent.
+
+Operation medians use five 500 ms samples with the same test binary. The
+full-map JSON row uses seven two-second samples at `-cpu=1` against a clean
+clone of the preceding commit.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkMapStorageOperations -benchtime=500ms -count=5 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MapGet -benchtime=2s -count=7 -benchmem -cpu=1'
+```
+
+| Operation | Baseline | Final | Improvement |
+| --- | ---: | ---: | ---: |
+| Update existing small field | 354.3 ns; 0 allocs | 239.7 ns; 0 allocs | 1.48x faster |
+| Peek small field | 99.23 ns; 0 allocs | 90.77 ns; 0 allocs | 1.09x faster |
+| Take then reinsert small field | 1,088 ns; 336 B; 2 allocs | 487.4 ns; 0 B; 0 allocs | 2.23x faster; allocation eliminated |
+| Replace two fields then promote third | 1,030 ns; 336 B; 2 allocs | 1,007 ns; 336 B; 2 allocs | 1.02x faster; cost unchanged |
+| Update existing eight-field map | 340.7 ns; 0 allocs | 256.0 ns; 0 allocs | 1.33x faster |
+| Peek eight-field map | 104.0 ns; 0 allocs | 90.39 ns; 0 allocs | 1.15x faster |
+| Full one-field map JSON command | 1,148 ns; 152 B; 3 allocs | 511.4 ns; 24 B; 1 alloc | 2.24x faster, 6.33x lower heap, 3x fewer allocs |
+
+The full-map path initially materialized a temporary Go map and measured 1,499
+ns, 488 B, and 5 allocations. That candidate was not retained. The final path
+writes the two-entry JSON object directly with generic nested-value fallback;
+its output is regression-tested against the existing encoder, including control
+characters, HTML-sensitive bytes, Unicode separators, integer bounds, and
+nested structures.
 
 <a id="string-compaction-allocation-rollback"></a>
 ### String Compaction Allocation Rollback
