@@ -3584,14 +3584,109 @@ func TestHTTPReplicatorSyncAllBoundsDigestAndFallbackWriteBatches(t *testing.T) 
 					t.Fatalf("SyncAll() target = %#v, want success", targetResult)
 				}
 			}
-			if largestBatch > defaultReplicationSyncKeyPageSize {
-				t.Fatalf("largest write batch = %d, want at most %d", largestBatch, defaultReplicationSyncKeyPageSize)
+			wantLargestBatch := defaultReplicationSyncKeyPageSize
+			if test.legacyTarget {
+				wantLargestBatch = keyCount
+			}
+			if largestBatch != wantLargestBatch {
+				t.Fatalf("largest write batch = %d, want %d", largestBatch, wantLargestBatch)
 			}
 			if got := targetTrie.GetString("session:0000"); got != "source" {
 				t.Fatalf("first target value = %q, want source", got)
 			}
 			if got := targetTrie.GetString(fmt.Sprintf("session:%04d", keyCount-1)); got != "source" {
 				t.Fatalf("last target value = %q, want source", got)
+			}
+		})
+	}
+}
+
+func TestHTTPReplicatorAggregatesLegacyFallbackScanPages(t *testing.T) {
+	const keyCount = 3*defaultReplicationSyncKeyPageSize + 1
+	source := newTestTrie(t)
+	targetTrie := newTestTrie(t)
+	for index := 0; index < keyCount; index++ {
+		source.UpsertString(fmt.Sprintf("session:%05d", index), "value")
+	}
+
+	var topology *TopologyStore
+	var requests atomic.Int64
+	var largestBatch atomic.Int64
+	safety := NewReplicationSafetyStore()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		payload := mustDecodeReplicationTestCommand(t, w, request)
+		batchSize := int64(1)
+		if normalizedCommand(payload.Command) == replicationBatchEnvelopeCommand || normalizedCommand(payload.Command) == "INTERNALBATCH" {
+			batchSize = int64(len(mustDecodeReplicationBatchValues(t, payload)))
+		}
+		requests.Add(1)
+		updateAtomicMax(&largestBatch, batchSize)
+		response, rejected := executeCacheCommand(request.Context(), targetTrie, payload, commandExecutionOptions{
+			NodeName:          "node-b",
+			Topology:          topology,
+			ReplicationSafety: safety,
+		})
+		status := http.StatusOK
+		if rejected {
+			status = http.StatusConflict
+		}
+		format, _ := commandWireFormatFromContentType(request.Header.Get("Content-Type"))
+		writeCommandResponseWire(w, request, status, response, format)
+	}))
+	defer target.Close()
+
+	topology = replicationTestTopology(t, target.URL)
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:     "node-a",
+		Topology: topology,
+		Election: NewElectionStore(topology, ElectionOptions{}),
+		Client:   target.Client(),
+	})
+	t.Cleanup(replicator.Close)
+	routing, ok := replicator.snapshotReplicationRouting()
+	if !ok {
+		t.Fatal("snapshotReplicationRouting() ok = false")
+	}
+	replicator.markReplicationDigestUnsupported(routing.nodes["node-b"], routing.fingerprint)
+
+	result := replicator.SyncAll(context.Background(), source, "session:")
+	if result.Skipped || result.Entries != keyCount {
+		t.Fatalf("SyncAll() = %#v, want %d repaired entries", result, keyCount)
+	}
+	for _, targetResult := range result.Targets {
+		if !targetResult.OK {
+			t.Fatalf("SyncAll() target = %#v, want success", targetResult)
+		}
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("fallback requests = %d, want two bounded aggregated requests", got)
+	}
+	if got := largestBatch.Load(); got != 2*defaultReplicationSyncKeyPageSize {
+		t.Fatalf("largest fallback batch = %d, want %d", got, 2*defaultReplicationSyncKeyPageSize)
+	}
+	if got := targetTrie.GetString("session:00000"); got != "value" {
+		t.Fatalf("first target value = %q, want value", got)
+	}
+	if got := targetTrie.GetString(fmt.Sprintf("session:%05d", keyCount-1)); got != "value" {
+		t.Fatalf("last target value = %q, want value", got)
+	}
+}
+
+func TestReplicationFallbackAggregationEntryLimit(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		pageSize  int
+		maxBytes  int
+		wantLimit int
+	}{
+		{name: "default aggregates two pages", pageSize: 1024, maxBytes: DefaultReplicationBatchMaxBytes, wantLimit: 2048},
+		{name: "small byte limit keeps one page", pageSize: 1024, maxBytes: 64 << 10, wantLimit: 1024},
+		{name: "disabled byte limit keeps one page", pageSize: 1024, maxBytes: 0, wantLimit: 1024},
+		{name: "large page cannot overflow", pageSize: math.MaxInt, maxBytes: math.MaxInt, wantLimit: math.MaxInt},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := replicationFallbackAggregationEntryLimit(test.pageSize, test.maxBytes); got != test.wantLimit {
+				t.Fatalf("replicationFallbackAggregationEntryLimit(%d, %d) = %d, want %d", test.pageSize, test.maxBytes, got, test.wantLimit)
 			}
 		})
 	}

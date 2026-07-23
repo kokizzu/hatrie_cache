@@ -171,6 +171,14 @@ func BenchmarkReplicationCompactBatchReceiver(b *testing.B) {
 		}
 		payloads[index] = replicationSyncPayload{key: fmt.Sprintf("session:%08d", index), binaryValue: value}
 	}
+	tenRequestRanges := make([][2]int, 0, 10)
+	for start := 0; start < keyCount; start += keyCount / 10 {
+		tenRequestRanges = append(tenRequestRanges, [2]int{start, start + keyCount/10})
+	}
+	fiveRequestRanges := make([][2]int, 0, 5)
+	for start := 0; start < keyCount; start += keyCount / 5 {
+		fiveRequestRanges = append(fiveRequestRanges, [2]int{start, start + keyCount/5})
+	}
 
 	for _, tt := range []struct {
 		name   string
@@ -178,6 +186,8 @@ func BenchmarkReplicationCompactBatchReceiver(b *testing.B) {
 	}{
 		{name: "OneRequest", ranges: [][2]int{{0, keyCount}}},
 		{name: "TwoRequests", ranges: [][2]int{{0, keyCount / 2}, {keyCount / 2, keyCount}}},
+		{name: "FiveRequests", ranges: fiveRequestRanges},
+		{name: "TenRequests", ranges: tenRequestRanges},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
 			compressed := make([][]byte, 0, len(tt.ranges))

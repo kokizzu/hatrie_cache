@@ -1008,12 +1008,14 @@ func (replicator *HTTPReplicator) syncDigestTargetPackedFallback(ctx context.Con
 	if limit < defaultReplicationSyncKeyPageSize {
 		limit = defaultReplicationSyncKeyPageSize
 	}
+	pageEntryLimit := limit
+	limit = replicationFallbackAggregationEntryLimit(limit, replicator.batchMaxBytes)
 	targets := make([]ReplicationTargetResult, 0, 1)
 	changed := 0
 	deleted := 0
 	done := false
 	arenaCount := 2
-	if grpcSession != nil {
+	if grpcSession != nil || limit > pageEntryLimit {
 		arenaCount = 1
 	}
 	arenas := make([]*replicationSyncPayloadArena, arenaCount)
@@ -1074,6 +1076,22 @@ func (replicator *HTTPReplicator) syncDigestTargetPackedFallback(ctx context.Con
 		targets = append(targets, ReplicationTargetResult{Node: inventory.target.ID, Address: inventory.target.Address, OK: true})
 	}
 	return targets, changed, deleted, true
+}
+
+func replicationFallbackAggregationEntryLimit(pageSize int, maxBytes int) int {
+	const minimumEstimatedEntryBytes = 96
+	const maxAggregatePages = 2
+	if pageSize <= 0 || maxBytes < minimumEstimatedEntryBytes || pageSize > maxBytes/minimumEstimatedEntryBytes {
+		return pageSize
+	}
+	pages := maxBytes / minimumEstimatedEntryBytes / pageSize
+	if pages > maxAggregatePages {
+		pages = maxAggregatePages
+	}
+	if pages <= 1 || pageSize > math.MaxInt/pages {
+		return pageSize
+	}
+	return pageSize * pages
 }
 
 func (replicator *HTTPReplicator) executeReplicationDigestChanges(ctx context.Context, trie *HatTrie, routing replicationRoutingSnapshot, target TopologyNode, changes []replicationDigestChange, grpcSession *replicationGRPCSyncSession, fallback bool) ([]ReplicationTargetResult, int, int, bool) {

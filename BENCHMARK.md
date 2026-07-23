@@ -191,6 +191,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Epoch-validated scanned-value reuse](#replication-descriptor-optimizations), 10k-key known-legacy sync | Read values after scan: 9.882 ms; 663,319 heap B; 374 allocs; 40 native batches | Reuse scanned values: 8.188 ms; 661,423 heap B; 372 allocs; 0 native batches | 1.21x faster; 1.27x faster focused preparation; reader pause 1.46x shorter | Mutation, TTL, partitions, and striped counters use the prior bounded lookup; the paired mutation control was neutral and allocations were unchanged |
 | Current pass | [In-place native radix ordering](#replication-descriptor-optimizations), 10k-key ordered scan | Comparator sort: 3.744 ms; 841,584 heap B; 100 allocs | MSD radix sort: 3.507 ms; 841,584 heap B; 100 allocs | 1.07x faster with unchanged heap and allocations | Uses fixed stack histograms with logarithmically bounded recursion; no per-key sort allocation |
 | Current pass | [Request-scoped fallback arena ring](#replication-descriptor-optimizations), 10k keys in ten pages | Fresh arena/page: 12.234 ms; 766,579 heap B; 1,408 allocs | Two reusable arenas: 11.333 ms; 287,987 heap B; 1,369 allocs | 1.08x faster, 2.66x lower heap, 1.03x fewer allocs | At most two page arenas remain live until their HTTP body writers finish; requests, wire bytes, and scan lock boundaries are unchanged |
+| Current pass | [Bounded two-page fallback aggregation](#replication-descriptor-optimizations), 10k keys | One page/request: 11.333 ms sender; 4.443 ms receiver; 10.01 requests; 287,987 sender heap B | Two pages/request: 9.699 ms sender; 3.663 ms receiver; 5.01 requests; 218,509 sender heap B | Combined CPU 1.18x faster; 2x fewer requests; sender heap 1.32x lower; 1.84x fewer sender allocs | Largest protobuf grows from 61,156 B to 122,156 B, still 8.6x below the default 1 MiB limit; scan lock pages stay at 1,024 keys |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
 | Reverted | [Exact protobuf batch coalescing](#replication-descriptor-optimizations), 10k-key legacy fallback | Two requests: sender 10.422 ms; receiver decode 4.066 ms; largest protobuf 305,156 B | One request: sender 10.215 ms; receiver decode 4.444 ms; largest protobuf 609,046 B | Sender 1.02x faster and 1.44x fewer allocs, but receiver 1.09x slower and combined CPU 1.012x slower | Rolled back; halving requests did not offset receiver decode cost and doubled the largest request |
 | Reverted | [Carried compact payload estimates](#replication-descriptor-optimizations), 10k-key scan, preparation, and split | Estimate during split: 4.215 ms | Carry from serialization: 4.230 ms | 0.996x; 0.36% slower with identical allocations | Rolled back; the isolated splitter was 4.37x faster, but moving the estimate made the complete CPU path slower |
@@ -2335,6 +2336,7 @@ feature. Improvements are ratios where larger is better.
 | Epoch-validated fallback values, 10,000 keys | Second native lookup: 4,585,669 ns; 947,473 B; 51 allocs; 40 native batches | Reuse scan descriptors: 3,597,822 ns; 945,424 B; 50 allocs; 0 native batches | 1.27x | 1.002x | 1.02x | Stable values are validated under the existing shared lock in 256-entry chunks; mutation falls back for the remaining records and was neutral in an alternating-order control |
 | Ordered native HAT-trie scan, 10,000 keys | 3,744,034 ns; 841,584 B; 100 allocs | 3,506,797 ns; 841,584 B; 100 allocs | 1.07x | 1.00x | 1.00x | Fixed 257-symbol stack histograms replace libc `qsort`; ordering and wire representation are unchanged |
 | Ten-page known-legacy sync, 10,000 keys | Fresh arena/page: 12,234,348 ns; 10.01 requests; 57,488 wire B; 766,579 B; 1,408 allocs | Two-arena ring: 11,333,138 ns; 10.01 requests; 57,493 wire B; 287,987 B; 1,369 allocs | 1.08x | 2.66x | 1.03x | Arena reset waits only when its earlier streaming writer is still active; two bounded page arenas can overlap, while page size and lock duration stay fixed |
+| Two-page known-legacy aggregation, 10,000 keys | Sender: 11,333,138 ns; 10.01 requests; 57,493 wire B; 287,987 B; 1,369 allocs. Receiver: 4,443,217 ns; 61,156 largest protobuf B | Sender: 9,698,527 ns; 5.01 requests; 56,551 wire B; 218,509 B; 745 allocs. Receiver: 3,663,435 ns; 122,156 largest protobuf B | Sender 1.17x; receiver 1.21x; combined 1.18x | Sender 1.32x; combined 1.02x | Sender 1.84x; combined 1.02x | Largest body is 2x higher but bounded to two unchanged 1,024-key scan pages and remains below the configured byte limit |
 | Single-pass legacy repair, 10,000 keys (rejected) | 11,459,282 ns; 55,892 wire B; 977,706 B; 433 allocs | Unordered: 10,675,192 ns; 64,258 wire B; 948,316 B; 392 allocs | 1.07x | 1.03x | 1.11x | Rejected: unordered transfer was 1.15x larger; restoring deterministic order took 12,316,337 ns, 1.075x slower than baseline |
 | Exact protobuf batch coalescing, 10,000 keys (rejected) | Sender: 10,422,384 ns; 2.004 requests; 949,539 B; 413 allocs. Receiver: 4,066,159 ns; 305,156 largest protobuf B | Sender: 10,214,713 ns; 1.004 requests; 928,371 B; 286 allocs. Receiver: 4,444,227 ns; 609,046 largest protobuf B | Sender 1.02x; combined 0.99x | Sender 1.02x; receiver 1.00x | Sender 1.44x; receiver 1.00x | Rejected: receiver decode was 1.09x slower, the largest request was 2.00x larger, and combined sender-plus-decode CPU was 1.012x slower |
 | Carried compact payload estimates, 10,000 keys (rejected) | Estimate during split: 4,214,771 ns | Carry from serialization: 4,230,028 ns | 0.996x | 1.00x | 1.00x | Rejected: a same-binary alternating-order control showed that moving the work into serialization was 0.36% slower overall |
@@ -2495,6 +2497,29 @@ control this is 1.08x faster, 2.66x lower heap, and 39 fewer allocations. The
 unchanged. The bounded lifetime cost is at most two page arenas per active
 fallback sync.
 
+The next pass aggregates at most two unchanged scan pages into one fallback
+request when the configured byte limit has room for a conservative 96 bytes per
+entry. HTTP uses one two-page arena in this mode, so its retained staging
+capacity does not exceed the preceding two one-page arena ring. A smaller or
+disabled byte limit retains one-page behavior. The helper uses division before
+multiplication and tests `math.MaxInt`, preventing configuration overflow from
+turning into a huge allocation.
+
+The paired sender median improved from 11.333 ms to 9.699 ms, requests fell from
+10.01 to 5.01, wire fell 1.7%, cumulative heap fell from 287,987 B to 218,509 B,
+and allocations fell from 1,369 to 745. The matching receiver decode median
+improved from 4.443 ms for ten requests to 3.663 ms for five. Combined measured
+CPU improves 1.18x, while combined heap and allocations each improve about
+1.02x. Median maximum reader pause fell from 0.707 ms to 0.167 ms because trie
+scan calls remain limited to 1,024 keys.
+
+The accepted cost is a twofold largest protobuf body increase, from 61,156 B to
+122,156 B, still 8.6x below the default 1 MiB transfer limit. A trial that
+aggregated ten pages reached 305,156 B and reduced requests further, but it
+could stage ten unusually large pages before splitting. That variant was
+rejected and replaced by the two-page cap to preserve the prior bounded-memory
+shape.
+
 The first arena candidate copied every key and reconstructed strings while
 sizing and writing protobuf. Its paired 10k end-to-end median was about 9%
 slower, so it was rejected before commit. Direct immutable key references
@@ -2610,6 +2635,14 @@ Raw local output is retained in:
 - `build/benchmarks/replication-page-arena-ring-after.txt`
 - `build/benchmarks/replication-page-arena-ab-control.txt`
 - `build/benchmarks/replication-page-arena-confirmation.txt`
+- `build/benchmarks/replication-page-aggregation-reader-before.txt`
+- `build/benchmarks/replication-page-aggregation-sender-after.txt`
+- `build/benchmarks/replication-page-aggregation-receiver-two.txt`
+- `build/benchmarks/replication-page-aggregation-receiver-ten.txt`
+- `build/benchmarks/replication-page-aggregation-reader-after.txt`
+- `build/benchmarks/replication-page-aggregation-two-page-sender.txt`
+- `build/benchmarks/replication-page-aggregation-receiver-five.txt`
+- `build/benchmarks/replication-page-aggregation-two-page-reader.txt`
 
 Reproduce the stable end-to-end row with:
 
@@ -2706,6 +2739,22 @@ make bench-replication-optimizations \
   REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
   BENCHTIME=100x COUNT=7 \
   REPLICATION_OPTIMIZATION_OUTPUT=replication-page-arena-confirmation.txt
+
+make bench-replication-optimizations \
+  REPLICATION_SPLIT_BENCH=NoSplitBenchmark \
+  REPLICATION_SYNC_BENCH=BenchmarkHTTPReplicatorSyncAllBatching/Default1k \
+  REPLICATION_DIGEST_BENCH=NoDigestBenchmark \
+  REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
+  BENCHTIME=100x COUNT=10 \
+  REPLICATION_OPTIMIZATION_OUTPUT=replication-page-aggregation-two-page-sender.txt
+
+make bench-replication-optimizations \
+  REPLICATION_SPLIT_BENCH=NoSplitBenchmark \
+  REPLICATION_SYNC_BENCH=BenchmarkReplicationCompactBatchReceiver/FiveRequests \
+  REPLICATION_DIGEST_BENCH=NoDigestBenchmark \
+  REPLICATION_ITERATOR_BENCH=NoIteratorBenchmark \
+  BENCHTIME=100x COUNT=10 \
+  REPLICATION_OPTIMIZATION_OUTPUT=replication-page-aggregation-receiver-five.txt
 ```
 
 ### Replication Page Traversal
@@ -2717,10 +2766,11 @@ Medians use `-benchtime=20x`; the current row is a seven-run median.
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Before persistent cursor (`471c229`) | 61,122,327 ns | 10 | 1,877,005 | 123,996 | 1.00x |
 | Previous (`e5b127d`) | 19,709,083 ns | 10 | 999,805 | 11,885 | 3.10x |
-| Current request-scoped arena ring | 11,333,138 ns | 10.01 | 287,987 | 1,369 | 5.39x |
+| Request-scoped arena ring | 11,333,138 ns | 10.01 | 287,987 | 1,369 | 5.39x |
+| Current bounded two-page aggregation | 9,698,527 ns | 5.01 | 218,509 | 745 | 6.30x |
 
-The current default-page path is 5.39x faster, uses 6.52x less cumulative heap,
-and performs 90.57x fewer allocations than the original traversal baseline.
+The current default-page path is 6.30x faster, uses 8.59x less cumulative heap,
+and performs 166.44x fewer allocations than the original traversal baseline.
 The native iterator returns up to 256 records per cgo crossing, so a 10,000-key
 scan needs about 40 batch calls instead of one crossing per key.
 
