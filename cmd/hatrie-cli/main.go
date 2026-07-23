@@ -898,6 +898,13 @@ type clusterStatusResult struct {
 	ReplicationError string                         `json:"replication_error,omitempty"`
 	Nodes            []clusterNodeStatus            `json:"nodes,omitempty"`
 	Errors           []string                       `json:"errors,omitempty"`
+	TopologyRepair   *clusterTopologyRepairResult   `json:"topology_repair,omitempty"`
+}
+
+type clusterTopologyRepairResult struct {
+	Applied      bool     `json:"applied"`
+	Authority    string   `json:"authority"`
+	NodesUpdated []string `json:"nodes_updated,omitempty"`
 }
 
 type clusterNodeStatus struct {
@@ -928,18 +935,22 @@ func runCluster(ctx context.Context, client *http.Client, addr string, args []st
 		return runClusterRemove(ctx, client, addr, args[1:], stdout, stderr)
 	case "decommission":
 		return runClusterDecommission(ctx, client, addr, args[1:], stdout, stderr)
-	case "status", "doctor":
-		return runClusterStatus(ctx, client, addr, args[1:], stdout, stderr)
+	case "status":
+		return runClusterStatus(ctx, client, addr, args[1:], false, stdout, stderr)
+	case "doctor":
+		return runClusterStatus(ctx, client, addr, args[1:], true, stdout, stderr)
 	default:
 		return fmt.Errorf("unknown cluster subcommand %q", args[0])
 	}
 }
 
-func runClusterStatus(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+func runClusterStatus(ctx context.Context, client *http.Client, addr string, args []string, doctor bool, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("cluster status", flag.ContinueOnError)
 	flags.SetOutput(cliWriter(stderr))
 	peer := flags.String("peer", addr, "cluster node monitoring API base URL")
 	probeNodes := flags.Bool("probe-nodes", true, "probe health for topology node addresses")
+	repairTopology := flags.Bool("repair-topology", false, "replace every member topology with the selected peer topology")
+	confirm := flags.Bool("yes", false, "confirm topology repair writes")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -947,36 +958,37 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 	if *peer == "" {
 		return errors.New("cluster status -peer is required")
 	}
+	if *repairTopology && !doctor {
+		return errors.New("cluster status does not allow -repair-topology; use cluster doctor")
+	}
+	if *repairTopology && !*probeNodes {
+		return errors.New("cluster doctor -repair-topology requires -probe-nodes=true")
+	}
+	if *repairTopology && !*confirm {
+		return errors.New("cluster doctor -repair-topology requires explicit -yes confirmation")
+	}
 
-	result := clusterStatusResult{OK: true, Peer: *peer}
-	health, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, *peer, "/api/health")
+	result, err := collectClusterStatus(ctx, client, *peer, *probeNodes)
 	if err != nil {
-		return fmt.Errorf("cluster health: %w", err)
+		return err
 	}
-	result.Health = &health
-	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
-	if err != nil {
-		return fmt.Errorf("cluster topology: %w", err)
-	}
-	result.Topology = &topology
-	election, err := getJSONValue[hatriecache.ElectionStatus](ctx, client, *peer, "/api/election")
-	if err != nil {
-		return fmt.Errorf("cluster election: %w", err)
-	}
-	result.Election = &election
-	replication, err := getJSONValue[hatriecache.ReplicationResult](ctx, client, *peer, "/api/replication")
-	if err != nil {
-		result.ReplicationError = err.Error()
-	} else {
-		result.Replication = &replication
-	}
-	if *probeNodes {
-		result.Nodes = probeClusterNodes(ctx, client, topology, election)
-		for _, node := range result.Nodes {
-			if !node.OK {
-				result.OK = false
-				result.Errors = append(result.Errors, clusterNodeErrors(node)...)
-			}
+	if *repairTopology {
+		if result.Topology == nil {
+			return errors.New("cluster doctor topology is unavailable")
+		}
+		peerNode := clusterPeerNodeID(*result.Topology, *peer)
+		nodesUpdated, err := putTopologyToNodes(ctx, client, *result.Topology, *peer, peerNode, nil)
+		if err != nil {
+			return fmt.Errorf("repair cluster topology: %w", err)
+		}
+		result, err = collectClusterStatus(ctx, client, *peer, true)
+		if err != nil {
+			return fmt.Errorf("verify repaired cluster topology: %w", err)
+		}
+		result.TopologyRepair = &clusterTopologyRepairResult{
+			Applied:      true,
+			Authority:    *peer,
+			NodesUpdated: nodesUpdated,
 		}
 	}
 	data, err := jsonwire.Marshal(result)
@@ -985,6 +997,41 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 	}
 	_, err = stdout.Write(append(data, '\n'))
 	return err
+}
+
+func collectClusterStatus(ctx context.Context, client *http.Client, peer string, probeNodes bool) (clusterStatusResult, error) {
+	result := clusterStatusResult{OK: true, Peer: peer}
+	health, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, peer, "/api/health")
+	if err != nil {
+		return clusterStatusResult{}, fmt.Errorf("cluster health: %w", err)
+	}
+	result.Health = &health
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, peer, "/api/topology")
+	if err != nil {
+		return clusterStatusResult{}, fmt.Errorf("cluster topology: %w", err)
+	}
+	result.Topology = &topology
+	election, err := getJSONValue[hatriecache.ElectionStatus](ctx, client, peer, "/api/election")
+	if err != nil {
+		return clusterStatusResult{}, fmt.Errorf("cluster election: %w", err)
+	}
+	result.Election = &election
+	replication, err := getJSONValue[hatriecache.ReplicationResult](ctx, client, peer, "/api/replication")
+	if err != nil {
+		result.ReplicationError = err.Error()
+	} else {
+		result.Replication = &replication
+	}
+	if probeNodes {
+		result.Nodes = probeClusterNodes(ctx, client, topology, election)
+		for _, node := range result.Nodes {
+			if !node.OK {
+				result.OK = false
+				result.Errors = append(result.Errors, clusterNodeErrors(node)...)
+			}
+		}
+	}
+	return result, nil
 }
 
 func probeClusterNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, election hatriecache.ElectionStatus) []clusterNodeStatus {

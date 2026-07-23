@@ -619,6 +619,19 @@ drift when a node's normalized topology differs from the peer view. They also
 compare elected shard leaders across probed nodes and report election drift
 when a peer would route writes to a different leader.
 
+To repair topology drift, explicitly select the authoritative peer and confirm
+the write. The command uploads that peer's normalized topology with a local
+`self` value for every recipient, then repeats the complete doctor probe:
+
+```sh
+make cli ARGS='cluster doctor -peer http://node-a:8080 -repair-topology -yes'
+```
+
+Repair requires node probing and is unavailable from `cluster status`, keeping
+the status command read-only. Review the initial doctor output before choosing
+an authority when members contain genuinely competing topology changes. A
+failed partial repair is safe to retry with the same authority.
+
 ### Removing A Replica
 
 Use `cluster decommission` for normal removal. It verifies the retiring node's
@@ -1833,6 +1846,7 @@ make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http:
 make cli ARGS='cluster decommission -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster doctor -peer http://node-a:8080'
+make cli ARGS='cluster doctor -peer http://node-a:8080 -repair-topology -yes'
 make cli ARGS='snapshot'
 ```
 

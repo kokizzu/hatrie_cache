@@ -2284,6 +2284,117 @@ func TestRunClusterStatusReportsTopologyDrift(t *testing.T) {
 	}
 }
 
+func TestRunClusterDoctorRepairsTopologyFromConfirmedPeer(t *testing.T) {
+	var nodeAURL string
+	var nodeBURL string
+	reference := func(self string) hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeFullReplica,
+			Self:    self,
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: nodeAURL, Role: "primary"},
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+		}
+	}
+	drifted := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeFullReplica,
+			Self:    "node-b",
+			Nodes:   []hatriecache.TopologyNode{{ID: "node-b", Address: nodeBURL, Role: "replica"}},
+		}
+	}
+	var nodeATopology hatriecache.ClusterTopology
+	var nodeBTopology hatriecache.ClusterTopology
+	var nodeAPuts int
+	var nodeBPuts int
+	election := hatriecache.ElectionStatus{Nodes: []hatriecache.ElectionNodeStatus{
+		{ID: "node-a", Online: true}, {ID: "node-b", Online: true},
+	}}
+
+	nodeB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-b"})
+		case "GET /api/topology":
+			if len(nodeBTopology.Nodes) == 0 {
+				json.NewEncoder(w).Encode(drifted())
+			} else {
+				json.NewEncoder(w).Encode(nodeBTopology)
+			}
+		case "PUT /api/topology":
+			nodeBPuts++
+			json.NewDecoder(r.Body).Decode(&nodeBTopology)
+			json.NewEncoder(w).Encode(nodeBTopology)
+		case "GET /api/election":
+			json.NewEncoder(w).Encode(election)
+		default:
+			t.Fatalf("unexpected node-b request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeB.Close()
+	nodeBURL = nodeB.URL
+
+	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "GET /api/topology":
+			if len(nodeATopology.Nodes) == 0 {
+				json.NewEncoder(w).Encode(reference("node-a"))
+			} else {
+				json.NewEncoder(w).Encode(nodeATopology)
+			}
+		case "PUT /api/topology":
+			nodeAPuts++
+			json.NewDecoder(r.Body).Decode(&nodeATopology)
+			json.NewEncoder(w).Encode(nodeATopology)
+		case "GET /api/election":
+			json.NewEncoder(w).Encode(election)
+		case "GET /api/replication":
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{Health: "healthy", HealthScore: 100})
+		default:
+			t.Fatalf("unexpected node-a request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeA.Close()
+	nodeAURL = nodeA.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", nodeA.URL,
+		"cluster", "doctor",
+		"-repair-topology",
+		"-yes",
+	}, stdout, &bytes.Buffer{}, nodeA.Client()); err != nil {
+		t.Fatalf("run(cluster doctor repair) error = %v", err)
+	}
+	if nodeAPuts != 1 || nodeBPuts != 1 {
+		t.Fatalf("topology puts = node-a %d node-b %d, want one each", nodeAPuts, nodeBPuts)
+	}
+	if nodeATopology.Self != "node-a" || nodeBTopology.Self != "node-b" {
+		t.Fatalf("repaired self values = %q/%q", nodeATopology.Self, nodeBTopology.Self)
+	}
+	var result clusterStatusResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster doctor repair result) error = %v", err)
+	}
+	if !result.OK || result.TopologyRepair == nil || !result.TopologyRepair.Applied || !reflect.DeepEqual(result.TopologyRepair.NodesUpdated, []string{"node-a", "node-b"}) {
+		t.Fatalf("cluster doctor repair result = %#v, want verified repair", result)
+	}
+}
+
+func TestRunClusterDoctorRepairRequiresConfirmation(t *testing.T) {
+	err := run(context.Background(), []string{"cluster", "doctor", "-repair-topology"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "-yes") {
+		t.Fatalf("run(cluster doctor repair without confirmation) error = %v, want -yes requirement", err)
+	}
+}
+
 func TestRunClusterStatusReportsElectionDrift(t *testing.T) {
 	var nodeAURL string
 	var nodeBURL string
