@@ -536,14 +536,24 @@ make cli ARGS='replication -sync -prefix session:'
 
 ### Joining A Cluster
 
-Use the CLI join workflow to add a running node to a peer's topology, upload the
-same topology to the joining node, and pull the peer journal into the joining
-node:
+Use the CLI join workflow to add a running node as a replica, upload a
+node-local copy of the new topology to every member, and pull the peer journal
+into the joining node:
 
 ```
 make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080'
 make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080 -pull-journal=false'
 ```
+
+The default command performs a peer health check, fetches and validates the
+topology, adds the node as a replica of every shard in sharded mode, propagates
+the topology to all members, and asks the new node to pull journal entries until
+current. Each upload sets `self` to the receiving node id. The JSON result lists
+`nodes_updated` and whether the target and journal were updated. Set
+`-update-nodes=false` only when topology distribution is handled externally;
+set `-update-target=false` when the joining node must not receive topology yet.
+The command is idempotent, so rerun the same command after repairing an
+unreachable member if propagation stops partway through.
 
 Joining a cluster means adding the node to the topology, starting it with a
 stable `NODE_ID`, catching it up from an existing node, and then allowing
@@ -590,6 +600,36 @@ topology node's health, topology, and election endpoints and report topology
 drift when a node's normalized topology differs from the peer view. They also
 compare elected shard leaders across probed nodes and report election drift
 when a peer would route writes to a different leader.
+
+### Removing A Replica
+
+Removing a replica is one idempotent CLI command. It removes the node record and
+all shard replica references, validates the resulting topology, and uploads a
+node-local copy to every remaining member. It does not contact the removed node
+or delete its data:
+
+```sh
+make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
+make cli ARGS='cluster doctor -peer http://node-a:8080'
+```
+
+Before removal, stop sending client traffic to the replica and confirm another
+replica is current. Stop or archive the removed process only after `cluster
+doctor` reports a consistent topology. The command refuses a node whose global
+role or any shard assignment is still `primary`; promote another node or upload
+a topology with reassigned shard primaries first. If a remaining member is
+offline, the command reports that node and stops; restore connectivity and
+rerun the same command. A repeated removal leaves membership unchanged but
+re-propagates the current topology, which completes recovery from a partial
+update. Use `-update-nodes=false` only with an external topology distributor.
+
+For authenticated APIs, place the shared operator token in the environment so
+the CLI can update every member without exposing it in shell history:
+
+```sh
+export HATRIE_CACHE_AUTH_TOKEN='operator-token'
+make cli ARGS='cluster remove -peer https://node-a.example:8080 -node node-c'
+```
 
 For sharded clusters, only enable `ENFORCE_LEADER_WRITES=true` after clients can
 write to the elected leader for each key or after the client/proxy layer handles
@@ -1739,6 +1779,9 @@ make cli ARGS='storage compact -start-key session: -limit-key session;'
 make cli ARGS='journal -after-sequence 42 -limit 1000'
 make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000'
 make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000 -until-current -max-batches 100'
+make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080'
+make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
+make cli ARGS='cluster doctor -peer http://node-a:8080'
 make cli ARGS='snapshot'
 ```
 

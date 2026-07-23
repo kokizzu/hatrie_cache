@@ -1942,6 +1942,67 @@ func TestClusterJoinTopologyAddsReplica(t *testing.T) {
 	}
 }
 
+func TestClusterRemoveTopologyRemovesReplica(t *testing.T) {
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeSharded,
+		Self:    "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+			{ID: "node-b", Address: "http://node-b:8080", Role: "replica"},
+			{ID: "node-c", Address: "http://node-c:8080", Role: "replica"},
+		},
+		Shards: []hatriecache.TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+		},
+	}
+
+	updated, changed, err := clusterRemoveTopology(topology, "node-b")
+	if err != nil {
+		t.Fatalf("clusterRemoveTopology() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("clusterRemoveTopology() changed = false, want true")
+	}
+	if len(updated.Nodes) != 2 || updated.Nodes[0].ID != "node-a" || updated.Nodes[1].ID != "node-c" {
+		t.Fatalf("nodes = %#v, want node-a and node-c", updated.Nodes)
+	}
+	if len(updated.Shards) != 1 || !reflect.DeepEqual(updated.Shards[0].Replicas, []string{"node-c"}) {
+		t.Fatalf("shards = %#v, want only node-c replica", updated.Shards)
+	}
+
+	again, changed, err := clusterRemoveTopology(updated, "node-b")
+	if err != nil {
+		t.Fatalf("clusterRemoveTopology(missing) error = %v", err)
+	}
+	if changed || !reflect.DeepEqual(again, updated) {
+		t.Fatalf("idempotent remove changed topology = %v %#v, want unchanged", changed, again)
+	}
+
+	if _, _, err := clusterRemoveTopology(topology, "node-a"); err == nil || !strings.Contains(err.Error(), "primary") {
+		t.Fatalf("clusterRemoveTopology(primary) error = %v, want primary refusal", err)
+	}
+}
+
+func TestTopologyForNodeSetsLocalIdentity(t *testing.T) {
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+			{ID: "node-b", Address: "http://node-b:8080", Role: "replica"},
+		},
+	}
+	updated := topologyForNode(topology, "node-b")
+	if updated.Self != "node-b" {
+		t.Fatalf("topologyForNode() self = %q, want node-b", updated.Self)
+	}
+	if topology.Self != "node-a" {
+		t.Fatalf("topologyForNode() mutated input self = %q, want node-a", topology.Self)
+	}
+}
+
 func TestRunClusterStatusReportsPeerAndNodeHealth(t *testing.T) {
 	var serverURL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2243,8 +2304,12 @@ func TestRunClusterJoinUpdatesPeerTargetAndPullsJournal(t *testing.T) {
 	if len(peerTopology.Nodes) != 2 || len(peerTopology.Shards) != 1 || !reflect.DeepEqual(peerTopology.Shards[0].Replicas, []string{"node-b"}) {
 		t.Fatalf("peer topology = %#v, want node-b replica", peerTopology)
 	}
+	if targetTopology.Self != "node-b" {
+		t.Fatalf("target topology self = %q, want node-b", targetTopology.Self)
+	}
+	targetTopology.Self = peerTopology.Self
 	if !reflect.DeepEqual(targetTopology, peerTopology) {
-		t.Fatalf("target topology = %#v, want peer topology %#v", targetTopology, peerTopology)
+		t.Fatalf("target topology = %#v, want peer topology with node-local self %#v", targetTopology, peerTopology)
 	}
 	if journalPull.Source != peerURL || !journalPull.UntilCurrent {
 		t.Fatalf("journal pull = %#v, want source peer until_current", journalPull)
@@ -2266,6 +2331,89 @@ func TestRunClusterJoinRequiresNodeAndAddress(t *testing.T) {
 	err = run(context.Background(), []string{"cluster", "join", "-node", "node-b"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
 	if err == nil || !strings.Contains(err.Error(), "cluster join -address is required") {
 		t.Fatalf("run(cluster join without address) error = %v, want address requirement", err)
+	}
+}
+
+func TestRunClusterRemoveUpdatesRemainingNodes(t *testing.T) {
+	var peerURL string
+	var remainingURL string
+	topology := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeSharded,
+			Self:    "node-a",
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: peerURL, Role: "primary"},
+				{ID: "node-b", Address: "http://removed.invalid", Role: "replica"},
+				{ID: "node-c", Address: remainingURL, Role: "replica"},
+			},
+			Shards: []hatriecache.TopologyShard{
+				{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+			},
+		}
+	}
+
+	var peerTopology hatriecache.ClusterTopology
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/health":
+			w.Write([]byte(`{"status":"online"}`))
+		case "GET /api/topology":
+			json.NewEncoder(w).Encode(topology())
+		case "PUT /api/topology":
+			if err := json.NewDecoder(r.Body).Decode(&peerTopology); err != nil {
+				t.Fatalf("Decode(peer topology) error = %v", err)
+			}
+			w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Fatalf("unexpected peer request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer peer.Close()
+	peerURL = peer.URL
+
+	var remainingTopology hatriecache.ClusterTopology
+	remaining := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/topology" {
+			t.Fatalf("unexpected remaining-node request %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&remainingTopology); err != nil {
+			t.Fatalf("Decode(remaining topology) error = %v", err)
+		}
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer remaining.Close()
+	remainingURL = remaining.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", peerURL,
+		"cluster", "remove",
+		"-node", "node-b",
+	}, stdout, &bytes.Buffer{}, peer.Client()); err != nil {
+		t.Fatalf("run(cluster remove) error = %v", err)
+	}
+	if peerTopology.Self != "node-a" || remainingTopology.Self != "node-c" {
+		t.Fatalf("topology self values = peer %q remaining %q, want node-a/node-c", peerTopology.Self, remainingTopology.Self)
+	}
+	for _, updated := range []hatriecache.ClusterTopology{peerTopology, remainingTopology} {
+		if len(updated.Nodes) != 2 || len(updated.Shards) != 1 || !reflect.DeepEqual(updated.Shards[0].Replicas, []string{"node-c"}) {
+			t.Fatalf("updated topology = %#v, want node-b removed", updated)
+		}
+	}
+	var result clusterRemoveResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster remove result) error = %v", err)
+	}
+	if !result.OK || !result.TopologyUpdated || !reflect.DeepEqual(result.NodesUpdated, []string{"node-a", "node-c"}) {
+		t.Fatalf("cluster remove result = %#v, want both remaining nodes updated", result)
+	}
+}
+
+func TestRunClusterRemoveRequiresNode(t *testing.T) {
+	err := run(context.Background(), []string{"cluster", "remove"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "cluster remove -node is required") {
+		t.Fatalf("run(cluster remove without node) error = %v, want node requirement", err)
 	}
 }
 

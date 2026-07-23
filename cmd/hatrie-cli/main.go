@@ -800,14 +800,24 @@ func findModuleRoot() string {
 }
 
 type clusterJoinResult struct {
-	OK              bool   `json:"ok"`
-	Message         string `json:"message"`
-	Peer            string `json:"peer"`
-	Node            string `json:"node"`
-	Address         string `json:"address"`
-	TopologyUpdated bool   `json:"topology_updated"`
-	TargetUpdated   bool   `json:"target_updated"`
-	JournalPulled   bool   `json:"journal_pulled"`
+	OK              bool     `json:"ok"`
+	Message         string   `json:"message"`
+	Peer            string   `json:"peer"`
+	Node            string   `json:"node"`
+	Address         string   `json:"address"`
+	TopologyUpdated bool     `json:"topology_updated"`
+	TargetUpdated   bool     `json:"target_updated"`
+	JournalPulled   bool     `json:"journal_pulled"`
+	NodesUpdated    []string `json:"nodes_updated,omitempty"`
+}
+
+type clusterRemoveResult struct {
+	OK              bool     `json:"ok"`
+	Message         string   `json:"message"`
+	Peer            string   `json:"peer"`
+	Node            string   `json:"node"`
+	TopologyUpdated bool     `json:"topology_updated"`
+	NodesUpdated    []string `json:"nodes_updated,omitempty"`
 }
 
 type clusterStatusResult struct {
@@ -839,11 +849,13 @@ type clusterNodeStatus struct {
 
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("cluster subcommand is required: join, status, doctor")
+		return errors.New("cluster subcommand is required: join, remove, status, doctor")
 	}
 	switch args[0] {
 	case "join":
 		return runClusterJoin(ctx, client, addr, args[1:], stdout, stderr)
+	case "remove":
+		return runClusterRemove(ctx, client, addr, args[1:], stdout, stderr)
 	case "status", "doctor":
 		return runClusterStatus(ctx, client, addr, args[1:], stdout, stderr)
 	default:
@@ -1023,6 +1035,7 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 	peer := flags.String("peer", addr, "existing cluster node monitoring API base URL")
 	role := flags.String("role", "replica", "topology role for the joining node: primary or replica")
 	updateTarget := flags.Bool("update-target", true, "upload the updated topology to the joining node")
+	updateNodes := flags.Bool("update-nodes", true, "upload the updated topology to every reachable cluster node")
 	pullJournal := flags.Bool("pull-journal", true, "pull the peer journal into the joining node after topology update")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -1052,18 +1065,33 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 	if err != nil {
 		return err
 	}
-	if topologyChanged {
-		if err := putJSONValueDiscard(ctx, client, *peer, "/api/topology", updated); err != nil {
-			return fmt.Errorf("upload peer topology: %w", err)
+	peerNode := clusterPeerNodeID(topology, *peer)
+	nodesUpdated := make([]string, 0, len(updated.Nodes))
+	if *updateNodes {
+		var err error
+		nodesUpdated, err = putTopologyToNodes(ctx, client, updated, *peer, peerNode, func(node hatriecache.TopologyNode) bool {
+			return *updateTarget || node.ID != *nodeID
+		})
+		if err != nil {
+			return fmt.Errorf("upload cluster topology: %w", err)
+		}
+	} else {
+		if topologyChanged {
+			if err := putJSONValueDiscard(ctx, client, *peer, "/api/topology", topologyForNode(updated, peerNode)); err != nil {
+				return fmt.Errorf("upload peer topology: %w", err)
+			}
+			if peerNode != "" {
+				nodesUpdated = append(nodesUpdated, peerNode)
+			}
+		}
+		if *updateTarget {
+			if err := putJSONValueDiscard(ctx, client, *nodeAddress, "/api/topology", topologyForNode(updated, *nodeID)); err != nil {
+				return fmt.Errorf("upload joining node topology: %w", err)
+			}
+			nodesUpdated = append(nodesUpdated, *nodeID)
 		}
 	}
-	targetUpdated := false
-	if *updateTarget {
-		if err := putJSONValueDiscard(ctx, client, *nodeAddress, "/api/topology", updated); err != nil {
-			return fmt.Errorf("upload joining node topology: %w", err)
-		}
-		targetUpdated = true
-	}
+	targetUpdated := stringInSlice(nodesUpdated, *nodeID)
 	journalPulled := false
 	if *pullJournal {
 		body, err := jsonwire.Marshal(struct {
@@ -1091,6 +1119,7 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 		TopologyUpdated: topologyChanged,
 		TargetUpdated:   targetUpdated,
 		JournalPulled:   journalPulled,
+		NodesUpdated:    nodesUpdated,
 	}
 	data, err := jsonwire.Marshal(result)
 	if err != nil {
@@ -1100,6 +1129,71 @@ func runClusterJoin(ctx context.Context, client *http.Client, addr string, args 
 		return err
 	}
 	return nil
+}
+
+func runClusterRemove(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cluster remove", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	nodeID := flags.String("node", "", "replica node id to remove from the cluster topology")
+	peer := flags.String("peer", addr, "existing cluster node monitoring API base URL")
+	updateNodes := flags.Bool("update-nodes", true, "upload the updated topology to every remaining cluster node")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*nodeID = strings.TrimSpace(*nodeID)
+	*peer = strings.TrimSpace(*peer)
+	if *nodeID == "" {
+		return errors.New("cluster remove -node is required")
+	}
+	if *peer == "" {
+		return errors.New("cluster remove -peer is required")
+	}
+
+	if _, err := getJSONValue[map[string]interface{}](ctx, client, *peer, "/api/health"); err != nil {
+		return fmt.Errorf("peer health: %w", err)
+	}
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("peer topology: %w", err)
+	}
+	updated, topologyChanged, err := clusterRemoveTopology(topology, *nodeID)
+	if err != nil {
+		return err
+	}
+	peerNode := clusterPeerNodeID(topology, *peer)
+
+	nodesUpdated := make([]string, 0, len(updated.Nodes))
+	if *updateNodes {
+		nodesUpdated, err = putTopologyToNodes(ctx, client, updated, *peer, peerNode, nil)
+		if err != nil {
+			return fmt.Errorf("upload cluster topology: %w", err)
+		}
+	} else if topologyChanged {
+		if peerNode == *nodeID {
+			peerNode = ""
+		}
+		if err := putJSONValueDiscard(ctx, client, *peer, "/api/topology", topologyForNode(updated, peerNode)); err != nil {
+			return fmt.Errorf("upload peer topology: %w", err)
+		}
+		if peerNode != "" {
+			nodesUpdated = append(nodesUpdated, peerNode)
+		}
+	}
+
+	result := clusterRemoveResult{
+		OK:              true,
+		Message:         "cluster replica removal completed",
+		Peer:            *peer,
+		Node:            *nodeID,
+		TopologyUpdated: topologyChanged,
+		NodesUpdated:    nodesUpdated,
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
 }
 
 func clusterJoinTopology(topology hatriecache.ClusterTopology, nodeID string, address string, role string) (hatriecache.ClusterTopology, bool, error) {
@@ -1154,6 +1248,118 @@ func clusterJoinTopology(topology hatriecache.ClusterTopology, nodeID string, ad
 		return hatriecache.ClusterTopology{}, false, err
 	}
 	return store.Get(), changed, nil
+}
+
+func clusterRemoveTopology(topology hatriecache.ClusterTopology, nodeID string) (hatriecache.ClusterTopology, bool, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return hatriecache.ClusterTopology{}, false, errors.New("cluster remove node id is required")
+	}
+
+	found := false
+	for _, node := range topology.Nodes {
+		if strings.TrimSpace(node.ID) != nodeID {
+			continue
+		}
+		found = true
+		if strings.TrimSpace(node.Role) == "primary" {
+			return hatriecache.ClusterTopology{}, false, fmt.Errorf("cluster remove refuses primary node %q; promote or reassign it first", nodeID)
+		}
+	}
+	for _, shard := range topology.Shards {
+		if strings.TrimSpace(shard.Primary) == nodeID {
+			return hatriecache.ClusterTopology{}, false, fmt.Errorf("cluster remove refuses shard primary node %q; reassign shard %d first", nodeID, shard.ID)
+		}
+	}
+	if !found {
+		store, err := hatriecache.NewTopologyStore(topology)
+		if err != nil {
+			return hatriecache.ClusterTopology{}, false, err
+		}
+		return store.Get(), false, nil
+	}
+
+	nodes := make([]hatriecache.TopologyNode, 0, len(topology.Nodes)-1)
+	for _, node := range topology.Nodes {
+		if strings.TrimSpace(node.ID) != nodeID {
+			nodes = append(nodes, node)
+		}
+	}
+	topology.Nodes = nodes
+	topology.Shards = append([]hatriecache.TopologyShard(nil), topology.Shards...)
+	for idx := range topology.Shards {
+		replicas := make([]string, 0, len(topology.Shards[idx].Replicas))
+		for _, replica := range topology.Shards[idx].Replicas {
+			if strings.TrimSpace(replica) != nodeID {
+				replicas = append(replicas, replica)
+			}
+		}
+		topology.Shards[idx].Replicas = replicas
+	}
+	if strings.TrimSpace(topology.Self) == nodeID {
+		topology.Self = ""
+	}
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return hatriecache.ClusterTopology{}, false, err
+	}
+	return store.Get(), true, nil
+}
+
+func topologyForNode(topology hatriecache.ClusterTopology, nodeID string) hatriecache.ClusterTopology {
+	topology.Self = strings.TrimSpace(nodeID)
+	return topology
+}
+
+func clusterPeerNodeID(topology hatriecache.ClusterTopology, peer string) string {
+	if self := strings.TrimSpace(topology.Self); self != "" {
+		return self
+	}
+	peer = strings.TrimRight(strings.TrimSpace(peer), "/")
+	for _, node := range topology.Nodes {
+		if strings.TrimRight(strings.TrimSpace(node.Address), "/") == peer {
+			return strings.TrimSpace(node.ID)
+		}
+	}
+	primary := ""
+	for _, node := range topology.Nodes {
+		if strings.TrimSpace(node.Role) != "primary" {
+			continue
+		}
+		if primary != "" {
+			primary = ""
+			break
+		}
+		primary = strings.TrimSpace(node.ID)
+	}
+	if primary != "" {
+		return primary
+	}
+	if len(topology.Nodes) > 0 {
+		return strings.TrimSpace(topology.Nodes[0].ID)
+	}
+	return ""
+}
+
+func putTopologyToNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, peer string, peerNode string, include func(hatriecache.TopologyNode) bool) ([]string, error) {
+	updated := make([]string, 0, len(topology.Nodes))
+	for _, node := range topology.Nodes {
+		if include != nil && !include(node) {
+			continue
+		}
+		address := strings.TrimSpace(node.Address)
+		if node.ID == peerNode {
+			address = strings.TrimSpace(peer)
+		}
+		if address == "" {
+			return updated, fmt.Errorf("node %q has no monitoring address", node.ID)
+		}
+		if err := putJSONValueDiscard(ctx, client, address, "/api/topology", topologyForNode(topology, node.ID)); err != nil {
+			return updated, fmt.Errorf("node %q: %w", node.ID, err)
+		}
+		updated = append(updated, node.ID)
+	}
+	return updated, nil
 }
 
 func stringInSlice(values []string, target string) bool {
