@@ -31,6 +31,17 @@ func (fn cliRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, err
 	return fn(request)
 }
 
+type cancelOnWrite struct {
+	writer io.Writer
+	cancel context.CancelFunc
+}
+
+func (writer cancelOnWrite) Write(data []byte) (int, error) {
+	n, err := writer.writer.Write(data)
+	writer.cancel()
+	return n, err
+}
+
 type trackingResponseBody struct {
 	reader *strings.Reader
 	closed bool
@@ -2848,6 +2859,166 @@ func TestRunClusterConfigDiffCanIncludeNodeLocalFields(t *testing.T) {
 	)
 	if len(differences) != 1 || differences[0].Field != "node_id" {
 		t.Fatalf("diffClusterConfigs(include local) = %#v, want node_id", differences)
+	}
+}
+
+func TestRunClusterStatusWatchWritesBoundedNDJSON(t *testing.T) {
+	var replicationRequests atomic.Int64
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(hatriecache.ClusterTopology{
+				Version: 1,
+				Mode:    hatriecache.TopologyModeFullReplica,
+				Self:    "node-a",
+				Nodes:   []hatriecache.TopologyNode{{ID: "node-a", Address: serverURL, Role: "primary"}},
+			})
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{})
+		case "/api/replication":
+			replicationRequests.Add(1)
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{Health: "healthy"})
+		default:
+			t.Fatalf("unexpected status watch request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"cluster", "status",
+		"-probe-nodes=false",
+		"-watch", "1ms",
+		"-count", "2",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(cluster status watch) error = %v", err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(stdout.Bytes()), []byte{'\n'})
+	if len(lines) != 2 || replicationRequests.Load() != 2 {
+		t.Fatalf("status watch lines/replication requests = %d/%d, want 2/2", len(lines), replicationRequests.Load())
+	}
+	for idx, line := range lines {
+		var result clusterStatusResult
+		if err := json.Unmarshal(line, &result); err != nil {
+			t.Fatalf("Unmarshal(status watch line %d) error = %v", idx, err)
+		}
+		if !result.OK || result.ObservedAt == "" || result.Topology == nil {
+			t.Fatalf("status watch line %d = %#v", idx, result)
+		}
+	}
+}
+
+func TestRunClusterStatusWatchStopsCleanlyOnCancellation(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(hatriecache.ClusterTopology{
+				Version: 1,
+				Mode:    hatriecache.TopologyModeFullReplica,
+				Self:    "node-a",
+				Nodes:   []hatriecache.TopologyNode{{ID: "node-a", Address: serverURL, Role: "primary"}},
+			})
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{})
+		case "/api/replication":
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{Health: "healthy"})
+		default:
+			t.Fatalf("unexpected canceled status watch request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stdout := &bytes.Buffer{}
+	err := run(ctx, []string{
+		"-addr", server.URL,
+		"cluster", "status",
+		"-probe-nodes=false",
+		"-watch", "1h",
+	}, cancelOnWrite{writer: stdout, cancel: cancel}, &bytes.Buffer{}, server.Client())
+	if err != nil {
+		t.Fatalf("run(canceled cluster status watch) error = %v", err)
+	}
+	if lines := bytes.Count(stdout.Bytes(), []byte{'\n'}); lines != 1 {
+		t.Fatalf("canceled status watch lines = %d, want 1", lines)
+	}
+}
+
+func TestRunClusterStatusWatchContinuesAfterTransientFailure(t *testing.T) {
+	var healthRequests atomic.Int64
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/health":
+			if healthRequests.Add(1) == 1 {
+				http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "/api/topology":
+			json.NewEncoder(w).Encode(hatriecache.ClusterTopology{
+				Version: 1,
+				Mode:    hatriecache.TopologyModeFullReplica,
+				Self:    "node-a",
+				Nodes:   []hatriecache.TopologyNode{{ID: "node-a", Address: serverURL, Role: "primary"}},
+			})
+		case "/api/election":
+			json.NewEncoder(w).Encode(hatriecache.ElectionStatus{})
+		case "/api/replication":
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{Health: "healthy"})
+		default:
+			t.Fatalf("unexpected transient status watch request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"cluster", "status",
+		"-probe-nodes=false",
+		"-watch", "1ms",
+		"-count", "2",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(cluster status transient watch) error = %v", err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(stdout.Bytes()), []byte{'\n'})
+	if len(lines) != 2 {
+		t.Fatalf("transient status watch lines = %d, want 2", len(lines))
+	}
+	var first clusterStatusResult
+	var second clusterStatusResult
+	if err := json.Unmarshal(lines[0], &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(lines[1], &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.OK || len(first.Errors) != 1 || !strings.Contains(first.Errors[0], "503") || !second.OK {
+		t.Fatalf("transient status snapshots = first %#v second %#v", first, second)
+	}
+}
+
+func TestRunClusterStatusWatchRejectsUnsafeFlagCombinations(t *testing.T) {
+	tests := [][]string{
+		{"cluster", "status", "-count", "2"},
+		{"cluster", "status", "-watch", "-1s"},
+		{"cluster", "doctor", "-repair-topology", "-yes", "-watch", "1s"},
+	}
+	for _, args := range tests {
+		if err := run(context.Background(), args, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient); err == nil {
+			t.Fatalf("run(%q) error = nil, want watch flag rejection", args)
+		}
 	}
 }
 

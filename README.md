@@ -656,6 +656,22 @@ drift when a node's normalized topology differs from the peer view. They also
 compare elected shard leaders across probed nodes and report election drift
 when a peer would route writes to a different leader.
 
+For a deployment or incident watch, repeat read-only status snapshots without
+an external shell loop:
+
+```sh
+make cli ARGS='-timeout 2m cluster status -peer http://node-a:8080 -watch 5s -count 12'
+make cli ARGS='-timeout 0 cluster status -peer http://node-a:8080 -watch 5s'
+```
+
+The first snapshot is immediate. Watch output is newline-delimited JSON with an
+`observed_at` timestamp on every line, so each snapshot can be streamed into
+`jq`, a file, or a log collector. `-count 0` continues until cancellation;
+positive counts bound the number of attempts. A transient collection failure
+is emitted as an `ok:false` snapshot and later intervals continue. The global
+CLI timeout covers the complete watch, so continuous mode uses `-timeout 0`.
+Topology repair cannot be combined with `-watch`.
+
 To repair topology drift, explicitly select the authoritative peer and confirm
 the write. The command uploads that peer's normalized topology with a local
 `self` value for every recipient, then repeats the complete doctor probe:

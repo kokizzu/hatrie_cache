@@ -1305,6 +1305,7 @@ type clusterDecommissionResult struct {
 type clusterStatusResult struct {
 	OK               bool                           `json:"ok"`
 	Peer             string                         `json:"peer"`
+	ObservedAt       string                         `json:"observed_at"`
 	Health           *hatriecache.MonitoringHealth  `json:"health,omitempty"`
 	Topology         *hatriecache.ClusterTopology   `json:"topology,omitempty"`
 	Election         *hatriecache.ElectionStatus    `json:"election,omitempty"`
@@ -1631,6 +1632,8 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 	flags.SetOutput(cliWriter(stderr))
 	peer := flags.String("peer", addr, "cluster node monitoring API base URL")
 	probeNodes := flags.Bool("probe-nodes", true, "probe health for topology node addresses")
+	watch := flags.Duration("watch", 0, "repeat status snapshots at this interval; use 0 for one snapshot")
+	count := flags.Int("count", 0, "number of watch snapshots; use 0 to continue until canceled")
 	repairTopology := flags.Bool("repair-topology", false, "replace every member topology with the selected peer topology")
 	confirm := flags.Bool("yes", false, "confirm topology repair writes")
 	if err := flags.Parse(args); err != nil {
@@ -1640,6 +1643,18 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 	if *peer == "" {
 		return errors.New("cluster status -peer is required")
 	}
+	if *watch < 0 {
+		return errors.New("cluster status -watch must be non-negative")
+	}
+	if *count < 0 {
+		return errors.New("cluster status -count must be non-negative")
+	}
+	if *watch == 0 && *count != 0 {
+		return errors.New("cluster status -count requires a positive -watch interval")
+	}
+	if *watch > 0 && *repairTopology {
+		return errors.New("cluster doctor -repair-topology cannot be combined with -watch")
+	}
 	if *repairTopology && !doctor {
 		return errors.New("cluster status does not allow -repair-topology; use cluster doctor")
 	}
@@ -1648,6 +1663,9 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 	}
 	if *repairTopology && !*confirm {
 		return errors.New("cluster doctor -repair-topology requires explicit -yes confirmation")
+	}
+	if *watch > 0 {
+		return watchClusterStatus(ctx, client, *peer, *probeNodes, *watch, *count, stdout)
 	}
 
 	result, err := collectClusterStatus(ctx, client, *peer, *probeNodes)
@@ -1681,8 +1699,50 @@ func runClusterStatus(ctx context.Context, client *http.Client, addr string, arg
 	return err
 }
 
+func watchClusterStatus(ctx context.Context, client *http.Client, peer string, probeNodes bool, interval time.Duration, count int, stdout io.Writer) error {
+	ctx = cliContext(ctx)
+	for iteration := 0; count == 0 || iteration < count; iteration++ {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		result, err := collectClusterStatus(ctx, client, peer, probeNodes)
+		if err != nil {
+			result = clusterStatusResult{
+				OK:         false,
+				Peer:       peer,
+				ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				Errors:     []string{err.Error()},
+			}
+		}
+		data, err := jsonwire.Marshal(result)
+		if err != nil {
+			return err
+		}
+		if _, err := stdout.Write(append(data, '\n')); err != nil {
+			return err
+		}
+		if count > 0 && iteration+1 >= count {
+			return nil
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil
+}
+
 func collectClusterStatus(ctx context.Context, client *http.Client, peer string, probeNodes bool) (clusterStatusResult, error) {
-	result := clusterStatusResult{OK: true, Peer: peer}
+	result := clusterStatusResult{OK: true, Peer: peer, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	health, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, peer, "/api/health")
 	if err != nil {
 		return clusterStatusResult{}, fmt.Errorf("cluster health: %w", err)
