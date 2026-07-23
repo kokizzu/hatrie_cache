@@ -193,6 +193,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Request-scoped fallback arena ring](#replication-descriptor-optimizations), 10k keys in ten pages | Fresh arena/page: 12.234 ms; 766,579 heap B; 1,408 allocs | Two reusable arenas: 11.333 ms; 287,987 heap B; 1,369 allocs | 1.08x faster, 2.66x lower heap, 1.03x fewer allocs | At most two page arenas remain live until their HTTP body writers finish; requests, wire bytes, and scan lock boundaries are unchanged |
 | Current pass | [Bounded two-page fallback aggregation](#replication-descriptor-optimizations), 10k keys | One page/request: 11.333 ms sender; 4.443 ms receiver; 10.01 requests; 287,987 sender heap B | Two pages/request: 9.699 ms sender; 3.663 ms receiver; 5.01 requests; 218,509 sender heap B | Combined CPU 1.18x faster; 2x fewer requests; sender heap 1.32x lower; 1.84x fewer sender allocs | Largest protobuf grows from 61,156 B to 122,156 B, still 8.6x below the default 1 MiB limit; scan lock pages stay at 1,024 keys |
 | Current pass | [Packed batch no-split proof](#replication-descriptor-optimizations), 10k-key known-legacy sync | Exact per-key estimate: 9.738 ms; 215,929 heap B; 744 allocs; 5.003 requests | Aggregate upper bound: 9.020 ms; 206,446 heap B; 744 allocs; 5.003 requests | 1.08x faster, 1.05x lower heap; wire and reader pause neutral | Applies only to complete packed arenas without carried estimates; all other layouts retain the exact splitter |
+| Reverted | [Direct native packed scan](#replication-descriptor-optimizations), 10k-key known-legacy sync | Existing: 9.441 ms; 207,179 heap B; 744 allocs | Direct arena drain: 9.228 ms; 184,267 heap B; 720 allocs | 1.02x faster, 1.12x lower heap, 1.03x fewer allocs | Rolled back; the focused path improved 1.10x, but 2.3% end-to-end CPU did not clear the 5% gate for a new C ABI |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
 | Reverted | [Exact protobuf batch coalescing](#replication-descriptor-optimizations), 10k-key legacy fallback | Two requests: sender 10.422 ms; receiver decode 4.066 ms; largest protobuf 305,156 B | One request: sender 10.215 ms; receiver decode 4.444 ms; largest protobuf 609,046 B | Sender 1.02x faster and 1.44x fewer allocs, but receiver 1.09x slower and combined CPU 1.012x slower | Rolled back; halving requests did not offset receiver decode cost and doubled the largest request |
 | Reverted | [Carried compact payload estimates](#replication-descriptor-optimizations), 10k-key scan, preparation, and split | Estimate during split: 4.215 ms | Carry from serialization: 4.230 ms | 0.996x; 0.36% slower with identical allocations | Rolled back; the isolated splitter was 4.37x faster, but moving the estimate made the complete CPU path slower |
@@ -2338,6 +2339,7 @@ feature. Improvements are ratios where larger is better.
 | Ordered native HAT-trie scan, 10,000 keys | 3,744,034 ns; 841,584 B; 100 allocs | 3,506,797 ns; 841,584 B; 100 allocs | 1.07x | 1.00x | 1.00x | Fixed 257-symbol stack histograms replace libc `qsort`; ordering and wire representation are unchanged |
 | Ten-page known-legacy sync, 10,000 keys | Fresh arena/page: 12,234,348 ns; 10.01 requests; 57,488 wire B; 766,579 B; 1,408 allocs | Two-arena ring: 11,333,138 ns; 10.01 requests; 57,493 wire B; 287,987 B; 1,369 allocs | 1.08x | 2.66x | 1.03x | Arena reset waits only when its earlier streaming writer is still active; two bounded page arenas can overlap, while page size and lock duration stay fixed |
 | Two-page known-legacy aggregation, 10,000 keys | Sender: 11,333,138 ns; 10.01 requests; 57,493 wire B; 287,987 B; 1,369 allocs. Receiver: 4,443,217 ns; 61,156 largest protobuf B | Sender: 9,698,527 ns; 5.01 requests; 56,551 wire B; 218,509 B; 745 allocs. Receiver: 3,663,435 ns; 122,156 largest protobuf B | Sender 1.17x; receiver 1.21x; combined 1.18x | Sender 1.32x; combined 1.02x | Sender 1.84x; combined 1.02x | Largest body is 2x higher but bounded to two unchanged 1,024-key scan pages and remains below the configured byte limit |
+| Direct native packed scan, 10,000 keys (rejected) | Sender: 9,440,845 ns; 207,179 B; 744 allocs. Focused: 3,827,521 ns; 945,425 B; 50 allocs | Sender: 9,227,708 ns; 184,267 B; 720 allocs. Focused: 3,484,635 ns; 819,482 B; 29 allocs | Sender 1.02x; focused 1.10x | Sender 1.12x; focused 1.15x | Sender 1.03x; focused 1.72x | Rejected: the end-to-end speedup was below the 5% gate for adding and maintaining a specialized C ABI |
 | Single-pass legacy repair, 10,000 keys (rejected) | 11,459,282 ns; 55,892 wire B; 977,706 B; 433 allocs | Unordered: 10,675,192 ns; 64,258 wire B; 948,316 B; 392 allocs | 1.07x | 1.03x | 1.11x | Rejected: unordered transfer was 1.15x larger; restoring deterministic order took 12,316,337 ns, 1.075x slower than baseline |
 | Exact protobuf batch coalescing, 10,000 keys (rejected) | Sender: 10,422,384 ns; 2.004 requests; 949,539 B; 413 allocs. Receiver: 4,066,159 ns; 305,156 largest protobuf B | Sender: 10,214,713 ns; 1.004 requests; 928,371 B; 286 allocs. Receiver: 4,444,227 ns; 609,046 largest protobuf B | Sender 1.02x; combined 0.99x | Sender 1.02x; receiver 1.00x | Sender 1.44x; receiver 1.00x | Rejected: receiver decode was 1.09x slower, the largest request was 2.00x larger, and combined sender-plus-decode CPU was 1.012x slower |
 | Carried compact payload estimates, 10,000 keys (rejected) | Estimate during split: 4,214,771 ns | Carry from serialization: 4,230,028 ns | 0.996x | 1.00x | 1.00x | Rejected: a same-binary alternating-order control showed that moving the work into serialization was 0.36% slower overall |
@@ -2545,6 +2547,24 @@ and 1.008 ms after. The first shorter reader pair moved in the opposite
 direction, confirming that the maximum is scheduler-sensitive; no reader-pause
 gain is claimed.
 
+A direct native packed-scan experiment added a lightweight iterator that wrote
+full prefixed keys and raw values directly into the final replication arena in
+up to 1,024-record calls. Tests were written first for packed value words,
+offset overflow, undersized-buffer retry, binary and long keys, pagination,
+mutation restart, TTL/striped fallback, and byte-identical all-type protobuf.
+The candidate removed intermediate cursor arrays, prefix expansion, and most
+256-record cgo crossings without changing sorted order or lock page size.
+
+Focused preparation improved from 3.828 ms, 945,425 B, and 50 allocations to
+3.485 ms, 819,482 B, and 29 allocations: 1.10x faster, 1.15x lower heap, and
+1.72x fewer allocations. The detached-baseline `300x`, ten-run end-to-end gate
+improved only from 9.441 ms to 9.228 ms, or 1.02x. Heap improved 1.12x and
+allocations improved 1.03x; 5.003 requests and approximately 56,549 compressed
+wire bytes were unchanged. Reader pause moved from 0.169 ms to 0.161 ms while
+reader-load wall time was neutral within 0.5%. Because the 2.3% sender gain did
+not clear the stated 5% threshold for maintaining a new C/Go ABI, all candidate
+code and feature tests were rolled back. No runtime tradeoff remains.
+
 The first arena candidate copied every key and reconstructed strings while
 sizing and writing protobuf. Its paired 10k end-to-end median was about 9%
 slower, so it was rejected before commit. Direct immutable key references
@@ -2674,6 +2694,12 @@ Raw local output is retained in:
 - `build/benchmarks/replication-no-split-proof-receiver-after.txt`
 - `build/benchmarks/replication-no-split-proof-reader-control-before.txt`
 - `build/benchmarks/replication-no-split-proof-reader-confirm-after.txt`
+- `build/benchmarks/replication-direct-native-scan-before.txt`
+- `build/benchmarks/replication-direct-native-scan-after.txt`
+- `build/benchmarks/replication-direct-native-scan-confirm-before.txt`
+- `build/benchmarks/replication-direct-native-scan-confirm-after.txt`
+- `build/benchmarks/replication-direct-native-scan-reader-before.txt`
+- `build/benchmarks/replication-direct-native-scan-reader-after.txt`
 
 Reproduce the stable end-to-end row with:
 
