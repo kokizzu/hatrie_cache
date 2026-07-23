@@ -3179,9 +3179,18 @@ func (replicator *HTTPReplicator) postReplicationCommandWithBodyResponse(ctx con
 	}
 	req, err := http.NewRequestWithContext(postCtx, http.MethodPost, endpoint, body)
 	if err != nil {
+		if closer, ok := body.(io.Closer); ok {
+			_ = closer.Close()
+		}
 		result.Error = err.Error()
 		return result, CacheCommandResponse{}
 	}
+	defer func() {
+		if _, ok := req.Body.(interface{ TransportOwnsClose() }); ok {
+			return
+		}
+		_ = req.Body.Close()
+	}()
 	req.Header.Set("Accept", contentType)
 	req.Header.Set("Content-Type", contentType)
 	if replicator.authToken != "" {
@@ -3193,6 +3202,7 @@ func (replicator *HTTPReplicator) postReplicationCommandWithBodyResponse(ctx con
 	}
 	resp, err := replicator.client.Do(req)
 	if err != nil {
+		_ = req.Body.Close()
 		result.Error = err.Error()
 		return result, CacheCommandResponse{}
 	}

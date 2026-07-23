@@ -48,6 +48,7 @@ type replicationSyncPayloadArena struct {
 	directRecords      []replicationSyncPayloadDirectRecord
 	scannedValueEpoch  uint64
 	scannedValuesValid bool
+	bodyWriters        sync.WaitGroup
 }
 
 func newReplicationSyncPayloadArena(capacity int) *replicationSyncPayloadArena {
@@ -83,6 +84,23 @@ func boundedReplicationSyncArenaCapacity(entries int, bytesPerEntry int) int {
 		return 0
 	}
 	return entries * bytesPerEntry
+}
+
+func (arena *replicationSyncPayloadArena) reset() {
+	if arena == nil {
+		return
+	}
+	arena.bodyWriters.Wait()
+	arena.keys = arena.keys[:0]
+	arena.keyRecords = arena.keyRecords[:0]
+	arena.values = arena.values[:0]
+	arena.records = arena.records[:0]
+	for index := range arena.directRecords {
+		arena.directRecords[index] = replicationSyncPayloadDirectRecord{}
+	}
+	arena.directRecords = arena.directRecords[:0]
+	arena.scannedValueEpoch = 0
+	arena.scannedValuesValid = false
 }
 
 func (arena *replicationSyncPayloadArena) append(key string, value []byte, payloadBytes int) (uint32, error) {
@@ -261,9 +279,14 @@ func replicationSyncBatchRequestBody(payloads []replicationSyncPayload, command 
 func replicationSyncBatchRequestBodyBatch(payloads replicationSyncPayloadBatch, command string, source string, sequence uint64, fingerprint string, compressionThreshold int) (io.Reader, string, string, error) {
 	size := replicationSyncBatchProtoSizeBatch(payloads, command, source, sequence, fingerprint)
 	if compressionThreshold > 0 && size >= compressionThreshold {
-		body := jsonwire.StreamingGzipWriterReader(func(writer io.Writer) error {
+		var release func()
+		if payloads.arena != nil {
+			payloads.arena.bodyWriters.Add(1)
+			release = payloads.arena.bodyWriters.Done
+		}
+		body := jsonwire.StreamingGzipWriterReaderWithRelease(func(writer io.Writer) error {
 			return writeReplicationSyncBatchProtoBatch(writer, payloads, command, source, sequence, fingerprint)
-		})
+		}, release)
 		return body, commandWireContentTypeProtobuf, "gzip", nil
 	}
 

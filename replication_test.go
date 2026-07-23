@@ -28,6 +28,20 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+type requestCloseTrackingBody struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (body *requestCloseTrackingBody) Read([]byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (body *requestCloseTrackingBody) Close() error {
+	body.once.Do(func() { close(body.closed) })
+	return nil
+}
+
 func TestParseReplicationTransport(t *testing.T) {
 	for input, want := range map[string]ReplicationTransport{
 		"":            ReplicationTransportHTTP,
@@ -5262,6 +5276,120 @@ func TestReplicationSyncArenaCapsEagerAllocation(t *testing.T) {
 	}
 	if directArena.keys != nil || directArena.records != nil {
 		t.Fatalf("direct arena allocated copied-key/indexed-record storage: %#v", directArena)
+	}
+}
+
+func TestReplicationSyncPayloadArenaResetReusesBacking(t *testing.T) {
+	arena := newReplicationSyncPayloadArena(4)
+	if _, err := arena.append("session:old", []byte("old-value"), 123); err != nil {
+		t.Fatal(err)
+	}
+	arena.beginScannedValues(42)
+	arena.directRecords = append(arena.directRecords, replicationSyncPayloadDirectRecord{key: "stale"})
+	keyBacking := &arena.keys[0]
+	keyRecordBacking := &arena.keyRecords[0]
+	valueBacking := &arena.values[0]
+	recordBacking := &arena.records[0]
+
+	arena.reset()
+	if len(arena.keys) != 0 || len(arena.keyRecords) != 0 || len(arena.values) != 0 || len(arena.records) != 0 || len(arena.directRecords) != 0 {
+		t.Fatalf("reset arena lengths = %d/%d/%d/%d/%d, want all zero", len(arena.keys), len(arena.keyRecords), len(arena.values), len(arena.records), len(arena.directRecords))
+	}
+	if arena.scannedValuesValid || arena.scannedValueEpoch != 0 {
+		t.Fatalf("reset scanned state = %v/%d, want false/0", arena.scannedValuesValid, arena.scannedValueEpoch)
+	}
+	if _, err := arena.append("session:new", []byte("new-value"), 456); err != nil {
+		t.Fatal(err)
+	}
+	if &arena.keys[0] != keyBacking || &arena.keyRecords[0] != keyRecordBacking || &arena.values[0] != valueBacking || &arena.records[0] != recordBacking {
+		t.Fatal("reset arena replaced reusable backing storage")
+	}
+	payload := arena.payload(0)
+	if payload.key != "session:new" || string(payload.binaryValue) != "new-value" || payload.payloadBytes != 456 {
+		t.Fatalf("reused payload = %#v, want only new data", payload)
+	}
+}
+
+func TestReplicationSyncPayloadArenaResetWaitsForStreamingBody(t *testing.T) {
+	arena := newReplicationSyncPayloadArena(1)
+	if _, err := arena.append("session:1", []byte(strings.Repeat("value", 64)), 320); err != nil {
+		t.Fatal(err)
+	}
+	body, _, _, err := replicationSyncBatchRequestBodyBatch(
+		replicationSyncPayloadBatch{arena: arena, count: 1},
+		replicationSetCompactCommand,
+		"node-a",
+		1,
+		"fingerprint",
+		1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closer, ok := body.(io.ReadCloser)
+	if !ok {
+		t.Fatalf("streaming body type = %T, want io.ReadCloser", body)
+	}
+	firstByte := make([]byte, 1)
+	if _, err := closer.Read(firstByte); err != nil {
+		t.Fatal(err)
+	}
+
+	resetDone := make(chan struct{})
+	go func() {
+		arena.reset()
+		close(resetDone)
+	}()
+	select {
+	case <-resetDone:
+		t.Fatal("arena reset completed while the streaming body still referenced it")
+	case <-time.After(10 * time.Millisecond):
+	}
+	if _, err := io.Copy(io.Discard, closer); err != nil {
+		t.Fatal(err)
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-resetDone:
+	case <-time.After(time.Second):
+		t.Fatal("arena reset did not resume after streaming body completion")
+	}
+	if len(arena.keys) != 0 || len(arena.values) != 0 || len(arena.records) != 0 {
+		t.Fatalf("reset arena lengths = %d/%d/%d, want all zero", len(arena.keys), len(arena.values), len(arena.records))
+	}
+}
+
+func TestPostReplicationCommandClosesRequestBodyBeforeReturn(t *testing.T) {
+	requestBody := &requestCloseTrackingBody{closed: make(chan struct{})}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{"Content-Type": []string{commandWireContentTypeJSON}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"message":"ok"}`)),
+			Request:    request,
+		}, nil
+	})}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Client: client})
+	t.Cleanup(replicator.Close)
+
+	result := replicator.postReplicationCommandWithBody(
+		context.Background(),
+		TopologyNode{ID: "node-b", Address: "127.0.0.1:8080"},
+		nil,
+		func() (io.Reader, string, string, error) {
+			return requestBody, commandWireContentTypeJSON, "", nil
+		},
+	)
+	if !result.OK {
+		t.Fatalf("postReplicationCommandWithBody() = %#v, want success", result)
+	}
+	select {
+	case <-requestBody.closed:
+	default:
+		t.Fatal("postReplicationCommandWithBody() returned before closing request body")
 	}
 }
 

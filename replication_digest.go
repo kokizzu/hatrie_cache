@@ -1012,8 +1012,20 @@ func (replicator *HTTPReplicator) syncDigestTargetPackedFallback(ctx context.Con
 	changed := 0
 	deleted := 0
 	done := false
+	arenaCount := 2
+	if grpcSession != nil {
+		arenaCount = 1
+	}
+	arenas := make([]*replicationSyncPayloadArena, arenaCount)
+	page := 0
 	for !done {
-		arena := newReplicationSyncPayloadArena(limit)
+		arenaIndex := page % len(arenas)
+		arena := arenas[arenaIndex]
+		if arena == nil {
+			arena = newReplicationSyncPayloadArena(limit)
+			arenas[arenaIndex] = arena
+		}
+		arena.reset()
 		for len(arena.records) < limit && !done {
 			remaining := limit - len(arena.records)
 			scanLimit := inventory.pageSize
@@ -1056,6 +1068,7 @@ func (replicator *HTTPReplicator) syncDigestTargetPackedFallback(ctx context.Con
 				return targets, changed, deleted, true
 			}
 		}
+		page++
 	}
 	if len(targets) == 0 {
 		targets = append(targets, ReplicationTargetResult{Node: inventory.target.ID, Address: inventory.target.Address, OK: true})

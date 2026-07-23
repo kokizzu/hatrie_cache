@@ -122,10 +122,14 @@ func StreamingGzipBytesReaderWithRelease(data []byte, release func([]byte)) io.R
 }
 
 func StreamingGzipWriterReader(write func(io.Writer) error) io.Reader {
+	return StreamingGzipWriterReaderWithRelease(write, nil)
+}
+
+func StreamingGzipWriterReaderWithRelease(write func(io.Writer) error, release func()) io.Reader {
 	return &StreamingGzipWriterBody{
 		streamingGzipBody: newStreamingGzipBody(func(writer *gzip.Writer) error {
 			return write(writer)
-		}, nil),
+		}, release),
 	}
 }
 
@@ -198,6 +202,8 @@ func (body *streamingGzipBody) Close() error {
 	return err
 }
 
+func (body *streamingGzipBody) TransportOwnsClose() {}
+
 func (body *streamingGzipBody) write() {
 	go func() {
 		defer close(body.done)
@@ -257,6 +263,8 @@ func (reader *releaseBytesReader) Close() error {
 	releaseBytesReaderPool.Put(reader)
 	return nil
 }
+
+func (reader *releaseBytesReader) TransportOwnsClose() {}
 
 func (reader *releaseBytesReader) releaseData() {
 	if reader.released || reader.release == nil {
