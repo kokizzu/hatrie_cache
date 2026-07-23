@@ -1700,6 +1700,58 @@ func TestCacheGRPCServerAuthTokenProtectsRPCs(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerPreviousAuthTokenExpires(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{
+		AuthToken:             "current",
+		AuthPreviousToken:     "previous",
+		AuthPreviousExpiresAt: time.Now().Add(time.Hour),
+	})
+	previous := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer previous")
+	if _, err := client.Health(previous, &hatriecachev1.HealthRequest{}); err != nil {
+		t.Fatalf("Health(previous token) error = %v", err)
+	}
+	current := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer current")
+	if _, err := client.Health(current, &hatriecachev1.HealthRequest{}); err != nil {
+		t.Fatalf("Health(current token) error = %v", err)
+	}
+	stop()
+
+	client, stop = newTestGRPCClient(t, ht, CacheGRPCOptions{
+		AuthToken:             "current",
+		AuthPreviousToken:     "previous",
+		AuthPreviousExpiresAt: time.Now().Add(-time.Hour),
+	})
+	defer stop()
+	_, err := client.Health(previous, &hatriecachev1.HealthRequest{})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("Health(expired previous token) error = %v, want Unauthenticated", err)
+	}
+	if _, err := client.Health(current, &hatriecachev1.HealthRequest{}); err != nil {
+		t.Fatalf("Health(current token after expiry) error = %v", err)
+	}
+}
+
+func TestCacheGRPCServerPreviousReplicationAuthTokenExpires(t *testing.T) {
+	server := NewCacheGRPCServer(newTestTrie(t), CacheGRPCOptions{
+		ReplicationAuthToken:             "current",
+		ReplicationAuthPreviousToken:     "previous",
+		ReplicationAuthPreviousExpiresAt: time.Now().Add(time.Hour),
+	})
+	previous := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer previous"))
+	if err := server.requireReplicationAuthorized(previous); err != nil {
+		t.Fatalf("requireReplicationAuthorized(previous) error = %v", err)
+	}
+	server.options.ReplicationAuthPreviousExpiresAt = time.Now().Add(-time.Hour)
+	if err := server.requireReplicationAuthorized(previous); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("requireReplicationAuthorized(expired previous) error = %v, want Unauthenticated", err)
+	}
+	current := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer current"))
+	if err := server.requireReplicationAuthorized(current); err != nil {
+		t.Fatalf("requireReplicationAuthorized(current) error = %v", err)
+	}
+}
+
 func TestGRPCTopologyNodeMaintenanceRoundTrip(t *testing.T) {
 	node := TopologyNode{
 		ID:                "node-a",

@@ -1006,8 +1006,8 @@ cross-field constraints, referenced TLS key pairs, gRPC client CA PEM files,
 and topology JSON when `TOPOLOGY_PATH`/`-topology-path` is set. Use
 `-print-config` through `make server SERVER_ARGS='-print-config'` or
 `make check-config CHECK_CONFIG_ARGS='-print-config'` to print the effective
-configuration as JSON with `monitoring_auth_token` redacted. Running servers
-also expose the same redacted view at `GET /api/config`.
+configuration as JSON with all operator and replication tokens redacted.
+Running servers also expose the same redacted view at `GET /api/config`.
 
 Provide a TLS certificate and key to serve the same monitoring API over HTTPS
 with HTTP/2 ALPN enabled:
@@ -1037,6 +1037,69 @@ make monitoring-server GRPC_ADDR=0.0.0.0:9090 GRPC_TLS_CERT=server.pem GRPC_TLS_
 
 The matching JSON config keys are `grpc_tls_cert`, `grpc_tls_key`, and
 `grpc_client_ca`.
+
+### Credential And Certificate Rotation
+
+Previous operator and replication tokens are opt-in and must have an absolute
+RFC3339 expiry in the future. The server rejects a previous token without a
+different current token and deadline, so an overlap cannot accidentally become
+permanent. HTTP and native gRPC accept either token before the deadline;
+outbound replication always sends the current replication token. After the
+deadline, the old token stops working without another restart.
+
+Use this two-stage token rollout to keep old and new nodes interoperable. Pick
+one deadline that leaves enough time to update and verify every node:
+
+1. On every node, keep the old token current and configure the new token in the
+   previous slot with the fixed deadline.
+2. Verify the new candidate on every node while the old operator token still
+   performs topology discovery.
+3. On every node, make the new token current and put the old token in the
+   previous slot with the same deadline.
+4. Verify using only the new token, then remove the previous-token settings
+   from every node. The deadline remains a fail-closed backstop.
+
+```sh
+# Stage 1 server settings on every node.
+make monitoring-server \
+  MONITORING_AUTH_TOKEN="$OLD_OPERATOR_TOKEN" \
+  MONITORING_AUTH_PREVIOUS_TOKEN="$NEW_OPERATOR_TOKEN" \
+  MONITORING_AUTH_PREVIOUS_TOKEN_EXPIRES_AT='2026-07-24T12:00:00Z' \
+  REPLICATION_AUTH_TOKEN="$OLD_REPLICATION_TOKEN" \
+  REPLICATION_AUTH_PREVIOUS_TOKEN="$NEW_REPLICATION_TOKEN" \
+  REPLICATION_AUTH_PREVIOUS_TOKEN_EXPIRES_AT='2026-07-24T12:00:00Z'
+
+# Verify the candidates cluster-wide without putting them in ARGS.
+HATRIE_CACHE_AUTH_TOKEN="$OLD_OPERATOR_TOKEN" \
+HATRIE_CACHE_CREDENTIAL_TOKEN="$NEW_OPERATOR_TOKEN" \
+  make cli ARGS='cluster credential-check'
+HATRIE_CACHE_AUTH_TOKEN="$OLD_OPERATOR_TOKEN" \
+HATRIE_CACHE_CREDENTIAL_TOKEN="$NEW_REPLICATION_TOKEN" \
+  make cli ARGS='cluster credential-check -scope replication'
+
+# After stage 2, both checks use the new credentials.
+HATRIE_CACHE_AUTH_TOKEN="$NEW_OPERATOR_TOKEN" make cli ARGS='cluster credential-check'
+HATRIE_CACHE_AUTH_TOKEN="$NEW_OPERATOR_TOKEN" \
+HATRIE_CACHE_CREDENTIAL_TOKEN="$NEW_REPLICATION_TOKEN" \
+  make cli ARGS='cluster credential-check -scope replication'
+```
+
+`cluster credential-check` also sends an unauthenticated control request, so a
+node with authentication accidentally disabled fails the default check. For
+monitoring certificate rotation, install the new trust chain in clients first,
+replace and restart one node at a time under `cluster maintenance`, then run:
+
+```sh
+HATRIE_CACHE_AUTH_TOKEN="$NEW_OPERATOR_TOKEN" \
+  make cli ARGS='cluster credential-check -require-tls -min-cert-validity 168h'
+```
+
+The report includes the validated monitoring HTTPS leaf subject, issuer, DNS
+names, validity dates, and remaining lifetime for every node. It does not probe
+the separate native gRPC certificate; validate that listener with a gRPC-aware
+client when `GRPC_TLS_CERT` differs from `MONITORING_TLS_CERT`. For mTLS CA
+rotation, temporarily provide a CA bundle containing both old and new client
+CAs, rotate clients, then remove the old CA.
 
 ### Security Checklist
 

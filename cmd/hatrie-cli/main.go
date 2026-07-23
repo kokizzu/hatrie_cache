@@ -1390,6 +1390,35 @@ type clusterUpgradeNode struct {
 	CanaryChecks      []string                  `json:"canary_checks"`
 }
 
+type clusterCredentialCheckResult struct {
+	OK              bool                         `json:"ok"`
+	Peer            string                       `json:"peer"`
+	Scope           string                       `json:"scope"`
+	CheckedAt       string                       `json:"checked_at"`
+	RequireAuth     bool                         `json:"require_auth"`
+	RequireTLS      bool                         `json:"require_tls"`
+	MinCertValidity string                       `json:"min_cert_validity"`
+	Nodes           []clusterCredentialCheckNode `json:"nodes"`
+}
+
+type clusterCredentialCheckNode struct {
+	ID                        string                        `json:"id"`
+	Address                   string                        `json:"address"`
+	OK                        bool                          `json:"ok"`
+	Authorized                bool                          `json:"authorized"`
+	AuthEnforced              bool                          `json:"auth_enforced"`
+	ProbeStatus               int                           `json:"probe_status,omitempty"`
+	Health                    *hatriecache.MonitoringHealth `json:"health,omitempty"`
+	TLS                       bool                          `json:"tls"`
+	CertificateSubject        string                        `json:"certificate_subject,omitempty"`
+	CertificateIssuer         string                        `json:"certificate_issuer,omitempty"`
+	CertificateDNSNames       []string                      `json:"certificate_dns_names,omitempty"`
+	CertificateNotBefore      string                        `json:"certificate_not_before,omitempty"`
+	CertificateNotAfter       string                        `json:"certificate_not_after,omitempty"`
+	CertificateValidForMillis int64                         `json:"certificate_valid_for_millis,omitempty"`
+	Error                     string                        `json:"error,omitempty"`
+}
+
 type clusterNodeStatus struct {
 	ID                 string                        `json:"id"`
 	Role               string                        `json:"role,omitempty"`
@@ -1407,7 +1436,7 @@ type clusterNodeStatus struct {
 
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor, config-diff, maintenance, upgrade-plan")
+		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor, config-diff, maintenance, upgrade-plan, credential-check")
 	}
 	switch args[0] {
 	case "add-replica":
@@ -1428,9 +1457,173 @@ func runCluster(ctx context.Context, client *http.Client, addr string, args []st
 		return runClusterMaintenance(ctx, client, addr, args[1:], stdout, stderr)
 	case "upgrade-plan":
 		return runClusterUpgradePlan(ctx, client, addr, args[1:], stdout, stderr)
+	case "credential-check":
+		return runClusterCredentialCheck(ctx, client, addr, args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown cluster subcommand %q", args[0])
 	}
+}
+
+func runClusterCredentialCheck(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cluster credential-check", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	peer := flags.String("peer", addr, "cluster node monitoring API base URL")
+	scope := flags.String("scope", "operator", "credential scope: operator or replication")
+	candidateToken := flags.String("credential-token", os.Getenv("HATRIE_CACHE_CREDENTIAL_TOKEN"), "candidate bearer token to test; required for replication scope")
+	requireAuth := flags.Bool("require-auth", true, "require unauthenticated control probes to be rejected")
+	requireTLS := flags.Bool("require-tls", false, "require HTTPS with a validated server certificate on every node")
+	minCertValidity := flags.Duration("min-cert-validity", 7*24*time.Hour, "minimum remaining TLS server certificate validity; use 0 to disable")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*peer = strings.TrimSpace(*peer)
+	*scope = strings.ToLower(strings.TrimSpace(*scope))
+	*candidateToken = strings.TrimSpace(*candidateToken)
+	if *peer == "" {
+		return errors.New("cluster credential-check -peer is required")
+	}
+	if *scope != "operator" && *scope != "replication" {
+		return errors.New("cluster credential-check -scope must be operator or replication")
+	}
+	if *scope == "replication" && *candidateToken == "" {
+		return errors.New("cluster credential-check -credential-token is required for replication scope")
+	}
+	if *minCertValidity < 0 {
+		return errors.New("cluster credential-check -min-cert-validity must be non-negative")
+	}
+
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	topology = store.Get()
+	peerNode := clusterPeerNodeID(topology, *peer)
+	checkedAt := time.Now().UTC()
+	result := clusterCredentialCheckResult{
+		OK:              true,
+		Peer:            *peer,
+		Scope:           *scope,
+		CheckedAt:       checkedAt.Format(time.RFC3339Nano),
+		RequireAuth:     *requireAuth,
+		RequireTLS:      *requireTLS,
+		MinCertValidity: minCertValidity.String(),
+		Nodes:           make([]clusterCredentialCheckNode, 0, len(topology.Nodes)),
+	}
+	for _, node := range topology.Nodes {
+		address := strings.TrimSpace(node.Address)
+		if node.ID == peerNode {
+			address = *peer
+		}
+		nodeResult := probeClusterCredential(ctx, client, node.ID, address, *scope, *candidateToken, *requireAuth, *requireTLS, *minCertValidity, checkedAt)
+		if !nodeResult.OK {
+			result.OK = false
+		}
+		result.Nodes = append(result.Nodes, nodeResult)
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+func probeClusterCredential(ctx context.Context, client *http.Client, nodeID string, address string, scope string, candidateToken string, requireAuth bool, requireTLS bool, minCertValidity time.Duration, now time.Time) clusterCredentialCheckNode {
+	result := clusterCredentialCheckNode{ID: nodeID, Address: address}
+	errorsFound := make([]string, 0, 4)
+	if address == "" {
+		result.Error = "node address is empty"
+		return result
+	}
+	path := "/api/health"
+	if scope == "replication" {
+		path = "/api/journal?after=0&limit=1"
+	}
+	request, err := http.NewRequestWithContext(cliContext(ctx), http.MethodGet, endpoint(address, path), nil)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	request.Header.Set("Accept", "application/json")
+	if candidateToken != "" {
+		request = request.WithContext(context.WithValue(request.Context(), suppressAutomaticAuthKey{}, true))
+		request.Header.Set("Authorization", "Bearer "+candidateToken)
+	}
+	response, err := cliHTTPClient(client).Do(request)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.ProbeStatus = response.StatusCode
+	result.Authorized = response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden
+	if response.TLS != nil && len(response.TLS.PeerCertificates) > 0 {
+		certificate := response.TLS.PeerCertificates[0]
+		result.TLS = true
+		result.CertificateSubject = certificate.Subject.String()
+		result.CertificateIssuer = certificate.Issuer.String()
+		result.CertificateDNSNames = append([]string(nil), certificate.DNSNames...)
+		result.CertificateNotBefore = certificate.NotBefore.UTC().Format(time.RFC3339)
+		result.CertificateNotAfter = certificate.NotAfter.UTC().Format(time.RFC3339)
+		result.CertificateValidForMillis = certificate.NotAfter.Sub(now).Milliseconds()
+		if minCertValidity > 0 && certificate.NotAfter.Sub(now) < minCertValidity {
+			errorsFound = append(errorsFound, fmt.Sprintf("TLS certificate expires before minimum validity %s", minCertValidity))
+		}
+	} else if requireTLS {
+		errorsFound = append(errorsFound, "TLS is required")
+	}
+	if !result.Authorized {
+		body, _ := readErrorBody(response.Body)
+		drainAndCloseResponse(response.Body)
+		errorsFound = append(errorsFound, fmt.Sprintf("credential probe returned %s: %s", response.Status, strings.TrimSpace(string(body))))
+	} else if scope == "operator" {
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			body, _ := readErrorBody(response.Body)
+			drainAndCloseResponse(response.Body)
+			errorsFound = append(errorsFound, fmt.Sprintf("health probe returned %s: %s", response.Status, strings.TrimSpace(string(body))))
+		} else {
+			var health hatriecache.MonitoringHealth
+			decoder := jsonwire.NewDecoder(io.LimitReader(response.Body, maxErrorBodyBytes))
+			decodeErr := decoder.Decode(&health)
+			drainAndCloseResponse(response.Body)
+			if decodeErr != nil {
+				errorsFound = append(errorsFound, "decode health: "+decodeErr.Error())
+			} else {
+				result.Health = &health
+				if health.Status != "online" {
+					errorsFound = append(errorsFound, fmt.Sprintf("health status is %q", health.Status))
+				}
+				if health.Node != "" && health.Node != nodeID {
+					errorsFound = append(errorsFound, fmt.Sprintf("health node is %q, expected %q", health.Node, nodeID))
+				}
+			}
+		}
+	} else {
+		drainAndCloseResponse(response.Body)
+	}
+
+	controlRequest, err := http.NewRequestWithContext(cliContext(ctx), http.MethodGet, endpoint(address, path), nil)
+	if err != nil {
+		errorsFound = append(errorsFound, "create unauthenticated control probe: "+err.Error())
+	} else {
+		controlRequest = controlRequest.WithContext(context.WithValue(controlRequest.Context(), suppressAutomaticAuthKey{}, true))
+		controlResponse, controlErr := cliHTTPClient(client).Do(controlRequest)
+		if controlErr != nil {
+			errorsFound = append(errorsFound, "unauthenticated control probe: "+controlErr.Error())
+		} else {
+			result.AuthEnforced = controlResponse.StatusCode == http.StatusUnauthorized || controlResponse.StatusCode == http.StatusForbidden
+			drainAndCloseResponse(controlResponse.Body)
+			if requireAuth && !result.AuthEnforced {
+				errorsFound = append(errorsFound, fmt.Sprintf("unauthenticated control probe returned %s", controlResponse.Status))
+			}
+		}
+	}
+	result.OK = len(errorsFound) == 0
+	result.Error = strings.Join(errorsFound, "; ")
+	return result
 }
 
 func runClusterStatus(ctx context.Context, client *http.Client, addr string, args []string, doctor bool, stdout io.Writer, stderr io.Writer) error {

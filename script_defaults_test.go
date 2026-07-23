@@ -50,8 +50,19 @@ func TestMonitoringWrapperPassesAuthToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(Makefile) error = %v", err)
 	}
-	if !strings.Contains(string(makefile), "MONITORING_AUTH_TOKEN ?=\n") || !strings.Contains(string(makefile), "MONITORING_AUTH_TOKEN='$(MONITORING_AUTH_TOKEN)'") {
-		t.Fatal("Makefile should expose MONITORING_AUTH_TOKEN to the monitoring wrapper")
+	for _, token := range []string{
+		"MONITORING_AUTH_TOKEN ?=\n",
+		"MONITORING_AUTH_PREVIOUS_TOKEN ?=\n",
+		"MONITORING_AUTH_PREVIOUS_TOKEN_EXPIRES_AT ?=\n",
+		"REPLICATION_AUTH_PREVIOUS_TOKEN ?=\n",
+		"REPLICATION_AUTH_PREVIOUS_TOKEN_EXPIRES_AT ?=\n",
+		"MONITORING_AUTH_TOKEN='$(MONITORING_AUTH_TOKEN)'",
+		"MONITORING_AUTH_PREVIOUS_TOKEN='$(MONITORING_AUTH_PREVIOUS_TOKEN)'",
+		"REPLICATION_AUTH_PREVIOUS_TOKEN='$(REPLICATION_AUTH_PREVIOUS_TOKEN)'",
+	} {
+		if !strings.Contains(string(makefile), token) {
+			t.Fatalf("Makefile missing auth rotation plumbing %q", token)
+		}
 	}
 
 	script, err := os.ReadFile("scripts/monitoring-server.sh")
@@ -61,7 +72,15 @@ func TestMonitoringWrapperPassesAuthToken(t *testing.T) {
 	scriptText := string(script)
 	for _, token := range []string{
 		"auth_token=${MONITORING_AUTH_TOKEN:-}",
+		"auth_previous_token=${MONITORING_AUTH_PREVIOUS_TOKEN:-}",
+		"auth_previous_token_expires_at=${MONITORING_AUTH_PREVIOUS_TOKEN_EXPIRES_AT:-}",
 		`-monitoring-auth-token "$auth_token"`,
+		`-monitoring-auth-previous-token "$auth_previous_token"`,
+		`-monitoring-auth-previous-token-expires-at "$auth_previous_token_expires_at"`,
+		"replication_auth_previous_token=${REPLICATION_AUTH_PREVIOUS_TOKEN:-}",
+		"replication_auth_previous_token_expires_at=${REPLICATION_AUTH_PREVIOUS_TOKEN_EXPIRES_AT:-}",
+		`-replication-auth-previous-token "$replication_auth_previous_token"`,
+		`-replication-auth-previous-token-expires-at "$replication_auth_previous_token_expires_at"`,
 	} {
 		if !strings.Contains(scriptText, token) {
 			t.Fatalf("monitoring wrapper missing auth token plumbing %q", token)

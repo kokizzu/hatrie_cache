@@ -2851,6 +2851,186 @@ func TestRunClusterConfigDiffCanIncludeNodeLocalFields(t *testing.T) {
 	}
 }
 
+func TestRunClusterCredentialCheckProbesEveryNodeWithCurrentToken(t *testing.T) {
+	var nodeAURL string
+	var nodeBURL string
+	wantNodeBToken := "new-token"
+	topology := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeFullReplica,
+			Self:    "node-a",
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: nodeAURL, Role: "primary"},
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+		}
+	}
+	nodeB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/health" {
+			t.Fatalf("unexpected node-b request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer "+wantNodeBToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-b"})
+	}))
+	defer nodeB.Close()
+	nodeBURL = nodeB.URL
+	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer new-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/topology":
+			json.NewEncoder(w).Encode(topology())
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		default:
+			t.Fatalf("unexpected node-a request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeA.Close()
+	nodeAURL = nodeA.URL
+
+	runCheck := func() clusterCredentialCheckResult {
+		stdout := &bytes.Buffer{}
+		if err := run(context.Background(), []string{
+			"-addr", nodeA.URL,
+			"-token", "new-token",
+			"cluster", "credential-check",
+			"-min-cert-validity", "0",
+		}, stdout, &bytes.Buffer{}, nodeA.Client()); err != nil {
+			t.Fatalf("run(cluster credential-check) error = %v", err)
+		}
+		var result clusterCredentialCheckResult
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatalf("Unmarshal(cluster credential-check result) error = %v", err)
+		}
+		return result
+	}
+	result := runCheck()
+	if !result.OK || len(result.Nodes) != 2 || !result.Nodes[0].Authorized || !result.Nodes[1].Authorized {
+		t.Fatalf("credential check result = %#v, want both nodes authorized", result)
+	}
+	if !result.Nodes[0].AuthEnforced || !result.Nodes[1].AuthEnforced {
+		t.Fatalf("credential check result = %#v, want unauthenticated controls rejected", result)
+	}
+
+	wantNodeBToken = "old-token"
+	result = runCheck()
+	if result.OK || !result.Nodes[0].OK || result.Nodes[1].OK || !strings.Contains(result.Nodes[1].Error, "401") {
+		t.Fatalf("credential check drift result = %#v, want only node-b unauthorized", result)
+	}
+}
+
+func TestRunClusterCredentialCheckSupportsReplicationToken(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/topology":
+			if r.Header.Get("Authorization") != "Bearer operator-token" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			json.NewEncoder(w).Encode(hatriecache.ClusterTopology{
+				Version: 1,
+				Mode:    hatriecache.TopologyModeFullReplica,
+				Self:    "node-a",
+				Nodes:   []hatriecache.TopologyNode{{ID: "node-a", Address: serverURL, Role: "primary"}},
+			})
+		case "/api/journal":
+			if r.Header.Get("Authorization") != "Bearer new-replication-token" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, "journal is not configured", http.StatusServiceUnavailable)
+		default:
+			t.Fatalf("unexpected replication credential request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"-token", "operator-token",
+		"cluster", "credential-check",
+		"-scope", "replication",
+		"-credential-token", "new-replication-token",
+		"-min-cert-validity", "0",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(cluster credential-check replication) error = %v", err)
+	}
+	var result clusterCredentialCheckResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster credential-check replication result) error = %v", err)
+	}
+	if !result.OK || result.Scope != "replication" || len(result.Nodes) != 1 || !result.Nodes[0].Authorized || !result.Nodes[0].AuthEnforced || result.Nodes[0].ProbeStatus != http.StatusServiceUnavailable {
+		t.Fatalf("replication credential check result = %#v", result)
+	}
+}
+
+func TestRunClusterCredentialCheckValidatesTLSCertificate(t *testing.T) {
+	var serverURL string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/topology":
+			json.NewEncoder(w).Encode(hatriecache.ClusterTopology{
+				Version: 1,
+				Mode:    hatriecache.TopologyModeFullReplica,
+				Self:    "node-a",
+				Nodes:   []hatriecache.TopologyNode{{ID: "node-a", Address: serverURL, Role: "primary"}},
+			})
+		case "/api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		default:
+			t.Fatalf("unexpected TLS node request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"cluster", "credential-check",
+		"-require-tls",
+		"-require-auth=false",
+		"-min-cert-validity", "1h",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(cluster credential-check TLS) error = %v", err)
+	}
+	var result clusterCredentialCheckResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster credential-check TLS result) error = %v", err)
+	}
+	if !result.OK || len(result.Nodes) != 1 || !result.Nodes[0].TLS || result.Nodes[0].CertificateSubject == "" || result.Nodes[0].CertificateNotAfter == "" || result.Nodes[0].CertificateValidForMillis <= 0 {
+		t.Fatalf("TLS credential check result = %#v", result)
+	}
+
+	stdout.Reset()
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"cluster", "credential-check",
+		"-require-tls",
+		"-require-auth=false",
+		"-min-cert-validity", "1000000h",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(cluster credential-check TLS expiry gate) error = %v", err)
+	}
+	result = clusterCredentialCheckResult{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster credential-check TLS expiry result) error = %v", err)
+	}
+	if result.OK || result.Nodes[0].OK || !strings.Contains(result.Nodes[0].Error, "expires before minimum") {
+		t.Fatalf("TLS credential expiry result = %#v, want validity failure", result)
+	}
+}
+
 func TestRunClusterUpgradePlanOrdersReplicasAndValidatesReadiness(t *testing.T) {
 	var nodeAURL string
 	var nodeBURL string

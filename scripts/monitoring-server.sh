@@ -6,6 +6,8 @@ web_dir=${MONITORING_WEB_DIR:-svelte-mpa/dist}
 tls_cert=${MONITORING_TLS_CERT:-}
 tls_key=${MONITORING_TLS_KEY:-}
 auth_token=${MONITORING_AUTH_TOKEN:-}
+auth_previous_token=${MONITORING_AUTH_PREVIOUS_TOKEN:-}
+auth_previous_token_expires_at=${MONITORING_AUTH_PREVIOUS_TOKEN_EXPIRES_AT:-}
 audit_log_path=${AUDIT_LOG_PATH:-}
 write_protection=${WRITE_PROTECTION:-false}
 rate_limit=${RATE_LIMIT:-0}
@@ -39,6 +41,8 @@ replication_grpc_batch_max_commands=${REPLICATION_GRPC_BATCH_MAX_COMMANDS:-32}
 replication_grpc_batch_window=${REPLICATION_GRPC_BATCH_WINDOW:-0}
 replication_http_fallback=${REPLICATION_HTTP_FALLBACK:-true}
 replication_auth_token=${REPLICATION_AUTH_TOKEN:-}
+replication_auth_previous_token=${REPLICATION_AUTH_PREVIOUS_TOKEN:-}
+replication_auth_previous_token_expires_at=${REPLICATION_AUTH_PREVIOUS_TOKEN_EXPIRES_AT:-}
 replication_batch_max_bytes=${REPLICATION_BATCH_MAX_BYTES:-1048576}
 replication_max_in_flight_targets=${REPLICATION_MAX_IN_FLIGHT_TARGETS:-4}
 replication_sync_interval=${REPLICATION_SYNC_INTERVAL:-0}
@@ -91,6 +95,8 @@ set -- \
 	-monitoring-tls-cert "$tls_cert" \
 	-monitoring-tls-key "$tls_key" \
 	-monitoring-auth-token "$auth_token" \
+	-monitoring-auth-previous-token "$auth_previous_token" \
+	-monitoring-auth-previous-token-expires-at "$auth_previous_token_expires_at" \
 	-audit-log-path "$audit_log_path" \
 	-write-protection="$write_protection" \
 	-rate-limit "$rate_limit" \
@@ -118,6 +124,8 @@ set -- \
 	-replication-circuit-breaker-failures "$replication_circuit_breaker_failures" \
 	-replication-circuit-breaker-cooldown "$replication_circuit_breaker_cooldown" \
 	-replication-auth-token "$replication_auth_token" \
+	-replication-auth-previous-token "$replication_auth_previous_token" \
+	-replication-auth-previous-token-expires-at "$replication_auth_previous_token_expires_at" \
 	-replication-transport "$replication_transport" \
 	-replication-grpc-window "$replication_grpc_window" \
 	-replication-grpc-batch-max-commands "$replication_grpc_batch_max_commands" \

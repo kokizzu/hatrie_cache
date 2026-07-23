@@ -17,22 +17,26 @@ import (
 )
 
 type CacheGRPCOptions struct {
-	NodeName             string
-	AuthToken            string
-	ReplicationAuthToken string
-	AuditLog             *AuditLogger
-	WriteProtected       bool
-	RateLimiter          *RateLimiter
-	Metrics              *APIMetrics
-	StartAt              time.Time
-	Snapshot             func() error
-	Journal              *CommandJournal
-	DirtyTracker         *LevelDBDirtyTracker
-	Topology             *TopologyStore
-	Election             *ElectionStore
-	Replicator           *HTTPReplicator
-	ReplicationSafety    *ReplicationSafetyStore
-	EnforceLeaderWrites  bool
+	NodeName                         string
+	AuthToken                        string
+	AuthPreviousToken                string
+	AuthPreviousExpiresAt            time.Time
+	ReplicationAuthToken             string
+	ReplicationAuthPreviousToken     string
+	ReplicationAuthPreviousExpiresAt time.Time
+	AuditLog                         *AuditLogger
+	WriteProtected                   bool
+	RateLimiter                      *RateLimiter
+	Metrics                          *APIMetrics
+	StartAt                          time.Time
+	Snapshot                         func() error
+	Journal                          *CommandJournal
+	DirtyTracker                     *LevelDBDirtyTracker
+	Topology                         *TopologyStore
+	Election                         *ElectionStore
+	Replicator                       *HTTPReplicator
+	ReplicationSafety                *ReplicationSafetyStore
+	EnforceLeaderWrites              bool
 }
 
 type CacheGRPCServer struct {
@@ -43,7 +47,9 @@ type CacheGRPCServer struct {
 
 func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServer {
 	options.AuthToken = normalizeAuthToken(options.AuthToken)
+	options.AuthPreviousToken = normalizeAuthToken(options.AuthPreviousToken)
 	options.ReplicationAuthToken = normalizeAuthToken(options.ReplicationAuthToken)
+	options.ReplicationAuthPreviousToken = normalizeAuthToken(options.ReplicationAuthPreviousToken)
 	if options.StartAt.IsZero() {
 		options.StartAt = time.Now()
 	}
@@ -64,17 +70,19 @@ func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServe
 }
 
 func (server *CacheGRPCServer) requireReplicationAuthorized(ctx context.Context) error {
-	if server.options.ReplicationAuthToken == "" {
+	tokens := newAuthTokenSet(server.options.ReplicationAuthToken, server.options.ReplicationAuthPreviousToken, server.options.ReplicationAuthPreviousExpiresAt)
+	if !tokens.configured() {
 		return server.requireAuthorized(ctx)
 	}
+	now := time.Now()
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		for _, candidate := range md.Get("x-hatrie-replication-token") {
-			if authTokenMatches(candidate, server.options.ReplicationAuthToken) {
+			if tokens.matches(candidate, now) {
 				return nil
 			}
 		}
 		for _, candidate := range md.Get("authorization") {
-			if authTokenMatches(authBearerToken(candidate), server.options.ReplicationAuthToken) {
+			if tokens.matches(authBearerToken(candidate), now) {
 				return nil
 			}
 		}
@@ -115,20 +123,22 @@ func (server *CacheGRPCServer) requestContext(ctx context.Context) (context.Cont
 }
 
 func (server *CacheGRPCServer) requireAuthorized(ctx context.Context) error {
-	if server.options.AuthToken == "" {
+	tokens := newAuthTokenSet(server.options.AuthToken, server.options.AuthPreviousToken, server.options.AuthPreviousExpiresAt)
+	if !tokens.configured() {
 		return nil
 	}
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return status.Error(codes.Unauthenticated, "unauthorized")
 	}
+	now := time.Now()
 	for _, candidate := range md.Get("x-hatrie-auth-token") {
-		if authTokenMatches(candidate, server.options.AuthToken) {
+		if tokens.matches(candidate, now) {
 			return nil
 		}
 	}
 	for _, candidate := range md.Get("authorization") {
-		if authTokenMatches(authBearerToken(candidate), server.options.AuthToken) {
+		if tokens.matches(authBearerToken(candidate), now) {
 			return nil
 		}
 	}

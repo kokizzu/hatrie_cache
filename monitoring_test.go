@@ -1990,6 +1990,61 @@ func TestMonitoringAuthTokenProtectsAPI(t *testing.T) {
 	}
 }
 
+func TestMonitoringPreviousAuthTokensExpire(t *testing.T) {
+	ht := newTestTrie(t)
+	future := time.Now().Add(time.Hour)
+	handler := NewMonitoringHandler(ht, MonitoringOptions{
+		AuthToken:                        "current-operator",
+		AuthPreviousToken:                "previous-operator",
+		AuthPreviousExpiresAt:            future,
+		ReplicationAuthToken:             "current-replication",
+		ReplicationAuthPreviousToken:     "previous-replication",
+		ReplicationAuthPreviousExpiresAt: future,
+	}).Handler()
+
+	for _, token := range []string{"current-operator", "previous-operator"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("operator token %q status = %d, want 200", token, resp.Code)
+		}
+	}
+	for _, token := range []string{"current-replication", "previous-replication"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"INTERNALDEL","key":"missing"}`))
+		req.Header.Set("X-Hatrie-Replication-Token", token)
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("replication token %q status = %d body %q, want 200", token, resp.Code, resp.Body.String())
+		}
+	}
+
+	expired := NewMonitoringHandler(ht, MonitoringOptions{
+		AuthToken:                        "current-operator",
+		AuthPreviousToken:                "previous-operator",
+		AuthPreviousExpiresAt:            time.Now().Add(-time.Hour),
+		ReplicationAuthToken:             "current-replication",
+		ReplicationAuthPreviousToken:     "previous-replication",
+		ReplicationAuthPreviousExpiresAt: time.Now().Add(-time.Hour),
+	}).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("Authorization", "Bearer previous-operator")
+	resp := httptest.NewRecorder()
+	expired.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expired operator token status = %d, want 401", resp.Code)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/commands", strings.NewReader(`{"command":"INTERNALDEL","key":"missing"}`))
+	req.Header.Set("X-Hatrie-Replication-Token", "previous-replication")
+	resp = httptest.NewRecorder()
+	expired.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expired replication token status = %d, want 401", resp.Code)
+	}
+}
+
 func TestMonitoringReplicationAuthTokenOnlyAllowsInternalCommands(t *testing.T) {
 	ht := newTestTrie(t)
 	handler := NewMonitoringHandler(ht, MonitoringOptions{

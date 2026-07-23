@@ -40,36 +40,42 @@ var errCommandJournalTailResponseTooLarge = errors.New("hatriecache: journal sou
 var errMonitoringEntriesLimitReached = errors.New("hatriecache: monitoring entries limit reached")
 
 type MonitoringOptions struct {
-	NodeName                        string
-	Version                         string
-	WebDir                          string
-	AuthToken                       string
-	ReplicationAuthToken            string
-	AuditLog                        *AuditLogger
-	WriteProtected                  bool
-	RateLimiter                     *RateLimiter
-	Metrics                         *APIMetrics
-	StartAt                         time.Time
-	Snapshot                        func() error
-	LevelDBStore                    PersistentStore
-	LevelDBDirtyTracker             *LevelDBDirtyTracker
-	BackupSnapshotFormat            SnapshotFormat
-	Journal                         *CommandJournal
-	JournalRecoveryRepositoryPath   string
-	JournalRecoveryRepositoryRetain int
-	Topology                        *TopologyStore
-	Election                        *ElectionStore
-	Replicator                      *HTTPReplicator
-	ReplicationSafety               *ReplicationSafetyStore
-	EnforceLeaderWrites             bool
-	RuntimeConfig                   map[string]interface{}
+	NodeName                         string
+	Version                          string
+	WebDir                           string
+	AuthToken                        string
+	AuthPreviousToken                string
+	AuthPreviousExpiresAt            time.Time
+	ReplicationAuthToken             string
+	ReplicationAuthPreviousToken     string
+	ReplicationAuthPreviousExpiresAt time.Time
+	AuditLog                         *AuditLogger
+	WriteProtected                   bool
+	RateLimiter                      *RateLimiter
+	Metrics                          *APIMetrics
+	StartAt                          time.Time
+	Snapshot                         func() error
+	LevelDBStore                     PersistentStore
+	LevelDBDirtyTracker              *LevelDBDirtyTracker
+	BackupSnapshotFormat             SnapshotFormat
+	Journal                          *CommandJournal
+	JournalRecoveryRepositoryPath    string
+	JournalRecoveryRepositoryRetain  int
+	Topology                         *TopologyStore
+	Election                         *ElectionStore
+	Replicator                       *HTTPReplicator
+	ReplicationSafety                *ReplicationSafetyStore
+	EnforceLeaderWrites              bool
+	RuntimeConfig                    map[string]interface{}
 }
 
 type MonitoringHandler struct {
-	trie      *HatTrie
-	options   MonitoringOptions
-	storageMu sync.Mutex
-	storage   monitoringStorageState
+	trie                  *HatTrie
+	options               MonitoringOptions
+	authTokens            authTokenSet
+	replicationAuthTokens authTokenSet
+	storageMu             sync.Mutex
+	storage               monitoringStorageState
 }
 
 type commandExecutionOptions struct {
@@ -240,7 +246,12 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 	if options.ReplicationSafety == nil {
 		options.ReplicationSafety = NewReplicationSafetyStore()
 	}
-	return &MonitoringHandler{trie: trie, options: options}
+	return &MonitoringHandler{
+		trie:                  trie,
+		options:               options,
+		authTokens:            newAuthTokenSet(options.AuthToken, options.AuthPreviousToken, options.AuthPreviousExpiresAt),
+		replicationAuthTokens: newAuthTokenSet(options.ReplicationAuthToken, options.ReplicationAuthPreviousToken, options.ReplicationAuthPreviousExpiresAt),
+	}
 }
 
 func monitoringBuildVersion() string {
@@ -300,25 +311,23 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 		mux.Handle("/", http.FileServer(http.Dir(handler.options.WebDir)))
 	}
 	var out http.Handler = mux
-	authToken := normalizeAuthToken(handler.options.AuthToken)
-	replicationAuthToken := normalizeAuthToken(handler.options.ReplicationAuthToken)
-	if authToken != "" || replicationAuthToken != "" {
-		out = monitoringAuthHandler(authToken, replicationAuthToken, out)
+	if handler.authTokens.configured() || handler.replicationAuthTokens.configured() {
+		out = monitoringAuthHandler(handler.authTokens, handler.replicationAuthTokens, out)
 	}
 	return gzipHTTPHandler(out)
 }
 
-func monitoringAuthHandler(token string, replicationToken string, next http.Handler) http.Handler {
+func monitoringAuthHandler(tokens authTokenSet, replicationTokens authTokenSet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !monitoringPathRequiresAuth(r.URL.Path) || monitoringRequestHasAuthToken(r, token) {
+		if !monitoringPathRequiresAuth(r.URL.Path) || monitoringRequestHasAuthToken(r, tokens) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if monitoringPathAcceptsReplicationAuth(r) && monitoringReplicationRequestAuthorized(r, replicationToken) {
+		if monitoringPathAcceptsReplicationAuth(r) && monitoringReplicationRequestAuthorized(r, replicationTokens) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if token == "" && !monitoringPathRequiresReplicationAuth(r) {
+		if !tokens.configured() && !monitoringPathRequiresReplicationAuth(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -344,26 +353,26 @@ func monitoringPathRequiresAuth(path string) bool {
 	return strings.HasPrefix(path, "/api/") || path == "/metrics"
 }
 
-func monitoringRequestHasAuthToken(r *http.Request, token string) bool {
-	token = normalizeAuthToken(token)
-	if token == "" {
+func monitoringRequestHasAuthToken(r *http.Request, tokens authTokenSet) bool {
+	if !tokens.configured() {
 		return false
 	}
-	if authTokenMatches(r.Header.Get("X-Hatrie-Auth-Token"), token) {
+	now := time.Now()
+	if tokens.matches(r.Header.Get("X-Hatrie-Auth-Token"), now) {
 		return true
 	}
-	return authTokenMatches(authBearerToken(r.Header.Get("Authorization")), token)
+	return tokens.matches(authBearerToken(r.Header.Get("Authorization")), now)
 }
 
-func monitoringReplicationRequestAuthorized(r *http.Request, token string) bool {
-	token = normalizeAuthToken(token)
-	if token == "" {
+func monitoringReplicationRequestAuthorized(r *http.Request, tokens authTokenSet) bool {
+	if !tokens.configured() {
 		return false
 	}
-	if authTokenMatches(r.Header.Get("X-Hatrie-Replication-Token"), token) {
+	now := time.Now()
+	if tokens.matches(r.Header.Get("X-Hatrie-Replication-Token"), now) {
 		return true
 	}
-	return authTokenMatches(authBearerToken(r.Header.Get("Authorization")), token)
+	return tokens.matches(authBearerToken(r.Header.Get("Authorization")), now)
 }
 
 func (handler *MonitoringHandler) auditHTTP(r *http.Request, event AuditEvent) {
@@ -836,12 +845,11 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 }
 
 func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest) bool {
-	replicationToken := normalizeAuthToken(handler.options.ReplicationAuthToken)
-	if replicationToken == "" {
+	if !handler.replicationAuthTokens.configured() {
 		return false
 	}
-	monitoringAuthorized := monitoringRequestHasAuthToken(r, normalizeAuthToken(handler.options.AuthToken))
-	replicationAuthorized := monitoringReplicationRequestAuthorized(r, replicationToken)
+	monitoringAuthorized := monitoringRequestHasAuthToken(r, handler.authTokens)
+	replicationAuthorized := monitoringReplicationRequestAuthorized(r, handler.replicationAuthTokens)
 	isInternal := isInternalReplicationCommand(request)
 	if isInternal && !monitoringAuthorized && !replicationAuthorized {
 		writeMonitoringUnauthorized(w)

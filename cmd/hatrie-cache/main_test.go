@@ -191,6 +191,53 @@ func TestParseConfigEnablesMonitoringServerExplicitly(t *testing.T) {
 	}
 }
 
+func TestParseConfigAcceptsBoundedPreviousAuthTokens(t *testing.T) {
+	operatorExpiry := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	replicationExpiry := operatorExpiry.Add(time.Hour)
+	cfg, err := parseConfig([]string{
+		"-monitoring-auth-token", "current-operator",
+		"-monitoring-auth-previous-token", "previous-operator",
+		"-monitoring-auth-previous-token-expires-at", operatorExpiry.Format(time.RFC3339),
+		"-replication-auth-token", "current-replication",
+		"-replication-auth-previous-token", "previous-replication",
+		"-replication-auth-previous-token-expires-at", replicationExpiry.Format(time.RFC3339),
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig(rotation) error = %v", err)
+	}
+	if cfg.monitoringAuthPreviousToken != "previous-operator" || !cfg.monitoringAuthPreviousExpiry.Equal(operatorExpiry) {
+		t.Fatalf("monitoring rotation config = %#v", cfg)
+	}
+	if cfg.replicationAuthPreviousToken != "previous-replication" || !cfg.replicationAuthPreviousExpiry.Equal(replicationExpiry) {
+		t.Fatalf("replication rotation config = %#v", cfg)
+	}
+	redacted := redactedConfig(cfg)
+	if redacted["monitoring_auth_previous_token"] != "<redacted>" || redacted["replication_auth_previous_token"] != "<redacted>" {
+		t.Fatalf("redacted rotation config = %#v", redacted)
+	}
+}
+
+func TestParseConfigRejectsUnboundedPreviousAuthTokens(t *testing.T) {
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	tests := [][]string{
+		{"-monitoring-auth-previous-token", "old"},
+		{"-monitoring-auth-previous-token", "old", "-monitoring-auth-previous-token-expires-at", future},
+		{"-monitoring-auth-previous-token-expires-at", future},
+		{"-monitoring-auth-token", "same", "-monitoring-auth-previous-token", "same", "-monitoring-auth-previous-token-expires-at", future},
+		{"-monitoring-auth-previous-token", "old", "-monitoring-auth-previous-token-expires-at", "2020-01-01T00:00:00Z"},
+		{"-replication-auth-previous-token", "old"},
+		{"-replication-auth-previous-token", "old", "-replication-auth-previous-token-expires-at", future},
+		{"-replication-auth-previous-token-expires-at", future},
+		{"-replication-auth-token", "same", "-replication-auth-previous-token", "same", "-replication-auth-previous-token-expires-at", future},
+		{"-replication-auth-previous-token", "old", "-replication-auth-previous-token-expires-at", "not-a-time"},
+	}
+	for _, args := range tests {
+		if _, err := parseConfig(args, &bytes.Buffer{}); err == nil {
+			t.Fatalf("parseConfig(%q) error = nil, want bounded rotation error", args)
+		}
+	}
+}
+
 func TestParseConfigLoadsConfigFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hatrie-cache.json")
 	if err := os.WriteFile(path, []byte(`{

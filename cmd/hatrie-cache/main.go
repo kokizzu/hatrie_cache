@@ -56,6 +56,8 @@ type config struct {
 	monitoringTLSCert              string
 	monitoringTLSKey               string
 	monitoringAuthToken            string
+	monitoringAuthPreviousToken    string
+	monitoringAuthPreviousExpiry   time.Time
 	auditLogPath                   string
 	writeProtection                bool
 	rateLimit                      int
@@ -90,6 +92,8 @@ type config struct {
 	replicationGRPCBatchWindow     time.Duration
 	replicationHTTPFallback        bool
 	replicationAuthToken           string
+	replicationAuthPreviousToken   string
+	replicationAuthPreviousExpiry  time.Time
 	replicationBatchMaxBytes       int
 	replicationMaxTargets          int
 	replicationSyncInterval        time.Duration
@@ -390,26 +394,30 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	defer stopReplicationSyncer()
 
 	monitoringHandler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
-		NodeName:                      defaultNodeID(cfg.nodeID),
-		WebDir:                        cfg.monitoringWebDir,
-		AuthToken:                     cfg.monitoringAuthToken,
-		ReplicationAuthToken:          cfg.replicationAuthToken,
-		AuditLog:                      auditLog,
-		WriteProtected:                cfg.writeProtection,
-		RateLimiter:                   rateLimiter,
-		Metrics:                       apiMetrics,
-		Snapshot:                      snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
-		LevelDBStore:                  dbStore,
-		LevelDBDirtyTracker:           levelDBDirtyTracker,
-		BackupSnapshotFormat:          snapshotFormat(cfg),
-		Journal:                       journal,
-		JournalRecoveryRepositoryPath: journalRecoverySourceRepositoryPath(dbStore, cfg.journalPullIncrementalRecovery),
-		Topology:                      topology,
-		Election:                      election,
-		Replicator:                    replicator,
-		ReplicationSafety:             replicationSafety,
-		EnforceLeaderWrites:           cfg.enforceLeaderWrites,
-		RuntimeConfig:                 redactedConfig(cfg),
+		NodeName:                         defaultNodeID(cfg.nodeID),
+		WebDir:                           cfg.monitoringWebDir,
+		AuthToken:                        cfg.monitoringAuthToken,
+		AuthPreviousToken:                cfg.monitoringAuthPreviousToken,
+		AuthPreviousExpiresAt:            cfg.monitoringAuthPreviousExpiry,
+		ReplicationAuthToken:             cfg.replicationAuthToken,
+		ReplicationAuthPreviousToken:     cfg.replicationAuthPreviousToken,
+		ReplicationAuthPreviousExpiresAt: cfg.replicationAuthPreviousExpiry,
+		AuditLog:                         auditLog,
+		WriteProtected:                   cfg.writeProtection,
+		RateLimiter:                      rateLimiter,
+		Metrics:                          apiMetrics,
+		Snapshot:                         snapshotCallback(trie, journal, cfg.snapshotPath, snapshotFormat(cfg)),
+		LevelDBStore:                     dbStore,
+		LevelDBDirtyTracker:              levelDBDirtyTracker,
+		BackupSnapshotFormat:             snapshotFormat(cfg),
+		Journal:                          journal,
+		JournalRecoveryRepositoryPath:    journalRecoverySourceRepositoryPath(dbStore, cfg.journalPullIncrementalRecovery),
+		Topology:                         topology,
+		Election:                         election,
+		Replicator:                       replicator,
+		ReplicationSafety:                replicationSafety,
+		EnforceLeaderWrites:              cfg.enforceLeaderWrites,
+		RuntimeConfig:                    redactedConfig(cfg),
 	})
 	stopDBCompactor := startLevelDBCompactor(ctx, dbStore, cfg.dbCompactInterval, levelDBCompactorOptions{
 		StartKey: cfg.dbCompactStartKey,
@@ -547,6 +555,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.monitoringTLSCert, "monitoring-tls-cert", "", "TLS certificate path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringTLSKey, "monitoring-tls-key", "", "TLS private key path for HTTPS/HTTP2 monitoring")
 	flags.StringVar(&cfg.monitoringAuthToken, "monitoring-auth-token", "", "optional bearer token required for monitoring API endpoints")
+	flags.StringVar(&cfg.monitoringAuthPreviousToken, "monitoring-auth-previous-token", "", "previous monitoring bearer token accepted only until its expiry")
+	flags.Func("monitoring-auth-previous-token-expires-at", "absolute RFC3339 expiry for the previous monitoring bearer token", rfc3339TimeFlag(&cfg.monitoringAuthPreviousExpiry))
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
 	flags.BoolVar(&cfg.writeProtection, "write-protection", cfg.writeProtection, "reject dangerous monitoring API writes")
 	flags.IntVar(&cfg.rateLimit, "rate-limit", cfg.rateLimit, "maximum dangerous monitoring API actions per caller per second; use 0 to disable")
@@ -581,6 +591,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.DurationVar(&cfg.replicationGRPCBatchWindow, "replication-grpc-batch-window", cfg.replicationGRPCBatchWindow, "optional maximum wait for grouping live gRPC commands; zero only batches already queued callers")
 	flags.BoolVar(&cfg.replicationHTTPFallback, "replication-http-fallback", cfg.replicationHTTPFallback, "fall back to HTTP when a gRPC replication stream cannot be used")
 	flags.StringVar(&cfg.replicationAuthToken, "replication-auth-token", "", "optional bearer token sent on HTTP replication and accepted only for internal replication commands")
+	flags.StringVar(&cfg.replicationAuthPreviousToken, "replication-auth-previous-token", "", "previous replication bearer token accepted only until its expiry")
+	flags.Func("replication-auth-previous-token-expires-at", "absolute RFC3339 expiry for the previous replication bearer token", rfc3339TimeFlag(&cfg.replicationAuthPreviousExpiry))
 	flags.IntVar(&cfg.replicationBatchMaxBytes, "replication-batch-max-bytes", cfg.replicationBatchMaxBytes, "maximum estimated bytes per HTTP replication batch; use 0 to disable batch splitting")
 	flags.IntVar(&cfg.replicationMaxTargets, "replication-max-in-flight-targets", cfg.replicationMaxTargets, "maximum concurrent HTTP replication targets; use 1 for serial delivery")
 	flags.DurationVar(&cfg.replicationSyncInterval, "replication-sync-interval", 0, "optional periodic anti-entropy replication sync interval; use 0 to disable")
@@ -631,6 +643,17 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		}
 	}
 	if err := flags.Parse(args); err != nil {
+		return config{}, err
+	}
+	cfg.monitoringAuthToken = strings.TrimSpace(cfg.monitoringAuthToken)
+	cfg.monitoringAuthPreviousToken = strings.TrimSpace(cfg.monitoringAuthPreviousToken)
+	cfg.replicationAuthToken = strings.TrimSpace(cfg.replicationAuthToken)
+	cfg.replicationAuthPreviousToken = strings.TrimSpace(cfg.replicationAuthPreviousToken)
+	now := time.Now()
+	if err := validatePreviousAuthToken("monitoring", cfg.monitoringAuthToken, cfg.monitoringAuthPreviousToken, cfg.monitoringAuthPreviousExpiry, now); err != nil {
+		return config{}, err
+	}
+	if err := validatePreviousAuthToken("replication", cfg.replicationAuthToken, cfg.replicationAuthPreviousToken, cfg.replicationAuthPreviousExpiry, now); err != nil {
 		return config{}, err
 	}
 	configProfile, err = parseConfigProfile(cfg.configProfile)
@@ -1050,7 +1073,7 @@ func writeRedactedConfig(writer io.Writer, cfg config) error {
 }
 
 func redactedConfig(cfg config) map[string]interface{} {
-	return map[string]interface{}{
+	out := map[string]interface{}{
 		"config_path":                          cfg.configPath,
 		"config_profile":                       cfg.configProfile,
 		"check_config":                         cfg.checkConfig,
@@ -1060,6 +1083,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"monitoring_tls_cert":                  cfg.monitoringTLSCert,
 		"monitoring_tls_key":                   cfg.monitoringTLSKey,
 		"monitoring_auth_token":                redactedSecret(cfg.monitoringAuthToken),
+		"monitoring_auth_previous_token":       redactedSecret(cfg.monitoringAuthPreviousToken),
 		"audit_log_path":                       cfg.auditLogPath,
 		"write_protection":                     cfg.writeProtection,
 		"rate_limit":                           cfg.rateLimit,
@@ -1094,6 +1118,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"replication_grpc_batch_window":        cfg.replicationGRPCBatchWindow.String(),
 		"replication_http_fallback":            cfg.replicationHTTPFallback,
 		"replication_auth_token":               redactedSecret(cfg.replicationAuthToken),
+		"replication_auth_previous_token":      redactedSecret(cfg.replicationAuthPreviousToken),
 		"replication_batch_max_bytes":          cfg.replicationBatchMaxBytes,
 		"replication_max_in_flight_targets":    cfg.replicationMaxTargets,
 		"replication_sync_interval":            cfg.replicationSyncInterval.String(),
@@ -1139,6 +1164,9 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"journal_pull_incremental_recovery":    cfg.journalPullIncrementalRecovery,
 		"journal_pull_wire_format":             cfg.journalPullWireFormat,
 	}
+	out["monitoring_auth_previous_token_expires_at"] = configTimeValue(cfg.monitoringAuthPreviousExpiry)
+	out["replication_auth_previous_token_expires_at"] = configTimeValue(cfg.replicationAuthPreviousExpiry)
+	return out
 }
 
 func redactedSecret(value string) string {
@@ -1146,6 +1174,51 @@ func redactedSecret(value string) string {
 		return ""
 	}
 	return "<redacted>"
+}
+
+func configTimeValue(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func rfc3339TimeFlag(target *time.Time) func(string) error {
+	return func(value string) error {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			*target = time.Time{}
+			return nil
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return fmt.Errorf("must be RFC3339: %w", err)
+		}
+		*target = parsed
+		return nil
+	}
+}
+
+func validatePreviousAuthToken(name string, current string, previous string, expiresAt time.Time, now time.Time) error {
+	if previous == "" && expiresAt.IsZero() {
+		return nil
+	}
+	if previous == "" {
+		return fmt.Errorf("%s previous auth token expiry requires a previous token", name)
+	}
+	if current == "" {
+		return fmt.Errorf("%s previous auth token requires a current token", name)
+	}
+	if expiresAt.IsZero() {
+		return fmt.Errorf("%s previous auth token requires an absolute expiry", name)
+	}
+	if current == previous {
+		return fmt.Errorf("%s current and previous auth tokens must differ", name)
+	}
+	if !expiresAt.After(now) {
+		return fmt.Errorf("%s previous auth token expiry must be in the future", name)
+	}
+	return nil
 }
 
 func configOptionName(key string) string {
@@ -1508,21 +1581,25 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 	}
 	server := grpc.NewServer(options...)
 	hatriecache.RegisterCacheGRPCServer(server, hatriecache.NewCacheGRPCServer(trie, hatriecache.CacheGRPCOptions{
-		NodeName:             defaultNodeID(cfg.nodeID),
-		AuthToken:            cfg.monitoringAuthToken,
-		ReplicationAuthToken: cfg.replicationAuthToken,
-		AuditLog:             auditLog,
-		WriteProtected:       cfg.writeProtection,
-		RateLimiter:          rateLimiter,
-		Metrics:              apiMetrics,
-		Snapshot:             snapshot,
-		Journal:              journal,
-		DirtyTracker:         dirtyTracker,
-		Topology:             topology,
-		Election:             election,
-		Replicator:           replicator,
-		ReplicationSafety:    replicationSafety,
-		EnforceLeaderWrites:  cfg.enforceLeaderWrites,
+		NodeName:                         defaultNodeID(cfg.nodeID),
+		AuthToken:                        cfg.monitoringAuthToken,
+		AuthPreviousToken:                cfg.monitoringAuthPreviousToken,
+		AuthPreviousExpiresAt:            cfg.monitoringAuthPreviousExpiry,
+		ReplicationAuthToken:             cfg.replicationAuthToken,
+		ReplicationAuthPreviousToken:     cfg.replicationAuthPreviousToken,
+		ReplicationAuthPreviousExpiresAt: cfg.replicationAuthPreviousExpiry,
+		AuditLog:                         auditLog,
+		WriteProtected:                   cfg.writeProtection,
+		RateLimiter:                      rateLimiter,
+		Metrics:                          apiMetrics,
+		Snapshot:                         snapshot,
+		Journal:                          journal,
+		DirtyTracker:                     dirtyTracker,
+		Topology:                         topology,
+		Election:                         election,
+		Replicator:                       replicator,
+		ReplicationSafety:                replicationSafety,
+		EnforceLeaderWrites:              cfg.enforceLeaderWrites,
 	}))
 	return server, listener, nil
 }
