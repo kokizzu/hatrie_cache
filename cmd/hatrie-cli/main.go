@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -907,6 +908,28 @@ type clusterTopologyRepairResult struct {
 	NodesUpdated []string `json:"nodes_updated,omitempty"`
 }
 
+type clusterConfigDiffResult struct {
+	OK            bool                    `json:"ok"`
+	Peer          string                  `json:"peer"`
+	ReferenceNode string                  `json:"reference_node"`
+	IgnoredFields []string                `json:"ignored_fields,omitempty"`
+	Nodes         []clusterConfigNodeDiff `json:"nodes"`
+}
+
+type clusterConfigNodeDiff struct {
+	ID          string                    `json:"id"`
+	Address     string                    `json:"address,omitempty"`
+	OK          bool                      `json:"ok"`
+	Differences []clusterConfigDifference `json:"differences,omitempty"`
+	Error       string                    `json:"error,omitempty"`
+}
+
+type clusterConfigDifference struct {
+	Field     string      `json:"field"`
+	Reference interface{} `json:"reference,omitempty"`
+	Node      interface{} `json:"node,omitempty"`
+}
+
 type clusterNodeStatus struct {
 	ID                 string                        `json:"id"`
 	Role               string                        `json:"role,omitempty"`
@@ -924,7 +947,7 @@ type clusterNodeStatus struct {
 
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor")
+		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor, config-diff")
 	}
 	switch args[0] {
 	case "add-replica":
@@ -939,6 +962,8 @@ func runCluster(ctx context.Context, client *http.Client, addr string, args []st
 		return runClusterStatus(ctx, client, addr, args[1:], false, stdout, stderr)
 	case "doctor":
 		return runClusterStatus(ctx, client, addr, args[1:], true, stdout, stderr)
+	case "config-diff":
+		return runClusterConfigDiff(ctx, client, addr, args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown cluster subcommand %q", args[0])
 	}
@@ -1032,6 +1057,147 @@ func collectClusterStatus(ctx context.Context, client *http.Client, peer string,
 		}
 	}
 	return result, nil
+}
+
+var clusterNodeLocalConfigFields = []string{
+	"audit_log_path",
+	"config_path",
+	"db_path",
+	"grpc_addr",
+	"grpc_client_ca",
+	"grpc_tls_cert",
+	"grpc_tls_key",
+	"journal_path",
+	"journal_pull_state_path",
+	"monitoring_addr",
+	"monitoring_tls_cert",
+	"monitoring_tls_key",
+	"monitoring_web_dir",
+	"node_id",
+	"replication_outbox_path",
+	"snapshot_path",
+	"topology_path",
+}
+
+func runClusterConfigDiff(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cluster config-diff", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	peer := flags.String("peer", addr, "authoritative cluster node monitoring API base URL")
+	includeNodeLocal := flags.Bool("include-node-local", false, "compare node-local paths, listener addresses, and node ids")
+	ignore := flags.String("ignore", "", "additional comma-separated config fields to ignore")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*peer = strings.TrimSpace(*peer)
+	if *peer == "" {
+		return errors.New("cluster config-diff -peer is required")
+	}
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	topology = store.Get()
+	peerNode := clusterPeerNodeID(topology, *peer)
+	reference, err := getJSONValue[map[string]interface{}](ctx, client, *peer, "/api/config")
+	if err != nil {
+		return fmt.Errorf("reference config: %w", err)
+	}
+	ignored := splitCLICommaList(*ignore)
+	if !*includeNodeLocal {
+		ignored = append(ignored, clusterNodeLocalConfigFields...)
+	}
+	ignored = uniqueSortedStrings(ignored)
+	ignoredSet := make(map[string]bool, len(ignored))
+	for _, field := range ignored {
+		ignoredSet[field] = true
+	}
+
+	result := clusterConfigDiffResult{
+		OK:            true,
+		Peer:          *peer,
+		ReferenceNode: peerNode,
+		IgnoredFields: ignored,
+		Nodes:         make([]clusterConfigNodeDiff, 0, len(topology.Nodes)),
+	}
+	for _, node := range topology.Nodes {
+		address := strings.TrimSpace(node.Address)
+		var config map[string]interface{}
+		var nodeErr error
+		if node.ID == peerNode {
+			address = *peer
+			config = reference
+		} else {
+			config, nodeErr = getJSONValue[map[string]interface{}](ctx, client, address, "/api/config")
+		}
+		nodeResult := clusterConfigNodeDiff{ID: node.ID, Address: address, OK: true}
+		if nodeErr != nil {
+			nodeResult.OK = false
+			nodeResult.Error = nodeErr.Error()
+			result.OK = false
+		} else {
+			nodeResult.Differences = diffClusterConfigs(reference, config, ignoredSet)
+			if len(nodeResult.Differences) > 0 {
+				nodeResult.OK = false
+				result.OK = false
+			}
+		}
+		result.Nodes = append(result.Nodes, nodeResult)
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+func diffClusterConfigs(reference map[string]interface{}, node map[string]interface{}, ignored map[string]bool) []clusterConfigDifference {
+	fields := make(map[string]bool, len(reference)+len(node))
+	for field := range reference {
+		fields[field] = true
+	}
+	for field := range node {
+		fields[field] = true
+	}
+	names := make([]string, 0, len(fields))
+	for field := range fields {
+		if ignored == nil || !ignored[field] {
+			names = append(names, field)
+		}
+	}
+	sort.Strings(names)
+	differences := make([]clusterConfigDifference, 0)
+	for _, field := range names {
+		if reflect.DeepEqual(reference[field], node[field]) {
+			continue
+		}
+		differences = append(differences, clusterConfigDifference{
+			Field:     field,
+			Reference: reference[field],
+			Node:      node[field],
+		})
+	}
+	return differences
+}
+
+func uniqueSortedStrings(values []string) []string {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			set[value] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func probeClusterNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, election hatriecache.ElectionStatus) []clusterNodeStatus {

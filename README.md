@@ -632,6 +632,20 @@ the status command read-only. Review the initial doctor output before choosing
 an authority when members contain genuinely competing topology changes. A
 failed partial repair is safe to retry with the same authority.
 
+Compare redacted effective configuration across all topology members with:
+
+```sh
+make cli ARGS='cluster config-diff -peer http://node-a:8080'
+make cli ARGS='cluster config-diff -peer http://node-a:8080 -include-node-local'
+make cli ARGS='cluster config-diff -peer http://node-a:8080 -ignore db_hot_load_max_age,rate_limit'
+```
+
+The peer is the reference. By default, expected node-local fields such as node
+id, listener addresses, TLS file paths, data paths, journal paths, and topology
+paths are ignored. Every other field is compared with stable field ordering;
+unreachable config endpoints and mismatches set the JSON result's `ok` field to
+false. Secrets remain redacted by `/api/config` before the CLI receives them.
+
 ### Removing A Replica
 
 Use `cluster decommission` for normal removal. It verifies the retiring node's
@@ -1847,6 +1861,7 @@ make cli ARGS='cluster decommission -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster doctor -peer http://node-a:8080'
 make cli ARGS='cluster doctor -peer http://node-a:8080 -repair-topology -yes'
+make cli ARGS='cluster config-diff -peer http://node-a:8080'
 make cli ARGS='snapshot'
 ```
 

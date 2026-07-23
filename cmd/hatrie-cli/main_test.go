@@ -2500,6 +2500,93 @@ func TestRunClusterDoctorAliasSkipsNodeProbe(t *testing.T) {
 	}
 }
 
+func TestRunClusterConfigDiffIgnoresNodeLocalFieldsAndReportsDrift(t *testing.T) {
+	var nodeAURL string
+	var nodeBURL string
+	topology := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeFullReplica,
+			Self:    "node-a",
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: nodeAURL, Role: "primary"},
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+		}
+	}
+	nodeB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/config" {
+			t.Fatalf("unexpected node-b request %s %s", r.Method, r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"node_id":               "node-b",
+			"db_path":               "/srv/node-b/cache",
+			"db_format":             "json",
+			"replication_mode":      "dual",
+			"monitoring_auth_token": "configured",
+		})
+	}))
+	defer nodeB.Close()
+	nodeBURL = nodeB.URL
+
+	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/topology":
+			json.NewEncoder(w).Encode(topology())
+		case "/api/config":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"node_id":               "node-a",
+				"db_path":               "/srv/node-a/cache",
+				"db_format":             "binary",
+				"replication_mode":      "dual",
+				"monitoring_auth_token": "configured",
+			})
+		default:
+			t.Fatalf("unexpected node-a request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeA.Close()
+	nodeAURL = nodeA.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", nodeA.URL,
+		"cluster", "config-diff",
+	}, stdout, &bytes.Buffer{}, nodeA.Client()); err != nil {
+		t.Fatalf("run(cluster config-diff) error = %v", err)
+	}
+	var result clusterConfigDiffResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster config-diff result) error = %v", err)
+	}
+	if result.OK || result.ReferenceNode != "node-a" || len(result.Nodes) != 2 {
+		t.Fatalf("config diff result = %#v, want one drift from node-a", result)
+	}
+	var nodeBResult *clusterConfigNodeDiff
+	for idx := range result.Nodes {
+		if result.Nodes[idx].ID == "node-b" {
+			nodeBResult = &result.Nodes[idx]
+		}
+	}
+	if nodeBResult == nil || nodeBResult.OK || len(nodeBResult.Differences) != 1 || nodeBResult.Differences[0].Field != "db_format" {
+		t.Fatalf("node-b config diff = %#v, want only db_format", nodeBResult)
+	}
+	if len(result.IgnoredFields) == 0 || !stringInSlice(result.IgnoredFields, "node_id") || !stringInSlice(result.IgnoredFields, "db_path") {
+		t.Fatalf("ignored fields = %#v, want node-local fields", result.IgnoredFields)
+	}
+}
+
+func TestRunClusterConfigDiffCanIncludeNodeLocalFields(t *testing.T) {
+	differences := diffClusterConfigs(
+		map[string]interface{}{"node_id": "node-a", "db_format": "binary"},
+		map[string]interface{}{"node_id": "node-b", "db_format": "binary"},
+		nil,
+	)
+	if len(differences) != 1 || differences[0].Field != "node_id" {
+		t.Fatalf("diffClusterConfigs(include local) = %#v, want node_id", differences)
+	}
+}
+
 func TestRunClusterJoinUpdatesPeerTargetAndPullsJournal(t *testing.T) {
 	initialTopology := hatriecache.ClusterTopology{
 		Version: 1,
