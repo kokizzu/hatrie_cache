@@ -621,25 +621,36 @@ when a peer would route writes to a different leader.
 
 ### Removing A Replica
 
-Removing a replica is one idempotent CLI command. It removes the node record and
-all shard replica references, validates the resulting topology, and uploads a
-node-local copy to every remaining member. It does not contact the removed node
-or delete its data:
+Use `cluster decommission` for normal removal. It verifies the retiring node's
+identity, requires at least one other replica per affected shard by default,
+checks every survivor, runs final anti-entropy sync, marks the target offline,
+removes membership, and verifies topology on every survivor:
 
 ```sh
-make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
+make cli ARGS='cluster decommission -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster doctor -peer http://node-a:8080'
 ```
 
-Before removal, stop sending client traffic to the replica and confirm another
-replica is current. Stop or archive the removed process only after `cluster
-doctor` reports a consistent topology. The command refuses a node whose global
-role or any shard assignment is still `primary`; promote another node or upload
-a topology with reassigned shard primaries first. If a remaining member is
-offline, the command reports that node and stops; restore connectivity and
-rerun the same command. A repeated removal leaves membership unchanged but
-re-propagates the current topology, which completes recovery from a partial
-update. Use `-update-nodes=false` only with an external topology distributor.
+The command refuses a node whose global role or any shard assignment is still
+`primary`; promote another node or upload reassigned shard primaries first. Use
+`-min-replicas=0` only when intentionally reducing to no replicas, and
+`-allow-unreachable` only when failed hardware cannot answer the identity
+check. A repeated decommission re-propagates and verifies current topology.
+Stop or archive the process only after the command returns its cleanup
+instruction.
+
+`cluster remove` remains the lower-level emergency primitive. It removes the
+node record and shard replica references without catch-up, health, or redundancy
+checks, then uploads a node-local topology to remaining members. It never
+contacts the removed node or deletes data:
+
+```sh
+make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
+```
+
+If a remaining member is offline, either command reports that node and stops;
+restore connectivity and rerun the same idempotent command. Use
+`-update-nodes=false` on raw removal only with an external topology distributor.
 
 For authenticated APIs, place the shared operator token in the environment so
 the CLI can update every member without exposing it in shell history:
@@ -1819,6 +1830,7 @@ make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1
 make cli ARGS='journal -pull-from http://leader:8080 -after-sequence 42 -limit 1000 -until-current -max-batches 100'
 make cli ARGS='cluster add-replica -peer http://node-a:8080 -address http://node-c:8080'
 make cli ARGS='cluster join -peer http://node-a:8080 -node node-c -address http://node-c:8080'
+make cli ARGS='cluster decommission -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster remove -peer http://node-a:8080 -node node-c'
 make cli ARGS='cluster doctor -peer http://node-a:8080'
 make cli ARGS='snapshot'

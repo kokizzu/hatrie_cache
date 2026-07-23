@@ -873,6 +873,21 @@ type clusterRemoveResult struct {
 	NodesUpdated    []string `json:"nodes_updated,omitempty"`
 }
 
+type clusterDecommissionResult struct {
+	OK               bool     `json:"ok"`
+	Message          string   `json:"message"`
+	Peer             string   `json:"peer"`
+	Node             string   `json:"node"`
+	RemovedAddress   string   `json:"removed_address,omitempty"`
+	AlreadyRemoved   bool     `json:"already_removed"`
+	FinalSync        bool     `json:"final_sync"`
+	MarkedOffline    bool     `json:"marked_offline"`
+	TopologyUpdated  bool     `json:"topology_updated"`
+	TopologyVerified bool     `json:"topology_verified"`
+	NodesUpdated     []string `json:"nodes_updated,omitempty"`
+	Cleanup          string   `json:"cleanup"`
+}
+
 type clusterStatusResult struct {
 	OK               bool                           `json:"ok"`
 	Peer             string                         `json:"peer"`
@@ -902,7 +917,7 @@ type clusterNodeStatus struct {
 
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("cluster subcommand is required: add-replica, join, remove, status, doctor")
+		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor")
 	}
 	switch args[0] {
 	case "add-replica":
@@ -911,6 +926,8 @@ func runCluster(ctx context.Context, client *http.Client, addr string, args []st
 		return runClusterJoin(ctx, client, addr, args[1:], stdout, stderr)
 	case "remove":
 		return runClusterRemove(ctx, client, addr, args[1:], stdout, stderr)
+	case "decommission":
+		return runClusterDecommission(ctx, client, addr, args[1:], stdout, stderr)
 	case "status", "doctor":
 		return runClusterStatus(ctx, client, addr, args[1:], stdout, stderr)
 	default:
@@ -1381,6 +1398,106 @@ func runClusterRemove(ctx context.Context, client *http.Client, addr string, arg
 	return err
 }
 
+func runClusterDecommission(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cluster decommission", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	nodeID := flags.String("node", "", "replica node id to retire")
+	peer := flags.String("peer", addr, "existing cluster node monitoring API base URL")
+	minReplicas := flags.Int("min-replicas", 1, "minimum replicas that must remain for every affected shard")
+	finalSync := flags.Bool("final-sync", true, "run anti-entropy replication before removal")
+	allowUnreachable := flags.Bool("allow-unreachable", false, "allow removal when the retiring endpoint cannot be identity-checked")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*nodeID = strings.TrimSpace(*nodeID)
+	*peer = strings.TrimSpace(*peer)
+	if *nodeID == "" {
+		return errors.New("cluster decommission -node is required")
+	}
+	if *peer == "" {
+		return errors.New("cluster decommission -peer is required")
+	}
+	if *minReplicas < 0 {
+		return errors.New("cluster decommission -min-replicas must be non-negative")
+	}
+
+	if _, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, *peer, "/api/health"); err != nil {
+		return fmt.Errorf("peer health: %w", err)
+	}
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("peer topology: %w", err)
+	}
+	retiringNode, err := validateClusterDecommission(topology, *nodeID, *minReplicas)
+	if err != nil {
+		return err
+	}
+	alreadyRemoved := retiringNode.ID == ""
+	if !alreadyRemoved {
+		health, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, retiringNode.Address, "/api/health")
+		if err != nil && !*allowUnreachable {
+			return fmt.Errorf("retiring node health: %w", err)
+		}
+		if err == nil && strings.TrimSpace(health.Node) != *nodeID {
+			return fmt.Errorf("retiring endpoint reports node %q, not %q", health.Node, *nodeID)
+		}
+	}
+
+	updated, topologyChanged, err := clusterRemoveTopology(topology, *nodeID)
+	if err != nil {
+		return err
+	}
+	peerNode := clusterPeerNodeID(topology, *peer)
+	if err := verifyClusterNodeHealth(ctx, client, updated, *peer, peerNode); err != nil {
+		return fmt.Errorf("surviving node health: %w", err)
+	}
+
+	finalSyncRan := false
+	markedOffline := false
+	if !alreadyRemoved {
+		if *finalSync {
+			if err := postJSON(ctx, client, *peer, "/api/replication", []byte("{}"), io.Discard); err != nil {
+				return fmt.Errorf("final anti-entropy sync: %w", err)
+			}
+			finalSyncRan = true
+		}
+		if err := postElectionUpdate(ctx, client, *peer, *nodeID, false, io.Discard); err != nil {
+			return fmt.Errorf("mark retiring node offline: %w", err)
+		}
+		markedOffline = true
+	}
+
+	nodesUpdated, err := putTopologyToNodes(ctx, client, updated, *peer, peerNode, nil)
+	if err != nil {
+		return fmt.Errorf("upload decommissioned topology: %w", err)
+	}
+	if err := verifyTopologyOnNodes(ctx, client, updated, *peer, peerNode); err != nil {
+		return fmt.Errorf("verify decommissioned topology: %w", err)
+	}
+
+	cleanup := fmt.Sprintf("stop node %s and archive or delete its data directory only after this verified result", *nodeID)
+	result := clusterDecommissionResult{
+		OK:               true,
+		Message:          "cluster replica decommissioned and verified",
+		Peer:             *peer,
+		Node:             *nodeID,
+		RemovedAddress:   retiringNode.Address,
+		AlreadyRemoved:   alreadyRemoved,
+		FinalSync:        finalSyncRan,
+		MarkedOffline:    markedOffline,
+		TopologyUpdated:  topologyChanged,
+		TopologyVerified: true,
+		NodesUpdated:     nodesUpdated,
+		Cleanup:          cleanup,
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
 func clusterJoinTopology(topology hatriecache.ClusterTopology, nodeID string, address string, role string) (hatriecache.ClusterTopology, bool, error) {
 	return clusterJoinTopologyWithReplace(topology, nodeID, address, role, false)
 }
@@ -1515,6 +1632,75 @@ func verifyTopologyOnNodes(ctx context.Context, client *http.Client, topology ha
 		}
 	}
 	return nil
+}
+
+func verifyClusterNodeHealth(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, peer string, peerNode string) error {
+	for _, node := range topology.Nodes {
+		address := strings.TrimSpace(node.Address)
+		if node.ID == peerNode {
+			address = strings.TrimSpace(peer)
+		}
+		health, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, address, "/api/health")
+		if err != nil {
+			return fmt.Errorf("node %q: %w", node.ID, err)
+		}
+		if !strings.EqualFold(strings.TrimSpace(health.Status), "online") {
+			return fmt.Errorf("node %q status is %q", node.ID, health.Status)
+		}
+		if healthNode := strings.TrimSpace(health.Node); healthNode != "" && healthNode != node.ID {
+			return fmt.Errorf("node %q endpoint reports node %q", node.ID, healthNode)
+		}
+	}
+	return nil
+}
+
+func validateClusterDecommission(topology hatriecache.ClusterTopology, nodeID string, minReplicas int) (hatriecache.TopologyNode, error) {
+	if minReplicas < 0 {
+		return hatriecache.TopologyNode{}, errors.New("minimum remaining replicas must be non-negative")
+	}
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return hatriecache.TopologyNode{}, err
+	}
+	normalized := store.Get()
+	nodeID = strings.TrimSpace(nodeID)
+	var retiring hatriecache.TopologyNode
+	for _, node := range normalized.Nodes {
+		if node.ID == nodeID {
+			retiring = node
+			break
+		}
+	}
+	if retiring.ID == "" {
+		return hatriecache.TopologyNode{}, nil
+	}
+	if retiring.Role == "primary" {
+		return hatriecache.TopologyNode{}, fmt.Errorf("cluster decommission refuses primary node %q; promote or reassign it first", nodeID)
+	}
+	for _, shard := range normalized.Shards {
+		if shard.Primary == nodeID {
+			return hatriecache.TopologyNode{}, fmt.Errorf("cluster decommission refuses shard primary node %q; reassign shard %d first", nodeID, shard.ID)
+		}
+		if !stringInSlice(shard.Replicas, nodeID) {
+			continue
+		}
+		remaining := len(shard.Replicas) - 1
+		if remaining < minReplicas {
+			return hatriecache.TopologyNode{}, fmt.Errorf("shard %d would have %d remaining replicas; require at least %d", shard.ID, remaining, minReplicas)
+		}
+	}
+	if normalized.Mode == hatriecache.TopologyModeFullReplica {
+		remaining := 0
+		for _, node := range normalized.Nodes {
+			if node.ID != nodeID && node.Role != "primary" {
+				remaining++
+			}
+		}
+		if remaining < minReplicas {
+			return hatriecache.TopologyNode{}, fmt.Errorf("full replica topology would have %d remaining replicas; require at least %d", remaining, minReplicas)
+		}
+	}
+	return retiring, nil
 }
 
 func clusterRemoveTopology(topology hatriecache.ClusterTopology, nodeID string) (hatriecache.ClusterTopology, bool, error) {

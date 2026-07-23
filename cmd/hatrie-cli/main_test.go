@@ -2112,6 +2112,32 @@ func TestClusterRemoveTopologyRemovesReplica(t *testing.T) {
 	}
 }
 
+func TestValidateClusterDecommissionRequiresRemainingReplica(t *testing.T) {
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeSharded,
+		Self:    "node-a",
+		Nodes: []hatriecache.TopologyNode{
+			{ID: "node-a", Address: "http://node-a:8080", Role: "primary"},
+			{ID: "node-b", Address: "http://node-b:8080", Role: "replica"},
+		},
+		Shards: []hatriecache.TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	}
+	if _, err := validateClusterDecommission(topology, "node-b", 1); err == nil || !strings.Contains(err.Error(), "remaining replicas") {
+		t.Fatalf("validateClusterDecommission(last replica) error = %v, want redundancy refusal", err)
+	}
+	node, err := validateClusterDecommission(topology, "node-b", 0)
+	if err != nil {
+		t.Fatalf("validateClusterDecommission(min 0) error = %v", err)
+	}
+	if node.ID != "node-b" {
+		t.Fatalf("validateClusterDecommission() node = %#v, want node-b", node)
+	}
+	if _, err := validateClusterDecommission(topology, "node-a", 0); err == nil || !strings.Contains(err.Error(), "primary") {
+		t.Fatalf("validateClusterDecommission(primary) error = %v, want primary refusal", err)
+	}
+}
+
 func TestTopologyForNodeSetsLocalIdentity(t *testing.T) {
 	topology := hatriecache.ClusterTopology{
 		Version: 1,
@@ -2663,6 +2689,123 @@ func TestRunClusterRemoveRequiresNode(t *testing.T) {
 	err := run(context.Background(), []string{"cluster", "remove"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
 	if err == nil || !strings.Contains(err.Error(), "cluster remove -node is required") {
 		t.Fatalf("run(cluster remove without node) error = %v, want node requirement", err)
+	}
+}
+
+func TestRunClusterDecommissionValidatesSyncsAndRemoves(t *testing.T) {
+	var peerURL string
+	var targetURL string
+	var survivorURL string
+	currentTopology := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeSharded,
+			Self:    "node-a",
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: peerURL, Role: "primary"},
+				{ID: "node-b", Address: targetURL, Role: "replica"},
+				{ID: "node-c", Address: survivorURL, Role: "replica"},
+			},
+			Shards: []hatriecache.TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}}},
+		}
+	}
+	var peerTopology hatriecache.ClusterTopology
+	var survivorTopology hatriecache.ClusterTopology
+	var sequence []string
+
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-a"})
+		case "GET /api/topology":
+			if len(peerTopology.Nodes) == 0 {
+				json.NewEncoder(w).Encode(currentTopology())
+			} else {
+				json.NewEncoder(w).Encode(peerTopology)
+			}
+		case "POST /api/replication":
+			sequence = append(sequence, "final-sync")
+			json.NewEncoder(w).Encode(hatriecache.ReplicationResult{Health: "healthy", HealthScore: 100})
+		case "POST /api/election":
+			sequence = append(sequence, "offline")
+			var request struct {
+				Node   string `json:"node"`
+				Online bool   `json:"online"`
+			}
+			json.NewDecoder(r.Body).Decode(&request)
+			if request.Node != "node-b" || request.Online {
+				t.Fatalf("election request = %#v, want node-b offline", request)
+			}
+			w.Write([]byte(`{"ok":true}`))
+		case "PUT /api/topology":
+			sequence = append(sequence, "remove-peer")
+			json.NewDecoder(r.Body).Decode(&peerTopology)
+			json.NewEncoder(w).Encode(peerTopology)
+		default:
+			t.Fatalf("unexpected peer request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer peer.Close()
+	peerURL = peer.URL
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/health" {
+			t.Fatalf("removed target unexpectedly contacted with %s %s", r.Method, r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-b"})
+	}))
+	defer target.Close()
+	targetURL = target.URL
+
+	survivor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/health":
+			json.NewEncoder(w).Encode(hatriecache.MonitoringHealth{Status: "online", Node: "node-c"})
+		case "PUT /api/topology":
+			sequence = append(sequence, "remove-survivor")
+			json.NewDecoder(r.Body).Decode(&survivorTopology)
+			json.NewEncoder(w).Encode(survivorTopology)
+		case "GET /api/topology":
+			json.NewEncoder(w).Encode(survivorTopology)
+		default:
+			t.Fatalf("unexpected survivor request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer survivor.Close()
+	survivorURL = survivor.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", peerURL,
+		"cluster", "decommission",
+		"-node", "node-b",
+	}, stdout, &bytes.Buffer{}, peer.Client()); err != nil {
+		t.Fatalf("run(cluster decommission) error = %v", err)
+	}
+	if !reflect.DeepEqual(sequence, []string{"final-sync", "offline", "remove-peer", "remove-survivor"}) {
+		t.Fatalf("decommission sequence = %#v", sequence)
+	}
+	for _, topology := range []hatriecache.ClusterTopology{peerTopology, survivorTopology} {
+		if len(topology.Nodes) != 2 || len(topology.Shards) != 1 || !reflect.DeepEqual(topology.Shards[0].Replicas, []string{"node-c"}) {
+			t.Fatalf("decommissioned topology = %#v, want node-b removed", topology)
+		}
+	}
+	var result clusterDecommissionResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster decommission result) error = %v", err)
+	}
+	if !result.OK || !result.FinalSync || !result.MarkedOffline || !result.TopologyVerified || result.RemovedAddress != targetURL {
+		t.Fatalf("cluster decommission result = %#v, want completed workflow", result)
+	}
+	if !strings.Contains(result.Cleanup, "node-b") {
+		t.Fatalf("cleanup = %q, want node-b instruction", result.Cleanup)
+	}
+}
+
+func TestRunClusterDecommissionRequiresNode(t *testing.T) {
+	err := run(context.Background(), []string{"cluster", "decommission"}, &bytes.Buffer{}, &bytes.Buffer{}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "cluster decommission -node is required") {
+		t.Fatalf("run(cluster decommission without node) error = %v, want node requirement", err)
 	}
 }
 
