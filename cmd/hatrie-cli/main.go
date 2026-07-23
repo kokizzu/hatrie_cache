@@ -150,7 +150,43 @@ func authenticatedHTTPClient(client *http.Client, token string) *http.Client {
 		transport = http.DefaultTransport
 	}
 	clone.Transport = authTokenTransport{token: token, base: transport}
+	checkRedirect := clone.CheckRedirect
+	clone.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if len(via) > 0 && !sameHTTPOrigin(request.URL, via[0].URL) {
+			request.Header.Del("Authorization")
+			request.Header.Del("X-Hatrie-Auth-Token")
+			request.Header.Del("X-Hatrie-Replication-Token")
+			*request = *request.WithContext(context.WithValue(request.Context(), suppressAutomaticAuthKey{}, true))
+		}
+		if checkRedirect != nil {
+			return checkRedirect(request, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
 	return &clone
+}
+
+func sameHTTPOrigin(left *url.URL, right *url.URL) bool {
+	if left == nil || right == nil || !strings.EqualFold(left.Scheme, right.Scheme) || !strings.EqualFold(left.Hostname(), right.Hostname()) {
+		return false
+	}
+	return effectiveHTTPPort(left) == effectiveHTTPPort(right)
+}
+
+func effectiveHTTPPort(value *url.URL) string {
+	if port := value.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(value.Scheme, "http") {
+		return "80"
+	}
+	if strings.EqualFold(value.Scheme, "https") {
+		return "443"
+	}
+	return ""
 }
 
 type authTokenTransport struct {
@@ -158,8 +194,11 @@ type authTokenTransport struct {
 	base  http.RoundTripper
 }
 
+type suppressAutomaticAuthKey struct{}
+
 func (transport authTokenTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if request.Header.Get("Authorization") == "" {
+	suppressAuth, _ := request.Context().Value(suppressAutomaticAuthKey{}).(bool)
+	if !suppressAuth && request.Header.Get("Authorization") == "" {
 		request = request.Clone(request.Context())
 		request.Header.Set("Authorization", "Bearer "+transport.token)
 	}

@@ -100,6 +100,72 @@ func TestRunDefaultsNilContextAndClient(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedHTTPClientDoesNotForwardTokenAcrossOriginRedirect(t *testing.T) {
+	var destinationAuthorization string
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		destinationAuthorization = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer destination.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, destination.URL+"/redirected", http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+
+	client := authenticatedHTTPClient(origin.Client(), "operator-secret")
+	response, err := client.Get(origin.URL + "/start")
+	if err != nil {
+		t.Fatalf("Get(cross-origin redirect) error = %v", err)
+	}
+	drainAndCloseResponse(response.Body)
+	if destinationAuthorization != "" {
+		t.Fatalf("redirected Authorization = %q, want empty", destinationAuthorization)
+	}
+}
+
+func TestAuthenticatedHTTPClientKeepsTokenOnSameOriginRedirect(t *testing.T) {
+	var redirectedAuthorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			http.Redirect(w, r, "/redirected", http.StatusTemporaryRedirect)
+			return
+		}
+		redirectedAuthorization = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := authenticatedHTTPClient(server.Client(), "operator-secret")
+	response, err := client.Get(server.URL + "/start")
+	if err != nil {
+		t.Fatalf("Get(same-origin redirect) error = %v", err)
+	}
+	drainAndCloseResponse(response.Body)
+	if redirectedAuthorization != "Bearer operator-secret" {
+		t.Fatalf("redirected Authorization = %q, want bearer token", redirectedAuthorization)
+	}
+}
+
+func BenchmarkAuthenticatedHTTPClientRequest(b *testing.B) {
+	response := &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: http.NoBody}
+	base := &http.Client{Transport: cliRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response, nil
+	})}
+	client := authenticatedHTTPClient(base, "operator-secret")
+	request, err := http.NewRequest(http.MethodGet, "https://node-a.example/api/health", nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := client.Transport.RoundTrip(request); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestHTTPHelpersAcceptNilStdout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -909,6 +909,26 @@ make monitoring-server GRPC_ADDR=0.0.0.0:9090 GRPC_TLS_CERT=server.pem GRPC_TLS_
 The matching JSON config keys are `grpc_tls_cert`, `grpc_tls_key`, and
 `grpc_client_ca`.
 
+### Security Checklist
+
+- Keep unauthenticated monitoring and gRPC listeners on loopback. For remote
+  access, use HTTPS or mTLS and set `MONITORING_AUTH_TOKEN`; use the narrower
+  `REPLICATION_AUTH_TOKEN` for replication and journal catch-up.
+- Supply CLI credentials with `HATRIE_CACHE_AUTH_TOKEN` instead of `-token` so
+  secrets are not retained in shell history. Restrict config, TLS key, journal,
+  snapshot, backup, and audit-log permissions to the service account.
+- Treat topology updates as privileged configuration. Cluster CLI commands send
+  the shared operator token directly to each configured member. They retain
+  credentials on same-origin redirects but strip operator and replication
+  headers whenever redirect scheme, host, or port changes.
+- Use different high-entropy operator and replication tokens, rotate them
+  through the deployment secret store, and do not embed credentials in node
+  URLs. Keep `WRITE_PROTECTION=true` where topology, election, snapshot,
+  storage, replication, and journal mutations need a second explicit gate.
+- Keep `MONITORING_READ_HEADER_TIMEOUT` enabled, set `RATE_LIMIT` for exposed
+  APIs, run `cluster doctor` after membership changes, and test restore bundles
+  away from the production data directory.
+
 Set `DB_PATH` to load and save cache data through the persistent storage
 backend. `DB_BACKEND=auto` is the default: a new empty path uses Pebble, a
 backend marker at `<DB_PATH>.backend` preserves the selected engine, and an

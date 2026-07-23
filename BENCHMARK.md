@@ -194,6 +194,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Bounded two-page fallback aggregation](#replication-descriptor-optimizations), 10k keys | One page/request: 11.333 ms sender; 4.443 ms receiver; 10.01 requests; 287,987 sender heap B | Two pages/request: 9.699 ms sender; 3.663 ms receiver; 5.01 requests; 218,509 sender heap B | Combined CPU 1.18x faster; 2x fewer requests; sender heap 1.32x lower; 1.84x fewer sender allocs | Largest protobuf grows from 61,156 B to 122,156 B, still 8.6x below the default 1 MiB limit; scan lock pages stay at 1,024 keys |
 | Current pass | [Packed batch no-split proof](#replication-descriptor-optimizations), 10k-key known-legacy sync | Exact per-key estimate: 9.738 ms; 215,929 heap B; 744 allocs; 5.003 requests | Aggregate upper bound: 9.020 ms; 206,446 heap B; 744 allocs; 5.003 requests | 1.08x faster, 1.05x lower heap; wire and reader pause neutral | Applies only to complete packed arenas without carried estimates; all other layouts retain the exact splitter |
 | Reverted | [Direct native packed scan](#replication-descriptor-optimizations), 10k-key known-legacy sync | Existing: 9.441 ms; 207,179 heap B; 744 allocs | Direct arena drain: 9.228 ms; 184,267 heap B; 720 allocs | 1.02x faster, 1.12x lower heap, 1.03x fewer allocs | Rolled back; the focused path improved 1.10x, but 2.3% end-to-end CPU did not clear the 5% gate for a new C ABI |
+| Current pass | [CLI redirect credential isolation](#cli-redirect-credential-isolation), authenticated request | Bearer token reached cross-origin redirect; 464.75 ns; 904 B; 6 allocs | Token suppressed across origin; 464.45 ns; 904 B; 6 allocs | Security fix with CPU neutral within 0.1% and identical heap/allocations | Same-origin redirects retain authentication; redirected APIs on another origin must authenticate independently |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
 | Reverted | [Exact protobuf batch coalescing](#replication-descriptor-optimizations), 10k-key legacy fallback | Two requests: sender 10.422 ms; receiver decode 4.066 ms; largest protobuf 305,156 B | One request: sender 10.215 ms; receiver decode 4.444 ms; largest protobuf 609,046 B | Sender 1.02x faster and 1.44x fewer allocs, but receiver 1.09x slower and combined CPU 1.012x slower | Rolled back; halving requests did not offset receiver decode cost and doubled the largest request |
 | Reverted | [Carried compact payload estimates](#replication-descriptor-optimizations), 10k-key scan, preparation, and split | Estimate during split: 4.215 ms | Carry from serialization: 4.230 ms | 0.996x; 0.36% slower with identical allocations | Rolled back; the isolated splitter was 4.37x faster, but moving the estimate made the complete CPU path slower |
@@ -2313,6 +2314,29 @@ end-to-end median is 2.04x faster, uses 1.03x less cumulative heap, and performs
 unsupported-digest probe across each 20-iteration sample; steady state is two
 requests. Modern digest-capable targets remained at one request and 215 wire B,
 with a neutral 14.916 ms before versus 14.909 ms after capability caching.
+
+### CLI Redirect Credential Isolation
+
+The authenticated CLI transport previously added its bearer token to every
+HTTP round trip. A redirect therefore received the token even when its scheme,
+host, or port differed from the original request. A test using two local
+origins failed first with `Bearer operator-secret` observed at the redirected
+destination. The retained implementation marks cross-origin redirect requests
+as unauthenticated and removes operator and replication credential headers;
+same-origin redirects keep the token.
+
+The ordinary non-redirect path was measured for ten `100000x` runs before and
+after the change. Median cost was 464.75 ns/op before and 464.45 ns/op after;
+both retained 904 B/op and 6 allocs/op. The 0.06% timing difference is noise,
+so the hardening has no measured steady-request CPU or memory cost. The only
+compatibility change is intentional: an API redirected to another origin must
+authenticate that origin independently.
+
+Reproduce the focused measurement with:
+
+```sh
+make run CMD="go test ./cmd/hatrie-cli -run NoTests -bench BenchmarkAuthenticatedHTTPClientRequest -benchtime 100000x -count 10"
+```
 
 ### Replication Descriptor Optimizations
 
