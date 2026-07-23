@@ -1547,7 +1547,7 @@ func splitReplicationTaskGroupByMaxBytes(group replicationTaskGroup, maxBytes in
 	if maxBytes <= 0 || len(group.payloads) <= 1 {
 		return []replicationTaskGroup{group}
 	}
-	threshold := maxBytes + 1
+	threshold := replicationPayloadEstimateThreshold(maxBytes)
 	estimatedBytes := group.payloadBytes
 	if len(estimatedBytes) != len(group.payloads) {
 		estimatedBytes = make([]int, len(group.payloads))
@@ -1602,7 +1602,10 @@ func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxByte
 	if maxBytes <= 0 || payloads.len() <= 1 {
 		return []replicationTaskGroup{group}
 	}
-	threshold := maxBytes + 1
+	threshold := replicationPayloadEstimateThreshold(maxBytes)
+	if estimate, ok := packedReplicationSyncBatchEstimateUpperBound(group, threshold); ok && estimate <= maxBytes {
+		return []replicationTaskGroup{group}
+	}
 	newGroup := func(start int, end int) replicationTaskGroup {
 		current := replicationTaskGroup{
 			target:           group.target,
@@ -1645,8 +1648,49 @@ func splitReplicationSyncTaskGroupByMaxBytes(group replicationTaskGroup, maxByte
 	return out
 }
 
+func packedReplicationSyncBatchEstimateUpperBound(group replicationTaskGroup, threshold int) (int, bool) {
+	arena := group.syncPayloadArena
+	if arena == nil || group.syncPayloadIndexes != nil || group.syncPayloadRecordStart != 0 ||
+		uint64(group.syncPayloadRecordCount) != uint64(len(arena.records)) ||
+		len(arena.keyRecords) != len(arena.records) || len(arena.directRecords) != 0 || arena.hasPayloadBytes {
+		return 0, false
+	}
+	if threshold <= 0 {
+		threshold = math.MaxInt
+	}
+	// A JSON key byte expands by at most six bytes as a control escape. The
+	// command, empty value/subkey strings, request estimate, and list separator
+	// contribute a fixed cost per payload.
+	const maxJSONKeyBytesPerInputByte = 6
+	perPayload := 64 +
+		jsonwire.EstimateJSONStringBytes(replicationSetCompactCommand) +
+		3*jsonwire.EstimateJSONStringBytes("") +
+		2
+	estimate := estimatedReplicationBatchEnvelopeBytes(threshold)
+	estimate = addReplicationEstimateProduct(estimate, len(arena.records), perPayload, threshold)
+	estimate = addReplicationEstimateProduct(estimate, len(arena.keys), maxJSONKeyBytesPerInputByte, threshold)
+	return jsonwire.AddEstimate(estimate, len(arena.values), threshold), true
+}
+
+func addReplicationEstimateProduct(total int, count int, bytesPerItem int, threshold int) int {
+	if threshold <= 0 || count <= 0 || bytesPerItem <= 0 {
+		return total
+	}
+	if total >= threshold {
+		return threshold
+	}
+	remaining := threshold - total
+	if count > (remaining-1)/bytesPerItem {
+		return threshold
+	}
+	return total + count*bytesPerItem
+}
+
 func replicationPayloadEstimateThreshold(maxBytes int) int {
 	if maxBytes > 0 {
+		if maxBytes == math.MaxInt {
+			return math.MaxInt
+		}
 		return maxBytes + 1
 	}
 	return minCompressedReplicationRequestBytes

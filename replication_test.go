@@ -4309,6 +4309,114 @@ func TestSplitReplicationTaskGroupByMaxBytesReusesArenaRecordRange(t *testing.T)
 	}
 }
 
+func TestPackedReplicationSyncBatchEstimateUpperBoundDominatesExactEstimate(t *testing.T) {
+	arena := newReplicationSyncPayloadArena(6)
+	testCases := []struct {
+		key   string
+		value []byte
+	}{
+		{key: "", value: nil},
+		{key: "session:plain", value: []byte("value")},
+		{key: "quote:\" slash:\\", value: []byte{0, 1, 2, 3}},
+		{key: "control:\x00\x01\b\f\n\r\t", value: []byte("binary-value")},
+		{key: string([]byte{0xff, 0xfe, '\\', '"'}), value: []byte{0xff, 0xfe, 0xfd}},
+		{key: "unicode:\u65e5\u672c\u8a9e", value: []byte("longer-binary-value")},
+	}
+	for index, testCase := range testCases {
+		if _, err := arena.append(testCase.key, testCase.value, 0); err != nil {
+			t.Fatalf("arena append %d: %v", index, err)
+		}
+	}
+	group := replicationTaskGroup{
+		syncPayloadArena:       arena,
+		syncPayloadRecordCount: uint32(len(arena.records)),
+	}
+
+	upperBound, ok := packedReplicationSyncBatchEstimateUpperBound(group, math.MaxInt)
+	if !ok {
+		t.Fatal("packed estimate upper bound rejected a complete packed arena")
+	}
+	exact := estimatedReplicationBatchEnvelopeBytes(math.MaxInt)
+	payloads := group.replicationSyncPayloadBatch()
+	for index := 0; index < payloads.len(); index++ {
+		payload := payloads.payload(index)
+		payloadBytes := estimatedReplicationRequestBytesWithin(CacheCommandRequest{
+			Command: replicationSetCompactCommand, Key: payload.key, BinaryValue: payload.binaryValue,
+		}, math.MaxInt)
+		exact = jsonwire.AddEstimate(exact, payloadBytes+2, math.MaxInt)
+	}
+	if upperBound < exact {
+		t.Fatalf("packed estimate upper bound = %d, want at least exact estimate %d", upperBound, exact)
+	}
+
+	groups := splitReplicationSyncTaskGroupByMaxBytes(group, upperBound)
+	if len(groups) != 1 || groups[0].syncPayloadArena != arena || groups[0].syncPayloadRecordCount != uint32(len(arena.records)) {
+		t.Fatalf("split at proven upper bound = %#v, want original complete arena group", groups)
+	}
+}
+
+func TestPackedReplicationSyncBatchEstimateUpperBoundRejectsUnsupportedLayouts(t *testing.T) {
+	packed := newReplicationSyncPayloadArena(2)
+	for _, key := range []string{"session:1", "session:2"} {
+		if _, err := packed.append(key, []byte("value-"+key), 0); err != nil {
+			t.Fatalf("packed arena append: %v", err)
+		}
+	}
+	carried := newReplicationSyncPayloadArena(1)
+	if _, err := carried.append("session:1", []byte("value"), 90); err != nil {
+		t.Fatalf("carried estimate arena append: %v", err)
+	}
+	direct := newReplicationSyncPayloadDirectArena(1)
+	direct.values = append(direct.values, "value"...)
+	if err := direct.appendDirectRecord("session:1", 0, len(direct.values)); err != nil {
+		t.Fatalf("direct arena append: %v", err)
+	}
+
+	testCases := map[string]replicationTaskGroup{
+		"indexed": {
+			syncPayloadArena: packed, syncPayloadIndexes: []uint32{0, 1},
+		},
+		"partial": {
+			syncPayloadArena: packed, syncPayloadRecordStart: 1, syncPayloadRecordCount: 1,
+		},
+		"direct": {
+			syncPayloadArena: direct, syncPayloadRecordCount: 1,
+		},
+		"carried estimate": {
+			syncPayloadArena: carried, syncPayloadRecordCount: 1,
+		},
+	}
+	for name, group := range testCases {
+		t.Run(name, func(t *testing.T) {
+			if estimate, ok := packedReplicationSyncBatchEstimateUpperBound(group, math.MaxInt); ok {
+				t.Fatalf("unsupported layout estimate = %d/%v, want rejected", estimate, ok)
+			}
+		})
+	}
+}
+
+func TestPackedReplicationSyncBatchEstimateUpperBoundSaturates(t *testing.T) {
+	arena := newReplicationSyncPayloadArena(2)
+	for _, key := range []string{strings.Repeat("\x00", 32), "session:2"} {
+		if _, err := arena.append(key, []byte(strings.Repeat("v", 32)), 0); err != nil {
+			t.Fatalf("arena append: %v", err)
+		}
+	}
+	group := replicationTaskGroup{
+		syncPayloadArena:       arena,
+		syncPayloadRecordCount: uint32(len(arena.records)),
+	}
+
+	const threshold = 101
+	estimate, ok := packedReplicationSyncBatchEstimateUpperBound(group, threshold)
+	if !ok || estimate != threshold {
+		t.Fatalf("saturated packed estimate = %d/%v, want %d/true", estimate, ok, threshold)
+	}
+	if got := replicationPayloadEstimateThreshold(math.MaxInt); got != math.MaxInt {
+		t.Fatalf("maximum payload estimate threshold = %d, want %d", got, math.MaxInt)
+	}
+}
+
 func TestSplitReplicationTaskGroupByMaxBytesReusesDirectArenaRecordRange(t *testing.T) {
 	arena := newReplicationSyncPayloadDirectArena(3)
 	for idx, key := range []string{"session:1", "session:2", "session:3"} {

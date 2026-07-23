@@ -48,6 +48,7 @@ type replicationSyncPayloadArena struct {
 	directRecords      []replicationSyncPayloadDirectRecord
 	scannedValueEpoch  uint64
 	scannedValuesValid bool
+	hasPayloadBytes    bool
 	bodyWriters        sync.WaitGroup
 }
 
@@ -101,6 +102,7 @@ func (arena *replicationSyncPayloadArena) reset() {
 	arena.directRecords = arena.directRecords[:0]
 	arena.scannedValueEpoch = 0
 	arena.scannedValuesValid = false
+	arena.hasPayloadBytes = false
 }
 
 func (arena *replicationSyncPayloadArena) append(key string, value []byte, payloadBytes int) (uint32, error) {
@@ -137,6 +139,7 @@ func (arena *replicationSyncPayloadArena) appendRecord(key string, valueOffset i
 		valueLength:  uint32(valueLength),
 		payloadBytes: uint32(payloadBytes),
 	})
+	arena.hasPayloadBytes = arena.hasPayloadBytes || payloadBytes > 0
 	return recordIndex, nil
 }
 
