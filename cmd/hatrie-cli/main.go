@@ -1,8 +1,13 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	stdjson "encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -40,6 +45,37 @@ type backupAndVerifyResult struct {
 	VerifyMillis   int64                               `json:"verify_millis"`
 	RehearseMillis int64                               `json:"rehearse_millis,omitempty"`
 	DurationMillis int64                               `json:"duration_millis"`
+}
+
+type supportBundleResult struct {
+	OK        bool   `json:"ok"`
+	Path      string `json:"path"`
+	Nodes     int    `json:"nodes"`
+	Errors    int    `json:"errors"`
+	Bytes     int64  `json:"bytes"`
+	SHA256    string `json:"sha256"`
+	Generated string `json:"generated_at"`
+}
+
+type supportBundleManifest struct {
+	Version     int                         `json:"version"`
+	GeneratedAt string                      `json:"generated_at"`
+	Peer        string                      `json:"peer"`
+	Nodes       []supportBundleManifestNode `json:"nodes"`
+}
+
+type supportBundleManifestNode struct {
+	ID      string                       `json:"id"`
+	Address string                       `json:"address"`
+	Dir     string                       `json:"dir"`
+	Entries []supportBundleManifestEntry `json:"entries,omitempty"`
+	Errors  map[string]string            `json:"errors,omitempty"`
+}
+
+type supportBundleManifestEntry struct {
+	Name   string `json:"name"`
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
 }
 
 const maxErrorBodyBytes = 1 << 20
@@ -95,7 +131,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, snapshot, backup, backup-and-verify, restore-bundle, restore-rehearsal, cluster, doctor")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, snapshot, backup, backup-and-verify, restore-bundle, restore-rehearsal, support-bundle, cluster, doctor")
 	}
 
 	switch remaining[0] {
@@ -123,6 +159,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return runBackup(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "backup-and-verify":
 		return runBackupAndVerify(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "support-bundle":
+		return runSupportBundle(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "restore-bundle":
 		return runRestoreBundle(remaining[1:], stdout, stderr)
 	case "restore-rehearsal":
@@ -564,6 +602,279 @@ func runBackupAndVerify(ctx context.Context, client *http.Client, addr string, a
 
 type backupPathRequestCLI struct {
 	Path string `json:"path"`
+}
+
+const maxSupportBundleEndpointBytes = 4 << 20
+
+func runSupportBundle(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) (returnErr error) {
+	flags := flag.NewFlagSet("support-bundle", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	peer := flags.String("peer", addr, "cluster node monitoring API base URL")
+	outputPath := flags.String("path", "", "output .tar.gz path")
+	auditLimit := flags.Int("audit-limit", 128, "recent audit events per node")
+	includeMetrics := flags.Bool("metrics", true, "include Prometheus metrics from every node")
+	overwrite := flags.Bool("overwrite", false, "replace an existing regular output file")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*peer = strings.TrimSpace(*peer)
+	*outputPath = strings.TrimSpace(*outputPath)
+	if *peer == "" {
+		return errors.New("support-bundle -peer is required")
+	}
+	if *outputPath == "" {
+		return errors.New("support-bundle -path is required")
+	}
+	if *auditLimit < 0 || *auditLimit > 128 {
+		return errors.New("support-bundle -audit-limit must be between 0 and 128")
+	}
+	if info, err := os.Lstat(*outputPath); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return errors.New("support-bundle output path must be a regular file")
+		}
+		if !*overwrite {
+			return errors.New("support-bundle output already exists; pass -overwrite to replace it")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	topology = store.Get()
+	peerNode := clusterPeerNodeID(topology, *peer)
+	parent := filepath.Dir(*outputPath)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(parent, ".hatrie-support-*.tar.gz")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer func() {
+		if returnErr != nil {
+			temp.Close()
+			os.Remove(tempPath)
+		}
+	}()
+	if err := temp.Chmod(0o600); err != nil {
+		return err
+	}
+	bundleHash := sha256.New()
+	gzipWriter := gzip.NewWriter(io.MultiWriter(temp, bundleHash))
+	tarWriter := tar.NewWriter(gzipWriter)
+	generatedAt := time.Now().UTC()
+	manifest := supportBundleManifest{
+		Version:     1,
+		GeneratedAt: generatedAt.Format(time.RFC3339Nano),
+		Peer:        *peer,
+		Nodes:       make([]supportBundleManifestNode, 0, len(topology.Nodes)),
+	}
+	errorCount := 0
+	jsonEndpoints := []struct {
+		Path string
+		File string
+	}{
+		{Path: "/api/health", File: "health.json"},
+		{Path: "/api/config", File: "config.json"},
+		{Path: "/api/topology", File: "topology.json"},
+		{Path: "/api/election", File: "election.json"},
+		{Path: "/api/replication", File: "replication.json"},
+		{Path: "/api/storage", File: "storage.json"},
+		{Path: "/api/audit?limit=" + strconv.Itoa(*auditLimit), File: "audit.json"},
+	}
+	for idx, node := range topology.Nodes {
+		address := strings.TrimSpace(node.Address)
+		if node.ID == peerNode {
+			address = *peer
+		}
+		dir := fmt.Sprintf("nodes/%03d-%s", idx+1, supportBundleSlug(node.ID))
+		nodeManifest := supportBundleManifestNode{ID: node.ID, Address: address, Dir: dir, Errors: map[string]string{}}
+		for _, endpoint := range jsonEndpoints {
+			value, fetchErr := getJSONValue[interface{}](ctx, client, address, endpoint.Path)
+			if fetchErr != nil {
+				nodeManifest.Errors[endpoint.File] = fetchErr.Error()
+				errorCount++
+				continue
+			}
+			data, marshalErr := stdjson.MarshalIndent(redactSupportValue(value), "", "  ")
+			if marshalErr != nil {
+				nodeManifest.Errors[endpoint.File] = marshalErr.Error()
+				errorCount++
+				continue
+			}
+			data = append(data, '\n')
+			entry, writeErr := writeSupportBundleEntry(tarWriter, dir+"/"+endpoint.File, data, generatedAt)
+			if writeErr != nil {
+				return writeErr
+			}
+			nodeManifest.Entries = append(nodeManifest.Entries, entry)
+		}
+		if *includeMetrics {
+			data, fetchErr := getLimitedHTTPBody(ctx, client, address, "/metrics", maxSupportBundleEndpointBytes)
+			if fetchErr != nil {
+				nodeManifest.Errors["metrics.txt"] = fetchErr.Error()
+				errorCount++
+			} else {
+				entry, writeErr := writeSupportBundleEntry(tarWriter, dir+"/metrics.txt", data, generatedAt)
+				if writeErr != nil {
+					return writeErr
+				}
+				nodeManifest.Entries = append(nodeManifest.Entries, entry)
+			}
+		}
+		if len(nodeManifest.Errors) == 0 {
+			nodeManifest.Errors = nil
+		}
+		manifest.Nodes = append(manifest.Nodes, nodeManifest)
+	}
+	manifestData, err := stdjson.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	manifestData = append(manifestData, '\n')
+	if _, err := writeSupportBundleEntry(tarWriter, "manifest.json", manifestData, generatedAt); err != nil {
+		return err
+	}
+	if err := tarWriter.Close(); err != nil {
+		return err
+	}
+	if err := gzipWriter.Close(); err != nil {
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if *overwrite {
+		if info, err := os.Lstat(*outputPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("support-bundle refuses to replace a symlink")
+		}
+	}
+	if err := os.Rename(tempPath, *outputPath); err != nil {
+		return err
+	}
+	if err := os.Chmod(*outputPath, 0o600); err != nil {
+		return err
+	}
+	info, err := os.Stat(*outputPath)
+	if err != nil {
+		return err
+	}
+	result := supportBundleResult{
+		OK:        errorCount == 0,
+		Path:      *outputPath,
+		Nodes:     len(topology.Nodes),
+		Errors:    errorCount,
+		Bytes:     info.Size(),
+		SHA256:    hex.EncodeToString(bundleHash.Sum(nil)),
+		Generated: manifest.GeneratedAt,
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+func supportBundleSlug(value string) string {
+	value = strings.TrimSpace(value)
+	var builder strings.Builder
+	for _, char := range value {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9', char == '-', char == '_', char == '.':
+			builder.WriteRune(char)
+		default:
+			builder.WriteByte('-')
+		}
+	}
+	if builder.Len() == 0 {
+		return "node"
+	}
+	return builder.String()
+}
+
+func redactSupportValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(typed))
+		for key, nested := range typed {
+			if supportBundleSecretField(key) {
+				out[key] = "[REDACTED]"
+			} else {
+				out[key] = redactSupportValue(nested)
+			}
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(typed))
+		for idx := range typed {
+			out[idx] = redactSupportValue(typed[idx])
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func supportBundleSecretField(field string) bool {
+	field = strings.ToLower(strings.TrimSpace(field))
+	for _, marker := range []string{"authorization", "credential", "password", "private_key", "secret", "token"} {
+		if strings.Contains(field, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeSupportBundleEntry(writer *tar.Writer, name string, data []byte, modified time.Time) (supportBundleManifestEntry, error) {
+	header := &tar.Header{Name: name, Mode: 0o600, Size: int64(len(data)), ModTime: modified}
+	if err := writer.WriteHeader(header); err != nil {
+		return supportBundleManifestEntry{}, err
+	}
+	if _, err := writer.Write(data); err != nil {
+		return supportBundleManifestEntry{}, err
+	}
+	digest := sha256.Sum256(data)
+	return supportBundleManifestEntry{Name: name, Bytes: int64(len(data)), SHA256: hex.EncodeToString(digest[:])}, nil
+}
+
+func getLimitedHTTPBody(ctx context.Context, client *http.Client, addr string, path string, limit int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(cliContext(ctx), http.MethodGet, endpoint(addr, path), nil)
+	if err != nil {
+		return nil, err
+	}
+	client = cliHTTPClient(client)
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer drainAndCloseResponse(response.Body)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, readErr := readErrorBody(response.Body)
+		if readErr != nil {
+			return nil, readErr
+		}
+		return nil, &commandHTTPError{status: response.Status, statusCode: response.StatusCode, message: strings.TrimSpace(string(body))}
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response exceeds %d bytes", limit)
+	}
+	return data, nil
 }
 
 func backupPartitionMetadataFromFlags(mode string, partitions string, node string, epoch uint64, fingerprint string, prefixes string) *hatriecache.BackupPartitionMetadata {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -1921,6 +1922,219 @@ func TestRunBackupAndVerifyRunsAllServerStages(t *testing.T) {
 	}
 	if result.DurationMillis < 0 || result.CreateMillis < 0 || result.VerifyMillis < 0 || result.RehearseMillis < 0 {
 		t.Fatalf("backup stage durations = %#v", result)
+	}
+}
+
+func TestRunSupportBundleCollectsAllNodesAndRedactsSecrets(t *testing.T) {
+	var nodeAURL string
+	var nodeBURL string
+	topology := func(self string) hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeFullReplica,
+			Self:    self,
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: nodeAURL, Role: "primary"},
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+		}
+	}
+	serveNode := func(nodeID string, writer http.ResponseWriter, request *http.Request) bool {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/api/health":
+			json.NewEncoder(writer).Encode(hatriecache.MonitoringHealth{Status: "online", Node: nodeID, Version: "v1.2.3"})
+		case "/api/config":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"node_id":               nodeID,
+				"monitoring_auth_token": "raw-operator-secret",
+				"nested":                map[string]interface{}{"password": "raw-password"},
+			})
+		case "/api/topology":
+			json.NewEncoder(writer).Encode(topology(nodeID))
+		case "/api/election":
+			json.NewEncoder(writer).Encode(hatriecache.ElectionStatus{})
+		case "/api/replication":
+			json.NewEncoder(writer).Encode(hatriecache.ReplicationResult{Health: "healthy"})
+		case "/api/storage":
+			writer.Write([]byte(`{"configured":true,"store":"pebble"}`))
+		case "/api/audit":
+			json.NewEncoder(writer).Encode(map[string]interface{}{"configured": true, "events": []interface{}{}})
+		case "/metrics":
+			writer.Header().Set("Content-Type", "text/plain")
+			writer.Write([]byte("hatrie_cache_up 1\n"))
+		default:
+			return false
+		}
+		return true
+	}
+	nodeB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !serveNode("node-b", w, r) {
+			t.Fatalf("unexpected node-b request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeB.Close()
+	nodeBURL = nodeB.URL
+	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !serveNode("node-a", w, r) {
+			t.Fatalf("unexpected node-a request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeA.Close()
+	nodeAURL = nodeA.URL
+
+	bundlePath := filepath.Join(t.TempDir(), "support.tar.gz")
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", nodeA.URL,
+		"support-bundle",
+		"-path", bundlePath,
+	}, stdout, &bytes.Buffer{}, nodeA.Client()); err != nil {
+		t.Fatalf("run(support-bundle) error = %v", err)
+	}
+	info, err := os.Stat(bundlePath)
+	if err != nil {
+		t.Fatalf("Stat(support bundle) error = %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("support bundle mode = %o, want 600", info.Mode().Perm())
+	}
+	file, err := os.Open(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+	entries := map[string][]byte{}
+	tarReader := tar.NewReader(gzipReader)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(tarReader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries[header.Name] = data
+	}
+	for _, name := range []string{
+		"manifest.json",
+		"nodes/001-node-a/config.json",
+		"nodes/001-node-a/metrics.txt",
+		"nodes/002-node-b/health.json",
+		"nodes/002-node-b/topology.json",
+	} {
+		if _, ok := entries[name]; !ok {
+			t.Fatalf("support bundle missing %s; entries = %#v", name, reflect.ValueOf(entries).MapKeys())
+		}
+	}
+	allData := bytes.Join(func() [][]byte {
+		out := make([][]byte, 0, len(entries))
+		for _, data := range entries {
+			out = append(out, data)
+		}
+		return out
+	}(), nil)
+	if bytes.Contains(allData, []byte("raw-operator-secret")) || bytes.Contains(allData, []byte("raw-password")) {
+		t.Fatalf("support bundle contains unredacted secret: %s", allData)
+	}
+	if !bytes.Contains(entries["nodes/001-node-a/config.json"], []byte("[REDACTED]")) {
+		t.Fatalf("redacted config = %s", entries["nodes/001-node-a/config.json"])
+	}
+	var result supportBundleResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(support bundle result) error = %v", err)
+	}
+	if !result.OK || result.Nodes != 2 || result.Bytes <= 0 || len(result.SHA256) != 64 {
+		t.Fatalf("support bundle result = %#v", result)
+	}
+}
+
+func TestRunSupportBundleRecordsEndpointFailuresAndContinues(t *testing.T) {
+	var serverURL string
+	topology := hatriecache.ClusterTopology{
+		Version: 1,
+		Mode:    hatriecache.TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes:   []hatriecache.TopologyNode{{ID: "node-a", Address: serverURL, Role: "primary"}},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/topology":
+			topology.Nodes[0].Address = serverURL
+			json.NewEncoder(w).Encode(topology)
+		case "/api/replication":
+			http.Error(w, "replication unavailable", http.StatusServiceUnavailable)
+		case "/metrics":
+			w.Write([]byte("hatrie_cache_up 1\n"))
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{"node": "node-a"})
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	bundlePath := filepath.Join(t.TempDir(), "support.tar.gz")
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"support-bundle",
+		"-path", bundlePath,
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(support-bundle) error = %v", err)
+	}
+	var result supportBundleResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(support bundle result) error = %v", err)
+	}
+	if result.OK || result.Errors != 1 {
+		t.Fatalf("support bundle result = %#v, want one recorded error", result)
+	}
+
+	file, err := os.Open(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+	tarReader := tar.NewReader(gzipReader)
+	var manifest supportBundleManifest
+	seenMetrics := false
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(tarReader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch header.Name {
+		case "manifest.json":
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				t.Fatal(err)
+			}
+		case "nodes/001-node-a/metrics.txt":
+			seenMetrics = true
+		}
+	}
+	if !seenMetrics || len(manifest.Nodes) != 1 || !strings.Contains(manifest.Nodes[0].Errors["replication.json"], "503") {
+		t.Fatalf("support bundle manifest = %#v, seen metrics = %t", manifest, seenMetrics)
 	}
 }
 

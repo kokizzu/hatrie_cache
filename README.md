@@ -482,6 +482,26 @@ directory with mode `0700`, verifies the recovered snapshot/journal/store, and
 removes the directory before returning. `-rehearse=false` skips only that final
 stage; backup verification remains mandatory.
 
+Before escalating an incident, collect one redacted diagnostic archive for the
+whole cluster:
+
+```sh
+make cli ARGS='support-bundle -path support/incident-001.tar.gz'
+make cli ARGS='support-bundle -path support/incident-001.tar.gz -audit-limit 64 -metrics=false -overwrite'
+```
+
+The CLI discovers every node from cluster topology and collects health,
+redacted configuration, topology, election, replication, storage, recent audit,
+and optional Prometheus output. It continues when an individual node or
+endpoint is unavailable and records each error in `manifest.json`; `ok` is
+false in the command result when any collection failed. JSON fields whose names
+contain credential, password, private-key, secret, token, or authorization
+markers are recursively replaced with `[REDACTED]`. The gzip tar is assembled
+through a mode-`0600` temporary file and atomically renamed, each archive entry
+has a SHA-256 checksum in the manifest, and the command returns the compressed
+bundle checksum. Metrics responses are capped at 4 MiB per node. Treat the
+archive as sensitive operational data despite redaction.
+
 When the server is running with a Pebble `DB_PATH`, explicitly request a
 file-level checkpoint bundle when lower restore heap and a ready-to-open native
 store matter more than elapsed time and transfer size:
