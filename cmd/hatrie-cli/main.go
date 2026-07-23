@@ -30,6 +30,18 @@ type clientConfig struct {
 	token   string
 }
 
+type backupAndVerifyResult struct {
+	OK             bool                                `json:"ok"`
+	Path           string                              `json:"path"`
+	Manifest       hatriecache.BackupBundleManifest    `json:"manifest"`
+	Verification   hatriecache.BackupDoctorReport      `json:"verification"`
+	Rehearsal      *hatriecache.RestoreRehearsalReport `json:"rehearsal,omitempty"`
+	CreateMillis   int64                               `json:"create_millis"`
+	VerifyMillis   int64                               `json:"verify_millis"`
+	RehearseMillis int64                               `json:"rehearse_millis,omitempty"`
+	DurationMillis int64                               `json:"duration_millis"`
+}
+
 const maxErrorBodyBytes = 1 << 20
 const maxResponseDrainBytes = 1 << 20
 const truncatedErrorBodySuffix = "\n... response body truncated"
@@ -83,7 +95,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		defer cancel()
 	}
 	if len(remaining) == 0 {
-		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, snapshot, backup, restore-bundle, restore-rehearsal, cluster, doctor")
+		return errors.New("subcommand is required: health, stats, entries, topology, election, replication, journal, storage, command, snapshot, backup, backup-and-verify, restore-bundle, restore-rehearsal, cluster, doctor")
 	}
 
 	switch remaining[0] {
@@ -109,6 +121,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 		return postJSON(ctx, client, cfg.addr, "/api/snapshot", []byte("{}"), stdout)
 	case "backup":
 		return runBackup(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
+	case "backup-and-verify":
+		return runBackupAndVerify(ctx, client, cfg.addr, remaining[1:], stdout, stderr)
 	case "restore-bundle":
 		return runRestoreBundle(remaining[1:], stdout, stderr)
 	case "restore-rehearsal":
@@ -462,6 +476,94 @@ func runBackup(ctx context.Context, client *http.Client, addr string, args []str
 		return err
 	}
 	return postJSON(ctx, client, addr, "/api/backup", body, stdout)
+}
+
+func runBackupAndVerify(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("backup-and-verify", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	path := flags.String("path", "", "server-side backup bundle output path")
+	mode := flags.String("mode", "auto", "backup mode: auto, snapshot, pebble-checkpoint, or pebble-incremental")
+	retain := flags.Int("retain", 0, "incremental repository manifests to retain; default 32")
+	snapshotFormat := flags.String("snapshot-format", "", "optional snapshot format override for the backup bundle")
+	rehearse := flags.Bool("rehearse", true, "restore the verified backup into an isolated temporary directory")
+	partitionMode := flags.String("partition-mode", "", "optional backup partition mode metadata")
+	partitions := flags.String("partitions", "", "comma-separated partition ids covered by the backup")
+	partitionNode := flags.String("partition-node", "", "optional node id that produced the partition backup")
+	partitionEpoch := flags.Uint64("partition-epoch", 0, "optional topology epoch for partition metadata")
+	partitionFingerprint := flags.String("partition-fingerprint", "", "optional topology fingerprint for partition metadata")
+	partitionPrefixes := flags.String("partition-prefixes", "", "comma-separated key prefixes covered by the partition backup")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*path = strings.TrimSpace(*path)
+	if *path == "" {
+		return errors.New("backup-and-verify -path is required")
+	}
+	partition := backupPartitionMetadataFromFlags(*partitionMode, *partitions, *partitionNode, *partitionEpoch, *partitionFingerprint, *partitionPrefixes)
+	backupRequest := struct {
+		Path           string                               `json:"path"`
+		Mode           string                               `json:"mode,omitempty"`
+		Retain         int                                  `json:"retain,omitempty"`
+		SnapshotFormat string                               `json:"snapshot_format,omitempty"`
+		Partition      *hatriecache.BackupPartitionMetadata `json:"partition,omitempty"`
+	}{
+		Path:           *path,
+		Mode:           strings.TrimSpace(*mode),
+		Retain:         *retain,
+		SnapshotFormat: strings.TrimSpace(*snapshotFormat),
+		Partition:      partition,
+	}
+	startedAt := time.Now()
+	stageStarted := time.Now()
+	manifest, err := postJSONAndDecode[hatriecache.BackupBundleManifest](ctx, client, addr, "/api/backup", backupRequest)
+	if err != nil {
+		return fmt.Errorf("create backup: %w", err)
+	}
+	createMillis := time.Since(stageStarted).Milliseconds()
+	stageStarted = time.Now()
+	verification, err := postJSONAndDecode[hatriecache.BackupDoctorReport](ctx, client, addr, "/api/backup/verify", backupPathRequestCLI{Path: *path})
+	if err != nil {
+		return fmt.Errorf("verify backup: %w", err)
+	}
+	if !verification.OK {
+		return errors.New("verify backup returned a non-ok report")
+	}
+	verifyMillis := time.Since(stageStarted).Milliseconds()
+	var rehearsal *hatriecache.RestoreRehearsalReport
+	var rehearseMillis int64
+	if *rehearse {
+		stageStarted = time.Now()
+		rehearsed, err := postJSONAndDecode[hatriecache.RestoreRehearsalReport](ctx, client, addr, "/api/backup/rehearse", backupPathRequestCLI{Path: *path})
+		if err != nil {
+			return fmt.Errorf("rehearse backup restore: %w", err)
+		}
+		if !rehearsed.OK {
+			return errors.New("rehearse backup restore returned a non-ok report")
+		}
+		rehearseMillis = time.Since(stageStarted).Milliseconds()
+		rehearsal = &rehearsed
+	}
+	result := backupAndVerifyResult{
+		OK:             true,
+		Path:           *path,
+		Manifest:       manifest,
+		Verification:   verification,
+		Rehearsal:      rehearsal,
+		CreateMillis:   createMillis,
+		VerifyMillis:   verifyMillis,
+		RehearseMillis: rehearseMillis,
+		DurationMillis: time.Since(startedAt).Milliseconds(),
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+type backupPathRequestCLI struct {
+	Path string `json:"path"`
 }
 
 func backupPartitionMetadataFromFlags(mode string, partitions string, node string, epoch uint64, fingerprint string, prefixes string) *hatriecache.BackupPartitionMetadata {
@@ -2663,6 +2765,31 @@ func postJSON(ctx context.Context, client *http.Client, addr string, path string
 		return err
 	}
 	return postJSONReaderWithEncoding(ctx, client, addr, path, reader, contentEncoding, stdout)
+}
+
+func postJSONAndDecode[T any](ctx context.Context, client *http.Client, addr string, path string, value interface{}) (T, error) {
+	var out T
+	body, err := jsonwire.Marshal(value)
+	if err != nil {
+		return out, err
+	}
+	reader, contentEncoding, err := jsonRequestBody(body)
+	if err != nil {
+		return out, err
+	}
+	req, err := http.NewRequestWithContext(cliContext(ctx), http.MethodPost, endpoint(addr, path), reader)
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	if contentEncoding != "" {
+		req.Header.Set("Content-Encoding", contentEncoding)
+	}
+	if err := doAndDecodeJSON(client, req, &out); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 func postJSONValue(ctx context.Context, client *http.Client, addr string, path string, value interface{}, estimatedSize int, stdout io.Writer) error {

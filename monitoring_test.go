@@ -1809,7 +1809,7 @@ func TestMonitoringHandlerWritesBackupBundle(t *testing.T) {
 		t.Fatalf("OpenCommandJournalWithFormat() error = %v", err)
 	}
 	defer journal.Close()
-	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !got.OK {
+	if got := journal.ExecuteCommand(ht, CacheCommandRequest{Command: "SETSTR", Key: "sg:name", Value: "ivi"}); !got.OK {
 		t.Fatalf("journaled SETSTR response = %#v, want ok", got)
 	}
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
@@ -1843,6 +1843,26 @@ func TestMonitoringHandlerWritesBackupBundle(t *testing.T) {
 		KeyPrefixes:         []string{"sg:"},
 	}) {
 		t.Fatalf("backup manifest partition = %#v, want requested partition metadata", manifest.Partition)
+	}
+
+	verifyResp := httptest.NewRecorder()
+	handler.ServeHTTP(verifyResp, httptest.NewRequest(http.MethodPost, "/api/backup/verify", strings.NewReader(`{"path":`+strconv.Quote(bundlePath)+`}`)))
+	if verifyResp.Code != http.StatusOK {
+		t.Fatalf("backup verify status = %d, want 200: %s", verifyResp.Code, verifyResp.Body.String())
+	}
+	var doctor BackupDoctorReport
+	if err := json.Unmarshal(verifyResp.Body.Bytes(), &doctor); err != nil || !doctor.OK || doctor.RecoveredKeys != 1 {
+		t.Fatalf("backup verify report/error = %#v/%v", doctor, err)
+	}
+
+	rehearseResp := httptest.NewRecorder()
+	handler.ServeHTTP(rehearseResp, httptest.NewRequest(http.MethodPost, "/api/backup/rehearse", strings.NewReader(`{"path":`+strconv.Quote(bundlePath)+`}`)))
+	if rehearseResp.Code != http.StatusOK {
+		t.Fatalf("backup rehearse status = %d, want 200: %s", rehearseResp.Code, rehearseResp.Body.String())
+	}
+	var rehearsal RestoreRehearsalReport
+	if err := json.Unmarshal(rehearseResp.Body.Bytes(), &rehearsal); err != nil || !rehearsal.OK || rehearsal.RecoveredKeys != 1 || rehearsal.WorkDirKept {
+		t.Fatalf("backup rehearsal report/error = %#v/%v", rehearsal, err)
 	}
 
 	resp = httptest.NewRecorder()

@@ -165,6 +165,10 @@ type backupBundleRequest struct {
 	Partition      BackupPartitionMetadata `json:"partition,omitempty"`
 }
 
+type backupPathRequest struct {
+	Path string `json:"path"`
+}
+
 type auditStatus struct {
 	Configured bool         `json:"configured"`
 	Events     []AuditEvent `json:"events"`
@@ -278,6 +282,8 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	mux.HandleFunc("/api/commands", handler.handleCommands)
 	mux.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	mux.HandleFunc("/api/backup", handler.handleBackup)
+	mux.HandleFunc("/api/backup/verify", handler.handleBackupVerify)
+	mux.HandleFunc("/api/backup/rehearse", handler.handleBackupRehearse)
 	mux.HandleFunc("/api/audit", handler.handleAudit)
 	mux.HandleFunc("/api/storage", handler.handleStorage)
 	mux.HandleFunc("/api/storage/flush", handler.handleStorageFlush)
@@ -1578,6 +1584,78 @@ func (handler *MonitoringHandler) handleBackup(w http.ResponseWriter, r *http.Re
 	}
 	handler.auditHTTP(r, AuditEvent{Action: "backup", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"path": request.Path, "mode": manifest.Mode, "snapshot_format": manifest.SnapshotFormat, "journal_sequence": manifest.JournalSequence}})
 	writeJSON(w, manifest)
+}
+
+func (handler *MonitoringHandler) handleBackupVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	path, ok := decodeBackupPathRequest(w, r)
+	if !ok {
+		return
+	}
+	report, err := VerifyBackupPath(path)
+	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "backup.verify", OK: false, Status: http.StatusBadRequest, Message: err.Error(), Details: map[string]interface{}{"path": path}})
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "backup.verify", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"path": path, "kind": report.Kind, "recovered_keys": report.RecoveredKeys}})
+	writeJSON(w, report)
+}
+
+func (handler *MonitoringHandler) handleBackupRehearse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	path, ok := decodeBackupPathRequest(w, r)
+	if !ok {
+		return
+	}
+	if handler.rejectDangerousHTTP(w, r, "backup.rehearse", map[string]interface{}{"path": path}) {
+		return
+	}
+	report, err := RehearseRestore(path, RestoreRehearsalOptions{})
+	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "backup.rehearse", OK: false, Status: http.StatusBadRequest, Message: err.Error(), Details: map[string]interface{}{"path": path}})
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "backup.rehearse", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"path": path, "kind": report.SourceKind, "recovered_keys": report.RecoveredKeys}})
+	writeJSON(w, report)
+}
+
+func decodeBackupPathRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if requestContextDone(w, r) {
+		return "", false
+	}
+	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
+	if !ok {
+		return "", false
+	}
+	defer closeBody()
+	decoder.DisallowUnknownFields()
+	var request backupPathRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid backup path request")
+		return "", false
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid backup path request")
+		return "", false
+	}
+	if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
+		return "", false
+	}
+	path := strings.TrimSpace(request.Path)
+	if path == "" {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("backup path is required"))
+		return "", false
+	}
+	return path, true
 }
 
 func (handler *MonitoringHandler) handleAudit(w http.ResponseWriter, r *http.Request) {

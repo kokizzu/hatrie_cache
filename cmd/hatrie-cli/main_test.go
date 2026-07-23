@@ -1874,6 +1874,56 @@ func TestRunBackupRequiresPath(t *testing.T) {
 	}
 }
 
+func TestRunBackupAndVerifyRunsAllServerStages(t *testing.T) {
+	var sequence []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sequence = append(sequence, r.URL.Path)
+		var request struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode(%s) error = %v", r.URL.Path, err)
+		}
+		if request.Path != "/srv/backups/run-001.tar.gz" {
+			t.Fatalf("%s path = %q", r.URL.Path, request.Path)
+		}
+		switch r.URL.Path {
+		case "/api/backup":
+			json.NewEncoder(w).Encode(hatriecache.BackupBundleManifest{Version: 1, Mode: hatriecache.BackupModeSnapshot, Snapshot: "snapshot.hc"})
+		case "/api/backup/verify":
+			json.NewEncoder(w).Encode(hatriecache.BackupDoctorReport{OK: true, Kind: "bundle", RecoveredKeys: 7})
+		case "/api/backup/rehearse":
+			json.NewEncoder(w).Encode(hatriecache.RestoreRehearsalReport{OK: true, SourceKind: "bundle", RecoveredKeys: 7})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", server.URL,
+		"backup-and-verify",
+		"-path", "/srv/backups/run-001.tar.gz",
+		"-mode", "snapshot",
+	}, stdout, &bytes.Buffer{}, server.Client()); err != nil {
+		t.Fatalf("run(backup-and-verify) error = %v", err)
+	}
+	if !reflect.DeepEqual(sequence, []string{"/api/backup", "/api/backup/verify", "/api/backup/rehearse"}) {
+		t.Fatalf("backup-and-verify sequence = %#v", sequence)
+	}
+	var result backupAndVerifyResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(backup-and-verify result) error = %v", err)
+	}
+	if !result.OK || result.Manifest.Version != 1 || !result.Verification.OK || result.Rehearsal == nil || !result.Rehearsal.OK || result.Rehearsal.RecoveredKeys != 7 {
+		t.Fatalf("backup-and-verify result = %#v", result)
+	}
+	if result.DurationMillis < 0 || result.CreateMillis < 0 || result.VerifyMillis < 0 || result.RehearseMillis < 0 {
+		t.Fatalf("backup stage durations = %#v", result)
+	}
+}
+
 func TestRunDoctorVerifiesBackupPath(t *testing.T) {
 	dir := t.TempDir()
 	ht := hatriecache.CreateHatTrie()

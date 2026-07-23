@@ -465,6 +465,23 @@ make cli ARGS='backup -path backup/run-001.tar.gz -mode snapshot'
 make cli ARGS='backup -path backup/sg.tar.gz -partitions sg -partition-mode partitioned -partition-node node-sg-a -partition-epoch 42 -partition-fingerprint topology-v1 -partition-prefixes sg:'
 ```
 
+For routine operation, create, verify, and rehearse restoration in one
+server-side workflow:
+
+```sh
+make cli ARGS='backup-and-verify -path backup/run-001.tar.gz'
+make cli ARGS='backup-and-verify -path backup/pebble-repository -mode pebble-incremental -retain 14'
+make cli ARGS='backup-and-verify -path backup/run-001.tar.gz -rehearse=false'
+```
+
+The command calls authenticated `/api/backup`, `/api/backup/verify`, and, by
+default, `/api/backup/rehearse` endpoints on the storage-owning server. It
+returns the manifest, checksum/structure doctor report, isolated restore report,
+and per-stage durations in one JSON result. Rehearsal restores into a temporary
+directory with mode `0700`, verifies the recovered snapshot/journal/store, and
+removes the directory before returning. `-rehearse=false` skips only that final
+stage; backup verification remains mandatory.
+
 When the server is running with a Pebble `DB_PATH`, explicitly request a
 file-level checkpoint bundle when lower restore heap and a ready-to-open native
 store matter more than elapsed time and transfer size:
@@ -1901,6 +1918,7 @@ make cli ARGS='cluster config-diff -peer http://node-a:8080'
 make cli ARGS='cluster maintenance begin -peer http://node-a:8080 -node node-b -reason "kernel upgrade"'
 make cli ARGS='cluster maintenance end -peer http://node-a:8080 -node node-b'
 make cli ARGS='cluster upgrade-plan -peer http://node-a:8080 -target-version v1.3.0 -run-canary'
+make cli ARGS='backup-and-verify -path backup/run-001.tar.gz'
 make cli ARGS='snapshot'
 ```
 
