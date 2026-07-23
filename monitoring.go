@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +41,7 @@ var errMonitoringEntriesLimitReached = errors.New("hatriecache: monitoring entri
 
 type MonitoringOptions struct {
 	NodeName                        string
+	Version                         string
 	WebDir                          string
 	AuthToken                       string
 	ReplicationAuthToken            string
@@ -92,6 +94,7 @@ type MonitoringHealth struct {
 	Status          string `json:"status"`
 	Node            string `json:"node"`
 	APIVersion      int    `json:"api_version"`
+	Version         string `json:"version"`
 	UptimeSeconds   int64  `json:"uptime_seconds"`
 	MemoryBytes     uint64 `json:"memory_bytes"`
 	DiskSpillBytes  uint64 `json:"disk_spill_bytes"`
@@ -214,6 +217,9 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 			options.NodeName = "local"
 		}
 	}
+	if strings.TrimSpace(options.Version) == "" {
+		options.Version = monitoringBuildVersion()
+	}
 	if options.Topology == nil {
 		topology, err := NewTopologyStore(SingleNodeTopology(options.NodeName, ""))
 		if err == nil {
@@ -231,6 +237,36 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 		options.ReplicationSafety = NewReplicationSafetyStore()
 	}
 	return &MonitoringHandler{trie: trie, options: options}
+}
+
+func monitoringBuildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "devel"
+	}
+	if version := strings.TrimSpace(info.Main.Version); version != "" && version != "(devel)" {
+		return version
+	}
+	revision := ""
+	dirty := false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = strings.TrimSpace(setting.Value)
+		case "vcs.modified":
+			dirty = setting.Value == "true"
+		}
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if revision == "" {
+		return "devel"
+	}
+	if dirty {
+		return revision + "-dirty"
+	}
+	return revision
 }
 
 func (handler *MonitoringHandler) Handler() http.Handler {
@@ -416,6 +452,7 @@ func (handler *MonitoringHandler) handleHealth(w http.ResponseWriter, r *http.Re
 		Status:          "online",
 		Node:            handler.options.NodeName,
 		APIVersion:      MonitoringAPIVersion,
+		Version:         handler.options.Version,
 		UptimeSeconds:   int64(time.Since(handler.options.StartAt).Seconds()),
 		MemoryBytes:     mem.Alloc,
 		DiskSpillBytes:  handler.trie.diskSpillBytes(),

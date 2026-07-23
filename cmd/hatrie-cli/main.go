@@ -946,6 +946,37 @@ type clusterMaintenanceResult struct {
 	LeaderAfter      []hatriecache.ElectionLeader `json:"leaders_after,omitempty"`
 }
 
+type clusterUpgradePlanResult struct {
+	OK             bool                 `json:"ok"`
+	Ready          bool                 `json:"ready"`
+	Compatible     bool                 `json:"compatible"`
+	Peer           string               `json:"peer"`
+	TargetVersion  string               `json:"target_version,omitempty"`
+	GeneratedAt    string               `json:"generated_at"`
+	MaxBackupAge   string               `json:"max_backup_age"`
+	RequireBackup  bool                 `json:"require_backup"`
+	Nodes          []clusterUpgradeNode `json:"nodes"`
+	BaselineCanary *clusterStatusResult `json:"baseline_canary,omitempty"`
+}
+
+type clusterUpgradeNode struct {
+	Order             int                       `json:"order"`
+	ID                string                    `json:"id"`
+	Address           string                    `json:"address"`
+	Role              string                    `json:"role,omitempty"`
+	Primary           bool                      `json:"primary"`
+	CurrentVersion    string                    `json:"current_version"`
+	APIVersion        int                       `json:"api_version"`
+	StorageConfigured bool                      `json:"storage_configured"`
+	BackupAt          string                    `json:"backup_at,omitempty"`
+	BackupAgeMillis   int64                     `json:"backup_age_millis,omitempty"`
+	Ready             bool                      `json:"ready"`
+	Blockers          []string                  `json:"blockers,omitempty"`
+	ConfigDifferences []clusterConfigDifference `json:"config_differences,omitempty"`
+	Commands          []string                  `json:"commands"`
+	CanaryChecks      []string                  `json:"canary_checks"`
+}
+
 type clusterNodeStatus struct {
 	ID                 string                        `json:"id"`
 	Role               string                        `json:"role,omitempty"`
@@ -963,7 +994,7 @@ type clusterNodeStatus struct {
 
 func runCluster(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor, config-diff, maintenance")
+		return errors.New("cluster subcommand is required: add-replica, join, decommission, remove, status, doctor, config-diff, maintenance, upgrade-plan")
 	}
 	switch args[0] {
 	case "add-replica":
@@ -982,6 +1013,8 @@ func runCluster(ctx context.Context, client *http.Client, addr string, args []st
 		return runClusterConfigDiff(ctx, client, addr, args[1:], stdout, stderr)
 	case "maintenance":
 		return runClusterMaintenance(ctx, client, addr, args[1:], stdout, stderr)
+	case "upgrade-plan":
+		return runClusterUpgradePlan(ctx, client, addr, args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown cluster subcommand %q", args[0])
 	}
@@ -1414,6 +1447,242 @@ func verifyMaintenanceElection(ctx context.Context, client *http.Client, topolog
 		}
 	}
 	return reference, nil
+}
+
+func runClusterUpgradePlan(ctx context.Context, client *http.Client, addr string, args []string, stdout io.Writer, stderr io.Writer) error {
+	flags := flag.NewFlagSet("cluster upgrade-plan", flag.ContinueOnError)
+	flags.SetOutput(cliWriter(stderr))
+	peer := flags.String("peer", addr, "reference cluster node monitoring API base URL")
+	targetVersion := flags.String("target-version", "", "version intended for the rollout")
+	maxBackupAge := flags.Duration("max-backup-age", 24*time.Hour, "maximum age of a successful backup audit event")
+	requireBackup := flags.Bool("require-backup", true, "require a recent successful backup on every node")
+	runCanary := flags.Bool("run-canary", false, "run the current cluster status/doctor probes as a baseline canary")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	*peer = strings.TrimSpace(*peer)
+	*targetVersion = strings.TrimSpace(*targetVersion)
+	if *peer == "" {
+		return errors.New("cluster upgrade-plan -peer is required")
+	}
+	if *maxBackupAge < 0 {
+		return errors.New("cluster upgrade-plan -max-backup-age must be non-negative")
+	}
+	topology, err := getJSONValue[hatriecache.ClusterTopology](ctx, client, *peer, "/api/topology")
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	store, err := hatriecache.NewTopologyStore(topology)
+	if err != nil {
+		return fmt.Errorf("cluster topology: %w", err)
+	}
+	topology = store.Get()
+	peerNode := clusterPeerNodeID(topology, *peer)
+	referenceHealth, err := getJSONValue[hatriecache.MonitoringHealth](ctx, client, *peer, "/api/health")
+	if err != nil {
+		return fmt.Errorf("reference health: %w", err)
+	}
+	referenceConfig, err := getJSONValue[map[string]interface{}](ctx, client, *peer, "/api/config")
+	if err != nil {
+		return fmt.Errorf("reference config: %w", err)
+	}
+	ignored := make(map[string]bool, len(clusterNodeLocalConfigFields))
+	for _, field := range clusterNodeLocalConfigFields {
+		ignored[field] = true
+	}
+	primaryNodes := make(map[string]bool)
+	for _, node := range topology.Nodes {
+		if node.Role == "primary" {
+			primaryNodes[node.ID] = true
+		}
+	}
+	for _, shard := range topology.Shards {
+		primaryNodes[shard.Primary] = true
+	}
+	now := time.Now().UTC()
+	result := clusterUpgradePlanResult{
+		OK:            true,
+		Ready:         true,
+		Compatible:    true,
+		Peer:          *peer,
+		TargetVersion: *targetVersion,
+		GeneratedAt:   now.Format(time.RFC3339Nano),
+		MaxBackupAge:  maxBackupAge.String(),
+		RequireBackup: *requireBackup,
+		Nodes:         make([]clusterUpgradeNode, 0, len(topology.Nodes)),
+	}
+	for _, topologyNode := range topology.Nodes {
+		address := strings.TrimSpace(topologyNode.Address)
+		if topologyNode.ID == peerNode {
+			address = *peer
+		}
+		node := clusterUpgradeNode{
+			ID:           topologyNode.ID,
+			Address:      address,
+			Role:         topologyNode.Role,
+			Primary:      primaryNodes[topologyNode.ID],
+			Ready:        true,
+			Commands:     upgradeNodeCommands(*peer, topologyNode.ID, *targetVersion),
+			CanaryChecks: upgradeNodeCanaryChecks(*peer, address),
+		}
+
+		health := referenceHealth
+		var healthErr error
+		if topologyNode.ID != peerNode {
+			health, healthErr = getJSONValue[hatriecache.MonitoringHealth](ctx, client, address, "/api/health")
+		}
+		if healthErr != nil {
+			node.Blockers = append(node.Blockers, "health: "+healthErr.Error())
+		} else {
+			node.CurrentVersion = health.Version
+			node.APIVersion = health.APIVersion
+			if !strings.EqualFold(strings.TrimSpace(health.Status), "online") {
+				node.Blockers = append(node.Blockers, "node is not online")
+			}
+			if health.Node != "" && health.Node != topologyNode.ID {
+				node.Blockers = append(node.Blockers, fmt.Sprintf("endpoint reports node %q", health.Node))
+			}
+			if referenceHealth.APIVersion != 0 && health.APIVersion != referenceHealth.APIVersion {
+				node.Blockers = append(node.Blockers, fmt.Sprintf("monitoring API version %d differs from reference %d", health.APIVersion, referenceHealth.APIVersion))
+				result.Compatible = false
+			}
+			if strings.TrimSpace(health.Version) == "" {
+				node.Blockers = append(node.Blockers, "binary version is unavailable")
+			}
+		}
+
+		var storage struct {
+			Configured bool `json:"configured"`
+		}
+		storage, storageErr := getJSONValue[struct {
+			Configured bool `json:"configured"`
+		}](ctx, client, address, "/api/storage")
+		if storageErr != nil {
+			node.Blockers = append(node.Blockers, "storage: "+storageErr.Error())
+		} else {
+			node.StorageConfigured = storage.Configured
+			if !storage.Configured {
+				node.Blockers = append(node.Blockers, "persistent storage is not configured")
+			}
+		}
+
+		config := referenceConfig
+		var configErr error
+		if topologyNode.ID != peerNode {
+			config, configErr = getJSONValue[map[string]interface{}](ctx, client, address, "/api/config")
+		}
+		if configErr != nil {
+			node.Blockers = append(node.Blockers, "config: "+configErr.Error())
+		} else {
+			node.ConfigDifferences = diffClusterConfigs(referenceConfig, config, ignored)
+			if len(node.ConfigDifferences) > 0 {
+				node.Blockers = append(node.Blockers, "effective config differs from reference")
+				result.Compatible = false
+			}
+		}
+
+		var audit struct {
+			Configured bool                     `json:"configured"`
+			Events     []hatriecache.AuditEvent `json:"events"`
+		}
+		audit, auditErr := getJSONValue[struct {
+			Configured bool                     `json:"configured"`
+			Events     []hatriecache.AuditEvent `json:"events"`
+		}](ctx, client, address, "/api/audit?limit=128")
+		if auditErr != nil {
+			if *requireBackup {
+				node.Blockers = append(node.Blockers, "backup audit: "+auditErr.Error())
+			}
+		} else if backupAt, ok := latestSuccessfulBackup(audit.Events); ok {
+			node.BackupAt = backupAt.Format(time.RFC3339Nano)
+			age := now.Sub(backupAt)
+			if age < 0 {
+				age = 0
+			}
+			node.BackupAgeMillis = age.Milliseconds()
+			if *requireBackup && age > *maxBackupAge {
+				node.Blockers = append(node.Blockers, fmt.Sprintf("latest backup is %s old; maximum is %s", age.Round(time.Second), maxBackupAge.String()))
+			}
+		} else if *requireBackup {
+			if !audit.Configured {
+				node.Blockers = append(node.Blockers, "audit log is not configured; backup freshness cannot be verified")
+			} else {
+				node.Blockers = append(node.Blockers, "no successful backup is present in recent audit history")
+			}
+		}
+
+		if len(node.Blockers) > 0 {
+			node.Ready = false
+			result.Ready = false
+		}
+		result.Nodes = append(result.Nodes, node)
+	}
+	sort.SliceStable(result.Nodes, func(i, j int) bool {
+		if result.Nodes[i].Primary != result.Nodes[j].Primary {
+			return !result.Nodes[i].Primary
+		}
+		return result.Nodes[i].ID < result.Nodes[j].ID
+	})
+	for idx := range result.Nodes {
+		result.Nodes[idx].Order = idx + 1
+	}
+	if *runCanary {
+		canary, err := collectClusterStatus(ctx, client, *peer, true)
+		if err != nil {
+			return fmt.Errorf("baseline canary: %w", err)
+		}
+		result.BaselineCanary = &canary
+		if !canary.OK {
+			result.Ready = false
+		}
+	}
+	data, err := jsonwire.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(append(data, '\n'))
+	return err
+}
+
+func latestSuccessfulBackup(events []hatriecache.AuditEvent) (time.Time, bool) {
+	var latest time.Time
+	for _, event := range events {
+		if event.Action != "backup" || !event.OK {
+			continue
+		}
+		occurredAt, err := time.Parse(time.RFC3339Nano, event.Time)
+		if err != nil {
+			continue
+		}
+		if occurredAt.After(latest) {
+			latest = occurredAt
+		}
+	}
+	return latest, !latest.IsZero()
+}
+
+func upgradeNodeCommands(peer string, nodeID string, targetVersion string) []string {
+	reason := "upgrade"
+	if targetVersion != "" {
+		reason += " to " + targetVersion
+	}
+	return []string{
+		"make cli ARGS=" + shellSingleQuote("cluster maintenance begin -peer "+peer+" -node "+nodeID+" -reason "+reason),
+		"restart " + nodeID + " with the target binary using the service manager",
+		"make cli ARGS=" + shellSingleQuote("cluster maintenance end -peer "+peer+" -node "+nodeID),
+	}
+}
+
+func upgradeNodeCanaryChecks(peer string, address string) []string {
+	return []string{
+		"make cli ARGS=" + shellSingleQuote("-addr "+address+" health"),
+		"make cli ARGS=" + shellSingleQuote("cluster doctor -peer "+peer),
+		"make cli ARGS=" + shellSingleQuote("-addr "+peer+" replication -sync"),
+	}
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func probeClusterNodes(ctx context.Context, client *http.Client, topology hatriecache.ClusterTopology, election hatriecache.ElectionStatus) []clusterNodeStatus {

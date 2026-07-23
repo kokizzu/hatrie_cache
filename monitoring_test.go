@@ -197,6 +197,7 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 
 	handler := NewMonitoringHandler(ht, MonitoringOptions{
 		NodeName: "test-node",
+		Version:  "v1.2.3-test",
 		StartAt:  now.Add(-time.Hour),
 	}).Handler()
 
@@ -209,7 +210,7 @@ func TestMonitoringHandlerExposesHealthStatsAndEntries(t *testing.T) {
 	if err := json.Unmarshal(healthResp.Body.Bytes(), &health); err != nil {
 		t.Fatalf("health JSON error = %v", err)
 	}
-	if health.Node != "test-node" || health.Status != "online" || health.APIVersion != MonitoringAPIVersion {
+	if health.Node != "test-node" || health.Status != "online" || health.APIVersion != MonitoringAPIVersion || health.Version != "v1.2.3-test" {
 		t.Fatalf("health = %#v, want test-node online", health)
 	}
 

@@ -2587,6 +2587,101 @@ func TestRunClusterConfigDiffCanIncludeNodeLocalFields(t *testing.T) {
 	}
 }
 
+func TestRunClusterUpgradePlanOrdersReplicasAndValidatesReadiness(t *testing.T) {
+	var nodeAURL string
+	var nodeBURL string
+	backupTime := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	topology := func() hatriecache.ClusterTopology {
+		return hatriecache.ClusterTopology{
+			Version: 1,
+			Mode:    hatriecache.TopologyModeSharded,
+			Self:    "node-a",
+			Nodes: []hatriecache.TopologyNode{
+				{ID: "node-a", Address: nodeAURL, Role: "primary"},
+				{ID: "node-b", Address: nodeBURL, Role: "replica"},
+			},
+			Shards: []hatriecache.TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+		}
+	}
+	serveNodeState := func(nodeID string, writer http.ResponseWriter, request *http.Request) bool {
+		switch request.URL.Path {
+		case "/api/health":
+			json.NewEncoder(writer).Encode(hatriecache.MonitoringHealth{Status: "online", Node: nodeID, APIVersion: hatriecache.MonitoringAPIVersion, Version: "v1.2.3"})
+		case "/api/storage":
+			writer.Write([]byte(`{"configured":true,"store":"pebble"}`))
+		case "/api/config":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"node_id":          nodeID,
+				"db_path":          "/srv/" + nodeID,
+				"db_format":        "binary",
+				"replication_mode": "dual",
+			})
+		case "/api/audit":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"configured": true,
+				"events":     []hatriecache.AuditEvent{{Time: backupTime, Action: "backup", OK: true}},
+			})
+		default:
+			return false
+		}
+		return true
+	}
+	nodeB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !serveNodeState("node-b", w, r) {
+			t.Fatalf("unexpected node-b request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeB.Close()
+	nodeBURL = nodeB.URL
+	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/topology" {
+			json.NewEncoder(w).Encode(topology())
+			return
+		}
+		if !serveNodeState("node-a", w, r) {
+			t.Fatalf("unexpected node-a request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer nodeA.Close()
+	nodeAURL = nodeA.URL
+
+	stdout := &bytes.Buffer{}
+	if err := run(context.Background(), []string{
+		"-addr", nodeA.URL,
+		"cluster", "upgrade-plan",
+		"-target-version", "v1.3.0",
+		"-max-backup-age", "2h",
+	}, stdout, &bytes.Buffer{}, nodeA.Client()); err != nil {
+		t.Fatalf("run(cluster upgrade-plan) error = %v", err)
+	}
+	var result clusterUpgradePlanResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(cluster upgrade-plan result) error = %v", err)
+	}
+	if !result.OK || !result.Ready || !result.Compatible || result.TargetVersion != "v1.3.0" || len(result.Nodes) != 2 {
+		t.Fatalf("upgrade plan result = %#v, want ready compatible plan", result)
+	}
+	if result.Nodes[0].ID != "node-b" || result.Nodes[0].Primary || result.Nodes[1].ID != "node-a" || !result.Nodes[1].Primary {
+		t.Fatalf("upgrade order = %#v, want replica before primary", result.Nodes)
+	}
+	if len(result.Nodes[0].CanaryChecks) < 3 || result.Nodes[0].BackupAgeMillis <= 0 || len(result.Nodes[0].Commands) < 2 {
+		t.Fatalf("node-b upgrade step = %#v, want backup age, commands, and canaries", result.Nodes[0])
+	}
+}
+
+func TestLatestSuccessfulBackupRejectsStaleOrMalformedEvents(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	events := []hatriecache.AuditEvent{
+		{Time: "bad", Action: "backup", OK: true},
+		{Time: now.Add(-time.Hour).Format(time.RFC3339Nano), Action: "backup", OK: false},
+		{Time: now.Add(-2 * time.Hour).Format(time.RFC3339Nano), Action: "backup", OK: true},
+	}
+	got, ok := latestSuccessfulBackup(events)
+	if !ok || !got.Equal(now.Add(-2*time.Hour)) {
+		t.Fatalf("latestSuccessfulBackup() = %v/%v", got, ok)
+	}
+}
+
 func TestClusterMaintenanceTopologyIsIdempotent(t *testing.T) {
 	topology := hatriecache.ClusterTopology{
 		Version: 1,

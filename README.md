@@ -722,6 +722,23 @@ verify every topology copy, compare elected leaders across members, and are
 idempotent. Do not stop the node until `begin` returns a verified result; do not
 return it to client traffic until `end` does.
 
+Generate a read-only rolling-upgrade plan before changing binaries:
+
+```sh
+make cli ARGS='cluster upgrade-plan -peer http://node-a:8080 -target-version v1.3.0'
+make cli ARGS='cluster upgrade-plan -peer http://node-a:8080 -target-version v1.3.0 -max-backup-age 12h -run-canary'
+```
+
+The planner checks reported binary and monitoring API versions, online state,
+persistent storage, redacted effective-config compatibility, and recent
+successful `backup` audit events. It places nodes that own no primary shard
+first, then primaries, and prints maintenance begin/end, external restart, and
+health/doctor/replication canary commands for each step. `-run-canary` executes
+the complete current cluster probe to establish a baseline. A missing or stale
+backup blocks readiness by default; use `-require-backup=false` only when backup
+evidence is managed externally. The planner never restarts a process or changes
+cluster state.
+
 Regenerate native gRPC/protobuf stubs after editing
 `proto/hatriecache/v1/cache.proto`:
 
@@ -1883,6 +1900,7 @@ make cli ARGS='cluster doctor -peer http://node-a:8080 -repair-topology -yes'
 make cli ARGS='cluster config-diff -peer http://node-a:8080'
 make cli ARGS='cluster maintenance begin -peer http://node-a:8080 -node node-b -reason "kernel upgrade"'
 make cli ARGS='cluster maintenance end -peer http://node-a:8080 -node node-b'
+make cli ARGS='cluster upgrade-plan -peer http://node-a:8080 -target-version v1.3.0 -run-canary'
 make cli ARGS='snapshot'
 ```
 
