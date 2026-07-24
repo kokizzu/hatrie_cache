@@ -1204,8 +1204,9 @@ make run CMD='go test . -run=NONE -bench=BenchmarkSlicePackedCommandChurn -bench
 | Public push then pop from empty | 522.7 ns; 64 B; 1 alloc | 468.2 ns; 0 B; 0 allocs | 1.12x faster; allocation eliminated |
 
 The two additional empty pool descriptors cost 160 fixed bytes per cache
-instance. About five fresh one-value slices or three fresh two-value slices
-recover that fixed cost. No configurable format or migration is required.
+instance. About five direct one- or two-value upserts recover that fixed cost;
+new-key push workloads recover it after about two one-value or three two-value
+slices. No configurable format or migration is required.
 
 <a id="string-compaction-allocation-rollback"></a>
 ### String Compaction Allocation Rollback
