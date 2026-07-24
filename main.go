@@ -1993,10 +1993,59 @@ func (ms *MapStorage) compactIfSparse(idx int32) {
 	ms.deleted[idx] = 0
 }
 
-// SliceStorage stores slice values outside the trie.
+type packedOneSlice struct {
+	value  interface{}
+	length uint8
+	nonNil bool
+}
+
+type packedTwoSlice struct {
+	values [2]interface{}
+	length uint8
+}
+
+type packedSliceValue struct {
+	values [2]interface{}
+	length uint8
+	nonNil bool
+}
+
+func packedSliceFromValue(value Slice) (packedSliceValue, bool) {
+	if len(value) > 2 {
+		return packedSliceValue{}, false
+	}
+	packed := packedSliceValue{length: uint8(len(value)), nonNil: value != nil}
+	for index := range value {
+		packed.values[index] = cloneValue(value[index])
+	}
+	return packed, true
+}
+
+func encodePackedSliceIndex(index int32, twoValuePool bool) int32 {
+	payload := uint32(index) << 1
+	if twoValuePool {
+		payload |= 1
+	}
+	return int32(^payload)
+}
+
+func decodePackedSliceIndex(index int32) (poolIndex int32, twoValuePool bool, ok bool) {
+	if index >= 0 {
+		return 0, false, false
+	}
+	payload := ^uint32(index)
+	return int32(payload >> 1), payload&1 != 0, true
+}
+
+// SliceStorage stores slice values outside the trie. Empty, one-value, and
+// two-value slices use packed pools selected by private negative indexes.
 type SliceStorage struct {
-	array     []deque
-	reusables reusableIndexes
+	array       []deque
+	reusables   reusableIndexes
+	oneValues   []packedOneSlice
+	oneReusable reusableIndexes
+	twoValues   []packedTwoSlice
+	twoReusable reusableIndexes
 }
 
 func CreateSliceStorage() *SliceStorage {
@@ -2058,13 +2107,327 @@ func (ss *SliceStorage) AddValuesChecked(value interface{}, values ...interface{
 	return ss.AppendValuesChecked(value, values...)
 }
 
+func (ss *SliceStorage) addAdaptive(value Slice) int32 {
+	if packed, ok := packedSliceFromValue(value); ok {
+		return ss.addPacked(packed)
+	}
+	return ss.Add(value)
+}
+
+func (ss *SliceStorage) putAdaptive(idx int32, value Slice) int32 {
+	if idx >= 0 {
+		ss.Put(idx, value)
+		return idx
+	}
+	if packed, ok := packedSliceFromValue(value); ok {
+		poolIndex, twoValuePool, isPacked := decodePackedSliceIndex(idx)
+		wantTwo := packed.length == 2
+		if isPacked && twoValuePool == wantTwo {
+			if wantTwo {
+				ss.twoValues[poolIndex] = packedTwoSlice{values: packed.values, length: packed.length}
+			} else {
+				ss.oneValues[poolIndex] = packedOneSlice{value: packed.values[0], length: packed.length, nonNil: packed.nonNil}
+			}
+			return idx
+		}
+		ss.Del(idx)
+		return ss.addPacked(packed)
+	}
+	if _, _, isPacked := decodePackedSliceIndex(idx); isPacked {
+		ss.Del(idx)
+		return ss.Add(value)
+	}
+	ss.Put(idx, value)
+	return idx
+}
+
+func (ss *SliceStorage) addValuesAdaptive(value interface{}, values ...interface{}) (int32, error) {
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return -1, errDequeCapacityTooLarge
+	}
+	if count > 2 {
+		return ss.AddValuesChecked(value, values...)
+	}
+	packed := packedSliceValue{length: uint8(count), nonNil: true}
+	packed.values[0] = cloneValue(value)
+	for index := range values {
+		packed.values[index+1] = cloneValue(values[index])
+	}
+	return ss.addPacked(packed), nil
+}
+
+func (ss *SliceStorage) addPacked(value packedSliceValue) int32 {
+	if value.length <= 1 {
+		data := packedOneSlice{value: value.values[0], length: value.length, nonNil: value.nonNil}
+		if idx, ok := ss.oneReusable.Take(); ok {
+			ss.oneValues[idx] = data
+			return encodePackedSliceIndex(idx, false)
+		}
+		ss.oneValues = append(ss.oneValues, data)
+		return encodePackedSliceIndex(int32(len(ss.oneValues)-1), false)
+	}
+	data := packedTwoSlice{values: value.values, length: value.length}
+	if idx, ok := ss.twoReusable.Take(); ok {
+		ss.twoValues[idx] = data
+		return encodePackedSliceIndex(idx, true)
+	}
+	ss.twoValues = append(ss.twoValues, data)
+	return encodePackedSliceIndex(int32(len(ss.twoValues)-1), true)
+}
+
+func (ss *SliceStorage) addDeque(value deque) int32 {
+	if idx, ok := ss.reusables.Take(); ok {
+		ss.array[idx] = value
+		return idx
+	}
+	ss.array = append(ss.array, value)
+	return int32(len(ss.array) - 1)
+}
+
+func (ss *SliceStorage) pushOneChecked(idx int32, value interface{}, values ...interface{}) (int32, error) {
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
+	if !packed {
+		return idx, ss.array[idx].PushOneChecked(value, values...)
+	}
+	additional, ok := checkedDequeNeeded(1, len(values))
+	if !ok {
+		return idx, errDequeCapacityTooLarge
+	}
+	current := ss.packedLength(poolIndex, twoValuePool)
+	needed, ok := checkedDequeNeeded(current, additional)
+	if !ok {
+		return idx, errDequeCapacityTooLarge
+	}
+	if needed <= 2 {
+		if twoValuePool {
+			data := &ss.twoValues[poolIndex]
+			data.values[data.length] = cloneValue(value)
+			data.length++
+			for _, next := range values {
+				data.values[data.length] = cloneValue(next)
+				data.length++
+			}
+			return idx, nil
+		}
+		data := &ss.oneValues[poolIndex]
+		if needed == 1 {
+			data.value = cloneValue(value)
+			data.length = 1
+			data.nonNil = true
+			return idx, nil
+		}
+		next := packedSliceValue{length: 2, nonNil: true}
+		if data.length == 1 {
+			next.values[0] = data.value
+			next.values[1] = cloneValue(value)
+		} else {
+			next.values[0] = cloneValue(value)
+			next.values[1] = cloneValue(values[0])
+		}
+		nextIndex := ss.addPacked(next)
+		ss.delPacked(poolIndex, false)
+		return nextIndex, nil
+	}
+
+	capacity, ok := grownDequeCapacity(current, needed)
+	if !ok {
+		return idx, errDequeCapacityTooLarge
+	}
+	dq := deque{values: make([]interface{}, capacity), size: current}
+	if twoValuePool {
+		copy(dq.values, ss.twoValues[poolIndex].values[:current])
+	} else if current == 1 {
+		dq.values[0] = ss.oneValues[poolIndex].value
+	}
+	dq.pushValue(value)
+	for _, next := range values {
+		dq.pushValue(next)
+	}
+	nextIndex := ss.addDeque(dq)
+	ss.delPacked(poolIndex, twoValuePool)
+	return nextIndex, nil
+}
+
+func (ss *SliceStorage) pop(idx int32, retain bool) (interface{}, bool) {
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
+	if !packed {
+		if retain {
+			return ss.array[idx].popRetain()
+		}
+		return ss.array[idx].Pop()
+	}
+	if !twoValuePool {
+		data := &ss.oneValues[poolIndex]
+		if data.length == 0 {
+			return nil, false
+		}
+		value := data.value
+		data.value = nil
+		data.length = 0
+		data.nonNil = true
+		return value, true
+	}
+	data := &ss.twoValues[poolIndex]
+	if data.length == 0 {
+		return nil, false
+	}
+	last := data.length - 1
+	value := data.values[last]
+	data.values[last] = nil
+	data.length--
+	return value, true
+}
+
+func (ss *SliceStorage) shift(idx int32) (interface{}, bool) {
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
+	if !packed {
+		return ss.array[idx].Shift()
+	}
+	if !twoValuePool {
+		return ss.pop(idx, false)
+	}
+	data := &ss.twoValues[poolIndex]
+	if data.length == 0 {
+		return nil, false
+	}
+	value := data.values[0]
+	if data.length == 2 {
+		data.values[0] = data.values[1]
+	} else {
+		data.values[0] = nil
+	}
+	data.values[1] = nil
+	data.length--
+	return value, true
+}
+
+func (ss *SliceStorage) head(idx int32) (interface{}, bool) {
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
+	if !packed {
+		return ss.array[idx].Head()
+	}
+	if !twoValuePool {
+		data := ss.oneValues[poolIndex]
+		return data.value, data.length > 0
+	}
+	data := ss.twoValues[poolIndex]
+	return data.values[0], data.length > 0
+}
+
+func (ss *SliceStorage) tail(idx int32) (interface{}, bool) {
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
+	if !packed {
+		return ss.array[idx].Tail()
+	}
+	if !twoValuePool {
+		data := ss.oneValues[poolIndex]
+		return data.value, data.length > 0
+	}
+	data := ss.twoValues[poolIndex]
+	if data.length == 0 {
+		return nil, false
+	}
+	return data.values[data.length-1], true
+}
+
+func (ss *SliceStorage) values(idx int32) Slice {
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
+	if !packed {
+		return ss.array[idx].Slice()
+	}
+	if !twoValuePool {
+		data := ss.oneValues[poolIndex]
+		if data.length == 0 {
+			if data.nonNil {
+				return make(Slice, 0)
+			}
+			return nil
+		}
+		return Slice{cloneValue(data.value)}
+	}
+	data := ss.twoValues[poolIndex]
+	if data.length == 0 {
+		return make(Slice, 0)
+	}
+	out := make(Slice, int(data.length))
+	for index := range out {
+		out[index] = cloneValue(data.values[index])
+	}
+	return out
+}
+
+func (ss *SliceStorage) length(idx int32) (int, bool) {
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
+	if !packed {
+		if idx < 0 || int(idx) >= len(ss.array) || ss.reusables.Has(idx) {
+			return 0, false
+		}
+		return ss.array[idx].Len(), true
+	}
+	if !twoValuePool {
+		if poolIndex < 0 || int(poolIndex) >= len(ss.oneValues) || ss.oneReusable.Has(poolIndex) {
+			return 0, false
+		}
+		return int(ss.oneValues[poolIndex].length), true
+	}
+	if poolIndex < 0 || int(poolIndex) >= len(ss.twoValues) || ss.twoReusable.Has(poolIndex) {
+		return 0, false
+	}
+	return int(ss.twoValues[poolIndex].length), true
+}
+
+func (ss *SliceStorage) packedLength(idx int32, twoValuePool bool) int {
+	if twoValuePool {
+		return int(ss.twoValues[idx].length)
+	}
+	return int(ss.oneValues[idx].length)
+}
+
 func (ss *SliceStorage) Del(idx int32) {
+	if poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx); packed {
+		ss.delPacked(poolIndex, twoValuePool)
+		return
+	}
 	if idx < 0 || int(idx) >= len(ss.array) {
 		return
 	}
 	ss.array[idx] = deque{}
+	if int(idx) == len(ss.array)-1 {
+		ss.array = ss.array[:idx]
+		ss.array = trimReusableTail(ss.array, &ss.reusables)
+		return
+	}
 	ss.reusables.Mark(idx)
 	ss.array = trimReusableTail(ss.array, &ss.reusables)
+}
+
+func (ss *SliceStorage) delPacked(idx int32, twoValuePool bool) {
+	if twoValuePool {
+		if idx < 0 || int(idx) >= len(ss.twoValues) {
+			return
+		}
+		ss.twoValues[idx] = packedTwoSlice{}
+		if int(idx) == len(ss.twoValues)-1 {
+			ss.twoValues = ss.twoValues[:idx]
+			ss.twoValues = trimReusableTail(ss.twoValues, &ss.twoReusable)
+			return
+		}
+		ss.twoReusable.Mark(idx)
+		ss.twoValues = trimReusableTail(ss.twoValues, &ss.twoReusable)
+		return
+	}
+	if idx < 0 || int(idx) >= len(ss.oneValues) {
+		return
+	}
+	ss.oneValues[idx] = packedOneSlice{}
+	if int(idx) == len(ss.oneValues)-1 {
+		ss.oneValues = ss.oneValues[:idx]
+		ss.oneValues = trimReusableTail(ss.oneValues, &ss.oneReusable)
+		return
+	}
+	ss.oneReusable.Mark(idx)
+	ss.oneValues = trimReusableTail(ss.oneValues, &ss.oneReusable)
 }
 
 const smallSetEntryLimit = 2
@@ -6424,7 +6787,11 @@ func (ht *HatTrie) upsertSliceLocked(key string, val Slice) error {
 		return err
 	}
 	if hval.IsSlice() {
-		ht.slices.Put(hval.Index, val)
+		if hval.Index >= 0 {
+			ht.slices.Put(hval.Index, val)
+		} else {
+			hval.Index = ht.slices.putAdaptive(hval.Index, val)
+		}
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
@@ -6434,7 +6801,12 @@ func (ht *HatTrie) upsertSliceLocked(key string, val Slice) error {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.slices.Add(val)
+	var idx int32
+	if len(val) <= 2 {
+		idx = ht.slices.addAdaptive(val)
+	} else {
+		idx = ht.slices.Add(val)
+	}
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}.toValue()
 	ht.recordWriteLocked(key)
 	return nil
@@ -6473,15 +6845,28 @@ func (ht *HatTrie) pushSlice(key string, val interface{}, vals ...interface{}) e
 		return err
 	}
 	if hval.IsSlice() {
-		if err := ht.slices.array[hval.Index].PushOneChecked(val, vals...); err != nil {
-			return err
+		if hval.Index >= 0 {
+			if err := ht.slices.array[hval.Index].PushOneChecked(val, vals...); err != nil {
+				return err
+			}
+		} else {
+			nextIndex, err := ht.slices.pushOneChecked(hval.Index, val, vals...)
+			if err != nil {
+				return err
+			}
+			hval.Index = nextIndex
 		}
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return nil
 	}
 
-	idx, err := ht.slices.AddValuesChecked(val, vals...)
+	var idx int32
+	if len(vals) < 2 {
+		idx, err = ht.slices.addValuesAdaptive(val, vals...)
+	} else {
+		idx, err = ht.slices.AddValuesChecked(val, vals...)
+	}
 	if err != nil {
 		return err
 	}
@@ -6520,7 +6905,13 @@ func (ht *HatTrie) PopSliceChecked(key string) (interface{}, bool, error) {
 		return nil, false, nil
 	}
 
-	val, ok := ht.slices.array[hval.Index].Pop()
+	var val interface{}
+	var ok bool
+	if hval.Index >= 0 {
+		val, ok = ht.slices.array[hval.Index].Pop()
+	} else {
+		val, ok = ht.slices.pop(hval.Index, false)
+	}
 	if !ok {
 		ht.recordReadLocked(false, key)
 		return nil, false, nil
@@ -6555,7 +6946,13 @@ func (ht *HatTrie) ShiftSliceChecked(key string) (interface{}, bool, error) {
 		return nil, false, nil
 	}
 
-	val, ok := ht.slices.array[hval.Index].Shift()
+	var val interface{}
+	var ok bool
+	if hval.Index >= 0 {
+		val, ok = ht.slices.array[hval.Index].Shift()
+	} else {
+		val, ok = ht.slices.shift(hval.Index)
+	}
 	if !ok {
 		ht.recordReadLocked(false, key)
 		return nil, false, nil
@@ -6580,13 +6977,22 @@ func (ht *HatTrie) HeadSliceChecked(key string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	dq, ok, err := ht.sliceRefLockedChecked(key)
+	hval, err := ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return nil, false, err
 	}
-	val, hit := dq.Head()
-	hit = ok && hit
+	if !hval.IsSlice() {
+		ht.recordReadLocked(false, key)
+		return nil, false, nil
+	}
+	var val interface{}
+	var hit bool
+	if hval.Index >= 0 {
+		val, hit = ht.slices.array[hval.Index].Head()
+	} else {
+		val, hit = ht.slices.head(hval.Index)
+	}
 	ht.recordReadLocked(hit, key)
 	if hit {
 		return cloneValue(val), true, nil
@@ -6609,13 +7015,22 @@ func (ht *HatTrie) TailSliceChecked(key string) (interface{}, bool, error) {
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
-	dq, ok, err := ht.sliceRefLockedChecked(key)
+	hval, err := ht.getLockedChecked(key)
 	if err != nil {
 		ht.recordReadLocked(false, key)
 		return nil, false, err
 	}
-	val, hit := dq.Tail()
-	hit = ok && hit
+	if !hval.IsSlice() {
+		ht.recordReadLocked(false, key)
+		return nil, false, nil
+	}
+	var val interface{}
+	var hit bool
+	if hval.Index >= 0 {
+		val, hit = ht.slices.array[hval.Index].Tail()
+	} else {
+		val, hit = ht.slices.tail(hval.Index)
+	}
 	ht.recordReadLocked(hit, key)
 	if hit {
 		return cloneValue(val), true, nil
@@ -6648,23 +7063,10 @@ func (ht *HatTrie) GetSliceChecked(key string) (Slice, bool, error) {
 		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.slices.array[hval.Index].Slice(), true, nil
-}
-
-func (ht *HatTrie) sliceRefLocked(key string) (*deque, bool) {
-	dq, ok, _ := ht.sliceRefLockedChecked(key)
-	return dq, ok
-}
-
-func (ht *HatTrie) sliceRefLockedChecked(key string) (*deque, bool, error) {
-	hval, err := ht.getLockedChecked(key)
-	if err != nil {
-		return nil, false, err
+	if hval.Index >= 0 {
+		return ht.slices.array[hval.Index].Slice(), true, nil
 	}
-	if hval.IsSlice() {
-		return &ht.slices.array[hval.Index], true, nil
-	}
-	return nil, false, nil
+	return ht.slices.values(hval.Index), true, nil
 }
 
 func (ht *HatTrie) UpsertSet(key string, val Set) {

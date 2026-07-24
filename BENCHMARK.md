@@ -213,6 +213,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
 | Current pass | [Packed small string-set storage](#packed-small-string-set-storage), 100k one/two-member sets | Slice/map entries: 94.36/142.4 retained B/set; 2.000/3.000 retained objects/set | Packed pools: 18.87/36.98 retained B/set; 0.00026/0.00026 retained objects/set | 5.00x/3.85x lower retained heap; about 7,692x/11,538x fewer retained objects; 1.39x/1.42x faster writes | Adds 160 fixed bytes/cache; promotes at the third member with unchanged generic retention and a 1.21x faster measured transition |
+| Current pass | [Packed small-slice storage](#packed-small-slice-storage), 100k zero/one/two-value slices | Deques: 46.23/62.23/78.23 retained B/slice; one retained object for nonempty slices | Packed pools: 27.39/27.39/46.23 retained B/slice; 0.00025 retained objects/slice | 1.69x/2.27x/1.69x lower retained heap; about 4,000x fewer retained objects for nonempty slices; tiny push retention improves up to 4.02x | Adds 160 fixed bytes/cache; promotion retains the generic deque, measures neutral, and halves transition allocations |
 | Reverted | [Packed-string compaction](#string-compaction-allocation-rollback), 100k varied 33-512 B strings | Packed copy: 30.07 MB cumulative heap; 121,848 KiB peak RSS | Dense remap: 2.81 MB cumulative heap; 93,516 KiB peak RSS | 10.71x lower cumulative heap, 1.30x lower peak RSS | Retains 3.79% more heap and forced GC is 1.81x slower; packing was not worth its immediate memory spike |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
@@ -1139,6 +1140,72 @@ The first candidate boxed packed strings during reads and made two-member
 reads 1.31x slower with 2x heap and 3x allocations; it was not retained. The
 final pools preserve interface payloads, so read ownership and allocation cost
 match the baseline. Wire and persistence formats are unchanged.
+
+<a id="packed-small-slice-storage"></a>
+### Packed Small-Slice Storage
+
+Fresh empty, one-, and two-value slices now use two packed pools selected by
+private negative backing indexes. The third value promotes once to the existing
+ring deque. A promoted key stays generic on later replacement, even when it
+shrinks, which prevents alternating two/three-value workloads from repeatedly
+converting representations. Deletion and recreation select the packed layout
+again. Logical values, wire encoding, snapshots, LevelDB records, monitoring,
+and compaction formats are unchanged.
+
+Behavior tests were added before the storage change for nil versus non-nil
+empty slices, nested-value ownership, push/pop/shift ordering, pool reuse,
+slot clearing, packed-to-generic promotion, compaction remapping, and snapshot
+restore. The retained-memory fixture inserts 100,000 values from preallocated
+inputs. Baseline results use detached commit `efacc3d`; final results use the
+candidate in the same environment. Figures are stable layout metrics from five
+one-pass runs.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkSliceStorageLayout100k -benchtime=1x -count=5 -benchmem -cpu=1'
+```
+
+| Workload, 100k keys | Baseline retained B/value | Final retained B/value | Baseline retained objects/value | Final retained objects/value | Retained improvement |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Upsert empty | 46.23 | 27.39 | 0.00025 | 0.00025 | 1.69x lower heap; objects unchanged |
+| Upsert one value | 62.23 | 27.39 | 1.000 | 0.00025 | 2.27x lower heap; about 4,000x fewer objects |
+| Upsert two values | 78.23 | 46.23 | 1.000 | 0.00025 | 1.69x lower heap; about 4,000x fewer objects |
+| Push one value into new key | 110.2 | 27.39 | 1.000 | 0.00025 | 4.02x lower heap; about 4,000x fewer objects |
+| Push two values into new key | 110.2 | 46.23 | 1.000 | 0.00025 | 2.38x lower heap; about 4,000x fewer objects |
+| Upsert 3 / 8 / 16 values | 94.23 / 174.2 / 302.2 | 94.23 / 174.2 / 302.2 | 1.000 | 1.000 | Byte-for-byte unchanged generic retention |
+
+| Workload, 100k keys | Baseline timed heap / allocs | Final timed heap / allocs | Improvement |
+| --- | ---: | ---: | ---: |
+| Upsert empty | 22,216,352 B / 29 | 12,969,960 B / 28 | 1.71x lower heap |
+| Upsert one value | 23,816,352 B / 100,029 | 12,969,960 B / 28 | 1.84x lower heap; about 3,572x fewer allocs |
+| Upsert two values | 25,416,352 B / 100,029 | 22,216,352 B / 29 | 1.14x lower heap; about 3,449x fewer allocs |
+| Push one value into new key | 28,616,352 B / 100,029 | 12,969,960 B / 28 | 2.21x lower heap; about 3,572x fewer allocs |
+| Push two values into new key | 28,616,352 B / 100,029 | 22,216,352 B / 29 | 1.29x lower heap; about 3,449x fewer allocs |
+| Promote two to three values | 31,816,352 B / 200,029 | 28,616,400 B / 100,030 | 1.11x lower heap; 2.00x fewer allocs |
+
+The distinct-key promotion control retains the same 110.2 B/value on both
+sides. Its median is neutral within 0.5%: 3,193 ns/value before and 3,176
+ns/value after. The candidate allocates the final deque once instead of first
+allocating a two-slot deque and then growing it. Fresh values above two entries
+and already-generic keys bypass adaptive helpers and use the prior deque path.
+
+Focused operation controls compare packed and generic representations in the
+same binary. Median results use five or seven one-second samples.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkSlicePackedOperationPairs -benchtime=1s -count=5 -benchmem -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSlicePackedCommandChurn -benchtime=1s -count=7 -benchmem -cpu=1'
+```
+
+| Operation | Generic deque | Packed | Result |
+| --- | ---: | ---: | ---: |
+| Head plus tail, two values | 163.3 ns; 0 B; 0 allocs | 164.0 ns; 0 B; 0 allocs | Neutral within 0.4% |
+| Read two values | 160.0 ns; 32 B; 1 alloc | 142.7 ns; 32 B; 1 alloc | 1.12x faster; allocation unchanged |
+| Command push then pop | 349.1 ns; 16 B; 1 alloc | 330.7 ns; 16 B; 1 alloc | 1.06x faster; allocation unchanged |
+| Public push then pop from empty | 522.7 ns; 64 B; 1 alloc | 468.2 ns; 0 B; 0 allocs | 1.12x faster; allocation eliminated |
+
+The two additional empty pool descriptors cost 160 fixed bytes per cache
+instance. About five fresh one-value slices or three fresh two-value slices
+recover that fixed cost. No configurable format or migration is required.
 
 <a id="string-compaction-allocation-rollback"></a>
 ### String Compaction Allocation Rollback

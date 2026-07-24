@@ -1288,7 +1288,7 @@ func (ht *HatTrie) snapshotEntryForStoreLockedWithStats(entry Entry, currentStor
 		}
 		out.Map = value
 	case DATAVALUE_TYPE_SLICE:
-		out.Slice = ht.slices.array[entry.Value.Index].Slice()
+		out.Slice = ht.slices.values(entry.Value.Index)
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		return ht.levelDBReferenceSnapshotEntryForStoreLocked(entry.Key, entry.Value, currentStore, currentDB)
 	case DATAVALUE_TYPE_SET:
@@ -1925,7 +1925,7 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 		idx := ht.maps.addAdaptive(entry.Map)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_MAP}
 	case "slice":
-		idx := ht.slices.Add(entry.Slice)
+		idx := ht.slices.addAdaptive(entry.Slice)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}
 	case "set":
 		idx := ht.sets.addAdaptive(entry.Set)

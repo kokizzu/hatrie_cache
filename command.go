@@ -1653,8 +1653,23 @@ func (ht *HatTrie) executeFastPushSliceCommand(key string, value string) (CacheC
 		if ht.expireIfNeededLocked(key, hval) {
 			ht.clearHotKeyLocked(key)
 		} else if hval.IsSlice() {
-			if err := ht.slices.array[hval.Index].PushOneChecked(value); err != nil {
-				return commandError(err.Error()), true
+			if hval.Index >= 0 {
+				if err := ht.slices.array[hval.Index].PushOneChecked(value); err != nil {
+					return commandError(err.Error()), true
+				}
+			} else {
+				nextIndex, err := ht.slices.pushOneChecked(hval.Index, value)
+				if err != nil {
+					return commandError(err.Error()), true
+				}
+				if nextIndex != hval.Index {
+					hval.Index = nextIndex
+					rawPtr := ht.tryLocation(key)
+					if rawPtr == nil {
+						rawPtr = ht.upsertLocation(key)
+					}
+					*rawPtr = hval.toValue()
+				}
 			}
 			ht.recordWriteLocked(key)
 			ht.cacheValueLocked(key, hval)
@@ -1667,8 +1682,16 @@ func (ht *HatTrie) executeFastPushSliceCommand(key string, value string) (CacheC
 		return commandError(err.Error()), true
 	}
 	if hval.IsSlice() {
-		if err := ht.slices.array[hval.Index].PushOneChecked(value); err != nil {
-			return commandError(err.Error()), true
+		if hval.Index >= 0 {
+			if err := ht.slices.array[hval.Index].PushOneChecked(value); err != nil {
+				return commandError(err.Error()), true
+			}
+		} else {
+			nextIndex, err := ht.slices.pushOneChecked(hval.Index, value)
+			if err != nil {
+				return commandError(err.Error()), true
+			}
+			hval.Index = nextIndex
 		}
 		if rawPtr != nil {
 			*rawPtr = hval.toValue()
@@ -1683,7 +1706,7 @@ func (ht *HatTrie) executeFastPushSliceCommand(key string, value string) (CacheC
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx, err := ht.slices.AddValuesChecked(value)
+	idx, err := ht.slices.addValuesAdaptive(value)
 	if err != nil {
 		return commandError(err.Error()), true
 	}
@@ -1706,7 +1729,13 @@ func (ht *HatTrie) executeFastPopSliceCommand(key string) (CacheCommandResponse,
 		ht.recordReadLocked(false, key)
 		return CacheCommandResponse{OK: true, Message: "value not found"}, true
 	}
-	value, ok := ht.slices.array[hval.Index].popRetain()
+	var value interface{}
+	var ok bool
+	if hval.Index >= 0 {
+		value, ok = ht.slices.array[hval.Index].popRetain()
+	} else {
+		value, ok = ht.slices.pop(hval.Index, true)
+	}
 	if !ok {
 		ht.recordReadLocked(false, key)
 		ht.cacheValueLocked(key, hval)
@@ -3143,7 +3172,10 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 	case DATAVALUE_TYPE_MAP:
 		return ht.maps.jsonString(hval.Index)
 	case DATAVALUE_TYPE_SLICE:
-		return jsonEncodedString(ht.slices.array[hval.Index].Slice())
+		if hval.Index >= 0 {
+			return jsonEncodedString(ht.slices.array[hval.Index].Slice())
+		}
+		return jsonEncodedString(ht.slices.values(hval.Index))
 	case DATAVALUE_TYPE_SET:
 		return jsonEncodedString(ht.sets.values(hval.Index))
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:

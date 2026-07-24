@@ -6,6 +6,12 @@ deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with
 stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
 O(1), and memory usage low without per-item node allocations.
+New empty, one-, and two-value slices use dedicated packed pools and promote
+once to the existing ring deque at the third value. Promoted keys remain
+generic to avoid conversion churn. The packed path cuts retained tiny-slice
+heap by up to 4.02x and eliminates steady push/pop allocation without changing
+wire, snapshot, or persistent formats; measurements are in
+[BENCHMARK.md](BENCHMARK.md#packed-small-slice-storage).
 Bloom filter values use packed bitsets plus double hashing for fast,
 low-memory membership checks without storing inserted items.
 Cuckoo filter values use compact fixed-size fingerprint buckets for fast,

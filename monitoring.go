@@ -2821,11 +2821,11 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		return int64(length), strconv.Itoa(length) + " fields"
 	case DATAVALUE_TYPE_SLICE:
-		if int(hval.Index) >= len(ht.slices.array) || hval.Index < 0 {
+		length, ok := ht.slices.length(hval.Index)
+		if !ok {
 			return 0, ""
 		}
-		value := ht.slices.array[hval.Index]
-		return int64(value.Len()), strconv.Itoa(value.Len()) + " items"
+		return int64(length), strconv.Itoa(length) + " items"
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		ref, ok := ht.dbrefs.Get(hval.Index)
 		if !ok {

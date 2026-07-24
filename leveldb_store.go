@@ -1210,7 +1210,7 @@ func (trie *HatTrie) levelDBHotValueBytesLocked(entry Entry) (int64, error) {
 	case DATAVALUE_TYPE_MAP:
 		return trie.maps.jsonSize(entry.Value.Index)
 	case DATAVALUE_TYPE_SLICE:
-		return jsonEncodedSize(trie.slices.array[entry.Value.Index].Slice())
+		return jsonEncodedSize(trie.slices.values(entry.Value.Index))
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		return 0, nil
 	case DATAVALUE_TYPE_SET:

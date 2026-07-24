@@ -955,6 +955,12 @@ func mapIndexReleased(ht *HatTrie, idx int32) bool {
 }
 
 func sliceIndexReleased(ht *HatTrie, idx int32) bool {
+	if packedIndex, twoValuePool, ok := decodePackedSliceIndex(idx); ok {
+		if twoValuePool {
+			return int(packedIndex) >= len(ht.slices.twoValues) || ht.slices.twoReusable.Has(packedIndex)
+		}
+		return int(packedIndex) >= len(ht.slices.oneValues) || ht.slices.oneReusable.Has(packedIndex)
+	}
 	return int(idx) >= len(ht.slices.array) || ht.slices.reusables.Has(idx)
 }
 
@@ -3179,7 +3185,7 @@ func TestCheckedSliceMutationsRejectUnsupportedValues(t *testing.T) {
 
 func TestPushSliceCheckedRejectsCapacityOverflowWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
-	ht.UpsertSlice("slice", Slice{"keep"})
+	ht.UpsertSlice("slice", Slice{"keep", "second", "third"})
 	hval := ht.Get("slice")
 	max := int(^uint(0) >> 1)
 	ht.slices.array[hval.Index].size = max
@@ -3188,7 +3194,7 @@ func TestPushSliceCheckedRejectsCapacityOverflowWithoutMutation(t *testing.T) {
 		t.Fatalf("PushSliceChecked(overflow) error = %v, want errDequeCapacityTooLarge", err)
 	}
 	got := ht.slices.array[hval.Index]
-	if got.size != max || len(got.values) != 1 || got.values[0] != "keep" {
+	if got.size != max || len(got.values) != 3 || got.values[0] != "keep" || got.values[1] != "second" || got.values[2] != "third" {
 		t.Fatalf("slice after rejected overflow = size %d values %#v, want unchanged sentinel state", got.size, got.values)
 	}
 }
@@ -3202,8 +3208,11 @@ func TestUpsertSliceReplacesExistingSliceAndClearsTTL(t *testing.T) {
 	}
 
 	ht.UpsertSlice("slice", Slice{"new"})
-	if got := ht.Get("slice"); !got.IsSlice() || got.Index != idx || got.HasTtl() {
-		t.Fatalf("slice value after UpsertSlice = %+v, want same slice index without TTL", got)
+	if got := ht.Get("slice"); !got.IsSlice() || got.HasTtl() {
+		t.Fatalf("slice value after UpsertSlice = %+v, want slice without TTL", got)
+	}
+	if !sliceIndexReleased(ht, idx) {
+		t.Fatalf("replaced two-value slice backing index %d was not released", idx)
 	}
 	if got := ht.GetSlice("slice"); !reflect.DeepEqual(got, Slice{"new"}) {
 		t.Fatalf("GetSlice(after UpsertSlice) = %#v, want new value", got)
