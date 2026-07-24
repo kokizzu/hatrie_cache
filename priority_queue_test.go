@@ -7,7 +7,7 @@ func TestPriorityQueueStringPushUsesTypedSlot(t *testing.T) {
 	if err := queue.PushStringChecked(7, "build"); err != nil {
 		t.Fatalf("PushStringChecked() error = %v", err)
 	}
-	if len(queue.items) != 1 || !queue.items[0].hasString || queue.items[0].stringValue != "build" || queue.items[0].Value != nil {
+	if len(queue.items) != 1 || !queue.items[0].hasStringValue() || queue.items[0].stringValue != "build" || queue.items[0].Value != nil {
 		t.Fatalf("stored item = %#v, want unboxed typed string", queue.items)
 	}
 	item, ok := queue.popItemRetain()

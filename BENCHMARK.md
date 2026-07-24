@@ -207,6 +207,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Retained journal catch-up](#journal-delta-first-recovery-benchmark) | Exact 10k snapshot: 0.092649 s; 25,709,960 heap B | 100 deltas: 0.002170 s; 163,918 heap B | 42.70x faster, 156.85x lower heap, 5.97x smaller wire | Snapshot remains required after journal compaction gaps |
 | Earlier | [Two-value small-set read](#collection-allocation-follow-up) | 155.5 ns; 48 B; 3 allocs | 54.46 ns; 32 B; 1 alloc | 2.86x faster, 1.50x lower heap, 3x fewer allocs | Promotes to a map at three entries |
 | Earlier | [Priority queue push+pop](#collection-allocation-follow-up) | 875.9 ns; 56 B; 3 allocs | 769.1 ns; 40 B; 2 allocs | 1.14x faster, 1.40x lower heap | Typed string fast path retains generic fallback |
+| Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
@@ -2371,6 +2372,56 @@ make run CMD='go test -run=NONE -bench=BenchmarkCommandFeature/RadixPrefix -benc
 The radix command allocation count falls from 20 to 1; the remaining
 allocation is the returned JSON string. Non-string or JSON-escaped radix values
 use the generic clone-and-encode path to preserve behavior.
+
+<a id="compact-priority-queue-items"></a>
+### Compact Priority-Queue Items
+
+The typed priority-queue string path previously stored `Value`, `stringValue`,
+and a `hasString` boolean in every heap item. On amd64 the trailing boolean
+forced the item from 48 to 56 bytes. Nonempty strings now use the nonempty
+`stringValue` field as their tag. Empty strings use one process-global
+pre-boxed empty-string interface, while generic nil and other values retain
+their prior `Value` representation. There is no per-cache or per-item marker
+allocation, sequence range change, or representation promotion.
+
+Tests were added before the layout change for nonempty and empty strings,
+generic nil, uncomparable nested maps, FIFO ties, deep-copy ownership, snapshot
+materialization, and the exact 48-byte item invariant. Existing snapshot,
+LevelDB, sequence-exhaustion, and command tests cover the surrounding formats
+and API behavior.
+
+The retained-memory fixture builds one 100,000-item string queue from
+preallocated inputs. Seven A/B runs alternate detached baseline `2436f19` and
+candidate test binaries pinned to one CPU. Heap and allocation counts cover the
+complete timed benchmark operation.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkPriorityQueueItemLayout100k -benchtime=1x -count=7 -benchmem -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkPriorityQueueTagOperations -benchtime=500ms -count=7 -benchmem -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/PriorityQueuePushPop -benchtime=1000000x -count=7 -benchmem -cpu=1'
+```
+
+| 100k-item layout | Baseline | Final | Improvement |
+| --- | ---: | ---: | ---: |
+| Item struct | 56 B | 48 B | 1.17x smaller |
+| Retained heap/item | 56.06 B | 48.04 B | 1.17x lower |
+| Timed cumulative heap | 8,003,616 B | 7,200,800 B | 1.11x lower |
+| Timed allocations | 3 | 3 | Unchanged |
+| Median build time/item | 135.2 ns | 119.2 ns | 1.13x faster |
+
+| Operation, seven-run median | Baseline | Final | Improvement |
+| --- | ---: | ---: | ---: |
+| Nonempty string push/pop | 30.56 ns; 0 B; 0 allocs | 24.03 ns; 0 B; 0 allocs | 1.27x faster |
+| Empty string push/pop | 30.74 ns; 0 B; 0 allocs | 24.07 ns; 0 B; 0 allocs | 1.28x faster |
+| Generic value dispatch | 1.623 ns; 0 B; 0 allocs | 1.485 ns; 0 B; 0 allocs | 1.09x faster |
+| Command push/pop | 641.1 ns; 40 B; 2 allocs | 612.1 ns; 40 B; 2 allocs | 1.05x faster; heap and allocs unchanged |
+
+The first candidate used a private marker in `Value` for every string. It
+reached the same 48-byte item size, but generic dispatch regressed from 1.534
+to 1.961 ns because it paid an interface-marker comparison. That variant was
+discarded. The retained design dispatches on `stringValue` length and has no
+generic-path marker check. Wire, snapshot, journal, and persistent storage
+formats remain unchanged.
 
 A later fast-path pass added exact numeric and plain-string command routes for
 roaring/sparse adds, HyperLogLog add/count, Top-K add/get, quantile add/query,

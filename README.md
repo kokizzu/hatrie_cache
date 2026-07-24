@@ -5,7 +5,10 @@ Slice/stack/queue values are stored behind compact HAT-trie indexes with a ring
 deque backing store, so push/pop/shift stay O(1) and removed elements do not
 retain old object references. Priority queue values use a flat binary heap with
 stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
-O(1), and memory usage low without per-item node allocations.
+O(1), and memory usage low without per-item node allocations. Its compact
+tag-free string slot uses 1.17x less retained item memory while preserving
+allocation-free string churn; measurements are in
+[BENCHMARK.md](BENCHMARK.md#compact-priority-queue-items).
 New empty, one-, and two-value slices use dedicated packed pools and promote
 once to the existing ring deque at the third value. Promoted keys remain
 generic to avoid conversion churn. The packed path cuts retained tiny-slice

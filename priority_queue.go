@@ -21,8 +21,9 @@ type priorityQueueItem struct {
 	Sequence    uint64      `json:"sequence"`
 	Value       interface{} `json:"value"`
 	stringValue string
-	hasString   bool
 }
+
+var priorityQueueEmptyStringValue interface{} = ""
 
 type priorityQueueData struct {
 	items        []priorityQueueItem
@@ -144,12 +145,7 @@ func (pq *priorityQueueData) PushStringChecked(priority int64, value string) err
 	if err := pq.ensureSequenceCapacity(1); err != nil {
 		return err
 	}
-	item := priorityQueueItem{
-		Priority:    priority,
-		Sequence:    pq.nextSequence,
-		stringValue: value,
-		hasString:   true,
-	}
+	item := newPriorityQueueStringItem(priority, pq.nextSequence, value)
 	pq.nextSequence++
 	pq.items = append(pq.items, item)
 	pq.siftUp(len(pq.items) - 1)
@@ -277,7 +273,6 @@ func (pq *priorityQueueData) SnapshotItems() []priorityQueueItem {
 		item, _ := copyData.popItem()
 		item.Value = cloneValue(item.value())
 		item.stringValue = ""
-		item.hasString = false
 		out = append(out, item)
 	}
 	return out
@@ -345,22 +340,39 @@ func (item priorityQueueItem) PriorityItem() PriorityItem {
 
 func newPriorityQueueItem(priority int64, sequence uint64, value interface{}) priorityQueueItem {
 	if text, ok := value.(string); ok {
-		return priorityQueueItem{Priority: priority, Sequence: sequence, stringValue: text, hasString: true}
+		return newPriorityQueueStringItem(priority, sequence, text)
 	}
 	return priorityQueueItem{Priority: priority, Sequence: sequence, Value: cloneValue(value)}
 }
 
+func newPriorityQueueStringItem(priority int64, sequence uint64, value string) priorityQueueItem {
+	item := priorityQueueItem{Priority: priority, Sequence: sequence}
+	if value == "" {
+		item.Value = priorityQueueEmptyStringValue
+	} else {
+		item.stringValue = value
+	}
+	return item
+}
+
 func (item priorityQueueItem) value() interface{} {
-	if item.hasString {
+	if item.stringValue != "" {
 		return item.stringValue
 	}
 	return item.Value
 }
 
+func (item priorityQueueItem) hasStringValue() bool {
+	if item.stringValue != "" {
+		return true
+	}
+	text, ok := item.Value.(string)
+	return ok && text == ""
+}
+
 func (item *priorityQueueItem) clearValue() {
 	item.Value = nil
 	item.stringValue = ""
-	item.hasString = false
 }
 
 // PriorityQueueStorage stores priority queue values outside the trie.

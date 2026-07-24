@@ -331,7 +331,6 @@ func prepareSnapshotPriorityQueueItemsBinary(items []priorityQueueItem) ([]prior
 		}
 		prepared[idx].Value = value
 		prepared[idx].stringValue = ""
-		prepared[idx].hasString = false
 	}
 	return prepared, nil
 }
