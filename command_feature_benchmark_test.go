@@ -179,6 +179,29 @@ func BenchmarkCommandFeature(b *testing.B) {
 	}
 }
 
+func BenchmarkXorCommandBuild64Path(b *testing.B) {
+	for _, benchmark := range []struct {
+		name       string
+		addCommand string
+	}{
+		{name: "Generic", addCommand: " ADDXF"},
+		{name: "PlainJSONString", addCommand: "ADDXF"},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				ht := CreateHatTrie()
+				benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "CREATEXF", Key: "xor:key", Value: "64"})
+				for item := 0; item < 64; item++ {
+					benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: benchmark.addCommand, Key: "xor:key", Value: "value-" + strconv.Itoa(item)})
+				}
+				benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "BUILDXF", Key: "xor:key"})
+				ht.Destroy()
+			}
+		})
+	}
+}
+
 func benchmarkExecuteCommand(b *testing.B, ht *HatTrie, request CacheCommandRequest) CacheCommandResponse {
 	b.Helper()
 	response := ht.ExecuteCommand(request)

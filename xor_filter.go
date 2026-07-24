@@ -245,6 +245,28 @@ func (filter *xorFilterData) AddOne(value interface{}, values ...interface{}) (i
 	return len(pending), nil
 }
 
+func (filter *xorFilterData) addJSONString(value string) (bool, error) {
+	if filter == nil {
+		return false, nil
+	}
+	if filter.built {
+		return false, errors.New("hatriecache: xor filter is already built")
+	}
+	key := xorFilterJSONStringKey(value)
+	if _, ok := filter.staged[key]; ok {
+		return false, nil
+	}
+	if uint64(len(filter.staged)) >= maxXorFilterItems {
+		return false, errors.New("hatriecache: xor filter staged item count is too large")
+	}
+	if filter.staged == nil {
+		filter.staged = make(map[string]interface{}, 1)
+	}
+	filter.staged[key] = value
+	filter.items = uint64(len(filter.staged))
+	return true, nil
+}
+
 func (filter *xorFilterData) Build() error {
 	if filter == nil {
 		return nil
@@ -311,6 +333,24 @@ func (filter xorFilterData) containsKey(key string) (bool, bool) {
 		return false, false
 	}
 	hash := xorFilterHashString(key, filter.seed)
+	fingerprint := xorFilterFingerprint(hash)
+	for _, index := range xorFilterIndexes(hash, filter.blockLength) {
+		fingerprint ^= filter.fingerprints[index]
+	}
+	return fingerprint == 0, true
+}
+
+func (filter xorFilterData) containsJSONString(value string) (bool, bool) {
+	if !filter.built {
+		return false, false
+	}
+	if filter.blockLength == 0 || len(filter.fingerprints) == 0 {
+		return false, true
+	}
+	if len(filter.fingerprints) != int(filter.blockLength)*3 {
+		return false, false
+	}
+	hash := xorFilterHashJSONString(value, filter.seed)
 	fingerprint := xorFilterFingerprint(hash)
 	for _, index := range xorFilterIndexes(hash, filter.blockLength) {
 		fingerprint ^= filter.fingerprints[index]
@@ -477,6 +517,15 @@ func xorFilterHashString(key string, seed uint64) uint64 {
 	return hash
 }
 
+func xorFilterHashJSONString(value string, seed uint64) uint64 {
+	hash := bloomFilterFNV64aJSONString(value)
+	hash = splitmix64(hash ^ seed)
+	if hash == 0 {
+		return xorFilterSeedBase
+	}
+	return hash
+}
+
 func xorFilterIndexes(hash uint64, blockLength uint32) [3]uint32 {
 	second := splitmix64(hash)
 	third := splitmix64(second)
@@ -501,6 +550,10 @@ func xorFilterItemKey(value interface{}) (string, error) {
 		return "", fmt.Errorf("hatriecache: unsupported xor filter value: %w", err)
 	}
 	return string(data), nil
+}
+
+func xorFilterJSONStringKey(value string) string {
+	return `"` + value + `"`
 }
 
 // XorFilterStorage stores XOR filter values outside the trie.

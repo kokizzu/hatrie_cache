@@ -4,9 +4,70 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestXorFilterPlainJSONStringFastPathMatchesGeneric(t *testing.T) {
+	values := []string{"", "alpha", "with space", "punctuation-_.:/"}
+	seeds := []uint64{0, 1, xorFilterSeedBase, ^uint64(0)}
+
+	generic, err := newXorFilterData(uint64(len(values)))
+	if err != nil {
+		t.Fatalf("newXorFilterData(generic) error = %v", err)
+	}
+	fast, err := newXorFilterData(uint64(len(values)))
+	if err != nil {
+		t.Fatalf("newXorFilterData(fast) error = %v", err)
+	}
+	for _, value := range values {
+		key, err := xorFilterItemKey(value)
+		if err != nil {
+			t.Fatalf("xorFilterItemKey(%q) error = %v", value, err)
+		}
+		if got := xorFilterJSONStringKey(value); got != key {
+			t.Fatalf("xorFilterJSONStringKey(%q) = %q, want %q", value, got, key)
+		}
+		for _, seed := range seeds {
+			if got, want := xorFilterHashJSONString(value, seed), xorFilterHashString(key, seed); got != want {
+				t.Fatalf("xorFilterHashJSONString(%q, %d) = %d, want %d", value, seed, got, want)
+			}
+		}
+		if _, err := generic.AddOne(value); err != nil {
+			t.Fatalf("generic AddOne(%q) error = %v", value, err)
+		}
+		added, err := fast.addJSONString(value)
+		if err != nil || !added {
+			t.Fatalf("fast addJSONString(%q) = %v/%v, want true/nil", value, added, err)
+		}
+	}
+	if added, err := fast.addJSONString(values[0]); err != nil || added {
+		t.Fatalf("duplicate addJSONString() = %v/%v, want false/nil", added, err)
+	}
+	if got, want := fast.Snapshot(), generic.Snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pending fast snapshot = %#v, want %#v", got, want)
+	}
+	if err := generic.Build(); err != nil {
+		t.Fatalf("generic Build() error = %v", err)
+	}
+	if err := fast.Build(); err != nil {
+		t.Fatalf("fast Build() error = %v", err)
+	}
+	if got, want := fast.Snapshot(), generic.Snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("built fast snapshot = %#v, want %#v", got, want)
+	}
+	for _, value := range values {
+		gotHit, gotQueryable := fast.containsJSONString(value)
+		wantHit, wantQueryable, err := generic.ContainsChecked(value)
+		if err != nil {
+			t.Fatalf("ContainsChecked(%q) error = %v", value, err)
+		}
+		if gotHit != wantHit || gotQueryable != wantQueryable {
+			t.Fatalf("containsJSONString(%q) = %v/%v, want %v/%v", value, gotHit, gotQueryable, wantHit, wantQueryable)
+		}
+	}
+}
 
 func TestXorFilterBuildAndContains(t *testing.T) {
 	filter, err := newXorFilterData(4)

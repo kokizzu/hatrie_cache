@@ -2538,6 +2538,47 @@ allocation to 18,432 B; the fixture rose to 18,472,960 B, or 12.47% more heap.
 That layout was discarded. The retained header layout leaves register
 allocations exact and has no cost for serialized or transferred data.
 
+<a id="xor-filter-scalar-fast-path"></a>
+### XOR Filter Scalar Fast Path
+
+Plain-string `ADDXF` and `HASXF` commands previously materialized canonical JSON
+keys through the generic encoder. `ADDXF` also allocated a temporary one-item
+slice and duplicate-detection map. `HASXF` performed a metadata lookup followed
+by a second locked membership lookup. Exact scalar commands now hash canonical
+JSON string bytes directly; staging constructs the same retained key without
+the transient batch structures, and lookup performs both checks under one lock.
+
+Tests were added before the implementation. They compare canonical keys and
+hashes over multiple seeds, exact and generic command responses, aliases,
+missing and unbuilt filters, generic fallbacks, cache read/write counters, and
+pending and built snapshots. Escaped, Unicode, empty, and batch values continue
+through the generic encoder. Snapshot, storage, journal, replication, and wire
+formats are unchanged.
+
+The `HASXF` rows are seven fixed one-million-operation runs before and after the
+change. The lifecycle A/B runs both paths in the same binary for 10,000 fixed
+iterations, repeated three times. Its generic control uses a leading-space
+uppercase command, which bypasses exact dispatch and normalizes without the
+extra allocation caused by lowercase conversion. Each lifecycle operation
+creates a filter, stages 64 distinct scalar strings, builds it, and destroys the
+trie.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/XorHas -benchmem -benchtime=1000000x -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorCommandBuild64Path -benchmem -benchtime=10000x -count=3 -cpu=1'
+```
+
+| Operation, median | Generic baseline | Scalar fast path | Improvement |
+| --- | ---: | ---: | ---: |
+| Built-filter `HASXF` | 557.7 ns; 64 B; 4 allocs | 286.0 ns; 0 B; 0 allocs | 1.95x faster; all transient heap removed |
+| Create + 64 `ADDXF` + build | 253.7 us; 22,601 B; 370 allocs | 232.9 us; 20,553 B; 242 allocs | 1.09x faster; 1.10x lower heap; 1.53x fewer allocations |
+
+`ADDXF` necessarily retains one canonical key and value per distinct staged
+item, exactly as before. The optimization removes 2,048 cumulative bytes and
+128 allocations from the 64-item lifecycle without adding fields, background
+work, configuration, or retained state. Plain-string filter contents and built
+fingerprints remain byte-identical to the generic path.
+
 The reservoir sample add path now has a plain-string fast path that hashes the
 JSON string representation directly and only boxes retained values. The focused
 1,000,000-iteration row was:

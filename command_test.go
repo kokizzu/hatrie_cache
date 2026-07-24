@@ -1185,6 +1185,113 @@ func TestExecuteCommandXorFilterOperations(t *testing.T) {
 	}
 }
 
+func TestExecuteExactFastCommandXorFilterAliasesAndFallback(t *testing.T) {
+	for _, command := range []string{"ADDXF", "XFADD"} {
+		t.Run(command, func(t *testing.T) {
+			ht := newTestTrie(t)
+			response, ok := ht.executeExactFastCommand(CacheCommandRequest{Command: command, Key: "seen", Value: "alpha"})
+			if !ok || !response.OK || response.Value != "1" {
+				t.Fatalf("executeExactFastCommand(%s) = %#v/%v, want staged one", command, response, ok)
+			}
+		})
+	}
+
+	for _, command := range []string{"HASXF", "XFHAS", "XFEXISTS"} {
+		t.Run(command, func(t *testing.T) {
+			ht := newTestTrie(t)
+			if _, err := ht.AddXorFilterChecked("seen", "alpha"); err != nil {
+				t.Fatalf("AddXorFilterChecked() error = %v", err)
+			}
+			if _, ok, err := ht.BuildXorFilter("seen"); err != nil || !ok {
+				t.Fatalf("BuildXorFilter() = %v/%v, want ok", ok, err)
+			}
+			response, ok := ht.executeExactFastCommand(CacheCommandRequest{Command: command, Key: "seen", Value: "alpha"})
+			if !ok || !response.OK || response.Value != "1" {
+				t.Fatalf("executeExactFastCommand(%s) = %#v/%v, want hit", command, response, ok)
+			}
+		})
+	}
+
+	for _, request := range []CacheCommandRequest{
+		{Command: "ADDXF", Key: "seen", Value: ""},
+		{Command: "ADDXF", Key: "seen", Value: `quote"value`},
+		{Command: "ADDXF", Key: "seen", Value: `slash\value`},
+		{Command: "ADDXF", Key: "seen", Value: "unicode-value" + string(rune(0x2603))},
+		{Command: "ADDXF", Key: "seen", Values: Slice{"alpha"}},
+		{Command: "HASXF", Key: "seen", Value: ""},
+		{Command: "HASXF", Key: "seen", Value: `quote"value`},
+		{Command: "HASXF", Key: "seen", Value: `slash\value`},
+		{Command: "HASXF", Key: "seen", Value: "unicode-value" + string(rune(0x2603))},
+		{Command: "HASXF", Key: "seen", Values: Slice{"alpha"}},
+	} {
+		if response, ok := newTestTrie(t).executeExactFastCommand(request); ok {
+			t.Fatalf("executeExactFastCommand(%#v) = %#v/true, want generic fallback", request, response)
+		}
+	}
+}
+
+func TestExecuteCommandXorFilterFastPathMatchesGenericSnapshots(t *testing.T) {
+	fast := newTestTrie(t)
+	generic := newTestTrie(t)
+	for _, value := range []string{"alpha", "beta", "alpha"} {
+		got := fast.ExecuteCommand(CacheCommandRequest{Command: "ADDXF", Key: "seen", Value: value})
+		want := generic.ExecuteCommand(CacheCommandRequest{Command: "addxf", Key: "seen", Value: value})
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("ADDXF(%q) fast response = %#v, generic response = %#v", value, got, want)
+		}
+	}
+	fastIndex := fast.Get("seen").Index
+	genericIndex := generic.Get("seen").Index
+	if got, want := fast.xorFilters.array[fastIndex].Snapshot(), generic.xorFilters.array[genericIndex].Snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pending fast snapshot = %#v, generic snapshot = %#v", got, want)
+	}
+	if got, want := fast.ExecuteCommand(CacheCommandRequest{Command: "BUILDXF", Key: "seen"}), generic.ExecuteCommand(CacheCommandRequest{Command: "buildxf", Key: "seen"}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("BUILDXF fast response = %#v, generic response = %#v", got, want)
+	}
+	if got, want := fast.xorFilters.array[fastIndex].Snapshot(), generic.xorFilters.array[genericIndex].Snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("built fast snapshot = %#v, generic snapshot = %#v", got, want)
+	}
+	for _, value := range []string{"alpha", xorFilterMissingValue(t, generic.xorFilters.array[genericIndex])} {
+		got := fast.ExecuteCommand(CacheCommandRequest{Command: "HASXF", Key: "seen", Value: value})
+		want := generic.ExecuteCommand(CacheCommandRequest{Command: "hasxf", Key: "seen", Value: value})
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("HASXF(%q) fast response = %#v, generic response = %#v", value, got, want)
+		}
+	}
+	gotStats, wantStats := fast.Stats(), generic.Stats()
+	if gotStats.Reads != wantStats.Reads || gotStats.Hits != wantStats.Hits || gotStats.Misses != wantStats.Misses || gotStats.Writes != wantStats.Writes {
+		t.Fatalf("fast stats = %#v, generic stats = %#v", gotStats, wantStats)
+	}
+
+	for _, state := range []struct {
+		name  string
+		setup func(*HatTrie)
+	}{
+		{name: "missing", setup: func(*HatTrie) {}},
+		{name: "unbuilt", setup: func(ht *HatTrie) {
+			if _, err := ht.AddXorFilterChecked("state", "alpha"); err != nil {
+				t.Fatalf("AddXorFilterChecked(state) error = %v", err)
+			}
+		}},
+	} {
+		t.Run(state.name, func(t *testing.T) {
+			fastState := newTestTrie(t)
+			genericState := newTestTrie(t)
+			state.setup(fastState)
+			state.setup(genericState)
+			got := fastState.ExecuteCommand(CacheCommandRequest{Command: "HASXF", Key: "state", Value: "alpha"})
+			want := genericState.ExecuteCommand(CacheCommandRequest{Command: "hasxf", Key: "state", Value: "alpha"})
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("fast response = %#v, generic response = %#v", got, want)
+			}
+			gotStats, wantStats := fastState.Stats(), genericState.Stats()
+			if gotStats.Reads != wantStats.Reads || gotStats.Hits != wantStats.Hits || gotStats.Misses != wantStats.Misses || gotStats.Writes != wantStats.Writes {
+				t.Fatalf("fast stats = %#v, generic stats = %#v", gotStats, wantStats)
+			}
+		})
+	}
+}
+
 func TestExecuteCommandXorFilterRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDXF", Key: "seen", Value: "alpha"}); !got.OK {
@@ -2537,6 +2644,22 @@ func TestExecuteExactFastCommandCoversCompactNumericRows(t *testing.T) {
 		setup   []CacheCommandRequest
 		request CacheCommandRequest
 	}{
+		{
+			name: "xor add",
+			setup: []CacheCommandRequest{
+				{Command: "CREATEXF", Key: "xor:key", Value: "8"},
+			},
+			request: CacheCommandRequest{Command: "ADDXF", Key: "xor:key", Value: "value"},
+		},
+		{
+			name: "xor has",
+			setup: []CacheCommandRequest{
+				{Command: "CREATEXF", Key: "xor:key", Value: "8"},
+				{Command: "ADDXF", Key: "xor:key", Value: "value"},
+				{Command: "BUILDXF", Key: "xor:key"},
+			},
+			request: CacheCommandRequest{Command: "HASXF", Key: "xor:key", Value: "value"},
+		},
 		{
 			name: "roaring add",
 			setup: []CacheCommandRequest{

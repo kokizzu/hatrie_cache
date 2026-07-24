@@ -1410,6 +1410,16 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastDeleteCuckooFilterCommand(key, request.Value)
+	case "ADDXF", "XFADD":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastAddXorFilterCommand(key, request.Value)
+	case "HASXF", "XFHAS", "XFEXISTS":
+		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+			return CacheCommandResponse{}, false
+		}
+		return ht.executeFastHasXorFilterCommand(key, request.Value)
 	case "INCRCMS", "ADDCMS", "CMSADD":
 		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
 			return CacheCommandResponse{}, false
@@ -2072,6 +2082,64 @@ func (ht *HatTrie) executeFastDeleteCuckooFilterCommand(key string, value string
 		ht.cacheValueLocked(key, hval)
 	}
 	return CacheCommandResponse{OK: true, Message: "removed cuckoo filter values", Value: strconv.Itoa(deleted)}, true
+}
+
+func (ht *HatTrie) executeFastAddXorFilterCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsXorFilter() {
+		added, err := ht.xorFilters.array[hval.Index].addJSONString(value)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		*rawPtr = hval.toValue()
+		if added {
+			ht.recordWriteLocked(key)
+		}
+		return CacheCommandResponse{OK: true, Message: "staged xor filter values", Value: strconv.Itoa(boolInt(added))}, true
+	}
+
+	data := newDefaultXorFilterData()
+	added, err := data.addJSONString(value)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.xorFilters.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_XOR_FILTER}.toValue()
+	ht.recordWriteLocked(key)
+	return CacheCommandResponse{OK: true, Message: "staged xor filter values", Value: strconv.Itoa(boolInt(added))}, true
+}
+
+func (ht *HatTrie) executeFastHasXorFilterCommand(key string, value string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return commandError(err.Error()), true
+	}
+	if !hval.IsXorFilter() {
+		ht.recordReadLocked(false, key)
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	ht.recordReadLocked(true, key)
+	hit, queryable := ht.xorFilters.array[hval.Index].containsJSONString(value)
+	if !queryable {
+		return commandError("xor filter is not built"), true
+	}
+	ht.recordReadLocked(hit, key)
+	return commandBool01Response(hit), true
 }
 
 func (ht *HatTrie) executeFastIncrementCountMinSketchCommand(key string, value string, count uint32) (CacheCommandResponse, bool) {
