@@ -208,6 +208,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Two-value small-set read](#collection-allocation-follow-up) | 155.5 ns; 48 B; 3 allocs | 54.46 ns; 32 B; 1 alloc | 2.86x faster, 1.50x lower heap, 3x fewer allocs | Promotes to a map at three entries |
 | Earlier | [Priority queue push+pop](#collection-allocation-follow-up) | 875.9 ns; 56 B; 3 allocs | 769.1 ns; 40 B; 2 allocs | 1.14x faster, 1.40x lower heap | Typed string fast path retains generic fallback |
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
+| Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
@@ -2422,6 +2423,34 @@ to 1.961 ns because it paid an interface-marker comparison. That variant was
 discarded. The retained design dispatches on `stringValue` length and has no
 generic-path marker check. Wire, snapshot, journal, and persistent storage
 formats remain unchanged.
+
+<a id="radix-node-tag-compaction-rollback"></a>
+### Radix-Node Tag Compaction Rollback
+
+A test-first candidate removed the radix node's `hasValue` field and represented
+a stored `nil` with one process-global private marker. It preserved split,
+merge, lookup, deletion, enumeration, snapshot, and missing-key behavior and
+reduced the amd64 node struct from 64 to 56 bytes. The 100,000-key fixture held
+111,112 nodes; retained memory fell from 115.2 to 102.4 B/node and cumulative
+heap fell from 23,466,496 to 20,799,856 B with the same 55,556 allocations.
+
+Pinned, alternating seven-run A/B measurements against commit `6e008d1` found
+that the marker check cost more on the dominant read path than the memory saved.
+
+| Operation, seven-run median | Baseline | Compact candidate | Result |
+| --- | ---: | ---: | ---: |
+| Build 100k keys | 235.9 ns/key | 226.7 ns/key | 1.04x faster |
+| Get string | 11.82 ns | 13.03 ns | 1.10x slower |
+| Get stored `nil` | 9.953 ns | 11.12 ns | 1.12x slower |
+| Get missing key | 7.092 ns | 8.225 ns | 1.16x slower |
+| Retained heap/node | 115.2 B | 102.4 B | 1.125x lower |
+| Cumulative heap | 23,466,496 B | 20,799,856 B | 1.128x lower |
+| Allocations | 55,556 | 55,556 | Unchanged |
+
+Both interface equality and private type-assertion marker variants failed the
+read-throughput gate. The candidate and its marker were removed, restoring the
+explicit presence bit and all baseline runtime characteristics. This rollback
+changes no wire, snapshot, journal, or persistent storage format.
 
 A later fast-path pass added exact numeric and plain-string command routes for
 roaring/sparse adds, HyperLogLog add/count, Top-K add/get, quantile add/query,
