@@ -2833,11 +2833,11 @@ func (ht *HatTrie) monitoringPreviewLocked(hval HatValue) (int64, string) {
 		}
 		return 0, "cold " + ref.Type + " value"
 	case DATAVALUE_TYPE_SET:
-		if int(hval.Index) >= len(ht.sets.array) || hval.Index < 0 {
+		length, ok := ht.sets.length(hval.Index)
+		if !ok {
 			return 0, ""
 		}
-		value := ht.sets.array[hval.Index]
-		return int64(value.Len()), strconv.Itoa(value.Len()) + " members"
+		return int64(length), strconv.Itoa(length) + " members"
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		if int(hval.Index) >= len(ht.priorityQueues.array) || hval.Index < 0 {
 			return 0, ""

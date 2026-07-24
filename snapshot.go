@@ -1292,7 +1292,7 @@ func (ht *HatTrie) snapshotEntryForStoreLockedWithStats(entry Entry, currentStor
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		return ht.levelDBReferenceSnapshotEntryForStoreLocked(entry.Key, entry.Value, currentStore, currentDB)
 	case DATAVALUE_TYPE_SET:
-		out.Set = ht.sets.array[entry.Value.Index].Values()
+		out.Set = ht.sets.values(entry.Value.Index)
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		out.PriorityQueue = ht.priorityQueues.array[entry.Value.Index].SnapshotItems()
 	case DATAVALUE_TYPE_BLOOM_FILTER:
@@ -1928,7 +1928,7 @@ func (ht *HatTrie) applySnapshotOperationAtLocked(operation snapshotOperation, n
 		idx := ht.slices.Add(entry.Slice)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SLICE}
 	case "set":
-		idx := ht.sets.Add(entry.Set)
+		idx := ht.sets.addAdaptive(entry.Set)
 		hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}
 	case "priority_queue":
 		idx := ht.priorityQueues.AddItems(entry.PriorityQueue)

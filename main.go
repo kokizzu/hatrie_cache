@@ -2460,10 +2460,66 @@ func (set *setData) compactIfSparse() {
 	set.deleted = 0
 }
 
-// SetStorage stores set values outside the trie.
+type packedOneStringSet struct {
+	value interface{}
+}
+
+type packedTwoStringSet struct {
+	values [2]interface{}
+}
+
+type packedStringSetValue struct {
+	values [2]interface{}
+	length uint8
+}
+
+func packedStringSetFromValues(values Set) (packedStringSetValue, bool) {
+	if len(values) > 2 {
+		return packedStringSetValue{}, false
+	}
+	var packed packedStringSetValue
+	for _, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			return packedStringSetValue{}, false
+		}
+		if (packed.length > 0 && packed.values[0].(string) == text) || (packed.length > 1 && packed.values[1].(string) == text) {
+			continue
+		}
+		if packed.length == 2 {
+			return packedStringSetValue{}, false
+		}
+		packed.values[packed.length] = value
+		packed.length++
+	}
+	return packed, true
+}
+
+func encodePackedStringSetIndex(index int32, twoValuePool bool) int32 {
+	payload := uint32(index) << 1
+	if twoValuePool {
+		payload |= 1
+	}
+	return int32(^payload)
+}
+
+func decodePackedStringSetIndex(index int32) (poolIndex int32, twoValuePool bool, ok bool) {
+	if index >= 0 {
+		return 0, false, false
+	}
+	payload := ^uint32(index)
+	return int32(payload >> 1), payload&1 != 0, true
+}
+
+// SetStorage stores set values outside the trie. One- and two-value plain
+// string sets use packed pools selected by private negative indexes.
 type SetStorage struct {
-	array     []setData
-	reusables reusableIndexes
+	array       []setData
+	reusables   reusableIndexes
+	oneStrings  []packedOneStringSet
+	oneReusable reusableIndexes
+	twoStrings  []packedTwoStringSet
+	twoReusable reusableIndexes
 }
 
 func CreateSetStorage() *SetStorage {
@@ -2527,13 +2583,270 @@ func (ss *SetStorage) AddData(value setData) int32 {
 	return ss.AppendData(value)
 }
 
+func (ss *SetStorage) addAdaptive(value Set) int32 {
+	if packed, ok := packedStringSetFromValues(value); ok {
+		return ss.addPacked(packed)
+	}
+	return ss.Add(value)
+}
+
+func (ss *SetStorage) putPacked(idx int32, value packedStringSetValue) int32 {
+	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
+	wantTwo := value.length == 2
+	if packed && twoValuePool == wantTwo {
+		if wantTwo {
+			ss.twoStrings[poolIndex] = packedTwoStringSet{values: value.values}
+		} else {
+			ss.oneStrings[poolIndex] = packedOneStringSet{value: value.values[0]}
+		}
+		return idx
+	}
+	ss.Del(idx)
+	return ss.addPacked(value)
+}
+
+func (ss *SetStorage) putDataAdaptive(idx int32, value setData) int32 {
+	if _, _, packed := decodePackedStringSetIndex(idx); packed {
+		ss.Del(idx)
+		return ss.AddData(value)
+	}
+	ss.PutData(idx, value)
+	return idx
+}
+
+func (ss *SetStorage) addPacked(value packedStringSetValue) int32 {
+	if value.length <= 1 {
+		data := packedOneStringSet{value: value.values[0]}
+		if idx, ok := ss.oneReusable.Take(); ok {
+			ss.oneStrings[idx] = data
+			return encodePackedStringSetIndex(idx, false)
+		}
+		ss.oneStrings = append(ss.oneStrings, data)
+		return encodePackedStringSetIndex(int32(len(ss.oneStrings)-1), false)
+	}
+	data := packedTwoStringSet{values: value.values}
+	if idx, ok := ss.twoReusable.Take(); ok {
+		ss.twoStrings[idx] = data
+		return encodePackedStringSetIndex(idx, true)
+	}
+	ss.twoStrings = append(ss.twoStrings, data)
+	return encodePackedStringSetIndex(int32(len(ss.twoStrings)-1), true)
+}
+
+func (ss *SetStorage) addPlainString(idx int32, value string) (int32, int) {
+	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
+	if !packed {
+		return idx, ss.array[idx].addPlainString(value)
+	}
+	if !twoValuePool {
+		data := &ss.oneStrings[poolIndex]
+		if data.value != nil && data.value.(string) == value {
+			return idx, 0
+		}
+		if data.value == nil {
+			data.value = value
+			return idx, 1
+		}
+		next := packedStringSetValue{values: [2]interface{}{data.value, value}, length: 2}
+		nextIndex := ss.addPacked(next)
+		ss.delPacked(poolIndex, false)
+		return nextIndex, 1
+	}
+
+	data := &ss.twoStrings[poolIndex]
+	for valueIndex := range data.values {
+		if data.values[valueIndex] != nil && data.values[valueIndex].(string) == value {
+			return idx, 0
+		}
+	}
+	if data.values[0] == nil {
+		data.values[0] = value
+		return idx, 1
+	}
+	if data.values[1] == nil {
+		data.values[1] = value
+		return idx, 1
+	}
+	promoted := setDataFromPlainStrings(data.values[0], data.values[1], value)
+	nextIndex := ss.AddData(promoted)
+	ss.delPacked(poolIndex, true)
+	return nextIndex, 1
+}
+
+func (ss *SetStorage) addGeneric(idx int32, keys []string, value interface{}, values ...interface{}) (int32, int) {
+	if _, _, packed := decodePackedStringSetIndex(idx); !packed {
+		return idx, ss.array[idx].addOneWithKeys(keys, value, values...)
+	}
+	data := ss.packedData(idx)
+	added := data.addOneWithKeys(keys, value, values...)
+	nextIndex := ss.AddData(data)
+	ss.Del(idx)
+	return nextIndex, added
+}
+
+func (ss *SetStorage) removePlainString(idx int32, value string) int {
+	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
+	if !packed {
+		return ss.array[idx].removeKey(jsonPlainStringKey(value))
+	}
+	if !twoValuePool {
+		data := &ss.oneStrings[poolIndex]
+		if data.value == nil || data.value.(string) != value {
+			return 0
+		}
+		data.value = nil
+		return 1
+	}
+	data := &ss.twoStrings[poolIndex]
+	for valueIndex := range data.values {
+		if data.values[valueIndex] == nil || data.values[valueIndex].(string) != value {
+			continue
+		}
+		if valueIndex == 0 {
+			data.values[0] = data.values[1]
+		}
+		data.values[1] = nil
+		return 1
+	}
+	return 0
+}
+
+func (ss *SetStorage) removeKeys(idx int32, keys []string) int {
+	if _, _, packed := decodePackedStringSetIndex(idx); packed {
+		return 0
+	}
+	return ss.array[idx].removeKeys(keys)
+}
+
+func (ss *SetStorage) hasPlainString(idx int32, value string) bool {
+	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
+	if !packed {
+		return ss.array[idx].hasPlainString(value)
+	}
+	if !twoValuePool {
+		data := ss.oneStrings[poolIndex]
+		return data.value != nil && data.value.(string) == value
+	}
+	data := ss.twoStrings[poolIndex]
+	return (data.values[0] != nil && data.values[0].(string) == value) || (data.values[1] != nil && data.values[1].(string) == value)
+}
+
+func (ss *SetStorage) hasKey(idx int32, key string) bool {
+	if _, _, packed := decodePackedStringSetIndex(idx); packed {
+		return false
+	}
+	return ss.array[idx].hasKey(key)
+}
+
+func (ss *SetStorage) values(idx int32) Set {
+	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
+	if !packed {
+		return ss.array[idx].Values()
+	}
+	if !twoValuePool {
+		data := ss.oneStrings[poolIndex]
+		if data.value == nil {
+			return make(Set, 0)
+		}
+		return Set{data.value}
+	}
+	data := ss.twoStrings[poolIndex]
+	if data.values[0] == nil {
+		return make(Set, 0)
+	}
+	if data.values[1] == nil {
+		return Set{data.values[0]}
+	}
+	first, second := data.values[0], data.values[1]
+	if second.(string) < first.(string) {
+		first, second = second, first
+	}
+	return Set{first, second}
+}
+
+func (ss *SetStorage) length(idx int32) (int, bool) {
+	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
+	if !packed {
+		if idx < 0 || int(idx) >= len(ss.array) || ss.reusables.Has(idx) {
+			return 0, false
+		}
+		return ss.array[idx].Len(), true
+	}
+	if !twoValuePool {
+		if poolIndex < 0 || int(poolIndex) >= len(ss.oneStrings) || ss.oneReusable.Has(poolIndex) {
+			return 0, false
+		}
+		if ss.oneStrings[poolIndex].value != nil {
+			return 1, true
+		}
+		return 0, true
+	}
+	if poolIndex < 0 || int(poolIndex) >= len(ss.twoStrings) || ss.twoReusable.Has(poolIndex) {
+		return 0, false
+	}
+	if ss.twoStrings[poolIndex].values[0] == nil {
+		return 0, true
+	}
+	if ss.twoStrings[poolIndex].values[1] == nil {
+		return 1, true
+	}
+	return 2, true
+}
+
+func (ss *SetStorage) packedData(idx int32) setData {
+	values := ss.values(idx)
+	data, _ := newSetDataChecked(values)
+	return data
+}
+
+func setDataFromPlainStrings(values ...interface{}) setData {
+	data := setData{items: make(map[string]interface{}, len(values))}
+	for _, value := range values {
+		key := jsonPlainStringKey(value.(string))
+		data.items[key] = value
+	}
+	return data
+}
+
 func (ss *SetStorage) Del(idx int32) {
+	if poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx); packed {
+		ss.delPacked(poolIndex, twoValuePool)
+		return
+	}
 	if idx < 0 || int(idx) >= len(ss.array) {
 		return
 	}
 	ss.array[idx] = setData{}
 	ss.reusables.Mark(idx)
 	ss.array = trimReusableTail(ss.array, &ss.reusables)
+}
+
+func (ss *SetStorage) delPacked(idx int32, twoValuePool bool) {
+	if twoValuePool {
+		if idx < 0 || int(idx) >= len(ss.twoStrings) {
+			return
+		}
+		ss.twoStrings[idx] = packedTwoStringSet{}
+		if int(idx) == len(ss.twoStrings)-1 {
+			ss.twoStrings = ss.twoStrings[:idx]
+			ss.twoStrings = trimReusableTail(ss.twoStrings, &ss.twoReusable)
+			return
+		}
+		ss.twoReusable.Mark(idx)
+		ss.twoStrings = trimReusableTail(ss.twoStrings, &ss.twoReusable)
+		return
+	}
+	if idx < 0 || int(idx) >= len(ss.oneStrings) {
+		return
+	}
+	ss.oneStrings[idx] = packedOneStringSet{}
+	if int(idx) == len(ss.oneStrings)-1 {
+		ss.oneStrings = ss.oneStrings[:idx]
+		ss.oneStrings = trimReusableTail(ss.oneStrings, &ss.oneReusable)
+		return
+	}
+	ss.oneReusable.Mark(idx)
+	ss.oneStrings = trimReusableTail(ss.oneStrings, &ss.oneReusable)
 }
 
 type LevelDBReference struct {
@@ -6365,9 +6678,14 @@ func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertSetChecked(key, val)
 	}
-	data, err := newSetDataChecked(val)
-	if err != nil {
-		return err
+	packed, usePacked := packedStringSetFromValues(val)
+	var data setData
+	if !usePacked {
+		var err error
+		data, err = newSetDataChecked(val)
+		if err != nil {
+			return err
+		}
 	}
 
 	ht.mu.Lock()
@@ -6378,7 +6696,11 @@ func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
 		return err
 	}
 	if hval.IsSet() {
-		ht.sets.PutData(hval.Index, data)
+		if usePacked {
+			hval.Index = ht.sets.putPacked(hval.Index, packed)
+		} else {
+			hval.Index = ht.sets.putDataAdaptive(hval.Index, data)
+		}
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
@@ -6388,7 +6710,12 @@ func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
 
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.sets.AddData(data)
+	idx := int32(0)
+	if usePacked {
+		idx = ht.sets.addPacked(packed)
+	} else {
+		idx = ht.sets.AddData(data)
+	}
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
 	ht.recordWriteLocked(key)
 	return nil
@@ -6406,9 +6733,18 @@ func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddSetChecked(key, val, vals...)
 	}
-	keys, err := setItemKeysOne(val, vals...)
-	if err != nil {
-		return 0, err
+	allStrings := setValuesAreStrings(val, vals...)
+	var keys []string
+	if allStrings {
+		if _, ok := checkedBatchSize(1, len(vals)); !ok {
+			return 0, errBatchSizeTooLarge
+		}
+	} else {
+		var err error
+		keys, err = setItemKeysOne(val, vals...)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	ht.mu.Lock()
@@ -6419,7 +6755,17 @@ func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{
 		return 0, err
 	}
 	if hval.IsSet() {
-		added := ht.sets.array[hval.Index].addOneWithKeys(keys, val, vals...)
+		added := 0
+		if allStrings {
+			hval.Index, added = ht.sets.addPlainString(hval.Index, val.(string))
+			for _, value := range vals {
+				var count int
+				hval.Index, count = ht.sets.addPlainString(hval.Index, value.(string))
+				added += count
+			}
+		} else {
+			hval.Index, added = ht.sets.addGeneric(hval.Index, keys, val, vals...)
+		}
 		*rawPtr = hval.toValue()
 		if added > 0 {
 			ht.recordWriteLocked(key)
@@ -6427,14 +6773,27 @@ func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{
 		return added, nil
 	}
 
-	var data setData
-	added := data.addOneWithKeys(keys, val, vals...)
 	if rawPtr == nil {
 		rawPtr = ht.upsertLocation(key)
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	idx := ht.sets.AddData(data)
+	added := 0
+	var idx int32
+	if allStrings {
+		packed := packedStringSetValue{values: [2]interface{}{val}, length: 1}
+		idx = ht.sets.addPacked(packed)
+		added = 1
+		for _, value := range vals {
+			var count int
+			idx, count = ht.sets.addPlainString(idx, value.(string))
+			added += count
+		}
+	} else {
+		var data setData
+		added = data.addOneWithKeys(keys, val, vals...)
+		idx = ht.sets.AddData(data)
+	}
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}.toValue()
 	ht.recordWriteLocked(key)
 	return added, nil
@@ -6452,9 +6811,18 @@ func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interfa
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.RemoveSetChecked(key, val, vals...)
 	}
-	keys, err := setItemKeysOne(val, vals...)
-	if err != nil {
-		return 0, err
+	allStrings := setValuesAreStrings(val, vals...)
+	var keys []string
+	if allStrings {
+		if _, ok := checkedBatchSize(1, len(vals)); !ok {
+			return 0, errBatchSizeTooLarge
+		}
+	} else {
+		var err error
+		keys, err = setItemKeysOne(val, vals...)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	ht.mu.Lock()
@@ -6470,7 +6838,24 @@ func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interfa
 		return 0, nil
 	}
 
-	removed := ht.sets.array[hval.Index].removeKeys(keys)
+	removed := 0
+	if allStrings {
+		removed = ht.sets.removePlainString(hval.Index, val.(string))
+		for _, value := range vals {
+			removed += ht.sets.removePlainString(hval.Index, value.(string))
+		}
+	} else if _, _, packed := decodePackedStringSetIndex(hval.Index); packed {
+		if value, ok := val.(string); ok {
+			removed += ht.sets.removePlainString(hval.Index, value)
+		}
+		for _, value := range vals {
+			if text, ok := value.(string); ok {
+				removed += ht.sets.removePlainString(hval.Index, text)
+			}
+		}
+	} else {
+		removed = ht.sets.removeKeys(hval.Index, keys)
+	}
 	ht.recordReadLocked(removed > 0, key)
 	if removed > 0 {
 		ht.recordWriteLocked(key)
@@ -6490,9 +6875,14 @@ func (ht *HatTrie) HasSetChecked(key string, val interface{}) (bool, error) {
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.HasSetChecked(key, val)
 	}
-	valueKey, err := setItemKey(val)
-	if err != nil {
-		return false, err
+	text, plainString := val.(string)
+	var valueKey string
+	if !plainString {
+		var err error
+		valueKey, err = setItemKey(val)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	ht.mu.Lock()
@@ -6507,7 +6897,12 @@ func (ht *HatTrie) HasSetChecked(key string, val interface{}) (bool, error) {
 		ht.recordReadLocked(false, key)
 		return false, nil
 	}
-	hit := ht.sets.array[hval.Index].hasKey(valueKey)
+	hit := false
+	if plainString {
+		hit = ht.sets.hasPlainString(hval.Index, text)
+	} else {
+		hit = ht.sets.hasKey(hval.Index, valueKey)
+	}
 	ht.recordReadLocked(hit, key)
 	return hit, nil
 }
@@ -6537,7 +6932,19 @@ func (ht *HatTrie) GetSetChecked(key string) (Set, bool, error) {
 		return nil, false, nil
 	}
 	ht.recordReadLocked(true, key)
-	return ht.sets.array[hval.Index].Values(), true, nil
+	return ht.sets.values(hval.Index), true, nil
+}
+
+func setValuesAreStrings(value interface{}, values ...interface{}) bool {
+	if _, ok := value.(string); !ok {
+		return false
+	}
+	for _, value := range values {
+		if _, ok := value.(string); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneBytes(value []byte) []byte {
@@ -6628,12 +7035,26 @@ func setItemKeysOne(value interface{}, values ...interface{}) ([]string, error) 
 }
 
 func jsonPlainStringKey(value string) string {
-	return `"` + value + `"`
+	if !jsonPlainStringNeedsCanonicalKey(value) {
+		return `"` + value + `"`
+	}
+	data, _ := json.Marshal(value)
+	return string(data)
+}
+
+func jsonPlainStringNeedsCanonicalKey(value string) bool {
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if character < 0x20 || character >= 0x7f || character == '"' || character == '\\' || character == '<' || character == '>' || character == '&' {
+			return true
+		}
+	}
+	return false
 }
 
 func jsonPlainStringMatchesKey(value string, key string) bool {
-	if len(key) != len(value)+2 || key[0] != '"' || key[len(key)-1] != '"' {
-		return false
+	if jsonPlainStringNeedsCanonicalKey(value) {
+		return key == jsonPlainStringKey(value)
 	}
-	return key[1:len(key)-1] == value
+	return len(key) == len(value)+2 && key[0] == '"' && key[len(key)-1] == '"' && key[1:len(key)-1] == value
 }

@@ -212,6 +212,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
+| Current pass | [Packed small string-set storage](#packed-small-string-set-storage), 100k one/two-member sets | Slice/map entries: 94.36/142.4 retained B/set; 2.000/3.000 retained objects/set | Packed pools: 18.87/36.98 retained B/set; 0.00026/0.00026 retained objects/set | 5.00x/3.85x lower retained heap; about 7,692x/11,538x fewer retained objects; 1.39x/1.42x faster writes | Adds 160 fixed bytes/cache; promotes at the third member with unchanged generic retention and a 1.21x faster measured transition |
 | Reverted | [Packed-string compaction](#string-compaction-allocation-rollback), 100k varied 33-512 B strings | Packed copy: 30.07 MB cumulative heap; 121,848 KiB peak RSS | Dense remap: 2.81 MB cumulative heap; 93,516 KiB peak RSS | 10.71x lower cumulative heap, 1.30x lower peak RSS | Retains 3.79% more heap and forced GC is 1.81x slower; packing was not worth its immediate memory spike |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
@@ -1077,6 +1078,67 @@ writes the two-entry JSON object directly with generic nested-value fallback;
 its output is regression-tested against the existing encoder, including control
 characters, HTML-sensitive bytes, Unicode separators, integer bounds, and
 nested structures.
+
+<a id="packed-small-string-set-storage"></a>
+### Packed Small String-Set Storage
+
+The previous small-set representation allocated one slice backing array plus
+one interface payload object per member. Empty, one-, and two-member
+plain-string sets now use separate packed pools selected by private negative
+backing indexes.
+Adding a third distinct member or a non-string value promotes once to the
+unchanged generic set representation. Full replacement can move a set back to
+a packed pool. Logical values remain the only representation exposed through
+commands, monitoring, snapshots, LevelDB, and memory compaction.
+
+Tests were added before the storage change for duplicate add, remove/reinsert,
+promotion, mixed nested values, clone ownership, compaction, and snapshot
+round-trip. Additional representation tests cover pool reuse, packed-index
+remapping, packed snapshot restore, and JSON-escaped string identities. The
+latter caught and fixed an older raw-quote identity shortcut for promoted sets.
+
+The retained-memory fixture inserts 100,000 sets from inputs allocated before
+measurement. Results are medians of three one-pass runs on the Ryzen 9 5950X.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkSetStorageLayout100k -benchtime=1x -count=3 -benchmem'
+```
+
+| Members/set | Baseline ns/set | Final ns/set | Baseline retained B/set | Final retained B/set | Baseline retained objects/set | Final retained objects/set | Result |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 2,262 | 1,622 | 94.36 | 18.87 | 2.000 | 0.00026 | 1.39x faster; 5.00x lower heap; about 7,692x fewer objects |
+| 2 | 2,369 | 1,667 | 142.4 | 36.98 | 3.000 | 0.00026 | 1.42x faster; 3.85x lower heap; about 11,538x fewer objects |
+| 3 | 2,682 | 2,408 | 430.4 | 430.5 | 5.001 | 5.001 | Generic retention unchanged within noise; 1.11x faster |
+| 8 | 3,397 | 2,938 | 510.4 | 510.4 | 10.00 | 10.00 | Generic retention unchanged; 1.16x faster |
+| 16 | 4,825 | 4,359 | 1,542 | 1,543 | 20.00 | 20.00 | Retention within measurement noise; 1.11x faster |
+
+For one-member sets, timed insertion falls from 30,247,776 B and 400,063
+allocations to 8,923,504 B and 28 allocations: 3.39x lower cumulative heap and
+about 14,288x fewer allocations. Two-member insertion falls from 38,252,544 B
+and 600,073 allocations to 17,764,960 B and 29 allocations: 2.15x lower heap
+and about 20,692x fewer allocations. The two additional empty pool descriptors
+cost 160 fixed bytes per cache instance; about three one-member or two
+two-member sets recover that fixed cost.
+
+Operation medians use five 500 ms samples with the same test binary:
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkSetStorageOperations -benchtime=500ms -count=5 -benchmem'
+```
+
+| Operation | Baseline | Final | Improvement |
+| --- | ---: | ---: | ---: |
+| Duplicate add, one member | 229.1 ns; 32 B; 3 allocs | 109.5 ns; 0 B; 0 allocs | 2.09x faster; allocations eliminated |
+| Membership, two members | 135.5 ns; 16 B; 2 allocs | 67.57 ns; 0 B; 0 allocs | 2.01x faster; allocations eliminated |
+| Remove then add, one member | 634.9 ns; 64 B; 6 allocs | 402.7 ns; 16 B; 1 alloc | 1.58x faster; 4x lower heap; 6x fewer allocs |
+| Replace two then promote third | 982.1 ns; 497 B; 11 allocs | 812.1 ns; 392 B; 8 allocs | 1.21x faster; 1.27x lower heap; 1.38x fewer allocs |
+| Membership, eight members | 150.3 ns; 32 B; 2 allocs | 131.9 ns; 16 B; 1 alloc | 1.14x faster; 2x lower heap and allocs |
+| Read two sorted members | 114.5 ns; 32 B; 1 alloc | 92.73 ns; 32 B; 1 alloc | 1.23x faster; allocation cost unchanged |
+
+The first candidate boxed packed strings during reads and made two-member
+reads 1.31x slower with 2x heap and 3x allocations; it was not retained. The
+final pools preserve interface payloads, so read ownership and allocation cost
+match the baseline. Wire and persistence formats are unchanged.
 
 <a id="string-compaction-allocation-rollback"></a>
 ### String Compaction Allocation Rollback

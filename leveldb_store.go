@@ -1214,7 +1214,7 @@ func (trie *HatTrie) levelDBHotValueBytesLocked(entry Entry) (int64, error) {
 	case DATAVALUE_TYPE_LEVELDB_REF:
 		return 0, nil
 	case DATAVALUE_TYPE_SET:
-		return jsonEncodedSize(trie.sets.array[entry.Value.Index].Values())
+		return jsonEncodedSize(trie.sets.values(entry.Value.Index))
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		return jsonEncodedSize(trie.priorityQueues.array[entry.Value.Index].SnapshotItems())
 	case DATAVALUE_TYPE_BLOOM_FILTER:

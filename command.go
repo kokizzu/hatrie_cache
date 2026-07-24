@@ -1729,8 +1729,15 @@ func (ht *HatTrie) executeFastAddSetCommand(key string, value string) (CacheComm
 		if ht.expireIfNeededLocked(key, hval) {
 			ht.clearHotKeyLocked(key)
 		} else if hval.IsSet() {
-			data := &ht.sets.array[hval.Index]
-			added := data.addPlainString(value)
+			nextIndex, added := ht.sets.addPlainString(hval.Index, value)
+			if nextIndex != hval.Index {
+				hval.Index = nextIndex
+				rawPtr := ht.tryLocation(key)
+				if rawPtr == nil {
+					rawPtr = ht.upsertLocation(key)
+				}
+				*rawPtr = hval.toValue()
+			}
 			if added > 0 {
 				ht.recordWriteLocked(key)
 				ht.cacheValueLocked(key, hval)
@@ -1744,8 +1751,8 @@ func (ht *HatTrie) executeFastAddSetCommand(key string, value string) (CacheComm
 		return commandError(err.Error()), true
 	}
 	if hval.IsSet() {
-		data := &ht.sets.array[hval.Index]
-		added := data.addPlainString(value)
+		nextIndex, added := ht.sets.addPlainString(hval.Index, value)
+		hval.Index = nextIndex
 		if rawPtr != nil {
 			*rawPtr = hval.toValue()
 		}
@@ -1761,9 +1768,9 @@ func (ht *HatTrie) executeFastAddSetCommand(key string, value string) (CacheComm
 	}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
-	data := setData{}
-	added := data.addPlainString(value)
-	idx := ht.sets.AddData(data)
+	packed := packedStringSetValue{values: [2]interface{}{value}, length: 1}
+	added := 1
+	idx := ht.sets.addPacked(packed)
 	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_SET}
 	*rawPtr = hval.toValue()
 	ht.recordWriteLocked(key)
@@ -1783,7 +1790,7 @@ func (ht *HatTrie) executeFastHasSetCommand(key string, value string) (CacheComm
 		ht.recordReadLocked(false, key)
 		return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}, true
 	}
-	hit := ht.sets.array[hval.Index].hasPlainString(value)
+	hit := ht.sets.hasPlainString(hval.Index, value)
 	ht.recordReadLocked(hit, key)
 	return commandBool01Response(hit), true
 }
@@ -3138,7 +3145,7 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 	case DATAVALUE_TYPE_SLICE:
 		return jsonEncodedString(ht.slices.array[hval.Index].Slice())
 	case DATAVALUE_TYPE_SET:
-		return jsonEncodedString(ht.sets.array[hval.Index].Values())
+		return jsonEncodedString(ht.sets.values(hval.Index))
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		return jsonEncodedString(ht.priorityQueues.array[hval.Index].Items())
 	case DATAVALUE_TYPE_BLOOM_FILTER:

@@ -49,6 +49,8 @@ type memoryCompactionPlan struct {
 	dbrefs            *LevelDBReferenceStorage
 	remaps            [DATAVALUE_TYPE_RADIX_TREE + 1][]int32
 	mapSmallRemap     []int32
+	setOneRemap       []int32
+	setTwoRemap       []int32
 	diskRemap         []int32
 	replicationMerkle *replicationMerkleIndex
 }
@@ -190,9 +192,26 @@ func (ht *HatTrie) buildMemoryCompactionPlanLocked() (memoryCompactionPlan, erro
 	}); err != nil {
 		return memoryCompactionPlan{}, err
 	}
-	if plan.sets, plan.remaps[DATAVALUE_TYPE_SET], err = compactSingleStorage(ht.sets.array, &ht.sets.reusables, func(values []setData) *SetStorage { return &SetStorage{array: values} }); err != nil {
-		return memoryCompactionPlan{}, err
+	setArray, setRemap, err := compactStorageSlice(ht.sets.array, &ht.sets.reusables)
+	if err != nil {
+		return memoryCompactionPlan{}, fmt.Errorf("hatriecache: compact sets: %w", err)
 	}
+	setOneStrings, setOneRemap, err := compactStorageSlice(ht.sets.oneStrings, &ht.sets.oneReusable)
+	if err != nil {
+		return memoryCompactionPlan{}, fmt.Errorf("hatriecache: compact one-string sets: %w", err)
+	}
+	setTwoStrings, setTwoRemap, err := compactStorageSlice(ht.sets.twoStrings, &ht.sets.twoReusable)
+	if err != nil {
+		return memoryCompactionPlan{}, fmt.Errorf("hatriecache: compact two-string sets: %w", err)
+	}
+	plan.sets = &SetStorage{
+		array:      setArray,
+		oneStrings: setOneStrings,
+		twoStrings: setTwoStrings,
+	}
+	plan.remaps[DATAVALUE_TYPE_SET] = setRemap
+	plan.setOneRemap = setOneRemap
+	plan.setTwoRemap = setTwoRemap
 	if plan.priorityQueues, plan.remaps[DATAVALUE_TYPE_PRIORITY_QUEUE], err = compactSingleStorage(ht.priorityQueues.array, &ht.priorityQueues.reusables, func(values []priorityQueueData) *PriorityQueueStorage { return &PriorityQueueStorage{array: values} }); err != nil {
 		return memoryCompactionPlan{}, err
 	}
@@ -351,6 +370,19 @@ func (plan *memoryCompactionPlan) remapValue(value *HatValue) error {
 				return fmt.Errorf("hatriecache: live %s references missing backing index %d", value.String(), oldIndex)
 			}
 			value.Index = encodeSmallMapIndex(plan.mapSmallRemap[oldIndex])
+			return nil
+		}
+	}
+	if value.IsSet() {
+		if oldIndex, twoValuePool, ok := decodePackedStringSetIndex(value.Index); ok {
+			remap := plan.setOneRemap
+			if twoValuePool {
+				remap = plan.setTwoRemap
+			}
+			if int(oldIndex) >= len(remap) || remap[oldIndex] < 0 {
+				return fmt.Errorf("hatriecache: live %s references missing packed backing index %d", value.String(), oldIndex)
+			}
+			value.Index = encodePackedStringSetIndex(remap[oldIndex], twoValuePool)
 			return nil
 		}
 	}
@@ -517,6 +549,8 @@ func (ht *HatTrie) memoryBackingBytesLocked() uint64 {
 	total += storageSliceBytes(ht.maps.small) + reusableBackingBytes(&ht.maps.smallReusables)
 	total += storageSliceBytes(ht.slices.array) + reusableBackingBytes(&ht.slices.reusables)
 	total += storageSliceBytes(ht.sets.array) + reusableBackingBytes(&ht.sets.reusables)
+	total += storageSliceBytes(ht.sets.oneStrings) + reusableBackingBytes(&ht.sets.oneReusable)
+	total += storageSliceBytes(ht.sets.twoStrings) + reusableBackingBytes(&ht.sets.twoReusable)
 	total += storageSliceBytes(ht.priorityQueues.array) + reusableBackingBytes(&ht.priorityQueues.reusables)
 	total += storageSliceBytes(ht.bloomFilters.array) + reusableBackingBytes(&ht.bloomFilters.reusables)
 	total += storageSliceBytes(ht.countMinSketches.array) + reusableBackingBytes(&ht.countMinSketches.reusables)

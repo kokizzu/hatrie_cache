@@ -36,7 +36,13 @@ Fenwick tree values use a compact int64 array for point updates, point reads,
 prefix sums, and range sums in O(log n) time without storing individual events.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack
 and trim freed tail slots, avoiding per-index hash-map overhead while keeping
-reuse checks, allocation, and delete-heavy memory release fast. TTL expiration
+reuse checks, allocation, and delete-heavy memory release fast.
+Empty, one-, and two-member plain-string sets use dedicated packed pools, then
+promote to the existing generic set representation at the third member or first
+non-string value. This cuts retained heap without changing wire, snapshot, or
+persistent formats; measurements are in
+[BENCHMARK.md](BENCHMARK.md#packed-small-string-set-storage).
+TTL expiration
 uses a min-heap schedule plus an authoritative key map, so vacuuming pops due
 keys instead of scanning every TTL entry. The map stores a compact heap index;
 deadline updates repair one existing node in O(log n), and `Persist`/delete
