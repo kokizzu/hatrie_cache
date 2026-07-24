@@ -202,6 +202,58 @@ func BenchmarkXorCommandBuild64Path(b *testing.B) {
 	}
 }
 
+func BenchmarkReservoirSampleGetPath(b *testing.B) {
+	for _, benchmark := range []struct {
+		name       string
+		getCommand string
+	}{
+		{name: "Generic", getCommand: " GETRS"},
+		{name: "PlainJSONString", getCommand: "GETRS"},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			ht := CreateHatTrie()
+			defer ht.Destroy()
+			setupCommandFeatureReservoirSampleWithValues(b, ht)
+			request := CacheCommandRequest{Command: benchmark.getCommand, Key: "sample:key"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchmarkExecuteCommand(b, ht, request)
+			}
+		})
+	}
+}
+
+func BenchmarkReservoirSampleGetEncodedPath(b *testing.B) {
+	for _, benchmark := range []struct {
+		name       string
+		getCommand string
+	}{
+		{name: "Generic", getCommand: " GETRS"},
+		{name: "Exact", getCommand: "GETRS"},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			ht := CreateHatTrie()
+			defer ht.Destroy()
+			if err := ht.UpsertReservoirSample("sample:key", 16); err != nil {
+				b.Fatalf("UpsertReservoirSample() error = %v", err)
+			}
+			for i := 0; i < 16; i++ {
+				value := "escaped-\"value-" + strconv.Itoa(i)
+				if update := ht.AddReservoirSample("sample:key", value); !update.Accepted {
+					b.Fatalf("AddReservoirSample(%q) = %#v, want accepted", value, update)
+				}
+			}
+			request := CacheCommandRequest{Command: benchmark.getCommand, Key: "sample:key"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchmarkExecuteCommand(b, ht, request)
+			}
+		})
+	}
+}
+
 func benchmarkExecuteCommand(b *testing.B, ht *HatTrie, request CacheCommandRequest) CacheCommandResponse {
 	b.Helper()
 	response := ht.ExecuteCommand(request)

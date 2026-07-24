@@ -1492,6 +1492,8 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddReservoirSampleCommand(key, request.Value)
+	case "GETRS", "RSGET", "SAMPLE":
+		return ht.executeFastGetReservoirSampleCommand(key)
 	case "ADDQ", "ADDQS", "QADD", "QSADD":
 		if len(request.Values) != 0 || len(request.Pairs) != 0 {
 			return CacheCommandResponse{}, false
@@ -2399,6 +2401,34 @@ func (ht *HatTrie) executeFastAddReservoirSampleCommand(key string, value string
 	return commandFastReservoirSampleUpdateResponse("added reservoir sample values", update), true
 }
 
+func (ht *HatTrie) executeFastGetReservoirSampleCommand(key string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsReservoirSample() {
+		if hval.IsLevelDBReference() {
+			ht.mu.Unlock()
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		ht.mu.Unlock()
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+	sample := ht.reservoirSamples.array[hval.Index]
+	capacity, ok := commandFastReservoirSampleItemsJSONCapacity(sample.items)
+	if !ok {
+		items := sample.Items()
+		ht.recordReadLocked(true, key)
+		ht.mu.Unlock()
+		return commandValueResponse("ok", items), true
+	}
+	items := sample.sortedItems()
+	ht.recordReadLocked(true, key)
+	ht.mu.Unlock()
+
+	payload := commandFastReservoirSampleItemsJSONWithCapacity(items, capacity)
+	return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+}
+
 func (ht *HatTrie) executeFastAddQuantileSketchCommand(key string, value float64) (CacheCommandResponse, bool) {
 	estimate, err := ht.AddQuantileSketchChecked(key, value)
 	if err != nil {
@@ -2507,6 +2537,75 @@ func commandFastReservoirSampleUpdateResponse(message string, update ReservoirSa
 	out = strconv.AppendUint(out, update.Capacity, 10)
 	out = append(out, '}')
 	return CacheCommandResponse{OK: true, Message: message, Value: string(out)}
+}
+
+func commandFastReservoirSampleItemsJSON(items []reservoirSampleItem) (string, bool) {
+	capacity, ok := commandFastReservoirSampleItemsJSONCapacity(items)
+	if !ok {
+		return "", false
+	}
+	return commandFastReservoirSampleItemsJSONWithCapacity(items, capacity), true
+}
+
+func commandFastReservoirSampleItemsJSONCapacity(items []reservoirSampleItem) (int, bool) {
+	const itemFixedBytes = len(`{"value":"","priority":,"sequence":}`)
+	max := int(^uint(0) >> 1)
+	capacity := len(`[]`)
+	for idx, item := range items {
+		value, ok := item.Value.(string)
+		if !ok || !commandFastJSONVerbatimString(value) {
+			return 0, false
+		}
+		extra := itemFixedBytes + commandFastUint64Digits(item.Priority) + commandFastUint64Digits(item.Sequence)
+		if idx > 0 {
+			extra++
+		}
+		if len(value) > max-extra || capacity > max-extra-len(value) {
+			return 0, false
+		}
+		capacity += extra + len(value)
+	}
+	return capacity, true
+}
+
+func commandFastReservoirSampleItemsJSONWithCapacity(items []reservoirSampleItem, capacity int) string {
+	var builder strings.Builder
+	builder.Grow(capacity)
+	builder.WriteByte('[')
+	var digits [20]byte
+	for idx, item := range items {
+		if idx > 0 {
+			builder.WriteByte(',')
+		}
+		builder.WriteString(`{"value":"`)
+		builder.WriteString(item.Value.(string))
+		builder.WriteString(`","priority":`)
+		_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Priority, 10))
+		builder.WriteString(`,"sequence":`)
+		_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Sequence, 10))
+		builder.WriteByte('}')
+	}
+	builder.WriteByte(']')
+	return builder.String()
+}
+
+func commandFastJSONVerbatimString(value string) bool {
+	for idx := 0; idx < len(value); idx++ {
+		c := value[idx]
+		if c < 0x20 || c == '"' || c == '\\' || c >= utf8.RuneSelf || c == '<' || c == '>' || c == '&' {
+			return false
+		}
+	}
+	return true
+}
+
+func commandFastUint64Digits(value uint64) int {
+	digits := 1
+	for value >= 10 {
+		value /= 10
+		digits++
+	}
+	return digits
 }
 
 func commandFastTopKItemsJSON(top topKData) (string, bool) {

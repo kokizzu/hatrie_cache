@@ -2591,6 +2591,60 @@ make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeatur
 | --- | --- | ---: | ---: | ---: |
 | Reservoir sample add | `BenchmarkCommandFeature/ReservoirSampleAdd` | 956.7 ns, 168 B, 6 allocs | 465.3 ns, 64 B, 1 alloc | 2.06x faster, 2.63x less memory, 6.00x fewer allocs |
 
+<a id="reservoir-sample-read-materialization"></a>
+### Reservoir Sample Read Materialization
+
+`GETRS` previously copied the internal heap into a temporary private slice,
+used reflected sorting, copied and cloned it again into the public item slice,
+and then passed that slice through the generic JSON encoder. A 16-item read
+spent 47% of sampled CPU below `Items()`, 41% below JSON encoding, and 26% below
+reflected sorting; these cumulative profile percentages overlap. The allocation
+profile attributed 49.1% of bytes to the required returned JSON, 22.8% to the
+private sorted copy, 21.8% to the public copy, and 3.4% to reflected sorting.
+
+The public `Items()` path now clones directly into its final slice and uses a
+typed priority/sequence sorter. Exact `GETRS`, `RSGET`, and `SAMPLE` commands
+with byte-safe string values retain one sorted copy and write the existing JSON
+shape directly with stack numeric buffers. Sorting and copying remain under the
+cache mutex, as before, but JSON encoding occurs after unlock. Values requiring
+JSON escaping or generic structured encoding use the existing encoder inside
+the same one-read handler. Cold LevelDB references retain the checked generic
+hydration path.
+
+Tests were added before the implementation and cover exact byte parity, all
+aliases, ignored request fields, missing and empty samples, priority/sequence
+ties, escaped and structured values, cache counters, nested clone ownership,
+encoded sizes, and existing snapshot behavior. No sample layout, retained
+state, command schema, snapshot, journal, replication, storage, or wire format
+changed.
+
+The baseline and final command rows are seven fixed one-million-operation runs.
+The phase and encoded-value controls run both routes in one binary with the
+generic command forced by allocation-free whitespace normalization. The write
+control alternates precompiled baseline `e92fb51` and candidate binaries on CPU
+0 for seven fixed one-million-operation runs.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/ReservoirSampleGet -benchmem -benchtime=1000000x -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkReservoirSampleGetPath -benchmem -benchtime=1000000x -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkReservoirSampleGetEncodedPath -benchmem -benchtime=1000000x -count=7 -cpu=1'
+```
+
+| 16-item read, median | Time/op | Bytes/op | Allocs/op | Improvement from baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline generic materialization | 3,910 ns | 2,336 B | 8 | - |
+| One-pass typed generic control | 2,754 ns | 1,744 B | 5 | 1.42x faster; 1.34x lower heap; 1.60x fewer allocations |
+| Final exact plain-string command | 2,323 ns | 1,688 B | 3 | 1.68x faster; 1.38x lower heap; 2.67x fewer allocations |
+
+The same-binary direct encoder median is 2,082 ns versus 2,754 ns for the
+already optimized generic path, a further 1.32x CPU improvement. Escaped-value
+generic encoding is neutral at 2,754 ns versus a 2,744 ns generic control
+(0.4% within noise), with both paths at 1,872 B and 5 allocations. The
+alternating write control measured 348.6 ns for the candidate versus 394.3 ns
+for the baseline, while both remained at 64 B and one allocation; this is
+treated as evidence of no write regression rather than a claimed write-path
+gain because the write implementation is unchanged.
+
 ### On-Demand Runtime Profiling
 
 Runtime profiling is an operator-only diagnostic feature and defaults off. The

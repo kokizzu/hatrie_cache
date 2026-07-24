@@ -55,6 +55,24 @@ type reservoirSampleItem struct {
 	Sequence uint64      `json:"sequence"`
 }
 
+type reservoirSampleItemsByPriority []reservoirSampleItem
+
+func (items reservoirSampleItemsByPriority) Len() int      { return len(items) }
+func (items reservoirSampleItemsByPriority) Swap(i, j int) { items[i], items[j] = items[j], items[i] }
+func (items reservoirSampleItemsByPriority) Less(i, j int) bool {
+	return reservoirSampleOrderLess(items[i].Priority, items[i].Sequence, items[j].Priority, items[j].Sequence)
+}
+
+type reservoirSamplePublicItemsByPriority []ReservoirSampleItem
+
+func (items reservoirSamplePublicItemsByPriority) Len() int { return len(items) }
+func (items reservoirSamplePublicItemsByPriority) Swap(i, j int) {
+	items[i], items[j] = items[j], items[i]
+}
+func (items reservoirSamplePublicItemsByPriority) Less(i, j int) bool {
+	return reservoirSampleOrderLess(items[i].Priority, items[i].Sequence, items[j].Priority, items[j].Sequence)
+}
+
 type reservoirSampleData struct {
 	capacity uint64
 	seen     uint64
@@ -275,15 +293,18 @@ func (sample *reservoirSampleData) addPrepared(item reservoirSampleItem) Reservo
 }
 
 func (sample reservoirSampleData) Items() []ReservoirSampleItem {
-	items := sample.sortedItems()
-	out := make([]ReservoirSampleItem, len(items))
-	for idx, item := range items {
+	if len(sample.items) == 0 {
+		return []ReservoirSampleItem{}
+	}
+	out := make([]ReservoirSampleItem, len(sample.items))
+	for idx, item := range sample.items {
 		out[idx] = ReservoirSampleItem{
 			Value:    cloneValue(item.Value),
 			Priority: item.Priority,
 			Sequence: item.Sequence,
 		}
 	}
+	sort.Sort(reservoirSamplePublicItemsByPriority(out))
 	return out
 }
 
@@ -336,13 +357,15 @@ func (sample reservoirSampleData) sortedItems() []reservoirSampleItem {
 	}
 	out := make([]reservoirSampleItem, len(sample.items))
 	copy(out, sample.items)
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Priority != out[j].Priority {
-			return out[i].Priority < out[j].Priority
-		}
-		return out[i].Sequence < out[j].Sequence
-	})
+	sort.Sort(reservoirSampleItemsByPriority(out))
 	return out
+}
+
+func reservoirSampleOrderLess(priority uint64, sequence uint64, otherPriority uint64, otherSequence uint64) bool {
+	if priority != otherPriority {
+		return priority < otherPriority
+	}
+	return sequence < otherSequence
 }
 
 func (sample *reservoirSampleData) siftUp(idx int) {
