@@ -17,6 +17,14 @@ const (
 	maxHyperLogLogPrecision     uint8 = 20
 )
 
+var hyperLogLogRankContributions = func() [65]float64 {
+	var values [65]float64
+	for rank := range values {
+		values[rank] = math.Ldexp(1, -rank)
+	}
+	return values
+}()
+
 // HyperLogLogInfo reports the shape and current estimate of a HyperLogLog.
 // HyperLogLog stores approximate distinct counts without storing observed items.
 type HyperLogLogInfo struct {
@@ -36,8 +44,11 @@ type hyperLogLogSnapshot struct {
 
 type hyperLogLogData struct {
 	registers    []uint8
-	precision    uint8
 	observations uint64
+	// These fields are derived from registers and intentionally never serialized.
+	harmonicSum   float64
+	zeroRegisters uint32
+	precision     uint8
 }
 
 func newHyperLogLogData(precision uint8) (hyperLogLogData, error) {
@@ -121,6 +132,7 @@ func newHyperLogLogDataFromSnapshot(snapshot hyperLogLogSnapshot) (hyperLogLogDa
 	}
 	out.registers = make([]uint8, len(raw))
 	copy(out.registers, raw)
+	out.rebuildSummary()
 	return out, nil
 }
 
@@ -161,8 +173,12 @@ func (hll *hyperLogLogData) addKey(key []byte) bool {
 	index, rank := hyperLogLogIndexAndRank(bloomFilterFNV64a(key), hll.precision)
 	hll.observations = saturatingAddUint64(hll.observations, 1)
 	if rank <= hll.registers[index] {
+		if hll.harmonicSum <= 0 {
+			hll.rebuildSummary()
+		}
 		return false
 	}
+	hll.updateSummary(hll.registers[index], rank)
 	hll.registers[index] = rank
 	return true
 }
@@ -175,8 +191,12 @@ func (hll *hyperLogLogData) addJSONString(value string) bool {
 	index, rank := hyperLogLogIndexAndRank(bloomFilterFNV64aJSONString(value), hll.precision)
 	hll.observations = saturatingAddUint64(hll.observations, 1)
 	if rank <= hll.registers[index] {
+		if hll.harmonicSum <= 0 {
+			hll.rebuildSummary()
+		}
 		return false
 	}
+	hll.updateSummary(hll.registers[index], rank)
 	hll.registers[index] = rank
 	return true
 }
@@ -186,19 +206,15 @@ func (hll hyperLogLogData) Count() uint64 {
 }
 
 func (hll hyperLogLogData) Info() HyperLogLogInfo {
-	var nonZero uint64
-	for _, register := range hll.registers {
-		if register != 0 {
-			nonZero++
-		}
-	}
+	sum, zeros := hll.estimateState()
+	nonZero := uint64(len(hll.registers) - zeros)
 	return HyperLogLogInfo{
 		Precision:        hll.precision,
 		RegisterCount:    uint64(hll.logicalRegisterCount()),
 		RegisterBytes:    uint64(len(hll.registers)),
 		Observations:     hll.observations,
 		NonZeroRegisters: nonZero,
-		Estimate:         hll.Count(),
+		Estimate:         hyperLogLogEstimateFromState(len(hll.registers), sum, zeros),
 	}
 }
 
@@ -223,24 +239,33 @@ func (hll hyperLogLogData) logicalRegisterCount() int {
 
 func (hll *hyperLogLogData) ensureRegisters() {
 	if hll != nil && len(hll.registers) == 0 && hll.precision > 0 {
-		hll.registers = make([]uint8, hyperLogLogRegisterCount(hll.precision))
+		count := hyperLogLogRegisterCount(hll.precision)
+		hll.registers = make([]uint8, count)
+		hll.harmonicSum = float64(count)
+		hll.zeroRegisters = uint32(count)
+		return
 	}
 }
 
 func (hll hyperLogLogData) estimate() float64 {
-	m := float64(len(hll.registers))
-	if m == 0 {
-		return 0
+	sum, zeros := hll.estimateState()
+	return hyperLogLogEstimateFloat64(len(hll.registers), sum, zeros)
+}
+
+func (hll hyperLogLogData) estimateState() (float64, int) {
+	if hll.summaryReady() {
+		return hll.harmonicSum, int(hll.zeroRegisters)
 	}
-	sum := 0.0
-	zeros := 0
-	for _, register := range hll.registers {
-		if register == 0 {
-			zeros++
-		}
-		sum += math.Ldexp(1, -int(register))
-	}
-	if sum == 0 {
+	return hyperLogLogFullScanState(hll.registers)
+}
+
+func hyperLogLogEstimateFromState(registers int, sum float64, zeros int) uint64 {
+	return hyperLogLogEstimateUint64(hyperLogLogEstimateFloat64(registers, sum, zeros))
+}
+
+func hyperLogLogEstimateFloat64(registers int, sum float64, zeros int) float64 {
+	m := float64(registers)
+	if m == 0 || sum == 0 {
 		return 0
 	}
 	raw := hyperLogLogAlpha(m) * m * m / sum
@@ -255,6 +280,54 @@ func (hll hyperLogLogData) estimate() float64 {
 		}
 	}
 	return raw
+}
+
+func hyperLogLogFullScanState(registers []uint8) (float64, int) {
+	sum := 0.0
+	zeros := 0
+	for _, register := range registers {
+		if register == 0 {
+			zeros++
+		}
+		sum += hyperLogLogRankContribution(register)
+	}
+	return sum, zeros
+}
+
+func (hll *hyperLogLogData) rebuildSummary() {
+	if hll == nil || len(hll.registers) == 0 {
+		return
+	}
+	sum, zeros := hyperLogLogFullScanState(hll.registers)
+	hll.harmonicSum = sum
+	hll.zeroRegisters = uint32(zeros)
+}
+
+func (hll *hyperLogLogData) updateSummary(oldRank uint8, newRank uint8) {
+	if hll == nil || oldRank >= newRank {
+		return
+	}
+	if hll.harmonicSum <= 0 {
+		hll.rebuildSummary()
+		if hll.harmonicSum <= 0 {
+			return
+		}
+	}
+	hll.harmonicSum += hyperLogLogRankContributions[newRank] - hyperLogLogRankContributions[oldRank]
+	if oldRank == 0 && hll.zeroRegisters > 0 {
+		hll.zeroRegisters--
+	}
+}
+
+func hyperLogLogRankContribution(rank uint8) float64 {
+	if int(rank) < len(hyperLogLogRankContributions) {
+		return hyperLogLogRankContributions[rank]
+	}
+	return math.Ldexp(1, -int(rank))
+}
+
+func (hll hyperLogLogData) summaryReady() bool {
+	return len(hll.registers) > 0 && hll.harmonicSum > 0 && hll.zeroRegisters <= uint32(len(hll.registers))
 }
 
 func hyperLogLogAlpha(m float64) float64 {

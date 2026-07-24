@@ -33,7 +33,9 @@ share long prefixes.
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts
-without retaining the observed items.
+without retaining the observed items. Incrementally maintained derived state
+keeps add responses, counts, and info estimates O(1) after construction or
+restore without changing the serialized register representation.
 Top-K values use a bounded Space-Saving min-heap to track heavy hitters with
 fixed memory and O(log k) updates.
 Reservoir sample values keep a deterministic fixed-capacity stream sample using

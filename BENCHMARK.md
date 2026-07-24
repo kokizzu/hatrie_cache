@@ -210,6 +210,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
+| Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
@@ -2473,6 +2474,69 @@ make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeatur
 | Quantile sketch estimate | `BenchmarkCommandFeature/QuantileSketchEstimate` | 638.3 ns | 64 B | 1 |
 | Fenwick tree add | `BenchmarkCommandFeature/FenwickTreeAdd` | 783.2 ns | 95 B | 1 |
 | Fenwick tree range | `BenchmarkCommandFeature/FenwickTreeRange` | 320.5 ns | 0 B | 0 |
+
+<a id="incremental-hyperloglog-estimates"></a>
+### Incremental HyperLogLog Estimates
+
+HyperLogLog add responses, count commands, and info commands previously scanned
+every register while holding the cache mutex. The command benchmark uses
+precision 10 with 1,024 registers; the default precision 14 has 16,384
+registers. The final implementation maintains the harmonic register sum and
+zero-register count whenever a rank increases, so estimation is O(1).
+
+The derived fields are rebuilt once after snapshot or persistent-storage load.
+They are not serialized: snapshots, journals, replication payloads, encoded
+sizes, and the exact register backing remain unchanged. A missing derived state
+on a manually constructed internal value falls back to a full scan and is
+rebuilt on mutation.
+
+Tests were added before the production change and use the old full scan as an
+independent oracle. They compare every public estimate after mutations at
+precisions 4, 10, 14, and 20, continue through 200,000-value distinct streams,
+exercise duplicates and adversarial ranks, and verify snapshot reconstruction
+and continued mutation. Layout tests pin the amd64 header at 48 bytes and prove
+that snapshots contain only register bytes.
+
+Seven A/B runs alternate baseline `df0083e` and candidate test binaries pinned
+to CPU 0. Command rows use 100,000 fixed iterations; focused rows use a 100 ms
+minimum; layout and 4,096-value batch rows use one complete operation.
+
+```sh
+make run CMD='go test . -run=HyperLogLog -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkHyperLogLogEstimateOperations -benchmem -benchtime=100ms -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/HyperLogLog -benchmem -benchtime=100000x -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkHyperLogLogLayout1000 -benchmem -benchtime=1x -count=7 -cpu=1'
+```
+
+| Operation, seven-run median | Baseline full scan | Incremental state | Improvement |
+| --- | ---: | ---: | ---: |
+| Precision-10 command add | 3,476 ns | 251.7 ns | 13.81x faster |
+| Precision-10 command count | 3,393 ns | 231.6 ns | 14.65x faster |
+| Precision-10 direct count | 3,190 ns | 31.88 ns | 100.06x faster |
+| Precision-10 info | 3,667 ns | 35.19 ns | 104.20x faster |
+| Precision-10 duplicate add and count | 3,229 ns | 36.32 ns | 88.90x faster |
+| Precision-14 direct count | 53,283 ns | 31.73 ns | 1,679x faster |
+| Precision-14 info | 58,395 ns | 34.99 ns | 1,669x faster |
+| Precision-14 duplicate add and count | 50,760 ns | 36.91 ns | 1,375x faster |
+| Precision-14 4,096-value add and count | 112,783 ns | 70,112 ns | 1.61x faster |
+
+All rows remain at 0 B/op and 0 allocs/op. The mutation-only internal primitive,
+which deliberately omits the required returned estimate, changes from 26.75 to
+28.45 ns, or 1.06x slower. Complete single and 4,096-value add/count operations
+remain faster because they eliminate the register scan.
+
+| 1,000 materialized default filters | Baseline | Final | Change |
+| --- | ---: | ---: | ---: |
+| HLL header | 40 B/filter | 48 B/filter | 8 B higher |
+| Register capacity | 16,384 B/filter | 16,384 B/filter | Unchanged |
+| Timed cumulative heap | 16,424,960 B | 16,433,152 B | 0.050% higher |
+| Timed allocations | 1,001 | 1,001 | Unchanged |
+
+An initial candidate stored 16 summary bytes after each register slice. Although
+the logical overhead was only 16 bytes, Go's size classes rounded each 16,400 B
+allocation to 18,432 B; the fixture rose to 18,472,960 B, or 12.47% more heap.
+That layout was discarded. The retained header layout leaves register
+allocations exact and has no cost for serialized or transferred data.
 
 The reservoir sample add path now has a plain-string fast path that hashes the
 JSON string representation directly and only boxes retained values. The focused
