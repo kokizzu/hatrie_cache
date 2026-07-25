@@ -4578,14 +4578,23 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 }
 
 func (ht *HatTrie) recordReadBatchLocked(batch *batchTelemetry, hit bool, keys ...string) {
+	ht.recordReadBatchCountLocked(batch, hit, 1, keys...)
+}
+
+func (ht *HatTrie) recordReadBatchCountLocked(batch *batchTelemetry, hit bool, count uint64, keys ...string) {
+	if count == 0 {
+		return
+	}
 	if batch == nil || ht.keyStatsMode != KeyStatsModeOff {
-		ht.recordReadLocked(hit, keys...)
+		for recorded := uint64(0); recorded < count; recorded++ {
+			ht.recordReadLocked(hit, keys...)
+		}
 		return
 	}
 	if hit {
-		batch.hits++
+		batch.hits += count
 	} else {
-		batch.misses++
+		batch.misses += count
 	}
 }
 

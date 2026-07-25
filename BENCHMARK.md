@@ -232,6 +232,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
+| Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
@@ -1551,6 +1552,60 @@ and allocations fell from 3,970 to 3,961. There is no new field, retained
 buffer, background worker, configuration, wire change, or storage-format
 change. A cached-clock package was not adopted because its updater goroutine
 and reduced timestamp precision add costs that aggregation avoids.
+
+<a id="adaptive-typed-scalar-execution"></a>
+### Adaptive Typed Scalar Execution
+
+The direct typed protobuf batch previously returned to Go for every command.
+The selected path validates the complete request once, executes eligible
+distinct and mixed scalar commands in ordered native chunks of 64, and
+reconciles the results in Go for storage ownership, exact telemetry, and typed
+response columns. Repeated `GET` operations for one key are resolved once and
+their result is copied into every response slot. This preserves same-key
+ordering across `SET_STRING`, `GET`, `SET_COUNTER`, `INC`, `EXISTS`, `DELETE`,
+and later reads.
+
+Tests were added before routing the typed batch through the native adapter.
+They initially observed zero native calls, then covered same-key ordering,
+64-command boundaries, repeated hits and misses, TTL fallback, exact counters,
+and oversized-key scratch release. The first naive repeated-read candidate was
+rejected: 16 cached reads regressed from 885.1 to 2,279 ns (2.58x slower). A
+scan-only guard was still 1.08x slower at 957.2 ns. Resolving the repeated key
+once produced 378.5 ns in the selection run and 396.5 ns in the final
+confirmation. Native mixed size two was also
+rejected at 629.5 versus 565.5 ns (1.11x slower), so native routing starts at
+four commands.
+
+```sh
+make bench-scalar-native-batch BENCHTIME=2s COUNT=7
+make run CMD='go test . -run=ScalarBatch -count=1'
+```
+
+| Seven-run median | Go-loop baseline | Adaptive final | Improvement |
+| --- | ---: | ---: | ---: |
+| Four distinct reads | 937.2 ns | 849.7 ns | 1.10x faster |
+| Four mixed commands | 1,004 ns | 894.2 ns | 1.12x faster |
+| 16 distinct reads | 3,320 ns; 736 B; 12 allocs | 2,438 ns; 736 B; 12 allocs | 1.36x faster; heap and allocations unchanged |
+| 16 mixed commands | 4,006 ns; 608 B; 20 allocs | 3,050 ns; 592 B; 17 allocs | 1.31x faster; 1.03x lower heap; 1.18x fewer allocs |
+| 16 repeated reads | 885.1 ns; 736 B; 12 allocs | 396.5 ns; 512 B; 5 allocs | 2.23x faster; 1.44x lower heap; 2.40x fewer allocs |
+| 256 distinct reads | 43,510 ns; 7,648 B; 20 allocs | 35,029 ns; 7,648 B; 20 allocs | 1.24x faster; heap and allocations unchanged |
+| 256 mixed commands | 53,293 ns; 6,368 B; 152 allocs | 41,320 ns; 6,048 B; 91 allocs | 1.29x faster; 1.05x lower heap; 1.67x fewer allocs |
+
+The complete 1,000-command scalar gRPC stream improved from the prior telemetry
+pass's 384.1 to 356.6 ns/command (1.08x), from 249,327 to 234,750 heap B
+(1.06x lower), and from 3,961 to 3,516 allocations (1.13x fewer), with the
+same 23.64 wire B/command. Against the original pre-telemetry path, the two
+passes together improve 450.1 to 356.6 ns/command (1.26x).
+
+The repeated-key path retains no native scratch. A 16-command native batch
+retains 1,664-1,680 B and a 256-command mixed request retains 6,720 B because
+only one 64-command chunk is cached. The key arena is capped at 64 KiB for
+direct batches and is released after oversized-key requests; operation and
+result arrays are capped at 64 entries. TTL keys, lazy storage references,
+local partitions, batches smaller than four, and journal, dirty-tracker,
+replicator, or leader-enforcement interception retain the previous behavior.
+There is no wire, persistence, configuration, or background-worker change.
+Raw final output is in `build/benchmarks/scalar-native-batch.txt`.
 
 ### Segmented WAL Compaction
 

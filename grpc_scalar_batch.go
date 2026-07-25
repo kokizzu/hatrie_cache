@@ -140,6 +140,19 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 	telemetry := batchTelemetry{}
 	defer ht.flushBatchTelemetryLocked(&telemetry)
 	ht.ensureOpen()
+	if err := ctx.Err(); err != nil {
+		response.Ok = false
+		response.Error = err.Error()
+		response.Statuses = response.Statuses[:0]
+		response.ValueKinds = response.ValueKinds[:0]
+		return response
+	}
+	if ht.executeScalarBatchRepeatedReadLocked(request, response, &telemetry) {
+		return response
+	}
+	if ht.executeScalarBatchNativeLocked(ctx, request, response, &telemetry) {
+		return response
+	}
 	for index, operation := range operations {
 		if index&63 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -229,6 +242,168 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 		}
 	}
 	return response
+}
+
+func (ht *HatTrie) executeScalarBatchRepeatedReadLocked(request *hatriecachev1.ScalarBatchRequest, response *hatriecachev1.ScalarBatchResponse, telemetry *batchTelemetry) bool {
+	operations := request.GetOperations()
+	if len(operations) < 2 || operations[0] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET || operations[1] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET {
+		return false
+	}
+	key := request.Keys[0]
+	if key == "" || request.Keys[1] != key || validateKey(key) != nil {
+		return false
+	}
+	for index := 2; index < len(operations); index++ {
+		if operations[index] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET || request.Keys[index] != key {
+			return false
+		}
+	}
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadBatchCountLocked(telemetry, false, uint64(len(operations)), key)
+		for index := range operations {
+			addScalarBatchError(response, index, err)
+		}
+		return true
+	}
+	if hval.Empty() {
+		ht.recordReadBatchCountLocked(telemetry, false, uint64(len(operations)), key)
+		for index := range operations {
+			response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND
+		}
+		return true
+	}
+
+	var value string
+	if hval.IsCounter() {
+		value = strconv.FormatInt(int64(hval.Index), 10)
+	} else {
+		value, err = ht.commandValueLocked(hval)
+		if err != nil {
+			ht.recordReadBatchCountLocked(telemetry, false, uint64(len(operations)), key)
+			for index := range operations {
+				addScalarBatchError(response, index, err)
+			}
+			return true
+		}
+	}
+	if len(value) != 0 && len(operations) <= int(^uint(0)>>1)/len(value) {
+		response.Values = make([]byte, 0, len(value)*len(operations))
+	}
+	response.ValueEnds = make([]uint32, 0, len(operations))
+	for index := range operations {
+		response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
+		response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES
+		response.Values = append(response.Values, value...)
+		response.ValueEnds = append(response.ValueEnds, uint32(len(response.Values)))
+	}
+	ht.recordReadBatchCountLocked(telemetry, true, uint64(len(operations)), key)
+	return true
+}
+
+func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *hatriecachev1.ScalarBatchRequest, response *hatriecachev1.ScalarBatchResponse, telemetry *batchTelemetry) bool {
+	operations := request.GetOperations()
+	if len(operations) < minNativeScalarDirectBatchSize || len(ht.dbrefs.array) != 0 || ctx.Err() != nil {
+		return false
+	}
+	integerIndex := 0
+	for index, operation := range operations {
+		if index&63 == 0 && ctx.Err() != nil {
+			return false
+		}
+		key := request.Keys[index]
+		if key == "" || validateKey(key) != nil {
+			return false
+		}
+		if _, expiring := ht.expires[key]; expiring {
+			return false
+		}
+		switch operation {
+		case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER,
+			hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT:
+			value := request.IntegerValues[integerIndex]
+			integerIndex++
+			if value < minCommandInt32 || value > maxCommandInt32 {
+				return false
+			}
+		}
+	}
+
+	chunkCapacity := len(operations)
+	if chunkCapacity > nativeScalarDirectBatchChunkSize {
+		chunkCapacity = nativeScalarDirectBatchChunkSize
+	}
+	items := ht.nativeCommandBatchScratch.items[:0]
+	if cap(items) < chunkCapacity {
+		items = make([]nativeCommandBatchItem, 0, chunkCapacity)
+	}
+	defer func() {
+		ht.nativeCommandBatchScratch.items = items[:0]
+		if cap(ht.nativeCommandBatchScratch.keys) > maxNativeScalarDirectRetainedKeyBytes {
+			ht.nativeCommandBatchScratch.keys = nil
+		}
+	}()
+	stringIndex := 0
+	integerIndex = 0
+	for start := 0; start < len(operations); start += nativeScalarDirectBatchChunkSize {
+		if err := ctx.Err(); err != nil {
+			response.Ok = false
+			response.Error = err.Error()
+			response.Statuses = response.Statuses[:start]
+			response.ValueKinds = response.ValueKinds[:start]
+			return true
+		}
+		end := start + nativeScalarDirectBatchChunkSize
+		if end > len(operations) {
+			end = len(operations)
+		}
+		items = items[:0]
+		for index := start; index < end; index++ {
+			operation := operations[index]
+			command := scalarNativePublicCommand(operation)
+			item := nativeCommandBatchItem{responseIndex: index, key: request.Keys[index], command: command}
+			switch operation {
+			case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING:
+				valueIndex := ht.strings.Add(string(request.StringValues[stringIndex]))
+				stringIndex++
+				item.input = HatValue{Index: valueIndex, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
+			case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER:
+				value := int32(request.IntegerValues[integerIndex])
+				integerIndex++
+				item.input = HatValue{Index: value, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
+			case hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT:
+				value := int32(request.IntegerValues[integerIndex])
+				integerIndex++
+				item.input = nativeCommandBatchIncrementInput(value)
+			}
+			items = append(items, item)
+		}
+		results := ht.runNativeCommandBatchLocked(items)
+		for index, item := range items {
+			ht.applyNativeScalarBatchResultLocked(response, item.responseIndex, item, results[index], telemetry)
+		}
+	}
+	return true
+}
+
+func scalarNativePublicCommand(operation hatriecachev1.ScalarCommand) publicScalarBatchCommand {
+	switch operation {
+	case hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET:
+		return publicScalarBatchGet
+	case hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS:
+		return publicScalarBatchExists
+	case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING:
+		return publicScalarBatchSetString
+	case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER:
+		return publicScalarBatchSetCounter
+	case hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT:
+		return publicScalarBatchIncrement
+	case hatriecachev1.ScalarCommand_SCALAR_COMMAND_DELETE:
+		return publicScalarBatchDelete
+	default:
+		return publicScalarBatchInvalid
+	}
 }
 
 func (ht *HatTrie) scalarBatchGetLocked(response *hatriecachev1.ScalarBatchResponse, index int, key string, telemetry *batchTelemetry) {

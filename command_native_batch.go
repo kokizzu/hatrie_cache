@@ -11,9 +11,14 @@ import (
 	"strconv"
 	"strings"
 	"unsafe"
+
+	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
 const minNativeCommandBatchSize = 32
+const minNativeScalarDirectBatchSize = 4
+const nativeScalarDirectBatchChunkSize = 64
+const maxNativeScalarDirectRetainedKeyBytes = 64 << 10
 
 type nativeCommandBatchFamily uint8
 
@@ -106,7 +111,7 @@ func (ht *HatTrie) executePublicNativeScalarBatchCommand(request CacheCommandReq
 		items = append(items, item)
 	}
 
-	results := ht.runNativeCommandBatchLocked(items, family)
+	results := ht.runNativeCommandBatchLocked(items)
 	telemetry := batchTelemetry{}
 	for index, item := range items {
 		result := results[index]
@@ -299,7 +304,7 @@ func (ht *HatTrie) nativeCommandBatchStateSupportedLocked(payloads []CacheComman
 	return true
 }
 
-func (ht *HatTrie) runNativeCommandBatchLocked(items []nativeCommandBatchItem, family nativeCommandBatchFamily) []C.hc_batch_result_t {
+func (ht *HatTrie) runNativeCommandBatchLocked(items []nativeCommandBatchItem) []C.hc_batch_result_t {
 	if len(items) == 0 {
 		return nil
 	}
@@ -323,21 +328,12 @@ func (ht *HatTrie) runNativeCommandBatchLocked(items []nativeCommandBatchItem, f
 	} else {
 		results = results[:len(items)]
 	}
-	operationCode := C.uint8_t(C.HC_BATCH_LOOKUP)
-	switch family {
-	case nativeCommandBatchSetString, nativeCommandBatchSetCounter:
-		operationCode = C.uint8_t(C.HC_BATCH_SET)
-	case nativeCommandBatchIncrement:
-		operationCode = C.uint8_t(C.HC_BATCH_INCREMENT)
-	case nativeCommandBatchDelete:
-		operationCode = C.uint8_t(C.HC_BATCH_DELETE)
-	}
 	for index, item := range items {
 		offset := len(keys)
 		keys = append(keys, item.key...)
 		operations[index].key_offset = C.uint32_t(offset)
 		operations[index].key_length = C.uint32_t(len(item.key))
-		operations[index].operation = operationCode
+		operations[index].operation = nativeCommandBatchOperationCode(item.command)
 		operations[index].input = item.input
 	}
 	C.hc_hattrie_command_batch(
@@ -354,6 +350,103 @@ func (ht *HatTrie) runNativeCommandBatchLocked(items []nativeCommandBatchItem, f
 	ht.nativeCommandBatchScratch.results = results[:0]
 	ht.nativeCommandBatchCalls++
 	return results
+}
+
+func nativeCommandBatchOperationCode(command publicScalarBatchCommand) C.uint8_t {
+	switch command {
+	case publicScalarBatchSetString, publicScalarBatchSetCounter:
+		return C.uint8_t(C.HC_BATCH_SET)
+	case publicScalarBatchIncrement:
+		return C.uint8_t(C.HC_BATCH_INCREMENT)
+	case publicScalarBatchDelete:
+		return C.uint8_t(C.HC_BATCH_DELETE)
+	default:
+		return C.uint8_t(C.HC_BATCH_LOOKUP)
+	}
+}
+
+func nativeCommandBatchIncrementInput(value int32) C.value_t {
+	return C.value_t(uint64(uint32(value)))
+}
+
+func (ht *HatTrie) applyNativeScalarBatchResultLocked(response *hatriecachev1.ScalarBatchResponse, index int, item nativeCommandBatchItem, result C.hc_batch_result_t, telemetry *batchTelemetry) {
+	previous := HatValue{}
+	previous.fromValue(result.previous)
+	current := HatValue{}
+	current.fromValue(result.value)
+	status := uint8(result.status)
+
+	switch item.command {
+	case publicScalarBatchGet:
+		if status != uint8(C.HC_BATCH_OK) || current.Empty() {
+			ht.recordReadBatchLocked(telemetry, false, item.key)
+			response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND
+			return
+		}
+		response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
+		response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES
+		if current.IsCounter() {
+			response.Values = strconv.AppendInt(response.Values, int64(current.Index), 10)
+		} else {
+			value, err := ht.commandValueLocked(current)
+			if err != nil {
+				ht.recordReadBatchLocked(telemetry, false, item.key)
+				addScalarBatchError(response, index, err)
+				response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE
+				return
+			}
+			response.Values = append(response.Values, value...)
+		}
+		response.ValueEnds = append(response.ValueEnds, uint32(len(response.Values)))
+		ht.recordReadBatchLocked(telemetry, true, item.key)
+	case publicScalarBatchExists:
+		hit := status == uint8(C.HC_BATCH_OK) && !current.Empty()
+		ht.recordReadBatchLocked(telemetry, hit, item.key)
+		response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
+		response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BOOLEAN
+		if hit {
+			response.IntegerValues = append(response.IntegerValues, 1)
+		} else {
+			response.IntegerValues = append(response.IntegerValues, 0)
+		}
+	case publicScalarBatchSetString:
+		ht.returnStorage(previous)
+		ht.clearExpirationLocked(item.key)
+		ht.recordWriteBatchLocked(telemetry, item.key)
+		response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
+	case publicScalarBatchSetCounter:
+		if !previous.IsCounter() {
+			ht.returnStorage(previous)
+		}
+		ht.clearExpirationLocked(item.key)
+		ht.recordWriteBatchLocked(telemetry, item.key)
+		response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
+	case publicScalarBatchIncrement:
+		if status == uint8(C.HC_BATCH_OVERFLOW) {
+			response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_COUNTER_OVERFLOW
+			return
+		}
+		if !previous.IsCounter() {
+			ht.returnStorage(previous)
+			ht.clearExpirationLocked(item.key)
+		}
+		ht.recordWriteBatchLocked(telemetry, item.key)
+		response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
+		response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_INTEGER
+		response.IntegerValues = append(response.IntegerValues, int64(current.Index))
+	case publicScalarBatchDelete:
+		if status != uint8(C.HC_BATCH_OK) {
+			response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND
+			return
+		}
+		ht.clearHotKeyLocked(item.key)
+		ht.clearExpirationLocked(item.key)
+		ht.deleteLevelDBSpillCandidateLocked(item.key)
+		ht.removeKeyStatsLocked(item.key)
+		ht.returnStorage(previous)
+		ht.recordDeleteBatchLocked(telemetry, item.key)
+		response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
+	}
 }
 
 func (ht *HatTrie) applyNativeCommandBatchResultLocked(item nativeCommandBatchItem, family nativeCommandBatchFamily, result C.hc_batch_result_t, telemetry *batchTelemetry) CacheCommandResponse {

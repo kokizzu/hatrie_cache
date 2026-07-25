@@ -29,6 +29,7 @@ require_file deploy/hatrie-cache.json
 require_executable scripts/check-config.sh
 require_executable scripts/docker-build.sh
 require_executable scripts/benchmark-smoke.sh
+require_executable scripts/benchmark-scalar-native-batch.sh
 require_executable scripts/update-benchmark-md.sh
 require_executable scripts/verify-benchmark-md-update.sh
 require_executable scripts/verify-local.sh
@@ -37,6 +38,7 @@ require_pattern Makefile '^[[:space:]]*verify:[[:space:]]+verify-local' "Makefil
 require_pattern Makefile '^[[:space:]]*verify-local:' "Makefile is missing verify-local target"
 require_pattern Makefile '^[[:space:]]*verify-local-contract:' "Makefile is missing verify-local-contract target"
 require_pattern Makefile '^[[:space:]]*bench-smoke:' "Makefile is missing bench-smoke target"
+require_pattern Makefile '^[[:space:]]*bench-scalar-native-batch:' "Makefile is missing scalar native batch benchmark target"
 require_pattern Makefile '^[[:space:]]*benchmark-md:' "Makefile is missing benchmark-md target"
 require_pattern Makefile '^[[:space:]]*verify-benchmark-md-update:' "Makefile is missing benchmark md update verifier target"
 
