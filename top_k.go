@@ -12,6 +12,7 @@ import (
 const (
 	DefaultTopKCapacity uint64 = 100
 	maxTopKCapacity     uint64 = 1 << 20
+	topKInlineIndexSize        = 2
 )
 
 // TopKItem is one tracked heavy-hitter candidate. Count is an upper-bound
@@ -54,7 +55,7 @@ type topKData struct {
 	capacity uint64
 	total    uint64
 	items    []topKItem
-	byKey    map[string]int
+	byKey    map[string]int // nil while the first two items are searched inline
 }
 
 func newTopKData(capacity uint64) (topKData, error) {
@@ -139,7 +140,7 @@ func newTopKDataFromSnapshot(snapshot topKSnapshot) (topKData, error) {
 		total:    snapshot.Total,
 		items:    make([]topKItem, len(snapshot.Items)),
 	}
-	if len(snapshot.Items) > 0 {
+	if len(snapshot.Items) > topKInlineIndexSize {
 		data.byKey = make(map[string]int, len(snapshot.Items))
 	}
 	for idx, item := range snapshot.Items {
@@ -149,7 +150,9 @@ func newTopKDataFromSnapshot(snapshot topKSnapshot) (topKData, error) {
 			Count: item.Count,
 			Error: item.Error,
 		}
-		data.byKey[item.Key] = idx
+		if data.byKey != nil {
+			data.byKey[item.Key] = idx
+		}
 	}
 	for i := len(data.items)/2 - 1; i >= 0; i-- {
 		data.siftDown(i)
@@ -186,13 +189,6 @@ func (top *topKData) AddOneChecked(value interface{}, count uint64, values ...in
 	if err != nil {
 		return TopKEstimate{}, err
 	}
-	if top.byKey == nil {
-		needed, ok := checkedBatchSize(len(top.items), len(prepared))
-		if !ok {
-			return TopKEstimate{}, errBatchSizeTooLarge
-		}
-		top.byKey = make(map[string]int, topKInitialIndexCapacity(top.capacity, needed))
-	}
 	estimate := TopKEstimate{}
 	for _, item := range prepared {
 		estimate = top.addPrepared(item, count)
@@ -214,12 +210,33 @@ func (top topKData) EstimateChecked(value interface{}) (TopKEstimate, error) {
 }
 
 func (top topKData) estimateKey(key string) TopKEstimate {
-	idx, ok := top.byKey[key]
-	if !ok {
-		return TopKEstimate{}
+	if len(top.items) > topKInlineIndexSize {
+		idx, ok := top.byKey[key]
+		if !ok {
+			return TopKEstimate{}
+		}
+		item := top.items[idx]
+		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
 	}
-	item := top.items[idx]
-	return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+	if len(top.items) > 0 && top.items[0].Key == key {
+		item := top.items[0]
+		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+	}
+	if len(top.items) > 1 && top.items[1].Key == key {
+		item := top.items[1]
+		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+	}
+	return TopKEstimate{}
+}
+
+func (top topKData) inlineIndexOfKey(key string) (int, bool) {
+	if len(top.items) > 0 && top.items[0].Key == key {
+		return 0, true
+	}
+	if len(top.items) > 1 && top.items[1].Key == key {
+		return 1, true
+	}
+	return 0, false
 }
 
 func topKInitialIndexCapacity(capacity uint64, needed int) int {
@@ -233,32 +250,59 @@ func topKInitialIndexCapacity(capacity uint64, needed int) int {
 }
 
 func (top *topKData) addPrepared(item topKItem, count uint64) TopKEstimate {
-	top.total = saturatingAddUint64(top.total, count)
-	if idx, ok := top.byKey[item.Key]; ok {
-		top.items[idx].Count = saturatingAddUint64(top.items[idx].Count, count)
-		top.siftDown(idx)
-		item := top.items[top.byKey[item.Key]]
-		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+	if top.byKey != nil {
+		if idx, ok := top.byKey[item.Key]; ok {
+			return top.addExisting(idx, count)
+		}
+	} else if idx, ok := top.inlineIndexOfKey(item.Key); ok {
+		return top.addExisting(idx, count)
 	}
+	return top.addMissing(item, count)
+}
+
+func (top *topKData) addExisting(idx int, count uint64) TopKEstimate {
+	top.total = saturatingAddUint64(top.total, count)
+	top.items[idx].Count = saturatingAddUint64(top.items[idx].Count, count)
+	estimate := TopKEstimate{Tracked: true, Count: top.items[idx].Count, Error: top.items[idx].Error}
+	top.siftDown(idx)
+	return estimate
+}
+
+func (top *topKData) addMissing(item topKItem, count uint64) TopKEstimate {
+	top.total = saturatingAddUint64(top.total, count)
 	if uint64(len(top.items)) < top.capacity {
+		if top.byKey == nil && len(top.items) >= topKInlineIndexSize {
+			top.promoteIndex(len(top.items) + 1)
+		}
 		item.Count = count
 		top.items = append(top.items, item)
 		idx := len(top.items) - 1
-		top.byKey[item.Key] = idx
+		if top.byKey != nil {
+			top.byKey[item.Key] = idx
+		}
 		top.siftUp(idx)
-		item = top.items[top.byKey[item.Key]]
 		return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
 	}
 
 	evicted := top.items[0]
-	delete(top.byKey, evicted.Key)
+	if top.byKey != nil {
+		delete(top.byKey, evicted.Key)
+	}
 	item.Count = saturatingAddUint64(evicted.Count, count)
 	item.Error = evicted.Count
 	top.items[0] = item
-	top.byKey[item.Key] = 0
+	if top.byKey != nil {
+		top.byKey[item.Key] = 0
+	}
 	top.siftDown(0)
-	item = top.items[top.byKey[item.Key]]
 	return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+}
+
+func (top *topKData) promoteIndex(needed int) {
+	top.byKey = make(map[string]int, topKInitialIndexCapacity(top.capacity, needed))
+	for idx := range top.items {
+		top.byKey[top.items[idx].Key] = idx
+	}
 }
 
 func (top *topKData) addPlainJSONString(value string, count uint64) TopKEstimate {
@@ -269,14 +313,14 @@ func (top *topKData) addPlainJSONString(value string, count uint64) TopKEstimate
 	if count == 0 {
 		return top.estimateKey(key)
 	}
-	if top.byKey == nil {
-		needed, ok := checkedBatchSize(len(top.items), 1)
-		if !ok {
-			return TopKEstimate{}
+	if top.byKey != nil {
+		if idx, ok := top.byKey[key]; ok {
+			return top.addExisting(idx, count)
 		}
-		top.byKey = make(map[string]int, topKInitialIndexCapacity(top.capacity, needed))
+	} else if idx, ok := top.inlineIndexOfKey(key); ok {
+		return top.addExisting(idx, count)
 	}
-	return top.addPrepared(topKItem{Key: key, Value: value}, count)
+	return top.addMissing(topKItem{Key: key, Value: value}, count)
 }
 
 func topKPlainJSONStringKey(value string) string {
@@ -397,8 +441,10 @@ func (top *topKData) siftDown(idx int) {
 
 func (top *topKData) swap(i, j int) {
 	top.items[i], top.items[j] = top.items[j], top.items[i]
-	top.byKey[top.items[i].Key] = i
-	top.byKey[top.items[j].Key] = j
+	if top.byKey != nil {
+		top.byKey[top.items[i].Key] = i
+		top.byKey[top.items[j].Key] = j
+	}
 }
 
 func topKHeapLess(a, b topKItem) bool {

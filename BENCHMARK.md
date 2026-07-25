@@ -214,6 +214,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | Escaped and structured values retain the typed generic path |
 | Current pass | [Multi-item Top-K reads](#multi-item-top-k-read-materialization), 16/default-100 string items | Generic materialization: 2,851/10,558 ns; 2,297/13,516 B; 8 allocs | Direct JSON: 1,851/6,898 ns; 1,624/9,752 B; 3 allocs | 1.54x/1.53x faster, 1.41x/1.39x lower heap, 2.67x fewer allocs | One-item and write implementations are unchanged; structured fallback improves 1.11x |
+| Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
@@ -2686,6 +2687,60 @@ slower, so it was discarded and the prior one-item code was restored. The final
 one-item path remains at 80 B and one allocation, while `ADDTOPK` remains at 72
 B and three allocations. Their implementations, retained state, ordering,
 storage, snapshots, journal, replication, and wire JSON shape are unchanged.
+
+<a id="lazy-small-top-k-indexes"></a>
+### Lazy Small Top-K Indexes
+
+Every nonempty Top-K sketch previously allocated a Go `map[string]int`, even
+when only one or two values were tracked. Measured linear lookup is faster at
+those cardinalities, while map lookup wins from the fourth item. Top-K now
+searches its existing item slice directly through two values and constructs the
+same map immediately before inserting a third distinct value. Capacity-one and
+capacity-two sketches remain inline through replacement; there is no retained
+side metadata or demotion work.
+
+Tests were added before implementation and cover inline duplicate updates,
+heap swaps, capacity-two eviction, zero-count estimates, batch promotion,
+map-index consistency, and one/two/three-item snapshot restoration. The
+plain-string update path also checks for a duplicate before constructing its
+boxed retained item, removing one transient allocation at every cardinality.
+Snapshot, storage, journal, replication, command, and wire formats are
+unchanged.
+
+The retained-memory rows use 100,000 default-capacity sketches and medians from
+three runs of five complete builds. Operation rows are seven fixed one-million-
+operation runs; complete commands use seven fixed 100,000-operation runs on the
+same Ryzen 9 5950X host.
+
+```sh
+make run CMD='go test . -run=none -bench=BenchmarkTopKSmallIndexMemory -benchtime=5x -count=3'
+make run CMD='go test . -run=none -bench=BenchmarkTopKSmallIndexLifecycle -benchmem -benchtime=1000000x -count=7'
+make run CMD='go test . -run=none -bench=BenchmarkTopKSmallIndexDuplicate -benchmem -benchtime=1000000x -count=7'
+make run CMD='go test . -run=none -bench=BenchmarkTopKSmallIndexEstimate -benchmem -benchtime=1000000x -count=7'
+make run CMD='go test . -run=none -bench=BenchmarkTopKSmallIndexCommand -benchmem -benchtime=100000x -count=7'
+```
+
+| Retained representation | Eager map | Lazy index | Improvement |
+| --- | ---: | ---: | ---: |
+| One item | 384 B; 5 objects/sketch | 128 B; 3 objects/sketch | 3.00x lower heap; 1.67x fewer objects |
+| Two items | 464 B; 7 objects/sketch | 208 B; 5 objects/sketch | 2.23x lower heap; 1.40x fewer objects |
+| Three items after promotion | 592 B; 9 objects/sketch | 592 B; 9 objects/sketch | Unchanged |
+
+| Operation, median | Eager map | Lazy index | Improvement |
+| --- | ---: | ---: | ---: |
+| Build one item | 282.5 ns; 336 B; 5 allocs | 108.0 ns; 80 B; 3 allocs | 2.62x faster; 4.20x lower heap; 1.67x fewer allocs |
+| Build two items | 457.6 ns; 464 B; 8 allocs | 235.8 ns; 208 B; 6 allocs | 1.94x faster; 2.23x lower heap; 1.33x fewer allocs |
+| Build three items and promote | 677.0 ns; 688 B; 11 allocs | 538.7 ns; 688 B; 11 allocs | 1.26x faster; heap and allocations unchanged |
+| Duplicate update, one/two/three/16 items | 73.19/74.91/82.63/86.34 ns; 32 B; 2 allocs | 39.30/40.62/44.43/48.65 ns; 16 B; 1 alloc | 1.84x-1.86x faster; half the heap and allocations |
+| Direct estimate, one/two/three/16 items | 11.11/12.32/12.31/14.62 ns | 5.616/8.429/11.58/12.86 ns | 1.98x/1.46x/1.06x/1.14x faster; zero allocation throughout |
+| Complete duplicate `ADDTOPK`, one/two/three/16 items | 428.4/420.7/433.7/436.3 ns; 80 B; 3 allocs | 364.4/369.3/366.9/380.0 ns; 64 B; 2 allocs | 1.14x-1.18x faster; 1.25x lower heap; 1.50x fewer allocs |
+
+An initial helper-based lookup candidate made isolated map-backed estimates
+1.62x-1.88x slower and was discarded. The retained cardinality branch makes
+all direct estimate sizes faster. Complete `ESTTOPK` at two and three items is
+neutral within 0.6%, while 16 items improves 0.8%; `GETTOPK` does not inspect
+the index and retains identical code and allocation counts. No configuration,
+fixed overhead, background work, or persistent-format tradeoff was added.
 
 ### On-Demand Runtime Profiling
 

@@ -5557,8 +5557,8 @@ func TestTopKLargeEmptyCapacityAllocatesLazily(t *testing.T) {
 		t.Fatalf("AddTopKChecked(first) = %#v/%v, want first tracked item", estimate, err)
 	}
 	top = ht.topKs.array[hval.Index]
-	if len(top.items) != 1 || len(top.byKey) != 1 {
-		t.Fatalf("Top-K backing after first add = items %d index %d, want one tracked item", len(top.items), len(top.byKey))
+	if len(top.items) != 1 || top.byKey != nil {
+		t.Fatalf("Top-K backing after first add = items %d index nil=%v, want one inline tracked item", len(top.items), top.byKey == nil)
 	}
 
 	restored, err := newTopKDataFromSnapshot(topKSnapshot{Capacity: maxTopKCapacity})
