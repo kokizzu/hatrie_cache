@@ -2612,24 +2612,71 @@ func commandFastTopKItemsJSON(top topKData) (string, bool) {
 	if len(top.items) == 0 {
 		return "[]", true
 	}
-	if len(top.items) != 1 {
+	if len(top.items) == 1 {
+		item := top.items[0]
+		value, ok := item.Value.(string)
+		if !ok || !commandFastJSONPlainString(value) {
+			return "", false
+		}
+		var builder strings.Builder
+		builder.Grow(len(`[{"value":"","count":18446744073709551615,"error":18446744073709551615}]`) + len(value))
+		builder.WriteString(`[{"value":"`)
+		builder.WriteString(value)
+		builder.WriteString(`","count":`)
+		builder.WriteString(strconv.FormatUint(item.Count, 10))
+		builder.WriteString(`,"error":`)
+		builder.WriteString(strconv.FormatUint(item.Error, 10))
+		builder.WriteString(`}]`)
+		return builder.String(), true
+	}
+	capacity, ok := commandFastTopKItemsJSONCapacity(top.items)
+	if !ok {
 		return "", false
 	}
-	item := top.items[0]
-	value, ok := item.Value.(string)
-	if !ok || !commandFastJSONPlainString(value) {
-		return "", false
+	items := top.sortedItems()
+	return commandFastTopKItemsJSONWithCapacity(items, capacity), true
+}
+
+func commandFastTopKItemsJSONCapacity(items []topKItem) (int, bool) {
+	const itemFixedBytes = len(`{"value":,"count":,"error":}`)
+	max := int(^uint(0) >> 1)
+	capacity := len(`[]`)
+	for idx, item := range items {
+		value, ok := item.Value.(string)
+		if !ok || !jsonPlainStringMatchesKey(value, item.Key) {
+			return 0, false
+		}
+		extra := itemFixedBytes + commandFastUint64Digits(item.Count) + commandFastUint64Digits(item.Error)
+		if idx > 0 {
+			extra++
+		}
+		if len(item.Key) > max-extra || capacity > max-extra-len(item.Key) {
+			return 0, false
+		}
+		capacity += extra + len(item.Key)
 	}
+	return capacity, true
+}
+
+func commandFastTopKItemsJSONWithCapacity(items []topKItem, capacity int) string {
 	var builder strings.Builder
-	builder.Grow(len(`[{"value":"","count":18446744073709551615,"error":18446744073709551615}]`) + len(value))
-	builder.WriteString(`[{"value":"`)
-	builder.WriteString(value)
-	builder.WriteString(`","count":`)
-	builder.WriteString(strconv.FormatUint(item.Count, 10))
-	builder.WriteString(`,"error":`)
-	builder.WriteString(strconv.FormatUint(item.Error, 10))
-	builder.WriteString(`}]`)
-	return builder.String(), true
+	builder.Grow(capacity)
+	builder.WriteByte('[')
+	var digits [20]byte
+	for idx, item := range items {
+		if idx > 0 {
+			builder.WriteByte(',')
+		}
+		builder.WriteString(`{"value":`)
+		builder.WriteString(item.Key)
+		builder.WriteString(`,"count":`)
+		_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Count, 10))
+		builder.WriteString(`,"error":`)
+		_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Error, 10))
+		builder.WriteByte('}')
+	}
+	builder.WriteByte(']')
+	return builder.String()
 }
 
 func commandFastQuantileEstimateResponse(message string, estimate QuantileEstimate) CacheCommandResponse {

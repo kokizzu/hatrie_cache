@@ -1950,6 +1950,48 @@ func TestExecuteCommandTopKOperations(t *testing.T) {
 	}
 }
 
+func TestCommandFastTopKItemsJSONMultipleStringsMatchesGeneric(t *testing.T) {
+	top, err := newTopKData(8)
+	if err != nil {
+		t.Fatalf("newTopKData() error = %v", err)
+	}
+	for _, item := range []struct {
+		value string
+		count uint64
+	}{
+		{value: "alpha", count: 5},
+		{value: `quote"and\\slash`, count: 3},
+		{value: "\u4e16\u754c", count: 3},
+		{value: "<tag>&value", count: 1},
+	} {
+		if _, err := top.AddChecked(item.value, item.count); err != nil {
+			t.Fatalf("AddChecked(%q) error = %v", item.value, err)
+		}
+	}
+
+	want := commandValueResponse("ok", top.Items())
+	got, ok := commandFastTopKItemsJSON(top)
+	if !ok {
+		t.Fatal("commandFastTopKItemsJSON() = false, want canonical string fast path")
+	}
+	if got != want.Value {
+		t.Fatalf("commandFastTopKItemsJSON() = %q, want %q", got, want.Value)
+	}
+}
+
+func TestCommandFastTopKItemsJSONFallsBackForNonString(t *testing.T) {
+	top, err := newTopKData(2)
+	if err != nil {
+		t.Fatalf("newTopKData() error = %v", err)
+	}
+	if _, err := top.AddChecked(Map{"route": "/api/cache"}, 1); err != nil {
+		t.Fatalf("AddChecked(map) error = %v", err)
+	}
+	if _, ok := commandFastTopKItemsJSON(top); ok {
+		t.Fatal("commandFastTopKItemsJSON(map) = true, want generic fallback")
+	}
+}
+
 func TestExecuteCommandTopKRejectsUnsupportedValuesWithoutMutation(t *testing.T) {
 	ht := newTestTrie(t)
 	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "ADDTOPK", Key: "top", Value: "alpha", Subkey: "2"}); !got.OK {

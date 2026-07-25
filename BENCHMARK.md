@@ -212,6 +212,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
+| Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | Escaped and structured values retain the typed generic path |
+| Current pass | [Multi-item Top-K reads](#multi-item-top-k-read-materialization), 16/default-100 string items | Generic materialization: 2,851/10,558 ns; 2,297/13,516 B; 8 allocs | Direct JSON: 1,851/6,898 ns; 1,624/9,752 B; 3 allocs | 1.54x/1.53x faster, 1.41x/1.39x lower heap, 2.67x fewer allocs | One-item and write implementations are unchanged; structured fallback improves 1.11x |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
@@ -2644,6 +2646,46 @@ alternating write control measured 348.6 ns for the candidate versus 394.3 ns
 for the baseline, while both remained at 64 B and one allocation; this is
 treated as evidence of no write regression rather than a claimed write-path
 gain because the write implementation is unchanged.
+
+<a id="multi-item-top-k-read-materialization"></a>
+### Multi-Item Top-K Read Materialization
+
+Multi-item `GETTOPK` previously copied and reflection-sorted the internal heap,
+allocated and cloned a second public item slice, then serialized that public
+slice through the generic JSON encoder. The one-item special case was already
+direct, so the former command benchmark did not exercise this multi-item cost.
+
+Tests and realistic 16/default-100-item benchmarks were added before the
+implementation. They require exact byte parity with generic JSON for plain,
+escaped, Unicode, and HTML-sensitive strings, preserve count/error/key tie
+ordering, and require non-string values to use the generic encoder. The
+implementation sorts one private copy through a typed standard-library sorter
+and writes canonical string keys plus numeric fields into one exactly sized
+response buffer. Public `Items()`, snapshots, and structured command fallbacks
+also use the typed sorter and therefore avoid two reflection allocations.
+
+The baseline and final rows are medians from seven fixed 10,000-operation runs
+on the same Ryzen 9 5950X host. A leading-space command selects the generic
+control without changing command semantics.
+
+```sh
+make run CMD='go test . -run=none -bench=BenchmarkTopKGet -benchmem -benchtime=10000x -count=7'
+make run CMD='go test . -run=none -bench=BenchmarkCommandFeature/TopK -benchmem -benchtime=100000x -count=7'
+```
+
+| Read path, median | Baseline | Final | Improvement |
+| --- | ---: | ---: | ---: |
+| Exact command, 16 strings | 2,851 ns; 2,297 B; 8 allocs | 1,851 ns; 1,624 B; 3 allocs | 1.54x faster; 1.41x lower heap; 2.67x fewer allocs |
+| Exact command, 100 strings | 10,558 ns; 13,516 B; 8 allocs | 6,898 ns; 9,752 B; 3 allocs | 1.53x faster; 1.39x lower heap; 2.67x fewer allocs |
+| Generic control, 16 strings | 2,878 ns; 2,297 B; 8 allocs | 2,606 ns; 2,200 B; 6 allocs | 1.10x faster; 1.04x lower heap; 1.33x fewer allocs |
+| Generic control, 100 strings | 10,859 ns; 13,512 B; 8 allocs | 10,317 ns; 13,394 B; 6 allocs | 1.05x faster; 1.01x lower heap; 1.33x fewer allocs |
+| Structured fallback, 16 items | 3,482 ns; 2,512 B; 11 allocs | 3,133 ns; 2,414 B; 9 allocs | 1.11x faster; 1.04x lower heap; 1.22x fewer allocs |
+
+An attempted one-item rewrite reduced heap but made its median CPU time 6%
+slower, so it was discarded and the prior one-item code was restored. The final
+one-item path remains at 80 B and one allocation, while `ADDTOPK` remains at 72
+B and three allocations. Their implementations, retained state, ordering,
+storage, snapshots, journal, replication, and wire JSON shape are unchanged.
 
 ### On-Demand Runtime Profiling
 

@@ -254,6 +254,55 @@ func BenchmarkReservoirSampleGetEncodedPath(b *testing.B) {
 	}
 }
 
+func BenchmarkTopKGetPath(b *testing.B) {
+	for _, size := range []int{16, 100} {
+		for _, benchmark := range []struct {
+			name       string
+			getCommand string
+		}{
+			{name: "Generic", getCommand: " GETTOPK"},
+			{name: "Exact", getCommand: "GETTOPK"},
+		} {
+			b.Run("Strings"+strconv.Itoa(size)+"/"+benchmark.name, func(b *testing.B) {
+				ht := CreateHatTrie()
+				defer ht.Destroy()
+				setupCommandFeatureTopKWithValues(b, ht, size)
+				request := CacheCommandRequest{Command: benchmark.getCommand, Key: "topk:key"}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					benchmarkExecuteCommand(b, ht, request)
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkTopKGetStructuredFallbackPath(b *testing.B) {
+	for _, benchmark := range []struct {
+		name       string
+		getCommand string
+	}{
+		{name: "Generic", getCommand: " GETTOPK"},
+		{name: "Exact", getCommand: "GETTOPK"},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			ht := CreateHatTrie()
+			defer ht.Destroy()
+			setupCommandFeatureTopKWithValues(b, ht, 15)
+			if estimate, err := ht.AddTopKChecked("topk:key", Map{"route": "/api/cache"}, 100); err != nil || !estimate.Tracked {
+				b.Fatalf("AddTopKChecked(map) = %#v/%v, want tracked", estimate, err)
+			}
+			request := CacheCommandRequest{Command: benchmark.getCommand, Key: "topk:key"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchmarkExecuteCommand(b, ht, request)
+			}
+		})
+	}
+}
+
 func benchmarkExecuteCommand(b *testing.B, ht *HatTrie, request CacheCommandRequest) CacheCommandResponse {
 	b.Helper()
 	response := ht.ExecuteCommand(request)
@@ -397,6 +446,19 @@ func setupCommandFeatureTopK(b *testing.B, ht *HatTrie) {
 func setupCommandFeatureTopKWithValue(b *testing.B, ht *HatTrie) {
 	setupCommandFeatureTopK(b, ht)
 	benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "ADDTOPK", Key: "topk:key", Value: "value", Subkey: "2"})
+}
+
+func setupCommandFeatureTopKWithValues(b *testing.B, ht *HatTrie, size int) {
+	b.Helper()
+	benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "CREATETOPK", Key: "topk:key", Value: strconv.Itoa(size)})
+	for idx := 0; idx < size; idx++ {
+		benchmarkExecuteCommand(b, ht, CacheCommandRequest{
+			Command: "ADDTOPK",
+			Key:     "topk:key",
+			Value:   "value-" + strconv.Itoa(idx),
+			Subkey:  strconv.Itoa(idx + 1),
+		})
+	}
 }
 
 func setupCommandFeatureReservoirSample(b *testing.B, ht *HatTrie) {

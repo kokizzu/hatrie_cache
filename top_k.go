@@ -345,17 +345,25 @@ func (top topKData) sortedItems() []topKItem {
 	}
 	out := make([]topKItem, len(top.items))
 	copy(out, top.items)
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Count != out[j].Count {
-			return out[i].Count > out[j].Count
-		}
-		if out[i].Error != out[j].Error {
-			return out[i].Error < out[j].Error
-		}
-		return out[i].Key < out[j].Key
-	})
+	sort.Sort(topKItemsByRank(out))
 	return out
 }
+
+type topKItemsByRank []topKItem
+
+func (items topKItemsByRank) Len() int { return len(items) }
+
+func (items topKItemsByRank) Less(i int, j int) bool {
+	if items[i].Count != items[j].Count {
+		return items[i].Count > items[j].Count
+	}
+	if items[i].Error != items[j].Error {
+		return items[i].Error < items[j].Error
+	}
+	return items[i].Key < items[j].Key
+}
+
+func (items topKItemsByRank) Swap(i int, j int) { items[i], items[j] = items[j], items[i] }
 
 func (top *topKData) siftUp(idx int) {
 	for idx > 0 {
