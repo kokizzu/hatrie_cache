@@ -137,6 +137,8 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
+	telemetry := batchTelemetry{}
+	defer ht.flushBatchTelemetryLocked(&telemetry)
 	ht.ensureOpen()
 	for index, operation := range operations {
 		if index&63 == 0 {
@@ -170,11 +172,11 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 		}
 		switch operation {
 		case hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET:
-			ht.scalarBatchGetLocked(response, index, key)
+			ht.scalarBatchGetLocked(response, index, key, &telemetry)
 		case hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS:
 			hval := ht.peekLocked(key)
 			hit := !hval.Empty()
-			ht.recordReadLocked(hit, key)
+			ht.recordReadBatchLocked(&telemetry, hit, key)
 			response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
 			response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BOOLEAN
 			if hit {
@@ -183,27 +185,29 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 				response.IntegerValues = append(response.IntegerValues, 0)
 			}
 		case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING:
-			if err := ht.upsertStringLocked(key, string(stringValue)); err != nil {
+			if err := ht.upsertStringValueLocked(key, string(stringValue)); err != nil {
 				addScalarBatchError(response, index, err)
 				continue
 			}
+			ht.recordWriteBatchLocked(&telemetry, key)
 			response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
 		case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER:
 			if integerValue < minCommandInt32 || integerValue > maxCommandInt32 {
 				response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_INVALID_ARGUMENT
 				continue
 			}
-			if err := ht.upsertCounterLocked(key, int32(integerValue)); err != nil {
+			if err := ht.upsertCounterValueLocked(key, int32(integerValue)); err != nil {
 				addScalarBatchError(response, index, err)
 				continue
 			}
+			ht.recordWriteBatchLocked(&telemetry, key)
 			response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
 		case hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT:
 			if integerValue < minCommandInt32 || integerValue > maxCommandInt32 {
 				response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_INVALID_ARGUMENT
 				continue
 			}
-			value, updated, err := ht.incrementCounterLocked(key, int32(integerValue), true)
+			value, updated, err := ht.incrementCounterValueLocked(key, int32(integerValue), true)
 			if err != nil {
 				addScalarBatchError(response, index, err)
 				continue
@@ -212,11 +216,12 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 				response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_COUNTER_OVERFLOW
 				continue
 			}
+			ht.recordWriteBatchLocked(&telemetry, key)
 			response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
 			response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_INTEGER
 			response.IntegerValues = append(response.IntegerValues, int64(value))
 		case hatriecachev1.ScalarCommand_SCALAR_COMMAND_DELETE:
-			if ht.deleteAndRecordLocked(key) {
+			if ht.deleteAndRecordBatchLocked(&telemetry, key) {
 				response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK
 			} else {
 				response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND
@@ -226,15 +231,15 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 	return response
 }
 
-func (ht *HatTrie) scalarBatchGetLocked(response *hatriecachev1.ScalarBatchResponse, index int, key string) {
+func (ht *HatTrie) scalarBatchGetLocked(response *hatriecachev1.ScalarBatchResponse, index int, key string, telemetry *batchTelemetry) {
 	hval, err := ht.getLockedChecked(key)
 	if err != nil {
-		ht.recordReadLocked(false, key)
+		ht.recordReadBatchLocked(telemetry, false, key)
 		addScalarBatchError(response, index, err)
 		return
 	}
 	if hval.Empty() {
-		ht.recordReadLocked(false, key)
+		ht.recordReadBatchLocked(telemetry, false, key)
 		response.Statuses[index] = hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND
 		return
 	}
@@ -245,7 +250,7 @@ func (ht *HatTrie) scalarBatchGetLocked(response *hatriecachev1.ScalarBatchRespo
 	} else {
 		value, valueErr := ht.commandValueLocked(hval)
 		if valueErr != nil {
-			ht.recordReadLocked(false, key)
+			ht.recordReadBatchLocked(telemetry, false, key)
 			addScalarBatchError(response, index, valueErr)
 			response.ValueKinds[index] = hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_NONE
 			return
@@ -253,7 +258,7 @@ func (ht *HatTrie) scalarBatchGetLocked(response *hatriecachev1.ScalarBatchRespo
 		response.Values = append(response.Values, value...)
 	}
 	response.ValueEnds = append(response.ValueEnds, uint32(len(response.Values)))
-	ht.recordReadLocked(true, key)
+	ht.recordReadBatchLocked(telemetry, true, key)
 }
 
 func newScalarBatchResponse(batchID uint64, count int) *hatriecachev1.ScalarBatchResponse {

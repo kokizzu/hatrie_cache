@@ -3232,6 +3232,14 @@ func (ht *HatTrie) upsertCounterValueLocked(key string, value int32) error {
 }
 
 func (ht *HatTrie) incrementCounterLocked(key string, by int32, checkOverflow bool) (int32, bool, error) {
+	value, updated, err := ht.incrementCounterValueLocked(key, by, checkOverflow)
+	if err == nil && updated {
+		ht.recordWriteLocked(key)
+	}
+	return value, updated, err
+}
+
+func (ht *HatTrie) incrementCounterValueLocked(key string, by int32, checkOverflow bool) (int32, bool, error) {
 	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
 	if err != nil {
 		return 0, false, err
@@ -3256,14 +3264,17 @@ func (ht *HatTrie) incrementCounterLocked(key string, by int32, checkOverflow bo
 		hval.Index = by
 	}
 	*rawPtr = hval.toValue()
-	ht.recordWriteLocked(key)
 	return hval.Index, true, nil
 }
 
 func (ht *HatTrie) deleteAndRecordLocked(key string) bool {
+	return ht.deleteAndRecordBatchLocked(nil, key)
+}
+
+func (ht *HatTrie) deleteAndRecordBatchLocked(batch *batchTelemetry, key string) bool {
 	deleted := ht.deleteLocked(key)
 	if deleted {
-		ht.recordDeleteLocked(key)
+		ht.recordDeleteBatchLocked(batch, key)
 	}
 	return deleted
 }

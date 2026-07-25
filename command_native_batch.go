@@ -107,14 +107,16 @@ func (ht *HatTrie) executePublicNativeScalarBatchCommand(request CacheCommandReq
 	}
 
 	results := ht.runNativeCommandBatchLocked(items, family)
+	telemetry := batchTelemetry{}
 	for index, item := range items {
 		result := results[index]
-		response := ht.applyNativeCommandBatchResultLocked(item, family, result)
+		response := ht.applyNativeCommandBatchResultLocked(item, family, result, &telemetry)
 		if !response.OK {
 			allOK = false
 		}
 		responses[item.responseIndex] = response
 	}
+	ht.flushBatchTelemetryLocked(&telemetry)
 	return publicCommandBatchResponse(responses, allOK), true
 }
 
@@ -354,7 +356,7 @@ func (ht *HatTrie) runNativeCommandBatchLocked(items []nativeCommandBatchItem, f
 	return results
 }
 
-func (ht *HatTrie) applyNativeCommandBatchResultLocked(item nativeCommandBatchItem, family nativeCommandBatchFamily, result C.hc_batch_result_t) CacheCommandResponse {
+func (ht *HatTrie) applyNativeCommandBatchResultLocked(item nativeCommandBatchItem, family nativeCommandBatchFamily, result C.hc_batch_result_t, telemetry *batchTelemetry) CacheCommandResponse {
 	previous := HatValue{}
 	previous.fromValue(result.previous)
 	current := HatValue{}
@@ -364,46 +366,46 @@ func (ht *HatTrie) applyNativeCommandBatchResultLocked(item nativeCommandBatchIt
 	switch family {
 	case nativeCommandBatchRead:
 		if status != uint8(C.HC_BATCH_OK) || current.Empty() {
-			ht.recordReadLocked(false, item.key)
+			ht.recordReadBatchLocked(telemetry, false, item.key)
 			if item.command == publicScalarBatchExists {
 				return CacheCommandResponse{OK: true, Message: "ok", Value: "0"}
 			}
 			return CacheCommandResponse{OK: true, Message: "key not found"}
 		}
 		if item.command == publicScalarBatchExists {
-			ht.recordReadLocked(true, item.key)
+			ht.recordReadBatchLocked(telemetry, true, item.key)
 			return CacheCommandResponse{OK: true, Message: "ok", Value: "1"}
 		}
 		if current.IsLevelDBReference() {
 			var err error
 			current, err = ht.hydrateLevelDBReferenceLocked(item.key, current)
 			if err != nil {
-				ht.recordReadLocked(false, item.key)
+				ht.recordReadBatchLocked(telemetry, false, item.key)
 				return commandError(err.Error())
 			}
 			if current.Empty() {
-				ht.recordReadLocked(false, item.key)
+				ht.recordReadBatchLocked(telemetry, false, item.key)
 				return CacheCommandResponse{OK: true, Message: "key not found"}
 			}
 		}
 		value, err := ht.commandValueLocked(current)
 		if err != nil {
-			ht.recordReadLocked(false, item.key)
+			ht.recordReadBatchLocked(telemetry, false, item.key)
 			return commandError(err.Error())
 		}
-		ht.recordReadLocked(true, item.key)
+		ht.recordReadBatchLocked(telemetry, true, item.key)
 		return CacheCommandResponse{OK: true, Message: "ok", Value: value}
 	case nativeCommandBatchSetString:
 		ht.returnStorage(previous)
 		ht.clearExpirationLocked(item.key)
-		ht.recordWriteLocked(item.key)
+		ht.recordWriteBatchLocked(telemetry, item.key)
 		return CacheCommandResponse{OK: true, Message: "stored string"}
 	case nativeCommandBatchSetCounter:
 		if !previous.IsCounter() {
 			ht.returnStorage(previous)
 		}
 		ht.clearExpirationLocked(item.key)
-		ht.recordWriteLocked(item.key)
+		ht.recordWriteBatchLocked(telemetry, item.key)
 		return CacheCommandResponse{OK: true, Message: "stored counter"}
 	case nativeCommandBatchIncrement:
 		if status == uint8(C.HC_BATCH_OVERFLOW) {
@@ -413,7 +415,7 @@ func (ht *HatTrie) applyNativeCommandBatchResultLocked(item nativeCommandBatchIt
 			ht.returnStorage(previous)
 			ht.clearExpirationLocked(item.key)
 		}
-		ht.recordWriteLocked(item.key)
+		ht.recordWriteBatchLocked(telemetry, item.key)
 		return CacheCommandResponse{OK: true, Message: "incremented", Value: strconv.FormatInt(int64(current.Index), 10)}
 	case nativeCommandBatchDelete:
 		if status != uint8(C.HC_BATCH_OK) {
@@ -424,7 +426,7 @@ func (ht *HatTrie) applyNativeCommandBatchResultLocked(item nativeCommandBatchIt
 		ht.deleteLevelDBSpillCandidateLocked(item.key)
 		ht.removeKeyStatsLocked(item.key)
 		ht.returnStorage(previous)
-		ht.recordDeleteLocked(item.key)
+		ht.recordDeleteBatchLocked(telemetry, item.key)
 		return CacheCommandResponse{OK: true, Message: "deleted"}
 	default:
 		return commandError("unsupported command")

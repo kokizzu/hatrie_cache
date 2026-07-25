@@ -231,6 +231,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
+| Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
@@ -1514,6 +1515,42 @@ increments, smaller batches, and journal executor interception retain the Go
 path. Ordered C results are reconciled in Go for backing-store cleanup,
 telemetry, mutation tracking, overflow errors, and response formatting. Raw
 output is in `build/benchmarks/native-c-command-batch.txt`.
+
+<a id="exact-batch-telemetry-aggregation"></a>
+### Exact Batch Telemetry Aggregation
+
+Default global telemetry previously called `time.Now` and updated atomic
+counters after every successful item in native public batches and direct typed
+gRPC scalar batches. CPU profiles attributed 19.2% of the 4,096-item native
+GET path and 8.1% of the complete scalar gRPC process to the clock. The final
+path accumulates exact hit, miss, write, and delete totals under the existing
+trie lock, then publishes each total and the batch-completion timestamp once.
+Explicit bounded or full per-key telemetry keeps its prior per-item timestamps
+and counters.
+
+Tests first fixed the clock to a counted function and failed with 32 calls for
+a 32-item native batch and seven calls for a seven-item mixed scalar batch.
+Both now make one call while retaining exact aggregate counters; detailed key
+telemetry still makes and records all 32 per-item updates.
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkBatchTelemetry -benchmem -benchtime=2s -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkBigWins/ScalarBatchStreamCommand -benchmem -benchtime=8s -count=1'
+```
+
+| Seven-run median | Per-item telemetry | Batch telemetry | Improvement |
+| --- | ---: | ---: | ---: |
+| Native 4,096 string reads | 1,011,781 ns; 262,144 B; 1 alloc | 857,091 ns; 262,144 B; 1 alloc | 1.18x faster; heap and allocations unchanged |
+| Direct typed scalar, 16 reads | 3,903 ns; 736 B; 12 allocs | 3,328 ns; 736 B; 12 allocs | 1.17x faster; heap and allocations unchanged |
+| Direct typed scalar, 256 reads | 55,274 ns; 7,648 B; 20 allocs | 47,116 ns; 7,648 B; 20 allocs | 1.17x faster; heap and allocations unchanged |
+
+The complete 1,000-command scalar gRPC stream spot check improved from 450.1
+to 384.1 ns/command (1.17x) with the same 23.64 measured wire B/command.
+Cumulative heap changed from 248,742 to 249,327 B (0.24%, treated as noise)
+and allocations fell from 3,970 to 3,961. There is no new field, retained
+buffer, background worker, configuration, wire change, or storage-format
+change. A cached-clock package was not adopted because its updater goroutine
+and reduced timestamp precision add costs that aggregation avoids.
 
 ### Segmented WAL Compaction
 

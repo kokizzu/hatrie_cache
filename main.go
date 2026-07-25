@@ -683,6 +683,13 @@ type atomicCacheStats struct {
 	lastWrite   atomic.Int64
 }
 
+type batchTelemetry struct {
+	hits    uint64
+	misses  uint64
+	writes  uint64
+	deletes uint64
+}
+
 func (stats *atomicCacheStats) initialize() {
 	stats.lastHit.Store(unsetAtomicCacheTime)
 	stats.lastMiss.Store(unsetAtomicCacheTime)
@@ -4570,6 +4577,40 @@ func (ht *HatTrie) recordReadLocked(hit bool, keys ...string) {
 	}
 }
 
+func (ht *HatTrie) recordReadBatchLocked(batch *batchTelemetry, hit bool, keys ...string) {
+	if batch == nil || ht.keyStatsMode != KeyStatsModeOff {
+		ht.recordReadLocked(hit, keys...)
+		return
+	}
+	if hit {
+		batch.hits++
+	} else {
+		batch.misses++
+	}
+}
+
+func (ht *HatTrie) flushBatchTelemetryLocked(batch *batchTelemetry) {
+	if batch == nil || batch.hits|batch.misses|batch.writes|batch.deletes == 0 {
+		return
+	}
+	now := ht.currentTime()
+	if batch.hits != 0 {
+		updateAtomicCacheTime(&ht.stats.lastHit, now)
+		ht.stats.hits.Add(batch.hits)
+	}
+	if batch.misses != 0 {
+		updateAtomicCacheTime(&ht.stats.lastMiss, now)
+		ht.stats.misses.Add(batch.misses)
+	}
+	if batch.writes != 0 {
+		updateAtomicCacheTime(&ht.stats.lastWrite, now)
+		ht.stats.writes.Add(batch.writes)
+	}
+	if batch.deletes != 0 {
+		ht.stats.deletes.Add(batch.deletes)
+	}
+}
+
 func (ht *HatTrie) recordGlobalRead(now time.Time, hit bool) {
 	if hit {
 		updateAtomicCacheTime(&ht.stats.lastHit, now)
@@ -4593,20 +4634,8 @@ func (ht *HatTrie) recordGlobalReadSerialized(now time.Time, hit bool) {
 }
 
 func (ht *HatTrie) recordWriteLocked(keys ...string) {
-	if ht.persistentDirtyTracker != nil {
-		for _, key := range keys {
-			ht.persistentDirtyTracker.Mark(key)
-		}
-	}
-	ht.trackSnapshotMutationsLocked(keys...)
-	ht.updateReplicationMerkleLocked(keys...)
-	ht.mutationEpoch++
+	ht.recordWriteMutationLocked(keys...)
 	now := ht.currentTime()
-	for _, key := range keys {
-		ht.clearHotKeyLocked(key)
-		ht.updateLevelDBSpillCandidateForKeyLocked(key)
-		ht.updateLevelDBHotByteAccountingForKeyLocked(key)
-	}
 	if ht.keyStatsMode == KeyStatsModeOff {
 		ht.recordGlobalWrite(now)
 		return
@@ -4626,6 +4655,31 @@ func (ht *HatTrie) recordWriteLocked(keys ...string) {
 		}
 		stats.Writes++
 		stats.setLastWrite(now)
+	}
+}
+
+func (ht *HatTrie) recordWriteBatchLocked(batch *batchTelemetry, keys ...string) {
+	if batch == nil || ht.keyStatsMode != KeyStatsModeOff {
+		ht.recordWriteLocked(keys...)
+		return
+	}
+	ht.recordWriteMutationLocked(keys...)
+	batch.writes++
+}
+
+func (ht *HatTrie) recordWriteMutationLocked(keys ...string) {
+	if ht.persistentDirtyTracker != nil {
+		for _, key := range keys {
+			ht.persistentDirtyTracker.Mark(key)
+		}
+	}
+	ht.trackSnapshotMutationsLocked(keys...)
+	ht.updateReplicationMerkleLocked(keys...)
+	ht.mutationEpoch++
+	for _, key := range keys {
+		ht.clearHotKeyLocked(key)
+		ht.updateLevelDBSpillCandidateForKeyLocked(key)
+		ht.updateLevelDBHotByteAccountingForKeyLocked(key)
 	}
 }
 
@@ -4722,17 +4776,23 @@ func (ht *HatTrie) recordGlobalWriteSerialized(now time.Time) {
 }
 
 func (ht *HatTrie) recordDeleteLocked(key string) {
+	ht.recordDeleteBatchLocked(nil, key)
+}
+
+func (ht *HatTrie) recordDeleteBatchLocked(batch *batchTelemetry, key string) {
 	if ht.persistentDirtyTracker != nil {
 		ht.persistentDirtyTracker.Mark(key)
 	}
 	ht.trackSnapshotMutationsLocked(key)
 	ht.updateReplicationMerkleLocked(key)
-	if ht.keyStatsMode == KeyStatsModeOff {
+	if batch != nil && ht.keyStatsMode == KeyStatsModeOff {
+		batch.deletes++
+	} else if ht.keyStatsMode == KeyStatsModeOff {
 		ht.stats.deletes.Add(1)
 	} else {
 		ht.keyStatsGlobal.Deletes++
 	}
-	ht.recordWriteLocked()
+	ht.recordWriteBatchLocked(batch)
 	ht.deleteLevelDBSpillCandidateLocked(key)
 	ht.deleteLevelDBHotByteAccountingLocked(key)
 	ht.removeKeyStatsLocked(key)
