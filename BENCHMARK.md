@@ -237,7 +237,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
-| Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock is approximate within its 5 ms refresh interval; injected test clocks and monotonic elapsed measurements are unchanged |
+| Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
@@ -939,6 +939,25 @@ KiB after for string set, which is measurement noise rather than retained
 growth. A repeated end-to-end counter run improved from the 432.5 ns baseline
 to 405.2 ns (1.07x). Raw clock and same-process A/B output is generated at
 `build/benchmarks/fastime.txt`.
+
+The production-default benchmark case also guards the constructor path. A
+follow-up attempt to call `fastime.UnixNanoNow` directly for default global
+telemetry was rejected and reverted: it preserved heap behavior but regressed
+all four seven-run command medians.
+
+| Rejected direct Unix telemetry read | Cached `time.Time` path | Direct Unix-nanosecond path | Result |
+| --- | ---: | ---: | ---: |
+| Command string set | 178.8 ns | 187.0 ns | 1.05x slower |
+| Command string get | 157.7 ns | 168.0 ns | 1.07x slower |
+| Command counter increment | 241.1 ns | 245.5 ns | 1.02x slower |
+| Command TTL refresh | 213.5 ns | 225.2 ns | 1.05x slower |
+| Heap / allocations | unchanged | unchanged | no memory benefit |
+
+Remaining standard-library clock reads are intentional. They protect
+monotonic elapsed measurements, authentication expiry, election leases,
+retries, circuit breakers, or sub-refresh-interval operational duration
+reporting; replacing them would introduce a correctness or precision cost for
+no meaningful throughput gain.
 
 Run the same sequential transport comparison across representative command
 families:

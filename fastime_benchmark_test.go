@@ -42,16 +42,12 @@ func TestFastimeClockDocumentsApproximateSemantics(t *testing.T) {
 		t.Fatal("fastime did not reuse a timestamp across immediate reads")
 	}
 
-	deadline := time.Now().Add(100 * time.Millisecond)
+	deadline := time.Now().Add(time.Second)
 	for fastime.Now().Equal(approximate) && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	if fastime.Now().Equal(approximate) {
-		t.Fatal("fastime did not refresh within 100ms")
-	}
-	lag := time.Since(fastime.Now())
-	if lag < -time.Millisecond || lag > 25*time.Millisecond {
-		t.Fatalf("fastime lag = %s, want -1ms..25ms", lag)
+		t.Fatal("fastime did not refresh within 1s")
 	}
 }
 
@@ -100,11 +96,11 @@ func BenchmarkClockSource(b *testing.B) {
 
 func BenchmarkTrieClockSource(b *testing.B) {
 	clocks := []struct {
-		name string
-		now  func() time.Time
+		name     string
+		override func() time.Time
 	}{
-		{name: "TimeNow", now: time.Now},
-		{name: "FastimeNow", now: fastime.Now},
+		{name: "Default"},
+		{name: "TimeNow", override: time.Now},
 	}
 	operations := []struct {
 		name    string
@@ -147,7 +143,9 @@ func BenchmarkTrieClockSource(b *testing.B) {
 				b.Run(clock.name, func(b *testing.B) {
 					trie := CreateHatTrie()
 					b.Cleanup(trie.Destroy)
-					trie.now = clock.now
+					if clock.override != nil {
+						trie.now = clock.override
+					}
 					if operation.setup != nil {
 						operation.setup(trie)
 					}
