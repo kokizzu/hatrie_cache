@@ -2365,6 +2365,65 @@ func (ss *SliceStorage) values(idx int32) Slice {
 	return out
 }
 
+func (ss *SliceStorage) packedJSONString(idx int32) (string, error) {
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
+	if !packed {
+		return "", errors.New("hatriecache: slice backing index is not packed")
+	}
+	if !twoValuePool {
+		if poolIndex < 0 || int(poolIndex) >= len(ss.oneValues) || ss.oneReusable.Has(poolIndex) {
+			return "", errors.New("hatriecache: slice backing index is missing")
+		}
+		data := ss.oneValues[poolIndex]
+		if data.length == 0 {
+			if data.nonNil {
+				return "[]", nil
+			}
+			return "null", nil
+		}
+		return packedSliceJSONString(data.value, nil, data.length)
+	}
+	if poolIndex < 0 || int(poolIndex) >= len(ss.twoValues) || ss.twoReusable.Has(poolIndex) {
+		return "", errors.New("hatriecache: slice backing index is missing")
+	}
+	data := ss.twoValues[poolIndex]
+	if data.length == 0 {
+		return "[]", nil
+	}
+	return packedSliceJSONString(data.values[0], data.values[1], data.length)
+}
+
+func packedSliceJSONString(first interface{}, second interface{}, length uint8) (string, error) {
+	estimated := 2
+	if text, ok := first.(string); ok {
+		estimated += len(text) + 2
+	} else {
+		estimated += 8
+	}
+	if length == 2 {
+		estimated++
+		if text, ok := second.(string); ok {
+			estimated += len(text) + 2
+		} else {
+			estimated += 8
+		}
+	}
+	var builder strings.Builder
+	builder.Grow(estimated)
+	builder.WriteByte('[')
+	if err := writeSmallMapJSONValue(&builder, first); err != nil {
+		return "", err
+	}
+	if length == 2 {
+		builder.WriteByte(',')
+		if err := writeSmallMapJSONValue(&builder, second); err != nil {
+			return "", err
+		}
+	}
+	builder.WriteByte(']')
+	return builder.String(), nil
+}
+
 func (ss *SliceStorage) length(idx int32) (int, bool) {
 	poolIndex, twoValuePool, packed := decodePackedSliceIndex(idx)
 	if !packed {

@@ -209,6 +209,37 @@ func assertSliceValueEqual(t *testing.T, ht *HatTrie, key string, want Slice) {
 	}
 }
 
+func TestPackedSliceCommandGetMatchesCanonicalJSON(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		values Slice
+	}{
+		{name: "nil", values: nil},
+		{name: "empty", values: Slice{}},
+		{name: "one nil", values: Slice{nil}},
+		{name: "one escaped", values: Slice{"<alpha>\n\"quoted\""}},
+		{name: "one invalid utf8", values: Slice{string([]byte{'a', 0xff, 'b'})}},
+		{name: "two unicode separators", values: Slice{"line\u2028separator", "paragraph\u2029separator"}},
+		{name: "two scalar", values: Slice{true, int64(-9223372036854775807)}},
+		{name: "two nested", values: Slice{Map{"<key>": "value"}, Slice{1, "two"}}},
+		{name: "promoted", values: Slice{"alpha", "beta", "gamma"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ht := newTestTrie(t)
+			ht.UpsertSlice("slice", test.values)
+
+			want, err := jsonEncodedString(ht.GetSlice("slice"))
+			if err != nil {
+				t.Fatalf("jsonEncodedString() error = %v", err)
+			}
+			got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "slice"})
+			if !got.OK || got.Value != want {
+				t.Fatalf("GET response = %#v, want value %q", got, want)
+			}
+		})
+	}
+}
+
 func BenchmarkSliceStorageLayout100k(b *testing.B) {
 	const keyCount = 100000
 	keys := make([]string, keyCount)
@@ -465,6 +496,32 @@ func BenchmarkSlicePackedOperationPairs(b *testing.B) {
 				if values := ht.GetSlice("slice"); len(values) != 2 {
 					b.Fatalf("GetSlice() length = %d, want 2", len(values))
 				}
+			}
+		})
+	}
+}
+
+func BenchmarkPackedSliceCommandGet(b *testing.B) {
+	for _, benchmark := range []struct {
+		name   string
+		values Slice
+	}{
+		{name: "Nil", values: nil},
+		{name: "Empty", values: Slice{}},
+		{name: "OneString", values: Slice{"alpha"}},
+		{name: "TwoStrings", values: Slice{"alpha", "beta"}},
+		{name: "TwoNested", values: Slice{Map{"key": "value"}, Slice{1, "two"}}},
+		{name: "Promoted", values: Slice{"alpha", "beta", "gamma"}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			ht := CreateHatTrie()
+			b.Cleanup(ht.Destroy)
+			ht.UpsertSlice("slice", benchmark.values)
+			request := CacheCommandRequest{Command: "GET", Key: "slice"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				benchmarkCommandResponseSink = ht.ExecuteCommand(request)
 			}
 		})
 	}

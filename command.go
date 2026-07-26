@@ -3400,7 +3400,7 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		if hval.Index >= 0 {
 			return jsonEncodedString(ht.slices.array[hval.Index].Slice())
 		}
-		return jsonEncodedString(ht.slices.values(hval.Index))
+		return ht.slices.packedJSONString(hval.Index)
 	case DATAVALUE_TYPE_SET:
 		return ht.sets.jsonString(hval.Index)
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
