@@ -21,7 +21,10 @@ Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
 low-memory membership checks with approximate delete support.
 XOR filter values stage unique items once, then compile them into static 8-bit
 fingerprint arrays for faster low-memory membership checks than Bloom filters
-on read-heavy immutable sets.
+on read-heavy immutable sets. Their private header fits in one 64-byte cache
+line, using 1.12x less retained memory per empty filter without changing
+fingerprints or formats; measurements are in
+[BENCHMARK.md](BENCHMARK.md#compact-xor-filter-headers).
 Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
 exact uint32 sets with fast membership, remove, count, and sorted iteration.
 Their fixed 1,024-word dense backing uses a compact 48-byte container header,

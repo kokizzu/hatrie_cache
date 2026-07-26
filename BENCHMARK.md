@@ -212,6 +212,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct generic priority-queue GET](#compact-priority-queue-items), empty/one/16/100 string items | Generic materialization: 207.1/422.4/2,863/23,449 ns | Shared-lock direct JSON: 159.3/268.3/2,386/17,977 ns | 1.30x/1.57x/1.20x/1.30x faster; up to 2.11x lower heap and 54x fewer allocations | Other value types retain the prior GET branch; a 100-item mixed queue is 1.37x faster with 1.56x lower heap and 28x fewer allocations |
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
+| Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
 | Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
@@ -3246,6 +3247,47 @@ item, exactly as before. The optimization removes 2,048 cumulative bytes and
 128 allocations from the 64-item lifecycle without adding fields, background
 work, configuration, or retained state. Plain-string filter contents and built
 fingerprints remain byte-identical to the generic path.
+
+<a id="compact-xor-filter-headers"></a>
+### Compact XOR-Filter Headers
+
+The XOR-filter header previously placed a one-byte built flag between aligned
+integer fields and a four-byte block length before pointer-aligned fields. Two
+independent padding gaps made the header 72 bytes. Grouping fields by alignment
+reduces it to exactly 64 bytes without changing a field, branch, allocation, or
+algorithm. Named-field construction means snapshots and restored filters are
+unaffected, and the in-memory type is private.
+
+A layout test and 100,000-filter fixture were added before the reorder. The
+test pins both the 72-byte legacy control and final 64-byte header. Existing
+tests cover staging, retries, byte-identical fingerprint construction, lookup,
+info, snapshots, restore, and continued mutation. The focused lookup keeps the
+old and new field orders in the same test binary and executes identical built-
+filter logic on the same fingerprint backing.
+
+```sh
+make run CMD='go test . -run="TestXorFilter(HeaderLayoutIsBounded|BuildAndContains|SnapshotRoundTrip|BuildRetriesWithoutChangingFingerprintResult|PlainJSONStringFastPathMatchesGeneric)" -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterHeaderLayout100k -benchmem -benchtime=1x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterHeaderLookupLayout -benchmem -benchtime=500ms -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/XorHas -benchmem -benchtime=1000000x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterLifecyclePhases64/PlainStringStage -benchmem -benchtime=1s -count=9 -cpu=1'
+```
+
+| Metric, median | Legacy field order | Compact field order | Improvement |
+| --- | ---: | ---: | ---: |
+| Header size | 72 B/filter | 64 B/filter | 1.125x smaller |
+| Retained 100k layout | 72.01 B/filter | 64.06 B/filter | 1.12x lower |
+| Initialize 100k headers | 51.28 ns/filter | 34.19 ns/filter | 1.50x faster |
+| Same-binary built lookup | 17.16 ns | 16.78 ns | 1.02x faster |
+| Complete `HASXF` command | 208.4 ns | 209.8 ns | Neutral within 0.7%; 0 B and 0 allocations both |
+| Stage 64 strings | 11,995 ns | 10,250 ns | 1.17x faster; 11,416 B and 139 allocations unchanged |
+
+The retained-memory delta is about 776 KiB per 100,000 filters, before
+allocator and cache-locality effects elsewhere in the process. The separate-
+run command and staging rows are supporting regression checks; the primary CPU
+evidence is the same-binary lookup. Fingerprint bytes, staged maps, public
+results, snapshots, journals, replication, storage, and wire formats are
+unchanged.
 
 <a id="linked-xor-filter-build-queue"></a>
 ### Linked XOR-Filter Build Queue

@@ -51,12 +51,12 @@ type xorFilterStagedItem struct {
 
 type xorFilterData struct {
 	expectedItems uint64
-	built         bool
 	items         uint64
 	seed          uint64
-	blockLength   uint32
 	fingerprints  []uint8
 	staged        map[string]interface{}
+	blockLength   uint32
+	built         bool
 }
 
 type xorFilterBuildSlot struct {
