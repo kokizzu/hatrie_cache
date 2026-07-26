@@ -51,7 +51,7 @@ type sparseBitsetData struct {
 type sparseBitsetContainer struct {
 	key         uint64
 	values      []uint16
-	bits        []uint64
+	bits        *[sparseBitsetBitmapWords]uint64
 	cardinality uint32
 	inline      [2]uint16
 }
@@ -185,7 +185,7 @@ func newSparseBitsetContainerFromSnapshot(snapshot sparseBitsetContainerSnapshot
 		if err != nil {
 			return sparseBitsetContainer{}, err
 		}
-		container.bits = make([]uint64, sparseBitsetBitmapWords)
+		container.bits = new([sparseBitsetBitmapWords]uint64)
 		for idx := range container.bits {
 			container.bits[idx] = binary.LittleEndian.Uint64(raw[idx*8 : idx*8+8])
 		}
@@ -330,12 +330,13 @@ func (bitset sparseBitsetData) findContainer(key uint64) (int, bool) {
 }
 
 func (container *sparseBitsetContainer) add(value uint16) bool {
-	if container.isBitmap() {
+	if backing := container.bits; backing != nil {
+		bitmap := backing[:]
 		word, mask := sparseBitsetBit(value)
-		if container.bits[word]&mask != 0 {
+		if bitmap[word]&mask != 0 {
 			return false
 		}
-		container.bits[word] |= mask
+		bitmap[word] |= mask
 		container.cardinality++
 		return true
 	}
@@ -394,12 +395,13 @@ func (container *sparseBitsetContainer) add(value uint16) bool {
 }
 
 func (container *sparseBitsetContainer) remove(value uint16) bool {
-	if container.isBitmap() {
+	if backing := container.bits; backing != nil {
+		bitmap := backing[:]
 		word, mask := sparseBitsetBit(value)
-		if container.bits[word]&mask == 0 {
+		if bitmap[word]&mask == 0 {
 			return false
 		}
-		container.bits[word] &^= mask
+		bitmap[word] &^= mask
 		container.cardinality--
 		if container.cardinality <= sparseBitsetArrayShrinkSize {
 			container.convertToArray()
@@ -455,9 +457,10 @@ func (container *sparseBitsetContainer) remove(value uint16) bool {
 }
 
 func (container sparseBitsetContainer) contains(value uint16) bool {
-	if container.isBitmap() {
+	if backing := container.bits; backing != nil {
+		bitmap := backing[:]
 		word, mask := sparseBitsetBit(value)
-		return container.bits[word]&mask != 0
+		return bitmap[word]&mask != 0
 	}
 	if container.values == nil {
 		switch container.cardinality {
@@ -552,7 +555,8 @@ func (container *sparseBitsetContainer) convertToBitmap() {
 	if container.isBitmap() {
 		return
 	}
-	next := make([]uint64, sparseBitsetBitmapWords)
+	backing := new([sparseBitsetBitmapWords]uint64)
+	next := backing[:]
 	if container.values == nil {
 		for idx := 0; idx < int(container.cardinality); idx++ {
 			word, mask := sparseBitsetBit(container.inline[idx])
@@ -569,7 +573,7 @@ func (container *sparseBitsetContainer) convertToBitmap() {
 	}
 	container.values = nil
 	container.inline = [2]uint16{}
-	container.bits = next
+	container.bits = backing
 }
 
 func (container *sparseBitsetContainer) convertToArray() {
@@ -611,8 +615,8 @@ func (container *sparseBitsetContainer) clear() {
 	for idx := range container.values {
 		container.values[idx] = 0
 	}
-	for idx := range container.bits {
-		container.bits[idx] = 0
+	if container.bits != nil {
+		*container.bits = [sparseBitsetBitmapWords]uint64{}
 	}
 	*container = sparseBitsetContainer{}
 }

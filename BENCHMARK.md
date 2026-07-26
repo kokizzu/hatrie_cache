@@ -214,6 +214,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
+| Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
@@ -3256,9 +3257,11 @@ Dense bitmap conversion remains at 4,097 values.
 Behavior tests were added before implementation for unsorted inserts,
 duplicates, lookup, ordered output, encoded size, snapshots, promotion,
 demotion, and final removal. Existing dense conversion, command, snapshot,
-storage, journal, and replication suites remain applicable. A size assertion
-fixes the container at 64 bytes. Same-binary controls retain the previous slice
-layout and alternate execution order for the many-container CPU comparison.
+storage, journal, and replication suites remain applicable. At this pass, a
+size assertion fixed the container at 64 bytes; the later
+[compact-header pass](#compact-sparse-bitset-headers) reduces it to 48 bytes.
+Same-binary controls retain the previous slice-value layout and alternate
+execution order for the many-container CPU comparison.
 
 ```sh
 make run CMD='go test . -run="TestSparseBitset|TestCheckedSparseBitset|TestExecuteCommandSparseBitset" -count=1'
@@ -3283,6 +3286,40 @@ small containers improved, its extra representation branch made a 4,096-value
 array lookup 30.86 ns versus 29.93 ns for the control, or 1.03x slower. It was
 replaced by an inlineable typed binary search; the final promoted lookup is
 1.01x faster. No failed implementation remains in production.
+
+<a id="compact-sparse-bitset-headers"></a>
+### Compact Sparse-Bitset Headers
+
+Dense sparse-bitset containers always have exactly 1,024 `uint64` words. Their
+stored `[]uint64` nevertheless occupied a 24-byte pointer/length/capacity
+header in every container, including the common inline singleton containers.
+The final layout stores a pointer to a fixed `[1024]uint64` backing and creates
+a local slice view while operating on dense words. The container shrinks from
+64 to 48 bytes; the two inline values still occupy otherwise unused tail
+padding, and the dense allocation remains exactly 8 KiB.
+
+Tests added before the change cover dense promotion, lookup, snapshot
+round-trip, demotion, and the header invariant. A same-binary control retains
+the prior slice header with identical inline, array, bitmap, and conversion
+logic. Paired operations alternate execution order.
+
+```sh
+make run CMD='go test . -run SparseBitset -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSparseBitsetBackingLayoutAlternating -benchtime=500x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSparseBitsetCompactHeaderRetained100k -benchtime=1x -count=5 -cpu=1 -benchmem'
+```
+
+| Operation, median | Slice-header control | Fixed-pointer final | Improvement |
+| --- | ---: | ---: | ---: |
+| Build 4,097-value bitmap | 211.179 us | 211.061 us | Neutral within 0.1% |
+| Bitmap lookup | 3.068 ns | 2.954 ns | 1.04x faster |
+| Bitmap remove/add | 5.675 ns | 5.594 ns | 1.01x faster |
+| Build 100,000 singleton containers | 22.061 ms; 34,511,448 B; 30 allocs | 17.478 ms; 27,819,368 B; 30 allocs | 1.26x faster; 1.24x lower cumulative heap; allocations unchanged |
+| Retained singleton layout | 71.60 B/container | 57.75 B/container | 1.24x lower retained heap |
+
+Validation, bitmap thresholds, and persistent decoding already require the
+fixed word count. Wire, snapshot, journal, database, ordering, and public API
+behavior are unchanged. No operation regression was measured.
 
 <a id="compact-roaring-container-headers"></a>
 ### Compact Roaring-Container Headers

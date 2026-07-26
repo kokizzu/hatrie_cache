@@ -30,7 +30,10 @@ measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-roaring-container-headers).
 Sparse bitset values use sorted 16-bit containers keyed by the upper 48 bits,
 promoting dense ranges to packed bitsets for exact uint64 membership with low
-memory overhead on sparse high-cardinality IDs.
+memory overhead on sparse high-cardinality IDs. Their inline values and fixed
+1,024-word bitmap backing fit in a compact 48-byte container header;
+measurements are in
+[BENCHMARK.md](BENCHMARK.md#compact-sparse-bitset-headers).
 Radix tree values use path-compressed string edges for exact nested key/value
 indexes with fast lookup, sorted prefix scans, and low overhead for keys that
 share long prefixes.

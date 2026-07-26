@@ -82,9 +82,9 @@ func TestSparseBitsetSmallContainerTransitionsPreserveBehavior(t *testing.T) {
 	}
 }
 
-func TestSparseBitsetContainerHasFourPaddingBytes(t *testing.T) {
-	if got := unsafe.Sizeof(sparseBitsetContainer{}); got != 64 {
-		t.Fatalf("sizeof(sparseBitsetContainer) = %d, want 64", got)
+func TestSparseBitsetContainerHasCompactHeader(t *testing.T) {
+	if got := unsafe.Sizeof(sparseBitsetContainer{}); got != 48 {
+		t.Fatalf("sizeof(sparseBitsetContainer) = %d, want 48", got)
 	}
 }
 
