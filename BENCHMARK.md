@@ -309,6 +309,7 @@ tree.
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Known-valid-key GET helper | Intended to skip redundant key validation | 121.7 ns versus 120.1 ns for the checked path | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Idempotent string assignment | Intended to skip an unchanged string-header write and reusable-index check | The refined one-check prototype made duplicates 1.27x slower and true replacements 1.07x slower | Removed before production; direct assignment remains; see [idempotent string assignment](#idempotent-string-assignment-rollback) |
 | Temporary packed-map materialization | Reused the generic map JSON encoder | 1,499 ns, 488 B, and 5 allocations | Replaced by direct JSON at 511.4 ns, 24 B, and 1 allocation; see [packed small-map storage](#packed-small-map-storage) |
 | Boxed packed-set reads | Avoided retaining interface payloads in packed pools | Two-member reads were 1.31x slower with 2x heap and 3x allocations | Removed; packed pools retain the faster interface payload layout; see [packed small string-set storage](#packed-small-string-set-storage) |
 | Sentinel-encoded packed-slice length | Shrunk each two-value slice record from 40 to 32 bytes and lowered the 100,000-slice retained/timed heap 1.25x | The refined marker made pop/push 1.06x slower and shift/push 1.04x slower; the first marker design was 1.10x/1.09x slower | Reverted; the inline length byte remains; see [packed two-slice length](#packed-two-slice-length-rollback) |
@@ -1292,6 +1293,32 @@ strings, cumulative heap falls from 108,816,416 to 69,731,720 B (1.56x lower),
 allocations fall from 500,117 to 400,067 (1.25x fewer), and median time improves
 from 273.039 to 243.218 ms (1.12x faster). Raw dedicated-fixture output is
 generated at `build/benchmarks/string-storage.txt`.
+
+<a id="idempotent-string-assignment-rollback"></a>
+#### Idempotent String Assignment Rollback
+
+An audit candidate tried to avoid `StringStorage.Put` when an existing string
+slot already contained the requested immutable value. The refined prototype
+used one bounds check, compared the slot directly, and otherwise performed the
+same assignment and reusable-index update as production. No cache code was
+changed before the storage primitive cleared its CPU gate.
+
+The test-first behavior fixture confirmed that a duplicate string upsert must
+retain its storage index and value while still clearing TTL and incrementing
+write accounting. A temporary same-binary benchmark timed 262,144 writes per
+block, alternated candidate/control order, covered both identical values and
+alternating real replacements, and repeated each case nine times on one
+logical CPU.
+
+| String slot update, nine-run median | Direct assignment | Equality first | Result |
+| --- | ---: | ---: | ---: |
+| Duplicate value | 2.623 ns | 3.332 ns | Candidate 1.27x slower |
+| True replacement | 2.811 ns | 3.017 ns | Candidate 1.07x slower |
+
+Writing the same two-word string header is cheaper than checking equality
+first, even before complete command overhead. The prototype, behavior fixture,
+and benchmark control were removed. Production retains direct assignment, so
+there is no added branch, code path, memory, format, or runtime cost.
 
 <a id="packed-small-map-storage"></a>
 ### Packed Small-Map Storage

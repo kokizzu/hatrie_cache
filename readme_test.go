@@ -221,6 +221,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Exact scalar command dispatch",
 		"Cgo call annotations",
 		"Known-valid-key GET helper",
+		"Idempotent string assignment",
 		"Temporary packed-map materialization",
 		"Boxed packed-set reads",
 		"Sentinel-encoded packed-slice length",
