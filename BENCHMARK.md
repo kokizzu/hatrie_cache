@@ -224,6 +224,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
+| Current pass | [Map field encoding outside cache lock](#packed-small-map-storage), exact `PEEKMAP` | Lock-held field encoding: 34.86 ns strings; 508.4 ns structured; writer stalled behind caller JSON | Point-in-time field reference: 29.68 ns strings; 456.4 ns structured; writer progresses during JSON | 1.17x/1.11x faster with identical zero/three allocations; unbounded caller-marshaler stall removed | Replacing a field may complete while the prior point-in-time response is still encoding; wire bytes and ownership are unchanged |
 | Current pass | [Packed small string-set storage](#packed-small-string-set-storage), 100k one/two-member sets | Slice/map entries: 94.36/142.4 retained B/set; 2.000/3.000 retained objects/set | Packed pools: 18.87/36.98 retained B/set; 0.00026/0.00026 retained objects/set | 5.00x/3.85x lower retained heap; about 7,692x/11,538x fewer retained objects; 1.39x/1.42x faster writes | Adds 160 fixed bytes/cache; promotes at the third member with unchanged generic retention and a 1.21x faster measured transition |
 | Current pass | [Direct packed string-set JSON](#packed-small-string-set-storage), empty/one/two-member command GET | Temporary set: 245.3/338.3/379.1 ns; 64/88/112 B; 3/4/4 allocs | Direct JSON: 76.35/134.9/153.1 ns; 0/16/16 B; 0/1/1 allocs | 3.21x/2.51x/2.48x faster; up to 7x lower heap; up to 4x fewer allocations | Packed plain strings only; promoted sets retain the generic encoder with unchanged wire, storage, ordering, and ownership |
 | Current pass | [Packed small-slice storage](#packed-small-slice-storage), 100k zero/one/two-value slices | Deques: 46.23/62.23/78.23 retained B/slice; one retained object for nonempty slices | Packed pools: 27.39/27.39/46.23 retained B/slice; 0.00025 retained objects/slice | 1.69x/2.27x/1.69x lower retained heap; about 4,000x fewer retained objects for nonempty slices; tiny push retention improves up to 4.02x | Adds 160 fixed bytes/cache; promotion retains the generic deque, measures neutral, and halves transition allocations |
@@ -1327,6 +1328,32 @@ make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MapGet -benchti
 | Update existing eight-field map | 340.7 ns; 0 allocs | 256.0 ns; 0 allocs | 1.33x faster |
 | Peek eight-field map | 104.0 ns; 0 allocs | 90.39 ns; 0 allocs | 1.15x faster |
 | Full one-field map JSON command | 1,148 ns; 152 B; 3 allocs | 511.4 ns; 24 B; 1 alloc | 2.24x faster, 6.33x lower heap, 3x fewer allocs |
+
+Exact `PEEKMAP` previously serialized a non-string field while holding the
+exclusive cache lock. A deterministic blocking-marshaler test proved that a
+field replacement could not complete during a 100 ms gate and remained blocked
+until response encoding was released. Stored nested maps and slices are cloned
+on write, and field updates replace the stored interface, so the exact command
+now captures that stable point-in-time reference, records the read, unlocks,
+and only then serializes it. Strings return from the same captured reference
+without encoding.
+
+The same-binary benchmark runs both orderings to cancel host drift. The rows
+are pooled medians from seven 500 ms samples per order on one logical CPU:
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkMapPeekCommandLockScope -benchmem -benchtime=500ms -count=7 -cpu=1'
+```
+
+| Exact `PEEKMAP` core | Lock-held encoding | Encode after unlock | Result |
+| --- | ---: | ---: | ---: |
+| String field | 34.86 ns; 0 B; 0 allocs | 29.68 ns; 0 B; 0 allocs | 1.17x faster; memory unchanged |
+| Structured field | 508.4 ns; 152 B; 3 allocs | 456.4 ns; 152 B; 3 allocs | 1.11x faster; memory unchanged |
+
+The response remains linearized at the successful field lookup. A concurrent
+replacement can complete while the prior response is still encoding, but it
+cannot mutate the captured nested value. Missing fields, cold references,
+read accounting, output JSON, persistence, and public ownership are unchanged.
 
 The full-map path initially materialized a temporary Go map and measured 1,499
 ns, 488 B, and 5 allocations. That candidate was not retained. The final path

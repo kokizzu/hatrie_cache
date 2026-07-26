@@ -3134,24 +3134,27 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 
 func (ht *HatTrie) executeFastPeekMapCommand(key string, subkey string) (CacheCommandResponse, bool) {
 	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
 	hval := ht.peekCachedLocked(key)
 	if !hval.IsMap() {
 		if hval.IsLevelDBReference() {
+			ht.mu.Unlock()
 			return CacheCommandResponse{}, false
 		}
 		ht.recordReadLocked(false, key)
+		ht.mu.Unlock()
 		return CacheCommandResponse{OK: true, Message: "value not found"}, true
 	}
 	value, ok := ht.maps.peek(hval.Index, subkey)
 	ht.recordReadLocked(ok, key)
 	if !ok {
+		ht.mu.Unlock()
 		return CacheCommandResponse{OK: true, Message: "value not found"}, true
 	}
 	if text, ok := value.(string); ok {
+		ht.mu.Unlock()
 		return CacheCommandResponse{OK: true, Message: "ok", Value: text}, true
 	}
+	ht.mu.Unlock()
 	payload, err := commandScalarString(value)
 	if err != nil {
 		return commandError(err.Error()), true
