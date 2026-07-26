@@ -478,7 +478,7 @@ func (ht *HatTrie) compactAuxiliaryMemoryLocked() {
 		ht.expires = nil
 		ht.expirations = nil
 	} else {
-		ht.rebuildExpirationHeapLocked()
+		ht.rebuildExpirationIndexLocked()
 	}
 	ht.compactKeyStatsLocked()
 	ht.levelDBSpillKeys = cloneStringSet(ht.levelDBSpillKeys)

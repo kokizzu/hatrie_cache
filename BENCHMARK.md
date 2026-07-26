@@ -288,6 +288,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
 | Current pass | [Single-pass expiration-index compaction](#single-pass-expiration-index-compaction), 10k expiring keys | Double map rebuild: 8.254 ms; 1,562,256 heap B; 10,095 allocs | Heap-authoritative rebuild: 6.120 ms; 1,125,320 heap B; 10,060 allocs | 1.35x faster, 1.39x lower heap, 35 fewer allocations | No measured tradeoff; `CompactMemory` policy, lock scope, TTL state, heap order, wire, and persistence are unchanged |
+| Current pass | [Linear expiration-index rebuild](#linear-expiration-index-rebuild), repeated 10k-TTL compaction | Heap `Push`: 6.033 ms; 1,125,278 heap B; 10,058 allocs | Clone plus direct positions: 5.964 ms; 1,125,278 heap B; 10,058 allocs | 1.01x faster with identical heap and allocations | No measured tradeoff; the right-sized heap, exact order, deadlines, index positions, and formats are unchanged |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
@@ -2865,6 +2866,39 @@ make run CMD='go test . -run=NONE -bench=BenchmarkCompactMemoryExpirationIndex10
 The final path constructs the index once from the expiration heap. TTL values,
 deadline updates, removals, heap ordering, compaction locking, retained memory,
 wire bytes, snapshots, and persistent formats are unchanged.
+
+<a id="linear-expiration-index-rebuild"></a>
+##### Linear Expiration-Index Rebuild
+
+The first single-pass version still fed the already-valid expiration heap back
+through `expirationHeap.Push`. In heap-array order every parent is seen before
+its children, so each insertion only rechecked an invariant that was already
+true and rewrote positions that can be derived directly from the array index.
+
+The pre-change correctness guard preserves the exact heap order and every
+deadline across compaction, in addition to validating each index and parent
+relationship. The final implementation clones the heap into
+the same right-sized backing used before and writes one map entry per fixed
+position. It does not retain the old high-water backing.
+
+```sh
+make run CMD='go test . -run=TestExpirationHeapIndexesStayConsistentAcrossUpdatesAndRemovals -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkCompactMemoryExpirationIndex10k -benchmem -benchtime=10x -count=10'
+```
+
+Ten complete compactions ran per sample. The committed heap-`Push` control was
+restored and measured between candidate runs; the conservative post-control
+candidate repeat is reported here.
+
+| Repeated full 10k-TTL compaction | Heap `Push` control | Linear final | Improvement |
+| --- | ---: | ---: | ---: |
+| Median time | 6,033,008 ns | 5,964,272 ns | 1.01x faster |
+| Cumulative heap | 1,125,278 B | 1,125,278 B | identical |
+| Allocations | 10,058 | 10,058 | identical |
+
+The comparison has identical heap and allocations. Compaction policy, lock
+scope, retained capacity, TTL behavior, snapshots, wire, and persistence are
+unchanged.
 
 <a id="online-generational-compaction-rollback"></a>
 #### Online Generational Compaction Rollback

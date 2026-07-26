@@ -5588,11 +5588,12 @@ func (ht *HatTrie) compactExpirationHeapLocked() {
 	}
 }
 
-func (ht *HatTrie) rebuildExpirationHeapLocked() {
-	next := make(expirationHeap, 0, len(ht.expires))
-	indexes := make(map[string]uint32, len(ht.expires))
-	for _, entry := range ht.expirations {
-		next.Push(entry, indexes)
+func (ht *HatTrie) rebuildExpirationIndexLocked() {
+	next := make(expirationHeap, len(ht.expirations))
+	copy(next, ht.expirations)
+	indexes := make(map[string]uint32, len(next))
+	for index, entry := range next {
+		indexes[entry.key] = uint32(index)
 	}
 	ht.expirations = next
 	ht.expires = indexes

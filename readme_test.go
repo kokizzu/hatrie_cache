@@ -419,6 +419,30 @@ func TestDocsDescribeSinglePassExpirationIndexCompaction(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeLinearExpirationIndexRebuild(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[linear expiration-index rebuild](BENCHMARK.md#linear-expiration-index-rebuild)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing linear expiration-index token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"5,964,272 ns",
+		"exact heap order",
+		"identical heap and allocations",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing linear expiration-index token %q", token)
+		}
+	}
+}
+
 func TestREADMEDocumentsXorFilterBuildHashIndex(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {

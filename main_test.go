@@ -8047,12 +8047,18 @@ func TestExpirationHeapIndexesStayConsistentAcrossUpdatesAndRemovals(t *testing.
 			t.Fatalf("Persist(%q) = false", key)
 		}
 	}
+	ht.mu.RLock()
+	wantHeap := append(expirationHeap(nil), ht.expirations...)
+	ht.mu.RUnlock()
 	if _, err := ht.CompactMemory(); err != nil {
 		t.Fatalf("CompactMemory() error = %v", err)
 	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
+	if !reflect.DeepEqual(ht.expirations, wantHeap) {
+		t.Fatal("expiration heap order or deadlines changed during compaction")
+	}
 	if len(ht.expires) != ht.expirations.Len() {
 		t.Fatalf("expiration index/heap lengths = %d/%d, want equal", len(ht.expires), ht.expirations.Len())
 	}
