@@ -214,6 +214,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Allocation-free duplicate radix updates](#idempotent-plain-string-radix-updates), exact plain-string `PUTRT` | 260.6 ns; 16 B; 1 alloc | 207.6 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated; focused duplicate 2.62x faster | Exact command only; public generic writes are unchanged, while replacements, dynamic builds, and reads are neutral or faster |
 | Current pass | [Order-independent radix bulk insertion](#order-independent-radix-bulk-insertion), 64/4,096-entry build and replacement | Sorted builds: 12,681/1,350,624 ns; replacements: 6,840/794,342 ns | Direct builds: 10,566/1,101,969 ns; replacements: 3,058/441,584 ns | Builds 1.20x/1.23x faster; replacements 2.24x/1.80x faster; one allocation and 1,152/65,536 B eliminated per call | No measured tradeoff; exact tree shape, item count, cloning, sorted traversal, snapshots, wire, and storage remain unchanged |
+| Current pass | [Borrowed command pair fields](#borrowed-command-pair-fields), pair-only `PUTMAP`/`PUTRT` replacement with 64/4,096 fields | Map: 26,107/2,311,800 ns; radix: 28,813/2,544,023 ns; 11,513/783,543 B | Map: 14,976/1,453,940 ns; radix: 16,328/1,742,736 ns; 2,144/131,181 B | Map 1.74x/1.59x faster; radix 1.76x/1.46x faster; 5.37x/5.97x lower heap; up to 25x fewer allocs | No measured tradeoff; storage still clones all retained values, and mixed subkey-plus-pairs requests retain an owned merge map |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -3124,6 +3125,47 @@ columns come from the dedicated allocation fixture. Final child order, prefix
 scan order, and serialized snapshots remain deterministic even though the
 temporary insertion order is not. No format, API, or retained-memory tradeoff
 was introduced.
+
+<a id="borrowed-command-pair-fields"></a>
+### Borrowed Command Pair Fields
+
+Pair-only `PUTMAP` and `PUTRT` requests previously validated every field, then
+copied the full `Pairs` map into a temporary map before passing it to storage.
+Both storage paths synchronously clone every retained value and never mutate
+the field map, so that copy provided no ownership boundary. The command helpers
+now return the already validated request map for pair-only calls. Requests that
+also specify `Subkey` still receive an owned merge map so the subkey can
+override a same-named pair without mutating caller input.
+
+Tests were added before the production change. The zero-allocation extraction
+contract failed at two allocations per call on the old implementation, then
+passed 100 repeated runs after the change. A separate mixed-fields test mutates
+the returned merge map and proves the request pairs remain unchanged. Existing
+command tests continue to cover nested-value cloning, invalid-value rejection,
+replacement of other cache types, and radix added counts.
+
+```sh
+make run CMD='go test . -run=TestCommand.*Fields -count=100'
+make run CMD='go test . -run=TestExecuteCommand -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandPairFieldsAlternating -benchtime=20x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandPairBulkReplacement/.*64 -benchtime=2000x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandPairBulkReplacement/.*4096 -benchtime=50x -count=7 -cpu=1 -benchmem'
+```
+
+| Pair-only operation, median | Copied fields | Borrowed fields | Result |
+| --- | ---: | ---: | ---: |
+| Map helper, 64 fields | 7,439 ns/extraction | 1,082 ns/extraction | 6.88x faster; two map allocations eliminated |
+| Radix helper, 64 fields | 7,444 ns/extraction | 974.7 ns/extraction | 7.64x faster; two map allocations eliminated |
+| Complete `PUTMAP`, 64 fields | 26,107 ns; 11,513 B; 13 allocs | 14,976 ns; 2,144 B; 2 allocs | 1.74x faster; 5.37x lower heap; 6.50x fewer allocs |
+| Complete `PUTRT`, 64 fields | 28,813 ns; 11,513 B; 13 allocs | 16,328 ns; 2,144 B; 2 allocs | 1.76x faster; 5.37x lower heap; 6.50x fewer allocs |
+| Complete `PUTMAP`, 4,096 fields | 2,311,800 ns; 783,543 B; 50 allocs | 1,453,940 ns; 131,181 B; 2 allocs | 1.59x faster; 5.97x lower heap; 25x fewer allocs |
+| Complete `PUTRT`, 4,096 fields | 2,544,023 ns; 783,543 B; 50 allocs | 1,742,736 ns; 131,181 B; 2 allocs | 1.46x faster; 5.97x lower heap; 25x fewer allocs |
+
+The helper CPU figures use same-binary alternating controls. The complete
+command rows compare repeated updates to already populated structures before
+and after the change. Validation, clone depth, stored values, write accounting,
+TTL handling, item counts, snapshots, journals, replication, and wire formats
+are unchanged.
 
 <a id="mutation-response-lock-release-rollback"></a>
 ### Mutation Response Lock Release Rollback

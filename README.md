@@ -16,8 +16,11 @@ accounting, and formats remain unchanged; see
 [BENCHMARK.md](BENCHMARK.md#live-string-slot-replacement).
 One- and two-field maps use a packed pool and avoid replacing an identical
 plain-string field value. Repeated exact `PUTMAP` becomes allocation-free and
-1.30x faster without changing write accounting or promoted-map behavior; see
-[BENCHMARK.md](BENCHMARK.md#packed-small-map-storage).
+1.30x faster. Pair-only bulk commands also borrow the validated request map
+until storage clones its values, making 64/4,096-field replacements
+1.74x/1.59x faster without changing ownership, write accounting, or promoted
+map behavior; see the [packed-map](BENCHMARK.md#packed-small-map-storage) and
+[command-pair](BENCHMARK.md#borrowed-command-pair-fields) measurements.
 New empty, one-, and two-value slices use dedicated packed pools and promote
 once to the existing ring deque at the third value. Promoted keys remain
 generic to avoid conversion churn. The packed path cuts retained tiny-slice
@@ -58,9 +61,12 @@ real replacements, dynamic construction, generic values, and reads remain
 neutral or faster. Bulk pair insertion also skips a redundant input-key sort:
 64/4,096-entry builds are 1.20x/1.23x faster and replacement calls are
 1.80x-2.24x faster while preserving the exact canonical tree and sorted output.
+Pair-only `PUTRT` command replacement is another 1.46x-1.76x faster by avoiding
+an unretained request-map copy.
 See [the duplicate-update](BENCHMARK.md#idempotent-plain-string-radix-updates)
 and [bulk-insertion](BENCHMARK.md#order-independent-radix-bulk-insertion)
-measurements.
+measurements, plus the shared
+[command-pair result](BENCHMARK.md#borrowed-command-pair-fields).
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts

@@ -3810,38 +3810,38 @@ func commandExpireAt(request CacheCommandRequest) (time.Time, bool) {
 }
 
 func commandMapFields(request CacheCommandRequest) (Map, bool) {
-	fields := Map{}
-	for subkey, value := range request.Pairs {
+	for subkey := range request.Pairs {
 		if strings.TrimSpace(subkey) == "" {
 			return nil, false
 		}
-		fields[subkey] = value
 	}
 	subkey := strings.TrimSpace(request.Subkey)
-	if subkey != "" {
-		fields[subkey] = request.Value
+	if subkey == "" {
+		return request.Pairs, len(request.Pairs) != 0
 	}
-	if len(fields) == 0 {
-		return nil, false
+	fields := make(Map, len(request.Pairs)+1)
+	for field, value := range request.Pairs {
+		fields[field] = value
 	}
+	fields[subkey] = request.Value
 	return fields, true
 }
 
 func commandRadixTreeFields(request CacheCommandRequest) (Map, bool) {
-	fields := Map{}
-	for subkey, value := range request.Pairs {
+	for subkey := range request.Pairs {
 		if strings.TrimSpace(subkey) == "" {
 			return nil, false
 		}
-		fields[subkey] = value
 	}
 	subkey := strings.TrimSpace(request.Subkey)
-	if subkey != "" {
-		fields[subkey] = request.Value
+	if subkey == "" {
+		return request.Pairs, len(request.Pairs) != 0
 	}
-	if len(fields) == 0 {
-		return nil, false
+	fields := make(Map, len(request.Pairs)+1)
+	for field, value := range request.Pairs {
+		fields[field] = value
 	}
+	fields[subkey] = request.Value
 	return fields, true
 }
 

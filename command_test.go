@@ -11,6 +11,58 @@ import (
 	"time"
 )
 
+var commandFieldsTestSink Map
+
+func TestCommandPairOnlyFieldsDoNotAllocate(t *testing.T) {
+	request := CacheCommandRequest{Pairs: Map{"name": "ivi", "age": 32}}
+	for _, test := range []struct {
+		name string
+		get  func(CacheCommandRequest) (Map, bool)
+	}{
+		{name: "map", get: commandMapFields},
+		{name: "radix", get: commandRadixTreeFields},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			allocs := testing.AllocsPerRun(1000, func() {
+				fields, ok := test.get(request)
+				if !ok || len(fields) != 2 || fields["name"] != "ivi" || fields["age"] != 32 {
+					t.Fatalf("fields = %#v/%v, want borrowed pair-only request", fields, ok)
+				}
+				commandFieldsTestSink = fields
+			})
+			if allocs != 0 {
+				t.Fatalf("pair-only field extraction allocations = %.0f, want 0", allocs)
+			}
+		})
+	}
+}
+
+func TestCommandMixedFieldsDoNotMutateRequestPairs(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		get  func(CacheCommandRequest) (Map, bool)
+	}{
+		{name: "map", get: commandMapFields},
+		{name: "radix", get: commandRadixTreeFields},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pairs := Map{"keep": "original", "override": "pairs"}
+			fields, ok := test.get(CacheCommandRequest{
+				Pairs:  pairs,
+				Subkey: "override",
+				Value:  "subkey",
+			})
+			if !ok || !reflect.DeepEqual(fields, Map{"keep": "original", "override": "subkey"}) {
+				t.Fatalf("mixed fields = %#v/%v", fields, ok)
+			}
+			fields["keep"] = "changed"
+			if !reflect.DeepEqual(pairs, Map{"keep": "original", "override": "pairs"}) {
+				t.Fatalf("request pairs mutated through mixed fields: %#v", pairs)
+			}
+		})
+	}
+}
+
 func TestExecuteCommandRejectsNilTrie(t *testing.T) {
 	var ht *HatTrie
 	for _, request := range []CacheCommandRequest{
