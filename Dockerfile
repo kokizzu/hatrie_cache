@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG GO_VERSION=1.22
+ARG GO_VERSION=1.26.5
 ARG NODE_VERSION=22
 ARG DEBIAN_VERSION=bookworm
 ARG VCS_REF=unknown

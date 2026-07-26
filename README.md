@@ -231,7 +231,7 @@ the optional performance guard and `make docker-build` for the production image.
 
 Runtime requirements:
 
-- Go 1.20 or newer.
+- Go 1.26.5 or newer.
 - `make`, a POSIX shell, and a C toolchain for the bundled HAT-trie C code.
 - Node.js plus `pnpm` or `bun` only when building the Svelte MPA web UI.
 

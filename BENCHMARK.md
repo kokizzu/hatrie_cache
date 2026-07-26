@@ -237,6 +237,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
+| Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
@@ -902,6 +903,25 @@ The end-to-end baseline samples were `1,597, 1,764, 1,495, 1,764,
 and response shapes are unchanged, so the optimization has no bandwidth or
 client compatibility effect. Raw final output is in
 `build/benchmarks/structured-protobuf-batch.txt` when generated locally.
+
+<a id="go-1265-toolchain-refresh"></a>
+#### Go 1.26.5 Toolchain Refresh
+
+The module minimum and Docker builder were updated from Go 1.20 and Go 1.22,
+respectively, to Go 1.26.5. The isolated benchmark held `fastime` at v1.1.9 and
+changed only the executing Go toolchain from 1.26.4 to 1.26.5.
+
+| Seven-run median | Go 1.26.4 | Go 1.26.5 | Result |
+| --- | ---: | ---: | ---: |
+| Command string set | 192.9 ns | 182.3 ns | 1.06x faster |
+| Command string get | 168.6 ns | 164.8 ns | 1.02x faster |
+| Command counter increment | 243.1 ns | 239.0 ns | 1.02x faster |
+| Command TTL refresh | 227.5 ns | 229.9 ns | 1.01x slower |
+| Heap / allocations | unchanged | unchanged | no memory regression |
+
+Raw output is generated under
+`build/benchmarks/go1.26.4-fastime1.1.9/fastime.txt` and
+`build/benchmarks/go1.26.5-fastime1.1.9/fastime.txt`.
 
 <a id="cached-default-trie-clock"></a>
 #### Cached Default Trie Clock
