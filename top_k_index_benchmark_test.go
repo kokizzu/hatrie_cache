@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"reflect"
 	"runtime"
 	"strconv"
 	"testing"
@@ -12,6 +13,36 @@ const topKSmallIndexBenchmarkSketches = 100000
 var topKSmallIndexBenchmarkSliceSink []topKData
 var topKSmallIndexBenchmarkTopSink topKData
 var topKSmallIndexBenchmarkEstimateSink TopKEstimate
+
+func TestTopKPlainJSONStringDuplicateMatchesGenericLayouts(t *testing.T) {
+	for _, size := range []int{1, 2, 3, 16} {
+		values := topKSmallIndexBenchmarkValues(size)
+		generic := newDefaultTopKData()
+		fast := newDefaultTopKData()
+		for idx, value := range values {
+			count := uint64(idx + 1)
+			generic.Add(value, count)
+			fast.addPlainJSONString(value, count)
+		}
+
+		value := values[size-1]
+		if got, want := fast.addPlainJSONString(value, 3), generic.Add(value, 3); got != want {
+			t.Fatalf("size %d duplicate estimate = %#v, want %#v", size, got, want)
+		}
+		if got, want := fast.addPlainJSONString(value, 0), generic.Add(value, 0); got != want {
+			t.Fatalf("size %d zero-count estimate = %#v, want %#v", size, got, want)
+		}
+		if got, want := fast.addPlainJSONString("missing", 0), generic.Add("missing", 0); got != want {
+			t.Fatalf("size %d missing estimate = %#v, want %#v", size, got, want)
+		}
+		if got, want := fast.Snapshot(), generic.Snapshot(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("size %d fast snapshot = %#v, want %#v", size, got, want)
+		}
+		if (fast.byKey == nil) != (generic.byKey == nil) {
+			t.Fatalf("size %d fast/generic index state differs", size)
+		}
+	}
+}
 
 func BenchmarkTopKSmallIndexMemory(b *testing.B) {
 	for _, size := range []int{1, 2, 3} {
@@ -85,6 +116,45 @@ func BenchmarkTopKSmallIndexDuplicate(b *testing.B) {
 			}
 		})
 	}
+}
+
+func BenchmarkTopKPlainJSONStringDuplicateLookup(b *testing.B) {
+	for _, size := range []int{1, 2, 3, 16} {
+		values := topKSmallIndexBenchmarkValues(size)
+		for _, lookup := range []struct {
+			name string
+			add  func(*topKData, string, uint64) TopKEstimate
+		}{
+			{name: "AllocatedControl", add: topKAddPlainJSONStringAllocatedControl},
+			{name: "VirtualInline", add: (*topKData).addPlainJSONString},
+		} {
+			b.Run(strconv.Itoa(size)+"/"+lookup.name, func(b *testing.B) {
+				top := topKSmallIndexBenchmarkTop(values)
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					topKSmallIndexBenchmarkEstimateSink = lookup.add(&top, values[size-1], 1)
+				}
+			})
+		}
+	}
+}
+
+func topKAddPlainJSONStringAllocatedControl(top *topKData, value string, count uint64) TopKEstimate {
+	if top == nil || top.capacity == 0 {
+		return TopKEstimate{}
+	}
+	key := topKPlainJSONStringKey(value)
+	if count == 0 {
+		return top.estimateKey(key)
+	}
+	if top.byKey != nil {
+		if idx, ok := top.byKey[key]; ok {
+			return top.addExisting(idx, count)
+		}
+	} else if idx, ok := top.inlineIndexOfKey(key); ok {
+		return top.addExisting(idx, count)
+	}
+	return top.addMissing(topKItem{Key: key, Value: value}, count)
 }
 
 func BenchmarkTopKSmallIndexEstimate(b *testing.B) {

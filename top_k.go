@@ -309,18 +309,42 @@ func (top *topKData) addPlainJSONString(value string, count uint64) TopKEstimate
 	if top == nil || top.capacity == 0 {
 		return TopKEstimate{}
 	}
+	if top.byKey == nil {
+		if idx, ok := top.inlineIndexOfPlainJSONString(value); ok {
+			if count == 0 {
+				item := top.items[idx]
+				return TopKEstimate{Tracked: true, Count: item.Count, Error: item.Error}
+			}
+			return top.addExisting(idx, count)
+		}
+		if count == 0 {
+			return TopKEstimate{}
+		}
+		key := topKPlainJSONStringKey(value)
+		return top.addMissing(topKItem{Key: key, Value: value}, count)
+	}
 	key := topKPlainJSONStringKey(value)
 	if count == 0 {
 		return top.estimateKey(key)
 	}
-	if top.byKey != nil {
-		if idx, ok := top.byKey[key]; ok {
-			return top.addExisting(idx, count)
-		}
-	} else if idx, ok := top.inlineIndexOfKey(key); ok {
+	if idx, ok := top.byKey[key]; ok {
 		return top.addExisting(idx, count)
 	}
 	return top.addMissing(topKItem{Key: key, Value: value}, count)
+}
+
+func (top topKData) inlineIndexOfPlainJSONString(value string) (int, bool) {
+	if len(top.items) > 0 && topKKeyMatchesPlainJSONString(top.items[0].Key, value) {
+		return 0, true
+	}
+	if len(top.items) > 1 && topKKeyMatchesPlainJSONString(top.items[1].Key, value) {
+		return 1, true
+	}
+	return 0, false
+}
+
+func topKKeyMatchesPlainJSONString(key string, value string) bool {
+	return len(key) == len(value)+2 && key[0] == '"' && key[len(key)-1] == '"' && key[1:len(key)-1] == value
 }
 
 func topKPlainJSONStringKey(value string) string {

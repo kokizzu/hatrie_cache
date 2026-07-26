@@ -162,6 +162,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Direct generic reservoir GET](#reservoir-sample-read-materialization)",
 		"[Direct generic Top-K GET](#multi-item-top-k-read-materialization)",
 		"[Generic Top-K encoding outside read lock](#multi-item-top-k-read-materialization)",
+		"[Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes)",
 		"[Per-key telemetry](#per-key-telemetry-modes)",
 		"[Atomic cache-wide telemetry](#atomic-cache-wide-telemetry)",
 		"[Concurrent scalar reads](#concurrent-scalar-read-fast-path)",

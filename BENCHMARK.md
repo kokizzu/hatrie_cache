@@ -223,6 +223,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Generic Top-K encoding outside read lock](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Lock-held direct JSON: 2,023/13,713 ns strings; 2,486/16,561 ns mixed; writer stalled behind caller JSON | Point-in-time copy: 1,988/13,598 ns strings; 2,469/16,036 ns mixed; writer progresses during JSON | 1.01x-1.03x faster serially with identical heap/allocations; unbounded caller-marshaler writer stall removed | Exact generic `GET` only; the dedicated `GETTOPK` candidate was rejected after a repeatable 1.05x CPU regression |
 | Reverted | [Generic Top-K slice sorter](#multi-item-top-k-read-materialization), 16/default-100 string items | `sort.Interface`: exact reads 2,240/8,108 ns | `slices.SortFunc`: 2,407/9,099 ns | One allocation and 24 B removed, but CPU 1.07x/1.12x slower | Rolled back; the small transient-memory saving did not justify slower reads |
 | Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
+| Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
@@ -3423,8 +3424,9 @@ make run CMD='go test . -run=none -bench=BenchmarkCommandFeature/TopK -benchmem 
 
 An attempted one-item rewrite reduced heap but made its median CPU time 6%
 slower, so it was discarded and the prior one-item code was restored. The final
-one-item path remains at 80 B and one allocation, while `ADDTOPK` remains at 72
-B and three allocations. Their implementations, retained state, ordering,
+one-item path remains at 80 B and one allocation. At that stage `ADDTOPK` was
+72 B and three allocations; later scalar and inline-duplicate passes are
+reported below. Their implementations, retained state, ordering,
 storage, snapshots, journal, replication, and wire JSON shape are unchanged.
 
 A later Go 1.26 candidate replaced the typed `sort.Interface` adapter with
@@ -3551,6 +3553,31 @@ make run CMD='go test . -run=none -bench=BenchmarkTopKSmallIndexCommand -benchme
 | Duplicate update, one/two/three/16 items | 73.19/74.91/82.63/86.34 ns; 32 B; 2 allocs | 39.30/40.62/44.43/48.65 ns; 16 B; 1 alloc | 1.84x-1.86x faster; half the heap and allocations |
 | Direct estimate, one/two/three/16 items | 11.11/12.32/12.31/14.62 ns | 5.616/8.429/11.58/12.86 ns | 1.98x/1.46x/1.06x/1.14x faster; zero allocation throughout |
 | Complete duplicate `ADDTOPK`, one/two/three/16 items | 428.4/420.7/433.7/436.3 ns; 80 B; 3 allocs | 364.4/369.3/366.9/380.0 ns; 64 B; 2 allocs | 1.14x-1.18x faster; 1.25x lower heap; 1.50x fewer allocs |
+
+A follow-up removes the remaining quoted-key allocation for duplicate
+plain-string updates while the index is inline. It compares each stored
+canonical key to virtual leading/trailing quotes around the command value;
+only a miss constructs the canonical key that must be retained. Promoted
+map-backed sketches keep their prior allocated lookup. Tests compare generic
+and fast snapshots, estimates, zero-count reads, misses, and index state at
+one, two, three, and 16 items.
+
+```sh
+make run CMD='go test . -run=TestTopKPlainJSONStringDuplicateMatchesGenericLayouts -count=1 -v'
+make run CMD='go test . -run=NONE -bench=BenchmarkTopKPlainJSONStringDuplicateLookup -benchmem -benchtime=1000000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/TopKAdd -benchmem -benchtime=1000000x -count=7 -cpu=1'
+```
+
+| Duplicate plain-string update, median | Allocated-key control | Virtual inline lookup | Improvement |
+| --- | ---: | ---: | ---: |
+| One tracked item | 37.06 ns; 16 B; 1 alloc | 12.48 ns; 0 B; 0 allocs | 2.97x faster; all transient heap removed |
+| Two tracked items | 45.40 ns; 16 B; 1 alloc | 12.94 ns; 0 B; 0 allocs | 3.51x faster; all transient heap removed |
+| Three tracked items, promoted | 41.25 ns; 16 B; 1 alloc | 40.85 ns; 16 B; 1 alloc | 1.01x faster; memory unchanged |
+| 16 tracked items, promoted | 45.04 ns; 16 B; 1 alloc | 44.92 ns; 16 B; 1 alloc | Neutral within 0.3%; memory unchanged |
+| Complete default one-item `ADDTOPK` | 316.7 ns; 56 B; 2 allocs | 262.5 ns; 48 B; 1 alloc | 1.21x faster; 1.17x lower heap; half the allocations |
+
+No field, retained object, wire byte, persistent format, command response, or
+configuration changed.
 
 An initial helper-based lookup candidate made isolated map-backed estimates
 1.62x-1.88x slower and was discarded. The retained cardinality branch makes
