@@ -14,6 +14,7 @@ const replicationMerkleBucketCount = 1024
 const replicationMerkleInitialTableCapacity = 1024
 const replicationMerklePendingInlineLimit = 32
 const replicationMerkleMaxPendingKeys = 1024
+const replicationMerkleEmptyRoot uint64 = 0x6a09e667f3bcc909
 
 type replicationMerkleLeaf struct {
 	xor   uint64
@@ -376,7 +377,7 @@ func replicationMerkleContribution(keyHash uint64, digest replicationDigest) uin
 }
 
 func replicationMerkleRoot(leaves [replicationMerkleBucketCount]replicationMerkleLeaf, count uint64) uint64 {
-	root := count ^ 0x6a09e667f3bcc909
+	root := count ^ replicationMerkleEmptyRoot
 	for bucket, leaf := range leaves {
 		if leaf.count == 0 {
 			continue
@@ -474,6 +475,10 @@ func (ht *HatTrie) replicationMerkleSnapshot() (replicationMerkleSnapshot, error
 		_ = ht.flushReplicationMerkleLocked(ht.replicationMerkle)
 	}
 	if ht.replicationMerkle == nil || !ht.replicationMerkle.valid {
+		if ht.sizeLocked() == 0 {
+			ht.replicationMerkle = nil
+			return replicationMerkleSnapshot{root: replicationMerkleEmptyRoot}, nil
+		}
 		index, err := ht.rebuildReplicationMerkleLocked()
 		if err != nil {
 			return replicationMerkleSnapshot{}, err

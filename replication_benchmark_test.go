@@ -1144,6 +1144,25 @@ func BenchmarkReplicationMerkleEmptyIndexActivation(b *testing.B) {
 	b.ReportMetric(float64(retained), "retained_B/op")
 }
 
+func BenchmarkReplicationMerkleEmptySnapshot(b *testing.B) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	var retained int
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		trie.mu.Lock()
+		trie.replicationMerkle = nil
+		trie.mu.Unlock()
+		snapshot, err := trie.replicationMerkleSnapshot()
+		if err != nil || snapshot.count != 0 {
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want empty snapshot", snapshot, err)
+		}
+		retained = trie.replicationMerkleRetainedBytes()
+	}
+	b.ReportMetric(float64(retained), "retained_B/op")
+}
+
 func BenchmarkReplicationMerkleEmptyIndexAllocation(b *testing.B) {
 	var index *replicationMerkleIndex
 	b.ReportAllocs()
@@ -1195,6 +1214,53 @@ func BenchmarkReplicationMerkleIndexInitializationPaired(b *testing.B) {
 	b.StopTimer()
 	b.ReportMetric(float64(eagerElapsed.Nanoseconds())/float64(b.N), "eager_ns/index")
 	b.ReportMetric(float64(lazyElapsed.Nanoseconds())/float64(b.N), "lazy_ns/index")
+	runtime.KeepAlive(index)
+}
+
+func BenchmarkReplicationMerkleNonemptySizeCheckPaired(b *testing.B) {
+	const keyCount = 10000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for idx := 0; idx < keyCount; idx++ {
+		trie.UpsertString("session:"+strconv.Itoa(idx), replicationDigestBenchmarkValue(idx, 1))
+	}
+	build := func(checkSize bool) *replicationMerkleIndex {
+		trie.mu.Lock()
+		defer trie.mu.Unlock()
+		if checkSize && trie.sizeLocked() == 0 {
+			b.Fatal("nonempty trie reported zero size")
+		}
+		index, err := trie.rebuildReplicationMerkleLocked()
+		if err != nil || index.count != keyCount {
+			b.Fatalf("rebuildReplicationMerkleLocked() = %#v/%v, want %d entries", index, err, keyCount)
+		}
+		return index
+	}
+	var baselineElapsed time.Duration
+	var checkedElapsed time.Duration
+	var index *replicationMerkleIndex
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if iteration&1 == 0 {
+			started := time.Now()
+			index = build(false)
+			baselineElapsed += time.Since(started)
+			started = time.Now()
+			index = build(true)
+			checkedElapsed += time.Since(started)
+			continue
+		}
+		started := time.Now()
+		index = build(true)
+		checkedElapsed += time.Since(started)
+		started = time.Now()
+		index = build(false)
+		baselineElapsed += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(baselineElapsed.Nanoseconds())/float64(b.N), "baseline_ns/index")
+	b.ReportMetric(float64(checkedElapsed.Nanoseconds())/float64(b.N), "checked_ns/index")
 	runtime.KeepAlive(index)
 }
 

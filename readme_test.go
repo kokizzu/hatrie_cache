@@ -303,6 +303,8 @@ func TestDocsDescribeLazyEmptyMerkleTableBacking(t *testing.T) {
 	for _, token := range []string{
 		"[lazy empty Merkle table](BENCHMARK.md#lazy-empty-merkle-table-backing)",
 		"allocates its open-addressing table on the first indexed key",
+		"[stateless empty Merkle root](BENCHMARK.md#stateless-empty-merkle-root)",
+		"retains no Merkle index",
 	} {
 		if !strings.Contains(string(readmeData), token) {
 			t.Fatalf("README.md missing lazy Merkle token %q", token)
@@ -315,7 +317,10 @@ func TestDocsDescribeLazyEmptyMerkleTableBacking(t *testing.T) {
 	}
 	for _, token := range []string{
 		"BenchmarkReplicationMerkleEmptyIndexAllocation",
+		"BenchmarkReplicationMerkleEmptySnapshot",
 		"2.08x faster",
+		"19.56x faster",
+		"10.58x lower heap",
 		"4x fewer allocations",
 		"16,384",
 	} {

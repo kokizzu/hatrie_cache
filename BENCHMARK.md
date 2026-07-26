@@ -292,6 +292,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Merkle 1%-changed repair](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 55.401 ms; 240,086 wire B | Merkle: 25.443 ms; 132,820 wire B | 2.18x faster, 1.81x smaller wire | Active write tracking is 1.88x slower |
 | Current pass | [Deferred Merkle maintenance](#hierarchical-merkle-anti-entropy), 100k writes plus root | Immediate update: 45.523 ms; 323,840 heap B | Coalesced/rebuild: 25.807 ms; 1,006,632 heap B | 1.76x faster cycle; active writes 2.04x faster | Root after broad churn is 6.00x slower; cycle heap is 3.11x higher |
 | Current pass | [Lazy empty Merkle table backing](#lazy-empty-merkle-table-backing), empty index allocation | Eager: 6,497 ns; 35,840 heap B; 4 allocs; 33,792 retained B | Lazy: 3,122 ns; 18,432 heap B; 1 alloc; 16,384 retained B | 2.08x faster, 1.94x lower heap, 4x fewer allocations, 2.06x lower retention | First 10k-key build has identical heap/allocations and paired CPU within 1.3%; nonempty layout and lookup are unchanged |
+| Current pass | [Stateless empty Merkle root](#stateless-empty-merkle-root), repeated empty snapshot activation | Lazy index: 17,186 ns; 33,424 heap B; 4 allocs; 16,384 retained B | Fixed root: 878.9 ns; 0 heap/allocs/retained B | 19.56x faster; all Merkle allocation and retention eliminated | First nonempty rebuild adds one native size read; paired 10k rebuild CPU is neutral within 0.5% with unchanged heap/allocations |
 | Final architecture | [Sequential gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 14,914 ns/command | 3.96x faster, 6.73x lower heap | Request/response remains sequential |
 | Final architecture | [Pipelined gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 3,118 ns/command | 18.94x faster, 7.67x lower heap, 6.57x fewer allocations | Requires concurrent sender/receiver with ordered response pairing |
 | Current pass | [Native gRPC batch stream](#persistent-grpc-command-stream), 10k commands, batch 16 | Pipelined: 2,638 ns/command; 41.00 wire B/command | Native batch: 1,161 ns/command; 37.04 wire B/command | 2.27x faster, 1.62x lower heap, 2.77x fewer allocations, 1.11x smaller wire, 16x fewer messages | Batching can add queueing latency; client chooses envelope size |
@@ -2871,7 +2872,9 @@ make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIncreme
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIndexBuild -benchtime=1x -count=5 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleEmptyIndexAllocation -benchtime=100000x -count=10 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleEmptyIndexActivation -benchtime=10000x -count=10 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleEmptySnapshot -benchtime=10000x -count=10 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIndexInitializationPaired -benchtime=5000x -count=5 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleNonemptySizeCheckPaired -benchtime=100x -count=7 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleTableOperations -benchtime=200ms -count=10 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleWriteTracking -benchtime=100000x -count=5 -benchmem'
 make bench-merkle-maintenance BENCHTIME=1x COUNT=7
@@ -2951,6 +2954,38 @@ alternating paired run measured 333.530 versus 337.890 us, within 1.3%; the
 bounded GC-disabled control measured lazy initialization 1.02x faster. The
 earlier end-to-end process drift therefore was not attributed as a regression.
 There is no wire, persistence, retained nonempty memory, or lookup change.
+
+<a id="stateless-empty-merkle-root"></a>
+#### Stateless Empty Merkle Root
+
+The lazy constructor still retained the inline 1,024-leaf array whenever an
+empty trie requested its first Merkle root. For an absent or invalid index,
+native trie size zero proves that every leaf and the entry count are zero, so
+the root is the fixed Merkle seed. A test was changed first to require that
+exact root, a nil retained index before and after memory compaction, and the
+ordinary nonempty table after inserting the first key; it failed with 16,384
+retained bytes.
+
+The snapshot path now returns the fixed root before constructing a scan cursor
+or index. This also releases an invalid empty index. Existing valid indexes do
+not take the new branch, and a nonempty first activation performs one native
+size read before the unchanged rebuild.
+
+| Empty Merkle snapshot path | Lazy index | Stateless root | Improvement |
+| --- | ---: | ---: | ---: |
+| Isolated activation median | 17,186 ns | 878.9 ns | 19.56x faster |
+| Cumulative heap | 33,424 B | 0 B | Allocation eliminated |
+| Allocations | 4 | 0 | Allocation eliminated |
+| Retained Merkle backing | 16,384 B | 0 B | Retention eliminated |
+| Complete create/snapshot/destroy | 177.917 us | 127.250 us | 1.40x faster |
+| Complete lifecycle heap | 36,912 B | 3,488 B | 10.58x lower heap |
+| Complete lifecycle allocations | 34 | 30 | 1.13x fewer allocations |
+
+An alternating seven-run 10,000-key rebuild control measured 3.863 ms without
+the native size check and 3.845 ms with it, neutral within 0.5%. Heap and
+allocations were unchanged. Empty and nonempty roots, local-partition root
+combination, snapshot invalidation, memory compaction, wire bytes, and storage
+formats retain their existing semantics.
 
 <a id="merkle-table-occupancy-sentinel-rollback"></a>
 #### Merkle Table Occupancy Sentinel Rollback

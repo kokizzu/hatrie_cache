@@ -69,26 +69,31 @@ func TestEmptyReplicationMerkleIndexDefersTableBacking(t *testing.T) {
 	if snapshot.count != 0 {
 		t.Fatalf("empty Merkle snapshot count = %d, want 0", snapshot.count)
 	}
-	if got, want := trie.replicationMerkleRetainedBytes(), replicationMerkleBucketCount*16; got != want {
+	wantEmpty := replicationMerkleSnapshot{}
+	wantEmpty.root = replicationMerkleRoot(wantEmpty.leaves, 0)
+	if !snapshot.equal(wantEmpty) {
+		t.Fatalf("empty Merkle snapshot root = %x, want %x", snapshot.root, wantEmpty.root)
+	}
+	if got, want := trie.replicationMerkleRetainedBytes(), 0; got != want {
 		t.Fatalf("empty Merkle retained bytes = %d, want %d", got, want)
 	}
 	trie.mu.RLock()
-	emptyTableCapacity := len(trie.replicationMerkle.table.keys)
+	emptyIndex := trie.replicationMerkle
 	trie.mu.RUnlock()
-	if emptyTableCapacity != 0 {
-		t.Fatalf("empty Merkle table capacity = %d, want 0", emptyTableCapacity)
+	if emptyIndex != nil {
+		t.Fatal("empty Merkle snapshot retained an index")
 	}
 	if _, err := trie.CompactMemory(); err != nil {
 		t.Fatalf("CompactMemory() error = %v", err)
 	}
-	if got, want := trie.replicationMerkleRetainedBytes(), replicationMerkleBucketCount*16; got != want {
+	if got, want := trie.replicationMerkleRetainedBytes(), 0; got != want {
 		t.Fatalf("compacted empty Merkle retained bytes = %d, want %d", got, want)
 	}
 	trie.mu.RLock()
-	compactedTableCapacity := len(trie.replicationMerkle.table.keys)
+	compactedIndex := trie.replicationMerkle
 	trie.mu.RUnlock()
-	if compactedTableCapacity != 0 {
-		t.Fatalf("compacted empty Merkle table capacity = %d, want 0", compactedTableCapacity)
+	if compactedIndex != nil {
+		t.Fatal("empty memory compaction retained a Merkle index")
 	}
 
 	trie.UpsertString("session:1", "value")
@@ -101,6 +106,28 @@ func TestEmptyReplicationMerkleIndexDefersTableBacking(t *testing.T) {
 	trie.mu.RUnlock()
 	if tableCapacity != replicationMerkleInitialTableCapacity || tableCount != 1 {
 		t.Fatalf("one-key Merkle table capacity/count = %d/%d, want %d/1", tableCapacity, tableCount, replicationMerkleInitialTableCapacity)
+	}
+}
+
+func TestEmptyReplicationMerkleSnapshotDropsInvalidIndex(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.mu.Lock()
+	trie.replicationMerkle = newReplicationMerkleIndex()
+	trie.replicationMerkle.invalidate()
+	trie.mu.Unlock()
+
+	snapshot, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("replicationMerkleSnapshot() error = %v", err)
+	}
+	if snapshot.root != replicationMerkleEmptyRoot || snapshot.count != 0 {
+		t.Fatalf("empty Merkle snapshot root/count = %x/%d, want %x/0", snapshot.root, snapshot.count, replicationMerkleEmptyRoot)
+	}
+	trie.mu.RLock()
+	index := trie.replicationMerkle
+	trie.mu.RUnlock()
+	if index != nil {
+		t.Fatal("empty Merkle snapshot retained an invalid index")
 	}
 }
 
