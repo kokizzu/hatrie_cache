@@ -226,6 +226,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Fully linked XOR peel order",
 		"Inline sparse bitsets with generic search",
 		"Inline Roaring-container values",
+		"Local slice view over fixed Roaring bitmap",
 		"HyperLogLog side allocation",
 		"String-keyed Merkle pending set",
 		"Top-K one-item rewrite",

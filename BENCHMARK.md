@@ -314,6 +314,7 @@ tree.
 | Fully linked XOR peel order | Halved normal-build allocations and cumulative heap | Cache-random reverse traversal made the 4,096/65,536-item builders 1.03x/1.05x slower | Replaced by linking only the queue while retaining contiguous peel order; see [linked XOR-filter build queue](#linked-xor-filter-build-queue) |
 | Inline sparse bitsets with generic search | Removed singleton/pair backing allocations and reduced retained objects | The added representation branch made 4,096-value array lookups 1.03x slower | Replaced by an inlineable typed binary search; promoted lookups are now 1.01x faster; see [inline sparse-bitset containers](#inline-sparse-bitset-containers) |
 | Inline Roaring-container values | Made 50,000 singleton containers 1.38x faster to build and removed 50,000 backing allocations | Promoted 16-value lookups were 1.04x slower; large-array and bitmap controls were also about 1.01x-1.02x slower | Reverted; the original slice representation remains; see [inline Roaring-container rollback](#inline-roaring-container-rollback) |
+| Local slice view over fixed Roaring bitmap | Preserved the 48-byte header while dense build/lookup measured 1.02x/1.09x faster | Paired bitmap remove/add was 4.594 versus 4.486 ns, or 1.024x slower | Reverted; direct fixed-pointer access remains 1.006x faster than the legacy slice in the longer control; see [compact Roaring-container headers](#compact-roaring-container-headers) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
@@ -3345,9 +3346,9 @@ make run CMD='go test . -run=NONE -bench=BenchmarkRoaringBitmapContainerRetained
 
 | Operation, median | Slice-header control | Fixed-pointer final | Improvement |
 | --- | ---: | ---: | ---: |
-| Build 4,097-value bitmap | 190.697 us | 189.567 us | 1.006x faster |
-| Bitmap lookup | 2.848 ns | 2.605 ns | 1.09x faster |
-| Bitmap remove/add | 5.141 ns | 4.985 ns | 1.03x faster |
+| Build 4,097-value bitmap | 200.967 us | 195.506 us | 1.03x faster |
+| Bitmap lookup | 3.287 ns | 3.013 ns | 1.09x faster |
+| Bitmap remove/add | 4.953 ns | 4.922 ns | 1.006x faster |
 | Build 50,000 singleton containers | 14.510 ms; 17,470,672 B; 50,026 allocs | 10.762 ms; 14,153,680 B; 50,026 allocs | 1.35x faster; 1.23x lower cumulative heap; allocations unchanged |
 | Retained singleton layout | 80.75 B/container | 66.66 B/container | 1.21x lower retained heap |
 
@@ -3355,6 +3356,13 @@ The bitmap size was already fixed by validation, conversion thresholds, and
 the persistent format, so the pointer does not narrow accepted state. Wire,
 snapshot, journal, database, ordering, and public API behavior are unchanged.
 No operation regression was measured.
+
+A follow-up converted the fixed pointer to a local slice view in dense
+operations. Build and lookup remained faster, but the nine-run paired
+remove/add median was 4.594 ns versus 4.486 ns for the legacy slice, or 1.024x
+slower. It was reverted. A longer audit of the retained direct-pointer form
+measured 4.922 versus 4.953 ns, so the shipped representation remains neutral
+to slightly faster on mutation. No follow-up code remains.
 
 <a id="inline-roaring-container-rollback"></a>
 #### Inline Roaring-Container Rollback
