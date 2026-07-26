@@ -255,6 +255,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Reverted | [Packed-string compaction](#string-compaction-allocation-rollback), 100k varied 33-512 B strings | Packed copy: 30.07 MB cumulative heap; 121,848 KiB peak RSS | Dense remap: 2.81 MB cumulative heap; 93,516 KiB peak RSS | 10.71x lower cumulative heap, 1.30x lower peak RSS | Retains 3.79% more heap and forced GC is 1.81x slower; packing was not worth its immediate memory spike |
 | Reverted | [Online generational compaction](#online-generational-compaction-rollback), 100k insert/90k delete | Exclusive rebuild: 10.258 ms reader pause; 0.91 MB heap | Staged generation: 1.091 ms reader pause; 6.18 MB heap | 9.40x shorter pause; 13.17x lower retained backing; 5.36x lower retained heap | Rolled back: total compaction was 1.54x slower, transient heap 6.80x higher, and allocations 2.67x higher |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
+| Current pass | [Lazy rate-limiter shard maps](#lazy-rate-limiter-shard-maps), constructor plus first client | Eager maps: 2,683.5 ns; 4,640 heap B; 66 allocs | First-shard allocation: 414.9 ns; 1,616 heap B; 3 allocs | 6.47x faster, 2.87x lower heap, 22x fewer allocations | Each shard allocates its map on first use; steady-state admission is slightly faster, and activating all 64 shards is CPU-neutral within 0.2% with identical memory |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
 | Current pass | [Local HAT-trie partitions](#local-hat-trie-partitions), 100k writes, 16 workers | One trie: 29.147 ms; 291.5 ns/write | 16 tries: 12.992 ms; 129.9 ns/write | 2.24x faster, 1.84x lower timed heap, 1.73x fewer timed allocs | Opt-in; separate-process maximum RSS is 1.05x higher and whole-keyspace operations merge partitions |
@@ -4674,6 +4675,46 @@ all direct estimate sizes faster. Complete `ESTTOPK` at two and three items is
 neutral within 0.6%, while 16 items improves 0.8%; `GETTOPK` does not inspect
 the index and retains identical code and allocation counts. No configuration,
 fixed overhead, background work, or persistent-format tradeoff was added.
+
+<a id="lazy-rate-limiter-shard-maps"></a>
+### Lazy Rate-Limiter Shard Maps
+
+Enabling the optional API rate limiter previously allocated an empty Go map in
+each of its 64 lock shards. A limiter with no callers therefore performed 65
+allocations and retained all map headers. Shards now leave the map nil until a
+caller hashes to them; nil-map reads remain valid, and the cold new-client path
+creates the map before its first write.
+
+The test-first lifecycle fixture requires all maps to be absent after
+construction, admits one client, and proves that exactly its selected shard is
+initialized. Existing token refill, rejection, clock rollback, and bounded
+high-cardinality tests retain the same behavior. The hot established-client
+branch now returns directly; pruning runs only after inserting a new client,
+the only operation that can increase shard cardinality.
+
+```sh
+make run CMD='go test . -run=TestRateLimiter -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkRateLimiterConstruction -benchmem -benchtime=100000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRateLimiterFirstClientLifecycle -benchmem -benchtime=100000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRateLimiterAllowSameClientAlternating -benchtime=10x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRateLimiterAllShardsLifecycle -benchmem -benchtime=10000x -count=10 -cpu=1'
+```
+
+| Rate-limiter lifecycle, ten-run median | Eager 64 maps | Lazy shards | Improvement |
+| --- | ---: | ---: | ---: |
+| Construction only | 2,540 ns; 4,224 B; 65 allocs | 269.5 ns; 1,152 B; 1 alloc | 9.42x faster; 3.67x lower heap; 65x fewer allocations |
+| Construction plus first client | 2,683.5 ns; 4,640 B; 66 allocs | 414.9 ns; 1,616 B; 3 allocs | 6.47x faster; 2.87x lower heap; 22x fewer allocations |
+| Established-client admission | 34.09 ns; 0 B; 0 allocs | 33.88 ns; 0 B; 0 allocs | 1.006x faster; memory unchanged |
+| Construction plus one client in all 64 shards | 11,269.5 ns; 30,848 B; 129 allocs | 11,289.5 ns; 30,848 B; 129 allocs | CPU-neutral within 0.2%; memory unchanged |
+
+The steady-state admission row is an alternating same-binary control; separate
+old/final medians were also neutral at 34.78 and 34.64 ns. A shard pays its map
+allocation once when its first caller arrives, but the complete first-client
+lifecycle already includes that work and remains substantially cheaper. Once
+every shard is active, cumulative heap and allocations exactly match the eager
+control without a measurable CPU regression. Lock sharding, token
+capacity/refill, client-state bounds, configuration, HTTP/gRPC behavior,
+metrics, and responses are unchanged.
 
 ### On-Demand Runtime Profiling
 

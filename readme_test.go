@@ -390,6 +390,33 @@ func TestDocsDescribeDeferredOptionalMaps(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeLazyRateLimiterShardMaps(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[lazy rate-limiter shard maps](BENCHMARK.md#lazy-rate-limiter-shard-maps)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing lazy rate-limiter token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkRateLimiterFirstClientLifecycle",
+		"BenchmarkRateLimiterAllowSameClientAlternating",
+		"6.47x faster",
+		"2.87x lower heap",
+		"22x fewer allocations",
+		"steady-state admission",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing lazy rate-limiter token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeSinglePassExpirationIndexCompaction(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

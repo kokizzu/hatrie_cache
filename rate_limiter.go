@@ -36,9 +36,6 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 		window: window,
 		now:    time.Now,
 	}
-	for idx := range limiter.shards {
-		limiter.shards[idx].clients = make(map[string]rateLimitClient)
-	}
 	return limiter
 }
 
@@ -61,9 +58,7 @@ func (limiter *RateLimiter) Allow(key string) bool {
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 	client, ok := shard.clients[key]
-	if !ok || client.lastSeen.IsZero() {
-		client = rateLimitClient{lastSeen: now, tokens: float64(limiter.limit)}
-	} else {
+	if ok && !client.lastSeen.IsZero() {
 		elapsed := now.Sub(client.lastSeen)
 		if elapsed < 0 {
 			elapsed = 0
@@ -73,15 +68,25 @@ func (limiter *RateLimiter) Allow(key string) bool {
 			client.tokens = maxTokens
 		}
 		client.lastSeen = now
-	}
-	if client.tokens < 1 {
+		if client.tokens < 1 {
+			shard.clients[key] = client
+			return false
+		}
+		client.tokens--
 		shard.clients[key] = client
-		return false
+		return true
 	}
-	client.tokens--
-	shard.clients[key] = client
+	return shard.allowNewClientLocked(key, now, limiter.limit, limiter.window)
+}
+
+//go:noinline
+func (shard *rateLimiterShard) allowNewClientLocked(key string, now time.Time, limit int, window time.Duration) bool {
+	if shard.clients == nil {
+		shard.clients = make(map[string]rateLimitClient)
+	}
+	shard.clients[key] = rateLimitClient{lastSeen: now, tokens: float64(limit - 1)}
 	if len(shard.clients) > rateLimiterMaxClientsPerShard {
-		shard.pruneLocked(now, limiter.window)
+		shard.pruneLocked(now, window)
 	}
 	return true
 }

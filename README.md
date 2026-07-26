@@ -987,6 +987,13 @@ make monitoring-server WRITE_PROTECTION=true
 make monitoring-server RATE_LIMIT=50 AUDIT_LOG_PATH=data/audit.jsonl
 ```
 
+The 64 limiter shards use [lazy rate-limiter shard maps](BENCHMARK.md#lazy-rate-limiter-shard-maps),
+so enabling an idle or low-cardinality limiter does not allocate one empty map
+per shard. Constructor plus first-client admission is 6.47x faster with 2.87x
+lower heap and 22x fewer allocations; established-client admission remains
+allocation-free and slightly faster. Each shard creates its bounded map only
+when its first caller arrives.
+
 Per-key monitoring metadata is off by default, so high-cardinality workloads
 retain only exact cache-wide counters and `StatsForKey` reports `false`. This
 default path updates cache-wide counters and monotonic timestamps atomically,
