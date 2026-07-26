@@ -219,6 +219,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Flat scalar structured validation](#flat-scalar-structured-validation), pair-only `PUTMAP`/`PUTRT` replacement with 64/4,096 fields | Map: 14,976/1,453,940 ns; radix: 16,328/1,742,736 ns; 2,144/131,181 B | Map: 3,251/247,728 ns; radix: 3,767/525,596 ns; 0 B; 0 allocs | Map 4.61x/5.87x faster; radix 4.33x/3.32x faster; command validation heap eliminated | No measured tradeoff; ordinary nested fallback is 1.02x-1.13x faster and custom marshalers, invalid values, cloning, wire, and storage are unchanged |
 | Current pass | [Flat scalar sequence validation](#flat-scalar-sequence-validation), checked slice/priority-queue replacement with 64/4,096 items | Slice: 3,926/198,293 ns; priority queue: 8,049/443,711 ns; 2,200-368,678 B; 3 allocs | Slice: 523.2/42,955 ns; priority queue: 2,791/182,809 ns; 1,152-196,608 B; 1 alloc | Slice 7.50x/4.62x faster; priority queue 2.88x/2.43x faster; 1.85x-2.00x lower heap; 3x fewer allocs | No measured tradeoff; worst-case nested fallback is 1.11x-1.26x faster with lower heap, while acceptance, cloning, wire, and storage are unchanged |
 | Current pass | [Single-fallback slice payload validation](#flat-scalar-sequence-validation), checked push with one nested value among 64/4,096 items | 6,432/284,075 ns; 2,764/131,753 B; 6/8 allocs | 2,969/38,259 ns; 1,588/66,179 B; 4/5 allocs | 2.17x/7.43x faster; 1.74x/1.99x lower heap; 1.50x/1.60x fewer allocs | No measured tradeoff; two nested values remain on the exact materialized path and are CPU-neutral with identical heap and allocations |
+| Current pass | [Trailing-fallback whole-sequence validation](#flat-scalar-sequence-validation), checked replacement with one trailing nested value among 64/4,096 items | Slice: 2,589/128,450 ns; priority queue: 6,693/411,923 ns; 5 allocs | Slice: 1,835/63,606 ns; priority queue: 4,639/233,791 ns; 4 allocs | Slice 1.41x/2.02x faster; priority queue 1.44x/1.76x faster; one fewer allocation | No measured tradeoff; an earlier non-scalar selects the exact prior whole-sequence path with identical heap and allocations |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -339,6 +340,7 @@ tree.
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
+| Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
 | Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
 | Naive repeated-read scalar routing | Tried to send repeated reads through the native selector | 16 reads regressed 2.58x; a scan-only guard remained 1.08x slower | Replaced by resolve-once response copying; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
@@ -3324,6 +3326,47 @@ Direct fallback changes only validation work. Stored values are still deeply
 cloned, and invalid-value behavior, custom-marshaler counts, mutation ordering,
 write accounting, snapshots, journals, replication, wire bytes, and persistent
 formats remain unchanged.
+
+Whole slice and priority-queue replacement had a similar sparse case when the
+only nested value was last. Because the existing scalar scan has already proven
+every earlier item, that final position proves uniqueness without a second scan.
+Validation now sends only that trailing value to the discard encoder. A
+non-scalar at any earlier position immediately retains the prior whole-sequence
+encoder call.
+
+Tests were added before production changes. The 4,096-item allocation guard
+initially reported two validation allocations and now reports one. Acceptance
+tests place nested, invalid, cyclic, unsupported, and custom-marshaler values
+between scalar neighbors, while a two-marshaler test proves the unchanged whole
+fallback invokes each marshaler exactly once.
+
+```sh
+make run CMD='go test . -run="SequenceValidation|SparseNestedWholeSequence|MultiFallbackWholeSequence" -count=100'
+make run CMD='go test . -run=TestSequenceValidationMatchesJSONMarshalAcceptance -race -count=10'
+make run CMD='go test . -run=NONE -bench=WholeSequenceFallbackAlternating/Nested1 -benchtime=20x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=WholeSequenceFallbackAlternating/Nested2 -benchtime=30x -count=15 -cpu=1'
+make run CMD='go test . -run=NONE -bench=WholeSequenceFallbackAllocations -benchmem -benchtime=200x -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=WholeSequenceSparseCheckedReplacement/.*64 -benchmem -benchtime=2000x -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=WholeSequenceSparseCheckedReplacement/.*4096 -benchmem -benchtime=50x -count=7 -cpu=1'
+```
+
+| Single trailing nested value, 64/4,096 items | Whole-sequence control | Direct fallback | Improvement |
+| --- | ---: | ---: | ---: |
+| Slice validation | 2,147/106,568 ns; 120/125 B; 2 allocs | 413.9/9,404 ns; 96/101 B; 1 alloc | 5.19x/11.33x faster; 1.25x/1.24x lower heap; 2x fewer allocs |
+| Priority-queue validation | 3,158/181,245 ns; 120/125 B; 2 allocs | 436.1/10,255 ns; 96/101 B; 1 alloc | 7.24x/17.67x faster; 1.25x/1.24x lower heap; 2x fewer allocs |
+
+| Complete checked replacement, 64/4,096 items | Before | Final | Improvement |
+| --- | ---: | ---: | ---: |
+| Slice | 2,589/128,450 ns; 1,608/65,992 B; 5 allocs | 1,835/63,606 ns; 1,584/65,973 B; 4 allocs | 1.41x/2.02x faster; one fewer allocation |
+| Priority queue | 6,693/411,923 ns; 3,656/197,078 B; 5 allocs | 4,639/233,791 ns; 3,632/197,056 B; 4 allocs | 1.44x/1.76x faster; one fewer allocation |
+
+The first prototype scanned the remainder after finding a non-scalar so it
+could optimize a sole nested value at any position. A second nested value then
+made the unchanged 4,096-item fallback about 1.01x slower. That prototype was
+removed. In the retained trailing-only design, the two-nested paired medians
+were neutral within 0.6% at 64 items; at 4,096 items slice validation was 1.01x
+faster and priority-queue validation was unchanged. Candidate and control both
+used exactly 217 B and three allocations at both sizes.
 
 <a id="mutation-response-lock-release-rollback"></a>
 ### Mutation Response Lock Release Rollback

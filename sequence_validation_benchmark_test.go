@@ -88,6 +88,181 @@ func BenchmarkSequenceCheckedReplacement(b *testing.B) {
 	}
 }
 
+func BenchmarkWholeSequenceSparseFallback(b *testing.B) {
+	for _, size := range []int{64, 4096} {
+		values, queue := sparseSequenceBenchmarkValues(size, 1)
+		for _, validation := range []struct {
+			name string
+			run  func() error
+		}{
+			{name: "Slice", run: func() error { return validateSliceValue(values) }},
+			{name: "PriorityQueue", run: func() error { return validatePriorityQueueValue(queue) }},
+		} {
+			b.Run(fmt.Sprintf("%s%d", validation.name, size), func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					if err := validation.run(); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkWholeSequenceSparseCheckedReplacement(b *testing.B) {
+	for _, size := range []int{64, 4096} {
+		values, queue := sparseSequenceBenchmarkValues(size, 1)
+		for _, replacement := range []struct {
+			name string
+			run  func(*HatTrie) error
+		}{
+			{name: "Slice", run: func(trie *HatTrie) error { return trie.UpsertSliceChecked("sequence", values) }},
+			{name: "PriorityQueue", run: func(trie *HatTrie) error {
+				return trie.UpsertPriorityQueueChecked("sequence", queue)
+			}},
+		} {
+			b.Run(fmt.Sprintf("%s%d", replacement.name, size), func(b *testing.B) {
+				trie := CreateHatTrie()
+				b.Cleanup(trie.Destroy)
+				if err := replacement.run(trie); err != nil {
+					b.Fatal(err)
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					if err := replacement.run(trie); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func validateSliceValueWholeControl(value Slice) error {
+	if flatJSONScalarSlice(value) {
+		return nil
+	}
+	return validateJSONToDiscard(value)
+}
+
+func validatePriorityQueueValueWholeControl(value PriorityQueue) error {
+	for _, item := range value {
+		if !flatJSONScalar(item.Value) {
+			return validateJSONToDiscard(value)
+		}
+	}
+	return nil
+}
+
+func BenchmarkWholeSequenceFallbackAlternating(b *testing.B) {
+	for _, nested := range []int{1, 2} {
+		for _, size := range []int{64, 4096} {
+			values, queue := sparseSequenceBenchmarkValues(size, nested)
+			validations := 4096
+			if size >= 4096 {
+				validations = 64
+			}
+			for _, validation := range []struct {
+				name      string
+				candidate func() error
+				control   func() error
+			}{
+				{
+					name:      "Slice",
+					candidate: func() error { return validateSliceValue(values) },
+					control:   func() error { return validateSliceValueWholeControl(values) },
+				},
+				{
+					name:      "PriorityQueue",
+					candidate: func() error { return validatePriorityQueueValue(queue) },
+					control:   func() error { return validatePriorityQueueValueWholeControl(queue) },
+				},
+			} {
+				b.Run(fmt.Sprintf("Nested%d/%s%d", nested, validation.name, size), func(b *testing.B) {
+					var candidateDuration, controlDuration time.Duration
+					for iteration := 0; iteration < b.N; iteration++ {
+						candidateFirst := iteration&1 != 0
+						for pass := 0; pass < 2; pass++ {
+							started := time.Now()
+							run := validation.control
+							if candidateFirst == (pass == 0) {
+								run = validation.candidate
+							}
+							for validationIndex := 0; validationIndex < validations; validationIndex++ {
+								if err := run(); err != nil {
+									b.Fatal(err)
+								}
+							}
+							duration := time.Since(started)
+							if candidateFirst == (pass == 0) {
+								candidateDuration += duration
+							} else {
+								controlDuration += duration
+							}
+						}
+					}
+					operations := float64(b.N * validations)
+					b.ReportMetric(float64(candidateDuration.Nanoseconds())/operations, "candidate-ns/validation")
+					b.ReportMetric(float64(controlDuration.Nanoseconds())/operations, "control-ns/validation")
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkWholeSequenceFallbackAllocations(b *testing.B) {
+	for _, size := range []int{64, 4096} {
+		values, queue := sparseSequenceBenchmarkValues(size, 2)
+		for _, validation := range []struct {
+			name      string
+			candidate func() error
+			control   func() error
+		}{
+			{
+				name:      "Slice",
+				candidate: func() error { return validateSliceValue(values) },
+				control:   func() error { return validateSliceValueWholeControl(values) },
+			},
+			{
+				name:      "PriorityQueue",
+				candidate: func() error { return validatePriorityQueueValue(queue) },
+				control:   func() error { return validatePriorityQueueValueWholeControl(queue) },
+			},
+		} {
+			for _, implementation := range []struct {
+				name string
+				run  func() error
+			}{
+				{name: "Control", run: validation.control},
+				{name: "Candidate", run: validation.candidate},
+			} {
+				b.Run(fmt.Sprintf("%s%d/%s", validation.name, size, implementation.name), func(b *testing.B) {
+					b.ReportAllocs()
+					for iteration := 0; iteration < b.N; iteration++ {
+						if err := implementation.run(); err != nil {
+							b.Fatal(err)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func sparseSequenceBenchmarkValues(size int, nested int) (Slice, PriorityQueue) {
+	values := commandFieldsBenchmarkValues(size)
+	queue := make(PriorityQueue, size)
+	for index := 0; index < nested; index++ {
+		values[len(values)-1-index] = Map{"field": "value"}
+	}
+	for index, value := range values {
+		queue[index] = PriorityItem{Priority: int64(index), Value: value}
+	}
+	return values, queue
+}
+
 func BenchmarkSlicePayloadSparseFallback(b *testing.B) {
 	for _, size := range []int{64, 4096} {
 		values := commandFieldsBenchmarkValues(size)

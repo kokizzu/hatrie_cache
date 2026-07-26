@@ -956,11 +956,20 @@ func validateMapValue(value Map) error {
 }
 
 func validateSliceValue(value Slice) error {
-	if flatJSONScalarSlice(value) {
+	for index, item := range value {
+		if flatJSONScalar(item) {
+			continue
+		}
+		if index == len(value)-1 {
+			if err := validateJSONToDiscard(item); err != nil {
+				return fmt.Errorf("hatriecache: unsupported slice value: %w", err)
+			}
+			return nil
+		}
+		if err := validateJSONToDiscard(value); err != nil {
+			return fmt.Errorf("hatriecache: unsupported slice value: %w", err)
+		}
 		return nil
-	}
-	if err := validateJSONToDiscard(value); err != nil {
-		return fmt.Errorf("hatriecache: unsupported slice value: %w", err)
 	}
 	return nil
 }

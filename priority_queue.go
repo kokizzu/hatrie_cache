@@ -45,18 +45,20 @@ func clonePriorityQueue(value PriorityQueue) PriorityQueue {
 }
 
 func validatePriorityQueueValue(value PriorityQueue) error {
-	allScalars := true
-	for _, item := range value {
-		if !flatJSONScalar(item.Value) {
-			allScalars = false
-			break
+	for index, item := range value {
+		if flatJSONScalar(item.Value) {
+			continue
 		}
-	}
-	if allScalars {
+		if index == len(value)-1 {
+			if err := validateJSONToDiscard(item.Value); err != nil {
+				return fmt.Errorf("hatriecache: unsupported priority queue value: %w", err)
+			}
+			return nil
+		}
+		if err := validateJSONToDiscard(value); err != nil {
+			return fmt.Errorf("hatriecache: unsupported priority queue value: %w", err)
+		}
 		return nil
-	}
-	if err := validateJSONToDiscard(value); err != nil {
-		return fmt.Errorf("hatriecache: unsupported priority queue value: %w", err)
 	}
 	return nil
 }

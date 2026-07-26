@@ -165,6 +165,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Flat scalar structured validation](#flat-scalar-structured-validation)",
 		"[Flat scalar sequence validation](#flat-scalar-sequence-validation)",
 		"[Single-fallback slice payload validation](#flat-scalar-sequence-validation)",
+		"[Trailing-fallback whole-sequence validation](#flat-scalar-sequence-validation)",
 		"[Compact XOR-filter headers](#compact-xor-filter-headers)",
 		"[Linked XOR-filter build queue](#linked-xor-filter-build-queue)",
 		"[Order-independent XOR-filter build](#order-independent-xor-filter-build)",
@@ -216,6 +217,7 @@ func TestREADMEDocumentsFlatScalarSequenceValidation(t *testing.T) {
 		"[sequence validation](BENCHMARK.md#flat-scalar-sequence-validation)",
 		"allocation-free validation",
 		"single nested payload",
+		"single trailing nested whole-sequence value",
 	} {
 		if !strings.Contains(readme, token) {
 			t.Fatalf("README.md missing sequence validation token %q", token)
