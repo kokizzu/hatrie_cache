@@ -214,7 +214,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
-| Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | Escaped and structured values retain the typed generic path |
+| Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
+| Current pass | [Direct generic reservoir GET](#reservoir-sample-read-materialization), 16/128 string and mixed items | Generic materialization: 2,709/18,349 ns strings; 2,941/18,861 ns mixed | Shared-lock direct JSON: 2,225/17,563 ns strings; 2,701/18,275 ns mixed | 1.03x-1.22x faster; up to 1.23x lower heap; 1.67x-2.00x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
 | Current pass | [Multi-item Top-K reads](#multi-item-top-k-read-materialization), 16/default-100 string items | Generic materialization: 2,851/10,558 ns; 2,297/13,516 B; 8 allocs | Direct JSON: 1,851/6,898 ns; 1,624/9,752 B; 3 allocs | 1.54x/1.53x faster, 1.41x/1.39x lower heap, 2.67x fewer allocs | One-item and write implementations are unchanged; structured fallback improves 1.11x |
 | Current pass | [Direct generic Top-K GET](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Generic materialization: 2,376/13,936 ns strings; 3,019/13,966 ns mixed | Shared-lock direct JSON: 1,660/10,024 ns strings; 2,148/10,263 ns mixed | 1.36x-1.43x faster; 1.35x-1.53x lower heap; 2.00x-2.20x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
 | Reverted | [Generic Top-K slice sorter](#multi-item-top-k-read-materialization), 16/default-100 string items | `sort.Interface`: exact reads 2,240/8,108 ns | `slices.SortFunc`: 2,407/9,099 ns | One allocation and 24 B removed, but CPU 1.07x/1.12x slower | Rolled back; the small transient-memory saving did not justify slower reads |
@@ -305,6 +306,7 @@ tree.
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Generic Top-K slice sorter | Removed one allocation and 24 transient bytes | Exact 16/100-item reads were 1.07x/1.12x slower and every generic row regressed | Reverted; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Generic Top-K structured fallback scan | Preserved the string-only direct encoder while extending exact generic `GET` | A 16-item structured read was 1.06x slower after scanning before unchanged materialization, with no heap or allocation gain | Replaced by one-pass mixed-value encoding; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
+| Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
 | Naive repeated-read scalar routing | Tried to send repeated reads through the native selector | 16 reads regressed 2.58x; a scan-only guard remained 1.08x slower | Replaced by resolve-once response copying; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
 | Two-command native scalar routing | Lowered the initial native threshold | 629.5 ns versus 565.5 ns, or 1.11x slower | Removed; native routing starts at four commands; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
@@ -3081,12 +3083,12 @@ private sorted copy, 21.8% to the public copy, and 3.4% to reflected sorting.
 
 The public `Items()` path now clones directly into its final slice and uses a
 typed priority/sequence sorter. Exact `GETRS`, `RSGET`, and `SAMPLE` commands
-with byte-safe string values retain one sorted copy and write the existing JSON
-shape directly with stack numeric buffers. Sorting and copying remain under the
-cache mutex, as before, but JSON encoding occurs after unlock. Values requiring
-JSON escaping or generic structured encoding use the existing encoder inside
-the same one-read handler. Cold LevelDB references retain the checked generic
-hydration path.
+retain one sorted copy and write the existing JSON shape directly with stack
+numeric buffers. All-verbatim strings keep their original specialized writer;
+escaped strings and structured values write into the same response buffer
+without allocating and cloning a public item slice. Sorting and copying remain
+under the cache mutex, as before, but JSON encoding occurs after unlock. Cold
+LevelDB references retain the checked generic hydration path.
 
 Tests were added before the implementation and cover exact byte parity, all
 aliases, ignored request fields, missing and empty samples, priority/sequence
@@ -3114,13 +3116,41 @@ make run CMD='go test . -run=NONE -bench=BenchmarkReservoirSampleGetEncodedPath 
 | Final exact plain-string command | 2,323 ns | 1,688 B | 3 | 1.68x faster; 1.38x lower heap; 2.67x fewer allocations |
 
 The same-binary direct encoder median is 2,082 ns versus 2,754 ns for the
-already optimized generic path, a further 1.32x CPU improvement. Escaped-value
-generic encoding is neutral at 2,754 ns versus a 2,744 ns generic control
-(0.4% within noise), with both paths at 1,872 B and 5 allocations. The
+already optimized generic path, a further 1.32x CPU improvement. The
 alternating write control measured 348.6 ns for the candidate versus 394.3 ns
 for the baseline, while both remained at 64 B and one allocation; this is
 treated as evidence of no write regression rather than a claimed write-path
 gain because the write implementation is unchanged.
+
+Exact uppercase generic `GET` now recognizes reservoir samples under the
+existing shared read lock, sorts one private copy, unlocks, and uses the same
+direct writer. Eleven 500 ms runs with `-cpu=1` produced these same-binary
+medians:
+
+```sh
+make run CMD='go test . -run=NONE -bench BenchmarkReservoirSampleGenericGetCommand/.+16 -benchmem -benchtime=500ms -count=11 -cpu=1'
+make run CMD='go test . -run=NONE -bench BenchmarkReservoirSampleGenericGetCommand/.+128 -benchmem -benchtime=500ms -count=11 -cpu=1'
+```
+
+| Exact generic `GET`, median | Generic control | Direct | Improvement |
+| --- | ---: | ---: | ---: |
+| 16 strings | 2,709 ns; 1,744 B; 5 allocs | 2,225 ns; 1,688 B; 3 allocs | 1.22x faster; 1.03x lower heap; 1.67x fewer allocs |
+| 128 strings | 18,349 ns; 14,416 B; 5 allocs | 17,563 ns; 14,360 B; 3 allocs | 1.04x faster; 1.004x lower heap; 1.67x fewer allocs |
+| 16 items, one structured | 2,941 ns; 2,216 B; 10 allocs | 2,701 ns; 1,808 B; 5 allocs | 1.09x faster; 1.23x lower heap; 2.00x fewer allocs |
+| 128 items, one structured | 18,861 ns; 14,889 B; 10 allocs | 18,275 ns; 14,481 B; 5 allocs | 1.03x faster; 1.03x lower heap; 2.00x fewer allocs |
+
+The escaped 16-item dedicated control was run in isolated exact-first and
+generic-second processes after a combined run showed time-order drift. Exact
+was 2,691 ns, 1,816 B, and 3 allocations versus 2,863 ns, 1,872 B, and 5
+allocations: 1.06x faster, 1.03x lower heap, and 1.67x fewer allocations.
+
+An intermediate exact-capacity candidate scanned every escaped string once to
+count output bytes and again while writing. Its isolated exact median was 3,489
+ns versus 2,707 ns generic, a 1.29x regression despite lower allocation. It was
+removed. The retained layout checks all reservation arithmetic without the
+second full escape scan; `strings.Builder` grows from that bounded reservation
+only when encoded bytes exceed raw bytes. No retained state, configuration,
+background work, format, or public ownership rule changed.
 
 <a id="multi-item-top-k-read-materialization"></a>
 ### Multi-Item Top-K Read Materialization

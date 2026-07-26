@@ -2417,18 +2417,20 @@ func (ht *HatTrie) executeFastGetReservoirSampleCommand(key string) (CacheComman
 		return CacheCommandResponse{OK: true, Message: "value not found"}, true
 	}
 	sample := ht.reservoirSamples.array[hval.Index]
-	capacity, ok := commandFastReservoirSampleItemsJSONCapacity(sample.items)
+	capacity, verbatimStrings, ok := commandFastReservoirSampleItemsJSONLayout(sample.items)
 	if !ok {
-		items := sample.Items()
 		ht.recordReadLocked(true, key)
 		ht.mu.Unlock()
-		return commandValueResponse("ok", items), true
+		return commandError("command response is too large"), true
 	}
 	items := sample.sortedItems()
 	ht.recordReadLocked(true, key)
 	ht.mu.Unlock()
 
-	payload := commandFastReservoirSampleItemsJSONWithCapacity(items, capacity)
+	payload, err := commandFastReservoirSampleItemsJSONWithCapacity(items, capacity, verbatimStrings)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
 	return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 }
 
@@ -2761,36 +2763,45 @@ func commandFastReservoirSampleUpdateResponse(message string, update ReservoirSa
 	return CacheCommandResponse{OK: true, Message: message, Value: string(out)}
 }
 
-func commandFastReservoirSampleItemsJSON(items []reservoirSampleItem) (string, bool) {
-	capacity, ok := commandFastReservoirSampleItemsJSONCapacity(items)
+func commandFastReservoirSampleItemsJSON(items []reservoirSampleItem) (string, error) {
+	capacity, verbatimStrings, ok := commandFastReservoirSampleItemsJSONLayout(items)
 	if !ok {
-		return "", false
+		return "", errors.New("command response is too large")
 	}
-	return commandFastReservoirSampleItemsJSONWithCapacity(items, capacity), true
+	return commandFastReservoirSampleItemsJSONWithCapacity(items, capacity, verbatimStrings)
 }
 
-func commandFastReservoirSampleItemsJSONCapacity(items []reservoirSampleItem) (int, bool) {
-	const itemFixedBytes = len(`{"value":"","priority":,"sequence":}`)
+func commandFastReservoirSampleItemsJSONLayout(items []reservoirSampleItem) (int, bool, bool) {
+	const itemFixedBytes = len(`{"value":,"priority":,"sequence":}`)
 	max := int(^uint(0) >> 1)
 	capacity := len(`[]`)
+	verbatimStrings := true
 	for idx, item := range items {
-		value, ok := item.Value.(string)
-		if !ok || !commandFastJSONVerbatimString(value) {
-			return 0, false
+		valueBytes := len(`null`)
+		if value, ok := item.Value.(string); ok {
+			if len(value) > max-len(`""`) {
+				return 0, false, false
+			}
+			valueBytes = len(value) + len(`""`)
+			if verbatimStrings && !commandFastJSONVerbatimString(value) {
+				verbatimStrings = false
+			}
+		} else {
+			verbatimStrings = false
 		}
 		extra := itemFixedBytes + commandFastUint64Digits(item.Priority) + commandFastUint64Digits(item.Sequence)
 		if idx > 0 {
 			extra++
 		}
-		if len(value) > max-extra || capacity > max-extra-len(value) {
-			return 0, false
+		if valueBytes > max-extra || capacity > max-extra-valueBytes {
+			return 0, verbatimStrings, false
 		}
-		capacity += extra + len(value)
+		capacity += extra + valueBytes
 	}
-	return capacity, true
+	return capacity, verbatimStrings, true
 }
 
-func commandFastReservoirSampleItemsJSONWithCapacity(items []reservoirSampleItem, capacity int) string {
+func commandFastReservoirSampleItemsJSONWithCapacity(items []reservoirSampleItem, capacity int, verbatimStrings bool) (string, error) {
 	var builder strings.Builder
 	builder.Grow(capacity)
 	builder.WriteByte('[')
@@ -2799,16 +2810,24 @@ func commandFastReservoirSampleItemsJSONWithCapacity(items []reservoirSampleItem
 		if idx > 0 {
 			builder.WriteByte(',')
 		}
-		builder.WriteString(`{"value":"`)
-		builder.WriteString(item.Value.(string))
-		builder.WriteString(`","priority":`)
+		builder.WriteString(`{"value":`)
+		if verbatimStrings {
+			builder.WriteByte('"')
+			builder.WriteString(item.Value.(string))
+			builder.WriteByte('"')
+		} else if value, ok := item.Value.(string); ok {
+			writeJSONString(&builder, value)
+		} else if err := writeSmallMapJSONValue(&builder, item.Value); err != nil {
+			return "", err
+		}
+		builder.WriteString(`,"priority":`)
 		_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Priority, 10))
 		builder.WriteString(`,"sequence":`)
 		_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Sequence, 10))
 		builder.WriteByte('}')
 	}
 	builder.WriteByte(']')
-	return builder.String()
+	return builder.String(), nil
 }
 
 func commandFastJSONVerbatimString(value string) bool {
@@ -3031,6 +3050,22 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 		payload, err := commandFastTopKItemsJSON(top)
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+	case hval.IsReservoirSample():
+		sample := ht.reservoirSamples.array[hval.Index]
+		capacity, verbatimStrings, ok := commandFastReservoirSampleItemsJSONLayout(sample.items)
+		if !ok {
+			ht.recordReadLocked(true, key)
+			ht.mu.RUnlock()
+			return commandError("command response is too large"), true
+		}
+		items := sample.sortedItems()
+		ht.recordReadLocked(true, key)
+		ht.mu.RUnlock()
+		payload, err := commandFastReservoirSampleItemsJSONWithCapacity(items, capacity, verbatimStrings)
 		if err != nil {
 			return commandError(err.Error()), true
 		}

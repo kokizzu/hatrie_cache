@@ -10,9 +10,9 @@ func TestReservoirSampleFastJSONMatchesGenericEncoding(t *testing.T) {
 		{Value: "", Priority: 1, Sequence: 2},
 		{Value: "alpha / beta", Priority: ^uint64(0), Sequence: 3},
 	}
-	got, ok := commandFastReservoirSampleItemsJSON(items)
-	if !ok {
-		t.Fatal("commandFastReservoirSampleItemsJSON() ok = false, want true")
+	got, err := commandFastReservoirSampleItemsJSON(items)
+	if err != nil {
+		t.Fatalf("commandFastReservoirSampleItemsJSON() error = %v", err)
 	}
 	want, err := jsonEncodedString([]ReservoirSampleItem{
 		{Value: "", Priority: 1, Sequence: 2},
@@ -86,7 +86,7 @@ func TestExecuteExactFastCommandReservoirSampleGetStatesAndOrdering(t *testing.T
 	}
 }
 
-func TestExecuteExactFastCommandReservoirSampleGetUsesGenericEncodingForEncodedValues(t *testing.T) {
+func TestExecuteExactFastCommandReservoirSampleGetDirectlyEncodesStructuredValues(t *testing.T) {
 	values := []interface{}{
 		`quote"value`,
 		`slash\value`,
@@ -113,10 +113,18 @@ func TestExecuteExactFastCommandReservoirSampleGetUsesGenericEncodingForEncodedV
 			}
 			fast.mu.Lock()
 			idx := fast.peekLocked("sample").Index
-			payload, direct := commandFastReservoirSampleItemsJSON(fast.reservoirSamples.array[idx].items)
+			payload, err := commandFastReservoirSampleItemsJSON(fast.reservoirSamples.array[idx].items)
+			publicItems := fast.reservoirSamples.array[idx].Items()
 			fast.mu.Unlock()
-			if direct || payload != "" {
-				t.Fatalf("commandFastReservoirSampleItemsJSON(%#v) = %q/%v, want generic encoding", value, payload, direct)
+			if err != nil {
+				t.Fatalf("commandFastReservoirSampleItemsJSON(%#v) error = %v", value, err)
+			}
+			wantPayload, err := jsonEncodedString(publicItems)
+			if err != nil {
+				t.Fatalf("jsonEncodedString(%#v) error = %v", value, err)
+			}
+			if payload != wantPayload {
+				t.Fatalf("commandFastReservoirSampleItemsJSON(%#v) = %q, want %q", value, payload, wantPayload)
 			}
 			got, ok := fast.executeExactFastCommand(CacheCommandRequest{Command: "GETRS", Key: "sample"})
 			if !ok {
