@@ -250,6 +250,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Known-valid-key GET helper",
 		"Idempotent string assignment",
 		"Temporary packed-map materialization",
+		"Single-object storage-header group",
 		"Boxed packed-set reads",
 		"Sentinel-encoded packed-slice length",
 		"SetStorage-level promoted JSON dispatch",
@@ -326,6 +327,35 @@ func TestDocsDescribeLazyEmptyMerkleTableBacking(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing lazy Merkle token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeGroupedStorageHeaders(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[grouped storage headers](BENCHMARK.md#grouped-storage-headers)",
+		"25 to 8 allocations",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing grouped storage token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkHatTrieConstruction",
+		"3.13x fewer allocations",
+		"3,360 B",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing grouped storage token %q", token)
 		}
 	}
 }

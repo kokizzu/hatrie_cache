@@ -238,6 +238,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
+| Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Live string-slot replacement](#live-string-slot-replacement), duplicate and changing values | Public `Put`: 3.057/2.731 ns | Proven-live replace: 1.416/1.532 ns | Primitive 2.16x/1.78x faster; complete API 1.015x/1.012x faster | Private cache callers rely on the existing live-index invariant; public deleted-index revival and all formats remain unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
@@ -322,6 +323,7 @@ tree.
 | Known-valid-key GET helper | Intended to skip redundant key validation | 121.7 ns versus 120.1 ns for the checked path | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Idempotent string assignment | Intended to skip an unchanged string-header write and reusable-index check | The refined one-check prototype made duplicates 1.27x slower and true replacements 1.07x slower | Removed before production; direct assignment remains; see [idempotent string assignment](#idempotent-string-assignment-rollback) |
 | Temporary packed-map materialization | Reused the generic map JSON encoder | 1,499 ns, 488 B, and 5 allocations | Replaced by direct JSON at 511.4 ns, 24 B, and 1 allocation; see [packed small-map storage](#packed-small-map-storage) |
+| Single-object storage-header group | Reduced empty cache construction from 25 to 7 allocations and was 1.06x faster | Go's 2,048-byte size class raised cumulative heap from 3,360 to 3,424 B | Replaced by the map-separated [grouped storage headers](#grouped-storage-headers), which retain the CPU/allocation gain with unchanged heap |
 | Boxed packed-set reads | Avoided retaining interface payloads in packed pools | Two-member reads were 1.31x slower with 2x heap and 3x allocations | Removed; packed pools retain the faster interface payload layout; see [packed small string-set storage](#packed-small-string-set-storage) |
 | Sentinel-encoded packed-slice length | Shrunk each two-value slice record from 40 to 32 bytes and lowered the 100,000-slice retained/timed heap 1.25x | The refined marker made pop/push 1.06x slower and shift/push 1.04x slower; the first marker design was 1.10x/1.09x slower | Reverted; the inline length byte remains; see [packed two-slice length](#packed-two-slice-length-rollback) |
 | SetStorage-level promoted JSON dispatch | Enabled direct promoted-set encoding at the shared storage encoder | Packed one/two-string command reads became 1.11x/1.10x slower | Replaced by command-level promoted routing; packed reads are neutral or faster; see [packed small string-set storage](#packed-small-string-set-storage) |
@@ -1257,6 +1259,39 @@ The isolated raw output is written to
 `build/benchmarks/native-ahtable-allocator.txt`. The capacity side array and
 bounded slack are the explicit memory cost; the full-process run shows their
 impact after the Go runtime and backing pools are included.
+
+<a id="grouped-storage-headers"></a>
+### Grouped Storage Headers
+
+Each `HatTrie` previously called 19 public typed-storage constructors. Their
+empty slice and reusable-index fields are valid zero values, but every returned
+header escaped as an independent heap object. A non-race allocation test was
+added first requiring no more than eight allocations for
+`CreateHatTrieWithDiskDir` plus `Destroy`; it failed at 25. A forced-GC test
+also pins the interior storage pointers and a live string operation.
+
+The internal constructor now allocates one 1,784-byte backing object for 18
+storage headers and retains the same typed pointers to its fields. `MapStorage`
+remains separate: its 184-byte header plus the group use the 192-byte and
+1,792-byte Go size classes, exactly matching the prior 1,984 storage-header
+bytes. Putting all 19 headers in one 1,968-byte object rounded to the 2,048-byte
+class. That first prototype was 1.06x faster and reduced 25 allocations to 7,
+but raised total constructor heap by 64 bytes, so it was rejected.
+
+```sh
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkHatTrieConstruction -benchmem -benchtime=10000x -count=10'
+```
+
+| Empty cache construction | Separate headers | Map-separated group | Improvement |
+| --- | ---: | ---: | ---: |
+| Median time | 16,148 ns | 15,320 ns | 1.05x faster |
+| Cumulative heap | 3,360 B | 3,360 B | unchanged |
+| Allocations | 25 | 8 | 3.13x fewer allocations |
+
+Public `Create*Storage` APIs retain their independent allocation and empty
+slice behavior. Internal command code still reads the same typed pointers;
+there is no added branch or indirection and no value, GC-lifetime, compaction,
+wire, snapshot, or persistence format change.
 
 <a id="single-representation-string-storage"></a>
 ### Single-Representation String Storage

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +34,56 @@ func enableTestKeyStats(t *testing.T, ht *HatTrie) {
 	t.Helper()
 	if err := ht.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
 		t.Fatalf("ConfigureKeyStats(full) error = %v", err)
+	}
+}
+
+func BenchmarkHatTrieConstruction(b *testing.B) {
+	dir := b.TempDir()
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		trie, err := CreateHatTrieWithDiskDir(dir, false)
+		if err != nil {
+			b.Fatal(err)
+		}
+		trie.Destroy()
+	}
+}
+
+func TestHatTrieConstructionUsesGroupedStorageBacking(t *testing.T) {
+	if raceEnabled {
+		t.Skip("race instrumentation changes constructor allocation counts")
+	}
+	dir := t.TempDir()
+	var createErr error
+	allocs := testing.AllocsPerRun(100, func() {
+		trie, err := CreateHatTrieWithDiskDir(dir, false)
+		if err != nil {
+			createErr = err
+			return
+		}
+		trie.Destroy()
+	})
+	if createErr != nil {
+		t.Fatalf("CreateHatTrieWithDiskDir() error = %v", createErr)
+	}
+	if allocs > 8 {
+		t.Fatalf("CreateHatTrieWithDiskDir() allocations = %.0f, want <= 8", allocs)
+	}
+}
+
+func TestHatTrieGroupedStorageLayout(t *testing.T) {
+	if got, want := reflect.TypeOf(hatTrieStorageGroup{}).Size(), uintptr(1784); got != want {
+		t.Fatalf("hatTrieStorageGroup size = %d, want %d", got, want)
+	}
+	if got, want := reflect.TypeOf(MapStorage{}).Size(), uintptr(184); got != want {
+		t.Fatalf("MapStorage size = %d, want %d", got, want)
+	}
+
+	trie := newTestTrie(t)
+	runtime.GC()
+	trie.UpsertString("grouped:storage", "live")
+	if got, ok, err := trie.GetStringChecked("grouped:storage"); err != nil || !ok || got != "live" {
+		t.Fatalf("GetStringChecked() after GC = %q/%t/%v, want live/true/nil", got, ok, err)
 	}
 }
 

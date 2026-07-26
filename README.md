@@ -108,6 +108,12 @@ prefix sums, and range sums in O(log n) time without storing individual events.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack
 and trim freed tail slots, avoiding per-index hash-map overhead while keeping
 reuse checks, allocation, and delete-heavy memory release fast.
+The internal cache constructor keeps 18 zero-valued typed storage headers in
+one allocation while leaving the larger map header separate for an exact Go
+size-class fit. These
+[grouped storage headers](BENCHMARK.md#grouped-storage-headers) reduce empty
+cache construction from 25 to 8 allocations with unchanged heap and storage
+access paths; public storage constructors remain independent.
 Empty, one-, and two-member plain-string sets use dedicated packed pools, then
 promote to the existing generic set representation at the third member or first
 non-string value. This cuts retained heap without changing wire, snapshot, or

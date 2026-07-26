@@ -3771,6 +3771,29 @@ func levelDBReferenceType(id uint8) string {
 
 // HatTrie wraps the C HAT-trie and keeps larger Go values in typed backing
 // pools referenced by compact HatValue records.
+// MapStorage stays separate because adding its 184-byte header would move this
+// group from the 1,792-byte to the 2,048-byte allocator size class.
+type hatTrieStorageGroup struct {
+	strings          StringStorage
+	raws             BytesStorage
+	slices           SliceStorage
+	sets             SetStorage
+	priorityQueues   PriorityQueueStorage
+	bloomFilters     BloomFilterStorage
+	countMinSketches CountMinSketchStorage
+	hyperLogLogs     HyperLogLogStorage
+	topKs            TopKStorage
+	cuckooFilters    CuckooFilterStorage
+	roaringBitmaps   RoaringBitmapStorage
+	quantileSketches QuantileSketchStorage
+	fenwickTrees     FenwickTreeStorage
+	sparseBitsets    SparseBitsetStorage
+	reservoirSamples ReservoirSampleStorage
+	xorFilters       XorFilterStorage
+	radixTrees       RadixTreeStorage
+	dbrefs           LevelDBReferenceStorage
+}
+
 type HatTrie struct {
 	mu                         sync.RWMutex
 	telemetryMu                sync.Mutex
@@ -3852,28 +3875,29 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 	if err != nil {
 		return nil, err
 	}
+	storage := &hatTrieStorageGroup{}
 	ht := &HatTrie{
 		root:             C.hattrie_create(),
-		strings:          CreateStringStorage(),
-		raws:             CreateBytesStorage(),
+		strings:          &storage.strings,
+		raws:             &storage.raws,
 		disks:            disks,
 		maps:             CreateMapStorage(),
-		slices:           CreateSliceStorage(),
-		sets:             CreateSetStorage(),
-		priorityQueues:   CreatePriorityQueueStorage(),
-		bloomFilters:     CreateBloomFilterStorage(),
-		countMinSketches: CreateCountMinSketchStorage(),
-		hyperLogLogs:     CreateHyperLogLogStorage(),
-		topKs:            CreateTopKStorage(),
-		cuckooFilters:    CreateCuckooFilterStorage(),
-		roaringBitmaps:   CreateRoaringBitmapStorage(),
-		quantileSketches: CreateQuantileSketchStorage(),
-		fenwickTrees:     CreateFenwickTreeStorage(),
-		sparseBitsets:    CreateSparseBitsetStorage(),
-		reservoirSamples: CreateReservoirSampleStorage(),
-		xorFilters:       CreateXorFilterStorage(),
-		radixTrees:       CreateRadixTreeStorage(),
-		dbrefs:           CreateLevelDBReferenceStorage(),
+		slices:           &storage.slices,
+		sets:             &storage.sets,
+		priorityQueues:   &storage.priorityQueues,
+		bloomFilters:     &storage.bloomFilters,
+		countMinSketches: &storage.countMinSketches,
+		hyperLogLogs:     &storage.hyperLogLogs,
+		topKs:            &storage.topKs,
+		cuckooFilters:    &storage.cuckooFilters,
+		roaringBitmaps:   &storage.roaringBitmaps,
+		quantileSketches: &storage.quantileSketches,
+		fenwickTrees:     &storage.fenwickTrees,
+		sparseBitsets:    &storage.sparseBitsets,
+		reservoirSamples: &storage.reservoirSamples,
+		xorFilters:       &storage.xorFilters,
+		radixTrees:       &storage.radixTrees,
+		dbrefs:           &storage.dbrefs,
 		expires:          map[string]uint32{},
 		keyStats:         map[string]*trackedKeyStats{},
 		keyStatsMode:     DefaultKeyStatsMode,
