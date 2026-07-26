@@ -2,6 +2,9 @@ package hatriecache
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -95,6 +98,7 @@ func TestProductionDockerfileAndBuildScript(t *testing.T) {
 	script := readDeployExample(t, "scripts/docker-build.sh")
 	for _, token := range []string{
 		"DOCKER_IMAGE",
+		"DOCKER_BUILD_CONTEXT",
 		"DOCKER_PLATFORM",
 		"docker build",
 	} {
@@ -106,11 +110,54 @@ func TestProductionDockerfileAndBuildScript(t *testing.T) {
 	makefile := readDeployExample(t, "Makefile")
 	for _, token := range []string{
 		"docker-build:",
+		"DOCKER_BUILD_CONTEXT",
 		"./scripts/docker-build.sh",
 	} {
 		if !strings.Contains(makefile, token) {
 			t.Fatalf("Makefile missing docker build token %q", token)
 		}
+	}
+}
+
+func TestDockerBuildScriptSeparatesDaemonAndBuildContexts(t *testing.T) {
+	tempDir := t.TempDir()
+	argsPath := filepath.Join(tempDir, "args")
+	contextPath := filepath.Join(tempDir, "daemon-context")
+	fakeDocker := filepath.Join(tempDir, "docker")
+	if err := os.WriteFile(fakeDocker, []byte("#!/bin/sh\n"+
+		"printf '%s\\n' \"${DOCKER_CONTEXT-}\" > \"$CAPTURE_CONTEXT\"\n"+
+		"printf '%s\\n' \"$@\" > \"$CAPTURE_ARGS\"\n"), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	command := exec.Command("sh", "scripts/docker-build.sh")
+	command.Env = []string{
+		"PATH=" + tempDir + ":" + os.Getenv("PATH"),
+		"CAPTURE_ARGS=" + argsPath,
+		"CAPTURE_CONTEXT=" + contextPath,
+		"DOCKER_CONTEXT=remote-builder",
+		"DOCKER_BUILD_CONTEXT=fixture-context",
+		"DOCKER_IMAGE=fixture:image",
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("docker build script: %v: %s", err, output)
+	}
+
+	daemonContext, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read captured daemon context: %v", err)
+	}
+	if got := strings.TrimSpace(string(daemonContext)); got != "remote-builder" {
+		t.Fatalf("docker daemon context = %q, want remote-builder", got)
+	}
+
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read captured docker arguments: %v", err)
+	}
+	want := []string{"build", "-f", "Dockerfile", "-t", "fixture:image", "fixture-context"}
+	if got := strings.Split(strings.TrimSpace(string(args)), "\n"); !slices.Equal(got, want) {
+		t.Fatalf("docker arguments = %#v, want %#v", got, want)
 	}
 }
 

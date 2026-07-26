@@ -384,6 +384,14 @@ Build the production container image with the same Makefile+script convention:
 make docker-build DOCKER_IMAGE=hatrie-cache:latest
 ```
 
+Use `DOCKER_BUILD_CONTEXT=/path/to/source` to change the filesystem build
+context. Docker's native `DOCKER_CONTEXT` remains available for selecting a
+local or remote daemon, for example:
+
+```
+DOCKER_CONTEXT=remote-builder make docker-build DOCKER_BUILD_CONTEXT=.
+```
+
 The `Dockerfile` builds the Svelte MPA assets, compiles `hatrie-cache` and
 `hatrie-cli` in a CGO-enabled builder stage, and runs the daemon as a non-root
 user on Debian slim. The default container command serves the monitoring UI/API

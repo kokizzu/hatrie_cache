@@ -3,7 +3,7 @@ set -eu
 
 image=${DOCKER_IMAGE:-hatrie-cache:latest}
 dockerfile=${DOCKERFILE:-Dockerfile}
-context=${DOCKER_CONTEXT:-.}
+context=${DOCKER_BUILD_CONTEXT:-.}
 platform=${DOCKER_PLATFORM:-}
 target=${DOCKER_TARGET:-}
 
