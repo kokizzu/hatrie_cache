@@ -62,6 +62,12 @@ unnecessary staged-key sort, making measured 64-65,536-item builds
 now reuse seed-independent 8-byte hashes instead of retaining 16-byte string
 headers and rehashing every key. The [XOR build hash index](BENCHMARK.md#compact-xor-filter-build-hash-index)
 cuts transient build heap by 1.18x-1.36x without changing fingerprints.
+Generic XOR additions also use [adaptive generic batch deduplication](BENCHMARK.md#adaptive-xor-batch-deduplication):
+a scalar request skips temporary deduplication state, batches of two through
+eight compare their bounded pending slice, and larger batches retain the map
+path. Same-binary alternating controls measured the common small batches
+1.04x-1.12x faster with heap and allocations unchanged, while all values are
+still validated before any staged mutation.
 Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
 exact uint32 sets with fast membership, remove, count, and sorted iteration.
 Their fixed 1,024-word dense backing uses a compact 48-byte container header,

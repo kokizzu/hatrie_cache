@@ -488,6 +488,31 @@ func TestREADMEDocumentsXorFilterBuildHashIndex(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeAdaptiveXorBatchDeduplication(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[adaptive generic batch deduplication](BENCHMARK.md#adaptive-xor-batch-deduplication)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing adaptive XOR batch token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkXorFilterGenericBatchDedupStrategy",
+		"1.04x-1.12x faster",
+		"transactional validation",
+		"heap and allocations unchanged",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing adaptive XOR batch token %q", token)
+		}
+	}
+}
+
 func TestREADMELinksShardingProposal(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

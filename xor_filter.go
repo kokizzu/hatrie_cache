@@ -19,6 +19,7 @@ const (
 	xorFilterMaxBuildAttempts     int     = 128
 	xorFilterSeedBase             uint64  = 0x9e3779b97f4a7c15
 	xorFilterInlineBuildHashes            = 64
+	xorFilterLinearBatchDedup             = 8
 )
 
 // XorFilterInfo reports the shape and compactness of a static XOR filter.
@@ -205,9 +206,31 @@ func (filter *xorFilterData) AddOne(value interface{}, values ...interface{}) (i
 	if filter.built {
 		return 0, errors.New("hatriecache: xor filter is already built")
 	}
+	if len(values) == 0 {
+		key, err := xorFilterItemKey(value)
+		if err != nil {
+			return 0, err
+		}
+		if _, ok := filter.staged[key]; ok {
+			return 0, nil
+		}
+		staged, ok := checkedBatchSize(len(filter.staged), 1)
+		if !ok || uint64(staged) > maxXorFilterItems {
+			return 0, errors.New("hatriecache: xor filter staged item count is too large")
+		}
+		if filter.staged == nil {
+			filter.staged = make(map[string]interface{}, 1)
+		}
+		filter.staged[key] = cloneValue(value)
+		filter.items = uint64(staged)
+		return 1, nil
+	}
 	count, ok := checkedBatchSize(1, len(values))
 	if !ok {
 		return 0, errBatchSizeTooLarge
+	}
+	if count <= xorFilterLinearBatchDedup {
+		return filter.addLinearBatch(value, values, count)
 	}
 	pending := make([]xorFilterPendingItem, 0, count)
 	seen := make(map[string]struct{}, count)
@@ -232,6 +255,48 @@ func (filter *xorFilterData) AddOne(value interface{}, values ...interface{}) (i
 		}
 		pending = append(pending, xorFilterPendingItem{key: key, value: value})
 		seen[key] = struct{}{}
+	}
+	staged, ok := checkedBatchSize(len(filter.staged), len(pending))
+	if !ok || uint64(staged) > maxXorFilterItems {
+		return 0, errors.New("hatriecache: xor filter staged item count is too large")
+	}
+	if filter.staged == nil && len(pending) > 0 {
+		filter.staged = make(map[string]interface{}, len(pending))
+	}
+	for _, item := range pending {
+		filter.staged[item.key] = cloneValue(item.value)
+	}
+	filter.items = uint64(len(filter.staged))
+	return len(pending), nil
+}
+
+func (filter *xorFilterData) addLinearBatch(value interface{}, values []interface{}, count int) (int, error) {
+	pending := make([]xorFilterPendingItem, 0, count)
+	key, err := xorFilterItemKey(value)
+	if err != nil {
+		return 0, err
+	}
+	if _, ok := filter.staged[key]; !ok {
+		pending = append(pending, xorFilterPendingItem{key: key, value: value})
+	}
+	for _, value := range values {
+		key, err := xorFilterItemKey(value)
+		if err != nil {
+			return 0, err
+		}
+		if _, ok := filter.staged[key]; ok {
+			continue
+		}
+		duplicate := false
+		for _, item := range pending {
+			if item.key == key {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			pending = append(pending, xorFilterPendingItem{key: key, value: value})
+		}
 	}
 	staged, ok := checkedBatchSize(len(filter.staged), len(pending))
 	if !ok || uint64(staged) > maxXorFilterItems {

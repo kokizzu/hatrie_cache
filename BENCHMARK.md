@@ -224,6 +224,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
 | Current pass | [Compact XOR-filter build hash index](#compact-xor-filter-build-hash-index), 64/4,096/65,536 staged items | String headers: 6,281/371,676/7,918,608 ns; 4,352/218,368/3,473,422 B | Base hashes: 5,675/367,143/7,820,713 ns; 3,200/185,600/2,949,129 B | 1.11x/1.01x/1.01x faster; 1.36x/1.18x/1.18x lower heap; one small-build allocation removed | Uses at most 512 transient stack bytes through 64 items; no retained state or format change; a forced retry is CPU-neutral within 0.4% |
+| Current pass | [Adaptive generic XOR batch deduplication](#adaptive-xor-batch-deduplication), one through eight requested values | Per-request map: 275.2/426.0/696.3/1,219 ns for 1/2/4/8 unique values | Direct scalar or pending-slice scan: 245.6/396.5/643.6/1,173.5 ns | 1.04x-1.12x faster; heap and allocations unchanged | Transactional validation and deduplication are unchanged; batches of nine or more retain the map path |
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
 | Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
@@ -3972,6 +3973,50 @@ item, exactly as before. The optimization removes 2,048 cumulative bytes and
 128 allocations from the 64-item lifecycle without adding fields, background
 work, configuration, or retained state. Plain-string filter contents and built
 fingerprints remain byte-identical to the generic path.
+
+<a id="adaptive-xor-batch-deduplication"></a>
+#### Adaptive Generic Batch Deduplication
+
+Generic `xorFilterData.AddOne` previously created a duplicate-detection map for
+every request, including a scalar insertion and the small variadic batches used
+by direct callers. The final path inserts one validated value directly, scans
+the already-required pending slice for batches of two through eight, and keeps
+the map for nine or more values where constant-time membership is expected to
+win. The threshold is fixed from the measured crossover rather than exposed as
+runtime configuration.
+
+The test-first fixture covers an existing staged value, duplicates within one
+request, mixed strings and `json.Number` values, and a late unsupported value.
+It proves transactional validation: an error after valid leading values leaves
+the complete staged snapshot unchanged. The implementation still validates and
+deduplicates the full request before cloning or publishing any pending value.
+
+The same-binary control retains the former per-request map algorithm and runs
+16,384 additions per block, alternating which implementation goes first. Ten
+fixed ten-pair runs on one logical CPU produced these medians; a separate
+100,000-iteration benchmark confirmed the allocation profile:
+
+```sh
+make run CMD='go test . -run=TestXorFilterGenericBatchAddDeduplicatesTransactionally -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterGenericBatchDedupAlternating -benchtime=10x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterGenericBatchDedupStrategy -benchmem -benchtime=100000x -count=10 -cpu=1'
+```
+
+| Generic addition | Map control | Adaptive final | Improvement |
+| --- | ---: | ---: | ---: |
+| One unique value | 275.2 ns | 245.6 ns | 1.12x faster |
+| Two unique values | 426.0 ns | 396.5 ns | 1.07x faster |
+| Four unique values | 696.3 ns | 643.6 ns | 1.08x faster |
+| Eight unique values | 1,219 ns | 1,173.5 ns | 1.04x faster |
+| Four duplicate-heavy values | 628.9 ns | 595.9 ns | 1.06x faster |
+| Eight duplicate-heavy values | 1,047.5 ns | 985.7 ns | 1.06x faster |
+
+The accepted small workloads are 1.04x-1.12x faster, with heap and allocations
+unchanged in every pair. Unique one/two/four/eight-value requests remain at
+368/464/592/848 B and 4/7/11/19 allocations. The 16-value control confirms the
+unchanged map path and memory profile; its separate CPU samples were noisy and
+are not claimed as an improvement. Filter contents, item counts, build output,
+snapshots, persistence, replication, and wire formats are unchanged.
 
 <a id="compact-xor-filter-headers"></a>
 ### Compact XOR-Filter Headers

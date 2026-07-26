@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -242,6 +243,197 @@ func TestXorFilterBuildAndContains(t *testing.T) {
 	if _, err := filter.Add("late"); err == nil || !strings.Contains(err.Error(), "already built") {
 		t.Fatalf("Add() after build error = %v, want already built", err)
 	}
+}
+
+func TestXorFilterGenericBatchAddDeduplicatesTransactionally(t *testing.T) {
+	filter, err := newXorFilterData(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added, err := filter.AddOne("existing"); err != nil || added != 1 {
+		t.Fatalf("AddOne(existing) = %d/%v, want 1/nil", added, err)
+	}
+	added, err := filter.AddOne("existing", "alpha", "alpha", json.Number("3"), json.Number("3"))
+	if err != nil || added != 2 {
+		t.Fatalf("AddOne(deduplicated batch) = %d/%v, want 2/nil", added, err)
+	}
+	before := filter.Snapshot()
+	if _, err := filter.AddOne("not-retained", make(chan int)); err == nil {
+		t.Fatal("AddOne(late invalid value) error = nil, want validation error")
+	}
+	if got := filter.Snapshot(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("failed AddOne() changed staged state: %#v -> %#v", before, got)
+	}
+}
+
+func BenchmarkXorFilterGenericBatchAdd(b *testing.B) {
+	for _, size := range []int{1, 2, 4, 8, 16, 64} {
+		for _, duplicateHeavy := range []bool{false, true} {
+			name := fmt.Sprintf("Unique%d", size)
+			if duplicateHeavy {
+				name = fmt.Sprintf("DuplicateHeavy%d", size)
+			}
+			values := make([]interface{}, size)
+			for index := range values {
+				valueIndex := index
+				if duplicateHeavy {
+					valueIndex %= 2
+				}
+				values[index] = fmt.Sprintf("generic-%d", valueIndex)
+			}
+			b.Run(name, func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					filter := xorFilterData{}
+					added, err := filter.AddOne(values[0], values[1:]...)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkXorFilterAttemptSink = added + len(filter.staged)
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkXorFilterGenericBatchDedupStrategy(b *testing.B) {
+	for _, size := range []int{1, 2, 4, 8, 16} {
+		for _, duplicateHeavy := range []bool{false, true} {
+			name := fmt.Sprintf("Unique%d", size)
+			if duplicateHeavy {
+				name = fmt.Sprintf("DuplicateHeavy%d", size)
+			}
+			values := make([]interface{}, size)
+			for index := range values {
+				valueIndex := index
+				if duplicateHeavy {
+					valueIndex %= 2
+				}
+				values[index] = fmt.Sprintf("generic-%d", valueIndex)
+			}
+			for _, adaptive := range []bool{false, true} {
+				strategy := "MapControl"
+				if adaptive {
+					strategy = "Adaptive"
+				}
+				b.Run(name+"/"+strategy, func(b *testing.B) {
+					b.ReportAllocs()
+					for iteration := 0; iteration < b.N; iteration++ {
+						filter := xorFilterData{}
+						var (
+							added int
+							err   error
+						)
+						if adaptive {
+							added, err = filter.AddOne(values[0], values[1:]...)
+						} else {
+							added, err = addXorFilterBatchMapControl(&filter, values[0], values[1:]...)
+						}
+						if err != nil {
+							b.Fatal(err)
+						}
+						benchmarkXorFilterAttemptSink = added + len(filter.staged)
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkXorFilterGenericBatchDedupAlternating(b *testing.B) {
+	const additions = 1 << 14
+	for _, size := range []int{1, 2, 4, 8} {
+		for _, duplicateHeavy := range []bool{false, true} {
+			name := fmt.Sprintf("Unique%d", size)
+			if duplicateHeavy {
+				name = fmt.Sprintf("DuplicateHeavy%d", size)
+			}
+			values := make([]interface{}, size)
+			for index := range values {
+				valueIndex := index
+				if duplicateHeavy {
+					valueIndex %= 2
+				}
+				values[index] = fmt.Sprintf("generic-%d", valueIndex)
+			}
+			b.Run(name, func(b *testing.B) {
+				var mapDuration, adaptiveDuration time.Duration
+				for iteration := 0; iteration < b.N; iteration++ {
+					adaptiveFirst := iteration&1 != 0
+					for pass := 0; pass < 2; pass++ {
+						started := time.Now()
+						if adaptiveFirst == (pass == 0) {
+							for addition := 0; addition < additions; addition++ {
+								filter := xorFilterData{}
+								added, err := filter.AddOne(values[0], values[1:]...)
+								if err != nil {
+									b.Fatal(err)
+								}
+								benchmarkXorFilterAttemptSink = added + len(filter.staged)
+							}
+							adaptiveDuration += time.Since(started)
+						} else {
+							for addition := 0; addition < additions; addition++ {
+								filter := xorFilterData{}
+								added, err := addXorFilterBatchMapControl(&filter, values[0], values[1:]...)
+								if err != nil {
+									b.Fatal(err)
+								}
+								benchmarkXorFilterAttemptSink = added + len(filter.staged)
+							}
+							mapDuration += time.Since(started)
+						}
+					}
+				}
+				operations := float64(b.N * additions)
+				b.ReportMetric(float64(adaptiveDuration.Nanoseconds())/operations, "adaptive-ns/add")
+				b.ReportMetric(float64(mapDuration.Nanoseconds())/operations, "map-ns/add")
+			})
+		}
+	}
+}
+
+func addXorFilterBatchMapControl(filter *xorFilterData, value interface{}, values ...interface{}) (int, error) {
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return 0, errBatchSizeTooLarge
+	}
+	pending := make([]xorFilterPendingItem, 0, count)
+	seen := make(map[string]struct{}, count)
+	key, err := xorFilterItemKey(value)
+	if err != nil {
+		return 0, err
+	}
+	if _, ok := filter.staged[key]; !ok {
+		pending = append(pending, xorFilterPendingItem{key: key, value: value})
+		seen[key] = struct{}{}
+	}
+	for _, value := range values {
+		key, err := xorFilterItemKey(value)
+		if err != nil {
+			return 0, err
+		}
+		if _, ok := filter.staged[key]; ok {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		pending = append(pending, xorFilterPendingItem{key: key, value: value})
+		seen[key] = struct{}{}
+	}
+	staged, ok := checkedBatchSize(len(filter.staged), len(pending))
+	if !ok || uint64(staged) > maxXorFilterItems {
+		return 0, errors.New("hatriecache: xor filter staged item count is too large")
+	}
+	if filter.staged == nil && len(pending) > 0 {
+		filter.staged = make(map[string]interface{}, len(pending))
+	}
+	for _, item := range pending {
+		filter.staged[item.key] = cloneValue(item.value)
+	}
+	filter.items = uint64(len(filter.staged))
+	return len(pending), nil
 }
 
 func TestXorFilterSnapshotRoundTrip(t *testing.T) {
