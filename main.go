@@ -4602,7 +4602,10 @@ func (ht *HatTrie) flushBatchTelemetryLocked(batch *batchTelemetry) {
 	if batch == nil || batch.hits|batch.misses|batch.writes|batch.deletes == 0 {
 		return
 	}
-	now := ht.currentTime()
+	ht.flushBatchTelemetryAtLocked(batch, ht.currentTime())
+}
+
+func (ht *HatTrie) flushBatchTelemetryAtLocked(batch *batchTelemetry, now time.Time) {
 	if batch.hits != 0 {
 		updateAtomicCacheTime(&ht.stats.lastHit, now)
 		ht.stats.hits.Add(batch.hits)

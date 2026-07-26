@@ -236,6 +236,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
+| Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
@@ -855,6 +856,51 @@ Responses retain ordered statuses while packing byte results into one buffer.
 Journaling, dirty persistence, replication, and leader enforcement use the
 existing side-effect executor. Raw output is generated at
 `build/benchmarks/structured-protobuf-batch.txt`.
+
+<a id="bounded-structured-batch-execution"></a>
+#### Bounded Structured Batch Execution
+
+The typed stream now validates its columns once and executes map, slice, set,
+and priority-queue operations directly. It holds the trie lock for at most four
+adjacent commands and aggregates default global telemetry across the request,
+reducing a representative 16-command batch from 19 clock reads to one. Four was
+selected after measuring lock sizes 2, 4, 8, and 16. The larger sizes completed
+the batch faster, but four keeps the critical section conservative while still
+removing most lock and command-dispatch overhead.
+
+The executor does not add retained trie state. Detailed or bounded per-key
+statistics, local partitions, noncanonical keys/subkeys, journaling, dirty
+persistence, replication, and leader-write enforcement retain the existing
+command loop. Differential tests compare responses, stored entries, and global
+statistics for every supported structured operation; fallback and race tests
+cover the compatibility cases.
+
+```sh
+make run CMD='go test . -run StructuredBatchDirect -count=1'
+make run CMD='go test -race . -run StructuredBatch -count=1'
+make run CMD='go test . -run=^none -bench=StructuredBatchDirect -benchmem -benchtime=1s -count=7 -cpu=1'
+make run CMD='go test . -run=^none -bench=StructuredBatchReaderPause -benchtime=10x -count=7 -cpu=2'
+make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7
+```
+
+| Seven-run median | Per-command command loop | Bounded executor, size 4 | Result |
+| --- | ---: | ---: | ---: |
+| Focused 8-command batch | 2,312 ns; 560 B; 19 allocs | 1,915 ns; 560 B; 19 allocs | 1.21x faster; heap unchanged |
+| Focused 16-command batch | 4,339 ns; 904 B; 30 allocs | 3,383 ns; 904 B; 30 allocs | 1.28x faster; heap unchanged |
+| End-to-end gRPC, per command | 1,724 ns | 1,503 ns | 1.15x faster |
+| End-to-end gRPC heap / 10k | 3,586,784 B | 3,587,480 B | 1.0002x; measurement noise |
+| End-to-end gRPC allocations / 10k | 77,681 | 77,686 | effectively unchanged |
+| End-to-end gRPC wire / command | 33.22 B | 33.22 B | unchanged |
+| 4,096-command runtime under reader load | 3.970 ms | 1.682 ms | 2.36x faster |
+| Observed maximum reader pause | 141,904 ns | 106,013 ns | 1.34x shorter |
+| Telemetry clock calls / 16 commands | 19 | 1 | 19x fewer |
+
+The end-to-end baseline samples were `1,597, 1,764, 1,495, 1,764,
+1,476, 1,724, 1,865` ns/command. The artifact-producing final samples were
+`1,435, 1,512, 1,324, 1,503, 1,462, 1,528, 1,711` ns/command. Protobuf request
+and response shapes are unchanged, so the optimization has no bandwidth or
+client compatibility effect. Raw final output is in
+`build/benchmarks/structured-protobuf-batch.txt` when generated locally.
 
 Run the same sequential transport comparison across representative command
 families:

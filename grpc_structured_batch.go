@@ -205,6 +205,13 @@ func (cursor *structuredBatchCursor) command(request *hatriecachev1.StructuredBa
 }
 
 func (ht *HatTrie) executeStructuredBatchDirect(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
+	if ht.structuredBatchRequiresCommandLoop(request) {
+		return ht.executeStructuredBatchCommandLoop(ctx, request)
+	}
+	return ht.executeStructuredBatchBounded(ctx, request)
+}
+
+func (ht *HatTrie) executeStructuredBatchCommandLoop(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
 	response := newStructuredBatchResponse(request.GetBatchId(), len(request.GetOperations()))
 	cursor := structuredBatchCursor{}
 	for index, operation := range request.GetOperations() {
