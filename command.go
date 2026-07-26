@@ -3402,7 +3402,7 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		}
 		return jsonEncodedString(ht.slices.values(hval.Index))
 	case DATAVALUE_TYPE_SET:
-		return jsonEncodedString(ht.sets.values(hval.Index))
+		return ht.sets.jsonString(hval.Index)
 	case DATAVALUE_TYPE_PRIORITY_QUEUE:
 		return jsonEncodedString(ht.priorityQueues.array[hval.Index].Items())
 	case DATAVALUE_TYPE_BLOOM_FILTER:

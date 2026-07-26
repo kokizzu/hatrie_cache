@@ -220,6 +220,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
 | Current pass | [Packed small string-set storage](#packed-small-string-set-storage), 100k one/two-member sets | Slice/map entries: 94.36/142.4 retained B/set; 2.000/3.000 retained objects/set | Packed pools: 18.87/36.98 retained B/set; 0.00026/0.00026 retained objects/set | 5.00x/3.85x lower retained heap; about 7,692x/11,538x fewer retained objects; 1.39x/1.42x faster writes | Adds 160 fixed bytes/cache; promotes at the third member with unchanged generic retention and a 1.21x faster measured transition |
+| Current pass | [Direct packed string-set JSON](#packed-small-string-set-storage), empty/one/two-member command GET | Temporary set: 245.3/338.3/379.1 ns; 64/88/112 B; 3/4/4 allocs | Direct JSON: 76.35/134.9/153.1 ns; 0/16/16 B; 0/1/1 allocs | 3.21x/2.51x/2.48x faster; up to 7x lower heap; up to 4x fewer allocations | Packed plain strings only; promoted sets retain the generic encoder with unchanged wire, storage, ordering, and ownership |
 | Current pass | [Packed small-slice storage](#packed-small-slice-storage), 100k zero/one/two-value slices | Deques: 46.23/62.23/78.23 retained B/slice; one retained object for nonempty slices | Packed pools: 27.39/27.39/46.23 retained B/slice; 0.00025 retained objects/slice | 1.69x/2.27x/1.69x lower retained heap; about 4,000x fewer retained objects for nonempty slices; tiny push retention improves up to 4.02x | Adds 160 fixed bytes/cache; promotion retains the generic deque, measures neutral, and halves transition allocations |
 | Reverted | [Packed-string compaction](#string-compaction-allocation-rollback), 100k varied 33-512 B strings | Packed copy: 30.07 MB cumulative heap; 121,848 KiB peak RSS | Dense remap: 2.81 MB cumulative heap; 93,516 KiB peak RSS | 10.71x lower cumulative heap, 1.30x lower peak RSS | Retains 3.79% more heap and forced GC is 1.81x slower; packing was not worth its immediate memory spike |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
@@ -1337,6 +1338,30 @@ make run CMD='go test . -run=NONE -bench=BenchmarkSetStorageOperations -benchtim
 | Replace two then promote third | 982.1 ns; 497 B; 11 allocs | 812.1 ns; 392 B; 8 allocs | 1.21x faster; 1.27x lower heap; 1.38x fewer allocs |
 | Membership, eight members | 150.3 ns; 32 B; 2 allocs | 131.9 ns; 16 B; 1 alloc | 1.14x faster; 2x lower heap and allocs |
 | Read two sorted members | 114.5 ns; 32 B; 1 alloc | 92.73 ns; 32 B; 1 alloc | 1.23x faster; allocation cost unchanged |
+
+Command GET previously expanded every packed set into a temporary public `Set`
+before JSON encoding it. Packed strings now write the same sorted JSON array
+directly through the existing canonical string escaper. Tests compare empty,
+one-, two-, and promoted-set output with the generic encoder, including control
+bytes, HTML-sensitive strings, invalid UTF-8, Unicode, and U+2028/U+2029.
+
+Nine alternating 300 ms A/B pairs used otherwise identical test binaries
+pinned to one CPU:
+
+```sh
+make run CMD='go test . -run none -bench BenchmarkPackedStringSetCommandGet -benchmem -benchtime=500ms -count=9 -cpu=1'
+```
+
+| Command GET, nine-run median | Temporary public set | Direct packed JSON | Improvement |
+| --- | ---: | ---: | ---: |
+| Empty | 245.3 ns; 64 B; 3 allocs | 76.35 ns; 0 B; 0 allocs | 3.21x faster; allocation-free |
+| One string | 338.3 ns; 88 B; 4 allocs | 134.9 ns; 16 B; 1 alloc | 2.51x faster; 5.50x lower heap; 4x fewer allocs |
+| Two strings | 379.1 ns; 112 B; 4 allocs | 153.1 ns; 16 B; 1 alloc | 2.48x faster; 7.00x lower heap; 4x fewer allocs |
+| Three-string promoted control | 636.4 ns; 184 B; 5 allocs | 616.2 ns; 184 B; 5 allocs | CPU 1.03x faster within noise; memory unchanged |
+
+The returned bytes, lexical member order, read telemetry, storage layout,
+snapshots, journals, replication payloads, and wire schema are unchanged. The
+promoted representation still calls the existing generic encoder.
 
 The first candidate boxed packed strings during reads and made two-member
 reads 1.31x slower with 2x heap and 3x allocations; it was not retained. The

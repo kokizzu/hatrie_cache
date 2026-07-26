@@ -3135,6 +3135,60 @@ func (ss *SetStorage) values(idx int32) Set {
 	return Set{first, second}
 }
 
+func (ss *SetStorage) jsonString(idx int32) (string, error) {
+	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
+	if !packed {
+		if idx < 0 || int(idx) >= len(ss.array) || ss.reusables.Has(idx) {
+			return "", errors.New("hatriecache: set backing index is missing")
+		}
+		return jsonEncodedString(ss.array[idx].Values())
+	}
+	if !twoValuePool {
+		if poolIndex < 0 || int(poolIndex) >= len(ss.oneStrings) || ss.oneReusable.Has(poolIndex) {
+			return "", errors.New("hatriecache: set backing index is missing")
+		}
+		value := ss.oneStrings[poolIndex].value
+		if value == nil {
+			return "[]", nil
+		}
+		var builder strings.Builder
+		text := value.(string)
+		builder.Grow(len(text) + 4)
+		builder.WriteByte('[')
+		writeJSONString(&builder, text)
+		builder.WriteByte(']')
+		return builder.String(), nil
+	}
+	if poolIndex < 0 || int(poolIndex) >= len(ss.twoStrings) || ss.twoReusable.Has(poolIndex) {
+		return "", errors.New("hatriecache: set backing index is missing")
+	}
+	values := ss.twoStrings[poolIndex].values
+	if values[0] == nil {
+		return "[]", nil
+	}
+	first := values[0].(string)
+	if values[1] == nil {
+		var builder strings.Builder
+		builder.Grow(len(first) + 4)
+		builder.WriteByte('[')
+		writeJSONString(&builder, first)
+		builder.WriteByte(']')
+		return builder.String(), nil
+	}
+	second := values[1].(string)
+	if second < first {
+		first, second = second, first
+	}
+	var builder strings.Builder
+	builder.Grow(len(first) + len(second) + 7)
+	builder.WriteByte('[')
+	writeJSONString(&builder, first)
+	builder.WriteByte(',')
+	writeJSONString(&builder, second)
+	builder.WriteByte(']')
+	return builder.String(), nil
+}
+
 func (ss *SetStorage) length(idx int32) (int, bool) {
 	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
 	if !packed {

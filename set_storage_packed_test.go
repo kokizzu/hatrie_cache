@@ -188,6 +188,35 @@ func assertSetValueEqual(t *testing.T, ht *HatTrie, key string, want Set) {
 	}
 }
 
+func TestPackedStringSetCommandGetMatchesCanonicalJSON(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		values Set
+	}{
+		{name: "empty", values: Set{}},
+		{name: "one escaped", values: Set{"<alpha>\n\"quoted\""}},
+		{name: "two sorted", values: Set{"zeta", "beta"}},
+		{name: "two unicode", values: Set{"東京", "éclair"}},
+		{name: "unicode separators", values: Set{"line\u2028separator", "paragraph\u2029separator"}},
+		{name: "invalid utf8", values: Set{string([]byte{'a', 0xff, 'b'})}},
+		{name: "promoted", values: Set{"gamma", "alpha", "beta"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ht := newTestTrie(t)
+			ht.UpsertSet("set", test.values)
+
+			want, err := jsonEncodedString(ht.GetSet("set"))
+			if err != nil {
+				t.Fatalf("jsonEncodedString() error = %v", err)
+			}
+			got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "set"})
+			if !got.OK || got.Value != want {
+				t.Fatalf("GET response = %#v, want value %q", got, want)
+			}
+		})
+	}
+}
+
 func BenchmarkSetStorageLayout100k(b *testing.B) {
 	const keyCount = 100000
 	keys := make([]string, keyCount)
@@ -331,4 +360,28 @@ func BenchmarkSetStorageOperations(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkPackedStringSetCommandGet(b *testing.B) {
+	for _, benchmark := range []struct {
+		name   string
+		values Set
+	}{
+		{name: "Empty", values: Set{}},
+		{name: "One", values: Set{"alpha"}},
+		{name: "Two", values: Set{"alpha", "beta"}},
+		{name: "Promoted", values: Set{"alpha", "beta", "gamma"}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			ht := CreateHatTrie()
+			b.Cleanup(ht.Destroy)
+			ht.UpsertSet("set", benchmark.values)
+			request := CacheCommandRequest{Command: "GET", Key: "set"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				benchmarkCommandResponseSink = ht.ExecuteCommand(request)
+			}
+		})
+	}
 }
