@@ -1128,6 +1128,76 @@ func BenchmarkReplicationMerkleIndexBuild(b *testing.B) {
 	b.ReportMetric(keyCount, "keys/op")
 }
 
+func BenchmarkReplicationMerkleEmptyIndexActivation(b *testing.B) {
+	var retained int
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		trie := CreateHatTrie()
+		snapshot, err := trie.replicationMerkleSnapshot()
+		if err != nil || snapshot.count != 0 {
+			trie.Destroy()
+			b.Fatalf("replicationMerkleSnapshot() = %#v/%v, want empty snapshot", snapshot, err)
+		}
+		retained = trie.replicationMerkleRetainedBytes()
+		trie.Destroy()
+	}
+	b.ReportMetric(float64(retained), "retained_B/op")
+}
+
+func BenchmarkReplicationMerkleEmptyIndexAllocation(b *testing.B) {
+	var index *replicationMerkleIndex
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		index = newReplicationMerkleIndex()
+	}
+	b.ReportMetric(float64(index.retainedBytes()), "retained_B/op")
+	runtime.KeepAlive(index)
+}
+
+func BenchmarkReplicationMerkleIndexInitializationPaired(b *testing.B) {
+	const keyCount = 10000
+	keys := make([]uint64, keyCount)
+	for idx := range keys {
+		keys[idx] = xxhash.Sum64String("session:" + strconv.Itoa(idx))
+	}
+	build := func(lazy bool) *replicationMerkleIndex {
+		index := &replicationMerkleIndex{valid: true}
+		if !lazy {
+			index.table = newReplicationMerkleTable()
+		}
+		for idx, key := range keys {
+			index.set(key, uint64(idx+1))
+		}
+		return index
+	}
+	var eagerElapsed time.Duration
+	var lazyElapsed time.Duration
+	var index *replicationMerkleIndex
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if iteration&1 == 0 {
+			started := time.Now()
+			index = build(false)
+			eagerElapsed += time.Since(started)
+			started = time.Now()
+			index = build(true)
+			lazyElapsed += time.Since(started)
+			continue
+		}
+		started := time.Now()
+		index = build(true)
+		lazyElapsed += time.Since(started)
+		started = time.Now()
+		index = build(false)
+		eagerElapsed += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(eagerElapsed.Nanoseconds())/float64(b.N), "eager_ns/index")
+	b.ReportMetric(float64(lazyElapsed.Nanoseconds())/float64(b.N), "lazy_ns/index")
+	runtime.KeepAlive(index)
+}
+
 func BenchmarkReplicationMerkleTableOperations(b *testing.B) {
 	const keyCount = 10000
 	keys := make([]uint64, keyCount)

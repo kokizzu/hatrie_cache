@@ -60,6 +60,50 @@ func TestReplicationMerkleIndexTracksMutationsWithinCompactBudget(t *testing.T) 
 	}
 }
 
+func TestEmptyReplicationMerkleIndexDefersTableBacking(t *testing.T) {
+	trie := newTestTrie(t)
+	snapshot, err := trie.replicationMerkleSnapshot()
+	if err != nil {
+		t.Fatalf("replicationMerkleSnapshot() error = %v", err)
+	}
+	if snapshot.count != 0 {
+		t.Fatalf("empty Merkle snapshot count = %d, want 0", snapshot.count)
+	}
+	if got, want := trie.replicationMerkleRetainedBytes(), replicationMerkleBucketCount*16; got != want {
+		t.Fatalf("empty Merkle retained bytes = %d, want %d", got, want)
+	}
+	trie.mu.RLock()
+	emptyTableCapacity := len(trie.replicationMerkle.table.keys)
+	trie.mu.RUnlock()
+	if emptyTableCapacity != 0 {
+		t.Fatalf("empty Merkle table capacity = %d, want 0", emptyTableCapacity)
+	}
+	if _, err := trie.CompactMemory(); err != nil {
+		t.Fatalf("CompactMemory() error = %v", err)
+	}
+	if got, want := trie.replicationMerkleRetainedBytes(), replicationMerkleBucketCount*16; got != want {
+		t.Fatalf("compacted empty Merkle retained bytes = %d, want %d", got, want)
+	}
+	trie.mu.RLock()
+	compactedTableCapacity := len(trie.replicationMerkle.table.keys)
+	trie.mu.RUnlock()
+	if compactedTableCapacity != 0 {
+		t.Fatalf("compacted empty Merkle table capacity = %d, want 0", compactedTableCapacity)
+	}
+
+	trie.UpsertString("session:1", "value")
+	if _, err := trie.replicationMerkleSnapshot(); err != nil {
+		t.Fatalf("nonempty replicationMerkleSnapshot() error = %v", err)
+	}
+	trie.mu.RLock()
+	tableCapacity := len(trie.replicationMerkle.table.keys)
+	tableCount := trie.replicationMerkle.table.count
+	trie.mu.RUnlock()
+	if tableCapacity != replicationMerkleInitialTableCapacity || tableCount != 1 {
+		t.Fatalf("one-key Merkle table capacity/count = %d/%d, want %d/1", tableCapacity, tableCount, replicationMerkleInitialTableCapacity)
+	}
+}
+
 func TestReplicationMerkleDefersAndCoalescesMutationsUntilSnapshot(t *testing.T) {
 	trie := newTestTrie(t)
 	trie.UpsertString("session:1", "one")

@@ -443,12 +443,16 @@ func compactReplicationMerkleIndex(source *replicationMerkleIndex) *replicationM
 			capacity = 1 << bits.Len(uint(minimum-1))
 		}
 	}
-	next := &replicationMerkleIndex{
-		table: replicationMerkleTable{
+	table := replicationMerkleTable{}
+	if source.table.count > 0 {
+		table = replicationMerkleTable{
 			keys:   make([]uint64, capacity),
 			values: make([]uint64, capacity),
 			used:   make([]uint8, capacity),
-		},
+		}
+	}
+	next := &replicationMerkleIndex{
+		table:  table,
 		leaves: source.leaves,
 		count:  source.count,
 		valid:  true,

@@ -261,7 +261,7 @@ type replicationMerklePendingKey struct {
 }
 
 func newReplicationMerkleIndex() *replicationMerkleIndex {
-	return &replicationMerkleIndex{table: newReplicationMerkleTable(), valid: true}
+	return &replicationMerkleIndex{valid: true}
 }
 
 func (index *replicationMerkleIndex) set(keyHash uint64, contribution uint64) {

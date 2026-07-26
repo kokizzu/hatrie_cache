@@ -129,6 +129,11 @@ trie, densely reindex in-memory typed pools, and shrink Merkle and metadata
 backing. Disk-spill indexes remain stable so file ownership cannot alias.
 Periodic compaction is available but remains off by default because the rebuild
 briefly takes the cache-wide write lock.
+The incremental replication index keeps its fixed Merkle leaves ready but
+allocates its open-addressing table on the first indexed key. The
+[lazy empty Merkle table](BENCHMARK.md#lazy-empty-merkle-table-backing) halves
+empty-index retention and removes three allocations without changing the
+nonempty table layout, lookup path, wire format, or persistence format.
 Map, slice, set, and priority queue APIs deep-copy nested JSON-style map/slice
 values at storage and read boundaries so callers cannot mutate cached state
 through shared nested references.

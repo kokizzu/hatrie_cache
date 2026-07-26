@@ -291,6 +291,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Merkle equal-state preflight](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 18.272 ms; 560,720 heap B | Merkle: 0.993 ms; 233,744 heap B | 18.40x faster, 2.40x lower heap | First activation builds a 29.60 B/key index |
 | Current pass | [Merkle 1%-changed repair](#hierarchical-merkle-anti-entropy), 10k x 1 KiB | Digest: 55.401 ms; 240,086 wire B | Merkle: 25.443 ms; 132,820 wire B | 2.18x faster, 1.81x smaller wire | Active write tracking is 1.88x slower |
 | Current pass | [Deferred Merkle maintenance](#hierarchical-merkle-anti-entropy), 100k writes plus root | Immediate update: 45.523 ms; 323,840 heap B | Coalesced/rebuild: 25.807 ms; 1,006,632 heap B | 1.76x faster cycle; active writes 2.04x faster | Root after broad churn is 6.00x slower; cycle heap is 3.11x higher |
+| Current pass | [Lazy empty Merkle table backing](#lazy-empty-merkle-table-backing), empty index allocation | Eager: 6,497 ns; 35,840 heap B; 4 allocs; 33,792 retained B | Lazy: 3,122 ns; 18,432 heap B; 1 alloc; 16,384 retained B | 2.08x faster, 1.94x lower heap, 4x fewer allocations, 2.06x lower retention | First 10k-key build has identical heap/allocations and paired CPU within 1.3%; nonempty layout and lookup are unchanged |
 | Final architecture | [Sequential gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 14,914 ns/command | 3.96x faster, 6.73x lower heap | Request/response remains sequential |
 | Final architecture | [Pipelined gRPC stream](#persistent-grpc-command-stream), 10k commands | Unary: 59,040 ns/command | 3,118 ns/command | 18.94x faster, 7.67x lower heap, 6.57x fewer allocations | Requires concurrent sender/receiver with ordered response pairing |
 | Current pass | [Native gRPC batch stream](#persistent-grpc-command-stream), 10k commands, batch 16 | Pipelined: 2,638 ns/command; 41.00 wire B/command | Native batch: 1,161 ns/command; 37.04 wire B/command | 2.27x faster, 1.62x lower heap, 2.77x fewer allocations, 1.11x smaller wire, 16x fewer messages | Batching can add queueing latency; client chooses envelope size |
@@ -2868,6 +2869,9 @@ retain the compatible sorted-digest implementation.
 ```sh
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIncremental -benchtime=1x -count=5 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIndexBuild -benchtime=1x -count=5 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleEmptyIndexAllocation -benchtime=100000x -count=10 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleEmptyIndexActivation -benchtime=10000x -count=10 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIndexInitializationPaired -benchtime=5000x -count=5 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleTableOperations -benchtime=200ms -count=10 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleWriteTracking -benchtime=100000x -count=5 -benchmem'
 make bench-merkle-maintenance BENCHTIME=1x COUNT=7
@@ -2915,6 +2919,38 @@ string-keyed map variant slowed the 16,384-key candidate cycle from 29.294 ms
 to 33.070 ms without reducing measured heap, so the hash-keyed map was retained.
 Pending updates survive memory compaction, and snapshots flush them while
 holding the same trie lock used by mutations.
+
+<a id="lazy-empty-merkle-table-backing"></a>
+#### Lazy Empty Merkle Table Backing
+
+An activated empty Merkle index needs its fixed 1,024 leaves for root
+compatibility but has no hash-to-digest records. It previously allocated the
+three 1,024-slot hash, digest, and occupancy arrays immediately. A test was
+added first requiring an empty snapshot and subsequent memory compaction to
+retain no table capacity; it failed at 33,792 retained bytes instead of the
+16,384-byte leaf array.
+
+The index now leaves the table zero-valued until the first `set`. That method
+already initialized a zero-valued table, so the first-key path reuses existing
+code and every nonempty probe, resize, lookup, and delete remains byte-for-byte
+the same. Empty memory compaction preserves the zero-capacity table, while the
+one-key correctness control allocates the same 1,024 slots and indexes the key.
+
+| Empty Merkle index | Eager table | Lazy table | Improvement |
+| --- | ---: | ---: | ---: |
+| Index allocation median | 6,497 ns | 3,122 ns | 2.08x faster |
+| Cumulative heap | 35,840 B | 18,432 B | 1.94x lower |
+| Allocations | 4 | 1 | 4x fewer allocations |
+| Retained backing | 33,792 B | 16,384 B | 2.06x lower |
+| Complete empty-trie activation | 156.591 us | 156.788 us | CPU-neutral within 0.13% |
+| Complete activation heap/allocations | 54,320 B / 37 | 36,912 B / 34 | 1.47x lower heap; 3 fewer allocations |
+
+Heap-resident eager and lazy 10,000-key index controls both use 558,083
+cumulative bytes, 16 allocations, and 29.49 retained B/key. A 5,000-iteration
+alternating paired run measured 333.530 versus 337.890 us, within 1.3%; the
+bounded GC-disabled control measured lazy initialization 1.02x faster. The
+earlier end-to-end process drift therefore was not attributed as a regression.
+There is no wire, persistence, retained nonempty memory, or lookup change.
 
 <a id="merkle-table-occupancy-sentinel-rollback"></a>
 #### Merkle Table Occupancy Sentinel Rollback
