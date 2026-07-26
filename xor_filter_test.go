@@ -5,8 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
+	"unsafe"
+)
+
+var (
+	benchmarkXorFilterFingerprintsSink []uint8
+	benchmarkXorFilterSnapshotSink     xorFilterSnapshot
+	benchmarkXorFilterAttemptSink      int
 )
 
 func TestXorFilterPlainJSONStringFastPathMatchesGeneric(t *testing.T) {
@@ -66,6 +74,88 @@ func TestXorFilterPlainJSONStringFastPathMatchesGeneric(t *testing.T) {
 		if gotHit != wantHit || gotQueryable != wantQueryable {
 			t.Fatalf("containsJSONString(%q) = %v/%v, want %v/%v", value, gotHit, gotQueryable, wantHit, wantQueryable)
 		}
+	}
+}
+
+func TestXorFilterBuildMatchesFirstSuccessfulFingerprintAttempt(t *testing.T) {
+	filter, err := newXorFilterData(64)
+	if err != nil {
+		t.Fatalf("newXorFilterData() error = %v", err)
+	}
+	keys := make([]string, 0, 64)
+	for item := 0; item < 64; item++ {
+		value := fmt.Sprintf("value-%d", item)
+		if added, err := filter.addJSONString(value); err != nil || !added {
+			t.Fatalf("addJSONString(%q) = %v/%v, want true/nil", value, added, err)
+		}
+		keys = append(keys, xorFilterJSONStringKey(value))
+	}
+	sort.Strings(keys)
+
+	var (
+		wantFingerprints []uint8
+		wantBlockLength  uint32
+		wantSeed         uint64
+		wantAttempt      = -1
+	)
+	for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
+		seed := xorFilterSeed(len(keys), attempt)
+		fingerprints, blockLength, ok := buildXorFilterFingerprintsSliceQueueControl(keys, seed)
+		if !ok {
+			if fingerprints != nil {
+				t.Fatalf("attempt %d returned failed non-nil fingerprints", attempt)
+			}
+			continue
+		}
+		wantFingerprints = fingerprints
+		wantBlockLength = blockLength
+		wantSeed = seed
+		wantAttempt = attempt
+		break
+	}
+	if wantAttempt < 0 {
+		t.Fatal("reference fingerprint attempts did not find a valid build")
+	}
+	if err := filter.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if filter.seed != wantSeed || filter.blockLength != wantBlockLength || !reflect.DeepEqual(filter.fingerprints, wantFingerprints) {
+		t.Fatalf("Build() state = seed %d block %d fingerprints %v, want attempt %d seed %d block %d fingerprints %v", filter.seed, filter.blockLength, filter.fingerprints, wantAttempt, wantSeed, wantBlockLength, wantFingerprints)
+	}
+}
+
+func TestXorFilterBuildRetriesWithoutChangingFingerprintResult(t *testing.T) {
+	filter, err := newXorFilterData(3)
+	if err != nil {
+		t.Fatalf("newXorFilterData() error = %v", err)
+	}
+	keys := make([]string, 0, 3)
+	for item := 0; item < 3; item++ {
+		value := fmt.Sprintf("retry-45-value-%d", item)
+		if added, err := filter.addJSONString(value); err != nil || !added {
+			t.Fatalf("addJSONString(%q) = %v/%v, want true/nil", value, added, err)
+		}
+		keys = append(keys, xorFilterJSONStringKey(value))
+	}
+	sort.Strings(keys)
+	if fingerprints, _, ok := buildXorFilterFingerprintsSliceQueueControl(keys, xorFilterSeed(len(keys), 0)); ok || fingerprints != nil {
+		t.Fatalf("attempt 0 = %v/%v, want failed nil fingerprints", ok, fingerprints)
+	}
+	wantFingerprints, wantBlockLength, ok := buildXorFilterFingerprintsSliceQueueControl(keys, xorFilterSeed(len(keys), 1))
+	if !ok {
+		t.Fatal("attempt 1 failed, want deterministic successful retry")
+	}
+	if err := filter.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if filter.seed != xorFilterSeed(len(keys), 1) || filter.blockLength != wantBlockLength || !reflect.DeepEqual(filter.fingerprints, wantFingerprints) {
+		t.Fatalf("Build() state = seed %d block %d fingerprints %v, want retry seed %d block %d fingerprints %v", filter.seed, filter.blockLength, filter.fingerprints, xorFilterSeed(len(keys), 1), wantBlockLength, wantFingerprints)
+	}
+}
+
+func TestXorFilterBuildSlotFitsQueueLinkInExistingPadding(t *testing.T) {
+	if got := unsafe.Sizeof(xorFilterBuildSlot{}); got != 16 {
+		t.Fatalf("sizeof(xorFilterBuildSlot) = %d, want 16", got)
 	}
 }
 
@@ -377,6 +467,193 @@ func htUpsertXorFilterForTest(expectedItems uint64) error {
 	ht := CreateHatTrie()
 	defer ht.Destroy()
 	return ht.UpsertXorFilter("bad", expectedItems)
+}
+
+func BenchmarkXorFilterLifecyclePhases64(b *testing.B) {
+	values := make([]string, 64)
+	keys := make([]string, 64)
+	for item := range values {
+		values[item] = fmt.Sprintf("value-%d", item)
+		keys[item] = xorFilterJSONStringKey(values[item])
+	}
+	sort.Strings(keys)
+
+	b.Run("PlainStringStage", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			filter := xorFilterData{}
+			for _, value := range values {
+				if _, err := filter.addJSONString(value); err != nil {
+					b.Fatal(err)
+				}
+			}
+			benchmarkXorFilterAttemptSink = len(filter.staged)
+		}
+	})
+
+	b.Run("FingerprintBuild", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
+				fingerprints, _, ok := buildXorFilterFingerprints(keys, xorFilterSeed(len(keys), attempt))
+				if !ok {
+					continue
+				}
+				benchmarkXorFilterFingerprintsSink = fingerprints
+				benchmarkXorFilterAttemptSink = attempt
+				break
+			}
+		}
+	})
+
+	filter := xorFilterData{}
+	for _, value := range values {
+		if _, err := filter.addJSONString(value); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.Run("PendingSnapshot", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			benchmarkXorFilterSnapshotSink = filter.Snapshot()
+		}
+	})
+}
+
+func BenchmarkXorFilterFingerprintBuild(b *testing.B) {
+	for _, fixture := range []struct {
+		name  string
+		items int
+		salt  int
+	}{
+		{name: "Retry3", items: 3, salt: 45},
+		{name: "Items64", items: 64},
+		{name: "Items4096", items: 4096},
+		{name: "Items65536", items: 65536},
+	} {
+		b.Run(fixture.name, func(b *testing.B) {
+			keys := make([]string, fixture.items)
+			for item := range keys {
+				keys[item] = xorFilterJSONStringKey(fmt.Sprintf("retry-%d-value-%d", fixture.salt, item))
+			}
+			sort.Strings(keys)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
+					fingerprints, _, ok := buildXorFilterFingerprints(keys, xorFilterSeed(len(keys), attempt))
+					if !ok {
+						continue
+					}
+					benchmarkXorFilterFingerprintsSink = fingerprints
+					benchmarkXorFilterAttemptSink = attempt
+					break
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkXorFilterQueueLayout(b *testing.B) {
+	for _, fixture := range []struct {
+		name  string
+		items int
+		salt  int
+	}{
+		{name: "Retry3", items: 3, salt: 45},
+		{name: "Items64", items: 64},
+		{name: "Items4096", items: 4096},
+		{name: "Items65536", items: 65536},
+	} {
+		keys := make([]string, fixture.items)
+		for item := range keys {
+			keys[item] = xorFilterJSONStringKey(fmt.Sprintf("retry-%d-value-%d", fixture.salt, item))
+		}
+		sort.Strings(keys)
+		for _, layout := range []struct {
+			name  string
+			build func([]string, uint64) ([]uint8, uint32, bool)
+		}{
+			{name: "SliceQueueControl", build: buildXorFilterFingerprintsSliceQueueControl},
+			{name: "LinkedQueue", build: buildXorFilterFingerprints},
+		} {
+			b.Run(fixture.name+"/"+layout.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
+						fingerprints, _, ok := layout.build(keys, xorFilterSeed(len(keys), attempt))
+						if !ok {
+							continue
+						}
+						benchmarkXorFilterFingerprintsSink = fingerprints
+						benchmarkXorFilterAttemptSink = attempt
+						break
+					}
+				}
+			})
+		}
+	}
+}
+
+func buildXorFilterFingerprintsSliceQueueControl(keys []string, seed uint64) ([]uint8, uint32, bool) {
+	blockLength := xorFilterBlockLength(uint64(len(keys)))
+	if blockLength == 0 {
+		return nil, 0, true
+	}
+	size := int(blockLength) * 3
+	slots := make([]xorFilterBuildSlot, size)
+	for _, key := range keys {
+		hash := xorFilterHashString(key, seed)
+		for _, index := range xorFilterIndexes(hash, blockLength) {
+			slots[index].count++
+			slots[index].xor ^= hash
+		}
+	}
+
+	queue := make([]uint32, 0, size)
+	for index, slot := range slots {
+		if slot.count == 1 {
+			queue = append(queue, uint32(index))
+		}
+	}
+
+	order := make([]xorFilterPeel, 0, len(keys))
+	for head := 0; head < len(queue); head++ {
+		index := queue[head]
+		slot := slots[index]
+		if slot.count != 1 {
+			continue
+		}
+		hash := slot.xor
+		order = append(order, xorFilterPeel{hash: hash, index: index})
+		for _, other := range xorFilterIndexes(hash, blockLength) {
+			if slots[other].count == 0 {
+				continue
+			}
+			slots[other].count--
+			slots[other].xor ^= hash
+			if slots[other].count == 1 {
+				queue = append(queue, other)
+			}
+		}
+	}
+	if len(order) != len(keys) {
+		return nil, blockLength, false
+	}
+
+	fingerprints := make([]uint8, size)
+	for pos := len(order) - 1; pos >= 0; pos-- {
+		item := order[pos]
+		fingerprint := xorFilterFingerprint(item.hash)
+		for _, index := range xorFilterIndexes(item.hash, blockLength) {
+			if index == item.index {
+				continue
+			}
+			fingerprint ^= fingerprints[index]
+		}
+		fingerprints[item.index] = fingerprint
+	}
+	return fingerprints, blockLength, true
 }
 
 func xorFilterMissingValue(t *testing.T, filter xorFilterData) string {

@@ -62,6 +62,7 @@ type xorFilterData struct {
 type xorFilterBuildSlot struct {
 	xor   uint64
 	count uint32
+	next  uint32
 }
 
 type xorFilterPeel struct {
@@ -446,16 +447,28 @@ func buildXorFilterFingerprints(keys []string, seed uint64) ([]uint8, uint32, bo
 		}
 	}
 
-	queue := make([]uint32, 0, size)
+	var queueHead, queueTail uint32
+	queueCount := 0
 	for index, slot := range slots {
 		if slot.count == 1 {
-			queue = append(queue, uint32(index))
+			queued := uint32(index)
+			if queueCount == 0 {
+				queueHead = queued
+			} else {
+				slots[queueTail].next = queued
+			}
+			queueTail = queued
+			queueCount++
 		}
 	}
 
 	order := make([]xorFilterPeel, 0, len(keys))
-	for head := 0; head < len(queue); head++ {
-		index := queue[head]
+	for queueCount > 0 {
+		index := queueHead
+		queueCount--
+		if queueCount > 0 {
+			queueHead = slots[index].next
+		}
 		slot := slots[index]
 		if slot.count != 1 {
 			continue
@@ -469,7 +482,13 @@ func buildXorFilterFingerprints(keys []string, seed uint64) ([]uint8, uint32, bo
 			slots[other].count--
 			slots[other].xor ^= hash
 			if slots[other].count == 1 {
-				queue = append(queue, other)
+				if queueCount == 0 {
+					queueHead = other
+				} else {
+					slots[queueTail].next = other
+				}
+				queueTail = other
+				queueCount++
 			}
 		}
 	}

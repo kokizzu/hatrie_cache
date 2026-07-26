@@ -212,6 +212,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct generic priority-queue GET](#compact-priority-queue-items), empty/one/16/100 string items | Generic materialization: 207.1/422.4/2,863/23,449 ns | Shared-lock direct JSON: 159.3/268.3/2,386/17,977 ns | 1.30x/1.57x/1.20x/1.30x faster; up to 2.11x lower heap and 54x fewer allocations | Other value types retain the prior GET branch; a 100-item mixed queue is 1.37x faster with 1.56x lower heap and 28x fewer allocations |
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
+| Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
@@ -306,6 +307,7 @@ tree.
 | Priority-queue interface marker | Reached the desired 48-byte item layout | Generic dispatch slowed from 1.534 to 1.961 ns | Replaced by length dispatch; see [compact priority-queue items](#compact-priority-queue-items) |
 | Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
+| Fully linked XOR peel order | Halved normal-build allocations and cumulative heap | Cache-random reverse traversal made the 4,096/65,536-item builders 1.03x/1.05x slower | Replaced by linking only the queue while retaining contiguous peel order; see [linked XOR-filter build queue](#linked-xor-filter-build-queue) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
@@ -3194,6 +3196,46 @@ item, exactly as before. The optimization removes 2,048 cumulative bytes and
 128 allocations from the 64-item lifecycle without adding fields, background
 work, configuration, or retained state. Plain-string filter contents and built
 fingerprints remain byte-identical to the generic path.
+
+<a id="linked-xor-filter-build-queue"></a>
+### Linked XOR-Filter Build Queue
+
+Fingerprint construction previously allocated a `uint32` queue sized for all
+three hash blocks in addition to the slot, peel-order, and final fingerprint
+arrays. Each 16-byte build slot already contained four alignment-padding bytes.
+Those bytes now hold the next queued slot index, removing the queue allocation
+without increasing the slot, filter, or storage representation. The peel-order
+slice remains contiguous for cache-local reverse assignment.
+
+Tests were added before the implementation. A legacy slice-queue builder is
+kept in test code as an independent oracle for the first successful seed,
+failed-attempt handling, exact block length, and byte-identical fingerprints.
+The slot-size assertion fixes the build slot at 16 bytes. The same-binary
+benchmark ran each layout for 500 ms to one second, seven to ten times on one
+CPU; rows below are medians.
+
+```sh
+make run CMD='go test . -run="TestXorFilterBuild(MatchesFirstSuccessfulFingerprintAttempt|RetriesWithoutChangingFingerprintResult|SlotFitsQueueLinkInExistingPadding)" -count=1 -v'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterQueueLayout -benchmem -benchtime=500ms -count=10 -cpu=1'
+```
+
+| Fingerprint build | Slice queue | Slot-linked queue | Improvement |
+| --- | ---: | ---: | ---: |
+| Three items, one failed seed | 873.4 ns; 1,744 B; 7 allocs | 733.4 ns; 1,424 B; 5 allocs | 1.19x faster; 1.22x lower heap; 1.40x fewer allocs |
+| 64 items | 4,084 ns; 3,680 B; 4 allocs | 3,944 ns; 3,200 B; 3 allocs | 1.04x faster; 1.15x lower heap; 1.33x fewer allocs |
+| 4,096 items | 0.339 ms; 173,312 B; 4 allocs | 0.324 ms; 152,832 B; 3 allocs | 1.05x faster; 1.13x lower heap; 1.33x fewer allocs |
+| 65,536 items | 6.474 ms; 2,752,520 B; 4 allocs | 6.198 ms; 2,424,840 B; 3 allocs | 1.04x faster; 1.14x lower heap; 1.33x fewer allocs |
+
+The complete 64-item scalar command lifecycle drops from the preceding 242
+allocations and about 20,689 B to 241 allocations and about 20,073 B. Retained
+fingerprints, false-positive behavior, seed selection, snapshots, journal,
+storage, replication, and wire bytes are unchanged.
+
+An initial variant also linked the reverse peel order through the slots. It
+reduced a successful build to two allocations and roughly half the cumulative
+heap, but random slot traversal made 4,096/65,536-item builds 1.03x/1.05x
+slower. That variant was removed and is indexed as rejected; it adds no runtime
+cost.
 
 The reservoir sample add path now has a plain-string fast path that hashes the
 JSON string representation directly and only boxes retained values. The focused
