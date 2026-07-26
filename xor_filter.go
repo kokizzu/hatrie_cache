@@ -18,6 +18,7 @@ const (
 	xorFilterFingerprintBits      uint8   = 8
 	xorFilterMaxBuildAttempts     int     = 128
 	xorFilterSeedBase             uint64  = 0x9e3779b97f4a7c15
+	xorFilterInlineBuildHashes            = 64
 )
 
 // XorFilterInfo reports the shape and compactness of a static XOR filter.
@@ -278,11 +279,7 @@ func (filter *xorFilterData) Build() error {
 	if uint64(len(filter.staged)) > maxXorFilterItems {
 		return errors.New("hatriecache: xor filter staged item count is too large")
 	}
-	keys := make([]string, 0, len(filter.staged))
-	for key := range filter.staged {
-		keys = append(keys, key)
-	}
-	if len(keys) == 0 {
+	if len(filter.staged) == 0 {
 		filter.built = true
 		filter.items = 0
 		filter.seed = 0
@@ -291,14 +288,34 @@ func (filter *xorFilterData) Build() error {
 		filter.staged = nil
 		return nil
 	}
+	if len(filter.staged) <= xorFilterInlineBuildHashes {
+		var inline [xorFilterInlineBuildHashes]uint64
+		baseHashes := inline[:len(filter.staged)]
+		index := 0
+		for key := range filter.staged {
+			baseHashes[index] = bloomFilterFNV64a([]byte(key))
+			index++
+		}
+		return filter.buildFromBaseHashes(baseHashes)
+	}
+	baseHashes := make([]uint64, len(filter.staged))
+	index := 0
+	for key := range filter.staged {
+		baseHashes[index] = bloomFilterFNV64a([]byte(key))
+		index++
+	}
+	return filter.buildFromBaseHashes(baseHashes)
+}
+
+func (filter *xorFilterData) buildFromBaseHashes(baseHashes []uint64) error {
 	for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
-		seed := xorFilterSeed(len(keys), attempt)
-		fingerprints, blockLength, ok := buildXorFilterFingerprints(keys, seed)
+		seed := xorFilterSeed(len(baseHashes), attempt)
+		fingerprints, blockLength, ok := buildXorFilterFingerprintsFromBaseHashes(baseHashes, seed)
 		if !ok {
 			continue
 		}
 		filter.built = true
-		filter.items = uint64(len(keys))
+		filter.items = uint64(len(baseHashes))
 		filter.seed = seed
 		filter.blockLength = blockLength
 		filter.fingerprints = fingerprints
@@ -445,7 +462,26 @@ func buildXorFilterFingerprints(keys []string, seed uint64) ([]uint8, uint32, bo
 			slots[index].xor ^= hash
 		}
 	}
+	return peelXorFilterBuildSlots(slots, len(keys), blockLength)
+}
 
+func buildXorFilterFingerprintsFromBaseHashes(baseHashes []uint64, seed uint64) ([]uint8, uint32, bool) {
+	blockLength := xorFilterBlockLength(uint64(len(baseHashes)))
+	if blockLength == 0 {
+		return nil, 0, true
+	}
+	slots := make([]xorFilterBuildSlot, int(blockLength)*3)
+	for _, baseHash := range baseHashes {
+		hash := xorFilterSeededHash(baseHash, seed)
+		for _, index := range xorFilterIndexes(hash, blockLength) {
+			slots[index].count++
+			slots[index].xor ^= hash
+		}
+	}
+	return peelXorFilterBuildSlots(slots, len(baseHashes), blockLength)
+}
+
+func peelXorFilterBuildSlots(slots []xorFilterBuildSlot, items int, blockLength uint32) ([]uint8, uint32, bool) {
 	var queueHead, queueTail uint32
 	queueCount := 0
 	for index, slot := range slots {
@@ -461,7 +497,7 @@ func buildXorFilterFingerprints(keys []string, seed uint64) ([]uint8, uint32, bo
 		}
 	}
 
-	order := make([]xorFilterPeel, 0, len(keys))
+	order := make([]xorFilterPeel, 0, items)
 	for queueCount > 0 {
 		index := queueHead
 		queueCount--
@@ -491,11 +527,11 @@ func buildXorFilterFingerprints(keys []string, seed uint64) ([]uint8, uint32, bo
 			}
 		}
 	}
-	if len(order) != len(keys) {
+	if len(order) != items {
 		return nil, blockLength, false
 	}
 
-	fingerprints := make([]uint8, size)
+	fingerprints := make([]uint8, len(slots))
 	for pos := len(order) - 1; pos >= 0; pos-- {
 		item := order[pos]
 		fingerprint := xorFilterFingerprint(item.hash)
@@ -527,8 +563,11 @@ func xorFilterBlockLength(items uint64) uint32 {
 }
 
 func xorFilterHashString(key string, seed uint64) uint64 {
-	hash := bloomFilterFNV64a([]byte(key))
-	hash = splitmix64(hash ^ seed)
+	return xorFilterSeededHash(bloomFilterFNV64a([]byte(key)), seed)
+}
+
+func xorFilterSeededHash(baseHash uint64, seed uint64) uint64 {
+	hash := splitmix64(baseHash ^ seed)
 	if hash == 0 {
 		return xorFilterSeedBase
 	}
@@ -536,12 +575,7 @@ func xorFilterHashString(key string, seed uint64) uint64 {
 }
 
 func xorFilterHashJSONString(value string, seed uint64) uint64 {
-	hash := bloomFilterFNV64aJSONString(value)
-	hash = splitmix64(hash ^ seed)
-	if hash == 0 {
-		return xorFilterSeedBase
-	}
-	return hash
+	return xorFilterSeededHash(bloomFilterFNV64aJSONString(value), seed)
 }
 
 func xorFilterIndexes(hash uint64, blockLength uint32) [3]uint32 {

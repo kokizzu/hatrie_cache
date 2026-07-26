@@ -169,6 +169,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Compact XOR-filter headers](#compact-xor-filter-headers)",
 		"[Linked XOR-filter build queue](#linked-xor-filter-build-queue)",
 		"[Order-independent XOR-filter build](#order-independent-xor-filter-build)",
+		"[Compact XOR-filter build hash index](#compact-xor-filter-build-hash-index)",
 		"[Inline sparse-bitset containers](#inline-sparse-bitset-containers)",
 		"[Compact sparse-bitset headers](#compact-sparse-bitset-headers)",
 		"[Compact Roaring-container headers](#compact-roaring-container-headers)",
@@ -256,6 +257,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Priority-queue structured fallback scan",
 		"Radix-node tag compaction",
 		"Fully linked XOR peel order",
+		"Direct staged-map XOR build",
 		"Marker-only plain XOR staging",
 		"Inline sparse bitsets with generic search",
 		"Inline Roaring-container values",
@@ -288,6 +290,22 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 	} {
 		if !strings.Contains(index, token) {
 			t.Fatalf("BENCHMARK.md rejected optimization index missing token %q", token)
+		}
+	}
+}
+
+func TestREADMEDocumentsXorFilterBuildHashIndex(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"[XOR build hash index](BENCHMARK.md#compact-xor-filter-build-hash-index)",
+		"seed-independent 8-byte hashes",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md missing XOR build hash-index token %q", token)
 		}
 	}
 }

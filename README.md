@@ -58,7 +58,10 @@ fingerprints or formats; header measurements are in
 order-independent builder also skips an
 unnecessary staged-key sort, making measured 64-65,536-item builds
 1.67x-2.08x faster with unchanged heap and allocations; measurements are in
-[BENCHMARK.md](BENCHMARK.md#order-independent-xor-filter-build).
+[BENCHMARK.md](BENCHMARK.md#order-independent-xor-filter-build). Build retries
+now reuse seed-independent 8-byte hashes instead of retaining 16-byte string
+headers and rehashing every key. The [XOR build hash index](BENCHMARK.md#compact-xor-filter-build-hash-index)
+cuts transient build heap by 1.18x-1.36x without changing fingerprints.
 Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
 exact uint32 sets with fast membership, remove, count, and sorted iteration.
 Their fixed 1,024-word dense backing uses a compact 48-byte container header,

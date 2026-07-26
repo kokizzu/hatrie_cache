@@ -180,6 +180,28 @@ func TestXorFilterFingerprintBuildIsOrderIndependent(t *testing.T) {
 	t.Fatal("ordered and reversed builds did not find a successful seed")
 }
 
+func TestXorFilterBuildDoesNotCopyStagedKeys(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts include race detector instrumentation")
+	}
+	staged := make(map[string]interface{}, 64)
+	for item := 0; item < 64; item++ {
+		key := xorFilterJSONStringKey(fmt.Sprintf("direct-build-%d", item))
+		staged[key] = item
+	}
+	var filter xorFilterData
+	allocs := testing.AllocsPerRun(100, func() {
+		filter = xorFilterData{staged: staged, items: uint64(len(staged))}
+		if err := filter.Build(); err != nil {
+			panic(err)
+		}
+		benchmarkXorFilterFingerprintsSink = filter.fingerprints
+	})
+	if allocs != 3 {
+		t.Fatalf("Build() allocations = %.0f, want 3 builder arrays", allocs)
+	}
+}
+
 func TestXorFilterBuildSlotFitsQueueLinkInExistingPadding(t *testing.T) {
 	if got := unsafe.Sizeof(xorFilterBuildSlot{}); got != 16 {
 		t.Fatalf("sizeof(xorFilterBuildSlot) = %d, want 16", got)
@@ -579,6 +601,127 @@ func BenchmarkXorFilterBuildKeyOrderAlternating(b *testing.B) {
 	}
 }
 
+func BenchmarkXorFilterStagedMapBuild(b *testing.B) {
+	for _, items := range []int{64, 4096, 65536} {
+		staged := make(map[string]interface{}, items)
+		for item := 0; item < items; item++ {
+			key := xorFilterJSONStringKey(fmt.Sprintf("direct-build-%d", item))
+			staged[key] = item
+		}
+		b.Run(strconv.Itoa(items), func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				filter := xorFilterData{staged: staged, items: uint64(len(staged))}
+				if err := filter.Build(); err != nil {
+					b.Fatal(err)
+				}
+				benchmarkXorFilterFingerprintsSink = filter.fingerprints
+			}
+		})
+	}
+}
+
+func BenchmarkXorFilterHashedStagedBuildAlternating(b *testing.B) {
+	fixtures := []struct {
+		name   string
+		staged map[string]interface{}
+		builds int
+	}{
+		{
+			name: "Retry3",
+			staged: map[string]interface{}{
+				xorFilterJSONStringKey("retry-45-value-0"): 0,
+				xorFilterJSONStringKey("retry-45-value-1"): 1,
+				xorFilterJSONStringKey("retry-45-value-2"): 2,
+			},
+			builds: 4096,
+		},
+	}
+	for _, items := range []int{64, 4096, 65536} {
+		staged := make(map[string]interface{}, items)
+		for item := 0; item < items; item++ {
+			key := xorFilterJSONStringKey(fmt.Sprintf("direct-build-%d", item))
+			staged[key] = item
+		}
+		builds := 4096
+		if items >= 4096 {
+			builds = 64
+		}
+		if items >= 65536 {
+			builds = 4
+		}
+		fixtures = append(fixtures, struct {
+			name   string
+			staged map[string]interface{}
+			builds int
+		}{name: strconv.Itoa(items), staged: staged, builds: builds})
+	}
+
+	for _, fixture := range fixtures {
+		b.Run(fixture.name, func(b *testing.B) {
+			var candidateDuration, controlDuration time.Duration
+			for iteration := 0; iteration < b.N; iteration++ {
+				candidateFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					for build := 0; build < fixture.builds; build++ {
+						var fingerprints []uint8
+						var attempt int
+						if candidateFirst == (pass == 0) {
+							fingerprints, attempt = benchmarkBuildXorFilterHashedFromStaged(fixture.staged)
+						} else {
+							fingerprints, attempt = benchmarkBuildXorFilterFromStaged(fixture.staged, true)
+						}
+						if fingerprints == nil {
+							b.Fatal("fingerprint build failed")
+						}
+						benchmarkXorFilterFingerprintsSink = fingerprints
+						benchmarkXorFilterAttemptSink = attempt
+					}
+					duration := time.Since(started)
+					if candidateFirst == (pass == 0) {
+						candidateDuration += duration
+					} else {
+						controlDuration += duration
+					}
+				}
+			}
+			builds := float64(b.N * fixture.builds)
+			b.ReportMetric(float64(candidateDuration.Nanoseconds())/builds, "candidate-ns/build")
+			b.ReportMetric(float64(controlDuration.Nanoseconds())/builds, "control-ns/build")
+		})
+	}
+}
+
+func BenchmarkXorFilterHashedStagedBuildAllocations(b *testing.B) {
+	for _, items := range []int{64, 4096, 65536} {
+		staged := make(map[string]interface{}, items)
+		for item := 0; item < items; item++ {
+			key := xorFilterJSONStringKey(fmt.Sprintf("direct-build-%d", item))
+			staged[key] = item
+		}
+		for _, implementation := range []struct {
+			name string
+			run  func() ([]uint8, int)
+		}{
+			{name: "Control", run: func() ([]uint8, int) { return benchmarkBuildXorFilterFromStaged(staged, true) }},
+			{name: "Candidate", run: func() ([]uint8, int) { return benchmarkBuildXorFilterHashedFromStaged(staged) }},
+		} {
+			b.Run(strconv.Itoa(items)+"/"+implementation.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					fingerprints, attempt := implementation.run()
+					if fingerprints == nil {
+						b.Fatal("fingerprint build failed")
+					}
+					benchmarkXorFilterFingerprintsSink = fingerprints
+					benchmarkXorFilterAttemptSink = attempt
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkXorFilterBuildKeyOrderAllocations(b *testing.B) {
 	for _, items := range []int{64, 4096, 65536} {
 		staged := make(map[string]interface{}, items)
@@ -618,6 +761,36 @@ func benchmarkBuildXorFilterFromStaged(staged map[string]interface{}, unsorted b
 	}
 	for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
 		fingerprints, _, ok := buildXorFilterFingerprints(keys, xorFilterSeed(len(keys), attempt))
+		if ok {
+			return fingerprints, attempt
+		}
+	}
+	return nil, -1
+}
+
+func benchmarkBuildXorFilterHashedFromStaged(staged map[string]interface{}) ([]uint8, int) {
+	if len(staged) <= xorFilterInlineBuildHashes {
+		var inline [xorFilterInlineBuildHashes]uint64
+		baseHashes := inline[:len(staged)]
+		index := 0
+		for key := range staged {
+			baseHashes[index] = bloomFilterFNV64a([]byte(key))
+			index++
+		}
+		return benchmarkBuildXorFilterFromBaseHashes(baseHashes)
+	}
+	baseHashes := make([]uint64, len(staged))
+	index := 0
+	for key := range staged {
+		baseHashes[index] = bloomFilterFNV64a([]byte(key))
+		index++
+	}
+	return benchmarkBuildXorFilterFromBaseHashes(baseHashes)
+}
+
+func benchmarkBuildXorFilterFromBaseHashes(baseHashes []uint64) ([]uint8, int) {
+	for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
+		fingerprints, _, ok := buildXorFilterFingerprintsFromBaseHashes(baseHashes, xorFilterSeed(len(baseHashes), attempt))
 		if ok {
 			return fingerprints, attempt
 		}

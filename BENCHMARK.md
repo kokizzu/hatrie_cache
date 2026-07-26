@@ -223,6 +223,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
+| Current pass | [Compact XOR-filter build hash index](#compact-xor-filter-build-hash-index), 64/4,096/65,536 staged items | String headers: 6,281/371,676/7,918,608 ns; 4,352/218,368/3,473,422 B | Base hashes: 5,675/367,143/7,820,713 ns; 3,200/185,600/2,949,129 B | 1.11x/1.01x/1.01x faster; 1.36x/1.18x/1.18x lower heap; one small-build allocation removed | Uses at most 512 transient stack bytes through 64 items; no retained state or format change; a forced retry is CPU-neutral within 0.4% |
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
 | Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
@@ -326,6 +327,7 @@ tree.
 | Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
 | Fully linked XOR peel order | Halved normal-build allocations and cumulative heap | Cache-random reverse traversal made the 4,096/65,536-item builders 1.03x/1.05x slower | Replaced by linking only the queue while retaining contiguous peel order; see [linked XOR-filter build queue](#linked-xor-filter-build-queue) |
+| Direct staged-map XOR build | Removed the key-index allocation and made the separate 65,536-item build 1.35x faster with 1.43x lower heap | Same-binary 64-item and forced-retry builds were 1.06x and about 1.20x slower | Replaced by a compact seed-independent hash index; see [compact XOR-filter build hash index](#compact-xor-filter-build-hash-index) |
 | Marker-only plain XOR staging | Removed 64 allocations and 1,024 cumulative bytes while making 64-item staging 1.17x faster | Pending snapshot creation shifted those costs later: 2 to 66 allocations, 3,456 to 4,480 bytes, and 1.23x slower | Reverted; staged values remain pre-boxed so snapshots stay cheap; see [XOR staging marker](#xor-staging-marker-rollback) |
 | Inline sparse bitsets with generic search | Removed singleton/pair backing allocations and reduced retained objects | The added representation branch made 4,096-value array lookups 1.03x slower | Replaced by an inlineable typed binary search; promoted lookups are now 1.01x faster; see [inline sparse-bitset containers](#inline-sparse-bitset-containers) |
 | Inline Roaring-container values | Made 50,000 singleton containers 1.38x faster to build and removed 50,000 backing allocations | Promoted 16-value lookups were 1.04x slower; large-array and bitmap controls were also about 1.01x-1.02x slower | Reverted; the original slice representation remains; see [inline Roaring-container rollback](#inline-roaring-container-rollback) |
@@ -3804,6 +3806,48 @@ The allocation controls measured 4,352 B/4 allocations at 64 items and
 were about 3.47 MB and four allocations. Staged values, pending snapshots,
 fingerprints, false-positive behavior, storage, journals, replication, and wire
 formats are unchanged.
+
+<a id="compact-xor-filter-build-hash-index"></a>
+#### Compact XOR-Filter Build Hash Index
+
+After sorting was removed, `Build` still copied every staged key into a
+temporary `[]string`. Each 16-byte string header remained live through all seed
+attempts, and each retry rescanned every key byte to recompute the same FNV base
+hash before mixing in a different seed. Build now computes each seed-independent
+base hash once. Up to 64 hashes use a fixed 512-byte stack array; larger builds
+use one 8-byte-per-key slice. Every seed still passes through the exact prior
+mix, slot aggregation, peel order, and fingerprint assignment.
+
+The allocation test was added before production changes and failed at four
+allocations for a successful 64-item build, then passed at the three required
+builder arrays. Existing first-success, forced-retry, reversed-order, snapshot,
+lookup, and scalar-fast-path tests preserve the exact seed, block length, and
+fingerprint bytes. Focused tests pass for 100 repetitions and under the race
+detector.
+
+```sh
+make run CMD='go test . -run="TestXorFilterBuild(DoesNotCopyStagedKeys|MatchesFirstSuccessfulFingerprintAttempt|RetriesWithoutChangingFingerprintResult|AndContains)" -count=100'
+make run CMD='go test . -run=TestXorFilterBuildAndContains -race -count=20'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterHashedStagedBuildAlternating -benchtime=5x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterHashedStagedBuildAllocations -benchmem -benchtime=20x -count=3 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/XorBuild64Items -benchmem -benchtime=1000x -count=7 -cpu=1'
+```
+
+| Staged build, paired median | String-header control | Base-hash index | Improvement |
+| ---: | ---: | ---: | ---: |
+| 64 items | 6,281 ns; 4,352 B; 4 allocs | 5,675 ns; 3,200 B; 3 allocs | 1.11x faster; 1.36x lower heap; 1.33x fewer allocs |
+| 4,096 items | 371,676 ns; 218,368 B; 4 allocs | 367,143 ns; 185,600 B; 4 allocs | 1.01x faster; 1.18x lower heap |
+| 65,536 items | 7,918,608 ns; 3,473,422 B; 4 allocs | 7,820,713 ns; 2,949,129 B; 4 allocs | 1.01x faster; 1.18x lower heap |
+| Three items, forced failed first seed | 981.9 ns | 985.8 ns | Neutral within 0.4%; the hash index is reused by the retry |
+
+The complete create, 64 scalar adds, and build lifecycle now uses 18,905 B and
+240 allocations, down from the immediately preceding 20,057 B and 241
+allocations. A direct-map prototype removed the index entirely and looked
+faster in separate large runs, but paired controls found it 1.06x slower at 64
+items and about 1.20x slower on the forced retry. It was removed and is listed
+in the rejected index. The retained design changes no filter header, staged or
+built state, selected seed, fingerprint bytes, false-positive behavior,
+snapshot, journal, replication, storage, or wire format.
 
 <a id="xor-staging-marker-rollback"></a>
 #### XOR Staging Marker Rollback
