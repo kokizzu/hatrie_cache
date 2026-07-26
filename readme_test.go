@@ -153,6 +153,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Direct priority-queue command reads](#compact-priority-queue-items)",
 		"[Direct generic priority-queue GET](#compact-priority-queue-items)",
 		"[Map field encoding outside cache lock](#packed-small-map-storage)",
+		"[Direct promoted-slice JSON](#packed-small-slice-storage)",
 		"[Radix prefix scan](#collection-allocation-follow-up)",
 		"[Reservoir sample add](#collection-allocation-follow-up)",
 		"[Direct generic reservoir GET](#reservoir-sample-read-materialization)",

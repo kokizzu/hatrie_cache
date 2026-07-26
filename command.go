@@ -3736,7 +3736,7 @@ func (ht *HatTrie) commandValueLocked(hval HatValue) (string, error) {
 		return ht.maps.jsonString(hval.Index)
 	case DATAVALUE_TYPE_SLICE:
 		if hval.Index >= 0 {
-			return jsonEncodedString(ht.slices.array[hval.Index].Slice())
+			return ht.slices.array[hval.Index].jsonString()
 		}
 		return ht.slices.packedJSONString(hval.Index)
 	case DATAVALUE_TYPE_SET:

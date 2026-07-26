@@ -223,6 +223,7 @@ func TestPackedSliceCommandGetMatchesCanonicalJSON(t *testing.T) {
 		{name: "two scalar", values: Slice{true, int64(-9223372036854775807)}},
 		{name: "two nested", values: Slice{Map{"<key>": "value"}, Slice{1, "two"}}},
 		{name: "promoted", values: Slice{"alpha", "beta", "gamma"}},
+		{name: "promoted mixed", values: Slice{"<alpha>\n", nil, Map{"nested": Slice{true, int64(-7)}}, uint64(^uint64(0))}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ht := newTestTrie(t)
@@ -238,6 +239,61 @@ func TestPackedSliceCommandGetMatchesCanonicalJSON(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("wrapped promoted", func(t *testing.T) {
+		ht := newTestTrie(t)
+		ht.UpsertSlice("slice", Slice{"alpha", "beta", "gamma", "delta"})
+		for range 2 {
+			if _, ok, err := ht.ShiftSliceChecked("slice"); err != nil || !ok {
+				t.Fatalf("ShiftSliceChecked() = %v/%v, want value/nil", ok, err)
+			}
+		}
+		if err := ht.PushSliceChecked("slice", "epsilon", "zeta"); err != nil {
+			t.Fatalf("PushSliceChecked() error = %v", err)
+		}
+		want := `["gamma","delta","epsilon","zeta"]`
+		got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "slice"})
+		if !got.OK || got.Value != want {
+			t.Fatalf("GET wrapped response = %#v, want value %q", got, want)
+		}
+	})
+
+	t.Run("promoted emptied", func(t *testing.T) {
+		ht := newTestTrie(t)
+		ht.UpsertSlice("slice", Slice{"alpha", "beta", "gamma"})
+		for range 3 {
+			if _, ok, err := ht.PopSliceChecked("slice"); err != nil || !ok {
+				t.Fatalf("PopSliceChecked() = %v/%v, want value/nil", ok, err)
+			}
+		}
+		got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "slice"})
+		if !got.OK || got.Value != "[]" {
+			t.Fatalf("GET emptied response = %#v, want []", got)
+		}
+	})
+
+	t.Run("promoted marshal error", func(t *testing.T) {
+		ht := newTestTrie(t)
+		value := &mutableSliceJSONValue{}
+		if err := ht.UpsertSliceChecked("slice", Slice{"alpha", "beta", value}); err != nil {
+			t.Fatalf("UpsertSliceChecked() error = %v", err)
+		}
+		value.fail = true
+		if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "slice"}); got.OK {
+			t.Fatalf("GET response = %#v, want marshal error", got)
+		}
+	})
+}
+
+type mutableSliceJSONValue struct {
+	fail bool
+}
+
+func (value *mutableSliceJSONValue) MarshalJSON() ([]byte, error) {
+	if value.fail {
+		return nil, fmt.Errorf("forced slice JSON error")
+	}
+	return []byte(`{"ok":true}`), nil
 }
 
 func BenchmarkSliceStorageLayout100k(b *testing.B) {
@@ -511,7 +567,9 @@ func BenchmarkPackedSliceCommandGet(b *testing.B) {
 		{name: "OneString", values: Slice{"alpha"}},
 		{name: "TwoStrings", values: Slice{"alpha", "beta"}},
 		{name: "TwoNested", values: Slice{Map{"key": "value"}, Slice{1, "two"}}},
-		{name: "Promoted", values: Slice{"alpha", "beta", "gamma"}},
+		{name: "Promoted3Strings", values: Slice{"alpha", "beta", "gamma"}},
+		{name: "Promoted16Strings", values: benchmarkSliceStrings(16)},
+		{name: "PromotedMixed", values: Slice{"<alpha>\n", nil, Map{"nested": Slice{true, int64(-7)}}, uint64(^uint64(0))}},
 	} {
 		b.Run(benchmark.name, func(b *testing.B) {
 			ht := CreateHatTrie()
@@ -525,4 +583,12 @@ func BenchmarkPackedSliceCommandGet(b *testing.B) {
 			}
 		})
 	}
+}
+
+func benchmarkSliceStrings(count int) Slice {
+	values := make(Slice, count)
+	for index := range values {
+		values[index] = fmt.Sprintf("value:%02d", index)
+	}
+	return values
 }

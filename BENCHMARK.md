@@ -228,7 +228,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Packed small string-set storage](#packed-small-string-set-storage), 100k one/two-member sets | Slice/map entries: 94.36/142.4 retained B/set; 2.000/3.000 retained objects/set | Packed pools: 18.87/36.98 retained B/set; 0.00026/0.00026 retained objects/set | 5.00x/3.85x lower retained heap; about 7,692x/11,538x fewer retained objects; 1.39x/1.42x faster writes | Adds 160 fixed bytes/cache; promotes at the third member with unchanged generic retention and a 1.21x faster measured transition |
 | Current pass | [Direct packed string-set JSON](#packed-small-string-set-storage), empty/one/two-member command GET | Temporary set: 245.3/338.3/379.1 ns; 64/88/112 B; 3/4/4 allocs | Direct JSON: 76.35/134.9/153.1 ns; 0/16/16 B; 0/1/1 allocs | 3.21x/2.51x/2.48x faster; up to 7x lower heap; up to 4x fewer allocations | Packed plain strings only; promoted sets retain the generic encoder with unchanged wire, storage, ordering, and ownership |
 | Current pass | [Packed small-slice storage](#packed-small-slice-storage), 100k zero/one/two-value slices | Deques: 46.23/62.23/78.23 retained B/slice; one retained object for nonempty slices | Packed pools: 27.39/27.39/46.23 retained B/slice; 0.00025 retained objects/slice | 1.69x/2.27x/1.69x lower retained heap; about 4,000x fewer retained objects for nonempty slices; tiny push retention improves up to 4.02x | Adds 160 fixed bytes/cache; promotion retains the generic deque, measures neutral, and halves transition allocations |
-| Current pass | [Direct packed-slice JSON](#packed-small-slice-storage), nil/empty/one/two-value command GET | Temporary slice: 222.8/253.2/345.5/376.1 ns | Direct JSON: 80.56/80.05/141.7/150.9 ns | 2.77x/3.16x/2.44x/2.49x faster; nil/empty become allocation-free; nested values improve 1.55x | Negative packed indexes only; promoted deques retain the exact prior command branch, wire bytes, storage, ordering, and ownership |
+| Current pass | [Direct packed-slice JSON](#packed-small-slice-storage), nil/empty/one/two-value command GET | Temporary slice: 222.8/253.2/345.5/376.1 ns | Direct JSON: 80.56/80.05/141.7/150.9 ns | 2.77x/3.16x/2.44x/2.49x faster; nil/empty become allocation-free; nested values improve 1.55x | Negative packed indexes only; promoted-deque follow-up is reported separately; wire bytes, storage, ordering, and ownership are unchanged |
+| Current pass | [Direct promoted-slice JSON](#packed-small-slice-storage), 3/16 strings and four mixed values | Temporary clone: 513.4/1,153/1,250 ns; 136/504/688 B; 4/4/9 allocs | Ring-order writer: 167.4/491.9/750.4 ns; 24/192/264 B; 1/1/4 allocs | 1.67x-3.07x faster; 2.61x-5.67x lower heap; 2.25x-4.00x fewer allocs | No measured tradeoff; public cloning, lock scope, writes, wire, storage, and persistent formats are unchanged |
 | Reverted | [Packed-string compaction](#string-compaction-allocation-rollback), 100k varied 33-512 B strings | Packed copy: 30.07 MB cumulative heap; 121,848 KiB peak RSS | Dense remap: 2.81 MB cumulative heap; 93,516 KiB peak RSS | 10.71x lower cumulative heap, 1.30x lower peak RSS | Retains 3.79% more heap and forced GC is 1.81x slower; packing was not worth its immediate memory spike |
 | Reverted | [Online generational compaction](#online-generational-compaction-rollback), 100k insert/90k delete | Exclusive rebuild: 10.258 ms reader pause; 0.91 MB heap | Staged generation: 1.091 ms reader pause; 6.18 MB heap | 9.40x shorter pause; 13.17x lower retained backing; 5.36x lower retained heap | Rolled back: total compaction was 1.54x slower, transient heap 6.80x higher, and allocations 2.67x higher |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
@@ -1513,8 +1514,8 @@ make run CMD='go test . -run=NONE -bench=BenchmarkSlicePackedCommandChurn -bench
 Packed command GET also previously expanded the internal slots into a temporary
 public `Slice` before JSON encoding. The direct path preserves `nil` as `null`,
 non-nil empty as `[]`, and writes one/two arbitrary values through the same
-scalar and nested-value encoder used by packed maps. Promoted positive indexes
-retain the exact prior deque branch.
+scalar and nested-value encoder used by packed maps. In that initial pass,
+promoted positive indexes retained the prior deque branch.
 
 Parity tests cover nil and non-nil empty containers, nil elements, escaped and
 HTML-sensitive strings, invalid UTF-8, Unicode separators, booleans, signed
@@ -1533,6 +1534,25 @@ make run CMD='go test . -run none -bench BenchmarkPackedSliceCommandGet -benchme
 | Two strings | 376.1 ns; 112 B; 4 allocs | 150.9 ns; 16 B; 1 alloc | 2.49x faster; 7.00x lower heap; 4x fewer allocs |
 | Two nested values | 1,110 ns; 608 B; 9 allocs | 716.1 ns; 200 B; 5 allocs | 1.55x faster; 3.04x lower heap; 1.80x fewer allocs |
 | Promoted deque control | 459.3 ns; 136 B; 4 allocs | 428.5 ns; 136 B; 4 allocs | CPU 1.07x faster within noise; memory unchanged |
+
+A later follow-up removed the promoted-deque control's temporary public clone.
+The command path now estimates response capacity with checked arithmetic and
+writes values directly in logical ring order through the same scalar/nested
+encoder. It preserves wrapped order, `null` versus `[]`, marshal errors,
+escaping, and invalid-UTF-8 replacement. Tests were added before production
+changes for mixed nested values, wrapped storage, an emptied promoted deque,
+and a stored marshaler that starts failing after insertion. Baseline and final
+rows below are medians of seven 500 ms runs on one logical CPU:
+
+```sh
+make run CMD='go test . -run=NONE -bench="^BenchmarkPackedSliceCommandGet/Promoted" -benchmem -benchtime=500ms -count=7 -cpu=1'
+```
+
+| Promoted command GET | Temporary public clone | Direct ring-order JSON | Improvement |
+| --- | ---: | ---: | ---: |
+| Three strings | 513.4 ns; 136 B; 4 allocs | 167.4 ns; 24 B; 1 alloc | 3.07x faster; 5.67x lower heap; 4.00x fewer allocs |
+| Sixteen strings | 1,153 ns; 504 B; 4 allocs | 491.9 ns; 192 B; 1 alloc | 2.34x faster; 2.63x lower heap; 4.00x fewer allocs |
+| Four mixed/nested values | 1,250 ns; 688 B; 9 allocs | 750.4 ns; 264 B; 4 allocs | 1.67x faster; 2.61x lower heap; 2.25x fewer allocs |
 
 Command response bytes, read telemetry, public clone ownership, retained
 storage, snapshots, journals, replication payloads, and wire schema are

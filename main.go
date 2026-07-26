@@ -140,6 +140,63 @@ func (dq *deque) Slice() Slice {
 	return out
 }
 
+func (dq *deque) jsonString() (string, error) {
+	if dq == nil || dq.values == nil {
+		return "null", nil
+	}
+	if dq.size == 0 {
+		return "[]", nil
+	}
+
+	estimated := 2
+	index := dq.head
+	for offset := 0; offset < dq.size; offset++ {
+		if offset > 0 {
+			var ok bool
+			estimated, ok = checkedIntSum(estimated, 1)
+			if !ok {
+				return "", errors.New("hatriecache: slice JSON is too large")
+			}
+		}
+		valueBytes := 8
+		if text, ok := dq.values[index].(string); ok {
+			var valid bool
+			valueBytes, valid = checkedIntSum(len(text), 2)
+			if !valid {
+				return "", errors.New("hatriecache: slice JSON is too large")
+			}
+		}
+		var ok bool
+		estimated, ok = checkedIntSum(estimated, valueBytes)
+		if !ok {
+			return "", errors.New("hatriecache: slice JSON is too large")
+		}
+		index++
+		if index == len(dq.values) {
+			index = 0
+		}
+	}
+
+	var builder strings.Builder
+	builder.Grow(estimated)
+	builder.WriteByte('[')
+	index = dq.head
+	for offset := 0; offset < dq.size; offset++ {
+		if offset > 0 {
+			builder.WriteByte(',')
+		}
+		if err := writeSmallMapJSONValue(&builder, dq.values[index]); err != nil {
+			return "", err
+		}
+		index++
+		if index == len(dq.values) {
+			index = 0
+		}
+	}
+	builder.WriteByte(']')
+	return builder.String(), nil
+}
+
 func (dq *deque) Push(values ...interface{}) {
 	_ = dq.PushChecked(values...)
 }
