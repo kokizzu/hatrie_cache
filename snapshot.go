@@ -182,6 +182,11 @@ func (tracker *snapshotMutationTracker) drain() []string {
 		return nil
 	}
 	tracker.mu.Lock()
+	if len(tracker.dirty) == 0 {
+		tracker.dirty = nil
+		tracker.mu.Unlock()
+		return nil
+	}
 	keys := make([]string, 0, len(tracker.dirty))
 	for key := range tracker.dirty {
 		keys = append(keys, key)
@@ -198,7 +203,11 @@ func (tracker *snapshotMutationTracker) take() map[string]struct{} {
 	}
 	tracker.mu.Lock()
 	dirty := tracker.dirty
-	tracker.dirty = make(map[string]struct{})
+	if len(dirty) == 0 {
+		tracker.dirty = nil
+	} else {
+		tracker.dirty = make(map[string]struct{})
+	}
 	tracker.mu.Unlock()
 	return dirty
 }
@@ -1090,7 +1099,7 @@ type snapshotCaptureReplacement struct {
 }
 
 func (ht *HatTrie) captureSnapshotMutationReplacements(tracker *snapshotMutationTracker, currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) (map[string]snapshotCaptureReplacement, uint64, error) {
-	replacements := make(map[string]snapshotCaptureReplacement)
+	var replacements map[string]snapshotCaptureReplacement
 	for {
 		var sequence uint64
 		var releaseBarrier func()
@@ -1121,6 +1130,9 @@ func (ht *HatTrie) captureSnapshotMutationReplacements(tracker *snapshotMutation
 		ht.mu.Unlock()
 		if releaseBarrier != nil {
 			releaseBarrier()
+		}
+		if replacements == nil {
+			replacements = make(map[string]snapshotCaptureReplacement, len(keys))
 		}
 
 		for first := 0; first < len(keys); first += snapshotCaptureScanPageEntries {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -148,6 +149,154 @@ func TestSnapshotCaptureUsesBoundedPages(t *testing.T) {
 	for idx, page := range capture.pages {
 		if cap(page) > snapshotCapturePageEntries {
 			t.Fatalf("capture page %d capacity = %d, want <= %d", idx, cap(page), snapshotCapturePageEntries)
+		}
+	}
+}
+
+func TestSnapshotMutationTrackerReleasesEmptyAndRetainsWriterReadyMap(t *testing.T) {
+	tracker := &snapshotMutationTracker{dirty: make(map[string]struct{})}
+	if dirty := tracker.drain(); dirty != nil || tracker.dirty != nil {
+		t.Fatalf("empty drain = %#v with retained map %v, want nil/nil", dirty, tracker.dirty)
+	}
+
+	tracker.mark("key:b", "key:a", "key:b")
+	if got := tracker.drain(); !reflect.DeepEqual(got, []string{"key:a", "key:b"}) || tracker.dirty == nil || len(tracker.dirty) != 0 {
+		t.Fatalf("dirty drain = %#v with next map %v, want sorted keys and an empty writer-ready map", got, tracker.dirty)
+	}
+	if dirty := tracker.drain(); dirty != nil || tracker.dirty != nil {
+		t.Fatalf("drain after dirty cycle = %#v with retained map %v, want nil/nil", dirty, tracker.dirty)
+	}
+
+	tracker.mark("key:c")
+	dirty := tracker.take()
+	if _, ok := dirty["key:c"]; !ok || tracker.dirty == nil || len(tracker.dirty) != 0 {
+		t.Fatalf("dirty take = %#v with next map %v, want key:c and an empty writer-ready map", dirty, tracker.dirty)
+	}
+	tracker.mark("key:d")
+	if _, mutated := dirty["key:d"]; mutated {
+		t.Fatalf("taken dirty map changed after a later mark: %#v", dirty)
+	}
+}
+
+func TestSnapshotCaptureReleasesUnusedMutationMap(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("key", "value")
+	var observed *snapshotMutationTracker
+	ht.snapshotCapturePageHook = func(page int) {
+		if page != 1 {
+			return
+		}
+		observed = ht.snapshotMutations
+		if observed == nil {
+			t.Fatal("snapshot mutation tracker is nil during capture")
+		}
+	}
+	if _, err := ht.captureSnapshot(); err != nil {
+		t.Fatalf("captureSnapshot() error = %v", err)
+	}
+	if observed == nil {
+		t.Fatal("snapshot capture hook did not observe active tracker")
+	}
+	observed.mu.Lock()
+	defer observed.mu.Unlock()
+	if observed.dirty != nil {
+		t.Fatalf("completed snapshot retained unused mutation map %v, want nil", observed.dirty)
+	}
+}
+
+var benchmarkSnapshotCaptureSink snapshotCapture
+
+func BenchmarkSnapshotNoMutationTracking(b *testing.B) {
+	for _, entries := range []int{0, 1} {
+		b.Run(fmt.Sprintf("Entries%d", entries), func(b *testing.B) {
+			ht := CreateHatTrie()
+			b.Cleanup(ht.Destroy)
+			if entries != 0 {
+				ht.UpsertString("key", "value")
+			}
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				capture, err := ht.captureSnapshot()
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkSnapshotCaptureSink = capture
+			}
+		})
+	}
+}
+
+func BenchmarkSnapshotMutationTrackerFirstMark(b *testing.B) {
+	for _, eager := range []bool{true, false} {
+		name := "Lazy"
+		if eager {
+			name = "Eager"
+		}
+		b.Run(name, func(b *testing.B) {
+			trackers := make([]snapshotMutationTracker, b.N)
+			if eager {
+				for idx := range trackers {
+					trackers[idx].dirty = make(map[string]struct{})
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for idx := range trackers {
+				trackers[idx].mark("key")
+			}
+		})
+	}
+}
+
+var benchmarkSnapshotDirtySink []string
+var benchmarkSnapshotReplacementsSink map[string]snapshotCaptureReplacement
+
+func benchmarkLegacySnapshotMutationDrain(tracker *snapshotMutationTracker) []string {
+	tracker.mu.Lock()
+	keys := make([]string, 0, len(tracker.dirty))
+	for key := range tracker.dirty {
+		keys = append(keys, key)
+	}
+	tracker.dirty = make(map[string]struct{})
+	tracker.mu.Unlock()
+	sort.Strings(keys)
+	return keys
+}
+
+func BenchmarkSnapshotMutationTrackingCycle(b *testing.B) {
+	for _, mutations := range []int{0, 1, 64} {
+		keys := make([]string, mutations)
+		for idx := range keys {
+			keys[idx] = fmt.Sprintf("key:%03d", idx)
+		}
+		for _, legacy := range []bool{false, true} {
+			mode := "Final"
+			if legacy {
+				mode = "Legacy"
+			}
+			b.Run(fmt.Sprintf("Mutations%d/%s", mutations, mode), func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					tracker := &snapshotMutationTracker{dirty: make(map[string]struct{})}
+					tracker.mark(keys...)
+					var replacements map[string]snapshotCaptureReplacement
+					var dirty []string
+					if legacy {
+						replacements = make(map[string]snapshotCaptureReplacement)
+						dirty = benchmarkLegacySnapshotMutationDrain(tracker)
+					} else {
+						dirty = tracker.drain()
+						if len(dirty) != 0 {
+							replacements = make(map[string]snapshotCaptureReplacement, len(dirty))
+						}
+					}
+					for _, key := range dirty {
+						replacements[key] = snapshotCaptureReplacement{}
+					}
+					benchmarkSnapshotDirtySink = dirty
+					benchmarkSnapshotReplacementsSink = replacements
+				}
+			})
 		}
 	}
 }

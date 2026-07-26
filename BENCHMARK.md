@@ -288,6 +288,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Parallel partition restore](#parallel-partition-restore), 100k x 256 B, 16 partitions | Serial: snapshot 258.183 ms; Pebble 213.948 ms | Bounded parallel: snapshot 202.398 ms; Pebble 181.435 ms | 1.28x faster snapshot restore; 1.18x faster Pebble startup | Heap and allocations rise by at most 0.1%; local partitions must be enabled |
 | Current pass | [Atomic generation snapshot restore](#atomic-generation-snapshot-restore), 100k x 256 B | Two-pass live mutation: 385.364 ms; 217.69 MB heap; 901,188 allocs | One-pass staged swap: 234.900 ms; 108.82 MB heap; 500,117 allocs | 1.64x faster, 2.00x lower heap, 1.80x fewer allocs | Restore temporarily retains old and staged generations; measured cutover is 1.72 us |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
+| Current pass | [Selective snapshot mutation maps](#selective-snapshot-mutation-maps), no-mutation tracking cycle | Eager reset/replacements: 177.4 ns; 160 heap B; 4 allocs | Allocate only after mutation: 65.44 ns; 64 heap B; 2 allocs | 2.71x faster, 2.50x lower heap, 2x fewer allocations | Initial dirty map stays eager so first concurrent mutation retains prior latency; one-mutation CPU is neutral within 0.6% |
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
 | Current pass | [Single-pass expiration-index compaction](#single-pass-expiration-index-compaction), 10k expiring keys | Double map rebuild: 8.254 ms; 1,562,256 heap B; 10,095 allocs | Heap-authoritative rebuild: 6.120 ms; 1,125,320 heap B; 10,060 allocs | 1.35x faster, 1.39x lower heap, 35 fewer allocations | No measured tradeoff; `CompactMemory` policy, lock scope, TTL state, heap order, wire, and persistence are unchanged |
 | Current pass | [Linear expiration-index rebuild](#linear-expiration-index-rebuild), repeated 10k-TTL compaction | Heap `Push`: 6.033 ms; 1,125,278 heap B; 10,058 allocs | Clone plus direct positions: 5.964 ms; 1,125,278 heap B; 10,058 allocs | 1.01x faster with identical heap and allocations | No measured tradeoff; the right-sized heap, exact order, deadlines, index positions, and formats are unchanged |
@@ -372,6 +373,7 @@ tree.
 | Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Carried compact payload estimates | Isolated splitting improved 4.37x | Complete scan/serialize/split CPU was 0.36% slower with unchanged allocations | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Specialized compact payload estimator | Focused splitting improved 1.92x | End-to-end CPU was 0.50% slower without memory, request, or wire gain | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Fully lazy snapshot mutation map | Removed one more map from snapshots without concurrent writes | First concurrent mark was 1.32x slower, 208 to 256 B, and one to two timed allocations | Rejected; captures retain a writer-ready initial map and use [selective snapshot mutation maps](#selective-snapshot-mutation-maps) only after drain |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -2804,6 +2806,50 @@ point-in-time semantics are unchanged. Encoding inside each 256-key scan page
 accounts for the small pause increase. A single value larger than 1 MiB owns a
 dedicated page because its payload cannot be subdivided without changing the
 record format.
+
+<a id="selective-snapshot-mutation-maps"></a>
+#### Selective Snapshot Mutation Maps
+
+Snapshot, streamed snapshot, Pebble generation, and local-partition capture all
+install a mutation tracker while scanning. The tracker previously allocated an
+empty replacement map before knowing whether any write raced the scan and
+installed another empty dirty map when the final drain found no work. Captures
+now return nil directly on an empty drain and create the replacement map only
+after observing dirty keys. Nonempty drains retain the old writer-ready map
+replacement and lock sequence, while replacement maps are sized from the first
+dirty batch.
+
+The test-first lifecycle fixture proves an empty drain releases its map, a
+nonempty drain preserves sorted keys and installs an empty writer-ready map,
+`take` transfers ownership without aliasing later writes, and completed capture
+does not retain an unused map. Concurrent stream, paged, and local-partition
+mutation reconciliation tests pass ten times.
+
+```sh
+make run CMD='go test . -run="TestSnapshotMutationTrackerReleasesEmptyAndRetainsWriterReadyMap|TestSnapshotCaptureReleasesUnusedMutationMap|TestSnapshotStreamCaptureReconcilesConcurrentMutations|TestSnapshotCaptureReconcilesMutationsBetweenScanPages|TestLocalPartition.*Snapshot" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkSnapshotMutationTrackingCycle -benchmem -benchtime=100000x -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSnapshotNoMutationTracking -benchmem -benchtime=2000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSnapshotMutationTrackerFirstMark -benchmem -benchtime=100000x -count=10 -cpu=1'
+```
+
+| Tracking cycle, seven-run median | Eager reset/replacements | Selective final | Improvement |
+| --- | ---: | ---: | ---: |
+| Zero mutations | 177.4 ns; 160 B; 4 allocs | 65.44 ns; 64 B; 2 allocs | 2.71x faster; 2.50x lower heap; 2x fewer allocations |
+| One mutation | 594.6 ns; 912 B; 8 allocs | 598.1 ns; 912 B; 8 allocs | CPU neutral within 0.6%; heap and allocations identical |
+| 64 mutations | 24,402 ns; 35,600 B; 89 allocs | 20,533 ns; 32,192 B; 82 allocs | 1.19x faster; 1.11x lower heap; seven fewer allocations |
+
+An actual empty capture improved from 8.351 to 7.838 us (1.07x), 15,153 to
+15,057 heap B, and seven to five allocations. A one-entry capture also removes
+exactly 96 B and two allocations; its CPU samples are intentionally not used
+because the 1.29 MiB capture-page allocation makes that microbenchmark
+GC-sensitive.
+
+A fully lazy prototype also removed the initial dirty map, but moved its cost
+onto the first concurrent writer: first-mark median rose from 87.8 to 116.0 ns
+(1.32x slower), from 208 to 256 B, and from one to two timed allocations. That
+part was rolled back. The retained initial map means writer latency, snapshot
+semantics, lock boundaries, output, storage, wire bytes, and formats are
+unchanged.
 
 ### Delete-Churn Memory Compaction
 

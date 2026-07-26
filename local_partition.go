@@ -682,7 +682,7 @@ func clearLocalPartitionSnapshotTracker(set *localPartitionSet, tracker *snapsho
 }
 
 func (ht *HatTrie) captureLocalPartitionMutationReplacements(set *localPartitionSet, tracker *snapshotMutationTracker, currentStore *LevelDBStore, currentDB *leveldb.DB, barrier snapshotCaptureBarrier) (map[string]snapshotCaptureReplacement, uint64, error) {
-	replacements := make(map[string]snapshotCaptureReplacement)
+	var replacements map[string]snapshotCaptureReplacement
 	for {
 		var sequence uint64
 		var releaseBarrier func()
@@ -726,6 +726,9 @@ func (ht *HatTrie) captureLocalPartitionMutationReplacements(set *localPartition
 		keys := make([]string, 0, len(dirty))
 		for key := range dirty {
 			keys = append(keys, key)
+		}
+		if replacements == nil {
+			replacements = make(map[string]snapshotCaptureReplacement, len(keys))
 		}
 
 		for first := 0; first < len(keys); first += snapshotCaptureScanPageEntries {

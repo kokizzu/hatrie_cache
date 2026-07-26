@@ -469,6 +469,33 @@ func TestDocsDescribeDirectSingleTargetGRPCSyncDispatch(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeSelectiveSnapshotMutationMaps(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[selective maps](BENCHMARK.md#selective-snapshot-mutation-maps)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing selective snapshot mutation-map token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkSnapshotMutationTrackingCycle",
+		"2.71x faster",
+		"CPU neutral within 0.6%",
+		"1.11x lower heap",
+		"Fully lazy snapshot mutation map",
+		"1.32x slower",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing selective snapshot mutation-map token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeSinglePassExpirationIndexCompaction(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

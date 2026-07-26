@@ -1517,6 +1517,14 @@ the median maximum reader pause from 61.740 ms to 2.822 ms (21.88x) while total
 snapshot time and cumulative heap remained effectively flat. See
 [BENCHMARK.md](BENCHMARK.md#bounded-page-snapshot-capture).
 
+Snapshot mutation bookkeeping uses
+[selective maps](BENCHMARK.md#selective-snapshot-mutation-maps): captures that
+see no concurrent write avoid two empty maps and are 2.71x faster in the
+isolated tracking cycle, while the initial dirty map stays writer-ready. The
+one-mutation control is CPU-neutral within 0.6%, and 64 mutations are 1.19x
+faster with 1.11x lower heap; snapshot output and recovery behavior are
+unchanged.
+
 Set `JOURNAL_PATH` to replay an append-only command journal at startup and fsync
 mutating cache commands before applying them. When `SNAPSHOT_PATH` is also set,
 snapshots store the journal checkpoint. The server defaults to 64 MiB journal
