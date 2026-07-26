@@ -2115,6 +2115,10 @@ Example full-replica topology:
 
 The Go wrapper supports key expiration with `Expire`, `ExpireAt`, `Persist`,
 and `TTL`. Expired entries are removed lazily when the key is read or mutated.
+The default cache clock is process-shared and refreshed every 5 ms, so automatic
+wall-clock expiration can be delayed by at most one refresh interval; injected
+test clocks remain exact. Monotonic timers and operational deadlines continue
+to use the standard Go clock.
 `TTL` returns `NoTTL` for missing, expired, or persistent keys. Use
 `VacuumExpired` for immediate cleanup or `StartExpirationCleaner` for periodic
 background cleanup. Use `StartExpirationCleanerContext` when cleaner lifetime

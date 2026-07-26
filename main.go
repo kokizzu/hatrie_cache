@@ -30,6 +30,7 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	json "github.com/goccy/go-json"
+	"github.com/kpango/fastime"
 )
 
 // HatValue is the compact value stored in the underlying HAT-trie.
@@ -3578,7 +3579,7 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		keyStats:         map[string]*trackedKeyStats{},
 		keyStatsMode:     DefaultKeyStatsMode,
 		keyStatsCapacity: 0,
-		now:              time.Now,
+		now:              fastime.Now,
 	}
 	ht.stats.initialize()
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
