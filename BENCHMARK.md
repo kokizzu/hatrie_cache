@@ -307,6 +307,7 @@ tree.
 | Generic Top-K slice sorter | Removed one allocation and 24 transient bytes | Exact 16/100-item reads were 1.07x/1.12x slower and every generic row regressed | Reverted; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Generic Top-K structured fallback scan | Preserved the string-only direct encoder while extending exact generic `GET` | A 16-item structured read was 1.06x slower after scanning before unchanged materialization, with no heap or allocation gain | Replaced by one-pass mixed-value encoding; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
+| Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
 | Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
 | Naive repeated-read scalar routing | Tried to send repeated reads through the native selector | 16 reads regressed 2.58x; a scan-only guard remained 1.08x slower | Replaced by resolve-once response copying; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
 | Two-command native scalar routing | Lowered the initial native threshold | 629.5 ns versus 565.5 ns, or 1.11x slower | Removed; native routing starts at four commands; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
@@ -1621,6 +1622,29 @@ Telemetry updates use a separate short critical section and remain exact.
 
 The optimized median is from three one-iteration runs with the same 100,000-key
 and 100,000-operation fixture as the architectural baseline.
+
+A later candidate extended exact generic `GET` under the same shared lock to
+maps, slices, and sets. JSON bytes, heap, and serial allocation counts were
+unchanged, and parallel reads improved substantially, but complete serial
+commands consistently regressed:
+
+| Collection fixture | Exclusive serial | Shared serial | Serial result | Exclusive parallel | Shared parallel | Parallel gain |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Packed two-field map | 249.3 ns | 350.8 ns | 1.41x slower | 323.2 ns | 76.07 ns | 4.25x faster |
+| Three-field map | 691.3 ns | 791.7 ns | 1.15x slower | 798.5 ns | 155.8 ns | 5.13x faster |
+| Packed two-value slice | 510.1 ns | 642.4 ns | 1.26x slower | 588.2 ns | 124.4 ns | 4.73x faster |
+| 16-value slice | 961.4 ns | 1,096 ns | 1.14x slower | 1,048 ns | 259.3 ns | 4.04x faster |
+| Packed two-member set | 111.8 ns | 223.0 ns | 2.00x slower | 232.8 ns | 67.03 ns | 3.47x faster |
+| 16-member set | 1,806 ns | 1,910 ns | 1.06x slower | 2,067 ns | 453.3 ns | 4.56x faster |
+
+The packed-map serial result was repeated in isolated exact-first and
+generic-second runs: 350.8 versus 249.3 ns, confirming that combined benchmark
+ordering was not the cause. The shared lookup must validate read-only fallback
+conditions before it knows the stored type; avoiding that fixed work would
+require either weakening TTL/cold-reference correctness or changing the
+already optimized scalar path. The collection extension and its test-only
+benchmark were removed, leaving no runtime tradeoff. Their existing direct
+packed encoders remain in the ordinary exclusive command path.
 
 ### Striped Existing Counter Writes
 

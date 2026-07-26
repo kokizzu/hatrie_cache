@@ -219,6 +219,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Generic Top-K slice sorter",
 		"Generic Top-K structured fallback scan",
 		"Reservoir escaped-value exact sizing",
+		"Shared-lock generic collection GET",
 		"Top-K helper lookup",
 		"Naive repeated-read scalar routing",
 		"Two-command native scalar routing",
