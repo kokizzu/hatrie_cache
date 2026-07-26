@@ -478,11 +478,6 @@ func (ht *HatTrie) compactAuxiliaryMemoryLocked() {
 		ht.expires = nil
 		ht.expirations = nil
 	} else {
-		nextExpires := make(map[string]uint32, len(ht.expires))
-		for key, at := range ht.expires {
-			nextExpires[key] = at
-		}
-		ht.expires = nextExpires
 		ht.rebuildExpirationHeapLocked()
 	}
 	ht.compactKeyStatsLocked()

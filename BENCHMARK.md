@@ -287,6 +287,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Atomic generation snapshot restore](#atomic-generation-snapshot-restore), 100k x 256 B | Two-pass live mutation: 385.364 ms; 217.69 MB heap; 901,188 allocs | One-pass staged swap: 234.900 ms; 108.82 MB heap; 500,117 allocs | 1.64x faster, 2.00x lower heap, 1.80x fewer allocs | Restore temporarily retains old and staged generations; measured cutover is 1.72 us |
 | Current pass | [Compact streaming snapshot capture](#compact-streaming-snapshot-capture), 100k keys | 182.221 ms; 47.61 MB heap; 97,152 KiB RSS | 151.348 ms; 24.57 MB heap; 63,104 KiB RSS | 1.20x faster, 1.94x lower heap, 1.54x lower RSS | Median maximum read pause is 7.9% higher at 3.24 ms |
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
+| Current pass | [Single-pass expiration-index compaction](#single-pass-expiration-index-compaction), 10k expiring keys | Double map rebuild: 8.254 ms; 1,562,256 heap B; 10,095 allocs | Heap-authoritative rebuild: 6.120 ms; 1,125,320 heap B; 10,060 allocs | 1.35x faster, 1.39x lower heap, 35 fewer allocations | No measured tradeoff; `CompactMemory` policy, lock scope, TTL state, heap order, wire, and persistence are unchanged |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
@@ -2834,6 +2835,36 @@ are skipped. The peak during a rebuild temporarily includes both C tries,
 compaction remap arrays, and both generations of outer pool slices, so operators
 should schedule it with enough memory headroom and outside latency-sensitive
 windows.
+
+<a id="single-pass-expiration-index-compaction"></a>
+#### Single-Pass Expiration-Index Compaction
+
+The nonempty TTL compaction path previously copied every expiration index entry
+into a right-sized map, then called `rebuildExpirationHeapLocked`. That rebuild
+creates another right-sized map and derives every authoritative position while
+restoring heap order, so the first complete map and all of its insertions were
+discarded immediately.
+
+The existing heap/index consistency test was extended first to compact after
+100 deadline inserts, updates, and removals, then verify every map position and
+heap parent. A focused benchmark compacts a complete trie with 10,000 live
+string keys and reverse-ordered deadlines. Values are ten-run medians on the
+Ryzen 9 5950X host.
+
+```sh
+make run CMD='go test . -run=TestExpirationHeapIndexesStayConsistentAcrossUpdatesAndRemovals -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkCompactMemoryExpirationIndex10k -benchmem -benchtime=1x -count=10'
+```
+
+| Full 10k-TTL compaction | Redundant map copy | Single heap rebuild | Improvement |
+| --- | ---: | ---: | ---: |
+| Median time | 8,254,494 ns | 6,120,101 ns | 1.35x faster |
+| Cumulative heap | 1,562,256 B | 1,125,320 B | 1.39x lower; 436,936 B removed |
+| Allocations | 10,095 | 10,060 | 35 fewer allocations |
+
+The final path constructs the index once from the expiration heap. TTL values,
+deadline updates, removals, heap ordering, compaction locking, retained memory,
+wire bytes, snapshots, and persistent formats are unchanged.
 
 <a id="online-generational-compaction-rollback"></a>
 #### Online Generational Compaction Rollback

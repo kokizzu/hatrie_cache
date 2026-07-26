@@ -1108,6 +1108,10 @@ to all live strings. The measured 100k
 insert/90k delete fixture reclaimed 13.73x backing and 11.13x live heap at a
 8.80 ms one-time pause; see
 [BENCHMARK.md](BENCHMARK.md#delete-churn-memory-compaction).
+A [single-pass expiration-index rebuild](BENCHMARK.md#single-pass-expiration-index-compaction)
+also makes the measured 10,000-TTL compaction 1.35x faster with 1.39x lower
+cumulative heap by avoiding a map copy that the heap rebuild immediately
+replaced.
 
 Long-running daemon options can also live in a JSON config file. Config keys
 match flag names and may use hyphens or underscores; duration values use Go

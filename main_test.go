@@ -8047,6 +8047,9 @@ func TestExpirationHeapIndexesStayConsistentAcrossUpdatesAndRemovals(t *testing.
 			t.Fatalf("Persist(%q) = false", key)
 		}
 	}
+	if _, err := ht.CompactMemory(); err != nil {
+		t.Fatalf("CompactMemory() error = %v", err)
+	}
 
 	ht.mu.Lock()
 	defer ht.mu.Unlock()

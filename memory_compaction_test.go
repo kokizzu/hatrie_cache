@@ -10,6 +10,29 @@ import (
 	"unsafe"
 )
 
+func BenchmarkCompactMemoryExpirationIndex10k(b *testing.B) {
+	const keys = 10_000
+	trie := CreateHatTrie()
+	defer trie.Destroy()
+	now := time.Unix(1_700_000_000, 0)
+	trie.now = func() time.Time { return now }
+	for index := 0; index < keys; index++ {
+		key := fmt.Sprintf("ttl:%05d", index)
+		trie.UpsertString(key, "value")
+		if !trie.ExpireAt(key, now.Add(time.Duration(keys-index)*time.Second)) {
+			b.Fatalf("ExpireAt(%q) = false, want true", key)
+		}
+	}
+	b.ReportAllocs()
+	b.ReportMetric(keys, "ttl_keys")
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := trie.CompactMemory(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestCompactMemoryReusesLiveStringBacking(t *testing.T) {
 	trie := newTestTrie(t)
 	value := strings.Repeat("live-string", 128)
