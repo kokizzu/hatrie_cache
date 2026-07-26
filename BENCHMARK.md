@@ -224,6 +224,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Packed small-slice storage](#packed-small-slice-storage), 100k zero/one/two-value slices | Deques: 46.23/62.23/78.23 retained B/slice; one retained object for nonempty slices | Packed pools: 27.39/27.39/46.23 retained B/slice; 0.00025 retained objects/slice | 1.69x/2.27x/1.69x lower retained heap; about 4,000x fewer retained objects for nonempty slices; tiny push retention improves up to 4.02x | Adds 160 fixed bytes/cache; promotion retains the generic deque, measures neutral, and halves transition allocations |
 | Current pass | [Direct packed-slice JSON](#packed-small-slice-storage), nil/empty/one/two-value command GET | Temporary slice: 222.8/253.2/345.5/376.1 ns | Direct JSON: 80.56/80.05/141.7/150.9 ns | 2.77x/3.16x/2.44x/2.49x faster; nil/empty become allocation-free; nested values improve 1.55x | Negative packed indexes only; promoted deques retain the exact prior command branch, wire bytes, storage, ordering, and ownership |
 | Reverted | [Packed-string compaction](#string-compaction-allocation-rollback), 100k varied 33-512 B strings | Packed copy: 30.07 MB cumulative heap; 121,848 KiB peak RSS | Dense remap: 2.81 MB cumulative heap; 93,516 KiB peak RSS | 10.71x lower cumulative heap, 1.30x lower peak RSS | Retains 3.79% more heap and forced GC is 1.81x slower; packing was not worth its immediate memory spike |
+| Reverted | [Online generational compaction](#online-generational-compaction-rollback), 100k insert/90k delete | Exclusive rebuild: 10.258 ms reader pause; 0.91 MB heap | Staged generation: 1.091 ms reader pause; 6.18 MB heap | 9.40x shorter pause; 13.17x lower retained backing; 5.36x lower retained heap | Rolled back: total compaction was 1.54x slower, transient heap 6.80x higher, and allocations 2.67x higher |
 | Current pass | [Atomic cache-wide telemetry](#atomic-cache-wide-telemetry), 32 readers | 222.0 ns/read | 93.21 ns/read | 2.38x faster | Adds 64 fixed bytes/cache; detailed key telemetry retains its mutex |
 | Final architecture | [Concurrent scalar reads](#concurrent-scalar-read-fast-path), 32 CPUs | 1,528 ns/read | 632.4 ns/read | 2.42x faster | Expiration cleanup and LevelDB hydration still take the exclusive path |
 | Final architecture | [Striped existing-counter writes](#striped-existing-counter-writes), 2 writers | 362.8 ns/write | 209.7 ns/write | 1.73x faster | Opt-in; 64 stripes retain 1,536 B and semantic writes fall back |
@@ -275,6 +276,45 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Bounded lazy outbox restore](#binary-grouped-replication-outbox), 100k jobs | 466.884 ms; 100,000 resident jobs; 415.1 MB heap | 5.019 ms; 1,024 resident jobs; 3.52 MB heap | 93.03x faster, 97.66x fewer resident jobs, 118.0x lower heap | LevelDB pages are lazy; legacy whole-file JSON still loads its file snapshot |
 | Current pass | [Outbox group commit](#binary-grouped-replication-outbox), 32 writers | JSON sync-each: 50.289 ms; 32 syncs | Binary grouped: 3.542 ms; 1 sync | 14.20x faster, 32x fewer syncs | Cumulative heap is 1.49x higher |
 | Current pass | [Journal-backed outbox](#journal-backed-replication-outbox), 10k durable 4 KiB mutations | Full LevelDB jobs: 136.854 s; 20,993 heap B/op; 2 syncs/op | Journal references: 7.845 s; 26,094 heap B/op; 1 sync/op | 17.44x faster, 2x fewer syncs | Total encoded/disk bytes are effectively unchanged; cumulative heap is 1.24x higher |
+
+## Rejected Optimization Index
+
+This is the central inventory of every failed or reverted performance
+experiment recorded in this document and in optimization-only revert history.
+Ordinary tests that reject invalid input are not performance experiments. A
+candidate appears here even when a later, materially different design solved
+the same problem. Unless a row explicitly names the retained replacement, all candidate code was removed and therefore adds no runtime cost to the current
+tree.
+
+| Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
+| --- | --- | --- | --- |
+| Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
+| Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Known-valid-key GET helper | Intended to skip redundant key validation | 121.7 ns versus 120.1 ns for the checked path | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Temporary packed-map materialization | Reused the generic map JSON encoder | 1,499 ns, 488 B, and 5 allocations | Replaced by direct JSON at 511.4 ns, 24 B, and 1 allocation; see [packed small-map storage](#packed-small-map-storage) |
+| Boxed packed-set reads | Avoided retaining interface payloads in packed pools | Two-member reads were 1.31x slower with 2x heap and 3x allocations | Removed; packed pools retain the faster interface payload layout; see [packed small string-set storage](#packed-small-string-set-storage) |
+| Priority-queue interface marker | Reached the desired 48-byte item layout | Generic dispatch slowed from 1.534 to 1.961 ns | Replaced by length dispatch; see [compact priority-queue items](#compact-priority-queue-items) |
+| Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
+| HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
+| String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
+| Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
+| Generic Top-K slice sorter | Removed one allocation and 24 transient bytes | Exact 16/100-item reads were 1.07x/1.12x slower and every generic row regressed | Reverted; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
+| Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
+| Naive repeated-read scalar routing | Tried to send repeated reads through the native selector | 16 reads regressed 2.58x; a scan-only guard remained 1.08x slower | Replaced by resolve-once response copying; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
+| Two-command native scalar routing | Lowered the initial native threshold | 629.5 ns versus 565.5 ns, or 1.11x slower | Removed; native routing starts at four commands; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
+| 64 KiB WAL staging | Saved another 65,536 transient bytes over 128 KiB | It was 1.07x slower and required seven writes instead of four | Rejected; 128 KiB remains the measured balance; see [bounded WAL staging](#bounded-wal-staging-arena) |
+| Online generational compaction | Shortened maximum reader pause 9.40x and reduced retained backing/heap 13.17x/5.36x | Total compaction was 1.54x slower, transient heap 6.80x higher, and allocations 2.67x higher | Reverted in `c3085d2`; see [online generational compaction](#online-generational-compaction-rollback) |
+| Packed-string compaction | Reduced retained heap 3.79% and retained objects 800x | Cumulative allocation was 10.71x higher, peak RSS 1.30x higher, and forced GC 1.81x slower | Reverted in `0f4adc3`; see [string compaction allocation](#string-compaction-allocation-rollback) |
+| Replication constructor flag | Avoided deriving invariant scan mode after construction | Added one 704-byte allocation | Removed; mode uses an existing byte; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Mixed-page compact descriptors | Tried to keep mixed SET/delete repair pages in the compact layout | Added 17% transient heap | Replaced by selecting generic compatibility storage before descriptor allocation; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Ten-page replication aggregation | Reduced request count beyond the retained two-page cap | Could stage ten unusually large pages before splitting | Removed to preserve bounded memory; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Copying replication arena | Shared value storage but copied/reconstructed every key during protobuf sizing and writing | The paired 10k end-to-end median was about 1.09x slower | Replaced by direct immutable key references; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Direct native packed scan | Focused preparation improved 1.10x with 1.15x lower heap | End-to-end CPU improved only 1.02x, below the 5% gate for a new C ABI | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Single-pass legacy repair | Unordered transfer was 1.07x faster with 1.11x fewer allocations | Wire grew 1.15x; restoring deterministic order made CPU 1.075x slower | Both variants reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Carried compact payload estimates | Isolated splitting improved 4.37x | Complete scan/serialize/split CPU was 0.36% slower with unchanged allocations | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Specialized compact payload estimator | Focused splitting improved 1.92x | End-to-end CPU was 0.50% slower without memory, request, or wire gain | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -2451,6 +2491,37 @@ are skipped. The peak during a rebuild temporarily includes both C tries,
 compaction remap arrays, and both generations of outer pool slices, so operators
 should schedule it with enough memory headroom and outside latency-sensitive
 windows.
+
+<a id="online-generational-compaction-rollback"></a>
+#### Online Generational Compaction Rollback
+
+Commit `30bc334` tested a staged replacement generation to reduce the exclusive
+compactor's reader pause. It scanned under bounded 256-key page locks, rebuilt
+off-lock, replayed tracked mutations, and performed only the final swap under
+the write lock. Correctness tests covered concurrent mutation, TTL, telemetry,
+Merkle state, lazy disk references, snapshots, and failed staging. Commit
+`c3085d2` reverted the design after its complete-path resource costs failed the
+acceptance gate.
+
+The historical pause fixture compared baseline `0a7f582` and `30bc334` on the
+same 100,000 insert/90,000 delete workload with an active reader. Values are
+seven-run medians on the Ryzen 9 5950X host.
+
+| Compaction metric | Exclusive rebuild | Online generation | Result |
+| --- | ---: | ---: | ---: |
+| Maximum reader pause | 10,257,679 ns | 1,091,339 ns | 9.40x shorter |
+| Total compaction | 10,236,288 ns | 15,785,538 ns | 1.54x slower |
+| Cumulative heap | 909,472 B | 6,180,888 B | 6.80x higher |
+| Allocations | 10,030 | 26,753 | 2.67x higher |
+
+The matching retention fixture kept every tenth key and forced a Go
+collection. The staged candidate reduced retained backing from 2,372,824 B to
+180,224 B (13.17x) and retained Go heap from 2,384,040 B to 445,168 B (5.36x).
+Those steady-state savings did not offset the immediate rebuild cost: the full
+churn cycle was 8.7% slower, allocated 22.8% more cumulative heap, and allocated
+2.7% more objects. The rollback restored the exclusive compactor, so none of
+the staged generation, mutation replay, or dual-generation transient overhead
+remains. Periodic compaction remains off by default.
 
 ### Pipelined Live gRPC Replication
 

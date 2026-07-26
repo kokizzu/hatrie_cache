@@ -182,6 +182,57 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 	}
 }
 
+func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
+	data, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	doc := string(data)
+	start := strings.Index(doc, "## Rejected Optimization Index")
+	if start < 0 {
+		t.Fatal("BENCHMARK.md missing rejected optimization index")
+	}
+	end := strings.Index(doc[start:], "\n<a id=\"delta-only-startup-persistence\"")
+	if end < 0 {
+		t.Fatal("BENCHMARK.md rejected optimization index has no detail-section boundary")
+	}
+	index := doc[start : start+end]
+	for _, token := range []string{
+		"Online generational compaction",
+		"Packed-string compaction",
+		"Direct Unix telemetry clock",
+		"Exact scalar command dispatch",
+		"Cgo call annotations",
+		"Known-valid-key GET helper",
+		"Temporary packed-map materialization",
+		"Boxed packed-set reads",
+		"Priority-queue interface marker",
+		"Radix-node tag compaction",
+		"HyperLogLog side allocation",
+		"String-keyed Merkle pending set",
+		"Top-K one-item rewrite",
+		"Generic Top-K slice sorter",
+		"Top-K helper lookup",
+		"Naive repeated-read scalar routing",
+		"Two-command native scalar routing",
+		"64 KiB WAL staging",
+		"Replication constructor flag",
+		"Mixed-page compact descriptors",
+		"Ten-page replication aggregation",
+		"Copying replication arena",
+		"Direct native packed scan",
+		"Single-pass legacy repair",
+		"Exact protobuf batch coalescing",
+		"Carried compact payload estimates",
+		"Specialized compact payload estimator",
+		"all candidate code was removed",
+	} {
+		if !strings.Contains(index, token) {
+			t.Fatalf("BENCHMARK.md rejected optimization index missing token %q", token)
+		}
+	}
+}
+
 func TestREADMELinksShardingProposal(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
