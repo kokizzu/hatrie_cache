@@ -970,17 +970,31 @@ func validateSliceValues(value interface{}, values ...interface{}) error {
 	if !ok {
 		return errBatchSizeTooLarge
 	}
-	if flatJSONScalar(value) {
-		allScalars := true
-		for _, next := range values {
-			if !flatJSONScalar(next) {
-				allScalars = false
-				break
-			}
+	nonScalar := value
+	nonScalarCount := 0
+	if !flatJSONScalar(value) {
+		nonScalarCount = 1
+	}
+	for _, next := range values {
+		if flatJSONScalar(next) {
+			continue
 		}
-		if allScalars {
-			return nil
+		if nonScalarCount == 0 {
+			nonScalar = next
 		}
+		nonScalarCount++
+		if nonScalarCount > 1 {
+			break
+		}
+	}
+	if nonScalarCount == 0 {
+		return nil
+	}
+	if nonScalarCount == 1 {
+		if err := validateJSONToDiscard(nonScalar); err != nil {
+			return fmt.Errorf("hatriecache: unsupported slice value: %w", err)
+		}
+		return nil
 	}
 	items := make(Slice, 0, capacity)
 	items = append(items, value)

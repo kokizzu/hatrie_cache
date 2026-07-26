@@ -16,7 +16,10 @@ allocation-free validation instead of serializing a payload that is immediately
 discarded. Complete
 64/4,096-item slice replacements are 7.50x/4.62x faster, and priority-queue
 replacements are 2.88x/2.43x faster, with roughly half the heap. Nested and
-custom values retain serializer validation and also measure faster; see the
+custom values retain serializer validation and also measure faster. A
+single nested payload among otherwise scalar variadic slice values is validated
+directly, making complete 64/4,096-item pushes 2.17x/7.43x faster while multiple
+nested values retain the prior whole-payload path; see the
 [sequence validation](BENCHMARK.md#flat-scalar-sequence-validation) results.
 Plain strings use a dedicated reusable slot pool. Cache-internal replacements
 of a proven-live slot skip the deleted-index tracker, making the isolated

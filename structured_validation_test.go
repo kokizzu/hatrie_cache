@@ -82,6 +82,37 @@ func TestFlatScalarSequenceValidationDoesNotAllocate(t *testing.T) {
 	}
 }
 
+func TestSparseNestedSlicePayloadValidationDoesNotMaterializeSequence(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts include race detector instrumentation")
+	}
+	values := make(Slice, 4096)
+	for index := range values {
+		values[index] = "value"
+	}
+	values[len(values)-1] = Map{"nested": "value"}
+	allocs := testing.AllocsPerRun(1000, func() {
+		structuredValidationTestSink = validateSliceValues(values[0], values[1:]...)
+	})
+	if structuredValidationTestSink != nil {
+		t.Fatalf("validation error = %v", structuredValidationTestSink)
+	}
+	if allocs != 1 {
+		t.Fatalf("sparse nested slice validation allocations = %.0f, want 1", allocs)
+	}
+}
+
+func TestMultiFallbackSlicePayloadInvokesMarshalersOnce(t *testing.T) {
+	calls := 0
+	value := structuredValidationTrackingMarshaler{calls: &calls}
+	if err := validateSliceValues("before", value, "middle", value, "after"); err != nil {
+		t.Fatalf("validation error = %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("custom marshaler calls = %d, want 2", calls)
+	}
+}
+
 func TestStructuredValidationMatchesJSONMarshalAcceptance(t *testing.T) {
 	cycle := Map{}
 	cycle["cycle"] = cycle
@@ -142,9 +173,10 @@ func TestSequenceValidationMatchesJSONMarshalAcceptance(t *testing.T) {
 		{name: "cycle", value: cycle},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, marshalErr := json.Marshal(Slice{test.value})
-			sliceErr := validateSliceValue(Slice{test.value})
-			slicePayloadErr := validateSliceValues(test.value)
+			payload := Slice{"before", test.value, "after"}
+			_, marshalErr := json.Marshal(payload)
+			sliceErr := validateSliceValue(payload)
+			slicePayloadErr := validateSliceValues(payload[0], payload[1:]...)
 			queueErr := validatePriorityQueueValue(PriorityQueue{{Priority: 1, Value: test.value}})
 			priorityPayloadErr := validatePriorityQueuePayload(test.value)
 			for name, validationErr := range map[string]error{
