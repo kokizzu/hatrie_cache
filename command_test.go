@@ -1970,16 +1970,16 @@ func TestCommandFastTopKItemsJSONMultipleStringsMatchesGeneric(t *testing.T) {
 	}
 
 	want := commandValueResponse("ok", top.Items())
-	got, ok := commandFastTopKItemsJSON(top)
-	if !ok {
-		t.Fatal("commandFastTopKItemsJSON() = false, want canonical string fast path")
+	got, err := commandFastTopKItemsJSON(top)
+	if err != nil {
+		t.Fatalf("commandFastTopKItemsJSON() error = %v", err)
 	}
 	if got != want.Value {
 		t.Fatalf("commandFastTopKItemsJSON() = %q, want %q", got, want.Value)
 	}
 }
 
-func TestCommandFastTopKItemsJSONFallsBackForNonString(t *testing.T) {
+func TestCommandFastTopKItemsJSONStructuredMatchesGeneric(t *testing.T) {
 	top, err := newTopKData(2)
 	if err != nil {
 		t.Fatalf("newTopKData() error = %v", err)
@@ -1987,8 +1987,13 @@ func TestCommandFastTopKItemsJSONFallsBackForNonString(t *testing.T) {
 	if _, err := top.AddChecked(Map{"route": "/api/cache"}, 1); err != nil {
 		t.Fatalf("AddChecked(map) error = %v", err)
 	}
-	if _, ok := commandFastTopKItemsJSON(top); ok {
-		t.Fatal("commandFastTopKItemsJSON(map) = true, want generic fallback")
+	want := commandValueResponse("ok", top.Items())
+	got, err := commandFastTopKItemsJSON(top)
+	if err != nil {
+		t.Fatalf("commandFastTopKItemsJSON(map) error = %v", err)
+	}
+	if got != want.Value {
+		t.Fatalf("commandFastTopKItemsJSON(map) = %q, want %q", got, want.Value)
 	}
 }
 

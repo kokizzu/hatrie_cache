@@ -2344,10 +2344,11 @@ func (ht *HatTrie) executeFastGetTopKCommand(key string) (CacheCommandResponse, 
 	}
 	top := ht.topKs.array[hval.Index]
 	ht.recordReadLocked(true, key)
-	if payload, ok := commandFastTopKItemsJSON(top); ok {
-		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+	payload, err := commandFastTopKItemsJSON(top)
+	if err != nil {
+		return commandError(err.Error()), true
 	}
-	return commandValueResponse("ok", top.Items()), true
+	return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 }
 
 func (ht *HatTrie) executeFastAddReservoirSampleCommand(key string, value string) (CacheCommandResponse, bool) {
@@ -2829,33 +2830,19 @@ func commandFastUint64Digits(value uint64) int {
 	return digits
 }
 
-func commandFastTopKItemsJSON(top topKData) (string, bool) {
+func commandFastTopKItemsJSON(top topKData) (string, error) {
 	if len(top.items) == 0 {
-		return "[]", true
-	}
-	if len(top.items) == 1 {
-		item := top.items[0]
-		value, ok := item.Value.(string)
-		if !ok || !commandFastJSONPlainString(value) {
-			return "", false
-		}
-		var builder strings.Builder
-		builder.Grow(len(`[{"value":"","count":18446744073709551615,"error":18446744073709551615}]`) + len(value))
-		builder.WriteString(`[{"value":"`)
-		builder.WriteString(value)
-		builder.WriteString(`","count":`)
-		builder.WriteString(strconv.FormatUint(item.Count, 10))
-		builder.WriteString(`,"error":`)
-		builder.WriteString(strconv.FormatUint(item.Error, 10))
-		builder.WriteString(`}]`)
-		return builder.String(), true
+		return "[]", nil
 	}
 	capacity, ok := commandFastTopKItemsJSONCapacity(top.items)
 	if !ok {
-		return "", false
+		return "", errors.New("command response is too large")
+	}
+	if len(top.items) == 1 {
+		return commandFastTopKItemsJSONWithCapacity(top.items, capacity)
 	}
 	items := top.sortedItems()
-	return commandFastTopKItemsJSONWithCapacity(items, capacity), true
+	return commandFastTopKItemsJSONWithCapacity(items, capacity)
 }
 
 func commandFastTopKItemsJSONCapacity(items []topKItem) (int, bool) {
@@ -2863,10 +2850,6 @@ func commandFastTopKItemsJSONCapacity(items []topKItem) (int, bool) {
 	max := int(^uint(0) >> 1)
 	capacity := len(`[]`)
 	for idx, item := range items {
-		value, ok := item.Value.(string)
-		if !ok || !jsonPlainStringMatchesKey(value, item.Key) {
-			return 0, false
-		}
 		extra := itemFixedBytes + commandFastUint64Digits(item.Count) + commandFastUint64Digits(item.Error)
 		if idx > 0 {
 			extra++
@@ -2879,7 +2862,7 @@ func commandFastTopKItemsJSONCapacity(items []topKItem) (int, bool) {
 	return capacity, true
 }
 
-func commandFastTopKItemsJSONWithCapacity(items []topKItem, capacity int) string {
+func commandFastTopKItemsJSONWithCapacity(items []topKItem, capacity int) (string, error) {
 	var builder strings.Builder
 	builder.Grow(capacity)
 	builder.WriteByte('[')
@@ -2889,7 +2872,11 @@ func commandFastTopKItemsJSONWithCapacity(items []topKItem, capacity int) string
 			builder.WriteByte(',')
 		}
 		builder.WriteString(`{"value":`)
-		builder.WriteString(item.Key)
+		if value, ok := item.Value.(string); ok && jsonPlainStringMatchesKey(value, item.Key) {
+			builder.WriteString(item.Key)
+		} else if err := writeSmallMapJSONValue(&builder, item.Value); err != nil {
+			return "", err
+		}
 		builder.WriteString(`,"count":`)
 		_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Count, 10))
 		builder.WriteString(`,"error":`)
@@ -2897,7 +2884,7 @@ func commandFastTopKItemsJSONWithCapacity(items []topKItem, capacity int) string
 		builder.WriteByte('}')
 	}
 	builder.WriteByte(']')
-	return builder.String()
+	return builder.String(), nil
 }
 
 func commandFastQuantileEstimateResponse(message string, estimate QuantileEstimate) CacheCommandResponse {
@@ -3035,6 +3022,15 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
 		payload, err := commandPriorityQueueItemsJSON(items, capacity, stringsOnly)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+	case hval.IsTopK():
+		top := ht.topKs.array[hval.Index]
+		payload, err := commandFastTopKItemsJSON(top)
+		ht.recordReadLocked(true, key)
+		ht.mu.RUnlock()
 		if err != nil {
 			return commandError(err.Error()), true
 		}

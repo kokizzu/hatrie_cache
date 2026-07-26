@@ -216,6 +216,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | Escaped and structured values retain the typed generic path |
 | Current pass | [Multi-item Top-K reads](#multi-item-top-k-read-materialization), 16/default-100 string items | Generic materialization: 2,851/10,558 ns; 2,297/13,516 B; 8 allocs | Direct JSON: 1,851/6,898 ns; 1,624/9,752 B; 3 allocs | 1.54x/1.53x faster, 1.41x/1.39x lower heap, 2.67x fewer allocs | One-item and write implementations are unchanged; structured fallback improves 1.11x |
+| Current pass | [Direct generic Top-K GET](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Generic materialization: 2,376/13,936 ns strings; 3,019/13,966 ns mixed | Shared-lock direct JSON: 1,660/10,024 ns strings; 2,148/10,263 ns mixed | 1.36x-1.43x faster; 1.35x-1.53x lower heap; 2.00x-2.20x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
 | Reverted | [Generic Top-K slice sorter](#multi-item-top-k-read-materialization), 16/default-100 string items | `sort.Interface`: exact reads 2,240/8,108 ns | `slices.SortFunc`: 2,407/9,099 ns | One allocation and 24 B removed, but CPU 1.07x/1.12x slower | Rolled back; the small transient-memory saving did not justify slower reads |
 | Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
@@ -303,6 +304,7 @@ tree.
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Generic Top-K slice sorter | Removed one allocation and 24 transient bytes | Exact 16/100-item reads were 1.07x/1.12x slower and every generic row regressed | Reverted; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
+| Generic Top-K structured fallback scan | Preserved the string-only direct encoder while extending exact generic `GET` | A 16-item structured read was 1.06x slower after scanning before unchanged materialization, with no heap or allocation gain | Replaced by one-pass mixed-value encoding; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
 | Naive repeated-read scalar routing | Tried to send repeated reads through the native selector | 16 reads regressed 2.58x; a scan-only guard remained 1.08x slower | Replaced by resolve-once response copying; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
 | Two-command native scalar routing | Lowered the initial native threshold | 629.5 ns versus 565.5 ns, or 1.11x slower | Removed; native routing starts at four commands; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
@@ -3130,12 +3132,13 @@ direct, so the former command benchmark did not exercise this multi-item cost.
 
 Tests and realistic 16/default-100-item benchmarks were added before the
 implementation. They require exact byte parity with generic JSON for plain,
-escaped, Unicode, and HTML-sensitive strings, preserve count/error/key tie
-ordering, and require non-string values to use the generic encoder. The
-implementation sorts one private copy through a typed standard-library sorter
-and writes canonical string keys plus numeric fields into one exactly sized
-response buffer. Public `Items()`, snapshots, and structured command fallbacks
-also use the typed sorter and therefore avoid two reflection allocations.
+escaped, Unicode, HTML-sensitive, and structured values and preserve
+count/error/key tie ordering. The implementation sorts one private copy through
+a typed standard-library sorter and writes canonical matching string keys plus
+numeric fields into one exactly sized response buffer. Structured values are
+encoded directly from their current stored value into that buffer instead of
+allocating, cloning, and serializing a second public item slice. Public
+`Items()` and snapshots retain their ownership-preserving clones.
 
 The baseline and final rows are medians from seven fixed 10,000-operation runs
 on the same Ryzen 9 5950X host. A leading-space command selects the generic
@@ -3175,6 +3178,37 @@ one CPU:
 The generic sorter removed one interface allocation and 24 transient bytes,
 but regressed every complete read path. It was removed, restoring the faster
 adapter and leaving no runtime or compatibility tradeoff.
+
+Exact uppercase generic `GET` now recognizes Top-K values under the existing
+shared read lock and uses the same direct encoder as `GETTOPK`. The first
+candidate retained a string-only helper and fell back to `Items()` after a
+failed eligibility scan. Its 16-item structured median was 3,673 ns versus
+3,468 ns for the unchanged generic control, a 1.06x regression with identical
+2,664 B and 11 allocations, so that candidate was removed. The retained
+one-pass mixed encoder avoids the scan/fallback pair and does not trust a stale
+canonical key for caller-owned custom values: matching strings use their
+already encoded key, while every other value is encoded from current stored
+state.
+
+Seven one-second paired runs produced these medians:
+
+```sh
+make run CMD='go test . -run=NONE -bench BenchmarkTopKGenericGetCommand -benchmem -benchtime=1s -count=7'
+make run CMD='go test . -run=NONE -bench "BenchmarkTopKGet(Path|StructuredFallbackPath)" -benchmem -benchtime=1s -count=7'
+```
+
+| Exact generic `GET`, median | Generic control | Direct | Improvement |
+| --- | ---: | ---: | ---: |
+| 16 strings | 2,376 ns; 2,200 B; 6 allocs | 1,660 ns; 1,624 B; 3 allocs | 1.43x faster; 1.35x lower heap; 2.00x fewer allocs |
+| 100 strings | 13,936 ns; 13,444 B; 6 allocs | 10,024 ns; 9,752 B; 3 allocs | 1.39x faster; 1.38x lower heap; 2.00x fewer allocs |
+| 16 items, one structured | 3,019 ns; 2,680 B; 11 allocs | 2,148 ns; 1,754 B; 5 allocs | 1.41x faster; 1.53x lower heap; 2.20x fewer allocs |
+| 100 items, one structured | 13,966 ns; 13,956 B; 11 allocs | 10,263 ns; 9,931 B; 5 allocs | 1.36x faster; 1.41x lower heap; 2.20x fewer allocs |
+
+The shared dedicated-command controls improved 1.49x for 16 strings, 1.43x
+for 100 strings, and 1.46x for the 16-item structured fixture. The change adds
+no retained state, configuration, background work, wire field, format version,
+or public value alias. Cold references and nonexact command spellings retain
+their checked generic paths.
 
 <a id="lazy-small-top-k-indexes"></a>
 ### Lazy Small Top-K Indexes
