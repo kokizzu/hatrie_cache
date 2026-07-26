@@ -100,6 +100,18 @@ func (tree *radixTreeData) Put(key string, value interface{}) bool {
 	return added
 }
 
+func (tree *radixTreeData) PutPlainString(key string, value string) bool {
+	if tree == nil {
+		return false
+	}
+	tree.ensureRoot()
+	added := tree.root.putPlainString(key, value)
+	if added {
+		tree.items++
+	}
+	return added
+}
+
 func (tree *radixTreeData) PutEntries(entries Map) int {
 	if tree == nil || len(entries) == 0 {
 		return 0
@@ -256,6 +268,47 @@ func (node *radixTreeNode) put(key string, value interface{}) bool {
 	child := radixTreeNode{
 		prefix:   remainder,
 		value:    cloneValue(value),
+		hasValue: true,
+	}
+	node.children = insertRadixChild(node.children, idx, child)
+	return true
+}
+
+func (node *radixTreeNode) putPlainString(key string, value string) bool {
+	common := commonPrefixLen(key, node.prefix)
+	if common < len(node.prefix) {
+		child := radixTreeNode{
+			prefix:   node.prefix[common:],
+			value:    node.value,
+			hasValue: node.hasValue,
+			children: node.children,
+		}
+		node.prefix = node.prefix[:common]
+		node.value = nil
+		node.hasValue = false
+		node.children = []radixTreeNode{child}
+	}
+
+	if common == len(key) {
+		added := !node.hasValue
+		if !added {
+			if stored, ok := node.value.(string); ok && stored == value {
+				return false
+			}
+		}
+		node.value = value
+		node.hasValue = true
+		return added
+	}
+
+	remainder := key[common:]
+	idx, found := node.childIndex(remainder[0])
+	if found {
+		return node.children[idx].putPlainString(remainder, value)
+	}
+	child := radixTreeNode{
+		prefix:   remainder,
+		value:    value,
 		hasValue: true,
 	}
 	node.children = insertRadixChild(node.children, idx, child)

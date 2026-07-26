@@ -47,7 +47,11 @@ measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-sparse-bitset-headers).
 Radix tree values use path-compressed string edges for exact nested key/value
 indexes with fast lookup, sorted prefix scans, and low overhead for keys that
-share long prefixes.
+share long prefixes. Repeated exact plain-string `PUTRT` avoids re-boxing an
+unchanged value, making the measured command 1.26x faster and allocation-free;
+real replacements, dynamic construction, generic values, and reads remain
+neutral or faster. See
+[BENCHMARK.md](BENCHMARK.md#idempotent-plain-string-radix-updates).
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts

@@ -60,6 +60,68 @@ func TestRadixTreePutGetDeleteAndPrefix(t *testing.T) {
 	}
 }
 
+func TestRadixTreePutPlainStringPreservesPutBehavior(t *testing.T) {
+	var nilTree *radixTreeData
+	if nilTree.PutPlainString("key", "value") {
+		t.Fatal("nil PutPlainString() = true, want false")
+	}
+
+	tree := newRadixTreeData()
+	if !tree.PutPlainString("user:100/profile", "active") {
+		t.Fatal("PutPlainString(first) = false, want new insert")
+	}
+	if tree.PutPlainString("user:100/profile", "active") {
+		t.Fatal("PutPlainString(duplicate) = true, want replacement")
+	}
+	if tree.items != 1 {
+		t.Fatalf("items after duplicate = %d, want 1", tree.items)
+	}
+	if tree.PutPlainString("user:100/profile", "idle") {
+		t.Fatal("PutPlainString(replacement) = true, want false")
+	}
+	if value, ok := tree.Get("user:100/profile"); !ok || value != "idle" {
+		t.Fatalf("Get(user:100/profile) = %#v/%v, want idle/true", value, ok)
+	}
+
+	if !tree.PutPlainString("user:101/profile", "pending") {
+		t.Fatal("PutPlainString(split sibling) = false, want new insert")
+	}
+	if !tree.PutPlainString("user", "root") {
+		t.Fatal("PutPlainString(prefix parent) = false, want new insert")
+	}
+	if !tree.PutPlainString("", "empty-key") {
+		t.Fatal("PutPlainString(empty key) = false, want new insert")
+	}
+	if tree.items != 4 {
+		t.Fatalf("items after inserts = %d, want 4", tree.items)
+	}
+
+	if !tree.Put("structured", Map{"state": "nested"}) {
+		t.Fatal("Put(structured) = false, want new insert")
+	}
+	if tree.PutPlainString("structured", "flat") {
+		t.Fatal("PutPlainString(structured replacement) = true, want false")
+	}
+	if value, ok := tree.Get("structured"); !ok || value != "flat" {
+		t.Fatalf("Get(structured) = %#v/%v, want flat/true", value, ok)
+	}
+}
+
+func TestRadixTreePutPlainStringDuplicateDoesNotAllocate(t *testing.T) {
+	tree := newRadixTreeData()
+	if !tree.PutPlainString("user:100/profile", "active") {
+		t.Fatal("PutPlainString(first) = false, want new insert")
+	}
+	allocs := testing.AllocsPerRun(1000, func() {
+		if tree.PutPlainString("user:100/profile", "active") {
+			t.Fatal("PutPlainString(duplicate) = true, want false")
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("PutPlainString(duplicate) allocations = %v, want 0", allocs)
+	}
+}
+
 func TestRadixTreeSnapshotRoundTrip(t *testing.T) {
 	tree := newRadixTreeData()
 	tree.Put("asset:css", "main.css")

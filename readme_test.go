@@ -157,6 +157,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Direct promoted-set JSON](#packed-small-string-set-storage)",
 		"[Direct promoted-slice JSON](#packed-small-slice-storage)",
 		"[Radix prefix scan](#collection-allocation-follow-up)",
+		"[Allocation-free duplicate radix updates](#idempotent-plain-string-radix-updates)",
 		"[Compact XOR-filter headers](#compact-xor-filter-headers)",
 		"[Linked XOR-filter build queue](#linked-xor-filter-build-queue)",
 		"[Order-independent XOR-filter build](#order-independent-xor-filter-build)",

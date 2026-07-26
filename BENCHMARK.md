@@ -212,6 +212,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct generic priority-queue GET](#compact-priority-queue-items), empty/one/16/100 string items | Generic materialization: 207.1/422.4/2,863/23,449 ns | Shared-lock direct JSON: 159.3/268.3/2,386/17,977 ns | 1.30x/1.57x/1.20x/1.30x faster; up to 2.11x lower heap and 54x fewer allocations | Other value types retain the prior GET branch; a 100-item mixed queue is 1.37x faster with 1.56x lower heap and 28x fewer allocations |
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
+| Current pass | [Allocation-free duplicate radix updates](#idempotent-plain-string-radix-updates), exact plain-string `PUTRT` | 260.6 ns; 16 B; 1 alloc | 207.6 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated; focused duplicate 2.62x faster | Exact command only; public generic writes are unchanged, while replacements, dynamic builds, and reads are neutral or faster |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -2979,6 +2980,48 @@ make run CMD='go test -run=NONE -bench=BenchmarkCommandFeature/RadixPrefix -benc
 The radix command allocation count falls from 20 to 1; the remaining
 allocation is the returned JSON string. Non-string or JSON-escaped radix values
 use the generic clone-and-encode path to preserve behavior.
+
+<a id="idempotent-plain-string-radix-updates"></a>
+### Idempotent Plain-String Radix Updates
+
+Exact plain-string `PUTRT` previously passed the request value through an
+escaping interface and assigned a freshly boxed string even when the same key
+already contained the same immutable string. The command now uses an internal
+typed radix insertion path. At an exact populated node it compares string
+values before assignment, avoiding the box for an idempotent update. New keys,
+different strings, node splits, empty keys, and replacement of structured
+values preserve the prior tree shape, item count, and return value. Generic
+public writes still use `Put`, so constant-interface reuse and structured-value
+cloning are unchanged.
+
+Tests were added before the typed method and cover nil receivers, first insert,
+duplicate, replacement, sibling and parent splits, empty keys, structured to
+string replacement, item counts, reads, and the zero-allocation duplicate
+contract. The alternating benchmark runs generic and typed operations in both
+orders in the same binary. Dynamic construction uses precomputed request-like
+keys and values; the lookup control compares identically shaped trees produced
+by each method.
+
+```sh
+make run CMD='go test . -run=TestRadixTreePutPlainString -count=1 -v'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/RadixPut -benchtime=1000000x -count=9 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkRadixTreePlainStringPutAlternating -benchtime=20x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRadixTreePlainStringBuildAlternating -benchtime=20x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRadixTreePlainStringPutLookupControl -benchtime=2000000x -count=9 -cpu=1 -benchmem'
+```
+
+| Plain-string radix operation, median | Generic control | Typed command path | Result |
+| --- | ---: | ---: | ---: |
+| Complete duplicate `PUTRT` | 260.6 ns; 16 B; 1 alloc | 207.6 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated |
+| Alternating focused duplicate | 43.60 ns; 16 B; 1 alloc | 16.63 ns; 0 B; 0 allocs | 2.62x faster; allocation eliminated |
+| Alternating true replacement | 43.32 ns; 16 B; 1 alloc | 41.94 ns; 16 B; 1 alloc | 1.03x faster; memory unchanged |
+| Dynamic 128-entry build | 20,141 ns; 31,168 B; 203 allocs | 20,091 ns; 31,168 B; 203 allocs | Neutral within 0.3%; memory unchanged |
+| Lookup after dynamic build | 41.60 ns; 0 B; 0 allocs | 41.28 ns; 0 B; 0 allocs | Neutral within 0.8%; memory unchanged |
+
+The exact command continues to record the write, update telemetry, cache the
+same radix handle, and return the same added/not-added response for duplicates.
+Node layout, retained memory, prefix ordering, snapshots, journals, persistent
+records, replication, and wire formats are unchanged.
 
 <a id="mutation-response-lock-release-rollback"></a>
 ### Mutation Response Lock Release Rollback

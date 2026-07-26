@@ -1617,7 +1617,7 @@ func (ht *HatTrie) executeFastPutRadixTreeCommand(key string, subkey string, val
 		if ht.expireIfNeededLocked(key, hval) {
 			ht.clearHotKeyLocked(key)
 		} else if hval.IsRadixTree() {
-			added := ht.radixTrees.array[hval.Index].Put(subkey, value)
+			added := ht.radixTrees.array[hval.Index].PutPlainString(subkey, value)
 			ht.recordWriteLocked(key)
 			ht.cacheValueLocked(key, hval)
 			return CacheCommandResponse{OK: true, Message: "stored radix tree values", Value: strconv.Itoa(boolInt(added))}, true
@@ -1629,7 +1629,7 @@ func (ht *HatTrie) executeFastPutRadixTreeCommand(key string, subkey string, val
 		return commandError(err.Error()), true
 	}
 	if hval.IsRadixTree() {
-		added := ht.radixTrees.array[hval.Index].Put(subkey, value)
+		added := ht.radixTrees.array[hval.Index].PutPlainString(subkey, value)
 		if rawPtr != nil {
 			*rawPtr = hval.toValue()
 		}
@@ -1644,7 +1644,7 @@ func (ht *HatTrie) executeFastPutRadixTreeCommand(key string, subkey string, val
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	data := newRadixTreeData()
-	added := data.Put(subkey, value)
+	added := data.PutPlainString(subkey, value)
 	idx := ht.radixTrees.AddData(data)
 	hval = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RADIX_TREE}
 	*rawPtr = hval.toValue()
