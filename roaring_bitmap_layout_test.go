@@ -14,7 +14,15 @@ var (
 	benchmarkRoaringBitmapLayoutContainerSink roaringBitmapContainer
 	benchmarkRoaringBitmapLayoutDataSink      roaringBitmapData
 	benchmarkRoaringBitmapSliceControlSink    roaringBitmapSliceBackingControl
+	benchmarkRoaringBitmapCompactControlSink  roaringBitmapCompactFieldOrderControl
 )
+
+type roaringBitmapCompactFieldOrderControl struct {
+	values      []uint16
+	bits        *[roaringBitmapBitmapWords]uint64
+	key         uint16
+	cardinality uint32
+}
 
 func TestRoaringBitmapFixedBitmapBackingPreservesTransitions(t *testing.T) {
 	var container roaringBitmapContainer
@@ -53,6 +61,9 @@ func TestRoaringBitmapFixedBitmapBackingPreservesTransitions(t *testing.T) {
 func TestRoaringBitmapContainerHeaderFitsOneCacheLine(t *testing.T) {
 	if got := unsafe.Sizeof(roaringBitmapContainer{}); got != 48 {
 		t.Fatalf("sizeof(roaringBitmapContainer) = %d, want 48", got)
+	}
+	if got := unsafe.Sizeof(roaringBitmapCompactFieldOrderControl{}); got != 40 {
+		t.Fatalf("sizeof(roaringBitmapCompactFieldOrderControl) = %d, want 40", got)
 	}
 }
 
@@ -211,6 +222,188 @@ func BenchmarkRoaringBitmapBackingLayoutAlternating(b *testing.B) {
 		operations := float64(b.N * accesses)
 		b.ReportMetric(float64(sliceDuration.Nanoseconds())/operations, "slice-ns/access")
 		b.ReportMetric(float64(pointerDuration.Nanoseconds())/operations, "pointer-ns/access")
+	})
+}
+
+func roaringBitmapCompactFieldOrderControlContains(container roaringBitmapCompactFieldOrderControl, value uint16) bool {
+	if bitmap := container.bits; bitmap != nil {
+		word, mask := roaringBitmapBit(value)
+		return bitmap[word]&mask != 0
+	}
+	idx := sort.Search(len(container.values), func(idx int) bool {
+		return container.values[idx] >= value
+	})
+	return idx < len(container.values) && container.values[idx] == value
+}
+
+func (container *roaringBitmapCompactFieldOrderControl) add(value uint16) bool {
+	if bitmap := container.bits; bitmap != nil {
+		word, mask := roaringBitmapBit(value)
+		if bitmap[word]&mask != 0 {
+			return false
+		}
+		bitmap[word] |= mask
+		container.cardinality++
+		return true
+	}
+	idx := sort.Search(len(container.values), func(idx int) bool {
+		return container.values[idx] >= value
+	})
+	if idx < len(container.values) && container.values[idx] == value {
+		return false
+	}
+	container.values = append(container.values, 0)
+	copy(container.values[idx+1:], container.values[idx:])
+	container.values[idx] = value
+	container.cardinality++
+	if len(container.values) > roaringBitmapArrayMaxSize {
+		container.convertToBitmap()
+	}
+	return true
+}
+
+func (container *roaringBitmapCompactFieldOrderControl) convertToBitmap() {
+	if container.bits != nil {
+		return
+	}
+	next := new([roaringBitmapBitmapWords]uint64)
+	for _, value := range container.values {
+		word, mask := roaringBitmapBit(value)
+		next[word] |= mask
+	}
+	for idx := range container.values {
+		container.values[idx] = 0
+	}
+	container.values = nil
+	container.bits = next
+}
+
+func roaringBitmapCurrentDenseRemoveAdd(container *roaringBitmapContainer, value uint16) bool {
+	bitmap := container.bits
+	word, mask := roaringBitmapBit(value)
+	if bitmap[word]&mask == 0 {
+		return false
+	}
+	bitmap[word] &^= mask
+	container.cardinality--
+	if bitmap[word]&mask != 0 {
+		return false
+	}
+	bitmap[word] |= mask
+	container.cardinality++
+	return true
+}
+
+func roaringBitmapCompactFieldOrderControlDenseRemoveAdd(container *roaringBitmapCompactFieldOrderControl, value uint16) bool {
+	bitmap := container.bits
+	word, mask := roaringBitmapBit(value)
+	if bitmap[word]&mask == 0 {
+		return false
+	}
+	bitmap[word] &^= mask
+	container.cardinality--
+	if bitmap[word]&mask != 0 {
+		return false
+	}
+	bitmap[word] |= mask
+	container.cardinality++
+	return true
+}
+
+func BenchmarkRoaringBitmapFieldOrderAlternating(b *testing.B) {
+	const accesses = 1 << 16
+
+	b.Run("Build4097", func(b *testing.B) {
+		var currentDuration, candidateDuration time.Duration
+		for iteration := 0; iteration < b.N; iteration++ {
+			candidateFirst := iteration&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if candidateFirst == (pass == 0) {
+					var container roaringBitmapCompactFieldOrderControl
+					for value := roaringBitmapArrayMaxSize; value >= 0; value-- {
+						container.add(uint16(value))
+					}
+					benchmarkRoaringBitmapCompactControlSink = container
+					candidateDuration += time.Since(started)
+				} else {
+					var container roaringBitmapContainer
+					for value := roaringBitmapArrayMaxSize; value >= 0; value-- {
+						container.add(uint16(value))
+					}
+					benchmarkRoaringBitmapLayoutContainerSink = container
+					currentDuration += time.Since(started)
+				}
+			}
+		}
+		b.ReportMetric(float64(currentDuration.Nanoseconds())/float64(b.N), "current-ns/build")
+		b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "candidate-ns/build")
+	})
+
+	current := roaringBitmapContainer{
+		bits:        new([roaringBitmapBitmapWords]uint64),
+		cardinality: roaringBitmapArrayMaxSize + 1,
+	}
+	candidate := roaringBitmapCompactFieldOrderControl{
+		bits:        new([roaringBitmapBitmapWords]uint64),
+		cardinality: roaringBitmapArrayMaxSize + 1,
+	}
+	for value := 0; value <= roaringBitmapArrayMaxSize; value++ {
+		word, mask := roaringBitmapBit(uint16(value))
+		current.bits[word] |= mask
+		candidate.bits[word] |= mask
+	}
+
+	b.Run("Contains", func(b *testing.B) {
+		var currentDuration, candidateDuration time.Duration
+		for iteration := 0; iteration < b.N; iteration++ {
+			candidateFirst := iteration&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if candidateFirst == (pass == 0) {
+					for access := 0; access < accesses; access++ {
+						benchmarkBoolSink = roaringBitmapCompactFieldOrderControlContains(candidate, uint16(access&roaringBitmapArrayMaxSize))
+					}
+					candidateDuration += time.Since(started)
+				} else {
+					for access := 0; access < accesses; access++ {
+						benchmarkBoolSink = current.contains(uint16(access & roaringBitmapArrayMaxSize))
+					}
+					currentDuration += time.Since(started)
+				}
+			}
+		}
+		operations := float64(b.N * accesses)
+		b.ReportMetric(float64(currentDuration.Nanoseconds())/operations, "current-ns/access")
+		b.ReportMetric(float64(candidateDuration.Nanoseconds())/operations, "candidate-ns/access")
+	})
+
+	b.Run("RemoveAdd", func(b *testing.B) {
+		var currentDuration, candidateDuration time.Duration
+		for iteration := 0; iteration < b.N; iteration++ {
+			candidateFirst := iteration&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if candidateFirst == (pass == 0) {
+					for access := 0; access < accesses; access++ {
+						if !roaringBitmapCompactFieldOrderControlDenseRemoveAdd(&candidate, uint16(access&roaringBitmapArrayMaxSize)) {
+							b.Fatal("candidate dense remove/add failed")
+						}
+					}
+					candidateDuration += time.Since(started)
+				} else {
+					for access := 0; access < accesses; access++ {
+						if !roaringBitmapCurrentDenseRemoveAdd(&current, uint16(access&roaringBitmapArrayMaxSize)) {
+							b.Fatal("current dense remove/add failed")
+						}
+					}
+					currentDuration += time.Since(started)
+				}
+			}
+		}
+		operations := float64(b.N * accesses)
+		b.ReportMetric(float64(currentDuration.Nanoseconds())/operations, "current-ns/access")
+		b.ReportMetric(float64(candidateDuration.Nanoseconds())/operations, "candidate-ns/access")
 	})
 }
 

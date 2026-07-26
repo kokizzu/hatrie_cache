@@ -317,6 +317,7 @@ tree.
 | Inline sparse bitsets with generic search | Removed singleton/pair backing allocations and reduced retained objects | The added representation branch made 4,096-value array lookups 1.03x slower | Replaced by an inlineable typed binary search; promoted lookups are now 1.01x faster; see [inline sparse-bitset containers](#inline-sparse-bitset-containers) |
 | Inline Roaring-container values | Made 50,000 singleton containers 1.38x faster to build and removed 50,000 backing allocations | Promoted 16-value lookups were 1.04x slower; large-array and bitmap controls were also about 1.01x-1.02x slower | Reverted; the original slice representation remains; see [inline Roaring-container rollback](#inline-roaring-container-rollback) |
 | Local slice view over fixed Roaring bitmap | Preserved the 48-byte header while dense build/lookup measured 1.02x/1.09x faster | Paired bitmap remove/add was 4.594 versus 4.486 ns, or 1.024x slower | Reverted; direct fixed-pointer access remains 1.006x faster than the legacy slice in the longer control; see [compact Roaring-container headers](#compact-roaring-container-headers) |
+| 40-byte Roaring field order | Lowered singleton retained and cumulative heap 1.21x/1.24x and made the 50,000-container build 1.11x faster | The best values-first layout made paired 4,097-value dense construction 1.018x and 1.044x slower in two nine-run confirmations; a pointer-first layout made lookup 1.039x slower | Reverted; the 48-byte operation-neutral layout remains; see [Roaring field-order compaction](#roaring-field-order-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
@@ -3448,6 +3449,34 @@ remove/add median was 4.594 ns versus 4.486 ns for the legacy slice, or 1.024x
 slower. It was reverted. A longer audit of the retained direct-pointer form
 measured 4.922 versus 4.953 ns, so the shipped representation remains neutral
 to slightly faster on mutation. No follow-up code remains.
+
+<a id="roaring-field-order-compaction-rollback"></a>
+#### Roaring Field-Order Compaction Rollback
+
+A later alignment audit reordered the four existing container fields without
+changing their types. Values-first order removed eight bytes of alignment
+padding, reducing the header from 48 to 40 bytes. On 50,000 singleton
+containers, the 40-byte layout reduced retained memory from 66.65 to 54.86
+B/container, reduced cumulative heap from 14,153,680 to 11,368,736 bytes, and
+reduced median construction time from 11.907 to 10.761 ms. That is 1.21x lower
+retained heap, 1.24x lower cumulative heap, and a 1.11x faster sparse build,
+with the same 50,026 allocations.
+
+The layout was not operation-neutral. A same-binary alternating control copies
+the 40-byte representation and identical add, conversion, lookup, and dense
+mutation logic. Two nine-run confirmations made its 4,097-value dense build
+1.018x and 1.044x slower than the 48-byte production order. The latest medians
+were 181,579 versus 173,943 ns/build. Dense lookup and remove/add were neutral,
+while a pointer-first 40-byte variant instead made lookup 1.039x slower.
+
+```sh
+make run CMD='go test . -run RoaringBitmap -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRoaringBitmapFieldOrderAlternating -benchtime=500x -count=9 -cpu=1'
+```
+
+The production field order was restored. The test-only 40-byte control remains
+to prevent repeating the experiment; it has no runtime memory, CPU, wire,
+persistence, or behavior cost.
 
 <a id="inline-roaring-container-rollback"></a>
 #### Inline Roaring-Container Rollback
