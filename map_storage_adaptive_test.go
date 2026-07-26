@@ -42,6 +42,42 @@ func TestAdaptiveSmallMapPromotionAndReplacement(t *testing.T) {
 	assertMapValueEqual(t, ht, "profile", Map{"only": int64(9)})
 }
 
+func TestAdaptiveMapPlainStringDuplicateAndReplacement(t *testing.T) {
+	ht := newTestTrie(t)
+	put := func(subkey string, value string) {
+		t.Helper()
+		response := ht.ExecuteCommand(CacheCommandRequest{Command: "PUTMAP", Key: "profile", Subkey: subkey, Value: value})
+		if !response.OK || response.Message != "stored map fields" {
+			t.Fatalf("PUTMAP %q=%q response = %#v, want stored map fields", subkey, value, response)
+		}
+	}
+
+	put("first", "one")
+	packedIndex := ht.Get("profile").Index
+	put("first", "one")
+	if got := ht.Get("profile").Index; got != packedIndex {
+		t.Fatalf("duplicate packed PUTMAP index = %d, want %d", got, packedIndex)
+	}
+	put("first", "updated")
+	put("second", "two")
+	put("third", "three")
+	promotedIndex := ht.Get("profile").Index
+	if promotedIndex < 0 {
+		t.Fatalf("three-field map index = %d, want promoted index", promotedIndex)
+	}
+	put("third", "three")
+	if got := ht.Get("profile").Index; got != promotedIndex {
+		t.Fatalf("duplicate promoted PUTMAP index = %d, want %d", got, promotedIndex)
+	}
+	put("third", "updated-three")
+
+	assertMapValueEqual(t, ht, "profile", Map{
+		"first":  "updated",
+		"second": "two",
+		"third":  "updated-three",
+	})
+}
+
 func TestAdaptiveSmallMapCompactionAndSnapshotRoundTrip(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.PutMap("first", "field", Map{"nested": true})
@@ -99,6 +135,64 @@ func TestSmallMapJSONStringMatchesGenericEncoding(t *testing.T) {
 			t.Fatalf("smallMapData.jsonString(%#v) = %q, want %q", value, got, want)
 		}
 	}
+}
+
+func BenchmarkMapPlainStringPutAdaptiveAlternating(b *testing.B) {
+	const puts = 1 << 16
+	for _, benchmark := range []struct {
+		name      string
+		promoted  bool
+		replacing bool
+	}{
+		{name: "PackedDuplicate"},
+		{name: "PackedReplace", replacing: true},
+		{name: "PromotedDuplicate", promoted: true},
+		{name: "PromotedReplace", promoted: true, replacing: true},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			candidateStorage, candidateIndex := benchmarkMapPutStorage(benchmark.promoted)
+			controlStorage, controlIndex := benchmarkMapPutStorage(benchmark.promoted)
+			var candidateDuration, controlDuration time.Duration
+			for iteration := 0; iteration < b.N; iteration++ {
+				candidateFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if candidateFirst == (pass == 0) {
+						for put := 0; put < puts; put++ {
+							value := "value"
+							if benchmark.replacing && put&1 != 0 {
+								value = "replacement"
+							}
+							candidateIndex = candidateStorage.putPlainStringAdaptive(candidateIndex, "field", value)
+						}
+						candidateDuration += time.Since(started)
+					} else {
+						for put := 0; put < puts; put++ {
+							value := "value"
+							if benchmark.replacing && put&1 != 0 {
+								value = "replacement"
+							}
+							controlIndex = controlStorage.putEntryAdaptive(controlIndex, "field", value)
+						}
+						controlDuration += time.Since(started)
+					}
+				}
+			}
+			operations := float64(b.N * puts)
+			b.ReportMetric(float64(candidateDuration.Nanoseconds())/operations, "candidate-ns/put")
+			b.ReportMetric(float64(controlDuration.Nanoseconds())/operations, "control-ns/put")
+		})
+	}
+}
+
+func benchmarkMapPutStorage(promoted bool) (*MapStorage, int32) {
+	storage := CreateMapStorage()
+	index := storage.addEntryAdaptive("field", "value")
+	if promoted {
+		index = storage.putPlainStringAdaptive(index, "second", "two")
+		index = storage.putPlainStringAdaptive(index, "third", "three")
+	}
+	return storage, index
 }
 
 func TestMapSmallToLargeMutationSequencePreservesBehavior(t *testing.T) {

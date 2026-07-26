@@ -231,6 +231,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
+| Current pass | [Allocation-free duplicate packed-map writes](#packed-small-map-storage), exact repeated `PUTMAP` | Generic boxed replacement: 258.2 ns; 16 B; 1 alloc | Typed equality reuse: 198.8 ns; 0 B; 0 allocs | 1.30x faster; allocation eliminated | One/two-field plain-string maps only; actual replacements are 1.07x faster and promoted duplicate/replacement controls are neutral |
 | Current pass | [Map field encoding outside cache lock](#packed-small-map-storage), exact `PEEKMAP` | Lock-held field encoding: 34.86 ns strings; 508.4 ns structured; writer stalled behind caller JSON | Point-in-time field reference: 29.68 ns strings; 456.4 ns structured; writer progresses during JSON | 1.17x/1.11x faster with identical zero/three allocations; unbounded caller-marshaler stall removed | Replacing a field may complete while the prior point-in-time response is still encoding; wire bytes and ownership are unchanged |
 | Current pass | [Packed small string-set storage](#packed-small-string-set-storage), 100k one/two-member sets | Slice/map entries: 94.36/142.4 retained B/set; 2.000/3.000 retained objects/set | Packed pools: 18.87/36.98 retained B/set; 0.00026/0.00026 retained objects/set | 5.00x/3.85x lower retained heap; about 7,692x/11,538x fewer retained objects; 1.39x/1.42x faster writes | Adds 160 fixed bytes/cache; promotes at the third member with unchanged generic retention and a 1.21x faster measured transition |
 | Current pass | [Direct packed string-set JSON](#packed-small-string-set-storage), empty/one/two-member command GET | Temporary set: 245.3/338.3/379.1 ns; 64/88/112 B; 3/4/4 allocs | Direct JSON: 76.35/134.9/153.1 ns; 0/16/16 B; 0/1/1 allocs | 3.21x/2.51x/2.48x faster; up to 7x lower heap; up to 4x fewer allocations | Packed plain strings only; promoted sets retain the generic encoder with unchanged wire, storage, ordering, and ownership |
@@ -1346,6 +1347,31 @@ make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MapGet -benchti
 | Update existing eight-field map | 340.7 ns; 0 allocs | 256.0 ns; 0 allocs | 1.33x faster |
 | Peek eight-field map | 104.0 ns; 0 allocs | 90.39 ns; 0 allocs | 1.15x faster |
 | Full one-field map JSON command | 1,148 ns; 152 B; 3 allocs | 511.4 ns; 24 B; 1 alloc | 2.24x faster, 6.33x lower heap, 3x fewer allocs |
+
+Exact plain-string `PUTMAP` previously converted the new string to an escaping
+interface before replacing a packed field, even when the stored string was
+identical. The typed packed-map path now compares the immutable strings first
+and reuses the stored interface for an idempotent write. It still records the
+same write and returns the same response. Different strings, generic values,
+and promotion retain normal ownership and replacement semantics; promoted Go
+maps explicitly delegate to the prior generic operation.
+
+```sh
+make run CMD='go test . -run TestAdaptiveMapPlainStringDuplicateAndReplacement -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MapPut -benchtime=1000000x -count=9 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkMapPlainStringPutAdaptiveAlternating -benchtime=200x -count=9 -cpu=1'
+```
+
+| Plain-string write, median | Generic control | Typed packed path | Improvement |
+| --- | ---: | ---: | ---: |
+| Complete duplicate `PUTMAP` | 258.2 ns; 16 B; 1 alloc | 198.8 ns; 0 B; 0 allocs | 1.30x faster; allocation eliminated |
+| Packed storage duplicate | 31.88 ns | 6.981 ns | 4.57x faster |
+| Packed storage replacement | 32.00 ns | 29.93 ns | 1.07x faster |
+| Promoted-map duplicate | 44.81 ns | 44.57 ns | Neutral within 0.6% |
+| Promoted-map replacement | 45.89 ns | 45.76 ns | Neutral within 0.3% |
+
+Map indexes, values, output bytes, telemetry, snapshot, journal, database,
+replication, and wire formats are unchanged.
 
 Exact `PEEKMAP` previously serialized a non-string field while holding the
 exclusive cache lock. A deterministic blocking-marshaler test proved that a

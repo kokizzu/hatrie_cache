@@ -152,6 +152,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Priority queue push+pop](#collection-allocation-follow-up)",
 		"[Direct priority-queue command reads](#compact-priority-queue-items)",
 		"[Direct generic priority-queue GET](#compact-priority-queue-items)",
+		"[Allocation-free duplicate packed-map writes](#packed-small-map-storage)",
 		"[Map field encoding outside cache lock](#packed-small-map-storage)",
 		"[Direct promoted-set JSON](#packed-small-string-set-storage)",
 		"[Direct promoted-slice JSON](#packed-small-slice-storage)",

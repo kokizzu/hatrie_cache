@@ -9,6 +9,10 @@ O(1), and memory usage low without per-item node allocations. Its compact
 tag-free string slot uses 1.17x less retained item memory while preserving
 allocation-free string churn; measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-priority-queue-items).
+One- and two-field maps use a packed pool and avoid replacing an identical
+plain-string field value. Repeated exact `PUTMAP` becomes allocation-free and
+1.30x faster without changing write accounting or promoted-map behavior; see
+[BENCHMARK.md](BENCHMARK.md#packed-small-map-storage).
 New empty, one-, and two-value slices use dedicated packed pools and promote
 once to the existing ring deque at the third value. Promoted keys remain
 generic to avoid conversion churn. The packed path cuts retained tiny-slice

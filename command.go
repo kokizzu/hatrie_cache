@@ -1569,7 +1569,7 @@ func (ht *HatTrie) executeFastPutMapCommand(key string, subkey string, value str
 		if ht.expireIfNeededLocked(key, hval) {
 			ht.clearHotKeyLocked(key)
 		} else if hval.IsMap() {
-			nextIndex := ht.maps.putEntryAdaptive(hval.Index, subkey, value)
+			nextIndex := ht.maps.putPlainStringAdaptive(hval.Index, subkey, value)
 			if nextIndex != hval.Index {
 				hval.Index = nextIndex
 				if rawPtr := ht.tryLocation(key); rawPtr != nil {
@@ -1587,7 +1587,7 @@ func (ht *HatTrie) executeFastPutMapCommand(key string, subkey string, value str
 		return commandError(err.Error()), true
 	}
 	if hval.IsMap() {
-		hval.Index = ht.maps.putEntryAdaptive(hval.Index, subkey, value)
+		hval.Index = ht.maps.putPlainStringAdaptive(hval.Index, subkey, value)
 		if rawPtr != nil {
 			*rawPtr = hval.toValue()
 		}

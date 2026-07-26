@@ -1535,6 +1535,22 @@ func (data *smallMapData) putEntry(subkey string, value interface{}) bool {
 	return true
 }
 
+func (data *smallMapData) putPlainString(subkey string, value string) bool {
+	if index := data.index(subkey); index >= 0 {
+		if current, ok := data.entries[index].value.(string); ok && current == value {
+			return true
+		}
+		data.entries[index].value = value
+		return true
+	}
+	if int(data.length) >= smallMapEntryLimit {
+		return false
+	}
+	data.entries[data.length] = smallMapEntry{key: subkey, value: value}
+	data.length++
+	return true
+}
+
 func (data *smallMapData) putEntries(fields Map) bool {
 	additional := 0
 	for subkey := range fields {
@@ -1811,6 +1827,25 @@ func (ms *MapStorage) putEntryAdaptive(idx int32, subkey string, value interface
 		}
 		promoted := data.materialize(false)
 		promoted[subkey] = cloneValue(value)
+		next := ms.addOwned(promoted)
+		ms.delSmall(smallIndex)
+		return next
+	}
+	ms.PutEntry(idx, subkey, value)
+	return idx
+}
+
+func (ms *MapStorage) putPlainStringAdaptive(idx int32, subkey string, value string) int32 {
+	if smallIndex, ok := decodeSmallMapIndex(idx); ok {
+		if int(smallIndex) >= len(ms.small) || ms.smallReusables.Has(smallIndex) {
+			return idx
+		}
+		data := &ms.small[smallIndex]
+		if data.putPlainString(subkey, value) {
+			return idx
+		}
+		promoted := data.materialize(false)
+		promoted[subkey] = value
 		next := ms.addOwned(promoted)
 		ms.delSmall(smallIndex)
 		return next
