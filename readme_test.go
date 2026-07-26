@@ -150,6 +150,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Retained journal catch-up](#journal-delta-first-recovery-benchmark)",
 		"[Two-value small-set read](#collection-allocation-follow-up)",
 		"[Priority queue push+pop](#collection-allocation-follow-up)",
+		"[Direct priority-queue command reads](#compact-priority-queue-items)",
 		"[Radix prefix scan](#collection-allocation-follow-up)",
 		"[Reservoir sample add](#collection-allocation-follow-up)",
 		"[Per-key telemetry](#per-key-telemetry-modes)",

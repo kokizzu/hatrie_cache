@@ -1385,6 +1385,8 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		return ht.executeFastPushPriorityQueueCommand(key, priority, request.Value)
 	case "POPPQ", "POPPRIORITY":
 		return ht.executeFastPopPriorityQueueCommand(key)
+	case "GETPQ", "GETPRIORITY":
+		return ht.executeFastGetPriorityQueueCommand(key)
 	case "ADDBF", "BFADD":
 		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
 			return CacheCommandResponse{}, false
@@ -2509,6 +2511,186 @@ func commandFastPriorityQueueItemJSON(priority int64, value string) (string, boo
 	builder.WriteString(value)
 	builder.WriteString(`"}`)
 	return builder.String(), true
+}
+
+func (ht *HatTrie) executeFastGetPriorityQueueCommand(key string) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	hval := ht.peekCachedLocked(key)
+	if !hval.IsPriorityQueue() {
+		if hval.IsLevelDBReference() {
+			ht.mu.Unlock()
+			return CacheCommandResponse{}, false
+		}
+		ht.recordReadLocked(false, key)
+		ht.mu.Unlock()
+		return CacheCommandResponse{OK: true, Message: "value not found"}, true
+	}
+
+	queue := &ht.priorityQueues.array[hval.Index]
+	capacity, ok := commandFastPriorityQueueItemsJSONCapacity(queue.items)
+	if !ok {
+		ht.mu.Unlock()
+		return CacheCommandResponse{}, false
+	}
+	if len(queue.items) == 0 {
+		ht.recordReadLocked(true, key)
+		ht.mu.Unlock()
+		return CacheCommandResponse{OK: true, Message: "ok", Value: "[]"}, true
+	}
+	if len(queue.items) == 1 {
+		item := queue.items[0]
+		ht.recordReadLocked(true, key)
+		ht.mu.Unlock()
+		return CacheCommandResponse{OK: true, Message: "ok", Value: commandFastPriorityQueueSingleItemJSON(item, capacity)}, true
+	}
+
+	items := make([]priorityQueueItem, len(queue.items))
+	copy(items, queue.items)
+	ht.recordReadLocked(true, key)
+	ht.mu.Unlock()
+	return CacheCommandResponse{OK: true, Message: "ok", Value: commandFastPriorityQueueItemsJSON(items, capacity)}, true
+}
+
+func commandFastPriorityQueueItemsJSONCapacity(items []priorityQueueItem) (int, bool) {
+	const itemFixedBytes = len(`{"priority":`) + len(`,"value":`) + len(`}`)
+	max := int(^uint(0) >> 1)
+	capacity := len(`[]`)
+	for idx, item := range items {
+		value, ok := priorityQueueItemString(item)
+		if !ok {
+			return 0, false
+		}
+		stringBytes, ok := commandJSONStringEncodedLength(value)
+		if !ok {
+			return 0, false
+		}
+		extra := itemFixedBytes + commandFastInt64Digits(item.Priority)
+		if stringBytes > max-extra {
+			return 0, false
+		}
+		extra += stringBytes
+		if idx > 0 {
+			extra++
+		}
+		if extra > max-capacity {
+			return 0, false
+		}
+		capacity += extra
+	}
+	return capacity, true
+}
+
+func commandFastPriorityQueueSingleItemJSON(item priorityQueueItem, capacity int) string {
+	var builder strings.Builder
+	builder.Grow(capacity)
+	builder.WriteByte('[')
+	writeCommandPriorityQueueItemJSON(&builder, item)
+	builder.WriteByte(']')
+	return builder.String()
+}
+
+func commandFastPriorityQueueItemsJSON(items []priorityQueueItem, capacity int) string {
+	var builder strings.Builder
+	builder.Grow(capacity)
+	builder.WriteByte('[')
+	first := true
+	for len(items) > 0 {
+		if !first {
+			builder.WriteByte(',')
+		}
+		first = false
+		item := items[0]
+		last := len(items) - 1
+		items[0] = items[last]
+		items = items[:last]
+		if len(items) > 0 {
+			priorityQueueSiftDownItems(items, 0)
+		}
+		writeCommandPriorityQueueItemJSON(&builder, item)
+	}
+	builder.WriteByte(']')
+	return builder.String()
+}
+
+func priorityQueueSiftDownItems(items []priorityQueueItem, idx int) {
+	for {
+		left := 2*idx + 1
+		if left >= len(items) {
+			return
+		}
+		smallest := left
+		right := left + 1
+		if right < len(items) && priorityQueueLess(items[right], items[left]) {
+			smallest = right
+		}
+		if !priorityQueueLess(items[smallest], items[idx]) {
+			return
+		}
+		items[idx], items[smallest] = items[smallest], items[idx]
+		idx = smallest
+	}
+}
+
+func writeCommandPriorityQueueItemJSON(builder *strings.Builder, item priorityQueueItem) {
+	var digits [20]byte
+	builder.WriteString(`{"priority":`)
+	_, _ = builder.Write(strconv.AppendInt(digits[:0], item.Priority, 10))
+	builder.WriteString(`,"value":`)
+	value, _ := priorityQueueItemString(item)
+	writeJSONString(builder, value)
+	builder.WriteByte('}')
+}
+
+func priorityQueueItemString(item priorityQueueItem) (string, bool) {
+	if item.stringValue != "" {
+		return item.stringValue, true
+	}
+	value, ok := item.Value.(string)
+	return value, ok
+}
+
+func commandFastInt64Digits(value int64) int {
+	if value >= 0 {
+		return commandFastUint64Digits(uint64(value))
+	}
+	return 1 + commandFastUint64Digits(uint64(-(value+1))+1)
+}
+
+func commandJSONStringEncodedLength(value string) (int, bool) {
+	max := int(^uint(0) >> 1)
+	length := len(`""`)
+	for index := 0; index < len(value); {
+		character := value[index]
+		extra := 1
+		if character < utf8.RuneSelf {
+			switch {
+			case character >= 0x20 && character != '\\' && character != '"' && character != '<' && character != '>' && character != '&':
+				extra = 1
+			case character == '\\' || character == '"' || character == '\b' || character == '\f' || character == '\n' || character == '\r' || character == '\t':
+				extra = 2
+			default:
+				extra = 6
+			}
+			index++
+		} else {
+			runeValue, size := utf8.DecodeRuneInString(value[index:])
+			if runeValue == utf8.RuneError && size == 1 {
+				extra = 6
+				index++
+			} else if runeValue == '\u2028' || runeValue == '\u2029' {
+				extra = 6
+				index += size
+			} else {
+				extra = size
+				index += size
+			}
+		}
+		if extra > max-length {
+			return 0, false
+		}
+		length += extra
+	}
+	return length, true
 }
 
 func commandFastTopKEstimateResponse(message string, estimate TopKEstimate) CacheCommandResponse {
