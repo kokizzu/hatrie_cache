@@ -214,6 +214,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | Escaped and structured values retain the typed generic path |
 | Current pass | [Multi-item Top-K reads](#multi-item-top-k-read-materialization), 16/default-100 string items | Generic materialization: 2,851/10,558 ns; 2,297/13,516 B; 8 allocs | Direct JSON: 1,851/6,898 ns; 1,624/9,752 B; 3 allocs | 1.54x/1.53x faster, 1.41x/1.39x lower heap, 2.67x fewer allocs | One-item and write implementations are unchanged; structured fallback improves 1.11x |
+| Reverted | [Generic Top-K slice sorter](#multi-item-top-k-read-materialization), 16/default-100 string items | `sort.Interface`: exact reads 2,240/8,108 ns | `slices.SortFunc`: 2,407/9,099 ns | One allocation and 24 B removed, but CPU 1.07x/1.12x slower | Rolled back; the small transient-memory saving did not justify slower reads |
 | Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
@@ -2972,6 +2973,22 @@ slower, so it was discarded and the prior one-item code was restored. The final
 one-item path remains at 80 B and one allocation, while `ADDTOPK` remains at 72
 B and three allocations. Their implementations, retained state, ordering,
 storage, snapshots, journal, replication, and wire JSON shape are unchanged.
+
+A later Go 1.26 candidate replaced the typed `sort.Interface` adapter with
+`slices.SortFunc`. Ordering and parity tests passed ten times. Nine alternating
+300 ms A/B pairs used otherwise identical precompiled test binaries pinned to
+one CPU:
+
+| Read path, nine-run median | `sort.Interface` | `slices.SortFunc` | Result |
+| --- | ---: | ---: | ---: |
+| Exact command, 16 strings | 2,240 ns; 1,624 B; 3 allocs | 2,407 ns; 1,600 B; 2 allocs | 1.07x slower |
+| Exact command, 100 strings | 8,108 ns; 9,752 B; 3 allocs | 9,099 ns; 9,728 B; 2 allocs | 1.12x slower |
+| Generic control, 16 strings | 3,138 ns; 2,192 B; 6 allocs | 3,290 ns; 2,168 B; 5 allocs | 1.05x slower |
+| Generic control, 100 strings | 12,444 ns; 13,264 B; 6 allocs | 13,711 ns; 13,240 B; 5 allocs | 1.10x slower |
+
+The generic sorter removed one interface allocation and 24 transient bytes,
+but regressed every complete read path. It was removed, restoring the faster
+adapter and leaving no runtime or compatibility tradeoff.
 
 <a id="lazy-small-top-k-indexes"></a>
 ### Lazy Small Top-K Indexes
