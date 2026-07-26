@@ -223,6 +223,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Radix-node tag compaction",
 		"Fully linked XOR peel order",
 		"Inline sparse bitsets with generic search",
+		"Inline Roaring-container values",
 		"HyperLogLog side allocation",
 		"String-keyed Merkle pending set",
 		"Top-K one-item rewrite",

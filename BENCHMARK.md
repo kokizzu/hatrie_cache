@@ -311,6 +311,7 @@ tree.
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
 | Fully linked XOR peel order | Halved normal-build allocations and cumulative heap | Cache-random reverse traversal made the 4,096/65,536-item builders 1.03x/1.05x slower | Replaced by linking only the queue while retaining contiguous peel order; see [linked XOR-filter build queue](#linked-xor-filter-build-queue) |
 | Inline sparse bitsets with generic search | Removed singleton/pair backing allocations and reduced retained objects | The added representation branch made 4,096-value array lookups 1.03x slower | Replaced by an inlineable typed binary search; promoted lookups are now 1.01x faster; see [inline sparse-bitset containers](#inline-sparse-bitset-containers) |
+| Inline Roaring-container values | Made 50,000 singleton containers 1.38x faster to build and removed 50,000 backing allocations | Promoted 16-value lookups were 1.04x slower; large-array and bitmap controls were also about 1.01x-1.02x slower | Reverted; the original slice representation remains; see [inline Roaring-container rollback](#inline-roaring-container-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
@@ -3281,6 +3282,31 @@ small containers improved, its extra representation branch made a 4,096-value
 array lookup 30.86 ns versus 29.93 ns for the control, or 1.03x slower. It was
 replaced by an inlineable typed binary search; the final promoted lookup is
 1.01x faster. No failed implementation remains in production.
+
+<a id="inline-roaring-container-rollback"></a>
+#### Inline Roaring-Container Rollback
+
+Roaring containers also have four trailing padding bytes. An experiment used
+them for the first two `uint16` values, promoted at the third value, and
+demoted after removal. Behavior, snapshot round-trip, encoded-size, and
+64-byte layout tests passed. Same-binary controls retained the slice-backed
+implementation and alternated lookup timing to expose representation costs.
+
+```sh
+make run CMD='go test . -run RoaringBitmap -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRoaringBitmapInlineRetained50k -benchtime=1x -count=5 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkRoaringBitmapPromotedContainsAlternating -benchtime=1000x -count=7 -cpu=1'
+```
+
+For 50,000 singleton containers, the five-run median improved from 11.749 ms
+to 8.488 ms, or 1.38x. Retained memory fell from 80.75 to 72.75 B/container,
+retained objects fell from about 0.5001 to 0.000040/container, and build
+allocations fell from 50,027 to 27. The required representation branch was not
+free, however: a paired 16-value lookup measured 5.139 versus 4.955 ns, or
+1.04x slower. The 4,096-value array and bitmap controls were also roughly
+1.01x-1.02x slower. Special-casing three values recovered that layout but
+made the larger controls worse. The complete candidate and its tests were
+removed; it adds no runtime cost.
 
 The reservoir sample add path now has a plain-string fast path that hashes the
 JSON string representation directly and only boxes retained values. The focused
