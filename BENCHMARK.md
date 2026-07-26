@@ -314,6 +314,7 @@ tree.
 | Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
 | Fully linked XOR peel order | Halved normal-build allocations and cumulative heap | Cache-random reverse traversal made the 4,096/65,536-item builders 1.03x/1.05x slower | Replaced by linking only the queue while retaining contiguous peel order; see [linked XOR-filter build queue](#linked-xor-filter-build-queue) |
+| Marker-only plain XOR staging | Removed 64 allocations and 1,024 cumulative bytes while making 64-item staging 1.17x faster | Pending snapshot creation shifted those costs later: 2 to 66 allocations, 3,456 to 4,480 bytes, and 1.23x slower | Reverted; staged values remain pre-boxed so snapshots stay cheap; see [XOR staging marker](#xor-staging-marker-rollback) |
 | Inline sparse bitsets with generic search | Removed singleton/pair backing allocations and reduced retained objects | The added representation branch made 4,096-value array lookups 1.03x slower | Replaced by an inlineable typed binary search; promoted lookups are now 1.01x faster; see [inline sparse-bitset containers](#inline-sparse-bitset-containers) |
 | Inline Roaring-container values | Made 50,000 singleton containers 1.38x faster to build and removed 50,000 backing allocations | Promoted 16-value lookups were 1.04x slower; large-array and bitmap controls were also about 1.01x-1.02x slower | Reverted; the original slice representation remains; see [inline Roaring-container rollback](#inline-roaring-container-rollback) |
 | Local slice view over fixed Roaring bitmap | Preserved the 48-byte header while dense build/lookup measured 1.02x/1.09x faster | Paired bitmap remove/add was 4.594 versus 4.486 ns, or 1.024x slower | Reverted; direct fixed-pointer access remains 1.006x faster than the legacy slice in the longer control; see [compact Roaring-container headers](#compact-roaring-container-headers) |
@@ -3329,6 +3330,30 @@ reduced a successful build to two allocations and roughly half the cumulative
 heap, but random slot traversal made 4,096/65,536-item builds 1.03x/1.05x
 slower. That variant was removed and is indexed as rejected; it adds no runtime
 cost.
+
+<a id="xor-staging-marker-rollback"></a>
+#### XOR Staging Marker Rollback
+
+Plain-string staging stores a canonical quoted JSON key and a boxed value used
+by pending snapshots. A candidate replaced each value with one process-global
+marker and reconstructed the plain string from the key during snapshot capture.
+The existing fast-path equivalence test plus a test-first marker assertion
+proved identical pending snapshots, builds, fingerprints, and lookups.
+
+```sh
+make run CMD='go test . -run XorFilter -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterLifecyclePhases64 -benchtime=10000x -count=9 -cpu=1 -benchmem'
+```
+
+| 64 staged strings, median | Existing boxed value | Marker candidate | Result |
+| --- | ---: | ---: | --- |
+| Stage | 12,759 ns; 11,416 B; 139 allocs | 10,833 ns; 10,392 B; 75 allocs | Candidate 1.18x faster, 1.10x lower heap, 1.85x fewer allocations |
+| Pending snapshot | 6,156 ns; 3,456 B; 2 allocs | 7,570 ns; 4,480 B; 66 allocs | Candidate 1.23x slower, 1.30x higher heap, and 33x more allocations |
+
+The marker did not eliminate value boxing; it deferred 64 boxes from staging to
+every pending snapshot. That is worse for repeated backups and monitoring, so
+the candidate and its representation test were removed. The original staged
+value and all baseline runtime behavior remain.
 
 <a id="inline-sparse-bitset-containers"></a>
 ### Inline Sparse-Bitset Containers

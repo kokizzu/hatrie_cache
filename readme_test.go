@@ -226,6 +226,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Priority-queue structured fallback scan",
 		"Radix-node tag compaction",
 		"Fully linked XOR peel order",
+		"Marker-only plain XOR staging",
 		"Inline sparse bitsets with generic search",
 		"Inline Roaring-container values",
 		"Local slice view over fixed Roaring bitmap",
