@@ -265,6 +265,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"40-byte Roaring field order",
 		"HyperLogLog side allocation",
 		"String-keyed Merkle pending set",
+		"Merkle table occupancy sentinel",
 		"Top-K one-item rewrite",
 		"Generic Top-K slice sorter",
 		"Generic Top-K structured fallback scan",

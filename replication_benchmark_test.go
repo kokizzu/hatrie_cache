@@ -1128,6 +1128,72 @@ func BenchmarkReplicationMerkleIndexBuild(b *testing.B) {
 	b.ReportMetric(keyCount, "keys/op")
 }
 
+func BenchmarkReplicationMerkleTableOperations(b *testing.B) {
+	const keyCount = 10000
+	keys := make([]uint64, keyCount)
+	missing := make([]uint64, keyCount)
+	for idx := range keys {
+		keys[idx] = xxhash.Sum64String("session:" + strconv.Itoa(idx))
+		missing[idx] = xxhash.Sum64String("missing:" + strconv.Itoa(idx))
+	}
+
+	b.Run("Build10K", func(b *testing.B) {
+		var retained int
+		b.ReportAllocs()
+		for iteration := 0; iteration < b.N; iteration++ {
+			table := newReplicationMerkleTable()
+			for idx, key := range keys {
+				table.set(key, uint64(idx+1))
+			}
+			retained = table.retainedBytes()
+		}
+		b.ReportMetric(float64(retained)/keyCount, "retained_B/key")
+	})
+
+	table := newReplicationMerkleTable()
+	for idx, key := range keys {
+		table.set(key, uint64(idx+1))
+	}
+	b.Run("Hit", func(b *testing.B) {
+		var value uint64
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			value, _ = table.get(keys[idx%keyCount])
+		}
+		if value == 0 {
+			b.Fatal("last table hit returned zero")
+		}
+	})
+	b.Run("Miss", func(b *testing.B) {
+		var found bool
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			_, found = table.get(missing[idx%keyCount])
+		}
+		if found {
+			b.Fatal("last table miss found a value")
+		}
+	})
+	b.Run("Update", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			table.set(keys[idx%keyCount], uint64(idx+1))
+		}
+	})
+	b.Run("DeleteReinsert", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			key := keys[idx%keyCount]
+			table.delete(key)
+			table.set(key, uint64(idx+1))
+		}
+	})
+}
+
 func BenchmarkReplicationMerkleWriteTracking(b *testing.B) {
 	const keyCount = 10000
 	keys := make([]string, keyCount)

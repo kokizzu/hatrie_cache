@@ -335,6 +335,7 @@ tree.
 | 40-byte Roaring field order | Lowered singleton retained and cumulative heap 1.21x/1.24x and made the 50,000-container build 1.11x faster | The best values-first layout made paired 4,097-value dense construction 1.018x and 1.044x slower in two nine-run confirmations; a pointer-first layout made lookup 1.039x slower | Reverted; the 48-byte operation-neutral layout remains; see [Roaring field-order compaction](#roaring-field-order-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
+| Merkle table occupancy sentinel | Removed the occupancy allocation, lowered complete-index retained heap 1.06x, and made direct update/delete 1.07x/1.17x faster | Direct hits/misses were 1.10x/1.40x slower and complete 10k index construction was 1.08x slower | Reverted; the dense byte occupancy table remains; see [Merkle table occupancy sentinel](#merkle-table-occupancy-sentinel-rollback) |
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Generic Top-K slice sorter | Removed one allocation and 24 transient bytes | Exact 16/100-item reads were 1.07x/1.12x slower and every generic row regressed | Reverted; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Generic Top-K structured fallback scan | Preserved the string-only direct encoder while extending exact generic `GET` | A 16-item structured read was 1.06x slower after scanning before unchanged materialization, with no heap or allocation gain | Replaced by one-pass mixed-value encoding; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
@@ -2867,6 +2868,7 @@ retain the compatible sorted-digest implementation.
 ```sh
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIncremental -benchtime=1x -count=5 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleIndexBuild -benchtime=1x -count=5 -benchmem'
+make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleTableOperations -benchtime=200ms -count=10 -benchmem'
 make run CMD='go test . -run=NoSuchTest -bench=BenchmarkReplicationMerkleWriteTracking -benchtime=100000x -count=5 -benchmem'
 make bench-merkle-maintenance BENCHTIME=1x COUNT=7
 ```
@@ -2913,6 +2915,35 @@ string-keyed map variant slowed the 16,384-key candidate cycle from 29.294 ms
 to 33.070 ms without reducing measured heap, so the hash-keyed map was retained.
 Pending updates survive memory compaction, and snapshots flush them while
 holding the same trie lock used by mutations.
+
+<a id="merkle-table-occupancy-sentinel-rollback"></a>
+#### Merkle Table Occupancy Sentinel Rollback
+
+The active Merkle index uses parallel hash, digest, and one-byte occupancy
+arrays. A test was added first requiring 16 bytes of backing per table slot;
+it failed against the retained 17-byte layout. The candidate used hash zero as
+the empty-slot sentinel and kept a fixed side slot for the valid zero hash.
+That removed one allocation per table size, reduced a 10,000-key direct build
+from 522,242 to 491,522 cumulative heap bytes and from 12 to 8 allocations,
+and lowered table backing from 27.85 to 26.21 B/key.
+
+Same-command ten-run medians exposed the cache-locality cost:
+
+| Merkle table operation | Byte occupancy | Zero sentinel | Candidate result |
+| --- | ---: | ---: | ---: |
+| Build 10k | 261.1 us | 263.4 us | 1.01x slower |
+| Existing-key hit | 2.555 ns | 2.812 ns | 1.10x slower |
+| Missing-key lookup | 7.172 ns | 10.035 ns | 1.40x slower |
+| Existing-key update | 6.209 ns | 5.790 ns | 1.07x faster |
+| Delete plus reinsert | 31.39 ns | 26.93 ns | 1.17x faster |
+
+The complete index build also moved from 4.220 to 4.565 ms, or 1.08x slower,
+while retained index memory improved only from 29.60 to 27.96 B/key and
+cumulative heap from 574,867 to 543,126 bytes. Missing lookups benefit from
+scanning the dense occupancy bytes before touching the wider hash array, so
+the occupancy allocation is useful metadata rather than removable waste. The
+runtime candidate and its failing compact-layout contract were removed; the
+focused operation benchmark remains to prevent repeating the experiment.
 
 ### Indexed Expiration Heap
 
