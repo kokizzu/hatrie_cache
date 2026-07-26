@@ -417,6 +417,32 @@ func TestDocsDescribeLazyRateLimiterShardMaps(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeLazyReplicationGRPCSessionMaps(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[lazy gRPC session maps](BENCHMARK.md#lazy-grpc-session-maps)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing lazy gRPC session token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkReplicationGRPCSessionLifecycle",
+		"2.98x-3.04x faster",
+		"3.25x lower heap",
+		"4x fewer allocations",
+		"live sessions never allocate sticky fallback",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing lazy gRPC session token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeSinglePassExpirationIndexCompaction(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

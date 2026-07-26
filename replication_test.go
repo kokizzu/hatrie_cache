@@ -302,6 +302,49 @@ func TestReplicationGRPCStreamLiveHTTPFallbackIsConfigurable(t *testing.T) {
 	}
 }
 
+func TestReplicationGRPCSessionDefersOptionalMaps(t *testing.T) {
+	replicator := &HTTPReplicator{}
+	syncSession := newReplicationGRPCSyncSession(context.Background(), replicator)
+	if syncSession.targets != nil || syncSession.fallback != nil {
+		t.Fatalf("new sync session maps = targets %v fallback %v, want nil/nil", syncSession.targets, syncSession.fallback)
+	}
+	syncSession.markFallback("node-b")
+	if syncSession.targets != nil || !syncSession.fallback["node-b"] {
+		t.Fatalf("sync fallback maps = targets %v fallback %v, want nil/marked", syncSession.targets, syncSession.fallback)
+	}
+	syncSession.close()
+	if syncSession.targets != nil {
+		t.Fatalf("closed sync session targets = %v, want nil", syncSession.targets)
+	}
+
+	liveSession := newReplicationGRPCLiveSession(context.Background(), replicator)
+	liveSession.markFallback("node-b")
+	if liveSession.targets != nil || liveSession.fallback != nil {
+		t.Fatalf("live fallback maps = targets %v fallback %v, want nil/nil", liveSession.targets, liveSession.fallback)
+	}
+	liveSession.close()
+}
+
+var benchmarkReplicationGRPCSessionSink *replicationGRPCSyncSession
+
+func BenchmarkReplicationGRPCSessionLifecycle(b *testing.B) {
+	replicator := &HTTPReplicator{}
+	for _, sticky := range []bool{false, true} {
+		name := "Live"
+		if sticky {
+			name = "Sync"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				session := newReplicationGRPCSession(context.Background(), replicator, sticky)
+				session.close()
+				benchmarkReplicationGRPCSessionSink = session
+			}
+		})
+	}
+}
+
 func TestReplicationGRPCStreamDigestDeleteUsesConfiguredHTTPFallback(t *testing.T) {
 	var requests atomic.Int64
 	var received CacheCommandRequest

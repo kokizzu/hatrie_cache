@@ -306,6 +306,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Pipelined live gRPC replication](#pipelined-live-grpc-replication), 10k writes | HTTP: 178.079 ms; 1,868,894 wire B | gRPC: 167.797 ms; 1,081,746 wire B | 1.06x faster, 1.73x smaller wire | Requires native gRPC listener; HTTP remains fallback |
 | Current pass | [Live gRPC micro-batching](#pipelined-live-grpc-replication), 10k writes | 193.299 ms; 10,000 batches; 1,081,747 wire B | 149.682 ms; 2,910 batches; 368,252 wire B | 1.29x faster, 3.44x fewer batches, 2.94x smaller wire | One-caller throughput is 1.6% lower; set max commands to 1 for legacy behavior |
 | Current pass | [Allocate-after-grouping live gRPC](#pipelined-live-grpc-replication), 10k writes | 154.265 ms; 2,959 batches; 353.63 MB heap; 2,037,671 allocs | 126.893 ms; 2,305 batches; 303.23 MB heap; 940,900 allocs | 1.22x faster, 1.28x fewer batches, 1.17x lower heap, 2.17x fewer allocs | Topology updates compute their fingerprint once; requests retain payload references until ack |
+| Current pass | [Lazy gRPC session maps](#lazy-grpc-session-maps), unused create-and-close lifecycle | Eager live/sync: 170.3/175.7 ns; 208 heap B; 4 allocs | Lazy live/sync: 57.10/57.88 ns; 64 heap B; 1 alloc | 2.98x-3.04x faster, 3.25x lower heap, 4x fewer allocations | First successful stream and actual sticky fallback allocate their required maps; live sessions never allocate sticky fallback state |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
 | Current pass | [Bounded lazy outbox restore](#binary-grouped-replication-outbox), 100k jobs | 466.884 ms; 100,000 resident jobs; 415.1 MB heap | 5.019 ms; 1,024 resident jobs; 3.52 MB heap | 93.03x faster, 97.66x fewer resident jobs, 118.0x lower heap | LevelDB pages are lazy; legacy whole-file JSON still loads its file snapshot |
@@ -3039,6 +3040,40 @@ payload bytes until the acknowledgement is delivered. This removes duplicate
 per-caller protobuf envelopes without copying values. Topology reloads pay the
 fingerprint cost once in `Set`; ordinary reads remain protected by the store's
 read lock.
+
+<a id="lazy-grpc-session-maps"></a>
+#### Lazy gRPC Session Maps
+
+Both live and anti-entropy gRPC sessions previously allocated target and
+fallback maps at construction, then allocated another empty target map during
+close. Target lookup and fallback lookup already support nil maps. Sessions now
+allocate the target map immediately before publishing the first successfully
+opened stream, allocate fallback state only when a sticky sync session actually
+falls back, and clear the target map to nil during close. Because live sessions
+do not retain sticky fallback decisions, live sessions never allocate sticky
+fallback state.
+
+The test-first lifecycle fixture proves new live/sync maps are nil, an actual
+sync fallback initializes only fallback state, a live fallback initializes
+neither map, and close leaves target state nil. Existing stream, fallback,
+digest-repair, batching, acknowledgement, and shutdown tests cover active
+sessions ten times.
+
+```sh
+make run CMD='go test . -run="TestReplicationGRPC(SessionDefersOptionalMaps|Stream)" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationGRPCSessionLifecycle -benchmem -benchtime=100000x -count=10 -cpu=1'
+```
+
+| Unused session create plus close, ten-run median | Eager maps | Lazy maps | Improvement |
+| --- | ---: | ---: | ---: |
+| Live session | 170.3 ns; 208 B; 4 allocs | 57.10 ns; 64 B; 1 alloc | 2.98x faster; 3.25x lower heap; 4x fewer allocations |
+| Sync session | 175.7 ns; 208 B; 4 allocs | 57.88 ns; 64 B; 1 alloc | 3.04x faster; 3.25x lower heap; 4x fewer allocations |
+
+The first active target still creates the same required map under the existing
+session mutex, after connection establishment and before publication. Sticky
+fallback creates one map only on the existing error path. No extra steady-state
+branch, retained target, goroutine, connection, request, wire byte,
+configuration, or compatibility behavior was added.
 
 ### Hierarchical Merkle Anti-Entropy
 

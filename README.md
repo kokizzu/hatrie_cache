@@ -1806,6 +1806,13 @@ internal connection, while `grpcs://` verifies the server with the host trust
 store. `REPLICATION_AUTH_TOKEN` is accepted by the stream without granting
 access to other gRPC methods.
 
+Stream sessions use [lazy gRPC session maps](BENCHMARK.md#lazy-grpc-session-maps):
+target state is allocated only after the first stream opens, sticky HTTP
+fallback state only after a sync-session failure, and live sessions never
+allocate fallback state. An unused create-and-close lifecycle is 2.98x-3.04x
+faster with 3.25x lower heap and four times fewer allocations; active target,
+wire, retry, and fallback behavior is unchanged.
+
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
 closed instead. For 10,000 live writes from 32 callers, zero-wait

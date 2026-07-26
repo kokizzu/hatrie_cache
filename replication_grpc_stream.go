@@ -82,8 +82,6 @@ func newReplicationGRPCSession(ctx context.Context, replicator *HTTPReplicator, 
 	return &replicationGRPCSyncSession{
 		replicator:     replicator,
 		ctx:            ctx,
-		targets:        make(map[string]*replicationGRPCStreamTarget),
-		fallback:       make(map[string]bool),
 		stickyFallback: stickyFallback,
 	}
 }
@@ -95,7 +93,7 @@ func (session *replicationGRPCSyncSession) close() {
 	session.mu.Lock()
 	session.closed = true
 	targets := session.targets
-	session.targets = make(map[string]*replicationGRPCStreamTarget)
+	session.targets = nil
 	session.mu.Unlock()
 	for _, target := range targets {
 		target.close()
@@ -441,6 +439,9 @@ func (session *replicationGRPCSyncSession) executeReplicationTaskGroup(ctx conte
 func (session *replicationGRPCSyncSession) markFallback(key string) {
 	session.mu.Lock()
 	if session.stickyFallback {
+		if session.fallback == nil {
+			session.fallback = make(map[string]bool)
+		}
 		session.fallback[key] = true
 	}
 	target := session.targets[key]
@@ -572,6 +573,9 @@ func (session *replicationGRPCSyncSession) streamTarget(node TopologyNode) (*rep
 		session.mu.Unlock()
 		target.close()
 		return existing, nil
+	}
+	if session.targets == nil {
+		session.targets = make(map[string]*replicationGRPCStreamTarget)
 	}
 	session.targets[key] = target
 	session.mu.Unlock()
