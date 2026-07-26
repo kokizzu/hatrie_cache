@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -2864,6 +2865,38 @@ func commandFastTopKItemsJSON(top topKData) (string, error) {
 	return commandFastTopKItemsJSONWithCapacity(items, capacity)
 }
 
+func commandFastTopKSingleItemJSON(item topKItem) (string, error) {
+	const itemFixedBytes = len(`{"value":,"count":,"error":}`)
+	max := int(^uint(0) >> 1)
+	extra := itemFixedBytes + commandFastUint64Digits(item.Count) + commandFastUint64Digits(item.Error)
+	if len(item.Key) > max-extra || len(`[]`) > max-extra-len(item.Key) {
+		return "", errors.New("command response is too large")
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(`[]`) + extra + len(item.Key))
+	builder.WriteString(`[{"value":`)
+	if value, ok := item.Value.(string); ok && jsonPlainStringMatchesKey(value, item.Key) {
+		builder.WriteString(item.Key)
+	} else if err := writeSmallMapJSONValue(&builder, item.Value); err != nil {
+		return "", err
+	}
+	var digits [20]byte
+	builder.WriteString(`,"count":`)
+	_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Count, 10))
+	builder.WriteString(`,"error":`)
+	_, _ = builder.Write(strconv.AppendUint(digits[:0], item.Error, 10))
+	builder.WriteString(`}]`)
+	return builder.String(), nil
+}
+
+func commandFastOwnedTopKItemsJSONWithCapacity(items []topKItem, capacity int) (string, error) {
+	if len(items) > 1 {
+		sort.Sort(topKItemsByRank(items))
+	}
+	return commandFastTopKItemsJSONWithCapacity(items, capacity)
+}
+
 func commandFastTopKItemsJSONCapacity(items []topKItem) (int, bool) {
 	const itemFixedBytes = len(`{"value":,"count":,"error":}`)
 	max := int(^uint(0) >> 1)
@@ -3046,10 +3079,33 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 		}
 		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 	case hval.IsTopK():
-		top := ht.topKs.array[hval.Index]
-		payload, err := commandFastTopKItemsJSON(top)
+		items := ht.topKs.array[hval.Index].items
+		if len(items) == 0 {
+			ht.recordReadLocked(true, key)
+			ht.mu.RUnlock()
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "[]"}, true
+		}
+		if len(items) == 1 {
+			item := items[0]
+			ht.recordReadLocked(true, key)
+			ht.mu.RUnlock()
+			payload, err := commandFastTopKSingleItemJSON(item)
+			if err != nil {
+				return commandError(err.Error()), true
+			}
+			return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+		}
+		capacity, ok := commandFastTopKItemsJSONCapacity(items)
+		if !ok {
+			ht.recordReadLocked(true, key)
+			ht.mu.RUnlock()
+			return commandError("command response is too large"), true
+		}
+		owned := make([]topKItem, len(items))
+		copy(owned, items)
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
+		payload, err := commandFastOwnedTopKItemsJSONWithCapacity(owned, capacity)
 		if err != nil {
 			return commandError(err.Error()), true
 		}

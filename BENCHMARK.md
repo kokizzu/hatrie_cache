@@ -218,6 +218,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct generic reservoir GET](#reservoir-sample-read-materialization), 16/128 string and mixed items | Generic materialization: 2,709/18,349 ns strings; 2,941/18,861 ns mixed | Shared-lock direct JSON: 2,225/17,563 ns strings; 2,701/18,275 ns mixed | 1.03x-1.22x faster; up to 1.23x lower heap; 1.67x-2.00x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
 | Current pass | [Multi-item Top-K reads](#multi-item-top-k-read-materialization), 16/default-100 string items | Generic materialization: 2,851/10,558 ns; 2,297/13,516 B; 8 allocs | Direct JSON: 1,851/6,898 ns; 1,624/9,752 B; 3 allocs | 1.54x/1.53x faster, 1.41x/1.39x lower heap, 2.67x fewer allocs | One-item and write implementations are unchanged; structured fallback improves 1.11x |
 | Current pass | [Direct generic Top-K GET](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Generic materialization: 2,376/13,936 ns strings; 3,019/13,966 ns mixed | Shared-lock direct JSON: 1,660/10,024 ns strings; 2,148/10,263 ns mixed | 1.36x-1.43x faster; 1.35x-1.53x lower heap; 2.00x-2.20x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
+| Current pass | [Generic Top-K encoding outside read lock](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Lock-held direct JSON: 2,023/13,713 ns strings; 2,486/16,561 ns mixed; writer stalled behind caller JSON | Point-in-time copy: 1,988/13,598 ns strings; 2,469/16,036 ns mixed; writer progresses during JSON | 1.01x-1.03x faster serially with identical heap/allocations; unbounded caller-marshaler writer stall removed | Exact generic `GET` only; the dedicated `GETTOPK` candidate was rejected after a repeatable 1.05x CPU regression |
 | Reverted | [Generic Top-K slice sorter](#multi-item-top-k-read-materialization), 16/default-100 string items | `sort.Interface`: exact reads 2,240/8,108 ns | `slices.SortFunc`: 2,407/9,099 ns | One allocation and 24 B removed, but CPU 1.07x/1.12x slower | Rolled back; the small transient-memory saving did not justify slower reads |
 | Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
@@ -306,6 +307,7 @@ tree.
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Generic Top-K slice sorter | Removed one allocation and 24 transient bytes | Exact 16/100-item reads were 1.07x/1.12x slower and every generic row regressed | Reverted; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Generic Top-K structured fallback scan | Preserved the string-only direct encoder while extending exact generic `GET` | A 16-item structured read was 1.06x slower after scanning before unchanged materialization, with no heap or allocation gain | Replaced by one-pass mixed-value encoding; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
+| Dedicated `GETTOPK` lock-release snapshot | Let writers proceed while caller-controlled JSON marshaling was blocked | The five-second 100-item structured read was 14,457 ns versus 13,776 ns legacy, or 1.05x slower, with identical 9,872 B and 5 allocations | Reverted for `GETTOPK`; the serial-neutral generic `GET` snapshot remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
 | Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
@@ -3257,6 +3259,37 @@ make run CMD='go test . -run=NONE -bench "BenchmarkTopKGet(Path|StructuredFallba
 | 100 strings | 13,936 ns; 13,444 B; 6 allocs | 10,024 ns; 9,752 B; 3 allocs | 1.39x faster; 1.38x lower heap; 2.00x fewer allocs |
 | 16 items, one structured | 3,019 ns; 2,680 B; 11 allocs | 2,148 ns; 1,754 B; 5 allocs | 1.41x faster; 1.53x lower heap; 2.20x fewer allocs |
 | 100 items, one structured | 13,966 ns; 13,956 B; 11 allocs | 10,263 ns; 9,931 B; 5 allocs | 1.36x faster; 1.41x lower heap; 2.20x fewer allocs |
+
+The exact generic `GET` originally kept its shared cache lock while sorting and
+encoding the private Top-K copy. That made a caller-owned `MarshalJSON` method
+part of the lock hold: a deterministic one- and multi-item test showed a writer
+could not complete during the full 100 ms observation gate and would remain
+blocked until the marshaler was released. The retained path now performs the
+bounded key/count sizing pass and private item copy under the shared lock,
+records the read, then unlocks before sorting and encoding. A one-item direct
+encoder preserves the original one-allocation helper contract.
+
+The serial comparison runs both orders to cancel host drift. The rows below are
+pooled medians from five 500 ms samples per order on one logical CPU:
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkGenericTopKReadLockScope -benchmem -benchtime=500ms -count=5 -cpu=1'
+```
+
+| Exact generic `GET` lock scope | Lock-held encoding | Snapshot then encode | Result |
+| --- | ---: | ---: | ---: |
+| 16 strings | 2,023 ns; 1,624 B; 3 allocs | 1,988 ns; 1,624 B; 3 allocs | 1.02x faster; memory unchanged |
+| 100 strings | 13,713 ns; 9,752 B; 3 allocs | 13,598 ns; 9,752 B; 3 allocs | 1.01x faster; memory unchanged |
+| 16 items, one structured | 2,486 ns; 1,744 B; 5 allocs | 2,469 ns; 1,744 B; 5 allocs | 1.01x faster; memory unchanged |
+| 100 items, one structured | 16,561 ns; 9,872 B; 5 allocs | 16,036 ns; 9,872 B; 5 allocs | 1.03x faster; memory unchanged |
+
+Applying the same lock release to dedicated `GETTOPK` also let the writer
+progress, but failed the serial gate. Its five-second 100-item structured run
+was 14,457 ns versus 13,776 ns for the legacy lock-held path, 1.05x slower,
+with the same 9,872 B and five allocations. CPU profiles showed no compensating
+work or memory reduction, so the dedicated candidate was reverted and remains
+listed in the rejected index. Only the neutral generic `GET` improvement is
+retained.
 
 The shared dedicated-command controls improved 1.49x for 16 strings, 1.43x
 for 100 strings, and 1.46x for the 16-item structured fixture. The change adds
