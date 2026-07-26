@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -151,6 +153,31 @@ func TestXorFilterBuildRetriesWithoutChangingFingerprintResult(t *testing.T) {
 	if filter.seed != xorFilterSeed(len(keys), 1) || filter.blockLength != wantBlockLength || !reflect.DeepEqual(filter.fingerprints, wantFingerprints) {
 		t.Fatalf("Build() state = seed %d block %d fingerprints %v, want retry seed %d block %d fingerprints %v", filter.seed, filter.blockLength, filter.fingerprints, xorFilterSeed(len(keys), 1), wantBlockLength, wantFingerprints)
 	}
+}
+
+func TestXorFilterFingerprintBuildIsOrderIndependent(t *testing.T) {
+	keys := make([]string, 4096)
+	for idx := range keys {
+		keys[idx] = xorFilterJSONStringKey(fmt.Sprintf("order-%d", idx))
+	}
+	sort.Strings(keys)
+	reversed := append([]string(nil), keys...)
+	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+		reversed[left], reversed[right] = reversed[right], reversed[left]
+	}
+
+	for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
+		seed := xorFilterSeed(len(keys), attempt)
+		orderedFingerprints, orderedBlockLength, orderedOK := buildXorFilterFingerprints(keys, seed)
+		reversedFingerprints, reversedBlockLength, reversedOK := buildXorFilterFingerprints(reversed, seed)
+		if orderedOK != reversedOK || orderedBlockLength != reversedBlockLength || !reflect.DeepEqual(orderedFingerprints, reversedFingerprints) {
+			t.Fatalf("attempt %d reversed build = %v/%d/%v, want %v/%d/%v", attempt, reversedOK, reversedBlockLength, reversedFingerprints, orderedOK, orderedBlockLength, orderedFingerprints)
+		}
+		if orderedOK {
+			return
+		}
+	}
+	t.Fatal("ordered and reversed builds did not find a successful seed")
 }
 
 func TestXorFilterBuildSlotFitsQueueLinkInExistingPadding(t *testing.T) {
@@ -518,6 +545,84 @@ func BenchmarkXorFilterLifecyclePhases64(b *testing.B) {
 			benchmarkXorFilterSnapshotSink = filter.Snapshot()
 		}
 	})
+}
+
+func BenchmarkXorFilterBuildKeyOrderAlternating(b *testing.B) {
+	for _, items := range []int{64, 4096, 65536} {
+		staged := make(map[string]interface{}, items)
+		for idx := 0; idx < items; idx++ {
+			key := xorFilterJSONStringKey(fmt.Sprintf("order-%d", idx))
+			staged[key] = idx
+		}
+		b.Run(strconv.Itoa(items), func(b *testing.B) {
+			var sortedDuration, unsortedDuration time.Duration
+			for iteration := 0; iteration < b.N; iteration++ {
+				unsortedFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					fingerprints, attempt := benchmarkBuildXorFilterFromStaged(staged, unsortedFirst == (pass == 0))
+					if fingerprints == nil {
+						b.Fatal("fingerprint build failed")
+					}
+					benchmarkXorFilterFingerprintsSink = fingerprints
+					benchmarkXorFilterAttemptSink = attempt
+					if unsortedFirst == (pass == 0) {
+						unsortedDuration += time.Since(started)
+					} else {
+						sortedDuration += time.Since(started)
+					}
+				}
+			}
+			b.ReportMetric(float64(sortedDuration.Nanoseconds())/float64(b.N), "sorted-ns/build")
+			b.ReportMetric(float64(unsortedDuration.Nanoseconds())/float64(b.N), "unsorted-ns/build")
+		})
+	}
+}
+
+func BenchmarkXorFilterBuildKeyOrderAllocations(b *testing.B) {
+	for _, items := range []int{64, 4096, 65536} {
+		staged := make(map[string]interface{}, items)
+		for idx := 0; idx < items; idx++ {
+			key := xorFilterJSONStringKey(fmt.Sprintf("order-%d", idx))
+			staged[key] = idx
+		}
+		for _, benchmark := range []struct {
+			name     string
+			unsorted bool
+		}{
+			{name: "Sorted"},
+			{name: "Unsorted", unsorted: true},
+		} {
+			b.Run(strconv.Itoa(items)+"/"+benchmark.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					fingerprints, attempt := benchmarkBuildXorFilterFromStaged(staged, benchmark.unsorted)
+					if fingerprints == nil {
+						b.Fatal("fingerprint build failed")
+					}
+					benchmarkXorFilterFingerprintsSink = fingerprints
+					benchmarkXorFilterAttemptSink = attempt
+				}
+			})
+		}
+	}
+}
+
+func benchmarkBuildXorFilterFromStaged(staged map[string]interface{}, unsorted bool) ([]uint8, int) {
+	keys := make([]string, 0, len(staged))
+	for key := range staged {
+		keys = append(keys, key)
+	}
+	if !unsorted {
+		sort.Strings(keys)
+	}
+	for attempt := 0; attempt < xorFilterMaxBuildAttempts; attempt++ {
+		fingerprints, _, ok := buildXorFilterFingerprints(keys, xorFilterSeed(len(keys), attempt))
+		if ok {
+			return fingerprints, attempt
+		}
+	}
+	return nil, -1
 }
 
 func BenchmarkXorFilterFingerprintBuild(b *testing.B) {

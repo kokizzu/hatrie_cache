@@ -23,8 +23,12 @@ XOR filter values stage unique items once, then compile them into static 8-bit
 fingerprint arrays for faster low-memory membership checks than Bloom filters
 on read-heavy immutable sets. Their private header fits in one 64-byte cache
 line, using 1.12x less retained memory per empty filter without changing
-fingerprints or formats; measurements are in
-[BENCHMARK.md](BENCHMARK.md#compact-xor-filter-headers).
+fingerprints or formats; header measurements are in
+[BENCHMARK.md](BENCHMARK.md#compact-xor-filter-headers). Their
+order-independent builder also skips an
+unnecessary staged-key sort, making measured 64-65,536-item builds
+1.67x-2.08x faster with unchanged heap and allocations; measurements are in
+[BENCHMARK.md](BENCHMARK.md#order-independent-xor-filter-build).
 Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
 exact uint32 sets with fast membership, remove, count, and sorted iteration.
 Their fixed 1,024-word dense backing uses a compact 48-byte container header,

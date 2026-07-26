@@ -282,7 +282,6 @@ func (filter *xorFilterData) Build() error {
 	for key := range filter.staged {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
 	if len(keys) == 0 {
 		filter.built = true
 		filter.items = 0

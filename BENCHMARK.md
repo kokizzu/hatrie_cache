@@ -214,6 +214,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
+| Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
 | Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
@@ -3330,6 +3331,39 @@ reduced a successful build to two allocations and roughly half the cumulative
 heap, but random slot traversal made 4,096/65,536-item builds 1.03x/1.05x
 slower. That variant was removed and is indexed as rejected; it adds no runtime
 cost.
+
+<a id="order-independent-xor-filter-build"></a>
+#### Order-Independent XOR-Filter Build
+
+`Build` previously copied staged map keys into a slice and sorted them before
+fingerprint construction. Sorting is unnecessary: each key contributes count
+and XOR updates to three slots, making slot aggregation commutative, and the
+peel queue is initialized and traversed by slot index. Map order therefore
+cannot alter the selected seed, block length, or fingerprint bytes.
+
+A test added before the production change compares sorted and reversed 4,096-
+key inputs across every attempted seed. The same-binary benchmark alternates
+sorted and direct-map-order builds so host-frequency drift affects both sides.
+Separate allocation controls verify that removing the in-place sort changes no
+heap or allocation count.
+
+```sh
+make run CMD='go test . -run TestXorFilterFingerprintBuildIsOrderIndependent -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterBuildKeyOrderAlternating -benchtime=100x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkXorFilterBuildKeyOrderAllocations -benchtime=100x -count=5 -cpu=1 -benchmem'
+```
+
+| Staged items, paired median | Sorted keys | Direct map order | Improvement |
+| ---: | ---: | ---: | ---: |
+| 64 | 7,520 ns | 4,513 ns | 1.67x faster |
+| 4,096 | 895,411 ns | 430,851 ns | 2.08x faster |
+| 65,536 | 18,136,097 ns | 10,070,846 ns | 1.80x faster |
+
+The allocation controls measured 4,352 B/4 allocations at 64 items and
+218,368 B/4 allocations at 4,096 items for both layouts. At 65,536 items both
+were about 3.47 MB and four allocations. Staged values, pending snapshots,
+fingerprints, false-positive behavior, storage, journals, replication, and wire
+formats are unchanged.
 
 <a id="xor-staging-marker-rollback"></a>
 #### XOR Staging Marker Rollback
