@@ -219,6 +219,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Known-valid-key GET helper",
 		"Temporary packed-map materialization",
 		"Boxed packed-set reads",
+		"Sentinel-encoded packed-slice length",
 		"SetStorage-level promoted JSON dispatch",
 		"Priority-queue interface marker",
 		"Priority-queue structured fallback scan",

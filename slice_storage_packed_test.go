@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func TestSliceTransitionSequencePreservesBehavior(t *testing.T) {
@@ -114,6 +115,67 @@ func TestPackedSliceStorageTransitionsReuseAndClearSlots(t *testing.T) {
 		t.Fatalf("two-value backing index %d was not released after promotion", twoValue.Index)
 	}
 	assertSliceValueEqual(t, ht, "queue", Slice{"third", "fourth", "fifth"})
+}
+
+func TestPackedTwoSliceStateTransitionsPreserveNilValues(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertSlice("queue", Slice{"first", nil})
+
+	index := ht.Get("queue").Index
+	poolIndex, twoValuePool, packed := decodePackedSliceIndex(index)
+	if !packed || !twoValuePool {
+		t.Fatalf("two-value slice index = %d/%v/%v, want packed two-value pool", poolIndex, twoValuePool, packed)
+	}
+	if got, ok := ht.slices.length(index); !ok || got != 2 {
+		t.Fatalf("initial length = %d/%v, want 2/true", got, ok)
+	}
+	if value, ok, err := ht.PopSliceChecked("queue"); err != nil || !ok || value != nil {
+		t.Fatalf("PopSliceChecked(nil) = %#v/%v/%v, want nil/true/nil", value, ok, err)
+	}
+	assertSliceValueEqual(t, ht, "queue", Slice{"first"})
+	if got, ok := ht.slices.length(index); !ok || got != 1 {
+		t.Fatalf("length after pop = %d/%v, want 1/true", got, ok)
+	}
+
+	if err := ht.PushSliceChecked("queue", nil); err != nil {
+		t.Fatalf("PushSliceChecked(nil) error = %v", err)
+	}
+	if got := ht.Get("queue").Index; got != index {
+		t.Fatalf("two-value pool index after refill = %d, want %d", got, index)
+	}
+	if value, ok, err := ht.ShiftSliceChecked("queue"); err != nil || !ok || value != "first" {
+		t.Fatalf("ShiftSliceChecked(first) = %#v/%v/%v, want first/true/nil", value, ok, err)
+	}
+	if head, ok, err := ht.HeadSliceChecked("queue"); err != nil || !ok || head != nil {
+		t.Fatalf("HeadSliceChecked(nil) = %#v/%v/%v, want nil/true/nil", head, ok, err)
+	}
+	if tail, ok, err := ht.TailSliceChecked("queue"); err != nil || !ok || tail != nil {
+		t.Fatalf("TailSliceChecked(nil) = %#v/%v/%v, want nil/true/nil", tail, ok, err)
+	}
+	if value, ok, err := ht.ShiftSliceChecked("queue"); err != nil || !ok || value != nil {
+		t.Fatalf("ShiftSliceChecked(nil) = %#v/%v/%v, want nil/true/nil", value, ok, err)
+	}
+	assertSliceValueEqual(t, ht, "queue", Slice{})
+	if got, ok := ht.slices.length(index); !ok || got != 0 {
+		t.Fatalf("drained length = %d/%v, want 0/true", got, ok)
+	}
+	if value, ok, err := ht.PopSliceChecked("queue"); err != nil || ok || value != nil {
+		t.Fatalf("PopSliceChecked(empty) = %#v/%v/%v, want nil/false/nil", value, ok, err)
+	}
+
+	if err := ht.PushSliceChecked("queue", nil, "last"); err != nil {
+		t.Fatalf("PushSliceChecked(nil, last) error = %v", err)
+	}
+	if got := ht.Get("queue").Index; got != index {
+		t.Fatalf("drained pool index after refill = %d, want %d", got, index)
+	}
+	assertSliceValueEqual(t, ht, "queue", Slice{nil, "last"})
+}
+
+func TestPackedTwoSliceLayoutIsBounded(t *testing.T) {
+	if got := unsafe.Sizeof(packedTwoSlice{}); got != 40 {
+		t.Fatalf("packedTwoSlice size = %d, want 40 bytes", got)
+	}
 }
 
 func TestPackedSlicesPreserveNilAndEmptyContainers(t *testing.T) {
@@ -555,6 +617,151 @@ func BenchmarkSlicePackedOperationPairs(b *testing.B) {
 			}
 		})
 	}
+}
+
+func BenchmarkPackedTwoSliceStateTransitions(b *testing.B) {
+	setup := func(b *testing.B) (*SliceStorage, int32) {
+		b.Helper()
+		storage := CreateSliceStorage()
+		index := storage.addPacked(packedSliceValue{
+			values: [2]interface{}{"first", "last"},
+			length: 2,
+			nonNil: true,
+		})
+		b.Cleanup(func() {
+			storage.Del(index)
+		})
+		return storage, index
+	}
+
+	b.Run("PopPush", func(b *testing.B) {
+		storage, index := setup(b)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			if value, ok := storage.pop(index, false); !ok || value != "last" {
+				b.Fatalf("pop() = %#v/%v, want last/true", value, ok)
+			}
+			nextIndex, err := storage.pushOneChecked(index, "last")
+			if err != nil || nextIndex != index {
+				b.Fatalf("pushOneChecked() = %d/%v, want %d/nil", nextIndex, err, index)
+			}
+		}
+	})
+
+	b.Run("ShiftPush", func(b *testing.B) {
+		storage, index := setup(b)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			if value, ok := storage.shift(index); !ok || value != "first" {
+				b.Fatalf("shift() = %#v/%v, want first/true", value, ok)
+			}
+			nextIndex, err := storage.pushOneChecked(index, "first")
+			if err != nil || nextIndex != index {
+				b.Fatalf("pushOneChecked() = %d/%v, want %d/nil", nextIndex, err, index)
+			}
+			storage.twoValues[0].values[0], storage.twoValues[0].values[1] =
+				storage.twoValues[0].values[1], storage.twoValues[0].values[0]
+		}
+	})
+}
+
+type benchmarkPackedSliceLengthMarker struct {
+	length uint8
+}
+
+type benchmarkMarkerPackedTwoSlice struct {
+	values [2]interface{}
+}
+
+var (
+	benchmarkPackedSliceEmptyValue = &benchmarkPackedSliceLengthMarker{}
+	benchmarkPackedSliceOneValue   = &benchmarkPackedSliceLengthMarker{length: 1}
+)
+
+func benchmarkMarkerPackedTwoSliceLength(data *benchmarkMarkerPackedTwoSlice) uint8 {
+	if marker, ok := data.values[1].(*benchmarkPackedSliceLengthMarker); ok {
+		return marker.length
+	}
+	return 2
+}
+
+func BenchmarkPackedTwoSliceLengthEncoding(b *testing.B) {
+	b.Run("PopPush/InlineLength", func(b *testing.B) {
+		data := packedTwoSlice{values: [2]interface{}{"first", "last"}, length: 2}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			last := data.length - 1
+			value := data.values[last]
+			data.values[last] = nil
+			data.length--
+			if value != "last" {
+				b.Fatalf("popped value = %#v, want last", value)
+			}
+			data.values[data.length] = value
+			data.length++
+		}
+	})
+
+	b.Run("PopPush/TypedMarker", func(b *testing.B) {
+		data := benchmarkMarkerPackedTwoSlice{values: [2]interface{}{"first", "last"}}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			length := benchmarkMarkerPackedTwoSliceLength(&data)
+			last := length - 1
+			value := data.values[last]
+			data.values[last] = nil
+			if length == 2 {
+				data.values[1] = benchmarkPackedSliceOneValue
+			} else {
+				data.values[1] = benchmarkPackedSliceEmptyValue
+			}
+			if value != "last" {
+				b.Fatalf("popped value = %#v, want last", value)
+			}
+			length = benchmarkMarkerPackedTwoSliceLength(&data)
+			data.values[length] = value
+		}
+	})
+
+	b.Run("ShiftPush/InlineLength", func(b *testing.B) {
+		data := packedTwoSlice{values: [2]interface{}{"first", "last"}, length: 2}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			value := data.values[0]
+			data.values[0] = data.values[1]
+			data.values[1] = nil
+			data.length--
+			if value != "first" {
+				b.Fatalf("shifted value = %#v, want first", value)
+			}
+			data.values[data.length] = value
+			data.length++
+			data.values[0], data.values[1] = data.values[1], data.values[0]
+		}
+	})
+
+	b.Run("ShiftPush/TypedMarker", func(b *testing.B) {
+		data := benchmarkMarkerPackedTwoSlice{values: [2]interface{}{"first", "last"}}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			length := benchmarkMarkerPackedTwoSliceLength(&data)
+			value := data.values[0]
+			data.values[0] = data.values[1]
+			data.values[1] = benchmarkPackedSliceOneValue
+			if value != "first" || length != 2 {
+				b.Fatalf("shifted value/length = %#v/%d, want first/2", value, length)
+			}
+			length = benchmarkMarkerPackedTwoSliceLength(&data)
+			data.values[length] = value
+			data.values[0], data.values[1] = data.values[1], data.values[0]
+		}
+	})
 }
 
 func BenchmarkPackedSliceCommandGet(b *testing.B) {

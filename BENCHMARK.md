@@ -307,6 +307,7 @@ tree.
 | Known-valid-key GET helper | Intended to skip redundant key validation | 121.7 ns versus 120.1 ns for the checked path | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Temporary packed-map materialization | Reused the generic map JSON encoder | 1,499 ns, 488 B, and 5 allocations | Replaced by direct JSON at 511.4 ns, 24 B, and 1 allocation; see [packed small-map storage](#packed-small-map-storage) |
 | Boxed packed-set reads | Avoided retaining interface payloads in packed pools | Two-member reads were 1.31x slower with 2x heap and 3x allocations | Removed; packed pools retain the faster interface payload layout; see [packed small string-set storage](#packed-small-string-set-storage) |
+| Sentinel-encoded packed-slice length | Shrunk each two-value slice record from 40 to 32 bytes and lowered the 100,000-slice retained/timed heap 1.25x | The refined marker made pop/push 1.06x slower and shift/push 1.04x slower; the first marker design was 1.10x/1.09x slower | Reverted; the inline length byte remains; see [packed two-slice length](#packed-two-slice-length-rollback) |
 | SetStorage-level promoted JSON dispatch | Enabled direct promoted-set encoding at the shared storage encoder | Packed one/two-string command reads became 1.11x/1.10x slower | Replaced by command-level promoted routing; packed reads are neutral or faster; see [packed small string-set storage](#packed-small-string-set-storage) |
 | Priority-queue interface marker | Reached the desired 48-byte item layout | Generic dispatch slowed from 1.534 to 1.961 ns | Replaced by length dispatch; see [compact priority-queue items](#compact-priority-queue-items) |
 | Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
@@ -1598,6 +1599,48 @@ The two additional empty pool descriptors cost 160 fixed bytes per cache
 instance. About five direct one- or two-value upserts recover that fixed cost;
 new-key push workloads recover it after about two one-value or three two-value
 slices. No configurable format or migration is required.
+
+<a id="packed-two-slice-length-rollback"></a>
+### Packed Two-Slice Length Rollback
+
+The two-value pool's `uint8` length leaves seven alignment bytes after two
+interface slots, making each record 40 bytes. It cannot simply be removed:
+`POP` and `SHIFT` deliberately leave drained and one-value slices in the same
+pool, so the field distinguishes lengths zero, one, and two, including a real
+`nil` element.
+
+A behavior test was added before the experiment for two/one/empty transitions,
+`nil` values, refill without changing the backing index, and failed pops from
+an empty slice. The candidate encoded unused slots with private process-global
+markers, reducing the record to 32 bytes without changing external values,
+indexes, allocation counts, wire bytes, or persistence formats. A refined
+variant used one typed marker in the second slot so every length read required
+only one type test.
+
+```sh
+make run CMD='go test . -run="TestPacked(TwoSliceStateTransitionsPreserveNilValues|TwoSliceLayoutIsBounded)" -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSliceStorageLayout100k/UpsertValues2 -benchmem -benchtime=1x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkPackedTwoSliceStateTransitions -benchmem -benchtime=1s -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkPackedTwoSliceLengthEncoding -benchmem -benchtime=1s -count=5 -cpu=1'
+```
+
+| Metric | Inline length baseline | First marker | Refined typed marker | Result |
+| --- | ---: | ---: | ---: | --- |
+| Record size | 40 B | 32 B | 32 B | Candidate is 1.25x smaller |
+| 100k retained heap | 46.23 B/slice | 36.98 B/slice | 36.98 B/slice | Candidate is 1.25x lower |
+| 100k timed heap | 22,216,976 B | 17,765,632 B | 17,765,632 B | Candidate is 1.25x lower |
+| 100k build CPU | 1,838 ns/slice | 1,859 ns/slice | 1,859 ns/slice | Candidate is 1.01x slower, within run noise |
+| Pop then push | 13.45 ns | 14.84 ns | 14.30 ns | Refined candidate is 1.06x slower |
+| Shift then push | 14.18 ns | 15.43 ns | 14.81 ns | Refined candidate is 1.04x slower |
+| Same-binary pop/push encoding | 5.021 ns | not retained | 5.829 ns | Refined candidate is 1.16x slower |
+| Same-binary shift/push encoding | 5.062 ns | not retained | 5.651 ns | Refined candidate is 1.12x slower |
+
+Both state-transition controls remained allocation-free. The repeated mutation
+regression outweighed the per-record memory reduction under the no-drawback
+gate. The five-run same-binary controls isolate the encoding work from host
+frequency and build drift and confirm the regression. Both marker variants were
+removed. The final 40-byte representation keeps its directly loaded length
+byte; only the new behavior, layout, and benchmark guards remain.
 
 <a id="string-compaction-allocation-rollback"></a>
 ### String Compaction Allocation Rollback
