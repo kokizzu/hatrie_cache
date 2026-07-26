@@ -240,6 +240,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
 | Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
+| Reverted | [Exact scalar mutation dispatch](#exact-scalar-mutation-dispatch), nine alternating binaries | Generic set/get/inc/expire: 200.2/181.1/277.3/238.1 ns | Exact helper: 203.8/185.9/272.4/239.2 ns | INC 1.02x faster; SET 1.02x, GET 1.03x, and TTL 1.005x slower | Rolled back; unchanged heap, allocations, wire, and storage did not justify regressions in three of four complete command paths |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
@@ -1023,6 +1024,49 @@ make bench-hatrie-transport-features HATRIE_TRANSPORT_BENCH='^BenchmarkCommandTr
 Both RPCs call the same command executor. The stream removes repeated unary RPC
 setup and permits HTTP/2 flow-control-bounded pipelining; it does not weaken
 command ordering or durability acknowledgements.
+
+<a id="exact-scalar-mutation-dispatch"></a>
+#### Exact Scalar Mutation Dispatch Rollback
+
+An exact uppercase fast path for `SETSTR` without expiration, `INC`, and
+`EXPIRE` was tested before command normalization. The candidate called the
+same checked mutations and returned the same responses as the generic switch;
+focused parity, overflow, TTL, and key-validation tests passed ten times.
+
+The strict performance control compiled both test binaries from the same tree,
+including the candidate helper and tests. The baseline disabled only the
+production helper call. Nine 300 ms benchmark pairs alternated baseline-first
+and candidate-first order. This removed the test-layout and process-order bias
+that had made earlier separate binaries look 1.08x to 1.11x faster.
+
+| Nine-run median | Generic dispatch | Exact helper | Result |
+| --- | ---: | ---: | ---: |
+| String set, cached clock | 200.2 ns | 203.8 ns | 1.02x slower |
+| String get control, cached clock | 181.1 ns | 185.9 ns | 1.03x slower |
+| Counter increment, cached clock | 277.3 ns | 272.4 ns | 1.02x faster |
+| TTL refresh, cached clock | 238.1 ns | 239.2 ns | 1.005x slower |
+| String set, `time.Now` | 243.4 ns | 243.2 ns | neutral |
+| String get control, `time.Now` | 232.0 ns | 227.6 ns | 1.02x faster |
+| Counter increment, `time.Now` | 312.3 ns | 318.4 ns | 1.02x slower |
+| TTL refresh, `time.Now` | 415.8 ns | 428.4 ns | 1.03x slower |
+| Heap / allocations | unchanged | unchanged | no memory benefit |
+
+The raw cached-clock samples were:
+
+| Command | Generic ns/op | Exact-helper ns/op |
+| --- | --- | --- |
+| String set | 219.8, 200.2, 181.9, 197.2, 197.1, 225.6, 191.0, 225.6, 200.5 | 203.8, 171.6, 218.5, 206.6, 196.1, 204.4, 198.5, 219.1, 188.0 |
+| String get control | 187.0, 162.5, 180.4, 201.1, 172.1, 181.1, 202.9, 182.2, 169.6 | 193.6, 171.9, 161.9, 200.5, 166.6, 187.7, 185.1, 185.9, 198.7 |
+| Counter increment | 270.0, 281.7, 269.9, 278.9, 289.7, 272.3, 273.2, 277.3, 314.2 | 249.7, 272.4, 246.6, 278.5, 315.3, 245.3, 269.6, 277.8, 314.7 |
+| TTL refresh | 239.1, 212.9, 223.0, 250.5, 228.2, 244.6, 267.6, 238.1, 233.4 | 260.1, 241.6, 209.3, 249.0, 231.9, 233.3, 297.2, 231.5, 239.2 |
+
+Two earlier layouts were also rejected. Adding the cases to the large exact
+command switch slowed its GET control from 166.1 to 180.8 ns. Hoisting GET
+ahead of that switch still slowed the control from 166.2 to 175.5 ns. Cgo
+`noescape`/`nocallback` annotations separately regressed the set/get/inc/TTL
+medians by 1.03x/1.10x/1.15x/1.03x, and a known-valid-key GET helper measured
+121.7 ns against the checked path's 120.1 ns. All production candidates and
+their temporary tests were removed, so this pass retains no runtime tradeoff.
 
 <a id="complete-tagged-structured-storage"></a>
 ### Complete Tagged Structured Storage
