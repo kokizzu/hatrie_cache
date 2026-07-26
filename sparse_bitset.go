@@ -53,6 +53,7 @@ type sparseBitsetContainer struct {
 	values      []uint16
 	bits        []uint64
 	cardinality uint32
+	inline      [2]uint16
 }
 
 func newSparseBitsetData() sparseBitsetData {
@@ -168,9 +169,16 @@ func newSparseBitsetContainerFromSnapshot(snapshot sparseBitsetContainerSnapshot
 		if err != nil {
 			return sparseBitsetContainer{}, err
 		}
-		container.values = make([]uint16, len(raw)/2)
-		for idx := range container.values {
-			container.values[idx] = binary.LittleEndian.Uint16(raw[idx*2 : idx*2+2])
+		count := len(raw) / 2
+		if count <= len(container.inline) {
+			for idx := 0; idx < count; idx++ {
+				container.inline[idx] = binary.LittleEndian.Uint16(raw[idx*2 : idx*2+2])
+			}
+		} else {
+			container.values = make([]uint16, count)
+			for idx := range container.values {
+				container.values[idx] = binary.LittleEndian.Uint16(raw[idx*2 : idx*2+2])
+			}
 		}
 	case sparseBitsetContainerKindBits:
 		raw, err := base64.StdEncoding.DecodeString(snapshot.Bits)
@@ -331,9 +339,47 @@ func (container *sparseBitsetContainer) add(value uint16) bool {
 		container.cardinality++
 		return true
 	}
-	idx := sort.Search(len(container.values), func(idx int) bool {
-		return container.values[idx] >= value
-	})
+	if container.values == nil {
+		switch container.cardinality {
+		case 0:
+			container.inline[0] = value
+			container.cardinality = 1
+			return true
+		case 1:
+			if container.inline[0] == value {
+				return false
+			}
+			if value < container.inline[0] {
+				container.inline[1] = container.inline[0]
+				container.inline[0] = value
+			} else {
+				container.inline[1] = value
+			}
+			container.cardinality = 2
+			return true
+		case 2:
+			if container.inline[0] == value || container.inline[1] == value {
+				return false
+			}
+			container.values = make([]uint16, 3)
+			switch {
+			case value < container.inline[0]:
+				container.values[0] = value
+				copy(container.values[1:], container.inline[:])
+			case value < container.inline[1]:
+				container.values[0] = container.inline[0]
+				container.values[1] = value
+				container.values[2] = container.inline[1]
+			default:
+				copy(container.values, container.inline[:])
+				container.values[2] = value
+			}
+			container.inline = [2]uint16{}
+			container.cardinality = 3
+			return true
+		}
+	}
+	idx := sparseBitsetSearch(container.values, value)
 	if idx < len(container.values) && container.values[idx] == value {
 		return false
 	}
@@ -360,9 +406,31 @@ func (container *sparseBitsetContainer) remove(value uint16) bool {
 		}
 		return true
 	}
-	idx := sort.Search(len(container.values), func(idx int) bool {
-		return container.values[idx] >= value
-	})
+	if container.values == nil {
+		switch container.cardinality {
+		case 0:
+			return false
+		case 1:
+			if container.inline[0] != value {
+				return false
+			}
+			container.inline[0] = 0
+			container.cardinality = 0
+			return true
+		case 2:
+			switch value {
+			case container.inline[0]:
+				container.inline[0] = container.inline[1]
+			case container.inline[1]:
+			default:
+				return false
+			}
+			container.inline[1] = 0
+			container.cardinality = 1
+			return true
+		}
+	}
+	idx := sparseBitsetSearch(container.values, value)
 	if idx >= len(container.values) || container.values[idx] != value {
 		return false
 	}
@@ -370,6 +438,14 @@ func (container *sparseBitsetContainer) remove(value uint16) bool {
 	container.values[len(container.values)-1] = 0
 	container.values = container.values[:len(container.values)-1]
 	container.cardinality--
+	if len(container.values) <= len(container.inline) {
+		copy(container.inline[:], container.values)
+		for idx := range container.values {
+			container.values[idx] = 0
+		}
+		container.values = nil
+		return true
+	}
 	if cap(container.values) > 16 && len(container.values)*4 < cap(container.values) {
 		next := make([]uint16, len(container.values))
 		copy(next, container.values)
@@ -383,9 +459,17 @@ func (container sparseBitsetContainer) contains(value uint16) bool {
 		word, mask := sparseBitsetBit(value)
 		return container.bits[word]&mask != 0
 	}
-	idx := sort.Search(len(container.values), func(idx int) bool {
-		return container.values[idx] >= value
-	})
+	if container.values == nil {
+		switch container.cardinality {
+		case 0:
+			return false
+		case 1:
+			return container.inline[0] == value
+		default:
+			return container.inline[0] == value || container.inline[1] == value
+		}
+	}
+	idx := sparseBitsetSearch(container.values, value)
 	return idx < len(container.values) && container.values[idx] == value
 }
 
@@ -398,6 +482,12 @@ func (container sparseBitsetContainer) appendValues(out []uint64) []uint64 {
 				out = append(out, prefix|uint64(wordIdx*64+bit))
 				word &^= uint64(1) << uint(bit)
 			}
+		}
+		return out
+	}
+	if container.values == nil {
+		for idx := 0; idx < int(container.cardinality); idx++ {
+			out = append(out, prefix|uint64(container.inline[idx]))
 		}
 		return out
 	}
@@ -421,8 +511,18 @@ func (container sparseBitsetContainer) Snapshot() sparseBitsetContainerSnapshot 
 		snapshot.Bits = base64.StdEncoding.EncodeToString(raw)
 		return snapshot
 	}
-	raw := make([]byte, len(container.values)*2)
-	for idx, value := range container.values {
+	count := len(container.values)
+	if container.values == nil {
+		count = int(container.cardinality)
+	}
+	raw := make([]byte, count*2)
+	for idx := 0; idx < count; idx++ {
+		var value uint16
+		if container.values == nil {
+			value = container.inline[idx]
+		} else {
+			value = container.values[idx]
+		}
 		binary.LittleEndian.PutUint16(raw[idx*2:idx*2+2], value)
 	}
 	snapshot.Kind = sparseBitsetContainerKindArray
@@ -433,6 +533,9 @@ func (container sparseBitsetContainer) Snapshot() sparseBitsetContainerSnapshot 
 func (container sparseBitsetContainer) EncodedSize() int64 {
 	if container.isBitmap() {
 		return sparseBitsetBitmapWords * 8
+	}
+	if container.values == nil {
+		return int64(container.cardinality) * 2
 	}
 	return int64(len(container.values) * 2)
 }
@@ -450,19 +553,43 @@ func (container *sparseBitsetContainer) convertToBitmap() {
 		return
 	}
 	next := make([]uint64, sparseBitsetBitmapWords)
-	for _, value := range container.values {
-		word, mask := sparseBitsetBit(value)
-		next[word] |= mask
+	if container.values == nil {
+		for idx := 0; idx < int(container.cardinality); idx++ {
+			word, mask := sparseBitsetBit(container.inline[idx])
+			next[word] |= mask
+		}
+	} else {
+		for _, value := range container.values {
+			word, mask := sparseBitsetBit(value)
+			next[word] |= mask
+		}
 	}
 	for idx := range container.values {
 		container.values[idx] = 0
 	}
 	container.values = nil
+	container.inline = [2]uint16{}
 	container.bits = next
 }
 
 func (container *sparseBitsetContainer) convertToArray() {
 	if !container.isBitmap() {
+		return
+	}
+	if container.cardinality <= uint32(len(container.inline)) {
+		idx := 0
+		for wordIdx, word := range container.bits {
+			for word != 0 {
+				bit := bits.TrailingZeros64(word)
+				container.inline[idx] = uint16(wordIdx*64 + bit)
+				idx++
+				word &^= uint64(1) << uint(bit)
+			}
+		}
+		for idx := range container.bits {
+			container.bits[idx] = 0
+		}
+		container.bits = nil
 		return
 	}
 	values := make([]uint16, 0, container.cardinality)
@@ -496,6 +623,19 @@ func sparseBitsetSplit(value uint64) (uint64, uint16) {
 
 func sparseBitsetBit(value uint16) (int, uint64) {
 	return int(value / 64), uint64(1) << uint(value%64)
+}
+
+func sparseBitsetSearch(values []uint16, value uint16) int {
+	low, high := 0, len(values)
+	for low < high {
+		mid := int(uint(low+high) >> 1)
+		if values[mid] < value {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	return low
 }
 
 func insertSparseBitsetContainer(containers []sparseBitsetContainer, idx int, container sparseBitsetContainer) []sparseBitsetContainer {

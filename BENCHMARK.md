@@ -213,6 +213,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
+| Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
@@ -308,6 +309,7 @@ tree.
 | Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
 | Fully linked XOR peel order | Halved normal-build allocations and cumulative heap | Cache-random reverse traversal made the 4,096/65,536-item builders 1.03x/1.05x slower | Replaced by linking only the queue while retaining contiguous peel order; see [linked XOR-filter build queue](#linked-xor-filter-build-queue) |
+| Inline sparse bitsets with generic search | Removed singleton/pair backing allocations and reduced retained objects | The added representation branch made 4,096-value array lookups 1.03x slower | Replaced by an inlineable typed binary search; promoted lookups are now 1.01x faster; see [inline sparse-bitset containers](#inline-sparse-bitset-containers) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
 | Top-K one-item rewrite | Reduced transient heap | Complete read CPU was 1.06x slower | Removed; the former one-item path remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
@@ -3236,6 +3238,48 @@ reduced a successful build to two allocations and roughly half the cumulative
 heap, but random slot traversal made 4,096/65,536-item builds 1.03x/1.05x
 slower. That variant was removed and is indexed as rejected; it adds no runtime
 cost.
+
+<a id="inline-sparse-bitset-containers"></a>
+### Inline Sparse-Bitset Containers
+
+Sparse bitsets divide `uint64` values into sorted 16-bit containers. A sparse
+container with one value previously retained a separate tiny `[]uint16`
+allocation. The 64-byte container had four alignment-padding bytes after its
+cardinality, so it now stores its first two sorted values there. A third value
+promotes to the existing slice representation; removal back to two values
+releases the slice. Snapshot restore selects the same compact representation.
+Dense bitmap conversion remains at 4,097 values.
+
+Behavior tests were added before implementation for unsorted inserts,
+duplicates, lookup, ordered output, encoded size, snapshots, promotion,
+demotion, and final removal. Existing dense conversion, command, snapshot,
+storage, journal, and replication suites remain applicable. A size assertion
+fixes the container at 64 bytes. Same-binary controls retain the previous slice
+layout and alternate execution order for the many-container CPU comparison.
+
+```sh
+make run CMD='go test . -run="TestSparseBitset|TestCheckedSparseBitset|TestExecuteCommandSparseBitset" -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSparseBitsetInlineLayout -benchmem -benchtime=500ms -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSparseBitsetDistinctSmallContainersAlternating -benchmem -benchtime=50x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSparseBitsetInlineRetained100k -benchmem -benchtime=1x -count=5 -cpu=1'
+```
+
+| Operation, median | Slice-backed control | Inline final | Improvement |
+| --- | ---: | ---: | ---: |
+| Build one value | 60.66 ns; 72 B; 2 allocs | 37.43 ns; 64 B; 1 alloc | 1.62x faster; one allocation removed |
+| Build two values | 67.88 ns; 72 B; 2 allocs | 42.16 ns; 64 B; 1 alloc | 1.61x faster; one allocation removed |
+| Promote at three values | 75.39 ns; 72 B; 2 allocs | 62.57 ns; 72 B; 2 allocs | 1.20x faster; heap and allocations unchanged |
+| Build 16,384 singleton containers, alternating timer | 2.256 ms | 1.812 ms | 1.25x faster |
+| Build 100,000 singleton containers | 26.63 ms; 35,311,496 B; 100,031 allocs | 23.49 ms; 34,511,480 B; 31 allocs | 1.13x faster; 1.02x lower cumulative heap; 3,227x fewer allocs |
+| Retained singleton layout, 100,000 containers | 79.60 B and 0.500 objects/container | 71.60 B and 0.000030 objects/container | 1.11x lower heap; about 16,667x fewer retained objects |
+| 4,096-value array lookup | 30.21 ns; 0 allocs | 29.93 ns; 0 allocs | 1.01x faster |
+| 4,097-value bitmap build / lookup | 0.201/0.003440 us | 0.189/0.003441 us | Build 1.06x faster; lookup neutral within 0.03% |
+
+An initial version retained the generic closure-based array search. Although
+small containers improved, its extra representation branch made a 4,096-value
+array lookup 30.86 ns versus 29.93 ns for the control, or 1.03x slower. It was
+replaced by an inlineable typed binary search; the final promoted lookup is
+1.01x faster. No failed implementation remains in production.
 
 The reservoir sample add path now has a plain-string fast path that hashes the
 JSON string representation directly and only boxes retained values. The focused
