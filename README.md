@@ -1813,6 +1813,13 @@ allocate fallback state. An unused create-and-close lifecycle is 2.98x-3.04x
 faster with 3.25x lower heap and four times fewer allocations; active target,
 wire, retry, and fallback behavior is unchanged.
 
+Single-target anti-entropy sync also uses
+[direct gRPC dispatch](BENCHMARK.md#direct-single-target-grpc-sync-dispatch):
+one task group bypasses target regrouping and is 1.33x faster with 2.10x lower
+heap and half the allocations in the isolated dispatcher. Same-target and
+multi-target controls retain identical heap and allocation counts, while wire,
+fallback, ordering, and bounded fanout are unchanged.
+
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
 closed instead. For 10,000 live writes from 32 callers, zero-wait

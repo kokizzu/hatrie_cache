@@ -443,6 +443,32 @@ func TestDocsDescribeLazyReplicationGRPCSessionMaps(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectSingleTargetGRPCSyncDispatch(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[direct gRPC dispatch](BENCHMARK.md#direct-single-target-grpc-sync-dispatch)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing direct gRPC dispatch token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkReplicationGRPCSingleTaskGroupPlanning",
+		"1.33x faster",
+		"2.10x lower heap",
+		"Four distinct targets",
+		"CPU neutral within 0.3%",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct gRPC dispatch token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeSinglePassExpirationIndexCompaction(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

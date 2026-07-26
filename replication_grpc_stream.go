@@ -372,6 +372,10 @@ func (target *replicationGRPCStreamTarget) failQueued(err error) {
 func (session *replicationGRPCSyncSession) executeReplicationTaskGroups(ctx context.Context, result ReplicationResult, groups []replicationTaskGroup) ReplicationResult {
 	result.Queued = false
 	result.Targets = make([]ReplicationTargetResult, len(groups))
+	if len(groups) == 1 {
+		result.Targets[0] = session.executeReplicationTaskGroup(ctx, groups[0])
+		return result
+	}
 	targetIndexes := make(map[string][]int, len(groups))
 	targetOrder := make([]string, 0, len(groups))
 	for idx := range groups {

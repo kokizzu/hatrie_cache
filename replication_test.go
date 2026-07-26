@@ -325,7 +325,24 @@ func TestReplicationGRPCSessionDefersOptionalMaps(t *testing.T) {
 	liveSession.close()
 }
 
+func TestReplicationGRPCSyncSessionSingleTaskGroupMatchesDirectExecution(t *testing.T) {
+	replicator := &HTTPReplicator{disableHTTPFallback: true}
+	group := replicationTaskGroup{target: TopologyNode{ID: "node-b", GRPCAddress: "bufnet"}}
+
+	directSession := newReplicationGRPCSyncSession(context.Background(), replicator)
+	direct := directSession.executeReplicationTaskGroup(context.Background(), group)
+	directSession.close()
+
+	groupedSession := newReplicationGRPCSyncSession(context.Background(), replicator)
+	grouped := groupedSession.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, []replicationTaskGroup{group})
+	groupedSession.close()
+	if grouped.Queued || len(grouped.Targets) != 1 || !reflect.DeepEqual(grouped.Targets[0], direct) {
+		t.Fatalf("single grouped result = %#v, want direct result %#v", grouped, direct)
+	}
+}
+
 var benchmarkReplicationGRPCSessionSink *replicationGRPCSyncSession
+var benchmarkReplicationResultSink ReplicationResult
 
 func BenchmarkReplicationGRPCSessionLifecycle(b *testing.B) {
 	replicator := &HTTPReplicator{}
@@ -340,6 +357,35 @@ func BenchmarkReplicationGRPCSessionLifecycle(b *testing.B) {
 				session := newReplicationGRPCSession(context.Background(), replicator, sticky)
 				session.close()
 				benchmarkReplicationGRPCSessionSink = session
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationGRPCSingleTaskGroupPlanning(b *testing.B) {
+	replicator := &HTTPReplicator{disableHTTPFallback: true}
+	session := newReplicationGRPCSyncSession(context.Background(), replicator)
+	b.Cleanup(session.close)
+	for _, tt := range []struct {
+		name   string
+		groups []replicationTaskGroup
+	}{
+		{name: "Single", groups: []replicationTaskGroup{{target: TopologyNode{ID: "node-b", GRPCAddress: "bufnet"}}}},
+		{name: "SameTarget2", groups: []replicationTaskGroup{
+			{target: TopologyNode{ID: "node-b", GRPCAddress: "bufnet"}},
+			{target: TopologyNode{ID: "node-b", GRPCAddress: "bufnet"}},
+		}},
+		{name: "DistinctTargets4", groups: []replicationTaskGroup{
+			{target: TopologyNode{ID: "node-b", GRPCAddress: "bufnet-b"}},
+			{target: TopologyNode{ID: "node-c", GRPCAddress: "bufnet-c"}},
+			{target: TopologyNode{ID: "node-d", GRPCAddress: "bufnet-d"}},
+			{target: TopologyNode{ID: "node-e", GRPCAddress: "bufnet-e"}},
+		}},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				benchmarkReplicationResultSink = session.executeReplicationTaskGroups(context.Background(), ReplicationResult{}, tt.groups)
 			}
 		})
 	}
