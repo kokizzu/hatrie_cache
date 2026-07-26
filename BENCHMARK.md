@@ -214,6 +214,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
+| Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
@@ -3282,6 +3283,41 @@ small containers improved, its extra representation branch made a 4,096-value
 array lookup 30.86 ns versus 29.93 ns for the control, or 1.03x slower. It was
 replaced by an inlineable typed binary search; the final promoted lookup is
 1.01x faster. No failed implementation remains in production.
+
+<a id="compact-roaring-container-headers"></a>
+### Compact Roaring-Container Headers
+
+Every dense Roaring container has exactly 1,024 `uint64` bitmap words. The
+previous `[]uint64` field nevertheless retained a 24-byte pointer/length/capacity
+header in every container, including sparse array containers. The final layout
+stores a pointer to a fixed `[1024]uint64` backing instead. This reduces the
+container from 64 to 48 bytes while leaving the 8 KiB dense allocation and all
+array storage unchanged. Snapshot restore and array/bitmap conversion allocate
+the same backing bytes as before.
+
+A behavior test covers array-to-bitmap promotion, lookup, snapshot round-trip,
+bitmap-to-array demotion, and exact header size. A same-binary control copies
+the prior slice layout and identical add, remove, contains, and conversion
+logic; each measured pair alternates execution order.
+
+```sh
+make run CMD='go test . -run RoaringBitmap -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRoaringBitmapBackingLayoutAlternating -benchtime=500x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRoaringBitmapContainerRetained50k -benchtime=1x -count=5 -cpu=1 -benchmem'
+```
+
+| Operation, median | Slice-header control | Fixed-pointer final | Improvement |
+| --- | ---: | ---: | ---: |
+| Build 4,097-value bitmap | 190.697 us | 189.567 us | 1.006x faster |
+| Bitmap lookup | 2.848 ns | 2.605 ns | 1.09x faster |
+| Bitmap remove/add | 5.141 ns | 4.985 ns | 1.03x faster |
+| Build 50,000 singleton containers | 14.510 ms; 17,470,672 B; 50,026 allocs | 10.762 ms; 14,153,680 B; 50,026 allocs | 1.35x faster; 1.23x lower cumulative heap; allocations unchanged |
+| Retained singleton layout | 80.75 B/container | 66.66 B/container | 1.21x lower retained heap |
+
+The bitmap size was already fixed by validation, conversion thresholds, and
+the persistent format, so the pointer does not narrow accepted state. Wire,
+snapshot, journal, database, ordering, and public API behavior are unchanged.
+No operation regression was measured.
 
 <a id="inline-roaring-container-rollback"></a>
 #### Inline Roaring-Container Rollback

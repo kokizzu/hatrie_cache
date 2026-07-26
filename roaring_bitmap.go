@@ -50,7 +50,7 @@ type roaringBitmapData struct {
 type roaringBitmapContainer struct {
 	key         uint16
 	values      []uint16
-	bits        []uint64
+	bits        *[roaringBitmapBitmapWords]uint64
 	cardinality uint32
 }
 
@@ -173,7 +173,7 @@ func newRoaringBitmapContainerFromSnapshot(snapshot roaringBitmapContainerSnapsh
 		if err != nil {
 			return roaringBitmapContainer{}, err
 		}
-		container.bits = make([]uint64, roaringBitmapBitmapWords)
+		container.bits = new([roaringBitmapBitmapWords]uint64)
 		for idx := range container.bits {
 			container.bits[idx] = binary.LittleEndian.Uint64(raw[idx*8 : idx*8+8])
 		}
@@ -318,12 +318,12 @@ func (bitmap roaringBitmapData) findContainer(key uint16) (int, bool) {
 }
 
 func (container *roaringBitmapContainer) add(value uint16) bool {
-	if container.isBitmap() {
+	if bitmap := container.bits; bitmap != nil {
 		word, mask := roaringBitmapBit(value)
-		if container.bits[word]&mask != 0 {
+		if bitmap[word]&mask != 0 {
 			return false
 		}
-		container.bits[word] |= mask
+		bitmap[word] |= mask
 		container.cardinality++
 		return true
 	}
@@ -344,12 +344,12 @@ func (container *roaringBitmapContainer) add(value uint16) bool {
 }
 
 func (container *roaringBitmapContainer) remove(value uint16) bool {
-	if container.isBitmap() {
+	if bitmap := container.bits; bitmap != nil {
 		word, mask := roaringBitmapBit(value)
-		if container.bits[word]&mask == 0 {
+		if bitmap[word]&mask == 0 {
 			return false
 		}
-		container.bits[word] &^= mask
+		bitmap[word] &^= mask
 		container.cardinality--
 		if container.cardinality <= roaringBitmapArrayShrinkSize {
 			container.convertToArray()
@@ -375,9 +375,9 @@ func (container *roaringBitmapContainer) remove(value uint16) bool {
 }
 
 func (container roaringBitmapContainer) contains(value uint16) bool {
-	if container.isBitmap() {
+	if bitmap := container.bits; bitmap != nil {
 		word, mask := roaringBitmapBit(value)
-		return container.bits[word]&mask != 0
+		return bitmap[word]&mask != 0
 	}
 	idx := sort.Search(len(container.values), func(idx int) bool {
 		return container.values[idx] >= value
@@ -445,7 +445,7 @@ func (container *roaringBitmapContainer) convertToBitmap() {
 	if container.isBitmap() {
 		return
 	}
-	next := make([]uint64, roaringBitmapBitmapWords)
+	next := new([roaringBitmapBitmapWords]uint64)
 	for _, value := range container.values {
 		word, mask := roaringBitmapBit(value)
 		next[word] |= mask
@@ -480,8 +480,8 @@ func (container *roaringBitmapContainer) clear() {
 	for idx := range container.values {
 		container.values[idx] = 0
 	}
-	for idx := range container.bits {
-		container.bits[idx] = 0
+	if container.bits != nil {
+		*container.bits = [roaringBitmapBitmapWords]uint64{}
 	}
 	*container = roaringBitmapContainer{}
 }

@@ -24,6 +24,10 @@ fingerprint arrays for faster low-memory membership checks than Bloom filters
 on read-heavy immutable sets.
 Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
 exact uint32 sets with fast membership, remove, count, and sorted iteration.
+Their fixed 1,024-word dense backing uses a compact 48-byte container header,
+reducing sparse-container retention without changing bitmap bytes or formats;
+measurements are in
+[BENCHMARK.md](BENCHMARK.md#compact-roaring-container-headers).
 Sparse bitset values use sorted 16-bit containers keyed by the upper 48 bits,
 promoting dense ranges to packed bitsets for exact uint64 membership with low
 memory overhead on sparse high-cardinality IDs.

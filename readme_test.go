@@ -158,6 +158,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Radix prefix scan](#collection-allocation-follow-up)",
 		"[Linked XOR-filter build queue](#linked-xor-filter-build-queue)",
 		"[Inline sparse-bitset containers](#inline-sparse-bitset-containers)",
+		"[Compact Roaring-container headers](#compact-roaring-container-headers)",
 		"[Reservoir sample add](#collection-allocation-follow-up)",
 		"[Direct generic reservoir GET](#reservoir-sample-read-materialization)",
 		"[Direct generic Top-K GET](#multi-item-top-k-read-materialization)",
