@@ -2527,11 +2527,7 @@ func (ht *HatTrie) executeFastGetPriorityQueueCommand(key string) (CacheCommandR
 	}
 
 	queue := &ht.priorityQueues.array[hval.Index]
-	capacity, ok := commandFastPriorityQueueItemsJSONCapacity(queue.items)
-	if !ok {
-		ht.mu.Unlock()
-		return CacheCommandResponse{}, false
-	}
+	capacity, stringsOnly := commandPriorityQueueItemsJSONLayout(queue.items)
 	if len(queue.items) == 0 {
 		ht.recordReadLocked(true, key)
 		ht.mu.Unlock()
@@ -2541,14 +2537,34 @@ func (ht *HatTrie) executeFastGetPriorityQueueCommand(key string) (CacheCommandR
 		item := queue.items[0]
 		ht.recordReadLocked(true, key)
 		ht.mu.Unlock()
-		return CacheCommandResponse{OK: true, Message: "ok", Value: commandFastPriorityQueueSingleItemJSON(item, capacity)}, true
+		payload, err := commandPriorityQueueSingleItemJSON(item, capacity, stringsOnly)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 	}
 
 	items := make([]priorityQueueItem, len(queue.items))
 	copy(items, queue.items)
 	ht.recordReadLocked(true, key)
 	ht.mu.Unlock()
-	return CacheCommandResponse{OK: true, Message: "ok", Value: commandFastPriorityQueueItemsJSON(items, capacity)}, true
+	payload, err := commandPriorityQueueItemsJSON(items, capacity, stringsOnly)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+}
+
+func commandPriorityQueueItemsJSONLayout(items []priorityQueueItem) (int, bool) {
+	if capacity, ok := commandFastPriorityQueueItemsJSONCapacity(items); ok {
+		return capacity, true
+	}
+	const estimatedItemBytes = 64
+	max := int(^uint(0) >> 1)
+	if len(items) > (max-len(`[]`))/estimatedItemBytes {
+		return 0, false
+	}
+	return len(`[]`) + len(items)*estimatedItemBytes, false
 }
 
 func commandFastPriorityQueueItemsJSONCapacity(items []priorityQueueItem) (int, bool) {
@@ -2581,15 +2597,27 @@ func commandFastPriorityQueueItemsJSONCapacity(items []priorityQueueItem) (int, 
 }
 
 func commandFastPriorityQueueSingleItemJSON(item priorityQueueItem, capacity int) string {
+	payload, _ := commandPriorityQueueSingleItemJSON(item, capacity, true)
+	return payload
+}
+
+func commandPriorityQueueSingleItemJSON(item priorityQueueItem, capacity int, stringsOnly bool) (string, error) {
 	var builder strings.Builder
 	builder.Grow(capacity)
 	builder.WriteByte('[')
-	writeCommandPriorityQueueItemJSON(&builder, item)
+	if err := writeCommandPriorityQueueItemJSON(&builder, item, stringsOnly); err != nil {
+		return "", err
+	}
 	builder.WriteByte(']')
-	return builder.String()
+	return builder.String(), nil
 }
 
 func commandFastPriorityQueueItemsJSON(items []priorityQueueItem, capacity int) string {
+	payload, _ := commandPriorityQueueItemsJSON(items, capacity, true)
+	return payload
+}
+
+func commandPriorityQueueItemsJSON(items []priorityQueueItem, capacity int, stringsOnly bool) (string, error) {
 	var builder strings.Builder
 	builder.Grow(capacity)
 	builder.WriteByte('[')
@@ -2606,10 +2634,12 @@ func commandFastPriorityQueueItemsJSON(items []priorityQueueItem, capacity int) 
 		if len(items) > 0 {
 			priorityQueueSiftDownItems(items, 0)
 		}
-		writeCommandPriorityQueueItemJSON(&builder, item)
+		if err := writeCommandPriorityQueueItemJSON(&builder, item, stringsOnly); err != nil {
+			return "", err
+		}
 	}
 	builder.WriteByte(']')
-	return builder.String()
+	return builder.String(), nil
 }
 
 func priorityQueueSiftDownItems(items []priorityQueueItem, idx int) {
@@ -2631,14 +2661,23 @@ func priorityQueueSiftDownItems(items []priorityQueueItem, idx int) {
 	}
 }
 
-func writeCommandPriorityQueueItemJSON(builder *strings.Builder, item priorityQueueItem) {
+func writeCommandPriorityQueueItemJSON(builder *strings.Builder, item priorityQueueItem, stringsOnly bool) error {
 	var digits [20]byte
 	builder.WriteString(`{"priority":`)
 	_, _ = builder.Write(strconv.AppendInt(digits[:0], item.Priority, 10))
 	builder.WriteString(`,"value":`)
-	value, _ := priorityQueueItemString(item)
-	writeJSONString(builder, value)
+	if stringsOnly {
+		value, _ := priorityQueueItemString(item)
+		writeJSONString(builder, value)
+	} else if value, ok := priorityQueueItemString(item); ok {
+		writeJSONString(builder, value)
+	} else {
+		if err := writeSmallMapJSONValue(builder, item.Value); err != nil {
+			return err
+		}
+	}
 	builder.WriteByte('}')
+	return nil
 }
 
 func priorityQueueItemString(item priorityQueueItem) (string, bool) {
@@ -2973,6 +3012,33 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
 		return CacheCommandResponse{OK: true, Message: "ok", Value: value}, true
+	case hval.IsPriorityQueue():
+		queue := &ht.priorityQueues.array[hval.Index]
+		capacity, stringsOnly := commandPriorityQueueItemsJSONLayout(queue.items)
+		if len(queue.items) == 0 {
+			ht.recordReadLocked(true, key)
+			ht.mu.RUnlock()
+			return CacheCommandResponse{OK: true, Message: "ok", Value: "[]"}, true
+		}
+		if len(queue.items) == 1 {
+			item := queue.items[0]
+			ht.recordReadLocked(true, key)
+			ht.mu.RUnlock()
+			payload, err := commandPriorityQueueSingleItemJSON(item, capacity, stringsOnly)
+			if err != nil {
+				return commandError(err.Error()), true
+			}
+			return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
+		}
+		items := make([]priorityQueueItem, len(queue.items))
+		copy(items, queue.items)
+		ht.recordReadLocked(true, key)
+		ht.mu.RUnlock()
+		payload, err := commandPriorityQueueItemsJSON(items, capacity, stringsOnly)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		return CacheCommandResponse{OK: true, Message: "ok", Value: payload}, true
 	default:
 		ht.mu.RUnlock()
 		return CacheCommandResponse{}, false

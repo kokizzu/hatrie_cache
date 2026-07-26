@@ -62,33 +62,62 @@ func TestExecuteExactFastCommandPriorityQueueGetStates(t *testing.T) {
 		}},
 	} {
 		t.Run(state.name, func(t *testing.T) {
-			fast := newTestTrie(t)
-			generic := newTestTrie(t)
-			state.setup(t, fast)
-			state.setup(t, generic)
-			got, ok := fast.executeExactFastCommand(CacheCommandRequest{Command: "GETPQ", Key: "queue"})
-			if !ok {
-				t.Fatal("executeExactFastCommand(GETPQ) ok = false, want true")
-			}
-			want := generic.ExecuteCommand(CacheCommandRequest{Command: " GETPQ", Key: "queue"})
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("fast response = %#v, generic response = %#v", got, want)
+			for _, command := range []string{"GETPQ", "GET"} {
+				t.Run(command, func(t *testing.T) {
+					fast := newTestTrie(t)
+					generic := newTestTrie(t)
+					state.setup(t, fast)
+					state.setup(t, generic)
+					got, ok := fast.executeExactFastCommand(CacheCommandRequest{Command: command, Key: "queue"})
+					if !ok {
+						t.Fatalf("executeExactFastCommand(%s) ok = false, want true", command)
+					}
+					want := generic.ExecuteCommand(CacheCommandRequest{Command: " " + command, Key: "queue"})
+					if !reflect.DeepEqual(got, want) {
+						t.Fatalf("fast response = %#v, generic response = %#v", got, want)
+					}
+				})
 			}
 		})
 	}
 }
 
-func TestExecuteExactFastCommandPriorityQueueGetFallsBackForStructuredValues(t *testing.T) {
+func TestExecuteExactFastCommandPriorityQueueGetEncodesStructuredValues(t *testing.T) {
 	ht := newTestTrie(t)
 	if _, err := ht.PushPriorityQueueChecked("queue", 1, Map{"nested": Slice{"value"}}); err != nil {
 		t.Fatalf("PushPriorityQueueChecked() error = %v", err)
 	}
-	if response, ok := ht.executeExactFastCommand(CacheCommandRequest{Command: "GETPQ", Key: "queue"}); ok {
-		t.Fatalf("executeExactFastCommand(GETPQ) = %#v/true, want generic fallback", response)
-	}
 	want := `[{"priority":1,"value":{"nested":["value"]}}]`
-	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETPQ", Key: "queue"}); !got.OK || got.Value != want {
-		t.Fatalf("GETPQ structured response = %#v, want %q", got, want)
+	for _, command := range []string{"GETPQ", "GET"} {
+		response, ok := ht.executeExactFastCommand(CacheCommandRequest{Command: command, Key: "queue"})
+		if !ok || !response.OK || response.Value != want {
+			t.Fatalf("executeExactFastCommand(%s) = %#v/%v, want direct %q", command, response, ok, want)
+		}
+		if got := ht.ExecuteCommand(CacheCommandRequest{Command: command, Key: "queue"}); !got.OK || got.Value != want {
+			t.Fatalf("%s structured response = %#v, want %q", command, got, want)
+		}
+	}
+}
+
+func TestExecuteExactFastCommandGenericGetPriorityQueueMatchesGeneric(t *testing.T) {
+	fast := newTestTrie(t)
+	generic := newTestTrie(t)
+	seedPriorityQueueReadFastPath(t, fast, 16)
+	seedPriorityQueueReadFastPath(t, generic, 16)
+
+	request := CacheCommandRequest{Command: "GET", Key: "queue"}
+	got, ok := fast.executeExactFastCommand(request)
+	if !ok {
+		t.Fatal("executeExactFastCommand(GET priority queue) ok = false, want true")
+	}
+	request.Command = " GET"
+	want := generic.ExecuteCommand(request)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("fast response = %#v, generic response = %#v", got, want)
+	}
+	gotStats, wantStats := fast.Stats(), generic.Stats()
+	if gotStats.Reads != wantStats.Reads || gotStats.Hits != wantStats.Hits || gotStats.Misses != wantStats.Misses || gotStats.Writes != wantStats.Writes {
+		t.Fatalf("fast stats = %#v, generic stats = %#v", gotStats, wantStats)
 	}
 }
 
@@ -142,6 +171,71 @@ func BenchmarkPriorityQueueGetCommand(b *testing.B) {
 						if !response.OK {
 							b.Fatalf("ExecuteCommand() = %#v, want ok", response)
 						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkPriorityQueueGenericGetCommand(b *testing.B) {
+	for _, size := range []int{0, 1, 16, 100} {
+		b.Run(fmt.Sprintf("Items%d", size), func(b *testing.B) {
+			for _, mode := range []struct {
+				name    string
+				command string
+			}{
+				{name: "Generic", command: " GET"},
+				{name: "Exact", command: "GET"},
+			} {
+				b.Run(mode.name, func(b *testing.B) {
+					ht := CreateHatTrie()
+					defer ht.Destroy()
+					seedPriorityQueueReadFastPath(b, ht, size)
+					request := CacheCommandRequest{Command: mode.command, Key: "queue"}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for idx := 0; idx < b.N; idx++ {
+						response := ht.ExecuteCommand(request)
+						if !response.OK {
+							b.Fatalf("ExecuteCommand() = %#v, want ok", response)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkPriorityQueueStructuredGetCommand(b *testing.B) {
+	for _, size := range []int{16, 100} {
+		b.Run(fmt.Sprintf("Items%d", size), func(b *testing.B) {
+			for _, command := range []string{"GETPQ", "GET"} {
+				b.Run(command, func(b *testing.B) {
+					for _, mode := range []struct {
+						name    string
+						command string
+					}{
+						{name: "Generic", command: " " + command},
+						{name: "Exact", command: command},
+					} {
+						b.Run(mode.name, func(b *testing.B) {
+							ht := CreateHatTrie()
+							defer ht.Destroy()
+							seedPriorityQueueReadFastPath(b, ht, size-1)
+							if _, err := ht.PushPriorityQueueChecked("queue", 1<<63-1, Map{"nested": Slice{"value"}}); err != nil {
+								b.Fatalf("PushPriorityQueueChecked(structured) error = %v", err)
+							}
+							request := CacheCommandRequest{Command: mode.command, Key: "queue"}
+							b.ReportAllocs()
+							b.ResetTimer()
+							for idx := 0; idx < b.N; idx++ {
+								response := ht.ExecuteCommand(request)
+								if !response.OK {
+									b.Fatalf("ExecuteCommand() = %#v, want ok", response)
+								}
+							}
+						})
 					}
 				})
 			}

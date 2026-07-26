@@ -208,7 +208,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Two-value small-set read](#collection-allocation-follow-up) | 155.5 ns; 48 B; 3 allocs | 54.46 ns; 32 B; 1 alloc | 2.86x faster, 1.50x lower heap, 3x fewer allocs | Promotes to a map at three entries |
 | Earlier | [Priority queue push+pop](#collection-allocation-follow-up) | 875.9 ns; 56 B; 3 allocs | 769.1 ns; 40 B; 2 allocs | 1.14x faster, 1.40x lower heap | Typed string fast path retains generic fallback |
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
-| Current pass | [Direct priority-queue command reads](#compact-priority-queue-items), empty/one/16/100 string items | Public materialization: 214.6/414.2/2,894/25,384 ns; up to 108 allocs | Direct JSON: 54.02/145.5/2,098/18,676 ns; at most 2 allocs | 3.97x/2.85x/1.38x/1.36x faster; up to 2.11x lower heap and 54x fewer allocations | String values only; structured values and cold references retain the exact generic path; wire, ordering, storage, and ownership are unchanged |
+| Current pass | [Direct priority-queue command reads](#compact-priority-queue-items), empty/one/16/100 string items | Public materialization: 214.6/414.2/2,894/25,384 ns; up to 108 allocs | Direct JSON: 54.02/145.5/2,098/18,676 ns; at most 2 allocs | 3.97x/2.85x/1.38x/1.36x faster; up to 2.11x lower heap and 54x fewer allocations | All validated values preserve generic JSON semantics; cold references retain checked hydration; wire, ordering, storage, and ownership are unchanged |
+| Current pass | [Direct generic priority-queue GET](#compact-priority-queue-items), empty/one/16/100 string items | Generic materialization: 207.1/422.4/2,863/23,449 ns | Shared-lock direct JSON: 159.3/268.3/2,386/17,977 ns | 1.30x/1.57x/1.20x/1.30x faster; up to 2.11x lower heap and 54x fewer allocations | Other value types retain the prior GET branch; a 100-item mixed queue is 1.37x faster with 1.56x lower heap and 28x fewer allocations |
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
@@ -296,6 +297,7 @@ tree.
 | Temporary packed-map materialization | Reused the generic map JSON encoder | 1,499 ns, 488 B, and 5 allocations | Replaced by direct JSON at 511.4 ns, 24 B, and 1 allocation; see [packed small-map storage](#packed-small-map-storage) |
 | Boxed packed-set reads | Avoided retaining interface payloads in packed pools | Two-member reads were 1.31x slower with 2x heap and 3x allocations | Removed; packed pools retain the faster interface payload layout; see [packed small string-set storage](#packed-small-string-set-storage) |
 | Priority-queue interface marker | Reached the desired 48-byte item layout | Generic dispatch slowed from 1.534 to 1.961 ns | Replaced by length dispatch; see [compact priority-queue items](#compact-priority-queue-items) |
+| Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
@@ -2840,18 +2842,19 @@ discarded. The retained design dispatches on `stringValue` length and has no
 generic-path marker check. Wire, snapshot, journal, and persistent storage
 formats remain unchanged.
 
-Exact `GETPQ` and `GETPRIORITY` command reads previously copied
-the internal heap, popped and cloned every value into a second public slice,
-then encoded that slice. The exact priority-queue commands now validate string
-values while holding the existing lock, copy only a multi-item heap, and write
-the canonical JSON array after unlocking. Empty and one-item queues need no
-heap copy. Structured values and lazy storage references return immediately to
-the prior checked generic path.
+Exact `GETPQ` and `GETPRIORITY` command reads previously copied the internal
+heap, popped and cloned every value into a second public slice, then encoded
+that slice. The exact priority-queue commands now detect string-only queues for
+exact output sizing, copy only a multi-item heap, and write the canonical JSON
+array after unlocking. Empty and one-item queues need no heap copy. Mixed
+queues encode strings without interface boxing and delegate only each
+structured payload to the existing generic value encoder. Lazy storage
+references retain the prior checked hydration path.
 
 Tests were added before implementation and compare both aliases with the
 generic encoder for empty, missing, wrong-type, escaped, HTML-sensitive,
 Unicode, invalid UTF-8, signed-priority-boundary, and equal-priority ordering
-cases. They also verify exact read telemetry and structured-value fallback.
+cases. They also verify exact read telemetry and direct structured-value parity.
 The rows are medians from seven runs for empty, one, and 100 items and nine runs
 for 16 items, pinned to one CPU. The generic control and exact path execute in
 the same binary.
@@ -2870,6 +2873,32 @@ make run CMD='go test . -run=none -bench=BenchmarkPriorityQueueGetCommand -bench
 The response bytes, priority/sequence ordering, public `Items()` ownership,
 snapshot, journal, replication, and persistent formats are unchanged. The path
 adds no retained fields, configuration, background work, or fixed memory.
+
+The generic exact-uppercase `GET` dispatcher now uses the same encoder for an
+in-memory priority queue. It prepares the copied heap under the existing shared
+read lock, preserving the scalar GET fallback for expired TTLs and lazy
+storage. Non-priority-queue value types execute the byte-for-byte previous
+switch branches.
+
+```sh
+make run CMD='go test . -run=none -bench=BenchmarkPriorityQueueGenericGetCommand -benchmem -benchtime=500ms -count=7 -cpu=1'
+make run CMD='go test . -run=none -bench=BenchmarkPriorityQueueStructuredGetCommand/Items100 -benchmem -benchtime=750ms -count=9 -cpu=1'
+```
+
+| Generic `GET` | Public materialization | Shared-lock direct JSON | Improvement |
+| --- | ---: | ---: | ---: |
+| Empty | 207.1 ns; 64 B; 3 allocs | 159.3 ns; 0 B; 0 allocs | 1.30x faster; allocation-free |
+| One item | 422.4 ns; 192 B; 6 allocs | 268.3 ns; 48 B; 1 alloc | 1.57x faster; 4.00x lower heap; 6x fewer allocs |
+| 16 items | 2,863 ns; 2,168 B; 21 allocs | 2,386 ns; 1,472 B; 2 allocs | 1.20x faster; 1.47x lower heap; 10.5x fewer allocs |
+| 100 items | 23,449 ns; 17,528 B; 108 allocs | 17,977 ns; 8,320 B; 2 allocs | 1.30x faster; 2.11x lower heap; 54x fewer allocs |
+| 100 items, final heap slot structured | 26,295 ns; 17,985 B; 112 allocs | 19,154 ns; 11,513 B; 4 allocs | 1.37x faster; 1.56x lower heap; 28x fewer allocs |
+
+The structured row exercises the longest string-only eligibility scan. An
+intermediate implementation then returned to generic materialization and could
+drift about 1% slower, so it was not retained. Direct mixed-value encoding
+removes that second pass and its public-slice clones. Empty, one-, mixed-, and
+string-only queues retain the same response bytes and ownership guarantees as
+the dedicated commands.
 
 <a id="radix-node-tag-compaction-rollback"></a>
 ### Radix-Node Tag Compaction Rollback
