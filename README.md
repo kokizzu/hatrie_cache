@@ -1846,7 +1846,11 @@ dormant until the first unfiltered sync, then retains about 29.6 B/key. Active
 writes coalesce up to 1,024 unique pending keys; the next sync applies each final
 value once, while broader churn triggers one linear index rebuild. This reduced
 the measured 100,000-write-plus-sync cycle from 45.5 ms to 25.8 ms. Prefix sync
-and multi-shard routing use the compatible bounded, sorted digest path.
+and multi-shard routing use the compatible bounded, sorted digest path. When
+that path has exactly one target, a
+[direct digest inventory](BENCHMARK.md#direct-single-target-digest-inventory)
+avoids per-key target-map lookup: 10,000-key planning is 1.15x faster with two
+fewer allocations, while the multi-target implementation is unchanged.
 Write batches retain at most 1,024 keys and are also split by
 `REPLICATION_BATCH_MAX_BYTES`.
 

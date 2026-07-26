@@ -469,6 +469,33 @@ func TestDocsDescribeDirectSingleTargetGRPCSyncDispatch(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectSingleTargetDigestInventory(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[direct digest inventory](BENCHMARK.md#direct-single-target-digest-inventory)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing direct digest inventory token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkReplicationDigestInventorySingleTargetAlternating",
+		"1.15x faster",
+		"312 B lower",
+		"two fewer",
+		"Shared-loop single-target digest branch",
+		"four-target control was 1.8% slower",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct digest inventory token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeSelectiveSnapshotMutationMaps(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

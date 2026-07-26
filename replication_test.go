@@ -3424,6 +3424,64 @@ func TestReplicationDigestUnsupportedCapabilityExpiresAndMatchesTarget(t *testin
 	}
 }
 
+func TestReplicationDigestInventoriesPreserveSingleAndMultipleTargets(t *testing.T) {
+	trie := newTestTrie(t)
+	for idx := 0; idx < 32; idx++ {
+		trie.UpsertString(fmt.Sprintf("session:%02d", idx), fmt.Sprintf("value-%02d", idx))
+	}
+	for _, replicas := range []int{1, 3} {
+		t.Run(fmt.Sprintf("Replicas%d", replicas), func(t *testing.T) {
+			nodes := []TopologyNode{{ID: "node-a", Address: "http://node-a"}}
+			replicaIDs := make([]string, replicas)
+			for idx := range replicaIDs {
+				replicaIDs[idx] = fmt.Sprintf("node-%c", 'b'+idx)
+				nodes = append(nodes, TopologyNode{ID: replicaIDs[idx], Address: "http://" + replicaIDs[idx]})
+			}
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes:   nodes,
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-a", Replicas: replicaIDs}},
+			})
+			if err != nil {
+				t.Fatalf("NewTopologyStore() error = %v", err)
+			}
+			routing, ok := newReplicationRoutingSnapshot("node-a", topology, nil)
+			if !ok {
+				t.Fatal("newReplicationRoutingSnapshot() ok = false")
+			}
+			replicator := &HTTPReplicator{self: "node-a"}
+			var inventories []replicationDigestTargetInventory
+			var entries int
+			if target, single := singleReplicationDigestTarget(routing, "node-a"); single {
+				inventories, entries, err = replicator.replicationDigestInventorySingleTarget(context.Background(), trie, "session:", 8, routing, target)
+			} else {
+				inventories, entries, err = replicator.replicationDigestInventories(context.Background(), trie, "session:", 8, routing)
+			}
+			if err != nil {
+				t.Fatalf("replicationDigestInventories() error = %v", err)
+			}
+			if entries != 32 || len(inventories) != replicas {
+				t.Fatalf("inventory entries/targets = %d/%d, want 32/%d", entries, len(inventories), replicas)
+			}
+			if replicas == 1 {
+				mapped, mappedEntries, mappedErr := replicator.replicationDigestInventories(context.Background(), trie, "session:", 8, routing)
+				if mappedErr != nil || mappedEntries != entries || !reflect.DeepEqual(mapped, inventories) {
+					t.Fatalf("single direct/map inventories differ: direct=%#v/%d map=%#v/%d err=%v", inventories, entries, mapped, mappedEntries, mappedErr)
+				}
+			}
+			for idx, inventory := range inventories {
+				if inventory.target.ID != replicaIDs[idx] || inventory.entryCount != 32 || inventory.root != nil || inventory.rootSum == 0 {
+					t.Fatalf("inventory %d = %#v, want finalized %s with 32 entries", idx, inventory, replicaIDs[idx])
+				}
+				if idx > 0 && inventory.rootSum != inventories[0].rootSum {
+					t.Fatalf("inventory %d root = %d, want shared root %d", idx, inventory.rootSum, inventories[0].rootSum)
+				}
+			}
+		})
+	}
+}
+
 func TestReplicationDigestUnsupportedSkipsClockWithoutCapability(t *testing.T) {
 	replicator := NewHTTPReplicator(HTTPReplicatorOptions{Self: "node-a"})
 	t.Cleanup(replicator.Close)

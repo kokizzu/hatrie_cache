@@ -1105,6 +1105,104 @@ func BenchmarkReplicationDigestIncremental(b *testing.B) {
 	}
 }
 
+var benchmarkReplicationDigestInventoriesSink []replicationDigestTargetInventory
+var benchmarkReplicationDigestEntriesSink int
+
+func BenchmarkReplicationDigestInventoryPlanning10K(b *testing.B) {
+	const keyCount = 10_000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for idx := 0; idx < keyCount; idx++ {
+		trie.UpsertString(fmt.Sprintf("session:%05d", idx), "value")
+	}
+	for _, replicas := range []int{1, 2, 4} {
+		b.Run(fmt.Sprintf("Targets%d", replicas), func(b *testing.B) {
+			nodes := []TopologyNode{{ID: "node-a", Address: "http://node-a"}}
+			replicaIDs := make([]string, replicas)
+			for idx := range replicaIDs {
+				replicaIDs[idx] = fmt.Sprintf("node-%c", 'b'+idx)
+				nodes = append(nodes, TopologyNode{ID: replicaIDs[idx], Address: "http://" + replicaIDs[idx]})
+			}
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes:   nodes,
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-a", Replicas: replicaIDs}},
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			routing, ok := newReplicationRoutingSnapshot("node-a", topology, nil)
+			if !ok {
+				b.Fatal("newReplicationRoutingSnapshot() failed")
+			}
+			replicator := &HTTPReplicator{self: "node-a"}
+			singleTarget, single := singleReplicationDigestTarget(routing, "node-a")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				var inventories []replicationDigestTargetInventory
+				var entries int
+				if single {
+					inventories, entries, err = replicator.replicationDigestInventorySingleTarget(context.Background(), trie, "session:", defaultReplicationSyncKeyPageSize, routing, singleTarget)
+				} else {
+					inventories, entries, err = replicator.replicationDigestInventories(context.Background(), trie, "session:", defaultReplicationSyncKeyPageSize, routing)
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkReplicationDigestInventoriesSink = inventories
+				benchmarkReplicationDigestEntriesSink = entries
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationDigestInventorySingleTargetAlternating(b *testing.B) {
+	const keyCount = 10_000
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	for idx := 0; idx < keyCount; idx++ {
+		trie.UpsertString(fmt.Sprintf("session:%05d", idx), "value")
+	}
+	topology := replicationTestTopology(b, "http://node-b")
+	routing, ok := newReplicationRoutingSnapshot("node-a", topology, nil)
+	if !ok {
+		b.Fatal("newReplicationRoutingSnapshot() failed")
+	}
+	target, single := singleReplicationDigestTarget(routing, "node-a")
+	if !single {
+		b.Fatal("singleReplicationDigestTarget() failed")
+	}
+	replicator := &HTTPReplicator{self: "node-a"}
+	var mapDuration, directDuration time.Duration
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		directFirst := iteration&1 != 0
+		for pass := 0; pass < 2; pass++ {
+			started := time.Now()
+			var inventories []replicationDigestTargetInventory
+			var entries int
+			var err error
+			if directFirst == (pass == 0) {
+				inventories, entries, err = replicator.replicationDigestInventorySingleTarget(context.Background(), trie, "session:", defaultReplicationSyncKeyPageSize, routing, target)
+				directDuration += time.Since(started)
+			} else {
+				inventories, entries, err = replicator.replicationDigestInventories(context.Background(), trie, "session:", defaultReplicationSyncKeyPageSize, routing)
+				mapDuration += time.Since(started)
+			}
+			if err != nil || entries != keyCount || len(inventories) != 1 {
+				b.Fatalf("inventory scan = %d entries/%d targets/%v", entries, len(inventories), err)
+			}
+			benchmarkReplicationDigestInventoriesSink = inventories
+			benchmarkReplicationDigestEntriesSink = entries
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/scan")
+	b.ReportMetric(float64(mapDuration.Nanoseconds())/float64(b.N), "map_ns/scan")
+}
+
 func BenchmarkReplicationMerkleIndexBuild(b *testing.B) {
 	const keyCount = 10000
 	for iteration := 0; iteration < b.N; iteration++ {

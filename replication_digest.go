@@ -148,13 +148,14 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 		result.Reason = "no sync targets"
 		return result
 	}
-	if target, single := singleReplicationDigestTarget(routing, replicator.self); single && replicator.replicationDigestUnsupported(target, routing.fingerprint) {
+	singleTarget, hasSingleTarget := singleReplicationDigestTarget(routing, replicator.self)
+	if hasSingleTarget && replicator.replicationDigestUnsupported(singleTarget, routing.fingerprint) {
 		var grpcSession *replicationGRPCSyncSession
 		if replicator.transport == ReplicationTransportGRPCStream {
 			grpcSession = newReplicationGRPCSyncSession(ctx, replicator)
 			defer grpcSession.close()
 		}
-		inventory := newReplicationDigestTargetInventory(target, prefix, pageSize)
+		inventory := newReplicationDigestTargetInventory(singleTarget, prefix, pageSize)
 		targets, changed, deleted, fallback := replicator.syncDigestTargetFallback(ctx, trie, routing, *inventory, grpcSession)
 		result.Entries = changed
 		result.Targets = targets
@@ -175,7 +176,14 @@ func (replicator *HTTPReplicator) syncAllPaged(ctx context.Context, trie *HatTri
 	if merkleResult, handled := replicator.syncAllMerkle(ctx, trie, prefix, pageSize, routing); handled {
 		return merkleResult
 	}
-	inventories, entries, err := replicator.replicationDigestInventories(ctx, trie, prefix, pageSize, routing)
+	var inventories []replicationDigestTargetInventory
+	var entries int
+	var err error
+	if hasSingleTarget {
+		inventories, entries, err = replicator.replicationDigestInventorySingleTarget(ctx, trie, prefix, pageSize, routing, singleTarget)
+	} else {
+		inventories, entries, err = replicator.replicationDigestInventories(ctx, trie, prefix, pageSize, routing)
+	}
 	result.Entries = entries
 	if err != nil {
 		result.Skipped = true
@@ -424,7 +432,6 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 		afterKey = page.nextAfterKey
 		hasAfterKey = true
 	}
-
 	out := make([]replicationDigestTargetInventory, 0, len(inventories))
 	for _, inventory := range inventories {
 		inventory.rootSum = inventory.root.Sum64()
@@ -435,6 +442,47 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 		return replicationTaskTargetKey(out[i].target) < replicationTaskTargetKey(out[j].target)
 	})
 	return out, entries, nil
+}
+
+func (replicator *HTTPReplicator) replicationDigestInventorySingleTarget(ctx context.Context, trie *HatTrie, prefix string, pageSize int, routing replicationRoutingSnapshot, target TopologyNode) ([]replicationDigestTargetInventory, int, error) {
+	inventory := newReplicationDigestTargetInventory(target, prefix, pageSize)
+	afterKey := ""
+	hasAfterKey := false
+	cursor := &replicationSyncCursor{packedKeys: true}
+	defer cursor.close(trie)
+	entries := 0
+	var scratch []byte
+	for {
+		page, err := replicationSyncEntriesPageWithCursor(trie, prefix, afterKey, hasAfterKey, pageSize, cursor, func(entry Entry) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			route, ok := routing.replicationScanRouteForKey(entry.Key)
+			if !ok || route.Leader.Leader != replicator.self || len(routing.replicationTargets(route, replicator.self)) == 0 {
+				return nil
+			}
+			var dumpErr error
+			scratch, ok, dumpErr = trie.appendCommandDumpScannedEntryBinaryWithoutStatsLocked(scratch[:0], entry)
+			if dumpErr != nil || !ok {
+				return dumpErr
+			}
+			appendReplicationDigestRoot(inventory.root, entry.Key, replicationValueDigest(scratch))
+			inventory.entryCount++
+			entries++
+			return nil
+		})
+		if err != nil {
+			return nil, entries, err
+		}
+		if !page.hasMore {
+			break
+		}
+		afterKey = page.nextAfterKey
+		hasAfterKey = true
+	}
+	inventory.rootSum = inventory.root.Sum64()
+	inventory.root = nil
+	return []replicationDigestTargetInventory{*inventory}, entries, nil
 }
 
 func (replicator *HTTPReplicator) replicationDigestInventoryForTarget(ctx context.Context, trie *HatTrie, pageSize int, routing replicationRoutingSnapshot, target TopologyNode, buckets replicationMerkleBucketMask) (replicationDigestTargetInventory, error) {

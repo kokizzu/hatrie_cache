@@ -193,6 +193,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Request-scoped fallback arena ring](#replication-descriptor-optimizations), 10k keys in ten pages | Fresh arena/page: 12.234 ms; 766,579 heap B; 1,408 allocs | Two reusable arenas: 11.333 ms; 287,987 heap B; 1,369 allocs | 1.08x faster, 2.66x lower heap, 1.03x fewer allocs | At most two page arenas remain live until their HTTP body writers finish; requests, wire bytes, and scan lock boundaries are unchanged |
 | Current pass | [Bounded two-page fallback aggregation](#replication-descriptor-optimizations), 10k keys | One page/request: 11.333 ms sender; 4.443 ms receiver; 10.01 requests; 287,987 sender heap B | Two pages/request: 9.699 ms sender; 3.663 ms receiver; 5.01 requests; 218,509 sender heap B | Combined CPU 1.18x faster; 2x fewer requests; sender heap 1.32x lower; 1.84x fewer sender allocs | Largest protobuf grows from 61,156 B to 122,156 B, still 8.6x below the default 1 MiB limit; scan lock pages stay at 1,024 keys |
 | Current pass | [Packed batch no-split proof](#replication-descriptor-optimizations), 10k-key known-legacy sync | Exact per-key estimate: 9.738 ms; 215,929 heap B; 744 allocs; 5.003 requests | Aggregate upper bound: 9.020 ms; 206,446 heap B; 744 allocs; 5.003 requests | 1.08x faster, 1.05x lower heap; wire and reader pause neutral | Applies only to complete packed arenas without carried estimates; all other layouts retain the exact splitter |
+| Current pass | [Direct single-target digest inventory](#direct-single-target-digest-inventory), 10k-key planning | Target map: 4.479 ms; 19,955 heap B; 58 allocs | Direct inventory: 3.907 ms; 19,643 heap B; 56 allocs | 1.15x faster, 312 fewer heap B, two fewer allocations | Caller selects only a proven sole target; the multi-target map function is unchanged |
 | Reverted | [Direct native packed scan](#replication-descriptor-optimizations), 10k-key known-legacy sync | Existing: 9.441 ms; 207,179 heap B; 744 allocs | Direct arena drain: 9.228 ms; 184,267 heap B; 720 allocs | 1.02x faster, 1.12x lower heap, 1.03x fewer allocs | Rolled back; the focused path improved 1.10x, but 2.3% end-to-end CPU did not clear the 5% gate for a new C ABI |
 | Current pass | [CLI redirect credential isolation](#cli-redirect-credential-isolation), authenticated request | Bearer token reached cross-origin redirect; 464.75 ns; 904 B; 6 allocs | Token suppressed across origin; 464.45 ns; 904 B; 6 allocs | Security fix with CPU neutral within 0.1% and identical heap/allocations | Same-origin redirects retain authentication; redirected APIs on another origin must authenticate independently |
 | Reverted | [Single-pass legacy repair](#replication-descriptor-optimizations), 10k keys | Existing: 11.459 ms; 55,892 wire B; 977,706 heap B; 433 allocs | Unordered: 10.675 ms; 64,258 wire B; sorted: 12.316 ms | Unordered was 1.07x faster but wire was 1.15x larger; sorted was 1.075x slower | Both candidates were rolled back; no runtime tradeoff remains |
@@ -368,6 +369,7 @@ tree.
 | Mixed-page compact descriptors | Tried to keep mixed SET/delete repair pages in the compact layout | Added 17% transient heap | Replaced by selecting generic compatibility storage before descriptor allocation; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Ten-page replication aggregation | Reduced request count beyond the retained two-page cap | Could stage ten unusually large pages before splitting | Removed to preserve bounded memory; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Copying replication arena | Shared value storage but copied/reconstructed every key during protobuf sizing and writing | The paired 10k end-to-end median was about 1.09x slower | Replaced by direct immutable key references; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
+| Shared-loop single-target digest branch | Removed the target map for one target without a separate scan loop | The added per-key branch made the immediate four-target control 1.8% slower | Replaced by caller-level selection; the [direct single-target digest inventory](#direct-single-target-digest-inventory) leaves the multi-target function unchanged |
 | Direct native packed scan | Focused preparation improved 1.10x with 1.15x lower heap | End-to-end CPU improved only 1.02x, below the 5% gate for a new C ABI | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Single-pass legacy repair | Unordered transfer was 1.07x faster with 1.11x fewer allocations | Wire grew 1.15x; restoring deterministic order made CPU 1.075x slower | Both variants reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -3152,6 +3154,41 @@ The fixture intentionally uses an invalid empty sync payload so it isolates
 dispatch planning from network, protobuf, and goroutine scheduling. The branch
 does not change request construction, wire bytes, storage, retries, fallback,
 timeouts, configuration, or public behavior.
+
+<a id="direct-single-target-digest-inventory"></a>
+#### Direct Single-Target Digest Inventory
+
+The compatible anti-entropy path computes a value-digest inventory for every
+target. `syncAllPaged` already proves whether all locally led shards have one
+common target for capability-cache lookup. It now reuses that proof to select a
+dedicated inventory scan for exactly one target, avoiding a
+`map[TopologyNode]*inventory`, one map lookup per scanned key, output-map
+materialization, and sorting. Zero or multiple targets call the original map
+function unchanged.
+
+The test-first fixture builds one- and three-replica routing snapshots, checks
+target order, entry counts, finalized roots, and proves the direct one-target
+inventory is deeply equal to the map result. Digest sync and legacy-fallback
+tests pass ten times.
+
+```sh
+make run CMD='go test . -run="TestReplicationDigestInventoriesPreserveSingleAndMultipleTargets|TestHTTPReplicatorSyncAllDigest" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationDigestInventoryPlanning10K -benchmem -benchtime=10x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationDigestInventorySingleTargetAlternating -benchtime=10x -count=10 -cpu=1'
+```
+
+| 10k-key single-target planning, ten-run median | Target map | Direct inventory | Improvement |
+| --- | ---: | ---: | ---: |
+| Alternating same-binary CPU | 4,479,183 ns | 3,907,212 ns | 1.15x faster |
+| Cumulative heap | 19,955 B | 19,643 B | 312 B lower |
+| Allocations | 58 | 56 | two fewer |
+
+An initial shared-loop prototype put a `singleInventory != nil` branch in the
+callback for every key. Its immediate four-target control was 1.8% slower, so
+that design was removed. The final caller-level split keeps the multi-target
+implementation unchanged and duplicates only the bounded scan loop. Digest
+bytes, roots, target ordering, lock pages, requests, wire bytes, storage,
+configuration, and compatibility behavior are unchanged.
 
 ### Hierarchical Merkle Anti-Entropy
 
