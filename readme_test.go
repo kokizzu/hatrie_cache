@@ -223,6 +223,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Dedicated `GETTOPK` lock-release snapshot",
 		"Reservoir escaped-value exact sizing",
 		"Reservoir sort outside cache lock",
+		"Mutation response encoding outside cache lock",
 		"Shared-lock generic collection GET",
 		"Top-K helper lookup",
 		"Naive repeated-read scalar routing",

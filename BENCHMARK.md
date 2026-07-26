@@ -311,6 +311,7 @@ tree.
 | Dedicated `GETTOPK` lock-release snapshot | Let writers proceed while caller-controlled JSON marshaling was blocked | The five-second 100-item structured read was 14,457 ns versus 13,776 ns legacy, or 1.05x slower, with identical 9,872 B and 5 allocations | Reverted for `GETTOPK`; the serial-neutral generic `GET` snapshot remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
+| Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
 | Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
 | Naive repeated-read scalar routing | Tried to send repeated reads through the native selector | 16 reads regressed 2.58x; a scan-only guard remained 1.08x slower | Replaced by resolve-once response copying; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
@@ -2849,6 +2850,41 @@ make run CMD='go test -run=NONE -bench=BenchmarkCommandFeature/RadixPrefix -benc
 The radix command allocation count falls from 20 to 1; the remaining
 allocation is the returned JSON string. Non-string or JSON-escaped radix values
 use the generic clone-and-encode path to preserve behavior.
+
+<a id="mutation-response-lock-release-rollback"></a>
+### Mutation Response Lock Release Rollback
+
+`POPSLICE` and `POPPQ` remove and retain their response value while holding the
+exclusive cache lock. A candidate completed mutation, accounting, and cache
+publication under that lock, then unlocked before serializing a non-string
+response. Tests added before the candidate used a blocking caller-controlled
+JSON marshaler: both legacy commands held an unrelated writer for at least 100
+ms, while the candidate let the writer finish before marshaling was released
+and still returned the removed point-in-time value. The race detector passed.
+
+The first grouped microbenchmark was discarded because fixture rebuilding
+dominated wall time and exposed different CPU-frequency phases. The final
+same-binary control preloaded 32,768 independent one-item keys, timed legacy
+and candidate command batches in alternating 256-key chunks, alternated first
+order across five rounds, and repeated the process seven times on one logical
+CPU:
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkMutationResponseLockScopePaired -benchtime=5x -count=7 -cpu=1'
+```
+
+| Pop response, median paired ratio | Candidate versus legacy | Heap / allocations |
+| --- | ---: | ---: |
+| Slice string | 0.9997x | unchanged at 0 B / 0 |
+| Slice structured | 0.9752x, or 1.03x slower | unchanged at 152 B / 3 |
+| Priority-queue string | 1.010x | unchanged at 32 B / 1 |
+| Priority-queue structured | 0.9729x, or 1.03x slower | unchanged at 576 B / 8 |
+
+The lock release therefore traded an unbounded writer stall reduction for a
+repeatable complete-path CPU regression on both ordinary structured response
+families. Production and experimental test code were fully reverted. Current
+wire bytes, mutation semantics, lock scope, heap, and allocations are
+unchanged.
 
 <a id="compact-priority-queue-items"></a>
 ### Compact Priority-Queue Items
