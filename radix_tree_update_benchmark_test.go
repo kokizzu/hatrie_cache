@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 )
@@ -169,6 +170,146 @@ func BenchmarkRadixTreePlainStringBuildAlternating(b *testing.B) {
 	operations := float64(b.N * builds)
 	b.ReportMetric(float64(candidateDuration.Nanoseconds())/operations, "candidate-ns/build")
 	b.ReportMetric(float64(controlDuration.Nanoseconds())/operations, "control-ns/build")
+}
+
+func BenchmarkRadixTreePutEntriesOrderAlternating(b *testing.B) {
+	for _, size := range []int{64, 4096} {
+		b.Run(fmt.Sprintf("Build%d", size), func(b *testing.B) {
+			entries := radixTreeBenchmarkMap(size)
+			builds := 256
+			if size >= 4096 {
+				builds = 4
+			}
+			var directDuration, sortedDuration time.Duration
+			for iteration := 0; iteration < b.N; iteration++ {
+				directFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if directFirst == (pass == 0) {
+						for build := 0; build < builds; build++ {
+							tree := newRadixTreeData()
+							if added := tree.PutEntries(entries); added != len(entries) {
+								b.Fatalf("direct added = %d, want %d", added, len(entries))
+							}
+						}
+						directDuration += time.Since(started)
+					} else {
+						for build := 0; build < builds; build++ {
+							tree := newRadixTreeData()
+							if added := radixTreePutEntriesSorted(&tree, entries); added != len(entries) {
+								b.Fatalf("sorted added = %d, want %d", added, len(entries))
+							}
+						}
+						sortedDuration += time.Since(started)
+					}
+				}
+			}
+			operations := float64(b.N * builds)
+			b.ReportMetric(float64(directDuration.Nanoseconds())/operations, "direct-ns/build")
+			b.ReportMetric(float64(sortedDuration.Nanoseconds())/operations, "sorted-ns/build")
+		})
+	}
+}
+
+func BenchmarkRadixTreePutEntriesReplacementAlternating(b *testing.B) {
+	for _, size := range []int{64, 4096} {
+		b.Run(fmt.Sprintf("Replace%d", size), func(b *testing.B) {
+			entries := radixTreeBenchmarkMap(size)
+			directTree := newRadixTreeData()
+			sortedTree := newRadixTreeData()
+			directTree.PutEntries(entries)
+			radixTreePutEntriesSorted(&sortedTree, entries)
+			updates := 256
+			if size >= 4096 {
+				updates = 4
+			}
+			var directDuration, sortedDuration time.Duration
+			for iteration := 0; iteration < b.N; iteration++ {
+				directFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if directFirst == (pass == 0) {
+						for update := 0; update < updates; update++ {
+							if added := directTree.PutEntries(entries); added != 0 {
+								b.Fatalf("direct replacement added = %d, want 0", added)
+							}
+						}
+						directDuration += time.Since(started)
+					} else {
+						for update := 0; update < updates; update++ {
+							if added := radixTreePutEntriesSorted(&sortedTree, entries); added != 0 {
+								b.Fatalf("sorted replacement added = %d, want 0", added)
+							}
+						}
+						sortedDuration += time.Since(started)
+					}
+				}
+			}
+			operations := float64(b.N * updates)
+			b.ReportMetric(float64(directDuration.Nanoseconds())/operations, "direct-ns/update")
+			b.ReportMetric(float64(sortedDuration.Nanoseconds())/operations, "sorted-ns/update")
+		})
+	}
+}
+
+func BenchmarkRadixTreePutEntriesOrderAllocations(b *testing.B) {
+	for _, size := range []int{64, 4096} {
+		entries := radixTreeBenchmarkMap(size)
+		b.Run(fmt.Sprintf("Sorted%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				tree := newRadixTreeData()
+				radixTreePutEntriesSorted(&tree, entries)
+			}
+		})
+		b.Run(fmt.Sprintf("Direct%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				tree := newRadixTreeData()
+				tree.PutEntries(entries)
+			}
+		})
+		directTree := newRadixTreeData()
+		sortedTree := newRadixTreeData()
+		directTree.PutEntries(entries)
+		radixTreePutEntriesSorted(&sortedTree, entries)
+		b.Run(fmt.Sprintf("ReplaceSorted%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				radixTreePutEntriesSorted(&sortedTree, entries)
+			}
+		})
+		b.Run(fmt.Sprintf("ReplaceDirect%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				directTree.PutEntries(entries)
+			}
+		})
+	}
+}
+
+func radixTreeBenchmarkMap(count int) Map {
+	keys, values := radixTreeBenchmarkEntries(count)
+	entries := make(Map, count)
+	for index, key := range keys {
+		entries[key] = values[index]
+	}
+	return entries
+}
+
+func radixTreePutEntriesSorted(tree *radixTreeData, entries Map) int {
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	added := 0
+	for _, key := range keys {
+		if tree.Put(key, entries[key]) {
+			added++
+		}
+	}
+	return added
 }
 
 func radixTreeBenchmarkKeys(count int) []string {

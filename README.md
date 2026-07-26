@@ -55,8 +55,12 @@ indexes with fast lookup, sorted prefix scans, and low overhead for keys that
 share long prefixes. Repeated exact plain-string `PUTRT` avoids re-boxing an
 unchanged value, making the measured command 1.26x faster and allocation-free;
 real replacements, dynamic construction, generic values, and reads remain
-neutral or faster. See
-[BENCHMARK.md](BENCHMARK.md#idempotent-plain-string-radix-updates).
+neutral or faster. Bulk pair insertion also skips a redundant input-key sort:
+64/4,096-entry builds are 1.20x/1.23x faster and replacement calls are
+1.80x-2.24x faster while preserving the exact canonical tree and sorted output.
+See [the duplicate-update](BENCHMARK.md#idempotent-plain-string-radix-updates)
+and [bulk-insertion](BENCHMARK.md#order-independent-radix-bulk-insertion)
+measurements.
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts

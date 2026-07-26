@@ -116,14 +116,9 @@ func (tree *radixTreeData) PutEntries(entries Map) int {
 	if tree == nil || len(entries) == 0 {
 		return 0
 	}
-	keys := make([]string, 0, len(entries))
-	for key := range entries {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
 	added := 0
-	for _, key := range keys {
-		if tree.Put(key, entries[key]) {
+	for key, value := range entries {
+		if tree.Put(key, value) {
 			added++
 		}
 	}

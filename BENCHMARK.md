@@ -213,6 +213,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Allocation-free duplicate radix updates](#idempotent-plain-string-radix-updates), exact plain-string `PUTRT` | 260.6 ns; 16 B; 1 alloc | 207.6 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated; focused duplicate 2.62x faster | Exact command only; public generic writes are unchanged, while replacements, dynamic builds, and reads are neutral or faster |
+| Current pass | [Order-independent radix bulk insertion](#order-independent-radix-bulk-insertion), 64/4,096-entry build and replacement | Sorted builds: 12,681/1,350,624 ns; replacements: 6,840/794,342 ns | Direct builds: 10,566/1,101,969 ns; replacements: 3,058/441,584 ns | Builds 1.20x/1.23x faster; replacements 2.24x/1.80x faster; one allocation and 1,152/65,536 B eliminated per call | No measured tradeoff; exact tree shape, item count, cloning, sorted traversal, snapshots, wire, and storage remain unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -3085,6 +3086,44 @@ The exact command continues to record the write, update telemetry, cache the
 same radix handle, and return the same added/not-added response for duplicates.
 Node layout, retained memory, prefix ordering, snapshots, journals, persistent
 records, replication, and wire formats are unchanged.
+
+<a id="order-independent-radix-bulk-insertion"></a>
+### Order-Independent Radix Bulk Insertion
+
+`radixTreeData.PutEntries` previously copied every input-map key into a
+temporary slice and sorted it before inserting the entries. That ordering was
+redundant: each compressed radix node keeps children sorted by their first
+byte, and node splitting produces the same canonical path-compressed tree for
+every insertion order. The implementation now ranges over the input map
+directly. Individual values still pass through `Put`, preserving value cloning,
+replacement, item-count, nil-receiver, and error behavior.
+
+The correctness test was added before the production change. It builds
+adversarial parent, child, sibling, empty-key, and shared-prefix entries in four
+different orders, then compares the exact private tree shape, item count,
+snapshot, and info. It also proves order-independent replacement and bulk-map
+insertion. The test passed 100 repeated runs before and after the change.
+
+```sh
+make run CMD='go test . -run=TestRadixTreeInsertionOrderProducesCanonicalShape -count=100'
+make run CMD='go test . -run=NONE -bench=BenchmarkRadixTreePutEntriesOrderAlternating -benchtime=20x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRadixTreePutEntriesReplacementAlternating -benchtime=20x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkRadixTreePutEntriesOrderAllocations/.*64 -benchtime=2000x -count=5 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkRadixTreePutEntriesOrderAllocations/.*4096 -benchtime=50x -count=5 -cpu=1 -benchmem'
+```
+
+| Bulk operation, median | Sorted control | Direct production path | Result |
+| --- | ---: | ---: | ---: |
+| Fresh 64-entry build | 12,681 ns; 15,296 B; 39 allocs | 10,566 ns; 14,144 B; 38 allocs | 1.20x faster; 1,152 B and one allocation removed |
+| Fresh 4,096-entry build | 1,350,624 ns; 1,026,369 B; 2,280 allocs | 1,101,969 ns; 960,832 B; 2,279 allocs | 1.23x faster; 65,536 B and one allocation removed |
+| Replace 64 existing entries | 6,840 ns; 1,152 B; 1 alloc | 3,058 ns; 0 B; 0 allocs | 2.24x faster; temporary heap eliminated |
+| Replace 4,096 existing entries | 794,342 ns; 65,536 B; 1 alloc | 441,584 ns; 0 B; 0 allocs | 1.80x faster; temporary heap eliminated |
+
+The CPU columns are medians from same-binary alternating controls; allocation
+columns come from the dedicated allocation fixture. Final child order, prefix
+scan order, and serialized snapshots remain deterministic even though the
+temporary insertion order is not. No format, API, or retained-memory tradeoff
+was introduced.
 
 <a id="mutation-response-lock-release-rollback"></a>
 ### Mutation Response Lock Release Rollback

@@ -60,6 +60,88 @@ func TestRadixTreePutGetDeleteAndPrefix(t *testing.T) {
 	}
 }
 
+func TestRadixTreeInsertionOrderProducesCanonicalShape(t *testing.T) {
+	items := []RadixTreeItem{
+		{Key: "", Value: "root"},
+		{Key: "a", Value: "a"},
+		{Key: "ab", Value: "ab"},
+		{Key: "abc", Value: "abc"},
+		{Key: "abd", Value: "abd"},
+		{Key: "alpha", Value: "alpha"},
+		{Key: "alphabet", Value: "alphabet"},
+		{Key: "alpine", Value: "alpine"},
+		{Key: "b", Value: "b"},
+		{Key: "beta", Value: "beta"},
+		{Key: "betamax", Value: "betamax"},
+		{Key: "zeta", Value: "zeta"},
+	}
+	orders := [][]int{
+		{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+		{11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0},
+		{5, 9, 1, 11, 3, 7, 0, 10, 2, 8, 6, 4},
+		{3, 0, 8, 6, 10, 2, 11, 1, 9, 4, 7, 5},
+	}
+	build := func(order []int) radixTreeData {
+		tree := newRadixTreeData()
+		for _, index := range order {
+			item := items[index]
+			tree.Put(item.Key, item.Value)
+		}
+		return tree
+	}
+
+	baseline := build(orders[0])
+	for index, order := range orders[1:] {
+		candidate := build(order)
+		if !reflect.DeepEqual(candidate.root, baseline.root) {
+			t.Fatalf("order %d root differs from canonical baseline:\n candidate=%#v\n baseline=%#v", index+1, candidate.root, baseline.root)
+		}
+		if candidate.items != baseline.items {
+			t.Fatalf("order %d items = %d, want %d", index+1, candidate.items, baseline.items)
+		}
+		if got, want := candidate.Snapshot(), baseline.Snapshot(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("order %d snapshot = %#v, want %#v", index+1, got, want)
+		}
+		if got, want := candidate.Info(), baseline.Info(); got != want {
+			t.Fatalf("order %d info = %#v, want %#v", index+1, got, want)
+		}
+	}
+
+	replaced := build(orders[2])
+	for _, index := range orders[3] {
+		item := items[index]
+		replaced.Put(item.Key, "replacement:"+item.Value.(string))
+	}
+	replacementBaseline := newRadixTreeData()
+	for _, item := range items {
+		replacementBaseline.Put(item.Key, "replacement:"+item.Value.(string))
+	}
+	if !reflect.DeepEqual(replaced.root, replacementBaseline.root) {
+		t.Fatalf("replacement order root differs:\n candidate=%#v\n baseline=%#v", replaced.root, replacementBaseline.root)
+	}
+
+	entries := make(Map, len(items))
+	for _, item := range items {
+		entries[item.Key] = item.Value
+	}
+	bulk := newRadixTreeData()
+	if added := bulk.PutEntries(entries); added != len(entries) {
+		t.Fatalf("bulk added = %d, want %d", added, len(entries))
+	}
+	if !reflect.DeepEqual(bulk.root, baseline.root) {
+		t.Fatalf("bulk root differs from canonical baseline:\n candidate=%#v\n baseline=%#v", bulk.root, baseline.root)
+	}
+	for key, value := range entries {
+		entries[key] = "replacement:" + value.(string)
+	}
+	if added := bulk.PutEntries(entries); added != 0 {
+		t.Fatalf("bulk replacement added = %d, want 0", added)
+	}
+	if !reflect.DeepEqual(bulk.root, replacementBaseline.root) {
+		t.Fatalf("bulk replacement root differs:\n candidate=%#v\n baseline=%#v", bulk.root, replacementBaseline.root)
+	}
+}
+
 func TestRadixTreePutPlainStringPreservesPutBehavior(t *testing.T) {
 	var nilTree *radixTreeData
 	if nilTree.PutPlainString("key", "value") {
