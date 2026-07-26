@@ -199,7 +199,10 @@ func TestPackedStringSetCommandGetMatchesCanonicalJSON(t *testing.T) {
 		{name: "two unicode", values: Set{"東京", "éclair"}},
 		{name: "unicode separators", values: Set{"line\u2028separator", "paragraph\u2029separator"}},
 		{name: "invalid utf8", values: Set{string([]byte{'a', 0xff, 'b'})}},
+		{name: "one nested", values: Set{Map{"nested": Slice{true, int64(-7)}}}},
+		{name: "two mixed", values: Set{uint64(^uint64(0)), nil}},
 		{name: "promoted", values: Set{"gamma", "alpha", "beta"}},
+		{name: "promoted mixed", values: Set{"<alpha>\n", nil, Map{"nested": Slice{true, int64(-7)}}, uint64(^uint64(0))}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ht := newTestTrie(t)
@@ -215,6 +218,42 @@ func TestPackedStringSetCommandGetMatchesCanonicalJSON(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("promoted emptied", func(t *testing.T) {
+		ht := newTestTrie(t)
+		values := Set{"alpha", "beta", "gamma"}
+		ht.UpsertSet("set", values)
+		if removed := ht.RemoveSet("set", values[0], values[1:]...); removed != len(values) {
+			t.Fatalf("RemoveSet() = %d, want %d", removed, len(values))
+		}
+		got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "set"})
+		if !got.OK || got.Value != "[]" {
+			t.Fatalf("GET emptied response = %#v, want []", got)
+		}
+	})
+
+	t.Run("promoted marshal error", func(t *testing.T) {
+		ht := newTestTrie(t)
+		value := &mutableSetJSONValue{}
+		if err := ht.UpsertSetChecked("set", Set{"alpha", "beta", value}); err != nil {
+			t.Fatalf("UpsertSetChecked() error = %v", err)
+		}
+		value.fail = true
+		if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GET", Key: "set"}); got.OK {
+			t.Fatalf("GET response = %#v, want marshal error", got)
+		}
+	})
+}
+
+type mutableSetJSONValue struct {
+	fail bool
+}
+
+func (value *mutableSetJSONValue) MarshalJSON() ([]byte, error) {
+	if value.fail {
+		return nil, fmt.Errorf("forced set JSON error")
+	}
+	return []byte(`{"ok":true}`), nil
 }
 
 func BenchmarkSetStorageLayout100k(b *testing.B) {
@@ -370,7 +409,9 @@ func BenchmarkPackedStringSetCommandGet(b *testing.B) {
 		{name: "Empty", values: Set{}},
 		{name: "One", values: Set{"alpha"}},
 		{name: "Two", values: Set{"alpha", "beta"}},
-		{name: "Promoted", values: Set{"alpha", "beta", "gamma"}},
+		{name: "Promoted3Strings", values: Set{"alpha", "beta", "gamma"}},
+		{name: "Promoted16Strings", values: benchmarkSetStrings(16)},
+		{name: "PromotedMixed", values: Set{"<alpha>\n", nil, Map{"nested": Slice{true, int64(-7)}}, uint64(^uint64(0))}},
 	} {
 		b.Run(benchmark.name, func(b *testing.B) {
 			ht := CreateHatTrie()
@@ -384,4 +425,12 @@ func BenchmarkPackedStringSetCommandGet(b *testing.B) {
 			}
 		})
 	}
+}
+
+func benchmarkSetStrings(count int) Set {
+	values := make(Set, count)
+	for index := range values {
+		values[index] = fmt.Sprintf("value:%02d", index)
+	}
+	return values
 }

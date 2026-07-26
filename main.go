@@ -2849,6 +2849,49 @@ func (set *setData) Values() Set {
 	return out
 }
 
+func (set *setData) jsonString() (string, error) {
+	if set == nil || set.items == nil {
+		return jsonEncodedString(set.Values())
+	}
+	if len(set.items) == 0 {
+		return "[]", nil
+	}
+	keys := make([]string, 0, len(set.items))
+	for key := range set.items {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	estimated := 2
+	for index, key := range keys {
+		addition := len(key)
+		if index > 0 {
+			var ok bool
+			addition, ok = checkedIntSum(addition, 1)
+			if !ok {
+				return "", errors.New("hatriecache: set JSON is too large")
+			}
+		}
+		var ok bool
+		estimated, ok = checkedIntSum(estimated, addition)
+		if !ok {
+			return "", errors.New("hatriecache: set JSON is too large")
+		}
+	}
+	var builder strings.Builder
+	builder.Grow(estimated)
+	builder.WriteByte('[')
+	for index, key := range keys {
+		if index > 0 {
+			builder.WriteByte(',')
+		}
+		if err := writeSmallMapJSONValue(&builder, set.items[key]); err != nil {
+			return "", err
+		}
+	}
+	builder.WriteByte(']')
+	return builder.String(), nil
+}
+
 func setSmallEntryLess(left setSmallEntry, right setSmallEntry) bool {
 	leftValue, leftPlain := left.value.(string)
 	rightValue, rightPlain := right.value.(string)

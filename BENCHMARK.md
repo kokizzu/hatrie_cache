@@ -227,6 +227,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Map field encoding outside cache lock](#packed-small-map-storage), exact `PEEKMAP` | Lock-held field encoding: 34.86 ns strings; 508.4 ns structured; writer stalled behind caller JSON | Point-in-time field reference: 29.68 ns strings; 456.4 ns structured; writer progresses during JSON | 1.17x/1.11x faster with identical zero/three allocations; unbounded caller-marshaler stall removed | Replacing a field may complete while the prior point-in-time response is still encoding; wire bytes and ownership are unchanged |
 | Current pass | [Packed small string-set storage](#packed-small-string-set-storage), 100k one/two-member sets | Slice/map entries: 94.36/142.4 retained B/set; 2.000/3.000 retained objects/set | Packed pools: 18.87/36.98 retained B/set; 0.00026/0.00026 retained objects/set | 5.00x/3.85x lower retained heap; about 7,692x/11,538x fewer retained objects; 1.39x/1.42x faster writes | Adds 160 fixed bytes/cache; promotes at the third member with unchanged generic retention and a 1.21x faster measured transition |
 | Current pass | [Direct packed string-set JSON](#packed-small-string-set-storage), empty/one/two-member command GET | Temporary set: 245.3/338.3/379.1 ns; 64/88/112 B; 3/4/4 allocs | Direct JSON: 76.35/134.9/153.1 ns; 0/16/16 B; 0/1/1 allocs | 3.21x/2.51x/2.48x faster; up to 7x lower heap; up to 4x fewer allocations | Packed plain strings only; promoted sets retain the generic encoder with unchanged wire, storage, ordering, and ownership |
+| Current pass | [Direct promoted-set JSON](#packed-small-string-set-storage), 3/16 strings and four mixed values | Sorted keys plus cloned set: 582.0/2,016/1,385 ns; 184/760/752 B; 5/5/10 allocs | Sorted keys plus direct values: 355.6/1,637/1,056 ns; 72/448/264 B; 2/2/4 allocs | 1.23x-1.64x faster; 1.70x-2.85x lower heap; 2.50x fewer allocs | Required deterministic key sorting remains; packed/public reads, writes, wire, storage, and persistent formats are unchanged |
 | Current pass | [Packed small-slice storage](#packed-small-slice-storage), 100k zero/one/two-value slices | Deques: 46.23/62.23/78.23 retained B/slice; one retained object for nonempty slices | Packed pools: 27.39/27.39/46.23 retained B/slice; 0.00025 retained objects/slice | 1.69x/2.27x/1.69x lower retained heap; about 4,000x fewer retained objects for nonempty slices; tiny push retention improves up to 4.02x | Adds 160 fixed bytes/cache; promotion retains the generic deque, measures neutral, and halves transition allocations |
 | Current pass | [Direct packed-slice JSON](#packed-small-slice-storage), nil/empty/one/two-value command GET | Temporary slice: 222.8/253.2/345.5/376.1 ns | Direct JSON: 80.56/80.05/141.7/150.9 ns | 2.77x/3.16x/2.44x/2.49x faster; nil/empty become allocation-free; nested values improve 1.55x | Negative packed indexes only; promoted-deque follow-up is reported separately; wire bytes, storage, ordering, and ownership are unchanged |
 | Current pass | [Direct promoted-slice JSON](#packed-small-slice-storage), 3/16 strings and four mixed values | Temporary clone: 513.4/1,153/1,250 ns; 136/504/688 B; 4/4/9 allocs | Ring-order writer: 167.4/491.9/750.4 ns; 24/192/264 B; 1/1/4 allocs | 1.67x-3.07x faster; 2.61x-5.67x lower heap; 2.25x-4.00x fewer allocs | No measured tradeoff; public cloning, lock scope, writes, wire, storage, and persistent formats are unchanged |
@@ -301,6 +302,7 @@ tree.
 | Known-valid-key GET helper | Intended to skip redundant key validation | 121.7 ns versus 120.1 ns for the checked path | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Temporary packed-map materialization | Reused the generic map JSON encoder | 1,499 ns, 488 B, and 5 allocations | Replaced by direct JSON at 511.4 ns, 24 B, and 1 allocation; see [packed small-map storage](#packed-small-map-storage) |
 | Boxed packed-set reads | Avoided retaining interface payloads in packed pools | Two-member reads were 1.31x slower with 2x heap and 3x allocations | Removed; packed pools retain the faster interface payload layout; see [packed small string-set storage](#packed-small-string-set-storage) |
+| SetStorage-level promoted JSON dispatch | Enabled direct promoted-set encoding at the shared storage encoder | Packed one/two-string command reads became 1.11x/1.10x slower | Replaced by command-level promoted routing; packed reads are neutral or faster; see [packed small string-set storage](#packed-small-string-set-storage) |
 | Priority-queue interface marker | Reached the desired 48-byte item layout | Generic dispatch slowed from 1.534 to 1.961 ns | Replaced by length dispatch; see [compact priority-queue items](#compact-priority-queue-items) |
 | Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
@@ -1440,9 +1442,34 @@ make run CMD='go test . -run none -bench BenchmarkPackedStringSetCommandGet -ben
 | Two strings | 379.1 ns; 112 B; 4 allocs | 153.1 ns; 16 B; 1 alloc | 2.48x faster; 7.00x lower heap; 4x fewer allocs |
 | Three-string promoted control | 636.4 ns; 184 B; 5 allocs | 616.2 ns; 184 B; 5 allocs | CPU 1.03x faster within noise; memory unchanged |
 
+A later promoted-set follow-up keeps the required sorted JSON-key scratch but
+writes stored values directly in that order instead of allocating and cloning
+a second public `Set`. Tests added before production changes cover generic
+nested one/two-member sets, promoted mixed values, removal to empty, canonical
+ordering/escaping, and a stored marshaler that starts failing after insertion.
+Baseline and final promoted rows are medians of seven 500 ms runs on one
+logical CPU:
+
+```sh
+make run CMD='go test . -run=NONE -bench="^BenchmarkPackedStringSetCommandGet/Promoted" -benchmem -benchtime=500ms -count=7 -cpu=1'
+```
+
+| Promoted command GET | Sorted keys plus cloned values | Sorted keys plus direct values | Improvement |
+| --- | ---: | ---: | ---: |
+| Three strings | 582.0 ns; 184 B; 5 allocs | 355.6 ns; 72 B; 2 allocs | 1.64x faster; 2.56x lower heap; 2.50x fewer allocs |
+| Sixteen strings | 2,016 ns; 760 B; 5 allocs | 1,637 ns; 448 B; 2 allocs | 1.23x faster; 1.70x lower heap; 2.50x fewer allocs |
+| Four mixed/nested values | 1,385 ns; 752 B; 10 allocs | 1,056 ns; 264 B; 4 allocs | 1.31x faster; 2.85x lower heap; 2.50x fewer allocs |
+
+The first placement put promoted dispatch inside `SetStorage.jsonString` and
+regressed existing packed one/two-string reads from 130.6/150.4 ns to
+144.9/165.9 ns, or 1.11x/1.10x slower. It was rejected. The retained command-
+level route restores the shared packed encoder byte-for-byte; detached-baseline
+controls measured packed empty/one/two reads at 75.61/130.6/150.4 ns versus
+73.16/123.9/147.9 ns final, with identical zero/one allocations.
+
 The returned bytes, lexical member order, read telemetry, storage layout,
 snapshots, journals, replication payloads, and wire schema are unchanged. The
-promoted representation still calls the existing generic encoder.
+public `GetSet` clone path remains unchanged.
 
 The first candidate boxed packed strings during reads and made two-member
 reads 1.31x slower with 2x heap and 3x allocations; it was not retained. The
