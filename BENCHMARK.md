@@ -238,6 +238,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
+| Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
@@ -923,14 +924,39 @@ Raw output is generated under
 `build/benchmarks/go1.26.4-fastime1.1.9/fastime.txt` and
 `build/benchmarks/go1.26.5-fastime1.1.9/fastime.txt`.
 
+<a id="latest-fastime-refresh"></a>
+#### Latest Fastime Refresh
+
+With the toolchain fixed at Go 1.26.5, `fastime` was updated from v1.1.9 to
+v1.1.10. The newer release uses typed atomic fields and allows its refresh
+daemon to stop immediately when its context is canceled. The application API
+and 5 ms global refresh cadence are unchanged.
+
+The machine varied between separate benchmark processes, so each production
+default is also normalized against the `time.Now` control from the same
+process. That ratio isolates the cached-clock effect more reliably than the
+absolute median alone.
+
+| Seven-run median | v1.1.9 default / `time.Now` | v1.1.10 default / `time.Now` | Normalized result |
+| --- | ---: | ---: | ---: |
+| Command string set | 182.3 / 215.1 ns | 195.6 / 227.5 ns | Advantage 1.18x to 1.16x |
+| Command string get | 164.8 / 207.7 ns | 165.5 / 209.4 ns | Advantage 1.26x to 1.27x |
+| Command counter increment | 239.0 / 275.9 ns | 236.7 / 277.9 ns | Advantage 1.15x to 1.17x |
+| Command TTL refresh | 229.9 / 362.3 ns | 224.5 / 376.1 ns | Advantage 1.58x to 1.68x |
+| `fastime.Now` clock read | 1.472 ns | 1.520 ns | 1.03x slower |
+| `fastime.UnixNanoNow` clock read | 1.385 ns | 1.346 ns | 1.03x faster |
+| Heap / allocations | unchanged | unchanged | no memory regression |
+
+Raw v1.1.10 output is generated under
+`build/benchmarks/go1.26.5-fastime1.1.10/fastime.txt`.
+
 <a id="cached-default-trie-clock"></a>
 #### Cached Default Trie Clock
 
-The default trie clock now uses `github.com/kpango/fastime` v1.1.9. That is the
-latest release retaining the project's Go 1.20 compatibility; v1.1.10 requires
-Go 1.24. The package refreshes one process-global timestamp every 5 ms. Trie
-tests can still replace `HatTrie.now`, so deterministic expiration and
-telemetry tests retain exact control.
+The default trie clock now uses `github.com/kpango/fastime` v1.1.10. The package
+refreshes one process-global timestamp every 5 ms. Trie tests can still replace
+`HatTrie.now`, so deterministic expiration and telemetry tests retain exact
+control.
 
 This substitution covers cache telemetry, expiration checks, snapshot cutoffs,
 and persistence paths that call `HatTrie.currentTime`. It intentionally does

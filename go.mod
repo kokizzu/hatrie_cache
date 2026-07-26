@@ -6,7 +6,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/goccy/go-json v0.10.6
-	github.com/kpango/fastime v1.1.9
+	github.com/kpango/fastime v1.1.10
 	github.com/syndtr/goleveldb v1.0.0
 	google.golang.org/grpc v1.64.1
 	google.golang.org/protobuf v1.34.2
