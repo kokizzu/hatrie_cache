@@ -2454,7 +2454,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 	if topologyStore == nil {
 		return replicationRoutingSnapshot{}, false
 	}
-	topology := topologyStore.Get()
+	topology, fingerprint := topologyStore.replicationSnapshot()
 	snapshot := replicationRoutingSnapshot{
 		topology:    topology,
 		nodes:       topologyNodesByID(topology),
@@ -2462,7 +2462,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 		owners:      make(map[uint32][]string, len(topology.Shards)),
 		targets:     make(map[uint32][]TopologyNode, len(topology.Shards)),
 		self:        self,
-		fingerprint: topology.Fingerprint(),
+		fingerprint: fingerprint,
 	}
 	if election != nil {
 		snapshot.online = election.activeNodesSnapshot(topology)

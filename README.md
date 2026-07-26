@@ -1828,6 +1828,14 @@ heap and half the allocations in the isolated dispatcher. Same-target and
 multi-target controls retain identical heap and allocation counts, while wire,
 fallback, ordering, and bounded fanout are unchanged.
 
+Replication routing snapshots reuse the
+[cached topology fingerprint](BENCHMARK.md#cached-replication-routing-fingerprint)
+computed when validated topology is installed instead of normalizing, sorting,
+and hashing the cloned topology again. Construction is 2.00x faster for one
+shard and 2.04x faster for four shards, with 3.71x-3.79x fewer allocations.
+Topology cloning, routing maps, target ordering, configuration, wire, storage,
+and public behavior are unchanged.
+
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
 closed instead. For 10,000 live writes from 32 callers, zero-wait

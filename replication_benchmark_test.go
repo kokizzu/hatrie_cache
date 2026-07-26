@@ -2358,6 +2358,120 @@ func BenchmarkReplicationRoutingPlanning(b *testing.B) {
 	})
 }
 
+var benchmarkReplicationRoutingSnapshotSink replicationRoutingSnapshot
+
+func BenchmarkReplicationRoutingSnapshotConstruction(b *testing.B) {
+	for _, tt := range []struct {
+		name     string
+		topology ClusterTopology
+	}{
+		{
+			name: "SingleShardTwoNodes",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes:   []TopologyNode{{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}},
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			},
+		},
+		{
+			name: "FourShardsFiveNodes",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}, {ID: "node-c", Address: "http://node-c"},
+					{ID: "node-d", Address: "http://node-d"}, {ID: "node-e", Address: "http://node-e"},
+				},
+				Shards: []TopologyShard{
+					{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+					{ID: 1, Primary: "node-b", Replicas: []string{"node-c", "node-d"}},
+					{ID: 2, Primary: "node-c", Replicas: []string{"node-d", "node-e"}},
+					{ID: 3, Primary: "node-d", Replicas: []string{"node-e", "node-a"}},
+				},
+			},
+		},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			store, err := NewTopologyStore(tt.topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				snapshot, ok := newReplicationRoutingSnapshot("node-a", store, nil)
+				if !ok {
+					b.Fatal("newReplicationRoutingSnapshot() failed")
+				}
+				benchmarkReplicationRoutingSnapshotSink = snapshot
+			}
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingSnapshotFingerprintAlternating(b *testing.B) {
+	for _, tt := range []struct {
+		name     string
+		topology ClusterTopology
+	}{
+		{
+			name: "SingleShardTwoNodes",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes:   []TopologyNode{{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}},
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+			},
+		},
+		{
+			name: "FourShardsFiveNodes",
+			topology: ClusterTopology{
+				Version: 1,
+				Self:    "node-a",
+				Nodes: []TopologyNode{
+					{ID: "node-a"}, {ID: "node-b", Address: "http://node-b"}, {ID: "node-c", Address: "http://node-c"},
+					{ID: "node-d", Address: "http://node-d"}, {ID: "node-e", Address: "http://node-e"},
+				},
+				Shards: []TopologyShard{
+					{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}},
+					{ID: 1, Primary: "node-b", Replicas: []string{"node-c", "node-d"}},
+					{ID: 2, Primary: "node-c", Replicas: []string{"node-d", "node-e"}},
+					{ID: 3, Primary: "node-d", Replicas: []string{"node-e", "node-a"}},
+				},
+			},
+		},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			store, err := NewTopologyStore(tt.topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			var cachedDuration, rehashDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				cachedFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					snapshot, ok := newReplicationRoutingSnapshot("node-a", store, nil)
+					if !ok {
+						b.Fatal("newReplicationRoutingSnapshot() failed")
+					}
+					if cachedFirst == (pass == 0) {
+						cachedDuration += time.Since(started)
+					} else {
+						snapshot.fingerprint = snapshot.topology.Fingerprint()
+						rehashDuration += time.Since(started)
+					}
+					benchmarkReplicationRoutingSnapshotSink = snapshot
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(cachedDuration.Nanoseconds())/float64(b.N), "cached_ns/snapshot")
+			b.ReportMetric(float64(rehashDuration.Nanoseconds())/float64(b.N), "rehash_ns/snapshot")
+		})
+	}
+}
+
 func BenchmarkReplicationBatchMetadataWire(b *testing.B) {
 	const payloadCount = 10000
 	payloads := make([]CacheCommandRequest, payloadCount)

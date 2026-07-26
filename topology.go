@@ -163,6 +163,15 @@ func (store *TopologyStore) Get() ClusterTopology {
 	return cloneTopology(store.topology)
 }
 
+func (store *TopologyStore) replicationSnapshot() (ClusterTopology, string) {
+	if store == nil {
+		return ClusterTopology{}, ""
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return cloneTopology(store.topology), store.fingerprint
+}
+
 // Fingerprint returns a stable content hash for the current topology. The local
 // Self field is ignored so the same cluster file can be compared across nodes.
 func (store *TopologyStore) Fingerprint() string {

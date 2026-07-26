@@ -179,6 +179,35 @@ func TestTopologyStoreFingerprintTracksTopologyUpdates(t *testing.T) {
 	}
 }
 
+func TestTopologyStoreReplicationSnapshotClonesMatchingFingerprint(t *testing.T) {
+	store, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	topology, fingerprint := store.replicationSnapshot()
+	if fingerprint == "" || fingerprint != topology.Fingerprint() || fingerprint != store.Fingerprint() {
+		t.Fatalf("replication snapshot fingerprint = %q, topology/store = %q/%q", fingerprint, topology.Fingerprint(), store.Fingerprint())
+	}
+	topology.Nodes[0].ID = "mutated"
+	topology.Shards[0].Primary = "mutated"
+	if current := store.Get(); current.Nodes[0].ID != "node-a" || current.Shards[0].Primary != "node-a" {
+		t.Fatalf("replication snapshot exposed store backing: %#v", current)
+	}
+
+	var nilStore *TopologyStore
+	if topology, fingerprint := nilStore.replicationSnapshot(); len(topology.Nodes) != 0 || fingerprint != "" {
+		t.Fatalf("nil replication snapshot = %#v/%q, want empty", topology, fingerprint)
+	}
+}
+
 func TestTopologyStoreRoutesVirtualBucketRanges(t *testing.T) {
 	topology := ClusterTopology{
 		Version:     1,

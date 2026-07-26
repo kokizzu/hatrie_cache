@@ -469,6 +469,33 @@ func TestDocsDescribeDirectSingleTargetGRPCSyncDispatch(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeCachedReplicationRoutingFingerprint(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[cached topology fingerprint](BENCHMARK.md#cached-replication-routing-fingerprint)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing cached topology fingerprint token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkReplicationRoutingSnapshotFingerprintAlternating",
+		"2.00x faster",
+		"2.04x faster",
+		"3.71x fewer allocations",
+		"3.79x fewer allocations",
+		"Topology installation still pays exactly one fingerprint",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing cached topology fingerprint token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectSingleTargetDigestInventory(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
