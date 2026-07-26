@@ -162,6 +162,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Order-independent radix bulk insertion](#order-independent-radix-bulk-insertion)",
 		"[Borrowed command pair fields](#borrowed-command-pair-fields)",
 		"[Flat scalar structured validation](#flat-scalar-structured-validation)",
+		"[Flat scalar sequence validation](#flat-scalar-sequence-validation)",
 		"[Compact XOR-filter headers](#compact-xor-filter-headers)",
 		"[Linked XOR-filter build queue](#linked-xor-filter-build-queue)",
 		"[Order-independent XOR-filter build](#order-independent-xor-filter-build)",
@@ -199,6 +200,22 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 	} {
 		if !strings.Contains(summary, token) {
 			t.Fatalf("BENCHMARK.md missing final architecture summary token %q", token)
+		}
+	}
+}
+
+func TestREADMEDocumentsFlatScalarSequenceValidation(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	readme := string(data)
+	for _, token := range []string{
+		"[sequence validation](BENCHMARK.md#flat-scalar-sequence-validation)",
+		"allocation-free validation",
+	} {
+		if !strings.Contains(readme, token) {
+			t.Fatalf("README.md missing sequence validation token %q", token)
 		}
 	}
 }

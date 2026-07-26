@@ -3,8 +3,6 @@ package hatriecache
 import (
 	"errors"
 	"fmt"
-
-	json "github.com/goccy/go-json"
 )
 
 // PriorityItem is one value stored in a priority queue. Lower priority values
@@ -47,7 +45,17 @@ func clonePriorityQueue(value PriorityQueue) PriorityQueue {
 }
 
 func validatePriorityQueueValue(value PriorityQueue) error {
-	if _, err := json.Marshal(value); err != nil {
+	allScalars := true
+	for _, item := range value {
+		if !flatJSONScalar(item.Value) {
+			allScalars = false
+			break
+		}
+	}
+	if allScalars {
+		return nil
+	}
+	if err := validateJSONToDiscard(value); err != nil {
 		return fmt.Errorf("hatriecache: unsupported priority queue value: %w", err)
 	}
 	return nil
@@ -66,7 +74,10 @@ func validatePriorityQueuePayload(value interface{}, values ...interface{}) erro
 }
 
 func validatePriorityQueueItemValue(value interface{}) error {
-	if _, err := json.Marshal(value); err != nil {
+	if flatJSONScalar(value) {
+		return nil
+	}
+	if err := validateJSONToDiscard(value); err != nil {
 		return fmt.Errorf("hatriecache: unsupported priority queue value: %w", err)
 	}
 	return nil

@@ -53,6 +53,35 @@ func TestFlatScalarStructuredValidationDoesNotAllocate(t *testing.T) {
 	}
 }
 
+func TestFlatScalarSequenceValidationDoesNotAllocate(t *testing.T) {
+	values := Slice{"value", true, nil, []byte("bytes"), int64(-1), uint64(2), float64(3.5)}
+	queue := make(PriorityQueue, len(values))
+	for index, value := range values {
+		queue[index] = PriorityItem{Priority: int64(index), Value: value}
+	}
+	for _, test := range []struct {
+		name     string
+		validate func() error
+	}{
+		{name: "slice", validate: func() error { return validateSliceValue(values) }},
+		{name: "slice payload", validate: func() error { return validateSliceValues(values[0], values[1:]...) }},
+		{name: "priority queue", validate: func() error { return validatePriorityQueueValue(queue) }},
+		{name: "priority payload", validate: func() error { return validatePriorityQueuePayload(values[0], values[1:]...) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			allocs := testing.AllocsPerRun(1000, func() {
+				structuredValidationTestSink = test.validate()
+			})
+			if structuredValidationTestSink != nil {
+				t.Fatalf("validation error = %v", structuredValidationTestSink)
+			}
+			if allocs != 0 {
+				t.Fatalf("flat scalar sequence validation allocations = %.0f, want 0", allocs)
+			}
+		})
+	}
+}
+
 func TestStructuredValidationMatchesJSONMarshalAcceptance(t *testing.T) {
 	cycle := Map{}
 	cycle["cycle"] = cycle
@@ -95,5 +124,37 @@ func TestStructuredValidationInvokesCustomMarshalerFallback(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("custom marshaler calls = %d, want 2", calls)
+	}
+}
+
+func TestSequenceValidationMatchesJSONMarshalAcceptance(t *testing.T) {
+	cycle := Map{}
+	cycle["cycle"] = cycle
+	for _, test := range []struct {
+		name  string
+		value interface{}
+	}{
+		{name: "nested valid", value: Map{"nested": Slice{"value", 1.5, true}}},
+		{name: "not a number", value: math.NaN()},
+		{name: "invalid number", value: json.Number("not-a-number")},
+		{name: "function", value: func() {}},
+		{name: "failing marshaler", value: structuredValidationFailingMarshaler{}},
+		{name: "cycle", value: cycle},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, marshalErr := json.Marshal(Slice{test.value})
+			sliceErr := validateSliceValue(Slice{test.value})
+			slicePayloadErr := validateSliceValues(test.value)
+			queueErr := validatePriorityQueueValue(PriorityQueue{{Priority: 1, Value: test.value}})
+			priorityPayloadErr := validatePriorityQueuePayload(test.value)
+			for name, validationErr := range map[string]error{
+				"slice": sliceErr, "slice payload": slicePayloadErr,
+				"priority queue": queueErr, "priority payload": priorityPayloadErr,
+			} {
+				if (validationErr == nil) != (marshalErr == nil) {
+					t.Fatalf("%s validation error = %v, marshal error = %v", name, validationErr, marshalErr)
+				}
+			}
+		})
 	}
 }

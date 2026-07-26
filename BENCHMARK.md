@@ -216,6 +216,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Order-independent radix bulk insertion](#order-independent-radix-bulk-insertion), 64/4,096-entry build and replacement | Sorted builds: 12,681/1,350,624 ns; replacements: 6,840/794,342 ns | Direct builds: 10,566/1,101,969 ns; replacements: 3,058/441,584 ns | Builds 1.20x/1.23x faster; replacements 2.24x/1.80x faster; one allocation and 1,152/65,536 B eliminated per call | No measured tradeoff; exact tree shape, item count, cloning, sorted traversal, snapshots, wire, and storage remain unchanged |
 | Current pass | [Borrowed command pair fields](#borrowed-command-pair-fields), pair-only `PUTMAP`/`PUTRT` replacement with 64/4,096 fields | Map: 26,107/2,311,800 ns; radix: 28,813/2,544,023 ns; 11,513/783,543 B | Map: 14,976/1,453,940 ns; radix: 16,328/1,742,736 ns; 2,144/131,181 B | Map 1.74x/1.59x faster; radix 1.76x/1.46x faster; 5.37x/5.97x lower heap; up to 25x fewer allocs | No measured tradeoff; storage still clones all retained values, and mixed subkey-plus-pairs requests retain an owned merge map |
 | Current pass | [Flat scalar structured validation](#flat-scalar-structured-validation), pair-only `PUTMAP`/`PUTRT` replacement with 64/4,096 fields | Map: 14,976/1,453,940 ns; radix: 16,328/1,742,736 ns; 2,144/131,181 B | Map: 3,251/247,728 ns; radix: 3,767/525,596 ns; 0 B; 0 allocs | Map 4.61x/5.87x faster; radix 4.33x/3.32x faster; command validation heap eliminated | No measured tradeoff; ordinary nested fallback is 1.02x-1.13x faster and custom marshalers, invalid values, cloning, wire, and storage are unchanged |
+| Current pass | [Flat scalar sequence validation](#flat-scalar-sequence-validation), checked slice/priority-queue replacement with 64/4,096 items | Slice: 3,926/198,293 ns; priority queue: 8,049/443,711 ns; 2,200-368,678 B; 3 allocs | Slice: 523.2/42,955 ns; priority queue: 2,791/182,809 ns; 1,152-196,608 B; 1 alloc | Slice 7.50x/4.62x faster; priority queue 2.88x/2.43x faster; 1.85x-2.00x lower heap; 3x fewer allocs | No measured tradeoff; worst-case nested fallback is 1.11x-1.26x faster with lower heap, while acceptance, cloning, wire, and storage are unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -3222,6 +3223,62 @@ change. Fallback allocation figures come from the equivalent discard-encoder
 fixture; the scalar scan itself allocates nothing. Error behavior, caller
 ownership, clone depth, write accounting, TTL handling, item counts, snapshots,
 journals, replication, and wire and storage formats remain unchanged.
+
+<a id="flat-scalar-sequence-validation"></a>
+### Flat Scalar Sequence Validation
+
+Checked slice and priority-queue writes had the same discarded-serialization
+cost as maps and radix trees. Whole-value validation marshaled every item, while
+variadic priority-queue pushes marshaled each item separately. Exact built-in
+JSON scalars now take the shared non-retaining type scan. Whole-sequence nested
+fallbacks write the encoded representation to `io.Discard`, and variadic slice
+fallback builds the same temporary sequence as before, then discard-encodes it.
+
+Tests were added before the production change. The allocation guard initially
+reported two allocations for whole slice and priority-queue validation, three
+for variadic slice validation, and one allocation per variadic priority-queue
+item. Acceptance tests compare valid nested values, invalid floats and
+`json.Number` values, unsupported functions, failing custom marshalers, and
+cycles with `json.Marshal`. Focused sequence tests pass for 100 repetitions.
+
+```sh
+make run CMD='go test . -run=SequenceValidation -count=100'
+make run CMD='go test . -run=Slice -count=20'
+make run CMD='go test . -run=PriorityQueue -count=20'
+make run CMD='go test . -run=NONE -bench=BenchmarkSequenceValidation/.*64 -benchtime=2000x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkSequenceValidation/.*4096 -benchtime=50x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkSequenceValidationFallbackAlternating -benchtime=10x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkSequenceValidationFallbackAllocations/.*64 -benchtime=2000x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkSequenceValidationFallbackAllocations/.*4096 -benchtime=50x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkSequenceCheckedReplacement/.*64 -benchtime=2000x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkSequenceCheckedReplacement/.*4096 -benchtime=50x -count=7 -cpu=1 -benchmem'
+```
+
+| Flat validation, 64/4,096 items | Marshal baseline | Final scan | Result |
+| --- | ---: | ---: | ---: |
+| Whole slice | 2,084/145,050 ns; 1,048/65,565 B; 2 allocs | 140.5/7,838 ns; 0 B; 0 allocs | 14.83x/18.51x faster; heap eliminated |
+| Variadic slice payload | 3,065/206,568 ns; 2,200/131,104 B; 3 allocs | 154.5/8,617 ns; 0 B; 0 allocs | 19.84x/23.97x faster; heap eliminated |
+| Whole priority queue | 4,393/266,619 ns; 2,712/172,066 B; 2 allocs | 126.1/6,907 ns; 0 B; 0 allocs | 34.84x/38.60x faster; heap eliminated |
+| Variadic priority payload | 4,244/286,868 ns; 1,024/65,541 B; 64/4,096 allocs | 217.3/12,248 ns; 0 B; 0 allocs | 19.53x/23.42x faster; heap eliminated |
+
+The nested fallback places its only nested map last, forcing the candidate to
+scan every preceding scalar before encoding. CPU uses nine same-binary
+alternating runs; heap uses the matching allocation fixture.
+
+| Worst-case nested fallback, 64/4,096 items | Marshal control | Final validation | Result |
+| --- | ---: | ---: | ---: |
+| Slice | 2,286/123,118 ns; 1,144/65,667 B; 3 allocs | 2,067/103,038 ns; 120/125 B; 2 allocs | 1.11x/1.20x faster; 9.53x/525.34x lower heap |
+| Priority queue | 3,723/224,722 ns; 2,808/172,174 B; 3 allocs | 2,946/180,901 ns; 120/125 B; 2 allocs | 1.26x/1.24x faster; 23.40x/1,377x lower heap |
+
+| Complete scalar replacement, 64/4,096 items | Before | Final | Result |
+| --- | ---: | ---: | ---: |
+| `UpsertSliceChecked` | 3,926/198,293 ns; 2,200/131,101 B; 3 allocs | 523.2/42,955 ns; 1,152/65,536 B; 1 alloc | 7.50x/4.62x faster; 1.91x/2.00x lower heap |
+| `UpsertPriorityQueueChecked` | 8,049/443,711 ns; 5,912/368,678 B; 3 allocs | 2,791/182,809 ns; 3,200/196,608 B; 1 alloc | 2.88x/2.43x faster; 1.85x/1.88x lower heap |
+
+The one remaining complete-operation allocation owns the replacement sequence;
+validation itself is allocation-free. Invalid-value behavior, custom-marshaler
+invocation, deep cloning, queue ordering, write accounting, snapshots,
+journals, replication, and wire and persistent formats remain unchanged.
 
 <a id="mutation-response-lock-release-rollback"></a>
 ### Mutation Response Lock Release Rollback

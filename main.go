@@ -956,7 +956,10 @@ func validateMapValue(value Map) error {
 }
 
 func validateSliceValue(value Slice) error {
-	if _, err := json.Marshal(value); err != nil {
+	if flatJSONScalarSlice(value) {
+		return nil
+	}
+	if err := validateJSONToDiscard(value); err != nil {
 		return fmt.Errorf("hatriecache: unsupported slice value: %w", err)
 	}
 	return nil
@@ -967,10 +970,25 @@ func validateSliceValues(value interface{}, values ...interface{}) error {
 	if !ok {
 		return errBatchSizeTooLarge
 	}
+	if flatJSONScalar(value) {
+		allScalars := true
+		for _, next := range values {
+			if !flatJSONScalar(next) {
+				allScalars = false
+				break
+			}
+		}
+		if allScalars {
+			return nil
+		}
+	}
 	items := make(Slice, 0, capacity)
 	items = append(items, value)
 	items = append(items, values...)
-	return validateSliceValue(items)
+	if err := validateJSONToDiscard(items); err != nil {
+		return fmt.Errorf("hatriecache: unsupported slice value: %w", err)
+	}
+	return nil
 }
 
 func validateKey(key string) error {

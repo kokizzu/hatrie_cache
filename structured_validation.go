@@ -16,6 +16,15 @@ func flatJSONScalarMap(values Map) bool {
 	return true
 }
 
+func flatJSONScalarSlice(values Slice) bool {
+	for _, value := range values {
+		if !flatJSONScalar(value) {
+			return false
+		}
+	}
+	return true
+}
+
 func flatJSONScalar(value interface{}) bool {
 	switch typed := value.(type) {
 	case nil, bool, string, []byte,

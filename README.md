@@ -9,6 +9,13 @@ O(1), and memory usage low without per-item node allocations. Its compact
 tag-free string slot uses 1.17x less retained item memory while preserving
 allocation-free string churn; measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-priority-queue-items).
+Checked flat-scalar slice and priority-queue upserts now use
+allocation-free validation instead of serializing a payload that is immediately
+discarded. Complete
+64/4,096-item slice replacements are 7.50x/4.62x faster, and priority-queue
+replacements are 2.88x/2.43x faster, with roughly half the heap. Nested and
+custom values retain serializer validation and also measure faster; see the
+[sequence validation](BENCHMARK.md#flat-scalar-sequence-validation) results.
 Plain strings use a dedicated reusable slot pool. Cache-internal replacements
 of a proven-live slot skip the deleted-index tracker, making the isolated
 assignment 1.78x-2.16x faster while public deleted-slot revival, TTL, write
