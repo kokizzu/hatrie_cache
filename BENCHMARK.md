@@ -309,6 +309,7 @@ tree.
 | Generic Top-K structured fallback scan | Preserved the string-only direct encoder while extending exact generic `GET` | A 16-item structured read was 1.06x slower after scanning before unchanged materialization, with no heap or allocation gain | Replaced by one-pass mixed-value encoding; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Dedicated `GETTOPK` lock-release snapshot | Let writers proceed while caller-controlled JSON marshaling was blocked | The five-second 100-item structured read was 14,457 ns versus 13,776 ns legacy, or 1.05x slower, with identical 9,872 B and 5 allocations | Reverted for `GETTOPK`; the serial-neutral generic `GET` snapshot remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
+| Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
 | Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
 | Naive repeated-read scalar routing | Tried to send repeated reads through the native selector | 16 reads regressed 2.58x; a scan-only guard remained 1.08x slower | Replaced by resolve-once response copying; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
@@ -3177,6 +3178,17 @@ removed. The retained layout checks all reservation arithmetic without the
 second full escape scan; `strings.Builder` grows from that bounded reservation
 only when encoded bytes exceed raw bytes. No retained state, configuration,
 background work, format, or public ownership rule changed.
+
+A later lock-scope candidate kept sizing and the required private copy under
+the cache lock but moved the existing typed sort after unlock. It added no
+memory, allocation, representation, or output change, but failed the serial
+gate in seven 500 ms runs on one logical CPU. Default-capacity generic reads
+regressed from 17,065 to 18,075 ns for strings and from 18,301 to 19,377 ns for
+one structured value, both 1.06x slower with identical 14,360/14,481 B and
+three/five allocations. The dedicated 16-item plain-string read regressed from
+1,971 to 2,163 ns, or 1.10x, with the same 1,688 B and three allocations. The
+candidate was fully reverted; reservoir copying and sorting therefore retain
+their previous lock scope.
 
 <a id="multi-item-top-k-read-materialization"></a>
 ### Multi-Item Top-K Read Materialization
