@@ -7,7 +7,9 @@ retain old object references. Priority queue values use a flat binary heap with
 stable insertion ordering for equal priorities, keeping push/pop O(log n), peek
 O(1), and memory usage low without per-item node allocations. Its compact
 tag-free string slot uses 1.17x less retained item memory while preserving
-allocation-free string churn; measurements are in
+allocation-free string churn. Exact plain-string pops also avoid an unnecessary
+interface round trip, making response extraction 1.07x faster with unchanged
+heap; measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-priority-queue-items).
 Checked flat-scalar slice and priority-queue upserts now use
 allocation-free validation instead of serializing a payload that is immediately

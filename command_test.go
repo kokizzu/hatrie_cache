@@ -806,8 +806,8 @@ func TestExecuteCommandPriorityQueueExactPathAllocationBudget(t *testing.T) {
 			t.Fatalf("POPPQ response = %#v, want value", got)
 		}
 	})
-	if allocs > 4 {
-		t.Fatalf("PUSHPQ+POPPQ exact path allocations = %.2f, want <= 4", allocs)
+	if allocs != 1 {
+		t.Fatalf("PUSHPQ+POPPQ exact path allocations = %.2f, want 1", allocs)
 	}
 }
 

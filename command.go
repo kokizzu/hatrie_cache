@@ -1930,7 +1930,7 @@ func (ht *HatTrie) executeFastPopPriorityQueueCommand(key string) (CacheCommandR
 	ht.recordReadLocked(true, key)
 	ht.recordWriteLocked(key)
 	ht.cacheValueLocked(key, hval)
-	if text, ok := item.value().(string); ok {
+	if text, ok := priorityQueueItemString(item); ok {
 		if payload, ok := commandFastPriorityQueueItemJSON(item.Priority, text); ok {
 			return CacheCommandResponse{OK: true, Message: "removed", Value: payload}, true
 		}

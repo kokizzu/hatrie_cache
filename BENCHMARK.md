@@ -210,6 +210,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
 | Current pass | [Direct priority-queue command reads](#compact-priority-queue-items), empty/one/16/100 string items | Public materialization: 214.6/414.2/2,894/25,384 ns; up to 108 allocs | Direct JSON: 54.02/145.5/2,098/18,676 ns; at most 2 allocs | 3.97x/2.85x/1.38x/1.36x faster; up to 2.11x lower heap and 54x fewer allocations | All validated values preserve generic JSON semantics; cold references retain checked hydration; wire, ordering, storage, and ownership are unchanged |
 | Current pass | [Direct generic priority-queue GET](#compact-priority-queue-items), empty/one/16/100 string items | Generic materialization: 207.1/422.4/2,863/23,449 ns | Shared-lock direct JSON: 159.3/268.3/2,386/17,977 ns | 1.30x/1.57x/1.20x/1.30x faster; up to 2.11x lower heap and 54x fewer allocations | Other value types retain the prior GET branch; a 100-item mixed queue is 1.37x faster with 1.56x lower heap and 28x fewer allocations |
+| Current pass | [Typed priority-queue pop extraction](#compact-priority-queue-items), exact plain-string response | Interface round trip: 49.27 ns; 32 B; 1 alloc | Existing typed accessor: 45.88 ns; 32 B; 1 alloc | 1.07x faster response extraction; heap and allocations unchanged | Exact string `POPPQ` only; empty, escaped, structured, missing, cold-reference, wire, and storage behavior are unchanged |
 | Reverted | [Radix-node tag compaction](#radix-node-tag-compaction-rollback), 111,112 nodes | 64 B struct; 115.2 retained B/node; 235.9 ns/key build | 56 B candidate; 102.4 retained B/node; 226.7 ns/key build | Candidate was 1.125x lower retained heap and 1.04x faster to build | Rolled back: pinned string, stored-`nil`, and missing-key reads were 1.10x-1.16x slower; no runtime tradeoff remains |
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Allocation-free duplicate radix updates](#idempotent-plain-string-radix-updates), exact plain-string `PUTRT` | 260.6 ns; 16 B; 1 alloc | 207.6 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated; focused duplicate 2.62x faster | Exact command only; public generic writes are unchanged, while replacements, dynamic builds, and reads are neutral or faster |
@@ -3357,6 +3358,32 @@ make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/PriorityQueuePu
 | Empty string push/pop | 30.74 ns; 0 B; 0 allocs | 24.07 ns; 0 B; 0 allocs | 1.28x faster |
 | Generic value dispatch | 1.623 ns; 0 B; 0 allocs | 1.485 ns; 0 B; 0 allocs | 1.09x faster |
 | Command push/pop | 641.1 ns; 40 B; 2 allocs | 612.1 ns; 40 B; 2 allocs | 1.05x faster; heap and allocs unchanged |
+
+Exact plain-string `POPPQ` still extracted the compact item's value through
+`interface{}` even though the typed accessor used by direct queue reads was
+already available. The pop path now calls that accessor directly. Existing
+semantic tests cover priority ordering, replacement, empty queues, generic
+values, and exact output; before the production substitution, the allocation
+budget was tightened from a loose upper bound to exactly the one returned JSON
+string for a reused push/pop request.
+
+```sh
+make run CMD='go test . -run="TestExecuteCommandPriorityQueueExactPath|TestExecuteCommandPriorityQueueOperations" -count=100'
+make run CMD='go test . -run=NONE -bench=BenchmarkPriorityQueuePopStringResponse -benchtime=1000000x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/PriorityQueuePushPop -benchtime=1000000x -count=9 -cpu=1 -benchmem'
+```
+
+| Plain-string pop response, seven-run median | Interface extraction | Typed extraction | Improvement |
+| --- | ---: | ---: | ---: |
+| JSON response construction | 49.27 ns; 32 B; 1 alloc | 45.88 ns; 32 B; 1 alloc | 1.07x faster; heap and allocations unchanged |
+
+The complete post-change push/pop median is 510.8 ns with the benchmark's
+per-iteration priority pointer included, still 40 B and two allocations. The
+separate-process baseline varied too much to attribute a complete-command ratio;
+the same-binary response benchmark is the accepted CPU evidence. Empty or
+escaped strings continue through generic JSON encoding, and structured values,
+wire bytes, snapshots, journals, replication, and persistent formats are
+unchanged.
 
 The first candidate used a private marker in `Value` for every string. It
 reached the same 48-byte item size, but generic dispatch regressed from 1.534

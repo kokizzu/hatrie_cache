@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+var priorityQueuePopResponseBenchmarkSink string
+
 func TestExecuteExactFastCommandPriorityQueueGetMatchesGeneric(t *testing.T) {
 	for _, command := range []string{"GETPQ", "GETPRIORITY"} {
 		t.Run(command, func(t *testing.T) {
@@ -238,6 +240,35 @@ func BenchmarkPriorityQueueStructuredGetCommand(b *testing.B) {
 						})
 					}
 				})
+			}
+		})
+	}
+}
+
+func BenchmarkPriorityQueuePopStringResponse(b *testing.B) {
+	item := newPriorityQueueStringItem(10, 1, "value")
+	for _, benchmark := range []struct {
+		name    string
+		extract func(priorityQueueItem) (string, bool)
+	}{
+		{name: "Interface", extract: func(item priorityQueueItem) (string, bool) {
+			value, ok := item.value().(string)
+			return value, ok
+		}},
+		{name: "Typed", extract: priorityQueueItemString},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for iteration := 0; iteration < b.N; iteration++ {
+				value, ok := benchmark.extract(item)
+				if !ok {
+					b.Fatal("string extraction failed")
+				}
+				payload, ok := commandFastPriorityQueueItemJSON(item.Priority, value)
+				if !ok {
+					b.Fatal("priority queue response encoding failed")
+				}
+				priorityQueuePopResponseBenchmarkSink = payload
 			}
 		})
 	}
