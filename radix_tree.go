@@ -531,14 +531,20 @@ func radixTreeValueSize(value interface{}) uint64 {
 }
 
 func validateRadixTreeValue(value interface{}) error {
-	if _, err := json.Marshal(value); err != nil {
+	if flatJSONScalar(value) {
+		return nil
+	}
+	if err := validateJSONToDiscard(value); err != nil {
 		return fmt.Errorf("hatriecache: unsupported radix tree value: %w", err)
 	}
 	return nil
 }
 
 func validateRadixTreeEntries(entries Map) error {
-	if _, err := json.Marshal(entries); err != nil {
+	if flatJSONScalarMap(entries) {
+		return nil
+	}
+	if err := validateJSONToDiscard(entries); err != nil {
 		return fmt.Errorf("hatriecache: unsupported radix tree value: %w", err)
 	}
 	return nil

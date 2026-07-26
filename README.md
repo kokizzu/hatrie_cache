@@ -19,8 +19,11 @@ plain-string field value. Repeated exact `PUTMAP` becomes allocation-free and
 1.30x faster. Pair-only bulk commands also borrow the validated request map
 until storage clones its values, making 64/4,096-field replacements
 1.74x/1.59x faster without changing ownership, write accounting, or promoted
-map behavior; see the [packed-map](BENCHMARK.md#packed-small-map-storage) and
-[command-pair](BENCHMARK.md#borrowed-command-pair-fields) measurements.
+map behavior. Flat scalar validation then removes the remaining serialization
+buffer, making those complete replacements another 4.61x/5.87x faster and
+allocation-free. See the [packed-map](BENCHMARK.md#packed-small-map-storage),
+[command-pair](BENCHMARK.md#borrowed-command-pair-fields), and
+[validation](BENCHMARK.md#flat-scalar-structured-validation) measurements.
 New empty, one-, and two-value slices use dedicated packed pools and promote
 once to the existing ring deque at the third value. Promoted keys remain
 generic to avoid conversion churn. The packed path cuts retained tiny-slice
@@ -62,11 +65,13 @@ neutral or faster. Bulk pair insertion also skips a redundant input-key sort:
 64/4,096-entry builds are 1.20x/1.23x faster and replacement calls are
 1.80x-2.24x faster while preserving the exact canonical tree and sorted output.
 Pair-only `PUTRT` command replacement is another 1.46x-1.76x faster by avoiding
-an unretained request-map copy.
+an unretained request-map copy, then 3.32x-4.33x faster and allocation-free for
+flat scalar fields after non-retaining validation.
 See [the duplicate-update](BENCHMARK.md#idempotent-plain-string-radix-updates)
 and [bulk-insertion](BENCHMARK.md#order-independent-radix-bulk-insertion)
 measurements, plus the shared
-[command-pair result](BENCHMARK.md#borrowed-command-pair-fields).
+[command-pair](BENCHMARK.md#borrowed-command-pair-fields) and
+[validation](BENCHMARK.md#flat-scalar-structured-validation) results.
 Count-Min Sketch values use compact uint32 counter grids plus double hashing
 for approximate frequency counts without storing observed items.
 HyperLogLog values use compact register arrays for approximate distinct counts

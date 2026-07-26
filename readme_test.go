@@ -161,6 +161,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Allocation-free duplicate radix updates](#idempotent-plain-string-radix-updates)",
 		"[Order-independent radix bulk insertion](#order-independent-radix-bulk-insertion)",
 		"[Borrowed command pair fields](#borrowed-command-pair-fields)",
+		"[Flat scalar structured validation](#flat-scalar-structured-validation)",
 		"[Compact XOR-filter headers](#compact-xor-filter-headers)",
 		"[Linked XOR-filter build queue](#linked-xor-filter-build-queue)",
 		"[Order-independent XOR-filter build](#order-independent-xor-filter-build)",

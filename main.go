@@ -946,7 +946,10 @@ func MarshalMapJSON(value Map) ([]byte, error) {
 }
 
 func validateMapValue(value Map) error {
-	if _, err := MarshalMapJSON(value); err != nil {
+	if flatJSONScalarMap(value) {
+		return nil
+	}
+	if err := validateJSONToDiscard(value); err != nil {
 		return fmt.Errorf("hatriecache: unsupported map value: %w", err)
 	}
 	return nil

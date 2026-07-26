@@ -215,6 +215,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Allocation-free duplicate radix updates](#idempotent-plain-string-radix-updates), exact plain-string `PUTRT` | 260.6 ns; 16 B; 1 alloc | 207.6 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated; focused duplicate 2.62x faster | Exact command only; public generic writes are unchanged, while replacements, dynamic builds, and reads are neutral or faster |
 | Current pass | [Order-independent radix bulk insertion](#order-independent-radix-bulk-insertion), 64/4,096-entry build and replacement | Sorted builds: 12,681/1,350,624 ns; replacements: 6,840/794,342 ns | Direct builds: 10,566/1,101,969 ns; replacements: 3,058/441,584 ns | Builds 1.20x/1.23x faster; replacements 2.24x/1.80x faster; one allocation and 1,152/65,536 B eliminated per call | No measured tradeoff; exact tree shape, item count, cloning, sorted traversal, snapshots, wire, and storage remain unchanged |
 | Current pass | [Borrowed command pair fields](#borrowed-command-pair-fields), pair-only `PUTMAP`/`PUTRT` replacement with 64/4,096 fields | Map: 26,107/2,311,800 ns; radix: 28,813/2,544,023 ns; 11,513/783,543 B | Map: 14,976/1,453,940 ns; radix: 16,328/1,742,736 ns; 2,144/131,181 B | Map 1.74x/1.59x faster; radix 1.76x/1.46x faster; 5.37x/5.97x lower heap; up to 25x fewer allocs | No measured tradeoff; storage still clones all retained values, and mixed subkey-plus-pairs requests retain an owned merge map |
+| Current pass | [Flat scalar structured validation](#flat-scalar-structured-validation), pair-only `PUTMAP`/`PUTRT` replacement with 64/4,096 fields | Map: 14,976/1,453,940 ns; radix: 16,328/1,742,736 ns; 2,144/131,181 B | Map: 3,251/247,728 ns; radix: 3,767/525,596 ns; 0 B; 0 allocs | Map 4.61x/5.87x faster; radix 4.33x/3.32x faster; command validation heap eliminated | No measured tradeoff; ordinary nested fallback is 1.02x-1.13x faster and custom marshalers, invalid values, cloning, wire, and storage are unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -3166,6 +3167,61 @@ command rows compare repeated updates to already populated structures before
 and after the change. Validation, clone depth, stored values, write accounting,
 TTL handling, item counts, snapshots, journals, replication, and wire formats
 are unchanged.
+
+<a id="flat-scalar-structured-validation"></a>
+### Flat Scalar Structured Validation
+
+Checked map and radix writes previously called `json.Marshal` on the complete
+value only to validate it, then discarded the returned bytes. Pair-only command
+borrowing made this visible as the last two allocations and 2,144/131,181 bytes
+for 64/4,096 scalar fields. Validation now recognizes built-in JSON-safe flat
+scalars without encoding: `nil`, booleans, strings, byte slices, integer types,
+and finite floats. Flat maps therefore require only one non-retaining type scan.
+
+Any named or custom type, nested map/slice, pointer, invalid float,
+`json.Number`, cycle, or marshaler-controlled value continues through
+`goccy/go-json`'s compiled encoder. That fallback writes its pooled encoding to
+`io.Discard` instead of allocating a returned byte copy. It therefore preserves
+the serializer's exact acceptance and custom-marshaler behavior while also
+offsetting the preliminary scalar scan for ordinary nested payloads.
+
+Tests were added before production changes. The flat scalar contract initially
+failed at two allocations for both map and radix validation. Acceptance tests
+compare nested, invalid-number, unsupported function/channel, custom-marshaler,
+and cyclic values with `json.Marshal`; a tracking marshaler proves both
+validation paths still invoke it. All tests pass for 100 repetitions.
+
+```sh
+make run CMD='go test . -run=StructuredValidation -count=100'
+make run CMD='go test . -run=TestExecuteCommand -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkFlatScalarStructuredValidationAlternating -benchtime=20x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkStructuredValidationFallbackAlternating -benchtime=10x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkStructuredValidationEncoder/.*64 -benchtime=2000x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkStructuredValidationEncoder/.*4096 -benchtime=50x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandPairBulkReplacement/.*64 -benchtime=2000x -count=7 -cpu=1 -benchmem'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandPairBulkReplacement/.*4096 -benchtime=50x -count=7 -cpu=1 -benchmem'
+```
+
+| Validation operation, median | Marshal control | Final validation | Result |
+| --- | ---: | ---: | ---: |
+| Flat 64-field map | 12,722 ns; 2,144 B; 2 allocs | 795.2 ns; 0 B; 0 allocs | 16.00x faster; heap eliminated |
+| Flat 4,096-field map | 937,768 ns; 131,180 B; 2 allocs | 35,610 ns; 0 B; 0 allocs | 26.34x faster; heap eliminated |
+| Nested 64-field fallback | 13,548 ns; 5,441 B; 4 allocs | 13,243 ns; 3,392 B; 3 allocs | 1.02x faster; 1.60x lower heap |
+| Nested 4,096-field fallback | 1,229,763 ns; 336,101 B; 4 allocs | 1,087,097 ns; 205,029 B; 3 allocs | 1.13x faster; 1.64x lower heap |
+
+| Complete scalar replacement, median | Before validation change | Final | Result |
+| --- | ---: | ---: | ---: |
+| `PUTMAP`, 64 fields | 14,976 ns; 2,144 B; 2 allocs | 3,251 ns; 0 B; 0 allocs | 4.61x faster; heap eliminated |
+| `PUTRT`, 64 fields | 16,328 ns; 2,144 B; 2 allocs | 3,767 ns; 0 B; 0 allocs | 4.33x faster; heap eliminated |
+| `PUTMAP`, 4,096 fields | 1,453,940 ns; 131,181 B; 2 allocs | 247,728 ns; 0 B; 0 allocs | 5.87x faster; heap eliminated |
+| `PUTRT`, 4,096 fields | 1,742,736 ns; 131,181 B; 2 allocs | 525,596 ns; 0 B; 0 allocs | 3.32x faster; heap eliminated |
+
+The CPU figures use same-binary alternating controls for isolated and fallback
+validation; complete rows are seven-run medians before and after the production
+change. Fallback allocation figures come from the equivalent discard-encoder
+fixture; the scalar scan itself allocates nothing. Error behavior, caller
+ownership, clone depth, write accounting, TTL handling, item counts, snapshots,
+journals, replication, and wire and storage formats remain unchanged.
 
 <a id="mutation-response-lock-release-rollback"></a>
 ### Mutation Response Lock Release Rollback
