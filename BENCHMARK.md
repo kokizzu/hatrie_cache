@@ -231,6 +231,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
+| Current pass | [Live string-slot replacement](#live-string-slot-replacement), duplicate and changing values | Public `Put`: 3.057/2.731 ns | Proven-live replace: 1.416/1.532 ns | Primitive 2.16x/1.78x faster; complete API 1.015x/1.012x faster | Private cache callers rely on the existing live-index invariant; public deleted-index revival and all formats remain unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
 | Current pass | [Allocation-free duplicate packed-map writes](#packed-small-map-storage), exact repeated `PUTMAP` | Generic boxed replacement: 258.2 ns; 16 B; 1 alloc | Typed equality reuse: 198.8 ns; 0 B; 0 allocs | 1.30x faster; allocation eliminated | One/two-field plain-string maps only; actual replacements are 1.07x faster and promoted duplicate/replacement controls are neutral |
 | Current pass | [Map field encoding outside cache lock](#packed-small-map-storage), exact `PEEKMAP` | Lock-held field encoding: 34.86 ns strings; 508.4 ns structured; writer stalled behind caller JSON | Point-in-time field reference: 29.68 ns strings; 456.4 ns structured; writer progresses during JSON | 1.17x/1.11x faster with identical zero/three allocations; unbounded caller-marshaler stall removed | Replacing a field may complete while the prior point-in-time response is still encoding; wire bytes and ownership are unchanged |
@@ -1293,6 +1294,41 @@ strings, cumulative heap falls from 108,816,416 to 69,731,720 B (1.56x lower),
 allocations fall from 500,117 to 400,067 (1.25x fewer), and median time improves
 from 273.039 to 243.218 ms (1.12x faster). Raw dedicated-fixture output is
 generated at `build/benchmarks/string-storage.txt`.
+
+<a id="live-string-slot-replacement"></a>
+#### Live String-Slot Replacement
+
+Cache string replacement previously called the exported `StringStorage.Put`,
+which assigns the slot and then asks the reusable-index bitset to revive that
+index. The four cache callers reach this operation only through a live string
+`HatValue`; a live trie entry cannot point at a deleted storage slot, so the bit
+lookup was invariantly false. They now use a private live-slot replacement that
+performs the same bounds check and assignment without touching reusable state.
+The exported `Put` is unchanged and still revives a deleted non-tail index.
+
+Tests were added before the private method. They cover public delete/revival,
+stale reusable-stack handling, live replacement with another reusable slot,
+invalid indexes, duplicate upsert TTL clearing, write accounting, stable
+storage indexes, and append/prepend behavior. The focused and complete-path
+benchmarks execute the old and new paths in alternating order in one binary:
+
+```sh
+make run CMD='go test . -run=Test\(StringStoragePutRevivesDeletedIndex\|StringStorageReplaceActiveLeavesReusableIndexesUnchanged\|LiveStringReplacementPreservesCacheBehavior\) -count=1 -v'
+make run CMD='go test . -run=NONE -bench=BenchmarkStringStorageReplaceActiveAlternating -benchtime=50x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkStringUpsertCheckedAlternating -benchtime=20x -count=9 -cpu=1'
+```
+
+| String replacement, nine-run median | Public `Put` control | Live-slot path | Result |
+| --- | ---: | ---: | ---: |
+| Primitive duplicate | 3.057 ns | 1.416 ns | 2.16x faster |
+| Primitive true replacement | 2.731 ns | 1.532 ns | 1.78x faster |
+| Complete duplicate `UpsertStringChecked` | 118.8 ns | 117.1 ns | 1.015x faster |
+| Complete true replacement | 110.3 ns | 109.0 ns | 1.012x faster |
+
+All rows remain allocation-free. Inserts still use `Add`; external or recovery
+code that intentionally revives a deleted slot still uses `Put`. Reads, string
+ownership, retained memory, TTL, telemetry, snapshots, journals, persistence,
+replication, and wire formats are unchanged.
 
 <a id="idempotent-string-assignment-rollback"></a>
 #### Idempotent String Assignment Rollback

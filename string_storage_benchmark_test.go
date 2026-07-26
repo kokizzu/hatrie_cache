@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func BenchmarkStringStorageLayout100k(b *testing.B) {
@@ -75,6 +76,164 @@ func BenchmarkStringStorageLayout100k(b *testing.B) {
 		b.StopTimer()
 		b.ReportMetric(float64(keys), "keys/op")
 	})
+}
+
+func BenchmarkStringUpsertCheckedPaths(b *testing.B) {
+	for _, benchmark := range []struct {
+		name      string
+		replacing bool
+	}{
+		{name: "Duplicate"},
+		{name: "Replacement", replacing: true},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			b.Cleanup(trie.Destroy)
+			trie.UpsertString("key", "value")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				value := "value"
+				if benchmark.replacing && iteration&1 != 0 {
+					value = "replacement"
+				}
+				if err := trie.UpsertStringChecked("key", value); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkStringStorageReplaceActiveAlternating(b *testing.B) {
+	const puts = 1 << 18
+	for _, benchmark := range []struct {
+		name      string
+		replacing bool
+	}{
+		{name: "Duplicate"},
+		{name: "Replacement", replacing: true},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			candidate := CreateStringStorage()
+			control := CreateStringStorage()
+			candidateIndex := candidate.Add("value")
+			controlIndex := control.Add("value")
+			var candidateDuration, controlDuration time.Duration
+			for iteration := 0; iteration < b.N; iteration++ {
+				candidateFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if candidateFirst == (pass == 0) {
+						for put := 0; put < puts; put++ {
+							value := "value"
+							if benchmark.replacing && put&1 != 0 {
+								value = "replacement"
+							}
+							candidate.replaceActive(candidateIndex, value)
+						}
+						candidateDuration += time.Since(started)
+					} else {
+						for put := 0; put < puts; put++ {
+							value := "value"
+							if benchmark.replacing && put&1 != 0 {
+								value = "replacement"
+							}
+							control.Put(controlIndex, value)
+						}
+						controlDuration += time.Since(started)
+					}
+				}
+			}
+			operations := float64(b.N * puts)
+			b.ReportMetric(float64(candidateDuration.Nanoseconds())/operations, "candidate-ns/put")
+			b.ReportMetric(float64(controlDuration.Nanoseconds())/operations, "control-ns/put")
+		})
+	}
+}
+
+func BenchmarkStringUpsertCheckedAlternating(b *testing.B) {
+	const puts = 1 << 16
+	for _, benchmark := range []struct {
+		name      string
+		replacing bool
+	}{
+		{name: "Duplicate"},
+		{name: "Replacement", replacing: true},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			candidate := CreateHatTrie()
+			control := CreateHatTrie()
+			b.Cleanup(candidate.Destroy)
+			b.Cleanup(control.Destroy)
+			candidate.UpsertString("key", "value")
+			control.UpsertString("key", "value")
+			var candidateDuration, controlDuration time.Duration
+			for iteration := 0; iteration < b.N; iteration++ {
+				candidateFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if candidateFirst == (pass == 0) {
+						for put := 0; put < puts; put++ {
+							value := "value"
+							if benchmark.replacing && put&1 != 0 {
+								value = "replacement"
+							}
+							if err := candidate.UpsertStringChecked("key", value); err != nil {
+								b.Fatal(err)
+							}
+						}
+						candidateDuration += time.Since(started)
+					} else {
+						for put := 0; put < puts; put++ {
+							value := "value"
+							if benchmark.replacing && put&1 != 0 {
+								value = "replacement"
+							}
+							if err := benchmarkLegacyUpsertStringChecked(control, "key", value); err != nil {
+								b.Fatal(err)
+							}
+						}
+						controlDuration += time.Since(started)
+					}
+				}
+			}
+			operations := float64(b.N * puts)
+			b.ReportMetric(float64(candidateDuration.Nanoseconds())/operations, "candidate-ns/put")
+			b.ReportMetric(float64(controlDuration.Nanoseconds())/operations, "control-ns/put")
+		})
+	}
+}
+
+func benchmarkLegacyUpsertStringChecked(trie *HatTrie, key string, value string) error {
+	if trie == nil {
+		return ErrNilHatTrie
+	}
+	if partition := trie.localPartitionForKey(key); partition != nil {
+		return benchmarkLegacyUpsertStringChecked(partition, key, value)
+	}
+	trie.mu.Lock()
+	defer trie.mu.Unlock()
+
+	rawPtr, hval, err := trie.upsertReplacementLocation(key)
+	if err != nil {
+		return err
+	}
+	if hval.IsStringAtRaws() {
+		trie.strings.Put(hval.Index, value)
+		trie.clearExpirationLocked(key)
+		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
+		*rawPtr = hval.toValue()
+		trie.recordWriteLocked(key)
+		return nil
+	}
+
+	trie.returnStorage(hval)
+	trie.clearExpirationLocked(key)
+	idx := trie.strings.Add(value)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
+	trie.recordWriteLocked(key)
+	return nil
 }
 
 func BenchmarkStringCompaction100k(b *testing.B) {

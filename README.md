@@ -9,6 +9,11 @@ O(1), and memory usage low without per-item node allocations. Its compact
 tag-free string slot uses 1.17x less retained item memory while preserving
 allocation-free string churn; measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-priority-queue-items).
+Plain strings use a dedicated reusable slot pool. Cache-internal replacements
+of a proven-live slot skip the deleted-index tracker, making the isolated
+assignment 1.78x-2.16x faster while public deleted-slot revival, TTL, write
+accounting, and formats remain unchanged; see
+[BENCHMARK.md](BENCHMARK.md#live-string-slot-replacement).
 One- and two-field maps use a packed pool and avoid replacing an identical
 plain-string field value. Repeated exact `PUTMAP` becomes allocation-free and
 1.30x faster without changing write accounting or promoted-map behavior; see

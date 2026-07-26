@@ -140,6 +140,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Structured gzip-best snapshot](README.md#serialization-tradeoffs)",
 		"[Binary LevelDB scalar records](README.md#serialization-tradeoffs)",
 		"[Binary LevelDB structured records](README.md#serialization-tradeoffs)",
+		"[Live string-slot replacement](#live-string-slot-replacement)",
 		"[Replication request batching](#replication-batching-benchmark)",
 		"[Replication routing and encoding](#replication-batching-benchmark)",
 		"[Replication page traversal](#replication-page-traversal)",

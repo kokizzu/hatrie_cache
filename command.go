@@ -3534,7 +3534,7 @@ func (ht *HatTrie) upsertStringValueLocked(key string, value string) error {
 		return err
 	}
 	if hval.IsStringAtRaws() {
-		ht.strings.Put(hval.Index, value)
+		ht.strings.replaceActive(hval.Index, value)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()

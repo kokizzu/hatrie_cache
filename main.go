@@ -1191,6 +1191,13 @@ func (ss *StringStorage) Put(idx int32, value string) {
 	ss.reusables.Use(idx)
 }
 
+func (ss *StringStorage) replaceActive(idx int32, value string) {
+	if idx < 0 || int(idx) >= len(ss.array) {
+		return
+	}
+	ss.array[idx] = value
+}
+
 func (ss *StringStorage) Append(value string) int32 {
 	ss.array = append(ss.array, value)
 	return int32(len(ss.array) - 1)
@@ -6487,7 +6494,7 @@ func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
 		return err
 	}
 	if hval.IsStringAtRaws() {
-		ht.strings.Put(hval.Index, val)
+		ht.strings.replaceActive(hval.Index, val)
 		ht.clearExpirationLocked(key)
 		hval.Flags &^= 1 << DATAVALUE_TTL_BIT_SHIFT
 		*rawPtr = hval.toValue()
@@ -6535,7 +6542,7 @@ func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 		if len(next) != capacity {
 			return "", errRawValueCapacityTooLarge
 		}
-		ht.strings.Put(hval.Index, next)
+		ht.strings.replaceActive(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return next, nil
@@ -6584,7 +6591,7 @@ func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) 
 		if len(next) != capacity {
 			return "", errRawValueCapacityTooLarge
 		}
-		ht.strings.Put(hval.Index, next)
+		ht.strings.replaceActive(hval.Index, next)
 		*rawPtr = hval.toValue()
 		ht.recordWriteLocked(key)
 		return next, nil
