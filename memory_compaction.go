@@ -475,7 +475,7 @@ func compactReplicationMerkleIndex(source *replicationMerkleIndex) *replicationM
 
 func (ht *HatTrie) compactAuxiliaryMemoryLocked() {
 	if len(ht.expires) == 0 {
-		ht.expires = map[string]uint32{}
+		ht.expires = nil
 		ht.expirations = nil
 	} else {
 		nextExpires := make(map[string]uint32, len(ht.expires))
@@ -492,7 +492,11 @@ func (ht *HatTrie) compactAuxiliaryMemoryLocked() {
 
 func (ht *HatTrie) compactKeyStatsLocked() {
 	if len(ht.keyStats) == 0 {
-		ht.keyStats = map[string]*trackedKeyStats{}
+		if ht.keyStatsMode == KeyStatsModeOff {
+			ht.keyStats = nil
+		} else {
+			ht.keyStats = make(map[string]*trackedKeyStats)
+		}
 		ht.keyStatsSlots = nil
 		ht.keyStatsFree = nil
 		ht.keyStatsHand = 0

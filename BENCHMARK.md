@@ -239,6 +239,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
+| Current pass | [Deferred optional maps](#deferred-optional-maps), default empty cache | Eager maps: 14,976 ns; 3,360 heap B; 8 allocs | Lazy maps: 14,721 ns; 3,264 heap B; 6 allocs | 1.02x faster, 96 B lower, 1.33x fewer allocations | First TTL is 1.04x faster with one fewer allocation; 10k distinct TTL scheduling is CPU-neutral within 0.2% with unchanged heap |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Live string-slot replacement](#live-string-slot-replacement), duplicate and changing values | Public `Put`: 3.057/2.731 ns | Proven-live replace: 1.416/1.532 ns | Primitive 2.16x/1.78x faster; complete API 1.015x/1.012x faster | Private cache callers rely on the existing live-index invariant; public deleted-index revival and all formats remain unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
@@ -1292,6 +1293,45 @@ Public `Create*Storage` APIs retain their independent allocation and empty
 slice behavior. Internal command code still reads the same typed pointers;
 there is no added branch or indirection and no value, GC-lifetime, compaction,
 wire, snapshot, or persistence format change.
+
+<a id="deferred-optional-maps"></a>
+### Deferred Optional Maps
+
+After storage-header grouping, every empty trie still allocated an expiration
+index and a per-key telemetry map. Both are optional: TTL metadata is only
+written by the first future expiration, and per-key telemetry defaults to off.
+The allocation test was tightened first from eight to six allocations and a
+lifecycle test required nil default maps, first-use activation, off-mode
+release, memory compaction, and successful reactivation. Both failed against
+the eager constructor before production code changed.
+
+The constructor now leaves both maps nil. Enabling bounded or full telemetry
+allocates its writable map before any tracked command. The first distinct TTL
+allocates the expiration index; ordinary commands and updates to existing TTLs
+retain their prior paths. Disabling telemetry releases its map, and memory
+compaction releases empty expiration or disabled telemetry metadata while
+preserving a writable map for telemetry that remains enabled.
+
+```sh
+make run CMD='go test . -run="TestHatTrieConstructionUsesGroupedStorageBacking|TestHatTrieDefersOptionalMapsUntilEnabled" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkHatTrieOptionalMapLifecycle -benchmem -benchtime=100000x -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkHatTrieOptionalMapExpirationScheduling -benchmem -benchtime=10000x -count=20'
+```
+
+CPU rows below are same-binary medians against eager controls. Heap and
+allocation rows are from the direct before/after lifecycle fixtures, excluding
+the control benchmark's closure overhead.
+
+| Complete lifecycle | Eager maps | Deferred maps | Improvement |
+| --- | ---: | ---: | ---: |
+| Empty construction | 14,976 ns; 3,360 B; 8 allocs | 14,721 ns; 3,264 B; 6 allocs | 1.02x faster, 96 B lower, 1.33x fewer allocations |
+| Construction plus first TTL | 16,230 ns; 3,696 B; 12 allocs | 15,666 ns; 3,648 B; 11 allocs | 1.04x faster, 48 B lower, one fewer allocation |
+| Construction plus telemetry activation/write | 14,511 ns; 3,696 B; 11 allocs | 14,411 ns; 3,648 B; 10 allocs | CPU neutral within 0.7%, 48 B lower, one fewer allocation |
+| Schedule 10,000 distinct TTLs | 530.5 ns/key; 271 B/key | 529.4 ns/key; 271 B/key | CPU-neutral within 0.2%; heap and allocations unchanged |
+
+The default path retains no replacement state or background work. TTL, key
+statistics, compaction, snapshot, restore, partition, wire, and persistent
+format behavior are unchanged.
 
 <a id="single-representation-string-storage"></a>
 ### Single-Representation String Storage

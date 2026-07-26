@@ -49,6 +49,137 @@ func BenchmarkHatTrieConstruction(b *testing.B) {
 	}
 }
 
+func BenchmarkHatTrieConstructionWithFirstExpiration(b *testing.B) {
+	dir := b.TempDir()
+	now := time.Unix(1_700_000_000, 0)
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		trie, err := CreateHatTrieWithDiskDir(dir, false)
+		if err != nil {
+			b.Fatal(err)
+		}
+		trie.now = func() time.Time { return now }
+		trie.UpsertString("ttl", "value")
+		if !trie.ExpireAt("ttl", now.Add(time.Hour)) {
+			b.Fatal("ExpireAt(ttl) = false, want true")
+		}
+		trie.Destroy()
+	}
+}
+
+func BenchmarkHatTrieConstructionWithKeyStatsActivation(b *testing.B) {
+	dir := b.TempDir()
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		trie, err := CreateHatTrieWithDiskDir(dir, false)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := trie.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+			b.Fatal(err)
+		}
+		trie.UpsertString("tracked", "value")
+		trie.Destroy()
+	}
+}
+
+func BenchmarkHatTrieDistinctExpirationScheduling(b *testing.B) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	keys := make([]string, b.N)
+	for index := range keys {
+		keys[index] = fmt.Sprintf("ttl:%d", index)
+		trie.UpsertString(keys[index], "value")
+	}
+	now := time.Unix(1_700_000_000, 0)
+	trie.now = func() time.Time { return now }
+	expiresAt := now.Add(time.Hour)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index, key := range keys {
+		if !trie.ExpireAt(key, expiresAt.Add(time.Duration(index))) {
+			b.Fatalf("ExpireAt(%q) = false, want true", key)
+		}
+	}
+}
+
+func BenchmarkHatTrieOptionalMapLifecycle(b *testing.B) {
+	for _, workload := range []struct {
+		name string
+		run  func(*testing.B, *HatTrie)
+	}{
+		{name: "Empty", run: func(_ *testing.B, _ *HatTrie) {}},
+		{name: "FirstExpiration", run: func(b *testing.B, trie *HatTrie) {
+			now := time.Unix(1_700_000_000, 0)
+			trie.now = func() time.Time { return now }
+			trie.UpsertString("ttl", "value")
+			if !trie.ExpireAt("ttl", now.Add(time.Hour)) {
+				b.Fatal("ExpireAt(ttl) = false, want true")
+			}
+		}},
+		{name: "KeyStatsActivation", run: func(b *testing.B, trie *HatTrie) {
+			if err := trie.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+				b.Fatal(err)
+			}
+			trie.UpsertString("tracked", "value")
+		}},
+	} {
+		for _, eager := range []bool{true, false} {
+			name := "Lazy"
+			if eager {
+				name = "EagerControl"
+			}
+			b.Run(workload.name+"/"+name, func(b *testing.B) {
+				dir := b.TempDir()
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					trie, err := CreateHatTrieWithDiskDir(dir, false)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if eager {
+						trie.expires = make(map[string]uint32)
+						trie.keyStats = make(map[string]*trackedKeyStats)
+					}
+					workload.run(b, trie)
+					trie.Destroy()
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkHatTrieOptionalMapExpirationScheduling(b *testing.B) {
+	for _, eager := range []bool{true, false} {
+		name := "Lazy"
+		if eager {
+			name = "EagerControl"
+		}
+		b.Run(name, func(b *testing.B) {
+			trie := CreateHatTrie()
+			defer trie.Destroy()
+			keys := make([]string, b.N)
+			for index := range keys {
+				keys[index] = fmt.Sprintf("ttl:%d", index)
+				trie.UpsertString(keys[index], "value")
+			}
+			if eager {
+				trie.expires = make(map[string]uint32)
+			}
+			now := time.Unix(1_700_000_000, 0)
+			trie.now = func() time.Time { return now }
+			expiresAt := now.Add(time.Hour)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index, key := range keys {
+				if !trie.ExpireAt(key, expiresAt.Add(time.Duration(index))) {
+					b.Fatalf("ExpireAt(%q) = false, want true", key)
+				}
+			}
+		})
+	}
+}
+
 func TestHatTrieConstructionUsesGroupedStorageBacking(t *testing.T) {
 	if raceEnabled {
 		t.Skip("race instrumentation changes constructor allocation counts")
@@ -66,8 +197,72 @@ func TestHatTrieConstructionUsesGroupedStorageBacking(t *testing.T) {
 	if createErr != nil {
 		t.Fatalf("CreateHatTrieWithDiskDir() error = %v", createErr)
 	}
-	if allocs > 8 {
-		t.Fatalf("CreateHatTrieWithDiskDir() allocations = %.0f, want <= 8", allocs)
+	if allocs > 6 {
+		t.Fatalf("CreateHatTrieWithDiskDir() allocations = %.0f, want <= 6", allocs)
+	}
+}
+
+func TestHatTrieDefersOptionalMapsUntilEnabled(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.mu.RLock()
+	expires := trie.expires
+	keyStats := trie.keyStats
+	trie.mu.RUnlock()
+	if expires != nil || keyStats != nil {
+		t.Fatalf("empty optional maps = expires:%v keyStats:%v, want both nil", expires != nil, keyStats != nil)
+	}
+
+	if err := trie.ConfigureKeyStats(KeyStatsModeFull, 0); err != nil {
+		t.Fatalf("ConfigureKeyStats(full) error = %v", err)
+	}
+	trie.mu.RLock()
+	expires = trie.expires
+	keyStats = trie.keyStats
+	trie.mu.RUnlock()
+	if expires != nil || keyStats == nil {
+		t.Fatalf("telemetry activation maps = expires:%v keyStats:%v, want false/true", expires != nil, keyStats != nil)
+	}
+	trie.UpsertString("optional:maps", "value")
+	if !trie.Expire("optional:maps", time.Hour) {
+		t.Fatal("Expire(optional:maps) = false, want true")
+	}
+	trie.mu.RLock()
+	expires = trie.expires
+	keyStats = trie.keyStats
+	trie.mu.RUnlock()
+	if expires == nil || keyStats == nil {
+		t.Fatalf("activated optional maps = expires:%v keyStats:%v, want both non-nil", expires != nil, keyStats != nil)
+	}
+
+	if err := trie.ConfigureKeyStats(KeyStatsModeOff, 0); err != nil {
+		t.Fatalf("ConfigureKeyStats(off) error = %v", err)
+	}
+	if !trie.Persist("optional:maps") {
+		t.Fatal("Persist(optional:maps) = false, want true")
+	}
+	if _, err := trie.CompactMemory(); err != nil {
+		t.Fatalf("CompactMemory() error = %v", err)
+	}
+	trie.mu.RLock()
+	expires = trie.expires
+	keyStats = trie.keyStats
+	trie.mu.RUnlock()
+	if expires != nil || keyStats != nil {
+		t.Fatalf("compacted disabled maps = expires:%v keyStats:%v, want both nil", expires != nil, keyStats != nil)
+	}
+
+	if err := trie.ConfigureKeyStats(KeyStatsModeBounded, 1); err != nil {
+		t.Fatalf("ConfigureKeyStats(bounded) error = %v", err)
+	}
+	if _, err := trie.CompactMemory(); err != nil {
+		t.Fatalf("CompactMemory() with enabled telemetry error = %v", err)
+	}
+	trie.UpsertString("optional:maps", "next")
+	if _, ok := trie.StatsForKey("optional:maps"); !ok {
+		t.Fatal("StatsForKey(optional:maps) = false after empty compaction, want true")
+	}
+	if !trie.Expire("optional:maps", time.Hour) {
+		t.Fatal("Expire(optional:maps) after empty compaction = false, want true")
 	}
 }
 

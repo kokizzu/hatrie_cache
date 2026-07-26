@@ -360,6 +360,36 @@ func TestDocsDescribeGroupedStorageHeaders(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDeferredOptionalMaps(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[deferred optional maps](BENCHMARK.md#deferred-optional-maps)",
+		"8 to 6 allocations",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing deferred optional-map token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkHatTrieOptionalMapLifecycle",
+		"96 B lower",
+		"1.33x fewer allocations",
+		"CPU-neutral within 0.2%",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing deferred optional-map token %q", token)
+		}
+	}
+}
+
 func TestREADMEDocumentsXorFilterBuildHashIndex(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {

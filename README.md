@@ -114,6 +114,12 @@ size-class fit. These
 [grouped storage headers](BENCHMARK.md#grouped-storage-headers) reduce empty
 cache construction from 25 to 8 allocations with unchanged heap and storage
 access paths; public storage constructors remain independent.
+The expiration index and disabled per-key telemetry map also remain absent
+until their features are first used. These
+[deferred optional maps](BENCHMARK.md#deferred-optional-maps) reduce default
+empty-cache construction from 8 to 6 allocations and by 96 heap bytes. First
+TTL and telemetry activation still allocate less overall, while sustained TTL
+scheduling is CPU- and memory-neutral.
 Empty, one-, and two-member plain-string sets use dedicated packed pools, then
 promote to the existing generic set representation at the third member or first
 non-string value. This cuts retained heap without changing wire, snapshot, or

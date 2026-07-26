@@ -3898,8 +3898,6 @@ func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*Hat
 		xorFilters:       &storage.xorFilters,
 		radixTrees:       &storage.radixTrees,
 		dbrefs:           &storage.dbrefs,
-		expires:          map[string]uint32{},
-		keyStats:         map[string]*trackedKeyStats{},
 		keyStatsMode:     DefaultKeyStatsMode,
 		keyStatsCapacity: 0,
 		now:              fastime.Now,
@@ -4195,13 +4193,16 @@ func (ht *HatTrie) configureKeyStatsLocked(mode KeyStatsMode, capacity int) {
 		ht.stats.restore(ht.keyStatsGlobal)
 	}
 	if mode == KeyStatsModeOff {
-		ht.keyStats = map[string]*trackedKeyStats{}
+		ht.keyStats = nil
 		ht.keyStatsMode = mode
 		ht.keyStatsCapacity = 0
 		ht.keyStatsSlots = nil
 		ht.keyStatsFree = nil
 		ht.keyStatsHand = 0
 		return
+	}
+	if ht.keyStats == nil {
+		ht.keyStats = make(map[string]*trackedKeyStats)
 	}
 	if mode == KeyStatsModeFull {
 		ht.keyStatsMode = mode
@@ -5562,6 +5563,9 @@ func (ht *HatTrie) setExpirationLocked(key string, at time.Time, rawPtr *C.value
 	if index, ok := ht.expires[key]; ok {
 		ht.expirations.Update(key, at, int(index), ht.expires)
 	} else {
+		if ht.expires == nil {
+			ht.expires = make(map[string]uint32)
+		}
 		ht.expirations.Push(expirationEntry{key: key, at: at}, ht.expires)
 	}
 	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
