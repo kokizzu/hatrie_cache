@@ -1116,6 +1116,10 @@ The follow-up [linear expiration-index rebuild](BENCHMARK.md#linear-expiration-i
 copies the already-valid right-sized heap and fills each map position directly,
 removing another measured 1% of 10,000-TTL compaction time without changing
 heap or allocation cost.
+[Validated bounded key-stat compaction](BENCHMARK.md#validated-bounded-key-stat-compaction)
+also skips a redundant full-sized `seen` map when slot metadata is consistent,
+making the 100,000-key fixture 1.02x faster with 1.44x lower cumulative heap;
+inconsistent internal state retains the prior repair path.
 
 Long-running daemon options can also live in a JSON config file. Config keys
 match flag names and may use hyphens or underscores; duration values use Go

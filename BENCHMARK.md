@@ -289,6 +289,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Delete-churn memory compaction](#delete-churn-memory-compaction), 100k insert/90k delete | 9,679,075 retained backing B; 9,850,096 retained heap B | 704,912 retained backing B; 884,600 retained heap B | 13.73x lower backing, 11.13x lower heap | One rebuild pauses access for 8.80 ms and adds 2.4% cumulative allocation to the full churn cycle |
 | Current pass | [Single-pass expiration-index compaction](#single-pass-expiration-index-compaction), 10k expiring keys | Double map rebuild: 8.254 ms; 1,562,256 heap B; 10,095 allocs | Heap-authoritative rebuild: 6.120 ms; 1,125,320 heap B; 10,060 allocs | 1.35x faster, 1.39x lower heap, 35 fewer allocations | No measured tradeoff; `CompactMemory` policy, lock scope, TTL state, heap order, wire, and persistence are unchanged |
 | Current pass | [Linear expiration-index rebuild](#linear-expiration-index-rebuild), repeated 10k-TTL compaction | Heap `Push`: 6.033 ms; 1,125,278 heap B; 10,058 allocs | Clone plus direct positions: 5.964 ms; 1,125,278 heap B; 10,058 allocs | 1.01x faster with identical heap and allocations | No measured tradeoff; the right-sized heap, exact order, deadlines, index positions, and formats are unchanged |
+| Current pass | [Validated bounded key-stat compaction](#validated-bounded-key-stat-compaction), 100k tracked keys | Unconditional seen map: 169.162 ms; 11,405,896 heap B; 100,577 allocs | Validated slots: 166.164 ms; 7,910,752 heap B; 100,317 allocs | 1.02x faster, 1.44x lower heap, about 260 fewer allocations | Inconsistent internal slot metadata retains the prior repair fallback; policy, eviction order, stats, and formats are unchanged |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
 | Final architecture | [1%-changed anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | Same full-transfer baseline | 72,812,784 ns; 240,086 wire B | 2.13x faster, 44.75x smaller wire | Digest pages add metadata before changed values |
@@ -2899,6 +2900,43 @@ candidate repeat is reported here.
 The comparison has identical heap and allocations. Compaction policy, lock
 scope, retained capacity, TTL behavior, snapshots, wire, and persistence are
 unchanged.
+
+<a id="validated-bounded-key-stat-compaction"></a>
+#### Validated Bounded Key-Stat Compaction
+
+Bounded telemetry maintains one slot per tracked key plus reusable holes from
+deletes. Compaction already cloned the key-to-stat map, then always allocated a
+second full-sized `seen` map to walk the slots, remove holes or duplicates, and
+append any map entries missing from the slot array. Healthy runtime state has a
+stronger invariant: each nonempty slot's stat points back to that exact slot,
+and the number of nonempty slots equals the map cardinality.
+
+The pre-change test creates evictions and holes, records slot order and the
+eviction hand, compacts, and verifies every resulting slot index. A second test
+deliberately installs duplicate and missing internal slots to prove the prior
+repair fallback remains available. The common path now validates slot pointers
+and cardinality without allocating; only inconsistent state constructs the
+`seen` map and runs the original repair algorithm.
+
+```sh
+make run CMD='go test . -run="TestCompactMemory(Preserves|Repairs).*BoundedKeyStatsSlots" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkCompactMemoryBoundedKeyStats100k -benchmem -benchtime=1x -count=10'
+```
+
+The benchmark compacts a complete trie with 100,000 live string keys and a
+bounded telemetry capacity of 100,000. Values are ten-run medians on the Ryzen
+9 5950X host.
+
+| Full bounded-telemetry compaction | Seen-map baseline | Validated final | Improvement |
+| --- | ---: | ---: | ---: |
+| Median time | 169,162,035 ns | 166,163,998 ns | 1.02x faster |
+| Cumulative heap | 11,405,896 B | 7,910,752 B | 1.44x lower; 3,495,144 B removed |
+| Allocations | about 100,577 | 100,317 | about 260 fewer |
+
+Tracked statistics, slot order, eviction hand, deletion holes, full/off modes,
+compaction locking, snapshots, wire, and persistence are unchanged. The
+validation adds no retained state and runs only during explicit or periodic
+compaction.
 
 <a id="online-generational-compaction-rollback"></a>
 #### Online Generational Compaction Rollback

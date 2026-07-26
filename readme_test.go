@@ -443,6 +443,35 @@ func TestDocsDescribeLinearExpirationIndexRebuild(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeValidatedBoundedKeyStatsCompaction(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Validated bounded key-stat compaction](BENCHMARK.md#validated-bounded-key-stat-compaction)",
+		"1.44x lower cumulative heap",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing bounded key-stat compaction token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkCompactMemoryBoundedKeyStats100k",
+		"3,495,144 B",
+		"repair fallback",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing bounded key-stat compaction token %q", token)
+		}
+	}
+}
+
 func TestREADMEDocumentsXorFilterBuildHashIndex(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {

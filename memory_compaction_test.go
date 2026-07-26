@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,113 @@ func BenchmarkCompactMemoryExpirationIndex10k(b *testing.B) {
 	for iteration := 0; iteration < b.N; iteration++ {
 		if _, err := trie.CompactMemory(); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCompactMemoryBoundedKeyStats100k(b *testing.B) {
+	const keys = 100_000
+	trie := CreateHatTrie()
+	defer trie.Destroy()
+	if err := trie.ConfigureKeyStats(KeyStatsModeBounded, keys); err != nil {
+		b.Fatal(err)
+	}
+	for index := 0; index < keys; index++ {
+		trie.UpsertString(fmt.Sprintf("stats:%06d", index), "value")
+	}
+	b.ReportAllocs()
+	b.ReportMetric(keys, "tracked_keys")
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := trie.CompactMemory(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestCompactMemoryPreservesBoundedKeyStatsSlots(t *testing.T) {
+	const capacity = 128
+	trie := newTestTrie(t)
+	if err := trie.ConfigureKeyStats(KeyStatsModeBounded, capacity); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < capacity+32; index++ {
+		trie.UpsertString(fmt.Sprintf("stats:%03d", index), "value")
+	}
+	trie.mu.RLock()
+	deleteKeys := make([]string, 0, capacity/4)
+	for slot, key := range trie.keyStatsSlots {
+		if slot%4 == 0 {
+			deleteKeys = append(deleteKeys, key)
+		}
+	}
+	trie.mu.RUnlock()
+	for _, key := range deleteKeys {
+		if !trie.Delete(key) {
+			t.Fatalf("Delete(%q) = false, want true", key)
+		}
+	}
+
+	trie.mu.RLock()
+	wantSlots := make([]string, 0, len(trie.keyStats))
+	for _, key := range trie.keyStatsSlots {
+		if key != "" {
+			wantSlots = append(wantSlots, key)
+		}
+	}
+	wantHand := trie.keyStatsHand % len(wantSlots)
+	trie.mu.RUnlock()
+
+	if _, err := trie.CompactMemory(); err != nil {
+		t.Fatalf("CompactMemory() error = %v", err)
+	}
+	trie.mu.RLock()
+	defer trie.mu.RUnlock()
+	if !reflect.DeepEqual(trie.keyStatsSlots, wantSlots) {
+		t.Fatal("bounded key-stat slot order changed during compaction")
+	}
+	if len(trie.keyStatsFree) != 0 || trie.keyStatsHand != wantHand {
+		t.Fatalf("compacted key-stat free/hand = %d/%d, want 0/%d", len(trie.keyStatsFree), trie.keyStatsHand, wantHand)
+	}
+	for slot, key := range trie.keyStatsSlots {
+		stats := trie.keyStats[key]
+		if stats == nil || stats.slot != uint32(slot) {
+			t.Fatalf("compacted key-stat slot %d key %q has metadata %#v", slot, key, stats)
+		}
+	}
+}
+
+func TestCompactMemoryRepairsInconsistentBoundedKeyStatsSlots(t *testing.T) {
+	trie := newTestTrie(t)
+	if err := trie.ConfigureKeyStats(KeyStatsModeBounded, 3); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"a", "b", "c"} {
+		trie.UpsertString(key, "value")
+	}
+	trie.mu.Lock()
+	trie.keyStatsSlots = []string{"a", "a", "missing"}
+	trie.mu.Unlock()
+
+	if _, err := trie.CompactMemory(); err != nil {
+		t.Fatalf("CompactMemory() error = %v", err)
+	}
+	trie.mu.RLock()
+	defer trie.mu.RUnlock()
+	if len(trie.keyStatsSlots) != 3 || len(trie.keyStats) != 3 {
+		t.Fatalf("repaired key-stat slots/map = %d/%d, want 3/3", len(trie.keyStatsSlots), len(trie.keyStats))
+	}
+	seen := make(map[string]struct{}, 3)
+	for slot, key := range trie.keyStatsSlots {
+		stats := trie.keyStats[key]
+		if stats == nil || stats.slot != uint32(slot) {
+			t.Fatalf("repaired key-stat slot %d key %q has metadata %#v", slot, key, stats)
+		}
+		seen[key] = struct{}{}
+	}
+	for _, key := range []string{"a", "b", "c"} {
+		if _, ok := seen[key]; !ok {
+			t.Fatalf("repaired key-stat slots missing %q", key)
 		}
 	}
 }

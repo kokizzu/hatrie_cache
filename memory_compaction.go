@@ -512,23 +512,38 @@ func (ht *HatTrie) compactKeyStatsLocked() {
 		return
 	}
 	nextSlots := make([]string, 0, len(ht.keyStats))
-	seen := make(map[string]struct{}, len(ht.keyStats))
-	for _, key := range ht.keyStatsSlots {
+	validSlots := true
+	for slot, key := range ht.keyStatsSlots {
 		if key == "" {
 			continue
 		}
-		if _, ok := ht.keyStats[key]; !ok {
-			continue
+		stats := ht.keyStats[key]
+		if stats == nil || stats.slot != uint32(slot) {
+			validSlots = false
+			break
 		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
 		nextSlots = append(nextSlots, key)
 	}
-	for key := range ht.keyStats {
-		if _, ok := seen[key]; !ok {
+	if !validSlots || len(nextSlots) != len(ht.keyStats) {
+		nextSlots = nextSlots[:0]
+		seen := make(map[string]struct{}, len(ht.keyStats))
+		for _, key := range ht.keyStatsSlots {
+			if key == "" {
+				continue
+			}
+			if _, ok := ht.keyStats[key]; !ok {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
 			nextSlots = append(nextSlots, key)
+		}
+		for key := range ht.keyStats {
+			if _, ok := seen[key]; !ok {
+				nextSlots = append(nextSlots, key)
+			}
 		}
 	}
 	for slot, key := range nextSlots {
