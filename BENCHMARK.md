@@ -276,6 +276,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Shared structured-batch keys](#shared-structured-batch-keys), 10k same-key `PEEK_MAP`, batch 16 | Repeated key column: 805.1 ns/command; 3,362,504 heap B; 64,490 allocs; 36.72 wire B/command | One shared key: 718.6 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | 1.12x faster, 1.28x lower heap, 1.21x fewer allocs, 1.94x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
 | Current pass | [Shared structured-batch subkeys](#shared-structured-batch-subkeys), 10k same-field `PEEK_MAP`, batch 16 | Shared key plus repeated subkeys: 721.8 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | One shared key and subkey: 670.1 ns/command; 2,305,907 heap B; 41,915 allocs; 12.35 wire B/command | 1.08x faster, 1.14x lower heap, 1.27x fewer allocs, 1.53x smaller wire | Additive request form; mixed-version clients retry expanded subkeys after an older server's column-count error |
 | Current pass | [Shared structured-batch values](#shared-structured-batch-values), 10k same-member `HAS_SET`, batch 16 | Shared key plus repeated values: 721.6 ns/command; 2,731,184 heap B; 60,051 allocs; 15.16 wire B/command | One shared key and value: 654.4 ns/command; 2,305,612 heap B; 48,777 allocs; 7.662 wire B/command | 1.10x faster, 1.18x lower heap, 1.23x fewer allocs, 1.98x smaller wire | Additive request form; mixed-version clients retry expanded values after an older server's column-count error |
+| Current pass | [One-time shared structured-value conversion](#one-time-shared-structured-value-conversion), 10k same-member `HAS_SET`, batch 16 | Expand headers, then convert per command: 584.8 ns/command; 2,305,582 heap B; 48,777 allocs | Convert once per envelope: 562.6 ns/command; 1,990,556 heap B; 38,776 allocs | 1.04x faster, 1.16x lower heap, 1.26x fewer allocs; wire unchanged | No measured tradeoff; positional controls retain identical heap/allocations and CPU within 0.3% |
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
 | Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
@@ -1154,6 +1155,43 @@ the baseline and final medians were 929.8 and 920.4 ns/command, both with
 77,606 allocations and effectively identical heap. Older servers reject one
 value for multiple consuming operations; mixed-version clients can retry with
 the expanded column.
+
+<a id="one-time-shared-structured-value-conversion"></a>
+##### One-Time Shared Structured-Value Conversion
+
+The first compact-value implementation expanded one decoded `[]byte` into a
+request-local `[][]byte` header slice, then converted that same payload to a Go
+string inside every consuming operation. The executor now converts it once per
+envelope and passes the immutable string through the direct and compatibility
+cursors. Positional values retain their existing per-column conversion path;
+the protobuf request, response, wire bytes, storage formats, and ownership
+rules are unchanged.
+
+The exact pre-change `3fc8479` test binary and the candidate binary ran in eight
+alternating pairs, pinned to one CPU. Each sample executes the complete gRPC
+stream path 100 times with 10,000 commands per iteration. Medians are calculated
+across the eight process samples:
+
+```sh
+make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=100x COUNT=8
+```
+
+For the historical comparison, compile the selected revision with `go test -c`
+through `make run`, pin both test binaries to the same CPU, and alternate their
+execution order. The normal benchmark target above regenerates all current
+structured-batch controls and artifacts without requiring historical binaries.
+
+| Complete stream path | Pre-change | Convert once | Improvement |
+| --- | ---: | ---: | --- |
+| Compact shared value | 584.8 ns/command; 2,305,582 B; 48,777 allocs | 562.6 ns/command; 1,990,556 B; 38,776 allocs | 1.04x faster; 1.16x lower heap; 1.26x fewer allocations |
+| Mixed positional control | 875.8 ns/command; 3,557,048 B; 77,606 allocs | 877.6 ns/command; 3,557,047 B; 77,606 allocs | CPU within 0.2%; heap and allocations identical |
+| Repeated positional-value control | 637.0 ns/command; 2,730,985 B; 60,050 allocs | 639.0 ns/command; 2,730,985 B; 60,050 allocs | CPU within 0.3%; heap and allocations identical |
+
+The compact path removes exactly one string conversion allocation per command.
+Wire size remains 7.662 B/command because the prior feature already compressed
+the request column. An earlier unpinned cross-process run gave conflicting CPU
+ordering; CPU pinning and alternating order resolved the result while both
+memory counters remained deterministic.
 
 <a id="go-1265-toolchain-refresh"></a>
 #### Go 1.26.5 Toolchain Refresh

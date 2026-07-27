@@ -42,15 +42,23 @@ func (ht *HatTrie) structuredBatchRequiresCommandLoop(request *hatriecachev1.Str
 }
 
 func (ht *HatTrie) executeStructuredBatchBounded(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchBoundedWithChunkSize(ctx, request, structuredBatchDirectChunkSize)
+	return ht.executeStructuredBatchBoundedPrepared(ctx, request, "", false)
+}
+
+func (ht *HatTrie) executeStructuredBatchBoundedPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
+	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, structuredBatchDirectChunkSize, sharedValue, hasSharedValue)
 }
 
 func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSize(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, chunkSize int) *hatriecachev1.StructuredBatchResponse {
+	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, chunkSize, "", false)
+}
+
+func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSizePrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, chunkSize int, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
 	response := newStructuredBatchResponse(request.GetBatchId(), len(request.GetOperations()))
 	telemetry := batchTelemetry{}
 	telemetryNow := time.Time{}
 
-	cursor := structuredBatchCursor{}
+	cursor := structuredBatchCursor{sharedValue: sharedValue, hasSharedValue: hasSharedValue}
 	operations := request.GetOperations()
 	for start := 0; start < len(operations); start += chunkSize {
 		if err := ctx.Err(); err != nil {
@@ -75,9 +83,8 @@ func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSize(ctx context.Contex
 			switch operation {
 			case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP:
 				subkey = request.Subkeys[cursor.subkey]
-				value = string(request.Values[cursor.value])
+				value = cursor.nextValue(request)
 				cursor.subkey++
-				cursor.value++
 			case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_MAP,
 				hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_TAKE_MAP:
 				subkey = request.Subkeys[cursor.subkey]
@@ -86,12 +93,10 @@ func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSize(ctx context.Contex
 				hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET,
 				hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_REMOVE_SET,
 				hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET:
-				value = string(request.Values[cursor.value])
-				cursor.value++
+				value = cursor.nextValue(request)
 			case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_PRIORITY:
-				value = string(request.Values[cursor.value])
+				value = cursor.nextValue(request)
 				priority = request.Priorities[cursor.priority]
-				cursor.value++
 				cursor.priority++
 			}
 			result := ht.executeStructuredBatchItemLocked(operation, key, subkey, value, priority, &telemetry)
