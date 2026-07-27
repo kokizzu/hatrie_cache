@@ -83,6 +83,9 @@ structured controls retain the prior encoder with neutral memory and CPU. XOR
 and Top-K prototypes were rejected because their Unicode/structured controls
 regressed. See the
 [public canonical-string lookup measurements](BENCHMARK.md#allocation-free-public-canonical-string-lookups).
+An attempted uppercase `EXISTS` specialization was removed because every
+placement slowed either exact GET or lowercase generic commands; see the
+[dispatch rollback](BENCHMARK.md#uppercase-exists-fast-path-rollback).
 The command-feature benchmark constructs optional TTL and priority integers
 outside timed loops, so its allocation columns describe command execution
 rather than Go escape-analysis cost in the fixture. The expiration command

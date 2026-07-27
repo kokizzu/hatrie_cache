@@ -325,6 +325,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Known-position expiration removal",
 		"Single-pass expiration time comparison",
 		"Single-pass expiration update direction",
+		"Uppercase EXISTS fast path",
 		"Replication constructor flag",
 		"Mixed-page compact descriptors",
 		"Ten-page replication aggregation",

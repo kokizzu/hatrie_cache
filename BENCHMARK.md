@@ -374,6 +374,7 @@ tree.
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Known-valid-key GET helper | Intended to skip redundant key validation | 121.7 ns versus 120.1 ns for the checked path | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Uppercase EXISTS fast path | Post-dispatch specialization made hits/misses 1.069x/1.038x faster with unchanged zero allocation | Large-switch placements made GET up to 1.045x slower; the isolated post-dispatch branch made lowercase generic `exists` about 1.046x slower, and the 100-command mixed profile was neutral | All three placements and temporary tests were removed; see [uppercase EXISTS fast path rollback](#uppercase-exists-fast-path-rollback) |
 | Idempotent string assignment | Intended to skip an unchanged string-header write and reusable-index check | The refined one-check prototype made duplicates 1.27x slower and true replacements 1.07x slower | Removed before production; direct assignment remains; see [idempotent string assignment](#idempotent-string-assignment-rollback) |
 | Temporary packed-map materialization | Reused the generic map JSON encoder | 1,499 ns, 488 B, and 5 allocations | Replaced by direct JSON at 511.4 ns, 24 B, and 1 allocation; see [packed small-map storage](#packed-small-map-storage) |
 | Single-object storage-header group | Reduced empty cache construction from 25 to 7 allocations and was 1.06x faster | Go's 2,048-byte size class raised cumulative heap from 3,360 to 3,424 B | Replaced by the map-separated [grouped storage headers](#grouped-storage-headers), which retain the CPU/allocation gain with unchanged heap |
@@ -1499,6 +1500,44 @@ ahead of that switch still slowed the control from 166.2 to 175.5 ns. Cgo
 medians by 1.03x/1.10x/1.15x/1.03x, and a known-valid-key GET helper measured
 121.7 ns against the checked path's 120.1 ns. All production candidates and
 their temporary tests were removed, so this pass retains no runtime tradeoff.
+
+<a id="uppercase-exists-fast-path-rollback"></a>
+#### Uppercase EXISTS Fast Path Rollback
+
+The exact uppercase dispatcher handles common command spellings before command
+and key normalization. `EXISTS` was not one of those cases, so an uppercase
+request first missed the large exact switch and then continued through the
+generic normalized switch. A direct fast path reused the same public `Exists`
+operation and exact response values; pre-change tests compared missing,
+present, and expired keys against whitespace/lowercase generic requests.
+
+A frozen binary measured uppercase hits at 136.1 ns, misses at 121.1 ns, and
+the exact GET control at 130.1 ns, all with zero heap and allocations. Lowercase
+`exists` retained its normalization cost at 8 B and one allocation. Adding a
+normal switch case provided only a small `EXISTS` gain and moved GET to 134.4
+ns versus 129.6 ns in its paired run, or 1.037x slower.
+
+The second layout specialized `EXISTS` after the established exact dispatcher
+had returned, leaving handled commands logically before the new branch. Longer
+alternating runs improved hits to 127.3 ns and misses to 116.7 ns, or 1.069x
+and 1.038x, while GET was neutral at 129.5 versus 130.1 ns. However, even an
+uppercase-first discriminator made the valid lowercase generic hit 190.0 ns
+versus 181.6 ns frozen, or about 1.046x slower. The complete mixed read-heavy
+profile was effectively neutral at 16,969 versus 16,998 ns per 100 commands
+because only four operations were `EXISTS`.
+
+A final placement moved the discriminator into the exact switch's existing
+default block so the caller layout was restored. It instead moved the GET
+control to 135.9 ns, or 1.045x slower than the 130.1 ns frozen median. The
+isolated command gain did not justify slowing either the dominant exact GET or
+generic normalized command surface, so all production changes and temporary
+fixtures were removed. Command behavior, allocations, wire, and storage remain
+unchanged.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommand -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedReadHeavy100 -benchmem -benchtime=2s -count=10'
+```
 
 <a id="complete-tagged-structured-storage"></a>
 ### Complete Tagged Structured Storage
