@@ -257,6 +257,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
 | Current pass | [Deferred optional maps](#deferred-optional-maps), default empty cache | Eager maps: 14,976 ns; 3,360 heap B; 8 allocs | Lazy maps: 14,721 ns; 3,264 heap B; 6 allocs | 1.02x faster, 96 B lower, 1.33x fewer allocations | First TTL is 1.04x faster with one fewer allocation; 10k distinct TTL scheduling is CPU-neutral within 0.2% with unchanged heap |
 | Current pass | [Packed disk/map storage headers](#packed-disk-map-storage-headers), empty cache construction | Separate headers: 14,902 ns; 3,264 heap B; 6 allocs | One auxiliary backing: 13,875 ns; 3,264 heap B; 5 allocs | 1.07x faster, 1.20x fewer allocations; heap unchanged | No measured tradeoff; public constructors stay independent and compaction/restore retain swappable typed pointers |
+| Current pass | [Single-pass default spill-directory initialization](#single-pass-default-spill-directory-initialization), default create/destroy | `MkdirTemp` plus redundant `MkdirAll`: 69,483 ns; 3,391 heap B; 10 allocs | Trust successful `MkdirTemp`: 66,639 ns; 3,151 heap B; 8 allocs | 1.043x faster, 240 B lower heap, 1.25x fewer allocations | No lazy initialization or shifted first-write cost; explicit-directory constructors retain validation and unchanged 3,264 B/five allocations |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Live string-slot replacement](#live-string-slot-replacement), duplicate and changing values | Public `Put`: 3.057/2.731 ns | Proven-live replace: 1.416/1.532 ns | Primitive 2.16x/1.78x faster; complete API 1.015x/1.012x faster | Private cache callers rely on the existing live-index invariant; public deleted-index revival and all formats remain unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
@@ -1702,6 +1703,46 @@ make run CMD='go test . -run=NONE -bench=^BenchmarkHatTrieConstruction -benchmem
 There is no per-command branch, additional pointer, retained buffer, wire,
 snapshot, storage, or persistence-format change. Both headers already shared
 the cache lifetime; only their allocator object boundary changed.
+
+<a id="single-pass-default-spill-directory-initialization"></a>
+### Single-Pass Default Spill-Directory Initialization
+
+`CreateHatTrie` previously called `os.MkdirTemp` to create its private spill
+directory and then passed that new path through `CreateHatTrieWithDiskDir`.
+The public constructor immediately called `os.MkdirAll`, which had to `Stat`
+the directory that `MkdirTemp` had just created. The duplicate validation cost
+two allocations and 240 B on every default cache construction.
+
+A lifecycle test was added first and passed against the baseline: the owned
+directory must exist immediately, accept a value above `DiskBytesThreshold`,
+return that value, and disappear after `Destroy`. The retained constructor
+builds `DiskStorage` metadata directly only after `MkdirTemp` succeeds. It does
+not defer directory creation or move any work or error to the first disk write.
+`CreateHatTrieWithDiskDir`, `CreateDiskStorage`, and every caller-supplied path
+still run the original `MkdirAll` validation.
+
+Long separate filesystem phases varied enough to reverse CPU ordering, so the
+CPU decision uses eight-operation candidate/control blocks in alternating
+order in one binary. All nine pinned pairs favored the single-pass path. Heap
+and allocation counts come from the ordinary default-construction benchmark.
+
+```sh
+make run CMD='go test . -run=TestCreateHatTrieOwnsReadyDiskDirectory -count=10 -v'
+make bench-default-construction BENCHTIME=10000x COUNT=7
+make bench-default-construction DEFAULT_CONSTRUCTION_BENCH='^BenchmarkHatTrieDefaultConstructionValidationAlternating$' BENCHTIME=1000x COUNT=9
+```
+
+| Default create/destroy | Redundant directory validation | Single-pass directory | Improvement |
+| --- | ---: | ---: | ---: |
+| Same-binary CPU median | 69,483 ns | 66,639 ns | 1.043x faster |
+| Cumulative heap | 3,391 B | 3,151 B | 240 B lower, 1.08x less heap |
+| Allocations | 10 | 8 | 1.25x fewer allocations |
+
+The explicit existing-directory constructor remains at 3,264 B and five
+allocations; its constructor, first-expiration, and key-stat activation
+controls did not regress. The HAT-trie root, ready disk directory, ownership,
+cleanup, values, locks, finalizer, wire, snapshot, journal, replication, and
+persistent formats are unchanged.
 
 <a id="single-representation-string-storage"></a>
 ### Single-Representation String Storage
@@ -6426,6 +6467,15 @@ The marker did not eliminate value boxing; it deferred 64 boxes from staging to
 every pending snapshot. That is worse for repeated backups and monitoring, so
 the candidate and its representation test were removed. The original staged
 value and all baseline runtime behavior remain.
+
+A later command-family allocation audit reconfirmed that decision. The full
+create, 64 scalar adds, and build fixture measured 18,882 B and 220 allocations;
+`alloc_objects` attributed its dominant production share to the 64 retained
+canonical keys and boxed staged values, while fixture value generation and
+temporary trie creation accounted for most of the remainder. The marker is the
+already-measured way to remove those staging boxes, and its pending-snapshot
+regression still disqualifies it. No second marker or deferred-boxing candidate
+was added.
 
 <a id="inline-sparse-bitset-containers"></a>
 ### Inline Sparse-Bitset Containers

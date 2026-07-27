@@ -186,6 +186,11 @@ The remaining disk and map headers share one exact-size-class
 empty construction from 6 to 5 allocations and making it 1.07x faster with
 identical cumulative heap. Their public constructors and swappable typed
 pointers remain unchanged.
+Default `CreateHatTrie` also uses its successful `MkdirTemp` result directly
+instead of revalidating the new spill directory with `MkdirAll`. This
+[single-pass initialization](BENCHMARK.md#single-pass-default-spill-directory-initialization)
+is 1.043x faster in paired measurements and removes two allocations plus 240 B
+without delaying directory creation or changing explicit-directory validation.
 Empty, one-, and two-member plain-string sets use dedicated packed pools, then
 promote to the existing generic set representation at the third member or first
 non-string value. This cuts retained heap without changing wire, snapshot, or
@@ -265,6 +270,7 @@ make bench-fenwick-add BENCHTIME=500ms COUNT=7
 make bench-quantile-add BENCHTIME=500ms COUNT=7
 make bench-topk-scalar BENCHTIME=1s COUNT=7
 make bench-canonical-string-lookups BENCHTIME=1s COUNT=7
+make bench-default-construction BENCHTIME=10000x COUNT=7
 make bench-string-compaction STRING_STORAGE_BENCH_KEYS=100000 BENCHTIME=1x COUNT=7
 make bench-startup-persistence BENCHTIME=1x COUNT=7
 make bench-live-replication BENCHTIME=1x COUNT=7

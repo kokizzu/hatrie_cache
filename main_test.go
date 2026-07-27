@@ -49,6 +49,50 @@ func BenchmarkHatTrieConstruction(b *testing.B) {
 	}
 }
 
+func BenchmarkHatTrieDefaultConstruction(b *testing.B) {
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		trie := CreateHatTrie()
+		trie.Destroy()
+	}
+}
+
+func BenchmarkHatTrieDefaultConstructionValidationAlternating(b *testing.B) {
+	const blockOperations = 8
+	var validatedDuration time.Duration
+	var trustedDuration time.Duration
+	run := func(validate bool) time.Duration {
+		started := time.Now()
+		for operation := 0; operation < blockOperations; operation++ {
+			dir, err := os.MkdirTemp("", "hatrie-cache-bench-*")
+			if err != nil {
+				b.Fatal(err)
+			}
+			trie, err := createHatTrieWithDiskDir(dir, true, validate)
+			if err != nil {
+				_ = os.RemoveAll(dir)
+				b.Fatal(err)
+			}
+			trie.Destroy()
+		}
+		return time.Since(started)
+	}
+
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if iteration&1 == 0 {
+			trustedDuration += run(false)
+			validatedDuration += run(true)
+		} else {
+			validatedDuration += run(true)
+			trustedDuration += run(false)
+		}
+	}
+	operations := float64(b.N * blockOperations)
+	b.ReportMetric(float64(trustedDuration.Nanoseconds())/operations, "trusted-ns/op")
+	b.ReportMetric(float64(validatedDuration.Nanoseconds())/operations, "validated-ns/op")
+}
+
 func BenchmarkHatTrieConstructionWithFirstExpiration(b *testing.B) {
 	dir := b.TempDir()
 	now := time.Unix(1_700_000_000, 0)
@@ -199,6 +243,29 @@ func TestHatTrieConstructionUsesGroupedStorageBacking(t *testing.T) {
 	}
 	if allocs > 5 {
 		t.Fatalf("CreateHatTrieWithDiskDir() allocations = %.0f, want <= 5", allocs)
+	}
+}
+
+func TestCreateHatTrieOwnsReadyDiskDirectory(t *testing.T) {
+	trie := CreateHatTrie()
+	dir := trie.disks.dir
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		trie.Destroy()
+		t.Fatalf("default disk directory Stat() = %#v/%v, want directory", info, err)
+	}
+	payload := testPayload(DiskBytesThreshold + 1)
+	if err := trie.UpsertBytesChecked("disk", payload); err != nil {
+		trie.Destroy()
+		t.Fatalf("UpsertBytesChecked(disk) error = %v", err)
+	}
+	if got, err := trie.GetBytesChecked("disk"); err != nil || !bytes.Equal(got, payload) {
+		trie.Destroy()
+		t.Fatalf("GetBytesChecked(disk) = %d bytes/%v, want %d bytes/nil", len(got), err, len(payload))
+	}
+	trie.Destroy()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("owned disk directory Stat() after Destroy = %v, want not exist", err)
 	}
 }
 

@@ -1356,12 +1356,16 @@ func createDiskStorageValue(dir string, ownedDir bool) (DiskStorage, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return DiskStorage{}, err
 	}
+	return newDiskStorageValue(dir, ownedDir), nil
+}
+
+func newDiskStorageValue(dir string, ownedDir bool) DiskStorage {
 	return DiskStorage{
 		dir:      dir,
 		rootDir:  dir,
 		ownedDir: ownedDir,
 		paths:    []string{},
-	}, nil
+	}
 }
 
 func (ds *DiskStorage) Put(idx int32, value []byte) error {
@@ -3900,7 +3904,7 @@ func CreateHatTrie() *HatTrie {
 	if err != nil {
 		panic(err)
 	}
-	ht, err := CreateHatTrieWithDiskDir(diskDir, true)
+	ht, err := createHatTrieWithDiskDir(diskDir, true, false)
 	if err != nil {
 		_ = os.RemoveAll(diskDir)
 		panic(err)
@@ -3909,9 +3913,19 @@ func CreateHatTrie() *HatTrie {
 }
 
 func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*HatTrie, error) {
-	disks, err := createDiskStorageValue(diskDir, removeDiskDirOnDestroy)
-	if err != nil {
-		return nil, err
+	return createHatTrieWithDiskDir(diskDir, removeDiskDirOnDestroy, true)
+}
+
+func createHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool, ensureDiskDir bool) (*HatTrie, error) {
+	var disks DiskStorage
+	if ensureDiskDir {
+		var err error
+		disks, err = createDiskStorageValue(diskDir, removeDiskDirOnDestroy)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		disks = newDiskStorageValue(diskDir, removeDiskDirOnDestroy)
 	}
 	storage := &hatTrieStorageGroup{}
 	auxStorage := &hatTrieAuxStorage{

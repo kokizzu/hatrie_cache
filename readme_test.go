@@ -141,6 +141,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Binary LevelDB scalar records](README.md#serialization-tradeoffs)",
 		"[Binary LevelDB structured records](README.md#serialization-tradeoffs)",
 		"[Live string-slot replacement](#live-string-slot-replacement)",
+		"[Single-pass default spill-directory initialization](#single-pass-default-spill-directory-initialization)",
 		"[Replication request batching](#replication-batching-benchmark)",
 		"[Replication routing and encoding](#replication-batching-benchmark)",
 		"[Replication page traversal](#replication-page-traversal)",
@@ -689,6 +690,39 @@ func TestDocsDescribeGroupedStorageHeaders(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing grouped storage token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeSinglePassDefaultSpillDirectoryInitialization(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[single-pass initialization](BENCHMARK.md#single-pass-default-spill-directory-initialization)",
+		"removes two allocations plus 240 B",
+		"make bench-default-construction BENCHTIME=10000x COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing default spill-directory token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Single-Pass Default Spill-Directory Initialization",
+		"69,483 ns",
+		"66,639 ns",
+		"3,391 B",
+		"3,151 B",
+		"18,882 B and 220 allocations",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing default spill-directory token %q", token)
 		}
 	}
 }
