@@ -392,6 +392,7 @@ tree.
 | Fully lazy snapshot mutation map | Removed one more map from snapshots without concurrent writes | First concurrent mark was 1.32x slower, 208 to 256 B, and one to two timed allocations | Rejected; captures retain a writer-ready initial map and use [selective snapshot mutation maps](#selective-snapshot-mutation-maps) only after drain |
 | Unchecked normalized replication owners | Removed repeated trim, empty-ID, and missing-node checks after topology validation | Two-shard snapshot construction was 1.08x slower; four shards were neutral within about 1%; 64 shards improved only 1.03x with identical memory | Reverted; the checked normalized helper remains; see [normalized replication target precomputation](#normalized-replication-target-precomputation) |
 | Topology-store large bucket dispatch | Binary search made 64/128/256-range routes 1.16x/1.29x/1.64x faster with unchanged allocation behavior | The added dispatch made the common two-range route 1.015x slower, 166.45 versus 164.05 ns | Removed from production; the unchanged linear topology-store route remains; see [topology-store large bucket dispatch](#topology-store-large-bucket-dispatch-rollback) |
+| Grouped replication target backing | One backing removed 63 allocations and made the isolated healthy 64-shard constructor 1.07x faster; four-shard groups kept heap flat and removed 48 allocations | One backing added 128/256 heap B at 8/16 shards; grouped backing made healthy 2/16-shard construction 1.02x/1.03x slower and offline 8/32/64-shard construction 1.18x/1.03x/1.01x slower | Never applied to production; the exact test/benchmark reproducer remains; see [grouped replication target backing](#grouped-replication-target-backing-rollback) |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -3689,6 +3690,51 @@ remain zero-allocation. The liveness map is private and immutable after
 construction; election timeout rules, lock scope, node validation, leader and
 target order, source exclusion, topology generation, wire, storage,
 persistence, and public configuration are unchanged.
+
+<a id="grouped-replication-target-backing-rollback"></a>
+#### Grouped Replication Target Backing Rollback
+
+Routing snapshots retain one immutable target slice per shard. A candidate
+reserved the sum of the existing per-shard capacities once and carved capped
+target slices from that common backing. The exact control compares headers,
+liveness, leaders, candidates, targets, and 4,096 complete routes for
+untracked healthy, tracked healthy, offline, timeout, and maintenance states
+at 2, 4, 16, and 64 shards. It also proves every returned target slice has its
+capacity capped at its length, so an accidental append cannot overwrite the
+next shard. The matrix passes 20 runs.
+
+```sh
+make run CMD='go test . -run=TestReplicationRoutingSnapshotPackedTargetsCandidateMatchesPerShardBacking -count=20'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingPackedTargetsConstruction$$/^(UntrackedHealthy|OneOffline)$$/^(2Shards|4Shards|8Shards|16Shards|32Shards|64Shards)$$/^(Baseline|Candidate)$$" -benchmem -benchtime=10000x -count=5 -cpu=1'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingPackedTargetsConstructionAlternating$$/^(UntrackedHealthy|OneOffline)$$/^(2Shards|8Shards|16Shards|32Shards|64Shards)$$" -benchtime=20000x -count=10 -cpu=1'
+```
+
+The first one-backing version reduced healthy 64-shard construction from 388
+to 325 allocations and improved its isolated median from 35,045 to 32,685 ns,
+or 1.07x. Go size-class rounding nevertheless raised cumulative heap from
+6,784 to 6,912 B at eight shards and from 13,696 to 13,952 B at 16 shards.
+That 128/256-byte regression disqualified the layout.
+
+A refined version grouped at most four shards per backing allocation. It
+matched baseline heap exactly at every measured size and still reduced healthy
+64-shard construction from 388 to 340 allocations. The complete same-loop CPU
+control was mixed:
+
+| Four-shard backing groups, paired median | Per-shard backing | Grouped backing | Result |
+| --- | ---: | ---: | ---: |
+| Healthy, two shards | 882.1 ns | 902.35 ns | 1.02x slower |
+| Healthy, eight shards | 4,728.5 ns | 4,333 ns | 1.09x faster |
+| Healthy, 16 shards | 9,117 ns | 9,362 ns | 1.03x slower |
+| Healthy, 64 shards | 36,192 ns | 35,809 ns | 1.01x faster |
+| One offline, eight shards | 4,115.5 ns | 4,854.5 ns | 1.18x slower |
+| One offline, 32 shards | 18,956 ns | 19,434 ns | 1.03x slower |
+| One offline, 64 shards | 38,124 ns | 38,595.5 ns | 1.01x slower |
+
+Changing the sorter to use a zero-based shard subslice did not remove the
+regressions. Allocation count alone therefore did not justify extra capacity
+planning and grouped-backing access. No production code changed, so current
+CPU, heap, target ownership, election behavior, wire, storage, and persistence
+remain unchanged; the candidate survives only as test and benchmark evidence.
 
 <a id="adaptive-replication-bucket-search"></a>
 #### Adaptive Replication Bucket Search

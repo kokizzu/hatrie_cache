@@ -751,6 +751,26 @@ func TestDocsDescribeSparseReplicationLivenessExceptions(t *testing.T) {
 	}
 }
 
+func TestBenchmarkDocsRecordRejectedGroupedReplicationTargetBacking(t *testing.T) {
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Grouped replication target backing",
+		"#grouped-replication-target-backing-rollback",
+		"TestReplicationRoutingSnapshotPackedTargetsCandidateMatchesPerShardBacking",
+		"BenchmarkReplicationRoutingPackedTargetsConstructionAlternating",
+		"added 128/256 heap B",
+		"1.18x slower",
+		"No production code changed",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing rejected grouped-target token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectReplicationRouteMembership(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
