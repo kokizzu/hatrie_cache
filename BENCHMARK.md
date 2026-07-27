@@ -223,6 +223,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Trailing-fallback whole-sequence validation](#flat-scalar-sequence-validation), checked replacement with one trailing nested value among 64/4,096 items | Slice: 2,589/128,450 ns; priority queue: 6,693/411,923 ns; 5 allocs | Slice: 1,835/63,606 ns; priority queue: 4,639/233,791 ns; 4 allocs | Slice 1.41x/2.02x faster; priority queue 1.44x/1.76x faster; one fewer allocation | No measured tradeoff; an earlier non-scalar selects the exact prior whole-sequence path with identical heap and allocations |
 | Current pass | [Compact Bloom-filter headers](#compact-bloom-filter-headers), 100k empty filters plus direct operations | 48-byte header; 48.00 retained B/filter; 47.16 ns/filter build; add/has 33.24/52.46 ns | 40-byte header; 40.06 retained B/filter; 41.22 ns/filter build; add/has 32.95/47.37 ns | 1.20x lower retained heap; build/add/has 1.14x/1.01x/1.11x faster | No measured tradeoff; allocations, bitset bytes, hashes, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Direct Count-Min Sketch row loops](#direct-count-min-sketch-row-loops), default depth four | Callback byte estimate/increment: 41.36/43.82 ns; callback plain-string estimate/increment: 24.94/28.34 ns | Direct byte estimate/increment: 34.50/28.14 ns; direct plain-string estimate/increment: 16.20/20.92 ns | Byte paths 1.20x/1.56x faster; exact string paths 1.54x/1.35x faster; zero heap/allocations throughout | No measured runtime tradeoff; complete `ESTCMS` is 1.02x faster and `INCRCMS` is neutral within 0.33%; header, counters, hashes, wire, and persistence are unchanged |
+| Current pass | [Generic Count-Min Sketch scalar additions](#generic-count-min-sketch-scalar-additions), checked update and estimate-only calls | Variadic wrapper: 102.5/127.7/130.7 ns safe/escaped/structured update; 103.1 ns estimate | Direct scalar: 70.63/92.06/96.76 ns update; 70.67 ns estimate | Updates 1.45x/1.39x/1.35x faster; estimate 1.46x faster; one allocation and 24 B removed | No measured tradeoff; frozen 128-value batch is neutral within 0.6%, while counters, estimates, validation, wire, and persistence are unchanged |
 | Current pass | [Prepared-result Fenwick updates](#prepared-result-fenwick-updates), 1K/1M trees | Re-query after write: 99.11/123.6 ns | Reuse checked result: 40.21/51.86 ns | 2.46x/2.38x faster; lazy first add 1.18x faster; complete `ADDFW` 1.11x faster | No measured tradeoff; heap, allocations, overflow checks, update responses, tree layout, wire, and persistence are unchanged |
 | Current pass | [Prevalidated quantile insertions](#prevalidated-quantile-insertions), scalar `ADDQ` | Public and private finite checks: 735.3 ns; 64 B; 1 alloc | One atomic public preflight: 699.3 ns; 64 B; 1 alloc | Complete command 1.05x faster; direct scalar and 16-value controls are neutral | No measured tradeoff; invalid batches remain all-or-reject, and summary, estimates, heap, allocations, wire, and persistence are unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
@@ -399,6 +400,7 @@ tree.
 | Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster | Scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower | All three layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
 | Bloom split-first preparation | Scalar safe/structured additions improved 1.39x/1.31x and a two-value batch improved 1.23x | The 128-value batch was 1.015x slower and the 16-value batch was 0.35% slower | Removed; only the [scalar public wrapper](#generic-bloom-filter-scalar-additions) was specialized, leaving variadic batches unchanged |
 | Inline Cuckoo scalar wrapper body | Scalar additions improved 1.51x-1.62x with one fewer allocation | Moving the larger body before `AddOneChecked` made the frozen 128-value batch 1.011x slower through binary-layout drift | Replaced by the [out-of-line scalar helper](#generic-cuckoo-filter-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.5% |
+| Count-Min clustered scalar helper | Scalar additions improved about 1.4x with one fewer allocation | Placing the helper between Count-Min hot methods made the frozen 128-value batch 10,970 versus 10,540 ns, or 1.041x slower | Replaced by the [end-of-file scalar helper](#generic-count-min-sketch-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.6% |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
@@ -5617,6 +5619,58 @@ pairs on one logical CPU.
 The retained header remains 48 bytes. Counter storage, hashes, accepted values,
 snapshots, wire encoding, storage encoding, and persistence formats are
 unchanged.
+
+<a id="generic-count-min-sketch-scalar-additions"></a>
+### Generic Count-Min Sketch Scalar Additions
+
+`countMinSketchData.AddChecked` previously delegated one value to
+`AddOneChecked`. That variadic method atomically prepares a `[][]byte`, so a
+scalar update or estimate-only call allocated a one-element slice that was
+immediately consumed once. The scalar wrapper now calls an out-of-line private
+helper that performs the same nil and shape checks, encodes one canonical JSON
+key, and either estimates or updates it directly. `AddOneChecked` and its batch
+preflight source are unchanged.
+
+Tests were written against a direct test-only candidate before the production
+wrapper changed. They compare return values and exact counters, width, depth,
+and total state against the former wrapper for plain, escaped, HTML-sensitive,
+Unicode, and structured values across zero-count estimates and updates. Nil,
+zero-shape, and invalid values retain the former behavior; failed encoding does
+not allocate counters or mutate state. The focused test passed 50 times, its
+race build passed ten times, and the complete Count-Min tests passed five times.
+
+```sh
+make run CMD='go test . -run TestCountMinSketchScalarAddCheckedCandidate -count=50'
+make run CMD='go test -race . -run TestCountMinSketchScalarAddCheckedCandidate -count=10'
+make bench-cms-scalar BENCHTIME=1s COUNT=7
+```
+
+Timing rows are medians from nine same-binary alternating candidate/reference
+runs with 128 operations per block. Allocation rows use the same candidate and
+former wrapper in one binary. The frozen production-binary row independently
+calls the actual public method before and after the change.
+
+| Scalar `AddChecked`, median | Former variadic wrapper | Direct scalar path | Improvement |
+| --- | ---: | ---: | ---: |
+| Safe-string update | 102.5 ns; 29 B; 2 allocs | 70.63 ns; 5 B; 1 alloc | 1.45x faster; 5.80x lower heap |
+| Escaped-string update | 127.7 ns; 40 B; 2 allocs | 92.06 ns; 16 B; 1 alloc | 1.39x faster; 2.50x lower heap |
+| Structured update | 130.7 ns; 40 B; 2 allocs | 96.76 ns; 16 B; 1 alloc | 1.35x faster; 2.50x lower heap |
+| Safe-string estimate only | 103.1 ns; 29 B; 2 allocs | 70.67 ns; 5 B; 1 alloc | 1.46x faster; 5.80x lower heap |
+
+The independently frozen public-method median improved from 120.2 to 71.47 ns,
+or 1.68x, while dropping from 29 B and two allocations to 5 B and one
+allocation. The frozen 128-value `AddOneChecked` batch control measured
+10,946 versus 11,016 ns, neutral within 0.6%, with identical 4,224 B and 129
+allocations.
+
+An initial out-of-line helper was placed between `addKey` and the JSON-string
+hot paths. Although it retained the scalar gain, alternating frozen binaries
+measured the 128-value batch at 10,540 ns before and 10,970 ns after, a 1.041x
+regression caused by code-layout displacement. Moving the exact helper to the
+end of the file recovered the batch control without changing generated scalar
+behavior. The clustered layout was removed. Counter contents, saturation,
+total counts, estimate-only semantics, accepted values, batch atomicity, wire,
+snapshots, and persistent formats are unchanged.
 
 <a id="compact-count-min-sketch-header-rollback"></a>
 #### Compact Count-Min Sketch Header Rollback

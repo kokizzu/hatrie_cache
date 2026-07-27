@@ -161,7 +161,7 @@ func (sketch *countMinSketchData) Add(value interface{}, count uint32) uint64 {
 }
 
 func (sketch *countMinSketchData) AddChecked(value interface{}, count uint32) (uint64, error) {
-	return sketch.AddOneChecked(value, count)
+	return sketch.addChecked(value, count)
 }
 
 func (sketch *countMinSketchData) AddOne(value interface{}, count uint32, values ...interface{}) uint64 {
@@ -585,4 +585,18 @@ func countMinSketchDepthValue(value uint64) (uint8, error) {
 		return 0, errors.New("hatriecache: count-min sketch depth must be between 1 and " + strconv.Itoa(int(maxCountMinSketchDepth)))
 	}
 	return uint8(value), nil
+}
+
+func (sketch *countMinSketchData) addChecked(value interface{}, count uint32) (uint64, error) {
+	if sketch == nil || sketch.width == 0 || sketch.depth == 0 {
+		return 0, nil
+	}
+	key, err := countMinSketchItemKey(value)
+	if err != nil {
+		return 0, err
+	}
+	if count == 0 {
+		return sketch.estimateKey(key), nil
+	}
+	return sketch.addKey(key, count), nil
 }

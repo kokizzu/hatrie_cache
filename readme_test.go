@@ -402,6 +402,37 @@ func TestDocsDescribeGenericHyperLogLogScalarAdditions(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeGenericCountMinScalarAdditions(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Count-Min scalar-add measurements](BENCHMARK.md#generic-count-min-sketch-scalar-additions)",
+		"make bench-cms-scalar BENCHTIME=1s COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing Count-Min scalar-add token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Generic Count-Min Sketch Scalar Additions",
+		"1.45x faster",
+		"120.2 to 71.47 ns",
+		"10,946 versus 11,016 ns",
+		"Count-Min clustered scalar helper",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing Count-Min scalar-add token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeBoundedShortGenericTopKDispatch(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
