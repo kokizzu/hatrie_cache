@@ -79,6 +79,7 @@ func (server *CacheGRPCServer) executeStructuredBatch(ctx context.Context, reque
 		response.Error = err.Error()
 		return response
 	}
+	request = materializeStructuredBatchSharedKey(request)
 	if server.scalarBatchRequiresCompatibilityPath() {
 		return server.executeStructuredBatchCompatibility(ctx, request)
 	}
@@ -93,7 +94,7 @@ func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchReques
 	if len(operations) > maxPublicCommandBatchSize {
 		return errors.New("structured batch exceeds maximum size")
 	}
-	if len(request.GetKeys()) != len(operations) {
+	if len(request.GetKeys()) != len(operations) && len(request.GetKeys()) != 1 {
 		return errors.New("structured batch keys must match operations")
 	}
 	subkeysNeeded := 0
@@ -137,6 +138,24 @@ func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchReques
 		return errors.New("structured batch priorities do not match PUSH_PRIORITY operations")
 	}
 	return nil
+}
+
+func materializeStructuredBatchSharedKey(request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchRequest {
+	if len(request.Keys) != 1 || len(request.Operations) == 1 {
+		return request
+	}
+	prepared := &hatriecachev1.StructuredBatchRequest{
+		BatchId:    request.BatchId,
+		Operations: request.Operations,
+		Keys:       make([]string, len(request.Operations)),
+		Subkeys:    request.Subkeys,
+		Values:     request.Values,
+		Priorities: request.Priorities,
+	}
+	for index := range prepared.Keys {
+		prepared.Keys[index] = request.Keys[0]
+	}
+	return prepared
 }
 
 type structuredBatchCursor struct {

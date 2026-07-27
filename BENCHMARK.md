@@ -273,6 +273,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Shared scalar-batch keys](#shared-scalar-batch-keys), 10k same-key GET, batch 16 | Repeated key column: 394.3 ns/command; 2,368,864 heap B; 34,823 allocs; 23.72 wire B/command | One shared key: 316.1 ns/command; 1,684,878 heap B; 23,020 allocs; 11.54 wire B/command | 1.25x faster, 1.41x lower heap, 1.51x fewer allocs, 2.06x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
+| Current pass | [Shared structured-batch keys](#shared-structured-batch-keys), 10k same-key `PEEK_MAP`, batch 16 | Repeated key column: 805.1 ns/command; 3,362,504 heap B; 64,490 allocs; 36.72 wire B/command | One shared key: 718.6 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | 1.12x faster, 1.28x lower heap, 1.21x fewer allocs, 1.94x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
 | Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
@@ -403,6 +404,7 @@ tree.
 | Generic replication target sorting at every size | Removed three reflective allocations and 184 cumulative heap B for one large target slice | Complete paired 31/63-target construction was 1.03x/1.025x slower | Replaced by the measured 16-target cutoff; large sets retain the original sorter; see [adaptive replication target sorting](#adaptive-replication-target-sorting) |
 | Dedicated packed scalar key fields | General distinct-key batches improved 1.09x with 1.44x fewer allocations and 1.56% less wire | Two added slice fields enlarged every decoded legacy request; the 10k legacy control used 31,947 more heap B, or 1.35%, even when the fields were absent | Removed before commit; [shared scalar-batch keys](#shared-scalar-batch-keys) reuse the existing key column, improve the target workload more, and leave the generated request layout unchanged |
 | Reused streamed scalar responses | Could remove roughly three response/status allocations per envelope | gRPC's `SendMsg` contract forbids modifying a message after send because tracing and stats handlers may consume it lazily | Rejected before an unsafe prototype; every streamed response remains independently owned |
+| gRPC shared transport buffers | Receive pooling and shared write buffers could reduce framing allocations | The APIs are experimental; receive pooling is disabled with stats/tracing and discouraged with compression, while shared write buffers use a global pool and add acquire/release work at every flush | Rejected as a no-tradeoff default before a product prototype; transport ownership and configuration remain unchanged |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -1036,6 +1038,42 @@ The end-to-end baseline samples were `1,597, 1,764, 1,495, 1,764,
 and response shapes are unchanged, so the optimization has no bandwidth or
 client compatibility effect. Raw final output is in
 `build/benchmarks/structured-protobuf-batch.txt` when generated locally.
+
+<a id="shared-structured-batch-keys"></a>
+#### Shared Structured-Batch Keys
+
+Repeated same-collection envelopes previously serialized and decoded the key
+once per operation. `StructuredBatchRequest.keys` now accepts either one key
+per operation or one shared key for the complete envelope. This reuses the
+existing protobuf column, so generated request size, field layout, persistent
+formats, and distinct-key execution remain unchanged. A shared request expands
+one request-local string-header slice after validation. The expansion uses an
+explicit protobuf projection rather than copying the generated message and its
+runtime mutex state.
+
+Tests were added before validation accepted the compact form. They cover
+ordered mixed `PUT_MAP`/`PEEK_MAP`/`TAKE_MAP` execution, journal replay, dirty
+tracking, local partitions, the legacy expanded column, and malformed columns.
+Focused repeated runs and the race detector passed.
+
+```sh
+make run CMD='env HATRIE_BIG_WINS_OPS=10000 go test . -run=NONE -bench="^BenchmarkBigWins/StructuredBatchStreamSharedKey(Repeated)?$$" -benchmem -benchtime=5x -count=15 -cpu=1'
+```
+
+Both rows are 15-run medians from the same binary, stream, batch size, server,
+and 10,000-command same-key `PEEK_MAP` fixture on the Ryzen 9 5950X host.
+
+| Key column | Time/10k | ns/command | Heap B/10k | Allocs/10k | Wire B/command | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Sixteen repeated key entries | 8.051 ms | 805.1 | 3,362,504 | 64,490 | 36.72 | baseline |
+| One shared key entry | 7.186 ms | 718.6 | 2,636,371 | 53,186 | 18.91 | 1.12x CPU, 1.28x heap, 1.21x allocations, 1.94x wire |
+
+The existing mixed structured benchmark retained identical heap and allocation
+counts against the untouched revision. Its cross-process CPU samples overlap;
+the distinct-key additions are two length comparisons and an allocation-free
+return, so there is no credible common-path regression. Older servers reject
+the compact form with the existing key-count error; mixed-version clients can
+retry with expanded keys.
 
 <a id="go-1265-toolchain-refresh"></a>
 #### Go 1.26.5 Toolchain Refresh

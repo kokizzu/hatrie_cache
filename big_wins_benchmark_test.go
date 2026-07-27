@@ -40,6 +40,8 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("ScalarBatchStreamCommandRepeatedKeys", benchmarkBigWinsScalarBatchStreamCommandRepeatedKeys)
 	b.Run("ScalarBatchStreamCommand", benchmarkBigWinsScalarBatchStreamCommand)
 	b.Run("NativeStructuredBatchStreamCommand", benchmarkBigWinsNativeStructuredBatchStreamCommand)
+	b.Run("StructuredBatchStreamSharedKeyRepeated", benchmarkBigWinsStructuredBatchStreamSharedKeyRepeated)
+	b.Run("StructuredBatchStreamSharedKey", benchmarkBigWinsStructuredBatchStreamSharedKey)
 	b.Run("StructuredBatchStreamCommand", benchmarkBigWinsStructuredBatchStreamCommand)
 	b.Run("ChurnRetentionBaseline", benchmarkBigWinsChurnRetentionBaseline)
 	b.Run("ChurnRetentionCompacted", benchmarkBigWinsChurnRetentionCompacted)
@@ -866,6 +868,90 @@ func structuredBenchmarkCommand(index int) *hatriecachev1.CommandRequest {
 	default:
 		return &hatriecachev1.CommandRequest{Command: "POPPQ", Key: "structured:pq"}
 	}
+}
+
+func benchmarkBigWinsStructuredBatchStreamSharedKeyRepeated(b *testing.B) {
+	benchmarkBigWinsStructuredBatchStreamSharedKeyMode(b, false)
+}
+
+func benchmarkBigWinsStructuredBatchStreamSharedKey(b *testing.B) {
+	benchmarkBigWinsStructuredBatchStreamSharedKeyMode(b, true)
+}
+
+func benchmarkBigWinsStructuredBatchStreamSharedKeyMode(b *testing.B, sharedKey bool) {
+	const batchSize = 16
+	operations := bigWinsBenchmarkOperations(1000)
+	wire := &benchmarkGRPCWireStats{}
+	client, stop := newGRPCBenchmarkClient(b, grpc.WithStatsHandler(wire))
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer stream.CloseSend()
+	if err := stream.Send(&hatriecachev1.StructuredBatchRequest{
+		BatchId:    1,
+		Operations: []hatriecachev1.StructuredCommand{hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP},
+		Keys:       []string{"structured:shared"},
+		Subkeys:    []string{"field"},
+		Values:     [][]byte{[]byte("value")},
+	}); err != nil {
+		b.Fatal(err)
+	}
+	if response, err := stream.Recv(); err != nil || !response.GetOk() {
+		b.Fatalf("structured shared-key setup response = %#v/%v", response, err)
+	}
+	wire.outbound.Store(0)
+	wire.inbound.Store(0)
+	batches := (operations + batchSize - 1) / batchSize
+	requests := make([]*hatriecachev1.StructuredBatchRequest, batches)
+	for batch := range requests {
+		count := batchSize
+		if remaining := operations - batch*batchSize; remaining < count {
+			count = remaining
+		}
+		request := &hatriecachev1.StructuredBatchRequest{
+			BatchId:    uint64(batch + 2),
+			Operations: make([]hatriecachev1.StructuredCommand, count),
+			Keys:       make([]string, count),
+			Subkeys:    make([]string, count),
+		}
+		for index := range request.Operations {
+			request.Operations[index] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PEEK_MAP
+			request.Keys[index] = "structured:shared"
+			request.Subkeys[index] = "field"
+		}
+		if sharedKey {
+			request.Keys = request.Keys[:1]
+		}
+		requests[batch] = request
+	}
+	var total time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		started := time.Now()
+		for batch, request := range requests {
+			if err := stream.Send(request); err != nil {
+				b.Fatalf("structured shared-key send %d = %v", batch, err)
+			}
+			response, err := stream.Recv()
+			if err != nil || !response.GetOk() || len(response.GetStatuses()) != len(request.GetOperations()) {
+				b.Fatalf("structured shared-key response %d = %#v/%v", batch, response, err)
+			}
+			for index, status := range response.GetStatuses() {
+				if status != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK || response.GetValueKinds()[index] != hatriecachev1.ScalarValueKind_SCALAR_VALUE_KIND_BYTES {
+					b.Fatalf("structured shared-key item %d/%d = %v/%v", batch, index, status, response.GetValueKinds()[index])
+				}
+			}
+		}
+		total += time.Since(started)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(operations), "commands/op")
+	b.ReportMetric(float64(batches), "messages/op")
+	b.ReportMetric(float64(total.Nanoseconds())/float64(b.N*operations), "ns/command")
+	b.ReportMetric(float64(wire.outbound.Load()+wire.inbound.Load())/float64(b.N*operations), "wire_B/command")
 }
 
 func benchmarkBigWinsStructuredBatchStreamCommand(b *testing.B) {

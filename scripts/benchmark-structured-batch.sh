@@ -2,7 +2,7 @@
 set -eu
 
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-build/benchmarks}
-benchmark=${STRUCTURED_BATCH_BENCH:-^BenchmarkBigWins/(NativeStructuredBatchStreamCommand|StructuredBatchStreamCommand)$}
+benchmark=${STRUCTURED_BATCH_BENCH:-^BenchmarkBigWins/(NativeStructuredBatchStreamCommand|StructuredBatchStreamCommand|StructuredBatchStreamSharedKey(Repeated)?)$}
 operations=${BIG_WINS_OPS:-10000}
 benchtime=${BENCHTIME:-1x}
 count=${COUNT:-5}

@@ -2547,8 +2547,14 @@ same columnar layout for maps, slices, sets, and priority queues. It supports
 `PUT_MAP`, `PEEK_MAP`, `TAKE_MAP`, `PUSH_SLICE`, `POP_SLICE`, `SHIFT_SLICE`,
 `HEAD_SLICE`, `TAIL_SLICE`, `ADD_SET`, `REMOVE_SET`, `HAS_SET`, `GET_SET`,
 `PUSH_PRIORITY`, `PEEK_PRIORITY`, `POP_PRIORITY`, and `GET_PRIORITY`.
-`operations` and `keys` are positional; `subkeys`, `values`, and `priorities`
-contain only the entries consumed by their corresponding operations, in order.
+`operations` and `keys` are normally positional. When every operation targets
+the same collection, send one `keys` entry and the server broadcasts it across
+the envelope; this is the preferred representation for repeated map, slice,
+set, and priority-queue operations. Older servers reject that compact form with
+the existing column-count application error, so mixed-version clients can
+retry once with one key entry per operation. `subkeys`, `values`, and
+`priorities` contain only the entries consumed by their corresponding
+operations, in order.
 Each consuming operation accepts one value, so clients should send adjacent
 operations for multiple values or use `CommandBatchStream` for the existing
 multi-value request shape. Responses reuse scalar status/value-kind enums and
@@ -2562,7 +2568,9 @@ make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7
 ```
 
 See [BENCHMARK.md](BENCHMARK.md#compact-typed-protobuf-structured-batches) for
-CPU, heap, allocation, and measured wire tradeoffs.
+CPU, heap, allocation, and measured wire tradeoffs. Shared-key requests use one
+temporary string-header expansion for execution; distinct-key requests and the
+generated protobuf layout are unchanged.
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with
 `next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
 page. Empty keys are valid, so Go clients should set the optional `AfterKey`
