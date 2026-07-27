@@ -153,16 +153,8 @@ func (store *ElectionStore) electShardLeaderLocked(shard TopologyShard, nodes []
 }
 
 func (store *ElectionStore) nodeActiveForElectionLocked(nodes []TopologyNode, nodeID string, now time.Time) bool {
-	low, high := 0, len(nodes)
-	for low < high {
-		middle := int(uint(low+high) >> 1)
-		if nodes[middle].ID < nodeID {
-			low = middle + 1
-		} else {
-			high = middle
-		}
-	}
-	if low >= len(nodes) || nodes[low].ID != nodeID || nodes[low].Maintenance {
+	node, ok := normalizedTopologyNode(nodes, nodeID)
+	if !ok || node.Maintenance {
 		return false
 	}
 	record, tracked := store.nodes[nodeID]
@@ -183,8 +175,7 @@ func (store *ElectionStore) setNode(nodeID string, offline bool) error {
 	if nodeID == "" {
 		return errors.New("hatriecache: election node id is required")
 	}
-	topology := store.topologySnapshot()
-	if !topologyHasNode(topology, nodeID) {
+	if !store.topology.hasNode(nodeID) {
 		return errors.New("hatriecache: election node is not registered")
 	}
 
@@ -282,13 +273,4 @@ func electShardLeader(shard TopologyShard, active map[string]bool) ElectionLeade
 		}
 	}
 	return leader
-}
-
-func topologyHasNode(topology ClusterTopology, nodeID string) bool {
-	for _, node := range topology.Nodes {
-		if node.ID == nodeID {
-			return true
-		}
-	}
-	return false
 }

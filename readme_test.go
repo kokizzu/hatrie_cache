@@ -524,6 +524,32 @@ func TestDocsDescribeDirectElectionKeyRouting(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeAllocationFreeElectionNodeUpdates(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[allocation-free node validation](BENCHMARK.md#allocation-free-election-node-updates)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing allocation-free election node-update token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkElectionStoreNodeUpdateAlternating",
+		"9.15x faster",
+		"standalone 33-36 ns final medians",
+		"0 B; 0 allocs",
+		"Node-ID trimming, unknown-node errors",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing allocation-free election node-update token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeCachedReplicationRoutingFingerprint(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

@@ -243,6 +243,32 @@ func (store *TopologyStore) electionRouteSnapshot(key string) (TopologyRoute, []
 	return route, store.topology.Nodes, true
 }
 
+func (store *TopologyStore) hasNode(nodeID string) bool {
+	if store == nil {
+		return false
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	_, ok := normalizedTopologyNode(store.topology.Nodes, nodeID)
+	return ok
+}
+
+func normalizedTopologyNode(nodes []TopologyNode, nodeID string) (TopologyNode, bool) {
+	low, high := 0, len(nodes)
+	for low < high {
+		middle := int(uint(low+high) >> 1)
+		if nodes[middle].ID < nodeID {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	if low >= len(nodes) || nodes[low].ID != nodeID {
+		return TopologyNode{}, false
+	}
+	return nodes[low], true
+}
+
 func normalizedTopologyRouteForKey(topology ClusterTopology, key string) (TopologyRoute, bool) {
 	mode := topology.Mode
 	if mode == TopologyModeFullReplica {

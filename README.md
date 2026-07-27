@@ -1770,6 +1770,13 @@ one/four-shard routes are 2.85x/5.08x faster with 8.50x/13.19x lower heap;
 offline failover, heartbeat timeout, maintenance, candidate order, and returned
 ownership are unchanged.
 
+Heartbeat and offline updates use
+[allocation-free node validation](BENCHMARK.md#allocation-free-election-node-updates):
+the current normalized topology is searched directly instead of cloned only to
+check membership. One/four-shard heartbeat validation is 4.59x/8.85x faster
+and performs no timed allocation, while topology-generation visibility,
+unknown-node errors, timestamps, and election record locking are unchanged.
+
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_TIMEOUT=15s
 ```

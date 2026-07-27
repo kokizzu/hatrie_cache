@@ -140,6 +140,36 @@ func TestElectionStoreRejectsUnknownNode(t *testing.T) {
 	}
 }
 
+func TestElectionStoreNodeUpdatesFollowTopologyGeneration(t *testing.T) {
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes:   []TopologyNode{{ID: "node-b"}, {ID: "node-a"}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	store := NewElectionStore(topology, ElectionOptions{})
+	if err := store.Heartbeat("node-b"); err != nil {
+		t.Fatalf("Heartbeat(node-b) before update error = %v", err)
+	}
+	if err := topology.Set(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeFullReplica,
+		Self:    "node-a",
+		Nodes:   []TopologyNode{{ID: "node-c"}, {ID: "node-a"}},
+	}); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+	if err := store.Heartbeat("node-b"); err == nil {
+		t.Fatal("Heartbeat(removed node-b) error = nil, want unregistered error")
+	}
+	if err := store.MarkOffline("node-c"); err != nil {
+		t.Fatalf("MarkOffline(new node-c) error = %v", err)
+	}
+}
+
 func TestElectionStoreLeaderForKeyMatchesSnapshotControl(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	for _, tt := range topologyStoreRouteBenchmarkCases() {
@@ -325,6 +355,99 @@ func BenchmarkElectionStoreLeaderForKeyAlternating(b *testing.B) {
 			})
 		}
 	}
+}
+
+func BenchmarkElectionStoreNodeUpdate(b *testing.B) {
+	for _, tt := range topologyStoreRouteBenchmarkCases() {
+		for _, offline := range []bool{false, true} {
+			operation := "Heartbeat"
+			if offline {
+				operation = "MarkOffline"
+			}
+			b.Run(tt.name+"/"+operation, func(b *testing.B) {
+				topology, err := NewTopologyStore(tt.topology)
+				if err != nil {
+					b.Fatal(err)
+				}
+				now := time.Unix(1_700_000_000, 0)
+				store := NewElectionStore(topology, ElectionOptions{Now: func() time.Time { return now }})
+				nodeID := tt.topology.Nodes[0].ID
+				b.ReportAllocs()
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					var err error
+					if offline {
+						err = store.MarkOffline(nodeID)
+					} else {
+						err = store.Heartbeat(nodeID)
+					}
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkElectionStoreNodeUpdateAlternating(b *testing.B) {
+	for _, tt := range topologyStoreRouteBenchmarkCases() {
+		for _, offline := range []bool{false, true} {
+			operation := "Heartbeat"
+			if offline {
+				operation = "MarkOffline"
+			}
+			b.Run(tt.name+"/"+operation, func(b *testing.B) {
+				topology, err := NewTopologyStore(tt.topology)
+				if err != nil {
+					b.Fatal(err)
+				}
+				now := time.Unix(1_700_000_000, 0)
+				store := NewElectionStore(topology, ElectionOptions{Now: func() time.Time { return now }})
+				nodeID := tt.topology.Nodes[0].ID
+				var directDuration, snapshotDuration time.Duration
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					directFirst := iteration&1 != 0
+					for pass := 0; pass < 2; pass++ {
+						started := time.Now()
+						var err error
+						if directFirst == (pass == 0) {
+							err = store.setNode(nodeID, offline)
+							directDuration += time.Since(started)
+						} else {
+							err = electionStoreSetNodeSnapshotControl(store, nodeID, offline)
+							snapshotDuration += time.Since(started)
+						}
+						if err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/update")
+				b.ReportMetric(float64(snapshotDuration.Nanoseconds())/float64(b.N), "snapshot_ns/update")
+			})
+		}
+	}
+}
+
+func electionStoreSetNodeSnapshotControl(store *ElectionStore, nodeID string, offline bool) error {
+	topology := store.topologySnapshot()
+	found := false
+	for _, node := range topology.Nodes {
+		if node.ID == nodeID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("node %q is not registered", nodeID)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.nodes[nodeID] = electionNodeRecord{lastSeen: store.now(), offline: offline}
+	return nil
 }
 
 func newBenchmarkElectionStore(b *testing.B, tt topologyStoreRouteBenchmarkCase, offline bool) (*ElectionStore, []string) {

@@ -312,6 +312,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct single-target gRPC sync dispatch](#direct-single-target-grpc-sync-dispatch), one task group | Generic grouping: 569.1 ns; 808 heap B; 8 allocs | Direct result slot: 426.8 ns; 384 heap B; 4 allocs | 1.33x faster, 2.10x lower heap, 2x fewer allocations | Applies only to exactly one group; repeated-target and multi-target controls retain identical heap/allocations and CPU within 1.1% |
 | Current pass | [Normalized topology-store routing](#normalized-topology-store-routing), one/four shards | Clone/sort all shards: 241.4/505.3 ns; 120/488 heap B; 4/9 allocs | Clone selected shard: 134.3/142.55 ns; 48/80 heap B; 2/2 allocs | 1.80x/3.54x faster; 2.50x/6.10x lower heap; 2x/4.50x fewer allocations | Store topology is already normalized; returned route ownership and generic routing for arbitrary topology values are unchanged |
 | Current pass | [Direct election-key routing](#direct-election-key-routing), healthy one/four shards | Topology snapshot plus active map: 643.95/1,337.5 ns; 680/1,688 heap B; 10/18 allocs | Selected route plus direct candidates: 226.15/263.35 ns; 80/128 heap B; 3/3 allocs | 2.85x/5.08x faster; 8.50x/13.19x lower heap; 3.33x/6x fewer allocations | Timeout, offline, maintenance, failover, topology-generation consistency, ownership, and lock order are unchanged |
+| Current pass | [Allocation-free election node updates](#allocation-free-election-node-updates), one/four-shard heartbeat | Full topology clone: 279.65/535.5 ns; 272/896 heap B; 3/6 allocs | Normalized node lookup: 60.91/60.505 ns; 0 heap B; 0 allocs | 4.59x/8.85x faster; all timed heap and allocations eliminated | Membership follows every topology generation; heartbeat/offline record writes, validation, timestamps, locks, and behavior are unchanged |
 | Current pass | [Cached replication routing fingerprint](#cached-replication-routing-fingerprint), one/four shards | Rehash: 3,238/7,028.5 ns; 3,920/7,832 heap B; 52/129 allocs | Cached: 1,621.5/3,447.5 ns; 3,032/5,600 heap B; 14/34 allocs | 2.00x/2.04x faster; 1.29x/1.40x lower heap; 3.71x/3.79x fewer allocations | Reuses the fingerprint already computed by validated topology installation; topology cloning, routing maps, wire, and behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
@@ -3239,6 +3240,49 @@ the internal node view remains immutable after its short read lock. Election
 records retain their own read lock, and no topology lock is held while waiting
 for it. Candidate order, timestamps, timeout boundaries, maintenance, response
 ownership, configuration, wire, persistence, and public behavior are unchanged.
+
+<a id="allocation-free-election-node-updates"></a>
+#### Allocation-Free Election Node Updates
+
+`ElectionStore.Heartbeat` and `MarkOffline` previously cloned the complete
+topology and all shard replica slices before linearly checking whether one node
+ID was registered. Installed topology nodes are already validated and sorted.
+The update path now performs one read-locked binary lookup in that normalized
+node list, releases the topology lock, and writes the same election record
+under the same election mutex.
+
+The test-first generation fixture proves a node is accepted before a topology
+update, rejected after removal, and that its replacement is immediately valid.
+Existing unknown-node, heartbeat timeout, failover, and concurrent topology
+tests cover validation and record behavior. The alternating benchmark compares
+the direct lookup with the exact former clone-and-linear-scan path in both
+orders; the separate fixture records allocation behavior.
+
+```sh
+make run CMD='go test . -run="TestElectionStore(NodeUpdatesFollowTopologyGeneration|RejectsUnknownNode|LeaderForKeyMatchesSnapshotControl|LeaderForKeyDuringTopologyAndHeartbeatUpdates|KeepsHealthyPrimaryAndPromotesReplica|TimesOutHeartbeats)" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkElectionStoreNodeUpdate -benchmem -benchtime=100000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkElectionStoreNodeUpdateAlternating -benchtime=100000x -count=10 -cpu=1'
+```
+
+| Ten-run alternating median | Full topology clone | Normalized node lookup | Improvement |
+| --- | ---: | ---: | ---: |
+| Full replica heartbeat | 204.65 ns; 208 B; 1 alloc | 61.535 ns; 0 B; 0 allocs | 3.33x faster; timed allocation eliminated |
+| Full replica offline mark | 201.8 ns; 208 B; 1 alloc | 61.595 ns; 0 B; 0 allocs | 3.28x faster; timed allocation eliminated |
+| One-shard heartbeat | 279.65 ns; 272 B; 3 allocs | 60.91 ns; 0 B; 0 allocs | 4.59x faster; timed allocations eliminated |
+| One-shard offline mark | 276.45 ns; 272 B; 3 allocs | 58.805 ns; 0 B; 0 allocs | 4.70x faster; timed allocations eliminated |
+| Four-shard heartbeat | 535.5 ns; 896 B; 6 allocs | 60.505 ns; 0 B; 0 allocs | 8.85x faster; timed allocations eliminated |
+| Four-shard offline mark | 529.1 ns; 896 B; 6 allocs | 59.99 ns; 0 B; 0 allocs | 8.82x faster; timed allocations eliminated |
+| Virtual-bucket heartbeat | 549.1 ns; 944 B; 7 allocs | 59.99 ns; 0 B; 0 allocs | 9.15x faster; timed allocations eliminated |
+| Virtual-bucket offline mark | 556.85 ns; 944 B; 7 allocs | 61.245 ns; 0 B; 0 allocs | 9.09x faster; timed allocations eliminated |
+
+The alternating CPU values include equal per-path timing overhead and are more
+conservative than the standalone 33-36 ns final medians. Heap and allocations
+come from the unchanged standalone fixture before and after implementation.
+The lookup still observes the current topology under its read lock; as before,
+a later topology generation can replace membership after validation but before
+the independent election record write. Node-ID trimming, unknown-node errors,
+timestamps, offline state, mutex scope, configuration, wire, persistence, and
+public behavior are unchanged.
 
 <a id="cached-replication-routing-fingerprint"></a>
 #### Cached Replication Routing Fingerprint
