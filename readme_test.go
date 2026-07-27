@@ -434,6 +434,36 @@ func TestDocsDescribeGenericCountMinScalarAdditions(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectGenericScalarSetKeys(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[generic scalar set measurements](BENCHMARK.md#direct-generic-scalar-set-keys)",
+		"make bench-set-scalar-generic BENCHTIME=1s COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing generic scalar set token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Direct Generic Scalar Set Keys",
+		"288.2 to 239.1 ns",
+		"167.5 to 131.3 ns",
+		"121.2 versus 121.9 ns",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing generic scalar set token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeBoundedShortGenericTopKDispatch(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

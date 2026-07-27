@@ -3313,6 +3313,17 @@ func (ss *SetStorage) addGeneric(idx int32, keys []string, value interface{}, va
 	return nextIndex, added
 }
 
+func (ss *SetStorage) addGenericKey(idx int32, key string, value interface{}) (int32, int) {
+	if _, _, packed := decodePackedStringSetIndex(idx); !packed {
+		return idx, ss.array[idx].addKeyValue(key, value)
+	}
+	data := ss.packedData(idx)
+	added := data.addKeyValue(key, value)
+	nextIndex := ss.AddData(data)
+	ss.Del(idx)
+	return nextIndex, added
+}
+
 func (ss *SetStorage) removePlainString(idx int32, value string) int {
 	poolIndex, twoValuePool, packed := decodePackedStringSetIndex(idx)
 	if !packed {
@@ -3345,6 +3356,13 @@ func (ss *SetStorage) removeKeys(idx int32, keys []string) int {
 		return 0
 	}
 	return ss.array[idx].removeKeys(keys)
+}
+
+func (ss *SetStorage) removeKey(idx int32, key string) int {
+	if _, _, packed := decodePackedStringSetIndex(idx); packed {
+		return 0
+	}
+	return ss.array[idx].removeKey(key)
 }
 
 func (ss *SetStorage) hasPlainString(idx int32, value string) bool {
@@ -7561,8 +7579,16 @@ func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{
 		return partition.AddSetChecked(key, val, vals...)
 	}
 	allStrings := setValuesAreStrings(val, vals...)
+	scalarGeneric := !allStrings && len(vals) == 0
+	var scalarKey string
 	var keys []string
-	if allStrings {
+	if scalarGeneric {
+		var err error
+		scalarKey, err = setItemKey(val)
+		if err != nil {
+			return 0, err
+		}
+	} else if allStrings {
 		if _, ok := checkedBatchSize(1, len(vals)); !ok {
 			return 0, errBatchSizeTooLarge
 		}
@@ -7590,6 +7616,8 @@ func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{
 				hval.Index, count = ht.sets.addPlainString(hval.Index, value.(string))
 				added += count
 			}
+		} else if scalarGeneric {
+			hval.Index, added = ht.sets.addGenericKey(hval.Index, scalarKey, val)
 		} else {
 			hval.Index, added = ht.sets.addGeneric(hval.Index, keys, val, vals...)
 		}
@@ -7616,6 +7644,10 @@ func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{
 			idx, count = ht.sets.addPlainString(idx, value.(string))
 			added += count
 		}
+	} else if scalarGeneric {
+		var data setData
+		added = data.addKeyValue(scalarKey, val)
+		idx = ht.sets.AddData(data)
 	} else {
 		var data setData
 		added = data.addOneWithKeys(keys, val, vals...)
@@ -7639,8 +7671,16 @@ func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interfa
 		return partition.RemoveSetChecked(key, val, vals...)
 	}
 	allStrings := setValuesAreStrings(val, vals...)
+	scalarGeneric := !allStrings && len(vals) == 0
+	var scalarKey string
 	var keys []string
-	if allStrings {
+	if scalarGeneric {
+		var err error
+		scalarKey, err = setItemKey(val)
+		if err != nil {
+			return 0, err
+		}
+	} else if allStrings {
 		if _, ok := checkedBatchSize(1, len(vals)); !ok {
 			return 0, errBatchSizeTooLarge
 		}
@@ -7680,6 +7720,8 @@ func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interfa
 				removed += ht.sets.removePlainString(hval.Index, text)
 			}
 		}
+	} else if scalarGeneric {
+		removed = ht.sets.removeKey(hval.Index, scalarKey)
 	} else {
 		removed = ht.sets.removeKeys(hval.Index, keys)
 	}

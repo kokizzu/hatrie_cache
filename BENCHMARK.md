@@ -261,6 +261,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Packed small string-set storage](#packed-small-string-set-storage), 100k one/two-member sets | Slice/map entries: 94.36/142.4 retained B/set; 2.000/3.000 retained objects/set | Packed pools: 18.87/36.98 retained B/set; 0.00026/0.00026 retained objects/set | 5.00x/3.85x lower retained heap; about 7,692x/11,538x fewer retained objects; 1.39x/1.42x faster writes | Adds 160 fixed bytes/cache; promotes at the third member with unchanged generic retention and a 1.21x faster measured transition |
 | Current pass | [Direct packed string-set JSON](#packed-small-string-set-storage), empty/one/two-member command GET | Temporary set: 245.3/338.3/379.1 ns; 64/88/112 B; 3/4/4 allocs | Direct JSON: 76.35/134.9/153.1 ns; 0/16/16 B; 0/1/1 allocs | 3.21x/2.51x/2.48x faster; up to 7x lower heap; up to 4x fewer allocations | Packed plain strings only; promoted sets retain the generic encoder with unchanged wire, storage, ordering, and ownership |
 | Current pass | [Direct promoted-set JSON](#packed-small-string-set-storage), 3/16 strings and four mixed values | Sorted keys plus cloned set: 582.0/2,016/1,385 ns; 184/760/752 B; 5/5/10 allocs | Sorted keys plus direct values: 355.6/1,637/1,056 ns; 72/448/264 B; 2/2/4 allocs | 1.23x-1.64x faster; 1.70x-2.85x lower heap; 2.50x fewer allocs | Required deterministic key sorting remains; packed/public reads, writes, wire, storage, and persistent formats are unchanged |
+| Current pass | [Direct generic scalar set keys](#direct-generic-scalar-set-keys), structured duplicate add and missing remove | One-element key slice: 288.2/167.5 ns; 64 B; 3 allocs | Direct canonical key: 239.1/131.3 ns; 48 B; 2 allocs | Add/remove 1.21x/1.28x faster; 1.33x lower heap; one allocation removed | No measured tradeoff; plain strings and structured 2/16-value batches are neutral within 0.6%, with identical memory |
 | Current pass | [Packed small-slice storage](#packed-small-slice-storage), 100k zero/one/two-value slices | Deques: 46.23/62.23/78.23 retained B/slice; one retained object for nonempty slices | Packed pools: 27.39/27.39/46.23 retained B/slice; 0.00025 retained objects/slice | 1.69x/2.27x/1.69x lower retained heap; about 4,000x fewer retained objects for nonempty slices; tiny push retention improves up to 4.02x | Adds 160 fixed bytes/cache; promotion retains the generic deque, measures neutral, and halves transition allocations |
 | Current pass | [Direct packed-slice JSON](#packed-small-slice-storage), nil/empty/one/two-value command GET | Temporary slice: 222.8/253.2/345.5/376.1 ns | Direct JSON: 80.56/80.05/141.7/150.9 ns | 2.77x/3.16x/2.44x/2.49x faster; nil/empty become allocation-free; nested values improve 1.55x | Negative packed indexes only; promoted-deque follow-up is reported separately; wire bytes, storage, ordering, and ownership are unchanged |
 | Current pass | [Direct promoted-slice JSON](#packed-small-slice-storage), 3/16 strings and four mixed values | Temporary clone: 513.4/1,153/1,250 ns; 136/504/688 B; 4/4/9 allocs | Ring-order writer: 167.4/491.9/750.4 ns; 24/192/264 B; 1/1/4 allocs | 1.67x-3.07x faster; 2.61x-5.67x lower heap; 2.25x-4.00x fewer allocs | No measured tradeoff; public cloning, lock scope, writes, wire, storage, and persistent formats are unchanged |
@@ -2024,6 +2025,57 @@ The first candidate boxed packed strings during reads and made two-member
 reads 1.31x slower with 2x heap and 3x allocations; it was not retained. The
 final pools preserve interface payloads, so read ownership and allocation cost
 match the baseline. Wire and persistence formats are unchanged.
+
+<a id="direct-generic-scalar-set-keys"></a>
+### Direct Generic Scalar Set Keys
+
+`AddSetChecked` and `RemoveSetChecked` previously canonicalized every
+non-string request through `setItemKeysOne`, including a scalar request. That
+helper allocated a one-element `[]string`; the storage operation then consumed
+its only key once. Non-string calls with no variadic tail now carry the
+canonical key directly into focused storage helpers. Packed string sets still
+promote through the same generic representation on a non-string add. The
+plain-string path, multi-value key preparation, cloning, duplicate detection,
+and removal logic remain source-identical.
+
+Differential tests were written before production changed. Map, struct, and
+slice values compare exact private set state and add counts against the former
+one-element wrapper across insertion, promotion, and duplicates. Invalid
+values remain all-or-reject. A public behavior test covers packed-string
+promotion, nested ownership, duplicate generic add, scalar remove, and
+membership. Focused tests passed 50 times, the race build passed ten times,
+and the existing set suite passed five times.
+
+```sh
+make run CMD='go test . -run TestSetScalarGeneric -count=50'
+make run CMD='go test -race . -run TestSetScalarGeneric -count=10'
+make bench-set-scalar-generic BENCHTIME=1s COUNT=7
+```
+
+The direct-key rows are nine same-binary alternating candidate/reference runs
+with 128 operations per block. Their allocation counts come from five fixed
+100,000-operation runs.
+
+| Duplicate generic `setData` add | One-element key slice | Direct key | Improvement |
+| --- | ---: | ---: | ---: |
+| Map | 376.9 ns; 144 B; 4 allocs | 349.5 ns; 128 B; 3 allocs | 1.08x faster; one allocation removed |
+| Struct | 130.7 ns; 48 B; 3 allocs | 95.71 ns; 32 B; 2 allocs | 1.37x faster; 1.50x lower heap |
+| Slice | 211.7 ns; 48 B; 3 allocs | 167.9 ns; 32 B; 2 allocs | 1.26x faster; 1.50x lower heap |
+
+Complete public controls use frozen before/after binaries, alternating order,
+one logical CPU, and longer isolated runs for each unchanged path.
+
+| Public set operation, median | Before and after | Improvement | Memory result |
+| --- | ---: | ---: | ---: |
+| Structured duplicate add | 288.2 to 239.1 ns | 1.21x faster | 64 to 48 B; 3 to 2 allocs |
+| Structured missing remove | 167.5 to 131.3 ns | 1.28x faster | 64 to 48 B; 3 to 2 allocs |
+| Plain-string duplicate control | 121.2 versus 121.9 ns | Neutral within 0.6% | 0 B; 0 allocs unchanged |
+| Two structured values | 397.8 versus 397.0 ns | Neutral within 0.2% | 128 B; 5 allocs unchanged |
+| Sixteen structured values | 1,982 versus 1,978 ns | Neutral within 0.2% | 1,024 B; 33 allocs unchanged |
+
+There is no retained key, value, set-layout, ordering, telemetry, snapshot,
+journal, replication, wire, or persistent-format change. Scalar values are
+still canonicalized and cloned exactly once at the same ownership boundary.
 
 <a id="packed-small-slice-storage"></a>
 ### Packed Small-Slice Storage

@@ -160,6 +160,11 @@ promote to the existing generic set representation at the third member or first
 non-string value. This cuts retained heap without changing wire, snapshot, or
 persistent formats; measurements are in
 [BENCHMARK.md](BENCHMARK.md#packed-small-string-set-storage).
+Generic scalar set add/remove operations now carry their canonical key directly
+instead of allocating a one-element key slice. Structured duplicate add and
+missing remove are 1.21x/1.28x faster with one fewer allocation, while plain
+strings and batches remain neutral; see the
+[generic scalar set measurements](BENCHMARK.md#direct-generic-scalar-set-keys).
 TTL expiration
 uses a min-heap schedule plus an authoritative key map, so vacuuming pops due
 keys instead of scanning every TTL entry. The map stores a compact heap index;
@@ -222,6 +227,7 @@ make bench-bloom-scalar BENCHTIME=1s COUNT=7
 make bench-cuckoo-scalar BENCHTIME=1s COUNT=7
 make bench-hll-scalar BENCHTIME=1s COUNT=7
 make bench-cms-scalar BENCHTIME=1s COUNT=7
+make bench-set-scalar-generic BENCHTIME=1s COUNT=7
 make bench-count-min-rows BENCHTIME=500ms COUNT=7
 make bench-fenwick-add BENCHTIME=500ms COUNT=7
 make bench-quantile-add BENCHTIME=500ms COUNT=7
