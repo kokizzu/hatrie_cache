@@ -1420,7 +1420,13 @@ func (ht *HatTrie) executeExactFastCommandPointer(request *CacheCommandRequest) 
 		}
 		return ht.executeFastDeleteCuckooFilterCommand(key, request.Value)
 	case "ADDXF", "XFADD":
-		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
+		if len(request.Values) != 0 {
+			if len(request.Values) > xorFilterLinearBatchDedup {
+				return ht.executeFastAddXorFilterBatchCommand(key, request.Values)
+			}
+			return CacheCommandResponse{}, false
+		}
+		if !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddXorFilterCommand(key, request.Value)
@@ -2133,6 +2139,42 @@ func (ht *HatTrie) executeFastAddXorFilterCommand(key string, value string) (Cac
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_XOR_FILTER}.toValue()
 	ht.recordWriteLocked(key)
 	return CacheCommandResponse{OK: true, Message: "staged xor filter values", Value: strconv.Itoa(boolInt(added))}, true
+}
+
+func (ht *HatTrie) executeFastAddXorFilterBatchCommand(key string, values Slice) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsXorFilter() {
+		added, err := ht.xorFilters.array[hval.Index].addCommandBatch(values)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		*rawPtr = hval.toValue()
+		if added > 0 {
+			ht.recordWriteLocked(key)
+		}
+		return CacheCommandResponse{OK: true, Message: "staged xor filter values", Value: strconv.Itoa(added)}, true
+	}
+
+	data := newDefaultXorFilterData()
+	added, err := data.addCommandBatch(values)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.xorFilters.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_XOR_FILTER}.toValue()
+	ht.recordWriteLocked(key)
+	return CacheCommandResponse{OK: true, Message: "staged xor filter values", Value: strconv.Itoa(added)}, true
 }
 
 func (ht *HatTrie) executeFastHasXorFilterCommand(key string, value string) (CacheCommandResponse, bool) {

@@ -334,6 +334,57 @@ func (filter *xorFilterData) addJSONString(value string) (bool, error) {
 	return true, nil
 }
 
+func (filter *xorFilterData) addCommandBatch(values Slice) (int, error) {
+	if filter == nil {
+		return 0, nil
+	}
+	if filter.built {
+		return 0, errors.New("hatriecache: xor filter is already built")
+	}
+	if uint64(len(values)) > maxXorFilterItems {
+		return 0, errors.New("hatriecache: xor filter staged item count is too large")
+	}
+	pending := make([]xorFilterPendingItem, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		key, err := xorFilterCommandItemKey(value)
+		if err != nil {
+			return 0, err
+		}
+		if _, ok := filter.staged[key]; ok {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		pending = append(pending, xorFilterPendingItem{key: key, value: value})
+		seen[key] = struct{}{}
+	}
+	staged, ok := checkedBatchSize(len(filter.staged), len(pending))
+	if !ok || uint64(staged) > maxXorFilterItems {
+		return 0, errors.New("hatriecache: xor filter staged item count is too large")
+	}
+	if filter.staged == nil && len(pending) > 0 {
+		filter.staged = make(map[string]interface{}, len(pending))
+	}
+	for _, item := range pending {
+		if _, ok := item.value.(string); ok {
+			filter.staged[item.key] = item.value
+		} else {
+			filter.staged[item.key] = cloneValue(item.value)
+		}
+	}
+	filter.items = uint64(len(filter.staged))
+	return len(pending), nil
+}
+
+func xorFilterCommandItemKey(value interface{}) (string, error) {
+	if stringValue, ok := value.(string); ok && commandFastCanonicalJSONString(stringValue) {
+		return xorFilterJSONStringKey(stringValue), nil
+	}
+	return xorFilterItemKey(value)
+}
+
 func (filter *xorFilterData) Build() error {
 	if filter == nil {
 		return nil

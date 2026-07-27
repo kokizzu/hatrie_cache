@@ -232,6 +232,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
 | Current pass | [Compact XOR-filter build hash index](#compact-xor-filter-build-hash-index), 64/4,096/65,536 staged items | String headers: 6,281/371,676/7,918,608 ns; 4,352/218,368/3,473,422 B | Base hashes: 5,675/367,143/7,820,713 ns; 3,200/185,600/2,949,129 B | 1.11x/1.01x/1.01x faster; 1.36x/1.18x/1.18x lower heap; one small-build allocation removed | Uses at most 512 transient stack bytes through 64 items; no retained state or format change; a forced retry is CPU-neutral within 0.4% |
 | Current pass | [Adaptive generic XOR batch deduplication](#adaptive-xor-batch-deduplication), one through eight requested values | Per-request map: 275.2/426.0/696.3/1,219 ns for 1/2/4/8 unique values | Direct scalar or pending-slice scan: 245.6/396.5/643.6/1,173.5 ns | 1.04x-1.12x faster; heap and allocations unchanged | Transactional validation and deduplication are unchanged; batches of nine or more retain the map path |
+| Current pass | [Direct large XOR command batches](#direct-large-xor-command-batches), 64 requested values | Generic-equivalent control: 12,997 ns; 12,800 heap B; 136 allocs | Direct command batch: 9,511 ns; 11,776 heap B; 72 allocs | 1.37x faster, 1.09x lower heap, 1.89x fewer allocations | Applies above the existing eight-value threshold; eight-value, scalar, invalid, built-filter, TTL replacement, snapshot, and mixed-value behavior are unchanged or faster |
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
 | Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
@@ -7022,6 +7023,56 @@ unchanged in every pair. Unique one/two/four/eight-value requests remain at
 unchanged map path and memory profile; its separate CPU samples were noisy and
 are not claimed as an improvement. Filter contents, item counts, build output,
 snapshots, persistence, replication, and wire formats are unchanged.
+
+<a id="direct-large-xor-command-batches"></a>
+#### Direct Large XOR Command Batches
+
+Exact scalar `ADDXF` already constructs canonical keys for ordinary strings,
+but a command carrying `Values` always fell through to generic request parsing
+and JSON encoding. Batches above the existing eight-value linear-deduplication
+threshold now validate and deduplicate once under the cache lock. Ordinary
+canonical strings use the exact key builder; escaped strings and structured
+values retain the generic encoder. Immutable string interfaces are retained
+directly instead of being reboxed, while structured values still pass through
+`cloneValue` before publication.
+
+Tests were added against the unchanged implementation before the specialization.
+They compare exact and forced-generic responses plus complete pending snapshots
+for a fresh filter, existing duplicates, replacement of an expiring string,
+built-filter rejection, escaped and structured values, a late invalid value,
+and an empty request. A forced GC after releasing and clearing the request slice
+proves that all staged strings remain independently reachable. Every value is
+encoded and deduplicated into private pending state before the first mutation,
+so invalid batches remain all-or-reject.
+
+CPU uses eight-operation exact/generic blocks in alternating order against
+independent tries in one binary. The generic command has leading whitespace to
+bypass exact dispatch; the pre-change exact and generic medians differed by at
+most 1.1%, confirming that it represents the former fallback. Heap and
+allocations are nine-run medians from the ordinary complete reserve-plus-add
+benchmark.
+
+```sh
+make run CMD='go test . -race -run="^TestXorFilterBatchCommand" -count=100'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkXorFilterBatchCommand64Alternating$ -benchtime=1000x -count=9 -cpu=1'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkXorFilterBatchCommand64Path$ -benchmem -benchtime=10000x -count=9 -cpu=1'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkXorCommandBuild64Path/PlainJSONString$ -benchmem -benchtime=10000x -count=7 -cpu=1'
+```
+
+| Complete command batch, median | Generic-equivalent control | Direct large batch | Improvement |
+| --- | ---: | ---: | ---: |
+| 64 ordinary strings | 12,997 ns; 12,800 B; 136 allocs | 9,511 ns; 11,776 B; 72 allocs | 1.37x faster; 1.09x lower heap; 1.89x fewer allocs |
+| 63 ordinary plus escaped last | 12,053 ns; 12,816 B; 136 allocs | 9,072 ns; 11,808 B; 73 allocs | 1.33x faster; 1.09x lower heap; 1.86x fewer allocs |
+| 63 ordinary plus structured last | 12,858 ns; 13,249 B; 139 allocs | 9,638 ns; 12,241 B; 76 allocs | 1.33x faster; 1.08x lower heap; 1.83x fewer allocs |
+| Eight-value boundary | 1,897 ns; 848 B; 19 allocs | 1,884 ns; 848 B; 19 allocs | CPU neutral within 0.7%; memory unchanged |
+
+Scalar requests keep the prior single nonempty-values check and exact scalar
+helper. Their complete create, 64 scalar adds, and build control retains exactly
+18,136 B and 154 allocations; CPU remained inside the host-frequency range.
+The optimization adds no header field, retained buffer, configuration, or wire
+form. Item counts, duplicate handling, selected build seed, fingerprint bytes,
+TTL clearing, telemetry, partitions, snapshots, journals, replication, storage,
+and public direct-Go methods are unchanged.
 
 <a id="compact-xor-filter-headers"></a>
 ### Compact XOR-Filter Headers

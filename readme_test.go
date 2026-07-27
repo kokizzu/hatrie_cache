@@ -1695,6 +1695,39 @@ func TestDocsDescribeAdaptiveXorBatchDeduplication(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectLargeXorCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[direct command path](BENCHMARK.md#direct-large-xor-command-batches)",
+		"1.89x fewer allocations",
+		"eight-value boundary and scalar path remain unchanged",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing direct XOR command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Direct Large XOR Command Batches",
+		"BenchmarkXorFilterBatchCommand64Alternating",
+		"12,997 ns; 12,800 B; 136 allocs",
+		"9,511 ns; 11,776 B; 72 allocs",
+		"forced GC after releasing and clearing the request slice",
+		"CPU neutral within 0.7%; memory unchanged",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct XOR command batch token %q", token)
+		}
+	}
+}
+
 func TestREADMELinksShardingProposal(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

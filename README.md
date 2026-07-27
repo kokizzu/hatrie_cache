@@ -136,6 +136,11 @@ eight compare their bounded pending slice, and larger batches retain the map
 path. Same-binary alternating controls measured the common small batches
 1.04x-1.12x faster with heap and allocations unchanged, while all values are
 still validated before any staged mutation.
+Large `ADDXF` command batches now use a
+[direct command path](BENCHMARK.md#direct-large-xor-command-batches) above that
+same eight-value threshold. A 64-string batch is 1.37x faster with 1.09x lower
+heap and 1.89x fewer allocations; escaped-last and structured-last controls
+also improve, while the eight-value boundary and scalar path remain unchanged.
 Roaring bitmap values use adaptive sorted-array and packed-bitset containers for
 exact uint32 sets with fast membership, remove, count, and sorted iteration.
 Their fixed 1,024-word dense backing uses a compact 48-byte container header,
