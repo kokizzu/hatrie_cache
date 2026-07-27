@@ -219,6 +219,33 @@ func (store *ElectionStore) activeNodesSnapshot(topology ClusterTopology) map[st
 	return store.activeNodesLocked(topology)
 }
 
+func (store *ElectionStore) inactiveNodesSnapshot(topology ClusterTopology) map[string]bool {
+	if store == nil {
+		return nil
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	now := store.now()
+	var inactive map[string]bool
+	for _, node := range topology.Nodes {
+		record, tracked := store.nodes[node.ID]
+		switch {
+		case node.Maintenance:
+		case !tracked:
+			continue
+		case record.offline:
+		case store.timeout > 0 && !record.lastSeen.IsZero() && now.Sub(record.lastSeen) > store.timeout:
+		default:
+			continue
+		}
+		if inactive == nil {
+			inactive = make(map[string]bool)
+		}
+		inactive[node.ID] = true
+	}
+	return inactive
+}
+
 func (store *ElectionStore) nodeStatusForTopologyNodeLocked(node TopologyNode, now time.Time) ElectionNodeStatus {
 	status := ElectionNodeStatus{ID: node.ID}
 	record, tracked := store.nodes[node.ID]

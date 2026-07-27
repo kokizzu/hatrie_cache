@@ -320,6 +320,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Map-free replication routing snapshots](#map-free-replication-routing-snapshots), 2/4/64 shards | Node map: 1,722.5/3,304.5/45,159 ns; 3,360/5,440/84,704 heap B | Sorted nodes: 1,282.5/2,819.5/42,968 ns; 2,288/4,368/68,232 heap B | 1.34x/1.17x/1.05x faster; 1.47x/1.25x/1.24x lower heap; 2/2/4 fewer allocations | Uses the normalized sorted topology generation and immutable precomputed targets; routing, target order, election state, wire, and behavior are unchanged |
 | Current pass | [Aligned replication shard state](#aligned-replication-shard-state), 2/16/64-shard snapshot plus hash route/targets | Three shard-ID maps: 1,360/10,153/44,388 ns construction; 75.385/95.83/89.315 ns routing | Three aligned slices: 923.4/8,794.5/38,234.5 ns construction; 70.88/70.07/65.025 ns routing | Construction 1.47x/1.15x/1.16x faster; routing 1.06x/1.37x/1.37x faster; 3/9/9 fewer construction allocations | Normalized shard order provides the index; complete hot routes preserve it through target lookup, while defensive by-ID access binary-searches the same sorted generation |
 | Current pass | [Canonical replication owner slices](#canonical-replication-owner-slices), election snapshot and bucket route at 2/16/64 shards | Duplicate owners: 1,293.5/11,369/45,965.5 ns; 17/121/457 allocs; routes 82.935/89.095/97.16 ns | Leader candidates: 1,140.5/10,183/41,608 ns; 14/104/392 allocs; routes 77.80/84.16/90.555 ns | Construction 1.13x/1.12x/1.10x faster; 3/17/65 fewer allocations; routes 1.07x/1.06x/1.07x faster | Leader candidates were already immutable route output; election, owner order, targets, wire, storage, and behavior are unchanged |
+| Current pass | [Sparse replication liveness exceptions](#sparse-replication-liveness-exceptions), healthy 2/16/64-shard snapshot and target membership | Active map: 1,104/10,692/40,087 ns; 1,312/14,680/57,560 B; membership 43.15 ns | Lazy inactive map: 895.8/9,248/36,527 ns; 1,056/13,696/54,016 B; membership 31.11 ns | Construction 1.23x/1.16x/1.10x faster; 256/984/3,544 fewer B; membership 1.39x faster | Offline, timeout, and maintenance construction is 1.01x-1.04x faster with equal or lower heap; election, target filtering, wire, storage, and behavior are unchanged |
 | Current pass | [Adaptive replication bucket search](#adaptive-replication-bucket-search), complete route plus targets at 16/64/256 ranges | Linear ranges: 91.115/111.0/180.05 ns | Binary ranges: 77.825/87.37/98.92 ns | 1.17x/1.27x/1.82x faster; heap and allocations unchanged | Two through eight ranges retain linear lookup; normalized contiguous ranges above that threshold use binary search |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
@@ -3641,6 +3642,53 @@ before production was changed. Election selection, offline handling,
 candidate and target order, aliasing already present in no-election routes,
 topology generation, wire, storage, persistence, and public configuration are
 unchanged.
+
+<a id="sparse-replication-liveness-exceptions"></a>
+#### Sparse Replication Liveness Exceptions
+
+Election-enabled routing snapshots formerly allocated and populated an active
+map for every topology node. Healthy nodes are the normal state, so the map
+retained the largest representation when there was nothing exceptional to
+record. Routing snapshots now lazily retain only offline, timed-out, or
+maintenance nodes. A healthy snapshot keeps a nil map; target planning, leader
+selection, and digest target membership reject the sparse exceptions directly.
+
+The test-first control retains the exact former active-map scan, target
+planning, leader selection, and membership check. The exact matrix covers
+untracked healthy, heartbeat-tracked healthy, offline, timed-out, and
+maintenance states at 2, 4, 16, and 64 shards. It compares topology, leaders,
+candidates, targets, per-node liveness, 4,096 complete routes, and sampled
+source/target membership, and passes 20 runs.
+
+```sh
+make run CMD='go test . -run=TestReplicationRoutingSnapshotSparseInactiveMatchesOnlineControl -count=20'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingInactiveNodesConstructionAlternating$$/^(UntrackedHealthy|TrackedHealthy|OneOffline|OneTimeout|OneMaintenance)$$/^(2Shards|16Shards|64Shards)$$" -benchtime=20000x -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingInactiveNodesConstruction$$/^(UntrackedHealthy|TrackedHealthy|OneOffline|OneTimeout|OneMaintenance)$$/^(2Shards|16Shards|64Shards)$$/^(Baseline|Candidate)$$" -benchmem -benchtime=10000x -count=5 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingInactiveNodeMembershipAlternating$$ -benchtime=1000000x -count=15 -cpu=1'
+```
+
+| Healthy snapshot, paired median | Active map | Sparse inactive map | Improvement |
+| --- | ---: | ---: | ---: |
+| Two shards | 1,104 ns; 1,312 B; 14 allocs | 895.8 ns; 1,056 B; 12 allocs | 1.23x faster; 256 fewer B; two fewer allocations |
+| 16 shards | 10,692 ns; 14,680 B; 104 allocs | 9,248 ns; 13,696 B; 100 allocs | 1.16x faster; 984 fewer B; four fewer allocations |
+| 64 shards | 40,087 ns; 57,560 B; 392 allocs | 36,527 ns; 54,016 B; 388 allocs | 1.10x faster; 3,544 fewer B; four fewer allocations |
+
+Tracked-healthy medians improve 1.20x/1.11x/1.09x at 2/16/64 shards with
+the same exact memory savings. Degraded states do not pay for the sparse form:
+
+| One inactive node, paired median | Two shards | 16 shards | 64 shards | Heap/allocation result |
+| --- | ---: | ---: | ---: | --- |
+| Explicitly offline | 1.03x faster | 1.03x faster | 1.01x faster | Equal at two shards; 728/3,288 fewer B and two fewer allocations at 16/64 |
+| Heartbeat timeout | 1.03x faster | 1.03x faster | 1.01x faster | Equal at two shards; 728/3,288 fewer B and two fewer allocations at 16/64 |
+| Maintenance | 1.03x faster | 1.03x faster | 1.02x faster | Equal at two shards; 728/3,288 fewer B and two fewer allocations at 16/64 |
+
+The complete membership check improves from 43.15 to 31.11 ns when healthy,
+or 1.39x, because a nil exception map replaces a successful active-map probe.
+With one offline node it improves from 38.16 to 30.23 ns, or 1.26x. Both paths
+remain zero-allocation. The liveness map is private and immutable after
+construction; election timeout rules, lock scope, node validation, leader and
+target order, source exclusion, topology generation, wire, storage,
+persistence, and public configuration are unchanged.
 
 <a id="adaptive-replication-bucket-search"></a>
 #### Adaptive Replication Bucket Search

@@ -1521,7 +1521,7 @@ func replicationRouteTargetsNode(routing replicationRoutingSnapshot, route Elect
 	if targetNode == "" || targetNode == source {
 		return false
 	}
-	if routing.online != nil && !routing.online[targetNode] {
+	if routing.inactive[targetNode] {
 		return false
 	}
 	owners := route.Route.Owners

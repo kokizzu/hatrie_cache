@@ -2362,6 +2362,25 @@ var benchmarkReplicationRoutingSnapshotSink replicationRoutingSnapshot
 
 var benchmarkReplicationRoutingNodeMapSink map[string]TopologyNode
 
+func precomputedNormalizedReplicationTargetsOnlineControl(owners []string, nodes []TopologyNode, online map[string]bool, self string) []TopologyNode {
+	targets := make([]TopologyNode, 0, len(owners))
+	for _, nodeID := range owners {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || nodeID == self || online != nil && !online[nodeID] {
+			continue
+		}
+		node, ok := normalizedTopologyNode(nodes, nodeID)
+		if !ok {
+			continue
+		}
+		targets = append(targets, node)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
+}
+
 type replicationRoutingSnapshotOwnerSlicesControl struct {
 	topology    ClusterTopology
 	shards      []TopologyShard
@@ -2403,7 +2422,7 @@ func newReplicationRoutingSnapshotOwnerSlicesControl(self string, topologyStore 
 	for index, shard := range snapshot.shards {
 		owners := routeOwners(shard)
 		snapshot.owners[index] = owners
-		snapshot.targets[index] = precomputedNormalizedReplicationTargets(owners, topology.Nodes, snapshot.online, snapshot.self)
+		snapshot.targets[index] = precomputedNormalizedReplicationTargetsOnlineControl(owners, topology.Nodes, snapshot.online, snapshot.self)
 		if election != nil {
 			snapshot.leaders[index] = electShardLeader(shard, snapshot.online)
 			continue
@@ -2900,7 +2919,7 @@ func BenchmarkReplicationRoutingSnapshotUncheckedOwnersAlternating(b *testing.B)
 				for pass := 0; pass < 2; pass++ {
 					started := time.Now()
 					if candidateFirst == (pass == 0) {
-						snapshot, ok := newReplicationRoutingSnapshotUncheckedOwnersCandidate("node-000", store, nil)
+						snapshot, ok := newReplicationRoutingSnapshotUncheckedOwnersCandidate("node-000", store)
 						candidateDuration += time.Since(started)
 						if !ok {
 							b.Fatal("routing snapshot construction failed")
@@ -3103,7 +3122,7 @@ func newReplicationRoutingSnapshotShardMapsControl(self string, topologyStore *T
 	for _, shard := range snapshot.shards {
 		owners := routeOwners(shard)
 		snapshot.owners[shard.ID] = owners
-		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargets(owners, topology.Nodes, snapshot.online, snapshot.self)
+		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargetsOnlineControl(owners, topology.Nodes, snapshot.online, snapshot.self)
 		if election != nil {
 			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
 			continue
@@ -3561,16 +3580,13 @@ func newReplicationRoutingSnapshotNodeMapControl(self string, topologyStore *Top
 	return replicationRoutingSnapshotNodeMapControl{snapshot: snapshot, nodes: nodes}, true
 }
 
-func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshot, bool) {
+func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topologyStore *TopologyStore) (replicationRoutingSnapshot, bool) {
 	topology, fingerprint := topologyStore.replicationSnapshot()
 	nodes := topologyNodesByID(topology)
 	snapshot := replicationRoutingSnapshot{
 		topology:    topology,
 		self:        self,
 		fingerprint: fingerprint,
-	}
-	if election != nil {
-		snapshot.online = election.activeNodesSnapshot(topology)
 	}
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
 		shard, ok := topology.fullReplicaShard()
@@ -3588,17 +3604,13 @@ func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topology
 	snapshot.targets = make([][]TopologyNode, len(snapshot.shards))
 	for index, shard := range snapshot.shards {
 		owners := routeOwners(shard)
-		snapshot.targets[index] = precomputedNormalizedReplicationTargetsUncheckedCandidate(owners, nodes, snapshot.online, snapshot.self)
-		if election != nil {
-			snapshot.leaders[index] = electShardLeader(shard, snapshot.online)
-		} else {
-			snapshot.leaders[index] = ElectionLeader{
-				Shard:      shard.ID,
-				Leader:     shard.Primary,
-				Available:  true,
-				Primary:    shard.Primary,
-				Candidates: owners,
-			}
+		snapshot.targets[index] = precomputedNormalizedReplicationTargetsUncheckedCandidate(owners, nodes, nil, snapshot.self)
+		snapshot.leaders[index] = ElectionLeader{
+			Shard:      shard.ID,
+			Leader:     shard.Primary,
+			Available:  true,
+			Primary:    shard.Primary,
+			Candidates: owners,
 		}
 	}
 	return snapshot, true

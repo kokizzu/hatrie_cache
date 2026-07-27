@@ -5469,10 +5469,10 @@ func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 			nil,
 			{owners[0]: true, owners[1]: false},
 		} {
-			routing.online = online
+			routing.inactive = inactiveNodesFromOnlineControl(routing.topology.Nodes, online)
 			for index := range routing.shards {
 				owners := routing.leaders[index].Candidates
-				routing.targets[index] = precomputedNormalizedReplicationTargets(owners, routing.topology.Nodes, online, routing.self)
+				routing.targets[index] = precomputedNormalizedReplicationTargets(owners, routing.topology.Nodes, routing.inactive, routing.self)
 			}
 			for _, source := range []string{"", routing.self, owners[0], owners[len(owners)-1]} {
 				for _, target := range append(append([]string(nil), owners...), "", "missing-node") {
@@ -5509,7 +5509,7 @@ func replicationRouteTargetsNodeIndexedControl(routing replicationRoutingSnapsho
 	if targetNode == "" || targetNode == source {
 		return false
 	}
-	if routing.online != nil && !routing.online[targetNode] {
+	if routing.inactive[targetNode] {
 		return false
 	}
 	owners := route.Route.Owners
@@ -5531,12 +5531,45 @@ func replicationRouteTargetsNodeMaterializedControl(routing replicationRoutingSn
 	if len(owners) == 0 {
 		owners = routing.replicationOwners(route.Route.Shard.ID)
 	}
-	for _, target := range precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, routing.online, source) {
+	for _, target := range precomputedNormalizedReplicationTargetsInactiveControl(owners, nodes, routing.inactive, source) {
 		if target.ID == targetNode {
 			return true
 		}
 	}
 	return false
+}
+
+func inactiveNodesFromOnlineControl(nodes []TopologyNode, online map[string]bool) map[string]bool {
+	if online == nil {
+		return nil
+	}
+	inactive := make(map[string]bool)
+	for _, node := range nodes {
+		if !online[node.ID] {
+			inactive[node.ID] = true
+		}
+	}
+	return inactive
+}
+
+func activeNodesFromInactiveControl(nodes []TopologyNode, inactive map[string]bool) map[string]bool {
+	if inactive == nil {
+		return nil
+	}
+	online := make(map[string]bool, len(nodes))
+	for _, node := range nodes {
+		online[node.ID] = !inactive[node.ID]
+	}
+	return online
+}
+
+func replicationRoutingLivenessMatchesOnlineControl(nodes []TopologyNode, inactive map[string]bool, online map[string]bool) bool {
+	for _, node := range nodes {
+		if !inactive[node.ID] != (online == nil || online[node.ID]) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestReplicationRoutingSnapshotReusesPrecomputedTargets(t *testing.T) {
@@ -5581,10 +5614,11 @@ func TestPrecomputedReplicationTargetsMatchDeduplicatingControl(t *testing.T) {
 	topology := store.Get()
 	nodes := topologyNodesByID(topology)
 	for _, self := range []string{"", "node-000", "node-031"} {
-		for _, online := range []map[string]bool{
+		for _, inactive := range []map[string]bool{
 			nil,
-			{"node-001": true, "node-002": false, "node-003": true},
+			{"node-002": true},
 		} {
+			online := activeNodesFromInactiveControl(topology.Nodes, inactive)
 			for _, shard := range topology.Shards {
 				owners := routeOwners(shard)
 				for _, owner := range owners {
@@ -5595,18 +5629,18 @@ func TestPrecomputedReplicationTargetsMatchDeduplicatingControl(t *testing.T) {
 						t.Fatalf("normalized shard %d owner %q is not registered", shard.ID, owner)
 					}
 				}
-				got := precomputedNormalizedReplicationTargets(owners, topology.Nodes, online, self)
+				got := precomputedNormalizedReplicationTargets(owners, topology.Nodes, inactive, self)
 				cleanupWant := precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, online, self)
 				if !reflect.DeepEqual(got, cleanupWant) {
-					t.Fatalf("targets for shard %d self=%q online=%v = %#v, cleanup control %#v", shard.ID, self, online, got, cleanupWant)
+					t.Fatalf("targets for shard %d self=%q inactive=%v = %#v, cleanup control %#v", shard.ID, self, inactive, got, cleanupWant)
 				}
 				uncheckedWant := precomputedNormalizedReplicationTargetsUncheckedCandidate(owners, nodes, online, self)
 				if !reflect.DeepEqual(got, uncheckedWant) {
-					t.Fatalf("targets for shard %d self=%q online=%v = %#v, unchecked candidate %#v", shard.ID, self, online, got, uncheckedWant)
+					t.Fatalf("targets for shard %d self=%q inactive=%v = %#v, unchecked candidate %#v", shard.ID, self, inactive, got, uncheckedWant)
 				}
 				want := precomputedReplicationTargetsDeduplicatingControl(owners, nodes, online, self)
 				if !reflect.DeepEqual(got, want) {
-					t.Fatalf("targets for shard %d self=%q online=%v = %#v, want %#v", shard.ID, self, online, got, want)
+					t.Fatalf("targets for shard %d self=%q inactive=%v = %#v, want %#v", shard.ID, self, inactive, got, want)
 				}
 			}
 		}
@@ -5630,7 +5664,7 @@ func TestReplicationRoutingSnapshotSortedNodesMatchNodeMap(t *testing.T) {
 			control, wantOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, election)
 			want := control.snapshot
 			got, gotOK := newReplicationRoutingSnapshot("node-000", store, election)
-			if gotOK != wantOK || got.topology.Version != want.topology.Version || !reflect.DeepEqual(got.topology, want.topology) || !reflect.DeepEqual(got.shards, want.shards) || !reflect.DeepEqual(got.online, want.online) || got.self != want.self || got.fingerprint != want.fingerprint {
+			if gotOK != wantOK || got.topology.Version != want.topology.Version || !reflect.DeepEqual(got.topology, want.topology) || !reflect.DeepEqual(got.shards, want.shards) || !replicationRoutingLivenessMatchesOnlineControl(got.topology.Nodes, got.inactive, want.online) || got.self != want.self || got.fingerprint != want.fingerprint {
 				t.Fatalf("%d shards election=%v sorted snapshot = %#v/%v, map snapshot %#v/%v", size, withElection, got, gotOK, want, wantOK)
 			}
 			for index := range got.shards {
@@ -5658,7 +5692,7 @@ func TestReplicationRoutingSnapshotShardSlicesMatchMaps(t *testing.T) {
 			}
 			want, wantOK := newReplicationRoutingSnapshotShardMapsControl("node-000", store, election)
 			got, gotOK := newReplicationRoutingSnapshot("node-000", store, election)
-			if gotOK != wantOK || got.topology.Version != want.topology.Version || !reflect.DeepEqual(got.topology, want.topology) || !reflect.DeepEqual(got.shards, want.shards) || !reflect.DeepEqual(got.online, want.online) || got.self != want.self || got.fingerprint != want.fingerprint {
+			if gotOK != wantOK || got.topology.Version != want.topology.Version || !reflect.DeepEqual(got.topology, want.topology) || !reflect.DeepEqual(got.shards, want.shards) || !replicationRoutingLivenessMatchesOnlineControl(got.topology.Nodes, got.inactive, want.online) || got.self != want.self || got.fingerprint != want.fingerprint {
 				t.Fatalf("%d shards election=%v slice snapshot header = %#v/%v, map snapshot %#v/%v", size, withElection, got, gotOK, want, wantOK)
 			}
 			for index, shard := range got.shards {
@@ -5789,7 +5823,7 @@ func TestReplicationRoutingSnapshotLeaderCandidatesMatchOwnerSlices(t *testing.T
 			if candidateOK != baselineOK || !candidateOK {
 				t.Fatalf("topology %d election=%v snapshot ok = %v/%v", topologyIndex, withElection, candidateOK, baselineOK)
 			}
-			if !reflect.DeepEqual(candidate.topology, baseline.topology) || !reflect.DeepEqual(candidate.shards, baseline.shards) || !reflect.DeepEqual(candidate.online, baseline.online) || candidate.self != baseline.self || candidate.fingerprint != baseline.fingerprint {
+			if !reflect.DeepEqual(candidate.topology, baseline.topology) || !reflect.DeepEqual(candidate.shards, baseline.shards) || !replicationRoutingLivenessMatchesOnlineControl(candidate.topology.Nodes, candidate.inactive, baseline.online) || candidate.self != baseline.self || candidate.fingerprint != baseline.fingerprint {
 				t.Fatalf("topology %d election=%v candidate header = %#v, baseline %#v", topologyIndex, withElection, candidate, baseline)
 			}
 			for index := range baseline.shards {
@@ -5849,6 +5883,25 @@ func precomputedNormalizedReplicationTargetsCleanupControl(owners []string, node
 			continue
 		}
 		if online != nil && !online[nodeID] {
+			continue
+		}
+		node, ok := nodes[nodeID]
+		if !ok {
+			continue
+		}
+		targets = append(targets, node)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
+}
+
+func precomputedNormalizedReplicationTargetsInactiveControl(owners []string, nodes map[string]TopologyNode, inactive map[string]bool, self string) []TopologyNode {
+	targets := make([]TopologyNode, 0, len(owners))
+	for _, nodeID := range owners {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || nodeID == self || inactive[nodeID] {
 			continue
 		}
 		node, ok := nodes[nodeID]

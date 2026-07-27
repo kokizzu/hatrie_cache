@@ -1909,6 +1909,16 @@ zero-allocation and is neutral-to-slightly faster, while election results,
 owner and target order, wire, storage, persistence, and configuration are
 unchanged.
 
+Election-enabled snapshots also keep
+[sparse liveness exceptions](BENCHMARK.md#sparse-replication-liveness-exceptions)
+instead of allocating an active map containing every healthy topology node.
+Healthy 2/16/64-shard construction is 1.23x/1.16x/1.10x faster, saves
+256/984/3,544 heap bytes, and removes 2/4/4 allocations. Offline, timeout, and
+maintenance fixtures remain 1.01x-1.04x faster with equal or lower heap. The
+zero-allocation digest target-membership check is 1.39x faster when healthy and
+1.26x faster with one offline node, while election rules, leader and target
+order, wire, storage, persistence, and configuration are unchanged.
+
 Explicit bucket routing also uses
 [adaptive range search](BENCHMARK.md#adaptive-replication-bucket-search).
 Up to eight normalized ranges retain the prior linear scan; larger range sets

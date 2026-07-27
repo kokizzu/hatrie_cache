@@ -278,7 +278,7 @@ func (group replicationTaskGroup) replicationSyncPayloadBatch() replicationSyncP
 type replicationRoutingSnapshot struct {
 	topology    ClusterTopology
 	shards      []TopologyShard
-	online      map[string]bool
+	inactive    map[string]bool
 	leaders     []ElectionLeader
 	targets     [][]TopologyNode
 	self        string
@@ -2459,7 +2459,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 		fingerprint: fingerprint,
 	}
 	if election != nil {
-		snapshot.online = election.activeNodesSnapshot(topology)
+		snapshot.inactive = election.inactiveNodesSnapshot(topology)
 	}
 	if topologyMode(topology.Mode) == TopologyModeFullReplica {
 		shard, ok := topology.fullReplicaShard()
@@ -2477,7 +2477,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 	snapshot.targets = make([][]TopologyNode, len(snapshot.shards))
 	for index, shard := range snapshot.shards {
 		candidates := routeOwners(shard)
-		snapshot.targets[index] = precomputedNormalizedReplicationTargets(candidates, topology.Nodes, snapshot.online, snapshot.self)
+		snapshot.targets[index] = precomputedNormalizedReplicationTargets(candidates, topology.Nodes, snapshot.inactive, snapshot.self)
 		leader := ElectionLeader{
 			Shard:      shard.ID,
 			Primary:    shard.Primary,
@@ -2488,7 +2488,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 			leader.Available = true
 		} else {
 			for _, nodeID := range candidates {
-				if snapshot.online[nodeID] {
+				if !snapshot.inactive[nodeID] {
 					leader.Leader = nodeID
 					leader.Available = true
 					break
@@ -2644,14 +2644,14 @@ func replicationRoutingShardIndexForBucket(topology ClusterTopology, bucket uint
 	return int(bucket % uint32(len(shards))), true
 }
 
-func precomputedNormalizedReplicationTargets(owners []string, nodes []TopologyNode, online map[string]bool, self string) []TopologyNode {
+func precomputedNormalizedReplicationTargets(owners []string, nodes []TopologyNode, inactive map[string]bool, self string) []TopologyNode {
 	targets := make([]TopologyNode, 0, len(owners))
 	for _, nodeID := range owners {
 		nodeID = strings.TrimSpace(nodeID)
 		if nodeID == "" || nodeID == self {
 			continue
 		}
-		if online != nil && !online[nodeID] {
+		if inactive[nodeID] {
 			continue
 		}
 		node, ok := normalizedTopologyNode(nodes, nodeID)

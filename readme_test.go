@@ -723,6 +723,34 @@ func TestDocsDescribeCanonicalReplicationOwnerSlices(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeSparseReplicationLivenessExceptions(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[sparse liveness exceptions](BENCHMARK.md#sparse-replication-liveness-exceptions)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing sparse replication-liveness token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkReplicationRoutingInactiveNodesConstructionAlternating",
+		"BenchmarkReplicationRoutingInactiveNodeMembershipAlternating",
+		"TestReplicationRoutingSnapshotSparseInactiveMatchesOnlineControl",
+		"3,544 fewer B",
+		"1.39x faster",
+		"1.26x faster",
+		"Offline, timeout, and maintenance",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing sparse replication-liveness token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectReplicationRouteMembership(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
