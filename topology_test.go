@@ -450,6 +450,108 @@ func topologyStoreRouteResortControl(store *TopologyStore, key string) (Topology
 	return store.topology.RouteForKey(key)
 }
 
+func TestNormalizedTopologyBucketIndexCandidateMatchesRoute(t *testing.T) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64, 128, 256} {
+		topology := replicationRoutingBenchmarkTopology(size)
+		topology.BucketCount = uint32(size * 256)
+		topology.BucketRanges = make([]TopologyBucketRange, size)
+		for index := range topology.BucketRanges {
+			topology.BucketRanges[index] = TopologyBucketRange{
+				Start: uint32(index * 256),
+				End:   uint32((index+1)*256 - 1),
+				Shard: uint32(size - index - 1),
+			}
+		}
+		store, err := NewTopologyStore(topology)
+		if err != nil {
+			t.Fatalf("NewTopologyStore(%d) error = %v", size, err)
+		}
+		for index := 0; index < 4096; index++ {
+			key := "session:" + strconv.Itoa(index)
+			want, wantOK := store.Route(key)
+			got, gotOK := topologyStoreRouteBucketIndexCandidate(store, key)
+			if gotOK != wantOK || !reflect.DeepEqual(got, want) {
+				t.Fatalf("%d ranges route(%q) = %#v/%v, want %#v/%v", size, key, got, gotOK, want, wantOK)
+			}
+		}
+	}
+}
+
+func BenchmarkNormalizedTopologyBucketIndexAlternating(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64, 128, 256} {
+		b.Run(strconv.Itoa(size)+"Ranges", func(b *testing.B) {
+			topology := replicationRoutingBenchmarkTopology(size)
+			topology.BucketCount = uint32(size * 256)
+			topology.BucketRanges = make([]TopologyBucketRange, size)
+			for index := range topology.BucketRanges {
+				topology.BucketRanges[index] = TopologyBucketRange{
+					Start: uint32(index * 256),
+					End:   uint32((index+1)*256 - 1),
+					Shard: uint32(index),
+				}
+			}
+			store, err := NewTopologyStore(topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			keys := make([]string, 4096)
+			for index := range keys {
+				keys[index] = "session:" + strconv.Itoa(index)
+			}
+			var linearDuration, indexedDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				key := keys[iteration&(len(keys)-1)]
+				indexedFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					var route TopologyRoute
+					var routed bool
+					if indexedFirst == (pass == 0) {
+						route, routed = topologyStoreRouteBucketIndexCandidate(store, key)
+						indexedDuration += time.Since(started)
+					} else {
+						route, routed = store.Route(key)
+						linearDuration += time.Since(started)
+					}
+					if !routed {
+						b.Fatal("route failed")
+					}
+					benchmarkTopologyStoreRouteSink = route
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(linearDuration.Nanoseconds())/float64(b.N), "linear_ns/route")
+			b.ReportMetric(float64(indexedDuration.Nanoseconds())/float64(b.N), "indexed_ns/route")
+		})
+	}
+}
+
+func topologyStoreRouteBucketIndexCandidate(store *TopologyStore, key string) (TopologyRoute, bool) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	if len(store.topology.BucketRanges) <= 32 {
+		return normalizedTopologyRouteForKey(store.topology, key)
+	}
+	return normalizedTopologyLargeBucketRouteCandidate(store.topology, key)
+}
+
+func normalizedTopologyLargeBucketRouteCandidate(topology ClusterTopology, key string) (TopologyRoute, bool) {
+	bucket := hashKeyToBucket(key, topology.BucketCount)
+	shardIndex, ok := replicationRoutingShardIndexForBucket(topology, bucket, topology.Shards)
+	if !ok {
+		return TopologyRoute{}, false
+	}
+	shard := cloneShard(topology.Shards[shardIndex])
+	return TopologyRoute{
+		Key:    key,
+		Mode:   topology.Mode,
+		Bucket: &bucket,
+		Shard:  shard,
+		Owners: routeOwners(shard),
+	}, true
+}
+
 func TestTopologyStoreRoutesFullReplicaMode(t *testing.T) {
 	topology := ClusterTopology{
 		Version: 1,

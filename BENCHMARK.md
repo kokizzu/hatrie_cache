@@ -389,6 +389,7 @@ tree.
 | Specialized compact payload estimator | Focused splitting improved 1.92x | End-to-end CPU was 0.50% slower without memory, request, or wire gain | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Fully lazy snapshot mutation map | Removed one more map from snapshots without concurrent writes | First concurrent mark was 1.32x slower, 208 to 256 B, and one to two timed allocations | Rejected; captures retain a writer-ready initial map and use [selective snapshot mutation maps](#selective-snapshot-mutation-maps) only after drain |
 | Unchecked normalized replication owners | Removed repeated trim, empty-ID, and missing-node checks after topology validation | Two-shard snapshot construction was 1.08x slower; four shards were neutral within about 1%; 64 shards improved only 1.03x with identical memory | Reverted; the checked normalized helper remains; see [normalized replication target precomputation](#normalized-replication-target-precomputation) |
+| Topology-store large bucket dispatch | Binary search made 64/128/256-range routes 1.16x/1.29x/1.64x faster with unchanged allocation behavior | The added dispatch made the common two-range route 1.015x slower, 166.45 versus 164.05 ns | Removed from production; the unchanged linear topology-store route remains; see [topology-store large bucket dispatch](#topology-store-large-bucket-dispatch-rollback) |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -3619,6 +3620,43 @@ bucket pointer in both versions; range lookup itself remains allocation-free.
 Modulo fallback for empty ranges or an out-of-range defensive call, missing
 shard rejection, topology validation, route contents, target order, election
 state, wire, storage, and persistence are unchanged.
+
+<a id="topology-store-large-bucket-dispatch-rollback"></a>
+#### Topology-Store Large Bucket Dispatch Rollback
+
+The private replication snapshot benefits from adaptive bucket search because
+its complete route method can choose the search within an already specialized
+hot path. Applying the same idea to `TopologyStore.Route` required an extra
+range-count dispatch before selecting the existing normalized route function.
+The candidate kept the exact old function for at most 32 ranges and isolated
+the binary lookup in a separate large-topology function, so the control did
+not give the candidate an artificial function-boundary advantage.
+
+The test-first fixture creates 2, 4, 8, 16, 32, 64, 128, and 256 contiguous
+bucket ranges, reverses range-to-shard assignment for the exact comparison,
+and checks 4,096 keys over 20 runs. The alternating same-binary benchmark
+measures the store lock, key hash, range selection, route construction, shard
+clone, and owner result together.
+
+```sh
+make run CMD='go test . -run=TestNormalizedTopologyBucketIndexCandidateMatchesRoute -count=20'
+make run CMD='go test . -run=NONE -bench=^BenchmarkNormalizedTopologyBucketIndexAlternating$$ -benchtime=300000x -count=10 -cpu=1'
+```
+
+| Ten-run complete-route median | Existing linear route | Indexed candidate | Result |
+| --- | ---: | ---: | ---: |
+| 2 ranges | 164.05 ns | 166.45 ns | 1.015x slower |
+| 64 ranges | 210.40 ns | 181.25 ns | 1.16x faster |
+| 128 ranges | 246.05 ns | 190.85 ns | 1.29x faster |
+| 256 ranges | 319.75 ns | 194.60 ns | 1.64x faster |
+
+The common two-range regression disqualified the candidate despite the large
+topology wins. All production changes were removed, so topology-store routing
+retains its former CPU, memory, allocation, wire, and behavior. The exact test
+and benchmark control remain as a reproducible crossover record. The adaptive
+private replication search remains because its independently measured design
+keeps two through eight ranges on the former branch without adding this store
+dispatch.
 
 <a id="direct-replication-route-membership"></a>
 #### Direct Replication Route Membership
