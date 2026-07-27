@@ -3,6 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SANITIZE_C=${SANITIZE_C:-auto}
+C_OPT_FLAGS=${C_OPT_FLAGS:--O3}
 
 . "$ROOT/scripts/c-sanitizer-policy.sh"
 
@@ -35,7 +36,7 @@ build_c_check() {
 	output=$1
 	test_file=$2
 	shift 2
-	gcc -std=c99 -Wall -Wextra "$@" \
+	gcc $C_OPT_FLAGS -std=c99 -Wall -Wextra "$@" \
 		-I"$ROOT/luikore__hat-trie/src" \
 		-o "$output" \
 		"$test_file" \
@@ -49,7 +50,7 @@ build_c_check() {
 build_c_ahtable_check() {
 	output=$1
 	shift
-	gcc -std=c99 -Wall -Wextra "$@" \
+	gcc $C_OPT_FLAGS -std=c99 -Wall -Wextra "$@" \
 		-I"$ROOT/luikore__hat-trie/src" \
 		-o "$output" \
 		"$ROOT/luikore__hat-trie/test/check_ahtable.c" \

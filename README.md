@@ -239,6 +239,15 @@ loop 1.032x faster at unchanged RSS. Complete GET improved only 1.003x while
 SET and mixed-read controls moved slightly slower, so the runtime candidate was
 removed. Its forced-split correctness test and
 `make bench-native-hattrie-lookup` fixture remain for future native audits.
+The [Production native C optimization](BENCHMARK.md#production-native-c-optimization)
+now pins `-O3` for the cgo package instead of inheriting an environment whose
+C flags contained no optimization level. Twenty alternating complete-command
+pairs made string SET/GET 1.44x/1.87x faster and the mixed read/write profiles
+1.74x/1.34x faster, with identical heap and allocation counts. Longer Cuckoo,
+radix, quantile, and replication controls were neutral or faster. The test
+binary is also 5,856 bytes smaller. Native verification and its LeakSanitizer
+fallback now compile at the same optimization level, while ABI, layouts, wire,
+storage, persistence, and runtime configuration remain unchanged.
 Long-running delete-heavy workloads can call `CompactMemory` to rebuild the C
 trie, densely reindex in-memory typed pools, and shrink Merkle and metadata
 backing. Disk-spill indexes remain stable so file ownership cannot alias.

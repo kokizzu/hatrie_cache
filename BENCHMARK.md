@@ -288,6 +288,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
+| Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
 | Reverted | [Native slot-mask rollback](#native-slot-mask-rollback), 50m native lookups and complete command controls | Runtime flag: power-of-two 3.474 s; non-power-of-two 3.551 s; specialized GET 154.8 ns | Original modulo: power-of-two 3.521/3.536 s; non-power-of-two 3.504 s; GET 155.8 ns | Specialized native lookup was 1.037x faster, but complete commands improved at most 1.006x; the shared fallback was 1.013x slower | Both implementations removed; the branch penalized arbitrary slot counts, while three specialized C entry points did not clear the complete-path complexity gate |
 | Reverted | [Direct native tryget traversal rollback](#direct-native-tryget-traversal-rollback), 50m native hits and complete command controls | Generic finder: 2.2255 s native; paired complete controls | Read-only traversal: 2.1557 s native; 1.003x complete GET | Native lookup was 1.032x faster with unchanged 9,532 KiB RSS, but complete GET gained only 0.3% while SET/mixed-read controls moved 1.010x/1.009x slower | Runtime specialization removed; forced-split correctness coverage and the reusable native benchmark remain |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
@@ -1736,6 +1737,45 @@ The isolated raw output is written to
 `build/benchmarks/native-ahtable-allocator.txt`. The capacity side array and
 bounded slack are the explicit memory cost; the full-process run shows their
 impact after the Go runtime and backing pools are included.
+
+<a id="production-native-c-optimization"></a>
+### Production Native C Optimization
+
+The production cgo package previously relied on the process-wide
+`CGO_CFLAGS`. On the benchmark host that setting contained only
+`-Wno-return-local-addr`, while `GOGCCFLAGS` contained ABI/debug options but no
+optimization level. The standalone native benchmarks already used `-O3`, so
+production commands were paying cgo overhead and then entering unoptimized C.
+The package now pins `-O3` in its own cgo directive. This changes compiler
+optimization only: the C ABI, source algorithms, headers, Go layouts, wire,
+storage, and persistence formats are unchanged.
+
+Frozen binaries were built immediately before and after the one-line flag
+change. Twenty runs alternated binary order, used one CPU, and fixed scalar
+runs at one million operations and 100-command profiles at 20,000 iterations.
+The speed column is the median of the 20 paired before/after ratios, which
+controls for the host's changing CPU frequency better than a baseline-first
+ratio of medians.
+
+| Complete command | Median paired speedup | Before heap/allocs | `-O3` heap/allocs |
+| --- | ---: | ---: | ---: |
+| String SET | 1.44x | 0 B / 0 | 0 B / 0 |
+| String GET | 1.87x | 0 B / 0 | 0 B / 0 |
+| Mixed read-heavy 100 | 1.74x | 4 B / 0 | 4 B / 0 |
+| Mixed write-heavy 100 | 1.34x | 66 B / 9 | 66 B / 9 |
+
+The complete command-family sweep kept heap and allocation counts unchanged.
+Apparent short-run losses in Cuckoo delete/add, radix prefix, quantile
+estimate, and replication dump disappeared in longer alternating controls:
+their final speed ratios were 1.002x, 0.997x, 1.007x, and 1.003x respectively.
+The 0.3% radix movement is treated as neutral. A 20-pair million-operation
+Cuckoo confirmation was 1.002x faster. The test binary also shrank from
+45,688,912 to 45,683,056 bytes, or 5,856 bytes, with 6,549 fewer text bytes.
+
+The ordinary Go suite, race detector, vet, coverage, optimized standalone C
+suite, and LeakSanitizer fallback all pass. `scripts/verify-c.sh` now defaults
+its two native builders to the same `-O3`, with a policy test preventing the
+production and native verification levels from silently diverging.
 
 <a id="native-slot-mask-rollback"></a>
 #### Native Slot-Mask Rollback

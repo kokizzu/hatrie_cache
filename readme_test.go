@@ -224,6 +224,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Map-free replication routing snapshots](#map-free-replication-routing-snapshots)",
 		"[Direct replication route membership](#direct-replication-route-membership)",
 		"[Normalized replication route owners](#direct-replication-route-membership)",
+		"[Production native C optimization](#production-native-c-optimization)",
 		"73.8% lower",
 		"2.38x faster",
 		"2.42x faster",
@@ -391,6 +392,21 @@ func TestDocsDescribeDirectNativeTrygetTraversalRollback(t *testing.T) {
 		for _, token := range []string{"Direct native tryget traversal rollback", "1.032x", "1.003x"} {
 			if !strings.Contains(doc, token) {
 				t.Fatalf("%s missing direct native tryget rollback token %q", path, token)
+			}
+		}
+	}
+}
+
+func TestDocsDescribeProductionNativeCOptimization(t *testing.T) {
+	for _, path := range []string{"README.md", "BENCHMARK.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		doc := string(data)
+		for _, token := range []string{"Production native C optimization", "-O3", "1.44x", "1.87x", "1.74x", "1.34x", "5,856"} {
+			if !strings.Contains(doc, token) {
+				t.Fatalf("%s missing production native optimization token %q", path, token)
 			}
 		}
 	}

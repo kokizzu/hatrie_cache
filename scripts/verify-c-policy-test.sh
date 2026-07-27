@@ -20,6 +20,14 @@ fail() {
 	exit 1
 }
 
+verify_c_script=$ROOT/scripts/verify-c.sh
+if ! grep -Fq 'C_OPT_FLAGS=${C_OPT_FLAGS:--O3}' "$verify_c_script"; then
+	fail "expected native verifier to default to production -O3"
+fi
+if [ "$(grep -Fc '$C_OPT_FLAGS' "$verify_c_script")" -lt 2 ]; then
+	fail "expected both native verifier builders to use C_OPT_FLAGS"
+fi
+
 expect_strict_enabled() {
 	printf '%s\n' "$1" > "$overcommit_file"
 	SANITIZE_C_ALLOW_STRICT_OVERCOMMIT=0

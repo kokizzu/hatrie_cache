@@ -1,7 +1,7 @@
 package hatriecache
 
 /*
-#cgo CFLAGS: -std=c99 -Wall -Wextra -I${SRCDIR}/luikore__hat-trie/src
+#cgo CFLAGS: -O3 -std=c99 -Wall -Wextra -I${SRCDIR}/luikore__hat-trie/src
 #include <stdlib.h>
 #include "luikore__hat-trie/src/hat-trie.h"
 */
