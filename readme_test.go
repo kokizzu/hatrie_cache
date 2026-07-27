@@ -190,6 +190,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Pipelined gRPC stream](#persistent-grpc-command-stream)",
 		"[Live gRPC micro-batching](#pipelined-live-grpc-replication)",
 		"[Bounded lazy outbox restore](#binary-grouped-replication-outbox)",
+		"[Election-record status leader lookup](#election-record-status-leader-lookup)",
 		"73.8% lower",
 		"2.38x faster",
 		"2.42x faster",
@@ -568,10 +569,38 @@ func TestDocsDescribeNormalizedElectionStatusGeneration(t *testing.T) {
 		"2.36x faster",
 		"2.54x lower heap",
 		"3.25x fewer allocations",
-		"response-owned slice remain present",
+		"every response-owned slice remained present",
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing normalized election-status token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeElectionRecordStatusLeaderLookup(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[election-record leader lookup](BENCHMARK.md#election-record-status-leader-lookup)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing election-record status token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkElectionStoreStatusActiveMapAlternating",
+		"64-node shared-primary",
+		"1.58x faster",
+		"1.32x faster",
+		"3,544 fewer heap bytes",
+		"old=184 new=184 actual=184",
+		"Maintenance generations retain",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing election-record status token %q", token)
 		}
 	}
 }

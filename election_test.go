@@ -129,6 +129,22 @@ func TestElectionStoreExcludesPersistedMaintenanceNode(t *testing.T) {
 	if got := nodeStatusByID(store.Status(), "node-a"); got.Online || got.Reason != "maintenance" {
 		t.Fatalf("maintenance node after heartbeat = %#v, want still offline", got)
 	}
+
+	updated := topology.Get()
+	updated.Nodes[0].Maintenance = false
+	if err := topology.Set(updated); err != nil {
+		t.Fatalf("Set(without maintenance) error = %v", err)
+	}
+	if got := leaderByShard(store.Status(), 0); got.Leader != "node-a" || !got.Available {
+		t.Fatalf("leader after maintenance removal = %#v, want node-a", got)
+	}
+	updated.Nodes[0].Maintenance = true
+	if err := topology.Set(updated); err != nil {
+		t.Fatalf("Set(with maintenance) error = %v", err)
+	}
+	if got := leaderByShard(store.Status(), 0); got.Leader != "node-b" || !got.Available {
+		t.Fatalf("leader after maintenance restore = %#v, want node-b", got)
+	}
 }
 
 func TestElectionStoreRejectsUnknownNode(t *testing.T) {
@@ -283,20 +299,16 @@ func TestElectionStoreLeaderForKeyDuringTopologyAndHeartbeatUpdates(t *testing.T
 }
 
 func TestElectionStoreStatusMatchesSnapshotControl(t *testing.T) {
-	for _, tt := range topologyStoreRouteBenchmarkCases() {
-		for _, offline := range []bool{false, true} {
-			state := "Healthy"
-			if offline {
-				state = "PrimaryOffline"
-			}
-			t.Run(tt.name+"/"+state, func(t *testing.T) {
+	for _, tt := range electionStatusBenchmarkCases() {
+		for _, state := range electionStatusBenchmarkStates(len(tt.topology.Nodes)) {
+			t.Run(tt.name+"/"+state.name, func(t *testing.T) {
 				topology, err := NewTopologyStore(tt.topology)
 				if err != nil {
 					t.Fatalf("NewTopologyStore() error = %v", err)
 				}
 				now := time.Unix(1_700_000_000, 0)
 				store := NewElectionStore(topology, ElectionOptions{Now: func() time.Time { return now }})
-				if offline {
+				if state.primaryOffline {
 					route, ok := topology.Route("session:0")
 					if !ok {
 						t.Fatal("Route(session:0) = false, want true")
@@ -305,7 +317,17 @@ func TestElectionStoreStatusMatchesSnapshotControl(t *testing.T) {
 						t.Fatalf("MarkOffline(%q) error = %v", route.Shard.Primary, err)
 					}
 				}
+				if state.allOffline {
+					markAllElectionNodesOffline(t, store, tt.topology)
+				}
+				if state.offlinePrefix > 0 {
+					markElectionNodePrefixOffline(t, store, tt.topology, state.offlinePrefix)
+				}
 				got := store.Status()
+				activeMapWant := electionStatusNormalizedActiveMapControl(store)
+				if !reflect.DeepEqual(got, activeMapWant) {
+					t.Fatalf("Status() = %#v, normalized active-map control = %#v", got, activeMapWant)
+				}
 				want := electionStatusSnapshotControl(store)
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("Status() = %#v, snapshot control = %#v", got, want)
@@ -320,6 +342,58 @@ func TestElectionStoreStatusMatchesSnapshotControl(t *testing.T) {
 			})
 		}
 	}
+}
+
+func electionStatusNormalizedActiveMapControl(store *ElectionStore) ElectionStatus {
+	topology, _ := store.topology.electionStatusSnapshot()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	active := store.activeNodesLocked(topology)
+	nodes := make([]ElectionNodeStatus, 0, len(topology.Nodes))
+	for _, node := range topology.Nodes {
+		nodes = append(nodes, electionNodeStatusActiveMapControl(store, node, active))
+	}
+	leaderCapacity := len(topology.Shards)
+	if topology.Mode == TopologyModeFullReplica {
+		leaderCapacity = 1
+	}
+	leaders := make([]ElectionLeader, 0, leaderCapacity)
+	if topology.Mode == TopologyModeFullReplica {
+		if shard, ok := normalizedFullReplicaShard(topology); ok {
+			leaders = append(leaders, electShardLeader(shard, active))
+		}
+	} else {
+		for _, shard := range topology.Shards {
+			leaders = append(leaders, electShardLeader(shard, active))
+		}
+	}
+	return ElectionStatus{TimeoutMillis: store.timeout.Milliseconds(), Nodes: nodes, Leaders: leaders}
+}
+
+func electionNodeStatusActiveMapControl(store *ElectionStore, node TopologyNode, active map[string]bool) ElectionNodeStatus {
+	record, tracked := store.nodes[node.ID]
+	status := ElectionNodeStatus{ID: node.ID}
+	if !tracked {
+		status.Online = active[node.ID]
+		status.Reason = "assumed_online"
+	} else {
+		lastSeen := record.lastSeen
+		status.LastSeen = &lastSeen
+		switch {
+		case record.offline:
+			status.Reason = "offline"
+		case !active[node.ID]:
+			status.Reason = "timeout"
+		default:
+			status.Online = true
+			status.Reason = "healthy"
+		}
+	}
+	if node.Maintenance {
+		status.Online = false
+		status.Reason = "maintenance"
+	}
+	return status
 }
 
 func TestElectionStoreStatusDuringTopologyUpdates(t *testing.T) {
@@ -384,12 +458,7 @@ func electionStatusSnapshotControl(store *ElectionStore) ElectionStatus {
 	active := store.activeNodesLocked(topology)
 	nodes := make([]ElectionNodeStatus, 0, len(topology.Nodes))
 	for _, node := range topology.Nodes {
-		online, reason, lastSeen := store.nodeStatusLocked(node.ID, active)
-		if node.Maintenance {
-			online = false
-			reason = "maintenance"
-		}
-		nodes = append(nodes, ElectionNodeStatus{ID: node.ID, Online: online, Reason: reason, LastSeen: lastSeen})
+		nodes = append(nodes, electionNodeStatusActiveMapControl(store, node, active))
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	shards := electionShardsSnapshotControl(topology)
@@ -566,14 +635,16 @@ func BenchmarkElectionStoreNodeUpdateAlternating(b *testing.B) {
 }
 
 func BenchmarkElectionStoreStatus(b *testing.B) {
-	for _, tt := range topologyStoreRouteBenchmarkCases() {
-		for _, offline := range []bool{false, true} {
-			state := "Healthy"
-			if offline {
-				state = "PrimaryOffline"
-			}
-			b.Run(tt.name+"/"+state, func(b *testing.B) {
-				store, _ := newBenchmarkElectionStore(b, tt, offline)
+	for _, tt := range electionStatusBenchmarkCases() {
+		for _, state := range electionStatusBenchmarkStates(len(tt.topology.Nodes)) {
+			b.Run(tt.name+"/"+state.name, func(b *testing.B) {
+				store, _ := newBenchmarkElectionStore(b, tt, state.primaryOffline)
+				if state.allOffline {
+					markAllElectionNodesOffline(b, store, tt.topology)
+				}
+				if state.offlinePrefix > 0 {
+					markElectionNodePrefixOffline(b, store, tt.topology, state.offlinePrefix)
+				}
 				b.ReportAllocs()
 				b.ResetTimer()
 				for iteration := 0; iteration < b.N; iteration++ {
@@ -585,14 +656,16 @@ func BenchmarkElectionStoreStatus(b *testing.B) {
 }
 
 func BenchmarkElectionStoreStatusAlternating(b *testing.B) {
-	for _, tt := range topologyStoreRouteBenchmarkCases() {
-		for _, offline := range []bool{false, true} {
-			state := "Healthy"
-			if offline {
-				state = "PrimaryOffline"
-			}
-			b.Run(tt.name+"/"+state, func(b *testing.B) {
-				store, _ := newBenchmarkElectionStore(b, tt, offline)
+	for _, tt := range electionStatusBenchmarkCases() {
+		for _, state := range electionStatusBenchmarkStates(len(tt.topology.Nodes)) {
+			b.Run(tt.name+"/"+state.name, func(b *testing.B) {
+				store, _ := newBenchmarkElectionStore(b, tt, state.primaryOffline)
+				if state.allOffline {
+					markAllElectionNodesOffline(b, store, tt.topology)
+				}
+				if state.offlinePrefix > 0 {
+					markElectionNodePrefixOffline(b, store, tt.topology, state.offlinePrefix)
+				}
 				var normalizedDuration, snapshotDuration time.Duration
 				b.ResetTimer()
 				for iteration := 0; iteration < b.N; iteration++ {
@@ -614,6 +687,140 @@ func BenchmarkElectionStoreStatusAlternating(b *testing.B) {
 			})
 		}
 	}
+}
+
+func BenchmarkElectionStoreStatusActiveMapAlternating(b *testing.B) {
+	for _, tt := range electionStatusBenchmarkCases() {
+		for _, state := range electionStatusBenchmarkStates(len(tt.topology.Nodes)) {
+			b.Run(tt.name+"/"+state.name, func(b *testing.B) {
+				store, _ := newBenchmarkElectionStore(b, tt, state.primaryOffline)
+				if state.allOffline {
+					markAllElectionNodesOffline(b, store, tt.topology)
+				}
+				if state.offlinePrefix > 0 {
+					markElectionNodePrefixOffline(b, store, tt.topology, state.offlinePrefix)
+				}
+				var directDuration, activeMapDuration time.Duration
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					directFirst := iteration&1 != 0
+					for pass := 0; pass < 2; pass++ {
+						started := time.Now()
+						if directFirst == (pass == 0) {
+							benchmarkElectionStatusSink = store.Status()
+							directDuration += time.Since(started)
+						} else {
+							benchmarkElectionStatusSink = electionStatusNormalizedActiveMapControl(store)
+							activeMapDuration += time.Since(started)
+						}
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(activeMapDuration.Nanoseconds())/float64(b.N), "active_map_ns/status")
+				b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/status")
+			})
+		}
+	}
+}
+
+type electionStatusBenchmarkState struct {
+	name           string
+	primaryOffline bool
+	allOffline     bool
+	offlinePrefix  int
+}
+
+func electionStatusBenchmarkStates(nodeCount int) []electionStatusBenchmarkState {
+	states := []electionStatusBenchmarkState{
+		{name: "Healthy"},
+		{name: "PrimaryOffline", primaryOffline: true},
+	}
+	if nodeCount >= 32 {
+		states = append(states,
+			electionStatusBenchmarkState{name: "TwoOffline", offlinePrefix: 2},
+			electionStatusBenchmarkState{name: "QuarterOffline", offlinePrefix: nodeCount / 4},
+			electionStatusBenchmarkState{name: "HalfOffline", offlinePrefix: nodeCount / 2},
+			electionStatusBenchmarkState{name: "ThreeQuartersOffline", offlinePrefix: nodeCount * 3 / 4},
+		)
+	}
+	return append(states, electionStatusBenchmarkState{name: "AllOffline", allOffline: true})
+}
+
+func markAllElectionNodesOffline(tb testing.TB, store *ElectionStore, topology ClusterTopology) {
+	tb.Helper()
+	for _, node := range topology.Nodes {
+		if err := store.MarkOffline(node.ID); err != nil {
+			tb.Fatalf("MarkOffline(%q) error = %v", node.ID, err)
+		}
+	}
+}
+
+func markElectionNodePrefixOffline(tb testing.TB, store *ElectionStore, topology ClusterTopology, count int) {
+	tb.Helper()
+	for _, node := range topology.Nodes[:count] {
+		if err := store.MarkOffline(node.ID); err != nil {
+			tb.Fatalf("MarkOffline(%q) error = %v", node.ID, err)
+		}
+	}
+}
+
+func electionStatusBenchmarkCases() []topologyStoreRouteBenchmarkCase {
+	cases := topologyStoreRouteBenchmarkCases()
+	for _, size := range []int{16, 32, 64} {
+		nodes := make([]TopologyNode, size)
+		shards := make([]TopologyShard, size)
+		for index := 0; index < size; index++ {
+			nodes[index] = TopologyNode{ID: fmt.Sprintf("node-%03d", index)}
+		}
+		for index := 0; index < size; index++ {
+			shards[index] = TopologyShard{
+				ID:       uint32(index),
+				Primary:  nodes[index].ID,
+				Replicas: []string{nodes[(index+1)%size].ID, nodes[(index+2)%size].ID},
+			}
+		}
+		cases = append(cases, topologyStoreRouteBenchmarkCase{
+			name: fmt.Sprintf("Sharded%dNodes%dShards", size, size),
+			topology: ClusterTopology{
+				Version: 1,
+				Mode:    TopologyModeSharded,
+				Nodes:   nodes,
+				Shards:  shards,
+			},
+		})
+		if size == 64 {
+			maintenanceTopology := cloneTopology(cases[len(cases)-1].topology)
+			maintenanceTopology.Nodes[0].Maintenance = true
+			maintenanceTopology.Nodes[0].MaintenanceReason = "benchmark"
+			cases = append(cases, topologyStoreRouteBenchmarkCase{
+				name:     "Sharded64OneMaintenance",
+				topology: maintenanceTopology,
+			})
+		}
+	}
+	const sharedPrimarySize = 64
+	sharedPrimaryNodes := make([]TopologyNode, sharedPrimarySize)
+	sharedPrimaryShards := make([]TopologyShard, sharedPrimarySize)
+	for index := range sharedPrimaryNodes {
+		sharedPrimaryNodes[index] = TopologyNode{ID: fmt.Sprintf("shared-node-%03d", index)}
+	}
+	for index := range sharedPrimaryShards {
+		sharedPrimaryShards[index] = TopologyShard{
+			ID:       uint32(index),
+			Primary:  sharedPrimaryNodes[0].ID,
+			Replicas: []string{sharedPrimaryNodes[1].ID, sharedPrimaryNodes[index%62+2].ID},
+		}
+	}
+	cases = append(cases, topologyStoreRouteBenchmarkCase{
+		name: "Sharded64SharedPrimary",
+		topology: ClusterTopology{
+			Version: 1,
+			Mode:    TopologyModeSharded,
+			Nodes:   sharedPrimaryNodes,
+			Shards:  sharedPrimaryShards,
+		},
+	})
+	return cases
 }
 
 func electionStoreSetNodeSnapshotControl(store *ElectionStore, nodeID string, offline bool) error {

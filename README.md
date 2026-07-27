@@ -1784,6 +1784,15 @@ that was already normalized at installation. Healthy one/four-shard status is
 2.09x/2.31x faster with 2.03x/2.49x lower heap; node, leader, candidate, and
 timestamp ownership and ordering are unchanged.
 
+Leader selection inside that response then uses
+[election-record leader lookup](BENCHMARK.md#election-record-status-leader-lookup):
+ordinary topology generations consult the existing read-locked election
+records instead of allocating an all-node active map. Healthy one/four/64-shard
+status is another 1.58x/1.29x/1.32x faster and removes 256/256/3,544 heap bytes.
+Complete outage and concentrated shared-primary failures also remain faster.
+Maintenance generations retain the former active-map algorithm, selected by a
+cached topology bit that adds no `TopologyStore` bytes on amd64.
+
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_TIMEOUT=15s
 ```

@@ -72,6 +72,7 @@ type TopologyStore struct {
 	topology            ClusterTopology
 	fingerprint         string
 	verifiesFingerprint bool
+	hasMaintenance      bool
 }
 
 // SingleNodeTopology returns a valid one-node topology with sharding disabled.
@@ -126,6 +127,7 @@ func newTopologyStore(path string, topology ClusterTopology) *TopologyStore {
 		topology:            topology,
 		fingerprint:         topology.Fingerprint(),
 		verifiesFingerprint: normalizedTopologyVerifiesReplicationFingerprint(topology),
+		hasMaintenance:      topologyHasMaintenance(topology),
 	}
 }
 
@@ -205,6 +207,7 @@ func (store *TopologyStore) Set(topology ClusterTopology) error {
 	}
 	fingerprint := normalized.Fingerprint()
 	verifiesFingerprint := normalizedTopologyVerifiesReplicationFingerprint(normalized)
+	hasMaintenance := topologyHasMaintenance(normalized)
 	if store.path != "" {
 		if err := SaveTopology(store.path, normalized); err != nil {
 			return err
@@ -216,6 +219,7 @@ func (store *TopologyStore) Set(topology ClusterTopology) error {
 	store.topology = normalized
 	store.fingerprint = fingerprint
 	store.verifiesFingerprint = verifiesFingerprint
+	store.hasMaintenance = hasMaintenance
 	return nil
 }
 
@@ -243,14 +247,23 @@ func (store *TopologyStore) electionRouteSnapshot(key string) (TopologyRoute, []
 	return route, store.topology.Nodes, true
 }
 
-func (store *TopologyStore) electionStatusSnapshot() ClusterTopology {
+func (store *TopologyStore) electionStatusSnapshot() (ClusterTopology, bool) {
 	if store == nil {
-		return ClusterTopology{}
+		return ClusterTopology{}, false
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	// Set replaces the normalized generation instead of mutating its backing.
-	return store.topology
+	return store.topology, store.hasMaintenance
+}
+
+func topologyHasMaintenance(topology ClusterTopology) bool {
+	for _, node := range topology.Nodes {
+		if node.Maintenance {
+			return true
+		}
+	}
+	return false
 }
 
 func (store *TopologyStore) hasNode(nodeID string) bool {

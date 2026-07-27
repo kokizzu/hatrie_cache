@@ -314,6 +314,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct election-key routing](#direct-election-key-routing), healthy one/four shards | Topology snapshot plus active map: 643.95/1,337.5 ns; 680/1,688 heap B; 10/18 allocs | Selected route plus direct candidates: 226.15/263.35 ns; 80/128 heap B; 3/3 allocs | 2.85x/5.08x faster; 8.50x/13.19x lower heap; 3.33x/6x fewer allocations | Timeout, offline, maintenance, failover, topology-generation consistency, ownership, and lock order are unchanged |
 | Current pass | [Allocation-free election node updates](#allocation-free-election-node-updates), one/four-shard heartbeat | Full topology clone: 279.65/535.5 ns; 272/896 heap B; 3/6 allocs | Normalized node lookup: 60.91/60.505 ns; 0 heap B; 0 allocs | 4.59x/8.85x faster; all timed heap and allocations eliminated | Membership follows every topology generation; heartbeat/offline record writes, validation, timestamps, locks, and behavior are unchanged |
 | Current pass | [Normalized election status generation](#normalized-election-status-generation), healthy one/four shards | Clone/sort topology: 808.05/1,851 ns; 944/2,432 heap B; 14/25 allocs | Borrow normalized generation: 387.1/800.0 ns; 464/976 heap B; 5/8 allocs | 2.09x/2.31x faster; 2.03x/2.49x lower heap; 2.80x/3.13x fewer allocations | Returned nodes, leaders, candidates, timestamps, ordering, generation consistency, locks, and behavior are unchanged |
+| Current pass | [Election-record status leader lookup](#election-record-status-leader-lookup), healthy one/four/64 shards | Temporary active map: 459.15/961.65/12,100 ns; 464/976/14,680 heap B; 5/8/70 allocs | Existing election records: 289.9/744.65/9,153 ns; 208/720/11,136 heap B; 3/6/66 allocs | 1.58x/1.29x/1.32x faster; 256/256/3,544 fewer heap bytes; 2/2/4 fewer allocations | Maintenance generations retain the former active map and are 1.07x faster with identical memory; cached mode bit adds no topology-store bytes on amd64 |
 | Current pass | [Cached replication routing fingerprint](#cached-replication-routing-fingerprint), one/four shards | Rehash: 3,238/7,028.5 ns; 3,920/7,832 heap B; 52/129 allocs | Cached: 1,621.5/3,447.5 ns; 3,032/5,600 heap B; 14/34 allocs | 2.00x/2.04x faster; 1.29x/1.40x lower heap; 3.71x/3.79x fewer allocations | Reuses the fingerprint already computed by validated topology installation; topology cloning, routing maps, wire, and behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
@@ -3321,12 +3322,64 @@ make run CMD='go test . -run=NONE -bench=BenchmarkElectionStoreStatusAlternating
 | Virtual buckets, primary offline | 1,950.5 ns; 2,504 B; 27 allocs | 931.2 ns; 1,000 B; 9 allocs | 2.09x faster; 2.50x lower heap; 3x fewer allocations |
 
 CPU values are alternating same-binary medians; heap and allocations come from
-the unchanged standalone fixture before and after implementation. The active
-node map and every response-owned slice remain present. Topology generations
+the unchanged standalone fixture before and after implementation. At this
+stage the active node map and every response-owned slice remained present; the
+following pass removes that map from ordinary topology generations. Topology generations
 are replaced rather than mutated, and the topology lock is released before
 the election lock is acquired. Maintenance, heartbeat timeout, failover,
 ordering, timestamps, response ownership, configuration, wire, persistence,
 and public behavior are unchanged.
+
+<a id="election-record-status-leader-lookup"></a>
+#### Election-Record Status Leader Lookup
+
+After normalized status generation, `ElectionStore.Status` still constructed a
+temporary `map[string]bool` for every topology node and then looked candidates
+up in that map. Ordinary topology generations now elect leaders from the
+existing read-locked election-record map. An untracked candidate remains
+assumed online; tracked candidates apply the same explicit-offline and exact
+heartbeat-timeout rules. The already-required owned node-status response is
+still built once with one shared timestamp.
+
+Maintenance is the one case where an election record alone cannot describe
+liveness. `TopologyStore` therefore caches a `hasMaintenance` bit beside its
+existing fingerprint and updates both under the same topology-generation lock.
+Maintenance generations retain the former active-map algorithm. On amd64 the
+extra bit consumes existing struct padding; an explicit layout check reported
+`old=184 new=184 actual=184`. No persistent per-node index or response field was
+added.
+
+The test-first control compares exact responses with both the normalized
+active-map builder and the older full-snapshot builder. It covers healthy,
+primary-offline, two-offline, quarter/half/three-quarter-offline, and complete
+outage states at 1, 2, 4, 16, 32, and 64 nodes; a 64-node shared-primary fixture
+forces the same failed candidates across every shard. A separate maintenance
+generation toggles maintenance through `TopologyStore.Set`, and the concurrent
+generation test remains race-clean.
+
+```sh
+make run CMD='go test . -run="TestElectionStore(StatusMatchesSnapshotControl|StatusDuringTopologyUpdates|ExcludesPersistedMaintenanceNode|KeepsHealthyPrimaryAndPromotesReplica|TimesOutHeartbeats|ReportsUnavailableWhenAllCandidatesOffline|FullReplicaLeaderUsesSelfThenReplica)" -count=10'
+make run CMD='go test -race . -run=TestElectionStoreStatusDuringTopologyUpdates -count=3'
+make run CMD='go test . -run=NONE -bench=^BenchmarkElectionStoreStatusActiveMapAlternating$$ -benchmem -benchtime=10000x -count=10 -cpu=1'
+```
+
+| Ten-run alternating median | Normalized active map | Election records | Improvement |
+| --- | ---: | ---: | ---: |
+| One shard, healthy | 459.15 ns; 464 B; 5 allocs | 289.9 ns; 208 B; 3 allocs | 1.58x faster; 256 fewer heap bytes; 2 fewer allocations |
+| Four shards, healthy | 961.65 ns; 976 B; 8 allocs | 744.65 ns; 720 B; 6 allocs | 1.29x faster; 256 fewer heap bytes; 2 fewer allocations |
+| 64 nodes/64 shards, healthy | 12,100 ns; 14,680 B; 70 allocs | 9,153 ns; 11,136 B; 66 allocs | 1.32x faster; 3,544 fewer heap bytes; 4 fewer allocations |
+| 64 nodes/64 shards, all offline | 14,485 ns; 16,216 B; 134 allocs | 13,271.5 ns; 12,672 B; 130 allocs | 1.09x faster; 3,544 fewer heap bytes; 4 fewer allocations |
+| 64-node shared-primary, two shared candidates offline | 13,357 ns; 14,728 B; 72 allocs | 10,982 ns; 11,184 B; 68 allocs | 1.22x faster; 3,544 fewer heap bytes; 4 fewer allocations |
+| 64 nodes, one maintenance node | 13,878.5 ns; 14,680 B; 70 allocs | 12,933.5 ns; 14,680 B; 70 allocs | 1.07x faster; memory unchanged |
+
+The complete-outage and shared-primary controls rejected an earlier pure
+binary-search prototype, which was respectively 1.08x and 1.11x slower than
+the active map. A failed-probe threshold also regressed concentrated failures
+because it built the map after paying for repeated searches. Neither prototype
+is retained. The final record-map path is faster in every measured ordinary,
+degraded, adversarial, and maintenance fixture. Locks, timeout boundaries,
+maintenance precedence, failover order, response ownership, topology updates,
+configuration, wire, storage, and persistence are unchanged.
 
 <a id="cached-replication-routing-fingerprint"></a>
 #### Cached Replication Routing Fingerprint

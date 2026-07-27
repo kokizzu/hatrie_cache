@@ -83,38 +83,30 @@ func (store *ElectionStore) Status() ElectionStatus {
 	if store == nil {
 		return ElectionStatus{}
 	}
-	topology := store.topology.electionStatusSnapshot()
+	topology, hasMaintenance := store.topology.electionStatusSnapshot()
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
-	active := store.activeNodesLocked(topology)
 	nodes := make([]ElectionNodeStatus, 0, len(topology.Nodes))
-	for _, node := range topology.Nodes {
-		online, reason, lastSeen := store.nodeStatusLocked(node.ID, active)
-		if node.Maintenance {
-			online = false
-			reason = "maintenance"
-		}
-		nodes = append(nodes, ElectionNodeStatus{
-			ID:       node.ID,
-			Online:   online,
-			Reason:   reason,
-			LastSeen: lastSeen,
-		})
+	now := store.now()
+	var active map[string]bool
+	if hasMaintenance {
+		active = store.activeNodesLockedAt(topology, now)
 	}
+	for _, node := range topology.Nodes {
+		status := store.nodeStatusForTopologyNodeLocked(node, now)
+		nodes = append(nodes, status)
+	}
+	lookup := newElectionStatusLeaderLookup(store.nodes, store.timeout, now)
 	leaderCapacity := len(topology.Shards)
 	if topology.Mode == TopologyModeFullReplica {
 		leaderCapacity = 1
 	}
 	leaders := make([]ElectionLeader, 0, leaderCapacity)
-	if topology.Mode == TopologyModeFullReplica {
-		if shard, ok := normalizedFullReplicaShard(topology); ok {
-			leaders = append(leaders, electShardLeader(shard, active))
-		}
+	if hasMaintenance {
+		leaders = electionStatusLeadersFromActiveMap(topology, leaders, active)
 	} else {
-		for _, shard := range topology.Shards {
-			leaders = append(leaders, electShardLeader(shard, active))
-		}
+		leaders = lookup.appendLeaders(topology, leaders)
 	}
 	return ElectionStatus{
 		TimeoutMillis: store.timeout.Milliseconds(),
@@ -193,8 +185,11 @@ func (store *ElectionStore) setNode(nodeID string, offline bool) error {
 }
 
 func (store *ElectionStore) activeNodesLocked(topology ClusterTopology) map[string]bool {
+	return store.activeNodesLockedAt(topology, store.now())
+}
+
+func (store *ElectionStore) activeNodesLockedAt(topology ClusterTopology, now time.Time) map[string]bool {
 	active := make(map[string]bool, len(topology.Nodes))
-	now := store.now()
 	for _, node := range topology.Nodes {
 		if node.Maintenance {
 			active[node.ID] = false
@@ -224,20 +219,31 @@ func (store *ElectionStore) activeNodesSnapshot(topology ClusterTopology) map[st
 	return store.activeNodesLocked(topology)
 }
 
-func (store *ElectionStore) nodeStatusLocked(nodeID string, active map[string]bool) (bool, string, *time.Time) {
-	record, tracked := store.nodes[nodeID]
+func (store *ElectionStore) nodeStatusForTopologyNodeLocked(node TopologyNode, now time.Time) ElectionNodeStatus {
+	status := ElectionNodeStatus{ID: node.ID}
+	record, tracked := store.nodes[node.ID]
 	if !tracked {
-		return active[nodeID], "assumed_online", nil
+		status.Online = !node.Maintenance
+		status.Reason = "assumed_online"
+		if node.Maintenance {
+			status.Reason = "maintenance"
+		}
+		return status
 	}
 	lastSeen := record.lastSeen
+	status.LastSeen = &lastSeen
 	switch {
+	case node.Maintenance:
+		status.Reason = "maintenance"
 	case record.offline:
-		return false, "offline", &lastSeen
-	case !active[nodeID]:
-		return false, "timeout", &lastSeen
+		status.Reason = "offline"
+	case store.timeout > 0 && !record.lastSeen.IsZero() && now.Sub(record.lastSeen) > store.timeout:
+		status.Reason = "timeout"
 	default:
-		return true, "healthy", &lastSeen
+		status.Online = true
+		status.Reason = "healthy"
 	}
+	return status
 }
 
 func electShardLeader(shard TopologyShard, active map[string]bool) ElectionLeader {
@@ -255,4 +261,73 @@ func electShardLeader(shard TopologyShard, active map[string]bool) ElectionLeade
 		}
 	}
 	return leader
+}
+
+type electionStatusLeaderLookup struct {
+	records map[string]electionNodeRecord
+	timeout time.Duration
+	now     time.Time
+}
+
+func newElectionStatusLeaderLookup(
+	records map[string]electionNodeRecord,
+	timeout time.Duration,
+	now time.Time,
+) electionStatusLeaderLookup {
+	return electionStatusLeaderLookup{
+		records: records,
+		timeout: timeout,
+		now:     now,
+	}
+}
+
+func (lookup *electionStatusLeaderLookup) appendLeaders(topology ClusterTopology, leaders []ElectionLeader) []ElectionLeader {
+	if topology.Mode == TopologyModeFullReplica {
+		if shard, ok := normalizedFullReplicaShard(topology); ok {
+			return append(leaders, lookup.elect(shard))
+		}
+		return leaders
+	}
+	for _, shard := range topology.Shards {
+		leaders = append(leaders, lookup.elect(shard))
+	}
+	return leaders
+}
+
+func electionStatusLeadersFromActiveMap(topology ClusterTopology, leaders []ElectionLeader, active map[string]bool) []ElectionLeader {
+	if topology.Mode == TopologyModeFullReplica {
+		if shard, ok := normalizedFullReplicaShard(topology); ok {
+			return append(leaders, electShardLeader(shard, active))
+		}
+		return leaders
+	}
+	for _, shard := range topology.Shards {
+		leaders = append(leaders, electShardLeader(shard, active))
+	}
+	return leaders
+}
+
+func (lookup *electionStatusLeaderLookup) elect(shard TopologyShard) ElectionLeader {
+	candidates := routeOwners(shard)
+	leader := ElectionLeader{
+		Shard:      shard.ID,
+		Primary:    shard.Primary,
+		Candidates: candidates,
+	}
+	for _, nodeID := range candidates {
+		if lookup.nodeOnline(nodeID) {
+			leader.Leader = nodeID
+			leader.Available = true
+			return leader
+		}
+	}
+	return leader
+}
+
+func (lookup *electionStatusLeaderLookup) nodeOnline(nodeID string) bool {
+	record, tracked := lookup.records[nodeID]
+	if !tracked {
+		return true
+	}
+	return !record.offline && (lookup.timeout <= 0 || record.lastSeen.IsZero() || lookup.now.Sub(record.lastSeen) <= lookup.timeout)
 }
