@@ -1389,42 +1389,42 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 	case "GETPQ", "GETPRIORITY":
 		return ht.executeFastGetPriorityQueueCommand(key)
 	case "ADDBF", "BFADD":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddBloomFilterCommand(key, request.Value)
 	case "HASBF", "BFHAS", "BFEXISTS":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastHasBloomFilterCommand(key, request.Value)
 	case "ADDCF", "CFADD":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddCuckooFilterCommand(key, request.Value)
 	case "HASCF", "CFHAS", "CFEXISTS":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastHasCuckooFilterCommand(key, request.Value)
 	case "DELCF", "REMCF", "CFDEL":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastDeleteCuckooFilterCommand(key, request.Value)
 	case "ADDXF", "XFADD":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddXorFilterCommand(key, request.Value)
 	case "HASXF", "XFHAS", "XFEXISTS":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastHasXorFilterCommand(key, request.Value)
 	case "INCRCMS", "ADDCMS", "CMSADD":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		count, err := commandCountMinSketchIncrement(request)
@@ -1433,7 +1433,7 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		}
 		return ht.executeFastIncrementCountMinSketchCommand(key, request.Value, count)
 	case "ESTCMS", "QUERYCMS", "CMSQUERY", "CMSCOUNT":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastEstimateCountMinSketchCommand(key, request.Value)
@@ -1473,14 +1473,14 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		}
 		return ht.executeFastAddSparseBitsetCommand(key, value)
 	case "ADDHLL", "HLLADD":
-		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddHyperLogLogCommand(key, request.Value)
 	case "COUNTHLL", "ESTHLL", "HLLCOUNT", "HLLCARD":
 		return ht.executeFastCountHyperLogLogCommand(key)
 	case "ADDTOPK", "TOPKADD":
-		if len(request.Values) != 0 || len(request.Pairs) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || len(request.Pairs) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		count, ok := commandFastOptionalUint64Field(request.Subkey, 1)
@@ -1491,7 +1491,7 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 	case "GETTOPK", "TOPK":
 		return ht.executeFastGetTopKCommand(key)
 	case "ADDRS", "RSADD":
-		if len(request.Values) != 0 || len(request.Pairs) != 0 || !commandFastJSONPlainString(request.Value) {
+		if len(request.Values) != 0 || len(request.Pairs) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddReservoirSampleCommand(key, request.Value)
@@ -2502,6 +2502,22 @@ func commandFastJSONPlainString(value string) bool {
 	for idx := 0; idx < len(value); idx++ {
 		c := value[idx]
 		if c < 0x20 || c == '"' || c == '\\' || c >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+func commandFastCanonicalJSONString(value string) bool {
+	if value == "" {
+		return false
+	}
+	for idx := 0; idx < len(value); idx++ {
+		c := value[idx]
+		if c >= utf8.RuneSelf || c == '\\' {
+			return false
+		}
+		if c <= '>' && (c < 0x20 || c == '"' || c == '&' || c == '<' || c == '>') {
 			return false
 		}
 	}

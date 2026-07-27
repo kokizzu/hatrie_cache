@@ -250,6 +250,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Generic Bloom-filter scalar additions](#generic-bloom-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 110.8/133.0/141.5 ns; 29-40 B; 2 allocs | Direct scalar encoding: 79.91/96.57/103.2 ns; 5-16 B; 1 alloc | 1.39x/1.38x/1.37x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.7% with identical memory |
 | Current pass | [Generic Cuckoo-filter scalar additions](#generic-cuckoo-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 98.84/119.1/112.4 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 62.61/75.87/76.72 ns; 5-16 B; 1 alloc | 1.58x/1.57x/1.47x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.5% with identical memory |
 | Current pass | [Generic Cuckoo-filter scalar deletions](#generic-cuckoo-filter-scalar-deletions), existing string/structured and missing values | Temporary key slice: 280.3/320.7/128.2 ns; 32-40 B; 2 allocs | Caller-owned key slot: 242.6/270.0/90.57 ns; 8-16 B; 1 alloc | 1.16x/1.19x/1.42x faster; one allocation and 24 B removed | No measured tradeoff; 2/16/128-value controls are 1.01x-1.05x faster with identical memory |
+| Current pass | [Canonical JSON command fast paths](#canonical-json-command-fast-paths), ordinary Bloom/Cuckoo/XOR/CMS/HLL/Top-K/reservoir strings | Accepted `<`, `>`, and `&` with noncanonical hashes/keys; 99.11/75.30/99.24/82.65/104.6/141.5/161.7 ns | Exact canonical fallback; 93.06/73.78/97.21/79.99/98.31/124.2/152.9 ns | Correct snapshots plus 1.02x-1.14x faster ordinary commands | No measured valid-path tradeoff; escaped HTML-sensitive strings use the existing generic canonical encoder, and the unaffected set control is CPU-neutral with identical memory |
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
@@ -406,6 +407,7 @@ tree.
 | Inline Cuckoo scalar wrapper body | Scalar additions improved 1.51x-1.62x with one fewer allocation | Moving the larger body before `AddOneChecked` made the frozen 128-value batch 1.011x slower through binary-layout drift | Replaced by the [out-of-line scalar helper](#generic-cuckoo-filter-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.5% |
 | Cuckoo variadic scalar-add preparation | A caller-owned scalar key slot made the isolated scalar primitive 1.35x-1.53x faster and removed one allocation plus 24 B | Using the shared helper inside `AddOneChecked` made 2/16/128-value public batches 1.047x/1.043x/1.009x slower; a scalar branch around the exact former helper made them 1.020x/1.033x/1.028x slower; dispatch at the public method made 2/16-value batches 1.118x/1.079x slower and new-filter creation 1.032x slower | All three layouts and their test code were removed; `AddOneChecked` and `HatTrie.AddCuckooFilterChecked` remain unchanged; see [the rollback](#cuckoo-filter-variadic-scalar-add-rollback) |
 | Cuckoo scalar-delete dispatch layouts | Early scalar dispatch removed one allocation; split-first tail backing also saved 24 B for two values and 128 B for 128 values | Early dispatch made the reverse-order 128-value control 1.019x slower; a separate batch helper made 16 values 1.028x slower; split-first backing made 16 values 1.012x slower | All three layouts were removed; [caller-owned scalar key storage](#generic-cuckoo-filter-scalar-deletions) keeps the original full batch allocation and single deletion loop, with every retained control neutral or faster |
+| Canonical JSON classifier layouts | Flat comparisons corrected `<`, `>`, and `&`; switch, two-pass `IndexAny`, and bitmask forms explored different branch/scan costs | Flat comparisons made ordinary Cuckoo/XOR/Count-Min commands 1.06x/1.07x/1.08x slower; isolated switch, two-pass, and full bitmask predicates were up to 1.29x, 5.32x, and 1.37x slower | Removed and replaced by the [grouped low-ASCII classifier](#canonical-json-command-fast-paths), whose complete ordinary command controls are neutral or faster |
 | Count-Min clustered scalar helper | Scalar additions improved about 1.4x with one fewer allocation | Placing the helper between Count-Min hot methods made the frozen 128-value batch 10,970 versus 10,540 ns, or 1.041x slower | Replaced by the [end-of-file scalar helper](#generic-count-min-sketch-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.6% |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
@@ -5754,6 +5756,62 @@ Fingerprint selection, approximate-delete semantics, input order, preflight
 failure behavior, lock scope, read/write accounting, TTLs, partitions, wire
 bytes, snapshots, journals, replication, persistent formats, and configuration
 are unchanged.
+
+<a id="canonical-json-command-fast-paths"></a>
+### Canonical JSON Command Fast Paths
+
+The exact uppercase command path previously classified every printable ASCII
+string without quotes or backslashes as directly quotable JSON. Go's canonical
+`encoding/json.Marshal` representation additionally escapes `<`, `>`, and `&`.
+Bloom, Cuckoo, XOR, Count-Min Sketch, HyperLogLog, Top-K, and reservoir commands
+therefore hashed or retained different canonical bytes from their public
+checked APIs for those three characters.
+
+A differential test was added before production changed. It applied
+`<script>&value>` through the exact uppercase path and the normalized lowercase
+generic path, then compared complete private snapshots. All seven families
+failed. The retained classifier rejects every byte that `encoding/json` would
+escape, so those values use the existing generic path. An exhaustive 256-byte
+contract verifies that every accepted one-byte string is byte-identical to
+`encoding/json.Marshal`; all seven snapshot comparisons now pass.
+
+```sh
+make run CMD='go test . -run "TestCommandFastCanonicalJSONStringMatchesJSONMarshal|TestCommandCanonicalJSONStringFastPathsMatchGeneric" -count=1 -v'
+make bench-command-json-string BENCHTIME=1s COUNT=7
+```
+
+Complete command rows compare a frozen pre-change binary with the retained
+grouped classifier on one logical CPU. XOR and Count-Min were also confirmed in
+immediate nine-run baseline/candidate pairs. Values are medians.
+
+| Ordinary string command | Noncanonical classifier | Canonical grouped classifier | Result |
+| --- | ---: | ---: | ---: |
+| Bloom membership | 99.11 ns; 0 B; 0 allocs | 93.06 ns; 0 B; 0 allocs | 1.06x faster |
+| Cuckoo membership | 75.30 ns; 0 B; 0 allocs | 73.78 ns; 0 B; 0 allocs | 1.02x faster |
+| XOR membership, paired confirmation | 99.24 ns; 0 B; 0 allocs | 97.21 ns; 0 B; 0 allocs | 1.02x faster |
+| Count-Min estimate, paired confirmation | 82.65 ns; 0 B; 0 allocs | 79.99 ns; 0 B; 0 allocs | 1.03x faster |
+| HyperLogLog duplicate add | 104.6 ns; 0 B; 0 allocs | 98.31 ns; 0 B; 0 allocs | 1.06x faster |
+| Top-K duplicate add | 141.5 ns; 48 B; 1 alloc | 124.2 ns; 48 B; 1 alloc | 1.14x faster |
+| Reservoir add | 161.7 ns; 64 B; 1 alloc | 152.9 ns; 64 B; 1 alloc | 1.06x faster |
+| Set membership, unaffected control | 60.94 ns; 0 B; 0 allocs | 60.78 ns; 0 B; 0 allocs | CPU-neutral within 0.3% |
+
+The first correct implementation appended three comparisons to the hot byte
+loop. It fixed every snapshot but made complete ordinary Cuckoo, XOR, and
+Count-Min commands about 1.06x, 1.07x, and 1.08x slower, so it was removed.
+Isolated three/14/64-byte classifier medians were 3.378/10.97/51.44 ns versus
+the old 3.160/9.421/44.00 ns. A switch measured 3.850/12.13/50.90 ns; a second
+`IndexAny` pass measured 16.81/22.42/83.78 ns; and a full two-word ASCII
+bitmask measured 4.342/11.45/50.64 ns. A grouped bitmask improved three bytes
+to 3.030 ns but regressed 14/64 bytes to 10.12/47.52 ns.
+
+The retained predicate first handles non-ASCII and backslash, then enters the
+larger comparison group only for bytes at or below `>`, which contains every
+remaining invalid character. Its isolated 14/64-byte medians are 7.942/34.57
+ns, 1.19x/1.27x faster than the old incomplete classifier. Sets and priority
+queues retain their original string classifier because they store actual
+strings rather than canonical JSON keys. Wire, journal, snapshot, persistence,
+filter parameters, probabilistic behavior for canonical values, lock scope,
+and configuration are unchanged.
 
 <a id="compact-cuckoo-filter-header-rollback"></a>
 ### Compact Cuckoo-Filter Header Rollback

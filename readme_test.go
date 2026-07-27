@@ -288,6 +288,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Scalar-only out-of-line wrapper",
 		"Bloom split-first preparation",
 		"Inline Cuckoo scalar wrapper body",
+		"Canonical JSON classifier layouts",
 		"Mutation response encoding outside cache lock",
 		"Shared-lock generic collection GET",
 		"Top-K helper lookup",
@@ -377,6 +378,37 @@ func TestDocsDescribeGenericCuckooScalarOperations(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing Cuckoo scalar-add token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeCanonicalJSONCommandFastPaths(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[canonical JSON command measurements](BENCHMARK.md#canonical-json-command-fast-paths)",
+		"1.02x-1.14x faster",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing canonical JSON command token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Canonical JSON Command Fast Paths",
+		"make bench-command-json-string BENCHTIME=1s COUNT=7",
+		"99.24 ns; 0 B; 0 allocs",
+		"Canonical JSON classifier layouts",
+		"16.81/22.42/83.78 ns",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing canonical JSON command token %q", token)
 		}
 	}
 }

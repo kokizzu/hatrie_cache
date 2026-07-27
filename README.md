@@ -69,6 +69,13 @@ allocating a temporary key slice. Existing string/structured deletions are
 bytes removed; 2/16/128-value controls are neutral or faster with identical
 memory. See the
 [Cuckoo scalar-delete measurements](BENCHMARK.md#generic-cuckoo-filter-scalar-deletions).
+Exact Bloom, Cuckoo, XOR, Count-Min Sketch, HyperLogLog, Top-K, and reservoir
+commands now use the same canonical JSON identity as their public checked APIs.
+The command classifier excludes `<`, `>`, and `&`, which `encoding/json`
+escapes, and routes those values through the established generic encoder.
+Ordinary command controls are 1.02x-1.14x faster with identical memory, while
+an unaffected set lookup is CPU-neutral; see the
+[canonical JSON command measurements](BENCHMARK.md#canonical-json-command-fast-paths).
 XOR filter values stage unique items once, then compile them into static 8-bit
 fingerprint arrays for faster low-memory membership checks than Bloom filters
 on read-heavy immutable sets. Their private header fits in one 64-byte cache
