@@ -142,8 +142,7 @@ func (hll *hyperLogLogData) Add(value interface{}) bool {
 }
 
 func (hll *hyperLogLogData) AddChecked(value interface{}) (bool, error) {
-	changed, err := hll.AddOneChecked(value)
-	return changed > 0, err
+	return hll.addChecked(value)
 }
 
 func (hll *hyperLogLogData) AddOne(value interface{}, values ...interface{}) int {
@@ -181,6 +180,17 @@ func (hll *hyperLogLogData) addKey(key []byte) bool {
 	hll.updateSummary(hll.registers[index], rank)
 	hll.registers[index] = rank
 	return true
+}
+
+func (hll *hyperLogLogData) addChecked(value interface{}) (bool, error) {
+	if hll == nil || hll.precision == 0 {
+		return false, nil
+	}
+	key, err := hyperLogLogItemKey(value)
+	if err != nil {
+		return false, err
+	}
+	return hll.addKey(key), nil
 }
 
 func (hll *hyperLogLogData) addJSONString(value string) bool {

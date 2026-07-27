@@ -372,6 +372,36 @@ func TestDocsDescribeGenericCuckooScalarAdditions(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeGenericHyperLogLogScalarAdditions(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[HyperLogLog scalar-add measurements](BENCHMARK.md#generic-hyperloglog-scalar-additions)",
+		"make bench-hll-scalar BENCHTIME=1s COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing HyperLogLog scalar-add token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Generic HyperLogLog Scalar Additions",
+		"1.52x faster",
+		"94.58 to 55.36 ns",
+		"9,671 ns before and 9,614 ns after",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing HyperLogLog scalar-add token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeBoundedShortGenericTopKDispatch(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

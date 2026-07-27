@@ -234,6 +234,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
+| Current pass | [Generic HyperLogLog scalar additions](#generic-hyperloglog-scalar-additions), safe/escaped/structured values | Variadic wrapper: 96.48/114.6/111.7 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 63.68/74.92/78.25 ns; 5-16 B; 1 alloc | 1.52x/1.53x/1.43x faster; one allocation and 24 B removed | No measured tradeoff; observations and cached estimate state match exactly, while the unchanged 128-value control is neutral within 0.6% with identical memory |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
 | Current pass | [Direct generic reservoir GET](#reservoir-sample-read-materialization), 16/128 string and mixed items | Generic materialization: 2,709/18,349 ns strings; 2,941/18,861 ns mixed | Shared-lock direct JSON: 2,225/17,563 ns strings; 2,701/18,275 ns mixed | 1.03x-1.22x faster; up to 1.23x lower heap; 1.67x-2.00x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
@@ -5369,6 +5370,45 @@ the logical overhead was only 16 bytes, Go's size classes rounded each 16,400 B
 allocation to 18,432 B; the fixture rose to 18,472,960 B, or 12.47% more heap.
 That layout was discarded. The retained header layout leaves register
 allocations exact and has no cost for serialized or transferred data.
+
+<a id="generic-hyperloglog-scalar-additions"></a>
+### Generic HyperLogLog Scalar Additions
+
+`hyperLogLogData.AddChecked` previously delegated one value to the variadic
+`AddOneChecked`, allocating a one-element `[][]byte` after canonical JSON
+encoding. The wrapper now calls a private scalar helper placed after `addKey`.
+It performs the same nil and precision checks, encodes one key, and executes
+the existing register update directly. `AddOneChecked` and its full batch
+preflight remain source-identical.
+
+Tests were added before production changed. They compare the complete private
+state, including observations, registers, harmonic sum, and zero-register
+count, against the former wrapper for plain, escaped, HTML-sensitive, Unicode,
+structured, duplicate, nil, zero-precision, and invalid values. Invalid input
+still leaves registers unallocated. The focused test passed 50 times after the
+change and its race build passed ten times.
+
+```sh
+make run CMD='go test . -run TestHyperLogLogScalarAddCheckedCandidate -count=50'
+make run CMD='go test -race . -run TestHyperLogLogScalarAddCheckedCandidate -count=10'
+make bench-hll-scalar BENCHTIME=1s COUNT=7
+```
+
+Timing rows are nine same-binary alternating candidate/reference medians with
+128 operations per block. Steady memory comes from 100,000-iteration runs.
+Frozen production binaries independently improved the safe-string median from
+94.58 to 55.36 ns, or 1.71x.
+
+| Scalar `AddChecked`, median | Former variadic wrapper | Direct scalar path | Improvement |
+| --- | ---: | ---: | ---: |
+| Safe string | 96.48 ns; 29 B; 2 allocs | 63.68 ns; 5 B; 1 alloc | 1.52x faster; 5.80x lower heap |
+| Escaped string | 114.6 ns; 40 B; 2 allocs | 74.92 ns; 16 B; 1 alloc | 1.53x faster; 2.50x lower heap |
+| Structured value | 111.7 ns; 40 B; 2 allocs | 78.25 ns; 16 B; 1 alloc | 1.43x faster; 2.50x lower heap |
+
+The unchanged 128-value path alternated frozen binaries in both process orders.
+Its median was 9,671 ns before and 9,614 ns after, neutral within 0.6%, with
+identical 4,224 B and 129 allocations. No retained field, estimate formula,
+wire byte, storage format, precision, or configuration changed.
 
 <a id="compact-bloom-filter-headers"></a>
 ### Compact Bloom-Filter Headers

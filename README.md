@@ -111,6 +111,9 @@ HyperLogLog values use compact register arrays for approximate distinct counts
 without retaining the observed items. Incrementally maintained derived state
 keeps add responses, counts, and info estimates O(1) after construction or
 restore without changing the serialized register representation.
+Generic scalar additions also bypass one-item variadic preparation, removing
+one allocation while preserving observation and register semantics; see the
+[HyperLogLog scalar-add measurements](BENCHMARK.md#generic-hyperloglog-scalar-additions).
 Top-K values use a bounded Space-Saving min-heap to track heavy hitters with
 fixed memory and O(log k) updates.
 Generic scalar updates for JSON-safe strings up to four bytes use a bounded
@@ -213,6 +216,7 @@ make bench-reservoir-small BENCHTIME=500000x COUNT=7
 make bench-bloom-header BENCHTIME=500ms COUNT=7
 make bench-bloom-scalar BENCHTIME=1s COUNT=7
 make bench-cuckoo-scalar BENCHTIME=1s COUNT=7
+make bench-hll-scalar BENCHTIME=1s COUNT=7
 make bench-count-min-rows BENCHTIME=500ms COUNT=7
 make bench-fenwick-add BENCHTIME=500ms COUNT=7
 make bench-quantile-add BENCHTIME=500ms COUNT=7
