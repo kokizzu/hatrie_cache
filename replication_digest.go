@@ -401,7 +401,7 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 			if !ok || route.Leader.Leader != replicator.self {
 				return nil
 			}
-			targets := routing.replicationTargets(route, replicator.self)
+			targets := routing.replicationTargets(route)
 			if len(targets) == 0 {
 				return nil
 			}
@@ -458,7 +458,7 @@ func (replicator *HTTPReplicator) replicationDigestInventorySingleTarget(ctx con
 				return err
 			}
 			route, ok := routing.replicationScanRouteForKey(entry.Key)
-			if !ok || route.Leader.Leader != replicator.self || len(routing.replicationTargets(route, replicator.self)) == 0 {
+			if !ok || route.Leader.Leader != replicator.self || len(routing.replicationTargets(route)) == 0 {
 				return nil
 			}
 			var dumpErr error

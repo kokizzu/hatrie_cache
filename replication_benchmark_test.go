@@ -274,7 +274,7 @@ func BenchmarkHTTPReplicatorLegacyFallbackReaderPause(b *testing.B) {
 	if !ok {
 		b.Fatal("snapshotReplicationRouting() ok = false")
 	}
-	replicator.markReplicationDigestUnsupported(routing.nodes["node-b"], routing.fingerprint)
+	replicator.markReplicationDigestUnsupported(replicationRoutingNode(b, routing, "node-b"), routing.fingerprint)
 
 	var maxPause atomic.Int64
 	b.ReportAllocs()
@@ -530,7 +530,7 @@ func BenchmarkReplicationDigestChangesDefaultWire(b *testing.B) {
 			if !ok {
 				b.Fatal("snapshotReplicationRouting() ok = false")
 			}
-			target := routing.nodes["node-b"]
+			target := replicationRoutingNode(b, routing, "node-b")
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -566,7 +566,7 @@ func BenchmarkReplicationDigestSourceIteratorModes(b *testing.B) {
 		b.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(b, routing, "node-b"),
 		prefix:   "session:",
 		pageSize: defaultReplicationSyncKeyPageSize,
 	}
@@ -638,7 +638,7 @@ func BenchmarkReplicationDigestFallbackCollectionModes(b *testing.B) {
 		b.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(b, routing, "node-b"),
 		prefix:   "session:",
 		pageSize: keyCount,
 	}
@@ -712,7 +712,7 @@ func BenchmarkReplicationPackedFallbackPreparation(b *testing.B) {
 		b.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(b, routing, "node-b"),
 		prefix:   "session:",
 		pageSize: keyCount,
 	}
@@ -778,7 +778,7 @@ func BenchmarkReplicationPackedFallbackMutationPair(b *testing.B) {
 		b.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(b, routing, "node-b"),
 		prefix:   "session:",
 		pageSize: keyCount,
 	}
@@ -2349,7 +2349,7 @@ func BenchmarkReplicationRoutingPlanning(b *testing.B) {
 				if !ok {
 					b.Fatal("snapshot routeForKey() failed")
 				}
-				targets += len(snapshot.replicationTargets(route, replicator.self))
+				targets += len(snapshot.replicationTargets(route))
 			}
 			if targets == 0 {
 				b.Fatal("snapshot routing returned no targets")
@@ -2359,6 +2359,8 @@ func BenchmarkReplicationRoutingPlanning(b *testing.B) {
 }
 
 var benchmarkReplicationRoutingSnapshotSink replicationRoutingSnapshot
+
+var benchmarkReplicationRoutingNodeMapSink map[string]TopologyNode
 
 func BenchmarkReplicationRoutingSnapshotConstruction(b *testing.B) {
 	for _, tt := range []struct {
@@ -2417,7 +2419,7 @@ var benchmarkReplicationRouteTargetSink bool
 func BenchmarkReplicationRouteTargetsNodeAlternating(b *testing.B) {
 	for _, ownerCount := range []int{2, 3, 16, 64} {
 		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
-			routing, route := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+			routing, route, nodes := replicationRouteTargetBenchmarkFixture(b, ownerCount)
 			source := route.Route.Owners[0]
 			target := route.Route.Owners[len(route.Route.Owners)-1]
 			var materializedDuration, directDuration time.Duration
@@ -2430,7 +2432,7 @@ func BenchmarkReplicationRouteTargetsNodeAlternating(b *testing.B) {
 						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
 						directDuration += time.Since(started)
 					} else {
-						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeMaterializedControl(routing, route, source, target)
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeMaterializedControl(routing, nodes, route, source, target)
 						materializedDuration += time.Since(started)
 					}
 				}
@@ -2445,7 +2447,7 @@ func BenchmarkReplicationRouteTargetsNodeAlternating(b *testing.B) {
 func BenchmarkReplicationRouteTargetsNodeValidationAlternating(b *testing.B) {
 	for _, ownerCount := range []int{2, 3, 16, 64} {
 		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
-			routing, route := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+			routing, route, nodes := replicationRouteTargetBenchmarkFixture(b, ownerCount)
 			source := route.Route.Owners[0]
 			target := route.Route.Owners[len(route.Route.Owners)-1]
 			var indexedDuration, normalizedDuration time.Duration
@@ -2458,7 +2460,7 @@ func BenchmarkReplicationRouteTargetsNodeValidationAlternating(b *testing.B) {
 						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
 						normalizedDuration += time.Since(started)
 					} else {
-						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeIndexedControl(routing, route, source, target)
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeIndexedControl(routing, nodes, route, source, target)
 						indexedDuration += time.Since(started)
 					}
 				}
@@ -2472,7 +2474,7 @@ func BenchmarkReplicationRouteTargetsNodeValidationAlternating(b *testing.B) {
 
 func BenchmarkReplicationRouteTargetsNode(b *testing.B) {
 	for _, ownerCount := range []int{2, 3, 16, 64} {
-		routing, route := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+		routing, route, nodes := replicationRouteTargetBenchmarkFixture(b, ownerCount)
 		source := route.Route.Owners[0]
 		target := route.Route.Owners[len(route.Route.Owners)-1]
 		for _, direct := range []bool{false, true} {
@@ -2486,7 +2488,7 @@ func BenchmarkReplicationRouteTargetsNode(b *testing.B) {
 					if direct {
 						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
 					} else {
-						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeMaterializedControl(routing, route, source, target)
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeMaterializedControl(routing, nodes, route, source, target)
 					}
 				}
 			})
@@ -2494,7 +2496,7 @@ func BenchmarkReplicationRouteTargetsNode(b *testing.B) {
 	}
 }
 
-func replicationRouteTargetBenchmarkFixture(tb testing.TB, ownerCount int) (replicationRoutingSnapshot, ElectionKeyRoute) {
+func replicationRouteTargetBenchmarkFixture(tb testing.TB, ownerCount int) (replicationRoutingSnapshot, ElectionKeyRoute, map[string]TopologyNode) {
 	tb.Helper()
 	nodes := make([]TopologyNode, ownerCount)
 	replicas := make([]string, 0, ownerCount-1)
@@ -2519,7 +2521,7 @@ func replicationRouteTargetBenchmarkFixture(tb testing.TB, ownerCount int) (repl
 		tb.Fatal("newReplicationRoutingSnapshot() failed")
 	}
 	shard := routing.shards[0]
-	return routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.owners[shard.ID]}}
+	return routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.owners[shard.ID]}}, topologyNodesByID(routing.topology)
 }
 
 func BenchmarkPrecomputedReplicationTargetsDedupAlternating(b *testing.B) {
@@ -2538,7 +2540,7 @@ func BenchmarkPrecomputedReplicationTargetsDedupAlternating(b *testing.B) {
 				for pass := 0; pass < 2; pass++ {
 					started := time.Now()
 					if directFirst == (pass == 0) {
-						benchmarkReplicationTargetsSink = precomputedNormalizedReplicationTargets(owners, nodes, nil, "node-000")
+						benchmarkReplicationTargetsSink = precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, nil, "node-000")
 						directDuration += time.Since(started)
 					} else {
 						benchmarkReplicationTargetsSink = precomputedReplicationTargetsDeduplicatingControl(owners, nodes, nil, "node-000")
@@ -2572,8 +2574,10 @@ func BenchmarkReplicationRoutingSnapshotUncheckedOwnersAlternating(b *testing.B)
 						snapshot, ok = newReplicationRoutingSnapshotUncheckedOwnersCandidate("node-000", store, nil)
 						candidateDuration += time.Since(started)
 					} else {
-						snapshot, ok = newReplicationRoutingSnapshot("node-000", store, nil)
+						control, controlOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, nil)
 						baselineDuration += time.Since(started)
+						snapshot, ok = control.snapshot, controlOK
+						benchmarkReplicationRoutingNodeMapSink = control.nodes
 					}
 					if !ok {
 						b.Fatal("routing snapshot construction failed")
@@ -2588,11 +2592,131 @@ func BenchmarkReplicationRoutingSnapshotUncheckedOwnersAlternating(b *testing.B)
 	}
 }
 
-func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshot, bool) {
+func BenchmarkReplicationRoutingSnapshotSortedNodesAlternating(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64} {
+		b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+			store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+			if err != nil {
+				b.Fatal(err)
+			}
+			var mapDuration, sortedDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				sortedFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					var snapshot replicationRoutingSnapshot
+					var ok bool
+					if sortedFirst == (pass == 0) {
+						snapshot, ok = newReplicationRoutingSnapshot("node-000", store, nil)
+						sortedDuration += time.Since(started)
+					} else {
+						control, controlOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, nil)
+						mapDuration += time.Since(started)
+						snapshot, ok = control.snapshot, controlOK
+						benchmarkReplicationRoutingNodeMapSink = control.nodes
+					}
+					if !ok {
+						b.Fatal("routing snapshot construction failed")
+					}
+					benchmarkReplicationRoutingSnapshotSink = snapshot
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(mapDuration.Nanoseconds())/float64(b.N), "map_ns/snapshot")
+			b.ReportMetric(float64(sortedDuration.Nanoseconds())/float64(b.N), "sorted_ns/snapshot")
+		})
+	}
+}
+
+func BenchmarkReplicationRoutingSnapshotNodeIndex(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64} {
+		store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, sortedNodes := range []bool{false, true} {
+			name := "Map"
+			if sortedNodes {
+				name = "SortedNodes"
+			}
+			b.Run(strconv.Itoa(size)+"Shards/"+name, func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					var snapshot replicationRoutingSnapshot
+					var ok bool
+					if sortedNodes {
+						snapshot, ok = newReplicationRoutingSnapshot("node-000", store, nil)
+					} else {
+						control, controlOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, nil)
+						snapshot, ok = control.snapshot, controlOK
+						benchmarkReplicationRoutingNodeMapSink = control.nodes
+					}
+					if !ok {
+						b.Fatal("routing snapshot construction failed")
+					}
+					benchmarkReplicationRoutingSnapshotSink = snapshot
+				}
+			})
+		}
+	}
+}
+
+type replicationRoutingSnapshotNodeMapControl struct {
+	snapshot replicationRoutingSnapshot
+	nodes    map[string]TopologyNode
+}
+
+func newReplicationRoutingSnapshotNodeMapControl(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshotNodeMapControl, bool) {
 	topology, fingerprint := topologyStore.replicationSnapshot()
+	nodes := topologyNodesByID(topology)
 	snapshot := replicationRoutingSnapshot{
 		topology:    topology,
-		nodes:       topologyNodesByID(topology),
+		leaders:     make(map[uint32]ElectionLeader, len(topology.Shards)),
+		owners:      make(map[uint32][]string, len(topology.Shards)),
+		targets:     make(map[uint32][]TopologyNode, len(topology.Shards)),
+		self:        self,
+		fingerprint: fingerprint,
+	}
+	if election != nil {
+		snapshot.online = election.activeNodesSnapshot(topology)
+	}
+	if topologyMode(topology.Mode) == TopologyModeFullReplica {
+		shard, ok := topology.fullReplicaShard()
+		if !ok {
+			return replicationRoutingSnapshotNodeMapControl{}, false
+		}
+		snapshot.shards = []TopologyShard{shard}
+	} else {
+		snapshot.shards = topology.Shards
+	}
+	if len(snapshot.shards) == 0 {
+		return replicationRoutingSnapshotNodeMapControl{}, false
+	}
+	for _, shard := range snapshot.shards {
+		owners := routeOwners(shard)
+		snapshot.owners[shard.ID] = owners
+		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, snapshot.online, snapshot.self)
+		if election != nil {
+			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
+		} else {
+			snapshot.leaders[shard.ID] = ElectionLeader{
+				Shard:      shard.ID,
+				Leader:     shard.Primary,
+				Available:  true,
+				Primary:    shard.Primary,
+				Candidates: owners,
+			}
+		}
+	}
+	return replicationRoutingSnapshotNodeMapControl{snapshot: snapshot, nodes: nodes}, true
+}
+
+func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshot, bool) {
+	topology, fingerprint := topologyStore.replicationSnapshot()
+	nodes := topologyNodesByID(topology)
+	snapshot := replicationRoutingSnapshot{
+		topology:    topology,
 		leaders:     make(map[uint32]ElectionLeader, len(topology.Shards)),
 		owners:      make(map[uint32][]string, len(topology.Shards)),
 		targets:     make(map[uint32][]TopologyNode, len(topology.Shards)),
@@ -2617,7 +2741,7 @@ func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topology
 	for _, shard := range snapshot.shards {
 		owners := routeOwners(shard)
 		snapshot.owners[shard.ID] = owners
-		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargetsUncheckedCandidate(owners, snapshot.nodes, snapshot.online, snapshot.self)
+		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargetsUncheckedCandidate(owners, nodes, snapshot.online, snapshot.self)
 		if election != nil {
 			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
 		} else {

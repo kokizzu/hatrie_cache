@@ -192,6 +192,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Bounded lazy outbox restore](#binary-grouped-replication-outbox)",
 		"[Election-record status leader lookup](#election-record-status-leader-lookup)",
 		"[Normalized replication target precomputation](#normalized-replication-target-precomputation)",
+		"[Map-free replication routing snapshots](#map-free-replication-routing-snapshots)",
 		"[Direct replication route membership](#direct-replication-route-membership)",
 		"[Normalized replication route owners](#direct-replication-route-membership)",
 		"73.8% lower",
@@ -660,6 +661,35 @@ func TestDocsDescribeNormalizedReplicationTargetPrecomputation(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing normalized replication-target token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeMapFreeReplicationRoutingSnapshots(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[map-free](BENCHMARK.md#map-free-replication-routing-snapshots)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing map-free replication routing token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkReplicationRoutingSnapshotSortedNodesAlternating",
+		"BenchmarkReplicationRoutingSnapshotNodeIndex",
+		"TestReplicationRoutingSnapshotSortedNodesMatchNodeMap",
+		"1.34x faster",
+		"16,472",
+		"68,232 B",
+		"four fewer allocations",
+		"test-only wrapper",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing map-free replication routing token %q", token)
 		}
 	}
 }

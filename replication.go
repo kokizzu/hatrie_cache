@@ -278,7 +278,6 @@ func (group replicationTaskGroup) replicationSyncPayloadBatch() replicationSyncP
 type replicationRoutingSnapshot struct {
 	topology    ClusterTopology
 	shards      []TopologyShard
-	nodes       map[string]TopologyNode
 	online      map[string]bool
 	leaders     map[uint32]ElectionLeader
 	owners      map[uint32][]string
@@ -2457,7 +2456,6 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 	topology, fingerprint := topologyStore.replicationSnapshot()
 	snapshot := replicationRoutingSnapshot{
 		topology:    topology,
-		nodes:       topologyNodesByID(topology),
 		leaders:     make(map[uint32]ElectionLeader, len(topology.Shards)),
 		owners:      make(map[uint32][]string, len(topology.Shards)),
 		targets:     make(map[uint32][]TopologyNode, len(topology.Shards)),
@@ -2482,7 +2480,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 	for _, shard := range snapshot.shards {
 		owners := routeOwners(shard)
 		snapshot.owners[shard.ID] = owners
-		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargets(owners, snapshot.nodes, snapshot.online, snapshot.self)
+		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargets(owners, topology.Nodes, snapshot.online, snapshot.self)
 		if election != nil {
 			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
 			continue
@@ -2538,36 +2536,11 @@ func (snapshot replicationRoutingSnapshot) replicationScanRouteForKey(key string
 	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[shard.ID]}, true
 }
 
-func (snapshot replicationRoutingSnapshot) replicationTargets(route ElectionKeyRoute, self string) []TopologyNode {
-	if self == snapshot.self {
-		if targets, ok := snapshot.targets[route.Route.Shard.ID]; ok {
-			return targets
-		}
-	}
-	owners := route.Route.Owners
-	if len(owners) == 0 {
-		owners = snapshot.owners[route.Route.Shard.ID]
-	}
-	targets := make([]TopologyNode, 0, len(owners))
-	for _, nodeID := range owners {
-		if nodeID == "" || nodeID == self {
-			continue
-		}
-		if snapshot.online != nil && !snapshot.online[nodeID] {
-			continue
-		}
-		node, ok := snapshot.nodes[nodeID]
-		if ok {
-			targets = append(targets, node)
-		}
-	}
-	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].ID < targets[j].ID
-	})
-	return targets
+func (snapshot replicationRoutingSnapshot) replicationTargets(route ElectionKeyRoute) []TopologyNode {
+	return snapshot.targets[route.Route.Shard.ID]
 }
 
-func precomputedNormalizedReplicationTargets(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
+func precomputedNormalizedReplicationTargets(owners []string, nodes []TopologyNode, online map[string]bool, self string) []TopologyNode {
 	targets := make([]TopologyNode, 0, len(owners))
 	for _, nodeID := range owners {
 		nodeID = strings.TrimSpace(nodeID)
@@ -2577,7 +2550,7 @@ func precomputedNormalizedReplicationTargets(owners []string, nodes map[string]T
 		if online != nil && !online[nodeID] {
 			continue
 		}
-		node, ok := nodes[nodeID]
+		node, ok := normalizedTopologyNode(nodes, nodeID)
 		if !ok {
 			continue
 		}

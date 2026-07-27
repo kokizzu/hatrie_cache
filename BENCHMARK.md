@@ -317,6 +317,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Election-record status leader lookup](#election-record-status-leader-lookup), healthy one/four/64 shards | Temporary active map: 459.15/961.65/12,100 ns; 464/976/14,680 heap B; 5/8/70 allocs | Existing election records: 289.9/744.65/9,153 ns; 208/720/11,136 heap B; 3/6/66 allocs | 1.58x/1.29x/1.32x faster; 256/256/3,544 fewer heap bytes; 2/2/4 fewer allocations | Maintenance generations retain the former active map and are 1.07x faster with identical memory; cached mode bit adds no topology-store bytes on amd64 |
 | Current pass | [Cached replication routing fingerprint](#cached-replication-routing-fingerprint), one/four shards | Rehash: 3,238/7,028.5 ns; 3,920/7,832 heap B; 52/129 allocs | Cached: 1,621.5/3,447.5 ns; 3,032/5,600 heap B; 14/34 allocs | 2.00x/2.04x faster; 1.29x/1.40x lower heap; 3.71x/3.79x fewer allocations | Reuses the fingerprint already computed by validated topology installation; topology cloning, routing maps, wire, and behavior are unchanged |
 | Current pass | [Normalized replication target precomputation](#normalized-replication-target-precomputation), one/four/64 shards | Per-shard duplicate map: 1,436.5/3,591.5/47,579.5 ns; 64 shards: 84,759 B, 403 allocs | Validated owners: 1,395/3,121.5/43,078.5 ns; 64 shards: 84,709 B, 402 allocs | 1.03x/1.15x/1.10x faster; 64 shards use 50 fewer heap bytes and one fewer allocation | Applies only to private snapshots of normalized topology; self, online, existence, and sorted-output filters are unchanged |
+| Current pass | [Map-free replication routing snapshots](#map-free-replication-routing-snapshots), 2/4/64 shards | Node map: 1,722.5/3,304.5/45,159 ns; 3,360/5,440/84,704 heap B | Sorted nodes: 1,282.5/2,819.5/42,968 ns; 2,288/4,368/68,232 heap B | 1.34x/1.17x/1.05x faster; 1.47x/1.25x/1.24x lower heap; 2/2/4 fewer allocations | Uses the normalized sorted topology generation and immutable precomputed targets; routing, target order, election state, wire, and behavior are unchanged |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
@@ -3476,6 +3477,48 @@ production code was reverted; the test-only candidate and
 `BenchmarkReplicationRoutingSnapshotUncheckedOwnersAlternating` retain the
 reproducer. Owner cleanup and missing-node rejection therefore remain in the
 private helper, while only the proven duplicate map is absent.
+
+<a id="map-free-replication-routing-snapshots"></a>
+#### Map-Free Replication Routing Snapshots
+
+Routing snapshots previously cloned the normalized topology and then built and
+retained a second `map[string]TopologyNode`. Snapshot construction used that
+map only while precomputing each shard's immutable target slice. Topology
+normalization already sorts unique node IDs, so construction now resolves each
+owner with the existing allocation-free binary lookup and retains no node map.
+All production target consumers use the precomputed slices; remote-source
+membership is handled by the direct normalized-owner check below rather than by
+rebuilding targets.
+
+The test-first control builds complete map-backed and sorted-node snapshots at
+2, 4, 8, 16, 32, and 64 shards, both without election state and with the last
+node offline, then compares every field exactly. The target-helper matrix also
+compares sorted lookup with the former map and deduplicating controls for
+multiple self IDs and online maps. The benchmark retains the former node map in
+a test-only wrapper so its allocation and lifetime match the removed field.
+
+```sh
+make run CMD='go test . -run="TestReplicationRoutingSnapshotSortedNodesMatchNodeMap|TestPrecomputedReplicationTargetsMatchDeduplicatingControl|TestReplicationRoutingSnapshot" -count=10'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingSnapshotSortedNodesAlternating$$ -benchtime=20000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingSnapshotNodeIndex$$ -benchmem -benchtime=10000x -count=10 -cpu=1'
+```
+
+| Ten-run median | Retained node map | Normalized sorted nodes | Improvement |
+| --- | ---: | ---: | ---: |
+| Two shards | 1,722.5 ns; 3,360 B; 18 allocs | 1,282.5 ns; 2,288 B; 16 allocs | 1.34x faster; 1.47x lower heap; two fewer allocations |
+| Four shards | 3,304.5 ns; 5,440 B; 34 allocs | 2,819.5 ns; 4,368 B; 32 allocs | 1.17x faster; 1.25x lower heap; two fewer allocations |
+| Eight shards | 5,426 ns; 8,448 B; 58 allocs | 4,850.5 ns; 7,376 B; 56 allocs | 1.12x faster; 1.15x lower heap; two fewer allocations |
+| 16 shards | 11,547 ns; 21,472 B; 114 allocs | 10,673 ns; 17,288 B; 110 allocs | 1.08x faster; 1.24x lower heap; four fewer allocations |
+| 32 shards | 22,151 ns; 42,464 B; 210 allocs | 21,132.5 ns; 34,184 B; 206 allocs | 1.05x faster; 1.24x lower heap; four fewer allocations |
+| 64 shards | 45,159 ns; 84,704 B; 402 allocs | 42,968 ns; 68,232 B; 398 allocs | 1.05x faster; 1.24x lower heap; four fewer allocations |
+
+CPU values are alternating same-binary medians; heap and allocation values are
+exact across every isolated run. The 64-shard snapshot removes 16,472 heap
+bytes. The private target accessor now exposes only
+its immutable precomputed result, matching every production caller. Topology
+cloning, self and online filtering, missing-node rejection, target sorting,
+election generation, shard routing, wire, storage, and persistence are
+unchanged.
 
 <a id="direct-replication-route-membership"></a>
 #### Direct Replication Route Membership

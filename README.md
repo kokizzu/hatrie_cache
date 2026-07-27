@@ -1884,6 +1884,13 @@ fixture uses 50 fewer heap bytes and one fewer allocation. Self exclusion,
 online filtering, node validation, target ordering, wire, and storage remain
 unchanged.
 
+Routing snapshots are also
+[map-free](BENCHMARK.md#map-free-replication-routing-snapshots): the normalized
+sorted node generation resolves owners while targets are precomputed, so a
+second node map is neither built nor retained. Construction is 1.34x/1.17x/
+1.05x faster at 2/4/64 shards and uses 1.47x/1.25x/1.24x lower heap, while
+target order, election state, routing, wire, and storage remain unchanged.
+
 Incoming digest routing uses
 [direct target membership](BENCHMARK.md#direct-replication-route-membership)
 instead of allocating and sorting a complete target slice for each boolean

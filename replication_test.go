@@ -431,7 +431,7 @@ func TestReplicationGRPCStreamDigestDeleteUsesConfiguredHTTPFallback(t *testing.
 			if !ok {
 				t.Fatal("snapshotReplicationRouting() ok = false")
 			}
-			target := routing.nodes["node-b"]
+			target := replicationRoutingNode(t, routing, "node-b")
 			session := newReplicationGRPCSyncSession(context.Background(), replicator)
 			t.Cleanup(session.close)
 
@@ -3563,7 +3563,7 @@ func TestReplicationScanRouteForKeyMatchesGenericRouting(t *testing.T) {
 				if !gotOK {
 					continue
 				}
-				if got.Route.Shard.ID != want.Route.Shard.ID || !reflect.DeepEqual(got.Leader, want.Leader) || !reflect.DeepEqual(got.Route.Owners, want.Route.Owners) || !reflect.DeepEqual(routing.replicationTargets(got, "node-a"), routing.replicationTargets(want, "node-a")) {
+				if got.Route.Shard.ID != want.Route.Shard.ID || !reflect.DeepEqual(got.Leader, want.Leader) || !reflect.DeepEqual(got.Route.Owners, want.Route.Owners) || !reflect.DeepEqual(routing.replicationTargets(got), routing.replicationTargets(want)) {
 					t.Fatalf("replication scan route(%q) = %#v, want routing scope %#v", key, got, want)
 				}
 			}
@@ -3795,7 +3795,7 @@ func TestHTTPReplicatorAggregatesLegacyFallbackScanPages(t *testing.T) {
 	if !ok {
 		t.Fatal("snapshotReplicationRouting() ok = false")
 	}
-	replicator.markReplicationDigestUnsupported(routing.nodes["node-b"], routing.fingerprint)
+	replicator.markReplicationDigestUnsupported(replicationRoutingNode(t, routing, "node-b"), routing.fingerprint)
 
 	result := replicator.SyncAll(context.Background(), source, "session:")
 	if result.Skipped || result.Entries != keyCount {
@@ -4958,7 +4958,7 @@ func TestPrepareReplicationDigestPackedTaskGroupReusesScannedValuesAndFallsBackA
 		t.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(t, routing, "node-b"),
 		prefix:   "session:",
 		pageSize: 10,
 	}
@@ -5071,7 +5071,7 @@ func TestReplicationScannedValuesFallBackAfterMutationBetweenChunks(t *testing.T
 		t.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(t, routing, "node-b"),
 		prefix:   "counter:",
 		pageSize: keyCount,
 	}
@@ -5173,7 +5173,7 @@ func TestReplicationScannedValuesMatchScalarWireForInMemoryTypes(t *testing.T) {
 		t.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(t, routing, "node-b"),
 		prefix:   "type:",
 		pageSize: 32,
 	}
@@ -5226,7 +5226,7 @@ func TestReplicationDigestKeySourceIteratorSkipsValueDigest(t *testing.T) {
 		t.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(t, routing, "node-b"),
 		prefix:   "session:",
 		pageSize: 10,
 	}
@@ -5269,7 +5269,7 @@ func TestReplicationDigestKeySourceAppendsFallbackChangesDirectly(t *testing.T) 
 		t.Fatal("snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target:   routing.nodes["node-b"],
+		target:   replicationRoutingNode(t, routing, "node-b"),
 		prefix:   "session:",
 		pageSize: 2,
 	}
@@ -5323,14 +5323,14 @@ func TestReplicationDigestSourceIteratorPrevalidatesInvariantScope(t *testing.T)
 		{
 			name: "entire one-shard scope",
 			inventory: replicationDigestTargetInventory{
-				target: oneShardRouting.nodes["node-b"], prefix: "session:", pageSize: 10,
+				target: replicationRoutingNode(t, oneShardRouting, "node-b"), prefix: "session:", pageSize: 10,
 			},
 			wantMode: true, wantEntry: true,
 		},
 		{
 			name: "bucket-filtered scope",
 			inventory: replicationDigestTargetInventory{
-				target: oneShardRouting.nodes["node-b"], prefix: "session:", pageSize: 10, hasBuckets: true,
+				target: replicationRoutingNode(t, oneShardRouting, "node-b"), prefix: "session:", pageSize: 10, hasBuckets: true,
 			},
 		},
 		{
@@ -5381,7 +5381,7 @@ func TestReplicationDigestSourceIteratorPrevalidatesInvariantScope(t *testing.T)
 		t.Fatal("multi-shard snapshotReplicationRouting() ok = false")
 	}
 	inventory := replicationDigestTargetInventory{
-		target: multiShardRouting.nodes["node-b"], prefix: "session:", pageSize: 10,
+		target: replicationRoutingNode(t, multiShardRouting, "node-b"), prefix: "session:", pageSize: 10,
 	}
 	iterator := newReplicationDigestKeySourceIterator(context.Background(), trie, multiShardRouting, "node-a", inventory)
 	defer iterator.close()
@@ -5401,6 +5401,15 @@ func replicationDigestChangeKeys(changes []replicationDigestChange) []string {
 		keys[index] = changes[index].key
 	}
 	return keys
+}
+
+func replicationRoutingNode(tb testing.TB, routing replicationRoutingSnapshot, nodeID string) TopologyNode {
+	tb.Helper()
+	node, ok := normalizedTopologyNode(routing.topology.Nodes, nodeID)
+	if !ok {
+		tb.Fatalf("routing node %q is not registered", nodeID)
+	}
+	return node
 }
 
 func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
@@ -5441,7 +5450,7 @@ func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 		if gotOK != wantOK || !reflect.DeepEqual(gotRoute, wantRoute) {
 			t.Fatalf("snapshot route %q = %#v/%v, want %#v/%v", key, gotRoute, gotOK, wantRoute, wantOK)
 		}
-		gotTargets := snapshot.replicationTargets(gotRoute, replicator.self)
+		gotTargets := snapshot.replicationTargets(gotRoute)
 		wantTargets := replicator.replicationTargets(wantRoute)
 		if !reflect.DeepEqual(gotTargets, wantTargets) {
 			t.Fatalf("snapshot targets %q = %#v, want %#v", key, gotTargets, wantTargets)
@@ -5454,7 +5463,7 @@ func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 
 func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 	for _, ownerCount := range []int{2, 3, 16, 64} {
-		routing, route := replicationRouteTargetBenchmarkFixture(t, ownerCount)
+		routing, route, nodes := replicationRouteTargetBenchmarkFixture(t, ownerCount)
 		owners := route.Route.Owners
 		for _, online := range []map[string]bool{
 			nil,
@@ -5463,16 +5472,16 @@ func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 			routing.online = online
 			for _, shard := range routing.shards {
 				owners := routing.owners[shard.ID]
-				routing.targets[shard.ID] = precomputedNormalizedReplicationTargets(owners, routing.nodes, online, routing.self)
+				routing.targets[shard.ID] = precomputedNormalizedReplicationTargets(owners, routing.topology.Nodes, online, routing.self)
 			}
 			for _, source := range []string{"", routing.self, owners[0], owners[len(owners)-1]} {
 				for _, target := range append(append([]string(nil), owners...), "", "missing-node") {
-					want := replicationRouteTargetsNodeMaterializedControl(routing, route, source, target)
+					want := replicationRouteTargetsNodeMaterializedControl(routing, nodes, route, source, target)
 					got := replicationRouteTargetsNode(routing, route, source, target)
 					if got != want {
 						t.Fatalf("%d owners online=%v source=%q target=%q direct=%v, materialized=%v", ownerCount, online, source, target, got, want)
 					}
-					indexedGot := replicationRouteTargetsNodeIndexedControl(routing, route, source, target)
+					indexedGot := replicationRouteTargetsNodeIndexedControl(routing, nodes, route, source, target)
 					if indexedGot != want {
 						t.Fatalf("%d owners online=%v source=%q target=%q indexed=%v, materialized=%v", ownerCount, online, source, target, indexedGot, want)
 					}
@@ -5483,12 +5492,12 @@ func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 		fallbackRoute := route
 		fallbackRoute.Route.Owners = nil
 		for _, target := range append(append([]string(nil), owners...), "missing-node") {
-			want := replicationRouteTargetsNodeMaterializedControl(routing, fallbackRoute, owners[0], target)
+			want := replicationRouteTargetsNodeMaterializedControl(routing, nodes, fallbackRoute, owners[0], target)
 			got := replicationRouteTargetsNode(routing, fallbackRoute, owners[0], target)
 			if got != want {
 				t.Fatalf("%d fallback owners target=%q direct=%v, materialized=%v", ownerCount, target, got, want)
 			}
-			indexedGot := replicationRouteTargetsNodeIndexedControl(routing, fallbackRoute, owners[0], target)
+			indexedGot := replicationRouteTargetsNodeIndexedControl(routing, nodes, fallbackRoute, owners[0], target)
 			if indexedGot != want {
 				t.Fatalf("%d fallback owners target=%q indexed=%v, materialized=%v", ownerCount, target, indexedGot, want)
 			}
@@ -5496,7 +5505,7 @@ func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 	}
 }
 
-func replicationRouteTargetsNodeIndexedControl(routing replicationRoutingSnapshot, route ElectionKeyRoute, source string, targetNode string) bool {
+func replicationRouteTargetsNodeIndexedControl(routing replicationRoutingSnapshot, nodes map[string]TopologyNode, route ElectionKeyRoute, source string, targetNode string) bool {
 	if targetNode == "" || targetNode == source {
 		return false
 	}
@@ -5511,14 +5520,18 @@ func replicationRouteTargetsNodeIndexedControl(routing replicationRoutingSnapsho
 		if owner != targetNode {
 			continue
 		}
-		_, ok := routing.nodes[targetNode]
+		_, ok := nodes[targetNode]
 		return ok
 	}
 	return false
 }
 
-func replicationRouteTargetsNodeMaterializedControl(routing replicationRoutingSnapshot, route ElectionKeyRoute, source string, targetNode string) bool {
-	for _, target := range routing.replicationTargets(route, source) {
+func replicationRouteTargetsNodeMaterializedControl(routing replicationRoutingSnapshot, nodes map[string]TopologyNode, route ElectionKeyRoute, source string, targetNode string) bool {
+	owners := route.Route.Owners
+	if len(owners) == 0 {
+		owners = routing.owners[route.Route.Shard.ID]
+	}
+	for _, target := range precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, routing.online, source) {
 		if target.ID == targetNode {
 			return true
 		}
@@ -5550,8 +5563,8 @@ func TestReplicationRoutingSnapshotReusesPrecomputedTargets(t *testing.T) {
 		t.Fatal("routeForKey() ok = false")
 	}
 
-	first := snapshot.replicationTargets(route, replicator.self)
-	second := snapshot.replicationTargets(route, replicator.self)
+	first := snapshot.replicationTargets(route)
+	second := snapshot.replicationTargets(route)
 	if len(first) != 2 || first[0].ID != "node-b" || first[1].ID != "node-c" {
 		t.Fatalf("precomputed targets = %#v, want node-b then node-c", first)
 	}
@@ -5582,7 +5595,7 @@ func TestPrecomputedReplicationTargetsMatchDeduplicatingControl(t *testing.T) {
 						t.Fatalf("normalized shard %d owner %q is not registered", shard.ID, owner)
 					}
 				}
-				got := precomputedNormalizedReplicationTargets(owners, nodes, online, self)
+				got := precomputedNormalizedReplicationTargets(owners, topology.Nodes, online, self)
 				cleanupWant := precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, online, self)
 				if !reflect.DeepEqual(got, cleanupWant) {
 					t.Fatalf("targets for shard %d self=%q online=%v = %#v, cleanup control %#v", shard.ID, self, online, got, cleanupWant)
@@ -5595,6 +5608,30 @@ func TestPrecomputedReplicationTargetsMatchDeduplicatingControl(t *testing.T) {
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("targets for shard %d self=%q online=%v = %#v, want %#v", shard.ID, self, online, got, want)
 				}
+			}
+		}
+	}
+}
+
+func TestReplicationRoutingSnapshotSortedNodesMatchNodeMap(t *testing.T) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64} {
+		store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+		if err != nil {
+			t.Fatalf("NewTopologyStore(%d) error = %v", size, err)
+		}
+		for _, withElection := range []bool{false, true} {
+			var election *ElectionStore
+			if withElection {
+				election = NewElectionStore(store, ElectionOptions{})
+				if err := election.MarkOffline(fmt.Sprintf("node-%03d", size-1)); err != nil {
+					t.Fatalf("MarkOffline(%d) error = %v", size, err)
+				}
+			}
+			control, wantOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, election)
+			want := control.snapshot
+			got, gotOK := newReplicationRoutingSnapshot("node-000", store, election)
+			if gotOK != wantOK || !reflect.DeepEqual(got, want) {
+				t.Fatalf("%d shards election=%v sorted snapshot = %#v/%v, map snapshot %#v/%v", size, withElection, got, gotOK, want, wantOK)
 			}
 		}
 	}
