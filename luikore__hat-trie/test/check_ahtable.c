@@ -28,6 +28,43 @@ str_map* M;
 int have_error = 0;
 
 
+void test_ahtable_header_and_non_power_slots()
+{
+    fprintf(stderr, "checking table header and non-power-of-two slots... \n");
+
+    if (sizeof(ahtable_t) != 8 * sizeof(size_t)) {
+        fprintf(stderr, "[error] ahtable header uses %zu bytes, expected %zu\n",
+                sizeof(ahtable_t), 8 * sizeof(size_t));
+        have_error = 1;
+    }
+
+    ahtable_t* table = ahtable_create_n(3);
+    char key[32];
+    size_t i;
+    for (i = 0; i < 1024; ++i) {
+        int len = snprintf(key, sizeof(key), "non-power-%04zu", i);
+        value_t* value = ahtable_get(table, key, (size_t) len);
+        if (value == NULL) {
+            fprintf(stderr, "[error] non-power insert %zu failed\n", i);
+            have_error = 1;
+            break;
+        }
+        *value = i + 1;
+    }
+    for (i = 0; i < 1024; ++i) {
+        int len = snprintf(key, sizeof(key), "non-power-%04zu", i);
+        value_t* value = ahtable_tryget(table, key, (size_t) len);
+        if (value == NULL || *value != i + 1) {
+            fprintf(stderr, "[error] non-power lookup %zu failed\n", i);
+            have_error = 1;
+            break;
+        }
+    }
+    ahtable_free(table);
+    fprintf(stderr, "done.\n");
+}
+
+
 void setup()
 {
     fprintf(stderr, "generating %zu keys ... ", n);
@@ -826,6 +863,7 @@ void test_checked_array_size()
 int main()
 {
     test_checked_array_size();
+    test_ahtable_header_and_non_power_slots();
     test_ahtable_zero_slot_create();
     test_ahtable_null_api();
     test_ahtable_empty_slot_operations();

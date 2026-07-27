@@ -288,6 +288,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
+| Reverted | [Native slot-mask rollback](#native-slot-mask-rollback), 50m native lookups and complete command controls | Runtime flag: power-of-two 3.474 s; non-power-of-two 3.551 s; specialized GET 154.8 ns | Original modulo: power-of-two 3.521/3.536 s; non-power-of-two 3.504 s; GET 155.8 ns | Specialized native lookup was 1.037x faster, but complete commands improved at most 1.006x; the shared fallback was 1.013x slower | Both implementations removed; the branch penalized arbitrary slot counts, while three specialized C entry points did not clear the complete-path complexity gate |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Shared scalar-batch keys](#shared-scalar-batch-keys), 10k same-key GET, batch 16 | Repeated key column: 394.3 ns/command; 2,368,864 heap B; 34,823 allocs; 23.72 wire B/command | One shared key: 316.1 ns/command; 1,684,878 heap B; 23,020 allocs; 11.54 wire B/command | 1.25x faster, 1.41x lower heap, 1.51x fewer allocs, 2.06x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
@@ -377,6 +378,7 @@ tree.
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Power-of-two ahtable slot mask | A branch-free HAT-trie-only API made 50 million native lookups 1.037x faster with unchanged backing, capacity, and header size | Shared dispatch made arbitrary-size lookup 1.013x slower; three specialized entry points improved complete GET/SET/mixed profiles by only 0.0%-0.6% | Both candidates removed; the stronger lookup fixture and non-power-of-two/header tests remain; see [Native slot-mask rollback](#native-slot-mask-rollback) |
 | Known-valid-key GET helper | Intended to skip redundant key validation | 121.7 ns versus 120.1 ns for the checked path | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Uppercase EXISTS fast path | Post-dispatch specialization made hits/misses 1.069x/1.038x faster with unchanged zero allocation | Large-switch placements made GET up to 1.045x slower; the isolated post-dispatch branch made lowercase generic `exists` about 1.046x slower, and the 100-command mixed profile was neutral | All three placements and temporary tests were removed; see [uppercase EXISTS fast path rollback](#uppercase-exists-fast-path-rollback) |
 | Idempotent string assignment | Intended to skip an unchanged string-header write and reusable-index check | The refined one-check prototype made duplicates 1.27x slower and true replacements 1.07x slower | Removed before production; direct assignment remains; see [idempotent string assignment](#idempotent-string-assignment-rollback) |
@@ -1728,6 +1730,61 @@ The isolated raw output is written to
 `build/benchmarks/native-ahtable-allocator.txt`. The capacity side array and
 bounded slack are the explicit memory cost; the full-process run shows their
 impact after the Go runtime and backing pools are included.
+
+<a id="native-slot-mask-rollback"></a>
+#### Native Slot-Mask Rollback
+
+Production HAT-trie buckets start with 4,096 slots and split into tables whose
+slot counts remain powers of two. Two candidates therefore replaced the
+per-key `hash % slots` operation with `hash & (slots - 1)`. Tests first pinned
+the existing 64-byte `ahtable_t` header and exercised 1,024 keys in a
+three-slot table, because the public `ahtable_create_n` API accepts arbitrary
+positive sizes.
+
+The first candidate stored a power-of-two bit in existing header padding and
+selected mask or modulo in every operation. Its alternating 50-million-lookup
+power-of-two median improved from 3.521 to 3.474 seconds, but the 4,093-slot
+control regressed from 3.504 to 3.551 seconds, or 1.013x slower. The runtime
+branch was removed.
+
+The second candidate restored the generic API's exact modulo machine code and
+added three HAT-trie-only get/try-get/delete entry points. This produced the
+stronger isolated result without changing header, live backing, retained slot
+capacity, or reallocation counts:
+
+| Alternating median | Original modulo | Specialized mask | Result |
+| --- | ---: | ---: | --- |
+| Native lookup, 50 million | 3.536300 s | 3.411535 s | 1.037x faster |
+| Live slot bytes | 3,900,000 B | 3,900,000 B | unchanged |
+| Retained slot capacity | 4,172,719 B | 4,172,719 B | unchanged |
+| Total slot reallocations | 58,925 | 58,925 | unchanged |
+
+The warmed reverse-order complete command controls did not preserve enough of
+that isolated gain:
+
+| Complete command, seven-run median | Original modulo | Specialized mask | Result |
+| --- | ---: | ---: | --- |
+| String GET | 155.8 ns | 154.8 ns | 1.006x faster |
+| String SET | 174.4 ns | 173.9 ns | 1.003x faster |
+| Mixed read-heavy 100 | 16,681 ns | 16,687 ns | neutral within 0.04% |
+| Mixed write-heavy 100 | 28,497 ns | 28,380 ns | 1.004x faster |
+| Timed scalar heap/allocations | 0 B / 0 | 0 B / 0 | unchanged |
+
+An earlier baseline-first run appeared 1.06x-1.07x faster for the profiles,
+but rerunning the frozen baseline after the candidate produced the same faster
+CPU state. The reverse controls above are therefore authoritative. Three new C
+entry points were not justified by a maximum 0.6% complete-path movement, so
+all production code was removed. The benchmark now keeps a configurable,
+allocation-free lookup phase and the C suite retains header-size and
+non-power-of-two correctness guards:
+
+```sh
+make bench-native-ahtable-allocator \
+  NATIVE_AHTABLE_KEYS=100000 \
+  NATIVE_AHTABLE_SLOTS=4096 \
+  NATIVE_AHTABLE_LOOKUPS=50000000 \
+  COUNT=7
+```
 
 <a id="grouped-storage-headers"></a>
 ### Grouped Storage Headers

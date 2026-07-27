@@ -227,6 +227,12 @@ are released immediately and nonempty slots shrink below one-third utilization,
 keeping churn fast without unbounded high-water retention. The isolated and
 full-cache measurements are in
 [BENCHMARK.md](BENCHMARK.md#adaptive-native-bucket-size-classes).
+A [Native slot-mask rollback](BENCHMARK.md#native-slot-mask-rollback) measured
+power-of-two bucket indexing separately. A specialized mask made the isolated
+50-million-lookup phase 1.037x faster, but complete commands improved at most
+1.006x; a shared-dispatch variant also made arbitrary-size tables 1.013x
+slower. Both runtime designs were removed, while the stronger benchmark and
+non-power-of-two correctness guard remain.
 Long-running delete-heavy workloads can call `CompactMemory` to rebuild the C
 trie, densely reindex in-memory typed pools, and shrink Merkle and metadata
 backing. Disk-spill indexes remain stable so file ownership cannot alias.

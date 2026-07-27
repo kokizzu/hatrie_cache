@@ -329,6 +329,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Uppercase EXISTS fast path",
 		"Pointer Count-Min increment parser",
 		"All-pointer priority parser",
+		"Power-of-two ahtable slot mask",
 		"Replication constructor flag",
 		"Mixed-page compact descriptors",
 		"Ten-page replication aggregation",
@@ -343,6 +344,21 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 	} {
 		if !strings.Contains(index, token) {
 			t.Fatalf("BENCHMARK.md rejected optimization index missing token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeNativeSlotMaskRollback(t *testing.T) {
+	for _, path := range []string{"README.md", "BENCHMARK.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		doc := string(data)
+		for _, token := range []string{"Native slot-mask rollback", "1.037x"} {
+			if !strings.Contains(doc, token) {
+				t.Fatalf("%s missing native slot-mask rollback token %q", path, token)
+			}
 		}
 	}
 }

@@ -5,6 +5,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-build/benchmarks}
 keys=${NATIVE_AHTABLE_KEYS:-100000}
 slots=${NATIVE_AHTABLE_SLOTS:-4096}
+lookup_operations=${NATIVE_AHTABLE_LOOKUPS:-10000000}
 count=${COUNT:-7}
 output="$artifact_dir/native-ahtable-allocator.txt"
 binary=$(mktemp "${TMPDIR:-/tmp}/hatrie-ahtable-bench.XXXXXX")
@@ -23,6 +24,6 @@ gcc -O3 -std=c99 -Wall -Wextra \
 run=1
 while [ "$run" -le "$count" ]; do
 	printf 'run=%s ' "$run" | tee -a "$output"
-	"$binary" "$keys" "$slots" | tee -a "$output"
+	"$binary" "$keys" "$slots" "$lookup_operations" | tee -a "$output"
 	run=$((run + 1))
 done

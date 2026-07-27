@@ -8,6 +8,10 @@
 
 #include "../src/ahtable.h"
 
+#define LOOKUP_KEY_COUNT 1024
+
+static volatile value_t lookup_sink;
+
 static double monotonic_seconds(void)
 {
     struct timespec value;
@@ -44,6 +48,7 @@ int main(int argc, char** argv)
 {
     const size_t keys = parse_size(argc > 1 ? argv[1] : NULL, 100000);
     const size_t slots = parse_size(argc > 2 ? argv[2] : NULL, 4096);
+    const size_t lookup_operations = parse_size(argc > 3 ? argv[3] : NULL, 10000000);
     ahtable_t* table = ahtable_create_n(slots);
     char key[96];
     size_t i;
@@ -95,17 +100,38 @@ int main(int argc, char** argv)
         }
     }
 
+    char lookup_keys[LOOKUP_KEY_COUNT][96];
+    size_t lookup_lengths[LOOKUP_KEY_COUNT];
+    for (i = 0; i < LOOKUP_KEY_COUNT; ++i) {
+        size_t key_index = i * keys / LOOKUP_KEY_COUNT;
+        const char* prefix = (key_index % 2 == 0) ? "replacement" : "primary";
+        lookup_lengths[i] = format_key(lookup_keys[i], sizeof(lookup_keys[i]), prefix, key_index);
+    }
+    start = monotonic_seconds();
+    for (i = 0; i < lookup_operations; ++i) {
+        size_t lookup_index = i & (LOOKUP_KEY_COUNT - 1);
+        value_t* value = ahtable_tryget(table, lookup_keys[lookup_index], lookup_lengths[lookup_index]);
+        if (value == NULL) {
+            fprintf(stderr, "timed lookup failed at %zu\n", i);
+            return 1;
+        }
+        lookup_sink ^= *value;
+    }
+    double lookup_seconds = monotonic_seconds() - start;
+
     struct rusage usage;
     memset(&usage, 0, sizeof(usage));
     if (getrusage(RUSAGE_SELF, &usage) != 0) {
         perror("getrusage");
         return 2;
     }
-    printf("keys=%zu slots=%zu insert_seconds=%.9f churn_seconds=%.9f used_bytes=%zu capacity_bytes=%zu insert_reallocations=%zu total_reallocations=%zu max_rss_kib=%ld\n",
+    printf("keys=%zu slots=%zu lookup_operations=%zu insert_seconds=%.9f churn_seconds=%.9f lookup_seconds=%.9f used_bytes=%zu capacity_bytes=%zu insert_reallocations=%zu total_reallocations=%zu max_rss_kib=%ld\n",
            keys,
            slots,
+           lookup_operations,
            insert_seconds,
            churn_seconds,
+           lookup_seconds,
            ahtable_slot_used_bytes(table),
            ahtable_slot_capacity_bytes(table),
            insert_reallocations,

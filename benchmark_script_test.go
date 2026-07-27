@@ -49,6 +49,7 @@ func TestNativeAhtableAllocatorBenchmarkIsReproducible(t *testing.T) {
 	for _, token := range []string{
 		"NATIVE_AHTABLE_KEYS",
 		"NATIVE_AHTABLE_SLOTS",
+		"NATIVE_AHTABLE_LOOKUPS",
 		"bench_ahtable_allocator.c",
 		"native-ahtable-allocator.txt",
 		"-O3",
