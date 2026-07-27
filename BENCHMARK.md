@@ -381,6 +381,7 @@ tree.
 | --- | --- | --- | --- |
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Post-O3 command normalization | Canonical SET improved up to 1.17x end to end and focused uppercase normalization improved up to 6.06x | Shared helpers slowed lowercase/spaced fallbacks up to 1.10x/1.06x; dispatcher-local recognition slowed TTL 1.034x; exact-switch recognition slowed lowercase/spaced SET and lowercase GET 1.07x/1.10x/1.08x | All runtime and temporary fixture code removed; see [Post-O3 Command Normalization Rollback](#post-o3-command-normalization-rollback) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Power-of-two ahtable slot mask | A branch-free HAT-trie-only API made 50 million native lookups 1.037x faster with unchanged backing, capacity, and header size | Shared dispatch made arbitrary-size lookup 1.013x slower; three specialized entry points improved complete GET/SET/mixed profiles by only 0.0%-0.6% | Both candidates removed; the stronger lookup fixture and non-power-of-two/header tests remain; see [Native slot-mask rollback](#native-slot-mask-rollback) |
 | Direct native tryget traversal | Replaced the generic pointer-writeback finder with a read-only traversal and made 50 million native hits 1.032x faster at identical RSS | Complete GET improved only 1.003x; unrelated SET and mixed-read paired controls moved 1.010x/1.009x slower | Runtime candidate removed; the new native benchmark and forced shared-prefix split test remain; see [Direct native tryget traversal rollback](#direct-native-tryget-traversal-rollback) |
@@ -1516,6 +1517,32 @@ ahead of that switch still slowed the control from 166.2 to 175.5 ns. Cgo
 medians by 1.03x/1.10x/1.15x/1.03x, and a known-valid-key GET helper measured
 121.7 ns against the checked path's 120.1 ns. All production candidates and
 their temporary tests were removed, so this pass retains no runtime tradeoff.
+
+<a id="post-o3-command-normalization-rollback"></a>
+#### Post-O3 Command Normalization Rollback
+
+This Post-O3 command normalization rollback began after production C moved to
+`-O3` and a fresh SET profile attributed about 1.6%
+flat CPU each to `strings.TrimSpace` and `strings.ToUpper`. Four placements
+were retested against frozen equal-layout binaries. Before production changes,
+an exhaustive fixture compared the current result with the legacy expression
+for 1,035 inputs, including every byte in leading, interior, and trailing
+positions plus whitespace, Unicode, and invalid UTF-8.
+
+| Candidate | Measured attraction | Disqualifying control |
+| --- | --- | --- |
+| Shared one-pass uppercase-ASCII recognition | Focused canonical `SETSTR` normalization improved 2.63x | Lowercase and spaced fallbacks were 1.10x and 1.06x slower |
+| Shared direct `SET`/`SETSTR` equality | Focused canonical normalization improved 6.06x | Lowercase, spaced, and Unicode fallbacks were 1.10x, 1.06x, and 1.04x slower because the helper no longer inlined |
+| Dispatcher-local uppercase-`S` discriminator | Complete canonical SET improved 1.15x; lowercase and spaced SET were each about 1.05x faster | A longer complete TTL control was 160.3 versus 154.4 ns, or 1.034x slower |
+| Exact-switch expiration-free SET | Complete canonical SET improved 1.17x | Lowercase SET, spaced SET, and lowercase GET were 1.07x, 1.10x, and 1.08x slower from large-switch layout changes |
+
+Heap and allocation counts were unchanged throughout. Longer pipeline,
+mixed-read, and exact-GET controls narrowed to noise for the dispatcher-local
+variant, but the repeatable TTL loss failed the no-regression gate. The exact
+switch reproduced the same cross-command layout sensitivity as the earlier
+scalar-dispatch experiment even with optimized C. Every production change,
+normalization helper, test, and temporary benchmark was removed; the original
+Unicode-aware normalization and exact switch remain byte-for-byte unchanged.
 
 <a id="uppercase-exists-fast-path-rollback"></a>
 #### Uppercase EXISTS Fast Path Rollback

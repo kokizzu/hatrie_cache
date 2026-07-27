@@ -86,6 +86,14 @@ regressed. See the
 An attempted uppercase `EXISTS` specialization was removed because every
 placement slowed either exact GET or lowercase generic commands; see the
 [dispatch rollback](BENCHMARK.md#uppercase-exists-fast-path-rollback).
+A [Post-O3 command normalization rollback](BENCHMARK.md#post-o3-command-normalization-rollback)
+retested shared ASCII recognition, direct SET equality, a dispatcher-local
+first-byte check, and exact-switch SET after native optimization. Canonical SET
+improved as much as 1.17x end to end, but the first three layouts slowed a
+lowercase/spaced fallback or TTL by up to 1.10x/1.06x/1.034x, while the exact
+switch slowed lowercase SET, spaced SET, and lowercase GET by
+1.07x/1.10x/1.08x. All candidate and temporary fixture code was removed, so
+normalization, switch layout, heap, allocations, wire, and storage are unchanged.
 Pointer exact-command request dispatch avoids passing the 168-byte amd64
 request value into the large uppercase dispatcher a second time. Exact and
 generic GET improve 1.081x, exact SET improves 1.022x, and allocations remain

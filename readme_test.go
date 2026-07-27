@@ -334,6 +334,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"All-pointer priority parser",
 		"Power-of-two ahtable slot mask",
 		"Direct native tryget traversal",
+		"Post-O3 command normalization",
 		"Replication constructor flag",
 		"Mixed-page compact descriptors",
 		"Ten-page replication aggregation",
@@ -407,6 +408,21 @@ func TestDocsDescribeProductionNativeCOptimization(t *testing.T) {
 		for _, token := range []string{"Production native C optimization", "-O3", "1.44x", "1.87x", "1.74x", "1.34x", "5,856"} {
 			if !strings.Contains(doc, token) {
 				t.Fatalf("%s missing production native optimization token %q", path, token)
+			}
+		}
+	}
+}
+
+func TestDocsDescribePostO3CommandNormalizationRollback(t *testing.T) {
+	for _, path := range []string{"README.md", "BENCHMARK.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		doc := string(data)
+		for _, token := range []string{"Post-O3 command normalization rollback", "1.17x", "1.10x", "1.08x"} {
+			if !strings.Contains(doc, token) {
+				t.Fatalf("%s missing post-O3 command normalization rollback token %q", path, token)
 			}
 		}
 	}
