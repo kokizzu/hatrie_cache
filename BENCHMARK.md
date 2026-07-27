@@ -427,6 +427,7 @@ tree.
 | 64 KiB WAL staging | Saved another 65,536 transient bytes over 128 KiB | It was 1.07x slower and required seven writes instead of four | Rejected; 128 KiB remains the measured balance; see [bounded WAL staging](#bounded-wal-staging-arena) |
 | Online generational compaction | Shortened maximum reader pause 9.40x and reduced retained backing/heap 13.17x/5.36x | Total compaction was 1.54x slower, transient heap 6.80x higher, and allocations 2.67x higher | Reverted in `c3085d2`; see [online generational compaction](#online-generational-compaction-rollback) |
 | Packed-string compaction | Reduced retained heap 3.79% and retained objects 800x | Cumulative allocation was 10.71x higher, peak RSS 1.30x higher, and forced GC 1.81x slower | Reverted in `0f4adc3`; see [string compaction allocation](#string-compaction-allocation-rollback) |
+| Known-position expiration removal | Intended to remove a duplicate expiration-index lookup when clearing an existing TTL and when vacuuming the known heap root | Direct delegation made the mixed-write profile 1.025x slower; the refined path was only 1.011x faster cross-binary, while same-binary existing clears were 1.008x slower and no-TTL `SET` was 1.007x slower | Both candidates and their temporary benchmark were removed; see [expiration removal lookup rollback](#expiration-removal-lookup-rollback) |
 | Replication constructor flag | Avoided deriving invariant scan mode after construction | Added one 704-byte allocation | Removed; mode uses an existing byte; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Mixed-page compact descriptors | Tried to keep mixed SET/delete repair pages in the compact layout | Added 17% transient heap | Replaced by selecting generic compatibility storage before descriptor allocation; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Ten-page replication aggregation | Reduced request count beyond the retained two-page cap | Could stage ten unusually large pages before splitting | Removed to preserve bounded memory; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -3456,6 +3457,44 @@ candidate repeat is reported here.
 The comparison has identical heap and allocations. Compaction policy, lock
 scope, retained capacity, TTL behavior, snapshots, wire, and persistence are
 unchanged.
+
+<a id="expiration-removal-lookup-rollback"></a>
+##### Expiration Removal Lookup Rollback
+
+`clearExpirationLocked` first checks the expiration-index map so the common
+missing-TTL path returns inline, then `expirationHeap.Remove` looks up an
+existing key again before removing its indexed slot. A CPU profile attributed
+about 7% of the write-heavy command fixture to map access and about 16% to heap
+removal, making the repeated lookup a plausible target.
+
+Correctness tests for deadline updates, removals, heap/index consistency, and
+vacuum ran ten times before every candidate. A frozen pre-change binary measured
+27,887 ns per 100-operation mixed-write profile and 177.3 ns for ordinary
+no-TTL `SET`, both with unchanged zero-or-existing allocation behavior.
+
+The first candidate delegated every clear directly to `Remove`. It preserved
+one map lookup for missing keys but moved the return behind the larger removal
+function. The mixed profile regressed to 28,581 ns, or 1.025x slower, and the
+candidate was replaced. The refined candidate preserved the inline missing-key
+return, passed the known index to a private removal helper, and used position
+zero for vacuum's known heap root. Its mixed profile reached 27,574 ns, only
+1.011x faster, while ordinary no-TTL `SET` moved to 178.5 ns, or 1.007x slower.
+
+A temporary same-binary alternating fixture then cleared 10,000 existing or
+missing TTLs with the exact legacy lookup sequence as control. Ten longer
+existing-TTL samples had 848.1 ns/clear candidate and 841.7 ns/clear control,
+making the candidate 1.008x slower. The indirect missing-key fixture was also
+1.023x slower, although compiler diagnostics confirmed every production caller
+still inlined the missing-key return. With no stable complete-path gain and a
+larger split removal implementation, the entire experiment and temporary
+benchmark were removed. The original heap/index behavior and runtime cost remain.
+
+```sh
+make run CMD='go test . -run=TestExpirationHeap -count=10'
+make run CMD='go test . -run=TestVacuum -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedWriteHeavy100 -benchmem -benchtime=1s -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/StringSet -benchmem -benchtime=1s -count=7'
+```
 
 <a id="validated-bounded-key-stat-compaction"></a>
 #### Validated Bounded Key-Stat Compaction
