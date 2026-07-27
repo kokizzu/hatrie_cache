@@ -1249,6 +1249,11 @@ the [removal lookup](BENCHMARK.md#expiration-removal-lookup-rollback) records.
 A [proven-absence insertion](BENCHMARK.md#expiration-absent-insertion-rollback)
 prototype made fresh scheduling 1.06x faster but was also removed because
 existing TTL commands became 1.013x-1.05x slower.
+An [Expiration decision-time capture rollback](BENCHMARK.md#expiration-decision-time-capture-rollback)
+also tested reusing one cached-clock sample. Passing the timestamp by value
+made exact TTL 1.019x faster but the mixed-write profile 1.011x slower; pointer
+and local-capture variants made exact TTL up to 1.047x slower in alternating
+controls. All three layouts were removed.
 [Validated bounded key-stat compaction](BENCHMARK.md#validated-bounded-key-stat-compaction)
 also skips a redundant full-sized `seen` map when slot metadata is consistent,
 making the 100,000-key fixture 1.02x faster with 1.44x lower cumulative heap;

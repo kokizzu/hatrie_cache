@@ -323,6 +323,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Linear expiration-index rebuild](#linear-expiration-index-rebuild), repeated 10k-TTL compaction | Heap `Push`: 6.033 ms; 1,125,278 heap B; 10,058 allocs | Clone plus direct positions: 5.964 ms; 1,125,278 heap B; 10,058 allocs | 1.01x faster with identical heap and allocations | No measured tradeoff; the right-sized heap, exact order, deadlines, index positions, and formats are unchanged |
 | Current pass | [Carried expiration update index](#carried-expiration-update-index), existing equal/later TTL | Validate then look up again: 209.5/204.4 ns | Reuse validated index: 166.2/171.4 ns | 1.26x/1.19x faster; public `TTLExpire` 1.126x faster | No measured tradeoff; first schedule/clear and the mixed-write profile are faster with heap/allocations unchanged; invalid metadata and failed native deletion retain the prior fallback |
 | Reverted | [Proven-absent expiration insertion](#expiration-absent-insertion-rollback), fresh schedule plus clear | Existing checked insertion: 390.9 ns | Direct known-absent insertion: 367.3 ns | Fresh scheduling 1.06x faster, but existing `TTLExpire` up to 1.05x slower | All variants rolled back; no runtime tradeoff remains |
+| Reverted | [Expiration decision-time capture rollback](#expiration-decision-time-capture-rollback), existing TTL refresh | Repeated cached-clock calls: exact TTL 206.3 ns; mixed write 100 paired control | Captured by value: exact TTL 202.5 ns; local capture 214.9 ns | By-value exact TTL was 1.019x faster, but mixed write was 1.011x slower; local capture was 1.047x slower | By-value, pointer, and local-capture variants removed; established clock sampling remains |
 | Current pass | [Validated bounded key-stat compaction](#validated-bounded-key-stat-compaction), 100k tracked keys | Unconditional seen map: 169.162 ms; 11,405,896 heap B; 100,577 allocs | Validated slots: 166.164 ms; 7,910,752 heap B; 100,317 allocs | 1.02x faster, 1.44x lower heap, about 260 fewer allocations | Inconsistent internal slot metadata retains the prior repair fallback; policy, eviction order, stats, and formats are unchanged |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
@@ -438,6 +439,7 @@ tree.
 | Proven-absent expiration insertion | Fresh schedule-plus-clear improved from 390.9 to 367.3 ns, or 1.06x | The broad layout made existing `TTLExpire` 1.05x slower; narrowed and relocated-helper layouts remained 1.013x/1.034x slower | All insertion helpers were removed; the retained path uses checked `expirationHeap.Push`; see [the rollback](#expiration-absent-insertion-rollback) |
 | Single-pass expiration time comparison | Plain `time.Time.Compare` made earlier/later primitive comparisons 1.44x/1.47x faster and an increasing-deadline heap build 1.027x faster | The same candidate made an equal-deadline sift-heavy heap 1.014x slower; two equality-first hybrids erased the distinct-deadline gain or exceeded the inlining budget and made the direct earlier control 1.021x slower | All comparator candidates and temporary fixtures were removed; the original `Equal` plus `Before` ordering remains; see [expiration time comparison rollback](#expiration-time-comparison-rollback) |
 | Single-pass expiration update direction | One `time.Time.Compare` made equal updates 1.28x faster; preserving `Before` and replacing only `After` made equal updates 1.019x faster with neutral earlier updates | One `Compare` made earlier updates 1.08x slower; the refined candidate made later updates 1.011x slower and the public TTL-extension path was neutral | Both direction selectors and their temporary fixture were removed; the original `Before` then `After` update remains; see [expiration update direction rollback](#expiration-update-direction-rollback) |
+| Expiration decision-time capture | Passing one operation timestamp made the exact TTL command 1.019x faster and reduced relative-refresh clock reads from four to two including telemetry | The by-value helper made the paired mixed-write profile 1.011x slower; a pointer form made exact TTL about 1.06x slower; local capture made it 1.047x slower | All three layouts and the temporary clock-count test were removed; see [Expiration decision-time capture rollback](#expiration-decision-time-capture-rollback) |
 | Pointer Count-Min increment parser | Default-count parsing improved from 6.087 to 5.278 ns, or 1.153x | Subkey parsing regressed from 14.33 to 14.46 ns, or 1.009x slower | Reverted; Count-Min callers and parser remain by value; see [narrow priority request parsing](#narrow-priority-request-parsing) |
 | All-pointer priority parser | Typed and subkey helpers improved 2.06x/1.12x in isolation | The complete exact subkey push/pop path regressed from 253.1 to 260.4 ns, or 1.029x slower | Replaced by direct typed-field dispatch plus trim-once subkey parsing; see [narrow priority request parsing](#narrow-priority-request-parsing) |
 | Replication constructor flag | Avoided deriving invariant scan mode after construction | Added one 704-byte allocation | Removed; mode uses an existing byte; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -3832,6 +3834,48 @@ and persistence remain unchanged.
 make run CMD='go test . -run=TestExpirationHeapIndexesStayConsistentAcrossUpdatesAndRemovals -count=10'
 make run CMD='go test . -run=TestVacuumExpiredSkipsStaleExpirationEntries -count=10'
 make run CMD='go test . -run=NONE -bench=BenchmarkBigWins/ExpirationDeadlineUpdate -benchmem -benchtime=1s -count=10'
+```
+
+<a id="expiration-decision-time-capture-rollback"></a>
+##### Expiration Decision-Time Capture Rollback
+
+A relative TTL refresh sampled the cached clock once to construct its absolute
+deadline, then `expireAtLocked` sampled it while checking an existing deadline
+and again while checking the replacement deadline. Write telemetry takes its
+own final sample. Capturing one operation timestamp looked both more consistent
+at a deadline boundary and cheaper.
+
+A fail-first test installed an advancing injected clock and covered public
+relative refresh, public absolute refresh, and the exact `EXPIRE` command. The
+existing relative paths made four clock calls and the absolute path made three.
+The first candidate passed one captured `time.Time` by value through the two
+private expiration helpers, reducing those counts to two including telemetry.
+
+Alternating frozen binaries showed that the focused exact command improved,
+but the complete write profile did not:
+
+| Seven/nine-pair median | Repeated clock calls | Captured by value | Result |
+| --- | ---: | ---: | --- |
+| Exact `TTLExpire` | 206.3 ns | 202.5 ns | 1.019x faster |
+| Mixed write-heavy 100 | paired control | paired candidate | candidate 1.011x slower |
+| Heap / allocations | 0 B / 0 exact | 0 B / 0 exact | unchanged |
+
+Two refinements attempted to retain the clock reduction without carrying a
+three-word value through both helpers. Passing a non-escaping pointer produced
+a 216.0 ns nine-run exact-command median versus 203.6 ns frozen, about 1.06x
+slower. Restoring every caller and helper signature and capturing only once
+inside `expireAtLocked` still measured 214.9 versus 205.3 ns in an alternating
+control, or 1.047x slower. Keeping the timestamp live in the hot function cost
+more than another cached-clock read on this build.
+
+All runtime changes and the temporary call-count test were removed. Clock
+sampling order, deadline behavior, telemetry timestamps, API, heap ordering,
+memory, wire, and persistence therefore remain unchanged.
+
+```sh
+make run CMD='go test . -run="TestExpire|TestTTL|TestPersist" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkExpirationUpdateLookup -benchmem -benchtime=1s -count=9 -cpu=1'
+make run CMD='go test . -run=NONE -bench="BenchmarkCommandFeature/(TTLExpire|MixedWriteHeavy100)" -benchmem -benchtime=2s -count=9 -cpu=1'
 ```
 
 <a id="validated-bounded-key-stat-compaction"></a>

@@ -326,6 +326,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Proven-absent expiration insertion",
 		"Single-pass expiration time comparison",
 		"Single-pass expiration update direction",
+		"Expiration decision-time capture",
 		"Uppercase EXISTS fast path",
 		"Pointer Count-Min increment parser",
 		"All-pointer priority parser",
@@ -344,6 +345,21 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 	} {
 		if !strings.Contains(index, token) {
 			t.Fatalf("BENCHMARK.md rejected optimization index missing token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeExpirationDecisionTimeCaptureRollback(t *testing.T) {
+	for _, path := range []string{"README.md", "BENCHMARK.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		doc := string(data)
+		for _, token := range []string{"Expiration decision-time capture rollback", "1.047x"} {
+			if !strings.Contains(doc, token) {
+				t.Fatalf("%s missing expiration decision-time rollback token %q", path, token)
+			}
 		}
 	}
 }
