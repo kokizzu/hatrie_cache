@@ -80,13 +80,13 @@ func (server *CacheGRPCServer) executeStructuredBatch(ctx context.Context, reque
 		response.Error = err.Error()
 		return response
 	}
+	sharedKey, hasSharedKey := structuredBatchSharedKey(request)
 	sharedValue, hasSharedValue := structuredBatchSharedValue(request, columns.values)
-	request = materializeStructuredBatchSharedKey(request)
 	request = materializeStructuredBatchSharedSubkey(request, columns.subkeys)
 	if server.scalarBatchRequiresCompatibilityPath() {
-		return server.executeStructuredBatchCompatibilityPrepared(ctx, request, sharedValue, hasSharedValue)
+		return server.executeStructuredBatchCompatibilityPrepared(ctx, request, sharedKey, hasSharedKey, sharedValue, hasSharedValue)
 	}
-	return server.trie.executeStructuredBatchDirectPrepared(ctx, request, sharedValue, hasSharedValue)
+	return server.trie.executeStructuredBatchDirectPrepared(ctx, request, sharedKey, hasSharedKey, sharedValue, hasSharedValue)
 }
 
 type structuredBatchColumns struct {
@@ -151,22 +151,11 @@ func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchReques
 	return columns, nil
 }
 
-func materializeStructuredBatchSharedKey(request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchRequest {
+func structuredBatchSharedKey(request *hatriecachev1.StructuredBatchRequest) (string, bool) {
 	if len(request.Keys) != 1 || len(request.Operations) == 1 {
-		return request
+		return "", false
 	}
-	prepared := &hatriecachev1.StructuredBatchRequest{
-		BatchId:    request.BatchId,
-		Operations: request.Operations,
-		Keys:       make([]string, len(request.Operations)),
-		Subkeys:    request.Subkeys,
-		Values:     request.Values,
-		Priorities: request.Priorities,
-	}
-	for index := range prepared.Keys {
-		prepared.Keys[index] = request.Keys[0]
-	}
-	return prepared
+	return request.Keys[0], true
 }
 
 func materializeStructuredBatchSharedSubkey(request *hatriecachev1.StructuredBatchRequest, subkeyCount int) *hatriecachev1.StructuredBatchRequest {
@@ -198,8 +187,17 @@ type structuredBatchCursor struct {
 	subkey         int
 	value          int
 	priority       int
+	sharedKey      string
+	hasSharedKey   bool
 	sharedValue    string
 	hasSharedValue bool
+}
+
+func (cursor *structuredBatchCursor) key(request *hatriecachev1.StructuredBatchRequest, index int) string {
+	if cursor.hasSharedKey {
+		return cursor.sharedKey
+	}
+	return request.Keys[index]
 }
 
 func (cursor *structuredBatchCursor) nextValue(request *hatriecachev1.StructuredBatchRequest) string {
@@ -212,7 +210,7 @@ func (cursor *structuredBatchCursor) nextValue(request *hatriecachev1.Structured
 }
 
 func (cursor *structuredBatchCursor) command(request *hatriecachev1.StructuredBatchRequest, index int) CacheCommandRequest {
-	item := CacheCommandRequest{Key: request.Keys[index]}
+	item := CacheCommandRequest{Key: cursor.key(request, index)}
 	switch request.Operations[index] {
 	case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP:
 		item.Command = "PUTMAP"
@@ -265,23 +263,23 @@ func (cursor *structuredBatchCursor) command(request *hatriecachev1.StructuredBa
 }
 
 func (ht *HatTrie) executeStructuredBatchDirect(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchDirectPrepared(ctx, request, "", false)
+	return ht.executeStructuredBatchDirectPrepared(ctx, request, "", false, "", false)
 }
 
-func (ht *HatTrie) executeStructuredBatchDirectPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
-	if ht.structuredBatchRequiresCommandLoop(request) {
-		return ht.executeStructuredBatchCommandLoopPrepared(ctx, request, sharedValue, hasSharedValue)
+func (ht *HatTrie) executeStructuredBatchDirectPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey string, hasSharedKey bool, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
+	if ht.structuredBatchRequiresCommandLoopPrepared(request, sharedKey, hasSharedKey) {
+		return ht.executeStructuredBatchCommandLoopPrepared(ctx, request, sharedKey, hasSharedKey, sharedValue, hasSharedValue)
 	}
-	return ht.executeStructuredBatchBoundedPrepared(ctx, request, sharedValue, hasSharedValue)
+	return ht.executeStructuredBatchBoundedPrepared(ctx, request, sharedKey, hasSharedKey, sharedValue, hasSharedValue)
 }
 
 func (ht *HatTrie) executeStructuredBatchCommandLoop(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchCommandLoopPrepared(ctx, request, "", false)
+	return ht.executeStructuredBatchCommandLoopPrepared(ctx, request, "", false, "", false)
 }
 
-func (ht *HatTrie) executeStructuredBatchCommandLoopPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
+func (ht *HatTrie) executeStructuredBatchCommandLoopPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey string, hasSharedKey bool, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
 	response := newStructuredBatchResponse(request.GetBatchId(), len(request.GetOperations()))
-	cursor := structuredBatchCursor{sharedValue: sharedValue, hasSharedValue: hasSharedValue}
+	cursor := structuredBatchCursor{sharedKey: sharedKey, hasSharedKey: hasSharedKey, sharedValue: sharedValue, hasSharedValue: hasSharedValue}
 	for index, operation := range request.GetOperations() {
 		if index&63 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -300,11 +298,11 @@ func (ht *HatTrie) executeStructuredBatchCommandLoopPrepared(ctx context.Context
 }
 
 func (server *CacheGRPCServer) executeStructuredBatchCompatibility(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
-	return server.executeStructuredBatchCompatibilityPrepared(ctx, request, "", false)
+	return server.executeStructuredBatchCompatibilityPrepared(ctx, request, "", false, "", false)
 }
 
-func (server *CacheGRPCServer) executeStructuredBatchCompatibilityPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
-	command := structuredBatchCacheCommandPrepared(request, sharedValue, hasSharedValue)
+func (server *CacheGRPCServer) executeStructuredBatchCompatibilityPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey string, hasSharedKey bool, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
+	command := structuredBatchCacheCommandPrepared(request, sharedKey, hasSharedKey, sharedValue, hasSharedValue)
 	result, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
 		NodeName:            server.options.NodeName,
 		Journal:             server.options.Journal,
@@ -319,12 +317,12 @@ func (server *CacheGRPCServer) executeStructuredBatchCompatibilityPrepared(ctx c
 }
 
 func structuredBatchCacheCommand(request *hatriecachev1.StructuredBatchRequest) CacheCommandRequest {
-	return structuredBatchCacheCommandPrepared(request, "", false)
+	return structuredBatchCacheCommandPrepared(request, "", false, "", false)
 }
 
-func structuredBatchCacheCommandPrepared(request *hatriecachev1.StructuredBatchRequest, sharedValue string, hasSharedValue bool) CacheCommandRequest {
+func structuredBatchCacheCommandPrepared(request *hatriecachev1.StructuredBatchRequest, sharedKey string, hasSharedKey bool, sharedValue string, hasSharedValue bool) CacheCommandRequest {
 	batch := make([]CacheCommandRequest, len(request.GetOperations()))
-	cursor := structuredBatchCursor{sharedValue: sharedValue, hasSharedValue: hasSharedValue}
+	cursor := structuredBatchCursor{sharedKey: sharedKey, hasSharedKey: hasSharedKey, sharedValue: sharedValue, hasSharedValue: hasSharedValue}
 	for index := range batch {
 		batch[index] = cursor.command(request, index)
 	}

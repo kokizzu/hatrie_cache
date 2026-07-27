@@ -11,6 +11,10 @@ import (
 const structuredBatchDirectChunkSize = 4
 
 func (ht *HatTrie) structuredBatchRequiresCommandLoop(request *hatriecachev1.StructuredBatchRequest) bool {
+	return ht.structuredBatchRequiresCommandLoopPrepared(request, "", false)
+}
+
+func (ht *HatTrie) structuredBatchRequiresCommandLoopPrepared(request *hatriecachev1.StructuredBatchRequest, sharedKey string, hasSharedKey bool) bool {
 	if ht == nil || ht.localPartitionSet() != nil {
 		return true
 	}
@@ -24,7 +28,10 @@ func (ht *HatTrie) structuredBatchRequiresCommandLoop(request *hatriecachev1.Str
 
 	subkeyIndex := 0
 	for index, operation := range request.GetOperations() {
-		key := request.Keys[index]
+		key := sharedKey
+		if !hasSharedKey {
+			key = request.Keys[index]
+		}
 		if !commandFastPathField(key) || !validKey(key) {
 			return true
 		}
@@ -42,23 +49,23 @@ func (ht *HatTrie) structuredBatchRequiresCommandLoop(request *hatriecachev1.Str
 }
 
 func (ht *HatTrie) executeStructuredBatchBounded(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchBoundedPrepared(ctx, request, "", false)
+	return ht.executeStructuredBatchBoundedPrepared(ctx, request, "", false, "", false)
 }
 
-func (ht *HatTrie) executeStructuredBatchBoundedPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, structuredBatchDirectChunkSize, sharedValue, hasSharedValue)
+func (ht *HatTrie) executeStructuredBatchBoundedPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey string, hasSharedKey bool, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
+	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, structuredBatchDirectChunkSize, sharedKey, hasSharedKey, sharedValue, hasSharedValue)
 }
 
 func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSize(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, chunkSize int) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, chunkSize, "", false)
+	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, chunkSize, "", false, "", false)
 }
 
-func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSizePrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, chunkSize int, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
+func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSizePrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, chunkSize int, sharedKey string, hasSharedKey bool, sharedValue string, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
 	response := newStructuredBatchResponse(request.GetBatchId(), len(request.GetOperations()))
 	telemetry := batchTelemetry{}
 	telemetryNow := time.Time{}
 
-	cursor := structuredBatchCursor{sharedValue: sharedValue, hasSharedValue: hasSharedValue}
+	cursor := structuredBatchCursor{sharedKey: sharedKey, hasSharedKey: hasSharedKey, sharedValue: sharedValue, hasSharedValue: hasSharedValue}
 	operations := request.GetOperations()
 	for start := 0; start < len(operations); start += chunkSize {
 		if err := ctx.Err(); err != nil {
@@ -76,7 +83,7 @@ func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSizePrepared(ctx contex
 		ht.mu.Lock()
 		for index := start; index < end; index++ {
 			operation := operations[index]
-			key := request.Keys[index]
+			key := cursor.key(request, index)
 			var subkey string
 			var value string
 			var priority int64

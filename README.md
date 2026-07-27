@@ -2576,7 +2576,8 @@ make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7
 See [BENCHMARK.md](BENCHMARK.md#compact-typed-protobuf-structured-batches) for
 CPU, heap, allocation, and measured wire tradeoffs. Shared key, subkey, and
 value requests avoid repeated wire entries. Shared keys and subkeys use
-temporary request-local header expansions; a shared value is converted to a Go
+request-local execution state: the server borrows the one decoded shared key,
+temporarily expands shared subkey headers, and converts a shared value to a Go
 string once per envelope without copying it per operation. Positional requests
 and the generated protobuf layout are unchanged.
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with

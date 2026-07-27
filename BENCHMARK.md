@@ -277,6 +277,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Shared structured-batch subkeys](#shared-structured-batch-subkeys), 10k same-field `PEEK_MAP`, batch 16 | Shared key plus repeated subkeys: 721.8 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | One shared key and subkey: 670.1 ns/command; 2,305,907 heap B; 41,915 allocs; 12.35 wire B/command | 1.08x faster, 1.14x lower heap, 1.27x fewer allocs, 1.53x smaller wire | Additive request form; mixed-version clients retry expanded subkeys after an older server's column-count error |
 | Current pass | [Shared structured-batch values](#shared-structured-batch-values), 10k same-member `HAS_SET`, batch 16 | Shared key plus repeated values: 721.6 ns/command; 2,731,184 heap B; 60,051 allocs; 15.16 wire B/command | One shared key and value: 654.4 ns/command; 2,305,612 heap B; 48,777 allocs; 7.662 wire B/command | 1.10x faster, 1.18x lower heap, 1.23x fewer allocs, 1.98x smaller wire | Additive request form; mixed-version clients retry expanded values after an older server's column-count error |
 | Current pass | [One-time shared structured-value conversion](#one-time-shared-structured-value-conversion), 10k same-member `HAS_SET`, batch 16 | Expand headers, then convert per command: 584.8 ns/command; 2,305,582 heap B; 48,777 allocs | Convert once per envelope: 562.6 ns/command; 1,990,556 heap B; 38,776 allocs | 1.04x faster, 1.16x lower heap, 1.26x fewer allocs; wire unchanged | No measured tradeoff; positional controls retain identical heap/allocations and CPU within 0.3% |
+| Current pass | [Cursor-borrowed shared structured keys](#cursor-borrowed-shared-structured-keys), 10k same-key `PEEK_MAP`, batch 16 | Expand 16 string headers: 649.7 ns/command; 2,636,161 heap B; 53,186 allocs | Borrow one decoded key: 647.8 ns/command; 2,476,150 heap B; 52,561 allocs | CPU neutral within 0.3%; 1.06x lower heap; 625 fewer allocations | No measured tradeoff; positional requests retain identical heap/allocations and are 0.4% faster in the paired median |
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
 | Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
@@ -1192,6 +1193,38 @@ Wire size remains 7.662 B/command because the prior feature already compressed
 the request column. An earlier unpinned cross-process run gave conflicting CPU
 ordering; CPU pinning and alternating order resolved the result while both
 memory counters remained deterministic.
+
+<a id="cursor-borrowed-shared-structured-keys"></a>
+##### Cursor-Borrowed Shared Structured Keys
+
+Compact structured batches still expanded their one decoded key into a
+request-local string-header slice before execution. The direct, command-loop,
+and compatibility cursors now select that immutable request key directly.
+There is no request clone or key-header allocation. Positional requests retain
+indexed key lookup, and shared-subkey materialization no longer forces shared
+keys to expand.
+
+The exact pushed `11ec972` binary and the candidate binary ran in eight
+alternating pairs pinned to one CPU. Each sample executed 100 complete
+10,000-command stream iterations. The standard current-tree command is:
+
+```sh
+make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=100x COUNT=8
+```
+
+| Complete stream path | Expanded key headers | Cursor-borrowed key | Result |
+| --- | ---: | ---: | --- |
+| Shared key, `PEEK_MAP` | 649.7 ns/command; 2,636,161 B; 53,186 allocs | 647.8 ns/command; 2,476,150 B; 52,561 allocs | CPU within 0.3%; 1.06x lower heap; 625 fewer allocations |
+| Shared key/subkey, `PEEK_MAP` | 595.6 ns/command; 2,305,809 B; 41,916 allocs | 593.8 ns/command; 2,145,799 B; 41,291 allocs | CPU within 0.3%; 1.07x lower heap; 625 fewer allocations |
+| Shared key/value, `HAS_SET` | 562.2 ns/command; 1,990,555 B; 38,776 allocs | 554.2 ns/command; 1,830,542 B; 38,151 allocs | 1.01x faster; 1.09x lower heap; 1.02x fewer allocations |
+| Mixed positional control | 876.7 ns/command; 3,557,046 B; 77,606 allocs | 872.8 ns/command; 3,557,047 B; 77,606 allocs | CPU 0.4% faster; heap and allocations identical |
+
+The deterministic reduction is one 256-byte, 16-string header allocation per
+envelope, or 160,000 payload bytes and 625 allocations per 10,000 commands;
+small allocator/accounting differences produce the table's 160,011-160,013 B
+process totals. Protobuf fields, wire bytes, key validation, response ordering,
+journal and dirty tracking, partition routing, storage, and key ownership are
+unchanged.
 
 <a id="go-1265-toolchain-refresh"></a>
 #### Go 1.26.5 Toolchain Refresh
