@@ -233,6 +233,12 @@ power-of-two bucket indexing separately. A specialized mask made the isolated
 1.006x; a shared-dispatch variant also made arbitrary-size tables 1.013x
 slower. Both runtime designs were removed, while the stronger benchmark and
 non-power-of-two correctness guard remain.
+A [Direct native tryget traversal rollback](BENCHMARK.md#direct-native-tryget-traversal-rollback)
+then removed generic finder writebacks and made the isolated 50-million-hit
+loop 1.032x faster at unchanged RSS. Complete GET improved only 1.003x while
+SET and mixed-read controls moved slightly slower, so the runtime candidate was
+removed. Its forced-split correctness test and
+`make bench-native-hattrie-lookup` fixture remain for future native audits.
 Long-running delete-heavy workloads can call `CompactMemory` to rebuild the C
 trie, densely reindex in-memory typed pools, and shrink Merkle and metadata
 backing. Disk-spill indexes remain stable so file ownership cannot alias.

@@ -961,6 +961,77 @@ void test_hattrie_null_cleanup()
     fprintf(stderr, "done.\n");
 }
 
+void test_hattrie_tryget_split_boundaries()
+{
+    fprintf(stderr, "checking tryget split boundaries... \n");
+    hattrie_t* trie = hattrie_create();
+    value_t* value = hattrie_get(trie, "", 0);
+    *value = 11;
+    value = hattrie_get(trie, "r", 1);
+    *value = 12;
+    value = hattrie_get(trie, "region", 6);
+    *value = 13;
+    value = hattrie_get(trie, "region:shared:", 14);
+    *value = 14;
+    value = hattrie_get(trie, "other", 5);
+    *value = 15;
+
+    char key[64];
+    size_t index;
+    for (index = 0; index < 20000; ++index) {
+        int length = snprintf(key, sizeof(key), "region:shared:%05zu:suffix", index);
+        if (length < 0 || (size_t) length >= sizeof(key)) {
+            fprintf(stderr, "[error] split-boundary key overflow\n");
+            have_error = 1;
+            break;
+        }
+        value = hattrie_get(trie, key, (size_t) length);
+        if (value == NULL) {
+            fprintf(stderr, "[error] split-boundary insertion failed at %zu\n", index);
+            have_error = 1;
+            break;
+        }
+        *value = (value_t) index + 100;
+    }
+
+    const char* prefixes[] = {"", "r", "region", "region:shared:", "other"};
+    const size_t prefix_lengths[] = {0, 1, 6, 14, 5};
+    const value_t prefix_values[] = {11, 12, 13, 14, 15};
+    for (index = 0; index < sizeof(prefixes) / sizeof(prefixes[0]); ++index) {
+        value = hattrie_tryget(trie, prefixes[index], prefix_lengths[index]);
+        if (value == NULL || *value != prefix_values[index]) {
+            fprintf(stderr, "[error] split-boundary prefix %zu mismatch\n", index);
+            have_error = 1;
+        }
+    }
+
+    for (index = 0; index < 20000; index += 97) {
+        int length = snprintf(key, sizeof(key), "region:shared:%05zu:suffix", index);
+        value = hattrie_tryget(trie, key, (size_t) length);
+        if (value == NULL || *value != (value_t) index + 100) {
+            fprintf(stderr, "[error] split-boundary lookup failed at %zu\n", index);
+            have_error = 1;
+        }
+    }
+    if (hattrie_tryget(trie, "region:shared:missing", 21) != NULL ||
+        hattrie_tryget(trie, "region:shared:20000:suffix", 26) != NULL ||
+        hattrie_tryget(trie, "regio", 5) != NULL) {
+        fprintf(stderr, "[error] split-boundary missing key was found\n");
+        have_error = 1;
+    }
+
+    for (index = 0; index < 20000; index += 997) {
+        int length = snprintf(key, sizeof(key), "region:shared:%05zu:suffix", index);
+        if (hattrie_del(trie, key, (size_t) length) != 0 ||
+            hattrie_tryget(trie, key, (size_t) length) != NULL) {
+            fprintf(stderr, "[error] split-boundary delete failed at %zu\n", index);
+            have_error = 1;
+        }
+    }
+    hattrie_free(trie);
+    fprintf(stderr, "done.\n");
+}
+
 
 
 int main()
@@ -975,6 +1046,7 @@ int main()
     test_hattrie_fused_iteration();
     test_hattrie_batch_iteration();
     test_hattrie_batch_lookup();
+    test_hattrie_tryget_split_boundaries();
 
     setup();
     test_hattrie_insert();

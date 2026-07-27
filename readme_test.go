@@ -332,6 +332,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Pointer Count-Min increment parser",
 		"All-pointer priority parser",
 		"Power-of-two ahtable slot mask",
+		"Direct native tryget traversal",
 		"Replication constructor flag",
 		"Mixed-page compact descriptors",
 		"Ten-page replication aggregation",
@@ -375,6 +376,21 @@ func TestDocsDescribeExpirationHeapHoleSiftingRollback(t *testing.T) {
 		for _, token := range []string{"Expiration heap hole-sifting rollback", "1.18x", "1.026x"} {
 			if !strings.Contains(doc, token) {
 				t.Fatalf("%s missing expiration heap hole-sifting rollback token %q", path, token)
+			}
+		}
+	}
+}
+
+func TestDocsDescribeDirectNativeTrygetTraversalRollback(t *testing.T) {
+	for _, path := range []string{"README.md", "BENCHMARK.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		doc := string(data)
+		for _, token := range []string{"Direct native tryget traversal rollback", "1.032x", "1.003x"} {
+			if !strings.Contains(doc, token) {
+				t.Fatalf("%s missing direct native tryget rollback token %q", path, token)
 			}
 		}
 	}
