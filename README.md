@@ -83,6 +83,12 @@ structured controls retain the prior encoder with neutral memory and CPU. XOR
 and Top-K prototypes were rejected because their Unicode/structured controls
 regressed. See the
 [public canonical-string lookup measurements](BENCHMARK.md#allocation-free-public-canonical-string-lookups).
+The command-feature benchmark constructs optional TTL and priority integers
+outside timed loops, so its allocation columns describe command execution
+rather than Go escape-analysis cost in the fixture. The expiration command
+itself is allocation-free for a reused request; measurements and the rejected
+breaking request-API redesign are documented in the
+[optional command fixture audit](BENCHMARK.md#optional-command-benchmark-fixture-allocations).
 XOR filter values stage unique items once, then compile them into static 8-bit
 fingerprint arrays for faster low-memory membership checks than Bloom filters
 on read-heavy immutable sets. Their private header fits in one 64-byte cache

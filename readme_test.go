@@ -446,6 +446,36 @@ func TestDocsDescribeAllocationFreeCanonicalStringLookups(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeOptionalCommandBenchmarkFixtureAllocations(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[optional command fixture audit](BENCHMARK.md#optional-command-benchmark-fixture-allocations)",
+		"allocation-free for a reused request",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing optional command fixture token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Optional Command Benchmark Fixture Allocations",
+		"390.0 ns; 8 B; 1 alloc",
+		"358.1 ns; 0 B; 0 allocs",
+		"Optional command integer representation",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing optional command fixture token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeGenericHyperLogLogScalarAdditions(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

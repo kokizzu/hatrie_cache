@@ -412,6 +412,7 @@ tree.
 | In-lock public canonical-string branch | Made ordinary Bloom/Cuckoo/XOR/Count-Min/Top-K lookups allocation-free and up to 3.10x faster | Same-process fallback medians made structured Bloom/Count-Min/Top-K 1.011x/1.007x/1.012x slower, escaped Cuckoo 1.106x slower, and Unicode XOR 1.026x slower | Removed and replaced for Bloom/Cuckoo/Count-Min by the [early-return layout](#allocation-free-public-canonical-string-lookups) |
 | Public XOR canonical-string lookup | Ordinary hits improved 2.22x and eliminated 32 B plus two allocations | A final 15-run alternating gate made the Unicode fallback about 1.06x-1.07x slower | Reverted; `HasXorFilterChecked` retains canonical marshaling for every generic value; see [public canonical-string lookups](#allocation-free-public-canonical-string-lookups) |
 | Public Top-K canonical-string lookup | Inline and promoted ordinary hits improved 3.10x/2.05x and became allocation-free | The 15-run alternating structured fallback median was 369.9 versus 365.0 ns, or 1.013x slower | Reverted; `EstimateTopKChecked` retains its prior implementation; see [public canonical-string lookups](#allocation-free-public-canonical-string-lookups) |
+| Optional command integer representation | Replacing `*int64` fields with values plus presence bits could prevent caller-local TTL and priority values from escaping | It would break the exported request API and require coordinated JSON, protobuf, journal, replication, CLI, and compatibility changes even though reused requests already execute allocation-free | Rejected; command benchmarks now [construct optional values outside timed loops](#optional-command-benchmark-fixture-allocations), while the compatible request representation remains |
 | Count-Min clustered scalar helper | Scalar additions improved about 1.4x with one fewer allocation | Placing the helper between Count-Min hot methods made the frozen 128-value batch 10,970 versus 10,540 ns, or 1.041x slower | Replaced by the [end-of-file scalar helper](#generic-count-min-sketch-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.6% |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
@@ -5875,6 +5876,41 @@ slower in the final alternating gate. Top-K inline/promoted hits improved
 slower. Neither rejected candidate remains in production. Public behavior,
 probabilistic parameters, locks, telemetry, TTL handling, partitions, wire,
 journal, snapshot, replication, and persistent formats are unchanged.
+
+<a id="optional-command-benchmark-fixture-allocations"></a>
+### Optional Command Benchmark Fixture Allocations
+
+The command-family audit initially reported 8 B and one allocation for every
+repeated `EXPIRE`. An allocation profile attributed the complete timed
+allocation to the benchmark's local `ttl := int64(3600)`: taking `&ttl` for
+`CacheCommandRequest.TTLSeconds` made that local escape on every iteration.
+The expiration heap, indexed deadline update, telemetry, and command dispatch
+were absent from the allocation profile. A fail-first allocation guard then
+proved that a prebuilt request repeatedly refreshes an existing deadline with
+zero allocations.
+
+The priority-queue fixture had the same issue for its local `Priority` value.
+Both optional integers are now constructed once before the timed subbenchmarks,
+matching server and reusable-client request ownership. A frozen pre-change
+binary and the corrected fixture produced these seven-run medians:
+
+| Command feature fixture | Local optional value | Prebuilt optional value | Measurement correction |
+| --- | ---: | ---: | ---: |
+| Repeated `EXPIRE` | 390.0 ns; 8 B; 1 alloc | 358.1 ns; 0 B; 0 allocs | 1.09x faster measured row; harness allocation eliminated |
+| Priority queue push+pop | 527.3 ns; 40 B; 2 allocs | 514.2 ns; 32 B; 1 alloc | 1.03x faster measured row; one harness allocation eliminated |
+
+```sh
+make run CMD='go test . -run=TestExecuteCommandExpireExactPathDoesNotAllocate -count=1 -v'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/TTLExpire -benchmem -benchtime=500ms -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/PriorityQueuePushPop -benchmem -benchtime=500ms -count=7'
+```
+
+These are benchmark-accuracy corrections, not production speedups, and are
+therefore excluded from the measured implementation summary. Replacing the
+exported optional pointers with values plus presence bits was rejected: it
+would break direct callers and touch every wire, journal, replication, and CLI
+conversion for no command-execution gain. Public API, JSON/protobuf behavior,
+storage, replication, and production code remain unchanged.
 
 <a id="compact-cuckoo-filter-header-rollback"></a>
 ### Compact Cuckoo-Filter Header Rollback

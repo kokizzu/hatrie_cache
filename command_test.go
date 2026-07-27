@@ -123,6 +123,25 @@ func TestExecuteCommandScalarBatchUsesLowAllocationFastPath(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandExpireExactPathDoesNotAllocate(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("ttl:key", "value")
+	ttlSeconds := int64(3600)
+	request := CacheCommandRequest{Command: "EXPIRE", Key: "ttl:key", TTLSeconds: &ttlSeconds}
+	if got := ht.ExecuteCommand(request); !got.OK {
+		t.Fatalf("warm EXPIRE response = %#v, want ok", got)
+	}
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		if got := ht.ExecuteCommand(request); !got.OK {
+			t.Fatalf("EXPIRE response = %#v, want ok", got)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("EXPIRE exact path allocations = %.2f, want 0", allocs)
+	}
+}
+
 func TestExecuteCommandScalarBatchUsesSingleNativeCCallPerFamily(t *testing.T) {
 	tests := []struct {
 		name  string

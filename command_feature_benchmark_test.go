@@ -19,6 +19,8 @@ func BenchmarkCommandFeature(b *testing.B) {
 	}
 	mixedReadHeavy := benchmarkCommandMixedReadHeavyRequests()
 	mixedWriteHeavy := benchmarkCommandMixedWriteHeavyRequests()
+	ttlSeconds := int64(3600)
+	priority := int64(10)
 	benchmarks := []struct {
 		name  string
 		setup func(*testing.B, *HatTrie)
@@ -49,8 +51,7 @@ func BenchmarkCommandFeature(b *testing.B) {
 		{name: "TTLExpire", setup: func(b *testing.B, ht *HatTrie) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "SETSTR", Key: "ttl:key", Value: "value"})
 		}, run: func(b *testing.B, ht *HatTrie, i int) {
-			ttl := int64(3600)
-			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "EXPIRE", Key: "ttl:key", TTLSeconds: &ttl})
+			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "EXPIRE", Key: "ttl:key", TTLSeconds: &ttlSeconds})
 		}},
 		{name: "MapPut", run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PUTMAP", Key: "map:key", Subkey: "field", Value: "value"})
@@ -74,7 +75,6 @@ func BenchmarkCommandFeature(b *testing.B) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "HASSET", Key: "set:key", Value: "value"})
 		}},
 		{name: "PriorityQueuePushPop", run: func(b *testing.B, ht *HatTrie, i int) {
-			priority := int64(10)
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "PUSHPQ", Key: "priority:key", Value: "value", Priority: &priority})
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "POPPQ", Key: "priority:key"})
 		}},
