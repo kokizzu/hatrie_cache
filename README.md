@@ -47,6 +47,9 @@ wire, snapshot, or persistent formats; measurements are in
 [BENCHMARK.md](BENCHMARK.md#packed-small-slice-storage).
 Bloom filter values use packed bitsets plus double hashing for fast,
 low-memory membership checks without storing inserted items.
+Their private header now uses the validated 32-bit bit-count bound, reducing
+empty-filter retention 1.20x while making bulk initialization 1.14x faster;
+direct add and membership controls are also faster with unchanged allocations.
 Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
 low-memory membership checks with approximate delete support.
 XOR filter values stage unique items once, then compile them into static 8-bit
@@ -196,6 +199,7 @@ make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 make bench-reservoir-small BENCHTIME=500000x COUNT=7
+make bench-bloom-header BENCHTIME=500ms COUNT=7
 make bench-string-compaction STRING_STORAGE_BENCH_KEYS=100000 BENCHTIME=1x COUNT=7
 make bench-startup-persistence BENCHTIME=1x COUNT=7
 make bench-live-replication BENCHTIME=1x COUNT=7

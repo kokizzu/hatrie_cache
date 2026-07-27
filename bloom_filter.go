@@ -42,9 +42,9 @@ type bloomFilterSnapshot struct {
 
 type bloomFilterData struct {
 	words      []uint64
-	bitCount   uint64
-	hashCount  uint8
 	insertions uint64
+	bitCount   uint32
+	hashCount  uint8
 }
 
 func newBloomFilterData(expectedItems uint64, falsePositiveRate float64) (bloomFilterData, error) {
@@ -65,7 +65,7 @@ func newDefaultBloomFilterData() bloomFilterData {
 
 func newBloomFilterDataWithShape(bitCount uint64, hashCount uint8) bloomFilterData {
 	return bloomFilterData{
-		bitCount:  bitCount,
+		bitCount:  uint32(bitCount),
 		hashCount: hashCount,
 	}
 }
@@ -167,7 +167,7 @@ func newBloomFilterDataFromSnapshot(snapshot bloomFilterSnapshot) (bloomFilterDa
 		return bloomFilterData{}, err
 	}
 	out := bloomFilterData{
-		bitCount:   snapshot.BitCount,
+		bitCount:   uint32(snapshot.BitCount),
 		hashCount:  snapshot.HashCount,
 		insertions: snapshot.Insertions,
 	}
@@ -304,7 +304,7 @@ func (filter bloomFilterData) Info() BloomFilterInfo {
 		fillRatio = float64(setBits) / float64(filter.bitCount)
 	}
 	return BloomFilterInfo{
-		BitCount:                   filter.bitCount,
+		BitCount:                   uint64(filter.bitCount),
 		BitBytes:                   uint64(len(filter.words)) * 8,
 		HashCount:                  filter.hashCount,
 		Insertions:                 filter.insertions,
@@ -331,7 +331,7 @@ func (filter bloomFilterData) Snapshot() bloomFilterSnapshot {
 		}
 	}
 	return bloomFilterSnapshot{
-		BitCount:   filter.bitCount,
+		BitCount:   uint64(filter.bitCount),
 		HashCount:  filter.hashCount,
 		Insertions: filter.insertions,
 		Bits:       base64.StdEncoding.EncodeToString(data),
@@ -343,6 +343,7 @@ func (filter bloomFilterData) EncodedSize() int64 {
 }
 
 func (filter *bloomFilterData) visitIndexes(key []byte, visit func(uint64)) {
+	bitCount := uint64(filter.bitCount)
 	first := bloomFilterFNV64a(key)
 	step := bloomFilterFNV64(key)
 	if step == 0 {
@@ -350,11 +351,12 @@ func (filter *bloomFilterData) visitIndexes(key []byte, visit func(uint64)) {
 	}
 	step |= 1
 	for idx := uint8(0); idx < filter.hashCount; idx++ {
-		visit((first + uint64(idx)*step) % filter.bitCount)
+		visit((first + uint64(idx)*step) % bitCount)
 	}
 }
 
 func (filter *bloomFilterData) visitJSONStringIndexes(value string, visit func(uint64)) {
+	bitCount := uint64(filter.bitCount)
 	first := bloomFilterFNV64aJSONString(value)
 	step := bloomFilterFNV64JSONString(value)
 	if step == 0 {
@@ -362,7 +364,7 @@ func (filter *bloomFilterData) visitJSONStringIndexes(value string, visit func(u
 	}
 	step |= 1
 	for idx := uint8(0); idx < filter.hashCount; idx++ {
-		visit((first + uint64(idx)*step) % filter.bitCount)
+		visit((first + uint64(idx)*step) % bitCount)
 	}
 }
 
@@ -370,7 +372,7 @@ func (filter *bloomFilterData) ensureWords() {
 	if filter == nil || len(filter.words) > 0 || filter.bitCount == 0 {
 		return
 	}
-	filter.words = make([]uint64, int(bloomFilterWordCount(filter.bitCount)))
+	filter.words = make([]uint64, int(bloomFilterWordCount(uint64(filter.bitCount))))
 }
 
 func (filter *bloomFilterData) maskUnusedBits() {

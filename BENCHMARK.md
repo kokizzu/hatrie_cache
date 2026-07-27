@@ -221,6 +221,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Flat scalar sequence validation](#flat-scalar-sequence-validation), checked slice/priority-queue replacement with 64/4,096 items | Slice: 3,926/198,293 ns; priority queue: 8,049/443,711 ns; 2,200-368,678 B; 3 allocs | Slice: 523.2/42,955 ns; priority queue: 2,791/182,809 ns; 1,152-196,608 B; 1 alloc | Slice 7.50x/4.62x faster; priority queue 2.88x/2.43x faster; 1.85x-2.00x lower heap; 3x fewer allocs | No measured tradeoff; worst-case nested fallback is 1.11x-1.26x faster with lower heap, while acceptance, cloning, wire, and storage are unchanged |
 | Current pass | [Single-fallback slice payload validation](#flat-scalar-sequence-validation), checked push with one nested value among 64/4,096 items | 6,432/284,075 ns; 2,764/131,753 B; 6/8 allocs | 2,969/38,259 ns; 1,588/66,179 B; 4/5 allocs | 2.17x/7.43x faster; 1.74x/1.99x lower heap; 1.50x/1.60x fewer allocs | No measured tradeoff; two nested values remain on the exact materialized path and are CPU-neutral with identical heap and allocations |
 | Current pass | [Trailing-fallback whole-sequence validation](#flat-scalar-sequence-validation), checked replacement with one trailing nested value among 64/4,096 items | Slice: 2,589/128,450 ns; priority queue: 6,693/411,923 ns; 5 allocs | Slice: 1,835/63,606 ns; priority queue: 4,639/233,791 ns; 4 allocs | Slice 1.41x/2.02x faster; priority queue 1.44x/1.76x faster; one fewer allocation | No measured tradeoff; an earlier non-scalar selects the exact prior whole-sequence path with identical heap and allocations |
+| Current pass | [Compact Bloom-filter headers](#compact-bloom-filter-headers), 100k empty filters plus direct operations | 48-byte header; 48.00 retained B/filter; 47.16 ns/filter build; add/has 33.24/52.46 ns | 40-byte header; 40.06 retained B/filter; 41.22 ns/filter build; add/has 32.95/47.37 ns | 1.20x lower retained heap; build/add/has 1.14x/1.01x/1.11x faster | No measured tradeoff; allocations, bitset bytes, hashes, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -374,6 +375,7 @@ tree.
 | Inline sparse bitsets with generic search | Removed singleton/pair backing allocations and reduced retained objects | The added representation branch made 4,096-value array lookups 1.03x slower | Replaced by an inlineable typed binary search; promoted lookups are now 1.01x faster; see [inline sparse-bitset containers](#inline-sparse-bitset-containers) |
 | Inline Roaring-container values | Made 50,000 singleton containers 1.38x faster to build and removed 50,000 backing allocations | Promoted 16-value lookups were 1.04x slower; large-array and bitmap controls were also about 1.01x-1.02x slower | Reverted; the original slice representation remains; see [inline Roaring-container rollback](#inline-roaring-container-rollback) |
 | Local slice view over fixed Roaring bitmap | Preserved the 48-byte header while dense build/lookup measured 1.02x/1.09x faster | Paired bitmap remove/add was 4.594 versus 4.486 ns, or 1.024x slower | Reverted; direct fixed-pointer access remains 1.006x faster than the legacy slice in the longer control; see [compact Roaring-container headers](#compact-roaring-container-headers) |
+| Late compact Bloom bit-count load | Reduced each Bloom header from 48 to 40 bytes with the same validated 32-bit count | A 20-million-operation confirmation made direct add 33.83 versus 33.73 ns, or 0.3% slower | Replaced by loading the count before the independent hash passes; final add is 1.01x faster than the 48-byte baseline; see [compact Bloom-filter headers](#compact-bloom-filter-headers) |
 | 40-byte Roaring field order | Lowered singleton retained and cumulative heap 1.21x/1.24x and made the 50,000-container build 1.11x faster | The best values-first layout made paired 4,097-value dense construction 1.018x and 1.044x slower in two nine-run confirmations; a pointer-first layout made lookup 1.039x slower | Reverted; the 48-byte operation-neutral layout remains; see [Roaring field-order compaction](#roaring-field-order-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
@@ -5354,6 +5356,48 @@ the logical overhead was only 16 bytes, Go's size classes rounded each 16,400 B
 allocation to 18,432 B; the fixture rose to 18,472,960 B, or 12.47% more heap.
 That layout was discarded. The retained header layout leaves register
 allocations exact and has no cost for serialized or transferred data.
+
+<a id="compact-bloom-filter-headers"></a>
+### Compact Bloom-Filter Headers
+
+Bloom-filter bit counts are validated at construction and restore to at most
+`1 << 31`, but the private header previously retained the count as `uint64`.
+Together with the one-byte hash count, alignment made each header 48 bytes.
+Storing the bounded count as `uint32` and grouping it after the aligned
+insertion counter reduces the header to 40 bytes. Public info and snapshots
+remain `uint64`; hash accumulation and modulo arithmetic also remain `uint64`.
+
+A layout test was added before production changes and failed at 48 bytes until
+the bounded representation was applied. Existing Bloom operation, invalid
+configuration, canonical JSON hashing, lazy bitset, snapshot, persistence,
+replication, and exact-command tests remain unchanged. The reproducible current
+benchmark is:
+
+```sh
+make bench-bloom-header BENCHTIME=500ms COUNT=7
+```
+
+The reported before/after values use warm alternating precompiled binaries on
+one logical CPU. The 100,000-header row used twelve one-pass pairs, direct add
+used ten fixed 20-million-operation pairs, and membership used eight fixed
+five-million-operation pairs.
+
+| Bloom-filter workload | 48-byte baseline | 40-byte final | Improvement |
+| --- | ---: | ---: | ---: |
+| Header size | 48 B/filter | 40 B/filter | 1.20x smaller |
+| 100k retained header backing | 48.00 B/filter | 40.06 B/filter | 1.20x lower retained heap |
+| 100k header initialization | 47.16 ns/filter | 41.22 ns/filter | 1.14x faster |
+| Direct add | 33.24 ns; 0 B; 0 allocs | 32.95 ns; 0 B; 0 allocs | 1.01x faster |
+| Direct membership | 52.46 ns; 0 B; 0 allocs | 47.37 ns; 0 B; 0 allocs | 1.11x faster |
+
+The first compact prototype loaded and widened the count after hashing. A
+longer confirmation measured 33.83 versus 33.73 ns for direct add, a 0.3%
+regression. Moving the independent count load before the two hash passes lets
+the processor overlap it with hashing and produces the final faster row; the
+late-load form was removed. Complete `ADDBF` and `HASBF` command controls are
+allocation-free and neutral within alternating process-order drift. Bitset
+bytes, false-positive shape, hash indexes, snapshots, storage, wire, and
+persistence formats are unchanged.
 
 <a id="xor-filter-scalar-fast-path"></a>
 ### XOR Filter Scalar Fast Path
