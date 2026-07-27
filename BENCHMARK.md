@@ -319,6 +319,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Normalized replication target precomputation](#normalized-replication-target-precomputation), one/four/64 shards | Per-shard duplicate map: 1,436.5/3,591.5/47,579.5 ns; 64 shards: 84,759 B, 403 allocs | Validated owners: 1,395/3,121.5/43,078.5 ns; 64 shards: 84,709 B, 402 allocs | 1.03x/1.15x/1.10x faster; 64 shards use 50 fewer heap bytes and one fewer allocation | Applies only to private snapshots of normalized topology; self, online, existence, and sorted-output filters are unchanged |
 | Current pass | [Map-free replication routing snapshots](#map-free-replication-routing-snapshots), 2/4/64 shards | Node map: 1,722.5/3,304.5/45,159 ns; 3,360/5,440/84,704 heap B | Sorted nodes: 1,282.5/2,819.5/42,968 ns; 2,288/4,368/68,232 heap B | 1.34x/1.17x/1.05x faster; 1.47x/1.25x/1.24x lower heap; 2/2/4 fewer allocations | Uses the normalized sorted topology generation and immutable precomputed targets; routing, target order, election state, wire, and behavior are unchanged |
 | Current pass | [Aligned replication shard state](#aligned-replication-shard-state), 2/16/64-shard snapshot plus hash route/targets | Three shard-ID maps: 1,360/10,153/44,388 ns construction; 75.385/95.83/89.315 ns routing | Three aligned slices: 923.4/8,794.5/38,234.5 ns construction; 70.88/70.07/65.025 ns routing | Construction 1.47x/1.15x/1.16x faster; routing 1.06x/1.37x/1.37x faster; 3/9/9 fewer construction allocations | Normalized shard order provides the index; complete hot routes preserve it through target lookup, while defensive by-ID access binary-searches the same sorted generation |
+| Current pass | [Canonical replication owner slices](#canonical-replication-owner-slices), election snapshot and bucket route at 2/16/64 shards | Duplicate owners: 1,293.5/11,369/45,965.5 ns; 17/121/457 allocs; routes 82.935/89.095/97.16 ns | Leader candidates: 1,140.5/10,183/41,608 ns; 14/104/392 allocs; routes 77.80/84.16/90.555 ns | Construction 1.13x/1.12x/1.10x faster; 3/17/65 fewer allocations; routes 1.07x/1.06x/1.07x faster | Leader candidates were already immutable route output; election, owner order, targets, wire, storage, and behavior are unchanged |
 | Current pass | [Adaptive replication bucket search](#adaptive-replication-bucket-search), complete route plus targets at 16/64/256 ranges | Linear ranges: 91.115/111.0/180.05 ns | Binary ranges: 77.825/87.37/98.92 ns | 1.17x/1.27x/1.82x faster; heap and allocations unchanged | Two through eight ranges retain linear lookup; normalized contiguous ranges above that threshold use binary search |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
@@ -3580,6 +3581,66 @@ slower at 2-8 shards; it was replaced before shipping by direct measured hot
 operations. Topology validation, election results, target order, source and
 online filtering, public routes, configuration, wire, storage, and persistence
 are unchanged.
+
+<a id="canonical-replication-owner-slices"></a>
+#### Canonical Replication Owner Slices
+
+Aligned routing snapshots still retained a separate outer owner-slice table
+even though every `ElectionLeader` already carried the identical candidate
+slice. With election enabled, construction also called the general election
+helper after building owners for target planning, allocating a second
+candidate backing per shard. Leader candidates are now the single immutable
+owner representation: target planning and election scan the same backing, and
+routes, digest checks, and defensive owner lookup read it directly. Removing
+the unused outer field also shrinks the snapshot value by one 24-byte slice header
+on the measured amd64 host.
+
+The test-first control keeps the exact former snapshot shape, constructor, and
+route methods. Exact tests compare snapshot headers, leaders, candidates,
+targets, normal routes, and scan routes for hash sharding, reversed
+non-contiguous bucket ownership, and full replication, both with and without
+an offline election node. Each matrix covers 4,096 keys and passes 20 runs.
+
+```sh
+make run CMD='go test . -run="TestReplicationRoutingSnapshotLeaderCandidatesMatchOwnerSlices|TestReplicationRoutingSnapshot(SortedNodesMatchNodeMap|ShardSlicesMatchMaps|ShardSliceRoutesMatchMaps)|TestReplicationRouteTargetsNodeMatchesMaterializedControl" -count=20'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingLeaderCandidatesConstructionAlternating$$ -benchtime=10000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingLeaderCandidatesConstructionAlternating$$/^Election$$ -benchtime=20000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingLeaderCandidatesConstruction$$ -benchmem -benchtime=20000x -count=3 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingLeaderCandidatesRouteAlternating$$ -benchtime=500000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingLeaderCandidatesRoute$$ -benchmem -benchtime=1000000x -count=5 -cpu=1'
+```
+
+| Election snapshot, paired median | Separate owner slices | Leader candidates | Improvement |
+| --- | ---: | ---: | ---: |
+| Two shards | 1,293.5 ns; 1,424 B; 17 allocs | 1,140.5 ns; 1,312 B; 14 allocs | 1.13x faster; 112 fewer B; three fewer allocations |
+| Four shards | 2,620 ns; 3,872 B; 35 allocs | 2,376 ns; 3,584 B; 30 allocs | 1.10x faster; 288 fewer B; five fewer allocations |
+| Eight shards | 5,236 ns; 7,616 B; 63 allocs | 4,802 ns; 7,040 B; 54 allocs | 1.09x faster; 576 fewer B; nine fewer allocations |
+| 16 shards | 11,369 ns; 15,832 B; 121 allocs | 10,183 ns; 14,680 B; 104 allocs | 1.12x faster; 1,152 fewer B; 17 fewer allocations |
+| 32 shards | 22,979.5 ns; 31,832 B; 233 allocs | 20,953.5 ns; 29,400 B; 200 allocs | 1.10x faster; 2,432 fewer B; 33 fewer allocations |
+| 64 shards | 45,965.5 ns; 62,424 B; 457 allocs | 41,608 ns; 57,560 B; 392 allocs | 1.10x faster; 4,864 fewer B; 65 fewer allocations |
+
+Without election, the final constructor is 1.01x-1.05x faster across 2-64
+shards, removes one allocation, and saves 48-1,792 cumulative heap bytes. The
+smaller gain is expected because the former no-election leader already reused
+the per-shard owner backing; only the redundant outer table remained.
+
+| Complete route plus targets, ten-run median | Separate owner slices | Leader candidates | Improvement |
+| --- | ---: | ---: | ---: |
+| Hash, two shards | 75.095 ns | 74.575 ns | 1.007x faster |
+| Hash, 16 shards | 73.56 ns | 72.715 ns | 1.012x faster |
+| Hash, 64 shards | 68.21 ns | 67.845 ns | 1.005x faster |
+| Bucket ranges, two shards | 82.935 ns | 77.80 ns | 1.07x faster |
+| Bucket ranges, 16 shards | 89.095 ns | 84.16 ns | 1.06x faster |
+| Bucket ranges, 64 shards | 97.16 ns | 90.555 ns | 1.07x faster |
+
+Hash routes remain zero-allocation. Explicit bucket routes retain their
+existing 4-byte returned-bucket allocation. An initial test-only route copied
+the complete leader into a local before constructing the response and made
+hash routes 1.02x-1.03x slower; direct indexed reads removed that regression
+before production was changed. Election selection, offline handling,
+candidate and target order, aliasing already present in no-election routes,
+topology generation, wire, storage, persistence, and public configuration are
+unchanged.
 
 <a id="adaptive-replication-bucket-search"></a>
 #### Adaptive Replication Bucket Search

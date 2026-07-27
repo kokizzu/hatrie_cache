@@ -1381,7 +1381,7 @@ func executeInternalReplicationDigest(ctx context.Context, trie *HatTrie, reques
 			return commandError("replication Merkle digest requires a whole-dataset single-shard sync"), false
 		}
 		shard := routing.shards[0]
-		if routing.leaders[0].Leader != source || !replicationRouteTargetsNode(routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.owners[0]}}, source, targetNode) {
+		if routing.leaders[0].Leader != source || !replicationRouteTargetsNode(routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.leaders[0].Candidates}}, source, targetNode) {
 			return commandError("replication Merkle digest source is outside target scope"), false
 		}
 		expected, err := decodeReplicationValueDigest(commandPairString(request.Pairs, replicationDigestRootMetadata))

@@ -5471,7 +5471,7 @@ func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 		} {
 			routing.online = online
 			for index := range routing.shards {
-				owners := routing.owners[index]
+				owners := routing.leaders[index].Candidates
 				routing.targets[index] = precomputedNormalizedReplicationTargets(owners, routing.topology.Nodes, online, routing.self)
 			}
 			for _, source := range []string{"", routing.self, owners[0], owners[len(owners)-1]} {
@@ -5630,8 +5630,13 @@ func TestReplicationRoutingSnapshotSortedNodesMatchNodeMap(t *testing.T) {
 			control, wantOK := newReplicationRoutingSnapshotNodeMapControl("node-000", store, election)
 			want := control.snapshot
 			got, gotOK := newReplicationRoutingSnapshot("node-000", store, election)
-			if gotOK != wantOK || !reflect.DeepEqual(got, want) {
+			if gotOK != wantOK || got.topology.Version != want.topology.Version || !reflect.DeepEqual(got.topology, want.topology) || !reflect.DeepEqual(got.shards, want.shards) || !reflect.DeepEqual(got.online, want.online) || got.self != want.self || got.fingerprint != want.fingerprint {
 				t.Fatalf("%d shards election=%v sorted snapshot = %#v/%v, map snapshot %#v/%v", size, withElection, got, gotOK, want, wantOK)
+			}
+			for index := range got.shards {
+				if !reflect.DeepEqual(got.leaders[index], want.leaders[index]) || !reflect.DeepEqual(got.leaders[index].Candidates, want.owners[index]) || !reflect.DeepEqual(got.targets[index], want.targets[index]) {
+					t.Fatalf("%d shards election=%v shard %d sorted state = %#v/%#v, map state %#v/%#v/%#v", size, withElection, index, got.leaders[index], got.targets[index], want.leaders[index], want.owners[index], want.targets[index])
+				}
 			}
 		}
 	}
@@ -5657,8 +5662,8 @@ func TestReplicationRoutingSnapshotShardSlicesMatchMaps(t *testing.T) {
 				t.Fatalf("%d shards election=%v slice snapshot header = %#v/%v, map snapshot %#v/%v", size, withElection, got, gotOK, want, wantOK)
 			}
 			for index, shard := range got.shards {
-				if !reflect.DeepEqual(got.leaders[index], want.leaders[shard.ID]) || !reflect.DeepEqual(got.owners[index], want.owners[shard.ID]) || !reflect.DeepEqual(got.targets[index], want.targets[shard.ID]) {
-					t.Fatalf("%d shards election=%v shard %d slice state = %#v/%#v/%#v, map state %#v/%#v/%#v", size, withElection, shard.ID, got.leaders[index], got.owners[index], got.targets[index], want.leaders[shard.ID], want.owners[shard.ID], want.targets[shard.ID])
+				if !reflect.DeepEqual(got.leaders[index], want.leaders[shard.ID]) || !reflect.DeepEqual(got.leaders[index].Candidates, want.owners[shard.ID]) || !reflect.DeepEqual(got.targets[index], want.targets[shard.ID]) {
+					t.Fatalf("%d shards election=%v shard %d slice state = %#v/%#v, map state %#v/%#v/%#v", size, withElection, shard.ID, got.leaders[index], got.targets[index], want.leaders[shard.ID], want.owners[shard.ID], want.targets[shard.ID])
 				}
 			}
 		}
@@ -5723,6 +5728,84 @@ func TestReplicationRoutingSnapshotShardSliceRoutesMatchMaps(t *testing.T) {
 				}
 				want, wantTargets, wantOK = maps.replicationScanRouteForKeyAndTargets(key)
 				got, gotTargets, gotOK = slices.replicationScanRouteForKeyAndTargets(key)
+				if gotOK != wantOK || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotTargets, wantTargets) {
+					t.Fatalf("topology %d election=%v scan route(%q) = %#v/%#v/%v, want %#v/%#v/%v", topologyIndex, withElection, key, got, gotTargets, gotOK, want, wantTargets, wantOK)
+				}
+			}
+		}
+	}
+}
+
+func TestReplicationRoutingSnapshotLeaderCandidatesMatchOwnerSlices(t *testing.T) {
+	topologies := []ClusterTopology{
+		replicationRoutingBenchmarkTopology(2),
+		replicationRoutingBenchmarkTopology(16),
+		{
+			Version:     1,
+			Mode:        TopologyModeSharded,
+			Self:        "node-a",
+			BucketCount: 16,
+			Nodes: []TopologyNode{
+				{ID: "node-a", Address: "http://node-a"},
+				{ID: "node-b", Address: "http://node-b"},
+				{ID: "node-c", Address: "http://node-c"},
+			},
+			Shards: []TopologyShard{
+				{ID: 3, Primary: "node-a", Replicas: []string{"node-b"}},
+				{ID: 19, Primary: "node-b", Replicas: []string{"node-c"}},
+			},
+			BucketRanges: []TopologyBucketRange{
+				{Start: 0, End: 7, Shard: 19},
+				{Start: 8, End: 15, Shard: 3},
+			},
+		},
+		{
+			Version: 1,
+			Mode:    TopologyModeFullReplica,
+			Self:    "node-a",
+			Nodes: []TopologyNode{
+				{ID: "node-a", Address: "http://node-a"},
+				{ID: "node-b", Address: "http://node-b"},
+				{ID: "node-c", Address: "http://node-c"},
+			},
+		},
+	}
+	for topologyIndex, topology := range topologies {
+		store, err := NewTopologyStore(topology)
+		if err != nil {
+			t.Fatalf("NewTopologyStore(%d) error = %v", topologyIndex, err)
+		}
+		for _, withElection := range []bool{false, true} {
+			var election *ElectionStore
+			if withElection {
+				election = NewElectionStore(store, ElectionOptions{})
+				lastNode := store.Get().Nodes[len(store.Get().Nodes)-1].ID
+				if err := election.MarkOffline(lastNode); err != nil {
+					t.Fatalf("MarkOffline(%q) error = %v", lastNode, err)
+				}
+			}
+			baseline, baselineOK := newReplicationRoutingSnapshotOwnerSlicesControl(topology.Self, store, election)
+			candidate, candidateOK := newReplicationRoutingSnapshot(topology.Self, store, election)
+			if candidateOK != baselineOK || !candidateOK {
+				t.Fatalf("topology %d election=%v snapshot ok = %v/%v", topologyIndex, withElection, candidateOK, baselineOK)
+			}
+			if !reflect.DeepEqual(candidate.topology, baseline.topology) || !reflect.DeepEqual(candidate.shards, baseline.shards) || !reflect.DeepEqual(candidate.online, baseline.online) || candidate.self != baseline.self || candidate.fingerprint != baseline.fingerprint {
+				t.Fatalf("topology %d election=%v candidate header = %#v, baseline %#v", topologyIndex, withElection, candidate, baseline)
+			}
+			for index := range baseline.shards {
+				if !reflect.DeepEqual(candidate.leaders[index], baseline.leaders[index]) || !reflect.DeepEqual(candidate.leaders[index].Candidates, baseline.owners[index]) || !reflect.DeepEqual(candidate.targets[index], baseline.targets[index]) {
+					t.Fatalf("topology %d election=%v shard %d candidate state = %#v/%#v, baseline %#v/%#v/%#v", topologyIndex, withElection, index, candidate.leaders[index], candidate.targets[index], baseline.leaders[index], baseline.owners[index], baseline.targets[index])
+				}
+			}
+			for keyIndex := 0; keyIndex < 4096; keyIndex++ {
+				key := fmt.Sprintf("session:%d", keyIndex)
+				want, wantTargets, wantOK := baseline.routeForKeyAndTargetsOwnerSlicesControl(key)
+				got, gotTargets, gotOK := candidate.routeForKeyAndTargets(key)
+				if gotOK != wantOK || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotTargets, wantTargets) {
+					t.Fatalf("topology %d election=%v route(%q) = %#v/%#v/%v, want %#v/%#v/%v", topologyIndex, withElection, key, got, gotTargets, gotOK, want, wantTargets, wantOK)
+				}
+				want, wantTargets, wantOK = baseline.replicationScanRouteForKeyAndTargetsOwnerSlicesControl(key)
+				got, gotTargets, gotOK = candidate.replicationScanRouteForKeyAndTargets(key)
 				if gotOK != wantOK || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotTargets, wantTargets) {
 					t.Fatalf("topology %d election=%v scan route(%q) = %#v/%#v/%v, want %#v/%#v/%v", topologyIndex, withElection, key, got, gotTargets, gotOK, want, wantTargets, wantOK)
 				}

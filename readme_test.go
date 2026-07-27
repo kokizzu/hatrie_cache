@@ -694,6 +694,35 @@ func TestDocsDescribeMapFreeReplicationRoutingSnapshots(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeCanonicalReplicationOwnerSlices(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[canonical owner representation](BENCHMARK.md#canonical-replication-owner-slices)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing canonical replication-owner token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkReplicationRoutingLeaderCandidatesConstructionAlternating",
+		"BenchmarkReplicationRoutingLeaderCandidatesRouteAlternating",
+		"TestReplicationRoutingSnapshotLeaderCandidatesMatchOwnerSlices",
+		"4,864 fewer B",
+		"65 fewer allocations",
+		"1.07x faster",
+		"24-byte slice header",
+		"hash routes 1.02x-1.03x slower",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing canonical replication-owner token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectReplicationRouteMembership(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

@@ -1899,6 +1899,16 @@ plus target selection is 1.06x/1.37x/1.37x faster at the same sizes; normalized
 shard order, election results, target ordering, wire, storage, and persistence
 remain unchanged.
 
+The aligned snapshot now treats each leader's immutable candidate slice as the
+[canonical owner representation](BENCHMARK.md#canonical-replication-owner-slices)
+instead of retaining a duplicate outer owner table and, with election enabled,
+allocating candidate backing twice. Election-enabled construction is
+1.13x/1.12x/1.10x faster at 2/16/64 shards and removes 3/17/65 allocations;
+complete bucket routing is 1.07x/1.06x/1.07x faster. Hash routing remains
+zero-allocation and is neutral-to-slightly faster, while election results,
+owner and target order, wire, storage, persistence, and configuration are
+unchanged.
+
 Explicit bucket routing also uses
 [adaptive range search](BENCHMARK.md#adaptive-replication-bucket-search).
 Up to eight normalized ranges retain the prior linear scan; larger range sets

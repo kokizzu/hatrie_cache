@@ -280,7 +280,6 @@ type replicationRoutingSnapshot struct {
 	shards      []TopologyShard
 	online      map[string]bool
 	leaders     []ElectionLeader
-	owners      [][]string
 	targets     [][]TopologyNode
 	self        string
 	fingerprint string
@@ -2475,23 +2474,28 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 		return replicationRoutingSnapshot{}, false
 	}
 	snapshot.leaders = make([]ElectionLeader, len(snapshot.shards))
-	snapshot.owners = make([][]string, len(snapshot.shards))
 	snapshot.targets = make([][]TopologyNode, len(snapshot.shards))
 	for index, shard := range snapshot.shards {
-		owners := routeOwners(shard)
-		snapshot.owners[index] = owners
-		snapshot.targets[index] = precomputedNormalizedReplicationTargets(owners, topology.Nodes, snapshot.online, snapshot.self)
-		if election != nil {
-			snapshot.leaders[index] = electShardLeader(shard, snapshot.online)
-			continue
-		}
-		snapshot.leaders[index] = ElectionLeader{
+		candidates := routeOwners(shard)
+		snapshot.targets[index] = precomputedNormalizedReplicationTargets(candidates, topology.Nodes, snapshot.online, snapshot.self)
+		leader := ElectionLeader{
 			Shard:      shard.ID,
-			Leader:     shard.Primary,
-			Available:  true,
 			Primary:    shard.Primary,
-			Candidates: owners,
+			Candidates: candidates,
 		}
+		if election == nil {
+			leader.Leader = shard.Primary
+			leader.Available = true
+		} else {
+			for _, nodeID := range candidates {
+				if snapshot.online[nodeID] {
+					leader.Leader = nodeID
+					leader.Available = true
+					break
+				}
+			}
+		}
+		snapshot.leaders[index] = leader
 	}
 	return snapshot, true
 }
@@ -2517,7 +2521,7 @@ func (snapshot replicationRoutingSnapshot) routeForKey(key string) (ElectionKeyR
 		}
 	}
 	shard := snapshot.shards[shardIndex]
-	owners := snapshot.owners[shardIndex]
+	owners := snapshot.leaders[shardIndex].Candidates
 	route := TopologyRoute{Key: key, Mode: mode, Bucket: bucket, Shard: shard, Owners: owners}
 	return ElectionKeyRoute{Key: key, Route: route, Leader: snapshot.leaders[shardIndex]}, true
 }
@@ -2543,7 +2547,7 @@ func (snapshot replicationRoutingSnapshot) routeForKeyAndTargets(key string) (El
 		}
 	}
 	shard := snapshot.shards[shardIndex]
-	owners := snapshot.owners[shardIndex]
+	owners := snapshot.leaders[shardIndex].Candidates
 	route := ElectionKeyRoute{
 		Key: key,
 		Route: TopologyRoute{
@@ -2563,7 +2567,7 @@ func (snapshot replicationRoutingSnapshot) replicationScanRouteForKey(key string
 		return snapshot.routeForKey(key)
 	}
 	shard := snapshot.shards[0]
-	owners := snapshot.owners[0]
+	owners := snapshot.leaders[0].Candidates
 	route := TopologyRoute{
 		Key:    key,
 		Mode:   topologyMode(snapshot.topology.Mode),
@@ -2578,7 +2582,7 @@ func (snapshot replicationRoutingSnapshot) replicationScanRouteForKeyAndTargets(
 		return snapshot.routeForKeyAndTargets(key)
 	}
 	shard := snapshot.shards[0]
-	owners := snapshot.owners[0]
+	owners := snapshot.leaders[0].Candidates
 	route := TopologyRoute{
 		Key:    key,
 		Mode:   topologyMode(snapshot.topology.Mode),
@@ -2601,7 +2605,7 @@ func (snapshot replicationRoutingSnapshot) replicationOwners(shardID uint32) []s
 	if !ok {
 		return nil
 	}
-	return snapshot.owners[index]
+	return snapshot.leaders[index].Candidates
 }
 
 func (snapshot replicationRoutingSnapshot) shardIndex(shardID uint32) (int, bool) {
