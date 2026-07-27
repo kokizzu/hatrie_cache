@@ -376,6 +376,7 @@ tree.
 | Inline Roaring-container values | Made 50,000 singleton containers 1.38x faster to build and removed 50,000 backing allocations | Promoted 16-value lookups were 1.04x slower; large-array and bitmap controls were also about 1.01x-1.02x slower | Reverted; the original slice representation remains; see [inline Roaring-container rollback](#inline-roaring-container-rollback) |
 | Local slice view over fixed Roaring bitmap | Preserved the 48-byte header while dense build/lookup measured 1.02x/1.09x faster | Paired bitmap remove/add was 4.594 versus 4.486 ns, or 1.024x slower | Reverted; direct fixed-pointer access remains 1.006x faster than the legacy slice in the longer control; see [compact Roaring-container headers](#compact-roaring-container-headers) |
 | Late compact Bloom bit-count load | Reduced each Bloom header from 48 to 40 bytes with the same validated 32-bit count | A 20-million-operation confirmation made direct add 33.83 versus 33.73 ns, or 0.3% slower | Replaced by loading the count before the independent hash passes; final add is 1.01x faster than the 48-byte baseline; see [compact Bloom-filter headers](#compact-bloom-filter-headers) |
+| Compact Cuckoo-filter header | Reduced each empty header from 48 to 40 bytes, retained heap 1.20x, and header initialization 1.18x | The best 40-byte layout made paired delete+add 36.74 versus 35.87 ns, or 1.024x slower; membership was neutral | Reverted; the 48-byte operation-faster layout remains; see [compact Cuckoo-filter header rollback](#compact-cuckoo-filter-header-rollback) |
 | 40-byte Roaring field order | Lowered singleton retained and cumulative heap 1.21x/1.24x and made the 50,000-container build 1.11x faster | The best values-first layout made paired 4,097-value dense construction 1.018x and 1.044x slower in two nine-run confirmations; a pointer-first layout made lookup 1.039x slower | Reverted; the 48-byte operation-neutral layout remains; see [Roaring field-order compaction](#roaring-field-order-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
@@ -5398,6 +5399,39 @@ late-load form was removed. Complete `ADDBF` and `HASBF` command controls are
 allocation-free and neutral within alternating process-order drift. Bitset
 bytes, false-positive shape, hash indexes, snapshots, storage, wire, and
 persistence formats are unchanged.
+
+<a id="compact-cuckoo-filter-header-rollback"></a>
+### Compact Cuckoo-Filter Header Rollback
+
+Cuckoo-filter bucket counts are validated to at most `1 << 24`, so narrowing
+the private bucket count from `uint64` to `uint32` can reduce
+`cuckooFilterData` from 48 to 40 bytes without changing its public `uint64`
+info and snapshot fields.
+A fail-first layout guard confirmed the original 48-byte size. The experiment
+then tested three 40-byte arrangements: two `uint32` fields, a retained
+`uint64` mutation count before the narrow bucket count, and a narrow bucket
+count at its original offset followed by the aligned `uint64` mutation count.
+
+The final comparison used 16 warm alternating original/candidate binary pairs
+on one logical CPU. Header runs constructed 100,000 lazy empty filters once per
+pair; operation runs used ten million iterations and remained allocation-free.
+
+| Cuckoo-filter workload, paired median | 48-byte baseline | Best 40-byte candidate | Result |
+| --- | ---: | ---: | ---: |
+| Header size | 48 B/filter | 40 B/filter | 1.20x smaller |
+| 100k retained header backing | 48.00 B/filter | 40.06 B/filter | 1.20x lower retained heap |
+| 100k header initialization | 41.10 ns/filter | 34.73 ns/filter | 1.18x faster |
+| Direct membership | 16.82 ns; 0 B; 0 allocs | 16.72 ns; 0 B; 0 allocs | Neutral within 0.6% |
+| Direct delete+add | 35.87 ns; 0 B; 0 allocs | 36.74 ns; 0 B; 0 allocs | 1.024x slower |
+
+Keeping the mutation count at `uint64` and preserving the bucket field's
+original offset did not remove the repeatable mutation loss. A further
+candidate loaded the narrowed bucket mask once and reused it for both indexes
+and relocation; a direct candidate-to-candidate control was neutral and did
+not recover complete-path throughput. All compact layouts, helper changes,
+test-only fixtures, and direct test adjustments were removed. The retained
+implementation therefore has no added branch, conversion, allocation, field,
+format change, or runtime cost from this experiment.
 
 <a id="xor-filter-scalar-fast-path"></a>
 ### XOR Filter Scalar Fast Path
