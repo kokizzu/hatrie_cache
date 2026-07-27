@@ -1942,6 +1942,17 @@ Public topology and routing APIs retain their prior cloned ownership, while
 election behavior, route and target order, wire, storage, persistence, and
 configuration remain unchanged.
 
+Sharded snapshots now also use
+[four-shard owner backing](BENCHMARK.md#grouped-replication-owner-backing):
+immutable leader candidate slices share one capacity-capped backing allocation
+for each group of at most four shards. Healthy 2/16/64-shard construction is
+1.03x/1.04x/1.02x faster, keeps cumulative heap exactly unchanged, and removes
+1/12/48 allocations. Offline controls also improve, while full-replica
+construction retains its former single-shard path and identical memory use. A
+single backing for every shard was rejected because Go size-class rounding
+added heap; candidate and target order, routing, election behavior, wire,
+storage, persistence, and configuration remain unchanged.
+
 Explicit bucket routing also uses
 [adaptive range search](BENCHMARK.md#adaptive-replication-bucket-search).
 Up to eight normalized ranges retain the prior linear scan; larger range sets

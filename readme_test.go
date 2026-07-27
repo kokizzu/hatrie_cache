@@ -827,6 +827,35 @@ func TestDocsDescribeBorrowedReplicationTopologyGeneration(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeGroupedReplicationOwnerBacking(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[four-shard owner backing](BENCHMARK.md#grouped-replication-owner-backing)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing grouped replication-owner token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Four-shard replication owner backing",
+		"TestReplicationRoutingSnapshotPackedOwnerBackingMatchesPerShardOwners",
+		"BenchmarkReplicationRoutingPackedOwnerBackingConstructionAlternating",
+		"128/256/128",
+		"cumulative heap bytes",
+		"23,445 ns; 30,208 B; 82 allocs",
+		"48 fewer allocations with identical heap",
+		"single-shard construction path",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing grouped replication-owner token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectReplicationRouteMembership(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

@@ -41,6 +41,7 @@ const defaultReplicationSyncKeyPageSize = 1024
 const replicationLinearGroupTaskLimit = 16
 const replicationLinearGroupTargetLimit = 4
 const replicationGenericTargetSortLimit = 16
+const replicationOwnerBackingGroupSize = 4
 const replicationBatchEnvelopeCommand = "INTERNALBATCHV2"
 const replicationSetBinaryCommand = "INTERNALSETV2"
 const replicationSetCompactCommand = "INTERNALSETV3"
@@ -2477,9 +2478,10 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 	}
 	snapshot.leaders = make([]ElectionLeader, len(snapshot.shards))
 	snapshot.targets = make([][]TopologyNode, len(snapshot.shards))
-	for index, shard := range snapshot.shards {
+	if len(snapshot.shards) == 1 {
+		shard := snapshot.shards[0]
 		candidates := routeOwners(shard)
-		snapshot.targets[index] = precomputedNormalizedReplicationTargets(candidates, topology.Nodes, snapshot.inactive, snapshot.self)
+		snapshot.targets[0] = precomputedNormalizedReplicationTargets(candidates, topology.Nodes, snapshot.inactive, snapshot.self)
 		leader := ElectionLeader{
 			Shard:      shard.ID,
 			Primary:    shard.Primary,
@@ -2497,7 +2499,47 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 				}
 			}
 		}
-		snapshot.leaders[index] = leader
+		snapshot.leaders[0] = leader
+		return snapshot, true
+	}
+	for groupStart := 0; groupStart < len(snapshot.shards); groupStart += replicationOwnerBackingGroupSize {
+		groupEnd := min(groupStart+replicationOwnerBackingGroupSize, len(snapshot.shards))
+		ownerCount := 0
+		for _, shard := range snapshot.shards[groupStart:groupEnd] {
+			if shard.Primary != "" {
+				ownerCount++
+			}
+			ownerCount += len(shard.Replicas)
+		}
+		ownerBacking := make([]string, 0, ownerCount)
+		for index := groupStart; index < groupEnd; index++ {
+			shard := snapshot.shards[index]
+			start := len(ownerBacking)
+			if shard.Primary != "" {
+				ownerBacking = append(ownerBacking, shard.Primary)
+			}
+			ownerBacking = append(ownerBacking, shard.Replicas...)
+			candidates := ownerBacking[start:len(ownerBacking):len(ownerBacking)]
+			snapshot.targets[index] = precomputedNormalizedReplicationTargets(candidates, topology.Nodes, snapshot.inactive, snapshot.self)
+			leader := ElectionLeader{
+				Shard:      shard.ID,
+				Primary:    shard.Primary,
+				Candidates: candidates,
+			}
+			if election == nil {
+				leader.Leader = shard.Primary
+				leader.Available = true
+			} else {
+				for _, nodeID := range candidates {
+					if !snapshot.inactive[nodeID] {
+						leader.Leader = nodeID
+						leader.Available = true
+						break
+					}
+				}
+			}
+			snapshot.leaders[index] = leader
+		}
 	}
 	return snapshot, true
 }
