@@ -2577,9 +2577,9 @@ See [BENCHMARK.md](BENCHMARK.md#compact-typed-protobuf-structured-batches) for
 CPU, heap, allocation, and measured wire tradeoffs. Shared key, subkey, and
 value requests avoid repeated wire entries. Shared keys and subkeys use
 request-local execution state: the server borrows the one decoded shared key,
-temporarily expands shared subkey headers, and converts a shared value to a Go
-string once per envelope without copying it per operation. Positional requests
-and the generated protobuf layout are unchanged.
+borrows the one decoded shared subkey across map operations, and converts a
+shared value to a Go string once per envelope without copying it per operation.
+Positional requests and the generated protobuf layout are unchanged.
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with
 `next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
 page. Empty keys are valid, so Go clients should set the optional `AfterKey`
