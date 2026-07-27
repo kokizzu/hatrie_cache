@@ -393,6 +393,7 @@ tree.
 | Dedicated `GETTOPK` lock-release snapshot | Let writers proceed while caller-controlled JSON marshaling was blocked | The five-second 100-item structured read was 14,457 ns versus 13,776 ns legacy, or 1.05x slower, with identical 9,872 B and 5 allocations | Reverted for `GETTOPK`; the serial-neutral generic `GET` snapshot remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
+| Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster | Scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower | All three layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
@@ -6042,6 +6043,34 @@ free, however: a paired 16-value lookup measured 5.139 versus 4.955 ns, or
 1.01x-1.02x slower. Special-casing three values recovered that layout but
 made the larger controls worse. The complete candidate and its tests were
 removed; it adds no runtime cost.
+
+<a id="reservoir-preparation-layout-rollbacks"></a>
+#### Reservoir Preparation Layout Rollbacks
+
+Generic reservoir additions atomically prepare every value before advancing the
+sample sequence or mutating the heap. Three test-first layouts tried to reduce
+the preparation work while preserving exact updates, private state, deterministic
+priorities, sequence-overflow rejection, and all-or-reject invalid batches.
+Differential tests covered capacities one, three, and 16; plain, escaped,
+HTML-sensitive, Unicode, and structured values; overflow; and an invalid value
+after a valid batch prefix. Each candidate passed those tests 20 times and the
+race build five times before benchmarking.
+
+The same-binary control alternated 64-operation candidate/reference blocks in
+both orders on one logical CPU. Seven 500 ms samples produced these medians:
+
+| Preparation layout | Attractive workload | Disqualifying control |
+| --- | --- | --- |
+| Scalar branch before batch preparation | Safe/escaped scalar adds 1.05x faster; structured scalar 1.03x faster | Two-value batch 194.4 versus 190.5 ns, or 1.02x slower |
+| First item local, remaining items slice | Two-value batch 151.4 versus 187.0 ns, or 1.24x faster; one allocation and 64 B removed | 16-value batch 1,350 versus 1,335 ns, or 1.01x slower |
+| Full-length slice filled by index | Two-value batch 199.2 versus 201.6 ns, or 1.01x faster | 128-value batch 10,709 versus 10,465 ns, or 1.02x slower |
+
+The split-first 128-value control improved only about 1%, while its 16-value
+regression was repeatable. The indexed layout kept memory identical but moved
+the regression to the large batch. No layout was neutral across scalar,
+two-value, medium, and large workloads, so the original capacity-sized append
+and uniform apply loops were restored. No candidate code, branch, retained
+state, allocation, format, or behavior remains in production.
 
 The reservoir sample add path now has a plain-string fast path that hashes the
 JSON string representation directly and only boxes retained values. The focused
