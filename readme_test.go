@@ -290,6 +290,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Exact protobuf batch coalescing",
 		"Carried compact payload estimates",
 		"Specialized compact payload estimator",
+		"Unchecked normalized replication owners",
 		"all candidate code was removed",
 	} {
 		if !strings.Contains(index, token) {

@@ -383,6 +383,7 @@ tree.
 | Carried compact payload estimates | Isolated splitting improved 4.37x | Complete scan/serialize/split CPU was 0.36% slower with unchanged allocations | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Specialized compact payload estimator | Focused splitting improved 1.92x | End-to-end CPU was 0.50% slower without memory, request, or wire gain | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Fully lazy snapshot mutation map | Removed one more map from snapshots without concurrent writes | First concurrent mark was 1.32x slower, 208 to 256 B, and one to two timed allocations | Rejected; captures retain a writer-ready initial map and use [selective snapshot mutation maps](#selective-snapshot-mutation-maps) only after drain |
+| Unchecked normalized replication owners | Removed repeated trim, empty-ID, and missing-node checks after topology validation | Two-shard snapshot construction was 1.08x slower; four shards were neutral within about 1%; 64 shards improved only 1.03x with identical memory | Reverted; the checked normalized helper remains; see [normalized replication target precomputation](#normalized-replication-target-precomputation) |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -3457,6 +3458,22 @@ arbitrary owner slices are not routed through this helper. Topology validation,
 self exclusion, online filtering, missing-node rejection, target sorting,
 snapshot ownership, configuration, wire, storage, and persistence are
 unchanged.
+
+A follow-up candidate also removed owner trimming, the empty-ID guard, and the
+registered-node check. Although normalized topology proves all three
+conditions, the complete same-binary path did not justify relying on them:
+
+| Ten-run alternating median | Checked normalized owners | Unchecked candidate | Result |
+| --- | ---: | ---: | ---: |
+| Two shards | 1,830 ns | 1,973.5 ns | 1.08x slower |
+| Four shards | 3,464 ns | 3,426.5 ns | 1.01x faster, within run noise |
+| 64 shards | 45,341.5 ns | 44,230.5 ns | 1.03x faster |
+
+Heap and allocations were identical in every paired fixture. The unchecked
+production code was reverted; the test-only candidate and
+`BenchmarkReplicationRoutingSnapshotUncheckedOwnersAlternating` retain the
+reproducer. Owner cleanup and missing-node rejection therefore remain in the
+private helper, while only the proven duplicate map is absent.
 
 <a id="direct-single-target-digest-inventory"></a>
 #### Direct Single-Target Digest Inventory

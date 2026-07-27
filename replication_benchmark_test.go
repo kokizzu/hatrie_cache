@@ -2443,6 +2443,86 @@ func BenchmarkPrecomputedReplicationTargetsDedupAlternating(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationRoutingSnapshotUncheckedOwnersAlternating(b *testing.B) {
+	for _, size := range []int{2, 4, 64} {
+		b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
+			store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+			if err != nil {
+				b.Fatal(err)
+			}
+			var baselineDuration, candidateDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				candidateFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					var snapshot replicationRoutingSnapshot
+					var ok bool
+					if candidateFirst == (pass == 0) {
+						snapshot, ok = newReplicationRoutingSnapshotUncheckedOwnersCandidate("node-000", store, nil)
+						candidateDuration += time.Since(started)
+					} else {
+						snapshot, ok = newReplicationRoutingSnapshot("node-000", store, nil)
+						baselineDuration += time.Since(started)
+					}
+					if !ok {
+						b.Fatal("routing snapshot construction failed")
+					}
+					benchmarkReplicationRoutingSnapshotSink = snapshot
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(baselineDuration.Nanoseconds())/float64(b.N), "baseline_ns/snapshot")
+			b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "candidate_ns/snapshot")
+		})
+	}
+}
+
+func newReplicationRoutingSnapshotUncheckedOwnersCandidate(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshot, bool) {
+	topology, fingerprint := topologyStore.replicationSnapshot()
+	snapshot := replicationRoutingSnapshot{
+		topology:    topology,
+		nodes:       topologyNodesByID(topology),
+		leaders:     make(map[uint32]ElectionLeader, len(topology.Shards)),
+		owners:      make(map[uint32][]string, len(topology.Shards)),
+		targets:     make(map[uint32][]TopologyNode, len(topology.Shards)),
+		self:        self,
+		fingerprint: fingerprint,
+	}
+	if election != nil {
+		snapshot.online = election.activeNodesSnapshot(topology)
+	}
+	if topologyMode(topology.Mode) == TopologyModeFullReplica {
+		shard, ok := topology.fullReplicaShard()
+		if !ok {
+			return replicationRoutingSnapshot{}, false
+		}
+		snapshot.shards = []TopologyShard{shard}
+	} else {
+		snapshot.shards = topology.Shards
+	}
+	if len(snapshot.shards) == 0 {
+		return replicationRoutingSnapshot{}, false
+	}
+	for _, shard := range snapshot.shards {
+		owners := routeOwners(shard)
+		snapshot.owners[shard.ID] = owners
+		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargetsUncheckedCandidate(owners, snapshot.nodes, snapshot.online, snapshot.self)
+		if election != nil {
+			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
+		} else {
+			snapshot.leaders[shard.ID] = ElectionLeader{
+				Shard:      shard.ID,
+				Leader:     shard.Primary,
+				Available:  true,
+				Primary:    shard.Primary,
+				Candidates: owners,
+			}
+		}
+	}
+	return snapshot, true
+}
+
 func replicationRoutingBenchmarkTopology(size int) ClusterTopology {
 	nodes := make([]TopologyNode, size)
 	shards := make([]TopologyShard, size)
@@ -2453,10 +2533,14 @@ func replicationRoutingBenchmarkTopology(size int) ClusterTopology {
 		}
 	}
 	for index := range shards {
+		replicas := make([]string, 0, 2)
+		for offset := 1; offset <= 2 && offset < size; offset++ {
+			replicas = append(replicas, nodes[(index+offset)%size].ID)
+		}
 		shards[index] = TopologyShard{
 			ID:       uint32(index),
 			Primary:  nodes[index].ID,
-			Replicas: []string{nodes[(index+1)%size].ID, nodes[(index+2)%size].ID},
+			Replicas: replicas,
 		}
 	}
 	return ClusterTopology{

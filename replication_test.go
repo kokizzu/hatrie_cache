@@ -5500,7 +5500,23 @@ func TestPrecomputedReplicationTargetsMatchDeduplicatingControl(t *testing.T) {
 		} {
 			for _, shard := range topology.Shards {
 				owners := routeOwners(shard)
+				for _, owner := range owners {
+					if owner == "" || strings.TrimSpace(owner) != owner {
+						t.Fatalf("normalized shard %d owner = %q, want non-empty trimmed ID", shard.ID, owner)
+					}
+					if _, ok := nodes[owner]; !ok {
+						t.Fatalf("normalized shard %d owner %q is not registered", shard.ID, owner)
+					}
+				}
 				got := precomputedNormalizedReplicationTargets(owners, nodes, online, self)
+				cleanupWant := precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, online, self)
+				if !reflect.DeepEqual(got, cleanupWant) {
+					t.Fatalf("targets for shard %d self=%q online=%v = %#v, cleanup control %#v", shard.ID, self, online, got, cleanupWant)
+				}
+				uncheckedWant := precomputedNormalizedReplicationTargetsUncheckedCandidate(owners, nodes, online, self)
+				if !reflect.DeepEqual(got, uncheckedWant) {
+					t.Fatalf("targets for shard %d self=%q online=%v = %#v, unchecked candidate %#v", shard.ID, self, online, got, uncheckedWant)
+				}
 				want := precomputedReplicationTargetsDeduplicatingControl(owners, nodes, online, self)
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("targets for shard %d self=%q online=%v = %#v, want %#v", shard.ID, self, online, got, want)
@@ -5508,6 +5524,45 @@ func TestPrecomputedReplicationTargetsMatchDeduplicatingControl(t *testing.T) {
 			}
 		}
 	}
+}
+
+func precomputedNormalizedReplicationTargetsCleanupControl(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
+	targets := make([]TopologyNode, 0, len(owners))
+	for _, nodeID := range owners {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || nodeID == self {
+			continue
+		}
+		if online != nil && !online[nodeID] {
+			continue
+		}
+		node, ok := nodes[nodeID]
+		if !ok {
+			continue
+		}
+		targets = append(targets, node)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
+}
+
+func precomputedNormalizedReplicationTargetsUncheckedCandidate(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
+	targets := make([]TopologyNode, 0, len(owners))
+	for _, nodeID := range owners {
+		if nodeID == self {
+			continue
+		}
+		if online != nil && !online[nodeID] {
+			continue
+		}
+		targets = append(targets, nodes[nodeID])
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
 }
 
 func precomputedReplicationTargetsDeduplicatingControl(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
