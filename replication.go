@@ -2512,6 +2512,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 			ownerCount += len(shard.Replicas)
 		}
 		ownerBacking := make([]string, 0, ownerCount)
+		targetBacking := make([]TopologyNode, 0, ownerCount)
 		for index := groupStart; index < groupEnd; index++ {
 			shard := snapshot.shards[index]
 			start := len(ownerBacking)
@@ -2520,7 +2521,9 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 			}
 			ownerBacking = append(ownerBacking, shard.Replicas...)
 			candidates := ownerBacking[start:len(ownerBacking):len(ownerBacking)]
-			snapshot.targets[index] = precomputedNormalizedReplicationTargets(candidates, topology.Nodes, snapshot.inactive, snapshot.self)
+			targetStart := len(targetBacking)
+			targetBacking = appendPrecomputedNormalizedReplicationTargets(targetBacking, candidates, topology.Nodes, snapshot.inactive, snapshot.self)
+			snapshot.targets[index] = targetBacking[targetStart:len(targetBacking):len(targetBacking)]
 			leader := ElectionLeader{
 				Shard:      shard.ID,
 				Primary:    shard.Primary,
@@ -2711,6 +2714,35 @@ func precomputedNormalizedReplicationTargets(owners []string, nodes []TopologyNo
 	} else {
 		sort.Slice(targets, func(i, j int) bool {
 			return targets[i].ID < targets[j].ID
+		})
+	}
+	return targets
+}
+
+func appendPrecomputedNormalizedReplicationTargets(targets []TopologyNode, owners []string, nodes []TopologyNode, inactive map[string]bool, self string) []TopologyNode {
+	start := len(targets)
+	for _, nodeID := range owners {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || nodeID == self {
+			continue
+		}
+		if inactive[nodeID] {
+			continue
+		}
+		node, ok := normalizedTopologyNode(nodes, nodeID)
+		if !ok {
+			continue
+		}
+		targets = append(targets, node)
+	}
+	added := targets[start:]
+	if len(added) <= replicationGenericTargetSortLimit {
+		slices.SortFunc(added, func(a, b TopologyNode) int {
+			return strings.Compare(a.ID, b.ID)
+		})
+	} else {
+		sort.Slice(added, func(i, j int) bool {
+			return added[i].ID < added[j].ID
 		})
 	}
 	return targets

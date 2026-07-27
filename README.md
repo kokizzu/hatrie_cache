@@ -1953,6 +1953,16 @@ single backing for every shard was rejected because Go size-class rounding
 added heap; candidate and target order, routing, election behavior, wire,
 storage, persistence, and configuration remain unchanged.
 
+The same four-shard capacity pass now provides
+[combined owner/target backing](BENCHMARK.md#combined-replication-owner-target-backing).
+It replaces each group's separate target allocations without another scan.
+Healthy 2/16/64-shard construction improves another 1.11x/1.05x/1.07x,
+keeps exact cumulative heap, and reduces allocations from 5/22/82 to 4/10/34.
+Offline construction is neutral or faster at every measured size. The prior
+standalone target-group experiment remains rejected because its additional
+capacity pass caused CPU regressions; full-replica construction remains on the
+unchanged single-shard path.
+
 Explicit bucket routing also uses
 [adaptive range search](BENCHMARK.md#adaptive-replication-bucket-search).
 Up to eight normalized ranges retain the prior linear scan; larger range sets

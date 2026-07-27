@@ -757,13 +757,13 @@ func TestBenchmarkDocsRecordRejectedGroupedReplicationTargetBacking(t *testing.T
 		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
 	}
 	for _, token := range []string{
-		"Grouped replication target backing",
+		"Standalone grouped replication target backing",
 		"#grouped-replication-target-backing-rollback",
 		"TestReplicationRoutingSnapshotPackedTargetsCandidateMatchesPerShardBacking",
 		"BenchmarkReplicationRoutingPackedTargetsConstructionAlternating",
 		"added 128/256 heap B",
 		"1.18x slower",
-		"No production code changed",
+		"combined owner/target layout",
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing rejected grouped-target token %q", token)
@@ -852,6 +852,35 @@ func TestDocsDescribeGroupedReplicationOwnerBacking(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing grouped replication-owner token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeCombinedReplicationOwnerTargetBacking(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[combined owner/target backing](BENCHMARK.md#combined-replication-owner-target-backing)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing combined replication-backing token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Combined replication owner/target backing",
+		"TestReplicationRoutingSnapshotCombinedBackingMatchesSeparateTargets",
+		"BenchmarkReplicationRoutingCombinedBackingConstructionAlternating",
+		"22,196.5 ns; 30,208 B; 82 allocs",
+		"20,770.5 ns; 30,208 B; 34 allocs",
+		"already-required owner count",
+		"11,881 to 12,006 ns",
+		"reverted before commit",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing combined replication-backing token %q", token)
 		}
 	}
 }

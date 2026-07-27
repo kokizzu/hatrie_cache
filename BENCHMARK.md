@@ -324,6 +324,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Adaptive replication target sorting](#adaptive-replication-target-sorting), healthy 2/16/64-shard snapshots | Reflective sort: 1,054/8,880/36,839 ns; 12/100/388 allocs | Generic sort through 16 targets: 932.4/6,856/29,815 ns; 10/52/196 allocs | 1.13x/1.30x/1.24x faster; 2/48/192 fewer allocations; 48/2,944/11,776 fewer heap B | Above 16 targets retains the original faster reflective sorter; full-replica 32/64-node CPU and memory are neutral |
 | Current pass | [Borrowed replication topology generation](#borrowed-replication-topology-generation), healthy 2/16/64-shard snapshots | Clone normalized generation: 790.35/6,439.5/27,287.5 ns; 1,008/10,752/42,240 B | Borrow immutable generation: 541.65/5,294/22,112 ns; 672/7,552/30,208 B | 1.46x/1.22x/1.23x faster; 1.50x/1.42x/1.40x lower heap; 4/18/66 fewer allocations | Private snapshot only; `Set` replaces complete generations and public topology/routing APIs retain cloned ownership |
 | Current pass | [Four-shard replication owner backing](#grouped-replication-owner-backing), healthy 2/16/64-shard snapshots | Per-shard owners: 591.9/5,183/24,017.5 ns; 6/34/130 allocs | Four-shard groups: 576.15/4,983/23,445 ns; 5/22/82 allocs | 1.03x/1.04x/1.02x faster; 1/12/48 fewer allocations with identical heap | Full-replica construction retains the prior one-shard path; capped candidate slices prevent cross-shard append aliasing |
+| Current pass | [Combined replication owner/target backing](#combined-replication-owner-target-backing), healthy 2/16/64-shard snapshots | Separate targets: 544.35/4,994.5/22,196.5 ns; 5/22/82 allocs | Shared group capacity: 490.5/4,735.5/20,770.5 ns; 4/10/34 allocs | 1.11x/1.05x/1.07x faster; 1/12/48 fewer allocations with identical heap | Reuses the existing owner count instead of adding the extra capacity pass that disqualified standalone target grouping; full replica is unchanged |
 | Current pass | [Adaptive replication bucket search](#adaptive-replication-bucket-search), complete route plus targets at 16/64/256 ranges | Linear ranges: 91.115/111.0/180.05 ns | Binary ranges: 77.825/87.37/98.92 ns | 1.17x/1.27x/1.82x faster; heap and allocations unchanged | Two through eight ranges retain linear lookup; normalized contiguous ranges above that threshold use binary search |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
@@ -395,8 +396,9 @@ tree.
 | Fully lazy snapshot mutation map | Removed one more map from snapshots without concurrent writes | First concurrent mark was 1.32x slower, 208 to 256 B, and one to two timed allocations | Rejected; captures retain a writer-ready initial map and use [selective snapshot mutation maps](#selective-snapshot-mutation-maps) only after drain |
 | Unchecked normalized replication owners | Removed repeated trim, empty-ID, and missing-node checks after topology validation | Two-shard snapshot construction was 1.08x slower; four shards were neutral within about 1%; 64 shards improved only 1.03x with identical memory | Reverted; the checked normalized helper remains; see [normalized replication target precomputation](#normalized-replication-target-precomputation) |
 | Topology-store large bucket dispatch | Binary search made 64/128/256-range routes 1.16x/1.29x/1.64x faster with unchanged allocation behavior | The added dispatch made the common two-range route 1.015x slower, 166.45 versus 164.05 ns | Removed from production; the unchanged linear topology-store route remains; see [topology-store large bucket dispatch](#topology-store-large-bucket-dispatch-rollback) |
-| Grouped replication target backing | One backing removed 63 allocations and made the isolated healthy 64-shard constructor 1.07x faster; four-shard groups kept heap flat and removed 48 allocations | One backing added 128/256 heap B at 8/16 shards; grouped backing made healthy 2/16-shard construction 1.02x/1.03x slower and offline 8/32/64-shard construction 1.18x/1.03x/1.01x slower | Never applied to production; the exact test/benchmark reproducer remains; see [grouped replication target backing](#grouped-replication-target-backing-rollback) |
+| Standalone grouped replication target backing | One backing removed 63 allocations and made the isolated healthy 64-shard constructor 1.07x faster; four-shard groups kept heap flat and removed 48 allocations | One backing added 128/256 heap B at 8/16 shards; a separate group-capacity pass made healthy 2/16 and offline 8/32/64 construction slower | The [standalone design](#grouped-replication-target-backing-rollback) remains rejected; [combined owner/target backing](#combined-replication-owner-target-backing) later reused an already-required owner pass and removed the CPU cost |
 | Single replication owner backing | Removed 63 owner allocations from a healthy 64-shard snapshot | Go size-class rounding added 128/256/128 cumulative heap B at 16/32/64 shards | Replaced by [four-shard replication owner backing](#grouped-replication-owner-backing), which keeps heap flat while removing 48 allocations at 64 shards |
+| Combined-backing helper extraction | Kept the full-replica constructor's machine-code body smaller by moving multi-shard construction behind one helper call | Offline 32/64-shard paired medians became 1.01x slower, 11,881 to 12,006 ns and 25,061 to 25,226 ns | Reverted before commit; the measured-faster grouped loop remains inline; see [combined owner/target backing](#combined-replication-owner-target-backing) |
 | Generic replication target sorting at every size | Removed three reflective allocations and 184 cumulative heap B for one large target slice | Complete paired 31/63-target construction was 1.03x/1.025x slower | Replaced by the measured 16-target cutoff; large sets retain the original sorter; see [adaptive replication target sorting](#adaptive-replication-target-sorting) |
 
 <a id="delta-only-startup-persistence"></a>
@@ -3834,6 +3836,63 @@ instead of mutating them. Candidate and target order, election and liveness
 behavior, route ownership, topology replacement, lock scope, wire, storage,
 persistence, and public configuration are unchanged.
 
+<a id="combined-replication-owner-target-backing"></a>
+#### Combined Replication Owner/Target Backing
+
+After owner slices were grouped, each shard still allocated a separate target
+backing slice. The owner group already counts the exact maximum number of
+owners for up to four shards. Production now uses that same count to allocate
+one target backing for the group and carves capacity-capped target slices from
+it while each shard is processed. No additional scan, retained index, route
+branch, or per-shard work is added.
+
+This is materially different from the rejected standalone target-group
+candidate below. That experiment added a separate capacity pass before every
+four shards and then allocated owners independently; its added scan caused
+several CPU regressions. The final layout shares the capacity pass already
+required by owner grouping and uses the retained adaptive target sorter.
+
+The exact separate-target control preserves the immediately preceding
+constructor. Untracked healthy, tracked healthy, offline, timeout, and
+maintenance states are compared at 2, 4, 16, and 64 shards, plus full-replica
+topologies at 2, 4, 8, 16, 32, and 64 nodes. The test compares complete
+snapshot state, 4,096 routes, and capacity-capped target slices across 20 runs.
+
+```sh
+make run CMD='go test . -run=TestReplicationRoutingSnapshotCombinedBackingMatchesSeparateTargets -count=20'
+make run CMD='go test -race . -run=TestReplicationRoutingSnapshotCombinedBackingMatchesSeparateTargets -count=5'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingCombinedBackingConstructionAlternating$$/^(UntrackedHealthy|OneOffline)$$" -benchtime=50000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingCombinedBackingConstruction$$" -benchmem -benchtime=20000x -count=1 -cpu=1'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingCombinedBackingConstructionAlternating$$/^FullReplica$$" -benchtime=50000x -count=10 -cpu=1'
+```
+
+| Healthy sharded snapshot, paired median | Separate target backing | Combined group backing | Improvement |
+| --- | ---: | ---: | ---: |
+| Two shards | 544.35 ns; 672 B; 5 allocs | 490.5 ns; 672 B; 4 allocs | 1.11x faster; one fewer allocation |
+| Four shards | 1,388 ns; 1,856 B; 7 allocs | 1,131 ns; 1,856 B; 4 allocs | 1.23x faster; three fewer allocations |
+| Eight shards | 2,419 ns; 3,776 B; 12 allocs | 2,245 ns; 3,776 B; 6 allocs | 1.08x faster; six fewer allocations |
+| 16 shards | 4,994.5 ns; 7,552 B; 22 allocs | 4,735.5 ns; 7,552 B; 10 allocs | 1.05x faster; 12 fewer allocations |
+| 32 shards | 10,412 ns; 15,360 B; 42 allocs | 10,004.5 ns; 15,360 B; 18 allocs | 1.04x faster; 24 fewer allocations |
+| 64 shards | 22,196.5 ns; 30,208 B; 82 allocs | 20,770.5 ns; 30,208 B; 34 allocs | 1.07x faster; 48 fewer allocations |
+
+One-offline 2/4/8/16/32/64-shard paired medians improve
+1.14x/1.02x/1.06x/1.05x/1.02x/1.03x. Heap remains exactly
+928/2,112/4,032/7,808/15,616/30,464 bytes while allocations fall from
+7/9/14/24/44/84 to 6/6/8/12/20/36. Full-replica construction takes the
+unchanged single-shard branch: every measured heap and allocation count is
+identical, and the same-loop CPU control varies within 1.3%.
+
+A refinement moved the multi-shard loop behind one helper call to make the
+single-shard machine-code body smaller. The call erased the smaller sharded
+gain: offline 32/64-shard paired medians changed from 11,881 to 12,006 ns and
+25,061 to 25,226 ns, both 1.01x slower. It was reverted before commit; the
+faster inline loop remains.
+
+The final target slices preserve deterministic order and have capacity equal
+to length, so an accidental append cannot overwrite the next shard. Topology
+generation ownership, election and liveness behavior, routing, lock scope,
+wire, storage, persistence, and public configuration are unchanged.
+
 <a id="grouped-replication-target-backing-rollback"></a>
 #### Grouped Replication Target Backing Rollback
 
@@ -3875,9 +3934,11 @@ control was mixed:
 
 Changing the sorter to use a zero-based shard subslice did not remove the
 regressions. Allocation count alone therefore did not justify extra capacity
-planning and grouped-backing access. No production code changed, so current
-CPU, heap, target ownership, election behavior, wire, storage, and persistence
-remain unchanged; the candidate survives only as test and benchmark evidence.
+planning and a separate grouped-backing pass. That candidate remains only as
+test and benchmark evidence. The later
+[combined owner/target layout](#combined-replication-owner-target-backing)
+reuses an already-required owner count and therefore removes the allocation
+without retaining this candidate's CPU regressions.
 
 <a id="adaptive-replication-bucket-search"></a>
 #### Adaptive Replication Bucket Search
