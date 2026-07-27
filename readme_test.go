@@ -270,6 +270,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Inline Roaring-container values",
 		"Local slice view over fixed Roaring bitmap",
 		"Compact Count-Min Sketch header",
+		"Backward quantile-summary compaction",
 		"40-byte Roaring field order",
 		"HyperLogLog side allocation",
 		"String-keyed Merkle pending set",

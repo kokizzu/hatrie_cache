@@ -379,6 +379,7 @@ tree.
 | Late compact Bloom bit-count load | Reduced each Bloom header from 48 to 40 bytes with the same validated 32-bit count | A 20-million-operation confirmation made direct add 33.83 versus 33.73 ns, or 0.3% slower | Replaced by loading the count before the independent hash passes; final add is 1.01x faster than the 48-byte baseline; see [compact Bloom-filter headers](#compact-bloom-filter-headers) |
 | Compact Cuckoo-filter header | Reduced each empty header from 48 to 40 bytes, retained heap 1.20x, and header initialization 1.18x | The best 40-byte layout made paired delete+add 36.74 versus 35.87 ns, or 1.024x slower; membership was neutral | Reverted; the 48-byte operation-faster layout remains; see [compact Cuckoo-filter header rollback](#compact-cuckoo-filter-header-rollback) |
 | Compact Count-Min Sketch header | Reduced each lazy header from 48 to 40 bytes, retained heap 1.20x, and header initialization 1.23x | With identical direct loops, the compact width made increment 33.44 versus 29.54 ns, or 1.13x slower; estimate was also 0.9% slower | Reverted; the 48-byte header plus faster direct loops remains; see [compact Count-Min Sketch header rollback](#compact-count-min-sketch-header-rollback) |
+| Backward quantile-summary compaction | Replaced repeated per-merge slice copies with one backward compaction pass, making a dense 1,024-sample compression 4.56x faster | A valid no-merge summary became 1.65x slower and a complete 4,096-value build became 1.40x slower with identical heap and allocations | Reverted; the common-path copy-on-merge loop remains; see [backward quantile-summary compaction](#quantile-sketch-backward-compaction-rollback) |
 | 40-byte Roaring field order | Lowered singleton retained and cumulative heap 1.21x/1.24x and made the 50,000-container build 1.11x faster | The best values-first layout made paired 4,097-value dense construction 1.018x and 1.044x slower in two nine-run confirmations; a pointer-first layout made lookup 1.039x slower | Reverted; the 48-byte operation-neutral layout remains; see [Roaring field-order compaction](#roaring-field-order-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
@@ -5497,6 +5498,34 @@ layout from the loop optimization.
 The hot increment regression outweighed the lazy-header saving. The private
 width remains `uint64`, and the compact layout, layout guard, and header-only
 fixture were removed. Only the operation-faster direct row loops were retained.
+
+<a id="quantile-sketch-backward-compaction-rollback"></a>
+#### Backward Quantile-Summary Compaction Rollback
+
+Quantile Sketch compression scans its sorted summary from right to left and
+removes each mergeable sample with a slice copy. A candidate accumulated
+survivors backward and shifted them once at the end, avoiding repeated copies
+when one compression removes many samples. Before the change, an exact-output
+test compared production with a frozen copy-on-merge reference across
+no-merge, full-merge, grouped, and generated summaries. The candidate matched
+the reference in all cases.
+
+The final comparison used seven fixed 500 ms runs on one logical CPU. The
+1,024-sample helper controls allocate nothing; the complete build inserts
+4,096 ascending values at the default epsilon and includes all summary growth
+and compression work.
+
+| Quantile Sketch workload, seven-run median | Copy-on-merge baseline | Backward candidate | Result |
+| --- | ---: | ---: | ---: |
+| Dense 1,024-sample compression | 8,096 ns; 0 B; 0 allocs | 1,776 ns; 0 B; 0 allocs | 4.56x faster |
+| No-merge 1,024-sample control | 1,055 ns; 0 B; 0 allocs | 1,741 ns; 0 B; 0 allocs | 1.65x slower |
+| Complete 4,096-value build | 411,124 ns; 6,120 B; 8 allocs | 577,008 ns; 6,120 B; 8 allocs | 1.40x slower |
+
+The candidate wrote each surviving sample even when no merge occurred. That
+extra common-path work dominated the occasional reduction in tail copies and
+made the complete API substantially slower. All candidate production code,
+reference tests, and benchmark fixtures were removed; snapshots, estimates,
+wire bytes, storage, and runtime behavior remain unchanged.
 
 <a id="xor-filter-scalar-fast-path"></a>
 ### XOR Filter Scalar Fast Path
