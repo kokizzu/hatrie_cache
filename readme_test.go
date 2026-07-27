@@ -181,6 +181,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Direct generic Top-K GET](#multi-item-top-k-read-materialization)",
 		"[Generic Top-K encoding outside read lock](#multi-item-top-k-read-materialization)",
 		"[Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes)",
+		"[Bounded generic Top-K scalar updates](#bounded-short-generic-top-k-dispatch)",
 		"[Per-key telemetry](#per-key-telemetry-modes)",
 		"[Atomic cache-wide telemetry](#atomic-cache-wide-telemetry)",
 		"[Concurrent scalar reads](#concurrent-scalar-read-fast-path)",
@@ -286,6 +287,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Mutation response encoding outside cache lock",
 		"Shared-lock generic collection GET",
 		"Top-K helper lookup",
+		"Wider generic Top-K string dispatch",
 		"Naive repeated-read scalar routing",
 		"Two-command native scalar routing",
 		"64 KiB WAL staging",
@@ -303,6 +305,37 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 	} {
 		if !strings.Contains(index, token) {
 			t.Fatalf("BENCHMARK.md rejected optimization index missing token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeBoundedShortGenericTopKDispatch(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[bounded Top-K dispatch measurements](BENCHMARK.md#bounded-short-generic-top-k-dispatch)",
+		"make bench-topk-scalar BENCHTIME=1s COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing bounded Top-K dispatch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkTopKGenericScalarDispatch",
+		"9.59x faster",
+		"1.60x faster",
+		"1.44x",
+		"four-byte limit was benchmark-selected",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing bounded Top-K dispatch token %q", token)
 		}
 	}
 }

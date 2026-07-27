@@ -243,6 +243,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Generic Top-K encoding outside read lock](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Lock-held direct JSON: 2,023/13,713 ns strings; 2,486/16,561 ns mixed; writer stalled behind caller JSON | Point-in-time copy: 1,988/13,598 ns strings; 2,469/16,036 ns mixed; writer progresses during JSON | 1.01x-1.03x faster serially with identical heap/allocations; unbounded caller-marshaler writer stall removed | Exact generic `GET` only; the dedicated `GETTOPK` candidate was rejected after a repeatable 1.05x CPU regression |
 | Reverted | [Generic Top-K slice sorter](#multi-item-top-k-read-materialization), 16/default-100 string items | `sort.Interface`: exact reads 2,240/8,108 ns | `slices.SortFunc`: 2,407/9,099 ns | One allocation and 24 B removed, but CPU 1.07x/1.12x slower | Rolled back; the small transient-memory saving did not justify slower reads |
 | Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
+| Current pass | [Bounded generic Top-K scalar updates](#bounded-short-generic-top-k-dispatch), duplicate/escaped/structured values | One-item preparation: 138.2/146.75/167.75 ns; 58-80 B; 3 allocs | Bounded/direct scalar path: 14.42/91.46/110.5 ns; 0-32 B; 0-2 allocs | 9.59x/1.60x/1.52x faster; up to all transient allocations eliminated | No measured control regression; estimates retain their original branch, batches are neutral within 0.4%, and long scalar updates remove one allocation with neutral or faster CPU |
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
@@ -397,6 +398,7 @@ tree.
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
 | Top-K helper lookup | Centralized inline and map-backed lookup | Map-backed estimates were 1.62x-1.88x slower | Removed; the cardinality branch remains; see [lazy small Top-K indexes](#lazy-small-top-k-indexes) |
+| Wider generic Top-K string dispatch | Unbounded scanning kept the short duplicate about 9x faster; 16-byte and 8-byte caps retained most of that gain | An unbounded late escape was 1.44x slower, the 16-byte boundary was 1.04x slower, and the 8-byte boundary was about 0.6% slower | Replaced by the four-byte [bounded generic Top-K scalar updates](#bounded-short-generic-top-k-dispatch), whose escaped and long controls are neutral or faster |
 | Naive repeated-read scalar routing | Tried to send repeated reads through the native selector | 16 reads regressed 2.58x; a scan-only guard remained 1.08x slower | Replaced by resolve-once response copying; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
 | Two-command native scalar routing | Lowered the initial native threshold | 629.5 ns versus 565.5 ns, or 1.11x slower | Removed; native routing starts at four commands; see [adaptive typed scalar execution](#adaptive-typed-scalar-execution) |
 | 64 KiB WAL staging | Saved another 65,536 transient bytes over 128 KiB | It was 1.07x slower and required seven writes instead of four | Rejected; 128 KiB remains the measured balance; see [bounded WAL staging](#bounded-wal-staging-arena) |
@@ -6374,6 +6376,60 @@ all direct estimate sizes faster. Complete `ESTTOPK` at two and three items is
 neutral within 0.6%, while 16 items improves 0.8%; `GETTOPK` does not inspect
 the index and retains identical code and allocation counts. No configuration,
 fixed overhead, background work, or persistent-format tradeoff was added.
+
+<a id="bounded-short-generic-top-k-dispatch"></a>
+### Bounded Generic Top-K Scalar Updates
+
+Generic nonzero `topKData.AddOneChecked` scalar calls previously allocated a
+one-element prepared-item slice only to iterate it once. Scalar updates now
+prepare and apply that item directly, while batches retain their atomic full
+preflight. The dedicated command path already proved that its direct quoted key
+and retained string are byte-for-byte equivalent for plain JSON strings, so the
+generic method selects that path for a scalar string of at most four bytes whose
+canonical JSON form needs no escaping. Control bytes, quote, backslash, `<`,
+`>`, `&`, non-ASCII bytes, and longer strings retain the canonical encoder but
+still avoid the temporary slice. Zero-count estimates return through the
+original branch before any new dispatch.
+
+Tests were added before accepting the optimization. They compare the returned
+estimate and exact private Top-K state against a frozen copy of the former
+algorithm across four capacities, duplicate and replacement layouts, zero-count
+estimates, batches, escaped strings, Unicode, structured values, and unsupported
+values. A byte-exhaustive test caught and excluded Go JSON's HTML-escaped
+`<`, `>`, and `&` bytes before publication. The focused test passed 20 times
+and its race build passed five times.
+
+```sh
+make run CMD='go test . -run "TestTopKGenericScalarDispatchMatchesReference|TestTopKPlainJSONStringValueMatchesCanonicalEncoding" -count=20'
+make run CMD='go test -race . -run "TestTopKGenericScalarDispatchMatchesReference|TestTopKPlainJSONStringValueMatchesCanonicalEncoding" -count=5'
+make bench-topk-scalar BENCHTIME=1s COUNT=7
+```
+
+The update rows are eight alternating fixed-iteration runs of frozen baseline
+and final test binaries. `BenchmarkTopKGenericScalarDispatchAlternating` also
+times candidate/reference blocks in both orders inside each iteration, including
+escaped, long, structured, batch, and estimate controls. Medians are from the
+same Ryzen 9 5950X host.
+
+| Generic scalar Top-K operation | Former prepared-slice path | Bounded/direct scalar path | Result |
+| --- | ---: | ---: | ---: |
+| Duplicate `"key"` | 138.2 ns; 58 B; 3 allocs | 14.42 ns; 0 B; 0 allocs | 9.59x faster; allocations eliminated |
+| Four-byte value escaped at the boundary | 146.75 ns; 64 B; 3 allocs | 91.46 ns; 16 B; 2 allocs | 1.60x faster; 4x lower heap; one allocation removed |
+| 4 KiB unescaped scalar | 3,500.5 ns; 9,776 B; 3 allocs | 3,497.5 ns; 9,728 B; 2 allocs | CPU neutral within 0.1%; 48 B and one allocation removed |
+| 4 KiB late-escaped scalar | 5,419 ns; 9,776 B; 3 allocs | 5,214.5 ns; 9,728 B; 2 allocs | 1.04x faster; 48 B and one allocation removed |
+| Structured duplicate scalar | 167.75 ns; 80 B; 3 allocs | 110.5 ns; 32 B; 2 allocs | 1.52x faster; 2.50x lower heap; one allocation removed |
+| Two-value batch control | 306.75 ns; 128 B; 5 allocs | 307.9 ns; 128 B; 5 allocs | CPU neutral within 0.4%; memory unchanged |
+
+The four-byte limit was benchmark-selected. An unbounded candidate made the
+short duplicate about 9x faster but scanned a 4 KiB late-escaped string before
+repeating the work in the canonical encoder, slowing it from 5.23 to 7.54 us,
+or 1.44x. A 16-byte cap still made its late-escaped boundary 1.04x slower
+(158.1 versus 165.1 ns), and an 8-byte cap left about a 0.6% boundary loss
+(142.9 versus 143.7 ns). All three wider candidates were removed. The retained
+path rejects over-limit strings from their length before scanning any byte.
+Estimate controls execute the source-identical original branch and are neutral
+with identical memory. The change adds no retained state, background work, wire
+byte, persistent-format field, or configuration.
 
 <a id="lazy-rate-limiter-shard-maps"></a>
 ### Lazy Rate-Limiter Shard Maps

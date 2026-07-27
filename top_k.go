@@ -13,6 +13,7 @@ const (
 	DefaultTopKCapacity uint64 = 100
 	maxTopKCapacity     uint64 = 1 << 20
 	topKInlineIndexSize        = 2
+	topKDirectStringMax        = 4
 )
 
 // TopKItem is one tracked heavy-hitter candidate. Count is an upper-bound
@@ -185,6 +186,16 @@ func (top *topKData) AddOneChecked(value interface{}, count uint64, values ...in
 		}
 		return top.estimateKey(key), nil
 	}
+	if len(values) == 0 {
+		if text, ok := value.(string); ok && topKPlainJSONStringValue(text) {
+			return top.addPlainJSONString(text, count), nil
+		}
+		item, err := prepareTopKItem(value)
+		if err != nil {
+			return TopKEstimate{}, err
+		}
+		return top.addPrepared(item, count), nil
+	}
 	prepared, err := prepareTopKItems(value, values...)
 	if err != nil {
 		return TopKEstimate{}, err
@@ -349,6 +360,19 @@ func topKKeyMatchesPlainJSONString(key string, value string) bool {
 
 func topKPlainJSONStringKey(value string) string {
 	return `"` + value + `"`
+}
+
+func topKPlainJSONStringValue(value string) bool {
+	if len(value) > topKDirectStringMax {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		char := value[index]
+		if char < 0x20 || char == '"' || char == '&' || char == '<' || char == '>' || char == '\\' || char >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 func (top topKData) Items() []TopKItem {

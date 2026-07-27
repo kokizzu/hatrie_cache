@@ -107,6 +107,11 @@ keeps add responses, counts, and info estimates O(1) after construction or
 restore without changing the serialized register representation.
 Top-K values use a bounded Space-Saving min-heap to track heavy hitters with
 fixed memory and O(log k) updates.
+Generic scalar updates for JSON-safe strings up to four bytes use a bounded
+direct path. The measured duplicate update is 9.59x faster with all transient
+allocations removed. Other scalar updates skip a one-element preparation slice,
+while estimates and batches retain their prior paths.
+See the [bounded Top-K dispatch measurements](BENCHMARK.md#bounded-short-generic-top-k-dispatch).
 Reservoir sample values keep a deterministic fixed-capacity stream sample using
 hashed priorities, so representative samples stay bounded in memory without
 retaining the full event history.
@@ -203,6 +208,7 @@ make bench-bloom-header BENCHTIME=500ms COUNT=7
 make bench-count-min-rows BENCHTIME=500ms COUNT=7
 make bench-fenwick-add BENCHTIME=500ms COUNT=7
 make bench-quantile-add BENCHTIME=500ms COUNT=7
+make bench-topk-scalar BENCHTIME=1s COUNT=7
 make bench-string-compaction STRING_STORAGE_BENCH_KEYS=100000 BENCHTIME=1x COUNT=7
 make bench-startup-persistence BENCHTIME=1x COUNT=7
 make bench-live-replication BENCHTIME=1x COUNT=7
