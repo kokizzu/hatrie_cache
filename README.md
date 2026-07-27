@@ -86,6 +86,11 @@ regressed. See the
 An attempted uppercase `EXISTS` specialization was removed because every
 placement slowed either exact GET or lowercase generic commands; see the
 [dispatch rollback](BENCHMARK.md#uppercase-exists-fast-path-rollback).
+Pointer exact-command request dispatch avoids passing the 168-byte amd64
+request value into the large uppercase dispatcher a second time. Exact and
+generic GET improve 1.081x, exact SET improves 1.022x, and allocations remain
+unchanged; see the
+[request dispatch measurements](BENCHMARK.md#pointer-exact-command-request-dispatch).
 The command-feature benchmark constructs optional TTL and priority integers
 outside timed loops, so its allocation columns describe command execution
 rather than Go escape-analysis cost in the fixture. The expiration command

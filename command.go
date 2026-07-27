@@ -50,7 +50,7 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			return ht.localPartitionForKey(key).ExecuteCommand(request)
 		}
 	}
-	if response, ok := ht.executeExactFastCommand(request); ok {
+	if response, ok := ht.executeExactFastCommandPointer(&request); ok {
 		return response
 	}
 	command := strings.ToUpper(strings.TrimSpace(request.Command))
@@ -1326,7 +1326,7 @@ func publicCommandBatchResponse(responses []CacheCommandResponse, ok bool) Cache
 	return CacheCommandResponse{OK: ok, Message: message, Responses: responses}
 }
 
-func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCommandResponse, bool) {
+func (ht *HatTrie) executeExactFastCommandPointer(request *CacheCommandRequest) (CacheCommandResponse, bool) {
 	key := request.Key
 	if !commandFastPathField(key) || !validKey(key) {
 		return CacheCommandResponse{}, false
@@ -1379,7 +1379,7 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
-		priority, ok := commandPriority(request)
+		priority, ok := commandPriority(*request)
 		if !ok {
 			return CacheCommandResponse{}, false
 		}
@@ -1427,7 +1427,7 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
-		count, err := commandCountMinSketchIncrement(request)
+		count, err := commandCountMinSketchIncrement(*request)
 		if err != nil {
 			return commandError(err.Error()), true
 		}
@@ -1548,6 +1548,10 @@ func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCo
 	default:
 		return CacheCommandResponse{}, false
 	}
+}
+
+func (ht *HatTrie) executeExactFastCommand(request CacheCommandRequest) (CacheCommandResponse, bool) {
+	return ht.executeExactFastCommandPointer(&request)
 }
 
 func (ht *HatTrie) executeFastDumpCommand(key string) CacheCommandResponse {

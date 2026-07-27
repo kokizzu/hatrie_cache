@@ -344,6 +344,21 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 	}
 }
 
+func TestDocsDescribePointerExactCommandRequestDispatch(t *testing.T) {
+	for _, path := range []string{"README.md", "BENCHMARK.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		doc := string(data)
+		for _, token := range []string{"Pointer exact-command request dispatch", "168-byte"} {
+			if !strings.Contains(doc, token) {
+				t.Fatalf("%s missing pointer request dispatch token %q", path, token)
+			}
+		}
+	}
+}
+
 func TestDocsDescribeGenericBloomScalarAdditions(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

@@ -252,6 +252,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Generic Cuckoo-filter scalar deletions](#generic-cuckoo-filter-scalar-deletions), existing string/structured and missing values | Temporary key slice: 280.3/320.7/128.2 ns; 32-40 B; 2 allocs | Caller-owned key slot: 242.6/270.0/90.57 ns; 8-16 B; 1 alloc | 1.16x/1.19x/1.42x faster; one allocation and 24 B removed | No measured tradeoff; 2/16/128-value controls are 1.01x-1.05x faster with identical memory |
 | Current pass | [Canonical JSON command fast paths](#canonical-json-command-fast-paths), ordinary Bloom/Cuckoo/XOR/CMS/HLL/Top-K/reservoir strings | Accepted `<`, `>`, and `&` with noncanonical hashes/keys; 99.11/75.30/99.24/82.65/104.6/141.5/161.7 ns | Exact canonical fallback; 93.06/73.78/97.21/79.99/98.31/124.2/152.9 ns | Correct snapshots plus 1.02x-1.14x faster ordinary commands | No measured valid-path tradeoff; escaped HTML-sensitive strings use the existing generic canonical encoder, and the unaffected set control is CPU-neutral with identical memory |
 | Current pass | [Allocation-free public canonical-string lookups](#allocation-free-public-canonical-string-lookups), Bloom/Cuckoo/Count-Min ordinary string hits | Canonical marshal: 121.7/100.4/117.4 ns; 16 B; 1 alloc each | Direct canonical hash: 63.73/43.10/51.02 ns; 0 B; 0 allocs | 1.91x/2.33x/2.30x faster; all timed heap and allocations eliminated | No measured fallback tradeoff; structured Bloom/Count-Min are CPU-neutral within 0.7%, escaped Cuckoo is 1.01x faster, and fallback memory is unchanged |
+| Current pass | [Pointer exact-command request dispatch](#pointer-exact-command-request-dispatch), exact/generic GET and exact SET | Second by-value pass of the 168-byte request: 131.4/84.40/150.2 ns | Stack-bound pointer: 121.6/78.05/146.9 ns | GET 1.081x faster; SET 1.022x faster; mixed-read profile 1.020x faster | No measured tradeoff; heap/allocations, command semantics, request API, wire, and storage are unchanged; field-heavy and mixed-write controls are neutral or faster |
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
@@ -1537,6 +1538,47 @@ unchanged.
 ```sh
 make run CMD='go test . -run=TestExecuteCommand -count=1'
 make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedReadHeavy100 -benchmem -benchtime=2s -count=10'
+```
+
+<a id="pointer-exact-command-request-dispatch"></a>
+#### Pointer Exact-Command Request Dispatch
+
+`ExecuteCommand` already owns its request value, then passed that complete
+value once more into the large exact-uppercase dispatcher. On amd64,
+`CacheCommandRequest` is 168 bytes because it carries the scalar fields plus
+slice, map, pointer, batch, and binary compatibility columns. The dispatcher
+does not retain or mutate the request, so production now passes its stack-local
+request by pointer. The private by-value method remains as a thin test wrapper
+after the hot dispatcher body, preserving direct test callers without moving
+the production body ahead of unrelated machine code.
+
+Pre-change `TestExecuteCommand` coverage passed before a frozen binary was
+built. The benchmark reuses one request and reports executor allocations. Seven
+two-second samples alternated frozen and candidate binaries on the same Ryzen 9
+5950X host.
+
+| Request path | By-value median | Pointer median | Result |
+| --- | ---: | ---: | --- |
+| Exact `GET` hit | 131.4 ns; 0 B; 0 allocs | 121.6 ns; 0 B; 0 allocs | 1.081x faster |
+| Generic lowercase `get` hit | 84.40 ns; 8 B; 1 alloc | 78.05 ns; 8 B; 1 alloc | 1.081x faster |
+| Exact `SETSTR` | 150.2 ns; 0 B; 0 allocs | 146.9 ns; 0 B; 0 allocs | 1.022x faster |
+| Mixed read-heavy, 100 commands | 17,322 ns; 5-6 B; 1 alloc | 16,979 ns; 5-6 B; 1 alloc | 1.020x faster |
+| Mixed write-heavy, 100 commands | 28,184 ns; 76 B; 10 allocs | 28,079 ns; 76 B; 10 allocs | Neutral to 1.004x faster |
+| Priority queue push/pop | 231.6 ns; 32 B; 1 alloc | 230.9 ns; 32 B; 1 alloc | Neutral to 1.003x faster |
+| Count-Min increment | 139.0 ns; 7 B; 1 alloc | 137.1 ns; 7 B; 1 alloc | 1.014x faster |
+
+Compiler diagnostics report that the dispatcher itself is intentionally too
+large to inline, while no `command.go` request is moved to the heap. The two
+field parsers that intentionally accept request values still receive an
+explicit value exactly as before. Public request ownership, validation,
+normalization, responses, allocations, wire encoding, journal records,
+replication, and storage formats are unchanged.
+
+```sh
+make run CMD='go test . -run=TestExecuteCommand -count=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkExecuteCommandRequestPassingControl -benchmem -benchtime=2s -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedReadHeavy100 -benchmem -benchtime=2s -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedWriteHeavy100 -benchmem -benchtime=2s -count=7'
 ```
 
 <a id="complete-tagged-structured-storage"></a>
