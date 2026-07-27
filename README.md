@@ -55,6 +55,9 @@ allocation with no batch-path change; see the
 [Bloom scalar-add measurements](BENCHMARK.md#generic-bloom-filter-scalar-additions).
 Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
 low-memory membership checks with approximate delete support.
+Their generic scalar-add wrapper also avoids temporary variadic preparation,
+removing one allocation while keeping the 128-value batch path neutral; see the
+[Cuckoo scalar-add measurements](BENCHMARK.md#generic-cuckoo-filter-scalar-additions).
 XOR filter values stage unique items once, then compile them into static 8-bit
 fingerprint arrays for faster low-memory membership checks than Bloom filters
 on read-heavy immutable sets. Their private header fits in one 64-byte cache
@@ -209,6 +212,7 @@ make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 make bench-reservoir-small BENCHTIME=500000x COUNT=7
 make bench-bloom-header BENCHTIME=500ms COUNT=7
 make bench-bloom-scalar BENCHTIME=1s COUNT=7
+make bench-cuckoo-scalar BENCHTIME=1s COUNT=7
 make bench-count-min-rows BENCHTIME=500ms COUNT=7
 make bench-fenwick-add BENCHTIME=500ms COUNT=7
 make bench-quantile-add BENCHTIME=500ms COUNT=7

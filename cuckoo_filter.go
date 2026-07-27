@@ -187,8 +187,7 @@ func (filter *cuckooFilterData) Add(value interface{}) bool {
 }
 
 func (filter *cuckooFilterData) AddChecked(value interface{}) (bool, error) {
-	added, err := filter.AddOneChecked(value)
-	return added > 0, err
+	return filter.addChecked(value)
 }
 
 func (filter *cuckooFilterData) AddOne(value interface{}, values ...interface{}) int {
@@ -231,6 +230,17 @@ func (filter *cuckooFilterData) addKey(key []byte) bool {
 		return true
 	}
 	return false
+}
+
+func (filter *cuckooFilterData) addChecked(value interface{}) (bool, error) {
+	if filter == nil || filter.bucketCount == 0 || filter.fingerprintBits == 0 {
+		return false, nil
+	}
+	key, err := cuckooFilterItemKey(value)
+	if err != nil {
+		return false, err
+	}
+	return filter.addKey(key), nil
 }
 
 func (filter *cuckooFilterData) addJSONString(value string) bool {

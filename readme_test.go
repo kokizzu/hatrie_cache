@@ -286,6 +286,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Reservoir sort outside cache lock",
 		"Reservoir scalar/batch preparation layouts",
 		"Bloom split-first preparation",
+		"Inline Cuckoo scalar wrapper body",
 		"Mutation response encoding outside cache lock",
 		"Shared-lock generic collection GET",
 		"Top-K helper lookup",
@@ -337,6 +338,36 @@ func TestDocsDescribeGenericBloomScalarAdditions(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing Bloom scalar-add token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeGenericCuckooScalarAdditions(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Cuckoo scalar-add measurements](BENCHMARK.md#generic-cuckoo-filter-scalar-additions)",
+		"make bench-cuckoo-scalar BENCHTIME=1s COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing Cuckoo scalar-add token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Generic Cuckoo-Filter Scalar Additions",
+		"1.58x faster",
+		"Inline Cuckoo scalar wrapper body",
+		"9,834 versus 9,724 ns",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing Cuckoo scalar-add token %q", token)
 		}
 	}
 }
