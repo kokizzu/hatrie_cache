@@ -1240,6 +1240,9 @@ rejected because they slowed valid equal-deadline or ordinary write paths; see
 the [expiration comparison](BENCHMARK.md#expiration-time-comparison-rollback),
 the [update direction](BENCHMARK.md#expiration-update-direction-rollback), and
 the [removal lookup](BENCHMARK.md#expiration-removal-lookup-rollback) records.
+A [proven-absence insertion](BENCHMARK.md#expiration-absent-insertion-rollback)
+prototype made fresh scheduling 1.06x faster but was also removed because
+existing TTL commands became 1.013x-1.05x slower.
 [Validated bounded key-stat compaction](BENCHMARK.md#validated-bounded-key-stat-compaction)
 also skips a redundant full-sized `seen` map when slot metadata is consistent,
 making the 100,000-key fixture 1.02x faster with 1.44x lower cumulative heap;

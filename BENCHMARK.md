@@ -321,6 +321,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-pass expiration-index compaction](#single-pass-expiration-index-compaction), 10k expiring keys | Double map rebuild: 8.254 ms; 1,562,256 heap B; 10,095 allocs | Heap-authoritative rebuild: 6.120 ms; 1,125,320 heap B; 10,060 allocs | 1.35x faster, 1.39x lower heap, 35 fewer allocations | No measured tradeoff; `CompactMemory` policy, lock scope, TTL state, heap order, wire, and persistence are unchanged |
 | Current pass | [Linear expiration-index rebuild](#linear-expiration-index-rebuild), repeated 10k-TTL compaction | Heap `Push`: 6.033 ms; 1,125,278 heap B; 10,058 allocs | Clone plus direct positions: 5.964 ms; 1,125,278 heap B; 10,058 allocs | 1.01x faster with identical heap and allocations | No measured tradeoff; the right-sized heap, exact order, deadlines, index positions, and formats are unchanged |
 | Current pass | [Carried expiration update index](#carried-expiration-update-index), existing equal/later TTL | Validate then look up again: 209.5/204.4 ns | Reuse validated index: 166.2/171.4 ns | 1.26x/1.19x faster; public `TTLExpire` 1.126x faster | No measured tradeoff; first schedule/clear and the mixed-write profile are faster with heap/allocations unchanged; invalid metadata and failed native deletion retain the prior fallback |
+| Reverted | [Proven-absent expiration insertion](#expiration-absent-insertion-rollback), fresh schedule plus clear | Existing checked insertion: 390.9 ns | Direct known-absent insertion: 367.3 ns | Fresh scheduling 1.06x faster, but existing `TTLExpire` up to 1.05x slower | All variants rolled back; no runtime tradeoff remains |
 | Current pass | [Validated bounded key-stat compaction](#validated-bounded-key-stat-compaction), 100k tracked keys | Unconditional seen map: 169.162 ms; 11,405,896 heap B; 100,577 allocs | Validated slots: 166.164 ms; 7,910,752 heap B; 100,317 allocs | 1.02x faster, 1.44x lower heap, about 260 fewer allocations | Inconsistent internal slot metadata retains the prior repair fallback; policy, eviction order, stats, and formats are unchanged |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
@@ -432,6 +433,7 @@ tree.
 | Online generational compaction | Shortened maximum reader pause 9.40x and reduced retained backing/heap 13.17x/5.36x | Total compaction was 1.54x slower, transient heap 6.80x higher, and allocations 2.67x higher | Reverted in `c3085d2`; see [online generational compaction](#online-generational-compaction-rollback) |
 | Packed-string compaction | Reduced retained heap 3.79% and retained objects 800x | Cumulative allocation was 10.71x higher, peak RSS 1.30x higher, and forced GC 1.81x slower | Reverted in `0f4adc3`; see [string compaction allocation](#string-compaction-allocation-rollback) |
 | Known-position expiration removal | Intended to remove a duplicate expiration-index lookup when clearing an existing TTL and when vacuuming the known heap root | Direct delegation made the mixed-write profile 1.025x slower; the refined path was only 1.011x faster cross-binary, while same-binary existing clears were 1.008x slower and no-TTL `SET` was 1.007x slower | Both candidates and their temporary benchmark were removed; see [expiration removal lookup rollback](#expiration-removal-lookup-rollback) |
+| Proven-absent expiration insertion | Fresh schedule-plus-clear improved from 390.9 to 367.3 ns, or 1.06x | The broad layout made existing `TTLExpire` 1.05x slower; narrowed and relocated-helper layouts remained 1.013x/1.034x slower | All insertion helpers were removed; the retained path uses checked `expirationHeap.Push`; see [the rollback](#expiration-absent-insertion-rollback) |
 | Single-pass expiration time comparison | Plain `time.Time.Compare` made earlier/later primitive comparisons 1.44x/1.47x faster and an increasing-deadline heap build 1.027x faster | The same candidate made an equal-deadline sift-heavy heap 1.014x slower; two equality-first hybrids erased the distinct-deadline gain or exceeded the inlining budget and made the direct earlier control 1.021x slower | All comparator candidates and temporary fixtures were removed; the original `Equal` plus `Before` ordering remains; see [expiration time comparison rollback](#expiration-time-comparison-rollback) |
 | Single-pass expiration update direction | One `time.Time.Compare` made equal updates 1.28x faster; preserving `Before` and replacing only `After` made equal updates 1.019x faster with neutral earlier updates | One `Compare` made earlier updates 1.08x slower; the refined candidate made later updates 1.011x slower and the public TTL-extension path was neutral | Both direction selectors and their temporary fixture were removed; the original `Before` then `After` update remains; see [expiration update direction rollback](#expiration-update-direction-rollback) |
 | Pointer Count-Min increment parser | Default-count parsing improved from 6.087 to 5.278 ns, or 1.153x | Subkey parsing regressed from 14.33 to 14.46 ns, or 1.009x slower | Reverted; Count-Min callers and parser remain by value; see [narrow priority request parsing](#narrow-priority-request-parsing) |
@@ -3623,6 +3625,36 @@ make run CMD='go test . -run "TestExecuteCommandExpireExactPathDoesNotAllocate|T
 make run CMD='go test . -run=NONE -bench=BenchmarkExpirationUpdateLookup -benchmem -benchtime=1s -count=7'
 make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/TTLExpire -benchmem -benchtime=2s -count=7'
 make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedWriteHeavy100 -benchmem -benchtime=2s -count=7'
+```
+
+<a id="expiration-absent-insertion-rollback"></a>
+##### Proven-Absence Insertion Rollback
+
+After the retained carried-index optimization, first-time TTL scheduling still
+looked up the key once to establish that no valid expiration existed, again in
+`setExpirationLocked`, and a third time in `expirationHeap.Push`. A direct
+insertion helper could safely skip the latter checks only when the map lookup
+proved true absence; an existing but invalid index still had to retain the old
+defensive path.
+
+The broad prototype made schedule-plus-clear 367.3 versus 390.9 ns, or 1.06x
+faster, with zero heap and allocations in both. It changed adjacent heap and
+expiration layout enough that the complete existing `TTLExpire` command moved
+from 199.8 to 209.8 ns, or 1.05x slower. Restoring the exact public `Push` body
+and keeping a second absence check reduced the loss to 202.4 ns, but that was
+still 1.013x slower. Moving both experimental helpers after the established
+heap/update block produced 206.6 ns, or 1.034x slower.
+
+All three production layouts were removed. The retained benchmark fixture
+continues to cover equal/later existing updates and fresh schedule-plus-clear,
+but runtime insertion, invalid-index behavior, heap ordering, memory, wire,
+journal, and storage behavior are exactly those in the preceding carried-index
+commit.
+
+```sh
+make run CMD='go test . -run "TestExecuteCommandExpireExactPathDoesNotAllocate|TestExpireAtPast|TestTTLAPIsHandleMissingAndImmediateExpiry|TestExpirationHeap" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkExpirationUpdateLookup -benchmem -benchtime=1s -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/TTLExpire -benchmem -benchtime=2s -count=7'
 ```
 
 <a id="expiration-removal-lookup-rollback"></a>
