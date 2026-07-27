@@ -371,6 +371,9 @@ func TestDocsDescribeGenericCuckooScalarOperations(t *testing.T) {
 		"280.3 ns; 32 B; 2 allocs",
 		"11,669 ns; 5,248 B; 129 allocs",
 		"Cuckoo scalar-delete dispatch layouts",
+		"Cuckoo variadic scalar-add preparation",
+		"364.9/1,639/11,539 ns",
+		"408.0/1,768 ns",
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing Cuckoo scalar-add token %q", token)

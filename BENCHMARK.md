@@ -404,6 +404,7 @@ tree.
 | Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster; the Scalar-only out-of-line wrapper improved scalar adds 1.09x-1.14x | Shared scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower; the isolated wrapper still made two-value batches 1.015x slower through layout drift | All four layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
 | Bloom split-first preparation | Scalar safe/structured additions improved 1.39x/1.31x and a two-value batch improved 1.23x | The 128-value batch was 1.015x slower and the 16-value batch was 0.35% slower | Removed; only the [scalar public wrapper](#generic-bloom-filter-scalar-additions) was specialized, leaving variadic batches unchanged |
 | Inline Cuckoo scalar wrapper body | Scalar additions improved 1.51x-1.62x with one fewer allocation | Moving the larger body before `AddOneChecked` made the frozen 128-value batch 1.011x slower through binary-layout drift | Replaced by the [out-of-line scalar helper](#generic-cuckoo-filter-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.5% |
+| Cuckoo variadic scalar-add preparation | A caller-owned scalar key slot made the isolated scalar primitive 1.35x-1.53x faster and removed one allocation plus 24 B | Using the shared helper inside `AddOneChecked` made 2/16/128-value public batches 1.047x/1.043x/1.009x slower; a scalar branch around the exact former helper made them 1.020x/1.033x/1.028x slower; dispatch at the public method made 2/16-value batches 1.118x/1.079x slower and new-filter creation 1.032x slower | All three layouts and their test code were removed; `AddOneChecked` and `HatTrie.AddCuckooFilterChecked` remain unchanged; see [the rollback](#cuckoo-filter-variadic-scalar-add-rollback) |
 | Cuckoo scalar-delete dispatch layouts | Early scalar dispatch removed one allocation; split-first tail backing also saved 24 B for two values and 128 B for 128 values | Early dispatch made the reverse-order 128-value control 1.019x slower; a separate batch helper made 16 values 1.028x slower; split-first backing made 16 values 1.012x slower | All three layouts were removed; [caller-owned scalar key storage](#generic-cuckoo-filter-scalar-deletions) keeps the original full batch allocation and single deletion loop, with every retained control neutral or faster |
 | Count-Min clustered scalar helper | Scalar additions improved about 1.4x with one fewer allocation | Placing the helper between Count-Min hot methods made the frozen 128-value batch 10,970 versus 10,540 ns, or 1.041x slower | Replaced by the [end-of-file scalar helper](#generic-count-min-sketch-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.6% |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
@@ -5666,6 +5667,40 @@ or 1.011x slower. The retained design keeps `AddChecked` as a small inlineable
 wrapper and places the non-inlineable scalar helper after `addKey`, preserving
 the hot variadic function layout. The first layout was removed and is retained
 only in the rejected index.
+
+<a id="cuckoo-filter-variadic-scalar-add-rollback"></a>
+#### Cuckoo-Filter Variadic Scalar-Add Rollback
+
+After scalar `AddChecked` was specialized, `AddOneChecked(value)` and the
+public `HatTrie.AddCuckooFilterChecked(key, value)` still prepared a
+one-element `[][]byte`. A test-only caller-owned key candidate matched exact
+private state for plain, escaped, Unicode, structured, nested, duplicate, nil,
+zero-shape, and invalid values. Focused tests passed 50 times and the race build
+passed ten times before production experiments began. The isolated successful
+add/delete cycle improved 1.35x-1.53x and dropped from two allocations to one,
+removing 24 B per scalar call.
+
+Three complete-path placements were tested against a frozen production binary
+on one logical CPU. Reusing the shared scalar-key helper directly inside
+`AddOneChecked` improved existing string/structured and duplicate public scalar
+adds from 282.6/292.0/226.7 ns to 243.4/270.0/209.8 ns and removed one
+allocation, but its 2/16/128-value controls moved from 364.9/1,639/11,539 ns to
+382.1/1,710/11,646 ns, or 1.047x/1.043x/1.009x slower.
+
+The second layout branched inside `AddOneChecked` and sent every nonempty tail
+through the exact former preparation helper. Its 2/16/128-value controls were
+372.2/1,693/11,862 ns, still 1.020x/1.033x/1.028x slower than baseline. The
+third restored `AddOneChecked` byte-for-byte and dispatched only at
+`HatTrie.AddCuckooFilterChecked`. Existing string/structured/duplicate scalars
+improved to 240.8/263.1/208.8 ns, but two and 16 values regressed to
+408.0/1,768 ns (1.118x/1.079x slower), and new-filter creation regressed from
+6,440 to 6,645 ns (1.032x slower). The 128-value row was effectively neutral.
+
+All three production layouts and the complete test-only fixture were removed.
+`cuckooFilterData.AddOneChecked`, public add routing, batch preflight, mutation
+semantics, allocation behavior, wire/storage formats, and configuration are
+source-identical to the retained baseline. The already-shipped direct scalar
+`AddChecked` optimization is unaffected.
 
 <a id="generic-cuckoo-filter-scalar-deletions"></a>
 ### Generic Cuckoo-Filter Scalar Deletions
