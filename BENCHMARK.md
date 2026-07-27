@@ -390,6 +390,8 @@ tree.
 | Idempotent string assignment | Intended to skip an unchanged string-header write and reusable-index check | The refined one-check prototype made duplicates 1.27x slower and true replacements 1.07x slower | Removed before production; direct assignment remains; see [idempotent string assignment](#idempotent-string-assignment-rollback) |
 | Temporary packed-map materialization | Reused the generic map JSON encoder | 1,499 ns, 488 B, and 5 allocations | Replaced by direct JSON at 511.4 ns, 24 B, and 1 allocation; see [packed small-map storage](#packed-small-map-storage) |
 | Single-object storage-header group | Reduced empty cache construction from 25 to 7 allocations and was 1.06x faster | Go's 2,048-byte size class raised cumulative heap from 3,360 to 3,424 B | Replaced by the map-separated [grouped storage headers](#grouped-storage-headers), which retain the CPU/allocation gain with unchanged heap |
+| Embedded initial storage group | Could combine the 896-byte `HatTrie` allocation with its 1,792-byte storage allocation and remove one constructor allocation without another lookup | Compaction and staged snapshot restore replace the typed storage pointers; embedding would retain obsolete initial backing for the cache lifetime or require ownership-aware copying across every generation swap | Rejected before a production prototype; independent backing preserves prompt reclamation and simple generation ownership; see [default constructor follow-up audit](#default-constructor-follow-up-audit) |
+| Lazy default spill directory | Could avoid `MkdirTemp` and cleanup work for caches that never spill a large value | `CreateHatTrie` guarantees an immediately usable owned directory and reports creation failure at construction; deferral would change observable state and move filesystem latency/failure into the first disk mutation | Rejected without changing runtime behavior; see [default constructor follow-up audit](#default-constructor-follow-up-audit) |
 | Raw owned-directory removal | Intended to bypass generic cleanup dispatch for the private empty spill directory | `os.RemoveAll` already reaches the same portable unlink/rmdir operation through `os.Remove`; bypassing it requires platform-specific syscalls plus fallback behavior | Rejected before a production prototype; portable cleanup remains; see [single-pass default spill-directory initialization](#single-pass-default-spill-directory-initialization) |
 | Boxed packed-set reads | Avoided retaining interface payloads in packed pools | Two-member reads were 1.31x slower with 2x heap and 3x allocations | Removed; packed pools retain the faster interface payload layout; see [packed small string-set storage](#packed-small-string-set-storage) |
 | Sentinel-encoded packed-slice length | Shrunk each two-value slice record from 40 to 32 bytes and lowered the 100,000-slice retained/timed heap 1.25x | The refined marker made pop/push 1.06x slower and shift/push 1.04x slower; the first marker design was 1.10x/1.09x slower | Reverted; the inline length byte remains; see [packed two-slice length](#packed-two-slice-length-rollback) |
@@ -2066,6 +2068,39 @@ operation as `os.Remove`. Calling a raw directory-removal syscall first would
 need operating-system-specific code and a fallback for nonempty/error cases.
 That candidate was rejected before production implementation because it adds
 maintenance and compatibility cost without eliminating filesystem work.
+
+<a id="default-constructor-follow-up-audit"></a>
+#### Default Constructor Follow-up Audit
+
+An allocation-rate-one profile isolated the default create/destroy lifecycle
+from its alternating validation benchmark. It confirmed 3,151 B and eight
+allocations per lifecycle. The constructor's three retained Go objects account
+for 3,008 B: the 896-byte `HatTrie` size class, 1,792-byte typed-storage group,
+and 320-byte disk/map group. The remaining five allocations and approximately
+143 B are temporary-directory naming plus portable `mkdir`/`rmdir` path
+conversion.
+
+```sh
+make run CMD='go test . -run=NoTests -bench=^BenchmarkHatTrieDefaultConstruction$ -benchmem -benchtime=10000x -count=1 -cpu=1 -memprofile=/tmp/hatrie-default-only.mem -memprofilerate=1'
+make run CMD='go tool pprof -top -alloc_space -nodecount=30 /tmp/hatrie-default-only.mem'
+make run CMD='go tool pprof -top -alloc_objects -nodecount=20 /tmp/hatrie-default-only.mem'
+```
+
+Deferring `MkdirTemp` was rejected without a runtime prototype. The existing
+`TestCreateHatTrieOwnsReadyDiskDirectory` contract requires the directory to
+exist when `CreateHatTrie` returns, verifies an immediate large-value spill,
+and requires `Destroy` to remove it. Laziness would move both latency and a
+possible filesystem failure from construction into a later mutation.
+
+Combining the initial typed-storage group with the `HatTrie` allocation was
+also rejected before production implementation. `CompactMemory` replaces all
+typed-storage pointers, while staged snapshot restore swaps those pointers
+between independently owned generations. An embedded initial group would keep
+the old arrays reachable after either operation unless every generation swap
+gained special clearing/copying ownership rules. That retention and lifecycle
+complexity are not justified by one fewer empty-cache allocation. The current
+separate allocation becomes unreachable normally, so compaction and destroyed
+staging generations can reclaim it promptly.
 
 <a id="single-representation-string-storage"></a>
 ### Single-Representation String Storage

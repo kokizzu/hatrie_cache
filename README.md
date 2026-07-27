@@ -214,6 +214,12 @@ instead of revalidating the new spill directory with `MkdirAll`. This
 [single-pass initialization](BENCHMARK.md#single-pass-default-spill-directory-initialization)
 is 1.043x faster in paired measurements and removes two allocations plus 240 B
 without delaying directory creation or changing explicit-directory validation.
+A [follow-up constructor audit](BENCHMARK.md#default-constructor-follow-up-audit)
+confirmed that the remaining five non-storage allocations are the portable
+temporary-directory create/remove path. Lazy creation was rejected because the
+owned directory is observable and usable immediately, while embedding initial
+storage would retain obsolete backing or complicate compaction and staged
+generation ownership merely to remove one allocation.
 Empty, one-, and two-member plain-string sets use dedicated packed pools, then
 promote to the existing generic set representation at the third member or first
 non-string value. This cuts retained heap without changing wire, snapshot, or

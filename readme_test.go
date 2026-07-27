@@ -904,7 +904,9 @@ func TestDocsDescribeSinglePassDefaultSpillDirectoryInitialization(t *testing.T)
 	}
 	for _, token := range []string{
 		"[single-pass initialization](BENCHMARK.md#single-pass-default-spill-directory-initialization)",
+		"[follow-up constructor audit](BENCHMARK.md#default-constructor-follow-up-audit)",
 		"removes two allocations plus 240 B",
+		"remaining five non-storage allocations",
 		"make bench-default-construction BENCHTIME=10000x COUNT=7",
 	} {
 		if !strings.Contains(string(readmeData), token) {
@@ -922,6 +924,10 @@ func TestDocsDescribeSinglePassDefaultSpillDirectoryInitialization(t *testing.T)
 		"66,639 ns",
 		"3,391 B",
 		"3,151 B",
+		"Default Constructor Follow-up Audit",
+		"three retained Go objects account",
+		"Lazy default spill directory",
+		"Embedded initial storage group",
 		"18,882 B and 220 allocations",
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
