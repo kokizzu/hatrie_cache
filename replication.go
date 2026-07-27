@@ -2454,7 +2454,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 	if topologyStore == nil {
 		return replicationRoutingSnapshot{}, false
 	}
-	topology, fingerprint := topologyStore.replicationSnapshot()
+	topology, fingerprint := topologyStore.replicationRoutingGeneration()
 	snapshot := replicationRoutingSnapshot{
 		topology:    topology,
 		self:        self,

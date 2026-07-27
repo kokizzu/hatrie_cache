@@ -799,6 +799,34 @@ func TestDocsDescribeAdaptiveReplicationTargetSorting(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeBorrowedReplicationTopologyGeneration(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[borrow the immutable normalized topology generation](BENCHMARK.md#borrowed-replication-topology-generation)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing borrowed replication-topology token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"TestReplicationRoutingSnapshotBorrowedTopologyMatchesClonedGeneration",
+		"TestReplicationRoutingSnapshotBorrowedTopologyConcurrentGenerationReplacement",
+		"BenchmarkReplicationRoutingBorrowedTopologyConstructionAlternating",
+		"12,032-byte",
+		"66 fewer allocations",
+		"1.50x lower heap",
+		"public topology/routing APIs retain cloned ownership",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing borrowed replication-topology token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectReplicationRouteMembership(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

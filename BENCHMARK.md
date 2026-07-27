@@ -322,6 +322,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Canonical replication owner slices](#canonical-replication-owner-slices), election snapshot and bucket route at 2/16/64 shards | Duplicate owners: 1,293.5/11,369/45,965.5 ns; 17/121/457 allocs; routes 82.935/89.095/97.16 ns | Leader candidates: 1,140.5/10,183/41,608 ns; 14/104/392 allocs; routes 77.80/84.16/90.555 ns | Construction 1.13x/1.12x/1.10x faster; 3/17/65 fewer allocations; routes 1.07x/1.06x/1.07x faster | Leader candidates were already immutable route output; election, owner order, targets, wire, storage, and behavior are unchanged |
 | Current pass | [Sparse replication liveness exceptions](#sparse-replication-liveness-exceptions), healthy 2/16/64-shard snapshot and target membership | Active map: 1,104/10,692/40,087 ns; 1,312/14,680/57,560 B; membership 43.15 ns | Lazy inactive map: 895.8/9,248/36,527 ns; 1,056/13,696/54,016 B; membership 31.11 ns | Construction 1.23x/1.16x/1.10x faster; 256/984/3,544 fewer B; membership 1.39x faster | Offline, timeout, and maintenance construction is 1.01x-1.04x faster with equal or lower heap; election, target filtering, wire, storage, and behavior are unchanged |
 | Current pass | [Adaptive replication target sorting](#adaptive-replication-target-sorting), healthy 2/16/64-shard snapshots | Reflective sort: 1,054/8,880/36,839 ns; 12/100/388 allocs | Generic sort through 16 targets: 932.4/6,856/29,815 ns; 10/52/196 allocs | 1.13x/1.30x/1.24x faster; 2/48/192 fewer allocations; 48/2,944/11,776 fewer heap B | Above 16 targets retains the original faster reflective sorter; full-replica 32/64-node CPU and memory are neutral |
+| Current pass | [Borrowed replication topology generation](#borrowed-replication-topology-generation), healthy 2/16/64-shard snapshots | Clone normalized generation: 790.35/6,439.5/27,287.5 ns; 1,008/10,752/42,240 B | Borrow immutable generation: 541.65/5,294/22,112 ns; 672/7,552/30,208 B | 1.46x/1.22x/1.23x faster; 1.50x/1.42x/1.40x lower heap; 4/18/66 fewer allocations | Private snapshot only; `Set` replaces complete generations and public topology/routing APIs retain cloned ownership |
 | Current pass | [Adaptive replication bucket search](#adaptive-replication-bucket-search), complete route plus targets at 16/64/256 ranges | Linear ranges: 91.115/111.0/180.05 ns | Binary ranges: 77.825/87.37/98.92 ns | 1.17x/1.27x/1.82x faster; heap and allocations unchanged | Two through eight ranges retain linear lookup; normalized contiguous ranges above that threshold use binary search |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
@@ -3733,6 +3734,54 @@ from 10,682 to 10,952 ns, or 1.025x slower. The retained cutoff therefore
 improves common target sets without imposing the large-set regression. Node
 filtering, deterministic order, topology and election state, routing, wire,
 storage, persistence, and public configuration are unchanged.
+
+<a id="borrowed-replication-topology-generation"></a>
+#### Borrowed Replication Topology Generation
+
+Routing snapshot construction formerly called the private cloned topology
+snapshot, duplicating the normalized node slice, shard slice, every replica
+slice, and bucket ranges before constructing its own immutable leaders and
+targets. `TopologyStore.Set` replaces the complete normalized generation under
+the store lock instead of mutating existing backing. The private replication
+routing snapshot now borrows that generation and its matching cached
+fingerprint under one read lock.
+
+The public `TopologyStore.Get`, `Route`, election route, and topology response
+paths retain their prior owned copies. Only the package-private routing
+snapshot borrows backing, and its callers do not mutate topology slices. The
+test-first cloned-generation control covers all five liveness states at 2, 4,
+16, and 64 shards and full-replica topologies at 2, 4, 8, 16, 32, and 64
+nodes. It compares complete snapshot state and 4,096 routes per case across 20
+runs in
+`TestReplicationRoutingSnapshotBorrowedTopologyMatchesClonedGeneration`.
+`TestReplicationRoutingSnapshotBorrowedTopologySurvivesGenerationReplacement`
+proves the old snapshot remains stable after replacement, and
+`TestReplicationRoutingSnapshotBorrowedTopologyConcurrentGenerationReplacement`
+stresses four readers across 1,000 alternating `Set` operations; the focused
+race control passes five runs.
+
+```sh
+make run CMD='go test . -run="TestReplicationRoutingSnapshotBorrowedTopology" -count=20'
+make run CMD='go test -race . -run="TestReplicationRoutingSnapshotBorrowedTopology" -count=5'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingBorrowedTopologyConstructionAlternating$$/^(UntrackedHealthy|OneOffline|FullReplica)$$/^(2Shards|16Shards|64Shards|2Nodes|16Nodes|64Nodes)$$" -benchtime=50000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingBorrowedTopologyConstruction$$/^(UntrackedHealthy|OneOffline|FullReplica)$$/^(2Shards|16Shards|64Shards|2Nodes|16Nodes|64Nodes)$$/^(Baseline|Candidate)$$" -benchmem -benchtime=20000x -count=1 -cpu=1'
+```
+
+| Healthy sharded snapshot, paired median | Cloned generation | Borrowed generation | Improvement |
+| --- | ---: | ---: | ---: |
+| Two shards | 790.35 ns; 1,008 B; 10 allocs | 541.65 ns; 672 B; 6 allocs | 1.46x faster; 1.50x lower heap; four fewer allocations |
+| 16 shards | 6,439.5 ns; 10,752 B; 52 allocs | 5,294 ns; 7,552 B; 34 allocs | 1.22x faster; 1.42x lower heap; 18 fewer allocations |
+| 64 shards | 27,287.5 ns; 42,240 B; 196 allocs | 22,112 ns; 30,208 B; 130 allocs | 1.23x faster; 1.40x lower heap; 66 fewer allocations |
+
+One-offline 2/16/64-shard snapshots improve 1.38x/1.23x/1.22x with the
+same 336/3,200/12,032-byte and 4/18/66-allocation savings. Full-replica
+2/16/64-node snapshots improve 1.13x/1.27x/1.22x, save
+208/1,792/6,784 bytes, and remove one allocation each. No measured path
+regressed. The borrowed generation is immutable and remains reachable only as
+long as the routing snapshot that previously retained an equivalent cloned
+generation. Election state, target and route ownership, deterministic order,
+topology replacement, lock scope, wire, storage, persistence, and public
+configuration are unchanged.
 
 <a id="grouped-replication-target-backing-rollback"></a>
 #### Grouped Replication Target Backing Rollback

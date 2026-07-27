@@ -174,6 +174,16 @@ func (store *TopologyStore) replicationSnapshot() (ClusterTopology, string) {
 	return cloneTopology(store.topology), store.fingerprint
 }
 
+func (store *TopologyStore) replicationRoutingGeneration() (ClusterTopology, string) {
+	if store == nil {
+		return ClusterTopology{}, ""
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	// Set replaces the normalized generation instead of mutating its backing.
+	return store.topology, store.fingerprint
+}
+
 // Fingerprint returns a stable content hash for the current topology. The local
 // Self field is ignored so the same cluster file can be compared across nodes.
 func (store *TopologyStore) Fingerprint() string {

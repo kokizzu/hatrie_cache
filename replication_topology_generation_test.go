@@ -1,34 +1,15 @@
 package hatriecache
 
 import (
+	"fmt"
 	"reflect"
-	"sort"
 	"strconv"
-	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-func precomputedNormalizedReplicationTargetsReflectiveSortControl(owners []string, nodes []TopologyNode, inactive map[string]bool, self string) []TopologyNode {
-	targets := make([]TopologyNode, 0, len(owners))
-	for _, nodeID := range owners {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" || nodeID == self || inactive[nodeID] {
-			continue
-		}
-		node, ok := normalizedTopologyNode(nodes, nodeID)
-		if !ok {
-			continue
-		}
-		targets = append(targets, node)
-	}
-	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].ID < targets[j].ID
-	})
-	return targets
-}
-
-func newReplicationRoutingSnapshotReflectiveTargetSortControl(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshot, bool) {
+func newReplicationRoutingSnapshotClonedTopologyControl(self string, topologyStore *TopologyStore, election *ElectionStore) (replicationRoutingSnapshot, bool) {
 	if topologyStore == nil {
 		return replicationRoutingSnapshot{}, false
 	}
@@ -57,7 +38,7 @@ func newReplicationRoutingSnapshotReflectiveTargetSortControl(self string, topol
 	snapshot.targets = make([][]TopologyNode, len(snapshot.shards))
 	for index, shard := range snapshot.shards {
 		candidates := routeOwners(shard)
-		snapshot.targets[index] = precomputedNormalizedReplicationTargetsReflectiveSortControl(candidates, topology.Nodes, snapshot.inactive, snapshot.self)
+		snapshot.targets[index] = precomputedNormalizedReplicationTargets(candidates, topology.Nodes, snapshot.inactive, snapshot.self)
 		leader := ElectionLeader{
 			Shard:      shard.ID,
 			Primary:    shard.Primary,
@@ -80,60 +61,130 @@ func newReplicationRoutingSnapshotReflectiveTargetSortControl(self string, topol
 	return snapshot, true
 }
 
-func replicationRoutingFullReplicaSortFixture(tb testing.TB, size int) (*TopologyStore, *ElectionStore) {
-	tb.Helper()
-	topology := replicationRoutingBenchmarkTopology(size)
-	topology.Mode = TopologyModeFullReplica
-	topology.Shards = nil
-	store, err := NewTopologyStore(topology)
-	if err != nil {
-		tb.Fatalf("NewTopologyStore(full replica %d) error = %v", size, err)
-	}
-	return store, NewElectionStore(store, ElectionOptions{})
-}
-
-func compareReplicationRoutingSnapshots(tb testing.TB, name string, baseline replicationRoutingSnapshot, baselineOK bool, candidate replicationRoutingSnapshot, candidateOK bool) {
-	tb.Helper()
-	if candidateOK != baselineOK || !candidateOK {
-		tb.Fatalf("%s snapshot ok = %v/%v", name, candidateOK, baselineOK)
-	}
-	if !reflect.DeepEqual(candidate.topology, baseline.topology) || !reflect.DeepEqual(candidate.shards, baseline.shards) || !reflect.DeepEqual(candidate.inactive, baseline.inactive) || !reflect.DeepEqual(candidate.leaders, baseline.leaders) || !reflect.DeepEqual(candidate.targets, baseline.targets) || candidate.self != baseline.self || candidate.fingerprint != baseline.fingerprint {
-		tb.Fatalf("%s candidate state = %#v, baseline %#v", name, candidate, baseline)
-	}
-	for keyIndex := 0; keyIndex < 4096; keyIndex++ {
-		key := "session:" + strconv.Itoa(keyIndex)
-		want, wantTargets, wantOK := baseline.routeForKeyAndTargets(key)
-		got, gotTargets, gotOK := candidate.routeForKeyAndTargets(key)
-		if gotOK != wantOK || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotTargets, wantTargets) {
-			tb.Fatalf("%s route(%q) = %#v/%#v/%v, want %#v/%#v/%v", name, key, got, gotTargets, gotOK, want, wantTargets, wantOK)
-		}
-	}
-}
-
-func TestReplicationRoutingSnapshotAdaptiveTargetSortMatchesReflectiveControl(t *testing.T) {
+func TestReplicationRoutingSnapshotBorrowedTopologyMatchesClonedGeneration(t *testing.T) {
 	for _, state := range replicationRoutingLivenessStates {
 		for _, size := range []int{2, 4, 16, 64} {
 			store, election, _ := replicationRoutingLivenessFixture(t, size, state)
-			baseline, baselineOK := newReplicationRoutingSnapshotReflectiveTargetSortControl("node-000", store, election)
+			baseline, baselineOK := newReplicationRoutingSnapshotClonedTopologyControl("node-000", store, election)
 			candidate, candidateOK := newReplicationRoutingSnapshot("node-000", store, election)
 			compareReplicationRoutingSnapshots(t, string(state)+"/"+strconv.Itoa(size), baseline, baselineOK, candidate, candidateOK)
 		}
 	}
 	for _, size := range []int{2, 4, 8, 16, 32, 64} {
 		store, election := replicationRoutingFullReplicaSortFixture(t, size)
-		baseline, baselineOK := newReplicationRoutingSnapshotReflectiveTargetSortControl("node-000", store, election)
+		baseline, baselineOK := newReplicationRoutingSnapshotClonedTopologyControl("node-000", store, election)
 		candidate, candidateOK := newReplicationRoutingSnapshot("node-000", store, election)
 		compareReplicationRoutingSnapshots(t, "FullReplica/"+strconv.Itoa(size), baseline, baselineOK, candidate, candidateOK)
 	}
 }
 
-func BenchmarkReplicationRoutingAdaptiveTargetSortConstructionAlternating(b *testing.B) {
+func TestReplicationRoutingSnapshotBorrowedTopologySurvivesGenerationReplacement(t *testing.T) {
+	store, _, _ := replicationRoutingLivenessFixture(t, 4, replicationRoutingLivenessUntrackedHealthy)
+	oldSnapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+	if !ok {
+		t.Fatal("old borrowed routing snapshot construction failed")
+	}
+	oldTopology := oldSnapshot.topology
+	oldFingerprint := oldSnapshot.fingerprint
+
+	next := store.Get()
+	for index := range next.Nodes {
+		next.Nodes[index].Address += "/next"
+	}
+	next.Shards[0].Primary, next.Shards[0].Replicas[0] = next.Shards[0].Replicas[0], next.Shards[0].Primary
+	if err := store.Set(next); err != nil {
+		t.Fatalf("Set(next generation) error = %v", err)
+	}
+
+	if !reflect.DeepEqual(oldSnapshot.topology, oldTopology) || oldSnapshot.fingerprint != oldFingerprint {
+		t.Fatalf("old borrowed snapshot changed after Set: %#v/%q", oldSnapshot.topology, oldSnapshot.fingerprint)
+	}
+	newSnapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+	if !ok {
+		t.Fatal("new borrowed routing snapshot construction failed")
+	}
+	if reflect.DeepEqual(newSnapshot.topology, oldSnapshot.topology) || newSnapshot.fingerprint == oldSnapshot.fingerprint {
+		t.Fatalf("new generation was not installed: %#v/%q", newSnapshot.topology, newSnapshot.fingerprint)
+	}
+	if got := store.Get(); !reflect.DeepEqual(got, newSnapshot.topology) {
+		t.Fatalf("store generation = %#v, snapshot %#v", got, newSnapshot.topology)
+	}
+}
+
+func TestReplicationRoutingSnapshotBorrowedTopologyConcurrentGenerationReplacement(t *testing.T) {
+	store, _, _ := replicationRoutingLivenessFixture(t, 16, replicationRoutingLivenessUntrackedHealthy)
+	topologyA := store.Get()
+	topologyB := store.Get()
+	for index := range topologyA.Nodes {
+		topologyA.Nodes[index].Address = "http://generation-a/" + topologyA.Nodes[index].ID
+		topologyB.Nodes[index].Address = "http://generation-b/" + topologyB.Nodes[index].ID
+	}
+	fingerprintA := topologyA.Fingerprint()
+	fingerprintB := topologyB.Fingerprint()
+	if err := store.Set(topologyA); err != nil {
+		t.Fatalf("Set(initial generation) error = %v", err)
+	}
+
+	const iterations = 1000
+	errors := make(chan error, 8)
+	var wait sync.WaitGroup
+	wait.Add(1)
+	go func() {
+		defer wait.Done()
+		for iteration := 0; iteration < iterations; iteration++ {
+			topology := topologyA
+			if iteration&1 != 0 {
+				topology = topologyB
+			}
+			if err := store.Set(topology); err != nil {
+				errors <- fmt.Errorf("Set(generation %d): %w", iteration, err)
+				return
+			}
+		}
+	}()
+	for reader := 0; reader < 4; reader++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for iteration := 0; iteration < iterations; iteration++ {
+				snapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+				if !ok {
+					errors <- fmt.Errorf("borrowed snapshot construction failed")
+					return
+				}
+				prefix := "http://generation-a/"
+				expectedFingerprint := fingerprintA
+				if snapshot.fingerprint == fingerprintB {
+					prefix = "http://generation-b/"
+					expectedFingerprint = fingerprintB
+				}
+				if snapshot.fingerprint != expectedFingerprint {
+					errors <- fmt.Errorf("unexpected fingerprint %q", snapshot.fingerprint)
+					return
+				}
+				for _, node := range snapshot.topology.Nodes {
+					if node.Address != prefix+node.ID {
+						errors <- fmt.Errorf("mixed generation node %#v for fingerprint %q", node, snapshot.fingerprint)
+						return
+					}
+				}
+			}
+		}()
+	}
+	wait.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatal(err)
+	}
+}
+
+func BenchmarkReplicationRoutingBorrowedTopologyConstructionAlternating(b *testing.B) {
 	for _, state := range []replicationRoutingLivenessState{replicationRoutingLivenessUntrackedHealthy, replicationRoutingLivenessOffline} {
 		b.Run(string(state), func(b *testing.B) {
 			for _, size := range []int{2, 4, 8, 16, 32, 64} {
 				b.Run(strconv.Itoa(size)+"Shards", func(b *testing.B) {
 					store, election, _ := replicationRoutingLivenessFixture(b, size, state)
-					benchmarkReplicationRoutingAdaptiveTargetSortAlternating(b, store, election)
+					benchmarkReplicationRoutingBorrowedTopologyAlternating(b, store, election)
 				})
 			}
 		})
@@ -141,12 +192,12 @@ func BenchmarkReplicationRoutingAdaptiveTargetSortConstructionAlternating(b *tes
 	for _, size := range []int{2, 4, 8, 16, 32, 64} {
 		b.Run("FullReplica/"+strconv.Itoa(size)+"Nodes", func(b *testing.B) {
 			store, election := replicationRoutingFullReplicaSortFixture(b, size)
-			benchmarkReplicationRoutingAdaptiveTargetSortAlternating(b, store, election)
+			benchmarkReplicationRoutingBorrowedTopologyAlternating(b, store, election)
 		})
 	}
 }
 
-func benchmarkReplicationRoutingAdaptiveTargetSortAlternating(b *testing.B, store *TopologyStore, election *ElectionStore) {
+func benchmarkReplicationRoutingBorrowedTopologyAlternating(b *testing.B, store *TopologyStore, election *ElectionStore) {
 	var baselineDuration, candidateDuration time.Duration
 	b.ResetTimer()
 	for iteration := 0; iteration < b.N; iteration++ {
@@ -159,7 +210,7 @@ func benchmarkReplicationRoutingAdaptiveTargetSortAlternating(b *testing.B, stor
 				snapshot, ok = newReplicationRoutingSnapshot("node-000", store, election)
 				candidateDuration += time.Since(started)
 			} else {
-				snapshot, ok = newReplicationRoutingSnapshotReflectiveTargetSortControl("node-000", store, election)
+				snapshot, ok = newReplicationRoutingSnapshotClonedTopologyControl("node-000", store, election)
 				baselineDuration += time.Since(started)
 			}
 			if !ok {
@@ -173,7 +224,7 @@ func benchmarkReplicationRoutingAdaptiveTargetSortAlternating(b *testing.B, stor
 	b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "candidate_ns/snapshot")
 }
 
-func BenchmarkReplicationRoutingAdaptiveTargetSortConstruction(b *testing.B) {
+func BenchmarkReplicationRoutingBorrowedTopologyConstruction(b *testing.B) {
 	for _, state := range []replicationRoutingLivenessState{replicationRoutingLivenessUntrackedHealthy, replicationRoutingLivenessOffline} {
 		for _, size := range []int{2, 4, 8, 16, 32, 64} {
 			store, election, _ := replicationRoutingLivenessFixture(b, size, state)
@@ -190,7 +241,7 @@ func BenchmarkReplicationRoutingAdaptiveTargetSortConstruction(b *testing.B) {
 						if candidate {
 							snapshot, ok = newReplicationRoutingSnapshot("node-000", store, election)
 						} else {
-							snapshot, ok = newReplicationRoutingSnapshotReflectiveTargetSortControl("node-000", store, election)
+							snapshot, ok = newReplicationRoutingSnapshotClonedTopologyControl("node-000", store, election)
 						}
 						if !ok {
 							b.Fatal("routing snapshot construction failed")
@@ -216,7 +267,7 @@ func BenchmarkReplicationRoutingAdaptiveTargetSortConstruction(b *testing.B) {
 					if candidate {
 						snapshot, ok = newReplicationRoutingSnapshot("node-000", store, election)
 					} else {
-						snapshot, ok = newReplicationRoutingSnapshotReflectiveTargetSortControl("node-000", store, election)
+						snapshot, ok = newReplicationRoutingSnapshotClonedTopologyControl("node-000", store, election)
 					}
 					if !ok {
 						b.Fatal("routing snapshot construction failed")

@@ -1930,6 +1930,18 @@ heap, and allocation behavior remain neutral because those paths retain the
 original sorter. Target filtering and deterministic order, routing, wire,
 storage, persistence, and configuration are unchanged.
 
+Private routing snapshots also
+[borrow the immutable normalized topology generation](BENCHMARK.md#borrowed-replication-topology-generation)
+instead of cloning nodes, shards, replica slices, and bucket ranges before
+building their independently owned leaders and targets. Healthy 2/16/64-shard
+construction is 1.46x/1.22x/1.23x faster, uses 1.50x/1.42x/1.40x lower heap,
+and removes 4/18/66 allocations. Offline and full-replica paths improve at
+every measured size. `TopologyStore.Set` replaces complete generations;
+concurrent replacement and race controls prove old snapshots remain stable.
+Public topology and routing APIs retain their prior cloned ownership, while
+election behavior, route and target order, wire, storage, persistence, and
+configuration remain unchanged.
+
 Explicit bucket routing also uses
 [adaptive range search](BENCHMARK.md#adaptive-replication-bucket-search).
 Up to eight normalized ranges retain the prior linear scan; larger range sets
