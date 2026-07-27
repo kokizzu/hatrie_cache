@@ -1379,7 +1379,13 @@ func (ht *HatTrie) executeExactFastCommandPointer(request *CacheCommandRequest) 
 		if len(request.Values) != 0 || !commandFastJSONPlainString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
-		priority, ok := commandPriority(*request)
+		var priority int64
+		var ok bool
+		if request.Priority != nil {
+			priority, ok = *request.Priority, true
+		} else {
+			priority, ok = commandPrioritySubkey(request.Subkey)
+		}
 		if !ok {
 			return CacheCommandResponse{}, false
 		}
@@ -3904,10 +3910,15 @@ func commandPriority(request CacheCommandRequest) (int64, bool) {
 	if request.Priority != nil {
 		return *request.Priority, true
 	}
-	if strings.TrimSpace(request.Subkey) == "" {
+	return commandPrioritySubkey(request.Subkey)
+}
+
+func commandPrioritySubkey(subkey string) (int64, bool) {
+	subkey = strings.TrimSpace(subkey)
+	if subkey == "" {
 		return 0, false
 	}
-	parsed, err := strconv.ParseInt(strings.TrimSpace(request.Subkey), 10, 64)
+	parsed, err := strconv.ParseInt(subkey, 10, 64)
 	if err != nil {
 		return 0, false
 	}

@@ -253,6 +253,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Canonical JSON command fast paths](#canonical-json-command-fast-paths), ordinary Bloom/Cuckoo/XOR/CMS/HLL/Top-K/reservoir strings | Accepted `<`, `>`, and `&` with noncanonical hashes/keys; 99.11/75.30/99.24/82.65/104.6/141.5/161.7 ns | Exact canonical fallback; 93.06/73.78/97.21/79.99/98.31/124.2/152.9 ns | Correct snapshots plus 1.02x-1.14x faster ordinary commands | No measured valid-path tradeoff; escaped HTML-sensitive strings use the existing generic canonical encoder, and the unaffected set control is CPU-neutral with identical memory |
 | Current pass | [Allocation-free public canonical-string lookups](#allocation-free-public-canonical-string-lookups), Bloom/Cuckoo/Count-Min ordinary string hits | Canonical marshal: 121.7/100.4/117.4 ns; 16 B; 1 alloc each | Direct canonical hash: 63.73/43.10/51.02 ns; 0 B; 0 allocs | 1.91x/2.33x/2.30x faster; all timed heap and allocations eliminated | No measured fallback tradeoff; structured Bloom/Count-Min are CPU-neutral within 0.7%, escaped Cuckoo is 1.01x faster, and fallback memory is unchanged |
 | Current pass | [Pointer exact-command request dispatch](#pointer-exact-command-request-dispatch), exact/generic GET and exact SET | Second by-value pass of the 168-byte request: 131.4/84.40/150.2 ns | Stack-bound pointer: 121.6/78.05/146.9 ns | GET 1.081x faster; SET 1.022x faster; mixed-read profile 1.020x faster | No measured tradeoff; heap/allocations, command semantics, request API, wire, and storage are unchanged; field-heavy and mixed-write controls are neutral or faster |
+| Current pass | [Narrow priority request parsing](#narrow-priority-request-parsing), exact typed/subkey push-pop | Shared by-value helper: 242.1/253.2 ns | Direct typed field plus trim-once subkey: 237.8/249.2 ns | 1.018x/1.016x faster; parser subkey 1.100x faster | No measured tradeoff; heap/allocations, generic commands, journal validation, request API, wire, and storage are unchanged; broader priority and Count-Min pointer variants were reverted |
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
@@ -432,6 +433,8 @@ tree.
 | Known-position expiration removal | Intended to remove a duplicate expiration-index lookup when clearing an existing TTL and when vacuuming the known heap root | Direct delegation made the mixed-write profile 1.025x slower; the refined path was only 1.011x faster cross-binary, while same-binary existing clears were 1.008x slower and no-TTL `SET` was 1.007x slower | Both candidates and their temporary benchmark were removed; see [expiration removal lookup rollback](#expiration-removal-lookup-rollback) |
 | Single-pass expiration time comparison | Plain `time.Time.Compare` made earlier/later primitive comparisons 1.44x/1.47x faster and an increasing-deadline heap build 1.027x faster | The same candidate made an equal-deadline sift-heavy heap 1.014x slower; two equality-first hybrids erased the distinct-deadline gain or exceeded the inlining budget and made the direct earlier control 1.021x slower | All comparator candidates and temporary fixtures were removed; the original `Equal` plus `Before` ordering remains; see [expiration time comparison rollback](#expiration-time-comparison-rollback) |
 | Single-pass expiration update direction | One `time.Time.Compare` made equal updates 1.28x faster; preserving `Before` and replacing only `After` made equal updates 1.019x faster with neutral earlier updates | One `Compare` made earlier updates 1.08x slower; the refined candidate made later updates 1.011x slower and the public TTL-extension path was neutral | Both direction selectors and their temporary fixture were removed; the original `Before` then `After` update remains; see [expiration update direction rollback](#expiration-update-direction-rollback) |
+| Pointer Count-Min increment parser | Default-count parsing improved from 6.087 to 5.278 ns, or 1.153x | Subkey parsing regressed from 14.33 to 14.46 ns, or 1.009x slower | Reverted; Count-Min callers and parser remain by value; see [narrow priority request parsing](#narrow-priority-request-parsing) |
+| All-pointer priority parser | Typed and subkey helpers improved 2.06x/1.12x in isolation | The complete exact subkey push/pop path regressed from 253.1 to 260.4 ns, or 1.029x slower | Replaced by direct typed-field dispatch plus trim-once subkey parsing; see [narrow priority request parsing](#narrow-priority-request-parsing) |
 | Replication constructor flag | Avoided deriving invariant scan mode after construction | Added one 704-byte allocation | Removed; mode uses an existing byte; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Mixed-page compact descriptors | Tried to keep mixed SET/delete repair pages in the compact layout | Added 17% transient heap | Replaced by selecting generic compatibility storage before descriptor allocation; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Ten-page replication aggregation | Reduced request count beyond the retained two-page cap | Could stage ten unusually large pages before splitting | Removed to preserve bounded memory; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -1579,6 +1582,48 @@ make run CMD='go test . -run=TestExecuteCommand -count=1'
 make run CMD='go test . -run=NONE -bench=BenchmarkExecuteCommandRequestPassingControl -benchmem -benchtime=2s -count=7'
 make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedReadHeavy100 -benchmem -benchtime=2s -count=7'
 make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedWriteHeavy100 -benchmem -benchtime=2s -count=7'
+```
+
+<a id="narrow-priority-request-parsing"></a>
+#### Narrow Priority Request Parsing
+
+Priority-queue commands accept a typed `Priority` pointer and retain `Subkey`
+as a compatibility fallback. The exact uppercase dispatcher already receives
+the 168-byte request by pointer, so it now reads a present typed priority
+directly instead of sending the complete request through the shared by-value
+parser. The shared parser remains by value for generic commands and journal
+preflight, but delegates fallback parsing to a string-only helper that trims
+the subkey once instead of repeating `strings.TrimSpace`.
+
+Priority command tests passed ten times before the final measurements. Frozen
+and candidate binaries used the same retained benchmark fixture. Seven-run
+medians were collected on the same Ryzen 9 5950X host; the exact subkey result
+was confirmed with fixed ten-million-iteration samples after it disqualified
+the broader pointer prototype. The shared subkey helper improved from 14.75 to 13.41 ns.
+
+| Priority path | Baseline median | Final median | Result |
+| --- | ---: | ---: | --- |
+| Typed parser helper | 3.498 ns; 0 B; 0 allocs | 3.366 ns; 0 B; 0 allocs | 1.039x faster |
+| Subkey parser helper | 14.75 ns; 0 B; 0 allocs | 13.41 ns; 0 B; 0 allocs | 1.100x faster |
+| Exact typed push/pop | 242.1 ns; 32 B; 1 alloc | 237.8 ns; 32 B; 1 alloc | 1.018x faster |
+| Exact subkey push/pop | 253.2 ns; 32 B; 1 alloc | 249.2 ns; 32 B; 1 alloc | 1.016x faster |
+| Generic typed push/pop | 1,023 ns; 200 B; 9 allocs | 1,017 ns; 200 B; 9 allocs | Neutral to 1.006x faster |
+| Generic subkey push/pop | 1,070 ns; 200 B; 9 allocs | 1,028 ns; 200 B; 9 allocs | 1.041x faster |
+
+Two broader signatures were removed. Passing every priority request by pointer
+made the isolated typed/subkey parsers 2.06x/1.12x faster, but made complete
+exact subkey push/pop 260.4 versus 253.1 ns, or 1.029x slower. Applying the
+same signature change to Count-Min parsing improved its default-count case
+from 6.087 to 5.278 ns but regressed subkey parsing from 14.33 to 14.46 ns.
+The retained narrow layout preserves the complete-path gains without either
+regression. Command semantics, validation, tie ordering, journal eligibility,
+request ownership, wire bytes, persistence, heap, and allocation counts are
+unchanged.
+
+```sh
+make run CMD='go test . -run "TestExecuteCommandPriorityQueue|TestCommandJournalReplaysPriorityQueueMutations" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandRequestFieldParsers/Priority -benchmem -benchtime=2s -count=7'
+make run CMD='go test . -run=NONE -bench=BenchmarkCommandPriorityRequestExecution -benchmem -benchtime=1s -count=7'
 ```
 
 <a id="complete-tagged-structured-storage"></a>

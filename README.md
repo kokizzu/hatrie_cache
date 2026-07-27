@@ -91,6 +91,13 @@ request value into the large uppercase dispatcher a second time. Exact and
 generic GET improve 1.081x, exact SET improves 1.022x, and allocations remain
 unchanged; see the
 [request dispatch measurements](BENCHMARK.md#pointer-exact-command-request-dispatch).
+Narrow priority request parsing reads a present typed priority directly in the
+pointer exact dispatcher and trims the compatibility subkey once. Complete
+exact typed/subkey push-pop improves 1.018x/1.016x with unchanged memory;
+broader priority and Count-Min pointer signatures were reverted after slower
+controls. See the
+[priority parsing measurements](BENCHMARK.md#narrow-priority-request-parsing),
+including the 14.75 to 13.41 ns helper result.
 The command-feature benchmark constructs optional TTL and priority integers
 outside timed loops, so its allocation columns describe command execution
 rather than Go escape-analysis cost in the fixture. The expiration command
