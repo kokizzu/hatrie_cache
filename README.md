@@ -69,6 +69,11 @@ low-memory membership checks with approximate delete support.
 Their generic scalar-add wrapper also avoids temporary variadic preparation,
 removing one allocation while keeping the 128-value batch path neutral; see the
 [Cuckoo scalar-add measurements](BENCHMARK.md#generic-cuckoo-filter-scalar-additions).
+Exact `ADDCF` requests carrying multiple `Values` now preflight the batch and
+hash canonical strings directly. Two/eight/64-string cycles are
+1.04x/1.11x/1.62x faster, while one value is CPU-neutral with 3x fewer
+allocations. The 64-value cycle removes 65 allocations and 2,817 heap bytes;
+see the [Cuckoo command-batch measurements](BENCHMARK.md#direct-cuckoo-filter-command-batches).
 Generic scalar deletions encode into a caller-owned one-key slot instead of
 allocating a temporary key slice. Existing string/structured deletions are
 1.16x/1.19x faster and misses are 1.42x faster, with one allocation and 24

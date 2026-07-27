@@ -1761,6 +1761,39 @@ func TestDocsDescribeDirectBloomFilterCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectCuckooFilterCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Cuckoo command-batch measurements](BENCHMARK.md#direct-cuckoo-filter-command-batches)",
+		"1.04x/1.11x/1.62x faster",
+		"65 allocations and 2,817 heap bytes",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing direct Cuckoo command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Direct Cuckoo-Filter Command Batches",
+		"BenchmarkCuckooFilterBatchCommandAlternating",
+		"11,605 ns; 19,201 B; 66 allocs",
+		"7,160 ns; 16,384 B; 1 alloc",
+		"near-capacity filter",
+		"Uniform Cuckoo command-batch helper",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct Cuckoo command batch token %q", token)
+		}
+	}
+}
+
 func TestREADMELinksShardingProposal(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

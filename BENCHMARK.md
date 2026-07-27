@@ -251,6 +251,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Generic Bloom-filter scalar additions](#generic-bloom-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 110.8/133.0/141.5 ns; 29-40 B; 2 allocs | Direct scalar encoding: 79.91/96.57/103.2 ns; 5-16 B; 1 alloc | 1.39x/1.38x/1.37x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.7% with identical memory |
 | Current pass | [Direct Bloom-filter command batches](#direct-bloom-filter-command-batches), one/two/eight/64 requested strings | Generic-equivalent: 3,430/3,520/3,676/11,076 ns; 8,232-11,008 heap B; 3-66 allocs | Direct command: 3,207/3,293/2,987/6,706 ns; 8,192 heap B; 1 alloc | 1.07x/1.07x/1.23x/1.65x faster; 64 values use 1.34x lower heap and 66x fewer allocations | No measured tradeoff; escaped, structured-tail, and all-structured controls are 1.01x-1.49x faster with identical or lower memory; scalar and generic APIs are unchanged |
 | Current pass | [Generic Cuckoo-filter scalar additions](#generic-cuckoo-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 98.84/119.1/112.4 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 62.61/75.87/76.72 ns; 5-16 B; 1 alloc | 1.58x/1.57x/1.47x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.5% with identical memory |
+| Current pass | [Direct Cuckoo-filter command batches](#direct-cuckoo-filter-command-batches), one/two/eight/64 requested strings | Generic-equivalent: 5,543/5,884/7,032/11,605 ns; 16,424-19,201 heap B; 3-66 allocs | Direct command: 5,544/5,685/6,353/7,160 ns; 16,384 heap B; 1 alloc | One value CPU-neutral with 3x fewer allocs; two/eight/64 values 1.04x/1.11x/1.62x faster; 64 values use 1.17x lower heap and 66x fewer allocations | No measured tradeoff; escaped and structured-tail batches are 1.46x faster, while all-structured CPU and memory are neutral; scalar and generic APIs are unchanged |
 | Current pass | [Generic Cuckoo-filter scalar deletions](#generic-cuckoo-filter-scalar-deletions), existing string/structured and missing values | Temporary key slice: 280.3/320.7/128.2 ns; 32-40 B; 2 allocs | Caller-owned key slot: 242.6/270.0/90.57 ns; 8-16 B; 1 alloc | 1.16x/1.19x/1.42x faster; one allocation and 24 B removed | No measured tradeoff; 2/16/128-value controls are 1.01x-1.05x faster with identical memory |
 | Current pass | [Canonical JSON command fast paths](#canonical-json-command-fast-paths), ordinary Bloom/Cuckoo/XOR/CMS/HLL/Top-K/reservoir strings | Accepted `<`, `>`, and `&` with noncanonical hashes/keys; 99.11/75.30/99.24/82.65/104.6/141.5/161.7 ns | Exact canonical fallback; 93.06/73.78/97.21/79.99/98.31/124.2/152.9 ns | Correct snapshots plus 1.02x-1.14x faster ordinary commands | No measured valid-path tradeoff; escaped HTML-sensitive strings use the existing generic canonical encoder, and the unaffected set control is CPU-neutral with identical memory |
 | Current pass | [Allocation-free public canonical-string lookups](#allocation-free-public-canonical-string-lookups), Bloom/Cuckoo/Count-Min ordinary string hits | Canonical marshal: 121.7/100.4/117.4 ns; 16 B; 1 alloc each | Direct canonical hash: 63.73/43.10/51.02 ns; 0 B; 0 allocs | 1.91x/2.33x/2.30x faster; all timed heap and allocations eliminated | No measured fallback tradeoff; structured Bloom/Count-Min are CPU-neutral within 0.7%, escaped Cuckoo is 1.01x faster, and fallback memory is unchanged |
@@ -427,6 +428,7 @@ tree.
 | Large-only Bloom command dispatch | Removed 65 JSON allocations from a 64-string command batch | Leaving one through eight values on generic fallback added a second length branch and made the unchanged eight-value exact command 1.011x slower in the first alternating gate | Replaced by the [all-size direct command batch](#direct-bloom-filter-command-batches), which is 1.07x-1.65x faster from one through 64 strings and leaves all-structured memory unchanged |
 | Inline Cuckoo scalar wrapper body | Scalar additions improved 1.51x-1.62x with one fewer allocation | Moving the larger body before `AddOneChecked` made the frozen 128-value batch 1.011x slower through binary-layout drift | Replaced by the [out-of-line scalar helper](#generic-cuckoo-filter-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.5% |
 | Cuckoo variadic scalar-add preparation | A caller-owned scalar key slot made the isolated scalar primitive 1.35x-1.53x faster and removed one allocation plus 24 B | Using the shared helper inside `AddOneChecked` made 2/16/128-value public batches 1.047x/1.043x/1.009x slower; a scalar branch around the exact former helper made them 1.020x/1.033x/1.028x slower; dispatch at the public method made 2/16-value batches 1.118x/1.079x slower and new-filter creation 1.032x slower | All three layouts and their test code were removed; `AddOneChecked` and `HatTrie.AddCuckooFilterChecked` remain unchanged; see [the rollback](#cuckoo-filter-variadic-scalar-add-rollback) |
+| Uniform Cuckoo command-batch helper | Removed transient JSON keys from canonical strings across every `Values` size | The first alternating one-value gate was 5,653 versus 5,592 ns, or 1.011x slower, despite lower memory | Replaced by the [one-item direct branch](#direct-cuckoo-filter-command-batches) inside the private command helper; the final longer one-value gate is CPU-neutral with 3x fewer allocations, and multi-value controls retain their gains |
 | Cuckoo scalar-delete dispatch layouts | Early scalar dispatch removed one allocation; split-first tail backing also saved 24 B for two values and 128 B for 128 values | Early dispatch made the reverse-order 128-value control 1.019x slower; a separate batch helper made 16 values 1.028x slower; split-first backing made 16 values 1.012x slower | All three layouts were removed; [caller-owned scalar key storage](#generic-cuckoo-filter-scalar-deletions) keeps the original full batch allocation and single deletion loop, with every retained control neutral or faster |
 | Canonical JSON classifier layouts | Flat comparisons corrected `<`, `>`, and `&`; switch, two-pass `IndexAny`, and bitmask forms explored different branch/scan costs | Flat comparisons made ordinary Cuckoo/XOR/Count-Min commands 1.06x/1.07x/1.08x slower; isolated switch, two-pass, and full bitmask predicates were up to 1.29x, 5.32x, and 1.37x slower | Removed and replaced by the [grouped low-ASCII classifier](#canonical-json-command-fast-paths), whose complete ordinary command controls are neutral or faster |
 | In-lock public canonical-string branch | Made ordinary Bloom/Cuckoo/XOR/Count-Min/Top-K lookups allocation-free and up to 3.10x faster | Same-process fallback medians made structured Bloom/Count-Min/Top-K 1.011x/1.007x/1.012x slower, escaped Cuckoo 1.106x slower, and Unicode XOR 1.026x slower | Removed and replaced for Bloom/Cuckoo/Count-Min by the [early-return layout](#allocation-free-public-canonical-string-lookups) |
@@ -6451,6 +6453,60 @@ All three production layouts and the complete test-only fixture were removed.
 semantics, allocation behavior, wire/storage formats, and configuration are
 source-identical to the retained baseline. The already-shipped direct scalar
 `AddChecked` optimization is unaffected.
+
+<a id="direct-cuckoo-filter-command-batches"></a>
+### Direct Cuckoo-Filter Command Batches
+
+Exact scalar `ADDCF` commands already hash canonical JSON strings directly,
+but requests carrying `Values` fell through to `cuckooFilterItemKeys`. That
+generic path allocates one encoded byte slice per ordinary string plus one
+containing slice before inserting any fingerprint. Exact command batches now
+preflight every noncanonical value, hash canonical strings directly, and then
+apply fingerprints in the exact request order. The public variadic API and
+forced-generic command path remain source-identical compatibility controls.
+
+Tests were added before production changed. They compare exact and
+forced-generic responses plus complete fingerprint snapshots for fresh 64-item
+batches, existing and within-request duplicates, a near-capacity filter that
+exercises relocation and failed insertion, replacement of an expiring string,
+escaped and structured values, a late invalid value, and an empty request.
+Every fallible encoding completes before the first fingerprint mutation, so
+invalid batches remain all-or-reject. Hashes, alternate buckets, relocation
+inputs, insertion order, counts, and returned added totals are byte-identical.
+
+CPU uses eight-operation exact/generic blocks in alternating order against
+independent tries in one binary. Heap and allocations are seven-run medians
+from complete 4,096-capacity reserve-plus-add cycles. Inputs are prepared before
+timing.
+
+```sh
+make run CMD='go test . -race -run=^TestCuckooFilterBatchCommand -count=100'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkCuckooFilterBatchCommandAlternating$$ -benchtime=2000x -count=9 -cpu=1'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkCuckooFilterBatchCommandPath$$ -benchmem -benchtime=2000x -count=7 -cpu=1'
+```
+
+| Complete command batch, median | Generic-equivalent control | Direct batch | Improvement |
+| --- | ---: | ---: | ---: |
+| One ordinary string in `Values` | 5,543 ns; 16,424 B; 3 allocs | 5,544 ns; 16,384 B; 1 alloc | CPU neutral within 0.1%; 3x fewer allocations |
+| Two ordinary strings | 5,884 ns; 16,464 B; 4 allocs | 5,685 ns; 16,384 B; 1 alloc | 1.04x faster; 4x fewer allocations |
+| Eight ordinary strings | 7,032 ns; 16,704 B; 10 allocs | 6,353 ns; 16,384 B; 1 alloc | 1.11x faster; 10x fewer allocations |
+| 64 ordinary strings | 11,605 ns; 19,201 B; 66 allocs | 7,160 ns; 16,384 B; 1 alloc | 1.62x faster; 1.17x lower heap; 66x fewer allocations |
+| 63 ordinary plus escaped last | 11,514 ns; 19,209 B; 66 allocs | 7,902 ns; 18,200 B; 3 allocs | 1.46x faster; 1.06x lower heap; 22x fewer allocations |
+| 63 ordinary plus structured last | 12,084 ns; 19,306 B; 67 allocs | 8,293 ns; 18,297 B; 4 allocs | 1.46x faster; 1.06x lower heap; 16.75x fewer allocations |
+| 64 structured values | 27,489 ns; 25,346 B; 130 allocs | 27,475 ns; 25,346 B; 130 allocs | CPU neutral within 0.1%; memory unchanged |
+
+The first helper sent a one-item `Values` request through the same two-pass
+layout as a large batch. It saved two allocations but measured 5,653 versus
+5,592 ns in the first alternating gate, a 1.011x CPU loss. The retained private
+helper applies one canonical hash or one generic key directly before entering
+the multi-item preflight layout. A longer 5,000-block confirmation measured
+4,638 versus 4,812 ns; the final full gate conservatively reports the later
+CPU-neutral pair and the deterministic memory reduction.
+
+The established scalar `Value` command keeps its previous check and scalar
+helper. No retained field, buffer, goroutine, configuration, wire form, or
+storage format was added. TTL clearing, telemetry, partitions, snapshots,
+journals, replication, and direct-Go APIs are unchanged.
 
 <a id="generic-cuckoo-filter-scalar-deletions"></a>
 ### Generic Cuckoo-Filter Scalar Deletions

@@ -212,6 +212,59 @@ func (filter *cuckooFilterData) AddOneChecked(value interface{}, values ...inter
 	return added, nil
 }
 
+func (filter *cuckooFilterData) addCommandBatch(values Slice) (int, error) {
+	if filter == nil || filter.bucketCount == 0 || filter.fingerprintBits == 0 {
+		return 0, nil
+	}
+	if len(values) == 1 {
+		if text, ok := values[0].(string); ok && commandFastCanonicalJSONString(text) {
+			return boolInt(filter.addJSONString(text)), nil
+		}
+		key, err := cuckooFilterItemKey(values[0])
+		if err != nil {
+			return 0, err
+		}
+		return boolInt(filter.addKey(key)), nil
+	}
+	var encoded [][]byte
+	for index, value := range values {
+		text, ok := value.(string)
+		if ok && commandFastCanonicalJSONString(text) {
+			continue
+		}
+		if encoded == nil {
+			encoded = make([][]byte, len(values))
+		}
+		key, err := cuckooFilterItemKey(value)
+		if err != nil {
+			return 0, err
+		}
+		encoded[index] = key
+	}
+
+	added := 0
+	if encoded == nil {
+		for _, value := range values {
+			if filter.addJSONString(value.(string)) {
+				added++
+			}
+		}
+		return added, nil
+	}
+	for index, value := range values {
+		changed := false
+		if encoded[index] != nil {
+			changed = filter.addKey(encoded[index])
+		} else {
+			changed = filter.addJSONString(value.(string))
+		}
+		if changed {
+			added++
+		}
+	}
+	return added, nil
+}
+
 func (filter *cuckooFilterData) addKey(key []byte) bool {
 	filter.ensureFingerprints()
 	hash := bloomFilterFNV64a(key)

@@ -1408,7 +1408,10 @@ func (ht *HatTrie) executeExactFastCommandPointer(request *CacheCommandRequest) 
 		}
 		return ht.executeFastHasBloomFilterCommand(key, request.Value)
 	case "ADDCF", "CFADD":
-		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
+		if len(request.Values) != 0 {
+			return ht.executeFastAddCuckooFilterBatchCommand(key, request.Values)
+		}
+		if !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddCuckooFilterCommand(key, request.Value)
@@ -2103,6 +2106,42 @@ func (ht *HatTrie) executeFastAddCuckooFilterCommand(key string, value string) (
 	*rawPtr = hval.toValue()
 	ht.recordWriteLocked(key)
 	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "added cuckoo filter values", Value: strconv.Itoa(added)}, true
+}
+
+func (ht *HatTrie) executeFastAddCuckooFilterBatchCommand(key string, values Slice) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsCuckooFilter() {
+		added, err := ht.cuckooFilters.array[hval.Index].addCommandBatch(values)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		*rawPtr = hval.toValue()
+		if added > 0 {
+			ht.recordWriteLocked(key)
+		}
+		return CacheCommandResponse{OK: true, Message: "added cuckoo filter values", Value: strconv.Itoa(added)}, true
+	}
+
+	data := newDefaultCuckooFilterData()
+	added, err := data.addCommandBatch(values)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.cuckooFilters.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_CUCKOO_FILTER}.toValue()
+	ht.recordWriteLocked(key)
 	return CacheCommandResponse{OK: true, Message: "added cuckoo filter values", Value: strconv.Itoa(added)}, true
 }
 
