@@ -7914,7 +7914,10 @@ func jsonPlainStringKey(value string) string {
 func jsonPlainStringNeedsCanonicalKey(value string) bool {
 	for index := 0; index < len(value); index++ {
 		character := value[index]
-		if character < 0x20 || character >= 0x7f || character == '"' || character == '\\' || character == '<' || character == '>' || character == '&' {
+		if character >= 0x7f || character == '\\' {
+			return true
+		}
+		if character <= '>' && (character < 0x20 || character == '"' || character == '&' || character == '<' || character == '>') {
 			return true
 		}
 	}

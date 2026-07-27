@@ -413,6 +413,39 @@ func TestDocsDescribeCanonicalJSONCommandFastPaths(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeAllocationFreeCanonicalStringLookups(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[public canonical-string lookup measurements](BENCHMARK.md#allocation-free-public-canonical-string-lookups)",
+		"1.91x-2.33x faster",
+		"make bench-canonical-string-lookups BENCHTIME=1s COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing public canonical-string lookup token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Allocation-Free Public Canonical-String Lookups",
+		"121.7 ns; 16 B; 1 alloc",
+		"63.73 ns; 0 B; 0 allocs",
+		"Public XOR canonical-string lookup",
+		"Public Top-K canonical-string lookup",
+		"^BenchmarkPublicCanonicalStringLookupFallbackAlternating$",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing public canonical-string lookup token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeGenericHyperLogLogScalarAdditions(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

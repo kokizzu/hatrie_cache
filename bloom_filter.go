@@ -603,6 +603,9 @@ func (ht *HatTrie) HasBloomFilterChecked(key string, val interface{}) (bool, err
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.HasBloomFilterChecked(key, val)
 	}
+	if value, ok := val.(string); ok && !jsonPlainStringNeedsCanonicalKey(value) {
+		return ht.hasBloomFilterPlainJSONStringChecked(key, value)
+	}
 	valueKey, err := bloomFilterItemKey(val)
 	if err != nil {
 		return false, err
@@ -621,6 +624,24 @@ func (ht *HatTrie) HasBloomFilterChecked(key string, val interface{}) (bool, err
 		return false, nil
 	}
 	hit := ht.bloomFilters.array[hval.Index].containsKey(valueKey)
+	ht.recordReadLocked(hit, key)
+	return hit, nil
+}
+
+func (ht *HatTrie) hasBloomFilterPlainJSONStringChecked(key string, value string) (bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
+	if !hval.IsBloomFilter() {
+		ht.recordReadLocked(false, key)
+		return false, nil
+	}
+	hit := ht.bloomFilters.array[hval.Index].containsJSONString(value)
 	ht.recordReadLocked(hit, key)
 	return hit, nil
 }

@@ -740,6 +740,9 @@ func (ht *HatTrie) HasCuckooFilterChecked(key string, val interface{}) (bool, er
 		return partition.HasCuckooFilterChecked(key, val)
 	}
 
+	if value, ok := val.(string); ok && !jsonPlainStringNeedsCanonicalKey(value) {
+		return ht.hasCuckooFilterPlainJSONStringChecked(key, value)
+	}
 	valueKey, err := cuckooFilterItemKey(val)
 	if err != nil {
 		return false, err
@@ -758,6 +761,24 @@ func (ht *HatTrie) HasCuckooFilterChecked(key string, val interface{}) (bool, er
 		return false, nil
 	}
 	hit := ht.cuckooFilters.array[hval.Index].containsKey(valueKey)
+	ht.recordReadLocked(hit, key)
+	return hit, nil
+}
+
+func (ht *HatTrie) hasCuckooFilterPlainJSONStringChecked(key string, value string) (bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return false, err
+	}
+	if !hval.IsCuckooFilter() {
+		ht.recordReadLocked(false, key)
+		return false, nil
+	}
+	hit := ht.cuckooFilters.array[hval.Index].containsJSONString(value)
 	ht.recordReadLocked(hit, key)
 	return hit, nil
 }

@@ -530,6 +530,9 @@ func (ht *HatTrie) EstimateCountMinSketchChecked(key string, val interface{}) (u
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.EstimateCountMinSketchChecked(key, val)
 	}
+	if value, ok := val.(string); ok && !jsonPlainStringNeedsCanonicalKey(value) {
+		return ht.estimateCountMinSketchPlainJSONStringChecked(key, value)
+	}
 	valueKey, err := countMinSketchItemKey(val)
 	if err != nil {
 		return 0, false, err
@@ -548,6 +551,24 @@ func (ht *HatTrie) EstimateCountMinSketchChecked(key string, val interface{}) (u
 		return 0, false, nil
 	}
 	estimate := ht.countMinSketches.array[hval.Index].estimateKey(valueKey)
+	ht.recordReadLocked(true, key)
+	return estimate, true, nil
+}
+
+func (ht *HatTrie) estimateCountMinSketchPlainJSONStringChecked(key string, value string) (uint64, bool, error) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	hval, err := ht.getLockedChecked(key)
+	if err != nil {
+		ht.recordReadLocked(false, key)
+		return 0, false, err
+	}
+	if !hval.IsCountMinSketch() {
+		ht.recordReadLocked(false, key)
+		return 0, false, nil
+	}
+	estimate := ht.countMinSketches.array[hval.Index].estimateJSONString(value)
 	ht.recordReadLocked(true, key)
 	return estimate, true, nil
 }
