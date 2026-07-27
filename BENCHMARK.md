@@ -321,6 +321,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Aligned replication shard state](#aligned-replication-shard-state), 2/16/64-shard snapshot plus hash route/targets | Three shard-ID maps: 1,360/10,153/44,388 ns construction; 75.385/95.83/89.315 ns routing | Three aligned slices: 923.4/8,794.5/38,234.5 ns construction; 70.88/70.07/65.025 ns routing | Construction 1.47x/1.15x/1.16x faster; routing 1.06x/1.37x/1.37x faster; 3/9/9 fewer construction allocations | Normalized shard order provides the index; complete hot routes preserve it through target lookup, while defensive by-ID access binary-searches the same sorted generation |
 | Current pass | [Canonical replication owner slices](#canonical-replication-owner-slices), election snapshot and bucket route at 2/16/64 shards | Duplicate owners: 1,293.5/11,369/45,965.5 ns; 17/121/457 allocs; routes 82.935/89.095/97.16 ns | Leader candidates: 1,140.5/10,183/41,608 ns; 14/104/392 allocs; routes 77.80/84.16/90.555 ns | Construction 1.13x/1.12x/1.10x faster; 3/17/65 fewer allocations; routes 1.07x/1.06x/1.07x faster | Leader candidates were already immutable route output; election, owner order, targets, wire, storage, and behavior are unchanged |
 | Current pass | [Sparse replication liveness exceptions](#sparse-replication-liveness-exceptions), healthy 2/16/64-shard snapshot and target membership | Active map: 1,104/10,692/40,087 ns; 1,312/14,680/57,560 B; membership 43.15 ns | Lazy inactive map: 895.8/9,248/36,527 ns; 1,056/13,696/54,016 B; membership 31.11 ns | Construction 1.23x/1.16x/1.10x faster; 256/984/3,544 fewer B; membership 1.39x faster | Offline, timeout, and maintenance construction is 1.01x-1.04x faster with equal or lower heap; election, target filtering, wire, storage, and behavior are unchanged |
+| Current pass | [Adaptive replication target sorting](#adaptive-replication-target-sorting), healthy 2/16/64-shard snapshots | Reflective sort: 1,054/8,880/36,839 ns; 12/100/388 allocs | Generic sort through 16 targets: 932.4/6,856/29,815 ns; 10/52/196 allocs | 1.13x/1.30x/1.24x faster; 2/48/192 fewer allocations; 48/2,944/11,776 fewer heap B | Above 16 targets retains the original faster reflective sorter; full-replica 32/64-node CPU and memory are neutral |
 | Current pass | [Adaptive replication bucket search](#adaptive-replication-bucket-search), complete route plus targets at 16/64/256 ranges | Linear ranges: 91.115/111.0/180.05 ns | Binary ranges: 77.825/87.37/98.92 ns | 1.17x/1.27x/1.82x faster; heap and allocations unchanged | Two through eight ranges retain linear lookup; normalized contiguous ranges above that threshold use binary search |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
@@ -393,6 +394,7 @@ tree.
 | Unchecked normalized replication owners | Removed repeated trim, empty-ID, and missing-node checks after topology validation | Two-shard snapshot construction was 1.08x slower; four shards were neutral within about 1%; 64 shards improved only 1.03x with identical memory | Reverted; the checked normalized helper remains; see [normalized replication target precomputation](#normalized-replication-target-precomputation) |
 | Topology-store large bucket dispatch | Binary search made 64/128/256-range routes 1.16x/1.29x/1.64x faster with unchanged allocation behavior | The added dispatch made the common two-range route 1.015x slower, 166.45 versus 164.05 ns | Removed from production; the unchanged linear topology-store route remains; see [topology-store large bucket dispatch](#topology-store-large-bucket-dispatch-rollback) |
 | Grouped replication target backing | One backing removed 63 allocations and made the isolated healthy 64-shard constructor 1.07x faster; four-shard groups kept heap flat and removed 48 allocations | One backing added 128/256 heap B at 8/16 shards; grouped backing made healthy 2/16-shard construction 1.02x/1.03x slower and offline 8/32/64-shard construction 1.18x/1.03x/1.01x slower | Never applied to production; the exact test/benchmark reproducer remains; see [grouped replication target backing](#grouped-replication-target-backing-rollback) |
+| Generic replication target sorting at every size | Removed three reflective allocations and 184 cumulative heap B for one large target slice | Complete paired 31/63-target construction was 1.03x/1.025x slower | Replaced by the measured 16-target cutoff; large sets retain the original sorter; see [adaptive replication target sorting](#adaptive-replication-target-sorting) |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -3690,6 +3692,47 @@ remain zero-allocation. The liveness map is private and immutable after
 construction; election timeout rules, lock scope, node validation, leader and
 target order, source exclusion, topology generation, wire, storage,
 persistence, and public configuration are unchanged.
+
+<a id="adaptive-replication-target-sorting"></a>
+#### Adaptive Replication Target Sorting
+
+Each routing snapshot sorts its immutable per-shard target slice by node ID.
+The former `sort.Slice` call uses reflection and allocates even for the normal
+one-to-three-target replica set. Production now uses `slices.SortFunc` through
+16 targets, eliminating that reflection path, and retains `sort.Slice` above
+16 targets where the reflective implementation is measurably faster.
+
+The test-first reflective control covers untracked healthy, tracked healthy,
+offline, timeout, and maintenance state at 2, 4, 16, and 64 shards, plus full
+replica topologies with 2, 4, 8, 16, 32, and 64 nodes. It compares topology,
+liveness, leaders, candidates, target order, and 4,096 complete routes per
+case and passes 20 runs.
+
+```sh
+make run CMD='go test . -run=TestReplicationRoutingSnapshotAdaptiveTargetSortMatchesReflectiveControl -count=20'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingAdaptiveTargetSortConstructionAlternating$$/^(UntrackedHealthy|OneOffline|FullReplica)$$/^(2Shards|16Shards|64Shards|2Nodes|8Nodes|16Nodes|32Nodes|64Nodes)$$" -benchtime=50000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench="^BenchmarkReplicationRoutingAdaptiveTargetSortConstruction$$/^(UntrackedHealthy|OneOffline|FullReplica)$$/^(2Shards|16Shards|64Shards|2Nodes|8Nodes|16Nodes|32Nodes|64Nodes)$$/^(Baseline|Candidate)$$" -benchmem -benchtime=20000x -count=1 -cpu=1'
+```
+
+| Healthy sharded snapshot, paired median | Reflective sort | Adaptive sort | Improvement |
+| --- | ---: | ---: | ---: |
+| Two shards | 1,054 ns; 1,056 B; 12 allocs | 932.4 ns; 1,008 B; 10 allocs | 1.13x faster; 48 fewer B; two fewer allocations |
+| 16 shards | 8,880 ns; 13,696 B; 100 allocs | 6,856 ns; 10,752 B; 52 allocs | 1.30x faster; 2,944 fewer B; 48 fewer allocations |
+| 64 shards | 36,839 ns; 54,016 B; 388 allocs | 29,815 ns; 42,240 B; 196 allocs | 1.24x faster; 11,776 fewer B; 192 fewer allocations |
+
+One-offline 2/16/64-shard snapshots improve 1.08x/1.21x/1.21x, save
+48/2,624/11,456 cumulative heap bytes, and remove 2/44/188 allocations.
+Full-replica 2/8/16-node snapshots improve 1.06x/1.05x/1.04x while removing
+one/three/three allocations and 24/184/184 bytes. Full-replica 32/64-node
+snapshots take the original sorter and retain identical heap and allocation
+counts; paired CPU is neutral within 0.6%.
+
+An all-generic candidate was rejected: the complete paired 31-target median
+rose from 5,657 to 5,823 ns, or 1.03x slower, and the 63-target median rose
+from 10,682 to 10,952 ns, or 1.025x slower. The retained cutoff therefore
+improves common target sets without imposing the large-set regression. Node
+filtering, deterministic order, topology and election state, routing, wire,
+storage, persistence, and public configuration are unchanged.
 
 <a id="grouped-replication-target-backing-rollback"></a>
 #### Grouped Replication Target Backing Rollback

@@ -771,6 +771,34 @@ func TestBenchmarkDocsRecordRejectedGroupedReplicationTargetBacking(t *testing.T
 	}
 }
 
+func TestDocsDescribeAdaptiveReplicationTargetSorting(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[adaptive target sorting](BENCHMARK.md#adaptive-replication-target-sorting)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing adaptive replication-target sort token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"TestReplicationRoutingSnapshotAdaptiveTargetSortMatchesReflectiveControl",
+		"BenchmarkReplicationRoutingAdaptiveTargetSortConstructionAlternating",
+		"slices.SortFunc",
+		"11,776 fewer B",
+		"192 fewer allocations",
+		"31/63-target",
+		"1.025x slower",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing adaptive replication-target sort token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectReplicationRouteMembership(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

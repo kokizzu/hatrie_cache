@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +40,7 @@ const minCompressedReplicationRequestBytes = 16 << 10
 const defaultReplicationSyncKeyPageSize = 1024
 const replicationLinearGroupTaskLimit = 16
 const replicationLinearGroupTargetLimit = 4
+const replicationGenericTargetSortLimit = 16
 const replicationBatchEnvelopeCommand = "INTERNALBATCHV2"
 const replicationSetBinaryCommand = "INTERNALSETV2"
 const replicationSetCompactCommand = "INTERNALSETV3"
@@ -2660,9 +2662,15 @@ func precomputedNormalizedReplicationTargets(owners []string, nodes []TopologyNo
 		}
 		targets = append(targets, node)
 	}
-	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].ID < targets[j].ID
-	})
+	if len(targets) <= replicationGenericTargetSortLimit {
+		slices.SortFunc(targets, func(a, b TopologyNode) int {
+			return strings.Compare(a.ID, b.ID)
+		})
+	} else {
+		sort.Slice(targets, func(i, j int) bool {
+			return targets[i].ID < targets[j].ID
+		})
+	}
 	return targets
 }
 

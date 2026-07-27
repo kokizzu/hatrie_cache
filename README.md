@@ -1919,6 +1919,17 @@ zero-allocation digest target-membership check is 1.39x faster when healthy and
 1.26x faster with one offline node, while election rules, leader and target
 order, wire, storage, persistence, and configuration are unchanged.
 
+Per-shard target ordering uses
+[adaptive target sorting](BENCHMARK.md#adaptive-replication-target-sorting):
+target sets through 16 entries use the non-reflective generic sorter, while
+larger sets retain the measured-faster prior sorter. Healthy 2/16/64-shard
+snapshot construction is 1.13x/1.30x/1.24x faster, saves
+48/2,944/11,776 cumulative heap bytes, and removes 2/48/192 allocations.
+One-offline construction improves 1.08x-1.21x. Full-replica 32/64-node CPU,
+heap, and allocation behavior remain neutral because those paths retain the
+original sorter. Target filtering and deterministic order, routing, wire,
+storage, persistence, and configuration are unchanged.
+
 Explicit bucket routing also uses
 [adaptive range search](BENCHMARK.md#adaptive-replication-bucket-search).
 Up to eight normalized ranges retain the prior linear scan; larger range sets
