@@ -5470,9 +5470,9 @@ func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 			{owners[0]: true, owners[1]: false},
 		} {
 			routing.online = online
-			for _, shard := range routing.shards {
-				owners := routing.owners[shard.ID]
-				routing.targets[shard.ID] = precomputedNormalizedReplicationTargets(owners, routing.topology.Nodes, online, routing.self)
+			for index := range routing.shards {
+				owners := routing.owners[index]
+				routing.targets[index] = precomputedNormalizedReplicationTargets(owners, routing.topology.Nodes, online, routing.self)
 			}
 			for _, source := range []string{"", routing.self, owners[0], owners[len(owners)-1]} {
 				for _, target := range append(append([]string(nil), owners...), "", "missing-node") {
@@ -5514,7 +5514,7 @@ func replicationRouteTargetsNodeIndexedControl(routing replicationRoutingSnapsho
 	}
 	owners := route.Route.Owners
 	if len(owners) == 0 {
-		owners = routing.owners[route.Route.Shard.ID]
+		owners = routing.replicationOwners(route.Route.Shard.ID)
 	}
 	for _, owner := range owners {
 		if owner != targetNode {
@@ -5529,7 +5529,7 @@ func replicationRouteTargetsNodeIndexedControl(routing replicationRoutingSnapsho
 func replicationRouteTargetsNodeMaterializedControl(routing replicationRoutingSnapshot, nodes map[string]TopologyNode, route ElectionKeyRoute, source string, targetNode string) bool {
 	owners := route.Route.Owners
 	if len(owners) == 0 {
-		owners = routing.owners[route.Route.Shard.ID]
+		owners = routing.replicationOwners(route.Route.Shard.ID)
 	}
 	for _, target := range precomputedNormalizedReplicationTargetsCleanupControl(owners, nodes, routing.online, source) {
 		if target.ID == targetNode {
@@ -5632,6 +5632,100 @@ func TestReplicationRoutingSnapshotSortedNodesMatchNodeMap(t *testing.T) {
 			got, gotOK := newReplicationRoutingSnapshot("node-000", store, election)
 			if gotOK != wantOK || !reflect.DeepEqual(got, want) {
 				t.Fatalf("%d shards election=%v sorted snapshot = %#v/%v, map snapshot %#v/%v", size, withElection, got, gotOK, want, wantOK)
+			}
+		}
+	}
+}
+
+func TestReplicationRoutingSnapshotShardSlicesMatchMaps(t *testing.T) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64} {
+		store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(size))
+		if err != nil {
+			t.Fatalf("NewTopologyStore(%d) error = %v", size, err)
+		}
+		for _, withElection := range []bool{false, true} {
+			var election *ElectionStore
+			if withElection {
+				election = NewElectionStore(store, ElectionOptions{})
+				if err := election.MarkOffline(fmt.Sprintf("node-%03d", size-1)); err != nil {
+					t.Fatalf("MarkOffline(%d) error = %v", size, err)
+				}
+			}
+			want, wantOK := newReplicationRoutingSnapshotShardMapsControl("node-000", store, election)
+			got, gotOK := newReplicationRoutingSnapshot("node-000", store, election)
+			if gotOK != wantOK || got.topology.Version != want.topology.Version || !reflect.DeepEqual(got.topology, want.topology) || !reflect.DeepEqual(got.shards, want.shards) || !reflect.DeepEqual(got.online, want.online) || got.self != want.self || got.fingerprint != want.fingerprint {
+				t.Fatalf("%d shards election=%v slice snapshot header = %#v/%v, map snapshot %#v/%v", size, withElection, got, gotOK, want, wantOK)
+			}
+			for index, shard := range got.shards {
+				if !reflect.DeepEqual(got.leaders[index], want.leaders[shard.ID]) || !reflect.DeepEqual(got.owners[index], want.owners[shard.ID]) || !reflect.DeepEqual(got.targets[index], want.targets[shard.ID]) {
+					t.Fatalf("%d shards election=%v shard %d slice state = %#v/%#v/%#v, map state %#v/%#v/%#v", size, withElection, shard.ID, got.leaders[index], got.owners[index], got.targets[index], want.leaders[shard.ID], want.owners[shard.ID], want.targets[shard.ID])
+				}
+			}
+		}
+	}
+}
+
+func TestReplicationRoutingSnapshotShardSliceRoutesMatchMaps(t *testing.T) {
+	topologies := []ClusterTopology{
+		replicationRoutingBenchmarkTopology(2),
+		replicationRoutingBenchmarkTopology(16),
+		{
+			Version:     1,
+			Mode:        TopologyModeSharded,
+			Self:        "node-a",
+			BucketCount: 16,
+			Nodes: []TopologyNode{
+				{ID: "node-a", Address: "http://node-a"},
+				{ID: "node-b", Address: "http://node-b"},
+				{ID: "node-c", Address: "http://node-c"},
+			},
+			Shards: []TopologyShard{
+				{ID: 3, Primary: "node-a", Replicas: []string{"node-b"}},
+				{ID: 19, Primary: "node-b", Replicas: []string{"node-c"}},
+			},
+			BucketRanges: []TopologyBucketRange{
+				{Start: 0, End: 7, Shard: 19},
+				{Start: 8, End: 15, Shard: 3},
+			},
+		},
+		{
+			Version: 1,
+			Mode:    TopologyModeFullReplica,
+			Self:    "node-a",
+			Nodes: []TopologyNode{
+				{ID: "node-a", Address: "http://node-a"},
+				{ID: "node-b", Address: "http://node-b"},
+				{ID: "node-c", Address: "http://node-c"},
+			},
+		},
+	}
+	for topologyIndex, topology := range topologies {
+		store, err := NewTopologyStore(topology)
+		if err != nil {
+			t.Fatalf("NewTopologyStore(%d) error = %v", topologyIndex, err)
+		}
+		for _, withElection := range []bool{false, true} {
+			var election *ElectionStore
+			if withElection {
+				election = NewElectionStore(store, ElectionOptions{})
+			}
+			maps, mapsOK := newReplicationRoutingSnapshotShardMapsControl(topology.Self, store, election)
+			slices, slicesOK := newReplicationRoutingSnapshot(topology.Self, store, election)
+			if mapsOK != slicesOK || !mapsOK {
+				t.Fatalf("topology %d election=%v snapshot ok = %v/%v", topologyIndex, withElection, mapsOK, slicesOK)
+			}
+			for keyIndex := 0; keyIndex < 4096; keyIndex++ {
+				key := fmt.Sprintf("session:%d", keyIndex)
+				want, wantTargets, wantOK := maps.routeForKeyAndTargets(key)
+				got, gotTargets, gotOK := slices.routeForKeyAndTargets(key)
+				if gotOK != wantOK || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotTargets, wantTargets) {
+					t.Fatalf("topology %d election=%v route(%q) = %#v/%#v/%v, want %#v/%#v/%v", topologyIndex, withElection, key, got, gotTargets, gotOK, want, wantTargets, wantOK)
+				}
+				want, wantTargets, wantOK = maps.replicationScanRouteForKeyAndTargets(key)
+				got, gotTargets, gotOK = slices.replicationScanRouteForKeyAndTargets(key)
+				if gotOK != wantOK || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotTargets, wantTargets) {
+					t.Fatalf("topology %d election=%v scan route(%q) = %#v/%#v/%v, want %#v/%#v/%v", topologyIndex, withElection, key, got, gotTargets, gotOK, want, wantTargets, wantOK)
+				}
 			}
 		}
 	}

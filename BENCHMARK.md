@@ -318,6 +318,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Cached replication routing fingerprint](#cached-replication-routing-fingerprint), one/four shards | Rehash: 3,238/7,028.5 ns; 3,920/7,832 heap B; 52/129 allocs | Cached: 1,621.5/3,447.5 ns; 3,032/5,600 heap B; 14/34 allocs | 2.00x/2.04x faster; 1.29x/1.40x lower heap; 3.71x/3.79x fewer allocations | Reuses the fingerprint already computed by validated topology installation; topology cloning, routing maps, wire, and behavior are unchanged |
 | Current pass | [Normalized replication target precomputation](#normalized-replication-target-precomputation), one/four/64 shards | Per-shard duplicate map: 1,436.5/3,591.5/47,579.5 ns; 64 shards: 84,759 B, 403 allocs | Validated owners: 1,395/3,121.5/43,078.5 ns; 64 shards: 84,709 B, 402 allocs | 1.03x/1.15x/1.10x faster; 64 shards use 50 fewer heap bytes and one fewer allocation | Applies only to private snapshots of normalized topology; self, online, existence, and sorted-output filters are unchanged |
 | Current pass | [Map-free replication routing snapshots](#map-free-replication-routing-snapshots), 2/4/64 shards | Node map: 1,722.5/3,304.5/45,159 ns; 3,360/5,440/84,704 heap B | Sorted nodes: 1,282.5/2,819.5/42,968 ns; 2,288/4,368/68,232 heap B | 1.34x/1.17x/1.05x faster; 1.47x/1.25x/1.24x lower heap; 2/2/4 fewer allocations | Uses the normalized sorted topology generation and immutable precomputed targets; routing, target order, election state, wire, and behavior are unchanged |
+| Current pass | [Aligned replication shard state](#aligned-replication-shard-state), 2/16/64-shard snapshot plus hash route/targets | Three shard-ID maps: 1,360/10,153/44,388 ns construction; 75.385/95.83/89.315 ns routing | Three aligned slices: 923.4/8,794.5/38,234.5 ns construction; 70.88/70.07/65.025 ns routing | Construction 1.47x/1.15x/1.16x faster; routing 1.06x/1.37x/1.37x faster; 3/9/9 fewer construction allocations | Normalized shard order provides the index; complete hot routes preserve it through target lookup, while defensive by-ID access binary-searches the same sorted generation |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
@@ -3519,6 +3520,64 @@ its immutable precomputed result, matching every production caller. Topology
 cloning, self and online filtering, missing-node rejection, target sorting,
 election generation, shard routing, wire, storage, and persistence are
 unchanged.
+
+<a id="aligned-replication-shard-state"></a>
+#### Aligned Replication Shard State
+
+After removing the retained node index, routing snapshots still built three
+maps keyed by shard ID for leaders, owner IDs, and precomputed targets. The
+topology store already normalizes shards into unique ascending ID order, and
+all three values are produced in that same pass. The snapshot now stores them
+in aligned slices and carries the selected slice index through complete
+route-and-target operations. Digest setup loops also enumerate the aligned
+state directly. Defensive callers that provide only a shard ID use a binary
+search over the same sorted immutable shard generation.
+
+The test-first map control preserves the former constructor and route logic.
+The exact matrix compares headers and all per-shard state at 2, 4, 8, 16, 32,
+and 64 shards, with and without an offline election node. A second 4,096-key
+matrix compares normal routes, scan routes, leaders, owners, targets, buckets,
+and success results for hash sharding, non-contiguous IDs with reversed bucket
+ranges, and full replication. Focused tests pass 20 repeated runs.
+
+```sh
+make run CMD='go test . -run="TestReplicationRoutingSnapshotShard|TestReplicationRouteTargetsNodeMatchesMaterializedControl|TestReplicationScanRouteForKey" -count=20'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingSnapshotShardSlicesAlternating$$ -benchtime=20000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingSnapshotShardSlices$$ -benchmem -benchtime=10000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingShardSlicesAlternating$$ -benchtime=200000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingShardSlicesRouteOnlyAlternating$$ -benchtime=500000x -count=10 -cpu=1'
+```
+
+| Ten-run construction median | Three shard maps | Three aligned slices | Improvement |
+| --- | ---: | ---: | ---: |
+| Two shards | 1,360 ns; 2,288 B; 16 allocs | 923.4 ns; 1,104 B; 13 allocs | 1.47x faster; 2.07x lower heap; three fewer allocations |
+| Four shards | 2,905 ns; 4,368 B; 32 allocs | 2,365 ns; 3,424 B; 29 allocs | 1.23x faster; 1.28x lower heap; three fewer allocations |
+| Eight shards | 4,889 ns; 7,376 B; 56 allocs | 4,304.5 ns; 6,976 B; 53 allocs | 1.14x faster; 1.06x lower heap; three fewer allocations |
+| 16 shards | 10,153 ns; 17,288 B; 110 allocs | 8,794.5 ns; 14,080 B; 101 allocs | 1.15x faster; 1.23x lower heap; nine fewer allocations |
+| 32 shards | 20,498.5 ns; 34,184 B; 206 allocs | 17,853 ns; 28,416 B; 197 allocs | 1.15x faster; 1.20x lower heap; nine fewer allocations |
+| 64 shards | 44,388 ns; 68,232 B; 398 allocs | 38,234.5 ns; 55,808 B; 389 allocs | 1.16x faster; 1.22x lower heap; nine fewer allocations |
+
+CPU values are paired same-binary medians. Heap and allocation values are
+exact across the isolated runs.
+
+| Complete route plus targets | Shard maps | Aligned slices | Improvement |
+| --- | ---: | ---: | ---: |
+| Hash, two shards | 75.385 ns | 70.88 ns | 1.06x faster |
+| Hash, 16 shards | 95.83 ns | 70.07 ns | 1.37x faster |
+| Hash, 64 shards | 89.315 ns | 65.025 ns | 1.37x faster |
+| Bucket ranges, two shards | 81.245 ns | 72.535 ns | 1.12x faster |
+| Bucket ranges, 16 shards | 114.35 ns | 80.66 ns | 1.42x faster |
+| Bucket ranges, 64 shards | 150.3 ns | 102.55 ns | 1.47x faster |
+
+Hash routes remain zero-allocation in both layouts. Explicit bucket routes
+retain the same existing 4-byte allocation for the returned bucket pointer.
+Route-only lookup is 1.12x/1.43x/1.44x faster at 2/16/64 hash shards and
+1.13x-1.45x faster across the measured bucket fixtures. An initial integrated
+version routed through a non-inlined shared index helper and was 1.11x-1.20x
+slower at 2-8 shards; it was replaced before shipping by direct measured hot
+operations. Topology validation, election results, target order, source and
+online filtering, public routes, configuration, wire, storage, and persistence
+are unchanged.
 
 <a id="direct-replication-route-membership"></a>
 #### Direct Replication Route Membership

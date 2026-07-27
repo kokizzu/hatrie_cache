@@ -1872,7 +1872,7 @@ Replication routing snapshots reuse the
 computed when validated topology is installed instead of normalizing, sorting,
 and hashing the cloned topology again. Construction is 2.00x faster for one
 shard and 2.04x faster for four shards, with 3.71x-3.79x fewer allocations.
-Topology cloning, routing maps, target ordering, configuration, wire, storage,
+Topology cloning, routing state, target ordering, configuration, wire, storage,
 and public behavior are unchanged.
 
 Per-shard targets also use
@@ -1890,6 +1890,14 @@ sorted node generation resolves owners while targets are precomputed, so a
 second node map is neither built nor retained. Construction is 1.34x/1.17x/
 1.05x faster at 2/4/64 shards and uses 1.47x/1.25x/1.24x lower heap, while
 target order, election state, routing, wire, and storage remain unchanged.
+
+Per-shard leaders, owners, and targets use
+[aligned shard state](BENCHMARK.md#aligned-replication-shard-state) instead of
+three additional shard-ID maps. Snapshot construction is 1.47x/1.15x/1.16x
+faster at 2/16/64 shards and removes 3/9/9 allocations. Complete hash routing
+plus target selection is 1.06x/1.37x/1.37x faster at the same sizes; normalized
+shard order, election results, target ordering, wire, storage, and persistence
+remain unchanged.
 
 Incoming digest routing uses
 [direct target membership](BENCHMARK.md#direct-replication-route-membership)

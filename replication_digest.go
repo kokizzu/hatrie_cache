@@ -266,11 +266,10 @@ func (replicator *HTTPReplicator) syncAllMerkle(ctx context.Context, trie *HatTr
 	if prefix != "" || len(routing.shards) != 1 {
 		return result, false
 	}
-	shard := routing.shards[0]
-	if routing.leaders[shard.ID].Leader != replicator.self {
+	if routing.leaders[0].Leader != replicator.self {
 		return result, false
 	}
-	targets := routing.targets[shard.ID]
+	targets := routing.targets[0]
 	if len(targets) == 0 {
 		return result, false
 	}
@@ -375,11 +374,11 @@ func decodeReplicationMerkleResponse(response CacheCommandResponse) (replication
 
 func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Context, trie *HatTrie, prefix string, pageSize int, routing replicationRoutingSnapshot) ([]replicationDigestTargetInventory, int, error) {
 	inventories := make(map[TopologyNode]*replicationDigestTargetInventory)
-	for _, shard := range routing.shards {
-		if routing.leaders[shard.ID].Leader != replicator.self {
+	for shardIndex := range routing.shards {
+		if routing.leaders[shardIndex].Leader != replicator.self {
 			continue
 		}
-		for _, target := range routing.targets[shard.ID] {
+		for _, target := range routing.targets[shardIndex] {
 			if _, ok := inventories[target]; !ok {
 				inventories[target] = newReplicationDigestTargetInventory(target, prefix, pageSize)
 			}
@@ -397,11 +396,10 @@ func (replicator *HTTPReplicator) replicationDigestInventories(ctx context.Conte
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			route, ok := routing.replicationScanRouteForKey(entry.Key)
+			route, targets, ok := routing.replicationScanRouteForKeyAndTargets(entry.Key)
 			if !ok || route.Leader.Leader != replicator.self {
 				return nil
 			}
-			targets := routing.replicationTargets(route)
 			if len(targets) == 0 {
 				return nil
 			}
@@ -457,8 +455,8 @@ func (replicator *HTTPReplicator) replicationDigestInventorySingleTarget(ctx con
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			route, ok := routing.replicationScanRouteForKey(entry.Key)
-			if !ok || route.Leader.Leader != replicator.self || len(routing.replicationTargets(route)) == 0 {
+			route, targets, ok := routing.replicationScanRouteForKeyAndTargets(entry.Key)
+			if !ok || route.Leader.Leader != replicator.self || len(targets) == 0 {
 				return nil
 			}
 			var dumpErr error
@@ -670,11 +668,11 @@ func (replicator *HTTPReplicator) syncDigestTarget(ctx context.Context, trie *Ha
 func singleReplicationDigestTarget(routing replicationRoutingSnapshot, source string) (TopologyNode, bool) {
 	var target TopologyNode
 	found := false
-	for _, shard := range routing.shards {
-		if routing.leaders[shard.ID].Leader != source {
+	for shardIndex := range routing.shards {
+		if routing.leaders[shardIndex].Leader != source {
 			continue
 		}
-		for _, candidate := range routing.targets[shard.ID] {
+		for _, candidate := range routing.targets[shardIndex] {
 			if !found {
 				target = candidate
 				found = true
@@ -794,11 +792,10 @@ func replicationDigestSourceScopeIsInvariant(routing replicationRoutingSnapshot,
 	if inventory.hasBuckets || len(routing.shards) != 1 || source != routing.self {
 		return false
 	}
-	shard := routing.shards[0]
-	if routing.leaders[shard.ID].Leader != source {
+	if routing.leaders[0].Leader != source {
 		return false
 	}
-	for _, target := range routing.targets[shard.ID] {
+	for _, target := range routing.targets[0] {
 		if target.ID == inventory.target.ID {
 			return true
 		}
@@ -1384,7 +1381,7 @@ func executeInternalReplicationDigest(ctx context.Context, trie *HatTrie, reques
 			return commandError("replication Merkle digest requires a whole-dataset single-shard sync"), false
 		}
 		shard := routing.shards[0]
-		if routing.leaders[shard.ID].Leader != source || !replicationRouteTargetsNode(routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.owners[shard.ID]}}, source, targetNode) {
+		if routing.leaders[0].Leader != source || !replicationRouteTargetsNode(routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.owners[0]}}, source, targetNode) {
 			return commandError("replication Merkle digest source is outside target scope"), false
 		}
 		expected, err := decodeReplicationValueDigest(commandPairString(request.Pairs, replicationDigestRootMetadata))
@@ -1529,7 +1526,7 @@ func replicationRouteTargetsNode(routing replicationRoutingSnapshot, route Elect
 	}
 	owners := route.Route.Owners
 	if len(owners) == 0 {
-		owners = routing.owners[route.Route.Shard.ID]
+		owners = routing.replicationOwners(route.Route.Shard.ID)
 	}
 	for _, owner := range owners {
 		if owner == targetNode {
