@@ -2859,6 +2859,116 @@ func BenchmarkReplicationRoutingSnapshotShardSlices(b *testing.B) {
 
 var benchmarkReplicationRoutingRouteSink ElectionKeyRoute
 
+func (snapshot replicationRoutingSnapshot) routeForKeyAndTargetsBucketLinearControl(key string) (ElectionKeyRoute, []TopologyNode, bool) {
+	if len(snapshot.shards) == 0 {
+		return ElectionKeyRoute{}, nil, false
+	}
+	mode := topologyMode(snapshot.topology.Mode)
+	shardIndex := 0
+	var bucket *uint32
+	if mode != TopologyModeFullReplica {
+		if snapshot.topology.BucketCount > 0 {
+			value := hashKeyToBucket(key, snapshot.topology.BucketCount)
+			selected, ok := replicationRoutingShardIndexForBucketLinearControl(snapshot.topology, value, snapshot.shards)
+			if !ok {
+				return ElectionKeyRoute{}, nil, false
+			}
+			shardIndex = selected
+			bucket = &value
+		} else {
+			shardIndex = hashKeyToShardIndex(key, len(snapshot.shards))
+		}
+	}
+	shard := snapshot.shards[shardIndex]
+	owners := snapshot.owners[shardIndex]
+	route := ElectionKeyRoute{
+		Key: key,
+		Route: TopologyRoute{
+			Key:    key,
+			Mode:   mode,
+			Bucket: bucket,
+			Shard:  shard,
+			Owners: owners,
+		},
+		Leader: snapshot.leaders[shardIndex],
+	}
+	return route, snapshot.targets[shardIndex], true
+}
+
+func replicationRoutingShardIndexForBucketLinearControl(topology ClusterTopology, bucket uint32, shards []TopologyShard) (int, bool) {
+	for _, bucketRange := range topology.BucketRanges {
+		if bucket < bucketRange.Start || bucket > bucketRange.End {
+			continue
+		}
+		index := sort.Search(len(shards), func(index int) bool {
+			return shards[index].ID >= bucketRange.Shard
+		})
+		return index, index < len(shards) && shards[index].ID == bucketRange.Shard
+	}
+	if len(shards) == 0 {
+		return 0, false
+	}
+	return int(bucket % uint32(len(shards))), true
+}
+
+func BenchmarkReplicationRoutingBucketRangeSearchAlternating(b *testing.B) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64, 128, 256} {
+		b.Run(strconv.Itoa(size)+"Ranges", func(b *testing.B) {
+			topology := replicationRoutingBenchmarkTopology(size)
+			topology.BucketCount = uint32(size * 256)
+			topology.BucketRanges = make([]TopologyBucketRange, size)
+			for index := range topology.BucketRanges {
+				topology.BucketRanges[index] = TopologyBucketRange{
+					Start: uint32(index * 256),
+					End:   uint32((index+1)*256 - 1),
+					Shard: uint32(index),
+				}
+			}
+			store, err := NewTopologyStore(topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			snapshot, ok := newReplicationRoutingSnapshot("node-000", store, nil)
+			if !ok {
+				b.Fatal("routing snapshot construction failed")
+			}
+			keys := make([]string, 4096)
+			for index := range keys {
+				keys[index] = "session:" + strconv.Itoa(index)
+			}
+			var linearDuration, searchDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				key := keys[iteration&(len(keys)-1)]
+				searchFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if searchFirst == (pass == 0) {
+						route, targets, routed := snapshot.routeForKeyAndTargets(key)
+						searchDuration += time.Since(started)
+						if !routed || len(targets) == 0 {
+							b.Fatal("search routing failed")
+						}
+						benchmarkReplicationRoutingRouteSink = route
+						benchmarkReplicationTargetsSink = targets
+					} else {
+						route, targets, routed := snapshot.routeForKeyAndTargetsBucketLinearControl(key)
+						linearDuration += time.Since(started)
+						if !routed || len(targets) == 0 {
+							b.Fatal("linear routing failed")
+						}
+						benchmarkReplicationRoutingRouteSink = route
+						benchmarkReplicationTargetsSink = targets
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(linearDuration.Nanoseconds())/float64(b.N), "linear_ns/route")
+			b.ReportMetric(float64(searchDuration.Nanoseconds())/float64(b.N), "search_ns/route")
+		})
+	}
+}
+
 func BenchmarkReplicationRoutingShardSlicesRouteOnlyAlternating(b *testing.B) {
 	for _, withBucketRanges := range []bool{false, true} {
 		mode := "Hash"

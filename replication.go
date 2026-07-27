@@ -2612,14 +2612,27 @@ func (snapshot replicationRoutingSnapshot) shardIndex(shardID uint32) (int, bool
 }
 
 func replicationRoutingShardIndexForBucket(topology ClusterTopology, bucket uint32, shards []TopologyShard) (int, bool) {
-	for _, bucketRange := range topology.BucketRanges {
-		if bucket < bucketRange.Start || bucket > bucketRange.End {
-			continue
-		}
-		index := sort.Search(len(shards), func(index int) bool {
-			return shards[index].ID >= bucketRange.Shard
+	if len(topology.BucketRanges) > 8 {
+		rangeIndex := sort.Search(len(topology.BucketRanges), func(index int) bool {
+			return topology.BucketRanges[index].End >= bucket
 		})
-		return index, index < len(shards) && shards[index].ID == bucketRange.Shard
+		if rangeIndex < len(topology.BucketRanges) && bucket >= topology.BucketRanges[rangeIndex].Start {
+			shardID := topology.BucketRanges[rangeIndex].Shard
+			index := sort.Search(len(shards), func(index int) bool {
+				return shards[index].ID >= shardID
+			})
+			return index, index < len(shards) && shards[index].ID == shardID
+		}
+	} else {
+		for _, bucketRange := range topology.BucketRanges {
+			if bucket < bucketRange.Start || bucket > bucketRange.End {
+				continue
+			}
+			index := sort.Search(len(shards), func(index int) bool {
+				return shards[index].ID >= bucketRange.Shard
+			})
+			return index, index < len(shards) && shards[index].ID == bucketRange.Shard
+		}
 	}
 	if len(shards) == 0 {
 		return 0, false

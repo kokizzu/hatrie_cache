@@ -319,6 +319,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Normalized replication target precomputation](#normalized-replication-target-precomputation), one/four/64 shards | Per-shard duplicate map: 1,436.5/3,591.5/47,579.5 ns; 64 shards: 84,759 B, 403 allocs | Validated owners: 1,395/3,121.5/43,078.5 ns; 64 shards: 84,709 B, 402 allocs | 1.03x/1.15x/1.10x faster; 64 shards use 50 fewer heap bytes and one fewer allocation | Applies only to private snapshots of normalized topology; self, online, existence, and sorted-output filters are unchanged |
 | Current pass | [Map-free replication routing snapshots](#map-free-replication-routing-snapshots), 2/4/64 shards | Node map: 1,722.5/3,304.5/45,159 ns; 3,360/5,440/84,704 heap B | Sorted nodes: 1,282.5/2,819.5/42,968 ns; 2,288/4,368/68,232 heap B | 1.34x/1.17x/1.05x faster; 1.47x/1.25x/1.24x lower heap; 2/2/4 fewer allocations | Uses the normalized sorted topology generation and immutable precomputed targets; routing, target order, election state, wire, and behavior are unchanged |
 | Current pass | [Aligned replication shard state](#aligned-replication-shard-state), 2/16/64-shard snapshot plus hash route/targets | Three shard-ID maps: 1,360/10,153/44,388 ns construction; 75.385/95.83/89.315 ns routing | Three aligned slices: 923.4/8,794.5/38,234.5 ns construction; 70.88/70.07/65.025 ns routing | Construction 1.47x/1.15x/1.16x faster; routing 1.06x/1.37x/1.37x faster; 3/9/9 fewer construction allocations | Normalized shard order provides the index; complete hot routes preserve it through target lookup, while defensive by-ID access binary-searches the same sorted generation |
+| Current pass | [Adaptive replication bucket search](#adaptive-replication-bucket-search), complete route plus targets at 16/64/256 ranges | Linear ranges: 91.115/111.0/180.05 ns | Binary ranges: 77.825/87.37/98.92 ns | 1.17x/1.27x/1.82x faster; heap and allocations unchanged | Two through eight ranges retain linear lookup; normalized contiguous ranges above that threshold use binary search |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
@@ -3578,6 +3579,46 @@ slower at 2-8 shards; it was replaced before shipping by direct measured hot
 operations. Topology validation, election results, target order, source and
 online filtering, public routes, configuration, wire, storage, and persistence
 are unchanged.
+
+<a id="adaptive-replication-bucket-search"></a>
+#### Adaptive Replication Bucket Search
+
+Explicit-bucket routing scanned every normalized bucket range until it found
+the range containing the key hash. Normalization already sorts ranges,
+requires contiguous complete bucket coverage, and sorts unique shard IDs. The
+private replication snapshot now keeps the linear scan for at most eight
+ranges and uses binary search by inclusive range end above that threshold. It
+then performs the existing binary shard-ID lookup. No index or retained memory
+is added.
+
+The test-first control keeps the former linear implementation. For 2, 4, 8,
+16, 32, 64, 128, and 256 ranges, the exact test reverses range-to-shard ID
+order and compares every valid bucket plus three defensive out-of-range
+buckets over 20 runs. The alternating same-binary benchmark measures complete
+key hash, range selection, route construction, and target retrieval rather
+than the search helper alone.
+
+```sh
+make run CMD='go test . -run="TestReplicationRoutingBucketRangeSearchMatchesLinear|TestReplicationRoutingSnapshotShard" -count=20'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingBucketRangeSearchAlternating$$ -benchtime=200000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRoutingShardSlices$$ -benchmem -benchtime=1000000x -count=5 -cpu=1'
+```
+
+| Ten-run complete-route median | Linear range scan | Adaptive binary search | Improvement |
+| --- | ---: | ---: | ---: |
+| 16 ranges | 91.115 ns | 77.825 ns | 1.17x faster |
+| 32 ranges | 95.24 ns | 85.435 ns | 1.11x faster |
+| 64 ranges | 111.0 ns | 87.37 ns | 1.27x faster |
+| 128 ranges | 138.45 ns | 93.22 ns | 1.49x faster |
+| 256 ranges | 180.05 ns | 98.92 ns | 1.82x faster |
+
+Two, four, and eight ranges execute the former linear branch unchanged and
+are not assigned an artificial speedup. Hash routing is untouched. Explicit
+bucket routes retain exactly 4 heap bytes and one allocation for the public
+bucket pointer in both versions; range lookup itself remains allocation-free.
+Modulo fallback for empty ranges or an out-of-range defensive call, missing
+shard rejection, topology validation, route contents, target order, election
+state, wire, storage, and persistence are unchanged.
 
 <a id="direct-replication-route-membership"></a>
 #### Direct Replication Route Membership

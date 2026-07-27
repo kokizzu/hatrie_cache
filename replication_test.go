@@ -5731,6 +5731,33 @@ func TestReplicationRoutingSnapshotShardSliceRoutesMatchMaps(t *testing.T) {
 	}
 }
 
+func TestReplicationRoutingBucketRangeSearchMatchesLinear(t *testing.T) {
+	for _, size := range []int{2, 4, 8, 16, 32, 64, 128, 256} {
+		topology := replicationRoutingBenchmarkTopology(size)
+		topology.BucketCount = uint32(size * 7)
+		topology.BucketRanges = make([]TopologyBucketRange, size)
+		for index := range topology.BucketRanges {
+			topology.BucketRanges[index] = TopologyBucketRange{
+				Start: uint32(index * 7),
+				End:   uint32((index+1)*7 - 1),
+				Shard: uint32(size - index - 1),
+			}
+		}
+		store, err := NewTopologyStore(topology)
+		if err != nil {
+			t.Fatalf("NewTopologyStore(%d) error = %v", size, err)
+		}
+		normalized := store.Get()
+		for bucket := uint32(0); bucket < normalized.BucketCount+3; bucket++ {
+			want, wantOK := replicationRoutingShardIndexForBucketLinearControl(normalized, bucket, normalized.Shards)
+			got, gotOK := replicationRoutingShardIndexForBucket(normalized, bucket, normalized.Shards)
+			if gotOK != wantOK || got != want {
+				t.Fatalf("%d ranges bucket %d search = %d/%v, linear = %d/%v", size, bucket, got, gotOK, want, wantOK)
+			}
+		}
+	}
+}
+
 func precomputedNormalizedReplicationTargetsCleanupControl(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
 	targets := make([]TopologyNode, 0, len(owners))
 	for _, nodeID := range owners {

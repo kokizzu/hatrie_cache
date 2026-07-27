@@ -1899,6 +1899,13 @@ plus target selection is 1.06x/1.37x/1.37x faster at the same sizes; normalized
 shard order, election results, target ordering, wire, storage, and persistence
 remain unchanged.
 
+Explicit bucket routing also uses
+[adaptive range search](BENCHMARK.md#adaptive-replication-bucket-search).
+Up to eight normalized ranges retain the prior linear scan; larger range sets
+use binary search without adding an index or retained memory. Complete routing
+is 1.17x/1.27x/1.82x faster at 16/64/256 ranges with identical allocation,
+route, target, wire, storage, and persistence behavior.
+
 Incoming digest routing uses
 [direct target membership](BENCHMARK.md#direct-replication-route-membership)
 instead of allocating and sorting a complete target slice for each boolean
