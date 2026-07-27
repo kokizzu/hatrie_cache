@@ -233,6 +233,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
 | Current pass | [Direct generic reservoir GET](#reservoir-sample-read-materialization), 16/128 string and mixed items | Generic materialization: 2,709/18,349 ns strings; 2,941/18,861 ns mixed | Shared-lock direct JSON: 2,225/17,563 ns strings; 2,701/18,275 ns mixed | 1.03x-1.22x faster; up to 1.23x lower heap; 1.67x-2.00x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
+| Current pass | [Small reservoir reads](#reservoir-sample-read-materialization), empty/one/16-item exact `GETRS` | Sorted snapshot: 187.8/374.9/2,115.5 ns; 8/136/1,688 B; 1/3/3 allocs | Constant empty/stack singleton: 165.9/311.0/2,107 ns; 0/80/1,688 B; 0/1/3 allocs | Empty/one item 1.13x/1.21x faster; one-item heap 1.70x lower; avoidable allocations eliminated | No measured tradeoff; 16-item CPU is neutral within 0.4%, and ordering, output, ownership, lock scope, wire, and storage are unchanged |
 | Current pass | [Multi-item Top-K reads](#multi-item-top-k-read-materialization), 16/default-100 string items | Generic materialization: 2,851/10,558 ns; 2,297/13,516 B; 8 allocs | Direct JSON: 1,851/6,898 ns; 1,624/9,752 B; 3 allocs | 1.54x/1.53x faster, 1.41x/1.39x lower heap, 2.67x fewer allocs | One-item and write implementations are unchanged; structured fallback improves 1.11x |
 | Current pass | [Direct generic Top-K GET](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Generic materialization: 2,376/13,936 ns strings; 3,019/13,966 ns mixed | Shared-lock direct JSON: 1,660/10,024 ns strings; 2,148/10,263 ns mixed | 1.36x-1.43x faster; 1.35x-1.53x lower heap; 2.00x-2.20x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
 | Current pass | [Generic Top-K encoding outside read lock](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Lock-held direct JSON: 2,023/13,713 ns strings; 2,486/16,561 ns mixed; writer stalled behind caller JSON | Point-in-time copy: 1,988/13,598 ns strings; 2,469/16,036 ns mixed; writer progresses during JSON | 1.01x-1.03x faster serially with identical heap/allocations; unbounded caller-marshaler writer stall removed | Exact generic `GET` only; the dedicated `GETTOPK` candidate was rejected after a repeatable 1.05x CPU regression |
@@ -383,6 +384,7 @@ tree.
 | Dedicated `GETTOPK` lock-release snapshot | Let writers proceed while caller-controlled JSON marshaling was blocked | The five-second 100-item structured read was 14,457 ns versus 13,776 ns legacy, or 1.05x slower, with identical 9,872 B and 5 allocations | Reverted for `GETTOPK`; the serial-neutral generic `GET` snapshot remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
+| Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
@@ -5893,8 +5895,38 @@ regressed from 17,065 to 18,075 ns for strings and from 18,301 to 19,377 ns for
 one structured value, both 1.06x slower with identical 14,360/14,481 B and
 three/five allocations. The dedicated 16-item plain-string read regressed from
 1,971 to 2,163 ns, or 1.10x, with the same 1,688 B and three allocations. The
-candidate was fully reverted; reservoir copying and sorting therefore retain
-their previous lock scope.
+candidate was fully reverted; multi-item reservoir copying and sorting
+therefore retain their previous lock scope.
+
+A later small-cardinality pass observed that empty reads still grew a
+`strings.Builder` for the constant `[]`, while one-item reads copied and called
+the sorter even though one item is already ordered. The retained path returns
+the empty constant from the existing writer and copies one internal item into a
+stack-owned snapshot before unlocking. This preserves the point-in-time value
+without allocating a slice; multi-item reads retain the established sorted
+copy. Exact generic `GET` uses the same branches. Existing and extended tests
+cover empty, plain-string, escaped, Unicode, HTML-sensitive, and structured
+singletons, response parity, telemetry, and race safety.
+
+Twelve warm alternating baseline/candidate pairs, fixed at 500,000 operations
+per row on one logical CPU, produced these medians:
+
+```sh
+make bench-reservoir-small BENCHTIME=500000x COUNT=12
+```
+
+| Exact `GETRS` | Sorted-snapshot baseline | Small-cardinality path | Improvement |
+| --- | ---: | ---: | ---: |
+| Empty | 187.8 ns; 8 B; 1 alloc | 165.9 ns; 0 B; 0 allocs | 1.13x faster; allocation eliminated |
+| One string | 374.9 ns; 136 B; 3 allocs | 311.0 ns; 80 B; 1 alloc | 1.21x faster; 1.70x lower heap; 3x fewer allocs |
+| Sixteen strings | 2,115.5 ns; 1,688 B; 3 allocs | 2,107 ns; 1,688 B; 3 allocs | CPU neutral within 0.4%; memory identical |
+
+An early-return refinement skipped layout and snapshot dispatch before the
+empty case. Eight warm alternating pairs made empty reads another 1.05x faster,
+but the added branch moved the 16-item control from 2,098 to 2,112 ns, a 0.7%
+regression with identical memory. It was removed. The retained implementation
+does not change sample layout, sorting, command bytes, public ownership,
+storage, persistence, replication, or wire formats.
 
 <a id="multi-item-top-k-read-materialization"></a>
 ### Multi-Item Top-K Read Materialization

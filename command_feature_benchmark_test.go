@@ -254,6 +254,30 @@ func BenchmarkReservoirSampleGetEncodedPath(b *testing.B) {
 	}
 }
 
+func BenchmarkReservoirSampleSmallGetCommand(b *testing.B) {
+	for _, size := range []int{0, 1, 16} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			ht := CreateHatTrie()
+			defer ht.Destroy()
+			if err := ht.UpsertReservoirSample("sample:key", 16); err != nil {
+				b.Fatalf("UpsertReservoirSample() error = %v", err)
+			}
+			for index := 0; index < size; index++ {
+				value := "value-" + strconv.Itoa(index)
+				if update := ht.AddReservoirSample("sample:key", value); !update.Accepted {
+					b.Fatalf("AddReservoirSample(%q) = %#v, want accepted", value, update)
+				}
+			}
+			request := CacheCommandRequest{Command: "GETRS", Key: "sample:key"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				benchmarkExecuteCommand(b, ht, request)
+			}
+		})
+	}
+}
+
 func BenchmarkTopKGetPath(b *testing.B) {
 	for _, size := range []int{16, 100} {
 		for _, benchmark := range []struct {

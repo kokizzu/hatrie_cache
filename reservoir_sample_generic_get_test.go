@@ -38,6 +38,47 @@ func TestExecuteExactFastCommandGenericGetReservoirSampleMatchesGeneric(t *testi
 	}
 }
 
+func TestExecuteExactFastCommandGenericGetSmallReservoirSamplesMatchesGeneric(t *testing.T) {
+	for _, fixture := range []struct {
+		name       string
+		size       int
+		structured bool
+	}{
+		{name: "empty"},
+		{name: "single string", size: 1},
+		{name: "single structured", size: 1, structured: true},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			fast := newTestTrie(t)
+			generic := newTestTrie(t)
+			if fixture.size == 0 {
+				if err := fast.UpsertReservoirSample("sample", 1); err != nil {
+					t.Fatalf("fast UpsertReservoirSample() error = %v", err)
+				}
+				if err := generic.UpsertReservoirSample("sample", 1); err != nil {
+					t.Fatalf("generic UpsertReservoirSample() error = %v", err)
+				}
+			} else {
+				seedReservoirSampleGenericGet(t, fast, fixture.size, fixture.structured, false)
+				seedReservoirSampleGenericGet(t, generic, fixture.size, fixture.structured, false)
+			}
+
+			got, ok := fast.executeExactFastCommand(CacheCommandRequest{Command: "GET", Key: "sample"})
+			if !ok {
+				t.Fatal("executeExactFastCommand(GET reservoir sample) ok = false, want true")
+			}
+			want := generic.ExecuteCommand(CacheCommandRequest{Command: " GET", Key: "sample"})
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("fast response = %#v, generic response = %#v", got, want)
+			}
+			gotStats, wantStats := fast.Stats(), generic.Stats()
+			if gotStats.Reads != wantStats.Reads || gotStats.Hits != wantStats.Hits || gotStats.Misses != wantStats.Misses || gotStats.Writes != wantStats.Writes {
+				t.Fatalf("fast stats = %#v, generic stats = %#v", gotStats, wantStats)
+			}
+		})
+	}
+}
+
 func BenchmarkReservoirSampleGenericGetCommand(b *testing.B) {
 	for _, size := range []int{16, int(DefaultReservoirSampleCapacity)} {
 		for _, structured := range []bool{false, true} {

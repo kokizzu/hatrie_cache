@@ -2424,7 +2424,14 @@ func (ht *HatTrie) executeFastGetReservoirSampleCommand(key string) (CacheComman
 		ht.mu.Unlock()
 		return commandError("command response is too large"), true
 	}
-	items := sample.sortedItems()
+	var singleton [1]reservoirSampleItem
+	var items []reservoirSampleItem
+	if len(sample.items) == 1 {
+		singleton[0] = sample.items[0]
+		items = singleton[:]
+	} else {
+		items = sample.sortedItems()
+	}
 	ht.recordReadLocked(true, key)
 	ht.mu.Unlock()
 
@@ -2803,6 +2810,9 @@ func commandFastReservoirSampleItemsJSONLayout(items []reservoirSampleItem) (int
 }
 
 func commandFastReservoirSampleItemsJSONWithCapacity(items []reservoirSampleItem, capacity int, verbatimStrings bool) (string, error) {
+	if len(items) == 0 {
+		return "[]", nil
+	}
 	var builder strings.Builder
 	builder.Grow(capacity)
 	builder.WriteByte('[')
@@ -3118,7 +3128,14 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 			ht.mu.RUnlock()
 			return commandError("command response is too large"), true
 		}
-		items := sample.sortedItems()
+		var singleton [1]reservoirSampleItem
+		var items []reservoirSampleItem
+		if len(sample.items) == 1 {
+			singleton[0] = sample.items[0]
+			items = singleton[:]
+		} else {
+			items = sample.sortedItems()
+		}
 		ht.recordReadLocked(true, key)
 		ht.mu.RUnlock()
 		payload, err := commandFastReservoirSampleItemsJSONWithCapacity(items, capacity, verbatimStrings)

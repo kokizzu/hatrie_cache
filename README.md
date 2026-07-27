@@ -107,6 +107,9 @@ fixed memory and O(log k) updates.
 Reservoir sample values keep a deterministic fixed-capacity stream sample using
 hashed priorities, so representative samples stay bounded in memory without
 retaining the full event history.
+Empty and one-item reservoir command reads avoid pointless builder and sorting
+allocations: they are 1.13x/1.21x faster, empty reads allocate nothing, and
+one-item reads use 1.70x less heap while multi-item controls remain neutral.
 Quantile sketch values use a compact Greenwald-Khanna summary for approximate
 p50/p95/p99-style numeric queries with bounded rank error and low memory use.
 Fenwick tree values use a compact int64 array for point updates, point reads,
@@ -192,6 +195,7 @@ make bench-serialization
 make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
+make bench-reservoir-small BENCHTIME=500000x COUNT=7
 make bench-string-compaction STRING_STORAGE_BENCH_KEYS=100000 BENCHTIME=1x COUNT=7
 make bench-startup-persistence BENCHTIME=1x COUNT=7
 make bench-live-replication BENCHTIME=1x COUNT=7
