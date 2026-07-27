@@ -308,8 +308,7 @@ func (filter *cuckooFilterData) Delete(value interface{}) bool {
 }
 
 func (filter *cuckooFilterData) DeleteChecked(value interface{}) (bool, error) {
-	deleted, err := filter.DeleteOneChecked(value)
-	return deleted > 0, err
+	return filter.deleteChecked(value)
 }
 
 func (filter *cuckooFilterData) DeleteOne(value interface{}, values ...interface{}) int {
@@ -346,6 +345,17 @@ func (filter *cuckooFilterData) deleteKey(key []byte) bool {
 		return true
 	}
 	return false
+}
+
+func (filter *cuckooFilterData) deleteChecked(value interface{}) (bool, error) {
+	if filter == nil || filter.bucketCount == 0 || filter.fingerprintBits == 0 {
+		return false, nil
+	}
+	key, err := cuckooFilterItemKey(value)
+	if err != nil {
+		return false, err
+	}
+	return filter.deleteKey(key), nil
 }
 
 func (filter *cuckooFilterData) deleteJSONString(value string) bool {
@@ -533,6 +543,30 @@ func cuckooFilterItemKeys(value interface{}, values ...interface{}) ([][]byte, e
 			return nil, err
 		}
 		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+func cuckooFilterItemKeysInto(value interface{}, values []interface{}, scalar *[1][]byte) ([][]byte, error) {
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return nil, errBatchSizeTooLarge
+	}
+	keys := scalar[:]
+	if len(values) > 0 {
+		keys = make([][]byte, count)
+	}
+	key, err := cuckooFilterItemKey(value)
+	if err != nil {
+		return nil, err
+	}
+	keys[0] = key
+	for index, value := range values {
+		key, err := cuckooFilterItemKey(value)
+		if err != nil {
+			return nil, err
+		}
+		keys[index+1] = key
 	}
 	return keys, nil
 }
@@ -741,7 +775,8 @@ func (ht *HatTrie) DeleteCuckooFilterChecked(key string, val interface{}, vals .
 		return partition.DeleteCuckooFilterChecked(key, val, vals...)
 	}
 
-	valueKeys, err := cuckooFilterItemKeys(val, vals...)
+	var scalarValueKey [1][]byte
+	valueKeys, err := cuckooFilterItemKeysInto(val, vals, &scalarValueKey)
 	if err != nil {
 		return 0, err
 	}

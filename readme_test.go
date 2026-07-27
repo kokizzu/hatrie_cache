@@ -343,13 +343,14 @@ func TestDocsDescribeGenericBloomScalarAdditions(t *testing.T) {
 	}
 }
 
-func TestDocsDescribeGenericCuckooScalarAdditions(t *testing.T) {
+func TestDocsDescribeGenericCuckooScalarOperations(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
 		t.Fatalf("ReadFile(README.md) error = %v", err)
 	}
 	for _, token := range []string{
 		"[Cuckoo scalar-add measurements](BENCHMARK.md#generic-cuckoo-filter-scalar-additions)",
+		"[Cuckoo scalar-delete measurements](BENCHMARK.md#generic-cuckoo-filter-scalar-deletions)",
 		"make bench-cuckoo-scalar BENCHTIME=1s COUNT=7",
 	} {
 		if !strings.Contains(string(readmeData), token) {
@@ -366,6 +367,10 @@ func TestDocsDescribeGenericCuckooScalarAdditions(t *testing.T) {
 		"1.58x faster",
 		"Inline Cuckoo scalar wrapper body",
 		"9,834 versus 9,724 ns",
+		"Generic Cuckoo-Filter Scalar Deletions",
+		"280.3 ns; 32 B; 2 allocs",
+		"11,669 ns; 5,248 B; 129 allocs",
+		"Cuckoo scalar-delete dispatch layouts",
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing Cuckoo scalar-add token %q", token)

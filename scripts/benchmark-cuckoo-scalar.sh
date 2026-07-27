@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-benchmark=${CUCKOO_SCALAR_BENCH:-^BenchmarkCuckooFilter(ScalarAddChecked|AddCheckedProduction|VariadicBatchControl)}
+benchmark=${CUCKOO_SCALAR_BENCH:-^BenchmarkCuckooFilter(ScalarAddChecked|AddCheckedProduction|VariadicBatchControl|ScalarDelete)}
 benchtime=${BENCHTIME:-1s}
 count=${COUNT:-1}
 

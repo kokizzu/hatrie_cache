@@ -249,6 +249,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Bounded generic Top-K scalar updates](#bounded-short-generic-top-k-dispatch), duplicate/escaped/structured values | One-item preparation: 138.2/146.75/167.75 ns; 58-80 B; 3 allocs | Bounded/direct scalar path: 14.42/91.46/110.5 ns; 0-32 B; 0-2 allocs | 9.59x/1.60x/1.52x faster; up to all transient allocations eliminated | No measured control regression; estimates retain their original branch, batches are neutral within 0.4%, and long scalar updates remove one allocation with neutral or faster CPU |
 | Current pass | [Generic Bloom-filter scalar additions](#generic-bloom-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 110.8/133.0/141.5 ns; 29-40 B; 2 allocs | Direct scalar encoding: 79.91/96.57/103.2 ns; 5-16 B; 1 alloc | 1.39x/1.38x/1.37x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.7% with identical memory |
 | Current pass | [Generic Cuckoo-filter scalar additions](#generic-cuckoo-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 98.84/119.1/112.4 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 62.61/75.87/76.72 ns; 5-16 B; 1 alloc | 1.58x/1.57x/1.47x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.5% with identical memory |
+| Current pass | [Generic Cuckoo-filter scalar deletions](#generic-cuckoo-filter-scalar-deletions), existing string/structured and missing values | Temporary key slice: 280.3/320.7/128.2 ns; 32-40 B; 2 allocs | Caller-owned key slot: 242.6/270.0/90.57 ns; 8-16 B; 1 alloc | 1.16x/1.19x/1.42x faster; one allocation and 24 B removed | No measured tradeoff; 2/16/128-value controls are 1.01x-1.05x faster with identical memory |
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
@@ -403,6 +404,7 @@ tree.
 | Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster; the Scalar-only out-of-line wrapper improved scalar adds 1.09x-1.14x | Shared scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower; the isolated wrapper still made two-value batches 1.015x slower through layout drift | All four layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
 | Bloom split-first preparation | Scalar safe/structured additions improved 1.39x/1.31x and a two-value batch improved 1.23x | The 128-value batch was 1.015x slower and the 16-value batch was 0.35% slower | Removed; only the [scalar public wrapper](#generic-bloom-filter-scalar-additions) was specialized, leaving variadic batches unchanged |
 | Inline Cuckoo scalar wrapper body | Scalar additions improved 1.51x-1.62x with one fewer allocation | Moving the larger body before `AddOneChecked` made the frozen 128-value batch 1.011x slower through binary-layout drift | Replaced by the [out-of-line scalar helper](#generic-cuckoo-filter-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.5% |
+| Cuckoo scalar-delete dispatch layouts | Early scalar dispatch removed one allocation; split-first tail backing also saved 24 B for two values and 128 B for 128 values | Early dispatch made the reverse-order 128-value control 1.019x slower; a separate batch helper made 16 values 1.028x slower; split-first backing made 16 values 1.012x slower | All three layouts were removed; [caller-owned scalar key storage](#generic-cuckoo-filter-scalar-deletions) keeps the original full batch allocation and single deletion loop, with every retained control neutral or faster |
 | Count-Min clustered scalar helper | Scalar additions improved about 1.4x with one fewer allocation | Placing the helper between Count-Min hot methods made the frozen 128-value batch 10,970 versus 10,540 ns, or 1.041x slower | Replaced by the [end-of-file scalar helper](#generic-count-min-sketch-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.6% |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
@@ -5664,6 +5666,59 @@ or 1.011x slower. The retained design keeps `AddChecked` as a small inlineable
 wrapper and places the non-inlineable scalar helper after `addKey`, preserving
 the hot variadic function layout. The first layout was removed and is retained
 only in the rejected index.
+
+<a id="generic-cuckoo-filter-scalar-deletions"></a>
+### Generic Cuckoo-Filter Scalar Deletions
+
+`cuckooFilterData.DeleteChecked` and `HatTrie.DeleteCuckooFilterChecked`
+previously canonicalized a scalar value into a one-element `[][]byte`. The
+encoded key allocation is required, but the slice backing was temporary. The
+private scalar wrapper now applies its one encoded key directly. The public
+path supplies a caller-owned one-key array to its preflight helper; an empty
+variadic tail uses that stack slot, while a nonempty tail allocates the same
+full key slice as before. Deletion still uses one ordered loop after every key
+has encoded successfully, so batches remain all-or-reject before mutation.
+
+Tests were added before production changed. They compare exact private filter
+state against the former variadic wrapper for plain, escaped, Unicode,
+structured, nested, existing, repeated-missing, nil, zero-shape, and invalid
+values. Public tests cover nested-value identity, existing and missing values,
+missing keys, and encoding failure. Focused tests passed 50 times, the race
+build passed ten times, and the existing Cuckoo-filter suite passed five times.
+
+```sh
+make run CMD='go test . -run TestCuckooFilterScalarDelete -count=50'
+make run CMD='go test -race . -run TestCuckooFilterScalarDelete -count=10'
+make bench-cuckoo-scalar CUCKOO_SCALAR_BENCH='^BenchmarkCuckooFilterScalarDelete' BENCHTIME=1s COUNT=7
+```
+
+Complete public-path rows use matching frozen binaries, one logical CPU, and
+seven one-second runs. Each successful delete is followed by a direct
+pre-encoded reinsertion so the measured filter remains populated. The 128-value
+control was confirmed separately in the opposite process order with nine
+three-second runs. Values below are medians.
+
+| Public Cuckoo-filter deletion | Temporary key slice | Caller-owned scalar slot | Result |
+| --- | ---: | ---: | ---: |
+| Existing string | 280.3 ns; 32 B; 2 allocs | 242.6 ns; 8 B; 1 alloc | 1.16x faster; 4.00x lower heap; 2x fewer allocs |
+| Existing structured value | 320.7 ns; 40 B; 2 allocs | 270.0 ns; 16 B; 1 alloc | 1.19x faster; 2.50x lower heap; 2x fewer allocs |
+| Missing string value | 128.2 ns; 40 B; 2 allocs | 90.57 ns; 16 B; 1 alloc | 1.42x faster; 2.50x lower heap; 2x fewer allocs |
+| Two-value batch | 394.7 ns; 80 B; 3 allocs | 392.2 ns; 80 B; 3 allocs | 1.01x faster; memory unchanged |
+| 16-value batch | 1,790 ns; 640 B; 17 allocs | 1,710 ns; 640 B; 17 allocs | 1.05x faster; memory unchanged |
+| 128-value batch | 11,669 ns; 5,248 B; 129 allocs | 11,563 ns; 5,248 B; 129 allocs | 1.01x faster; memory unchanged |
+
+Three placements were rejected. An early scalar branch retained the allocation
+gain but made the reverse-order 128-value control 11,650 versus 11,438 ns, or
+1.019x slower. Moving batch work behind a separate helper made the 16-value
+control 1,736 versus 1,688 ns, or 1.028x slower. Allocating only the variadic
+tail saved 24 B for two values and 128 B for 128 values, but its 16-value
+control was 1,719 versus 1,699 ns, or 1.012x slower. All three production
+layouts were removed before retaining caller-owned scalar storage.
+
+Fingerprint selection, approximate-delete semantics, input order, preflight
+failure behavior, lock scope, read/write accounting, TTLs, partitions, wire
+bytes, snapshots, journals, replication, persistent formats, and configuration
+are unchanged.
 
 <a id="compact-cuckoo-filter-header-rollback"></a>
 ### Compact Cuckoo-Filter Header Rollback

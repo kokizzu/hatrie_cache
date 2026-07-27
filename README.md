@@ -63,6 +63,12 @@ low-memory membership checks with approximate delete support.
 Their generic scalar-add wrapper also avoids temporary variadic preparation,
 removing one allocation while keeping the 128-value batch path neutral; see the
 [Cuckoo scalar-add measurements](BENCHMARK.md#generic-cuckoo-filter-scalar-additions).
+Generic scalar deletions encode into a caller-owned one-key slot instead of
+allocating a temporary key slice. Existing string/structured deletions are
+1.16x/1.19x faster and misses are 1.42x faster, with one allocation and 24
+bytes removed; 2/16/128-value controls are neutral or faster with identical
+memory. See the
+[Cuckoo scalar-delete measurements](BENCHMARK.md#generic-cuckoo-filter-scalar-deletions).
 XOR filter values stage unique items once, then compile them into static 8-bit
 fingerprint arrays for faster low-memory membership checks than Bloom filters
 on read-heavy immutable sets. Their private header fits in one 64-byte cache
