@@ -42,6 +42,7 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("NativeStructuredBatchStreamCommand", benchmarkBigWinsNativeStructuredBatchStreamCommand)
 	b.Run("StructuredBatchStreamSharedKeyRepeated", benchmarkBigWinsStructuredBatchStreamSharedKeyRepeated)
 	b.Run("StructuredBatchStreamSharedKey", benchmarkBigWinsStructuredBatchStreamSharedKey)
+	b.Run("StructuredBatchStreamSharedColumns", benchmarkBigWinsStructuredBatchStreamSharedColumns)
 	b.Run("StructuredBatchStreamCommand", benchmarkBigWinsStructuredBatchStreamCommand)
 	b.Run("ChurnRetentionBaseline", benchmarkBigWinsChurnRetentionBaseline)
 	b.Run("ChurnRetentionCompacted", benchmarkBigWinsChurnRetentionCompacted)
@@ -871,14 +872,18 @@ func structuredBenchmarkCommand(index int) *hatriecachev1.CommandRequest {
 }
 
 func benchmarkBigWinsStructuredBatchStreamSharedKeyRepeated(b *testing.B) {
-	benchmarkBigWinsStructuredBatchStreamSharedKeyMode(b, false)
+	benchmarkBigWinsStructuredBatchStreamSharedColumnMode(b, false, false)
 }
 
 func benchmarkBigWinsStructuredBatchStreamSharedKey(b *testing.B) {
-	benchmarkBigWinsStructuredBatchStreamSharedKeyMode(b, true)
+	benchmarkBigWinsStructuredBatchStreamSharedColumnMode(b, true, false)
 }
 
-func benchmarkBigWinsStructuredBatchStreamSharedKeyMode(b *testing.B, sharedKey bool) {
+func benchmarkBigWinsStructuredBatchStreamSharedColumns(b *testing.B) {
+	benchmarkBigWinsStructuredBatchStreamSharedColumnMode(b, true, true)
+}
+
+func benchmarkBigWinsStructuredBatchStreamSharedColumnMode(b *testing.B, sharedKey bool, sharedSubkey bool) {
 	const batchSize = 16
 	operations := bigWinsBenchmarkOperations(1000)
 	wire := &benchmarkGRPCWireStats{}
@@ -923,6 +928,9 @@ func benchmarkBigWinsStructuredBatchStreamSharedKeyMode(b *testing.B, sharedKey 
 		}
 		if sharedKey {
 			request.Keys = request.Keys[:1]
+		}
+		if sharedSubkey {
+			request.Subkeys = request.Subkeys[:1]
 		}
 		requests[batch] = request
 	}

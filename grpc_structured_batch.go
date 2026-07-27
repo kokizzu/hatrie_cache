@@ -71,7 +71,8 @@ func structuredBatchMutates(operations []hatriecachev1.StructuredCommand) bool {
 
 func (server *CacheGRPCServer) executeStructuredBatch(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
 	response := &hatriecachev1.StructuredBatchResponse{BatchId: request.GetBatchId()}
-	if err := validateStructuredBatchColumns(request); err != nil {
+	columns, err := validateStructuredBatchColumns(request)
+	if err != nil {
 		response.Error = err.Error()
 		return response
 	}
@@ -80,22 +81,28 @@ func (server *CacheGRPCServer) executeStructuredBatch(ctx context.Context, reque
 		return response
 	}
 	request = materializeStructuredBatchSharedKey(request)
+	request = materializeStructuredBatchSharedSubkey(request, columns.subkeys)
 	if server.scalarBatchRequiresCompatibilityPath() {
 		return server.executeStructuredBatchCompatibility(ctx, request)
 	}
 	return server.trie.executeStructuredBatchDirect(ctx, request)
 }
 
-func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchRequest) error {
+type structuredBatchColumns struct {
+	subkeys int
+}
+
+func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchRequest) (structuredBatchColumns, error) {
+	columns := structuredBatchColumns{}
 	operations := request.GetOperations()
 	if len(operations) == 0 {
-		return errors.New("structured batch requires operations")
+		return columns, errors.New("structured batch requires operations")
 	}
 	if len(operations) > maxPublicCommandBatchSize {
-		return errors.New("structured batch exceeds maximum size")
+		return columns, errors.New("structured batch exceeds maximum size")
 	}
 	if len(request.GetKeys()) != len(operations) && len(request.GetKeys()) != 1 {
-		return errors.New("structured batch keys must match operations")
+		return columns, errors.New("structured batch keys must match operations")
 	}
 	subkeysNeeded := 0
 	valuesNeeded := 0
@@ -125,19 +132,20 @@ func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchReques
 			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_POP_PRIORITY,
 			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_GET_PRIORITY:
 		default:
-			return errors.New("structured batch contains an unsupported operation")
+			return columns, errors.New("structured batch contains an unsupported operation")
 		}
 	}
-	if len(request.GetSubkeys()) != subkeysNeeded {
-		return errors.New("structured batch subkeys do not match map operations")
+	if len(request.GetSubkeys()) != subkeysNeeded && !(subkeysNeeded > 1 && len(request.GetSubkeys()) == 1) {
+		return columns, errors.New("structured batch subkeys do not match map operations")
 	}
 	if len(request.GetValues()) != valuesNeeded {
-		return errors.New("structured batch values do not match value operations")
+		return columns, errors.New("structured batch values do not match value operations")
 	}
 	if len(request.GetPriorities()) != prioritiesNeeded {
-		return errors.New("structured batch priorities do not match PUSH_PRIORITY operations")
+		return columns, errors.New("structured batch priorities do not match PUSH_PRIORITY operations")
 	}
-	return nil
+	columns.subkeys = subkeysNeeded
+	return columns, nil
 }
 
 func materializeStructuredBatchSharedKey(request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchRequest {
@@ -154,6 +162,24 @@ func materializeStructuredBatchSharedKey(request *hatriecachev1.StructuredBatchR
 	}
 	for index := range prepared.Keys {
 		prepared.Keys[index] = request.Keys[0]
+	}
+	return prepared
+}
+
+func materializeStructuredBatchSharedSubkey(request *hatriecachev1.StructuredBatchRequest, subkeyCount int) *hatriecachev1.StructuredBatchRequest {
+	if len(request.Subkeys) != 1 || subkeyCount <= 1 {
+		return request
+	}
+	prepared := &hatriecachev1.StructuredBatchRequest{
+		BatchId:    request.BatchId,
+		Operations: request.Operations,
+		Keys:       request.Keys,
+		Subkeys:    make([]string, subkeyCount),
+		Values:     request.Values,
+		Priorities: request.Priorities,
+	}
+	for index := range prepared.Subkeys {
+		prepared.Subkeys[index] = request.Subkeys[0]
 	}
 	return prepared
 }

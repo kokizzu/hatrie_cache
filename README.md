@@ -2554,7 +2554,10 @@ set, and priority-queue operations. Older servers reject that compact form with
 the existing column-count application error, so mixed-version clients can
 retry once with one key entry per operation. `subkeys`, `values`, and
 `priorities` contain only the entries consumed by their corresponding
-operations, in order.
+operations, in order. When every map operation targets the same field, send
+one `subkeys` entry and the server broadcasts it across only the map operations;
+this works independently of key sharing. Older servers likewise require the
+expanded subkey column.
 Each consuming operation accepts one value, so clients should send adjacent
 operations for multiple values or use `CommandBatchStream` for the existing
 multi-value request shape. Responses reuse scalar status/value-kind enums and
@@ -2568,9 +2571,9 @@ make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7
 ```
 
 See [BENCHMARK.md](BENCHMARK.md#compact-typed-protobuf-structured-batches) for
-CPU, heap, allocation, and measured wire tradeoffs. Shared-key requests use one
-temporary string-header expansion for execution; distinct-key requests and the
-generated protobuf layout are unchanged.
+CPU, heap, allocation, and measured wire tradeoffs. Shared key and subkey
+requests use temporary string-header expansions for execution; positional
+requests and the generated protobuf layout are unchanged.
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with
 `next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
 page. Empty keys are valid, so Go clients should set the optional `AfterKey`

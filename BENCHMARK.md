@@ -274,6 +274,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
 | Current pass | [Shared structured-batch keys](#shared-structured-batch-keys), 10k same-key `PEEK_MAP`, batch 16 | Repeated key column: 805.1 ns/command; 3,362,504 heap B; 64,490 allocs; 36.72 wire B/command | One shared key: 718.6 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | 1.12x faster, 1.28x lower heap, 1.21x fewer allocs, 1.94x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
+| Current pass | [Shared structured-batch subkeys](#shared-structured-batch-subkeys), 10k same-field `PEEK_MAP`, batch 16 | Shared key plus repeated subkeys: 721.8 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | One shared key and subkey: 670.1 ns/command; 2,305,907 heap B; 41,915 allocs; 12.35 wire B/command | 1.08x faster, 1.14x lower heap, 1.27x fewer allocs, 1.53x smaller wire | Additive request form; mixed-version clients retry expanded subkeys after an older server's column-count error |
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
 | Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
@@ -405,6 +406,7 @@ tree.
 | Dedicated packed scalar key fields | General distinct-key batches improved 1.09x with 1.44x fewer allocations and 1.56% less wire | Two added slice fields enlarged every decoded legacy request; the 10k legacy control used 31,947 more heap B, or 1.35%, even when the fields were absent | Removed before commit; [shared scalar-batch keys](#shared-scalar-batch-keys) reuse the existing key column, improve the target workload more, and leave the generated request layout unchanged |
 | Reused streamed scalar responses | Could remove roughly three response/status allocations per envelope | gRPC's `SendMsg` contract forbids modifying a message after send because tracing and stats handlers may consume it lazily | Rejected before an unsafe prototype; every streamed response remains independently owned |
 | gRPC shared transport buffers | Receive pooling and shared write buffers could reduce framing allocations | The APIs are experimental; receive pooling is disabled with stats/tracing and discouraged with compression, while shared write buffers use a global pool and add acquire/release work at every flush | Rejected as a no-tradeoff default before a product prototype; transport ownership and configuration remain unchanged |
+| Combined structured-column materializer | Expanded shared keys and subkeys from one backing allocation | The larger helper stopped inlining and added one allocation per shared-key-only envelope: 2,636,371 to 2,746,424 heap B and 53,186 to 53,812 allocations per 10k commands | Replaced before commit by separate inlinable key/subkey materializers; the shared-key-only control returned exactly to its shipped heap and allocation counts |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -1074,6 +1076,45 @@ the distinct-key additions are two length comparisons and an allocation-free
 return, so there is no credible common-path regression. Older servers reject
 the compact form with the existing key-count error; mixed-version clients can
 retry with expanded keys.
+
+<a id="shared-structured-batch-subkeys"></a>
+#### Shared Structured-Batch Subkeys
+
+Map-heavy envelopes can also repeat the same field name once per map operation.
+`StructuredBatchRequest.subkeys` now accepts one shared subkey when at least two
+map operations consume it. This compact form is independent of key sharing and
+broadcasts only across map operations, so slice, set, and priority-queue
+operations may remain interleaved. Positional subkeys, protobuf fields, and
+persistent formats are unchanged.
+
+Tests were written against the rejecting validator before implementation. They
+cover direct mixed map ordering, interleaved non-map operations with distinct
+keys, stray-subkey rejection, journal replay, dirty tracking, local partitions,
+and the legacy positional shape. Focused tests passed 20 repetitions and the
+race fixture passed five repetitions.
+
+```sh
+make run CMD='env HATRIE_BIG_WINS_OPS=10000 go test . -run=NONE -bench="BenchmarkBigWins/StructuredBatchStreamShared(Key|Columns)\\z" -benchmem -benchtime=5x -count=15 -cpu=1'
+```
+
+Both rows are 15-run medians from one binary and the same 10,000-command,
+16-command-envelope `PEEK_MAP` fixture. The baseline already sends one shared
+key; only the subkey representation changes.
+
+| Subkey column | ns/command | Heap B/10k | Allocs/10k | Wire B/command | Improvement |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Sixteen repeated subkey entries | 721.8 | 2,636,371 | 53,186 | 18.91 | baseline |
+| One shared subkey entry | 670.1 | 2,305,907 | 41,915 | 12.35 | 1.08x CPU, 1.14x heap, 1.27x allocations, 1.53x wire |
+
+An eight-pair alternating `100x` control compared ordinary positional mixed
+requests against untouched commit `e850892`. Medians were 963.0 ns/command for
+the baseline and 953.4 ns/command for the final path; both used exactly 77,606
+allocations and heap differed by only a few sampled bytes. The first prototype
+combined both expansions in one larger helper, but lost compiler inlining and
+added one allocation per shared-key-only envelope. Splitting the helpers
+restored the shipped shared-key control exactly. Older servers reject a shared
+subkey for multiple map operations; mixed-version clients can retry with the
+expanded column.
 
 <a id="go-1265-toolchain-refresh"></a>
 #### Go 1.26.5 Toolchain Refresh
