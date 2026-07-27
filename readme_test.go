@@ -1728,6 +1728,39 @@ func TestDocsDescribeDirectLargeXorCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectBloomFilterCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Bloom command-batch measurements](BENCHMARK.md#direct-bloom-filter-command-batches)",
+		"1.07x/1.07x/1.23x/1.65x",
+		"65 allocations and 2,816 heap bytes",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing direct Bloom command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Direct Bloom-Filter Command Batches",
+		"BenchmarkBloomFilterBatchCommandAlternating",
+		"11,076 ns; 11,008 B; 66 allocs",
+		"6,706 ns; 8,192 B; 1 alloc",
+		"all-or-reject",
+		"Large-only Bloom command dispatch",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct Bloom command batch token %q", token)
+		}
+	}
+}
+
 func TestREADMELinksShardingProposal(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

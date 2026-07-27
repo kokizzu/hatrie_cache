@@ -249,6 +249,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
 | Current pass | [Bounded generic Top-K scalar updates](#bounded-short-generic-top-k-dispatch), duplicate/escaped/structured values | One-item preparation: 138.2/146.75/167.75 ns; 58-80 B; 3 allocs | Bounded/direct scalar path: 14.42/91.46/110.5 ns; 0-32 B; 0-2 allocs | 9.59x/1.60x/1.52x faster; up to all transient allocations eliminated | No measured control regression; estimates retain their original branch, batches are neutral within 0.4%, and long scalar updates remove one allocation with neutral or faster CPU |
 | Current pass | [Generic Bloom-filter scalar additions](#generic-bloom-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 110.8/133.0/141.5 ns; 29-40 B; 2 allocs | Direct scalar encoding: 79.91/96.57/103.2 ns; 5-16 B; 1 alloc | 1.39x/1.38x/1.37x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.7% with identical memory |
+| Current pass | [Direct Bloom-filter command batches](#direct-bloom-filter-command-batches), one/two/eight/64 requested strings | Generic-equivalent: 3,430/3,520/3,676/11,076 ns; 8,232-11,008 heap B; 3-66 allocs | Direct command: 3,207/3,293/2,987/6,706 ns; 8,192 heap B; 1 alloc | 1.07x/1.07x/1.23x/1.65x faster; 64 values use 1.34x lower heap and 66x fewer allocations | No measured tradeoff; escaped, structured-tail, and all-structured controls are 1.01x-1.49x faster with identical or lower memory; scalar and generic APIs are unchanged |
 | Current pass | [Generic Cuckoo-filter scalar additions](#generic-cuckoo-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 98.84/119.1/112.4 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 62.61/75.87/76.72 ns; 5-16 B; 1 alloc | 1.58x/1.57x/1.47x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.5% with identical memory |
 | Current pass | [Generic Cuckoo-filter scalar deletions](#generic-cuckoo-filter-scalar-deletions), existing string/structured and missing values | Temporary key slice: 280.3/320.7/128.2 ns; 32-40 B; 2 allocs | Caller-owned key slot: 242.6/270.0/90.57 ns; 8-16 B; 1 alloc | 1.16x/1.19x/1.42x faster; one allocation and 24 B removed | No measured tradeoff; 2/16/128-value controls are 1.01x-1.05x faster with identical memory |
 | Current pass | [Canonical JSON command fast paths](#canonical-json-command-fast-paths), ordinary Bloom/Cuckoo/XOR/CMS/HLL/Top-K/reservoir strings | Accepted `<`, `>`, and `&` with noncanonical hashes/keys; 99.11/75.30/99.24/82.65/104.6/141.5/161.7 ns | Exact canonical fallback; 93.06/73.78/97.21/79.99/98.31/124.2/152.9 ns | Correct snapshots plus 1.02x-1.14x faster ordinary commands | No measured valid-path tradeoff; escaped HTML-sensitive strings use the existing generic canonical encoder, and the unaffected set control is CPU-neutral with identical memory |
@@ -423,6 +424,7 @@ tree.
 | Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster; the Scalar-only out-of-line wrapper improved scalar adds 1.09x-1.14x | Shared scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower; the isolated wrapper still made two-value batches 1.015x slower through layout drift | All four layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
 | Bloom split-first preparation | Scalar safe/structured additions improved 1.39x/1.31x and a two-value batch improved 1.23x | The 128-value batch was 1.015x slower and the 16-value batch was 0.35% slower | Removed; only the [scalar public wrapper](#generic-bloom-filter-scalar-additions) was specialized, leaving variadic batches unchanged |
+| Large-only Bloom command dispatch | Removed 65 JSON allocations from a 64-string command batch | Leaving one through eight values on generic fallback added a second length branch and made the unchanged eight-value exact command 1.011x slower in the first alternating gate | Replaced by the [all-size direct command batch](#direct-bloom-filter-command-batches), which is 1.07x-1.65x faster from one through 64 strings and leaves all-structured memory unchanged |
 | Inline Cuckoo scalar wrapper body | Scalar additions improved 1.51x-1.62x with one fewer allocation | Moving the larger body before `AddOneChecked` made the frozen 128-value batch 1.011x slower through binary-layout drift | Replaced by the [out-of-line scalar helper](#generic-cuckoo-filter-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.5% |
 | Cuckoo variadic scalar-add preparation | A caller-owned scalar key slot made the isolated scalar primitive 1.35x-1.53x faster and removed one allocation plus 24 B | Using the shared helper inside `AddOneChecked` made 2/16/128-value public batches 1.047x/1.043x/1.009x slower; a scalar branch around the exact former helper made them 1.020x/1.033x/1.028x slower; dispatch at the public method made 2/16-value batches 1.118x/1.079x slower and new-filter creation 1.032x slower | All three layouts and their test code were removed; `AddOneChecked` and `HatTrie.AddCuckooFilterChecked` remain unchanged; see [the rollback](#cuckoo-filter-variadic-scalar-add-rollback) |
 | Cuckoo scalar-delete dispatch layouts | Early scalar dispatch removed one allocation; split-first tail backing also saved 24 B for two values and 128 B for 128 values | Early dispatch made the reverse-order 128-value control 1.019x slower; a separate batch helper made 16 values 1.028x slower; split-first backing made 16 values 1.012x slower | All three layouts were removed; [caller-owned scalar key storage](#generic-cuckoo-filter-scalar-deletions) keeps the original full batch allocation and single deletion loop, with every retained control neutral or faster |
@@ -6311,6 +6313,62 @@ slice for the remaining values. It made safe/structured scalar calls
 regressed from 10,947 to 11,109 ns, or 1.015x, while 16 values were 0.35%
 slower. That layout and all of its production code were removed. Specializing
 only the public scalar wrapper retains the scalar gain without that batch cost.
+
+<a id="direct-bloom-filter-command-batches"></a>
+### Direct Bloom-Filter Command Batches
+
+Exact scalar `ADDBF` commands already hash canonical JSON string bytes without
+materializing an encoded key, but a request carrying `Values` always fell
+through to `bloomFilterItemKeys`. That generic helper allocates one byte slice
+per ordinary string plus the containing key slice before applying the batch.
+Exact command batches now preflight every value under the same cache lock,
+hash canonical strings directly, and allocate encoded keys only for escaped,
+structured, or otherwise noncanonical values. The public variadic API and
+forced-generic command path remain source-identical compatibility controls.
+
+Tests were added against the unchanged implementation before exact dispatch
+was specialized. They compare exact and forced-generic responses plus complete
+bitset snapshots for a fresh 64-value request, existing duplicates, replacement
+of an expiring string, escaped and structured values, a late invalid value, and
+an empty request. Every noncanonical value is encoded before the first bit is
+changed, so invalid batches remain all-or-reject. Canonical strings require no
+fallible preparation and Bloom filters retain only bits, not request values.
+
+CPU uses eight-operation exact/generic blocks in alternating order against
+independent tries in one binary. Heap and allocations are seven-run medians
+from the ordinary complete reserve-plus-add benchmark. Each iteration resets a
+4,096-item, 0.001-false-positive-rate filter; input values are constructed
+before timing.
+
+```sh
+make run CMD='go test . -race -run=^TestBloomFilterBatchCommand -count=100'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkBloomFilterBatchCommandAlternating$$ -benchtime=1000x -count=9 -cpu=1'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkBloomFilterBatchCommandPath$$ -benchmem -benchtime=2000x -count=7 -cpu=1'
+```
+
+| Complete command batch, median | Generic-equivalent control | Direct batch | Improvement |
+| --- | ---: | ---: | ---: |
+| One ordinary string in `Values` | 3,430 ns; 8,232 B; 3 allocs | 3,207 ns; 8,192 B; 1 alloc | 1.07x faster; 3x fewer allocations |
+| Two ordinary strings | 3,520 ns; 8,272 B; 4 allocs | 3,293 ns; 8,192 B; 1 alloc | 1.07x faster; 4x fewer allocations |
+| Eight ordinary strings | 3,676 ns; 8,512 B; 10 allocs | 2,987 ns; 8,192 B; 1 alloc | 1.23x faster; 10x fewer allocations |
+| 64 ordinary strings | 11,076 ns; 11,008 B; 66 allocs | 6,706 ns; 8,192 B; 1 alloc | 1.65x faster; 1.34x lower heap; 66x fewer allocations |
+| 63 ordinary plus escaped last | 11,095 ns; 11,016 B; 66 allocs | 7,454 ns; 10,008 B; 3 allocs | 1.49x faster; 1.10x lower heap; 22x fewer allocations |
+| 63 ordinary plus structured last | 11,474 ns; 11,113 B; 67 allocs | 7,786 ns; 10,105 B; 4 allocs | 1.47x faster; 1.10x lower heap; 16.75x fewer allocations |
+| 64 structured values | 27,909 ns; 17,153 B; 130 allocs | 27,628 ns; 17,153 B; 130 allocs | 1.01x faster; memory unchanged |
+
+The first candidate specialized only batches above eight values. Although it
+retained the large gain, its extra exact-dispatch branch made the unchanged
+eight-value fallback 1.011x slower. That threshold and fallback layout were
+removed. Routing every nonempty `Values` request through the transactional
+helper instead makes one through eight values faster and removes the control
+cost without adding a configuration threshold.
+
+The established scalar `Value` command remains allocation-free and within
+cross-process frequency variation of the clean parent. The implementation adds
+no retained field, buffer, goroutine, configuration, wire form, or storage
+format. Hashes, false-positive behavior, duplicate counts, TTL clearing,
+telemetry, partitions, snapshots, journals, replication, and public direct-Go
+methods are unchanged.
 
 <a id="generic-cuckoo-filter-scalar-additions"></a>
 ### Generic Cuckoo-Filter Scalar Additions

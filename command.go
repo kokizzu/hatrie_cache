@@ -1395,7 +1395,10 @@ func (ht *HatTrie) executeExactFastCommandPointer(request *CacheCommandRequest) 
 	case "GETPQ", "GETPRIORITY":
 		return ht.executeFastGetPriorityQueueCommand(key)
 	case "ADDBF", "BFADD":
-		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
+		if len(request.Values) != 0 {
+			return ht.executeFastAddBloomFilterBatchCommand(key, request.Values)
+		}
+		if !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddBloomFilterCommand(key, request.Value)
@@ -1999,6 +2002,42 @@ func (ht *HatTrie) executeFastAddBloomFilterCommand(key string, value string) (C
 	*rawPtr = hval.toValue()
 	ht.recordWriteLocked(key)
 	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "added bloom filter values", Value: strconv.Itoa(added)}, true
+}
+
+func (ht *HatTrie) executeFastAddBloomFilterBatchCommand(key string, values Slice) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsBloomFilter() {
+		added, err := ht.bloomFilters.array[hval.Index].addCommandBatch(values)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		*rawPtr = hval.toValue()
+		if added > 0 {
+			ht.recordWriteLocked(key)
+		}
+		return CacheCommandResponse{OK: true, Message: "added bloom filter values", Value: strconv.Itoa(added)}, true
+	}
+
+	data := newDefaultBloomFilterData()
+	added, err := data.addCommandBatch(values)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.bloomFilters.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_BLOOM_FILTER}.toValue()
+	ht.recordWriteLocked(key)
 	return CacheCommandResponse{OK: true, Message: "added bloom filter values", Value: strconv.Itoa(added)}, true
 }
 

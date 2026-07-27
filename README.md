@@ -58,6 +58,12 @@ direct add and membership controls are also faster with unchanged allocations.
 Generic scalar additions also avoid the variadic batch wrapper, removing one
 allocation with no batch-path change; see the
 [Bloom scalar-add measurements](BENCHMARK.md#generic-bloom-filter-scalar-additions).
+Exact `ADDBF` requests carrying `Values` now validate the complete request and
+hash canonical strings directly instead of allocating one JSON payload per
+item. Complete one/two/eight/64-string batches are 1.07x/1.07x/1.23x/1.65x
+faster; the 64-value cycle removes 65 allocations and 2,816 heap bytes, while
+escaped, structured-tail, and all-structured controls are also faster. See the
+[Bloom command-batch measurements](BENCHMARK.md#direct-bloom-filter-command-batches).
 Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
 low-memory membership checks with approximate delete support.
 Their generic scalar-add wrapper also avoids temporary variadic preparation,

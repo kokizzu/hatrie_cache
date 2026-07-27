@@ -220,6 +220,49 @@ func (filter *bloomFilterData) AddOneChecked(value interface{}, values ...interf
 	return added, nil
 }
 
+func (filter *bloomFilterData) addCommandBatch(values Slice) (int, error) {
+	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
+		return 0, nil
+	}
+	var encoded [][]byte
+	for index, value := range values {
+		text, ok := value.(string)
+		if ok && commandFastCanonicalJSONString(text) {
+			continue
+		}
+		if encoded == nil {
+			encoded = make([][]byte, len(values))
+		}
+		key, err := bloomFilterItemKey(value)
+		if err != nil {
+			return 0, err
+		}
+		encoded[index] = key
+	}
+
+	added := 0
+	if encoded == nil {
+		for _, value := range values {
+			if filter.addJSONString(value.(string)) {
+				added++
+			}
+		}
+		return added, nil
+	}
+	for index, value := range values {
+		changed := false
+		if encoded[index] != nil {
+			changed = filter.addKey(encoded[index])
+		} else {
+			changed = filter.addJSONString(value.(string))
+		}
+		if changed {
+			added++
+		}
+	}
+	return added, nil
+}
+
 func (filter *bloomFilterData) addKey(key []byte) bool {
 	filter.ensureWords()
 	changed := false
