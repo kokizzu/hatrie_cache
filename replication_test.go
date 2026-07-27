@@ -5452,6 +5452,51 @@ func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 	}
 }
 
+func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
+	for _, ownerCount := range []int{2, 3, 16, 64} {
+		routing, route := replicationRouteTargetBenchmarkFixture(t, ownerCount)
+		owners := route.Route.Owners
+		for _, online := range []map[string]bool{
+			nil,
+			{owners[0]: true, owners[1]: false},
+		} {
+			routing.online = online
+			for _, shard := range routing.shards {
+				owners := routing.owners[shard.ID]
+				routing.targets[shard.ID] = precomputedNormalizedReplicationTargets(owners, routing.nodes, online, routing.self)
+			}
+			for _, source := range []string{"", routing.self, owners[0], owners[len(owners)-1]} {
+				for _, target := range append(append([]string(nil), owners...), "", "missing-node") {
+					want := replicationRouteTargetsNodeMaterializedControl(routing, route, source, target)
+					got := replicationRouteTargetsNode(routing, route, source, target)
+					if got != want {
+						t.Fatalf("%d owners online=%v source=%q target=%q direct=%v, materialized=%v", ownerCount, online, source, target, got, want)
+					}
+				}
+			}
+		}
+
+		fallbackRoute := route
+		fallbackRoute.Route.Owners = nil
+		for _, target := range append(append([]string(nil), owners...), "missing-node") {
+			want := replicationRouteTargetsNodeMaterializedControl(routing, fallbackRoute, owners[0], target)
+			got := replicationRouteTargetsNode(routing, fallbackRoute, owners[0], target)
+			if got != want {
+				t.Fatalf("%d fallback owners target=%q direct=%v, materialized=%v", ownerCount, target, got, want)
+			}
+		}
+	}
+}
+
+func replicationRouteTargetsNodeMaterializedControl(routing replicationRoutingSnapshot, route ElectionKeyRoute, source string, targetNode string) bool {
+	for _, target := range routing.replicationTargets(route, source) {
+		if target.ID == targetNode {
+			return true
+		}
+	}
+	return false
+}
+
 func TestReplicationRoutingSnapshotReusesPrecomputedTargets(t *testing.T) {
 	topology, err := NewTopologyStore(ClusterTopology{
 		Version: 1,

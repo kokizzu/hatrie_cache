@@ -317,6 +317,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Election-record status leader lookup](#election-record-status-leader-lookup), healthy one/four/64 shards | Temporary active map: 459.15/961.65/12,100 ns; 464/976/14,680 heap B; 5/8/70 allocs | Existing election records: 289.9/744.65/9,153 ns; 208/720/11,136 heap B; 3/6/66 allocs | 1.58x/1.29x/1.32x faster; 256/256/3,544 fewer heap bytes; 2/2/4 fewer allocations | Maintenance generations retain the former active map and are 1.07x faster with identical memory; cached mode bit adds no topology-store bytes on amd64 |
 | Current pass | [Cached replication routing fingerprint](#cached-replication-routing-fingerprint), one/four shards | Rehash: 3,238/7,028.5 ns; 3,920/7,832 heap B; 52/129 allocs | Cached: 1,621.5/3,447.5 ns; 3,032/5,600 heap B; 14/34 allocs | 2.00x/2.04x faster; 1.29x/1.40x lower heap; 3.71x/3.79x fewer allocations | Reuses the fingerprint already computed by validated topology installation; topology cloning, routing maps, wire, and behavior are unchanged |
 | Current pass | [Normalized replication target precomputation](#normalized-replication-target-precomputation), one/four/64 shards | Per-shard duplicate map: 1,436.5/3,591.5/47,579.5 ns; 64 shards: 84,759 B, 403 allocs | Validated owners: 1,395/3,121.5/43,078.5 ns; 64 shards: 84,709 B, 402 allocs | 1.03x/1.15x/1.10x faster; 64 shards use 50 fewer heap bytes and one fewer allocation | Applies only to private snapshots of normalized topology; self, online, existence, and sorted-output filters are unchanged |
+| Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
 | Current pass | [Bounded lazy outbox restore](#binary-grouped-replication-outbox), 100k jobs | 466.884 ms; 100,000 resident jobs; 415.1 MB heap | 5.019 ms; 1,024 resident jobs; 3.52 MB heap | 93.03x faster, 97.66x fewer resident jobs, 118.0x lower heap | LevelDB pages are lazy; legacy whole-file JSON still loads its file snapshot |
@@ -3474,6 +3475,42 @@ production code was reverted; the test-only candidate and
 `BenchmarkReplicationRoutingSnapshotUncheckedOwnersAlternating` retain the
 reproducer. Owner cleanup and missing-node rejection therefore remain in the
 private helper, while only the proven duplicate map is absent.
+
+<a id="direct-replication-route-membership"></a>
+#### Direct Replication Route Membership
+
+Incoming digest and Merkle scans validate that the requested target belongs to
+each routed shard. The former boolean helper called `replicationTargets` with
+the remote source ID, which allocated a target slice, filtered every owner,
+sorted the result, and then scanned it only to answer one membership question.
+The helper now checks source exclusion and online state once, scans the existing
+owner IDs directly, and validates the matching node against the snapshot index.
+No target representation or ordering is needed for this private boolean result.
+
+The test-first control covers 2, 3, 16, and 64 owners with explicit and
+snapshot-fallback owner slices, local and remote sources, every registered
+target, missing and empty targets, and nil/degraded online maps. It compares the
+direct result with the former materializing implementation exactly. Existing
+digest tests cover full handler routing and repair behavior.
+
+```sh
+make run CMD='go test . -run="TestReplicationRouteTargetsNodeMatchesMaterializedControl|TestReplicationDigest" -count=10'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRouteTargetsNodeAlternating$$ -benchtime=100000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRouteTargetsNode$$ -benchmem -benchtime=100000x -count=10 -cpu=1'
+```
+
+| Ten-run median | Materialize, filter, sort | Direct membership | Improvement |
+| --- | ---: | ---: | ---: |
+| Two owners | 182.95 ns; 232 B; 2 allocs | 39.07 ns; 0 B; 0 allocs | 4.68x faster; all heap and allocations eliminated |
+| Three owners | 330.6 ns; 504 B; 4 allocs | 42.775 ns; 0 B; 0 allocs | 7.73x faster; all heap and allocations eliminated |
+| 16 owners | 1,167 ns; 1,976 B; 4 allocs | 82.63 ns; 0 B; 0 allocs | 14.12x faster; all heap and allocations eliminated |
+| 64 owners | 4,184.5 ns; 6,968 B; 4 allocs | 215.45 ns; 0 B; 0 allocs | 19.42x faster; all heap and allocations eliminated |
+
+CPU values are alternating same-binary medians. Heap and allocation values are
+from the isolated old/new sub-benchmarks; the direct path is zero-allocation in
+every run. Source exclusion, online semantics, registered-node validation,
+owner fallback, shard routing, topology ownership, configuration, wire,
+storage, and persistence are unchanged.
 
 <a id="direct-single-target-digest-inventory"></a>
 #### Direct Single-Target Digest Inventory

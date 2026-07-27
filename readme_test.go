@@ -192,6 +192,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Bounded lazy outbox restore](#binary-grouped-replication-outbox)",
 		"[Election-record status leader lookup](#election-record-status-leader-lookup)",
 		"[Normalized replication target precomputation](#normalized-replication-target-precomputation)",
+		"[Direct replication route membership](#direct-replication-route-membership)",
 		"73.8% lower",
 		"2.38x faster",
 		"2.42x faster",
@@ -658,6 +659,33 @@ func TestDocsDescribeNormalizedReplicationTargetPrecomputation(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing normalized replication-target token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeDirectReplicationRouteMembership(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[direct target membership](BENCHMARK.md#direct-replication-route-membership)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing direct replication route-membership token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkReplicationRouteTargetsNodeAlternating",
+		"TestReplicationRouteTargetsNodeMatchesMaterializedControl",
+		"7.73x faster",
+		"19.42x faster",
+		"6,968 B",
+		"all heap and allocations eliminated",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct replication route-membership token %q", token)
 		}
 	}
 }

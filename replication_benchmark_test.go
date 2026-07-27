@@ -2412,6 +2412,88 @@ func BenchmarkReplicationRoutingSnapshotConstruction(b *testing.B) {
 
 var benchmarkReplicationTargetsSink []TopologyNode
 
+var benchmarkReplicationRouteTargetSink bool
+
+func BenchmarkReplicationRouteTargetsNodeAlternating(b *testing.B) {
+	for _, ownerCount := range []int{2, 3, 16, 64} {
+		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
+			routing, route := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+			source := route.Route.Owners[0]
+			target := route.Route.Owners[len(route.Route.Owners)-1]
+			var materializedDuration, directDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				directFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if directFirst == (pass == 0) {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
+						directDuration += time.Since(started)
+					} else {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeMaterializedControl(routing, route, source, target)
+						materializedDuration += time.Since(started)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/check")
+			b.ReportMetric(float64(materializedDuration.Nanoseconds())/float64(b.N), "materialized_ns/check")
+		})
+	}
+}
+
+func BenchmarkReplicationRouteTargetsNode(b *testing.B) {
+	for _, ownerCount := range []int{2, 3, 16, 64} {
+		routing, route := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+		source := route.Route.Owners[0]
+		target := route.Route.Owners[len(route.Route.Owners)-1]
+		for _, direct := range []bool{false, true} {
+			name := "Materialized"
+			if direct {
+				name = "Direct"
+			}
+			b.Run(strconv.Itoa(ownerCount)+"Owners/"+name, func(b *testing.B) {
+				b.ReportAllocs()
+				for iteration := 0; iteration < b.N; iteration++ {
+					if direct {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
+					} else {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeMaterializedControl(routing, route, source, target)
+					}
+				}
+			})
+		}
+	}
+}
+
+func replicationRouteTargetBenchmarkFixture(tb testing.TB, ownerCount int) (replicationRoutingSnapshot, ElectionKeyRoute) {
+	tb.Helper()
+	nodes := make([]TopologyNode, ownerCount)
+	replicas := make([]string, 0, ownerCount-1)
+	for index := range nodes {
+		nodes[index] = TopologyNode{ID: fmt.Sprintf("node-%03d", index), Address: fmt.Sprintf("http://node-%03d", index)}
+		if index != 1 {
+			replicas = append(replicas, nodes[index].ID)
+		}
+	}
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Self:    nodes[0].ID,
+		Nodes:   nodes,
+		Shards:  []TopologyShard{{ID: 7, Primary: nodes[1].ID, Replicas: replicas}},
+	})
+	if err != nil {
+		tb.Fatal(err)
+	}
+	routing, ok := newReplicationRoutingSnapshot(nodes[0].ID, topology, nil)
+	if !ok {
+		tb.Fatal("newReplicationRoutingSnapshot() failed")
+	}
+	shard := routing.shards[0]
+	return routing, ElectionKeyRoute{Route: TopologyRoute{Shard: shard, Owners: routing.owners[shard.ID]}}
+}
+
 func BenchmarkPrecomputedReplicationTargetsDedupAlternating(b *testing.B) {
 	for _, ownerCount := range []int{2, 3, 64} {
 		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {

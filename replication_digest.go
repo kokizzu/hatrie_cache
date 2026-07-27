@@ -1521,10 +1521,22 @@ func (trie *HatTrie) replicationDigestPage(prefix string, afterKey string, hasAf
 }
 
 func replicationRouteTargetsNode(routing replicationRoutingSnapshot, route ElectionKeyRoute, source string, targetNode string) bool {
-	for _, target := range routing.replicationTargets(route, source) {
-		if target.ID == targetNode {
-			return true
+	if targetNode == "" || targetNode == source {
+		return false
+	}
+	if routing.online != nil && !routing.online[targetNode] {
+		return false
+	}
+	owners := route.Route.Owners
+	if len(owners) == 0 {
+		owners = routing.owners[route.Route.Shard.ID]
+	}
+	for _, owner := range owners {
+		if owner != targetNode {
+			continue
 		}
+		_, ok := routing.nodes[targetNode]
+		return ok
 	}
 	return false
 }

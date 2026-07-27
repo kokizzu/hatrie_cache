@@ -1884,6 +1884,13 @@ fixture uses 50 fewer heap bytes and one fewer allocation. Self exclusion,
 online filtering, node validation, target ordering, wire, and storage remain
 unchanged.
 
+Incoming digest routing uses
+[direct target membership](BENCHMARK.md#direct-replication-route-membership)
+instead of allocating and sorting a complete target slice for each boolean
+check. The common three-owner check is 7.73x faster and removes all 504 heap
+bytes and four allocations; source, online, registered-node, owner-fallback,
+wire, and routing behavior are unchanged.
+
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
 closed instead. For 10,000 live writes from 32 callers, zero-wait
