@@ -1345,10 +1345,18 @@ type DiskStorage struct {
 }
 
 func CreateDiskStorage(dir string, ownedDir bool) (*DiskStorage, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	storage, err := createDiskStorageValue(dir, ownedDir)
+	if err != nil {
 		return nil, err
 	}
-	return &DiskStorage{
+	return &storage, nil
+}
+
+func createDiskStorageValue(dir string, ownedDir bool) (DiskStorage, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return DiskStorage{}, err
+	}
+	return DiskStorage{
 		dir:      dir,
 		rootDir:  dir,
 		ownedDir: ownedDir,
@@ -1824,7 +1832,12 @@ type MapStorage struct {
 }
 
 func CreateMapStorage() *MapStorage {
-	return &MapStorage{
+	storage := createMapStorageValue()
+	return &storage
+}
+
+func createMapStorageValue() MapStorage {
+	return MapStorage{
 		array: []Map{},
 	}
 }
@@ -3794,6 +3807,13 @@ type hatTrieStorageGroup struct {
 	dbrefs           LevelDBReferenceStorage
 }
 
+// These two headers occupy the same 320-byte size class together as they do
+// separately, while one backing object removes an empty-cache allocation.
+type hatTrieAuxStorage struct {
+	disks DiskStorage
+	maps  MapStorage
+}
+
 type HatTrie struct {
 	mu                         sync.RWMutex
 	telemetryMu                sync.Mutex
@@ -3871,17 +3891,21 @@ func CreateHatTrie() *HatTrie {
 }
 
 func CreateHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool) (*HatTrie, error) {
-	disks, err := CreateDiskStorage(diskDir, removeDiskDirOnDestroy)
+	disks, err := createDiskStorageValue(diskDir, removeDiskDirOnDestroy)
 	if err != nil {
 		return nil, err
 	}
 	storage := &hatTrieStorageGroup{}
+	auxStorage := &hatTrieAuxStorage{
+		disks: disks,
+		maps:  createMapStorageValue(),
+	}
 	ht := &HatTrie{
 		root:             C.hattrie_create(),
 		strings:          &storage.strings,
 		raws:             &storage.raws,
-		disks:            disks,
-		maps:             CreateMapStorage(),
+		disks:            &auxStorage.disks,
+		maps:             &auxStorage.maps,
 		slices:           &storage.slices,
 		sets:             &storage.sets,
 		priorityQueues:   &storage.priorityQueues,

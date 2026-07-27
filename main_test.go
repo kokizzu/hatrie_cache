@@ -197,8 +197,8 @@ func TestHatTrieConstructionUsesGroupedStorageBacking(t *testing.T) {
 	if createErr != nil {
 		t.Fatalf("CreateHatTrieWithDiskDir() error = %v", createErr)
 	}
-	if allocs > 6 {
-		t.Fatalf("CreateHatTrieWithDiskDir() allocations = %.0f, want <= 6", allocs)
+	if allocs > 5 {
+		t.Fatalf("CreateHatTrieWithDiskDir() allocations = %.0f, want <= 5", allocs)
 	}
 }
 
@@ -273,12 +273,27 @@ func TestHatTrieGroupedStorageLayout(t *testing.T) {
 	if got, want := reflect.TypeOf(MapStorage{}).Size(), uintptr(184); got != want {
 		t.Fatalf("MapStorage size = %d, want %d", got, want)
 	}
+	auxSize := reflect.TypeOf(hatTrieAuxStorage{}).Size()
+	separateSize := reflect.TypeOf(DiskStorage{}).Size() + reflect.TypeOf(MapStorage{}).Size()
+	if auxSize != separateSize || auxSize > 320 {
+		t.Fatalf("hatTrieAuxStorage size = %d, want separate payload %d within 320-byte class", auxSize, separateSize)
+	}
 
 	trie := newTestTrie(t)
 	runtime.GC()
 	trie.UpsertString("grouped:storage", "live")
 	if got, ok, err := trie.GetStringChecked("grouped:storage"); err != nil || !ok || got != "live" {
 		t.Fatalf("GetStringChecked() after GC = %q/%t/%v, want live/true/nil", got, ok, err)
+	}
+	trie.UpsertMap("grouped:map", Map{"field": "live"})
+	diskValue := testPayload(DiskBytesThreshold + 1)
+	trie.UpsertBytes("grouped:disk", diskValue)
+	runtime.GC()
+	if got, ok, err := trie.PeekMapChecked("grouped:map", "field"); err != nil || !ok || got != "live" {
+		t.Fatalf("PeekMapChecked() after GC = %#v/%t/%v, want live/true/nil", got, ok, err)
+	}
+	if got, err := trie.GetBytesChecked("grouped:disk"); err != nil || !bytes.Equal(got, diskValue) {
+		t.Fatalf("GetBytesChecked(disk) after GC = %d bytes/%v, want %d bytes/nil", len(got), err, len(diskValue))
 	}
 }
 

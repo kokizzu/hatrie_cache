@@ -242,6 +242,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
 | Current pass | [Deferred optional maps](#deferred-optional-maps), default empty cache | Eager maps: 14,976 ns; 3,360 heap B; 8 allocs | Lazy maps: 14,721 ns; 3,264 heap B; 6 allocs | 1.02x faster, 96 B lower, 1.33x fewer allocations | First TTL is 1.04x faster with one fewer allocation; 10k distinct TTL scheduling is CPU-neutral within 0.2% with unchanged heap |
+| Current pass | [Packed disk/map storage headers](#packed-disk-map-storage-headers), empty cache construction | Separate headers: 14,902 ns; 3,264 heap B; 6 allocs | One auxiliary backing: 13,875 ns; 3,264 heap B; 5 allocs | 1.07x faster, 1.20x fewer allocations; heap unchanged | No measured tradeoff; public constructors stay independent and compaction/restore retain swappable typed pointers |
 | Current pass | [Single-representation string storage](#single-representation-string-storage), 100k x 256 B | Mirrored string/bytes: 236.169 ms; 303.5 retained B/key; 100,080 allocs | Dedicated string pool: 187.566 ms; 18.87 retained B/key; 28 allocs | 1.26x faster, 16.08x lower retained heap, 3,574x fewer allocs | String-to-bytes reads materialize the requested clone; wire and storage formats are unchanged |
 | Current pass | [Live string-slot replacement](#live-string-slot-replacement), duplicate and changing values | Public `Put`: 3.057/2.731 ns | Proven-live replace: 1.416/1.532 ns | Primitive 2.16x/1.78x faster; complete API 1.015x/1.012x faster | Private cache callers rely on the existing live-index invariant; public deleted-index revival and all formats remain unchanged |
 | Current pass | [Packed small-map storage](#packed-small-map-storage), 100k one/two-field maps | Go maps: 354.5 retained B/map; 2.000 retained objects/map; 200,064 timed allocs | Packed pool: 84.00 retained B/map; 0.00025 retained objects/map; 29 timed allocs | 4.22x lower retained heap, about 8,000x fewer retained objects, 6,899x fewer timed allocs | Promotes at the third field with baseline-equivalent heap/allocations; no measured operation, large-map, wire, or persistence regression |
@@ -1632,6 +1633,42 @@ the control benchmark's closure overhead.
 The default path retains no replacement state or background work. TTL, key
 statistics, compaction, snapshot, restore, partition, wire, and persistent
 format behavior are unchanged.
+
+<a id="packed-disk-map-storage-headers"></a>
+### Packed Disk/Map Storage Headers
+
+After optional maps were deferred, empty construction still allocated
+`DiskStorage` and `MapStorage` as separate internal objects. Their 104-byte and
+184-byte payloads occupy Go's 128-byte and 192-byte size classes. One private
+288-byte auxiliary object fits the same 320 total allocated bytes, so packing
+only those two headers removes one allocation without increasing cumulative or
+retained heap. The larger 18-header backing remains separate and therefore
+does not repeat the rejected 2,048-byte all-header layout.
+
+The allocation guard was tightened from six to five first and failed against
+the separate headers. A layout test fixes the 288-byte payload and 320-byte
+class ceiling, forces garbage collection, and then exercises strings, maps,
+and disk-backed bytes through the interior typed pointers. Public
+`CreateDiskStorage` and `CreateMapStorage` still return independently owned
+objects. Cache compaction and staged restore can still replace or swap the
+same `*DiskStorage` and `*MapStorage` fields.
+
+The exact pre-change and candidate binaries ran in 12 or 16 alternating pairs
+pinned to one CPU with 10,000 complete construct/destroy cycles per sample:
+
+```sh
+make run CMD='go test . -run=NONE -bench=^BenchmarkHatTrieConstruction -benchmem -benchtime=10000x -count=16 -cpu=1'
+```
+
+| Complete lifecycle | Separate headers | Packed auxiliary backing | Improvement |
+| --- | ---: | ---: | ---: |
+| Empty construct/destroy | 14,902 ns; 3,264 B; 6 allocs | 13,875 ns; 3,264 B; 5 allocs | 1.07x faster; one fewer allocation; heap identical |
+| Construction plus first TTL | 15,515 ns; 3,648 B; 11 allocs | 14,862 ns; 3,648 B; 10 allocs | 1.04x faster; one fewer allocation; heap identical |
+| Construction plus telemetry activation/write | 15,314 ns; 3,648 B; 10 allocs | 14,377 ns; 3,648 B; 9 allocs | 1.07x faster; one fewer allocation; heap identical |
+
+There is no per-command branch, additional pointer, retained buffer, wire,
+snapshot, storage, or persistence-format change. Both headers already shared
+the cache lifetime; only their allocator object boundary changed.
 
 <a id="single-representation-string-storage"></a>
 ### Single-Representation String Storage

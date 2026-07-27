@@ -126,6 +126,11 @@ until their features are first used. These
 empty-cache construction from 8 to 6 allocations and by 96 heap bytes. First
 TTL and telemetry activation still allocate less overall, while sustained TTL
 scheduling is CPU- and memory-neutral.
+The remaining disk and map headers share one exact-size-class
+[auxiliary backing](BENCHMARK.md#packed-disk-map-storage-headers), reducing
+empty construction from 6 to 5 allocations and making it 1.07x faster with
+identical cumulative heap. Their public constructors and swappable typed
+pointers remain unchanged.
 Empty, one-, and two-member plain-string sets use dedicated packed pools, then
 promote to the existing generic set representation at the third member or first
 non-string value. This cuts retained heap without changing wire, snapshot, or
