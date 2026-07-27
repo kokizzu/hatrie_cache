@@ -190,13 +190,22 @@ func (sketch *countMinSketchData) AddOneChecked(value interface{}, count uint32,
 func (sketch *countMinSketchData) addKey(key []byte, count uint32) uint64 {
 	sketch.ensureCounters()
 	estimate := uint64(maxCountMinSketchCounter)
-	sketch.visitIndexes(key, func(index uint64) {
+	first := bloomFilterFNV64a(key)
+	step := bloomFilterFNV64(key)
+	if step == 0 {
+		step = bloomFilterFNVPrime64
+	}
+	step |= 1
+	width := sketch.width
+	for row := uint8(0); row < sketch.depth; row++ {
+		column := (first + uint64(row)*step) % width
+		index := uint64(row)*width + column
 		next := saturatingAddUint32(sketch.counters[index], count)
 		sketch.counters[index] = next
 		if uint64(next) < estimate {
 			estimate = uint64(next)
 		}
-	})
+	}
 	sketch.total = saturatingAddUint64(sketch.total, uint64(count))
 	return estimate
 }
@@ -210,13 +219,22 @@ func (sketch *countMinSketchData) addJSONString(value string, count uint32) uint
 	}
 	sketch.ensureCounters()
 	estimate := uint64(maxCountMinSketchCounter)
-	sketch.visitJSONStringIndexes(value, func(index uint64) {
+	first := bloomFilterFNV64aJSONString(value)
+	step := bloomFilterFNV64JSONString(value)
+	if step == 0 {
+		step = bloomFilterFNVPrime64
+	}
+	step |= 1
+	width := sketch.width
+	for row := uint8(0); row < sketch.depth; row++ {
+		column := (first + uint64(row)*step) % width
+		index := uint64(row)*width + column
 		next := saturatingAddUint32(sketch.counters[index], count)
 		sketch.counters[index] = next
 		if uint64(next) < estimate {
 			estimate = uint64(next)
 		}
-	})
+	}
 	sketch.total = saturatingAddUint64(sketch.total, uint64(count))
 	return estimate
 }
@@ -242,11 +260,20 @@ func (sketch *countMinSketchData) estimateKey(key []byte) uint64 {
 		return 0
 	}
 	estimate := maxCountMinSketchCounter
-	sketch.visitIndexes(key, func(index uint64) {
+	first := bloomFilterFNV64a(key)
+	step := bloomFilterFNV64(key)
+	if step == 0 {
+		step = bloomFilterFNVPrime64
+	}
+	step |= 1
+	width := sketch.width
+	for row := uint8(0); row < sketch.depth; row++ {
+		column := (first + uint64(row)*step) % width
+		index := uint64(row)*width + column
 		if sketch.counters[index] < estimate {
 			estimate = sketch.counters[index]
 		}
-	})
+	}
 	return uint64(estimate)
 }
 
@@ -255,11 +282,20 @@ func (sketch *countMinSketchData) estimateJSONString(value string) uint64 {
 		return 0
 	}
 	estimate := maxCountMinSketchCounter
-	sketch.visitJSONStringIndexes(value, func(index uint64) {
+	first := bloomFilterFNV64aJSONString(value)
+	step := bloomFilterFNV64JSONString(value)
+	if step == 0 {
+		step = bloomFilterFNVPrime64
+	}
+	step |= 1
+	width := sketch.width
+	for row := uint8(0); row < sketch.depth; row++ {
+		column := (first + uint64(row)*step) % width
+		index := uint64(row)*width + column
 		if sketch.counters[index] < estimate {
 			estimate = sketch.counters[index]
 		}
-	})
+	}
 	return uint64(estimate)
 }
 
@@ -302,32 +338,6 @@ func (sketch countMinSketchData) Snapshot() countMinSketchSnapshot {
 
 func (sketch countMinSketchData) EncodedSize() int64 {
 	return int64(len(sketch.counters) * 4)
-}
-
-func (sketch *countMinSketchData) visitIndexes(key []byte, visit func(uint64)) {
-	first := bloomFilterFNV64a(key)
-	step := bloomFilterFNV64(key)
-	if step == 0 {
-		step = bloomFilterFNVPrime64
-	}
-	step |= 1
-	for row := uint8(0); row < sketch.depth; row++ {
-		column := (first + uint64(row)*step) % sketch.width
-		visit(uint64(row)*sketch.width + column)
-	}
-}
-
-func (sketch *countMinSketchData) visitJSONStringIndexes(value string, visit func(uint64)) {
-	first := bloomFilterFNV64aJSONString(value)
-	step := bloomFilterFNV64JSONString(value)
-	if step == 0 {
-		step = bloomFilterFNVPrime64
-	}
-	step |= 1
-	for row := uint8(0); row < sketch.depth; row++ {
-		column := (first + uint64(row)*step) % sketch.width
-		visit(uint64(row)*sketch.width + column)
-	}
 }
 
 func (sketch *countMinSketchData) ensureCounters() {

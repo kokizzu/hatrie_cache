@@ -222,6 +222,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-fallback slice payload validation](#flat-scalar-sequence-validation), checked push with one nested value among 64/4,096 items | 6,432/284,075 ns; 2,764/131,753 B; 6/8 allocs | 2,969/38,259 ns; 1,588/66,179 B; 4/5 allocs | 2.17x/7.43x faster; 1.74x/1.99x lower heap; 1.50x/1.60x fewer allocs | No measured tradeoff; two nested values remain on the exact materialized path and are CPU-neutral with identical heap and allocations |
 | Current pass | [Trailing-fallback whole-sequence validation](#flat-scalar-sequence-validation), checked replacement with one trailing nested value among 64/4,096 items | Slice: 2,589/128,450 ns; priority queue: 6,693/411,923 ns; 5 allocs | Slice: 1,835/63,606 ns; priority queue: 4,639/233,791 ns; 4 allocs | Slice 1.41x/2.02x faster; priority queue 1.44x/1.76x faster; one fewer allocation | No measured tradeoff; an earlier non-scalar selects the exact prior whole-sequence path with identical heap and allocations |
 | Current pass | [Compact Bloom-filter headers](#compact-bloom-filter-headers), 100k empty filters plus direct operations | 48-byte header; 48.00 retained B/filter; 47.16 ns/filter build; add/has 33.24/52.46 ns | 40-byte header; 40.06 retained B/filter; 41.22 ns/filter build; add/has 32.95/47.37 ns | 1.20x lower retained heap; build/add/has 1.14x/1.01x/1.11x faster | No measured tradeoff; allocations, bitset bytes, hashes, behavior, wire, and persistence formats are unchanged |
+| Current pass | [Direct Count-Min Sketch row loops](#direct-count-min-sketch-row-loops), default depth four | Callback byte estimate/increment: 41.36/43.82 ns; callback plain-string estimate/increment: 24.94/28.34 ns | Direct byte estimate/increment: 34.50/28.14 ns; direct plain-string estimate/increment: 16.20/20.92 ns | Byte paths 1.20x/1.56x faster; exact string paths 1.54x/1.35x faster; zero heap/allocations throughout | No measured runtime tradeoff; complete `ESTCMS` is 1.02x faster and `INCRCMS` is neutral within 0.33%; header, counters, hashes, wire, and persistence are unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -377,6 +378,7 @@ tree.
 | Local slice view over fixed Roaring bitmap | Preserved the 48-byte header while dense build/lookup measured 1.02x/1.09x faster | Paired bitmap remove/add was 4.594 versus 4.486 ns, or 1.024x slower | Reverted; direct fixed-pointer access remains 1.006x faster than the legacy slice in the longer control; see [compact Roaring-container headers](#compact-roaring-container-headers) |
 | Late compact Bloom bit-count load | Reduced each Bloom header from 48 to 40 bytes with the same validated 32-bit count | A 20-million-operation confirmation made direct add 33.83 versus 33.73 ns, or 0.3% slower | Replaced by loading the count before the independent hash passes; final add is 1.01x faster than the 48-byte baseline; see [compact Bloom-filter headers](#compact-bloom-filter-headers) |
 | Compact Cuckoo-filter header | Reduced each empty header from 48 to 40 bytes, retained heap 1.20x, and header initialization 1.18x | The best 40-byte layout made paired delete+add 36.74 versus 35.87 ns, or 1.024x slower; membership was neutral | Reverted; the 48-byte operation-faster layout remains; see [compact Cuckoo-filter header rollback](#compact-cuckoo-filter-header-rollback) |
+| Compact Count-Min Sketch header | Reduced each lazy header from 48 to 40 bytes, retained heap 1.20x, and header initialization 1.23x | With identical direct loops, the compact width made increment 33.44 versus 29.54 ns, or 1.13x slower; estimate was also 0.9% slower | Reverted; the 48-byte header plus faster direct loops remains; see [compact Count-Min Sketch header rollback](#compact-count-min-sketch-header-rollback) |
 | 40-byte Roaring field order | Lowered singleton retained and cumulative heap 1.21x/1.24x and made the 50,000-container build 1.11x faster | The best values-first layout made paired 4,097-value dense construction 1.018x and 1.044x slower in two nine-run confirmations; a pointer-first layout made lookup 1.039x slower | Reverted; the 48-byte operation-neutral layout remains; see [Roaring field-order compaction](#roaring-field-order-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
@@ -5432,6 +5434,69 @@ not recover complete-path throughput. All compact layouts, helper changes,
 test-only fixtures, and direct test adjustments were removed. The retained
 implementation therefore has no added branch, conversion, allocation, field,
 format change, or runtime cost from this experiment.
+
+<a id="direct-count-min-sketch-row-loops"></a>
+### Direct Count-Min Sketch Row Loops
+
+Count-Min Sketch estimate and increment previously visited each depth row
+through a callback. Assembly inspection showed that the indirect call forced
+the width and hash state to spill and reload for every row. A correctness test
+was added and passed against the callback implementation before the rewrite;
+it checks exact counter placement at non-power-of-two width 13 and depth seven,
+the resulting estimate, and parity between the byte-key and validated plain
+JSON-string paths.
+
+The four estimate/increment paths now run their row loops directly. They retain
+the same FNV-64a and FNV-64 hashes, zero-step fallback, odd probe step, modulo,
+row offset, saturating counters, and total-count behavior. The focused
+benchmark is reproducible with:
+
+```sh
+make bench-count-min-rows BENCHTIME=500ms COUNT=7
+```
+
+The focused rows are medians from 14 warm alternating original/final binary
+pairs for byte keys and ten fixed ten-million-operation same-binary runs for
+plain strings. Complete commands use 12 warm alternating two-million-operation
+pairs on one logical CPU.
+
+| Count-Min Sketch workload | Callback baseline | Direct loop | Improvement |
+| --- | ---: | ---: | ---: |
+| Byte-key estimate | 41.36 ns; 0 B; 0 allocs | 34.50 ns; 0 B; 0 allocs | 1.20x faster |
+| Byte-key increment | 43.82 ns; 0 B; 0 allocs | 28.14 ns; 0 B; 0 allocs | 1.56x faster |
+| Plain-string estimate | 24.94 ns; 0 B; 0 allocs | 16.20 ns; 0 B; 0 allocs | 1.54x faster |
+| Plain-string increment | 28.34 ns; 0 B; 0 allocs | 20.92 ns; 0 B; 0 allocs | 1.35x faster |
+| Complete `ESTCMS` | 181.4 ns; 0 B; 0 allocs | 177.6 ns; 0 B; 0 allocs | 1.02x faster |
+| Complete `INCRCMS` | 259.2 ns; 7 B; 0 allocs | 260.05 ns; 7 B; 0 allocs | Neutral within 0.33% |
+
+The retained header remains 48 bytes. Counter storage, hashes, accepted values,
+snapshots, wire encoding, storage encoding, and persistence formats are
+unchanged.
+
+<a id="compact-count-min-sketch-header-rollback"></a>
+#### Compact Count-Min Sketch Header Rollback
+
+Count-Min Sketch width is validated indirectly by the existing
+`width * depth <= 1 << 24` counter limit, making a private `uint32` width look
+safe. A fail-first guard confirmed the original header was 48 bytes. Narrowing
+the width produced a 40-byte layout; both early and late widening variants were
+measured before combining the experiment with the direct row loops.
+
+The final decision used an exact wide-width control containing the same direct
+loops as the compact candidate. Twelve warm alternating pairs isolated field
+layout from the loop optimization.
+
+| Count-Min Sketch layout workload | 48-byte wide width | 40-byte compact width | Result |
+| --- | ---: | ---: | ---: |
+| Header size | 48 B/sketch | 40 B/sketch | 1.20x smaller |
+| 100k retained header backing | 48.01 B/sketch | 40.06 B/sketch | 1.20x lower retained heap |
+| 100k header initialization | 43.48 ns/sketch | 35.24 ns/sketch | 1.23x faster |
+| Direct estimate | 34.79 ns; 0 B; 0 allocs | 35.10 ns; 0 B; 0 allocs | 0.9% slower |
+| Direct increment | 29.54 ns; 0 B; 0 allocs | 33.44 ns; 0 B; 0 allocs | 1.13x slower |
+
+The hot increment regression outweighed the lazy-header saving. The private
+width remains `uint64`, and the compact layout, layout guard, and header-only
+fixture were removed. Only the operation-faster direct row loops were retained.
 
 <a id="xor-filter-scalar-fast-path"></a>
 ### XOR Filter Scalar Fast Path

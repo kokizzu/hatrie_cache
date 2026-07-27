@@ -200,6 +200,7 @@ make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Struc
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 make bench-reservoir-small BENCHTIME=500000x COUNT=7
 make bench-bloom-header BENCHTIME=500ms COUNT=7
+make bench-count-min-rows BENCHTIME=500ms COUNT=7
 make bench-string-compaction STRING_STORAGE_BENCH_KEYS=100000 BENCHTIME=1x COUNT=7
 make bench-startup-persistence BENCHTIME=1x COUNT=7
 make bench-live-replication BENCHTIME=1x COUNT=7
