@@ -38,6 +38,22 @@ func TestValidateStructuredBatchColumnsAcceptsSharedSubkey(t *testing.T) {
 	}
 }
 
+func TestValidateStructuredBatchColumnsAcceptsSharedValue(t *testing.T) {
+	request := &hatriecachev1.StructuredBatchRequest{
+		Operations: []hatriecachev1.StructuredCommand{
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET,
+		},
+		Keys:    []string{"profile", "queue", "members"},
+		Subkeys: []string{"city"},
+		Values:  [][]byte{[]byte("shared")},
+	}
+	if _, err := validateStructuredBatchColumns(request); err != nil {
+		t.Fatalf("validateStructuredBatchColumns() error = %v", err)
+	}
+}
+
 func TestValidateStructuredBatchColumnsRejectsSharedKeyWithoutOperations(t *testing.T) {
 	request := &hatriecachev1.StructuredBatchRequest{Keys: []string{"profile"}}
 	if _, err := validateStructuredBatchColumns(request); err == nil {
@@ -56,6 +72,20 @@ func TestValidateStructuredBatchColumnsRejectsSubkeyWithoutMapOperations(t *test
 	}
 	if _, err := validateStructuredBatchColumns(request); err == nil {
 		t.Fatal("validateStructuredBatchColumns() error = nil, want subkey-count error")
+	}
+}
+
+func TestValidateStructuredBatchColumnsRejectsValueWithoutValueOperations(t *testing.T) {
+	request := &hatriecachev1.StructuredBatchRequest{
+		Operations: []hatriecachev1.StructuredCommand{
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HEAD_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_TAIL_SLICE,
+		},
+		Keys:   []string{"first", "second"},
+		Values: [][]byte{[]byte("unexpected")},
+	}
+	if _, err := validateStructuredBatchColumns(request); err == nil {
+		t.Fatal("validateStructuredBatchColumns() error = nil, want value-count error")
 	}
 }
 
@@ -195,6 +225,54 @@ func TestCacheGRPCServerStructuredBatchStreamExecutesSharedSubkeyAcrossMixedKeys
 	}
 }
 
+func TestCacheGRPCServerStructuredBatchStreamExecutesSharedValueAcrossCommandFamilies(t *testing.T) {
+	ht := newTestTrie(t)
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.StructuredBatchRequest{
+		BatchId: 107,
+		Operations: []hatriecachev1.StructuredCommand{
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_SLICE,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_PRIORITY,
+		},
+		Keys:       []string{"profile", "queue", "members", "members", "priority"},
+		Subkeys:    []string{"city"},
+		Values:     [][]byte{[]byte("shared")},
+		Priorities: []int64{7},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil || !response.GetOk() || len(response.GetStatuses()) != 5 {
+		t.Fatalf("shared-value structured response = %#v/%v", response, err)
+	}
+	for index, status := range response.GetStatuses() {
+		if status != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK {
+			t.Fatalf("shared-value status %d = %v, want OK", index, status)
+		}
+	}
+	mapValue, mapOK, mapErr := ht.PeekMapChecked("profile", "city")
+	if mapErr != nil || !mapOK || mapValue != "shared" {
+		t.Fatalf("shared-value map = %#v/%v/%v", mapValue, mapOK, mapErr)
+	}
+	if result := ht.ExecuteCommand(CacheCommandRequest{Command: "HEADSLICE", Key: "queue"}); !result.OK || result.Value != "shared" {
+		t.Fatalf("shared-value slice = %#v", result)
+	}
+	if result := ht.ExecuteCommand(CacheCommandRequest{Command: "HASSET", Key: "members", Value: "shared"}); !result.OK || result.Value != "1" {
+		t.Fatalf("shared-value set = %#v", result)
+	}
+	if result := ht.ExecuteCommand(CacheCommandRequest{Command: "PEEKPQ", Key: "priority"}); !result.OK || result.Value != `{"priority":7,"value":"shared"}` {
+		t.Fatalf("shared-value priority queue = %#v", result)
+	}
+}
+
 func TestCacheGRPCServerStructuredBatchSharedKeySupportsLocalPartitions(t *testing.T) {
 	ht := newTestTrie(t)
 	if err := ht.ConfigureLocalPartitions(8); err != nil {
@@ -269,6 +347,79 @@ func TestCacheGRPCServerStructuredBatchSharedSubkeyPreservesJournalAndDirtyTrack
 	city, ok, peekErr := recovered.PeekMapChecked("profile", "city")
 	if sequence != 2 || peekErr != nil || !ok || city != "Singapore" {
 		t.Fatalf("shared-column replay = sequence %d, city %#v/%v/%v", sequence, city, ok, peekErr)
+	}
+}
+
+func TestCacheGRPCServerStructuredBatchSharedValuePreservesJournalAndDirtyTracking(t *testing.T) {
+	ht := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	dirty := NewLevelDBDirtyTracker()
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{Journal: journal, DirtyTracker: dirty})
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.StructuredBatchRequest{
+		BatchId: 108,
+		Operations: []hatriecachev1.StructuredCommand{
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP,
+		},
+		Keys:    []string{"profile"},
+		Subkeys: []string{"city", "country"},
+		Values:  [][]byte{[]byte("shared")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil || !response.GetOk() {
+		t.Fatalf("journaled shared-value structured batch = %#v/%v", response, err)
+	}
+	if journal.Sequence() != 2 || dirty.Pending() != 1 {
+		t.Fatalf("shared-value durability state = sequence %d, dirty %d; want 2/1", journal.Sequence(), dirty.Pending())
+	}
+	recovered := newTestTrie(t)
+	sequence, err := journal.Replay(recovered, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	city, cityOK, cityErr := recovered.PeekMapChecked("profile", "city")
+	country, countryOK, countryErr := recovered.PeekMapChecked("profile", "country")
+	if sequence != 2 || cityErr != nil || countryErr != nil || !cityOK || !countryOK || city != "shared" || country != "shared" {
+		t.Fatalf("shared-value replay = sequence %d, city %#v/%v/%v, country %#v/%v/%v", sequence, city, cityOK, cityErr, country, countryOK, countryErr)
+	}
+}
+
+func TestCacheGRPCServerStructuredBatchSharedValueSupportsLocalPartitions(t *testing.T) {
+	ht := newTestTrie(t)
+	if err := ht.ConfigureLocalPartitions(8); err != nil {
+		t.Fatal(err)
+	}
+	client, stop := newTestGRPCClient(t, ht, CacheGRPCOptions{})
+	defer stop()
+	stream, err := client.StructuredBatchStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&hatriecachev1.StructuredBatchRequest{
+		BatchId: 109,
+		Operations: []hatriecachev1.StructuredCommand{
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET,
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET,
+		},
+		Keys:   []string{"members"},
+		Values: [][]byte{[]byte("shared")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil || !response.GetOk() || len(response.GetStatuses()) != 2 || response.GetStatuses()[0] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK || response.GetStatuses()[1] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK {
+		t.Fatalf("partitioned shared-value structured response = %#v/%v", response, err)
 	}
 }
 

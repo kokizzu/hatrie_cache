@@ -82,6 +82,7 @@ func (server *CacheGRPCServer) executeStructuredBatch(ctx context.Context, reque
 	}
 	request = materializeStructuredBatchSharedKey(request)
 	request = materializeStructuredBatchSharedSubkey(request, columns.subkeys)
+	request = materializeStructuredBatchSharedValue(request, columns.values)
 	if server.scalarBatchRequiresCompatibilityPath() {
 		return server.executeStructuredBatchCompatibility(ctx, request)
 	}
@@ -90,6 +91,7 @@ func (server *CacheGRPCServer) executeStructuredBatch(ctx context.Context, reque
 
 type structuredBatchColumns struct {
 	subkeys int
+	values  int
 }
 
 func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchRequest) (structuredBatchColumns, error) {
@@ -138,13 +140,14 @@ func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchReques
 	if len(request.GetSubkeys()) != subkeysNeeded && !(subkeysNeeded > 1 && len(request.GetSubkeys()) == 1) {
 		return columns, errors.New("structured batch subkeys do not match map operations")
 	}
-	if len(request.GetValues()) != valuesNeeded {
+	if len(request.GetValues()) != valuesNeeded && !(valuesNeeded > 1 && len(request.GetValues()) == 1) {
 		return columns, errors.New("structured batch values do not match value operations")
 	}
 	if len(request.GetPriorities()) != prioritiesNeeded {
 		return columns, errors.New("structured batch priorities do not match PUSH_PRIORITY operations")
 	}
 	columns.subkeys = subkeysNeeded
+	columns.values = valuesNeeded
 	return columns, nil
 }
 
@@ -180,6 +183,24 @@ func materializeStructuredBatchSharedSubkey(request *hatriecachev1.StructuredBat
 	}
 	for index := range prepared.Subkeys {
 		prepared.Subkeys[index] = request.Subkeys[0]
+	}
+	return prepared
+}
+
+func materializeStructuredBatchSharedValue(request *hatriecachev1.StructuredBatchRequest, valueCount int) *hatriecachev1.StructuredBatchRequest {
+	if len(request.Values) != 1 || valueCount <= 1 {
+		return request
+	}
+	prepared := &hatriecachev1.StructuredBatchRequest{
+		BatchId:    request.BatchId,
+		Operations: request.Operations,
+		Keys:       request.Keys,
+		Subkeys:    request.Subkeys,
+		Values:     make([][]byte, valueCount),
+		Priorities: request.Priorities,
+	}
+	for index := range prepared.Values {
+		prepared.Values[index] = request.Values[0]
 	}
 	return prepared
 }

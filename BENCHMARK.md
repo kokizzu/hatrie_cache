@@ -275,6 +275,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
 | Current pass | [Shared structured-batch keys](#shared-structured-batch-keys), 10k same-key `PEEK_MAP`, batch 16 | Repeated key column: 805.1 ns/command; 3,362,504 heap B; 64,490 allocs; 36.72 wire B/command | One shared key: 718.6 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | 1.12x faster, 1.28x lower heap, 1.21x fewer allocs, 1.94x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
 | Current pass | [Shared structured-batch subkeys](#shared-structured-batch-subkeys), 10k same-field `PEEK_MAP`, batch 16 | Shared key plus repeated subkeys: 721.8 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | One shared key and subkey: 670.1 ns/command; 2,305,907 heap B; 41,915 allocs; 12.35 wire B/command | 1.08x faster, 1.14x lower heap, 1.27x fewer allocs, 1.53x smaller wire | Additive request form; mixed-version clients retry expanded subkeys after an older server's column-count error |
+| Current pass | [Shared structured-batch values](#shared-structured-batch-values), 10k same-member `HAS_SET`, batch 16 | Shared key plus repeated values: 721.6 ns/command; 2,731,184 heap B; 60,051 allocs; 15.16 wire B/command | One shared key and value: 654.4 ns/command; 2,305,612 heap B; 48,777 allocs; 7.662 wire B/command | 1.10x faster, 1.18x lower heap, 1.23x fewer allocs, 1.98x smaller wire | Additive request form; mixed-version clients retry expanded values after an older server's column-count error |
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
 | Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
@@ -1115,6 +1116,44 @@ added one allocation per shared-key-only envelope. Splitting the helpers
 restored the shipped shared-key control exactly. Older servers reject a shared
 subkey for multiple map operations; mixed-version clients can retry with the
 expanded column.
+
+<a id="shared-structured-batch-values"></a>
+#### Shared Structured-Batch Values
+
+Repeated-value envelopes can now send one `StructuredBatchRequest.values`
+entry when at least two operations consume the same immutable bytes. The server
+expands only the `[][]byte` headers; every entry references the one decoded
+payload without copying it. This works across map writes, slice pushes, set
+operations, and priority-queue pushes, including interleaved command families.
+Positional requests, protobuf fields, value ownership, and persistent formats
+are unchanged.
+
+Tests were written against the rejecting validator before implementation. They
+cover mixed command families, stray-value rejection, journal replay, dirty
+tracking, local partitions, and positional values. Focused tests passed 20
+repetitions; the shared-column race fixture passed five repetitions.
+
+```sh
+make run CMD='env HATRIE_BIG_WINS_OPS=10000 go test . -run=NONE -bench="BenchmarkBigWins/StructuredBatchStreamSharedValue(Repeated)?\\z" -benchmem -benchtime=5x -count=15 -cpu=1'
+```
+
+Both rows are 15-run medians from one binary and the same 10,000-command,
+16-command-envelope `HAS_SET` fixture. Both already send one shared key; only
+the value representation changes.
+
+| Value column | ns/command | Heap B/10k | Allocs/10k | Wire B/command | Improvement |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Sixteen repeated value entries | 721.6 | 2,731,184 | 60,051 | 15.16 | baseline |
+| One shared value entry | 654.4 | 2,305,612 | 48,777 | 7.662 | 1.10x CPU, 1.18x heap, 1.23x allocations, 1.98x wire |
+
+The existing shared-key/subkey control retained exactly 2,305,907 heap B and
+41,915 allocations per 10k commands; its current 664.2 ns/command median
+overlaps the prior 670.1 ns measurement. An eight-pair alternating `100x`
+control compared ordinary positional requests with the exact `5ac1105` binary:
+the baseline and final medians were 929.8 and 920.4 ns/command, both with
+77,606 allocations and effectively identical heap. Older servers reject one
+value for multiple consuming operations; mixed-version clients can retry with
+the expanded column.
 
 <a id="go-1265-toolchain-refresh"></a>
 #### Go 1.26.5 Toolchain Refresh
