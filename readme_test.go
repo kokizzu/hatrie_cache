@@ -376,6 +376,21 @@ func TestDocsDescribeNarrowPriorityRequestParsing(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeCarriedExpirationUpdateIndex(t *testing.T) {
+	for _, path := range []string{"README.md", "BENCHMARK.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		doc := string(data)
+		for _, token := range []string{"Carried expiration update index", "225.0 to 199.8 ns"} {
+			if !strings.Contains(doc, token) {
+				t.Fatalf("%s missing carried expiration index token %q", path, token)
+			}
+		}
+	}
+}
+
 func TestDocsDescribeGenericBloomScalarAdditions(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

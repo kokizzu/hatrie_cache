@@ -5603,27 +5603,44 @@ func (ht *HatTrie) expireAtLocked(key string, at time.Time) (bool, bool) {
 
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
-	if ht.expireIfNeededLocked(key, hval) {
-		return false, false
+	expirationIndex, hasExpiration := ht.expirationIndexLocked(key)
+	if hasExpiration && !ht.currentTime().Before(ht.expirations[expirationIndex].at) {
+		if ht.deleteKnownLocked(key, hval) {
+			ht.recordExpirationLocked(key)
+			return false, false
+		}
 	}
 	if !ht.currentTime().Before(at) {
 		deleted := ht.deleteKnownLocked(key, hval)
 		return deleted, deleted
 	}
 
-	ht.setExpirationLocked(key, at, rawPtr, hval)
+	if hasExpiration {
+		ht.setExpirationAtIndexLocked(key, at, rawPtr, hval, expirationIndex)
+	} else {
+		ht.setExpirationLocked(key, at, rawPtr, hval)
+	}
 	return true, false
 }
 
 func (ht *HatTrie) setExpirationLocked(key string, at time.Time, rawPtr *C.value_t, hval HatValue) HatValue {
 	if index, ok := ht.expires[key]; ok {
-		ht.expirations.Update(key, at, int(index), ht.expires)
+		return ht.setExpirationAtIndexLocked(key, at, rawPtr, hval, int(index))
 	} else {
 		if ht.expires == nil {
 			ht.expires = make(map[string]uint32)
 		}
 		ht.expirations.Push(expirationEntry{key: key, at: at}, ht.expires)
 	}
+	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
+	if rawPtr != nil {
+		*rawPtr = hval.toValue()
+	}
+	return hval
+}
+
+func (ht *HatTrie) setExpirationAtIndexLocked(key string, at time.Time, rawPtr *C.value_t, hval HatValue, index int) HatValue {
+	ht.expirations.Update(key, at, index, ht.expires)
 	hval.Flags |= 1 << DATAVALUE_TTL_BIT_SHIFT
 	if rawPtr != nil {
 		*rawPtr = hval.toValue()
@@ -5671,12 +5688,20 @@ func (ht *HatTrie) expireIfNeededLocked(key string, hval HatValue) bool {
 }
 
 func (ht *HatTrie) expirationAtLocked(key string) (time.Time, bool) {
-	position, ok := ht.expires[key]
-	index := int(position)
-	if !ok || index < 0 || index >= len(ht.expirations) || ht.expirations[index].key != key {
+	index, ok := ht.expirationIndexLocked(key)
+	if !ok {
 		return time.Time{}, false
 	}
 	return ht.expirations[index].at, true
+}
+
+func (ht *HatTrie) expirationIndexLocked(key string) (int, bool) {
+	position, ok := ht.expires[key]
+	index := int(position)
+	if !ok || index < 0 || index >= len(ht.expirations) || ht.expirations[index].key != key {
+		return 0, false
+	}
+	return index, true
 }
 
 func (ht *HatTrie) expirationTimeLocked(key string) time.Time {

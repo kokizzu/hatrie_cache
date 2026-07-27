@@ -1231,6 +1231,10 @@ The follow-up [linear expiration-index rebuild](BENCHMARK.md#linear-expiration-i
 copies the already-valid right-sized heap and fills each map position directly,
 removing another measured 1% of 10,000-TTL compaction time without changing
 heap or allocation cost.
+Carried expiration update index reuse avoids looking up an already-validated
+TTL position again. Existing equal/later deadline updates improve 1.26x/1.19x,
+and the public command improves from 225.0 to 199.8 ns with unchanged memory;
+see the [TTL update measurements](BENCHMARK.md#carried-expiration-update-index).
 Comparator and known-position removal follow-ups were also measured and
 rejected because they slowed valid equal-deadline or ordinary write paths; see
 the [expiration comparison](BENCHMARK.md#expiration-time-comparison-rollback),
