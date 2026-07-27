@@ -323,6 +323,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Two-command native scalar routing",
 		"64 KiB WAL staging",
 		"Known-position expiration removal",
+		"Single-pass expiration time comparison",
 		"Replication constructor flag",
 		"Mixed-page compact descriptors",
 		"Ten-page replication aggregation",

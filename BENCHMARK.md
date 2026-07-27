@@ -428,6 +428,7 @@ tree.
 | Online generational compaction | Shortened maximum reader pause 9.40x and reduced retained backing/heap 13.17x/5.36x | Total compaction was 1.54x slower, transient heap 6.80x higher, and allocations 2.67x higher | Reverted in `c3085d2`; see [online generational compaction](#online-generational-compaction-rollback) |
 | Packed-string compaction | Reduced retained heap 3.79% and retained objects 800x | Cumulative allocation was 10.71x higher, peak RSS 1.30x higher, and forced GC 1.81x slower | Reverted in `0f4adc3`; see [string compaction allocation](#string-compaction-allocation-rollback) |
 | Known-position expiration removal | Intended to remove a duplicate expiration-index lookup when clearing an existing TTL and when vacuuming the known heap root | Direct delegation made the mixed-write profile 1.025x slower; the refined path was only 1.011x faster cross-binary, while same-binary existing clears were 1.008x slower and no-TTL `SET` was 1.007x slower | Both candidates and their temporary benchmark were removed; see [expiration removal lookup rollback](#expiration-removal-lookup-rollback) |
+| Single-pass expiration time comparison | Plain `time.Time.Compare` made earlier/later primitive comparisons 1.44x/1.47x faster and an increasing-deadline heap build 1.027x faster | The same candidate made an equal-deadline sift-heavy heap 1.014x slower; two equality-first hybrids erased the distinct-deadline gain or exceeded the inlining budget and made the direct earlier control 1.021x slower | All comparator candidates and temporary fixtures were removed; the original `Equal` plus `Before` ordering remains; see [expiration time comparison rollback](#expiration-time-comparison-rollback) |
 | Replication constructor flag | Avoided deriving invariant scan mode after construction | Added one 704-byte allocation | Removed; mode uses an existing byte; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Mixed-page compact descriptors | Tried to keep mixed SET/delete repair pages in the compact layout | Added 17% transient heap | Replaced by selecting generic compatibility storage before descriptor allocation; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Ten-page replication aggregation | Reduced request count beyond the retained two-page cap | Could stage ten unusually large pages before splitting | Removed to preserve bounded memory; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -3494,6 +3495,49 @@ make run CMD='go test . -run=TestExpirationHeap -count=10'
 make run CMD='go test . -run=TestVacuum -count=10'
 make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/MixedWriteHeavy100 -benchmem -benchtime=1s -count=7'
 make run CMD='go test . -run=NONE -bench=BenchmarkCommandFeature/StringSet -benchmem -benchtime=1s -count=7'
+```
+
+<a id="expiration-time-comparison-rollback"></a>
+##### Expiration Time Comparison Rollback
+
+Expiration heap ordering first compares deadlines and then keys so equal
+deadlines remain deterministic. The established comparator calls
+`time.Time.Equal`, calls `Before` only for unequal instants, and compares keys
+only for equal instants. A single `time.Time.Compare` looked attractive because
+unequal deadlines would traverse the time representation once instead of
+twice.
+
+A pre-change test covered earlier and later instants, equal-deadline key order,
+and equal instants represented with different locations. It passed ten times
+before each candidate. The frozen primitive medians were 5.623 ns for equal,
+5.078 ns for earlier, and 5.014 ns for later comparisons, all with zero heap
+and allocations. Plain `Compare` reduced the unequal medians to 3.523 and
+3.400 ns, or 1.44x and 1.47x faster.
+
+The complete paired heap control prewarmed and reused two 10,000-entry heaps
+and index maps, alternated candidate/control order in one binary, and changed
+only the comparator. Increasing distinct deadlines improved from 40.220 to
+39.145 ns/entry, or 1.027x. Equal deadlines inserted in descending key order
+instead regressed from 562.65 to 570.25 ns/entry, or 1.014x. This is a valid
+common workload because many callers schedule multiple keys for the same
+absolute deadline.
+
+An exact-`time.Time` equality check before `Compare` retained only a 1.016x
+increasing-deadline gain and still made the equal-deadline heap about 1.01x
+slower. A final `Equal`-then-`Compare` formulation looked neutral in the
+callback fixture, but compiler diagnostics showed that production
+`expirationEntry.before` grew to cost 134 against the inlining budget of 80.
+Its warmed direct earlier control was 5.159 ns versus 5.052 ns in the frozen
+implementation, or 1.021x slower.
+
+The pure candidate traded one valid workload for another, while both hybrids
+removed the worthwhile gain or introduced a production regression. All code,
+correctness fixtures, and temporary benchmarks were removed. Heap ordering,
+TTL behavior, memory, wire, storage, and persistence remain exactly as before.
+
+```sh
+make run CMD='go test . -run=TestExpirationHeap -count=10'
+make run CMD='go test . -run=TestVacuum -count=10'
 ```
 
 <a id="validated-bounded-key-stat-compaction"></a>
