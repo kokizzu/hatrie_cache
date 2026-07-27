@@ -5472,6 +5472,10 @@ func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 					if got != want {
 						t.Fatalf("%d owners online=%v source=%q target=%q direct=%v, materialized=%v", ownerCount, online, source, target, got, want)
 					}
+					indexedGot := replicationRouteTargetsNodeIndexedControl(routing, route, source, target)
+					if indexedGot != want {
+						t.Fatalf("%d owners online=%v source=%q target=%q indexed=%v, materialized=%v", ownerCount, online, source, target, indexedGot, want)
+					}
 				}
 			}
 		}
@@ -5484,8 +5488,33 @@ func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 			if got != want {
 				t.Fatalf("%d fallback owners target=%q direct=%v, materialized=%v", ownerCount, target, got, want)
 			}
+			indexedGot := replicationRouteTargetsNodeIndexedControl(routing, fallbackRoute, owners[0], target)
+			if indexedGot != want {
+				t.Fatalf("%d fallback owners target=%q indexed=%v, materialized=%v", ownerCount, target, indexedGot, want)
+			}
 		}
 	}
+}
+
+func replicationRouteTargetsNodeIndexedControl(routing replicationRoutingSnapshot, route ElectionKeyRoute, source string, targetNode string) bool {
+	if targetNode == "" || targetNode == source {
+		return false
+	}
+	if routing.online != nil && !routing.online[targetNode] {
+		return false
+	}
+	owners := route.Route.Owners
+	if len(owners) == 0 {
+		owners = routing.owners[route.Route.Shard.ID]
+	}
+	for _, owner := range owners {
+		if owner != targetNode {
+			continue
+		}
+		_, ok := routing.nodes[targetNode]
+		return ok
+	}
+	return false
 }
 
 func replicationRouteTargetsNodeMaterializedControl(routing replicationRoutingSnapshot, route ElectionKeyRoute, source string, targetNode string) bool {

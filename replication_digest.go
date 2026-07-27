@@ -1532,11 +1532,9 @@ func replicationRouteTargetsNode(routing replicationRoutingSnapshot, route Elect
 		owners = routing.owners[route.Route.Shard.ID]
 	}
 	for _, owner := range owners {
-		if owner != targetNode {
-			continue
+		if owner == targetNode {
+			return true
 		}
-		_, ok := routing.nodes[targetNode]
-		return ok
 	}
 	return false
 }

@@ -1889,7 +1889,9 @@ Incoming digest routing uses
 instead of allocating and sorting a complete target slice for each boolean
 check. The common three-owner check is 7.73x faster and removes all 504 heap
 bytes and four allocations; source, online, registered-node, owner-fallback,
-wire, and routing behavior are unchanged.
+wire, and routing behavior are unchanged. Relying on normalized owner
+registration then removes the final redundant node-index probe, making the
+zero-allocation three-owner check another 1.25x faster.
 
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail

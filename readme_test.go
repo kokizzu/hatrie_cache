@@ -193,6 +193,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Election-record status leader lookup](#election-record-status-leader-lookup)",
 		"[Normalized replication target precomputation](#normalized-replication-target-precomputation)",
 		"[Direct replication route membership](#direct-replication-route-membership)",
+		"[Normalized replication route owners](#direct-replication-route-membership)",
 		"73.8% lower",
 		"2.38x faster",
 		"2.42x faster",
@@ -678,11 +679,14 @@ func TestDocsDescribeDirectReplicationRouteMembership(t *testing.T) {
 	}
 	for _, token := range []string{
 		"BenchmarkReplicationRouteTargetsNodeAlternating",
+		"BenchmarkReplicationRouteTargetsNodeValidationAlternating",
 		"TestReplicationRouteTargetsNodeMatchesMaterializedControl",
 		"7.73x faster",
+		"1.25x faster",
 		"19.42x faster",
 		"6,968 B",
 		"all heap and allocations eliminated",
+		"Both direct variants remain zero-allocation",
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing direct replication route-membership token %q", token)

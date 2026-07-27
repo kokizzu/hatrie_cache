@@ -318,6 +318,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Cached replication routing fingerprint](#cached-replication-routing-fingerprint), one/four shards | Rehash: 3,238/7,028.5 ns; 3,920/7,832 heap B; 52/129 allocs | Cached: 1,621.5/3,447.5 ns; 3,032/5,600 heap B; 14/34 allocs | 2.00x/2.04x faster; 1.29x/1.40x lower heap; 3.71x/3.79x fewer allocations | Reuses the fingerprint already computed by validated topology installation; topology cloning, routing maps, wire, and behavior are unchanged |
 | Current pass | [Normalized replication target precomputation](#normalized-replication-target-precomputation), one/four/64 shards | Per-shard duplicate map: 1,436.5/3,591.5/47,579.5 ns; 64 shards: 84,759 B, 403 allocs | Validated owners: 1,395/3,121.5/43,078.5 ns; 64 shards: 84,709 B, 402 allocs | 1.03x/1.15x/1.10x faster; 64 shards use 50 fewer heap bytes and one fewer allocation | Applies only to private snapshots of normalized topology; self, online, existence, and sorted-output filters are unchanged |
 | Current pass | [Direct replication route membership](#direct-replication-route-membership), three-owner remote-source check | Materialize/filter/sort: 330.6 ns; 504 heap B; 4 allocs | Direct owner check: 42.775 ns; 0 heap B; 0 allocs | 7.73x faster; all timed heap and allocations eliminated | Private boolean validation only; source exclusion, online filtering, registered-node validation, explicit/fallback owners, wire, and routing behavior are unchanged |
+| Current pass | [Normalized replication route owners](#direct-replication-route-membership), three-owner remote-source check | Direct plus node-index probe: 37.475 ns | Validated owner match: 29.865 ns | 1.25x faster; zero heap and allocations in both | Every private route owner comes from the validated normalized snapshot; source, online, owner fallback, wire, and behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
 | Current pass | [Bounded lazy outbox restore](#binary-grouped-replication-outbox), 100k jobs | 466.884 ms; 100,000 resident jobs; 415.1 MB heap | 5.019 ms; 1,024 resident jobs; 3.52 MB heap | 93.03x faster, 97.66x fewer resident jobs, 118.0x lower heap | LevelDB pages are lazy; legacy whole-file JSON still loads its file snapshot |
@@ -3511,6 +3512,30 @@ from the isolated old/new sub-benchmarks; the direct path is zero-allocation in
 every run. Source exclusion, online semantics, registered-node validation,
 owner fallback, shard routing, topology ownership, configuration, wire,
 storage, and persistence are unchanged.
+
+A follow-up removes the remaining node-index probe after an owner ID matches.
+Every owner in this private snapshot comes from topology normalization, which
+already rejects empty, duplicate, and unregistered primary or replica IDs. The
+same test matrix compares the normalized-owner result with both the indexed
+direct control and the original materializing control.
+
+```sh
+make run CMD='go test . -run=TestReplicationRouteTargetsNodeMatchesMaterializedControl -count=20'
+make run CMD='go test . -run=NONE -bench=^BenchmarkReplicationRouteTargetsNodeValidationAlternating$$ -benchtime=1000000x -count=10 -cpu=1'
+```
+
+| Ten-run alternating median | Direct plus node-index probe | Normalized owner match | Improvement |
+| --- | ---: | ---: | ---: |
+| Two owners | 36.76 ns | 30.315 ns | 1.21x faster |
+| Three owners | 37.475 ns | 29.865 ns | 1.25x faster |
+| 16 owners | 74.07 ns | 64.74 ns | 1.14x faster |
+| 64 owners | 212.3 ns | 200.75 ns | 1.06x faster |
+
+Both direct variants remain zero-allocation. The removed lookup did not provide
+additional validation for any constructible routing snapshot; public arbitrary
+topologies still pass through topology normalization. Source and online checks,
+explicit and fallback owner selection, shard routing, wire, storage,
+configuration, and persistence are unchanged.
 
 <a id="direct-single-target-digest-inventory"></a>
 #### Direct Single-Target Digest Inventory

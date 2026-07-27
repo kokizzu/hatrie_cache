@@ -2442,6 +2442,34 @@ func BenchmarkReplicationRouteTargetsNodeAlternating(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationRouteTargetsNodeValidationAlternating(b *testing.B) {
+	for _, ownerCount := range []int{2, 3, 16, 64} {
+		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
+			routing, route := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+			source := route.Route.Owners[0]
+			target := route.Route.Owners[len(route.Route.Owners)-1]
+			var indexedDuration, normalizedDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				normalizedFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if normalizedFirst == (pass == 0) {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNode(routing, route, source, target)
+						normalizedDuration += time.Since(started)
+					} else {
+						benchmarkReplicationRouteTargetSink = replicationRouteTargetsNodeIndexedControl(routing, route, source, target)
+						indexedDuration += time.Since(started)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(indexedDuration.Nanoseconds())/float64(b.N), "indexed_ns/check")
+			b.ReportMetric(float64(normalizedDuration.Nanoseconds())/float64(b.N), "normalized_ns/check")
+		})
+	}
+}
+
 func BenchmarkReplicationRouteTargetsNode(b *testing.B) {
 	for _, ownerCount := range []int{2, 3, 16, 64} {
 		routing, route := replicationRouteTargetBenchmarkFixture(b, ownerCount)
