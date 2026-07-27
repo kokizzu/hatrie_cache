@@ -126,23 +126,16 @@ func (tree *fenwickTreeData) Add(index uint64, delta int64) (FenwickTreeUpdate, 
 	if tree == nil || delta == 0 || index >= tree.size || !tree.validShape() {
 		return FenwickTreeUpdate{}, false
 	}
-	if !tree.canAdd(index, delta) {
+	value, prefix, total, ok := tree.prepareAdd(index, delta)
+	if !ok {
 		return FenwickTreeUpdate{}, false
 	}
 	tree.ensureTree()
 	for pos := index + 1; pos <= tree.size; pos += pos & -pos {
 		tree.tree[pos] += delta
 	}
-	tree.total += delta
+	tree.total = total
 	tree.updates = saturatingAddUint64(tree.updates, 1)
-	value, ok := tree.Value(index)
-	if !ok {
-		return FenwickTreeUpdate{}, false
-	}
-	prefix, ok := tree.PrefixSum(index)
-	if !ok {
-		return FenwickTreeUpdate{}, false
-	}
 	update := FenwickTreeUpdate{
 		Index:     index,
 		Delta:     delta,
@@ -231,33 +224,43 @@ func (tree fenwickTreeData) EncodedSize() int64 {
 	return size
 }
 
-func (tree fenwickTreeData) canAdd(index uint64, delta int64) bool {
-	value, ok := tree.Value(index)
-	if !ok {
-		return false
-	}
-	if _, ok := checkedAddFenwickInt64(value, delta); !ok {
-		return false
-	}
+func (tree fenwickTreeData) prepareAdd(index uint64, delta int64) (int64, int64, int64, bool) {
 	prefix, ok := tree.PrefixSum(index)
 	if !ok {
-		return false
+		return 0, 0, 0, false
 	}
-	if _, ok := checkedAddFenwickInt64(prefix, delta); !ok {
-		return false
+	value := prefix
+	if index > 0 {
+		left, ok := tree.PrefixSum(index - 1)
+		if !ok {
+			return 0, 0, 0, false
+		}
+		value, ok = checkedSubFenwickInt64(prefix, left)
+		if !ok {
+			return 0, 0, 0, false
+		}
 	}
-	if _, ok := checkedAddFenwickInt64(tree.total, delta); !ok {
-		return false
+	value, ok = checkedAddFenwickInt64(value, delta)
+	if !ok {
+		return 0, 0, 0, false
+	}
+	prefix, ok = checkedAddFenwickInt64(prefix, delta)
+	if !ok {
+		return 0, 0, 0, false
+	}
+	total, ok := checkedAddFenwickInt64(tree.total, delta)
+	if !ok {
+		return 0, 0, 0, false
 	}
 	if len(tree.tree) == 0 {
-		return true
+		return value, prefix, total, true
 	}
 	for pos := index + 1; pos <= tree.size; pos += pos & -pos {
 		if _, ok := checkedAddFenwickInt64(tree.tree[pos], delta); !ok {
-			return false
+			return 0, 0, 0, false
 		}
 	}
-	return true
+	return value, prefix, total, true
 }
 
 func (tree fenwickTreeData) validShape() bool {

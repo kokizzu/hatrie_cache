@@ -167,6 +167,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Single-fallback slice payload validation](#flat-scalar-sequence-validation)",
 		"[Trailing-fallback whole-sequence validation](#flat-scalar-sequence-validation)",
 		"[Direct Count-Min Sketch row loops](#direct-count-min-sketch-row-loops)",
+		"[Prepared-result Fenwick updates](#prepared-result-fenwick-updates)",
 		"[Compact XOR-filter headers](#compact-xor-filter-headers)",
 		"[Linked XOR-filter build queue](#linked-xor-filter-build-queue)",
 		"[Order-independent XOR-filter build](#order-independent-xor-filter-build)",

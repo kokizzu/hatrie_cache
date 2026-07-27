@@ -223,6 +223,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Trailing-fallback whole-sequence validation](#flat-scalar-sequence-validation), checked replacement with one trailing nested value among 64/4,096 items | Slice: 2,589/128,450 ns; priority queue: 6,693/411,923 ns; 5 allocs | Slice: 1,835/63,606 ns; priority queue: 4,639/233,791 ns; 4 allocs | Slice 1.41x/2.02x faster; priority queue 1.44x/1.76x faster; one fewer allocation | No measured tradeoff; an earlier non-scalar selects the exact prior whole-sequence path with identical heap and allocations |
 | Current pass | [Compact Bloom-filter headers](#compact-bloom-filter-headers), 100k empty filters plus direct operations | 48-byte header; 48.00 retained B/filter; 47.16 ns/filter build; add/has 33.24/52.46 ns | 40-byte header; 40.06 retained B/filter; 41.22 ns/filter build; add/has 32.95/47.37 ns | 1.20x lower retained heap; build/add/has 1.14x/1.01x/1.11x faster | No measured tradeoff; allocations, bitset bytes, hashes, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Direct Count-Min Sketch row loops](#direct-count-min-sketch-row-loops), default depth four | Callback byte estimate/increment: 41.36/43.82 ns; callback plain-string estimate/increment: 24.94/28.34 ns | Direct byte estimate/increment: 34.50/28.14 ns; direct plain-string estimate/increment: 16.20/20.92 ns | Byte paths 1.20x/1.56x faster; exact string paths 1.54x/1.35x faster; zero heap/allocations throughout | No measured runtime tradeoff; complete `ESTCMS` is 1.02x faster and `INCRCMS` is neutral within 0.33%; header, counters, hashes, wire, and persistence are unchanged |
+| Current pass | [Prepared-result Fenwick updates](#prepared-result-fenwick-updates), 1K/1M trees | Re-query after write: 99.11/123.6 ns | Reuse checked result: 40.21/51.86 ns | 2.46x/2.38x faster; lazy first add 1.18x faster; complete `ADDFW` 1.11x faster | No measured tradeoff; heap, allocations, overflow checks, update responses, tree layout, wire, and persistence are unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -5526,6 +5527,47 @@ extra common-path work dominated the occasional reduction in tail copies and
 made the complete API substantially slower. All candidate production code,
 reference tests, and benchmark fixtures were removed; snapshots, estimates,
 wire bytes, storage, and runtime behavior remain unchanged.
+
+<a id="prepared-result-fenwick-updates"></a>
+### Prepared-Result Fenwick Updates
+
+A successful Fenwick-tree `Add` previously queried the point value and prefix
+while checking overflow, traversed the prefix again, updated the tree, then
+queried the point value and prefix again to construct its response. For an
+interior index this performed six prefix traversals around the required
+affected-node overflow check and write loops.
+
+Validation now returns the already checked post-update point value, prefix,
+and total. The write loop consumes those values directly, eliminating one
+pre-write and three post-write prefix traversals. Every checked addition and
+subtraction, affected-node overflow check, update order, lazy allocation, zero
+compaction, and saturating update count remains unchanged.
+
+Tests were added before the implementation. They compare each response with
+post-update point and prefix queries, prove failed overflow leaves the exact
+snapshot unchanged, and compare 10,000 deterministic randomized operations
+plus integer boundaries against a test-only copy of the former traversal
+algorithm.
+
+```sh
+make bench-fenwick-add BENCHTIME=500ms COUNT=7
+```
+
+Direct rows are seven fixed one-second runs on one logical CPU. Lazy first-add
+rows run both implementations in the same final binary. The complete command
+row is the median of 12 alternating original/final process pairs with two
+million operations each.
+
+| Fenwick update workload | Traversal baseline | Prepared result | Improvement |
+| --- | ---: | ---: | ---: |
+| Existing value, size 1K | 99.11 ns; 0 B; 0 allocs | 40.21 ns; 0 B; 0 allocs | 2.46x faster |
+| Existing value, size 1M | 123.6 ns; 0 B; 0 allocs | 51.86 ns; 0 B; 0 allocs | 2.38x faster |
+| Lazy first add, size 1K | 1,431 ns; 9,472 B; 1 alloc | 1,215 ns; 9,472 B; 1 alloc | 1.18x faster |
+| Complete `ADDFW` | 553.95 ns; 95 B; 1 alloc | 498.05 ns; 95 B; 1 alloc | 1.11x faster |
+
+The private and public structures, backing array, numerical behavior,
+snapshots, command output, wire encoding, storage encoding, and persistent
+formats are unchanged.
 
 <a id="xor-filter-scalar-fast-path"></a>
 ### XOR Filter Scalar Fast Path
