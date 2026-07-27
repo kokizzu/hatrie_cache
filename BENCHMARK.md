@@ -429,6 +429,7 @@ tree.
 | Packed-string compaction | Reduced retained heap 3.79% and retained objects 800x | Cumulative allocation was 10.71x higher, peak RSS 1.30x higher, and forced GC 1.81x slower | Reverted in `0f4adc3`; see [string compaction allocation](#string-compaction-allocation-rollback) |
 | Known-position expiration removal | Intended to remove a duplicate expiration-index lookup when clearing an existing TTL and when vacuuming the known heap root | Direct delegation made the mixed-write profile 1.025x slower; the refined path was only 1.011x faster cross-binary, while same-binary existing clears were 1.008x slower and no-TTL `SET` was 1.007x slower | Both candidates and their temporary benchmark were removed; see [expiration removal lookup rollback](#expiration-removal-lookup-rollback) |
 | Single-pass expiration time comparison | Plain `time.Time.Compare` made earlier/later primitive comparisons 1.44x/1.47x faster and an increasing-deadline heap build 1.027x faster | The same candidate made an equal-deadline sift-heavy heap 1.014x slower; two equality-first hybrids erased the distinct-deadline gain or exceeded the inlining budget and made the direct earlier control 1.021x slower | All comparator candidates and temporary fixtures were removed; the original `Equal` plus `Before` ordering remains; see [expiration time comparison rollback](#expiration-time-comparison-rollback) |
+| Single-pass expiration update direction | One `time.Time.Compare` made equal updates 1.28x faster; preserving `Before` and replacing only `After` made equal updates 1.019x faster with neutral earlier updates | One `Compare` made earlier updates 1.08x slower; the refined candidate made later updates 1.011x slower and the public TTL-extension path was neutral | Both direction selectors and their temporary fixture were removed; the original `Before` then `After` update remains; see [expiration update direction rollback](#expiration-update-direction-rollback) |
 | Replication constructor flag | Avoided deriving invariant scan mode after construction | Added one 704-byte allocation | Removed; mode uses an existing byte; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Mixed-page compact descriptors | Tried to keep mixed SET/delete repair pages in the compact layout | Added 17% transient heap | Replaced by selecting generic compatibility storage before descriptor allocation; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Ten-page replication aggregation | Reduced request count beyond the retained two-page cap | Could stage ten unusually large pages before splitting | Removed to preserve bounded memory; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -3538,6 +3539,45 @@ TTL behavior, memory, wire, storage, and persistence remain exactly as before.
 ```sh
 make run CMD='go test . -run=TestExpirationHeap -count=10'
 make run CMD='go test . -run=TestVacuum -count=10'
+```
+
+<a id="expiration-update-direction-rollback"></a>
+##### Expiration Update Direction Rollback
+
+Updating an existing TTL stores the new deadline, then repairs the indexed heap
+upward for an earlier instant, downward for a later instant, or not at all for
+an equal instant. The established direction check uses `Before` followed by
+`After`, so equal and later updates appeared to offer a redundant second time
+comparison that could be collapsed.
+
+A pre-change test directly moved a heap entry earlier, updated it to the same
+instant represented in another location, moved it later, and checked every heap
+parent and index after each operation. It passed ten times before production
+changes. A frozen binary measured direct earlier/equal/later updates at
+7.920/8.997/10.225 ns with zero heap and allocations. The complete public
+later-update loop measured 163.4 ns with one bounded heap entry and zero heap or
+allocations.
+
+The first candidate switched once on `time.Time.Compare`. Equal updates fell to
+7.028 ns, or 1.28x faster, and later updates also improved, but earlier updates
+rose to 8.580 ns, or 1.08x slower. The candidate was replaced rather than
+trading update directions.
+
+The refined candidate retained the exact original `Before` branch and replaced
+only `After` with `!Equal`. Earlier updates remained neutral at 7.918 ns and
+equal updates improved to 8.830 ns, or 1.019x. A longer later-only confirmation
+measured 10.335 ns versus 10.225 ns frozen, or 1.011x slower. The public
+TTL-extension median was effectively unchanged at 163.3 versus 163.4 ns, so no
+complete-path gain justified slowing the ordinary later direction.
+
+Both candidates and the temporary correctness/benchmark file were removed.
+Expiration update direction, heap repair, index handling, memory, wire, storage,
+and persistence remain unchanged.
+
+```sh
+make run CMD='go test . -run=TestExpirationHeapIndexesStayConsistentAcrossUpdatesAndRemovals -count=10'
+make run CMD='go test . -run=TestVacuumExpiredSkipsStaleExpirationEntries -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkBigWins/ExpirationDeadlineUpdate -benchmem -benchtime=1s -count=10'
 ```
 
 <a id="validated-bounded-key-stat-compaction"></a>

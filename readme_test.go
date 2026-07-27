@@ -324,6 +324,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"64 KiB WAL staging",
 		"Known-position expiration removal",
 		"Single-pass expiration time comparison",
+		"Single-pass expiration update direction",
 		"Replication constructor flag",
 		"Mixed-page compact descriptors",
 		"Ten-page replication aggregation",
