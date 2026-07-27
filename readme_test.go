@@ -191,6 +191,7 @@ func TestBenchmarkMarkdownSummarizesMeasuredImprovements(t *testing.T) {
 		"[Live gRPC micro-batching](#pipelined-live-grpc-replication)",
 		"[Bounded lazy outbox restore](#binary-grouped-replication-outbox)",
 		"[Election-record status leader lookup](#election-record-status-leader-lookup)",
+		"[Normalized replication target precomputation](#normalized-replication-target-precomputation)",
 		"73.8% lower",
 		"2.38x faster",
 		"2.42x faster",
@@ -628,6 +629,34 @@ func TestDocsDescribeCachedReplicationRoutingFingerprint(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing cached topology fingerprint token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeNormalizedReplicationTargetPrecomputation(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[normalized target precomputation](BENCHMARK.md#normalized-replication-target-precomputation)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing normalized replication-target token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkPrecomputedReplicationTargetsDedupAlternating",
+		"TestPrecomputedReplicationTargetsMatchDeduplicatingControl",
+		"1.15x faster",
+		"1.10x faster",
+		"50 fewer heap bytes",
+		"one fewer allocation",
+		"duplicate primary/replica owners",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing normalized replication-target token %q", token)
 		}
 	}
 }

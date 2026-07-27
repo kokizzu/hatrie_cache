@@ -1875,6 +1875,15 @@ shard and 2.04x faster for four shards, with 3.71x-3.79x fewer allocations.
 Topology cloning, routing maps, target ordering, configuration, wire, storage,
 and public behavior are unchanged.
 
+Per-shard targets also use
+[normalized target precomputation](BENCHMARK.md#normalized-replication-target-precomputation):
+validated topology already forbids duplicate primary/replica owners, so the
+private snapshot builder no longer creates a redundant duplicate map for each
+shard. Complete four/64-shard snapshots are 1.15x/1.10x faster; the 64-shard
+fixture uses 50 fewer heap bytes and one fewer allocation. Self exclusion,
+online filtering, node validation, target ordering, wire, and storage remain
+unchanged.
+
 If a stream cannot be opened or fails in transit, sync falls back to the
 existing HTTP path by default. Set `REPLICATION_HTTP_FALLBACK=false` to fail
 closed instead. For 10,000 live writes from 32 callers, zero-wait

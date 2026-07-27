@@ -2391,6 +2391,7 @@ func BenchmarkReplicationRoutingSnapshotConstruction(b *testing.B) {
 				},
 			},
 		},
+		{name: "SixtyFourShards", topology: replicationRoutingBenchmarkTopology(64)},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
 			store, err := NewTopologyStore(tt.topology)
@@ -2406,6 +2407,64 @@ func BenchmarkReplicationRoutingSnapshotConstruction(b *testing.B) {
 				benchmarkReplicationRoutingSnapshotSink = snapshot
 			}
 		})
+	}
+}
+
+var benchmarkReplicationTargetsSink []TopologyNode
+
+func BenchmarkPrecomputedReplicationTargetsDedupAlternating(b *testing.B) {
+	for _, ownerCount := range []int{2, 3, 64} {
+		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
+			nodes := make(map[string]TopologyNode, ownerCount)
+			owners := make([]string, ownerCount)
+			for index := range owners {
+				owners[index] = fmt.Sprintf("node-%03d", index)
+				nodes[owners[index]] = TopologyNode{ID: owners[index], Address: "http://" + owners[index]}
+			}
+			var directDuration, deduplicatingDuration time.Duration
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				directFirst := iteration&1 != 0
+				for pass := 0; pass < 2; pass++ {
+					started := time.Now()
+					if directFirst == (pass == 0) {
+						benchmarkReplicationTargetsSink = precomputedNormalizedReplicationTargets(owners, nodes, nil, "node-000")
+						directDuration += time.Since(started)
+					} else {
+						benchmarkReplicationTargetsSink = precomputedReplicationTargetsDeduplicatingControl(owners, nodes, nil, "node-000")
+						deduplicatingDuration += time.Since(started)
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(deduplicatingDuration.Nanoseconds())/float64(b.N), "dedup_ns/targets")
+			b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/targets")
+		})
+	}
+}
+
+func replicationRoutingBenchmarkTopology(size int) ClusterTopology {
+	nodes := make([]TopologyNode, size)
+	shards := make([]TopologyShard, size)
+	for index := range nodes {
+		nodes[index] = TopologyNode{
+			ID:      fmt.Sprintf("node-%03d", index),
+			Address: fmt.Sprintf("http://node-%03d", index),
+		}
+	}
+	for index := range shards {
+		shards[index] = TopologyShard{
+			ID:       uint32(index),
+			Primary:  nodes[index].ID,
+			Replicas: []string{nodes[(index+1)%size].ID, nodes[(index+2)%size].ID},
+		}
+	}
+	return ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Self:    nodes[0].ID,
+		Nodes:   nodes,
+		Shards:  shards,
 	}
 }
 

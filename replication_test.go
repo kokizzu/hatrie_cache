@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -5483,6 +5484,57 @@ func TestReplicationRoutingSnapshotReusesPrecomputedTargets(t *testing.T) {
 	if &first[0] != &second[0] {
 		t.Fatalf("target backing arrays differ: %p != %p, want immutable snapshot reuse", &first[0], &second[0])
 	}
+}
+
+func TestPrecomputedReplicationTargetsMatchDeduplicatingControl(t *testing.T) {
+	store, err := NewTopologyStore(replicationRoutingBenchmarkTopology(64))
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	topology := store.Get()
+	nodes := topologyNodesByID(topology)
+	for _, self := range []string{"", "node-000", "node-031"} {
+		for _, online := range []map[string]bool{
+			nil,
+			{"node-001": true, "node-002": false, "node-003": true},
+		} {
+			for _, shard := range topology.Shards {
+				owners := routeOwners(shard)
+				got := precomputedNormalizedReplicationTargets(owners, nodes, online, self)
+				want := precomputedReplicationTargetsDeduplicatingControl(owners, nodes, online, self)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("targets for shard %d self=%q online=%v = %#v, want %#v", shard.ID, self, online, got, want)
+				}
+			}
+		}
+	}
+}
+
+func precomputedReplicationTargetsDeduplicatingControl(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
+	targets := make([]TopologyNode, 0, len(owners))
+	seen := make(map[string]struct{}, len(owners))
+	for _, nodeID := range owners {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || nodeID == self {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		if online != nil && !online[nodeID] {
+			continue
+		}
+		node, ok := nodes[nodeID]
+		if !ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		targets = append(targets, node)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
 }
 
 func TestReplicationSyncPayloadGroupsStayCompactWhenSplit(t *testing.T) {

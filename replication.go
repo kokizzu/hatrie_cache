@@ -2482,7 +2482,7 @@ func newReplicationRoutingSnapshot(self string, topologyStore *TopologyStore, el
 	for _, shard := range snapshot.shards {
 		owners := routeOwners(shard)
 		snapshot.owners[shard.ID] = owners
-		snapshot.targets[shard.ID] = precomputedReplicationTargets(owners, snapshot.nodes, snapshot.online, snapshot.self)
+		snapshot.targets[shard.ID] = precomputedNormalizedReplicationTargets(owners, snapshot.nodes, snapshot.online, snapshot.self)
 		if election != nil {
 			snapshot.leaders[shard.ID] = electShardLeader(shard, snapshot.online)
 			continue
@@ -2567,15 +2567,11 @@ func (snapshot replicationRoutingSnapshot) replicationTargets(route ElectionKeyR
 	return targets
 }
 
-func precomputedReplicationTargets(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
+func precomputedNormalizedReplicationTargets(owners []string, nodes map[string]TopologyNode, online map[string]bool, self string) []TopologyNode {
 	targets := make([]TopologyNode, 0, len(owners))
-	seen := make(map[string]struct{}, len(owners))
 	for _, nodeID := range owners {
 		nodeID = strings.TrimSpace(nodeID)
 		if nodeID == "" || nodeID == self {
-			continue
-		}
-		if _, ok := seen[nodeID]; ok {
 			continue
 		}
 		if online != nil && !online[nodeID] {
@@ -2585,7 +2581,6 @@ func precomputedReplicationTargets(owners []string, nodes map[string]TopologyNod
 		if !ok {
 			continue
 		}
-		seen[nodeID] = struct{}{}
 		targets = append(targets, node)
 	}
 	sort.Slice(targets, func(i, j int) bool {
