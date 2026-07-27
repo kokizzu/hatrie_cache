@@ -10,6 +10,7 @@ artifact_dir=${BENCHMARK_ARTIFACT_DIR:-${HATRIE_BENCHMARK_ARTIFACT_DIR:-}}
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/hatrie-command-bench.XXXXXX")
 binary="$tmp_dir/hatrie_cache.test"
 output_file="$tmp_dir/output.txt"
+normalized_output_file="$tmp_dir/output.normalized.txt"
 time_file="$tmp_dir/time.txt"
 raw_file=
 rows_tsv=
@@ -63,6 +64,11 @@ record_benchmark_rows() {
 	' "$output_file" >>"$rows_tsv"
 }
 
+normalize_output_file() {
+	sed 's/[[:space:]]*$//' "$output_file" >"$normalized_output_file"
+	mv "$normalized_output_file" "$output_file"
+}
+
 go test -c -o "$binary" .
 
 emit 'HAT-trie benchmark: bench=%s benchtime=%s count=%s pipeline_ops=%s mixed_profile_ops=%s\n\n' "$bench" "${benchtime:-default}" "$count" "$pipeline_ops" "$mixed_profile_ops"
@@ -83,6 +89,7 @@ if [ -x /usr/bin/time ]; then
 			"$0" -test.run "^$" -test.bench "$2" -test.benchmem -test.count "$3"
 		fi
 	' "$binary" "$benchtime" "$bench" "$count" >"$output_file" 2>"$time_file"
+	normalize_output_file
 	cat "$output_file"
 	if [ -n "$raw_file" ]; then
 		cat "$output_file" >>"$raw_file"
@@ -101,6 +108,7 @@ if [ -x /usr/bin/time ]; then
 	fi
 else
 	run_benchmark >"$output_file"
+	normalize_output_file
 	cat "$output_file"
 	if [ -n "$raw_file" ]; then
 		cat "$output_file" >>"$raw_file"

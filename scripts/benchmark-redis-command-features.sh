@@ -17,6 +17,27 @@ raw_file=
 rows_tsv=
 memory_tsv=
 
+redis_benchmark_qps() {
+	awk -F, '
+		NF < 8 { exit 1 }
+		{
+			value = $(NF - 6)
+			gsub(/"/, "", value)
+			if (value != "inf" && value !~ /^[0-9]+([.][0-9]+)?$/) {
+				exit 1
+			}
+			print value
+		}
+	'
+}
+
+case "${REDIS_BENCHMARK_PARSE_CSV_ONLY:-0}" in
+	1|true|yes)
+		redis_benchmark_qps
+		exit
+		;;
+esac
+
 if [ -n "$artifact_dir" ]; then
 	mkdir -p "$artifact_dir"
 	raw_file="$artifact_dir/redis-command-features.md"
@@ -66,11 +87,13 @@ if ! redis_ready; then
 	esac
 fi
 
+redis_version=$(redis-cli -h "$host" -p "$port" INFO server | tr -d '\r' | awk -F: '$1 == "redis_version" { print $2 }')
+
 run_redis_benchmark() {
 	feature=$1
 	shift
 	output=$(redis-benchmark -h "$host" -p "$port" -n "$requests" -c "$clients" -r "$keyspace" --csv "$@" | tail -n 1)
-	qps=$(printf '%s\n' "$output" | awk -F, '{ value = $2; gsub(/"/, "", value); print value }')
+	qps=$(printf '%s\n' "$output" | redis_benchmark_qps)
 	seconds_10k=$(awk -v qps="$qps" 'BEGIN { if (qps <= 0) { print "0.000000"; } else { printf "%.6f", 10000 / qps } }')
 	emit '| %s | `%s` | %.2f req/s | %s s |\n' "$feature" "$*" "$qps" "$seconds_10k"
 	if [ -n "$rows_tsv" ]; then
@@ -82,7 +105,7 @@ run_redis_pipeline_benchmark() {
 	feature=$1
 	shift
 	output=$(redis-benchmark -h "$host" -p "$port" -n "$requests" -c "$clients" -r "$keyspace" -P "$pipeline" --csv "$@" | tail -n 1)
-	qps=$(printf '%s\n' "$output" | awk -F, '{ value = $2; gsub(/"/, "", value); print value }')
+	qps=$(printf '%s\n' "$output" | redis_benchmark_qps)
 	seconds_10k=$(awk -v qps="$qps" 'BEGIN { if (qps <= 0) { print "0.000000"; } else { printf "%.6f", 10000 / qps } }')
 	command="-P $pipeline $*"
 	emit '| %s | `%s` | %.2f req/s | %s s |\n' "$feature" "$command" "$qps" "$seconds_10k"
@@ -96,7 +119,7 @@ run_redis_lua_profile_benchmark() {
 	ops_per_cycle=$2
 	script=$3
 	output=$(redis-benchmark -h "$host" -p "$port" -n "$requests" -c "$clients" --csv EVAL "$script" 0 "$prefix" | tail -n 1)
-	qps=$(printf '%s\n' "$output" | awk -F, '{ value = $2; gsub(/"/, "", value); print value }')
+	qps=$(printf '%s\n' "$output" | redis_benchmark_qps)
 	seconds_10k=$(awk -v qps="$qps" -v ops="$ops_per_cycle" 'BEGIN { if (qps <= 0 || ops <= 0) { print "0.000000"; } else { printf "%.6f", 10000 / (qps * ops) } }')
 	command="EVAL ${ops_per_cycle}op profile"
 	emit '| %s | `%s` | %.2f req/s | %s s |\n' "$feature" "$command" "$qps" "$seconds_10k"
@@ -124,7 +147,7 @@ while [ "$mixed_idx" -le "$mixed_profile_ops" ]; do
 done
 redis-cli -h "$host" -p "$port" SET "$prefix:mixed:counter" 0 >/dev/null
 
-emit 'Redis benchmark: host=%s port=%s requests=%s clients=%s keyspace=%s pipeline=%s mixed_profile_ops=%s\n\n' "$host" "$port" "$requests" "$clients" "$keyspace" "$pipeline" "$mixed_profile_ops"
+emit 'Redis %s benchmark: host=%s port=%s requests=%s clients=%s keyspace=%s pipeline=%s mixed_profile_ops=%s\n\n' "${redis_version:-unknown}" "$host" "$port" "$requests" "$clients" "$keyspace" "$pipeline" "$mixed_profile_ops"
 emit '| Feature family | Redis command | Throughput | Seconds / 10k ops |\n'
 emit '| --- | --- | ---: | ---: |\n'
 run_redis_benchmark 'String write' SET "$prefix:string" value

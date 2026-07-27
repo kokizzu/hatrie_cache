@@ -2,9 +2,27 @@ package hatriecache
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
+
+func TestRedisCommandBenchmarkParsesThroughputAfterEmbeddedLuaCommas(t *testing.T) {
+	input := strings.Join([]string{
+		`"SET key value","18867.93","0.252","0.248","0.255","0.255","0.255","0.255"`,
+		`"EVAL return redis.call("SET","a","b") 0","1000.00","0.260","0.256","0.263","0.263","0.263","0.263"`,
+	}, "\n") + "\n"
+	command := exec.Command("sh", "scripts/benchmark-redis-command-features.sh")
+	command.Env = append(os.Environ(), "REDIS_BENCHMARK_PARSE_CSV_ONLY=1")
+	command.Stdin = strings.NewReader(input)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Redis benchmark parser error = %v: %s", err, output)
+	}
+	if got, want := string(output), "18867.93\n1000.00\n"; got != want {
+		t.Fatalf("Redis benchmark parsed throughput = %q, want %q", got, want)
+	}
+}
 
 func TestBenchmarkSerializationScriptIncludesDocumentedStructuredJournalBenches(t *testing.T) {
 	data, err := os.ReadFile("scripts/benchmark-serialization.sh")

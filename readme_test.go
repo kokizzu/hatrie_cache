@@ -107,11 +107,35 @@ func TestBenchmarkMarkdownTracksExecuteCommand(t *testing.T) {
 		"HAT-trie vs Tarantool",
 		"HAT-trie vs Redis",
 		"Raw Tarantool Result",
-		"Tarantool benchmark: version=2.6.0-0-g47aa4e01e requests=1000000 keyspace=10000",
+		"Tarantool 2.6.0-0-g47aa4e01e benchmark: requests=1000000 keyspace=10000",
 		"`SET`",
 	} {
 		if !strings.Contains(doc, token) {
 			t.Fatalf("BENCHMARK.md missing comparison/source token %q", token)
+		}
+	}
+}
+
+func TestGeneratedCommandBenchmarkComparisonDoesNotOwnManualSections(t *testing.T) {
+	data, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	doc := string(data)
+	start := strings.Index(doc, "<!-- BEGIN GENERATED COMMAND BENCHMARK COMPARISON -->")
+	end := strings.Index(doc, "<!-- END GENERATED COMMAND BENCHMARK COMPARISON -->")
+	if start < 0 || end <= start {
+		t.Fatal("BENCHMARK.md has invalid generated command comparison markers")
+	}
+	generated := doc[start:end]
+	for _, heading := range []string{"## HAT-trie vs Tarantool", "## HAT-trie vs Redis"} {
+		if !strings.Contains(generated, heading) {
+			t.Fatalf("generated command comparison missing %q", heading)
+		}
+	}
+	for _, heading := range []string{"## Replication Batching Benchmark", "## Journal Delta-First Recovery Benchmark"} {
+		if strings.Contains(generated, heading) {
+			t.Fatalf("generated command comparison incorrectly owns manual section %q", heading)
 		}
 	}
 }
@@ -473,6 +497,36 @@ func TestDocsDescribeOptionalCommandBenchmarkFixtureAllocations(t *testing.T) {
 	} {
 		if !strings.Contains(string(benchmarkData), token) {
 			t.Fatalf("BENCHMARK.md missing optional command fixture token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeTimedCommandBenchmarkHelperCorrection(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[timed command benchmark helper audit](BENCHMARK.md#timed-command-benchmark-helper-overhead)",
+		"benchmark-harness correction, not a production speedup",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing timed command benchmark helper token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Timed Command Benchmark Helper Overhead",
+		"314.4 ns | 172.1 ns | 1.83x",
+		"300.7 ns | 158.7 ns | 1.90x",
+		"only inside benchmark failure branches",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing timed command benchmark helper token %q", token)
 		}
 	}
 }
@@ -1661,6 +1715,9 @@ func TestRedisCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T) {
 			t.Fatalf("Redis command benchmark script missing token %q", token)
 		}
 	}
+	if !strings.Contains(script, "value = $(NF - 6)") || strings.Count(script, "redis_benchmark_qps)") != 3 {
+		t.Fatal("Redis command benchmark does not use the validated trailing-column throughput parser")
+	}
 }
 
 func TestTarantoolCommandFeatureBenchmarkScriptReportsSecondsPer10K(t *testing.T) {
@@ -1719,6 +1776,7 @@ func TestHatTrieCommandFeatureBenchmarkScriptReportsRSS(t *testing.T) {
 		"/usr/bin/time",
 		"Max resident set size",
 		"HATRIE_PIPELINE_OPS",
+		"normalize_output_file",
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("HAT-trie command benchmark script missing token %q", token)

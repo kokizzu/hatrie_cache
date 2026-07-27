@@ -24,6 +24,7 @@ type commandTransportBenchmark struct {
 }
 
 func BenchmarkCommandTransportFeature(b *testing.B) {
+	priority := int64(10)
 	benchmarks := []commandTransportBenchmark{
 		{name: "StringSet", run: func(b *testing.B, execute benchmarkCommandExecutor, i int) {
 			benchmarkExecuteTransportCommand(b, execute, CacheCommandRequest{Command: "SETSTR", Key: "string:key", Value: "value"})
@@ -55,7 +56,6 @@ func BenchmarkCommandTransportFeature(b *testing.B) {
 			benchmarkExecuteTransportCommand(b, execute, CacheCommandRequest{Command: "HASSET", Key: "set:key", Value: "value"})
 		}},
 		{name: "PriorityQueuePushPop", run: func(b *testing.B, execute benchmarkCommandExecutor, i int) {
-			priority := int64(10)
 			benchmarkExecuteTransportCommand(b, execute, CacheCommandRequest{Command: "PUSHPQ", Key: "priority:key", Value: "value", Priority: &priority})
 			benchmarkExecuteTransportCommand(b, execute, CacheCommandRequest{Command: "POPPQ", Key: "priority:key"})
 		}},
@@ -182,9 +182,9 @@ func BenchmarkCommandTransportFeature(b *testing.B) {
 }
 
 func benchmarkExecuteTransportCommand(b *testing.B, execute benchmarkCommandExecutor, request CacheCommandRequest) CacheCommandResponse {
-	b.Helper()
 	response := execute(request)
 	if !response.OK {
+		b.Helper()
 		b.Fatalf("ExecuteCommand(%s, %s) = %#v, want ok", request.Command, request.Key, response)
 	}
 	benchmarkCommandResponseSink = response

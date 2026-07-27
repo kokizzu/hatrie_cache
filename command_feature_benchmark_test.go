@@ -328,9 +328,9 @@ func BenchmarkTopKGetStructuredFallbackPath(b *testing.B) {
 }
 
 func benchmarkExecuteCommand(b *testing.B, ht *HatTrie, request CacheCommandRequest) CacheCommandResponse {
-	b.Helper()
 	response := ht.ExecuteCommand(request)
 	if !response.OK {
+		b.Helper()
 		b.Fatalf("ExecuteCommand(%s, %s) = %#v, want ok", request.Command, request.Key, response)
 	}
 	benchmarkCommandResponseSink = response
@@ -338,10 +338,10 @@ func benchmarkExecuteCommand(b *testing.B, ht *HatTrie, request CacheCommandRequ
 }
 
 func benchmarkExecuteCommandProfile(b *testing.B, ht *HatTrie, requests []CacheCommandRequest) {
-	b.Helper()
 	for _, request := range requests {
 		response := ht.ExecuteCommand(request)
 		if !response.OK {
+			b.Helper()
 			b.Fatalf("ExecuteCommand(%s, %s) = %#v, want ok", request.Command, request.Key, response)
 		}
 		benchmarkCommandResponseSink = response

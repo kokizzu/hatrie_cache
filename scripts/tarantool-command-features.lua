@@ -74,7 +74,7 @@ local function print_row(feature, command, seconds)
 	print(string.format('| %s | `%s` | %s |', feature, command, format_seconds(seconds)))
 end
 
-print(string.format('Tarantool benchmark: version=%s requests=%d keyspace=%d pipeline=%d', box.info.version, requests, keyspace, pipeline))
+print(string.format('Tarantool %s benchmark: requests=%d keyspace=%d pipeline=%d', box.info.version, requests, keyspace, pipeline))
 print('')
 print('| Feature family | Tarantool operation | Seconds / 10k feature cycles |')
 print('| --- | --- | ---: |')
