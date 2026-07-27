@@ -244,6 +244,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Reverted | [Generic Top-K slice sorter](#multi-item-top-k-read-materialization), 16/default-100 string items | `sort.Interface`: exact reads 2,240/8,108 ns | `slices.SortFunc`: 2,407/9,099 ns | One allocation and 24 B removed, but CPU 1.07x/1.12x slower | Rolled back; the small transient-memory saving did not justify slower reads |
 | Current pass | [Lazy small Top-K indexes](#lazy-small-top-k-indexes), 100k one/two-item sketches | Eager map: 384/464 retained B; 5/7 objects per sketch | Inline: 128/208 retained B; 3/5 objects per sketch | 3.00x/2.23x lower heap; 1.67x/1.40x fewer objects; builds 2.62x/1.94x faster | Third distinct item promotes automatically with unchanged retained heap; complete map-backed commands are neutral or faster |
 | Current pass | [Bounded generic Top-K scalar updates](#bounded-short-generic-top-k-dispatch), duplicate/escaped/structured values | One-item preparation: 138.2/146.75/167.75 ns; 58-80 B; 3 allocs | Bounded/direct scalar path: 14.42/91.46/110.5 ns; 0-32 B; 0-2 allocs | 9.59x/1.60x/1.52x faster; up to all transient allocations eliminated | No measured control regression; estimates retain their original branch, batches are neutral within 0.4%, and long scalar updates remove one allocation with neutral or faster CPU |
+| Current pass | [Generic Bloom-filter scalar additions](#generic-bloom-filter-scalar-additions), safe/escaped/structured values | Variadic wrapper: 110.8/133.0/141.5 ns; 29-40 B; 2 allocs | Direct scalar encoding: 79.91/96.57/103.2 ns; 5-16 B; 1 alloc | 1.39x/1.38x/1.37x faster; one allocation and 24 B removed | No measured tradeoff; `AddOneChecked` is unchanged and its 128-value control is CPU-neutral within 0.7% with identical memory |
 | Current pass | [Allocation-free inline Top-K duplicates](#lazy-small-top-k-indexes), one/two tracked strings | Quoted-key lookup: 37.06/45.40 ns; 16 B; 1 alloc | Virtual quoted comparison: 12.48/12.94 ns; 0 B; 0 allocs | 2.97x/3.51x faster; all lookup heap removed; complete `ADDTOPK` 1.21x faster with half the allocations | Missing values still allocate their retained canonical key; three/16-item map-backed controls are neutral or 1.01x faster |
 | Final architecture | [Per-key telemetry](#per-key-telemetry-modes), 100k keys | 242.5 retained B/key, unbounded | 63.57 retained B/key, off by default | 73.8% lower memory, 3.81x efficiency | `StatsForKey` requires explicit bounded/full opt-in |
 | Current pass | [Grouped storage headers](#grouped-storage-headers), empty cache construction | Separate headers: 16,148 ns; 3,360 heap B; 25 allocs | Grouped: 15,320 ns; 3,360 heap B; 8 allocs | 1.05x faster, 3.13x fewer allocations; heap unchanged | Internal constructor only; public storage constructors, typed pointers, command paths, retained values, wire, and persistence are unchanged |
@@ -394,6 +395,7 @@ tree.
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster | Scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower | All three layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
+| Bloom split-first preparation | Scalar safe/structured additions improved 1.39x/1.31x and a two-value batch improved 1.23x | The 128-value batch was 1.015x slower and the 16-value batch was 0.35% slower | Removed; only the [scalar public wrapper](#generic-bloom-filter-scalar-additions) was specialized, leaving variadic batches unchanged |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
@@ -5407,6 +5409,53 @@ late-load form was removed. Complete `ADDBF` and `HASBF` command controls are
 allocation-free and neutral within alternating process-order drift. Bitset
 bytes, false-positive shape, hash indexes, snapshots, storage, wire, and
 persistence formats are unchanged.
+
+<a id="generic-bloom-filter-scalar-additions"></a>
+### Generic Bloom-Filter Scalar Additions
+
+`bloomFilterData.AddChecked` previously delegated its single value to
+`AddOneChecked`. The variadic method atomically prepares a `[][]byte` for every
+requested value, so scalar callers allocated a one-element slice that was
+immediately iterated once. The scalar wrapper now performs the same nil and
+shape checks, encodes one canonical JSON key, and applies it directly.
+`AddOneChecked` and `bloomFilterItemKeys` are source-identical, preserving full
+preflight and no-partial-mutation semantics for variadic batches.
+
+Tests were added before the production change. They compare return values and
+the exact private filter state against the former wrapper for plain, escaped,
+HTML-sensitive, Unicode, structured, duplicate, nil, zero-shape, and invalid
+values. Invalid encoding still leaves the bitset unallocated. The focused test
+passed 50 times after implementation and its race build passed ten times.
+
+```sh
+make run CMD='go test . -run TestBloomFilterScalarAddCheckedCandidate -count=50'
+make run CMD='go test -race . -run TestBloomFilterScalarAddCheckedCandidate -count=10'
+make bench-bloom-scalar BENCHTIME=1s COUNT=7
+```
+
+Timing rows are nine same-binary alternating candidate/reference runs with
+128 operations per block. Memory values come from frozen before/after binaries
+calling the actual public method. The independent production-binary medians
+improved 1.40x-1.55x; the more conservative alternating ratios are reported.
+
+| Scalar `AddChecked`, median | Former variadic wrapper | Direct scalar path | Improvement |
+| --- | ---: | ---: | ---: |
+| Safe string | 110.8 ns; 29 B; 2 allocs | 79.91 ns; 5 B; 1 alloc | 1.39x faster; 5.80x lower heap |
+| Escaped string | 133.0 ns; 40 B; 2 allocs | 96.57 ns; 16 B; 1 alloc | 1.38x faster; 2.50x lower heap |
+| Structured value | 141.5 ns; 40 B; 2 allocs | 103.2 ns; 16 B; 1 alloc | 1.37x faster; 2.50x lower heap |
+
+The largest unchanged batch control alternated frozen binaries in both orders.
+Its median was 11,063 ns before and 10,996 ns after, neutral within 0.7%, with
+identical 4,224 B and 129 allocations for 128 values. There is no retained
+state, wire byte, persistent-format, hash, false-positive, or configuration
+change.
+
+A broader split-first candidate encoded one key locally and allocated a second
+slice for the remaining values. It made safe/structured scalar calls
+1.39x/1.31x faster and two-value batches 1.23x faster, but the 128-value median
+regressed from 10,947 to 11,109 ns, or 1.015x, while 16 values were 0.35%
+slower. That layout and all of its production code were removed. Specializing
+only the public scalar wrapper retains the scalar gain without that batch cost.
 
 <a id="compact-cuckoo-filter-header-rollback"></a>
 ### Compact Cuckoo-Filter Header Rollback

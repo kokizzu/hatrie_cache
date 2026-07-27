@@ -285,6 +285,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Reservoir escaped-value exact sizing",
 		"Reservoir sort outside cache lock",
 		"Reservoir scalar/batch preparation layouts",
+		"Bloom split-first preparation",
 		"Mutation response encoding outside cache lock",
 		"Shared-lock generic collection GET",
 		"Top-K helper lookup",
@@ -306,6 +307,36 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 	} {
 		if !strings.Contains(index, token) {
 			t.Fatalf("BENCHMARK.md rejected optimization index missing token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeGenericBloomScalarAdditions(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Bloom scalar-add measurements](BENCHMARK.md#generic-bloom-filter-scalar-additions)",
+		"make bench-bloom-scalar BENCHTIME=1s COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing Bloom scalar-add token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Generic Bloom-Filter Scalar Additions",
+		"1.39x faster",
+		"Bloom split-first preparation",
+		"10,947 to 11,109 ns",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing Bloom scalar-add token %q", token)
 		}
 	}
 }

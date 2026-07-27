@@ -50,6 +50,9 @@ low-memory membership checks without storing inserted items.
 Their private header now uses the validated 32-bit bit-count bound, reducing
 empty-filter retention 1.20x while making bulk initialization 1.14x faster;
 direct add and membership controls are also faster with unchanged allocations.
+Generic scalar additions also avoid the variadic batch wrapper, removing one
+allocation with no batch-path change; see the
+[Bloom scalar-add measurements](BENCHMARK.md#generic-bloom-filter-scalar-additions).
 Cuckoo filter values use compact fixed-size fingerprint buckets for fast,
 low-memory membership checks with approximate delete support.
 XOR filter values stage unique items once, then compile them into static 8-bit
@@ -205,6 +208,7 @@ make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Struc
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 make bench-reservoir-small BENCHTIME=500000x COUNT=7
 make bench-bloom-header BENCHTIME=500ms COUNT=7
+make bench-bloom-scalar BENCHTIME=1s COUNT=7
 make bench-count-min-rows BENCHTIME=500ms COUNT=7
 make bench-fenwick-add BENCHTIME=500ms COUNT=7
 make bench-quantile-add BENCHTIME=500ms COUNT=7

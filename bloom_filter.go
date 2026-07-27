@@ -188,8 +188,14 @@ func (filter *bloomFilterData) Add(value interface{}) bool {
 }
 
 func (filter *bloomFilterData) AddChecked(value interface{}) (bool, error) {
-	added, err := filter.AddOneChecked(value)
-	return added > 0, err
+	if filter == nil || filter.bitCount == 0 || filter.hashCount == 0 {
+		return false, nil
+	}
+	key, err := bloomFilterItemKey(value)
+	if err != nil {
+		return false, err
+	}
+	return filter.addKey(key), nil
 }
 
 func (filter *bloomFilterData) AddOne(value interface{}, values ...interface{}) int {
