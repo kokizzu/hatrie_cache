@@ -497,6 +497,33 @@ func TestDocsDescribeNormalizedTopologyStoreRouting(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectElectionKeyRouting(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[direct election routing](BENCHMARK.md#direct-election-key-routing)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing direct election routing token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkElectionStoreLeaderForKeyAlternating",
+		"4,096 keys per topology",
+		"5.08x faster",
+		"13.19x lower heap",
+		"6x fewer allocations",
+		"no topology lock is held while waiting",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct election routing token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeCachedReplicationRoutingFingerprint(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

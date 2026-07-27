@@ -311,6 +311,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Lazy gRPC session maps](#lazy-grpc-session-maps), unused create-and-close lifecycle | Eager live/sync: 170.3/175.7 ns; 208 heap B; 4 allocs | Lazy live/sync: 57.10/57.88 ns; 64 heap B; 1 alloc | 2.98x-3.04x faster, 3.25x lower heap, 4x fewer allocations | First successful stream and actual sticky fallback allocate their required maps; live sessions never allocate sticky fallback state |
 | Current pass | [Direct single-target gRPC sync dispatch](#direct-single-target-grpc-sync-dispatch), one task group | Generic grouping: 569.1 ns; 808 heap B; 8 allocs | Direct result slot: 426.8 ns; 384 heap B; 4 allocs | 1.33x faster, 2.10x lower heap, 2x fewer allocations | Applies only to exactly one group; repeated-target and multi-target controls retain identical heap/allocations and CPU within 1.1% |
 | Current pass | [Normalized topology-store routing](#normalized-topology-store-routing), one/four shards | Clone/sort all shards: 241.4/505.3 ns; 120/488 heap B; 4/9 allocs | Clone selected shard: 134.3/142.55 ns; 48/80 heap B; 2/2 allocs | 1.80x/3.54x faster; 2.50x/6.10x lower heap; 2x/4.50x fewer allocations | Store topology is already normalized; returned route ownership and generic routing for arbitrary topology values are unchanged |
+| Current pass | [Direct election-key routing](#direct-election-key-routing), healthy one/four shards | Topology snapshot plus active map: 643.95/1,337.5 ns; 680/1,688 heap B; 10/18 allocs | Selected route plus direct candidates: 226.15/263.35 ns; 80/128 heap B; 3/3 allocs | 2.85x/5.08x faster; 8.50x/13.19x lower heap; 3.33x/6x fewer allocations | Timeout, offline, maintenance, failover, topology-generation consistency, ownership, and lock order are unchanged |
 | Current pass | [Cached replication routing fingerprint](#cached-replication-routing-fingerprint), one/four shards | Rehash: 3,238/7,028.5 ns; 3,920/7,832 heap B; 52/129 allocs | Cached: 1,621.5/3,447.5 ns; 3,032/5,600 heap B; 14/34 allocs | 2.00x/2.04x faster; 1.29x/1.40x lower heap; 3.71x/3.79x fewer allocations | Reuses the fingerprint already computed by validated topology installation; topology cloning, routing maps, wire, and behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
@@ -3194,6 +3195,50 @@ selected shard's replica slice and the route's owner slice remain separate
 copies, while bucket metadata remains caller-owned. Topology update locking,
 hashes, bucket selection, owner order, configuration, wire, persistence, and
 public behavior are unchanged; the read-lock hold is strictly shorter.
+
+<a id="direct-election-key-routing"></a>
+#### Direct Election-Key Routing
+
+`ElectionStore.LeaderForKey` previously cloned the complete topology, called
+the generic clone-and-sort router, allocated an active-state map for every
+topology node, and finally scanned the selected shard's candidates. It now
+takes an owned selected route plus the matching immutable normalized node view
+under the topology read lock, releases that lock, and checks only primary and
+replica election records under the election read lock. Node lookup uses the
+already-sorted topology without allocating.
+
+The test-first fixture compares 4,096 keys per topology with the exact former
+snapshot implementation after a primary is marked offline, mutates returned
+route and candidate slices, and verifies later reads are unchanged. Existing
+tests cover healthy primary selection, timeout, all-offline unavailability,
+full-replica promotion, and persisted maintenance. A concurrent topology
+update, heartbeat, and route fixture also passes the race detector.
+
+```sh
+make run CMD='go test . -run="TestElectionStore(LeaderForKeyMatchesSnapshotControl|LeaderForKeyDuringTopologyAndHeartbeatUpdates|KeepsHealthyPrimaryAndPromotesReplica|TimesOutHeartbeats|ReportsUnavailableWhenAllCandidatesOffline|FullReplicaLeaderUsesSelfThenReplica|ExcludesPersistedMaintenanceNode)" -count=10'
+make run CMD='go test -race . -run=TestElectionStoreLeaderForKeyDuringTopologyAndHeartbeatUpdates -count=3'
+make run CMD='go test . -run=NONE -bench=BenchmarkElectionStoreLeaderForKey -benchmem -benchtime=100000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkElectionStoreLeaderForKeyAlternating -benchtime=100000x -count=10 -cpu=1'
+```
+
+| Ten-run median | Topology snapshot plus active map | Selected route plus direct candidates | Improvement |
+| --- | ---: | ---: | ---: |
+| Full replica, healthy | 729.95 ns; 936 B; 10 allocs | 231.8 ns; 80 B; 3 allocs | 3.15x faster; 11.70x lower heap; 3.33x fewer allocations |
+| Full replica, primary offline | 731.05 ns; 936 B; 10 allocs | 258.65 ns; 80 B; 3 allocs | 2.83x faster; 11.70x lower heap; 3.33x fewer allocations |
+| One shard, healthy | 643.95 ns; 680 B; 10 allocs | 226.15 ns; 80 B; 3 allocs | 2.85x faster; 8.50x lower heap; 3.33x fewer allocations |
+| One shard, primary offline | 673.2 ns; 680 B; 10 allocs | 255.8 ns; 80 B; 3 allocs | 2.63x faster; 8.50x lower heap; 3.33x fewer allocations |
+| Four shards, healthy | 1,337.5 ns; 1,688 B; 18 allocs | 263.35 ns; 128 B; 3 allocs | 5.08x faster; 13.19x lower heap; 6x fewer allocations |
+| Four shards, primary offline | 1,354 ns; 1,688 B; 18 allocs | 274.85 ns; 128 B; 3 allocs | 4.93x faster; 13.19x lower heap; 6x fewer allocations |
+| Virtual buckets, healthy | 1,386.5 ns; 1,740 B; 20 allocs | 282.45 ns; 132 B; 4 allocs | 4.91x faster; 13.18x lower heap; 5x fewer allocations |
+| Virtual buckets, primary offline | 1,433.5 ns; 1,740 B; 20 allocs | 298.1 ns; 132 B; 4 allocs | 4.81x faster; 13.18x lower heap; 5x fewer allocations |
+
+CPU values are alternating same-binary medians; heap and allocations are the
+separate unchanged fixture before and after implementation. The topology store
+replaces validated generations instead of mutating their backing arrays, so
+the internal node view remains immutable after its short read lock. Election
+records retain their own read lock, and no topology lock is held while waiting
+for it. Candidate order, timestamps, timeout boundaries, maintenance, response
+ownership, configuration, wire, persistence, and public behavior are unchanged.
 
 <a id="cached-replication-routing-fingerprint"></a>
 #### Cached Replication Routing Fingerprint

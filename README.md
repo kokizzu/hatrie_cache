@@ -1762,6 +1762,14 @@ The current shard primary stays leader while healthy; when it is marked offline
 or its heartbeat times out, the first healthy replica becomes leader. A running
 monitoring server refreshes its own node heartbeat periodically while it is up:
 
+Per-key leader selection uses
+[direct election routing](BENCHMARK.md#direct-election-key-routing): it reads
+one owned normalized route and checks only that shard's candidates instead of
+cloning the whole topology and allocating an all-node active map. Healthy
+one/four-shard routes are 2.85x/5.08x faster with 8.50x/13.19x lower heap;
+offline failover, heartbeat timeout, maintenance, candidate order, and returned
+ownership are unchanged.
+
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_TIMEOUT=15s
 ```

@@ -1,8 +1,10 @@
 package hatriecache
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -136,6 +138,220 @@ func TestElectionStoreRejectsUnknownNode(t *testing.T) {
 	if err := store.MarkOffline(""); err == nil {
 		t.Fatal("MarkOffline(empty) error = nil, want error")
 	}
+}
+
+func TestElectionStoreLeaderForKeyMatchesSnapshotControl(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	for _, tt := range topologyStoreRouteBenchmarkCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			topology, err := NewTopologyStore(tt.topology)
+			if err != nil {
+				t.Fatalf("NewTopologyStore() error = %v", err)
+			}
+			store := NewElectionStore(topology, ElectionOptions{
+				Timeout: time.Second,
+				Now:     func() time.Time { return now },
+			})
+			firstRoute, ok := topology.Route("session:0")
+			if !ok {
+				t.Fatal("Route(session:0) = false, want true")
+			}
+			if err := store.MarkOffline(firstRoute.Shard.Primary); err != nil {
+				t.Fatalf("MarkOffline(%q) error = %v", firstRoute.Shard.Primary, err)
+			}
+			for index := 0; index < 4096; index++ {
+				key := "session:" + strconv.Itoa(index)
+				got, gotOK := store.LeaderForKey(key)
+				want, wantOK := electionLeaderForKeySnapshotControl(store, key)
+				if gotOK != wantOK || !reflect.DeepEqual(got, want) {
+					t.Fatalf("LeaderForKey(%q) = %#v/%v, snapshot control = %#v/%v", key, got, gotOK, want, wantOK)
+				}
+			}
+
+			got, ok := store.LeaderForKey("session:0")
+			if !ok {
+				t.Fatal("LeaderForKey(session:0) = false, want true")
+			}
+			got.Route.Owners[0] = "mutated-owner"
+			if len(got.Route.Shard.Replicas) > 0 {
+				got.Route.Shard.Replicas[0] = "mutated-replica"
+			}
+			got.Leader.Candidates[0] = "mutated-candidate"
+			after, afterOK := store.LeaderForKey("session:0")
+			want, wantOK := electionLeaderForKeySnapshotControl(store, "session:0")
+			if afterOK != wantOK || !reflect.DeepEqual(after, want) {
+				t.Fatalf("LeaderForKey() after returned-value mutation = %#v/%v, want %#v/%v", after, afterOK, want, wantOK)
+			}
+		})
+	}
+}
+
+func TestElectionStoreLeaderForKeyDuringTopologyAndHeartbeatUpdates(t *testing.T) {
+	base := ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Nodes:   []TopologyNode{{ID: "node-a"}, {ID: "node-b"}, {ID: "node-c"}},
+		Shards: []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+			{ID: 1, Primary: "node-c", Replicas: []string{"node-b"}},
+		},
+	}
+	topology, err := NewTopologyStore(base)
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	store := NewElectionStore(topology, ElectionOptions{Now: func() time.Time { return now }})
+	updated := base
+	updated.Shards = []TopologyShard{
+		{ID: 1, Primary: "node-b", Replicas: []string{"node-c"}},
+		{ID: 0, Primary: "node-b", Replicas: []string{"node-a"}},
+	}
+
+	const iterations = 1000
+	errors := make(chan error, 3)
+	var workers sync.WaitGroup
+	workers.Add(3)
+	go func() {
+		defer workers.Done()
+		for iteration := 0; iteration < iterations; iteration++ {
+			next := base
+			if iteration&1 != 0 {
+				next = updated
+			}
+			if err := topology.Set(next); err != nil {
+				errors <- err
+				return
+			}
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		for iteration := 0; iteration < iterations; iteration++ {
+			if err := store.Heartbeat("node-b"); err != nil {
+				errors <- err
+				return
+			}
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		for iteration := 0; iteration < iterations; iteration++ {
+			route, ok := store.LeaderForKey("session:" + strconv.Itoa(iteration))
+			if !ok || len(route.Route.Owners) == 0 || len(route.Leader.Candidates) == 0 {
+				errors <- fmt.Errorf("LeaderForKey() = %#v/%v during concurrent updates", route, ok)
+				return
+			}
+		}
+	}()
+	workers.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatal(err)
+	}
+}
+
+func electionLeaderForKeySnapshotControl(store *ElectionStore, key string) (ElectionKeyRoute, bool) {
+	topology := store.topologySnapshot()
+	route, ok := topology.RouteForKey(key)
+	if !ok {
+		return ElectionKeyRoute{}, false
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	active := store.activeNodesLocked(topology)
+	leader := electShardLeader(route.Shard, active)
+	return ElectionKeyRoute{Key: key, Route: route, Leader: leader}, true
+}
+
+var benchmarkElectionKeyRouteSink ElectionKeyRoute
+
+func BenchmarkElectionStoreLeaderForKey(b *testing.B) {
+	for _, tt := range topologyStoreRouteBenchmarkCases() {
+		for _, offline := range []bool{false, true} {
+			state := "Healthy"
+			if offline {
+				state = "PrimaryOffline"
+			}
+			b.Run(tt.name+"/"+state, func(b *testing.B) {
+				store, keys := newBenchmarkElectionStore(b, tt, offline)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					route, ok := store.LeaderForKey(keys[iteration&1023])
+					if !ok {
+						b.Fatal("LeaderForKey() = false, want true")
+					}
+					benchmarkElectionKeyRouteSink = route
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkElectionStoreLeaderForKeyAlternating(b *testing.B) {
+	for _, tt := range topologyStoreRouteBenchmarkCases() {
+		for _, offline := range []bool{false, true} {
+			state := "Healthy"
+			if offline {
+				state = "PrimaryOffline"
+			}
+			b.Run(tt.name+"/"+state, func(b *testing.B) {
+				store, keys := newBenchmarkElectionStore(b, tt, offline)
+				var directDuration, snapshotDuration time.Duration
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					directFirst := iteration&1 != 0
+					for pass := 0; pass < 2; pass++ {
+						started := time.Now()
+						var route ElectionKeyRoute
+						var ok bool
+						if directFirst == (pass == 0) {
+							route, ok = store.LeaderForKey(keys[iteration&1023])
+							directDuration += time.Since(started)
+						} else {
+							route, ok = electionLeaderForKeySnapshotControl(store, keys[iteration&1023])
+							snapshotDuration += time.Since(started)
+						}
+						if !ok {
+							b.Fatal("LeaderForKey() = false, want true")
+						}
+						benchmarkElectionKeyRouteSink = route
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(directDuration.Nanoseconds())/float64(b.N), "direct_ns/route")
+				b.ReportMetric(float64(snapshotDuration.Nanoseconds())/float64(b.N), "snapshot_ns/route")
+			})
+		}
+	}
+}
+
+func newBenchmarkElectionStore(b *testing.B, tt topologyStoreRouteBenchmarkCase, offline bool) (*ElectionStore, []string) {
+	b.Helper()
+	topology, err := NewTopologyStore(tt.topology)
+	if err != nil {
+		b.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	store := NewElectionStore(topology, ElectionOptions{
+		Timeout: time.Second,
+		Now:     func() time.Time { return now },
+	})
+	keys := make([]string, 1024)
+	for index := range keys {
+		keys[index] = "session:" + strconv.Itoa(index)
+	}
+	if offline {
+		route, ok := topology.Route(keys[0])
+		if !ok {
+			b.Fatal("Route() = false, want true")
+		}
+		if err := store.MarkOffline(route.Shard.Primary); err != nil {
+			b.Fatal(err)
+		}
+	}
+	return store, keys
 }
 
 func electionTestTopology(t *testing.T) *TopologyStore {

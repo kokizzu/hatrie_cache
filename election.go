@@ -120,20 +120,59 @@ func (store *ElectionStore) Status() ElectionStatus {
 }
 
 func (store *ElectionStore) LeaderForKey(key string) (ElectionKeyRoute, bool) {
-	if store == nil {
+	if store == nil || store.topology == nil {
 		return ElectionKeyRoute{}, false
 	}
-	topology := store.topologySnapshot()
-	route, ok := topology.RouteForKey(key)
+	route, nodes, ok := store.topology.electionRouteSnapshot(key)
 	if !ok {
 		return ElectionKeyRoute{}, false
 	}
 
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	active := store.activeNodesLocked(topology)
-	leader := electShardLeader(route.Shard, active)
+	leader := store.electShardLeaderLocked(route.Shard, nodes)
 	return ElectionKeyRoute{Key: key, Route: route, Leader: leader}, true
+}
+
+func (store *ElectionStore) electShardLeaderLocked(shard TopologyShard, nodes []TopologyNode) ElectionLeader {
+	candidates := routeOwners(shard)
+	leader := ElectionLeader{
+		Shard:      shard.ID,
+		Primary:    shard.Primary,
+		Candidates: candidates,
+	}
+	now := store.now()
+	for _, nodeID := range candidates {
+		if store.nodeActiveForElectionLocked(nodes, nodeID, now) {
+			leader.Leader = nodeID
+			leader.Available = true
+			return leader
+		}
+	}
+	return leader
+}
+
+func (store *ElectionStore) nodeActiveForElectionLocked(nodes []TopologyNode, nodeID string, now time.Time) bool {
+	low, high := 0, len(nodes)
+	for low < high {
+		middle := int(uint(low+high) >> 1)
+		if nodes[middle].ID < nodeID {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	if low >= len(nodes) || nodes[low].ID != nodeID || nodes[low].Maintenance {
+		return false
+	}
+	record, tracked := store.nodes[nodeID]
+	if !tracked {
+		return true
+	}
+	if record.offline {
+		return false
+	}
+	return store.timeout <= 0 || record.lastSeen.IsZero() || now.Sub(record.lastSeen) <= store.timeout
 }
 
 func (store *ElectionStore) setNode(nodeID string, offline bool) error {

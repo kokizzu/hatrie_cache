@@ -229,6 +229,20 @@ func (store *TopologyStore) Route(key string) (TopologyRoute, bool) {
 	return normalizedTopologyRouteForKey(store.topology, key)
 }
 
+func (store *TopologyStore) electionRouteSnapshot(key string) (TopologyRoute, []TopologyNode, bool) {
+	if store == nil {
+		return TopologyRoute{}, nil, false
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	route, ok := normalizedTopologyRouteForKey(store.topology, key)
+	if !ok {
+		return TopologyRoute{}, nil, false
+	}
+	// Set replaces the normalized generation instead of mutating its backing.
+	return route, store.topology.Nodes, true
+}
+
 func normalizedTopologyRouteForKey(topology ClusterTopology, key string) (TopologyRoute, bool) {
 	mode := topology.Mode
 	if mode == TopologyModeFullReplica {
