@@ -397,7 +397,7 @@ tree.
 | Dedicated `GETTOPK` lock-release snapshot | Let writers proceed while caller-controlled JSON marshaling was blocked | The five-second 100-item structured read was 14,457 ns versus 13,776 ns legacy, or 1.05x slower, with identical 9,872 B and 5 allocations | Reverted for `GETTOPK`; the serial-neutral generic `GET` snapshot remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
-| Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster | Scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower | All three layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
+| Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster; the Scalar-only out-of-line wrapper improved scalar adds 1.09x-1.14x | Shared scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower; the isolated wrapper still made two-value batches 1.015x slower through layout drift | All four layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
 | Bloom split-first preparation | Scalar safe/structured additions improved 1.39x/1.31x and a two-value batch improved 1.23x | The 128-value batch was 1.015x slower and the 16-value batch was 0.35% slower | Removed; only the [scalar public wrapper](#generic-bloom-filter-scalar-additions) was specialized, leaving variadic batches unchanged |
 | Inline Cuckoo scalar wrapper body | Scalar additions improved 1.51x-1.62x with one fewer allocation | Moving the larger body before `AddOneChecked` made the frozen 128-value batch 1.011x slower through binary-layout drift | Replaced by the [out-of-line scalar helper](#generic-cuckoo-filter-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.5% |
 | Count-Min clustered scalar helper | Scalar additions improved about 1.4x with one fewer allocation | Placing the helper between Count-Min hot methods made the frozen 128-value batch 10,970 versus 10,540 ns, or 1.041x slower | Replaced by the [end-of-file scalar helper](#generic-count-min-sketch-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.6% |
@@ -6241,7 +6241,7 @@ removed; it adds no runtime cost.
 #### Reservoir Preparation Layout Rollbacks
 
 Generic reservoir additions atomically prepare every value before advancing the
-sample sequence or mutating the heap. Three test-first layouts tried to reduce
+sample sequence or mutating the heap. Four test-first layouts tried to reduce
 the preparation work while preserving exact updates, private state, deterministic
 priorities, sequence-overflow rejection, and all-or-reject invalid batches.
 Differential tests covered capacities one, three, and 16; plain, escaped,
@@ -6257,13 +6257,19 @@ both orders on one logical CPU. Seven 500 ms samples produced these medians:
 | Scalar branch before batch preparation | Safe/escaped scalar adds 1.05x faster; structured scalar 1.03x faster | Two-value batch 194.4 versus 190.5 ns, or 1.02x slower |
 | First item local, remaining items slice | Two-value batch 151.4 versus 187.0 ns, or 1.24x faster; one allocation and 64 B removed | 16-value batch 1,350 versus 1,335 ns, or 1.01x slower |
 | Full-length slice filled by index | Two-value batch 199.2 versus 201.6 ns, or 1.01x faster | 128-value batch 10,709 versus 10,465 ns, or 1.02x slower |
+| Scalar-only out-of-line wrapper | Safe/escaped/structured scalar adds 1.14x/1.11x/1.09x faster | Frozen two-value batch 201.1 versus 198.1 ns, or 1.015x slower; heap and allocations were unchanged |
 
 The split-first 128-value control improved only about 1%, while its 16-value
 regression was repeatable. The indexed layout kept memory identical but moved
-the regression to the large batch. No layout was neutral across scalar,
-two-value, medium, and large workloads, so the original capacity-sized append
-and uniform apply loops were restored. No candidate code, branch, retained
-state, allocation, format, or behavior remains in production.
+the regression to the large batch. The later scalar-only candidate left
+`AddOneChecked` source-identical and put its helper first at the source-file end,
+then in a lexically last production file. Its differential tests passed 50
+times and its race build passed ten times, but both placements retained a
+roughly 1.4%-1.5% two-value loss in longer frozen-binary controls; 16- and
+128-value batches were neutral. No layout was neutral across scalar, two-value,
+medium, and large workloads, so the original capacity-sized append and uniform
+apply loops were restored. No candidate code, branch, retained state,
+allocation, format, or behavior remains in production.
 
 The reservoir sample add path now has a plain-string fast path that hashes the
 JSON string representation directly and only boxes retained values. The focused

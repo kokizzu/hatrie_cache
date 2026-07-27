@@ -285,6 +285,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"Reservoir escaped-value exact sizing",
 		"Reservoir sort outside cache lock",
 		"Reservoir scalar/batch preparation layouts",
+		"Scalar-only out-of-line wrapper",
 		"Bloom split-first preparation",
 		"Inline Cuckoo scalar wrapper body",
 		"Mutation response encoding outside cache lock",
