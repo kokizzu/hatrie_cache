@@ -2580,6 +2580,9 @@ request-local execution state: the server borrows the one decoded shared key,
 borrows the one decoded shared subkey across map operations, and converts a
 shared value to a Go string once per envelope without copying it per operation.
 Positional requests and the generated protobuf layout are unchanged.
+Homogeneous nonempty shared-value `HAS_SET` batches also allocate their exact
+boolean response capacity once; mixed, positional, error-capable, and
+compatibility paths retain lazy result growth.
 `EntriesRequest.limit` bounds large key listings and returns `has_more` with
 `next_after_key`; pass that value as `EntriesRequest.after_key` to read the next
 page. Empty keys are valid, so Go clients should set the optional `AfterKey`

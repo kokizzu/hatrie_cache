@@ -86,12 +86,13 @@ func (server *CacheGRPCServer) executeStructuredBatch(ctx context.Context, reque
 	if server.scalarBatchRequiresCompatibilityPath() {
 		return server.executeStructuredBatchCompatibilityPrepared(ctx, request, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue)
 	}
-	return server.trie.executeStructuredBatchDirectPrepared(ctx, request, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue)
+	return server.trie.executeStructuredBatchDirectPrepared(ctx, request, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue, columns.guaranteedIntegerResults)
 }
 
 type structuredBatchColumns struct {
-	subkeys int
-	values  int
+	subkeys                  int
+	values                   int
+	guaranteedIntegerResults int
 }
 
 func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchRequest) (structuredBatchColumns, error) {
@@ -109,6 +110,7 @@ func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchReques
 	subkeysNeeded := 0
 	valuesNeeded := 0
 	prioritiesNeeded := 0
+	hasSetResults := 0
 	for _, operation := range operations {
 		switch operation {
 		case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUT_MAP:
@@ -119,9 +121,11 @@ func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchReques
 			subkeysNeeded++
 		case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_SLICE,
 			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET,
-			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_REMOVE_SET,
-			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET:
+			hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_REMOVE_SET:
 			valuesNeeded++
+		case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET:
+			valuesNeeded++
+			hasSetResults++
 		case hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_PUSH_PRIORITY:
 			valuesNeeded++
 			prioritiesNeeded++
@@ -148,6 +152,9 @@ func validateStructuredBatchColumns(request *hatriecachev1.StructuredBatchReques
 	}
 	columns.subkeys = subkeysNeeded
 	columns.values = valuesNeeded
+	if hasSetResults == len(operations) && len(operations) > 1 && len(request.Values) == 1 && len(request.Values[0]) > 0 {
+		columns.guaranteedIntegerResults = hasSetResults
+	}
 	return columns, nil
 }
 
@@ -271,14 +278,14 @@ func (cursor *structuredBatchCursor) command(request *hatriecachev1.StructuredBa
 }
 
 func (ht *HatTrie) executeStructuredBatchDirect(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchDirectPrepared(ctx, request, "", "", "", false, false, false)
+	return ht.executeStructuredBatchDirectPrepared(ctx, request, "", "", "", false, false, false, 0)
 }
 
-func (ht *HatTrie) executeStructuredBatchDirectPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey, sharedSubkey, sharedValue string, hasSharedKey, hasSharedSubkey, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
+func (ht *HatTrie) executeStructuredBatchDirectPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey, sharedSubkey, sharedValue string, hasSharedKey, hasSharedSubkey, hasSharedValue bool, guaranteedIntegerResults int) *hatriecachev1.StructuredBatchResponse {
 	if ht.structuredBatchRequiresCommandLoopPrepared(request, sharedKey, sharedSubkey, hasSharedKey, hasSharedSubkey) {
 		return ht.executeStructuredBatchCommandLoopPrepared(ctx, request, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue)
 	}
-	return ht.executeStructuredBatchBoundedPrepared(ctx, request, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue)
+	return ht.executeStructuredBatchBoundedPrepared(ctx, request, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue, guaranteedIntegerResults)
 }
 
 func (ht *HatTrie) executeStructuredBatchCommandLoop(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
@@ -353,12 +360,20 @@ func structuredBatchResponseFromCommand(request *hatriecachev1.StructuredBatchRe
 }
 
 func newStructuredBatchResponse(batchID uint64, count int) *hatriecachev1.StructuredBatchResponse {
-	return &hatriecachev1.StructuredBatchResponse{
+	return newStructuredBatchResponseWithIntegerCapacity(batchID, count, 0)
+}
+
+func newStructuredBatchResponseWithIntegerCapacity(batchID uint64, count int, integerCapacity int) *hatriecachev1.StructuredBatchResponse {
+	response := &hatriecachev1.StructuredBatchResponse{
 		BatchId:    batchID,
 		Ok:         true,
 		Statuses:   make([]hatriecachev1.ScalarResultStatus, count),
 		ValueKinds: make([]hatriecachev1.ScalarValueKind, count),
 	}
+	if integerCapacity > 0 {
+		response.IntegerValues = make([]int64, 0, integerCapacity)
+	}
+	return response
 }
 
 func appendStructuredBatchResult(response *hatriecachev1.StructuredBatchResponse, index int, operation hatriecachev1.StructuredCommand, result CacheCommandResponse) {

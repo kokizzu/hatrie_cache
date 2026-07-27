@@ -53,19 +53,19 @@ func (ht *HatTrie) structuredBatchRequiresCommandLoopPrepared(request *hatriecac
 }
 
 func (ht *HatTrie) executeStructuredBatchBounded(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchBoundedPrepared(ctx, request, "", "", "", false, false, false)
+	return ht.executeStructuredBatchBoundedPrepared(ctx, request, "", "", "", false, false, false, 0)
 }
 
-func (ht *HatTrie) executeStructuredBatchBoundedPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey, sharedSubkey, sharedValue string, hasSharedKey, hasSharedSubkey, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, structuredBatchDirectChunkSize, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue)
+func (ht *HatTrie) executeStructuredBatchBoundedPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey, sharedSubkey, sharedValue string, hasSharedKey, hasSharedSubkey, hasSharedValue bool, guaranteedIntegerResults int) *hatriecachev1.StructuredBatchResponse {
+	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, structuredBatchDirectChunkSize, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue, guaranteedIntegerResults)
 }
 
 func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSize(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, chunkSize int) *hatriecachev1.StructuredBatchResponse {
-	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, chunkSize, "", "", "", false, false, false)
+	return ht.executeStructuredBatchBoundedWithChunkSizePrepared(ctx, request, chunkSize, "", "", "", false, false, false, 0)
 }
 
-func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSizePrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, chunkSize int, sharedKey, sharedSubkey, sharedValue string, hasSharedKey, hasSharedSubkey, hasSharedValue bool) *hatriecachev1.StructuredBatchResponse {
-	response := newStructuredBatchResponse(request.GetBatchId(), len(request.GetOperations()))
+func (ht *HatTrie) executeStructuredBatchBoundedWithChunkSizePrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, chunkSize int, sharedKey, sharedSubkey, sharedValue string, hasSharedKey, hasSharedSubkey, hasSharedValue bool, guaranteedIntegerResults int) *hatriecachev1.StructuredBatchResponse {
+	response := newStructuredBatchResponseWithIntegerCapacity(request.GetBatchId(), len(request.GetOperations()), guaranteedIntegerResults)
 	telemetry := batchTelemetry{}
 	telemetryNow := time.Time{}
 

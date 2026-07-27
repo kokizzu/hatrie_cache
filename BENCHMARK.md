@@ -279,6 +279,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [One-time shared structured-value conversion](#one-time-shared-structured-value-conversion), 10k same-member `HAS_SET`, batch 16 | Expand headers, then convert per command: 584.8 ns/command; 2,305,582 heap B; 48,777 allocs | Convert once per envelope: 562.6 ns/command; 1,990,556 heap B; 38,776 allocs | 1.04x faster, 1.16x lower heap, 1.26x fewer allocs; wire unchanged | No measured tradeoff; positional controls retain identical heap/allocations and CPU within 0.3% |
 | Current pass | [Cursor-borrowed shared structured keys](#cursor-borrowed-shared-structured-keys), 10k same-key `PEEK_MAP`, batch 16 | Expand 16 string headers: 649.7 ns/command; 2,636,161 heap B; 53,186 allocs | Borrow one decoded key: 647.8 ns/command; 2,476,150 heap B; 52,561 allocs | CPU neutral within 0.3%; 1.06x lower heap; 625 fewer allocations | No measured tradeoff; positional requests retain identical heap/allocations and are 0.4% faster in the paired median |
 | Current pass | [Cursor-borrowed shared structured subkeys](#cursor-borrowed-shared-structured-subkeys), 10k same-field `PEEK_MAP`, batch 16 | Expand 16 string headers: 591.7 ns/command; 2,145,799 heap B; 41,291 allocs | Borrow one decoded subkey: 576.7 ns/command; 1,985,786 heap B; 40,665 allocs | 1.03x faster, 1.08x lower heap, about 625 fewer allocations | No measured tradeoff; shared-key, shared-value, and positional controls retain identical heap/allocations and neutral-or-better CPU |
+| Current pass | [Exact shared-boolean response capacity](#exact-shared-boolean-response-capacity), 10k same-member `HAS_SET`, batch 16 | Geometric result growth: 553.5 ns/command; 1,830,543 heap B; 38,151 allocs | One exact result allocation: 546.9 ns/command; 1,755,538 heap B; 35,651 allocs | 1.01x faster, 1.04x lower heap, 1.07x fewer allocations | No measured tradeoff; mixed positional and shared-column controls retain identical memory and CPU within 0.5% |
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
 | Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
@@ -1262,6 +1263,40 @@ The final target removes one 256-byte header allocation per envelope. Protobuf
 fields, 12.35 wire B/command, request ownership, validation, response ordering,
 journal and dirty tracking, local partitions, storage, and ordinary positional
 requests are unchanged.
+
+<a id="exact-shared-boolean-response-capacity"></a>
+##### Exact Shared-Boolean Response Capacity
+
+A 16-command `HAS_SET` response previously grew its `IntegerValues` column
+through capacities 1, 2, 4, 8, and 16. Validation now records exact response
+cardinality only when every operation is `HAS_SET` and the request carries one
+nonempty shared value. After the direct-path gate proves the request uses the
+bounded executor, its response allocates the final 16-element capacity once.
+
+Empty shared values can produce command errors, so they deliberately retain
+lazy result allocation. Mixed integer operations, byte results, positional
+values, journal/dirty/replication compatibility execution, local partitions,
+and single-operation envelopes also retain the previous constructor. A focused
+test fixes those boundaries.
+
+The exact pushed `aed6714` binary and candidate binary ran in eight alternating
+pairs pinned to one CPU, with 100 complete 10,000-command stream iterations per
+sample:
+
+```sh
+make bench-structured-batch BIG_WINS_OPS=10000 BENCHTIME=100x COUNT=8
+```
+
+| Complete stream path | Geometric result growth | Exact response capacity | Result |
+| --- | ---: | ---: | --- |
+| Shared key/value, `HAS_SET` | 553.5 ns/command; 1,830,543 B; 38,151 allocs | 546.9 ns/command; 1,755,538 B; 35,651 allocs | 1.01x faster; 1.04x lower heap; 1.07x fewer allocations |
+| Mixed positional control | 864.3 ns/command; 3,557,047 B; 77,606 allocs | 868.1 ns/command; 3,557,046 B; 77,606 allocs | CPU within 0.5%; heap and allocations identical |
+| Shared key/subkey control | 583.3 ns/command; 1,985,787 B; 40,665 allocs | 586.1 ns/command; 1,985,786 B; 40,665 allocs | CPU within 0.5%; heap and allocations identical |
+
+The target removes four growth allocations and 120 allocated bytes per
+16-command envelope: 2,500 allocations and 75,000 payload bytes per 10,000
+commands. Protobuf output, 7.662 wire B/command, status/value ordering, cache
+behavior, locking, telemetry, storage, and persistence formats are unchanged.
 
 <a id="go-1265-toolchain-refresh"></a>
 #### Go 1.26.5 Toolchain Refresh

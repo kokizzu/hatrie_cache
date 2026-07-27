@@ -54,6 +54,35 @@ func TestValidateStructuredBatchColumnsAcceptsSharedValue(t *testing.T) {
 	}
 }
 
+func TestValidateStructuredBatchColumnsPreallocatesOnlyGuaranteedSharedBooleans(t *testing.T) {
+	operations := []hatriecachev1.StructuredCommand{
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET,
+		hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_HAS_SET,
+	}
+	request := &hatriecachev1.StructuredBatchRequest{
+		Operations: operations,
+		Keys:       []string{"members"},
+		Values:     [][]byte{[]byte("shared")},
+	}
+	columns, err := validateStructuredBatchColumns(request)
+	if err != nil || columns.guaranteedIntegerResults != len(operations) {
+		t.Fatalf("guaranteed shared boolean columns = %#v/%v, want %d", columns, err, len(operations))
+	}
+
+	request.Values[0] = nil
+	columns, err = validateStructuredBatchColumns(request)
+	if err != nil || columns.guaranteedIntegerResults != 0 {
+		t.Fatalf("empty shared boolean columns = %#v/%v, want no preallocation", columns, err)
+	}
+
+	request.Values[0] = []byte("shared")
+	request.Operations[1] = hatriecachev1.StructuredCommand_STRUCTURED_COMMAND_ADD_SET
+	columns, err = validateStructuredBatchColumns(request)
+	if err != nil || columns.guaranteedIntegerResults != 0 {
+		t.Fatalf("mixed integer columns = %#v/%v, want no preallocation", columns, err)
+	}
+}
+
 func TestValidateStructuredBatchColumnsRejectsSharedKeyWithoutOperations(t *testing.T) {
 	request := &hatriecachev1.StructuredBatchRequest{Keys: []string{"profile"}}
 	if _, err := validateStructuredBatchColumns(request); err == nil {
