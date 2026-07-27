@@ -243,6 +243,16 @@ func (store *TopologyStore) electionRouteSnapshot(key string) (TopologyRoute, []
 	return route, store.topology.Nodes, true
 }
 
+func (store *TopologyStore) electionStatusSnapshot() ClusterTopology {
+	if store == nil {
+		return ClusterTopology{}
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	// Set replaces the normalized generation instead of mutating its backing.
+	return store.topology
+}
+
 func (store *TopologyStore) hasNode(nodeID string) bool {
 	if store == nil {
 		return false

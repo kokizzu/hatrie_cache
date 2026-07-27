@@ -550,6 +550,32 @@ func TestDocsDescribeAllocationFreeElectionNodeUpdates(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeNormalizedElectionStatusGeneration(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[normalized generation output](BENCHMARK.md#normalized-election-status-generation)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing normalized election-status token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkElectionStoreStatusAlternating",
+		"2.36x faster",
+		"2.54x lower heap",
+		"3.25x fewer allocations",
+		"response-owned slice remain present",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing normalized election-status token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeCachedReplicationRoutingFingerprint(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

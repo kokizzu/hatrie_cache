@@ -2,7 +2,6 @@ package hatriecache
 
 import (
 	"errors"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -84,7 +83,7 @@ func (store *ElectionStore) Status() ElectionStatus {
 	if store == nil {
 		return ElectionStatus{}
 	}
-	topology := store.topologySnapshot()
+	topology := store.topology.electionStatusSnapshot()
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -103,14 +102,19 @@ func (store *ElectionStore) Status() ElectionStatus {
 			LastSeen: lastSeen,
 		})
 	}
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].ID < nodes[j].ID
-	})
-
-	shards := electionShards(topology)
-	leaders := make([]ElectionLeader, 0, len(shards))
-	for _, shard := range shards {
-		leaders = append(leaders, electShardLeader(shard, active))
+	leaderCapacity := len(topology.Shards)
+	if topology.Mode == TopologyModeFullReplica {
+		leaderCapacity = 1
+	}
+	leaders := make([]ElectionLeader, 0, leaderCapacity)
+	if topology.Mode == TopologyModeFullReplica {
+		if shard, ok := normalizedFullReplicaShard(topology); ok {
+			leaders = append(leaders, electShardLeader(shard, active))
+		}
+	} else {
+		for _, shard := range topology.Shards {
+			leaders = append(leaders, electShardLeader(shard, active))
+		}
 	}
 	return ElectionStatus{
 		TimeoutMillis: store.timeout.Milliseconds(),
@@ -188,13 +192,6 @@ func (store *ElectionStore) setNode(nodeID string, offline bool) error {
 	return nil
 }
 
-func (store *ElectionStore) topologySnapshot() ClusterTopology {
-	if store == nil || store.topology == nil {
-		return ClusterTopology{}
-	}
-	return store.topology.Get()
-}
-
 func (store *ElectionStore) activeNodesLocked(topology ClusterTopology) map[string]bool {
 	active := make(map[string]bool, len(topology.Nodes))
 	now := store.now()
@@ -241,21 +238,6 @@ func (store *ElectionStore) nodeStatusLocked(nodeID string, active map[string]bo
 	default:
 		return true, "healthy", &lastSeen
 	}
-}
-
-func electionShards(topology ClusterTopology) []TopologyShard {
-	if topologyMode(topology.Mode) == TopologyModeFullReplica {
-		shard, ok := topology.fullReplicaShard()
-		if !ok {
-			return nil
-		}
-		return []TopologyShard{shard}
-	}
-	shards := cloneShards(topology.Shards)
-	sort.Slice(shards, func(i, j int) bool {
-		return shards[i].ID < shards[j].ID
-	})
-	return shards
 }
 
 func electShardLeader(shard TopologyShard, active map[string]bool) ElectionLeader {

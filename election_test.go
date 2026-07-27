@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
@@ -281,8 +282,139 @@ func TestElectionStoreLeaderForKeyDuringTopologyAndHeartbeatUpdates(t *testing.T
 	}
 }
 
+func TestElectionStoreStatusMatchesSnapshotControl(t *testing.T) {
+	for _, tt := range topologyStoreRouteBenchmarkCases() {
+		for _, offline := range []bool{false, true} {
+			state := "Healthy"
+			if offline {
+				state = "PrimaryOffline"
+			}
+			t.Run(tt.name+"/"+state, func(t *testing.T) {
+				topology, err := NewTopologyStore(tt.topology)
+				if err != nil {
+					t.Fatalf("NewTopologyStore() error = %v", err)
+				}
+				now := time.Unix(1_700_000_000, 0)
+				store := NewElectionStore(topology, ElectionOptions{Now: func() time.Time { return now }})
+				if offline {
+					route, ok := topology.Route("session:0")
+					if !ok {
+						t.Fatal("Route(session:0) = false, want true")
+					}
+					if err := store.MarkOffline(route.Shard.Primary); err != nil {
+						t.Fatalf("MarkOffline(%q) error = %v", route.Shard.Primary, err)
+					}
+				}
+				got := store.Status()
+				want := electionStatusSnapshotControl(store)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("Status() = %#v, snapshot control = %#v", got, want)
+				}
+
+				got.Nodes[0].ID = "mutated-node"
+				got.Leaders[0].Candidates[0] = "mutated-candidate"
+				after := store.Status()
+				if !reflect.DeepEqual(after, want) {
+					t.Fatalf("Status() after returned-value mutation = %#v, want %#v", after, want)
+				}
+			})
+		}
+	}
+}
+
+func TestElectionStoreStatusDuringTopologyUpdates(t *testing.T) {
+	base := ClusterTopology{
+		Version: 1,
+		Mode:    TopologyModeSharded,
+		Nodes:   []TopologyNode{{ID: "node-c"}, {ID: "node-a"}, {ID: "node-b"}},
+		Shards: []TopologyShard{
+			{ID: 1, Primary: "node-c", Replicas: []string{"node-b"}},
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+		},
+	}
+	topology, err := NewTopologyStore(base)
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	store := NewElectionStore(topology, ElectionOptions{})
+	updated := base
+	updated.Shards = []TopologyShard{
+		{ID: 0, Primary: "node-b", Replicas: []string{"node-a"}},
+		{ID: 1, Primary: "node-b", Replicas: []string{"node-c"}},
+	}
+
+	const iterations = 1000
+	errors := make(chan error, 2)
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		for iteration := 0; iteration < iterations; iteration++ {
+			next := base
+			if iteration&1 != 0 {
+				next = updated
+			}
+			if err := topology.Set(next); err != nil {
+				errors <- err
+				return
+			}
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		for iteration := 0; iteration < iterations; iteration++ {
+			status := store.Status()
+			if len(status.Nodes) != 3 || len(status.Leaders) != 2 || status.Nodes[0].ID != "node-a" || status.Nodes[2].ID != "node-c" || status.Leaders[0].Shard != 0 || status.Leaders[1].Shard != 1 {
+				errors <- fmt.Errorf("Status() returned a partial or unsorted generation: %#v", status)
+				return
+			}
+		}
+	}()
+	workers.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatal(err)
+	}
+}
+
+func electionStatusSnapshotControl(store *ElectionStore) ElectionStatus {
+	topology := store.topology.Get()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	active := store.activeNodesLocked(topology)
+	nodes := make([]ElectionNodeStatus, 0, len(topology.Nodes))
+	for _, node := range topology.Nodes {
+		online, reason, lastSeen := store.nodeStatusLocked(node.ID, active)
+		if node.Maintenance {
+			online = false
+			reason = "maintenance"
+		}
+		nodes = append(nodes, ElectionNodeStatus{ID: node.ID, Online: online, Reason: reason, LastSeen: lastSeen})
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	shards := electionShardsSnapshotControl(topology)
+	leaders := make([]ElectionLeader, 0, len(shards))
+	for _, shard := range shards {
+		leaders = append(leaders, electShardLeader(shard, active))
+	}
+	return ElectionStatus{TimeoutMillis: store.timeout.Milliseconds(), Nodes: nodes, Leaders: leaders}
+}
+
+func electionShardsSnapshotControl(topology ClusterTopology) []TopologyShard {
+	if topologyMode(topology.Mode) == TopologyModeFullReplica {
+		shard, ok := topology.fullReplicaShard()
+		if !ok {
+			return nil
+		}
+		return []TopologyShard{shard}
+	}
+	shards := cloneShards(topology.Shards)
+	sort.Slice(shards, func(i, j int) bool { return shards[i].ID < shards[j].ID })
+	return shards
+}
+
 func electionLeaderForKeySnapshotControl(store *ElectionStore, key string) (ElectionKeyRoute, bool) {
-	topology := store.topologySnapshot()
+	topology := store.topology.Get()
 	route, ok := topology.RouteForKey(key)
 	if !ok {
 		return ElectionKeyRoute{}, false
@@ -295,6 +427,7 @@ func electionLeaderForKeySnapshotControl(store *ElectionStore, key string) (Elec
 }
 
 var benchmarkElectionKeyRouteSink ElectionKeyRoute
+var benchmarkElectionStatusSink ElectionStatus
 
 func BenchmarkElectionStoreLeaderForKey(b *testing.B) {
 	for _, tt := range topologyStoreRouteBenchmarkCases() {
@@ -432,8 +565,59 @@ func BenchmarkElectionStoreNodeUpdateAlternating(b *testing.B) {
 	}
 }
 
+func BenchmarkElectionStoreStatus(b *testing.B) {
+	for _, tt := range topologyStoreRouteBenchmarkCases() {
+		for _, offline := range []bool{false, true} {
+			state := "Healthy"
+			if offline {
+				state = "PrimaryOffline"
+			}
+			b.Run(tt.name+"/"+state, func(b *testing.B) {
+				store, _ := newBenchmarkElectionStore(b, tt, offline)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					benchmarkElectionStatusSink = store.Status()
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkElectionStoreStatusAlternating(b *testing.B) {
+	for _, tt := range topologyStoreRouteBenchmarkCases() {
+		for _, offline := range []bool{false, true} {
+			state := "Healthy"
+			if offline {
+				state = "PrimaryOffline"
+			}
+			b.Run(tt.name+"/"+state, func(b *testing.B) {
+				store, _ := newBenchmarkElectionStore(b, tt, offline)
+				var normalizedDuration, snapshotDuration time.Duration
+				b.ResetTimer()
+				for iteration := 0; iteration < b.N; iteration++ {
+					normalizedFirst := iteration&1 != 0
+					for pass := 0; pass < 2; pass++ {
+						started := time.Now()
+						if normalizedFirst == (pass == 0) {
+							benchmarkElectionStatusSink = store.Status()
+							normalizedDuration += time.Since(started)
+						} else {
+							benchmarkElectionStatusSink = electionStatusSnapshotControl(store)
+							snapshotDuration += time.Since(started)
+						}
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(normalizedDuration.Nanoseconds())/float64(b.N), "normalized_ns/status")
+				b.ReportMetric(float64(snapshotDuration.Nanoseconds())/float64(b.N), "snapshot_ns/status")
+			})
+		}
+	}
+}
+
 func electionStoreSetNodeSnapshotControl(store *ElectionStore, nodeID string, offline bool) error {
-	topology := store.topologySnapshot()
+	topology := store.topology.Get()
 	found := false
 	for _, node := range topology.Nodes {
 		if node.ID == nodeID {

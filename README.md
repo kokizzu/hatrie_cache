@@ -1777,6 +1777,13 @@ check membership. One/four-shard heartbeat validation is 4.59x/8.85x faster
 and performs no timed allocation, while topology-generation visibility,
 unknown-node errors, timestamps, and election record locking are unchanged.
 
+Election status uses
+[normalized generation output](BENCHMARK.md#normalized-election-status-generation):
+it builds the same owned status response without cloning or sorting topology
+that was already normalized at installation. Healthy one/four-shard status is
+2.09x/2.31x faster with 2.03x/2.49x lower heap; node, leader, candidate, and
+timestamp ownership and ordering are unchanged.
+
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json ELECTION_TIMEOUT=15s
 ```
