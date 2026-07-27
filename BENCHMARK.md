@@ -224,6 +224,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact Bloom-filter headers](#compact-bloom-filter-headers), 100k empty filters plus direct operations | 48-byte header; 48.00 retained B/filter; 47.16 ns/filter build; add/has 33.24/52.46 ns | 40-byte header; 40.06 retained B/filter; 41.22 ns/filter build; add/has 32.95/47.37 ns | 1.20x lower retained heap; build/add/has 1.14x/1.01x/1.11x faster | No measured tradeoff; allocations, bitset bytes, hashes, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Direct Count-Min Sketch row loops](#direct-count-min-sketch-row-loops), default depth four | Callback byte estimate/increment: 41.36/43.82 ns; callback plain-string estimate/increment: 24.94/28.34 ns | Direct byte estimate/increment: 34.50/28.14 ns; direct plain-string estimate/increment: 16.20/20.92 ns | Byte paths 1.20x/1.56x faster; exact string paths 1.54x/1.35x faster; zero heap/allocations throughout | No measured runtime tradeoff; complete `ESTCMS` is 1.02x faster and `INCRCMS` is neutral within 0.33%; header, counters, hashes, wire, and persistence are unchanged |
 | Current pass | [Prepared-result Fenwick updates](#prepared-result-fenwick-updates), 1K/1M trees | Re-query after write: 99.11/123.6 ns | Reuse checked result: 40.21/51.86 ns | 2.46x/2.38x faster; lazy first add 1.18x faster; complete `ADDFW` 1.11x faster | No measured tradeoff; heap, allocations, overflow checks, update responses, tree layout, wire, and persistence are unchanged |
+| Current pass | [Prevalidated quantile insertions](#prevalidated-quantile-insertions), scalar `ADDQ` | Public and private finite checks: 735.3 ns; 64 B; 1 alloc | One atomic public preflight: 699.3 ns; 64 B; 1 alloc | Complete command 1.05x faster; direct scalar and 16-value controls are neutral | No measured tradeoff; invalid batches remain all-or-reject, and summary, estimates, heap, allocations, wire, and persistence are unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -5568,6 +5569,39 @@ million operations each.
 The private and public structures, backing array, numerical behavior,
 snapshots, command output, wire encoding, storage encoding, and persistent
 formats are unchanged.
+
+<a id="prevalidated-quantile-insertions"></a>
+### Prevalidated Quantile Insertions
+
+Quantile Sketch `Add` already validates the leading value and every variadic
+value before changing the summary, preserving all-or-reject behavior when any
+input is NaN or infinite. Its private insertion primitive repeated the same
+finite-number check for every value after that successful preflight.
+
+The private primitive is now named `addValid` and trusts its sole caller's
+completed preflight. Tests added before the change place NaN and positive or
+negative infinity at the beginning, middle, and end of a batch and prove that
+the count, samples, and exact snapshot remain unchanged.
+
+```sh
+make bench-quantile-add BENCHTIME=500ms COUNT=7
+```
+
+The complete command row is the median of 12 alternating original/final
+process pairs with two million operations each. Direct scalar and 16-value
+batch controls use ten and twelve alternating pairs respectively; process
+frequency caused two timing clusters, so the batch decision uses the median
+within-pair ratio rather than comparing unrelated raw medians.
+
+| Quantile insertion workload | Duplicate-check baseline | One preflight | Result |
+| --- | ---: | ---: | ---: |
+| Direct scalar | 172.85 ns; 0 B; 0 allocs | 172.65 ns; 0 B; 0 allocs | Neutral within 0.2% |
+| Direct 16-value batch | Paired ratio 1.000x; 0 B; 0 allocs | Paired ratio 1.002x; 0 B; 0 allocs | Neutral within 0.3% |
+| Complete `ADDQ` | 735.3 ns; 64 B; 1 alloc | 699.3 ns; 64 B; 1 alloc | 1.05x faster |
+
+Summary insertion, compression, rank bounds, estimates, invalid-input
+handling, snapshots, command responses, wire encoding, storage encoding, and
+persistent formats are unchanged.
 
 <a id="xor-filter-scalar-fast-path"></a>
 ### XOR Filter Scalar Fast Path

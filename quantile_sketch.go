@@ -138,18 +138,15 @@ func (sketch *quantileSketchData) Add(value float64, values ...float64) Quantile
 	if !validQuantileSketchValues(value, values...) {
 		return QuantileEstimate{}
 	}
-	sketch.addOne(value)
+	sketch.addValid(value)
 	for _, value := range values {
-		sketch.addOne(value)
+		sketch.addValid(value)
 	}
 	estimate, _ := sketch.Estimate(0.5)
 	return estimate
 }
 
-func (sketch *quantileSketchData) addOne(value float64) {
-	if !validQuantileSketchValue(value) {
-		return
-	}
+func (sketch *quantileSketchData) addValid(value float64) {
 	sketch.count = saturatingAddUint64(sketch.count, 1)
 	insert := sort.Search(len(sketch.summary), func(idx int) bool {
 		return sketch.summary[idx].Value > value
