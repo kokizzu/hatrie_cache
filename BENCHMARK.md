@@ -6596,6 +6596,40 @@ would break direct callers and touch every wire, journal, replication, and CLI
 conversion for no command-execution gain. Public API, JSON/protobuf behavior,
 storage, replication, and production code remain unchanged.
 
+<a id="precomputed-xor-command-benchmark-inputs"></a>
+#### Precomputed XOR Command Benchmark Inputs
+
+`XorBuild64Items` measures a complete cache create, XOR reserve, 64 scalar
+adds, fingerprint build, and destroy cycle. Its timed loop also constructed
+each caller-owned `"value-N"` string with `strconv.Itoa`, unlike the constant or
+prebuilt requests used by the other command rows. An allocation profile
+attributed 64 allocations per cycle to that input construction rather than the
+cache. The fixture now builds the immutable values once before sub-benchmark
+timing and passes the same strings through all 64 production commands. The
+focused generic-versus-exact XOR command benchmark uses the same input fixture.
+
+```sh
+make bench-hatrie-command-features HATRIE_COMMAND_BENCH='^BenchmarkCommandFeature/XorBuild64Items$' BENCHTIME=10000x COUNT=7
+make run CMD='go test . -run=NoTests -bench=^BenchmarkXorCommandBuild64Path$ -benchmem -benchtime=10000x -count=7 -cpu=1'
+make bench-hatrie-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks BENCHTIME=1000000x COUNT=1
+make benchmark-md BENCHMARK_ARTIFACT_DIR=build/benchmarks
+```
+
+| Complete 64-item XOR fixture, seven-run median | Timed input construction | Precomputed caller inputs | Measurement correction |
+| --- | ---: | ---: | ---: |
+| Time | 102,752 ns | 98,037 ns | 1.048x faster measured row |
+| Cumulative heap | 18,637 B | 18,203 B | 434 B lower, 1.024x less |
+| Allocations | 218 | 154 | 64 harness allocations removed, 1.42x fewer |
+
+The fresh million-operation artifact reports 100,470 ns, 18,204 B, and 154
+allocations. A corrected allocation-rate-one profile accounts for the
+remaining objects: owned canonical staged keys/values and map growth, three
+fingerprint-builder arrays, the cache lifecycle, and command responses. The
+previous marker-only staged representation removed 64 production allocations
+but made pending snapshot creation 1.23x slower and was already reverted. No
+production path, staged ownership, snapshot cost, wire format, or cache result
+changed in this fixture-only correction.
+
 <a id="timed-command-benchmark-helper-overhead"></a>
 ### Timed Command Benchmark Helper Overhead
 
@@ -7862,8 +7896,8 @@ Generated from command benchmark artifacts in `build/benchmarks`.
 
 | System | Run | Memory metric | Value |
 | --- | --- | --- | ---: |
-| HAT-trie cache | `HAT-trie benchmark: bench=^BenchmarkCommandFeature$ benchtime=1000000x count=1 pipeline_ops=16 mixed_profile_ops=100` | Max resident set size | 42264 KiB |
-| HAT-trie cache | `HAT-trie benchmark: bench=^BenchmarkCommandFeature$ benchtime=1000000x count=1 pipeline_ops=16 mixed_profile_ops=100` | Benchmark process wall time | 2:45.13 |
+| HAT-trie cache | `HAT-trie benchmark: bench=^BenchmarkCommandFeature$ benchtime=1000000x count=1 pipeline_ops=16 mixed_profile_ops=100` | Max resident set size | 43396 KiB |
+| HAT-trie cache | `HAT-trie benchmark: bench=^BenchmarkCommandFeature$ benchtime=1000000x count=1 pipeline_ops=16 mixed_profile_ops=100` | Benchmark process wall time | 2:23.74 |
 | Redis | `Redis 7.0.4 benchmark: host=127.0.0.1 port=6380 requests=10000 clients=1 keyspace=10000 pipeline=16 mixed_profile_ops=100` | used_memory | 2577952 B |
 | Redis | `Redis 7.0.4 benchmark: host=127.0.0.1 port=6380 requests=10000 clients=1 keyspace=10000 pipeline=16 mixed_profile_ops=100` | used_memory_rss | 9711616 B |
 | Redis | `Redis 7.0.4 benchmark: host=127.0.0.1 port=6380 requests=10000 clients=1 keyspace=10000 pipeline=16 mixed_profile_ops=100` | used_memory_peak | 3251944 B |
@@ -7882,49 +7916,49 @@ HAT-trie memory is the benchmark test process RSS, so it includes the Go runtime
 
 | Feature family | HAT-trie benchmark | HAT-trie seconds / 10k | HAT alloc/op | Tarantool measured operation | Tarantool seconds / 10k | Tarantool/HAT speedup |
 | --- | --- | ---: | ---: | --- | ---: | ---: |
-| String write | `BenchmarkCommandFeature/StringSet` | 0.002074 s | 0 B/op | `space:replace()` | 0.008913 s | 4.30x |
-| Pipelined string write | `BenchmarkCommandFeature/PipelineBatch16` | 0.002186 s | 1152 B/op | `16x space:replace() batch loop` | 0.007513 s | 3.44x |
-| Mixed read-heavy profile | `BenchmarkCommandFeature/MixedReadHeavy100` | 0.001698 s | 7 B/op | `90 get + 5 replace + 4 exists + 1 counter` | 0.003967 s | 2.34x |
-| Mixed write-heavy profile | `BenchmarkCommandFeature/MixedWriteHeavy100` | 0.002846 s | 79 B/op | `40 replace + 30 ttl update + 20 get + 10 counter` | 0.011077 s | 3.89x |
-| String read | `BenchmarkCommandFeature/StringGet` | 0.001585 s | 0 B/op | `space.index.primary:get()` | 0.018306 s | 11.55x |
-| Integer counter | `BenchmarkCommandFeature/CounterInc` | 0.002443 s | 7 B/op | `space:update({{"+", 2, 1}})` | 0.012910 s | 5.28x |
-| TTL update | `BenchmarkCommandFeature/TTLExpire` | 0.002312 s | 0 B/op | `space:update({{"=", 3, expires_at}})` | 0.014722 s | 6.37x |
-| Map/hash write | `BenchmarkCommandFeature/MapPut` | 0.000730 s | 0 B/op | `space:replace({key, field, value})` | 0.007521 s | 10.30x |
-| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 0.000644 s | 0 B/op | `space.index.primary:get({key, field})` | 0.042494 s | 65.98x |
-| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 0.001698 s | 16 B/op | `space:replace() + space:delete()` | 0.012852 s | 7.57x |
-| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 0.001270 s | 0 B/op | `space:replace() + space.index.primary:get()` | 0.027953 s | 22.01x |
-| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 0.002129 s | 32 B/op | `tree index insert + index:min() + delete` | 0.041397 s | 19.44x |
-| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 0.001774 s | 0 B/op | `space:replace() membership index` | 0.006817 s | 3.84x |
-| Roaring bitmap lookup | `BenchmarkCommandFeature/RoaringHas` | 0.000776 s | 0 B/op | `space.index.primary:get() membership index` | 0.019047 s | 24.55x |
-| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 0.001843 s | 0 B/op | `space:replace() membership index` | 0.007105 s | 3.86x |
-| Sparse uint64 bitset lookup | `BenchmarkCommandFeature/SparseBitsetHas` | 0.000912 s | 0 B/op | `space.index.primary:get() membership index` | 0.018535 s | 20.32x |
-| Radix-tree put | `BenchmarkCommandFeature/RadixPut` | 0.000812 s | 0 B/op | `space:replace() tree string key` | 0.009571 s | 11.79x |
-| Radix-tree prefix scan | `BenchmarkCommandFeature/RadixPrefix` | 0.008793 s | 1024 B/op | `index:pairs(prefix, {iterator = "GE"})` | 0.173563 s | 19.74x |
-| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.001683 s | 64 B/op | `msgpack.encode(tuple)` | 0.027465 s | 16.32x |
+| String write | `BenchmarkCommandFeature/StringSet` | 0.001449 s | 0 B/op | `space:replace()` | 0.008913 s | 6.15x |
+| Pipelined string write | `BenchmarkCommandFeature/PipelineBatch16` | 0.001455 s | 1152 B/op | `16x space:replace() batch loop` | 0.007513 s | 5.16x |
+| Mixed read-heavy profile | `BenchmarkCommandFeature/MixedReadHeavy100` | 0.001038 s | 7 B/op | `90 get + 5 replace + 4 exists + 1 counter` | 0.003967 s | 3.82x |
+| Mixed write-heavy profile | `BenchmarkCommandFeature/MixedWriteHeavy100` | 0.002267 s | 79 B/op | `40 replace + 30 ttl update + 20 get + 10 counter` | 0.011077 s | 4.89x |
+| String read | `BenchmarkCommandFeature/StringGet` | 0.001012 s | 0 B/op | `space.index.primary:get()` | 0.018306 s | 18.09x |
+| Integer counter | `BenchmarkCommandFeature/CounterInc` | 0.001593 s | 7 B/op | `space:update({{"+", 2, 1}})` | 0.012910 s | 8.10x |
+| TTL update | `BenchmarkCommandFeature/TTLExpire` | 0.001715 s | 0 B/op | `space:update({{"=", 3, expires_at}})` | 0.014722 s | 8.58x |
+| Map/hash write | `BenchmarkCommandFeature/MapPut` | 0.000752 s | 0 B/op | `space:replace({key, field, value})` | 0.007521 s | 10.00x |
+| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 0.000671 s | 0 B/op | `space.index.primary:get({key, field})` | 0.042494 s | 63.33x |
+| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 0.001858 s | 16 B/op | `space:replace() + space:delete()` | 0.012852 s | 6.92x |
+| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 0.001396 s | 0 B/op | `space:replace() + space.index.primary:get()` | 0.027953 s | 20.02x |
+| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 0.002413 s | 32 B/op | `tree index insert + index:min() + delete` | 0.041397 s | 17.16x |
+| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 0.001574 s | 0 B/op | `space:replace() membership index` | 0.006817 s | 4.33x |
+| Roaring bitmap lookup | `BenchmarkCommandFeature/RoaringHas` | 0.000936 s | 0 B/op | `space.index.primary:get() membership index` | 0.019047 s | 20.35x |
+| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 0.001396 s | 0 B/op | `space:replace() membership index` | 0.007105 s | 5.09x |
+| Sparse uint64 bitset lookup | `BenchmarkCommandFeature/SparseBitsetHas` | 0.001113 s | 0 B/op | `space.index.primary:get() membership index` | 0.018535 s | 16.65x |
+| Radix-tree put | `BenchmarkCommandFeature/RadixPut` | 0.000950 s | 0 B/op | `space:replace() tree string key` | 0.009571 s | 10.07x |
+| Radix-tree prefix scan | `BenchmarkCommandFeature/RadixPrefix` | 0.009072 s | 1024 B/op | `index:pairs(prefix, {iterator = "GE"})` | 0.173563 s | 19.13x |
+| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.001437 s | 64 B/op | `msgpack.encode(tuple)` | 0.027465 s | 19.11x |
 
 ## HAT-trie vs Redis
 
 | Feature family | HAT-trie benchmark | HAT-trie seconds / 10k | Redis measured command | Redis seconds / 10k | Redis/HAT speedup |
 | --- | --- | ---: | --- | ---: | ---: |
-| String write | `BenchmarkCommandFeature/StringSet` | 0.002074 s | `SET hatriebench:2587239:string value` | 0.544000 s | 262.30x |
-| Pipelined string write | `BenchmarkCommandFeature/PipelineBatch16` | 0.002186 s | `-P 16 SET hatriebench:2587239:pipeline:string value` | 0.037000 s | 16.93x |
-| Mixed read-heavy profile | `BenchmarkCommandFeature/MixedReadHeavy100` | 0.001698 s | `EVAL 100op profile` | 0.013830 s | 8.14x |
-| Mixed write-heavy profile | `BenchmarkCommandFeature/MixedWriteHeavy100` | 0.002846 s | `EVAL 100op profile` | 0.016670 s | 5.86x |
-| String read | `BenchmarkCommandFeature/StringGet` | 0.001585 s | `GET hatriebench:2587239:string:__rand_int__` | 0.533000 s | 336.28x |
-| Integer counter | `BenchmarkCommandFeature/CounterInc` | 0.002443 s | `INCR hatriebench:2587239:counter` | 0.539000 s | 220.63x |
-| TTL update | `BenchmarkCommandFeature/TTLExpire` | 0.002312 s | `EXPIRE hatriebench:2587239:ttl 3600` | 0.548000 s | 237.02x |
-| Map/hash write | `BenchmarkCommandFeature/MapPut` | 0.000730 s | `HSET hatriebench:2587239:hash field value` | 0.533000 s | 730.14x |
-| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 0.000644 s | `HGET hatriebench:2587239:hash field` | 0.518000 s | 804.35x |
-| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 0.001698 s | `LPUSH hatriebench:2587239:list value` + `RPOP hatriebench:2587239:list:pop` | 1.042000 s | 613.66x |
-| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 0.001270 s | `SADD hatriebench:2587239:set value` + `SISMEMBER hatriebench:2587239:set value` | 1.045000 s | 822.83x |
-| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 0.002129 s | `ZADD hatriebench:2587239:zset 10 value` + `ZPOPMIN hatriebench:2587239:zset:pop` | 1.090000 s | 511.98x |
-| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 0.001774 s | `SETBIT hatriebench:2587239:bitmap 65543 1` | 0.543000 s | 306.09x |
-| Roaring bitmap lookup | `BenchmarkCommandFeature/RoaringHas` | 0.000776 s | `GETBIT hatriebench:2587239:bitmap 65543` | 0.544000 s | 701.03x |
-| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 0.001843 s | `SETBIT hatriebench:2587239:bitmap 65543 1` | 0.543000 s | 294.63x |
-| Sparse uint64 bitset lookup | `BenchmarkCommandFeature/SparseBitsetHas` | 0.000912 s | `GETBIT hatriebench:2587239:bitmap 65543` | 0.544000 s | 596.49x |
-| HyperLogLog add | `BenchmarkCommandFeature/HyperLogLogAdd` | 0.001150 s | `PFADD hatriebench:2587239:hll value` | 0.544000 s | 473.04x |
-| HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 0.000983 s | `PFCOUNT hatriebench:2587239:hll` | 0.532000 s | 541.20x |
-| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.001683 s | `DUMP hatriebench:2587239:string` | 0.536000 s | 318.48x |
+| String write | `BenchmarkCommandFeature/StringSet` | 0.001449 s | `SET hatriebench:2587239:string value` | 0.544000 s | 375.43x |
+| Pipelined string write | `BenchmarkCommandFeature/PipelineBatch16` | 0.001455 s | `-P 16 SET hatriebench:2587239:pipeline:string value` | 0.037000 s | 25.43x |
+| Mixed read-heavy profile | `BenchmarkCommandFeature/MixedReadHeavy100` | 0.001038 s | `EVAL 100op profile` | 0.013830 s | 13.32x |
+| Mixed write-heavy profile | `BenchmarkCommandFeature/MixedWriteHeavy100` | 0.002267 s | `EVAL 100op profile` | 0.016670 s | 7.35x |
+| String read | `BenchmarkCommandFeature/StringGet` | 0.001012 s | `GET hatriebench:2587239:string:__rand_int__` | 0.533000 s | 526.68x |
+| Integer counter | `BenchmarkCommandFeature/CounterInc` | 0.001593 s | `INCR hatriebench:2587239:counter` | 0.539000 s | 338.36x |
+| TTL update | `BenchmarkCommandFeature/TTLExpire` | 0.001715 s | `EXPIRE hatriebench:2587239:ttl 3600` | 0.548000 s | 319.53x |
+| Map/hash write | `BenchmarkCommandFeature/MapPut` | 0.000752 s | `HSET hatriebench:2587239:hash field value` | 0.533000 s | 708.78x |
+| Map/hash read | `BenchmarkCommandFeature/MapPeek` | 0.000671 s | `HGET hatriebench:2587239:hash field` | 0.518000 s | 771.98x |
+| List/deque push+pop | `BenchmarkCommandFeature/SlicePushPop` | 0.001858 s | `LPUSH hatriebench:2587239:list value` + `RPOP hatriebench:2587239:list:pop` | 1.042000 s | 560.82x |
+| Set add+has | `BenchmarkCommandFeature/SetAddHas` | 0.001396 s | `SADD hatriebench:2587239:set value` + `SISMEMBER hatriebench:2587239:set value` | 1.045000 s | 748.57x |
+| Priority queue push+pop | `BenchmarkCommandFeature/PriorityQueuePushPop` | 0.002413 s | `ZADD hatriebench:2587239:zset 10 value` + `ZPOPMIN hatriebench:2587239:zset:pop` | 1.090000 s | 451.72x |
+| Roaring bitmap add | `BenchmarkCommandFeature/RoaringAdd` | 0.001574 s | `SETBIT hatriebench:2587239:bitmap 65543 1` | 0.543000 s | 344.98x |
+| Roaring bitmap lookup | `BenchmarkCommandFeature/RoaringHas` | 0.000936 s | `GETBIT hatriebench:2587239:bitmap 65543` | 0.544000 s | 581.20x |
+| Sparse uint64 bitset add | `BenchmarkCommandFeature/SparseBitsetAdd` | 0.001396 s | `SETBIT hatriebench:2587239:bitmap 65543 1` | 0.543000 s | 388.97x |
+| Sparse uint64 bitset lookup | `BenchmarkCommandFeature/SparseBitsetHas` | 0.001113 s | `GETBIT hatriebench:2587239:bitmap 65543` | 0.544000 s | 488.77x |
+| HyperLogLog add | `BenchmarkCommandFeature/HyperLogLogAdd` | 0.001182 s | `PFADD hatriebench:2587239:hll value` | 0.544000 s | 460.24x |
+| HyperLogLog count | `BenchmarkCommandFeature/HyperLogLogCount` | 0.001075 s | `PFCOUNT hatriebench:2587239:hll` | 0.532000 s | 494.88x |
+| Replication dump | `BenchmarkCommandFeature/ReplicationDump` | 0.001437 s | `DUMP hatriebench:2587239:string` | 0.536000 s | 373.00x |
 
 <!-- END GENERATED COMMAND BENCHMARK COMPARISON -->
 
@@ -8795,52 +8829,52 @@ goos: linux
 goarch: amd64
 pkg: hatrie_cache
 cpu: AMD Ryzen 9 5950X 16-Core Processor
-BenchmarkCommandFeature/StringSet-32         	 1000000	       207.4 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/PipelineBatch16-32   	 1000000	      3497 ns/op	    1152 B/op	       1 allocs/op
-BenchmarkCommandFeature/MixedReadHeavy100-32 	 1000000	     16985 ns/op	       7 B/op	       1 allocs/op
-BenchmarkCommandFeature/MixedWriteHeavy100-32         	 1000000	     28457 ns/op	      79 B/op	      10 allocs/op
-BenchmarkCommandFeature/StringGet-32                  	 1000000	       158.5 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/CounterInc-32                 	 1000000	       244.3 ns/op	       7 B/op	       0 allocs/op
-BenchmarkCommandFeature/TTLExpire-32                  	 1000000	       231.2 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/MapPut-32                     	 1000000	        72.96 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/MapPeek-32                    	 1000000	        64.36 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/MapGet-32                     	 1000000	       159.1 ns/op	      24 B/op	       1 allocs/op
-BenchmarkCommandFeature/SlicePushPop-32               	 1000000	       169.8 ns/op	      16 B/op	       1 allocs/op
-BenchmarkCommandFeature/SetAddHas-32                  	 1000000	       127.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/PriorityQueuePushPop-32       	 1000000	       212.9 ns/op	      32 B/op	       1 allocs/op
-BenchmarkCommandFeature/BloomAdd-32                   	 1000000	        95.59 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/BloomHas-32                   	 1000000	       115.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/CuckooDeleteAdd-32            	 1000000	       198.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/CuckooHas-32                  	 1000000	        90.83 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/XorBuild64Items-32            	 1000000	    108042 ns/op	   18637 B/op	     218 allocs/op
-BenchmarkCommandFeature/XorHas-32                     	 1000000	       108.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/RoaringAdd-32                 	 1000000	       177.4 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/RoaringHas-32                 	 1000000	        77.59 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/SparseBitsetAdd-32            	 1000000	       184.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/SparseBitsetHas-32            	 1000000	        91.19 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/RadixPut-32                   	 1000000	        81.25 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/RadixPrefix-32                	 1000000	       879.3 ns/op	    1024 B/op	       1 allocs/op
-BenchmarkCommandFeature/CountMinSketchIncrement-32    	 1000000	       126.0 ns/op	       7 B/op	       0 allocs/op
-BenchmarkCommandFeature/CountMinSketchEstimate-32     	 1000000	        80.81 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/HyperLogLogAdd-32             	 1000000	       115.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/HyperLogLogCount-32           	 1000000	        98.30 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/StringSet-32         	 1000000	       144.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/PipelineBatch16-32   	 1000000	      2328 ns/op	    1152 B/op	       1 allocs/op
+BenchmarkCommandFeature/MixedReadHeavy100-32 	 1000000	     10382 ns/op	       7 B/op	       1 allocs/op
+BenchmarkCommandFeature/MixedWriteHeavy100-32         	 1000000	     22666 ns/op	      79 B/op	      10 allocs/op
+BenchmarkCommandFeature/StringGet-32                  	 1000000	       101.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/CounterInc-32                 	 1000000	       159.3 ns/op	       7 B/op	       0 allocs/op
+BenchmarkCommandFeature/TTLExpire-32                  	 1000000	       171.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/MapPut-32                     	 1000000	        75.19 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/MapPeek-32                    	 1000000	        67.10 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/MapGet-32                     	 1000000	       153.5 ns/op	      24 B/op	       1 allocs/op
+BenchmarkCommandFeature/SlicePushPop-32               	 1000000	       185.8 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCommandFeature/SetAddHas-32                  	 1000000	       139.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/PriorityQueuePushPop-32       	 1000000	       241.3 ns/op	      32 B/op	       1 allocs/op
+BenchmarkCommandFeature/BloomAdd-32                   	 1000000	        98.15 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/BloomHas-32                   	 1000000	       110.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/CuckooDeleteAdd-32            	 1000000	       203.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/CuckooHas-32                  	 1000000	        80.13 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/XorBuild64Items-32            	 1000000	    100470 ns/op	   18204 B/op	     154 allocs/op
+BenchmarkCommandFeature/XorHas-32                     	 1000000	       120.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/RoaringAdd-32                 	 1000000	       157.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/RoaringHas-32                 	 1000000	        93.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/SparseBitsetAdd-32            	 1000000	       139.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/SparseBitsetHas-32            	 1000000	       111.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/RadixPut-32                   	 1000000	        94.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/RadixPrefix-32                	 1000000	       907.2 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkCommandFeature/CountMinSketchIncrement-32    	 1000000	       124.5 ns/op	       7 B/op	       0 allocs/op
+BenchmarkCommandFeature/CountMinSketchEstimate-32     	 1000000	        87.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/HyperLogLogAdd-32             	 1000000	       118.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/HyperLogLogCount-32           	 1000000	       107.5 ns/op	       0 B/op	       0 allocs/op
 BenchmarkCommandFeature/TopKAdd-32                    	 1000000	       143.3 ns/op	      48 B/op	       1 allocs/op
-BenchmarkCommandFeature/TopKGet-32                    	 1000000	       132.4 ns/op	      48 B/op	       1 allocs/op
-BenchmarkCommandFeature/ReservoirSampleAdd-32         	 1000000	       151.2 ns/op	      64 B/op	       1 allocs/op
-BenchmarkCommandFeature/ReservoirSampleGet-32         	 1000000	      1903 ns/op	    1688 B/op	       3 allocs/op
-BenchmarkCommandFeature/QuantileSketchAdd-32          	 1000000	       640.0 ns/op	      64 B/op	       1 allocs/op
-BenchmarkCommandFeature/QuantileSketchEstimate-32     	 1000000	       271.9 ns/op	      64 B/op	       1 allocs/op
-BenchmarkCommandFeature/FenwickTreeAdd-32             	 1000000	       403.9 ns/op	      95 B/op	       1 allocs/op
-BenchmarkCommandFeature/FenwickTreeRange-32           	 1000000	       107.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCommandFeature/ReplicationDump-32            	 1000000	       168.3 ns/op	      64 B/op	       1 allocs/op
+BenchmarkCommandFeature/TopKGet-32                    	 1000000	       143.2 ns/op	      48 B/op	       1 allocs/op
+BenchmarkCommandFeature/ReservoirSampleAdd-32         	 1000000	       151.3 ns/op	      64 B/op	       1 allocs/op
+BenchmarkCommandFeature/ReservoirSampleGet-32         	 1000000	      1948 ns/op	    1688 B/op	       3 allocs/op
+BenchmarkCommandFeature/QuantileSketchAdd-32          	 1000000	       526.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkCommandFeature/QuantileSketchEstimate-32     	 1000000	       263.2 ns/op	      64 B/op	       1 allocs/op
+BenchmarkCommandFeature/FenwickTreeAdd-32             	 1000000	       294.9 ns/op	      95 B/op	       1 allocs/op
+BenchmarkCommandFeature/FenwickTreeRange-32           	 1000000	       105.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCommandFeature/ReplicationDump-32            	 1000000	       143.7 ns/op	      64 B/op	       1 allocs/op
 PASS
 
 Memory summary:
 
 | Metric | Value |
 | --- | ---: |
-| Max resident set size | 42264 KiB |
-| Benchmark process wall time | 2:45.13 |
+| Max resident set size | 43396 KiB |
+| Benchmark process wall time | 2:23.74 |
 
 ```
 

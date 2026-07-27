@@ -17,6 +17,7 @@ func BenchmarkCommandFeature(b *testing.B) {
 		idx := strconv.Itoa(i)
 		pipelineBatch = append(pipelineBatch, CacheCommandRequest{Command: "SETSTR", Key: "pipeline:string:" + idx, Value: "value"})
 	}
+	xorValues := benchmarkXorCommandValues()
 	mixedReadHeavy := benchmarkCommandMixedReadHeavyRequests()
 	mixedWriteHeavy := benchmarkCommandMixedWriteHeavyRequests()
 	ttlSeconds := int64(3600)
@@ -93,11 +94,13 @@ func BenchmarkCommandFeature(b *testing.B) {
 		}},
 		{name: "XorBuild64Items", run: func(b *testing.B, ht *HatTrie, i int) {
 			buildTrie := CreateHatTrie()
-			setupCommandFeatureXorStaged(b, buildTrie)
+			setupCommandFeatureXorStaged(b, buildTrie, xorValues)
 			benchmarkExecuteCommand(b, buildTrie, CacheCommandRequest{Command: "BUILDXF", Key: "xor:key"})
 			buildTrie.Destroy()
 		}},
-		{name: "XorHas", setup: setupCommandFeatureXorBuilt, run: func(b *testing.B, ht *HatTrie, i int) {
+		{name: "XorHas", setup: func(b *testing.B, ht *HatTrie) {
+			setupCommandFeatureXorBuilt(b, ht, xorValues)
+		}, run: func(b *testing.B, ht *HatTrie, i int) {
 			benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "HASXF", Key: "xor:key", Value: "value-7"})
 		}},
 		{name: "RoaringAdd", setup: setupCommandFeatureRoaring, run: func(b *testing.B, ht *HatTrie, i int) {
@@ -180,6 +183,7 @@ func BenchmarkCommandFeature(b *testing.B) {
 }
 
 func BenchmarkXorCommandBuild64Path(b *testing.B) {
+	values := benchmarkXorCommandValues()
 	for _, benchmark := range []struct {
 		name       string
 		addCommand string
@@ -192,14 +196,22 @@ func BenchmarkXorCommandBuild64Path(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				ht := CreateHatTrie()
 				benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "CREATEXF", Key: "xor:key", Value: "64"})
-				for item := 0; item < 64; item++ {
-					benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: benchmark.addCommand, Key: "xor:key", Value: "value-" + strconv.Itoa(item)})
+				for _, value := range values {
+					benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: benchmark.addCommand, Key: "xor:key", Value: value})
 				}
 				benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "BUILDXF", Key: "xor:key"})
 				ht.Destroy()
 			}
 		})
 	}
+}
+
+func benchmarkXorCommandValues() []string {
+	values := make([]string, 64)
+	for i := range values {
+		values[i] = "value-" + strconv.Itoa(i)
+	}
+	return values
 }
 
 func BenchmarkReservoirSampleGetPath(b *testing.B) {
@@ -403,15 +415,15 @@ func setupCommandFeatureCuckooWithValue(b *testing.B, ht *HatTrie) {
 	benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "ADDCF", Key: "cuckoo:key", Value: "value"})
 }
 
-func setupCommandFeatureXorStaged(b *testing.B, ht *HatTrie) {
+func setupCommandFeatureXorStaged(b *testing.B, ht *HatTrie, values []string) {
 	benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "CREATEXF", Key: "xor:key", Value: "64"})
-	for i := 0; i < 64; i++ {
-		benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "ADDXF", Key: "xor:key", Value: "value-" + strconv.Itoa(i)})
+	for _, value := range values {
+		benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "ADDXF", Key: "xor:key", Value: value})
 	}
 }
 
-func setupCommandFeatureXorBuilt(b *testing.B, ht *HatTrie) {
-	setupCommandFeatureXorStaged(b, ht)
+func setupCommandFeatureXorBuilt(b *testing.B, ht *HatTrie, values []string) {
+	setupCommandFeatureXorStaged(b, ht, values)
 	benchmarkExecuteCommand(b, ht, CacheCommandRequest{Command: "BUILDXF", Key: "xor:key"})
 }
 

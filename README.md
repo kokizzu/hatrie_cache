@@ -112,6 +112,11 @@ rather than Go escape-analysis cost in the fixture. The expiration command
 itself is allocation-free for a reused request; measurements and the rejected
 breaking request-API redesign are documented in the
 [optional command fixture audit](BENCHMARK.md#optional-command-benchmark-fixture-allocations).
+The complete 64-item XOR build benchmark also
+[precomputes caller inputs](BENCHMARK.md#precomputed-xor-command-benchmark-inputs)
+before timing. This removes 64 `strconv` allocations that were unrelated to
+cache execution while leaving cache creation, reserve, every scalar add, build,
+and destruction inside the measured cycle.
 XOR filter values stage unique items once, then compile them into static 8-bit
 fingerprint arrays for faster low-memory membership checks than Bloom filters
 on read-heavy immutable sets. Their private header fits in one 64-byte cache

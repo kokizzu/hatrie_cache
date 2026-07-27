@@ -650,6 +650,39 @@ func TestDocsDescribeOptionalCommandBenchmarkFixtureAllocations(t *testing.T) {
 	}
 }
 
+func TestDocsDescribePrecomputedXorCommandBenchmarkInputs(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[precomputes caller inputs](BENCHMARK.md#precomputed-xor-command-benchmark-inputs)",
+		"removes 64 `strconv` allocations",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing XOR command fixture token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Precomputed XOR Command Benchmark Inputs",
+		"102,752 ns",
+		"98,037 ns",
+		"18,637 B",
+		"18,203 B",
+		"64 harness allocations removed",
+		"100,470 ns, 18,204 B, and 154",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing XOR command fixture token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeTimedCommandBenchmarkHelperCorrection(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
