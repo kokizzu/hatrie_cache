@@ -270,6 +270,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
+| Current pass | [Shared scalar-batch keys](#shared-scalar-batch-keys), 10k same-key GET, batch 16 | Repeated key column: 394.3 ns/command; 2,368,864 heap B; 34,823 allocs; 23.72 wire B/command | One shared key: 316.1 ns/command; 1,684,878 heap B; 23,020 allocs; 11.54 wire B/command | 1.25x faster, 1.41x lower heap, 1.51x fewer allocs, 2.06x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
 | Current pass | [Go 1.26.5 toolchain refresh](#go-1265-toolchain-refresh), direct command operations | Go 1.26.4 set/get/inc/TTL: 192.9/168.6/243.1/227.5 ns | Go 1.26.5: 182.3/164.8/239.0/229.9 ns | 1.06x/1.02x/1.02x faster; TTL 1.01x slower; heap and allocations unchanged | Minimum supported Go version and Docker builder become 1.26.5 |
@@ -400,6 +401,8 @@ tree.
 | Single replication owner backing | Removed 63 owner allocations from a healthy 64-shard snapshot | Go size-class rounding added 128/256/128 cumulative heap B at 16/32/64 shards | Replaced by [four-shard replication owner backing](#grouped-replication-owner-backing), which keeps heap flat while removing 48 allocations at 64 shards |
 | Combined-backing helper extraction | Kept the full-replica constructor's machine-code body smaller by moving multi-shard construction behind one helper call | Offline 32/64-shard paired medians became 1.01x slower, 11,881 to 12,006 ns and 25,061 to 25,226 ns | Reverted before commit; the measured-faster grouped loop remains inline; see [combined owner/target backing](#combined-replication-owner-target-backing) |
 | Generic replication target sorting at every size | Removed three reflective allocations and 184 cumulative heap B for one large target slice | Complete paired 31/63-target construction was 1.03x/1.025x slower | Replaced by the measured 16-target cutoff; large sets retain the original sorter; see [adaptive replication target sorting](#adaptive-replication-target-sorting) |
+| Dedicated packed scalar key fields | General distinct-key batches improved 1.09x with 1.44x fewer allocations and 1.56% less wire | Two added slice fields enlarged every decoded legacy request; the 10k legacy control used 31,947 more heap B, or 1.35%, even when the fields were absent | Removed before commit; [shared scalar-batch keys](#shared-scalar-batch-keys) reuse the existing key column, improve the target workload more, and leave the generated request layout unchanged |
+| Reused streamed scalar responses | Could remove roughly three response/status allocations per envelope | gRPC's `SendMsg` contract forbids modifying a message after send because tracing and stats handlers may consume it lazily | Rejected before an unsafe prototype; every streamed response remains independently owned |
 
 <a id="delta-only-startup-persistence"></a>
 ### Delta-Only Startup Persistence
@@ -2272,6 +2275,51 @@ local partitions, batches smaller than four, and journal, dirty-tracker,
 replicator, or leader-enforcement interception retain the previous behavior.
 There is no wire, persistence, configuration, or background-worker change.
 Raw final output is in `build/benchmarks/scalar-native-batch.txt`.
+
+<a id="shared-scalar-batch-keys"></a>
+### Shared Scalar-Batch Keys
+
+Repeated-key scalar envelopes previously serialized and decoded the same key
+once per command. `ScalarBatchRequest.keys` now accepts either one key per
+operation or one shared key for the complete envelope. The compact form needs
+no protobuf schema field, generated-request growth, unsafe string conversion,
+configuration, or retained state. Distinct-key requests keep their original
+layout and direct indexed execution.
+
+Tests were added before the server accepted the compact form. They cover mixed
+same-key operation ordering, the direct resolve-once read path, journal replay,
+dirty tracking, local partitions, legacy expanded columns, malformed columns,
+and exact telemetry. Shared mixed, intercepted, and partitioned requests expand
+one request-local string-header slice. Shared all-`GET` requests are consumed
+directly and allocate no expansion.
+
+```sh
+make run CMD='env HATRIE_BIG_WINS_OPS=10000 go test . -run=NONE -bench="^BenchmarkBigWins/ScalarBatchStreamCommand(RepeatedKeys)?$$" -benchmem -benchtime=5x -count=15 -cpu=1'
+```
+
+Both rows are 15-run medians from the same binary, stream, batch size, server,
+and 10,000-command repeated-key fixture on the Ryzen 9 5950X host.
+
+| Key column | Time/10k | ns/command | Heap B/10k | Allocs/10k | Wire B/command | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Sixteen repeated key entries | 3.943 ms | 394.3 | 2,368,864 | 34,823 | 23.72 | baseline |
+| One shared key entry | 3.161 ms | 316.1 | 1,684,878 | 23,020 | 11.54 | 1.25x CPU, 1.41x heap, 1.51x allocations, 2.06x wire |
+
+An allocation profile reduced protobuf string-slice decoding from 12,508
+objects in the original profiled run to 1,043 objects with one key per message.
+The profile still includes setup and framework decoding outside the timed
+region, so the complete benchmark table remains the acceptance measurement.
+Older servers reject a shared key for a multi-command envelope with the
+existing key-count error; mixed-version clients can retry with expanded keys.
+
+The first prototype instead added `packed_keys` and `key_ends` protobuf fields.
+It improved its same-binary control 1.09x and removed 1.44x allocations, but
+the two slice fields enlarged every decoded legacy request: the untouched-head
+10k control used 2,368,864 heap B while the enlarged legacy request used
+2,400,811 B, a 1.35% regression even when the fields were absent. That design
+was removed. Reusing response objects was also rejected before implementation:
+gRPC permits tracing and stats handlers to consume a sent message lazily, so a
+stream cannot safely mutate or pool the response immediately after `SendMsg`.
 
 ### Segmented WAL Compaction
 

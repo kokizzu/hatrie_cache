@@ -2517,9 +2517,14 @@ server or port. See [BENCHMARK.md](BENCHMARK.md#persistent-grpc-command-stream).
 
 For scalar-heavy clients, `CacheService.ScalarBatchStream` is the lower-CPU,
 lower-allocation protobuf interface. Its request is columnar: `operations` and
-`keys` have one entry per command, `string_values` has one entry per
-`SET_STRING`, and `integer_values` has one entry per `SET_COUNTER` or
-`INCREMENT`, each in operation order. Supported operations are `GET`, `EXISTS`,
+`keys` normally have one entry per command. When every command targets the same
+key, send one `keys` entry and the server broadcasts it across the envelope;
+this is the preferred representation for repeated-key batches. Older servers
+reject that compact form with the existing column-count application error, so
+mixed-version clients can retry once with one key entry per command.
+`string_values` has one entry per `SET_STRING`, and `integer_values` has one
+entry per `SET_COUNTER` or `INCREMENT`, each in operation order. Supported
+operations are `GET`, `EXISTS`,
 `SET_STRING`, `SET_COUNTER`, `INCREMENT`, and `DELETE`. Responses return one
 status and value kind per command. Byte results share one `values` buffer with
 cumulative `value_ends`; integer and boolean results use `integer_values`.
@@ -2528,7 +2533,10 @@ protection, and rate limits retain normal gRPC status errors. When journaling,
 dirty persistence, replication, or leader-write enforcement is configured, the
 server automatically uses the established transactional side-effect executor;
 otherwise it executes the validated scalar columns directly under one trie
-lock. Reproduce the comparison with:
+lock. Shared all-`GET` batches stay on the resolve-once path without expanding
+the key column; mixed, journaled, or partitioned shared-key batches expand one
+request-local string-header slice while still avoiding repeated protobuf key
+strings and wire bytes. Reproduce the comparison with:
 
 ```sh
 make bench-scalar-batch BIG_WINS_OPS=10000 BENCHTIME=1x COUNT=7

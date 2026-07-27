@@ -94,7 +94,7 @@ func validateScalarBatchColumns(request *hatriecachev1.ScalarBatchRequest) error
 	if len(operations) > maxPublicCommandBatchSize {
 		return errors.New("scalar batch exceeds maximum size")
 	}
-	if len(request.GetKeys()) != len(operations) {
+	if len(request.GetKeys()) != len(operations) && len(request.GetKeys()) != 1 {
 		return errors.New("scalar batch keys must match operations")
 	}
 	stringsNeeded := 0
@@ -127,7 +127,7 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 		if err := ctx.Err(); err != nil {
 			return &hatriecachev1.ScalarBatchResponse{BatchId: request.GetBatchId(), Error: err.Error()}
 		}
-		result := ht.executePartitionedPublicBatchCommand(scalarBatchCacheCommand(request))
+		result := ht.executePartitionedPublicBatchCommand(scalarBatchCacheCommand(materializeScalarBatchSharedKey(request)))
 		return scalarBatchResponseFromCommand(request, result)
 	}
 	operations := request.GetOperations()
@@ -150,6 +150,7 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 	if ht.executeScalarBatchRepeatedReadLocked(request, response, &telemetry) {
 		return response
 	}
+	request = materializeScalarBatchSharedKey(request)
 	if ht.executeScalarBatchNativeLocked(ctx, request, response, &telemetry) {
 		return response
 	}
@@ -250,11 +251,12 @@ func (ht *HatTrie) executeScalarBatchRepeatedReadLocked(request *hatriecachev1.S
 		return false
 	}
 	key := request.Keys[0]
-	if key == "" || request.Keys[1] != key || validateKey(key) != nil {
+	sharedKey := len(request.Keys) == 1
+	if key == "" || (!sharedKey && request.Keys[1] != key) || validateKey(key) != nil {
 		return false
 	}
 	for index := 2; index < len(operations); index++ {
-		if operations[index] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET || request.Keys[index] != key {
+		if operations[index] != hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET || (!sharedKey && request.Keys[index] != key) {
 			return false
 		}
 	}
@@ -452,6 +454,7 @@ func addScalarBatchError(response *hatriecachev1.ScalarBatchResponse, index int,
 }
 
 func (server *CacheGRPCServer) executeScalarBatchCompatibility(ctx context.Context, request *hatriecachev1.ScalarBatchRequest) *hatriecachev1.ScalarBatchResponse {
+	request = materializeScalarBatchSharedKey(request)
 	command := scalarBatchCacheCommand(request)
 	result, _ := executeCacheCommand(ctx, server.trie, command, commandExecutionOptions{
 		NodeName:            server.options.NodeName,
@@ -544,6 +547,23 @@ func scalarBatchCacheCommand(request *hatriecachev1.ScalarBatchRequest) CacheCom
 		batch[index] = item
 	}
 	return CacheCommandRequest{Command: "BATCH", Batch: batch}
+}
+
+func materializeScalarBatchSharedKey(request *hatriecachev1.ScalarBatchRequest) *hatriecachev1.ScalarBatchRequest {
+	if len(request.Keys) != 1 || len(request.Operations) == 1 {
+		return request
+	}
+	prepared := &hatriecachev1.ScalarBatchRequest{
+		BatchId:       request.BatchId,
+		Operations:    request.Operations,
+		Keys:          make([]string, len(request.Operations)),
+		StringValues:  request.StringValues,
+		IntegerValues: request.IntegerValues,
+	}
+	for index := range prepared.Keys {
+		prepared.Keys[index] = request.Keys[0]
+	}
+	return prepared
 }
 
 func scalarStatusForCommandError(message string) hatriecachev1.ScalarResultStatus {

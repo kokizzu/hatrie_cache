@@ -121,6 +121,33 @@ func TestScalarBatchDirectKeepsRepeatedPresentReadOnCachedPath(t *testing.T) {
 	}
 }
 
+func TestScalarBatchDirectKeepsSharedKeyRepeatedReadOnCachedPath(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("same", "value")
+	operations := make([]hatriecachev1.ScalarCommand, minNativeCommandBatchSize)
+	for index := range operations {
+		operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
+	}
+	request := &hatriecachev1.ScalarBatchRequest{BatchId: 33, Operations: operations, Keys: []string{"same"}}
+
+	beforeStats := trie.Stats()
+	beforeCalls := trie.nativeCommandBatchCalls
+	response := trie.executeScalarBatchDirect(context.Background(), request)
+	if !response.GetOk() || len(response.GetValueEnds()) != len(operations) {
+		t.Fatalf("executeScalarBatchDirect(shared repeated read) = %#v, want all values", response)
+	}
+	if got := trie.nativeCommandBatchCalls - beforeCalls; got != 0 {
+		t.Fatalf("shared repeated read native calls = %d, want cached Go path", got)
+	}
+	if string(response.GetValues()) != strings.Repeat("value", len(operations)) {
+		t.Fatalf("shared repeated read values = %q, want repeated value", response.GetValues())
+	}
+	afterStats := trie.Stats()
+	if afterStats.Reads-beforeStats.Reads != uint64(len(operations)) || afterStats.Hits-beforeStats.Hits != uint64(len(operations)) || afterStats.Misses-beforeStats.Misses != 0 {
+		t.Fatalf("shared repeated read stats delta = reads %d hits %d misses %d", afterStats.Reads-beforeStats.Reads, afterStats.Hits-beforeStats.Hits, afterStats.Misses-beforeStats.Misses)
+	}
+}
+
 func TestScalarBatchDirectCoalescesRepeatedMiss(t *testing.T) {
 	trie := newTestTrie(t)
 	operations := make([]hatriecachev1.ScalarCommand, minNativeCommandBatchSize)

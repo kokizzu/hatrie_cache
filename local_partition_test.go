@@ -665,7 +665,7 @@ func TestLocalPartitionsMonitoringAndScalarGRPC(t *testing.T) {
 			hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT,
 			hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET,
 		},
-		Keys:          []string{"grpc:count", "grpc:count", "grpc:count"},
+		Keys:          []string{"grpc:count"},
 		IntegerValues: []int64{40, 2},
 	}); err != nil {
 		t.Fatal(err)

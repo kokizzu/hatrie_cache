@@ -37,6 +37,7 @@ func BenchmarkBigWins(b *testing.B) {
 	b.Run("StreamCommand", benchmarkBigWinsStreamCommand)
 	b.Run("PipelinedStreamCommand", benchmarkBigWinsPipelinedStreamCommand)
 	b.Run("NativeBatchStreamCommand", benchmarkBigWinsNativeBatchStreamCommand)
+	b.Run("ScalarBatchStreamCommandRepeatedKeys", benchmarkBigWinsScalarBatchStreamCommandRepeatedKeys)
 	b.Run("ScalarBatchStreamCommand", benchmarkBigWinsScalarBatchStreamCommand)
 	b.Run("NativeStructuredBatchStreamCommand", benchmarkBigWinsNativeStructuredBatchStreamCommand)
 	b.Run("StructuredBatchStreamCommand", benchmarkBigWinsStructuredBatchStreamCommand)
@@ -690,6 +691,14 @@ func benchmarkBigWinsNativeBatchStreamCommand(b *testing.B) {
 }
 
 func benchmarkBigWinsScalarBatchStreamCommand(b *testing.B) {
+	benchmarkBigWinsScalarBatchStreamCommandKeys(b, true)
+}
+
+func benchmarkBigWinsScalarBatchStreamCommandRepeatedKeys(b *testing.B) {
+	benchmarkBigWinsScalarBatchStreamCommandKeys(b, false)
+}
+
+func benchmarkBigWinsScalarBatchStreamCommandKeys(b *testing.B, sharedKey bool) {
 	const batchSize = 16
 	operations := bigWinsBenchmarkOperations(1000)
 	wire := &benchmarkGRPCWireStats{}
@@ -726,7 +735,13 @@ func benchmarkBigWinsScalarBatchStreamCommand(b *testing.B) {
 			operationsColumn[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
 			keys[index] = "command:key"
 		}
-		requests[batch] = &hatriecachev1.ScalarBatchRequest{BatchId: uint64(batch + 2), Operations: operationsColumn, Keys: keys}
+		request := &hatriecachev1.ScalarBatchRequest{BatchId: uint64(batch + 2), Operations: operationsColumn}
+		if sharedKey {
+			request.Keys = keys[:1]
+		} else {
+			request.Keys = keys
+		}
+		requests[batch] = request
 	}
 	var total time.Duration
 	b.ReportAllocs()
