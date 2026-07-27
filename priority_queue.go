@@ -146,6 +146,17 @@ func (pq *priorityQueueData) PushOneChecked(priority int64, value interface{}, v
 	}
 	if len(values) > 0 {
 		pq.reserveCapacity(needed)
+	} else {
+		item := priorityQueueItem{Priority: priority, Sequence: pq.nextSequence}
+		if text, ok := value.(string); ok {
+			item = newPriorityQueueStringItem(priority, pq.nextSequence, text)
+		} else {
+			item.Value = cloneValue(value)
+		}
+		pq.nextSequence++
+		pq.items = append(pq.items, item)
+		pq.siftUp(len(pq.items) - 1)
+		return 1, nil
 	}
 	pq.pushValue(priority, value)
 	for _, value := range values {
@@ -552,10 +563,15 @@ func (ht *HatTrie) pushPriorityQueue(key string, priority int64, val interface{}
 	ht.returnStorage(hval)
 	ht.clearExpirationLocked(key)
 	idx := ht.priorityQueues.Add(nil)
-	added, err := ht.priorityQueues.array[idx].PushOneChecked(priority, val, vals...)
-	if err != nil {
-		ht.priorityQueues.Del(idx)
-		return 0, err
+	added := 1
+	if len(vals) == 0 {
+		ht.priorityQueues.array[idx].pushValue(priority, val)
+	} else {
+		added, err = ht.priorityQueues.array[idx].PushOneChecked(priority, val, vals...)
+		if err != nil {
+			ht.priorityQueues.Del(idx)
+			return 0, err
+		}
 	}
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_PRIORITY_QUEUE}.toValue()
 	ht.recordWriteLocked(key)

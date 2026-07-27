@@ -208,6 +208,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Retained journal catch-up](#journal-delta-first-recovery-benchmark) | Exact 10k snapshot: 0.092649 s; 25,709,960 heap B | 100 deltas: 0.002170 s; 163,918 heap B | 42.70x faster, 156.85x lower heap, 5.97x smaller wire | Snapshot remains required after journal compaction gaps |
 | Earlier | [Two-value small-set read](#collection-allocation-follow-up) | 155.5 ns; 48 B; 3 allocs | 54.46 ns; 32 B; 1 alloc | 2.86x faster, 1.50x lower heap, 3x fewer allocs | Promotes to a map at three entries |
 | Earlier | [Priority queue push+pop](#collection-allocation-follow-up) | 875.9 ns; 56 B; 3 allocs | 769.1 ns; 40 B; 2 allocs | 1.14x faster, 1.40x lower heap | Typed string fast path retains generic fallback |
+| Current pass | [Direct scalar priority-queue pushes](#direct-scalar-priority-queue-pushes), established string/structured and new string queues | Variadic item path: 156.6/212.4/600.1 ns | Direct scalar item: 146.7/206.2/585.6 ns | 1.07x/1.03x/1.02x faster; memory unchanged | No measured tradeoff; established and new 2/16/128-value controls are 1.01x-1.07x faster with identical memory |
 | Current pass | [Compact priority-queue items](#compact-priority-queue-items), 100k string items | Tagged dual slot: 56.06 retained B/item; 135.2 ns/item build | Tag-free slot: 48.04 retained B/item; 119.2 ns/item build | 1.17x lower retained heap; 1.13x faster build; string churn 1.27x faster | No per-cache or per-item overhead; empty strings use one process-global pre-boxed value; wire and persistence formats are unchanged |
 | Current pass | [Direct priority-queue command reads](#compact-priority-queue-items), empty/one/16/100 string items | Public materialization: 214.6/414.2/2,894/25,384 ns; up to 108 allocs | Direct JSON: 54.02/145.5/2,098/18,676 ns; at most 2 allocs | 3.97x/2.85x/1.38x/1.36x faster; up to 2.11x lower heap and 54x fewer allocations | All validated values preserve generic JSON semantics; cold references retain checked hydration; wire, ordering, storage, and ownership are unchanged |
 | Current pass | [Direct generic priority-queue GET](#compact-priority-queue-items), empty/one/16/100 string items | Generic materialization: 207.1/422.4/2,863/23,449 ns | Shared-lock direct JSON: 159.3/268.3/2,386/17,977 ns | 1.30x/1.57x/1.20x/1.30x faster; up to 2.11x lower heap and 54x fewer allocations | Other value types retain the prior GET branch; a 100-item mixed queue is 1.37x faster with 1.56x lower heap and 28x fewer allocations |
@@ -377,6 +378,7 @@ tree.
 | SetStorage-level promoted JSON dispatch | Enabled direct promoted-set encoding at the shared storage encoder | Packed one/two-string command reads became 1.11x/1.10x slower | Replaced by command-level promoted routing; packed reads are neutral or faster; see [packed small string-set storage](#packed-small-string-set-storage) |
 | Priority-queue interface marker | Reached the desired 48-byte item layout | Generic dispatch slowed from 1.534 to 1.961 ns | Replaced by length dispatch; see [compact priority-queue items](#compact-priority-queue-items) |
 | Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
+| Priority-queue scalar dispatch placements | A typed scalar primitive was 1.45x faster and an early public dispatch made established strings 1.11x faster | The direct-generic helper made strings 1.04x slower; public dispatch made structured scalars and two-value batches 1.03x/1.02x slower; an out-of-line helper made structured scalars 1.03x slower; specializing first-item insertion inside the primitive made create/delete 0.9%-1.2% slower | All four placements were removed or replaced by [direct scalar priority-queue pushes](#direct-scalar-priority-queue-pushes), whose scalar, new-queue, and 2/16/128-value controls are all neutral or faster |
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
 | Fully linked XOR peel order | Halved normal-build allocations and cumulative heap | Cache-random reverse traversal made the 4,096/65,536-item builders 1.03x/1.05x slower | Replaced by linking only the queue while retaining contiguous peel order; see [linked XOR-filter build queue](#linked-xor-filter-build-queue) |
 | Direct staged-map XOR build | Removed the key-index allocation and made the separate 65,536-item build 1.35x faster with 1.43x lower heap | Same-binary 64-item and forced-retry builds were 1.06x and about 1.20x slower | Replaced by a compact seed-independent hash index; see [compact XOR-filter build hash index](#compact-xor-filter-build-hash-index) |
@@ -5177,6 +5179,68 @@ repeatable complete-path CPU regression on both ordinary structured response
 families. Production and experimental test code were fully reverted. Current
 wire bytes, mutation semantics, lock scope, heap, and allocations are
 unchanged.
+
+<a id="direct-scalar-priority-queue-pushes"></a>
+### Direct Scalar Priority-Queue Pushes
+
+`priorityQueueData.PushOneChecked` previously sent a scalar request through
+the same variadic tail path as a batch. It checked batch size, reserved only
+for nonempty tails, then constructed the first item through the generic item
+helper and entered an empty loop. The scalar side of the existing tail branch
+now constructs exactly one item directly. Strings select the existing compact
+string representation once; known non-strings clone directly into the generic
+slot. The nonempty-tail branch and its insertion loop remain source-identical.
+
+A known-new queue also starts at sequence zero with empty storage, so a scalar
+creation now calls the established generic item insertion directly instead of
+entering the checked variadic wrapper. New batches retain that wrapper. This
+does not weaken checked validation: `PushPriorityQueueChecked` still validates
+the complete payload before locking, and the unchecked API retains its former
+acceptance behavior.
+
+Tests were added before production changed. They compare exact private heap
+state against the former scalar wrapper for strings, empty strings, integers,
+structs, and nested maps; cover sequence exhaustion without mutation; and
+exercise public FIFO ties, nested ownership, new queues, and replacement of a
+different value type. Focused tests passed 50 times, the race build passed ten
+times, and the existing priority-queue suite passed five times.
+
+```sh
+make run CMD='go test . -run TestPriorityQueueScalarPush -count=50'
+make run CMD='go test -race . -run TestPriorityQueueScalarPush -count=10'
+make bench-priority-queue-scalar BENCHTIME=1s COUNT=7
+```
+
+The complete public-path rows use matching frozen baseline and final test
+binaries, one logical CPU, seven one-second runs, and internal retain-pop only
+to keep established queue size constant between public pushes. New-queue rows
+delete the key after every public push. Values are medians; the first row of a
+new process is retained rather than silently discarded.
+
+| Public priority-queue push | Variadic baseline | Direct scalar layout | Result |
+| --- | ---: | ---: | ---: |
+| Established scalar string | 156.6 ns; 0 B; 0 allocs | 146.7 ns; 0 B; 0 allocs | 1.07x faster; memory unchanged |
+| Established scalar struct | 212.4 ns; 0 B; 0 allocs | 206.2 ns; 0 B; 0 allocs | 1.03x faster; memory unchanged |
+| New scalar string plus delete | 600.1 ns; 64 B; 3 allocs | 585.6 ns; 64 B; 3 allocs | 1.02x faster; memory unchanged |
+| Established two-value batch | 198.4 ns; 0 B; 0 allocs | 186.0 ns; 0 B; 0 allocs | 1.07x faster; memory unchanged |
+| Established 16-value batch | 2,289 ns; 1,792 B; 2 allocs | 2,263 ns; 1,792 B; 2 allocs | 1.01x faster; memory unchanged |
+| Established 128-value batch | 23,267 ns; 12,416 B; 4 allocs | 22,897 ns; 12,416 B; 4 allocs | 1.02x faster; memory unchanged |
+| New two-value batch plus delete | 640.4 ns; 112 B; 3 allocs | 614.4 ns; 112 B; 3 allocs | 1.04x faster; memory unchanged |
+| New 16-value batch plus delete | 1,150 ns; 912 B; 3 allocs | 1,127 ns; 912 B; 3 allocs | 1.02x faster; memory unchanged |
+
+Four placements were rejected before the retained layout. A direct generic
+test helper made scalar strings 1.04x slower with no allocation change. A
+caller-level typed dispatch improved established strings 1.11x but made
+structured scalars and two-value batches 1.03x/1.02x slower. Moving scalar
+work to an out-of-line helper restored batches but left structured scalars
+1.03x slower. Handling first-item insertion inside that scalar primitive made
+the create/delete control 0.9%-1.2% slower. All rejected production code was
+removed; the final known-new insertion is selected at the storage-creation
+site instead.
+
+Priority ordering, FIFO tie sequences, cloning, ownership, item layout,
+telemetry, TTL behavior, snapshots, journals, replication, wire bytes, and
+persistent formats are unchanged.
 
 <a id="compact-priority-queue-items"></a>
 ### Compact Priority-Queue Items

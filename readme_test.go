@@ -464,6 +464,37 @@ func TestDocsDescribeDirectGenericScalarSetKeys(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectScalarPriorityQueuePushes(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[scalar push measurements](BENCHMARK.md#direct-scalar-priority-queue-pushes)",
+		"make bench-priority-queue-scalar BENCHTIME=1s COUNT=7",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing scalar priority-queue token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Direct Scalar Priority-Queue Pushes",
+		"156.6 ns; 0 B; 0 allocs | 146.7 ns",
+		"600.1 ns; 64 B; 3 allocs | 585.6 ns",
+		"23,267 ns; 12,416 B; 4 allocs | 22,897 ns",
+		"Priority-queue scalar dispatch placements",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing scalar priority-queue token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeBoundedShortGenericTopKDispatch(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

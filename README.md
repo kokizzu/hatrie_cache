@@ -11,6 +11,11 @@ allocation-free string churn. Exact plain-string pops also avoid an unnecessary
 interface round trip, making response extraction 1.07x faster with unchanged
 heap; measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-priority-queue-items).
+Scalar priority-queue pushes construct their known single item directly, while
+new scalar queues skip an unnecessary checked variadic wrapper. Established
+string/structured pushes are 1.07x/1.03x faster and new scalar queues are 1.02x
+faster, with unchanged memory and neutral-or-faster 2/16/128-value controls;
+see the [scalar push measurements](BENCHMARK.md#direct-scalar-priority-queue-pushes).
 Checked flat-scalar slice and priority-queue upserts now use
 allocation-free validation instead of serializing a payload that is immediately
 discarded. Complete
@@ -228,6 +233,7 @@ make bench-cuckoo-scalar BENCHTIME=1s COUNT=7
 make bench-hll-scalar BENCHTIME=1s COUNT=7
 make bench-cms-scalar BENCHTIME=1s COUNT=7
 make bench-set-scalar-generic BENCHTIME=1s COUNT=7
+make bench-priority-queue-scalar BENCHTIME=1s COUNT=7
 make bench-count-min-rows BENCHTIME=500ms COUNT=7
 make bench-fenwick-add BENCHTIME=500ms COUNT=7
 make bench-quantile-add BENCHTIME=500ms COUNT=7
