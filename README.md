@@ -1254,6 +1254,12 @@ also tested reusing one cached-clock sample. Passing the timestamp by value
 made exact TTL 1.019x faster but the mixed-write profile 1.011x slower; pointer
 and local-capture variants made exact TTL up to 1.047x slower in alternating
 controls. All three layouts were removed.
+An [Expiration heap hole-sifting rollback](BENCHMARK.md#expiration-heap-hole-sifting-rollback)
+shifted one heap entry per level instead of swapping two. Focused update and
+remove+push improved up to 1.18x with unchanged memory, but the narrowed
+complete path improved mixed writes only 1.012x while unrelated no-TTL
+`StringSet` became 1.026x slower. Both layouts and their temporary fixtures
+were removed, leaving the established heap unchanged.
 [Validated bounded key-stat compaction](BENCHMARK.md#validated-bounded-key-stat-compaction)
 also skips a redundant full-sized `seen` map when slot metadata is consistent,
 making the 100,000-key fixture 1.02x faster with 1.44x lower cumulative heap;

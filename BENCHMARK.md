@@ -324,6 +324,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Carried expiration update index](#carried-expiration-update-index), existing equal/later TTL | Validate then look up again: 209.5/204.4 ns | Reuse validated index: 166.2/171.4 ns | 1.26x/1.19x faster; public `TTLExpire` 1.126x faster | No measured tradeoff; first schedule/clear and the mixed-write profile are faster with heap/allocations unchanged; invalid metadata and failed native deletion retain the prior fallback |
 | Reverted | [Proven-absent expiration insertion](#expiration-absent-insertion-rollback), fresh schedule plus clear | Existing checked insertion: 390.9 ns | Direct known-absent insertion: 367.3 ns | Fresh scheduling 1.06x faster, but existing `TTLExpire` up to 1.05x slower | All variants rolled back; no runtime tradeoff remains |
 | Reverted | [Expiration decision-time capture rollback](#expiration-decision-time-capture-rollback), existing TTL refresh | Repeated cached-clock calls: exact TTL 206.3 ns; mixed write 100 paired control | Captured by value: exact TTL 202.5 ns; local capture 214.9 ns | By-value exact TTL was 1.019x faster, but mixed write was 1.011x slower; local capture was 1.047x slower | By-value, pointer, and local-capture variants removed; established clock sampling remains |
+| Reverted | [Expiration heap hole-sifting rollback](#expiration-heap-hole-sifting-rollback), 256-key update/remove+push and complete commands | Swap sifts: 97.21/180.4 ns | Narrow hole sifts: 82.69/164.2 ns | Focused update/remove+push was 1.18x/1.10x faster, but mixed write gained only 1.012x and no-TTL `StringSet` was 1.026x slower | Broad and narrow layouts plus temporary fixtures removed; the original swap sifts remain |
 | Current pass | [Validated bounded key-stat compaction](#validated-bounded-key-stat-compaction), 100k tracked keys | Unconditional seen map: 169.162 ms; 11,405,896 heap B; 100,577 allocs | Validated slots: 166.164 ms; 7,910,752 heap B; 100,317 allocs | 1.02x faster, 1.44x lower heap, about 260 fewer allocations | Inconsistent internal slot metadata retains the prior repair fallback; policy, eviction order, stats, and formats are unchanged |
 | Current pass | [Indexed expiration heap](#indexed-expiration-heap), 100k deadline updates on one key | 250.0 ns/update; 91 B/op; 19 final heap nodes | 194.8 ns/update; 0 B/op; 1 heap node | 1.28x faster; cumulative allocation eliminated; 19x fewer final nodes | Heap index is `uint32`, limiting simultaneously scheduled TTL keys to practical in-memory sizes |
 | Final architecture | [Equal-state anti-entropy](#incremental-anti-entropy), 10k x 1 KiB | 154,735,234 ns; 10,743,774 wire B | 22,129,470 ns; 215 wire B | 6.99x faster, 49,971x smaller wire | Equality still scans and hashes both replicas |
@@ -440,6 +441,7 @@ tree.
 | Single-pass expiration time comparison | Plain `time.Time.Compare` made earlier/later primitive comparisons 1.44x/1.47x faster and an increasing-deadline heap build 1.027x faster | The same candidate made an equal-deadline sift-heavy heap 1.014x slower; two equality-first hybrids erased the distinct-deadline gain or exceeded the inlining budget and made the direct earlier control 1.021x slower | All comparator candidates and temporary fixtures were removed; the original `Equal` plus `Before` ordering remains; see [expiration time comparison rollback](#expiration-time-comparison-rollback) |
 | Single-pass expiration update direction | One `time.Time.Compare` made equal updates 1.28x faster; preserving `Before` and replacing only `After` made equal updates 1.019x faster with neutral earlier updates | One `Compare` made earlier updates 1.08x slower; the refined candidate made later updates 1.011x slower and the public TTL-extension path was neutral | Both direction selectors and their temporary fixture were removed; the original `Before` then `After` update remains; see [expiration update direction rollback](#expiration-update-direction-rollback) |
 | Expiration decision-time capture | Passing one operation timestamp made the exact TTL command 1.019x faster and reduced relative-refresh clock reads from four to two including telemetry | The by-value helper made the paired mixed-write profile 1.011x slower; a pointer form made exact TTL about 1.06x slower; local capture made it 1.047x slower | All three layouts and the temporary clock-count test were removed; see [Expiration decision-time capture rollback](#expiration-decision-time-capture-rollback) |
+| Expiration heap hole-sifting | Shifted one parent/child per level and published the moved entry once, making focused update/remove+push 1.18x/1.10x faster with unchanged memory | The narrowed layout improved complete mixed writes only 1.012x while making unrelated no-TTL `StringSet` 1.026x slower; the broader layout also lost 1.016x-1.022x on that control | Both runtime variants, the swap-reference test, and temporary benchmark/Make target were removed; see [Expiration heap hole-sifting rollback](#expiration-heap-hole-sifting-rollback) |
 | Pointer Count-Min increment parser | Default-count parsing improved from 6.087 to 5.278 ns, or 1.153x | Subkey parsing regressed from 14.33 to 14.46 ns, or 1.009x slower | Reverted; Count-Min callers and parser remain by value; see [narrow priority request parsing](#narrow-priority-request-parsing) |
 | All-pointer priority parser | Typed and subkey helpers improved 2.06x/1.12x in isolation | The complete exact subkey push/pop path regressed from 253.1 to 260.4 ns, or 1.029x slower | Replaced by direct typed-field dispatch plus trim-once subkey parsing; see [narrow priority request parsing](#narrow-priority-request-parsing) |
 | Replication constructor flag | Avoided deriving invariant scan mode after construction | Added one 704-byte allocation | Removed; mode uses an existing byte; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -3876,6 +3878,61 @@ memory, wire, and persistence therefore remain unchanged.
 make run CMD='go test . -run="TestExpire|TestTTL|TestPersist" -count=10'
 make run CMD='go test . -run=NONE -bench=BenchmarkExpirationUpdateLookup -benchmem -benchtime=1s -count=9 -cpu=1'
 make run CMD='go test . -run=NONE -bench="BenchmarkCommandFeature/(TTLExpire|MixedWriteHeavy100)" -benchmem -benchtime=2s -count=9 -cpu=1'
+```
+
+<a id="expiration-heap-hole-sifting-rollback"></a>
+##### Expiration Heap Hole-Sifting Rollback
+
+The mixed-write CPU profile attributed 17.77% cumulatively to expiration-heap
+removal, including 3.91% flat in downward sifting and 7.42% cumulatively in its
+swap helper. Each swap copied two entries and wrote both string-to-index map
+positions. A standard hole sift instead carries the moving entry in a local,
+shifts one parent or child into each vacated position, and publishes the moving
+entry once at its final position. It appeared able to nearly halve map writes
+per traversed level without adding storage or changing asymptotic behavior.
+
+A test was added before production changed. It copied the established swap
+algorithm as a reference and compared exact heap contents, exact stored
+`time.Time` values, removed entries, and every index-map position after 20,000
+deterministic randomized pushes, existing-key pushes, earlier/later updates,
+and arbitrary removals. It passed 20 times before the rewrite, then passed 20
+times plus the race build with each candidate.
+
+The first candidate also delayed publishing a newly pushed or last-slot moved
+entry until its final hole. Frozen binaries and a same-binary alternating
+reference showed a real focused gain with zero heap and allocations throughout:
+
+| Broad hole-sift workload, median | Swap baseline | Delayed-publication hole | Result |
+| --- | ---: | ---: | ---: |
+| Update among 256 deadlines | 89.69 ns | 80.31 ns | 1.12x faster |
+| Remove then push among 256 deadlines | 174.5 ns | 148.4 ns | 1.18x faster |
+| Mixed write-heavy 100, paired ratio | control | candidate | 1.039x faster |
+| Unrelated no-TTL `StringSet`, paired ratio | control | candidate | 1.016x-1.022x slower |
+
+To reduce code-layout impact, a second candidate restored `Push`, `Remove`, and
+`Update` exactly and changed only the two sift loops. Its same-binary medians
+were still favorable, but the complete-path result did not clear the control:
+
+| Narrow hole-sift workload, alternating median | Swap baseline | Hole candidate | Result |
+| --- | ---: | ---: | ---: |
+| Update among 256 deadlines | 97.21 ns | 82.69 ns | 1.18x faster |
+| Remove then push among 256 deadlines | 180.4 ns | 164.2 ns | 1.10x faster |
+| Mixed write-heavy 100, paired ratio | control | candidate | 1.012x faster |
+| Exact one-key `TTLExpire`, paired ratio | control | candidate | 1.097x faster |
+| Unrelated no-TTL `StringSet`, paired ratio | control | candidate | 1.026x slower |
+
+The `StringSet` command never enters a sift, so its repeatable loss indicates
+that the changed production text/layout outweighed most of the focused gain in
+the complete binary. Accepting a 2.6% common write regression for a 1.2% mixed
+gain would violate the no-tradeoff gate. Both implementations, the temporary
+reference test, focused benchmark, script, and Make target were removed. Heap
+ordering, map writes, TTL behavior, memory, wire, storage, and persistence are
+exactly unchanged.
+
+```sh
+make run CMD='go test . -run=TestExpirationHeapMatchesSwapSiftReference -count=20'
+make bench-expiration-sift BENCHTIME=1s COUNT=9
+make run CMD='/tmp/hatrie-expiration-sift-before.test -test.run=NoTests -test.bench=BenchmarkCommandFeature/MixedWriteHeavy100 -test.benchmem -test.benchtime=1s -test.count=9 -test.cpu=1'
 ```
 
 <a id="validated-bounded-key-stat-compaction"></a>
