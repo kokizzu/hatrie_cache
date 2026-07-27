@@ -226,7 +226,59 @@ func (store *TopologyStore) Route(key string) (TopologyRoute, bool) {
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return store.topology.RouteForKey(key)
+	return normalizedTopologyRouteForKey(store.topology, key)
+}
+
+func normalizedTopologyRouteForKey(topology ClusterTopology, key string) (TopologyRoute, bool) {
+	mode := topology.Mode
+	if mode == TopologyModeFullReplica {
+		shard, ok := normalizedFullReplicaShard(topology)
+		if !ok {
+			return TopologyRoute{}, false
+		}
+		return TopologyRoute{Key: key, Mode: mode, Shard: shard, Owners: routeOwners(shard)}, true
+	}
+
+	shards := topology.Shards
+	if len(shards) == 0 {
+		return TopologyRoute{}, false
+	}
+	if topology.BucketCount > 0 {
+		bucket := hashKeyToBucket(key, topology.BucketCount)
+		shard, ok := topology.shardForBucket(bucket, shards)
+		if !ok {
+			return TopologyRoute{}, false
+		}
+		shard = cloneShard(shard)
+		return TopologyRoute{
+			Key:    key,
+			Mode:   mode,
+			Bucket: &bucket,
+			Shard:  shard,
+			Owners: routeOwners(shard),
+		}, true
+	}
+
+	shard := cloneShard(shards[hashKeyToShardIndex(key, len(shards))])
+	return TopologyRoute{Key: key, Mode: mode, Shard: shard, Owners: routeOwners(shard)}, true
+}
+
+func normalizedFullReplicaShard(topology ClusterTopology) (TopologyShard, bool) {
+	nodes := topology.Nodes
+	if len(nodes) == 0 {
+		return TopologyShard{}, false
+	}
+	primary := topology.Self
+	if primary == "" || !topologyNodeExists(nodes, primary) {
+		primary = nodes[0].ID
+	}
+	replicas := make([]string, 0, len(nodes)-1)
+	for _, node := range nodes {
+		if node.ID != primary {
+			replicas = append(replicas, node.ID)
+		}
+	}
+	return TopologyShard{ID: 0, Primary: primary, Replicas: replicas}, true
 }
 
 // Fingerprint returns a stable content hash for topology routing and ownership.
@@ -628,10 +680,15 @@ func cloneShards(shards []TopologyShard) []TopologyShard {
 	}
 	out := make([]TopologyShard, len(shards))
 	for idx, shard := range shards {
-		out[idx] = shard
-		if shard.Replicas != nil {
-			out[idx].Replicas = append([]string(nil), shard.Replicas...)
-		}
+		out[idx] = cloneShard(shard)
+	}
+	return out
+}
+
+func cloneShard(shard TopologyShard) TopologyShard {
+	out := shard
+	if shard.Replicas != nil {
+		out.Replicas = append([]string(nil), shard.Replicas...)
 	}
 	return out
 }

@@ -310,6 +310,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Allocate-after-grouping live gRPC](#pipelined-live-grpc-replication), 10k writes | 154.265 ms; 2,959 batches; 353.63 MB heap; 2,037,671 allocs | 126.893 ms; 2,305 batches; 303.23 MB heap; 940,900 allocs | 1.22x faster, 1.28x fewer batches, 1.17x lower heap, 2.17x fewer allocs | Topology updates compute their fingerprint once; requests retain payload references until ack |
 | Current pass | [Lazy gRPC session maps](#lazy-grpc-session-maps), unused create-and-close lifecycle | Eager live/sync: 170.3/175.7 ns; 208 heap B; 4 allocs | Lazy live/sync: 57.10/57.88 ns; 64 heap B; 1 alloc | 2.98x-3.04x faster, 3.25x lower heap, 4x fewer allocations | First successful stream and actual sticky fallback allocate their required maps; live sessions never allocate sticky fallback state |
 | Current pass | [Direct single-target gRPC sync dispatch](#direct-single-target-grpc-sync-dispatch), one task group | Generic grouping: 569.1 ns; 808 heap B; 8 allocs | Direct result slot: 426.8 ns; 384 heap B; 4 allocs | 1.33x faster, 2.10x lower heap, 2x fewer allocations | Applies only to exactly one group; repeated-target and multi-target controls retain identical heap/allocations and CPU within 1.1% |
+| Current pass | [Normalized topology-store routing](#normalized-topology-store-routing), one/four shards | Clone/sort all shards: 241.4/505.3 ns; 120/488 heap B; 4/9 allocs | Clone selected shard: 134.3/142.55 ns; 48/80 heap B; 2/2 allocs | 1.80x/3.54x faster; 2.50x/6.10x lower heap; 2x/4.50x fewer allocations | Store topology is already normalized; returned route ownership and generic routing for arbitrary topology values are unchanged |
 | Current pass | [Cached replication routing fingerprint](#cached-replication-routing-fingerprint), one/four shards | Rehash: 3,238/7,028.5 ns; 3,920/7,832 heap B; 52/129 allocs | Cached: 1,621.5/3,447.5 ns; 3,032/5,600 heap B; 14/34 allocs | 2.00x/2.04x faster; 1.29x/1.40x lower heap; 3.71x/3.79x fewer allocations | Reuses the fingerprint already computed by validated topology installation; topology cloning, routing maps, wire, and behavior are unchanged |
 | Current pass | [Binary outbox encoding](#binary-grouped-replication-outbox), 4 KiB job | JSON: 8,949 ns; 5,948 B | Binary: 4,123 ns; 4,412 B | 2.17x faster, 25.8% smaller | Binary records require project tooling to inspect |
 | Current pass | [Binary outbox replay](#binary-grouped-replication-outbox), 10k jobs | JSON: 217.479 ms | Binary: 87.330 ms | 2.49x faster, 1.34x fewer allocs | Existing JSON records remain readable |
@@ -3155,6 +3156,44 @@ The fixture intentionally uses an invalid empty sync payload so it isolates
 dispatch planning from network, protobuf, and goroutine scheduling. The branch
 does not change request construction, wire bytes, storage, retries, fallback,
 timeouts, configuration, or public behavior.
+
+<a id="normalized-topology-store-routing"></a>
+#### Normalized Topology-Store Routing
+
+`TopologyStore` validates, clones, and sorts nodes, shards, replicas, and bucket
+ranges whenever topology is installed. Its per-key `Route` method nevertheless
+called the generic `ClusterTopology.RouteForKey`, which cloned and sorted every
+shard again before selecting one. Store-backed routing now selects directly
+from the immutable normalized order under the existing read lock and clones
+only the returned shard. Public `ClusterTopology.RouteForKey` remains unchanged
+because standalone topology values can still be unsorted.
+
+The test-first ownership fixture compares store routing with public routing,
+mutates the returned replica, owner, and bucket storage, and proves a later
+route is unchanged. A separate 4,096-key sweep proves exact route equivalence
+for full-replica, one/four-shard hash routing, and compact virtual-bucket ranges.
+The alternating benchmark runs the new selector and the exact former
+lock-plus-generic-route implementation in both orders inside one binary.
+
+```sh
+make run CMD='go test . -run="TestTopologyStore(RouteMatchesPublicRouting|RouteReturnsOwnedNormalizedRoute|RoutesVirtualBucketRanges|RoutesFullReplicaMode|ValidatesNormalizesAndRoutes)" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkTopologyStoreRoute -benchmem -benchtime=100000x -count=10 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkTopologyStoreRouteAlternating -benchtime=100000x -count=10 -cpu=1'
+```
+
+| Ten-run median | Clone and sort normalized backing | Select and clone one shard | Improvement |
+| --- | ---: | ---: | ---: |
+| Full replica, two nodes | 401.25 ns; 440 B; 6 allocs | 138.5 ns; 48 B; 2 allocs | 2.90x faster; 9.17x lower heap; 3x fewer allocations |
+| Sharded, one shard | 241.4 ns; 120 B; 4 allocs | 134.3 ns; 48 B; 2 allocs | 1.80x faster; 2.50x lower heap; 2x fewer allocations |
+| Sharded, four shards | 505.3 ns; 488 B; 9 allocs | 142.55 ns; 80 B; 2 allocs | 3.54x faster; 6.10x lower heap; 4.50x fewer allocations |
+| Virtual buckets, four shards | 515.8 ns; 492 B; 10 allocs | 159.1 ns; 84 B; 3 allocs | 3.24x faster; 5.86x lower heap; 3.33x fewer allocations |
+
+CPU values are the alternating same-binary medians. Heap and allocation values
+come from the unchanged route fixture before and after implementation. The
+selected shard's replica slice and the route's owner slice remain separate
+copies, while bucket metadata remains caller-owned. Topology update locking,
+hashes, bucket selection, owner order, configuration, wire, persistence, and
+public behavior are unchanged; the read-lock hold is strictly shorter.
 
 <a id="cached-replication-routing-fingerprint"></a>
 #### Cached Replication Routing Fingerprint

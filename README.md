@@ -1745,6 +1745,14 @@ multi-datacenter or region-owned datasets, see
 explicit partition ownership, backup boundaries, and failover separate from
 automatic sharding.
 
+Store-backed key lookup uses
+[normalized topology routing](BENCHMARK.md#normalized-topology-store-routing):
+validated topology is already sorted, so each lookup selects directly and
+clones only its returned shard instead of cloning and sorting every shard.
+One/four-shard routes are 1.80x/3.54x faster with 2.50x/6.10x lower heap.
+Returned route values remain caller-owned, while standalone routing for
+arbitrary unsorted `ClusterTopology` values is unchanged.
+
 ```
 make monitoring-server NODE_ID=node-a TOPOLOGY_PATH=data/topology.json
 ```

@@ -469,6 +469,34 @@ func TestDocsDescribeDirectSingleTargetGRPCSyncDispatch(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeNormalizedTopologyStoreRouting(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if token := "[normalized topology routing](BENCHMARK.md#normalized-topology-store-routing)"; !strings.Contains(string(readmeData), token) {
+		t.Fatalf("README.md missing normalized topology routing token %q", token)
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"BenchmarkTopologyStoreRouteAlternating",
+		"4,096-key sweep",
+		"1.80x faster",
+		"3.54x faster",
+		"9.17x lower heap",
+		"4.50x fewer allocations",
+		"Public `ClusterTopology.RouteForKey` remains unchanged",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing normalized topology routing token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeCachedReplicationRoutingFingerprint(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
