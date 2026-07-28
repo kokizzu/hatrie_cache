@@ -200,6 +200,13 @@ restore without changing the serialized register representation.
 Generic scalar additions also bypass one-item variadic preparation, removing
 one allocation while preserving observation and register semantics; see the
 [HyperLogLog scalar-add measurements](BENCHMARK.md#generic-hyperloglog-scalar-additions).
+Exact uppercase `ADDHLL`/`HLLADD` requests carrying `Values` now preflight
+noncanonical values and hash canonical strings directly instead of allocating
+one encoded JSON key per item. Hot one/two/eight/64-value commands are
+1.75x/1.90x/3.43x/4.71x faster, and 64 ordinary values remove all 65 request
+allocations. A fresh 64-value cycle is 2.49x faster with 1.17x lower heap and
+66x fewer allocations; see the
+[HyperLogLog command-batch measurements](BENCHMARK.md#direct-hyperloglog-command-batches).
 Top-K values use a bounded Space-Saving min-heap to track heavy hitters with
 fixed memory and O(log k) updates.
 Generic scalar updates for JSON-safe strings up to four bytes use a bounded

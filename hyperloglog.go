@@ -167,6 +167,54 @@ func (hll *hyperLogLogData) AddOneChecked(value interface{}, values ...interface
 	return changed, nil
 }
 
+func (hll *hyperLogLogData) addCommandBatch(values Slice) error {
+	if hll == nil || hll.precision == 0 {
+		return nil
+	}
+	if len(values) == 1 {
+		if text, ok := values[0].(string); ok && commandFastCanonicalJSONString(text) {
+			hll.addJSONString(text)
+			return nil
+		}
+		key, err := hyperLogLogItemKey(values[0])
+		if err != nil {
+			return err
+		}
+		hll.addKey(key)
+		return nil
+	}
+	var encoded [][]byte
+	for index, value := range values {
+		text, ok := value.(string)
+		if ok && commandFastCanonicalJSONString(text) {
+			continue
+		}
+		if encoded == nil {
+			encoded = make([][]byte, len(values))
+		}
+		key, err := hyperLogLogItemKey(value)
+		if err != nil {
+			return err
+		}
+		encoded[index] = key
+	}
+
+	if encoded == nil {
+		for _, value := range values {
+			hll.addJSONString(value.(string))
+		}
+		return nil
+	}
+	for index, value := range values {
+		if encoded[index] != nil {
+			hll.addKey(encoded[index])
+		} else {
+			hll.addJSONString(value.(string))
+		}
+	}
+	return nil
+}
+
 func (hll *hyperLogLogData) addKey(key []byte) bool {
 	hll.ensureRegisters()
 	index, rank := hyperLogLogIndexAndRank(bloomFilterFNV64a(key), hll.precision)

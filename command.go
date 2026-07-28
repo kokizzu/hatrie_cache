@@ -1495,7 +1495,10 @@ func (ht *HatTrie) executeExactFastCommandPointer(request *CacheCommandRequest) 
 		}
 		return ht.executeFastAddSparseBitsetCommand(key, value)
 	case "ADDHLL", "HLLADD":
-		if len(request.Values) != 0 || !commandFastCanonicalJSONString(request.Value) {
+		if len(request.Values) != 0 {
+			return ht.executeFastAddHyperLogLogBatchCommand(key, request.Values)
+		}
+		if !commandFastCanonicalJSONString(request.Value) {
 			return CacheCommandResponse{}, false
 		}
 		return ht.executeFastAddHyperLogLogCommand(key, request.Value)
@@ -2443,6 +2446,41 @@ func (ht *HatTrie) executeFastAddHyperLogLogCommand(key string, value string) (C
 	*rawPtr = hval.toValue()
 	ht.recordWriteLocked(key)
 	ht.cacheValueLocked(key, hval)
+	return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(data.Count(), 10)}, true
+}
+
+func (ht *HatTrie) executeFastAddHyperLogLogBatchCommand(key string, values Slice) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsHyperLogLog() {
+		data := &ht.hyperLogLogs.array[hval.Index]
+		if err := data.addCommandBatch(values); err != nil {
+			return commandError(err.Error()), true
+		}
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(data.Count(), 10)}, true
+	}
+
+	data := newDefaultHyperLogLogData()
+	if err := data.addCommandBatch(values); err != nil {
+		return commandError(err.Error()), true
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.hyperLogLogs.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_HYPERLOGLOG}.toValue()
+	ht.recordWriteLocked(key)
 	return CacheCommandResponse{OK: true, Message: "added hyperloglog values", Value: strconv.FormatUint(data.Count(), 10)}, true
 }
 

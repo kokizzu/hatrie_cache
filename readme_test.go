@@ -774,6 +774,40 @@ func TestDocsDescribeGenericCountMinScalarAdditions(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectHyperLogLogCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[HyperLogLog command-batch measurements](BENCHMARK.md#direct-hyperloglog-command-batches)",
+		"1.75x/1.90x/3.43x/4.71x faster",
+		"66x fewer allocations",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing direct HyperLogLog command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Direct HyperLogLog Command Batches",
+		"BenchmarkHyperLogLogExistingBatchCommandPath",
+		"5,666 ns; 2,817 B; 65 allocs",
+		"1,204 ns; 1 B; 0 rounded allocs",
+		"saturated observation counts",
+		"Normalized-fallback HyperLogLog batch routing",
+		"0x5b0` to `0x5c8",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct HyperLogLog command batch token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectGenericScalarSetKeys(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

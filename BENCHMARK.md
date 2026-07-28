@@ -239,6 +239,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Current pass | [Generic HyperLogLog scalar additions](#generic-hyperloglog-scalar-additions), safe/escaped/structured values | Variadic wrapper: 96.48/114.6/111.7 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 63.68/74.92/78.25 ns; 5-16 B; 1 alloc | 1.52x/1.53x/1.43x faster; one allocation and 24 B removed | No measured tradeoff; observations and cached estimate state match exactly, while the unchanged 128-value control is neutral within 0.6% with identical memory |
+| Current pass | [Direct HyperLogLog command batches](#direct-hyperloglog-command-batches), existing sketch with one/two/eight/64 requested strings | Generic-equivalent: 284.8/352.1/946.7/5,666 ns; up to 2,817 heap B and 65 allocs | Direct command: 162.5/185.8/276.2/1,204 ns; at most 1 amortized heap B and zero rounded allocs | 1.75x/1.90x/3.43x/4.71x faster; 64-value request allocations eliminated | No measured runtime tradeoff; fresh 64-value creation is 2.49x faster with 1.17x lower heap, structured controls are neutral or faster, and scalar plus forced-generic APIs retain their prior paths |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
 | Current pass | [Direct generic reservoir GET](#reservoir-sample-read-materialization), 16/128 string and mixed items | Generic materialization: 2,709/18,349 ns strings; 2,941/18,861 ns mixed | Shared-lock direct JSON: 2,225/17,563 ns strings; 2,701/18,275 ns mixed | 1.03x-1.22x faster; up to 1.23x lower heap; 1.67x-2.00x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
@@ -438,6 +439,7 @@ tree.
 | Optional command integer representation | Replacing `*int64` fields with values plus presence bits could prevent caller-local TTL and priority values from escaping | It would break the exported request API and require coordinated JSON, protobuf, journal, replication, CLI, and compatibility changes even though reused requests already execute allocation-free | Rejected; command benchmarks now [construct optional values outside timed loops](#optional-command-benchmark-fixture-allocations), while the compatible request representation remains |
 | Count-Min clustered scalar helper | Scalar additions improved about 1.4x with one fewer allocation | Placing the helper between Count-Min hot methods made the frozen 128-value batch 10,970 versus 10,540 ns, or 1.041x slower | Replaced by the [end-of-file scalar helper](#generic-count-min-sketch-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.6% |
 | Exact-dispatch Count-Min batch routing | Removed ordinary-string JSON keys from uppercase `Values` requests | Inline parsing made the unrelated mixed-write profile 1.014x slower; an out-of-line request helper remained about 1.006x-1.010x slower in paired medians | Both placements were removed; [normalized-fallback selection](#direct-count-min-sketch-command-batches) restores the exact scalar dispatcher case and retains the complete batch gain with neutral-or-faster mixed controls |
+| Normalized-fallback HyperLogLog batch routing | Preserved the exact dispatcher source while removing ordinary-string JSON keys from uppercase `Values` requests | The extra late return spill enlarged every `ExecuteCommand` stack frame from `0x5b0` to `0x5c8`; initial unpinned scalar and mixed controls also moved slower | Removed; [exact-switch HyperLogLog batch routing](#direct-hyperloglog-command-batches) restores the complete caller and dispatcher stack frames while pinned scalar and mixed controls are neutral or faster |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
@@ -6228,6 +6230,62 @@ The unchanged 128-value path alternated frozen binaries in both process orders.
 Its median was 9,671 ns before and 9,614 ns after, neutral within 0.6%, with
 identical 4,224 B and 129 allocations. No retained field, estimate formula,
 wire byte, storage format, precision, or configuration changed.
+
+<a id="direct-hyperloglog-command-batches"></a>
+### Direct HyperLogLog Command Batches
+
+Exact scalar HyperLogLog commands already hash canonical JSON strings directly,
+but an uppercase request carrying `Values` previously fell through to
+`hyperLogLogItemKeys`. That generic path allocates one encoded byte slice per
+ordinary string plus the containing slice before updating any register. The
+exact command branch now preflights every noncanonical value, hashes canonical
+strings directly, and applies observations in request order. Spaced, lowercase,
+public variadic, journal, and other forced-generic paths remain unchanged.
+
+Tests were added and passed against the unchanged implementation before the
+direct helper existed. They compare exact and forced-generic responses plus
+register snapshots, observations, harmonic sums, zero-register counts, and TTL
+state for fresh and existing sketches, duplicates, low-precision collisions,
+saturated observation counts, replacement of an expiring string, escaped and
+structured values, an empty string, a late invalid value, and an empty request.
+Every fallible key is encoded before the first register changes, preserving
+all-or-reject behavior.
+
+The hot-sketch rows below are nine-run medians from 10,000 complete commands on
+one pinned logical CPU. Inputs and the precision-14 register array are created
+before timing; the direct rows' reported one byte is therefore an amortized
+benchmark artifact rather than one allocation per command. The fresh row
+reserves the sketch inside every timed cycle.
+
+```sh
+make run CMD='go test . -run=^TestHyperLogLogBatchCommandExactMatchesGeneric$$ -count=100'
+make run CMD='go test -race . -run=^TestHyperLogLogBatchCommandExactMatchesGeneric$$ -count=10'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkHyperLogLogExistingBatchCommandPath$$ -benchmem -benchtime=10000x -count=9 -cpu=1'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkHyperLogLogBatchCommandPath$$ -benchmem -benchtime=5000x -count=9 -cpu=1'
+```
+
+| Existing-sketch command batch, median | Generic-equivalent control | Direct batch | Improvement |
+| --- | ---: | ---: | ---: |
+| One ordinary string in `Values` | 284.8 ns; 41 B; 2 allocs | 162.5 ns; 1 B; 0 rounded allocs | 1.75x faster; request allocations eliminated |
+| Two ordinary strings | 352.1 ns; 81 B; 3 allocs | 185.8 ns; 1 B; 0 rounded allocs | 1.90x faster; request allocations eliminated |
+| Eight ordinary strings | 946.7 ns; 321 B; 9 allocs | 276.2 ns; 1 B; 0 rounded allocs | 3.43x faster; request allocations eliminated |
+| 64 ordinary strings | 5,666 ns; 2,817 B; 65 allocs | 1,204 ns; 1 B; 0 rounded allocs | 4.71x faster; request allocations eliminated |
+| 63 ordinary plus escaped last | 5,718 ns; 2,825 B; 65 allocs | 1,961 ns; 1,817 B; 2 allocs | 2.92x faster; 1.56x lower heap; 32.5x fewer allocations |
+| 63 ordinary plus structured last | 5,825 ns; 2,922 B; 66 allocs | 2,380 ns; 1,913 B; 3 allocs | 2.45x faster; 1.53x lower heap; 22x fewer allocations |
+| All 64 values structured | 22,426 ns; 8,962 B; 129 allocs | 22,289 ns; 8,962 B; 129 allocs | 1.006x faster; memory unchanged |
+| Fresh sketch plus 64 ordinary strings | 11,087 ns; 19,201 B; 66 allocs | 4,453 ns; 16,384 B; 1 alloc | 2.49x faster; 1.17x lower heap; 66x fewer allocations |
+
+The first production placement selected the direct helper after normalization.
+Although its focused batch path was fast, generated-code inspection showed that
+the additional late return spill enlarged every `ExecuteCommand` stack frame
+from `0x5b0` to `0x5c8`. That layout was removed. Routing `Values` through the
+existing exact HyperLogLog switch arm restores `ExecuteCommand` to the parent's
+60,985-byte body and `0x5b0` frame; the exact dispatcher retains its `0x1b8`
+frame. Eight fixed-work parent/candidate pairs pinned to one logical CPU measured
+the scalar command at 107.75/107.55 ns and the unrelated 100-command mixed-write
+profile at 22,049.5/21,901.5 ns, with identical heap and allocations. No cache
+header, register, estimate, wire, snapshot, persistent format, or configuration
+changed.
 
 <a id="compact-bloom-filter-headers"></a>
 ### Compact Bloom-Filter Headers
