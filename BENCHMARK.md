@@ -242,6 +242,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct HyperLogLog command batches](#direct-hyperloglog-command-batches), existing sketch with one/two/eight/64 requested strings | Generic-equivalent: 284.8/352.1/946.7/5,666 ns; up to 2,817 heap B and 65 allocs | Direct command: 162.5/185.8/276.2/1,204 ns; at most 1 amortized heap B and zero rounded allocs | 1.75x/1.90x/3.43x/4.71x faster; 64-value request allocations eliminated | No measured runtime tradeoff; fresh 64-value creation is 2.49x faster with 1.17x lower heap, structured controls are neutral or faster, and scalar plus forced-generic APIs retain their prior paths |
 | Current pass | [Allocation-aware Top-K command batches](#allocation-aware-top-k-command-batches), existing sketch with two/eight/64 requested strings | Full preparation: 413.8/1,314/29,762 ns; up to 5,248 heap B and 129 allocs | Lazy canonical preparation: 262.6/583.8/21,072 ns; up to 1,024 heap B and 64 allocs | 1.58x/2.25x/1.41x faster; 64-value heap 5.13x lower and allocations 2.02x fewer | No measured runtime tradeoff; one-value, escaped, structured, fresh, read, scalar, and mixed-workload controls are neutral or faster, while public `AddOneChecked` and global command layouts are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
+| Current pass | [Allocation-aware reservoir command batches](#allocation-aware-reservoir-command-batches), existing sample with one/two/eight/64 requested strings | Full preparation: 388.8/482.0/1,235/6,256 ns; up to 3,456 heap B and 68 allocs | Direct canonical batch: 305.0/340.7/466.7/1,654 ns; 128 heap B and 3 allocs | 1.27x/1.41x/2.65x/3.78x faster; 64-value heap 27x lower and allocations 22.67x fewer | No measured tradeoff; escaped/structured tails are 3.57x/2.87x faster, all-structured is neutral with identical memory, and scalar/public paths are machine-code unchanged |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
 | Current pass | [Direct generic reservoir GET](#reservoir-sample-read-materialization), 16/128 string and mixed items | Generic materialization: 2,709/18,349 ns strings; 2,941/18,861 ns mixed | Shared-lock direct JSON: 2,225/17,563 ns strings; 2,701/18,275 ns mixed | 1.03x-1.22x faster; up to 1.23x lower heap; 1.67x-2.00x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
 | Current pass | [Small reservoir reads](#reservoir-sample-read-materialization), empty/one/16-item exact `GETRS` | Sorted snapshot: 187.8/374.9/2,115.5 ns; 8/136/1,688 B; 1/3/3 allocs | Constant empty/stack singleton: 165.9/311.0/2,107 ns; 0/80/1,688 B; 0/1/3 allocs | Empty/one item 1.13x/1.21x faster; one-item heap 1.70x lower; avoidable allocations eliminated | No measured tradeoff; 16-item CPU is neutral within 0.4%, and ordering, output, ownership, lock scope, wire, and storage are unchanged |
@@ -442,6 +443,7 @@ tree.
 | Exact-dispatch Count-Min batch routing | Removed ordinary-string JSON keys from uppercase `Values` requests | Inline parsing made the unrelated mixed-write profile 1.014x slower; an out-of-line request helper remained about 1.006x-1.010x slower in paired medians | Both placements were removed; [normalized-fallback selection](#direct-count-min-sketch-command-batches) restores the exact scalar dispatcher case and retains the complete batch gain with neutral-or-faster mixed controls |
 | Normalized-fallback HyperLogLog batch routing | Preserved the exact dispatcher source while removing ordinary-string JSON keys from uppercase `Values` requests | The extra late return spill enlarged every `ExecuteCommand` stack frame from `0x5b0` to `0x5c8`; initial unpinned scalar and mixed controls also moved slower | Removed; [exact-switch HyperLogLog batch routing](#direct-hyperloglog-command-batches) restores the complete caller and dispatcher stack frames while pinned scalar and mixed controls are neutral or faster |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
+| Reboxed reservoir command batches | Directly hashed canonical strings and removed the prepared-item array | Reboxing every retained string still left 1,152 B and 67 allocations for 64 values, while custom-processing a noncanonical first value made the all-structured control about 1.06x slower | Replaced by [allocation-aware reservoir command batches](#allocation-aware-reservoir-command-batches): original request interfaces are retained directly, a noncanonical first value delegates to byte-identical `AddOneChecked`, and all-structured CPU/memory are neutral |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
@@ -8160,6 +8162,81 @@ were removed. The retained same-signature call keeps `ExecuteCommand` at
 bytes, and preserves scalar Top-K add/get and `AddOneChecked` code sizes and
 addresses. No retained state, format, wire byte, command response, public API,
 configuration, or background work changed.
+
+<a id="allocation-aware-reservoir-command-batches"></a>
+### Allocation-Aware Reservoir Command Batches
+
+Multi-value reservoir commands previously called public `AddOneChecked`, which
+allocated a full `[]reservoirSampleItem`, marshaled every ordinary string to
+JSON for its deterministic priority, then applied the prepared items in request
+order. The preparation is transactional, but canonical JSON strings cannot
+fail and their priority can be hashed directly without materializing quoted
+bytes.
+
+The command-only path now validates sequence capacity and every exceptional
+value before its first mutation. Canonical strings retain their existing
+caller-owned interfaces and hash directly. The first escaped or structured
+tail item is held in a stack slot; the full indexed preparation array appears
+only if a second exceptional item requires it. A noncanonical first value
+delegates immediately to the unchanged public path. Application order,
+priority, sequence, eviction, final response, and all-or-reject behavior are
+unchanged.
+
+Tests were written against the unchanged implementation before production was
+modified. They compare exact and normalized command responses, snapshots,
+priorities, sequences, TTL state, write accounting, capacity eviction,
+aliases, long and empty strings, caller ownership, local partitions, invalid
+tails, and sequence exhaustion. A separate candidate/reference test compares
+the private path directly with public `AddOneChecked`. Focused parity passed
+100 times and the race build passed ten times.
+
+The complete-command rows are matched seven-run medians from frozen parent and
+final test binaries on one Ryzen 9 5950X logical CPU. Each iteration uses an
+existing capacity-128 sample; the fresh row recreates that sample before every
+64-value command. `BenchmarkReservoirSampleExistingBatchCommandPath` and
+`BenchmarkReservoirSampleBatchCommandPath` are compiled into both binaries;
+`BenchmarkReservoirSampleCommandBatchAlternating` compares preparation paths
+inside one process.
+
+```sh
+make run CMD='go test . -run="^TestReservoirSample(CommandBatchDataMatchesReference|BatchCommand)" -count=100'
+make run CMD='go test -race . -run="^TestReservoirSample(CommandBatchDataMatchesReference|BatchCommand)" -count=10'
+make bench-reservoir-batch BENCHTIME=10000x COUNT=7
+```
+
+| Complete reservoir command batch, median | Full preparation | Direct canonical batch | Improvement |
+| --- | ---: | ---: | ---: |
+| Existing, one string in `Values` | 388.8 ns; 144 B; 4 allocs | 305.0 ns; 128 B; 3 allocs | 1.27x faster; 1.13x lower heap; 1.33x fewer allocs |
+| Existing, two strings | 482.0 ns; 224 B; 6 allocs | 340.7 ns; 128 B; 3 allocs | 1.41x faster; 1.75x lower heap; 2x fewer allocs |
+| Existing, eight strings | 1,235 ns; 512 B; 12 allocs | 466.7 ns; 128 B; 3 allocs | 2.65x faster; 4x lower heap; 4x fewer allocs |
+| Existing, 64 strings | 6,256 ns; 3,456 B; 68 allocs | 1,654 ns; 128 B; 3 allocs | 3.78x faster; 27x lower heap; 22.67x fewer allocs |
+| Existing, escaped last | 6,300 ns; 3,464 B; 68 allocs | 1,763 ns; 152 B; 4 allocs | 3.57x faster; 22.79x lower heap; 17x fewer allocs |
+| Existing, structured last | 6,914 ns; 3,896 B; 71 allocs | 2,411 ns; 584 B; 7 allocs | 2.87x faster; 6.67x lower heap; 10.14x fewer allocs |
+| Existing, all structured | 37,894 ns; 31,108 B; 260 allocs | 37,751 ns; 31,108 B; 260 allocs | Neutral within 0.4%; memory unchanged |
+| Fresh, 64 strings | 11,270 ns; 7,904 B; 75 allocs | 8,094 ns; 4,576 B; 10 allocs | 1.39x faster; 1.73x lower heap; 7.50x fewer allocs |
+
+The clean same-binary alternating data control measured canonical 64-value
+preparation at about 1.25 us versus 5.91 us for `AddOneChecked`, a 4.72x
+improvement. Escaped-tail and structured-tail controls improved 2.74x and
+2.36x before the final stack-singleton refinement; all-structured was neutral.
+The complete final rows above include response construction and the final
+refinement.
+
+The first prototype reboxed every canonical string while constructing its
+retained item and custom-processed noncanonical-first batches. Although 64
+ordinary values improved to about 3.25 us, they still consumed 1,152 B and 67
+allocations, and all-structured commands regressed from about 38.35 to 40.67
+us, or 1.06x. That layout was removed. An intermediate correction retained a
+full 2,048-byte indexed array for one exceptional tail; the final stack slot
+removes that allocation and creates the array only for two or more exceptions.
+
+The retained call has the same signature as the public method it replaced.
+`ExecuteCommand` remains 60,985 bytes with its `0x5b0` frame, and the exact
+dispatcher remains 17,866 bytes with its `0x1b8` frame. Instruction-byte
+checks prove the exact dispatcher, the 3,258-byte scalar reservoir command,
+and the 1,006-byte public `AddOneChecked` are byte-identical to the parent.
+Public APIs, scalar `Value` commands, snapshots, journals, replication, wire,
+storage, TTL semantics, telemetry, and retained layouts are unchanged.
 
 <a id="lazy-rate-limiter-shard-maps"></a>
 ### Lazy Rate-Limiter Shard Maps

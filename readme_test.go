@@ -842,6 +842,39 @@ func TestDocsDescribeAllocationAwareTopKCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeAllocationAwareReservoirCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[reservoir command-batch measurements](BENCHMARK.md#allocation-aware-reservoir-command-batches)",
+		"1.27x/1.41x/2.65x/3.78x faster",
+		"27x less heap",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing reservoir command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Allocation-Aware Reservoir Command Batches",
+		"BenchmarkReservoirSampleCommandBatchAlternating",
+		"6,256 ns; 3,456 B; 68 allocs",
+		"1,654 ns; 128 B; 3 allocs",
+		"Reboxed reservoir command batches",
+		"60,985 bytes with its `0x5b0` frame",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing reservoir command batch token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectGenericScalarSetKeys(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

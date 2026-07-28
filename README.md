@@ -224,6 +224,13 @@ controls are neutral or faster; see the
 Reservoir sample values keep a deterministic fixed-capacity stream sample using
 hashed priorities, so representative samples stay bounded in memory without
 retaining the full event history.
+Multi-value `ADDRS`/`RSADD` commands preflight exceptional values while hashing
+ordinary strings directly from their caller-owned interfaces. Existing
+one/two/eight/64-string commands are 1.27x/1.41x/2.65x/3.78x faster; the
+64-value path uses 27x less heap and 22.67x fewer allocations. Escaped-tail and
+structured-tail batches are 3.57x/2.87x faster with 22.79x/6.67x less heap,
+while all-structured, scalar, and public variadic paths remain unchanged; see
+the [reservoir command-batch measurements](BENCHMARK.md#allocation-aware-reservoir-command-batches).
 Empty and one-item reservoir command reads avoid pointless builder and sorting
 allocations: they are 1.13x/1.21x faster, empty reads allocate nothing, and
 one-item reads use 1.70x less heap while multi-item controls remain neutral.
@@ -350,6 +357,7 @@ make bench-serialization BENCHTIME=20x
 make bench-serialization SERIALIZATION_BENCH='BenchmarkLevelDB(Save|Load).*Structured' BENCHTIME=20x
 make bench-structured-storage-codec BENCHTIME=1000x COUNT=7
 make bench-reservoir-small BENCHTIME=500000x COUNT=7
+make bench-reservoir-batch BENCHTIME=10000x COUNT=7
 make bench-bloom-header BENCHTIME=500ms COUNT=7
 make bench-bloom-scalar BENCHTIME=1s COUNT=7
 make bench-cuckoo-scalar BENCHTIME=1s COUNT=7

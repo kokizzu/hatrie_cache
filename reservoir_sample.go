@@ -456,6 +456,73 @@ func fnv64aByte(hash uint64, value byte) uint64 {
 	return hash
 }
 
+func (sample *reservoirSampleData) addCommandBatchChecked(first interface{}, values []interface{}) (ReservoirSampleUpdate, error) {
+	if sample == nil || sample.capacity == 0 {
+		return ReservoirSampleUpdate{}, nil
+	}
+	firstText, ok := first.(string)
+	if !ok || !commandFastCanonicalJSONString(firstText) {
+		return sample.AddOneChecked(first, values...)
+	}
+	count, ok := checkedBatchSize(1, len(values))
+	if !ok {
+		return ReservoirSampleUpdate{}, errBatchSizeTooLarge
+	}
+	if err := sample.ensureSequenceCapacity(count); err != nil {
+		return ReservoirSampleUpdate{}, err
+	}
+
+	nextSequence := sample.seen + 1
+	var prepared []reservoirSampleItem
+	preparedIndex := -1
+	var preparedOne reservoirSampleItem
+	for index, value := range values {
+		nextSequence++
+		if text, ok := value.(string); ok && commandFastCanonicalJSONString(text) {
+			continue
+		}
+		item, err := prepareReservoirSampleItem(nextSequence, value)
+		if err != nil {
+			return ReservoirSampleUpdate{}, err
+		}
+		if preparedIndex < 0 {
+			preparedIndex = index + 1
+			preparedOne = item
+			continue
+		}
+		if prepared == nil {
+			prepared = make([]reservoirSampleItem, count)
+			prepared[preparedIndex] = preparedOne
+		}
+		prepared[index+1] = item
+	}
+
+	sequence := sample.seen + 1
+	update := sample.addPrepared(reservoirSampleItem{
+		Value:    first,
+		Priority: reservoirSamplePlainStringPriority(sequence, firstText),
+		Sequence: sequence,
+	})
+	for index, value := range values {
+		sequence++
+		if prepared != nil && prepared[index+1].Sequence != 0 {
+			update = sample.addPrepared(prepared[index+1])
+			continue
+		}
+		if prepared == nil && index+1 == preparedIndex {
+			update = sample.addPrepared(preparedOne)
+			continue
+		}
+		text := value.(string)
+		update = sample.addPrepared(reservoirSampleItem{
+			Value:    value,
+			Priority: reservoirSamplePlainStringPriority(sequence, text),
+			Sequence: sequence,
+		})
+	}
+	return update, nil
+}
+
 // ReservoirSampleStorage stores fixed-memory stream samples outside the trie.
 type ReservoirSampleStorage struct {
 	array     []reservoirSampleData
@@ -640,6 +707,47 @@ func (ht *HatTrie) ReservoirSampleInfoChecked(key string) (ReservoirSampleInfo, 
 	}
 	ht.recordReadLocked(true, key)
 	return ht.reservoirSamples.array[hval.Index].Info(), true, nil
+}
+
+func (ht *HatTrie) addReservoirSampleCommandBatchChecked(key string, val interface{}, vals ...interface{}) (ReservoirSampleUpdate, error) {
+	if ht == nil {
+		return ReservoirSampleUpdate{}, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.addReservoirSampleCommandBatchChecked(key, val, vals...)
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return ReservoirSampleUpdate{}, err
+	}
+	if hval.IsReservoirSample() {
+		update, err := ht.reservoirSamples.array[hval.Index].addCommandBatchChecked(val, vals)
+		if err != nil {
+			return ReservoirSampleUpdate{}, err
+		}
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked(key)
+		return update, nil
+	}
+
+	data := newDefaultReservoirSampleData()
+	update, err := data.addCommandBatchChecked(val, vals)
+	if err != nil {
+		return ReservoirSampleUpdate{}, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.reservoirSamples.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_RESERVOIR_SAMPLE}.toValue()
+	ht.recordWriteLocked(key)
+	return update, nil
 }
 
 func reservoirSampleCapacityValue(value uint64) (uint64, error) {

@@ -113,6 +113,9 @@ BENCH ?= .
 BENCHTIME ?=
 COUNT ?= 1
 RESERVOIR_SMALL_BENCH ?= ^BenchmarkReservoirSampleSmallGetCommand$$
+RESERVOIR_BATCH_PATH_BENCH ?= ^BenchmarkReservoirSample(ExistingBatchCommandPath|BatchCommandPath)$$
+RESERVOIR_BATCH_ALTERNATING_BENCH ?= ^BenchmarkReservoirSampleCommandBatchAlternating$$
+RESERVOIR_BATCH_ALTERNATING_BENCHTIME ?= 100x
 BLOOM_HEADER_LAYOUT_BENCH ?= ^BenchmarkBloomFilterHeaderLayout100k$$
 BLOOM_HEADER_OPERATION_BENCH ?= ^BenchmarkBloomFilter(AddKey|ContainsKey)$$
 BLOOM_HEADER_LAYOUT_BENCHTIME ?= 1x
@@ -221,7 +224,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-string-compaction bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-replication-optimizations bench-merkle-maintenance bench-native-ahtable-allocator bench-native-hattrie-lookup bench-native-command-batch bench-scalar-batch bench-scalar-native-batch bench-structured-batch bench-fastime bench-big-wins bench-storage-backends bench-default-construction bench-command-features bench-command-json-string bench-canonical-string-lookups bench-reservoir-small bench-bloom-header bench-bloom-scalar bench-cuckoo-scalar bench-hll-scalar bench-cms-scalar bench-set-scalar-generic bench-priority-queue-scalar bench-count-min-rows bench-fenwick-add bench-quantile-add bench-topk-scalar bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-string-compaction bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-replication-optimizations bench-merkle-maintenance bench-native-ahtable-allocator bench-native-hattrie-lookup bench-native-command-batch bench-scalar-batch bench-scalar-native-batch bench-structured-batch bench-fastime bench-big-wins bench-storage-backends bench-default-construction bench-command-features bench-command-json-string bench-canonical-string-lookups bench-reservoir-small bench-reservoir-batch bench-bloom-header bench-bloom-scalar bench-cuckoo-scalar bench-hll-scalar bench-cms-scalar bench-set-scalar-generic bench-priority-queue-scalar bench-count-min-rows bench-fenwick-add bench-quantile-add bench-topk-scalar bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -403,6 +406,9 @@ bench-canonical-string-lookups:
 
 bench-reservoir-small:
 	RESERVOIR_SMALL_BENCH='$(RESERVOIR_SMALL_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-reservoir-small.sh
+
+bench-reservoir-batch:
+	RESERVOIR_BATCH_PATH_BENCH='$(RESERVOIR_BATCH_PATH_BENCH)' RESERVOIR_BATCH_ALTERNATING_BENCH='$(RESERVOIR_BATCH_ALTERNATING_BENCH)' RESERVOIR_BATCH_ALTERNATING_BENCHTIME='$(RESERVOIR_BATCH_ALTERNATING_BENCHTIME)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-reservoir-batch.sh
 
 bench-bloom-header:
 	BLOOM_HEADER_LAYOUT_BENCH='$(BLOOM_HEADER_LAYOUT_BENCH)' BLOOM_HEADER_OPERATION_BENCH='$(BLOOM_HEADER_OPERATION_BENCH)' BLOOM_HEADER_LAYOUT_BENCHTIME='$(BLOOM_HEADER_LAYOUT_BENCHTIME)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-bloom-header.sh
