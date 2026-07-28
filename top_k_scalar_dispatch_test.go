@@ -2,6 +2,7 @@ package hatriecache
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +146,15 @@ func BenchmarkTopKGenericScalarDispatchAlternating(b *testing.B) {
 	type structuredValue struct {
 		Name string `json:"name"`
 	}
+	plainBatch := make([]interface{}, 64)
+	escapedBatch := make([]interface{}, len(plainBatch))
+	structuredBatch := make([]interface{}, len(plainBatch))
+	for index := range plainBatch {
+		plainBatch[index] = "value-" + strconv.Itoa(index)
+		escapedBatch[index] = plainBatch[index]
+		structuredBatch[index] = structuredValue{Name: "value-" + strconv.Itoa(index)}
+	}
+	escapedBatch[len(escapedBatch)-1] = "<tag>"
 	for _, benchmark := range []struct {
 		name   string
 		value  interface{}
@@ -156,6 +166,9 @@ func BenchmarkTopKGenericScalarDispatchAlternating(b *testing.B) {
 		{name: "EscapedLong", value: strings.Repeat("a", 4095) + "\"", count: 1},
 		{name: "StructuredDuplicate", value: structuredValue{Name: "value"}, count: 1},
 		{name: "BatchTwo", value: "alpha", values: []interface{}{"beta"}, count: 1},
+		{name: "Batch64", value: plainBatch[0], values: plainBatch[1:], count: 1},
+		{name: "EscapedLastBatch64", value: escapedBatch[0], values: escapedBatch[1:], count: 1},
+		{name: "StructuredBatch64", value: structuredBatch[0], values: structuredBatch[1:], count: 1},
 		{name: "EscapedEstimate", value: "a\""},
 		{name: "SafeLongEstimate", value: strings.Repeat("a", 4096)},
 		{name: "StructuredEstimate", value: structuredValue{Name: "value"}},

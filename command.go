@@ -835,7 +835,7 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 			}
 			return commandValueResponse("added top-k value", estimate)
 		}
-		if _, err := ht.AddTopKChecked(key, values[0], count, values[1:]...); err != nil {
+		if _, err := ht.addTopKCommandBatchChecked(key, values[0], count, values[1:]...); err != nil {
 			return commandError(err.Error())
 		}
 		return CacheCommandResponse{OK: true, Message: "added top-k values", Value: strconv.Itoa(len(values))}

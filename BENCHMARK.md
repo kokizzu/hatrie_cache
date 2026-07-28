@@ -240,6 +240,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Current pass | [Generic HyperLogLog scalar additions](#generic-hyperloglog-scalar-additions), safe/escaped/structured values | Variadic wrapper: 96.48/114.6/111.7 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 63.68/74.92/78.25 ns; 5-16 B; 1 alloc | 1.52x/1.53x/1.43x faster; one allocation and 24 B removed | No measured tradeoff; observations and cached estimate state match exactly, while the unchanged 128-value control is neutral within 0.6% with identical memory |
 | Current pass | [Direct HyperLogLog command batches](#direct-hyperloglog-command-batches), existing sketch with one/two/eight/64 requested strings | Generic-equivalent: 284.8/352.1/946.7/5,666 ns; up to 2,817 heap B and 65 allocs | Direct command: 162.5/185.8/276.2/1,204 ns; at most 1 amortized heap B and zero rounded allocs | 1.75x/1.90x/3.43x/4.71x faster; 64-value request allocations eliminated | No measured runtime tradeoff; fresh 64-value creation is 2.49x faster with 1.17x lower heap, structured controls are neutral or faster, and scalar plus forced-generic APIs retain their prior paths |
+| Current pass | [Allocation-aware Top-K command batches](#allocation-aware-top-k-command-batches), existing sketch with two/eight/64 requested strings | Full preparation: 413.8/1,314/29,762 ns; up to 5,248 heap B and 129 allocs | Lazy canonical preparation: 262.6/583.8/21,072 ns; up to 1,024 heap B and 64 allocs | 1.58x/2.25x/1.41x faster; 64-value heap 5.13x lower and allocations 2.02x fewer | No measured runtime tradeoff; one-value, escaped, structured, fresh, read, scalar, and mixed-workload controls are neutral or faster, while public `AddOneChecked` and global command layouts are unchanged |
 | Earlier | [Reservoir sample add](#collection-allocation-follow-up) | 956.7 ns; 168 B; 6 allocs | 465.3 ns; 64 B; 1 alloc | 2.06x faster, 2.63x lower heap, 6x fewer allocs | Fast path applies to plain strings |
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
 | Current pass | [Direct generic reservoir GET](#reservoir-sample-read-materialization), 16/128 string and mixed items | Generic materialization: 2,709/18,349 ns strings; 2,941/18,861 ns mixed | Shared-lock direct JSON: 2,225/17,563 ns strings; 2,701/18,275 ns mixed | 1.03x-1.22x faster; up to 1.23x lower heap; 1.67x-2.00x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
@@ -8093,6 +8094,72 @@ path rejects over-limit strings from their length before scanning any byte.
 Estimate controls execute the source-identical original branch and are neutral
 with identical memory. The change adds no retained state, background work, wire
 byte, persistent-format field, or configuration.
+
+<a id="allocation-aware-top-k-command-batches"></a>
+### Allocation-Aware Top-K Command Batches
+
+Multi-value Top-K commands previously called the public variadic update path,
+which encoded every value into a full `[]topKItem` before applying it. That
+preflight preserves all-or-reject behavior but allocates an encoded JSON key
+for every ordinary string. The command-only batch path now validates all values
+before its first mutation, applies canonical strings directly, and allocates
+the indexed preparation slice lazily only when a noncanonical value needs it.
+Prepared and direct values are then applied in original request order.
+
+Tests were added before acceptance and compare exact responses, snapshots,
+totals, heap state, and TTL state against the unchanged generic command across
+fresh and existing sketches, duplicates, eviction, count precedence,
+saturation, expiration replacement, empty and long strings, structured values,
+invalid tails, and aliases. Focused parity passed 100 times, the race build
+passed ten times, and the broader Top-K suite passed ten times.
+
+The complete-command rows are matched nine-run medians from frozen parent and
+final test binaries pinned to one Ryzen 9 5950X logical CPU. Both binaries use
+the same benchmark sources. `BenchmarkTopKExistingBatchCommandPath` measures
+the established sketch, while `BenchmarkTopKBatchCommandPath` measures fresh
+creation. `Exact` is the ordinary uppercase command; the leading-space generic
+spelling was also measured and produced the same memory profile and equivalent
+CPU.
+
+```sh
+make run CMD='go test . -run=TestTopKBatchCommandExactMatchesGeneric -count=100'
+make run CMD='go test -race . -run=TestTopKBatchCommandExactMatchesGeneric -count=10'
+make run CMD='go test . -run=NoTests -bench=BenchmarkTopK.*BatchCommandPath -benchmem -benchtime=10000x -count=9 -cpu=1'
+make run CMD='go test . -run=NoTests -bench=BenchmarkTopKGenericScalarDispatchAlternating/.*Batch64 -benchtime=100x -count=9 -cpu=1'
+```
+
+| Complete Top-K command batch, median | Full preparation | Lazy canonical preparation | Improvement |
+| --- | ---: | ---: | ---: |
+| Existing, one string control | 452.8 ns; 136 B; 5 allocs | 449.6 ns; 136 B; 5 allocs | Neutral within 0.8%; unchanged path and memory |
+| Existing, two strings | 413.8 ns; 160 B; 5 allocs | 262.6 ns; 32 B; 2 allocs | 1.58x faster; 5.00x lower heap; 2.50x fewer allocs |
+| Existing, eight strings | 1,314 ns; 640 B; 17 allocs | 583.8 ns; 128 B; 8 allocs | 2.25x faster; 5.00x lower heap; 2.13x fewer allocs |
+| Existing, 64 strings | 29,762 ns; 5,248 B; 129 allocs | 21,072 ns; 1,024 B; 64 allocs | 1.41x faster; 5.13x lower heap; 2.02x fewer allocs |
+| Existing, escaped last | 23,810 ns; 5,264 B; 129 allocs | 19,875 ns; 4,256 B; 66 allocs | 1.20x faster; 1.24x lower heap; 1.95x fewer allocs |
+| Existing, structured last | 24,113 ns; 5,696 B; 132 allocs | 20,598 ns; 4,688 B; 69 allocs | 1.17x faster; 1.22x lower heap; 1.91x fewer allocs |
+| Existing, all structured | 42,164 ns; 32,901 B; 321 allocs | 41,934 ns; 32,901 B; 321 allocs | Neutral within 0.6%; memory unchanged |
+| Fresh, 64 strings | 20,859 ns; 19,705 B; 147 allocs | 18,019 ns; 16,504 B; 146 allocs | 1.16x faster; 1.19x lower heap |
+
+The same-binary alternating data-path medians were 23,769 versus 28,705 ns for
+64 canonical strings (1.21x faster), 21,307 versus 24,334 ns with an escaped
+tail (1.14x faster), and 29,627 versus 29,764 ns for 64 structured values
+(neutral within 0.5%). The one/16-item `GETTOPK` controls were unchanged or
+faster with identical memory. The 100-operation mixed-write median was 21,606
+versus 21,559 ns, a neutral 0.2% difference with the same 52 B and nine
+allocations.
+
+Several faster-looking placements were rejected before publication. Adding a
+new exact-dispatch arm enlarged that global dispatcher by 305 bytes and moved
+Top-K reads enough to regress the smallest `GETTOPK` control by 1.3%-2.2%.
+Moving all Top-K parsing out of line made scalar adds 2.1% slower. Routing after
+generic normalization grew the `ExecuteCommand` frame from `0x5b0` to `0x5b8`.
+Changing public `AddOneChecked` perturbed its one-value path, and a private
+batch method with a narrower signature shortened `ExecuteCommand` by 37 bytes
+but made the smallest scalar command about 1.4% slower. All of those layouts
+were removed. The retained same-signature call keeps `ExecuteCommand` at
+60,985 bytes with its `0x5b0` frame, keeps the exact dispatcher at 17,866
+bytes, and preserves scalar Top-K add/get and `AddOneChecked` code sizes and
+addresses. No retained state, format, wire byte, command response, public API,
+configuration, or background work changed.
 
 <a id="lazy-rate-limiter-shard-maps"></a>
 ### Lazy Rate-Limiter Shard Maps

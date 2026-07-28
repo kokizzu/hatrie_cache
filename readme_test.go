@@ -808,6 +808,40 @@ func TestDocsDescribeDirectHyperLogLogCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeAllocationAwareTopKCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Top-K command-batch measurements](BENCHMARK.md#allocation-aware-top-k-command-batches)",
+		"1.58x/2.25x/1.41x faster",
+		"5.13x less heap",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing Top-K command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Allocation-Aware Top-K Command Batches",
+		"BenchmarkTopKExistingBatchCommandPath",
+		"29,762 ns; 5,248 B; 129 allocs",
+		"21,072 ns; 1,024 B; 64 allocs",
+		"all-or-reject",
+		"batch method with a narrower signature",
+		"60,985 bytes with its `0x5b0` frame",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing Top-K command batch token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectGenericScalarSetKeys(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

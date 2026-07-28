@@ -214,6 +214,13 @@ direct path. The measured duplicate update is 9.59x faster with all transient
 allocations removed. Other scalar updates skip a one-element preparation slice,
 while estimates and batches retain their prior paths.
 See the [bounded Top-K dispatch measurements](BENCHMARK.md#bounded-short-generic-top-k-dispatch).
+Multi-value `ADDTOPK`/`TOPKADD` commands now preflight noncanonical values once
+and apply canonical strings without building a prepared-item slice. Existing
+two/eight/64-value string batches are 1.58x/2.25x/1.41x faster; the 64-value
+path uses 5.13x less heap and 2.02x fewer allocations. Escaped-tail,
+structured-tail, all-structured, fresh, scalar, read, and mixed-workload
+controls are neutral or faster; see the
+[Top-K command-batch measurements](BENCHMARK.md#allocation-aware-top-k-command-batches).
 Reservoir sample values keep a deterministic fixed-capacity stream sample using
 hashed priorities, so representative samples stay bounded in memory without
 retaining the full event history.

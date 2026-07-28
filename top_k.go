@@ -783,6 +783,95 @@ func (ht *HatTrie) TopKInfoChecked(key string) (TopKInfo, bool, error) {
 	return ht.topKs.array[hval.Index].Info(), true, nil
 }
 
+func (ht *HatTrie) addTopKCommandBatchChecked(key string, value interface{}, count uint64, values ...interface{}) (TopKEstimate, error) {
+	if ht == nil {
+		return TopKEstimate{}, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.addTopKCommandBatchChecked(key, value, count, values...)
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return TopKEstimate{}, err
+	}
+	if hval.IsTopK() {
+		estimate, err := ht.topKs.array[hval.Index].addManyChecked(value, count, values)
+		if err != nil {
+			return TopKEstimate{}, err
+		}
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked(key)
+		return estimate, nil
+	}
+
+	data := newDefaultTopKData()
+	estimate, err := data.addManyChecked(value, count, values)
+	if err != nil {
+		return TopKEstimate{}, err
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.topKs.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_TOP_K}.toValue()
+	ht.recordWriteLocked(key)
+	return estimate, nil
+}
+
+func (top *topKData) addManyChecked(first interface{}, count uint64, values []interface{}) (TopKEstimate, error) {
+	size := len(values) + 1
+	var prepared []topKItem
+	if text, ok := first.(string); !ok || !commandFastCanonicalJSONString(text) {
+		item, err := prepareTopKItem(first)
+		if err != nil {
+			return TopKEstimate{}, err
+		}
+		prepared = make([]topKItem, size)
+		prepared[0] = item
+	}
+	for index, value := range values {
+		if text, ok := value.(string); ok && commandFastCanonicalJSONString(text) {
+			continue
+		}
+		item, err := prepareTopKItem(value)
+		if err != nil {
+			return TopKEstimate{}, err
+		}
+		if prepared == nil {
+			prepared = make([]topKItem, size)
+		}
+		prepared[index+1] = item
+	}
+
+	estimate := TopKEstimate{}
+	if prepared == nil {
+		estimate = top.addPlainJSONString(first.(string), count)
+		for _, value := range values {
+			estimate = top.addPlainJSONString(value.(string), count)
+		}
+		return estimate, nil
+	}
+	if prepared[0].Key != "" {
+		estimate = top.addPrepared(prepared[0], count)
+	} else {
+		estimate = top.addPlainJSONString(first.(string), count)
+	}
+	for index, value := range values {
+		if prepared[index+1].Key != "" {
+			estimate = top.addPrepared(prepared[index+1], count)
+		} else {
+			estimate = top.addPlainJSONString(value.(string), count)
+		}
+	}
+	return estimate, nil
+}
+
 func topKCapacityValue(value uint64) (uint64, error) {
 	if value == 0 || value > maxTopKCapacity {
 		return 0, errors.New("hatriecache: top-k capacity must be between 1 and " + strconv.FormatUint(maxTopKCapacity, 10))
