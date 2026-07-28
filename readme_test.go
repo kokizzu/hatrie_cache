@@ -1794,6 +1794,39 @@ func TestDocsDescribeDirectCuckooFilterCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeDirectCountMinSketchCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Count-Min command-batch measurements](BENCHMARK.md#direct-count-min-sketch-command-batches)",
+		"1.85x/1.95x/3.05x/3.45x faster",
+		"remove all\n65 request allocations",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing direct Count-Min command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Direct Count-Min Sketch Command Batches",
+		"BenchmarkCountMinSketchExistingBatchCommandPath",
+		"7,658 ns; 2,819 B; 65 allocs",
+		"2,219 ns; 3 B; 0 rounded allocs",
+		"saturated counters",
+		"Exact-dispatch Count-Min batch routing",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing direct Count-Min command batch token %q", token)
+		}
+	}
+}
+
 func TestREADMELinksShardingProposal(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

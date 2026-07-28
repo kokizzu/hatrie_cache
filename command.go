@@ -736,6 +736,10 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		if err != nil {
 			return commandError(err.Error())
 		}
+		if len(request.Values) != 0 && request.Command == command {
+			response, _ := ht.executeFastIncrementCountMinSketchBatchCommand(key, request.Values, count)
+			return response
+		}
 		if len(values) == 1 {
 			estimate, err := ht.IncrementCountMinSketchChecked(key, values[0], count)
 			if err != nil {
@@ -2319,6 +2323,48 @@ func (ht *HatTrie) executeFastIncrementCountMinSketchCommand(key string, value s
 	ht.recordWriteLocked(key)
 	ht.cacheValueLocked(key, hval)
 	return CacheCommandResponse{OK: true, Message: "incremented count-min sketch", Value: strconv.FormatUint(estimate, 10)}, true
+}
+
+func (ht *HatTrie) executeFastIncrementCountMinSketchBatchCommand(key string, values Slice, count uint32) (CacheCommandResponse, bool) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if hval.IsCountMinSketch() {
+		estimate, err := ht.countMinSketches.array[hval.Index].addCommandBatch(values, count)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+		if rawPtr != nil {
+			*rawPtr = hval.toValue()
+		}
+		ht.recordWriteLocked(key)
+		if len(values) == 1 {
+			return CacheCommandResponse{OK: true, Message: "incremented count-min sketch", Value: strconv.FormatUint(estimate, 10)}, true
+		}
+		return CacheCommandResponse{OK: true, Message: "incremented count-min sketch values", Value: strconv.Itoa(len(values))}, true
+	}
+
+	data := newDefaultCountMinSketchData()
+	estimate, err := data.addCommandBatch(values, count)
+	if err != nil {
+		return commandError(err.Error()), true
+	}
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.countMinSketches.AddData(data)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_COUNT_MIN_SKETCH}.toValue()
+	ht.recordWriteLocked(key)
+	if len(values) == 1 {
+		return CacheCommandResponse{OK: true, Message: "incremented count-min sketch", Value: strconv.FormatUint(estimate, 10)}, true
+	}
+	return CacheCommandResponse{OK: true, Message: "incremented count-min sketch values", Value: strconv.Itoa(len(values))}, true
 }
 
 func (ht *HatTrie) executeFastEstimateCountMinSketchCommand(key string, value string) (CacheCommandResponse, bool) {

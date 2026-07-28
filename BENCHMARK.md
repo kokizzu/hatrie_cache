@@ -225,6 +225,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact Bloom-filter headers](#compact-bloom-filter-headers), 100k empty filters plus direct operations | 48-byte header; 48.00 retained B/filter; 47.16 ns/filter build; add/has 33.24/52.46 ns | 40-byte header; 40.06 retained B/filter; 41.22 ns/filter build; add/has 32.95/47.37 ns | 1.20x lower retained heap; build/add/has 1.14x/1.01x/1.11x faster | No measured tradeoff; allocations, bitset bytes, hashes, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Direct Count-Min Sketch row loops](#direct-count-min-sketch-row-loops), default depth four | Callback byte estimate/increment: 41.36/43.82 ns; callback plain-string estimate/increment: 24.94/28.34 ns | Direct byte estimate/increment: 34.50/28.14 ns; direct plain-string estimate/increment: 16.20/20.92 ns | Byte paths 1.20x/1.56x faster; exact string paths 1.54x/1.35x faster; zero heap/allocations throughout | No measured runtime tradeoff; complete `ESTCMS` is 1.02x faster and `INCRCMS` is neutral within 0.33%; header, counters, hashes, wire, and persistence are unchanged |
 | Current pass | [Generic Count-Min Sketch scalar additions](#generic-count-min-sketch-scalar-additions), checked update and estimate-only calls | Variadic wrapper: 102.5/127.7/130.7 ns safe/escaped/structured update; 103.1 ns estimate | Direct scalar: 70.63/92.06/96.76 ns update; 70.67 ns estimate | Updates 1.45x/1.39x/1.35x faster; estimate 1.46x faster; one allocation and 24 B removed | No measured tradeoff; frozen 128-value batch is neutral within 0.6%, while counters, estimates, validation, wire, and persistence are unchanged |
+| Current pass | [Direct Count-Min Sketch command batches](#direct-count-min-sketch-command-batches), existing sketch with one/two/eight/64 requested strings | Generic-equivalent: 340.6/404.2/1,200/7,658 ns; up to 2,819 heap B and 65 allocs | Direct command: 184.0/207.3/393.1/2,219 ns; at most 7 heap B and zero rounded allocs | 1.85x/1.95x/3.05x/3.45x faster; 64-value request allocations eliminated | No measured tradeoff; escaped/structured-tail batches are 2.19x/2.09x faster, all-structured CPU/memory are unchanged, and scalar plus forced-generic APIs retain their prior paths |
 | Current pass | [Prepared-result Fenwick updates](#prepared-result-fenwick-updates), 1K/1M trees | Re-query after write: 99.11/123.6 ns | Reuse checked result: 40.21/51.86 ns | 2.46x/2.38x faster; lazy first add 1.18x faster; complete `ADDFW` 1.11x faster | No measured tradeoff; heap, allocations, overflow checks, update responses, tree layout, wire, and persistence are unchanged |
 | Current pass | [Prevalidated quantile insertions](#prevalidated-quantile-insertions), scalar `ADDQ` | Public and private finite checks: 735.3 ns; 64 B; 1 alloc | One atomic public preflight: 699.3 ns; 64 B; 1 alloc | Complete command 1.05x faster; direct scalar and 16-value controls are neutral | No measured tradeoff; invalid batches remain all-or-reject, and summary, estimates, heap, allocations, wire, and persistence are unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
@@ -436,6 +437,7 @@ tree.
 | Public Top-K canonical-string lookup | Inline and promoted ordinary hits improved 3.10x/2.05x and became allocation-free | The 15-run alternating structured fallback median was 369.9 versus 365.0 ns, or 1.013x slower | Reverted; `EstimateTopKChecked` retains its prior implementation; see [public canonical-string lookups](#allocation-free-public-canonical-string-lookups) |
 | Optional command integer representation | Replacing `*int64` fields with values plus presence bits could prevent caller-local TTL and priority values from escaping | It would break the exported request API and require coordinated JSON, protobuf, journal, replication, CLI, and compatibility changes even though reused requests already execute allocation-free | Rejected; command benchmarks now [construct optional values outside timed loops](#optional-command-benchmark-fixture-allocations), while the compatible request representation remains |
 | Count-Min clustered scalar helper | Scalar additions improved about 1.4x with one fewer allocation | Placing the helper between Count-Min hot methods made the frozen 128-value batch 10,970 versus 10,540 ns, or 1.041x slower | Replaced by the [end-of-file scalar helper](#generic-count-min-sketch-scalar-additions), which retains the scalar gain and leaves the batch control neutral within 0.6% |
+| Exact-dispatch Count-Min batch routing | Removed ordinary-string JSON keys from uppercase `Values` requests | Inline parsing made the unrelated mixed-write profile 1.014x slower; an out-of-line request helper remained about 1.006x-1.010x slower in paired medians | Both placements were removed; [normalized-fallback selection](#direct-count-min-sketch-command-batches) restores the exact scalar dispatcher case and retains the complete batch gain with neutral-or-faster mixed controls |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
@@ -6925,6 +6927,68 @@ end of the file recovered the batch control without changing generated scalar
 behavior. The clustered layout was removed. Counter contents, saturation,
 total counts, estimate-only semantics, accepted values, batch atomicity, wire,
 snapshots, and persistent formats are unchanged.
+
+<a id="direct-count-min-sketch-command-batches"></a>
+### Direct Count-Min Sketch Command Batches
+
+Exact scalar Count-Min commands already hash canonical JSON strings directly,
+but a request carrying `Values` fell through to `countMinSketchItemKeys`. That
+generic path allocates one encoded byte slice per ordinary string plus the
+containing slice before updating any row. Uppercase exact command batches now
+retain the established normalization and count parser, preflight every
+noncanonical value, hash canonical strings directly, and update counters in
+the original request order. Spaced, lowercase, public variadic, journal, and
+other forced-generic paths remain unchanged compatibility controls.
+
+Tests were added and passed against the unchanged implementation before the
+direct helper existed. They compare exact and forced-generic responses plus
+complete counter snapshots, total counts, and TTL state for a fresh 64-value
+request, existing and within-request duplicates, nondefault counts,
+`Pairs["count"]` precedence, saturated counters, replacement of an expiring
+string, an empty string, escaped and structured values, a late invalid value,
+an invalid count, and an empty request. Every fallible key is encoded before
+the first row changes, so invalid batches remain all-or-reject.
+
+CPU and transient request memory below are nine-run medians from a complete
+command against an existing default-width sketch. Inputs and the sketch are
+created before timing; the one lazy 32,768-byte counter allocation is therefore
+amortized over 10,000 commands and accounts for the direct rows' three reported
+bytes. A separate reserve-plus-command cycle confirms that a fresh 64-string
+request falls from 35,585 B and 66 allocations to the required 32,768-byte
+counter grid and one allocation.
+
+```sh
+make run CMD='go test . -run=^TestCountMinSketchBatchCommandExactMatchesGeneric$$ -count=100'
+make run CMD='go test -race . -run=^TestCountMinSketchBatchCommandExactMatchesGeneric$$ -count=10'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkCountMinSketchExistingBatchCommandPath$$ -benchmem -benchtime=10000x -count=9 -cpu=1'
+make run CMD='go test . -run=NoTests -bench=^BenchmarkCountMinSketchBatchCommandPath$$ -benchmem -benchtime=2000x -count=9 -cpu=1'
+```
+
+| Existing-sketch command batch, median | Generic-equivalent control | Direct batch | Improvement |
+| --- | ---: | ---: | ---: |
+| One ordinary string in `Values` | 340.6 ns; 43 B; 2 allocs | 184.0 ns; 7 B; 0 rounded allocs | 1.85x faster; request allocations eliminated |
+| Two ordinary strings | 404.2 ns; 83 B; 3 allocs | 207.3 ns; 3 B; 0 rounded allocs | 1.95x faster; request allocations eliminated |
+| Eight ordinary strings | 1,200 ns; 323 B; 9 allocs | 393.1 ns; 3 B; 0 rounded allocs | 3.05x faster; request allocations eliminated |
+| 64 ordinary strings | 7,658 ns; 2,819 B; 65 allocs | 2,219 ns; 3 B; 0 rounded allocs | 3.45x faster; request allocations eliminated |
+| 64 ordinary strings, count seven | 6,348 ns; 2,819 B; 65 allocs | 2,233 ns; 3 B; 0 rounded allocs | 2.84x faster; request allocations eliminated |
+| 63 ordinary plus escaped last | 6,405 ns; 2,827 B; 65 allocs | 2,927 ns; 1,819 B; 2 allocs | 2.19x faster; 1.55x lower heap; 32.5x fewer allocations |
+| 63 ordinary plus structured last | 6,817 ns; 2,923 B; 66 allocs | 3,262 ns; 1,915 B; 3 allocs | 2.09x faster; 1.53x lower heap; 22x fewer allocations |
+| 64 structured values | 23,072 ns; 8,964 B; 129 allocs | 23,069 ns; 8,964 B; 129 allocs | CPU neutral within 0.1%; memory unchanged |
+
+Two faster-looking routing placements were rejected before the helper was
+accepted. Parsing and dispatching directly inside the large exact-command
+switch made the unrelated mixed-write profile 21,246 versus 20,961 ns, or
+1.014x slower. Moving parsing behind one out-of-line request helper reduced but
+did not remove the loss: paired medians remained about 1.006x-1.010x slower.
+Both variants were removed. The retained layout restores the exact Count-Min
+dispatcher case to its original source and selects the direct helper only after
+an uppercase `Values` request has already entered the normalized Count-Min
+fallback. Bracketing final mixed-write medians were 20,891/21,113 ns versus
+21,319 ns for the frozen parent, neutral or faster with identical memory.
+
+The scalar `Value` command, public direct-Go API, count validation, saturation,
+total-count accounting, estimates, telemetry, TTL clearing, partitions,
+snapshots, journals, replication, wire forms, and storage formats are unchanged.
 
 <a id="compact-count-min-sketch-header-rollback"></a>
 #### Compact Count-Min Sketch Header Rollback

@@ -187,6 +187,53 @@ func (sketch *countMinSketchData) AddOneChecked(value interface{}, count uint32,
 	return estimate, nil
 }
 
+func (sketch *countMinSketchData) addCommandBatch(values Slice, count uint32) (uint64, error) {
+	if sketch == nil || sketch.width == 0 || sketch.depth == 0 {
+		return 0, nil
+	}
+	if len(values) == 1 {
+		if text, ok := values[0].(string); ok && commandFastCanonicalJSONString(text) {
+			return sketch.addJSONString(text, count), nil
+		}
+		key, err := countMinSketchItemKey(values[0])
+		if err != nil {
+			return 0, err
+		}
+		return sketch.addKey(key, count), nil
+	}
+	var encoded [][]byte
+	for index, value := range values {
+		text, ok := value.(string)
+		if ok && commandFastCanonicalJSONString(text) {
+			continue
+		}
+		if encoded == nil {
+			encoded = make([][]byte, len(values))
+		}
+		key, err := countMinSketchItemKey(value)
+		if err != nil {
+			return 0, err
+		}
+		encoded[index] = key
+	}
+
+	estimate := uint64(0)
+	if encoded == nil {
+		for _, value := range values {
+			estimate = sketch.addJSONString(value.(string), count)
+		}
+		return estimate, nil
+	}
+	for index, value := range values {
+		if encoded[index] != nil {
+			estimate = sketch.addKey(encoded[index], count)
+		} else {
+			estimate = sketch.addJSONString(value.(string), count)
+		}
+	}
+	return estimate, nil
+}
+
 func (sketch *countMinSketchData) addKey(key []byte, count uint32) uint64 {
 	sketch.ensureCounters()
 	estimate := uint64(maxCountMinSketchCounter)

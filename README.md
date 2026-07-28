@@ -186,6 +186,13 @@ Generic scalar updates and estimate-only calls bypass one-item variadic
 preparation, removing one allocation while keeping the 128-value batch path
 neutral; see the
 [Count-Min scalar-add measurements](BENCHMARK.md#generic-count-min-sketch-scalar-additions).
+Exact uppercase `INCRCMS`/`ADDCMS`/`CMSADD` requests carrying `Values` now
+preflight every noncanonical value and hash canonical strings directly instead
+of allocating one encoded JSON key per item. Hot one/two/eight/64-value
+commands are 1.85x/1.95x/3.05x/3.45x faster, and 64 ordinary values remove all
+65 request allocations. Escaped and structured-tail controls are 2.19x/2.09x
+faster, while all-structured CPU and memory are unchanged; see the
+[Count-Min command-batch measurements](BENCHMARK.md#direct-count-min-sketch-command-batches).
 HyperLogLog values use compact register arrays for approximate distinct counts
 without retaining the observed items. Incrementally maintained derived state
 keeps add responses, counts, and info estimates O(1) after construction or
