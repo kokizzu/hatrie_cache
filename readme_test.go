@@ -973,6 +973,38 @@ func TestDocsDescribeAllocationFreeRoaringRemoveCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeRoaringMembershipValidationRollbacks(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Roaring membership rollback](BENCHMARK.md#roaring-membership-validation-rollbacks)",
+		"1.21x/1.26x/1.23x",
+		"every command stack frame",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing Roaring membership rollback token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Roaring Membership Validation Rollbacks",
+		"961.6/2,138/1,378 versus 874.8/1,943/1,277 ns",
+		"59,978 to 59,877 bytes",
+		"59,557 bytes and shifted exact dispatch by 416 bytes",
+		"helper variants, tests, and benchmark",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing Roaring membership rollback token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeSparseBitsetAddCommandBatchRollbacks(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

@@ -448,6 +448,7 @@ tree.
 | Reboxed reservoir command batches | Directly hashed canonical strings and removed the prepared-item array | Reboxing every retained string still left 1,152 B and 67 allocations for 64 values, while custom-processing a noncanonical first value made the all-structured control about 1.06x slower | Replaced by [allocation-aware reservoir command batches](#allocation-aware-reservoir-command-batches): original request interfaces are retained directly, a noncanonical first value delegates to byte-identical `AddOneChecked`, and all-structured CPU/memory are neutral |
 | Inline normalized quantile response placement | Retained the quantile batch CPU and allocation gains while constructing the specialized response in the main command switch | The added return spill enlarged every `ExecuteCommand` stack frame from `0x5b0` to `0x5c0`, charging unrelated commands | Replaced by the out-of-line [allocation-aware quantile command batch](#allocation-aware-quantile-command-batches) helper; final `ExecuteCommand` is 60,532 bytes with its original `0x5b0` frame |
 | Exact-dispatch Roaring removal shortcut | Removed parser allocation and made exact scalar removal 1.31x faster | The exact dispatcher grew 657 bytes; a generic wrapper also shifted later code, with paired Roaring-add controls up to 1.10x slower | Replaced by [layout-neutral Roaring removal batches](#allocation-free-roaring-remove-command-batches): the exact dispatcher has exactly its former size and frame, response handling remains in the generic switch, and target/control medians are neutral or faster |
+| Roaring membership validation without materialization | Eliminated all parser heap at every batch size and made generic scalar/64/128-value `HASRB` commands 1.21x/1.26x/1.23x faster | An out-of-line validator shifted exact dispatch by 96 bytes and made unchanged Roaring-add 64/128/mixed controls 1.10x/1.10x/1.08x slower; alternate placements shifted it by 416 bytes or grew every command frame from `0x5b0` to `0x5c0` | Fully reverted; membership parsing, dispatch, CPU, heap, allocations, wire, journal, and read accounting retain their former production behavior; see [the rollback](#roaring-membership-validation-rollbacks) |
 | Sparse-bitset add command stack batches | Eliminated one parsed-slice allocation and made one/two/eight-value commands up to 1.29x faster | A 64-value stack enlarged the helper enough to slow 64/128/mixed controls by 1.032x/1.16x/1.05x; an eight-value threshold still slowed unchanged 64-value parent/final controls by 1.035x-1.20x across three placements | Fully reverted; `ADDSB`/`SBADD`, the exact dispatcher, generic switch, parser, heap, and allocations retain their former production code; see [the rollback](#sparse-bitset-add-command-batch-rollbacks) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
@@ -7855,6 +7856,48 @@ again 18,026 bytes with its original `0x1b8` frame and alignment, and paired
 Roaring-add 64/128/mixed/scalar plus mixed read/write controls are neutral or
 faster with unchanged heap and allocation counts. Wire, journal, replication,
 storage, and snapshot formats are unchanged.
+
+<a id="roaring-membership-validation-rollbacks"></a>
+#### Roaring Membership Validation Rollbacks
+
+`HASRB`, `RBHAS`, and `RBEXISTS` consume only the first requested value but
+intentionally validate every supplied value before reading the bitmap. The
+production parser materializes all validated values in an owning `[]uint32`.
+A candidate instead retained only the first parsed value while scanning the
+remainder, preserving invalid-tail rejection without materialization.
+
+Tests written against the unchanged implementation compared exact and forced
+generic execution across scalar hits and misses, aliases, 1/64/128-value
+batches, mixed representations, invalid tails, missing keys, responses,
+snapshots, read/write accounting, the typed API, and local partitions. They
+passed 20 times before each candidate placement was measured.
+
+Seven-run one-CPU medians showed a strong local result:
+
+| Complete Roaring membership command | Former owning parser | Validation scan | Improvement |
+| --- | ---: | ---: | ---: |
+| Generic scalar `Value` | 111.7 ns; 4 B; 1 alloc | 92.55 ns; 0 B; 0 allocs | 1.21x faster; allocation eliminated |
+| Alias scalar `Value` | 112.6 ns; 4 B; 1 alloc | 92.32 ns; 0 B; 0 allocs | 1.22x faster; allocation eliminated |
+| One `uint32` in `Values` | 101.0 ns; 4 B; 1 alloc | 81.50 ns; 0 B; 0 allocs | 1.24x faster; allocation eliminated |
+| 64 `uint32` values | 371.7 ns; 256 B; 1 alloc | 294.6 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated |
+| 128 `uint32` values | 634.9 ns; 512 B; 1 alloc | 517.9 ns; 0 B; 0 allocs | 1.23x faster; allocation eliminated |
+| Mixed representations, 64 values | 698.9 ns; 256 B; 1 alloc | 611.7 ns; 0 B; 0 allocs | 1.14x faster; allocation eliminated |
+| Exact scalar control | 72.67 ns; 0 B; 0 allocs | 71.06 ns; 0 B; 0 allocs | Neutral to faster |
+
+The complete command path is instruction-layout sensitive, so three placements
+were gated against parent/final binaries:
+
+| Candidate placement | Layout result | Disqualifying result |
+| --- | --- | --- |
+| Validation helper with response handling retained in the generic switch | `ExecuteCommand` retained its `0x5b0` frame but shrank from 59,978 to 59,877 bytes; exact dispatch retained its size/frame but moved 96 bytes | Paired Roaring-add 64/128/mixed medians became 961.6/2,138/1,378 versus 874.8/1,943/1,277 ns, or 1.10x/1.10x/1.08x slower |
+| Complete membership response helper | Kept the `0x5b0` command frame | `ExecuteCommand` shrank to 59,557 bytes and shifted exact dispatch by 416 bytes, failing the layout gate before unrelated CPU was accepted |
+| Scalar/response inline with only batch validation out of line | Recovered the original code size within 27 bytes | The added locals enlarged every `ExecuteCommand` frame from `0x5b0` to `0x5c0` |
+
+The target gains do not justify a 1.08x-1.10x regression in the already
+optimized Roaring add path, a large hot-code shift, or a permanent stack charge
+on every command. All production changes, helper variants, tests, and benchmark
+fixtures were removed. The original owning parser and exact/generic dispatch
+remain byte-for-byte unchanged.
 
 <a id="sparse-bitset-add-command-batch-rollbacks"></a>
 #### Sparse-Bitset Add Command Batch Rollbacks

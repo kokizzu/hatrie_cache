@@ -170,6 +170,11 @@ existing dispatch route. One/two/eight/64-value removals are
 1.14x/1.16x/1.26x/1.28x faster with zero parser heap or allocations; scalar,
 mixed, and 128-value fallback commands are also neutral or faster. See the
 [Roaring removal measurements](BENCHMARK.md#allocation-free-roaring-remove-command-batches).
+Allocation-free `HASRB` validation prototypes improved generic scalar and
+64/128-value commands by 1.21x/1.26x/1.23x, but every placement either slowed
+unchanged Roaring-add controls, shifted hot dispatch substantially, or enlarged
+every command stack frame. They were reverted; see the
+[Roaring membership rollback](BENCHMARK.md#roaring-membership-validation-rollbacks).
 Sparse bitset values use sorted 16-bit containers keyed by the upper 48 bits,
 promoting dense ranges to packed bitsets for exact uint64 membership with low
 memory overhead on sparse high-cardinality IDs. Their inline values and fixed
