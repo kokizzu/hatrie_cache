@@ -239,6 +239,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
 | Current pass | [Allocation-free Roaring add command batches](#allocation-free-roaring-add-command-batches), existing bitmap with one/two/eight/64 requested uint32 values | Parsed heap slice and generic fallback: 131.1/141.4/224.4/992.2 ns; 4/8/32/256 B and 1 alloc | Bounded stack preflight and direct dispatch: 105.2/114.8/174.5/868.9 ns; 0 B and 0 allocs | 1.25x/1.23x/1.29x/1.14x faster; parser allocation eliminated through 64 values | No measured tradeoff; 128-value CPU/memory is neutral, mixed and fresh batches are faster, exact scalar and mixed command controls are neutral or faster, and global command frames are unchanged |
+| Current pass | [Allocation-free Roaring remove command batches](#allocation-free-roaring-remove-command-batches), existing bitmap with one/two/eight/64 requested uint32 values | Parsed heap slice: 291.0/333.6/659.4/3,048 ns; 4/8/32/256 B and 1 alloc | Bounded stack preflight: 254.6/287.3/522.9/2,380 ns; 0 B and 0 allocs | 1.14x/1.16x/1.26x/1.28x faster; parser allocation eliminated through 64 values | No measured tradeoff; 128-value and mixed batches remain faster, add/scalar/mixed command controls are neutral or faster, and global command frames are unchanged |
+| Reverted | [Shared-lock bitmap membership](#shared-lock-bitmap-membership-rollback), exact `HASRB`/`HASSB` | Exclusive lock: 77.55/91.76 ns serial; 157.8/146.4 ns at eight-way contention | Shared lock: 119.1/132.7 ns serial; 112.4/90.74 ns at eight-way contention | Parallel reads 1.40x/1.61x faster, but serial reads 1.54x/1.45x slower | Fully reverted; zero-allocation memory behavior was unchanged and no runtime/configuration cost remains |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Current pass | [Generic HyperLogLog scalar additions](#generic-hyperloglog-scalar-additions), safe/escaped/structured values | Variadic wrapper: 96.48/114.6/111.7 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 63.68/74.92/78.25 ns; 5-16 B; 1 alloc | 1.52x/1.53x/1.43x faster; one allocation and 24 B removed | No measured tradeoff; observations and cached estimate state match exactly, while the unchanged 128-value control is neutral within 0.6% with identical memory |
 | Current pass | [Direct HyperLogLog command batches](#direct-hyperloglog-command-batches), existing sketch with one/two/eight/64 requested strings | Generic-equivalent: 284.8/352.1/946.7/5,666 ns; up to 2,817 heap B and 65 allocs | Direct command: 162.5/185.8/276.2/1,204 ns; at most 1 amortized heap B and zero rounded allocs | 1.75x/1.90x/3.43x/4.71x faster; 64-value request allocations eliminated | No measured runtime tradeoff; fresh 64-value creation is 2.49x faster with 1.17x lower heap, structured controls are neutral or faster, and scalar plus forced-generic APIs retain their prior paths |
@@ -449,6 +451,7 @@ tree.
 | Inline normalized quantile response placement | Retained the quantile batch CPU and allocation gains while constructing the specialized response in the main command switch | The added return spill enlarged every `ExecuteCommand` stack frame from `0x5b0` to `0x5c0`, charging unrelated commands | Replaced by the out-of-line [allocation-aware quantile command batch](#allocation-aware-quantile-command-batches) helper; final `ExecuteCommand` is 60,532 bytes with its original `0x5b0` frame |
 | Exact-dispatch Roaring removal shortcut | Removed parser allocation and made exact scalar removal 1.31x faster | The exact dispatcher grew 657 bytes; a generic wrapper also shifted later code, with paired Roaring-add controls up to 1.10x slower | Replaced by [layout-neutral Roaring removal batches](#allocation-free-roaring-remove-command-batches): the exact dispatcher has exactly its former size and frame, response handling remains in the generic switch, and target/control medians are neutral or faster |
 | Roaring membership validation without materialization | Eliminated all parser heap at every batch size and made generic scalar/64/128-value `HASRB` commands 1.21x/1.26x/1.23x faster | An out-of-line validator shifted exact dispatch by 96 bytes and made unchanged Roaring-add 64/128/mixed controls 1.10x/1.10x/1.08x slower; alternate placements shifted it by 416 bytes or grew every command frame from `0x5b0` to `0x5c0` | Fully reverted; membership parsing, dispatch, CPU, heap, allocations, wire, journal, and read accounting retain their former production behavior; see [the rollback](#roaring-membership-validation-rollbacks) |
+| Shared-lock bitmap membership | Made eight-way exact `HASRB`/`HASSB` reads 1.40x/1.61x faster without allocation | Uncontended exact reads became 1.54x/1.45x slower because `RWMutex.RLock` and fallback checks cost more than the complete short operation saved under contention | Fully reverted; exact bitmap membership retains the exclusive hot-cache path; see [the rollback](#shared-lock-bitmap-membership-rollback) |
 | Sparse-bitset add command stack batches | Eliminated one parsed-slice allocation and made one/two/eight-value commands up to 1.29x faster | A 64-value stack enlarged the helper enough to slow 64/128/mixed controls by 1.032x/1.16x/1.05x; an eight-value threshold still slowed unchanged 64-value parent/final controls by 1.035x-1.20x across three placements | Fully reverted; `ADDSB`/`SBADD`, the exact dispatcher, generic switch, parser, heap, and allocations retain their former production code; see [the rollback](#sparse-bitset-add-command-batch-rollbacks) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
@@ -7898,6 +7901,36 @@ optimized Roaring add path, a large hot-code shift, or a permanent stack charge
 on every command. All production changes, helper variants, tests, and benchmark
 fixtures were removed. The original owning parser and exact/generic dispatch
 remain byte-for-byte unchanged.
+
+<a id="shared-lock-bitmap-membership-rollback"></a>
+#### Shared-Lock Bitmap Membership Rollback
+
+Exact `HASRB` and `HASSB` commands formerly took the cache-wide exclusive lock
+for their short, allocation-free membership checks. A test-first candidate used
+the shared lock for ordinary in-memory values and retained the existing
+exclusive generic fallback for expired or malformed TTL metadata and lazy disk
+references. Exact and forced-generic responses, statistics, and stored state
+were compared for hits, misses, absent keys, wrong types, hot and cold values,
+live and expired TTLs, and both bitmap families. The suite passed 20 times and
+then passed ten race-enabled repetitions after the change.
+
+The final candidate skipped duplicate key validation and irrelevant
+counter-stripe checks. Eleven parent/candidate runs alternated in both orders on
+one logical CPU; seven-run eight-way measurements captured the contended case:
+
+| Complete exact membership command | Exclusive lock | Shared lock | Result |
+| --- | ---: | ---: | ---: |
+| Roaring, serial | 77.55 ns; 0 B; 0 allocs | 119.1 ns; 0 B; 0 allocs | 1.54x slower |
+| Sparse, serial | 91.76 ns; 0 B; 0 allocs | 132.7 ns; 0 B; 0 allocs | 1.45x slower |
+| Roaring, eight parallel readers | 157.8 ns; 0 B; 0 allocs | 112.4 ns; 0 B; 0 allocs | 1.40x faster |
+| Sparse, eight parallel readers | 146.4 ns; 0 B; 0 allocs | 90.74 ns; 0 B; 0 allocs | 1.61x faster |
+
+The shared lock helps under deliberate contention, but its atomic reader
+bookkeeping and fallback checks are larger than these complete membership
+operations on the ordinary uncontended path. Making that trade configurable
+would add API and operational complexity for two narrow commands. The runtime
+candidate and temporary fixture were removed, leaving the original code and
+zero-allocation behavior unchanged.
 
 <a id="sparse-bitset-add-command-batch-rollbacks"></a>
 #### Sparse-Bitset Add Command Batch Rollbacks
