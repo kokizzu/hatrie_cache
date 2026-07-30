@@ -875,6 +875,39 @@ func TestDocsDescribeAllocationAwareReservoirCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeAllocationAwareQuantileCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[quantile command-batch measurements](BENCHMARK.md#allocation-aware-quantile-command-batches)",
+		"1.67x/1.63x/1.45x/1.24x faster",
+		"8.30x less heap",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing quantile command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Allocation-Aware Quantile Command Batches",
+		"BenchmarkQuantileSketchCommandBatchAlternating",
+		"2,463 ns; 656 B; 4 allocs",
+		"1,988 ns; 79 B; 1 alloc",
+		"Inline normalized quantile response placement",
+		"60,532 bytes with its original `0x5b0` frame",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing quantile command batch token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectGenericScalarSetKeys(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

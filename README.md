@@ -236,6 +236,13 @@ allocations: they are 1.13x/1.21x faster, empty reads allocate nothing, and
 one-item reads use 1.70x less heap while multi-item controls remain neutral.
 Quantile sketch values use a compact Greenwald-Khanna summary for approximate
 p50/p95/p99-style numeric queries with bounded rank error and low memory use.
+Multi-value `ADDQ`/`ADDQS`/`QADD`/`QSADD` commands preflight finite numbers once
+and use bounded stack storage through 64 values before applying the batch.
+Existing one/two/eight/64-number commands are 1.67x/1.63x/1.45x/1.24x faster;
+the 64-value path uses 8.30x less heap and 4x fewer allocations. Larger and
+mixed-representation batches retain the checked fallback and remain faster,
+while exact scalar and unrelated command controls are neutral; see the
+[quantile command-batch measurements](BENCHMARK.md#allocation-aware-quantile-command-batches).
 Fenwick tree values use a compact int64 array for point updates, point reads,
 prefix sums, and range sums in O(log n) time without storing individual events.
 Typed backing pools reuse deleted indexes through a compact bitset-backed stack

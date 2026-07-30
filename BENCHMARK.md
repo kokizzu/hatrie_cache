@@ -228,6 +228,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct Count-Min Sketch command batches](#direct-count-min-sketch-command-batches), existing sketch with one/two/eight/64 requested strings | Generic-equivalent: 340.6/404.2/1,200/7,658 ns; up to 2,819 heap B and 65 allocs | Direct command: 184.0/207.3/393.1/2,219 ns; at most 7 heap B and zero rounded allocs | 1.85x/1.95x/3.05x/3.45x faster; 64-value request allocations eliminated | No measured tradeoff; escaped/structured-tail batches are 2.19x/2.09x faster, all-structured CPU/memory are unchanged, and scalar plus forced-generic APIs retain their prior paths |
 | Current pass | [Prepared-result Fenwick updates](#prepared-result-fenwick-updates), 1K/1M trees | Re-query after write: 99.11/123.6 ns | Reuse checked result: 40.21/51.86 ns | 2.46x/2.38x faster; lazy first add 1.18x faster; complete `ADDFW` 1.11x faster | No measured tradeoff; heap, allocations, overflow checks, update responses, tree layout, wire, and persistence are unchanged |
 | Current pass | [Prevalidated quantile insertions](#prevalidated-quantile-insertions), scalar `ADDQ` | Public and private finite checks: 735.3 ns; 64 B; 1 alloc | One atomic public preflight: 699.3 ns; 64 B; 1 alloc | Complete command 1.05x faster; direct scalar and 16-value controls are neutral | No measured tradeoff; invalid batches remain all-or-reject, and summary, estimates, heap, allocations, wire, and persistence are unchanged |
+| Current pass | [Allocation-aware quantile command batches](#allocation-aware-quantile-command-batches), existing sketch with one/two/eight/64 requested numbers | Parsed slice, public wrapper, and generic response: 549.2/575.4/752.1/2,463 ns; up to 656 heap B and 4 allocs | Bounded preflight and direct response: 328.3/353.0/517.8/1,988 ns; at most 79 heap B and 1 alloc | 1.67x/1.63x/1.45x/1.24x faster; 64-value heap 8.30x lower and allocations 4x fewer | No measured tradeoff; 128-value and mixed representations remain faster, exact scalar and mixed command controls are neutral or faster, and the global command frame is unchanged |
 | Current pass | [Compact XOR-filter headers](#compact-xor-filter-headers), 100k empty filters | 72-byte header; 72.01 retained B/filter; 51.28 ns/filter initialization | 64-byte header; 64.06 retained B/filter; 34.19 ns/filter initialization | 1.12x lower retained heap; 1.50x faster bulk initialization; same-binary lookup 1.02x faster | Field reorder only; allocations, fingerprints, staged values, behavior, wire, and persistence formats are unchanged |
 | Current pass | [Linked XOR-filter build queue](#linked-xor-filter-build-queue), 64/4,096/65,536 items | Slice queue: 4,084 ns/0.339 ms/6.474 ms; 3,680/173,312/2,752,520 B; 4 allocs | Slot-linked queue: 3,944 ns/0.324 ms/6.198 ms; 3,200/152,832/2,424,840 B; 3 allocs | 1.04x-1.05x faster; 1.13x-1.15x lower heap; 1.33x fewer allocs | Uses four existing padding bytes per build slot; fingerprints, retained filters, wire, persistence, and public behavior are unchanged |
 | Current pass | [Order-independent XOR-filter build](#order-independent-xor-filter-build), 64/4,096/65,536 staged items | Sorted keys: 7.520 us/0.895 ms/18.136 ms | Direct map order: 4.513 us/0.431 ms/10.071 ms | 1.67x/2.08x/1.80x faster; heap and allocations unchanged | Slot aggregation is commutative and the peel queue is slot ordered; explicit reversed-order tests preserve seed, block length, and fingerprint bytes |
@@ -444,6 +445,7 @@ tree.
 | Normalized-fallback HyperLogLog batch routing | Preserved the exact dispatcher source while removing ordinary-string JSON keys from uppercase `Values` requests | The extra late return spill enlarged every `ExecuteCommand` stack frame from `0x5b0` to `0x5c8`; initial unpinned scalar and mixed controls also moved slower | Removed; [exact-switch HyperLogLog batch routing](#direct-hyperloglog-command-batches) restores the complete caller and dispatcher stack frames while pinned scalar and mixed controls are neutral or faster |
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reboxed reservoir command batches | Directly hashed canonical strings and removed the prepared-item array | Reboxing every retained string still left 1,152 B and 67 allocations for 64 values, while custom-processing a noncanonical first value made the all-structured control about 1.06x slower | Replaced by [allocation-aware reservoir command batches](#allocation-aware-reservoir-command-batches): original request interfaces are retained directly, a noncanonical first value delegates to byte-identical `AddOneChecked`, and all-structured CPU/memory are neutral |
+| Inline normalized quantile response placement | Retained the quantile batch CPU and allocation gains while constructing the specialized response in the main command switch | The added return spill enlarged every `ExecuteCommand` stack frame from `0x5b0` to `0x5c0`, charging unrelated commands | Replaced by the out-of-line [allocation-aware quantile command batch](#allocation-aware-quantile-command-batches) helper; final `ExecuteCommand` is 60,532 bytes with its original `0x5b0` frame |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
@@ -7177,6 +7179,73 @@ within-pair ratio rather than comparing unrelated raw medians.
 Summary insertion, compression, rank bounds, estimates, invalid-input
 handling, snapshots, command responses, wire encoding, storage encoding, and
 persistent formats are unchanged.
+
+<a id="allocation-aware-quantile-command-batches"></a>
+### Allocation-Aware Quantile Command Batches
+
+Generic multi-value `ADDQ`, `ADDQS`, `QADD`, and `QSADD` commands previously
+materialized every parsed number in a heap slice, called the public checked
+wrapper, and then used the generic response encoder. The public wrapper and the
+private insertion path repeated finite-number validation after command parsing.
+
+The command path now parses and validates scalar `Value` directly. `Values`
+batches through 64 entries use a bounded stack array; larger batches retain an
+owning heap slice so stack cost remains bounded. A private command helper then
+applies the already-preflighted values and returns the estimate through the
+existing specialized quantile response writer. Parsing and finite checks still
+finish before the lock or any mutation, so an invalid value at any position is
+all-or-reject. Public APIs, journal preflight ownership, exact scalar dispatch,
+TTL replacement, routing, write accounting, snapshots, and stored summaries
+retain their established paths and behavior.
+
+```sh
+make bench-quantile-batch BENCHTIME=500ms \
+  QUANTILE_BATCH_ALTERNATING_BENCHTIME=200x COUNT=7
+```
+
+Complete-path rows are medians of seven pinned-CPU runs. The alternating rows
+come from `BenchmarkQuantileSketchCommandBatchAlternating`, which executes the
+candidate and a frozen reconstruction of the former parser, public wrapper,
+and generic response path in both orders within one process.
+
+| Complete quantile command batch, median | Former complete path | Bounded direct path | Improvement |
+| --- | ---: | ---: | ---: |
+| Existing `float64`, one value | 549.2 ns; 136 B; 4 allocs | 328.3 ns; 64 B; 1 alloc | 1.67x faster; 2.13x less heap; 4x fewer allocs |
+| Existing `float64`, two values | 575.4 ns; 159 B; 4 allocs | 353.0 ns; 79 B; 1 alloc | 1.63x faster; 2.01x less heap; 4x fewer allocs |
+| Existing `float64`, eight values | 752.1 ns; 207 B; 4 allocs | 517.8 ns; 79 B; 1 alloc | 1.45x faster; 2.62x less heap; 4x fewer allocs |
+| Existing `float64`, 64 values | 2,463 ns; 656 B; 4 allocs | 1,988 ns; 79 B; 1 alloc | 1.24x faster; 8.30x less heap; 4x fewer allocs |
+| Existing `float64`, 128 values | 4,358 ns; 1,168 B; 4 allocs | 4,162 ns; 1,103 B; 2 allocs | 1.05x faster; 1.06x less heap; 2x fewer allocs |
+| Existing strings, 64 values | 4,025 ns; 656 B; 4 allocs | 3,630 ns; 79 B; 1 alloc | 1.11x faster; 8.30x less heap; 4x fewer allocs |
+| Existing `json.Number`, 64 values | 3,906 ns; 656 B; 4 allocs | 3,668 ns; 79 B; 1 alloc | 1.06x faster; 8.30x less heap; 4x fewer allocs |
+| Existing mixed representations, 64 values | 3,248 ns; 656 B; 4 allocs | 3,021 ns; 79 B; 1 alloc | 1.08x faster; 8.30x less heap; 4x fewer allocs |
+| Fresh `float64`, 64 values | 2,688 ns; 808 B; 7 allocs | 2,141 ns; 232 B; 4 allocs | 1.26x faster; 3.48x less heap; 1.75x fewer allocs |
+
+The same-binary alternating gate keeps every fallback faster: candidate versus
+frozen-reference medians are 1.69x/1.73x/1.58x/1.29x/1.10x for one, two,
+eight, 64, and 128 `float64` values; 64-value string, `json.Number`, and mixed
+batches improve 1.17x/1.18x/1.22x; fresh 64-value creation improves 1.27x.
+One-shot first-call memory also falls from 840 B and eight allocations to 128 B
+and three allocations for 64 values, so the bounded stack path does not hide a
+warmup penalty.
+
+Parent/final test binaries were additionally alternated on the unchanged exact
+scalar command and mixed command profiles. Exact `ADDQ` is neutral/slightly
+faster at 492.9 versus 488.7 ns with the same 64 B and one allocation; the
+mixed-read and mixed-write profiles improve about 1.01x and 1.02x with no
+allocation change. The exact scalar dispatcher remains 17,866 bytes with its
+`0x1b8` frame. An initial inline response placement was rejected because it
+grew every `ExecuteCommand` frame from `0x5b0` to `0x5c0`; the retained
+out-of-line helper leaves `ExecuteCommand` at 60,532 bytes with its original
+`0x5b0` frame.
+
+To repeat the parent/final control gate, first compile both revisions as Go test
+binaries and pass them to the same Make target:
+
+```sh
+make bench-quantile-batch BENCHTIME=500ms COUNT=10 \
+  QUANTILE_BATCH_BASELINE_BINARY=/tmp/hatrie-quantile-parent.test \
+  QUANTILE_BATCH_CANDIDATE_BINARY=/tmp/hatrie-quantile-candidate.test
+```
 
 <a id="xor-filter-scalar-fast-path"></a>
 ### XOR Filter Scalar Fast Path

@@ -122,6 +122,13 @@ BLOOM_HEADER_LAYOUT_BENCHTIME ?= 1x
 COUNT_MIN_ROWS_BENCH ?= ^BenchmarkCountMinSketch(DirectRows|JSONStringRows)$$
 FENWICK_ADD_BENCH ?= ^BenchmarkFenwickTree(AddTraversal|FirstAdd)$$
 QUANTILE_ADD_BENCH ?= ^BenchmarkQuantileSketchAddValidation$$
+QUANTILE_BATCH_PATH_BENCH ?= ^BenchmarkQuantileSketch(Existing|Fresh)BatchCommandPath$$
+QUANTILE_BATCH_ALTERNATING_BENCH ?= ^BenchmarkQuantileSketchCommandBatchAlternating$$
+QUANTILE_BATCH_ALTERNATING_BENCHTIME ?= 200x
+QUANTILE_BATCH_CONTROL_BENCH ?= ^BenchmarkCommandFeature/(QuantileSketchAdd|MixedReadHeavy100|MixedWriteHeavy100)$$
+QUANTILE_BATCH_CONTROL_BENCHTIME ?= 500ms
+QUANTILE_BATCH_BASELINE_BINARY ?=
+QUANTILE_BATCH_CANDIDATE_BINARY ?=
 TOP_K_SCALAR_BENCH ?= ^BenchmarkTopKGenericScalarDispatch
 BLOOM_SCALAR_BENCH ?= ^BenchmarkBloomFilter(ScalarAddChecked|AddCheckedProduction|VariadicBatchControl)
 CUCKOO_SCALAR_BENCH ?= ^BenchmarkCuckooFilter(ScalarAddChecked|AddCheckedProduction|VariadicBatchControl|ScalarDelete)
@@ -224,7 +231,7 @@ DOCKER_PLATFORM ?=
 DOCKER_TARGET ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-string-compaction bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-replication-optimizations bench-merkle-maintenance bench-native-ahtable-allocator bench-native-hattrie-lookup bench-native-command-batch bench-scalar-batch bench-scalar-native-batch bench-structured-batch bench-fastime bench-big-wins bench-storage-backends bench-default-construction bench-command-features bench-command-json-string bench-canonical-string-lookups bench-reservoir-small bench-reservoir-batch bench-bloom-header bench-bloom-scalar bench-cuckoo-scalar bench-hll-scalar bench-cms-scalar bench-set-scalar-generic bench-priority-queue-scalar bench-count-min-rows bench-fenwick-add bench-quantile-add bench-topk-scalar bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
+.PHONY: test verify verify-local verify-local-contract verify-go verify-race verify-c verify-frontend verify-ops verify-benchmark-md-update backup restore restore-bundle restore-rehearsal doctor cluster-status storage-status storage-flush storage-compact server check-config print-sane-config docker-build bench bench-serialization bench-journal-catchup bench-journal-wire bench-journal-apply bench-pebble-generation bench-pebble-backup bench-incremental-backup bench-atomic-restore bench-checkpoint-bootstrap bench-existing-recovery bench-partition-restore bench-partition-whole-keyspace bench-partition-cursor bench-partition-snapshot bench-cold-hydration bench-reference-slab bench-string-storage bench-string-compaction bench-structured-storage-codec bench-startup-persistence bench-live-replication bench-replication-optimizations bench-merkle-maintenance bench-native-ahtable-allocator bench-native-hattrie-lookup bench-native-command-batch bench-scalar-batch bench-scalar-native-batch bench-structured-batch bench-fastime bench-big-wins bench-storage-backends bench-default-construction bench-command-features bench-command-json-string bench-canonical-string-lookups bench-reservoir-small bench-reservoir-batch bench-bloom-header bench-bloom-scalar bench-cuckoo-scalar bench-hll-scalar bench-cms-scalar bench-set-scalar-generic bench-priority-queue-scalar bench-count-min-rows bench-fenwick-add bench-quantile-add bench-quantile-batch bench-topk-scalar bench-hatrie-command-features bench-hatrie-transport-features bench-redis-command-features bench-tarantool-command-features bench-command-comparison bench-smoke benchmark-md command-support run generate-proto cli monitoring-server frontend-install frontend-dev frontend-check frontend-test frontend-build frontend-smoke frontend-backend-smoke
 
 test: verify-go
 
@@ -421,6 +428,9 @@ bench-fenwick-add:
 
 bench-quantile-add:
 	QUANTILE_ADD_BENCH='$(QUANTILE_ADD_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-quantile-add.sh
+
+bench-quantile-batch:
+	QUANTILE_BATCH_PATH_BENCH='$(QUANTILE_BATCH_PATH_BENCH)' QUANTILE_BATCH_ALTERNATING_BENCH='$(QUANTILE_BATCH_ALTERNATING_BENCH)' QUANTILE_BATCH_ALTERNATING_BENCHTIME='$(QUANTILE_BATCH_ALTERNATING_BENCHTIME)' QUANTILE_BATCH_CONTROL_BENCH='$(QUANTILE_BATCH_CONTROL_BENCH)' QUANTILE_BATCH_CONTROL_BENCHTIME='$(QUANTILE_BATCH_CONTROL_BENCHTIME)' QUANTILE_BATCH_BASELINE_BINARY='$(QUANTILE_BATCH_BASELINE_BINARY)' QUANTILE_BATCH_CANDIDATE_BINARY='$(QUANTILE_BATCH_CANDIDATE_BINARY)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-quantile-batch.sh
 
 bench-topk-scalar:
 	TOP_K_SCALAR_BENCH='$(TOP_K_SCALAR_BENCH)' BENCHTIME='$(BENCHTIME)' COUNT='$(COUNT)' ./scripts/benchmark-topk-scalar.sh

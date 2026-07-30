@@ -914,15 +914,7 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "created quantile sketch"}
 	case "ADDQ", "ADDQS", "QADD", "QSADD":
-		values, err := quantileSketchValuesFromCommand(request)
-		if err != nil {
-			return commandError(err.Error())
-		}
-		estimate, err := ht.AddQuantileSketchChecked(key, values[0], values[1:]...)
-		if err != nil {
-			return commandError(err.Error())
-		}
-		return commandValueResponse("added quantile sketch values", estimate)
+		return ht.executeQuantileSketchCommandValues(key, request.Value, request.Values)
 	case "ESTQ", "QUERYQ", "QQUERY", "QSQUERY", "QUANTILE":
 		quantile, err := commandQuantileValue(request)
 		if err != nil {
@@ -4403,20 +4395,70 @@ func commandQuantileSketchEpsilon(request CacheCommandRequest) (float64, error) 
 	return quantileSketchEpsilonValue(epsilon)
 }
 
+const maxStackQuantileSketchCommandValues = 64
+
+func (ht *HatTrie) executeQuantileSketchCommandValues(key string, value string, values Slice) CacheCommandResponse {
+	estimate, err := ht.addQuantileSketchCommandValuesChecked(key, value, values)
+	if err != nil {
+		return commandError(err.Error())
+	}
+	return commandFastQuantileEstimateResponse("added quantile sketch values", estimate)
+}
+
+func (ht *HatTrie) addQuantileSketchCommandValuesChecked(key string, value string, values Slice) (QuantileEstimate, error) {
+	if len(values) == 0 {
+		if value == "" {
+			return QuantileEstimate{}, errors.New("value or values is required")
+		}
+		parsed, err := commandFloat64Value(value)
+		if err != nil || !validQuantileSketchValue(parsed) {
+			return QuantileEstimate{}, errors.New("quantile sketch value must be a finite number")
+		}
+		var scalar [1]float64
+		scalar[0] = parsed
+		return ht.addQuantileSketchCommandBatchChecked(key, scalar[:])
+	}
+	if len(values) > maxStackQuantileSketchCommandValues {
+		parsed, err := quantileSketchValuesFromCommandSlice(values)
+		if err != nil {
+			return QuantileEstimate{}, err
+		}
+		return ht.addQuantileSketchCommandBatchChecked(key, parsed)
+	}
+
+	var stack [maxStackQuantileSketchCommandValues]float64
+	parsed := stack[:len(values)]
+	if err := parseQuantileSketchCommandValues(parsed, values); err != nil {
+		return QuantileEstimate{}, err
+	}
+	return ht.addQuantileSketchCommandBatchChecked(key, parsed)
+}
+
 func quantileSketchValuesFromCommand(request CacheCommandRequest) ([]float64, error) {
 	values, ok := commandSliceValues(request)
 	if !ok {
 		return nil, errors.New("value or values is required")
 	}
-	out := make([]float64, len(values))
-	for idx, value := range values {
-		parsed, err := commandFloat64Value(value)
-		if err != nil || !validQuantileSketchValue(parsed) {
-			return nil, errors.New("quantile sketch value must be a finite number")
-		}
-		out[idx] = parsed
+	return quantileSketchValuesFromCommandSlice(values)
+}
+
+func quantileSketchValuesFromCommandSlice(values Slice) ([]float64, error) {
+	parsed := make([]float64, len(values))
+	if err := parseQuantileSketchCommandValues(parsed, values); err != nil {
+		return nil, err
 	}
-	return out, nil
+	return parsed, nil
+}
+
+func parseQuantileSketchCommandValues(parsed []float64, values Slice) error {
+	for idx, value := range values {
+		value, err := commandFloat64Value(value)
+		if err != nil || !validQuantileSketchValue(value) {
+			return errors.New("quantile sketch value must be a finite number")
+		}
+		parsed[idx] = value
+	}
+	return nil
 }
 
 func commandQuantileValue(request CacheCommandRequest) (float64, error) {

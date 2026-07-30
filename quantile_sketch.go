@@ -146,6 +146,17 @@ func (sketch *quantileSketchData) Add(value float64, values ...float64) Quantile
 	return estimate
 }
 
+func (sketch *quantileSketchData) addValidBatch(values []float64) QuantileEstimate {
+	if sketch == nil || sketch.epsilon == 0 {
+		return QuantileEstimate{}
+	}
+	for _, value := range values {
+		sketch.addValid(value)
+	}
+	estimate, _ := sketch.Estimate(0.5)
+	return estimate
+}
+
 func (sketch *quantileSketchData) addValid(value float64) {
 	sketch.count = saturatingAddUint64(sketch.count, 1)
 	insert := sort.Search(len(sketch.summary), func(idx int) bool {
@@ -411,6 +422,40 @@ func (ht *HatTrie) AddQuantileSketchChecked(key string, val float64, vals ...flo
 	ht.clearExpirationLocked(key)
 	idx := ht.quantileSketches.AddData(newDefaultQuantileSketchData())
 	estimate := ht.quantileSketches.array[idx].Add(val, vals...)
+	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}.toValue()
+	ht.recordWriteLocked(key)
+	return estimate, nil
+}
+
+func (ht *HatTrie) addQuantileSketchCommandBatchChecked(key string, values []float64) (QuantileEstimate, error) {
+	if ht == nil {
+		return QuantileEstimate{}, ErrNilHatTrie
+	}
+	if partition := ht.localPartitionForKey(key); partition != nil {
+		return partition.addQuantileSketchCommandBatchChecked(key, values)
+	}
+
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+
+	rawPtr, hval, err := ht.freshLocationCheckedLocked(key)
+	if err != nil {
+		return QuantileEstimate{}, err
+	}
+	if hval.IsQuantileSketch() {
+		estimate := ht.quantileSketches.array[hval.Index].addValidBatch(values)
+		*rawPtr = hval.toValue()
+		ht.recordWriteLocked(key)
+		return estimate, nil
+	}
+
+	if rawPtr == nil {
+		rawPtr = ht.upsertLocation(key)
+	}
+	ht.returnStorage(hval)
+	ht.clearExpirationLocked(key)
+	idx := ht.quantileSketches.AddData(newDefaultQuantileSketchData())
+	estimate := ht.quantileSketches.array[idx].addValidBatch(values)
 	*rawPtr = HatValue{Index: idx, Flags: DATAVALUE_TYPE_QUANTILE_SKETCH}.toValue()
 	ht.recordWriteLocked(key)
 	return estimate, nil
