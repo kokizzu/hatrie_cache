@@ -447,6 +447,7 @@ tree.
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reboxed reservoir command batches | Directly hashed canonical strings and removed the prepared-item array | Reboxing every retained string still left 1,152 B and 67 allocations for 64 values, while custom-processing a noncanonical first value made the all-structured control about 1.06x slower | Replaced by [allocation-aware reservoir command batches](#allocation-aware-reservoir-command-batches): original request interfaces are retained directly, a noncanonical first value delegates to byte-identical `AddOneChecked`, and all-structured CPU/memory are neutral |
 | Inline normalized quantile response placement | Retained the quantile batch CPU and allocation gains while constructing the specialized response in the main command switch | The added return spill enlarged every `ExecuteCommand` stack frame from `0x5b0` to `0x5c0`, charging unrelated commands | Replaced by the out-of-line [allocation-aware quantile command batch](#allocation-aware-quantile-command-batches) helper; final `ExecuteCommand` is 60,532 bytes with its original `0x5b0` frame |
+| Exact-dispatch Roaring removal shortcut | Removed parser allocation and made exact scalar removal 1.31x faster | The exact dispatcher grew 657 bytes; a generic wrapper also shifted later code, with paired Roaring-add controls up to 1.10x slower | Replaced by [layout-neutral Roaring removal batches](#allocation-free-roaring-remove-command-batches): the exact dispatcher has exactly its former size and frame, response handling remains in the generic switch, and target/control medians are neutral or faster |
 | Sparse-bitset add command stack batches | Eliminated one parsed-slice allocation and made one/two/eight-value commands up to 1.29x faster | A 64-value stack enlarged the helper enough to slow 64/128/mixed controls by 1.032x/1.16x/1.05x; an eight-value threshold still slowed unchanged 64-value parent/final controls by 1.035x-1.20x across three placements | Fully reverted; `ADDSB`/`SBADD`, the exact dispatcher, generic switch, parser, heap, and allocations retain their former production code; see [the rollback](#sparse-bitset-add-command-batch-rollbacks) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
@@ -7802,6 +7803,58 @@ paired median, with unchanged memory. `ExecuteCommand` shrinks from 60,532 to
 bytes to route the batch out of line, but retains its `0x1b8` frame; exact
 scalar and mixed controls show no instruction-layout regression, and the two
 dispatchers are 130 bytes smaller in aggregate.
+
+<a id="allocation-free-roaring-remove-command-batches"></a>
+### Allocation-Free Roaring Remove Command Batches
+
+`REMRB`, `DELRB`, `RBREM`, and `RBDEL` formerly allocated a new `[]uint32` for
+every scalar or batch command before calling `RemoveRoaringBitmapChecked`.
+They now parse scalar `Value` directly and preflight `Values` batches through
+64 entries into the same bounded 256-byte stack shape used by Roaring adds.
+Larger batches retain the original right-sized heap parser. Parsing still
+finishes before mutation, so an invalid tail cannot partially remove values.
+The established typed API continues to own partition routing, locking, read
+and write accounting, TTL behavior, and bitmap mutation.
+
+Tests were written and passed against the old implementation before production
+changes. They compare exact and forced-generic execution across all command
+forms, present and missing values, scalar and mixed representations, the
+64/128 boundary, invalid tails, wrong-type TTL preservation, public API state
+and response parity, write accounting, and local partitions. A regression test
+now requires zero allocation for scalar and 64-value exact/alias commands.
+
+```sh
+make bench-roaring-batch BENCHTIME=500ms COUNT=5
+```
+
+The table uses five parent/final binary runs alternated in both orders on one
+logical CPU. Each timed operation restores the typed values before executing a
+successful removal, so the measurements include real removal work without
+container creation or destruction.
+
+| Complete Roaring remove command | Former parsed slice | Bounded command path | Improvement |
+| --- | ---: | ---: | ---: |
+| Existing `uint32`, one value | 291.0 ns; 4 B; 1 alloc | 254.6 ns; 0 B; 0 allocs | 1.14x faster; allocation eliminated |
+| Existing `uint32`, two values | 333.6 ns; 8 B; 1 alloc | 287.3 ns; 0 B; 0 allocs | 1.16x faster; allocation eliminated |
+| Existing `uint32`, eight values | 659.4 ns; 32 B; 1 alloc | 522.9 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated |
+| Existing `uint32`, 64 values | 3,048 ns; 256 B; 1 alloc | 2,380 ns; 0 B; 0 allocs | 1.28x faster; allocation eliminated |
+| Existing mixed representations, 64 values | 2,930 ns; 256 B; 1 alloc | 2,696 ns; 0 B; 0 allocs | 1.09x faster; allocation eliminated |
+| Exact scalar `Value` | 265.1 ns; 4 B; 1 alloc | 226.5 ns; 0 B; 0 allocs | 1.17x faster; allocation eliminated |
+| Generic scalar `Value` | 266.6 ns; 4 B; 1 alloc | 226.8 ns; 0 B; 0 allocs | 1.18x faster; allocation eliminated |
+| Existing `uint32`, 128 values | 5,210 ns; 1,635 B; 8 allocs | 4,747 ns; 1,635 B; 8 allocs | 1.10x faster; fallback heap unchanged |
+
+Two faster-looking layouts were rejected before settling on the retained one.
+Routing `REMRB` through exact dispatch made scalar removal 1.31x faster, but
+grew that hot dispatcher from 18,026 to 18,683 bytes. Removing the exact case
+but returning through a generic wrapper restored its `0x1b8` frame and size,
+yet shrank `ExecuteCommand` by 296 bytes and moved later hot code; paired
+Roaring-add controls regressed by as much as 1.10x. The final layout leaves
+response construction in the generic switch and moves only parsing/removal out
+of line. `ExecuteCommand` retains its `0x5b0` frame, the exact dispatcher is
+again 18,026 bytes with its original `0x1b8` frame and alignment, and paired
+Roaring-add 64/128/mixed/scalar plus mixed read/write controls are neutral or
+faster with unchanged heap and allocation counts. Wire, journal, replication,
+storage, and snapshot formats are unchanged.
 
 <a id="sparse-bitset-add-command-batch-rollbacks"></a>
 #### Sparse-Bitset Add Command Batch Rollbacks

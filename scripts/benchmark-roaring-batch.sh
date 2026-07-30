@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-path_benchmark=${ROARING_BATCH_PATH_BENCH:-^BenchmarkRoaringBitmap(Existing|Fresh)AddBatchCommandPath$}
+path_benchmark=${ROARING_BATCH_PATH_BENCH:-^BenchmarkRoaringBitmap((Existing|Fresh)Add|ExistingRemove)BatchCommandPath$}
 alternating_benchmark=${ROARING_BATCH_ALTERNATING_BENCH:-^BenchmarkRoaringBitmapAddCommandBatchAlternating$}
 alternating_benchtime=${ROARING_BATCH_ALTERNATING_BENCHTIME:-400x}
 control_benchmark=${ROARING_BATCH_CONTROL_BENCH:-^BenchmarkCommandFeature/(RoaringAdd|MixedReadHeavy100|MixedWriteHeavy100)$}

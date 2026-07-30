@@ -165,6 +165,11 @@ and all parser heap and allocations are eliminated through 64 values. The
 128-value fallback, exact scalar add, mixed workloads, routing, and formats are
 neutral or faster; see the
 [Roaring command-batch measurements](BENCHMARK.md#allocation-free-roaring-add-command-batches).
+`REMRB` and its aliases use the same bounded parser without changing their
+existing dispatch route. One/two/eight/64-value removals are
+1.14x/1.16x/1.26x/1.28x faster with zero parser heap or allocations; scalar,
+mixed, and 128-value fallback commands are also neutral or faster. See the
+[Roaring removal measurements](BENCHMARK.md#allocation-free-roaring-remove-command-batches).
 Sparse bitset values use sorted 16-bit containers keyed by the upper 48 bits,
 promoting dense ranges to packed bitsets for exact uint64 membership with low
 memory overhead on sparse high-cardinality IDs. Their inline values and fixed

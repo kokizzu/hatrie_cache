@@ -941,6 +941,38 @@ func TestDocsDescribeAllocationFreeRoaringAddCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeAllocationFreeRoaringRemoveCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Roaring removal measurements](BENCHMARK.md#allocation-free-roaring-remove-command-batches)",
+		"1.14x/1.16x/1.26x/1.28x faster",
+		"zero parser heap or allocations",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing Roaring removal token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Allocation-Free Roaring Remove Command Batches",
+		"3,048 ns; 256 B; 1 alloc",
+		"2,380 ns; 0 B; 0 allocs",
+		"again 18,026 bytes with its original `0x1b8` frame",
+		"Exact-dispatch Roaring removal shortcut",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing Roaring removal token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeSparseBitsetAddCommandBatchRollbacks(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {
