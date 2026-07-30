@@ -908,6 +908,39 @@ func TestDocsDescribeAllocationAwareQuantileCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeAllocationFreeRoaringAddCommandBatches(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[Roaring command-batch measurements](BENCHMARK.md#allocation-free-roaring-add-command-batches)",
+		"1.25x/1.23x/1.29x/1.14x faster",
+		"all parser heap and allocations are eliminated through 64 values",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing Roaring command batch token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Allocation-Free Roaring Add Command Batches",
+		"BenchmarkRoaringBitmapAddCommandBatchAlternating",
+		"992.2 ns; 256 B; 1 alloc",
+		"868.9 ns; 0 B; 0 allocs",
+		"128-value heap fallback is",
+		"60,242 bytes and retains its `0x5b0` frame",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing Roaring command batch token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectGenericScalarSetKeys(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

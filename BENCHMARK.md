@@ -238,6 +238,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Inline sparse-bitset containers](#inline-sparse-bitset-containers), 100k singleton containers | Slice-backed: 26.63 ms; 79.60 retained B/container; 0.500 retained objects/container; 100,031 allocs | Two-value inline: 23.49 ms; 71.60 retained B/container; 0.000030 retained objects/container; 31 allocs | 1.13x faster; 1.11x lower retained heap; about 16,667x fewer retained objects; 3,227x fewer allocs | Uses four existing padding bytes; the third value promotes; 4,096-value array and bitmap build/read controls are neutral or faster; formats are unchanged |
 | Current pass | [Compact sparse-bitset headers](#compact-sparse-bitset-headers), 100k singleton containers | 64-byte header: 22.061 ms; 71.60 retained B/container; 34.51 MB cumulative heap | 48-byte header: 17.478 ms; 57.75 retained B/container; 27.82 MB cumulative heap | 1.26x faster; 1.24x lower retained and cumulative heap | No measured operation regression; allocations, inline values, fixed bitmap bytes, wire, persistence, and behavior are unchanged |
 | Current pass | [Compact Roaring-container headers](#compact-roaring-container-headers), 50k singleton containers | 64-byte header: 14.510 ms; 80.75 retained B/container; 17.47 MB cumulative heap | 48-byte header: 10.762 ms; 66.66 retained B/container; 14.15 MB cumulative heap | 1.35x faster; 1.21x lower retained heap; 1.23x lower cumulative heap | No measured operation regression; the fixed 1,024-word bitmap backing, allocations, wire, persistence, and behavior are unchanged |
+| Current pass | [Allocation-free Roaring add command batches](#allocation-free-roaring-add-command-batches), existing bitmap with one/two/eight/64 requested uint32 values | Parsed heap slice and generic fallback: 131.1/141.4/224.4/992.2 ns; 4/8/32/256 B and 1 alloc | Bounded stack preflight and direct dispatch: 105.2/114.8/174.5/868.9 ns; 0 B and 0 allocs | 1.25x/1.23x/1.29x/1.14x faster; parser allocation eliminated through 64 values | No measured tradeoff; 128-value CPU/memory is neutral, mixed and fresh batches are faster, exact scalar and mixed command controls are neutral or faster, and global command frames are unchanged |
 | Current pass | [Incremental HyperLogLog estimates](#incremental-hyperloglog-estimates), precision-10 commands and default precision-14 reads | Full register scan: add 3,476 ns; count 3,393 ns; default count 53,283 ns | Derived state: add 251.7 ns; count 231.6 ns; default count 31.73 ns | Commands 13.81x/14.65x faster; default count 1,679x faster; 4,096-value add/count 1.61x faster | Header adds 8 B/filter and the materialized fixture adds 0.050% heap; unexported update-only primitive is 1.06x slower; allocations and formats are unchanged |
 | Current pass | [Generic HyperLogLog scalar additions](#generic-hyperloglog-scalar-additions), safe/escaped/structured values | Variadic wrapper: 96.48/114.6/111.7 ns; 29-40 B; 2 allocs | Out-of-line scalar path: 63.68/74.92/78.25 ns; 5-16 B; 1 alloc | 1.52x/1.53x/1.43x faster; one allocation and 24 B removed | No measured tradeoff; observations and cached estimate state match exactly, while the unchanged 128-value control is neutral within 0.6% with identical memory |
 | Current pass | [Direct HyperLogLog command batches](#direct-hyperloglog-command-batches), existing sketch with one/two/eight/64 requested strings | Generic-equivalent: 284.8/352.1/946.7/5,666 ns; up to 2,817 heap B and 65 allocs | Direct command: 162.5/185.8/276.2/1,204 ns; at most 1 amortized heap B and zero rounded allocs | 1.75x/1.90x/3.43x/4.71x faster; 64-value request allocations eliminated | No measured runtime tradeoff; fresh 64-value creation is 2.49x faster with 1.17x lower heap, structured controls are neutral or faster, and scalar plus forced-generic APIs retain their prior paths |
@@ -7743,6 +7744,63 @@ free, however: a paired 16-value lookup measured 5.139 versus 4.955 ns, or
 1.01x-1.02x slower. Special-casing three values recovered that layout but
 made the larger controls worse. The complete candidate and its tests were
 removed; it adds no runtime cost.
+
+<a id="allocation-free-roaring-add-command-batches"></a>
+### Allocation-Free Roaring Add Command Batches
+
+`ADDRB` and `RBADD` previously converted every command value into a newly
+allocated `[]uint32`, then called the typed public API. Exact uppercase requests
+with `Values` also left the exact dispatcher before doing that same work in the
+generic command switch.
+
+The command path now parses scalar `Value` directly. `Values` batches through
+64 entries preflight into a bounded stack array, while larger batches retain
+one right-sized owning heap slice. The already-typed slice is passed to the
+existing `AddRoaringBitmapChecked` method, which retains no caller backing and
+continues to own partition routing, locking, replacement, TTL clearing, write
+accounting, and bitmap mutation. Every value is parsed before the typed method
+is called, preserving all-or-reject behavior. Journal preflight retains the
+original owning parser so durable command records cannot borrow stack state.
+
+Tests added before the production change compare exact and forced-generic
+execution across aliases, fresh and existing bitmaps, TTL replacement, scalar,
+mixed numeric representations, the 64/128-value boundary, invalid values at
+the tail, public API snapshots, write counts, and local partitions.
+
+```sh
+make bench-roaring-batch BENCHTIME=500ms \
+  ROARING_BATCH_ALTERNATING_BENCHTIME=400x COUNT=7
+```
+
+Complete one/two/eight-value rows are seven-run pinned-CPU medians. The
+64-value and mixed rows use ten parent/final binary runs alternated in both
+orders to avoid process-frequency bias.
+
+| Complete Roaring add command | Former parsed slice | Bounded command path | Improvement |
+| --- | ---: | ---: | ---: |
+| Existing `uint32`, one value | 131.1 ns; 4 B; 1 alloc | 105.2 ns; 0 B; 0 allocs | 1.25x faster; allocation eliminated |
+| Existing `uint32`, two values | 141.4 ns; 8 B; 1 alloc | 114.8 ns; 0 B; 0 allocs | 1.23x faster; allocation eliminated |
+| Existing `uint32`, eight values | 224.4 ns; 32 B; 1 alloc | 174.5 ns; 0 B; 0 allocs | 1.29x faster; allocation eliminated |
+| Existing `uint32`, 64 values | 992.2 ns; 256 B; 1 alloc | 868.9 ns; 0 B; 0 allocs | 1.14x faster; allocation eliminated |
+| Existing mixed representations, 64 values | 1,392.5 ns; 256 B; 1 alloc | 1,274 ns; 0 B; 0 allocs | 1.09x faster; allocation eliminated |
+| Generic scalar `Value` | 138.9 ns; 4 B; 1 alloc | 115.0 ns; 0 B; 0 allocs | 1.21x faster; allocation eliminated |
+| Fresh `uint32`, 64 values | 8,272 B; 72 allocs | 8,016 B; 71 allocs | 256 B and one allocation removed; same-binary CPU 1.01x faster |
+
+`BenchmarkRoaringBitmapAddCommandBatchAlternating` compares the bounded helper
+with a frozen reconstruction of the former parser and typed call in both block
+orders. Its medians improve 1.10x/1.13x/1.10x/1.12x for one/two/eight/64
+values and 1.08x for mixed 64-value input. The 128-value heap fallback is
+neutral within 0.3%, with the same 512 B and one allocation. One-shot first
+operation memory for 64 values also falls from 7,984 B and 69 allocations to
+7,728 B and 68 allocations.
+
+Parent/final binaries leave exact scalar `ADDRB` neutral at about 98.5 ns with
+zero allocation. Mixed-read is about 0.6% faster and mixed-write is neutral by
+paired median, with unchanged memory. `ExecuteCommand` shrinks from 60,532 to
+60,242 bytes and retains its `0x5b0` frame. The exact dispatcher grows by 160
+bytes to route the batch out of line, but retains its `0x1b8` frame; exact
+scalar and mixed controls show no instruction-layout regression, and the two
+dispatchers are 130 bytes smaller in aggregate.
 
 <a id="reservoir-preparation-layout-rollbacks"></a>
 #### Reservoir Preparation Layout Rollbacks

@@ -158,6 +158,13 @@ Their fixed 1,024-word dense backing uses a compact 48-byte container header,
 reducing sparse-container retention without changing bitmap bytes or formats;
 measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-roaring-container-headers).
+`ADDRB`/`RBADD` commands parse scalar values directly and use bounded stack
+storage through 64 requested values before calling the established typed API.
+Existing one/two/eight/64-value commands are 1.25x/1.23x/1.29x/1.14x faster,
+and all parser heap and allocations are eliminated through 64 values. The
+128-value fallback, exact scalar add, mixed workloads, routing, and formats are
+neutral or faster; see the
+[Roaring command-batch measurements](BENCHMARK.md#allocation-free-roaring-add-command-batches).
 Sparse bitset values use sorted 16-bit containers keyed by the upper 48 bits,
 promoting dense ranges to packed bitsets for exact uint64 membership with low
 memory overhead on sparse high-cardinality IDs. Their inline values and fixed

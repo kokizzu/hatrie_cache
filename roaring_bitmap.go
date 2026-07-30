@@ -775,15 +775,26 @@ func roaringBitmapValuesFromCommand(request CacheCommandRequest) ([]uint32, erro
 	if !ok {
 		return nil, errors.New("value or values is required")
 	}
-	out := make([]uint32, 0, len(values))
-	for _, value := range values {
-		parsed, err := roaringBitmapValueFromCommand(value)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, parsed)
+	return roaringBitmapValuesFromCommandSlice(values)
+}
+
+func roaringBitmapValuesFromCommandSlice(values Slice) ([]uint32, error) {
+	parsed := make([]uint32, len(values))
+	if err := parseRoaringBitmapCommandValues(parsed, values); err != nil {
+		return nil, err
 	}
-	return out, nil
+	return parsed, nil
+}
+
+func parseRoaringBitmapCommandValues(parsed []uint32, values Slice) error {
+	for index, value := range values {
+		parsedValue, err := roaringBitmapValueFromCommand(value)
+		if err != nil {
+			return err
+		}
+		parsed[index] = parsedValue
+	}
+	return nil
 }
 
 func roaringBitmapValueFromCommand(value interface{}) (uint32, error) {

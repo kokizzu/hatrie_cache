@@ -522,15 +522,7 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "created roaring bitmap"}
 	case "ADDRB", "RBADD":
-		values, err := roaringBitmapValuesFromCommand(request)
-		if err != nil {
-			return commandError(err.Error())
-		}
-		added, err := ht.AddRoaringBitmapChecked(key, values[0], values[1:]...)
-		if err != nil {
-			return commandError(err.Error())
-		}
-		return CacheCommandResponse{OK: true, Message: "added roaring bitmap values", Value: strconv.Itoa(added)}
+		return ht.executeRoaringBitmapAddCommandValues(key, request.Value, request.Values)
 	case "REMRB", "DELRB", "RBREM", "RBDEL":
 		values, err := roaringBitmapValuesFromCommand(request)
 		if err != nil {
@@ -1464,7 +1456,7 @@ func (ht *HatTrie) executeExactFastCommandPointer(request *CacheCommandRequest) 
 		return ht.executeFastHasRoaringBitmapCommand(key, value)
 	case "ADDRB":
 		if len(request.Values) != 0 {
-			return CacheCommandResponse{}, false
+			return ht.executeRoaringBitmapAddCommandValues(key, request.Value, request.Values), true
 		}
 		value, ok := commandFastUint32Field(request.Value)
 		if !ok {
@@ -2385,6 +2377,43 @@ func (ht *HatTrie) executeFastAddRoaringBitmapCommand(key string, value uint32) 
 		return commandError(err.Error()), true
 	}
 	return CacheCommandResponse{OK: true, Message: "added roaring bitmap values", Value: strconv.Itoa(added)}, true
+}
+
+const maxStackRoaringBitmapCommandValues = 64
+
+func (ht *HatTrie) executeRoaringBitmapAddCommandValues(key string, value string, values Slice) CacheCommandResponse {
+	added, err := ht.addRoaringBitmapCommandValuesChecked(key, value, values)
+	if err != nil {
+		return commandError(err.Error())
+	}
+	return CacheCommandResponse{OK: true, Message: "added roaring bitmap values", Value: strconv.Itoa(added)}
+}
+
+func (ht *HatTrie) addRoaringBitmapCommandValuesChecked(key string, value string, values Slice) (int, error) {
+	if len(values) == 0 {
+		if value == "" {
+			return 0, errors.New("value or values is required")
+		}
+		parsed, err := roaringBitmapValueFromCommand(value)
+		if err != nil {
+			return 0, err
+		}
+		return ht.AddRoaringBitmapChecked(key, parsed)
+	}
+	if len(values) > maxStackRoaringBitmapCommandValues {
+		parsed, err := roaringBitmapValuesFromCommandSlice(values)
+		if err != nil {
+			return 0, err
+		}
+		return ht.AddRoaringBitmapChecked(key, parsed[0], parsed[1:]...)
+	}
+
+	var stack [maxStackRoaringBitmapCommandValues]uint32
+	parsed := stack[:len(values)]
+	if err := parseRoaringBitmapCommandValues(parsed, values); err != nil {
+		return 0, err
+	}
+	return ht.AddRoaringBitmapChecked(key, parsed[0], parsed[1:]...)
 }
 
 func (ht *HatTrie) executeFastAddSparseBitsetCommand(key string, value uint64) (CacheCommandResponse, bool) {
