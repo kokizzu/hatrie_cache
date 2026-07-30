@@ -447,6 +447,7 @@ tree.
 | Early empty-reservoir command return | Skipped layout and snapshot helpers, making the already allocation-free empty path another 1.05x faster | The added common-path branch made the paired 16-item control 2,112 versus 2,098 ns, or 1.007x slower, with identical memory | Reverted; the retained writer returns constant `[]` after the existing layout path and the one-item stack snapshot remains; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reboxed reservoir command batches | Directly hashed canonical strings and removed the prepared-item array | Reboxing every retained string still left 1,152 B and 67 allocations for 64 values, while custom-processing a noncanonical first value made the all-structured control about 1.06x slower | Replaced by [allocation-aware reservoir command batches](#allocation-aware-reservoir-command-batches): original request interfaces are retained directly, a noncanonical first value delegates to byte-identical `AddOneChecked`, and all-structured CPU/memory are neutral |
 | Inline normalized quantile response placement | Retained the quantile batch CPU and allocation gains while constructing the specialized response in the main command switch | The added return spill enlarged every `ExecuteCommand` stack frame from `0x5b0` to `0x5c0`, charging unrelated commands | Replaced by the out-of-line [allocation-aware quantile command batch](#allocation-aware-quantile-command-batches) helper; final `ExecuteCommand` is 60,532 bytes with its original `0x5b0` frame |
+| Sparse-bitset add command stack batches | Eliminated one parsed-slice allocation and made one/two/eight-value commands up to 1.29x faster | A 64-value stack enlarged the helper enough to slow 64/128/mixed controls by 1.032x/1.16x/1.05x; an eight-value threshold still slowed unchanged 64-value parent/final controls by 1.035x-1.20x across three placements | Fully reverted; `ADDSB`/`SBADD`, the exact dispatcher, generic switch, parser, heap, and allocations retain their former production code; see [the rollback](#sparse-bitset-add-command-batch-rollbacks) |
 | Mutation response encoding outside cache lock | Let unrelated writers proceed during caller-controlled `POPSLICE` and `POPPQ` JSON marshaling | Ordinary structured slice and priority-queue pops were each about 1.03x slower with unchanged heap and allocations | Reverted; mutation, accounting, and response encoding retain their prior single lock scope; see [mutation response lock release](#mutation-response-lock-release-rollback) |
 | Generalized whole-sequence single-fallback scan | Directly validated a sole nested value at any position and retained the large sparse gain | Finding a second nested value made the 4,096-item unchanged fallback about 1.01x slower | Replaced by a trailing-only proof that never scans beyond the prior fallback boundary; see [flat scalar sequence validation](#flat-scalar-sequence-validation) |
 | Shared-lock generic collection GET | Parallel map/slice/set reads improved 3.47x-5.13x with unchanged allocation counts | Serial reads were 1.06x-2.00x slower because the shared-read lookup's fixed cost outweighed concurrency for complete collection commands | Removed; scalar, priority-queue, Top-K, and reservoir shared reads remain; see [concurrent scalar reads](#concurrent-scalar-read-fast-path) |
@@ -7801,6 +7802,45 @@ paired median, with unchanged memory. `ExecuteCommand` shrinks from 60,532 to
 bytes to route the batch out of line, but retains its `0x1b8` frame; exact
 scalar and mixed controls show no instruction-layout regression, and the two
 dispatchers are 130 bytes smaller in aggregate.
+
+<a id="sparse-bitset-add-command-batch-rollbacks"></a>
+#### Sparse-Bitset Add Command Batch Rollbacks
+
+`ADDSB` and `SBADD` allocate one parsed `[]uint64` before calling the typed
+public API. Tests added before each prototype compared exact and generic
+responses and internal snapshots across aliases, fresh and existing bitsets,
+TTL replacement, the 8/64/128 boundaries, mixed numeric representations,
+invalid tails, public API parity, write accounting, and local partitions. All
+candidate layouts passed those tests 20 times before performance gating.
+
+The unchanged complete-command baseline on one logical CPU was:
+
+| Existing sparse add batch | Time | Heap | Allocations |
+| --- | ---: | ---: | ---: |
+| One `uint64` | 129.9 ns | 8 B | 1 |
+| Two `uint64` values | 145.6 ns | 16 B | 1 |
+| Eight `uint64` values | 216.0 ns | 64 B | 1 |
+| 64 `uint64` values | 928.9 ns | 512 B | 1 |
+| 128 `uint64` values | 1,885 ns | 1,024 B | 1 |
+| Mixed representations, 64 values | 1,321 ns | 512 B | 1 |
+
+Four placements were measured and rejected:
+
+| Candidate layout | Attractive result | Disqualifying result |
+| --- | --- | --- |
+| 64-value stack helper for generic and exact batches | One/two/eight values became 1.12x/1.15x/1.15x faster with zero heap | Complete 64/128/mixed rows became 1.032x/1.16x/1.05x slower |
+| Eight-value stack helper routed directly from exact dispatch | One/two/eight values became 1.25x/1.29x/1.27x faster with zero heap | Alternating parent/final 64-value median became 953.9 versus 921.6 ns, or 1.035x slower |
+| Exact short-batch routing with the generic body restored | Preserved the short allocation win and left the large parser source unchanged | Alternating parent/final 64-value median became 1,011.5 versus 959.6 ns, or 1.054x slower |
+| Generic-switch short-batch branch with exact dispatch restored | Kept the exact dispatcher machine code unchanged | `ExecuteCommand` grew from 60,242 to 60,530 bytes and the 64-value median became 1,116 versus 932.9 ns, or 1.20x slower |
+
+The 512-byte stack buffer charged every helper invocation even when the request
+used the heap fallback. Lowering the threshold fixed that local cost, but the
+remaining branch or dispatcher placement perturbed the much larger command
+body enough to regress unchanged batches. The short-batch gains did not
+justify any of those losses. All production helpers, branches, parser
+refactors, temporary tests, and benchmark fixtures were removed. The original
+all-or-reject parser, public typed call, exact dispatcher, generic switch,
+wire, journal, replication, storage, heap, and allocation behavior remain.
 
 <a id="reservoir-preparation-layout-rollbacks"></a>
 #### Reservoir Preparation Layout Rollbacks

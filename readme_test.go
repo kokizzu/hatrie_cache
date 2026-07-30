@@ -941,6 +941,37 @@ func TestDocsDescribeAllocationFreeRoaringAddCommandBatches(t *testing.T) {
 	}
 }
 
+func TestDocsDescribeSparseBitsetAddCommandBatchRollbacks(t *testing.T) {
+	readmeData, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"[sparse command-batch rollback](BENCHMARK.md#sparse-bitset-add-command-batch-rollbacks)",
+		"1.035x-1.20x",
+	} {
+		if !strings.Contains(string(readmeData), token) {
+			t.Fatalf("README.md missing sparse command batch rollback token %q", token)
+		}
+	}
+
+	benchmarkData, err := os.ReadFile("BENCHMARK.md")
+	if err != nil {
+		t.Fatalf("ReadFile(BENCHMARK.md) error = %v", err)
+	}
+	for _, token := range []string{
+		"Sparse-Bitset Add Command Batch Rollbacks",
+		"Sparse-bitset add command stack batches",
+		"1,011.5 versus 959.6 ns",
+		"1,116 versus 932.9 ns",
+		"temporary tests, and benchmark fixtures were removed",
+	} {
+		if !strings.Contains(string(benchmarkData), token) {
+			t.Fatalf("BENCHMARK.md missing sparse command batch rollback token %q", token)
+		}
+	}
+}
+
 func TestDocsDescribeDirectGenericScalarSetKeys(t *testing.T) {
 	readmeData, err := os.ReadFile("README.md")
 	if err != nil {

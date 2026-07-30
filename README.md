@@ -171,6 +171,10 @@ memory overhead on sparse high-cardinality IDs. Their inline values and fixed
 1,024-word bitmap backing fit in a compact 48-byte container header;
 measurements are in
 [BENCHMARK.md](BENCHMARK.md#compact-sparse-bitset-headers).
+Bounded `ADDSB` parser prototypes made one/two/eight-value commands as much as
+1.29x faster, but every tested placement slowed the unchanged 64-value control
+by 1.035x-1.20x. They were reverted; see the
+[sparse command-batch rollback](BENCHMARK.md#sparse-bitset-add-command-batch-rollbacks).
 Radix tree values use path-compressed string edges for exact nested key/value
 indexes with fast lookup, sorted prefix scans, and low overhead for keys that
 share long prefixes. Repeated exact plain-string `PUTRT` avoids re-boxing an
