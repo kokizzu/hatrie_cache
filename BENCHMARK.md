@@ -500,6 +500,7 @@ tree.
 | Reused streamed scalar responses | Could remove roughly three response/status allocations per envelope | gRPC's `SendMsg` contract forbids modifying a message after send because tracing and stats handlers may consume it lazily | Rejected before an unsafe prototype; every streamed response remains independently owned |
 | Reused structured-stream receive envelope | Removed exactly 63 allocations and 11,089 cumulative heap B from 63 envelopes | The optimized shared-key paired CPU ratio was 0.996x; separate medians regressed from 739.709 to 756.087 us (1.022x slower), and the repeated-key control also regressed 0.7% by separate medians | Removed; generated `Recv()` remains; see [structured receive-envelope rollback](#structured-stream-receive-envelope-rollback) |
 | Reused generic batch-stream receive envelope | Homogeneous 1,000-GET batches improved 1.014x and removed exactly 63 allocations plus 5,040 cumulative heap B | The equivalent mixed structured-command stream regressed to 0.982x, or 1.85% slower, with no wire change | Removed; generated `Recv()` remains; see [generic batch receive-envelope rollback](#generic-batch-stream-receive-envelope-rollback) |
+| Reused replication-stream receive envelope | A fixed 10,000-envelope transfer saved 1.28 MB and about 9,870 allocations; the normal 313-batch one-CPU mode also saved memory | Fixed-envelope paired CPU regressed to 0.980x, or 2.1% slower; normal-mode CPU was inconclusive across paired versus separate medians | Removed; generated `Recv()` remains; see [replication receive-envelope rollback](#replication-stream-receive-envelope-rollback) |
 | gRPC shared transport buffers | Receive pooling and shared write buffers could reduce framing allocations | The APIs are experimental; receive pooling is disabled with stats/tracing and discouraged with compression, while shared write buffers use a global pool and add acquire/release work at every flush | Rejected as a no-tradeoff default before a product prototype; transport ownership and configuration remain unchanged |
 | Combined structured-column materializer | Expanded shared keys and subkeys from one backing allocation | The larger helper stopped inlining and added one allocation per shared-key-only envelope: 2,636,371 to 2,746,424 heap B and 53,186 to 53,812 allocations per 10k commands | Replaced before commit by separate inlinable key/subkey materializers; the shared-key-only control returned exactly to its shipped heap and allocation counts |
 | Structured shared-column descriptor copy | Consolidated six private shared key/subkey/value arguments and still removed the subkey-header allocation | The unchanged shared-value-only control slowed from 558.0 to 565.0 ns/command (1.013x) with identical heap and allocations | Replaced before commit by scalar parameters; the control returned to 562.8 versus 562.4 ns/command while retaining [cursor-borrowed shared subkeys](#cursor-borrowed-shared-structured-subkeys) |
@@ -3357,6 +3358,34 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 500x Benc
 
 The homogeneous gain did not justify a regression in a supported mixed batch
 workload, so the runtime candidate was removed and generated `Recv()` remains.
+
+<a id="replication-stream-receive-envelope-rollback"></a>
+#### Replication Receive-Envelope Rollback
+
+`ReplicationStream` was the final generated server receive loop tested with a
+reset stream-owned request. Ten ordinary and three race-detector repetitions
+passed. The ordinary zero-wait live fixture varied its number of envelopes with
+scheduler coalescing, so a second control set the existing batch limit to one,
+fixing both variants at exactly 10,000 envelopes and identical wire bytes:
+
+```sh
+make run CMD='env HATRIE_BENCH_GRPC_LIVE_BATCH_MAX_COMMANDS=1 /tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 3x BenchmarkReplicationLiveTransport10K/^grpc-stream$'
+```
+
+| 10,000-write live stream | Generated `Recv()` | Reused request | Result |
+| --- | ---: | ---: | --- |
+| Fixed 10,000-envelope CPU | 281.320338 ms | 289.689665 ms | 0.980x paired median; 2.1% slower |
+| Cumulative heap | 125,175,869 B | 123,896,048 B | 1,279,821 B lower |
+| Allocations | 1,187,313 | 1,177,443 | about 9,870 fewer |
+| Wire | 1,087,249 B | 1,087,249 B | unchanged |
+
+The normal one-CPU fixture coalesced the same writes into 313 envelopes. It
+saved 35,952 median heap B and about 295 allocations, but CPU disagreed between
+the 1.006x paired ratio and 0.991x ratio of separate medians. A default
+32-CPU run varied from 2,029 to 2,264 batches, making CPU and cumulative-heap
+comparisons scheduler-dependent. The fixed-envelope regression is sufficient
+to reject the candidate: the replication runtime uses generated `Recv()` and
+retains no stream-owned request.
 
 ### Segmented WAL Compaction
 
