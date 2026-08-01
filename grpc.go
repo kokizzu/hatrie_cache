@@ -261,8 +261,10 @@ func (server *CacheGRPCServer) CommandStream(stream hatriecachev1.CacheService_C
 	if err != nil {
 		return err
 	}
+	request := new(hatriecachev1.CommandRequest)
 	for {
-		request, err := stream.Recv()
+		*request = hatriecachev1.CommandRequest{}
+		err := stream.RecvMsg(request)
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
