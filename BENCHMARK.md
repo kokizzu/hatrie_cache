@@ -502,6 +502,7 @@ tree.
 | Reused structured-stream receive envelope | Removed exactly 63 allocations and 11,089 cumulative heap B from 63 envelopes | The optimized shared-key paired CPU ratio was 0.996x; separate medians regressed from 739.709 to 756.087 us (1.022x slower), and the repeated-key control also regressed 0.7% by separate medians | Removed; generated `Recv()` remains; see [structured receive-envelope rollback](#structured-stream-receive-envelope-rollback) |
 | Reused generic batch-stream receive envelope | Homogeneous 1,000-GET batches improved 1.014x and removed exactly 63 allocations plus 5,040 cumulative heap B | The equivalent mixed structured-command stream regressed to 0.982x, or 1.85% slower, with no wire change | Removed; generated `Recv()` remains; see [generic batch receive-envelope rollback](#generic-batch-stream-receive-envelope-rollback) |
 | Reused replication-stream receive envelope | A fixed 10,000-envelope transfer saved 1.28 MB and about 9,870 allocations; the normal 313-batch one-CPU mode also saved memory | Fixed-envelope paired CPU regressed to 0.980x, or 2.1% slower; normal-mode CPU was inconclusive across paired versus separate medians | Removed; generated `Recv()` remains; see [replication receive-envelope rollback](#replication-stream-receive-envelope-rollback) |
+| Reused replication acknowledgement receive envelope | A fixed 10,000-envelope client transfer saved 802,112 cumulative heap B and about 10,038 allocations while CPU was neutral at 1.004x | The production-default 313-batch workload regressed to 0.972x, or 2.8% slower, while saving only 28,406 B and 328 allocations | Removed; generated client `Recv()` remains; the reject-then-accept behavior test remains; see [replication acknowledgement receive-envelope rollback](#replication-ack-receive-envelope-rollback) |
 | gRPC shared transport buffers | Receive pooling and shared write buffers could reduce framing allocations | The APIs are experimental; receive pooling is disabled with stats/tracing and discouraged with compression, while shared write buffers use a global pool and add acquire/release work at every flush | Rejected as a no-tradeoff default before a product prototype; transport ownership and configuration remain unchanged |
 | Combined structured-column materializer | Expanded shared keys and subkeys from one backing allocation | The larger helper stopped inlining and added one allocation per shared-key-only envelope: 2,636,371 to 2,746,424 heap B and 53,186 to 53,812 allocations per 10k commands | Replaced before commit by separate inlinable key/subkey materializers; the shared-key-only control returned exactly to its shipped heap and allocation counts |
 | Structured shared-column descriptor copy | Consolidated six private shared key/subkey/value arguments and still removed the subkey-header allocation | The unchanged shared-value-only control slowed from 558.0 to 565.0 ns/command (1.013x) with identical heap and allocations | Replaced before commit by scalar parameters; the control returned to 562.8 versus 562.4 ns/command while retaining [cursor-borrowed shared subkeys](#cursor-borrowed-shared-structured-subkeys) |
@@ -3426,6 +3427,46 @@ the 1.006x paired ratio and 0.991x ratio of separate medians. A default
 comparisons scheduler-dependent. The fixed-envelope regression is sufficient
 to reject the candidate: the replication runtime uses generated `Recv()` and
 retains no stream-owned request.
+
+<a id="replication-ack-receive-envelope-rollback"></a>
+#### Replication Acknowledgement Receive-Envelope Rollback
+
+The replication client acknowledgement loop was tested separately from the
+server request loop above. Directly reusing the generated acknowledgement
+pointer would be unsafe because completed jobs consume results asynchronously.
+The candidate instead reset one receiver-owned protobuf, copied only its
+sequence, status, and message into a value channel, validated the sequence in
+the stream owner, and returned success or rejection without exposing the
+protobuf pointer.
+
+A black-box reject-then-accept stream test was added first and remains. It
+proves that rejection metadata is preserved and that the following successful
+acknowledgement cannot inherit stale fields. Ten normal repetitions and three
+race-detector repetitions passed with both the candidate and the restored
+generated `Recv()` implementation.
+
+The paired production-default control used 313 micro-batches for 10,000
+commands. A second control set the existing live batch limit to one, producing
+exactly 10,000 acknowledgements:
+
+```sh
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 5x BenchmarkReplicationLiveTransport10K/^grpc-stream$'
+make run CMD='env HATRIE_BENCH_GRPC_LIVE_BATCH_MAX_COMMANDS=1 /tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 3x BenchmarkReplicationLiveTransport10K/^grpc-stream$'
+```
+
+| 10,000-write client stream | Generated `Recv()` | Reused acknowledgement | Result |
+| --- | ---: | ---: | --- |
+| Default 313-batch CPU | 121.353242 ms | 124.093160 ms | 0.972x paired median; 2.8% slower |
+| Default cumulative heap | 73,189,654 B | 73,161,248 B | 28,406 B lower |
+| Default allocations | 566,275 | 565,947 | 328 fewer |
+| Fixed 10,000-envelope CPU | 299.045185 ms | 293.200470 ms | 1.004x paired median; CPU-neutral |
+| Fixed cumulative heap | 125,176,082 B | 124,373,970 B | 802,112 B lower |
+| Fixed allocations | 1,187,601 | 1,177,563 | about 10,038 fewer |
+| Protocol and logical wire | unchanged | unchanged | no representation change |
+
+The allocation saving scales with acknowledgement count, but the normal
+batched workload is the production default and lost materially more CPU than
+the small memory reduction justified. The runtime candidate was removed.
 
 ### Segmented WAL Compaction
 

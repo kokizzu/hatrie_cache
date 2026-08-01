@@ -35,6 +35,34 @@ type pipeliningReplicationGRPCServer struct {
 	release   chan struct{}
 }
 
+type rejectThenAcceptReplicationGRPCServer struct {
+	hatriecachev1.UnimplementedCacheServiceServer
+}
+
+func (server *rejectThenAcceptReplicationGRPCServer) ReplicationStream(stream hatriecachev1.CacheService_ReplicationStreamServer) error {
+	accepted := false
+	for {
+		batch, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		ack := &hatriecachev1.ReplicationStreamAck{Sequence: batch.GetSequence()}
+		if accepted {
+			ack.Ok = true
+			ack.Entries = uint64(len(batch.GetKeys()))
+		} else {
+			ack.Message = "replication rejected"
+			accepted = true
+		}
+		if err := stream.Send(ack); err != nil {
+			return err
+		}
+	}
+}
+
 func (server *pipeliningReplicationGRPCServer) ReplicationStream(stream hatriecachev1.CacheService_ReplicationStreamServer) error {
 	warmup, err := stream.Recv()
 	if err != nil {
@@ -2202,6 +2230,66 @@ func TestReplicationGRPCStreamLiveSetDeleteReusesConnection(t *testing.T) {
 	}
 	if got := replicator.grpcStreamBatches.Load(); got != 2 {
 		t.Fatalf("gRPC stream batches = %d, want SET and DEL batches", got)
+	}
+}
+
+func TestReplicationGRPCStreamPreservesRejectedAcknowledgement(t *testing.T) {
+	listener := bufconn.Listen(testGRPCBufferSize)
+	server := grpc.NewServer()
+	hatriecachev1.RegisterCacheServiceServer(server, &rejectThenAcceptReplicationGRPCServer{})
+	go func() {
+		if err := server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
+			t.Errorf("grpc Serve() error = %v", err)
+		}
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+	})
+
+	topology, err := NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b", GRPCAddress: "bufnet"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:                "node-a",
+		Topology:            topology,
+		Election:            NewElectionStore(topology, ElectionOptions{}),
+		Transport:           ReplicationTransportGRPCStream,
+		DisableHTTPFallback: true,
+		GRPCDialOptions: []grpc.DialOption{
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		},
+	})
+	t.Cleanup(replicator.Close)
+
+	sourceTrie := newTestTrie(t)
+	for idx, key := range []string{"rejected", "accepted"} {
+		sourceTrie.UpsertString(key, "value")
+		result := replicator.ReplicateCommand(context.Background(), sourceTrie,
+			CacheCommandRequest{Command: "SETSTR", Key: key, Value: "value"}, CacheCommandResponse{OK: true})
+		if len(result.Targets) != 1 {
+			t.Fatalf("replication %d targets = %#v, want one target", idx, result.Targets)
+		}
+		target := result.Targets[0]
+		if idx == 0 {
+			if target.OK || target.Error != "replication rejected" || target.Node != "node-b" || target.Address != "bufnet" {
+				t.Fatalf("rejected replication target = %#v, want preserved rejection", target)
+			}
+			continue
+		}
+		if !target.OK || target.Error != "" {
+			t.Fatalf("accepted replication target = %#v, want success without stale rejection", target)
+		}
 	}
 }
 
