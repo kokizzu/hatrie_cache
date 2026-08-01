@@ -497,6 +497,7 @@ tree.
 | Unconditional borrowed live target planning | Removed five route allocations per command in both batched and fixed-envelope live gRPC modes | The initial fixed one-command-envelope control was 0.990x by paired CPU median despite lower allocation | Narrowed to micro-batched mode; configured one-command mode runs the exact established planner in a separately compiled function; see [borrowed live target planning](#borrowed-live-replication-target-planning) |
 | Comparable target keys in every replication map | Eliminated key concatenation and cut a 64-target/1,024-task grouping control from 1,990 to 966 allocations while improving CPU 1.03x | The 24-byte key raised grouping heap from 770,896 to 781,904 B, or 1.4% | Narrowed to persistent gRPC stream-session maps; generic grouping and digest ordering retain the 16-byte prefixed string; see [comparable stream identities](#comparable-grpc-stream-target-identities) |
 | Dedicated last-result timestamp field | Reused two timestamp objects and removed about 20,000 allocations per 10,000 replicated commands | Adding a field to `HTTPReplicator` changed its hot layout and reduced `GOGC=off` complete-stream CPU to 0.972x, or 2.8% slower | Removed; the accepted [retained timestamp storage](#retained-last-result-timestamp-storage) reuses the pointers already owned by the private stored result without changing the replicator layout |
+| Contiguous prepared replication operations | A 128-set batch was 1.027x faster by paired CPU and removed 127 allocations | Cumulative heap rose from 231,076 to 235,172 B, or 4,096 B/1.8%; contiguous storage also cost 256/512 B at 8/16 items | Reverted; per-child operations remain independently allocated, and allocator-size controls remain in [the rollback](#contiguous-prepared-replication-operations-rollback) |
 | Direct native packed scan | Focused preparation improved 1.10x with 1.15x lower heap | End-to-end CPU improved only 1.02x, below the 5% gate for a new C ABI | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Single-pass legacy repair | Unordered transfer was 1.07x faster with 1.11x fewer allocations | Wire grew 1.15x; restoring deterministic order made CPU 1.075x slower | Both variants reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -4908,6 +4909,56 @@ the slice after execution. Input contents, validation order, normalization,
 preparation ownership, all-or-nothing validation, operation ordering, safety
 tokens, journal and dirty side effects, routing, wire, storage, persistence,
 configuration, and public behavior are unchanged.
+
+<a id="contiguous-prepared-replication-operations-rollback"></a>
+#### Contiguous Prepared Replication Operations Rollback
+
+The typed receiver still allocates one decoded `snapshotOperation` per set
+child so it can validate the whole batch before mutating the trie. A candidate
+placed canonical all-set operations in one contiguous backing allocation. A
+distinct-value test was added and passed on the baseline first, then passed with
+the candidate, proving that every prepared pointer remained independent. Set,
+delete-only, and alternating set/delete controls measured the candidate's scope.
+
+```sh
+make run CMD='go test . -run=TestInternalReplicationBatchPreparedOperationsRemainDistinct -count=20'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 2000x BenchmarkInternalReplication.*BatchApply'
+make run CMD='go test . -run=NONE -bench=BenchmarkPreparedInternalReplicationOperationStorage -benchmem -benchtime=1000x -count=3 -cpu=1'
+```
+
+| 128-item all-set batch | Individual operations | Contiguous backing | Result |
+| --- | ---: | ---: | ---: |
+| Separate CPU median | 198,874 ns | 194,276 ns | 1.024x faster |
+| Paired CPU ratio median | baseline | candidate | 1.027x faster |
+| Cumulative heap | 231,076 B | 235,172 B | 4,096 B higher; 1.018x worse |
+| Allocations | 1,795 | 1,668 | 127 fewer |
+
+Delete-only and mixed 128-item controls retained exactly 35,456 B/129 allocs
+and 133,271 B/963 allocs because they used the established path. Their separate
+CPU medians were tied or slightly faster, so the rejection is specifically the
+all-set cumulative-heap regression rather than a hidden fallback regression.
+
+The isolated allocator control explains why a simple batch-size gate is not a
+general solution:
+
+| Operations | Individual heap/allocs | Contiguous heap/allocs | Heap change |
+| ---: | ---: | ---: | ---: |
+| 2 | 720 B / 3 | 720 B / 2 | tied |
+| 4 | 1,440 B / 5 | 1,440 B / 2 | tied |
+| 8 | 2,880 B / 9 | 3,136 B / 2 | 256 B worse |
+| 16 | 5,760 B / 17 | 6,272 B / 2 | 512 B worse |
+| 32 | 11,520 B / 33 | 11,136 B / 2 | 384 B better |
+| 64 | 23,040 B / 65 | 22,272 B / 2 | 768 B better |
+| 128 | 46,208 B / 129 | 50,304 B / 2 | 4,096 B worse |
+| 256 | 92,416 B / 257 | 92,416 B / 2 | tied |
+
+Gating the optimization to the default 32-item stream envelope was considered
+but not retained. It would couple application behavior to current Go allocator
+size classes and allocate all 32 large operations before an invalid first child
+could fail, whereas the established path allocates only through the rejected
+child. The complete runtime candidate was removed. Validation order, failure
+allocation behavior, operation ownership, batch atomicity, CPU, heap, wire, and
+persistence therefore remain unchanged.
 
 <a id="lazy-grpc-session-maps"></a>
 #### Lazy gRPC Session Maps

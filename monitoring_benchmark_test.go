@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+var benchmarkPreparedInternalReplicationOperationsSink []*snapshotOperation
+
 func BenchmarkInternalReplicationBatchApply(b *testing.B) {
 	const batchItems = 128
 	payloads := make([]CacheCommandRequest, 0, batchItems)
@@ -17,19 +19,91 @@ func BenchmarkInternalReplicationBatchApply(b *testing.B) {
 			Value:   `{"type":"string","string":"value"}`,
 		})
 	}
+	benchmarkInternalReplicationBatchApply(b, payloads)
+}
+
+func BenchmarkInternalReplicationDefaultBatchApply(b *testing.B) {
+	const batchItems = DefaultReplicationGRPCLiveBatchMaxCommands
+	payloads := make([]CacheCommandRequest, 0, batchItems)
+	for idx := 0; idx < batchItems; idx++ {
+		payloads = append(payloads, CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     "bench:" + strconv.Itoa(idx),
+			Value:   `{"type":"string","string":"value"}`,
+		})
+	}
+	benchmarkInternalReplicationBatchApply(b, payloads)
+}
+
+func BenchmarkInternalReplicationDeleteBatchApply(b *testing.B) {
+	const batchItems = 128
+	payloads := make([]CacheCommandRequest, 0, batchItems)
+	for idx := 0; idx < batchItems; idx++ {
+		payloads = append(payloads, CacheCommandRequest{
+			Command: "INTERNALDEL",
+			Key:     "bench:" + strconv.Itoa(idx),
+		})
+	}
+	benchmarkInternalReplicationBatchApply(b, payloads)
+}
+
+func BenchmarkInternalReplicationMixedBatchApply(b *testing.B) {
+	const batchItems = 128
+	payloads := make([]CacheCommandRequest, 0, batchItems)
+	for idx := 0; idx < batchItems; idx++ {
+		request := CacheCommandRequest{Command: "INTERNALDEL", Key: "bench:" + strconv.Itoa(idx)}
+		if idx&1 == 0 {
+			request.Command = "INTERNALSET"
+			request.Value = `{"type":"string","string":"value"}`
+		}
+		payloads = append(payloads, request)
+	}
+	benchmarkInternalReplicationBatchApply(b, payloads)
+}
+
+func benchmarkInternalReplicationBatchApply(b *testing.B, payloads []CacheCommandRequest) {
+	b.Helper()
 	request := CacheCommandRequest{Command: "INTERNALBATCH", Batch: payloads}
 	trie := CreateHatTrie()
 	defer trie.Destroy()
 	options := commandExecutionOptions{ReplicationSafety: NewReplicationSafetyStore()}
 
 	b.ReportAllocs()
-	b.ReportMetric(float64(batchItems), "items/op")
+	b.ReportMetric(float64(len(payloads)), "items/op")
 	b.ResetTimer()
 	for idx := 0; idx < b.N; idx++ {
 		response, rejected := executeCacheCommand(context.Background(), trie, request, options)
 		if rejected || !response.OK {
 			b.Fatalf("executeCacheCommand() = %#v rejected=%v, want ok", response, rejected)
 		}
+	}
+}
+
+func BenchmarkPreparedInternalReplicationOperationStorage(b *testing.B) {
+	for _, count := range []int{2, 4, 8, 16, 32, 64, 128, 256} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			b.Run("Individual", func(b *testing.B) {
+				b.ReportAllocs()
+				for idx := 0; idx < b.N; idx++ {
+					operations := make([]*snapshotOperation, count)
+					for operationIdx := range operations {
+						operations[operationIdx] = new(snapshotOperation)
+					}
+					benchmarkPreparedInternalReplicationOperationsSink = operations
+				}
+			})
+			b.Run("Contiguous", func(b *testing.B) {
+				b.ReportAllocs()
+				for idx := 0; idx < b.N; idx++ {
+					backing := make([]snapshotOperation, count)
+					operations := make([]*snapshotOperation, count)
+					for operationIdx := range operations {
+						operations[operationIdx] = &backing[operationIdx]
+					}
+					benchmarkPreparedInternalReplicationOperationsSink = operations
+				}
+			})
+		})
 	}
 }
 

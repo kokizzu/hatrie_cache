@@ -2464,6 +2464,34 @@ func TestInternalReplicationBatchDoesNotMutateTypedPayloads(t *testing.T) {
 	}
 }
 
+func TestInternalReplicationBatchPreparedOperationsRemainDistinct(t *testing.T) {
+	const payloadCount = 32
+	payloads := make([]CacheCommandRequest, payloadCount)
+	for idx := range payloads {
+		payloads[idx] = CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     "prepared:" + strconv.Itoa(idx),
+			Value:   `{"type":"string","string":"value-` + strconv.Itoa(idx) + `"}`,
+		}
+	}
+
+	ht := newTestTrie(t)
+	response, rejected := executeCacheCommand(context.Background(), ht, CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Batch:   payloads,
+	}, commandExecutionOptions{ReplicationSafety: NewReplicationSafetyStore()})
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand() = %#v rejected=%v, want success", response, rejected)
+	}
+	for idx := range payloads {
+		key := "prepared:" + strconv.Itoa(idx)
+		want := "value-" + strconv.Itoa(idx)
+		if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: key}); !got.OK || got.Value != want {
+			t.Fatalf("GETSTR %s = %#v, want %q", key, got, want)
+		}
+	}
+}
+
 func TestInternalReplicationBatchPreservesJournalDirtyAndSafetySideEffects(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("old", "value")
