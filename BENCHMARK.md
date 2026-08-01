@@ -300,6 +300,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
+| Current pass | [Native build-cache dependency tracking](#native-build-cache-dependency-tracking), included C/header edits | Go reused a stale cgo object after `hat-trie.c` changed | Embedded source manifest invalidates the package action; mutated behavior reaches the rebuilt binary | Correct native rebuild instead of a false cache hit; mixed read/write 1.005x/1.004x, scalar controls neutral | The changed-source build now pays the required native recompile; unchanged builds retain normal caching, and the production binary is 72 B smaller in the paired build |
 | Reverted | [Native slot-mask rollback](#native-slot-mask-rollback), 50m native lookups and complete command controls | Runtime flag: power-of-two 3.474 s; non-power-of-two 3.551 s; specialized GET 154.8 ns | Original modulo: power-of-two 3.521/3.536 s; non-power-of-two 3.504 s; GET 155.8 ns | Specialized native lookup was 1.037x faster, but complete commands improved at most 1.006x; the shared fallback was 1.013x slower | Both implementations removed; the branch penalized arbitrary slot counts, while three specialized C entry points did not clear the complete-path complexity gate |
 | Reverted | [Direct native tryget traversal rollback](#direct-native-tryget-traversal-rollback), 50m native hits and complete command controls | Generic finder: 2.2255 s native; paired complete controls | Read-only traversal: 2.1557 s native; 1.003x complete GET | Native lookup was 1.032x faster with unchanged 9,532 KiB RSS, but complete GET gained only 0.3% while SET/mixed-read controls moved 1.010x/1.009x slower | Runtime specialization removed; forced-split correctness coverage and the reusable native benchmark remain |
 | Reverted | [One-sided hybrid bucket reuse](#one-sided-hybrid-bucket-reuse-rollback), 100k native inserts | Rebuild both split tables: shared-prefix 64.303 ms; distributed 18.520 ms | Reuse all-key hybrid side: shared-prefix 51.177 ms; distributed 20.282 ms | Shared-prefix insertion was 1.239x faster, but distributed insertion was 1.149x slower | Runtime candidate removed; insertion timing and shared/distributed controls remain in the native benchmark |
@@ -1837,6 +1838,45 @@ The ordinary Go suite, race detector, vet, coverage, optimized standalone C
 suite, and LeakSanitizer fallback all pass. `scripts/verify-c.sh` now defaults
 its two native builders to the same `-O3`, with a policy test preventing the
 production and native verification levels from silently diverging.
+
+<a id="native-build-cache-dependency-tracking"></a>
+### Native Build-Cache Dependency Tracking
+
+`hattrie_cgo.c` textually includes four vendored C files. Go's package input
+list contained only that root wrapper and `native_command_batch.c`, so changing
+an included implementation or header could reuse the old cgo object. This was
+observed during the native split experiments and reproduced in an isolated
+cache: `hattrie_size` was changed to return one extra item, the second test
+binary was rebuilt with the same `GOCACHE`, and the size test still passed
+against stale native code.
+
+An unreferenced `embed.FS` now names every included `*.c` and `*.h` file. Go
+therefore hashes those files as package inputs, while the linker removes the
+manifest from production. The repeatable verifier copies the tracked source to
+an isolated fixture, builds once, mutates `hattrie_size`, rebuilds with the same
+cache, and requires the exact expected size-test failure from the new object:
+
+```sh
+make verify-native-cache-dependency
+```
+
+The verifier failed before the manifest with `stale native object reused` and
+passes after it. Production daemon binaries measured 36,498,912 B before and
+36,498,840 B after, confirming there is no embedded-source payload in the
+linked executable. Eleven alternating frozen-binary pairs also checked the
+complete hot paths:
+
+| Complete command | Before | Dependency manifest | Paired ratio | Memory |
+| --- | ---: | ---: | ---: | ---: |
+| String SET | 122.9 ns | 123.1 ns | 0.999x, neutral | 0 B / 0 allocs both |
+| String GET | 94.20 ns | 94.44 ns | 0.997x, neutral | 0 B / 0 allocs both |
+| Mixed read-heavy 100 | 9,664 ns | 9,624 ns | 1.005x | 5 B / 0 allocs both |
+| Mixed write-heavy 100 | 21,260 ns | 21,226 ns | 1.004x | 77 B / 10 allocs both |
+
+An unchanged tree retains ordinary Go cache hits. A changed native source now
+performs the native compile that correctness requires instead of returning
+immediately with stale machine code. Runtime behavior, C ABI, wire, storage,
+configuration, and deployed memory are unchanged.
 
 <a id="native-slot-mask-rollback"></a>
 #### Native Slot-Mask Rollback

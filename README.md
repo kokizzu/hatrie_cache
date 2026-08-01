@@ -350,6 +350,13 @@ radix, quantile, and replication controls were neutral or faster. The test
 binary is also 5,856 bytes smaller. Native verification and its LeakSanitizer
 fallback now compile at the same optimization level, while ABI, layouts, wire,
 storage, persistence, and runtime configuration remain unchanged.
+The [native build-cache dependency manifest](BENCHMARK.md#native-build-cache-dependency-tracking)
+also makes Go track every C and header file textually included by
+`hattrie_cgo.c`. This prevents an edited native implementation from silently
+reusing a stale cgo object. Run `make verify-native-cache-dependency` to copy the
+tree, mutate a native size function, rebuild against one cache, and prove that
+the changed object reaches the test binary. The manifest is linker-stripped and
+does not enlarge the production daemon or alter runtime behavior.
 Long-running delete-heavy workloads can call `CompactMemory` to rebuild the C
 trie, densely reindex in-memory typed pools, and shrink Merkle and metadata
 backing. Disk-spill indexes remain stable so file ownership cannot alias.
