@@ -2421,6 +2421,49 @@ func TestMonitoringHandlerExecutesInternalReplicationBatch(t *testing.T) {
 	}
 }
 
+func TestInternalReplicationBatchDoesNotMutateTypedPayloads(t *testing.T) {
+	ht := newTestTrie(t)
+	ht.UpsertString("old", "value")
+	payloads := []CacheCommandRequest{
+		{
+			Command: " internalset ",
+			Key:     " name ",
+			Value:   `{"type":"string","string":"batched"}`,
+		},
+		{
+			Command: " internaldel ",
+			Key:     " old ",
+		},
+	}
+	wantPayloads := []CacheCommandRequest{
+		{
+			Command: " internalset ",
+			Key:     " name ",
+			Value:   `{"type":"string","string":"batched"}`,
+		},
+		{
+			Command: " internaldel ",
+			Key:     " old ",
+		},
+	}
+	response, rejected := executeCacheCommand(context.Background(), ht, CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Batch:   payloads,
+	}, commandExecutionOptions{ReplicationSafety: NewReplicationSafetyStore()})
+	if rejected || !response.OK {
+		t.Fatalf("executeCacheCommand() = %#v rejected=%v, want success", response, rejected)
+	}
+	if !reflect.DeepEqual(payloads, wantPayloads) {
+		t.Fatalf("typed payloads = %#v, want unchanged %#v", payloads, wantPayloads)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "GETSTR", Key: "name"}); !got.OK || got.Value != "batched" {
+		t.Fatalf("GETSTR name = %#v, want batched", got)
+	}
+	if got := ht.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: "old"}); !got.OK || got.Value != "0" {
+		t.Fatalf("EXISTS old = %#v, want deleted", got)
+	}
+}
+
 func TestInternalReplicationBatchPreservesJournalDirtyAndSafetySideEffects(t *testing.T) {
 	ht := newTestTrie(t)
 	ht.UpsertString("old", "value")

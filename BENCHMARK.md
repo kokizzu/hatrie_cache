@@ -366,6 +366,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Borrowed live replication target planning](#borrowed-live-replication-target-planning), 10k writes/313 batches | Cloned route: 84.297 ms; 49.04 MB heap; 356,131 allocs | Borrowed generation: 82.968 ms; 45.92 MB heap; 306,109 allocs | 1.032x paired CPU; 3.13 MB lower heap; about 50,022 fewer allocations | Enabled only with live micro-batching; fixed one-command mode retains its exact planner, while HTTP, queue, storage, wire, and public routing are unchanged |
 | Current pass | [Comparable gRPC stream target identities](#comparable-grpc-stream-target-identities), 10k writes/313 batches | Prefixed string keys: 45.92 MB heap; 306,125 allocs | Comparable session keys: 45.60 MB heap; 286,119 allocs | 1.014x paired CPU without GC; 321 KB lower heap; about 20,006 fewer allocations | Scoped to persistent stream-session maps; generic grouping retains its smaller string key and exact memory profile |
 | Current pass | [Retained last-result timestamp storage](#retained-last-result-timestamp-storage), 10k writes/313 batches | Clone timestamps on store: 83.920 ms; 45.60 MB heap; 286,127 allocs | Reuse private timestamp storage: 81.270 ms; 45.12 MB heap; 266,118 allocs | 1.020x paired CPU; 481 KB lower heap; 20,009 fewer allocations | Public reads still deep-clone both timestamps; caller ownership, nil timing, wire, persistence, and `HTTPReplicator` layout are unchanged |
+| Current pass | [Borrowed typed internal replication batches](#borrowed-typed-internal-replication-batches), 10k writes/313 batches | Clone decoded child requests: 45.12 MB heap; 266,109 allocs | Borrow immutable batch: 43.20 MB heap; 265,800 allocs | CPU neutral within 0.4%; 1.92 MB lower heap; 309 fewer allocations | The synchronous preparer still copies every child into private state; input immutability, validation, atomic preflight, wire, and persistence are unchanged |
 | Current pass | [Normalized topology-store routing](#normalized-topology-store-routing), one/four shards | Clone/sort all shards: 241.4/505.3 ns; 120/488 heap B; 4/9 allocs | Clone selected shard: 134.3/142.55 ns; 48/80 heap B; 2/2 allocs | 1.80x/3.54x faster; 2.50x/6.10x lower heap; 2x/4.50x fewer allocations | Store topology is already normalized; returned route ownership and generic routing for arbitrary topology values are unchanged |
 | Current pass | [Direct election-key routing](#direct-election-key-routing), healthy one/four shards | Topology snapshot plus active map: 643.95/1,337.5 ns; 680/1,688 heap B; 10/18 allocs | Selected route plus direct candidates: 226.15/263.35 ns; 80/128 heap B; 3/3 allocs | 2.85x/5.08x faster; 8.50x/13.19x lower heap; 3.33x/6x fewer allocations | Timeout, offline, maintenance, failover, topology-generation consistency, ownership, and lock order are unchanged |
 | Current pass | [Generation-based replication target selection](#generation-based-replication-target-selection), 10k routed writes | Full status/maps: 17.482 ms; 17.52 MB heap; 170,000 allocs | Immutable generation/inactive exceptions: 7.626 ms; 6.32 MB heap; 70,000 allocs | 2.29x faster, 2.77x lower heap, 2.43x fewer allocations; complete gRPC 1.098x faster | No cache or stale state; topology/election snapshots, target order, ownership, wire, and persistence are unchanged |
@@ -4856,6 +4857,57 @@ stored result.
 Result contents, caller ownership, mutex scope, nil timing, target results,
 queue state, routing, transport, wire, storage, persistence, configuration, and
 public behavior are unchanged.
+
+<a id="borrowed-typed-internal-replication-batches"></a>
+#### Borrowed Typed Internal Replication Batches
+
+The internal batch receiver copied every protobuf-decoded `Batch` slice before
+validation, then immediately copied each child request by value into private
+prepared state. No code mutated the intermediate slice or its child requests.
+Typed batches now borrow the decoder-owned slice for the duration of the
+synchronous prepare-and-apply call. Legacy `Values` batches still allocate and
+decode their own request slice.
+
+An input-immutability test was added and passed against the cloning baseline
+before the change. It uses noncanonical command and key text so normalization
+would visibly alter the caller's slice if preparation stopped operating on
+request values. Existing batch tests cover mixed set/delete execution, journal
+and dirty-tracker effects, replication safety, malformed input, and atomic
+preflight rejection.
+
+```sh
+make run CMD='go test . -run="Test(InternalReplicationBatchDoesNotMutateTypedPayloads|MonitoringHandlerExecutesInternalReplicationBatch|InternalReplicationBatchPreservesJournalDirtyAndSafetySideEffects|MonitoringHandlerRejectsInvalidInternalReplicationBatchWithoutPartialMutation)" -count=20'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 2000x BenchmarkInternalReplicationBatchApply'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 5x BenchmarkReplicationLiveTransport10K/grpc-stream'
+make run CMD='env GOGC=off /tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 10x BenchmarkReplicationLiveTransport10K/grpc-stream'
+```
+
+| 128-item typed server batch | Clone child slice | Borrow child slice | Improvement |
+| --- | ---: | ---: | ---: |
+| Separate CPU median | 206,166 ns | 201,357 ns | 1.024x faster |
+| Paired CPU ratio median | baseline | optimized | 1.024x faster |
+| Cumulative heap | 252,838 B | 231,076 B | 21,762 B lower; 1.094x lower |
+| Allocations | 1,796 | 1,795 | one batch allocation removed |
+
+| Complete 10,000-write stream | Clone child slice | Borrow child slice | Improvement |
+| --- | ---: | ---: | ---: |
+| Normal-GC separate CPU median | 79.972307 ms | 78.853772 ms | 1.014x faster |
+| Normal-GC paired CPU ratio median | baseline | optimized | 0.996x; neutral within 0.4% |
+| `GOGC=off` separate CPU median | 73.049785 ms | 72.531719 ms | 1.007x faster |
+| `GOGC=off` paired CPU ratio median | baseline | optimized | 1.005x faster |
+| Normal-GC cumulative heap median | 45,117,646 B | 43,197,673 B | 1,919,973 B lower; 1.044x lower |
+| Normal-GC allocation median | 266,109 | 265,800 | 309 fewer |
+| `GOGC=off` cumulative heap median | 37,609,429 B | 35,692,918 B | 1,916,511 B lower; 1.054x lower |
+| `GOGC=off` allocation median | 263,497 | 263,195 | 302 fewer |
+| Batches and logical payload | 313 / unchanged | 313 / unchanged | no protocol change |
+
+The removed copy was shallow, so nested maps, slices, and binary values were
+already borrowed. The final path only extends that existing ownership to the
+outer child-request slice during the same synchronous call; it does not retain
+the slice after execution. Input contents, validation order, normalization,
+preparation ownership, all-or-nothing validation, operation ordering, safety
+tokens, journal and dirty side effects, routing, wire, storage, persistence,
+configuration, and public behavior are unchanged.
 
 <a id="lazy-grpc-session-maps"></a>
 #### Lazy gRPC Session Maps
