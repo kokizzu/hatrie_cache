@@ -499,6 +499,7 @@ tree.
 | Dedicated last-result timestamp field | Reused two timestamp objects and removed about 20,000 allocations per 10,000 replicated commands | Adding a field to `HTTPReplicator` changed its hot layout and reduced `GOGC=off` complete-stream CPU to 0.972x, or 2.8% slower | Removed; the accepted [retained timestamp storage](#retained-last-result-timestamp-storage) reuses the pointers already owned by the private stored result without changing the replicator layout |
 | Contiguous prepared replication operations | A 128-set batch was 1.027x faster by paired CPU and removed 127 allocations | Cumulative heap rose from 231,076 to 235,172 B, or 4,096 B/1.8%; contiguous storage also cost 256/512 B at 8/16 items | Reverted; per-child operations remain independently allocated, and allocator-size controls remain in [the rollback](#contiguous-prepared-replication-operations-rollback) |
 | Preallocated replication metadata map | A three-field literal measured 223.9 ns versus production's 224.2 ns | Preallocation measured 225.3 ns, while all variants retained 384 B and five allocations | Rejected as neutral; production construction remains unchanged; see [the metadata-map control](#replication-metadata-map-construction-rollback) |
+| Direct typed gRPC receiver metadata | Bypassing the generic three-field metadata map made one/32-entry receiver batches 1.271x/1.032x faster and removed six allocations | The complete normal-GC 10,000-write stream was 0.934x as fast, or 6.6% slower, despite 121,593 B and 1,862 fewer allocations | Fully reverted; the generic metadata envelope remains, while atomicity/safety coverage and the focused benchmark remain in [the rollback](#direct-typed-grpc-receiver-metadata-rollback) |
 | Direct native packed scan | Focused preparation improved 1.10x with 1.15x lower heap | End-to-end CPU improved only 1.02x, below the 5% gate for a new C ABI | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Single-pass legacy repair | Unordered transfer was 1.07x faster with 1.11x fewer allocations | Wire grew 1.15x; restoring deterministic order made CPU 1.075x slower | Both variants reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -4983,6 +4984,54 @@ account for the same five allocations. Neither candidate provided a meaningful
 CPU or memory gain, so runtime construction, metadata contents, safety parsing,
 wire bytes, and behavior remain unchanged. The focused control remains to make
 the rejected alternatives reproducible.
+
+<a id="direct-typed-grpc-receiver-metadata-rollback"></a>
+#### Direct Typed gRPC Receiver Metadata Rollback
+
+The native replication stream decodes typed child requests, then wraps them in
+the same internal metadata `Map` used by HTTP and compatibility callers before
+generic command dispatch. A candidate passed the typed children and the three
+safety fields directly to the internal batch executor. A test was added and
+passed against the baseline first; it covers successful atomic application,
+duplicate sequence handling, topology-fingerprint rejection, and malformed
+second-child rejection without partial mutation.
+
+```sh
+make run CMD='go test . -run=TestCacheGRPCServerReplicationStreamBatchPreservesSafetyAndAtomicValidation -count=20'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 10000x BenchmarkCacheGRPCServerApplyReplicationStreamBatch'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 10x BenchmarkReplicationLiveTransport10K/grpc-stream'
+make run CMD='env GOGC=off /tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 10x BenchmarkReplicationLiveTransport10K/grpc-stream'
+```
+
+| Focused receiver batch, 11-pair median | Generic metadata envelope | Narrow typed candidate | Result |
+| --- | ---: | ---: | ---: |
+| One child CPU | 2,350 ns | 1,854 ns | 1.271x faster |
+| 32 children CPU | 28,441 ns | 27,560 ns | 1.032x faster |
+| One child cumulative heap/allocs | 2,343 B / 23 | 1,955 B / 17 | 388 B and six allocations removed |
+| 32 children cumulative heap/allocs | 38,207 B / 178 | 37,815 B / 172 | 392 B and six allocations removed |
+
+The first candidate reused a generalized value-oriented safety helper for both
+the envelope and every child. Although the focused one-child receiver improved
+about 1.20x, the complete `GOGC=off` stream fell to `0.952x`; the extra child
+trimming and helper work erased the metadata saving. That helper was removed
+and a batch-only safety check restored the established child path.
+
+| Complete 10,000-write stream, 11-pair median | Generic envelope | Narrow typed candidate | Result |
+| --- | ---: | ---: | ---: |
+| Normal-GC separate CPU | 75.097369 ms | 80.331430 ms | `0.935x`; 6.5% slower |
+| Normal-GC paired CPU ratio | baseline | candidate | `0.934x`; 6.6% slower |
+| Normal-GC cumulative heap | 35,816,183 B | 35,694,590 B | 121,593 B lower |
+| Normal-GC allocations | 263,218 | 261,356 | 1,862 fewer |
+| `GOGC=off` separate CPU | 72.686718 ms | 73.028804 ms | `0.995x`; neutral within 0.5% |
+| `GOGC=off` paired CPU ratio | baseline | candidate | `0.996x`; neutral within 0.4% |
+| Batches and logical payload | 313 / unchanged | 313 / unchanged | no protocol gain |
+
+The normal-GC loss persisted across a longer alternating-order confirmation
+and is much larger than the saved allocation volume. The complete runtime
+candidate was therefore removed. Typed decode, generic safety parsing,
+validation order, atomic execution, wire bytes, persistence, and public
+behavior remain unchanged. The correctness test and focused benchmark remain
+to guard behavior and make any future receiver design measurable.
 
 <a id="lazy-grpc-session-maps"></a>
 #### Lazy gRPC Session Maps

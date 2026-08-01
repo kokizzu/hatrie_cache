@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
+
 	"github.com/cespare/xxhash/v2"
 	"github.com/syndtr/goleveldb/leveldb"
 	"google.golang.org/grpc"
@@ -31,6 +33,50 @@ import (
 )
 
 var replicationOutboxBenchmarkData []byte
+
+func BenchmarkCacheGRPCServerApplyReplicationStreamBatch(b *testing.B) {
+	for _, entryCount := range []int{1, DefaultReplicationGRPCLiveBatchMaxCommands} {
+		b.Run(strconv.Itoa(entryCount), func(b *testing.B) {
+			topology := replicationTestTopology(b, "http://node-b")
+			target := CreateHatTrie()
+			b.Cleanup(target.Destroy)
+			server := NewCacheGRPCServer(target, CacheGRPCOptions{
+				NodeName:          "node-b",
+				Topology:          topology,
+				ReplicationSafety: NewReplicationSafetyStore(),
+			})
+			source := CreateHatTrie()
+			b.Cleanup(source.Destroy)
+			batch := &hatriecachev1.ReplicationStreamBatch{
+				Source:              "node-a",
+				TopologyFingerprint: topology.Fingerprint(),
+				Keys:                make([]string, entryCount),
+				BinaryValues:        make([][]byte, entryCount),
+			}
+			for idx := 0; idx < entryCount; idx++ {
+				key := "stream:" + strconv.Itoa(idx)
+				source.UpsertString(key, "value")
+				payload, ok := replicationCommandPayload(source, key, replicationPayloadSet)
+				if !ok {
+					b.Fatalf("replicationCommandPayload(%s) ok = false", key)
+				}
+				batch.Keys[idx] = key
+				batch.BinaryValues[idx] = payload.BinaryValue
+			}
+
+			b.ReportAllocs()
+			b.ReportMetric(float64(entryCount), "entries/op")
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				batch.Sequence = uint64(idx + 1)
+				ack := server.applyReplicationStreamBatch(context.Background(), batch)
+				if !ack.GetOk() || ack.GetEntries() != uint64(entryCount) {
+					b.Fatalf("applyReplicationStreamBatch() = %#v, want success", ack)
+				}
+			}
+		})
+	}
+}
 
 type benchmarkGRPCWireStats struct {
 	outbound atomic.Int64

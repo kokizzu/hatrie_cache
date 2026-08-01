@@ -2144,6 +2144,74 @@ func TestReplicationGRPCStreamSyncPreservesPagedOrder(t *testing.T) {
 	}
 }
 
+func TestCacheGRPCServerReplicationStreamBatchPreservesSafetyAndAtomicValidation(t *testing.T) {
+	topology := replicationTestTopology(t, "http://node-b")
+	target := newTestTrie(t)
+	server := NewCacheGRPCServer(target, CacheGRPCOptions{
+		NodeName:          "node-b",
+		Topology:          topology,
+		ReplicationSafety: NewReplicationSafetyStore(),
+	})
+	source := newTestTrie(t)
+	source.UpsertString("stream:first", "first")
+	first, ok := replicationCommandPayload(source, "stream:first", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload(stream:first) ok = false")
+	}
+
+	batch := &hatriecachev1.ReplicationStreamBatch{
+		Source:              "node-a",
+		Sequence:            42,
+		TopologyFingerprint: topology.Fingerprint(),
+		Keys:                []string{"stream:first"},
+		BinaryValues:        [][]byte{first.BinaryValue},
+	}
+	if ack := server.applyReplicationStreamBatch(context.Background(), batch); !ack.GetOk() || ack.GetEntries() != 1 {
+		t.Fatalf("first acknowledgement = %#v, want one applied entry", ack)
+	}
+	if got := target.GetString("stream:first"); got != "first" {
+		t.Fatalf("stream:first = %q, want first", got)
+	}
+
+	source.UpsertString("stream:first", "duplicate")
+	duplicate, ok := replicationCommandPayload(source, "stream:first", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload(stream:first duplicate) ok = false")
+	}
+	batch.BinaryValues[0] = duplicate.BinaryValue
+	if ack := server.applyReplicationStreamBatch(context.Background(), batch); !ack.GetOk() || ack.GetMessage() != "duplicate replication command" {
+		t.Fatalf("duplicate acknowledgement = %#v, want duplicate success", ack)
+	}
+	if got := target.GetString("stream:first"); got != "first" {
+		t.Fatalf("stream:first after duplicate = %q, want first", got)
+	}
+
+	batch.Sequence = 43
+	batch.TopologyFingerprint = "wrong-topology"
+	if ack := server.applyReplicationStreamBatch(context.Background(), batch); ack.GetOk() || ack.GetMessage() != "replication topology fingerprint mismatch" {
+		t.Fatalf("mismatched acknowledgement = %#v, want topology rejection", ack)
+	}
+	if got := target.GetString("stream:first"); got != "first" {
+		t.Fatalf("stream:first after mismatch = %q, want first", got)
+	}
+
+	source.UpsertString("stream:second", "second")
+	second, ok := replicationCommandPayload(source, "stream:second", replicationPayloadSet)
+	if !ok {
+		t.Fatal("replicationCommandPayload(stream:second) ok = false")
+	}
+	batch.Sequence = 44
+	batch.TopologyFingerprint = topology.Fingerprint()
+	batch.Keys = []string{"stream:second", "stream:broken"}
+	batch.BinaryValues = [][]byte{second.BinaryValue, {1, 2, 3}}
+	if ack := server.applyReplicationStreamBatch(context.Background(), batch); ack.GetOk() {
+		t.Fatalf("malformed acknowledgement = %#v, want validation error", ack)
+	}
+	if target.Exists("stream:second") || target.Exists("stream:broken") {
+		t.Fatal("malformed batch partially mutated target")
+	}
+}
+
 func TestReplicationGRPCStreamLiveSetDeleteReusesConnection(t *testing.T) {
 	targetTrie := newTestTrie(t)
 	listener := bufconn.Listen(testGRPCBufferSize)
