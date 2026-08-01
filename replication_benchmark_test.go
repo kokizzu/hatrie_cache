@@ -33,6 +33,61 @@ import (
 )
 
 var replicationOutboxBenchmarkData []byte
+var replicationGRPCStreamFlightBenchmarkSink *replicationGRPCStreamFlight
+
+func BenchmarkReplicationGRPCStreamCollectFlight(b *testing.B) {
+	for _, benchmark := range []struct {
+		name          string
+		jobCount      int
+		carryIndex    int
+		expectedCount int
+	}{
+		{name: "one", jobCount: 1, carryIndex: -1, expectedCount: 1},
+		{name: "two", jobCount: 2, carryIndex: -1, expectedCount: 2},
+		{name: "incompatible-carry", jobCount: 2, carryIndex: 1, expectedCount: 1},
+		{name: "two-then-queued-carry", jobCount: DefaultReplicationGRPCLiveBatchMaxCommands, carryIndex: 2, expectedCount: 2},
+		{name: "thirty-two", jobCount: DefaultReplicationGRPCLiveBatchMaxCommands, carryIndex: -1, expectedCount: DefaultReplicationGRPCLiveBatchMaxCommands},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			target := &replicationGRPCStreamTarget{
+				ctx:              context.Background(),
+				jobs:             make(chan *replicationGRPCStreamJob, benchmark.jobCount-1),
+				batchMaxCommands: DefaultReplicationGRPCLiveBatchMaxCommands,
+			}
+			jobs := make([]replicationGRPCStreamJob, benchmark.jobCount)
+			for idx := range jobs {
+				jobs[idx] = replicationGRPCStreamJob{
+					ctx:                 context.Background(),
+					source:              "source",
+					topologyFingerprint: "topology",
+					payloads: replicationSyncPayloadBatch{inline: []replicationSyncPayload{{
+						key: "key",
+					}}},
+				}
+			}
+			if benchmark.carryIndex >= 0 {
+				jobs[benchmark.carryIndex].source = "other-source"
+			}
+
+			b.ReportAllocs()
+			b.ReportMetric(float64(benchmark.jobCount), "jobs/op")
+			b.ResetTimer()
+			for idx := 0; idx < b.N; idx++ {
+				for jobIdx := 1; jobIdx < len(jobs); jobIdx++ {
+					target.jobs <- &jobs[jobIdx]
+				}
+				flight, carry, err := target.collectFlight(&jobs[0])
+				if err != nil || (carry != nil) != (benchmark.carryIndex >= 0) || len(flight.jobs) != benchmark.expectedCount {
+					b.Fatalf("collectFlight = %d jobs, carry %p, err %v", len(flight.jobs), carry, err)
+				}
+				for len(target.jobs) != 0 {
+					<-target.jobs
+				}
+				replicationGRPCStreamFlightBenchmarkSink = flight
+			}
+		})
+	}
+}
 
 func BenchmarkCacheGRPCServerApplyReplicationStreamBatch(b *testing.B) {
 	for _, entryCount := range []int{1, DefaultReplicationGRPCLiveBatchMaxCommands} {

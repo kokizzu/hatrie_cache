@@ -505,6 +505,43 @@ func TestReplicationGRPCSessionDefersOptionalMaps(t *testing.T) {
 	liveSession.close()
 }
 
+func TestReplicationGRPCStreamCollectFlightPreservesOrderAndCarry(t *testing.T) {
+	target := &replicationGRPCStreamTarget{
+		ctx:              context.Background(),
+		jobs:             make(chan *replicationGRPCStreamJob, 2),
+		batchMaxCommands: 4,
+	}
+	newJob := func(source, key string) *replicationGRPCStreamJob {
+		return &replicationGRPCStreamJob{
+			ctx:                 context.Background(),
+			source:              source,
+			topologyFingerprint: "topology",
+			payloads: replicationSyncPayloadBatch{inline: []replicationSyncPayload{{
+				key: key,
+			}}},
+		}
+	}
+	first := newJob("source-a", "first")
+	second := newJob("source-a", "second")
+	carry := newJob("source-b", "carry")
+	target.jobs <- second
+	target.jobs <- carry
+
+	flight, next, err := target.collectFlight(first)
+	if err != nil {
+		t.Fatalf("collectFlight: %v", err)
+	}
+	if next != carry {
+		t.Fatalf("carry = %p, want %p", next, carry)
+	}
+	if flight.entries != 2 {
+		t.Fatalf("entries = %d, want 2", flight.entries)
+	}
+	if len(flight.jobs) != 2 || flight.jobs[0] != first || flight.jobs[1] != second {
+		t.Fatalf("jobs = %#v, want first and second in order", flight.jobs)
+	}
+}
+
 func TestReplicationGRPCSyncSessionSingleTaskGroupMatchesDirectExecution(t *testing.T) {
 	replicator := &HTTPReplicator{disableHTTPFallback: true}
 	group := replicationTaskGroup{target: TopologyNode{ID: "node-b", GRPCAddress: "bufnet"}}

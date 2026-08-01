@@ -504,6 +504,8 @@ tree.
 | Contiguous prepared replication operations | A 128-set batch was 1.027x faster by paired CPU and removed 127 allocations | Cumulative heap rose from 231,076 to 235,172 B, or 4,096 B/1.8%; contiguous storage also cost 256/512 B at 8/16 items | Reverted; per-child operations remain independently allocated, and allocator-size controls remain in [the rollback](#contiguous-prepared-replication-operations-rollback) |
 | Preallocated replication metadata map | A three-field literal measured 223.9 ns versus production's 224.2 ns | Preallocation measured 225.3 ns, while all variants retained 384 B and five allocations | Rejected as neutral; production construction remains unchanged; see [the metadata-map control](#replication-metadata-map-construction-rollback) |
 | Direct typed gRPC receiver metadata | Bypassing the generic three-field metadata map made one/32-entry receiver batches 1.271x/1.032x faster and removed six allocations | The complete normal-GC 10,000-write stream was 0.934x as fast, or 6.6% slower, despite 121,593 B and 1,862 fewer allocations | Fully reverted; the generic metadata envelope remains, while atomicity/safety coverage and the focused benchmark remain in [the rollback](#direct-typed-grpc-receiver-metadata-rollback) |
+| Queue-depth gRPC flight preallocation | Full 32-job flight construction was 1.25x faster, used 1.77x less heap, and cut allocations from seven to three | Two compatible jobs followed by a queued topology-change carry became 1.18x slower and used 4.33x more heap | Reverted; geometric growth remains, and full/carry controls remain in [the rollback](#grpc-flight-job-storage-rollbacks) |
+| Fixed-array gRPC flight staging | Intended to copy up to 32 collected job pointers once and reduced the full-flight allocation count from seven to four | Escape analysis moved the 256-byte staging array to the heap: one-job heap rose 5.71x, its allocations doubled, and full-flight heap/CPU also regressed | Reverted; exact staging and queue prediction were both rejected in [the rollback](#grpc-flight-job-storage-rollbacks) |
 | Direct native packed scan | Focused preparation improved 1.10x with 1.15x lower heap | End-to-end CPU improved only 1.02x, below the 5% gate for a new C ABI | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Single-pass legacy repair | Unordered transfer was 1.07x faster with 1.11x fewer allocations | Wire grew 1.15x; restoring deterministic order made CPU 1.075x slower | Both variants reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -5169,6 +5171,107 @@ candidate was therefore removed. Typed decode, generic safety parsing,
 validation order, atomic execution, wire bytes, persistence, and public
 behavior remain unchanged. The correctness test and focused benchmark remain
 to guard behavior and make any future receiver design measurable.
+
+<a id="grpc-flight-job-storage-rollbacks"></a>
+#### gRPC Flight Job Storage Rollbacks
+
+The live gRPC sender groups compatible queued jobs into one flight. Its job
+pointer slice starts at one element and grows geometrically, which costs seven
+allocations and 552 cumulative bytes for a full default 32-job flight. A test
+was added and passed against the baseline before either candidate. It proves
+compatible jobs retain order and that the first incompatible source remains a
+carry rather than entering the current flight.
+
+The focused benchmark reuses jobs and the channel so reported allocations come
+from flight construction. It covers one and two compatible jobs, an immediate
+incompatible carry, a full 32-job flight, and an adversarial queue containing
+two compatible jobs followed by an incompatible topology/source carry.
+
+```sh
+make run CMD='go test . -run=TestReplicationGRPCStreamCollectFlightPreservesOrderAndCarry -count=1'
+make run CMD='go test . -run NONE -bench BenchmarkReplicationGRPCStreamCollectFlight -benchmem -benchtime=10000x -count=10 -cpu=1'
+```
+
+The first candidate used `len(target.jobs)` after accepting a second compatible
+job to reserve the remaining bounded command slots. One-job and immediate-carry
+paths stayed at 56 B/two allocations because the reservation was delayed until
+compatibility and byte-limit checks passed.
+
+| Ten-run median | Geometric baseline | Queue-depth reservation | Result |
+| --- | ---: | ---: | ---: |
+| Full 32-job flight | 3,721 ns; 552 B; 7 allocs | 2,985 ns; 312 B; 3 allocs | 1.25x faster; 1.77x lower heap; 2.33x fewer allocations |
+| Two jobs then queued carry | 2,076 ns; 72 B; 3 allocs | 2,443 ns; 312 B; 3 allocs | 1.18x slower; 4.33x higher heap |
+
+Queue depth cannot prove that later jobs share source/topology metadata or fit
+the remaining byte limit. The carry regression therefore represents valid
+production behavior during a topology transition, not a synthetic invalid
+input. The candidate was removed.
+
+The second candidate staged up to 32 pointers in a fixed local array and copied
+only the accepted prefix into exact flight storage. This avoided predicting
+queue compatibility, but the array escaped to the heap through the returned
+flight construction.
+
+| Ten-run median | Geometric baseline | Fixed-array staging | Result |
+| --- | ---: | ---: | ---: |
+| One-job flight | 1,238 ns; 56 B; 2 allocs | 1,585 ns; 320 B; 4 allocs | 1.28x slower; 5.71x higher heap; 2x allocations |
+| Full 32-job flight | 3,033 ns; 552 B; 7 allocs | 3,469 ns; 568 B; 4 allocs | 1.14x slower; 1.03x higher heap despite three fewer allocations |
+
+Both runtime candidates were fully removed. The retained geometric slice has
+the smallest one/carry storage, allocates only for jobs actually accepted, and
+does not retain backing after acknowledgement. Job order, compatibility,
+command/byte caps, timeout and cancellation handling, acknowledgement routing,
+wire bytes, configuration, and public behavior remain unchanged. The test and
+benchmark remain to prevent either rejected representation from being retried
+without measuring its edge cases.
+
+<a id="remaining-live-replication-allocation-audit"></a>
+#### Remaining Live Replication Allocation Audit
+
+The current binary was profiled after the accepted timestamp and private-result
+backing changes. CPU profiling perturbed zero-wait batching from the normal 313
+flights to 1,487, and allocation profiling produced 1,400 flights, so profile
+percentages are used only to locate work. The final unprofiled run below is the
+authoritative current-path state.
+
+```sh
+make run CMD='go test . -run NONE -bench BenchmarkReplicationLiveTransport10K/grpc-stream -benchtime=10x -count=1 -cpuprofile=/tmp/hatrie-live-current.cpu'
+make run CMD='go tool pprof -top -nodecount=25 /tmp/hatrie-live-current.cpu'
+make run CMD='go test . -run NONE -bench BenchmarkReplicationLiveTransport10K/grpc-stream -benchtime=10x -count=1 -memprofile=/tmp/hatrie-live-current.mem'
+make run CMD='go tool pprof -top -alloc_objects -nodecount=50 /tmp/hatrie-live-current.mem'
+make run CMD='go test . -run NONE -bench BenchmarkReplicationLiveTransport10K/grpc-stream -benchmem -benchtime=10x -count=5 -cpu=1'
+```
+
+| Current 10,000-write gRPC stream, five-run median | Result |
+| --- | ---: |
+| CPU | 76.070174 ms |
+| Flights | 313 |
+| Logical commands / callers | 10,000 / 32 |
+| Wire | 61,206 B |
+| Cumulative heap | 34,541,000 B |
+| Allocations | 243,318 |
+
+The largest remaining repository-owned allocation sites and their disposition
+are:
+
+| Site | Why it remains |
+| --- | --- |
+| Per-job `context.WithTimeout` and timer | The deadline starts before queue admission and must wake callers while selecting among enqueue, acknowledgement, caller cancellation, session shutdown, and target shutdown. Relying only on the target flight timer would let queued jobs outlive their configured per-command timeout; pooling contexts is not ownership-safe. |
+| Buffered job result channel | A caller can leave on timeout or cancellation while the target goroutine completes later. The one-slot buffer lets completion finish without blocking the target and participates in selects with session/target shutdown. Embedding a waiter or using an unbuffered channel introduces a completion race or deadlock; pooling retains cross-request state. |
+| Flight job pointer slice | The two measured alternatives above either predict incompatible queued work or force fixed staging onto the heap. Geometric growth is retained because it has exact one/carry cost and no post-ack retention. |
+| Protobuf `Keys` and `BinaryValues` slices | They are separate generated repeated fields with different element types. Combining backing requires unsafe representation tricks; fixed arrays over-allocate partial flights, while pooling retains the largest observed flight. |
+| Prepared `snapshotOperation` objects | Every child must be fully decoded and validated before the first mutation to preserve atomic rejection. [Contiguous operations](#contiguous-prepared-replication-operations-rollback) removed allocations but raised cumulative heap, and pooling would retain decoded values. |
+| Decoded string/value ownership | Protobuf receive buffers are transport-owned and may be reused after dispatch. Unsafe string borrowing or retaining binary decode input would make stored values depend on message-buffer lifetime. |
+| Caller-visible result targets and timestamps | Returned slices and timestamp pointers must remain independently owned after the next command. Private monitoring storage now reuses only exact-shape backing; reusing public backing would let later commands mutate earlier results. |
+| gRPC gzip and protobuf transport work | Compression accounts for visible CPU but is what produces the measured 61 KB wire payload. Disabling or changing it is a CPU/bandwidth/protocol tradeoff; experimental shared gRPC buffers add global retention and tracing/compression restrictions. |
+| Native trie cgo calls | These are the actual compact HAT-trie lookup/update operations. Removing crossings requires changing the native API or batching semantics, both already covered by dedicated larger-batch measurements rather than a no-cost local rewrite. |
+
+No remaining profiled site has a representation that preserves timeout and
+cancellation semantics, atomic validation, caller ownership, bounded retained
+memory, wire format and size, and the established fast controls while also
+reducing measured CPU or cumulative heap. This closes the current no-tradeoff
+live-replication audit; future changes need a new representation or an explicit
+product tradeoff, not another local allocation substitution.
 
 <a id="lazy-grpc-session-maps"></a>
 #### Lazy gRPC Session Maps
