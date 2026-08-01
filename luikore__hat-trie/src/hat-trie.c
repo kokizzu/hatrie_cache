@@ -310,9 +310,8 @@ static void hattrie_split(hattrie_t* T, node_ptr parent, node_ptr node)
 
     /* create new left and right nodes */
 
-    /* TODO: Add a special case if either node is a hybrid bucket containing all
-     * the keys. In such a case, do not build a new table, just use the old one.
-     * */
+    /* Reusing an all-key hybrid side slowed distributed-key insertion. Rebuild
+     * both tables to retain the measured-faster general slot layout. */
     size_t num_slots;
 
 

@@ -330,6 +330,11 @@ loop 1.032x faster at unchanged RSS. Complete GET improved only 1.003x while
 SET and mixed-read controls moved slightly slower, so the runtime candidate was
 removed. Its forced-split correctness test and
 `make bench-native-hattrie-lookup` fixture remain for future native audits.
+The [One-sided hybrid bucket reuse rollback](BENCHMARK.md#one-sided-hybrid-bucket-reuse-rollback)
+also tested retaining an old table when every split key stayed on one hybrid
+side. Shared-prefix insertion improved 1.239x, but binary-distributed insertion
+became 1.149x slower with no RSS gain, so only the benchmark's insertion timing
+and distributed-key control remain.
 The [Production native C optimization](BENCHMARK.md#production-native-c-optimization)
 now pins `-O3` for the cgo package instead of inheriting an environment whose
 C flags contained no optimization level. Twenty alternating complete-command

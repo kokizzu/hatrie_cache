@@ -334,6 +334,7 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 		"All-pointer priority parser",
 		"Power-of-two ahtable slot mask",
 		"Direct native tryget traversal",
+		"One-sided hybrid bucket reuse",
 		"Post-O3 command normalization",
 		"Replication constructor flag",
 		"Mixed-page compact descriptors",
@@ -349,6 +350,21 @@ func TestBenchmarkMarkdownIndexesRejectedOptimizations(t *testing.T) {
 	} {
 		if !strings.Contains(index, token) {
 			t.Fatalf("BENCHMARK.md rejected optimization index missing token %q", token)
+		}
+	}
+}
+
+func TestDocsDescribeOneSidedHybridBucketReuseRollback(t *testing.T) {
+	for _, path := range []string{"README.md", "BENCHMARK.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		doc := string(data)
+		for _, token := range []string{"One-sided hybrid bucket reuse rollback", "1.239x", "1.149x"} {
+			if !strings.Contains(doc, token) {
+				t.Fatalf("%s missing one-sided bucket rollback token %q", path, token)
+			}
 		}
 	}
 }

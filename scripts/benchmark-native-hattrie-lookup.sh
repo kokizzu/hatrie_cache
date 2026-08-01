@@ -5,10 +5,20 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 artifact_dir=${BENCHMARK_ARTIFACT_DIR:-build/benchmarks}
 keys=${NATIVE_HATTRIE_KEYS:-100000}
 lookup_operations=${NATIVE_HATTRIE_LOOKUPS:-10000000}
+key_mode=${NATIVE_HATTRIE_KEY_MODE:-shared}
 count=${COUNT:-7}
 output="$artifact_dir/native-hattrie-lookup.txt"
 binary=$(mktemp "${TMPDIR:-/tmp}/hatrie-lookup-bench.XXXXXX")
 trap 'rm -f "$binary"' EXIT HUP INT TERM
+
+case "$key_mode" in
+	shared|distributed)
+		;;
+	*)
+		echo "NATIVE_HATTRIE_KEY_MODE must be shared or distributed" >&2
+		exit 2
+		;;
+esac
 
 mkdir -p "$artifact_dir"
 gcc -O3 -std=c99 -Wall -Wextra \
@@ -24,6 +34,6 @@ gcc -O3 -std=c99 -Wall -Wextra \
 run=1
 while [ "$run" -le "$count" ]; do
 	printf 'run=%s ' "$run" | tee -a "$output"
-	"$binary" "$keys" "$lookup_operations" | tee -a "$output"
+	"$binary" "$keys" "$lookup_operations" "$key_mode" | tee -a "$output"
 	run=$((run + 1))
 done
