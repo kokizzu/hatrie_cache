@@ -4249,6 +4249,27 @@ func BenchmarkFinishReplicationResultTiming(b *testing.B) {
 	}
 }
 
+func BenchmarkCloneReplicationResultTimingPresence(b *testing.B) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	finishedAt := startedAt.Add(25 * time.Millisecond)
+	for _, benchmark := range []struct {
+		name   string
+		result ReplicationResult
+	}{
+		{name: "None", result: ReplicationResult{}},
+		{name: "Started", result: ReplicationResult{StartedAt: &startedAt}},
+		{name: "Finished", result: ReplicationResult{FinishedAt: &finishedAt}},
+		{name: "Both", result: ReplicationResult{StartedAt: &startedAt, FinishedAt: &finishedAt}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationResultSink = cloneReplicationResult(benchmark.result)
+			}
+		})
+	}
+}
+
 func BenchmarkSplitReplicationTaskGroupByMaxBytes(b *testing.B) {
 	const payloadCount = 4096
 	const maxBytes = 16 << 10

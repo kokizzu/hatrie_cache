@@ -1344,6 +1344,38 @@ func TestFinishReplicationResultTimingPointersAreIndependent(t *testing.T) {
 	}
 }
 
+func TestCloneReplicationResultPreservesPartialTiming(t *testing.T) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	finishedAt := startedAt.Add(25 * time.Millisecond)
+	for _, test := range []struct {
+		name     string
+		result   ReplicationResult
+		started  bool
+		finished bool
+	}{
+		{name: "none", result: ReplicationResult{}},
+		{name: "started", result: ReplicationResult{StartedAt: &startedAt}, started: true},
+		{name: "finished", result: ReplicationResult{FinishedAt: &finishedAt}, finished: true},
+		{name: "both", result: ReplicationResult{StartedAt: &startedAt, FinishedAt: &finishedAt}, started: true, finished: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cloned := cloneReplicationResult(test.result)
+			if (cloned.StartedAt != nil) != test.started || (cloned.FinishedAt != nil) != test.finished {
+				t.Fatalf("cloned timing = %v/%v, want presence %t/%t", cloned.StartedAt, cloned.FinishedAt, test.started, test.finished)
+			}
+			if test.started && (cloned.StartedAt == test.result.StartedAt || !cloned.StartedAt.Equal(*test.result.StartedAt)) {
+				t.Fatalf("cloned started timestamp = %v, want independent %v", cloned.StartedAt, test.result.StartedAt)
+			}
+			if test.finished && (cloned.FinishedAt == test.result.FinishedAt || !cloned.FinishedAt.Equal(*test.result.FinishedAt)) {
+				t.Fatalf("cloned finished timestamp = %v, want independent %v", cloned.FinishedAt, test.result.FinishedAt)
+			}
+			if test.started && test.finished && cloned.StartedAt == cloned.FinishedAt {
+				t.Fatal("cloned started and finished timestamps share one pointer")
+			}
+		})
+	}
+}
+
 func TestReplicationHealthScoresQueueState(t *testing.T) {
 	healthy := withReplicationHealth(ReplicationResult{
 		Queue: &ReplicationQueueStats{Enabled: true, Depth: 0, Capacity: 8},

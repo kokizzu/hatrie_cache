@@ -499,6 +499,7 @@ tree.
 | Unconditional borrowed live target planning | Removed five route allocations per command in both batched and fixed-envelope live gRPC modes | The initial fixed one-command-envelope control was 0.990x by paired CPU median despite lower allocation | Narrowed to micro-batched mode; configured one-command mode runs the exact established planner in a separately compiled function; see [borrowed live target planning](#borrowed-live-replication-target-planning) |
 | Comparable target keys in every replication map | Eliminated key concatenation and cut a 64-target/1,024-task grouping control from 1,990 to 966 allocations while improving CPU 1.03x | The 24-byte key raised grouping heap from 770,896 to 781,904 B, or 1.4% | Narrowed to persistent gRPC stream-session maps; generic grouping and digest ordering retain the 16-byte prefixed string; see [comparable stream identities](#comparable-grpc-stream-target-identities) |
 | Dedicated last-result timestamp field | Reused two timestamp objects and removed about 20,000 allocations per 10,000 replicated commands | Adding a field to `HTTPReplicator` changed its hot layout and reduced `GOGC=off` complete-stream CPU to 0.972x, or 2.8% slower | Removed; the accepted [retained timestamp storage](#retained-last-result-timestamp-storage) reuses the pointers already owned by the private stored result without changing the replicator layout |
+| Grouped public last-result timestamps | Both-present result cloning removed one allocation and improved up to 1.27x | Flat and nested presence layouts made started-only/finished-only controls 1.5%-3.7% and 2.3%-2.8% slower | Fully reverted; generic result cloning retains two independent helpers, and the presence matrix remains in [the rollback](#grouped-public-last-result-timestamps-rollback) |
 | Unconditional last-result target capacity reuse | Removed the private target clone for stable fanout and cleared truncated elements | A temporary large fanout followed by a smaller result would retain the largest backing array despite clearing its references | Replaced before acceptance by [exact-shape target backing reuse](#retained-last-result-target-backing); any length or capacity change allocates the same exact-size backing as the baseline |
 | Contiguous prepared replication operations | A 128-set batch was 1.027x faster by paired CPU and removed 127 allocations | Cumulative heap rose from 231,076 to 235,172 B, or 4,096 B/1.8%; contiguous storage also cost 256/512 B at 8/16 items | Reverted; per-child operations remain independently allocated, and allocator-size controls remain in [the rollback](#contiguous-prepared-replication-operations-rollback) |
 | Preallocated replication metadata map | A three-field literal measured 223.9 ns versus production's 224.2 ns | Preallocation measured 225.3 ns, while all variants retained 384 B and five allocations | Rejected as neutral; production construction remains unchanged; see [the metadata-map control](#replication-metadata-map-construction-rollback) |
@@ -4913,6 +4914,37 @@ Timestamp precision and order, duration calculation, pointer mutability,
 result-to-result ownership, private last-result cloning, JSON fields, routing,
 transport, wire, storage, persistence, configuration, and public behavior are
 unchanged.
+
+<a id="grouped-public-last-result-timestamps-rollback"></a>
+#### Grouped Public Last-Result Timestamps Rollback
+
+Public `LastResult` reads deep-clone stored timestamps so caller mutation cannot
+reach private monitoring state. Grouping both timestamps into one 48-byte array
+would remove one object without changing cumulative bytes. A presence test was
+added and passed on the baseline first; it verifies nil, started-only,
+finished-only, and both-present results retain exact presence, values,
+independent source ownership, and distinct returned pointers.
+
+```sh
+make run CMD='go test . -run=TestCloneReplicationResultPreservesPartialTiming -count=20'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 1000000x BenchmarkCloneReplicationResultTimingPresence'
+```
+
+| Result-clone timing presence | Baseline heap/allocs | Grouped both-present heap/allocs | Paired CPU result |
+| --- | ---: | ---: | ---: |
+| None | 0 B / 0 | 0 B / 0 | neutral or faster |
+| Started only | 24 B / 1 | 24 B / 1 | flat switch `0.985x`; nested branch `0.977x` |
+| Finished only | 24 B / 1 | 24 B / 1 | flat switch `0.963x`; nested branch `0.972x` |
+| Both present | 48 B / 2 | 48 B / 1 | up to 1.27x faster; one allocation removed |
+
+The first layout grouped the common case and delegated partial results to the
+old clone helpers, duplicating nil checks. A four-way switch removed duplicate
+allocations but retained the partial CPU losses. A final nested branch tested
+each pointer exactly once and still made started-only/finished-only cloning
+2.3%/2.8% slower by paired median. All runtime variants were removed.
+Timestamp presence, heap, allocations, CPU, pointer ownership, monitoring JSON,
+and public behavior therefore retain the established implementation. The test
+and benchmark remain to make future representations prove every presence case.
 
 <a id="retained-last-result-target-backing"></a>
 #### Retained Last-Result Target Backing
