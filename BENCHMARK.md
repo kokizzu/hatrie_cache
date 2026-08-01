@@ -499,6 +499,7 @@ tree.
 | Dedicated packed scalar key fields | General distinct-key batches improved 1.09x with 1.44x fewer allocations and 1.56% less wire | Two added slice fields enlarged every decoded legacy request; the 10k legacy control used 31,947 more heap B, or 1.35%, even when the fields were absent | Removed before commit; [shared scalar-batch keys](#shared-scalar-batch-keys) reuse the existing key column, improve the target workload more, and leave the generated request layout unchanged |
 | Reused streamed scalar responses | Could remove roughly three response/status allocations per envelope | gRPC's `SendMsg` contract forbids modifying a message after send because tracing and stats handlers may consume it lazily | Rejected before an unsafe prototype; every streamed response remains independently owned |
 | Reused structured-stream receive envelope | Removed exactly 63 allocations and 11,089 cumulative heap B from 63 envelopes | The optimized shared-key paired CPU ratio was 0.996x; separate medians regressed from 739.709 to 756.087 us (1.022x slower), and the repeated-key control also regressed 0.7% by separate medians | Removed; generated `Recv()` remains; see [structured receive-envelope rollback](#structured-stream-receive-envelope-rollback) |
+| Reused generic batch-stream receive envelope | Homogeneous 1,000-GET batches improved 1.014x and removed exactly 63 allocations plus 5,040 cumulative heap B | The equivalent mixed structured-command stream regressed to 0.982x, or 1.85% slower, with no wire change | Removed; generated `Recv()` remains; see [generic batch receive-envelope rollback](#generic-batch-stream-receive-envelope-rollback) |
 | gRPC shared transport buffers | Receive pooling and shared write buffers could reduce framing allocations | The APIs are experimental; receive pooling is disabled with stats/tracing and discouraged with compression, while shared write buffers use a global pool and add acquire/release work at every flush | Rejected as a no-tradeoff default before a product prototype; transport ownership and configuration remain unchanged |
 | Combined structured-column materializer | Expanded shared keys and subkeys from one backing allocation | The larger helper stopped inlining and added one allocation per shared-key-only envelope: 2,636,371 to 2,746,424 heap B and 53,186 to 53,812 allocations per 10k commands | Replaced before commit by separate inlinable key/subkey materializers; the shared-key-only control returned exactly to its shipped heap and allocation counts |
 | Structured shared-column descriptor copy | Consolidated six private shared key/subkey/value arguments and still removed the subkey-header allocation | The unchanged shared-value-only control slowed from 558.0 to 565.0 ns/command (1.013x) with identical heap and allocations | Replaced before commit by scalar parameters; the control returned to 562.8 versus 562.4 ns/command while retaining [cursor-borrowed shared subkeys](#cursor-borrowed-shared-structured-subkeys) |
@@ -3332,6 +3333,30 @@ command. The allocation reduction did not justify slower complete-stream CPU,
 so the structured runtime change was removed. This also rules out mechanically
 applying request reuse to every generated stream without an independent
 end-to-end benchmark.
+
+<a id="generic-batch-stream-receive-envelope-rollback"></a>
+#### Generic Batch Receive-Envelope Rollback
+
+`CommandBatchStream` was tested with the same reset-and-`RecvMsg` pattern.
+Ten ordinary and three race-detector repetitions passed before two independent
+11-pair, 500-iteration, CPU-pinned complete-stream controls were measured:
+
+```sh
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 500x BenchmarkBigWins/^NativeBatchStreamCommand$'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 500x BenchmarkBigWins/^NativeStructuredBatchStreamCommand$'
+```
+
+| 1,000-command stream, 63 messages | Generated `Recv()` | Reused request | Result |
+| --- | ---: | ---: | --- |
+| Homogeneous GET CPU | 1.131606 ms | 1.115974 ms | 1.014x faster paired median |
+| Mixed structured CPU | 1.531654 ms | 1.554126 ms | 0.982x; 1.85% slower paired median |
+| Homogeneous cumulative heap | 1,118,353 B | 1,113,313 B | 5,040 B lower |
+| Mixed cumulative heap | 1,054,727 B | 1,049,687 B | 5,040 B lower |
+| Allocations, homogeneous/mixed | 11,502 / 11,863 | 11,439 / 11,800 | exactly 63 fewer in both |
+| Wire | 36.95 / 60.33 B/command | 36.95 / 60.33 B/command | unchanged |
+
+The homogeneous gain did not justify a regression in a supported mixed batch
+workload, so the runtime candidate was removed and generated `Recv()` remains.
 
 ### Segmented WAL Compaction
 
