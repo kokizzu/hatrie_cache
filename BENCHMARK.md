@@ -306,6 +306,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Reverted | [Allocation-free native split scans](#allocation-free-native-split-scan-rollback), 100k inserts plus 5m lookup controls | Heap-backed iterators: four temporary heap objects per proper split | Best fused cursor: distributed insertion 1.085x faster; complete 100k Go insertion 1.123x faster | Standalone `tryget` was 1.044x slower; inline and aligned refinements remained 1.081x/1.052x slower | All runtime/API/test code removed; repeat-build and process-CPU benchmark controls remain |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Shared scalar-batch keys](#shared-scalar-batch-keys), 10k same-key GET, batch 16 | Repeated key column: 394.3 ns/command; 2,368,864 heap B; 34,823 allocs; 23.72 wire B/command | One shared key: 316.1 ns/command; 1,684,878 heap B; 23,020 allocs; 11.54 wire B/command | 1.25x faster, 1.41x lower heap, 1.51x fewer allocs, 2.06x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
+| Current pass | [Reused scalar-stream receive envelope](#reused-scalar-stream-receive-envelope), 1k same-key GET, 63 messages | New request/message: 294.730 us; 163,395 heap B; 2,297 allocs | One reset request/stream: 284.550 us; 154,309 heap B; 2,234 allocs | 1.033x paired CPU, 1.059x lower heap, 1.028x fewer allocs; 63 allocations removed | No measured tradeoff; explicit reset preserves fresh-message semantics, wire is unchanged, and the blocked receive retains the same one empty envelope as generated `Recv()` |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
 | Current pass | [Bounded structured batch execution](#bounded-structured-batch-execution), 10k mixed commands, batch 16 | Per-command dispatch: 1,724 ns/command; 3,586,784 heap B; 77,681 allocs | Four-command executor: 1,503 ns/command; 3,587,480 heap B; 77,686 allocs | 1.15x faster; heap and allocations effectively unchanged; wire unchanged | Default telemetry and unpartitioned local execution only; all compatibility cases retain the command loop |
 | Current pass | [Shared structured-batch keys](#shared-structured-batch-keys), 10k same-key `PEEK_MAP`, batch 16 | Repeated key column: 805.1 ns/command; 3,362,504 heap B; 64,490 allocs; 36.72 wire B/command | One shared key: 718.6 ns/command; 2,636,371 heap B; 53,186 allocs; 18.91 wire B/command | 1.12x faster, 1.28x lower heap, 1.21x fewer allocs, 1.94x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
@@ -3227,6 +3228,43 @@ the two slice fields enlarged every decoded legacy request: the untouched-head
 was removed. Reusing response objects was also rejected before implementation:
 gRPC permits tracing and stats handlers to consume a sent message lazily, so a
 stream cannot safely mutate or pool the response immediately after `SendMsg`.
+
+<a id="reused-scalar-stream-receive-envelope"></a>
+### Reused Scalar-Stream Receive Envelope
+
+Generated server `Recv()` allocated a new 144-byte `ScalarBatchRequest` before
+every `RecvMsg` call. The scalar stream now owns one request for its lifetime,
+clears it before every receive, and decodes the next envelope into that storage.
+The explicit clear drops all backing slices before a blocked receive and
+preserves the generated helper's fresh-message behavior after malformed or
+sparse requests. The existing malformed-then-valid test exercises that reset
+contract.
+
+The acceptance run alternated frozen before/after binaries in 11 pairs, pinned
+each process to one CPU, and executed each 1,000-command benchmark 1,000 times.
+Each operation carries 63 protobuf envelopes. Separate before/after medians are
+shown below; the median of paired CPU ratios is used for the CPU improvement.
+
+```sh
+make run CMD='env HATRIE_BIG_WINS_OPS=1000 go test . -run=NONE -bench="^BenchmarkBigWins/ScalarBatchStreamCommand(RepeatedKeys)?$$" -benchmem -benchtime=1000x -count=11 -cpu=1'
+```
+
+| 1,000-command stream | Before | Reused receive envelope | Improvement |
+| --- | ---: | ---: | ---: |
+| Shared key CPU | 294.730 us | 284.550 us | 1.033x paired median |
+| Shared key cumulative heap | 163,395 B | 154,309 B | 1.059x lower; 9,086 B removed |
+| Shared key allocations | 2,297 | 2,234 | 1.028x fewer; exactly 63 removed |
+| Shared key wire | 11.46 B/command | 11.46 B/command | unchanged |
+| Repeated-key cumulative heap | 232,219 B | 223,137 B | 1.041x lower; 9,082 B removed |
+| Repeated-key allocations | 3,489 | 3,426 | 1.018x fewer; exactly 63 removed |
+| Repeated-key wire | 23.64 B/command | 23.64 B/command | unchanged |
+
+An empty or idle stream does not gain a standing allocation: generated
+`Recv()` already creates one empty request before blocking or returning EOF,
+while the retained loop has the same one empty request. Responses remain
+independently allocated because gRPC permits stats and tracing handlers to
+consume a sent message after `SendMsg` returns. There is no schema,
+configuration, persistence, or compatibility change.
 
 ### Segmented WAL Compaction
 

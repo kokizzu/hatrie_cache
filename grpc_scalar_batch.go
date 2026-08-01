@@ -18,8 +18,10 @@ func (server *CacheGRPCServer) ScalarBatchStream(stream hatriecachev1.CacheServi
 	if err := server.requireTrie(); err != nil {
 		return err
 	}
+	request := new(hatriecachev1.ScalarBatchRequest)
 	for {
-		request, err := stream.Recv()
+		*request = hatriecachev1.ScalarBatchRequest{}
+		err := stream.RecvMsg(request)
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
