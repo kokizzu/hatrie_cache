@@ -303,6 +303,61 @@ func TestReplicationGRPCStreamLiveHTTPFallbackIsConfigurable(t *testing.T) {
 	}
 }
 
+func TestReplicationGRPCStreamLiveMultiTargetFallbackPreservesMetadata(t *testing.T) {
+	var requests atomic.Int64
+	var topology *TopologyStore
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := mustDecodeReplicationTestCommand(t, w, r)
+		if normalizedCommand(request.Command) != replicationSetCompactCommand {
+			t.Fatalf("live fallback command = %q, want %s", request.Command, replicationSetCompactCommand)
+		}
+		if request.Pairs[replicationMetaSourceNode] != "node-a" || request.Pairs[replicationMetaTopologyFingerprint] != topology.Fingerprint() || request.Pairs[replicationMetaSequence] == "" {
+			t.Fatalf("live fallback metadata = %#v, want source, topology fingerprint, and sequence", request.Pairs)
+		}
+		requests.Add(1)
+		writeJSON(w, CacheCommandResponse{OK: true, Message: "ok"})
+	}))
+	defer target.Close()
+
+	var err error
+	topology, err = NewTopologyStore(ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: target.URL},
+			{ID: "node-c", Address: target.URL},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b", "node-c"}}},
+	})
+	if err != nil {
+		t.Fatalf("NewTopologyStore() error = %v", err)
+	}
+	replicator := NewHTTPReplicator(HTTPReplicatorOptions{
+		Self:      "node-a",
+		Topology:  topology,
+		Election:  NewElectionStore(topology, ElectionOptions{}),
+		Client:    target.Client(),
+		Transport: ReplicationTransportGRPCStream,
+	})
+	t.Cleanup(replicator.Close)
+	trie := newTestTrie(t)
+	trie.UpsertString("live:fanout", "value")
+	result := replicator.ReplicateCommand(context.Background(), trie,
+		CacheCommandRequest{Command: "SETSTR", Key: "live:fanout", Value: "value"}, CacheCommandResponse{OK: true})
+	if len(result.Targets) != 2 {
+		t.Fatalf("live fallback targets = %#v, want two targets", result.Targets)
+	}
+	for _, target := range result.Targets {
+		if !target.OK {
+			t.Fatalf("live fallback target = %#v, want success", target)
+		}
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("live fallback requests = %d, want 2", got)
+	}
+}
+
 func TestReplicationGRPCSessionDefersOptionalMaps(t *testing.T) {
 	replicator := &HTTPReplicator{}
 	syncSession := newReplicationGRPCSyncSession(context.Background(), replicator)

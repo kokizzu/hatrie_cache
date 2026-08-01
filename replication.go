@@ -650,10 +650,41 @@ func (replicator *HTTPReplicator) SyncAll(ctx context.Context, trie *HatTrie, pr
 }
 
 func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	if replicator.transport == ReplicationTransportGRPCStream && replicator.grpcLiveSession != nil {
+		return replicator.replicateLiveCommand(ctx, trie, request, response)
+	}
 	result, tasks := replicator.planReplication(ctx, trie, request, response)
 	if len(tasks) == 0 {
 		return result
 	}
+	return replicator.executeReplicationTasks(ctx, result, tasks)
+}
+
+func (replicator *HTTPReplicator) replicateLiveCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	if trie == nil {
+		return ReplicationResult{
+			Command: normalizedCommand(request.Command),
+			Key:     strings.TrimSpace(request.Key),
+			Skipped: true,
+			Reason:  "trie is not configured",
+		}
+	}
+	result, kind, targets, ok := replicator.planReplicationTargets(ctx, request, response)
+	if !ok {
+		return result
+	}
+	payload, ok := replicationCommandPayload(trie, result.Key, kind)
+	if !ok {
+		result.Skipped = true
+		result.Reason = "no local value to replicate"
+		return result
+	}
+	if len(targets) == 1 {
+		if direct, handled := replicator.executeSingleLiveReplicationTask(ctx, result, replicationTask{target: targets[0], payload: payload}); handled {
+			return direct
+		}
+	}
+	_, tasks := replicator.tasksForReplicationPayload(result, targets, payload)
 	return replicator.executeReplicationTasks(ctx, result, tasks)
 }
 

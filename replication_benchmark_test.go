@@ -2393,6 +2393,60 @@ func BenchmarkReplicationTargetSelection(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationCommandTransportDispatch(b *testing.B) {
+	replicator := &HTTPReplicator{transport: ReplicationTransportHTTP}
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	request := CacheCommandRequest{Command: "GET", Key: "not-replicated"}
+	response := CacheCommandResponse{OK: true}
+	for _, benchmark := range []struct {
+		name string
+		run  func() ReplicationResult
+	}{
+		{name: "Established", run: func() ReplicationResult {
+			return replicateCommandEstablishedControl(replicator, context.Background(), trie, request, response)
+		}},
+		{name: "TransportDispatch", run: func() ReplicationResult {
+			return replicator.replicateCommand(context.Background(), trie, request, response)
+		}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationResultSink = benchmark.run()
+			}
+		})
+	}
+	b.Run("Alternating", func(b *testing.B) {
+		var establishedDuration, dispatchDuration time.Duration
+		b.ResetTimer()
+		for iteration := 0; iteration < b.N; iteration++ {
+			dispatchFirst := iteration&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if dispatchFirst == (pass == 0) {
+					benchmarkReplicationResultSink = replicator.replicateCommand(context.Background(), trie, request, response)
+					dispatchDuration += time.Since(started)
+				} else {
+					benchmarkReplicationResultSink = replicateCommandEstablishedControl(replicator, context.Background(), trie, request, response)
+					establishedDuration += time.Since(started)
+				}
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(establishedDuration.Nanoseconds())/float64(b.N), "established_ns/command")
+		b.ReportMetric(float64(dispatchDuration.Nanoseconds())/float64(b.N), "dispatch_ns/command")
+	})
+}
+
+func replicateCommandEstablishedControl(replicator *HTTPReplicator, ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	result, tasks := replicator.planReplication(ctx, trie, request, response)
+	if len(tasks) == 0 {
+		return result
+	}
+	return replicator.executeReplicationTasks(ctx, result, tasks)
+}
+
 var benchmarkReplicationRoutingSnapshotSink replicationRoutingSnapshot
 
 var benchmarkReplicationRoutingNodeMapSink map[string]TopologyNode
