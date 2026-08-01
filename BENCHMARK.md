@@ -317,6 +317,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Latest fastime refresh](#latest-fastime-refresh), Go 1.26.5 direct commands | v1.1.9 normalized fastime advantage, set/get/inc/TTL: 1.18x/1.26x/1.15x/1.58x | v1.1.10: 1.16x/1.27x/1.17x/1.68x | Set advantage 1.02x lower; get effectively unchanged; increment 1.02x and TTL 1.06x higher; heap unchanged | Retains latest typed-atomic and daemon-cancellation fixes; absolute medians are reported below because process speed varied |
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
 | Reverted | [Exact scalar mutation dispatch](#exact-scalar-mutation-dispatch), nine alternating binaries | Generic set/get/inc/expire: 200.2/181.1/277.3/238.1 ns | Exact helper: 203.8/185.9/272.4/239.2 ns | INC 1.02x faster; SET 1.02x, GET 1.03x, and TTL 1.005x slower | Rolled back; unchanged heap, allocations, wire, and storage did not justify regressions in three of four complete command paths |
+| Reverted | [Signed command integer parser](#signed-command-integer-parser-rollback), exact Fenwick delta parsing | `TrimSpace` plus `strconv.ParseInt`; parser `"1"`/full-width/invalid/overflow 12.77/35.32/69.48/89.47 ns | Hand parser 1.971/21.64/3.331/19.31 ns; invalid/overflow allocation-free | Parser 6.48x/1.63x/20.86x/4.63x faster | Rolled back: final complete `ADDFW` improved only 1.003x by paired ratio while unchanged quantile controls were 1.039x/1.012x slower |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
@@ -392,6 +393,7 @@ tree.
 | --- | --- | --- | --- |
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Signed command integer parser | Made one-digit/full-width values 6.48x/1.63x faster, invalid/overflow inputs 20.86x/4.63x faster, and removed 49-72 B plus two allocations from parser errors | Direct placement made complete `ADDFW` 1.03x slower; wrapped placements improved it only 1.003x-1.043x while unchanged command controls moved up to 1.039x slower; the float counterpart was 1.136x slower | All parser, helper, layout, contract, and benchmark-fixture changes removed; see [signed command integer parser rollback](#signed-command-integer-parser-rollback) |
 | Post-O3 command normalization | Canonical SET improved up to 1.17x end to end and focused uppercase normalization improved up to 6.06x | Shared helpers slowed lowercase/spaced fallbacks up to 1.10x/1.06x; dispatcher-local recognition slowed TTL 1.034x; exact-switch recognition slowed lowercase/spaced SET and lowercase GET 1.07x/1.10x/1.08x | All runtime and temporary fixture code removed; see [Post-O3 Command Normalization Rollback](#post-o3-command-normalization-rollback) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Power-of-two ahtable slot mask | A branch-free HAT-trie-only API made 50 million native lookups 1.037x faster with unchanged backing, capacity, and header size | Shared dispatch made arbitrary-size lookup 1.013x slower; three specialized entry points improved complete GET/SET/mixed profiles by only 0.0%-0.6% | Both candidates removed; the stronger lookup fixture and non-power-of-two/header tests remain; see [Native slot-mask rollback](#native-slot-mask-rollback) |
@@ -6858,6 +6860,63 @@ make bench-hatrie-command-features BENCHMARK_ARTIFACT_DIR=build/benchmarks BENCH
 
 No production file, API, wire format, memory layout, or runtime path changed.
 These ratios correct benchmark attribution and are not application speedups.
+
+<a id="signed-command-integer-parser-rollback"></a>
+### Signed Command Integer Parser Rollback
+
+The exact `ADDFW` path parses a signed decimal delta. The retained parser first
+rejects boundary whitespace with `strings.TrimSpace`, then calls
+`strconv.ParseInt`. A handwritten parser modeled on the existing unsigned
+command parser removed the duplicate scan for valid ASCII and avoided
+`strconv` error allocations. A differential contract compared exact return
+values and success flags at both integer limits, signed overflow, explicit plus
+signs, leading zeros, all Unicode whitespace classes, invalid UTF-8, and every
+one- through four-byte combination of digits, signs, spaces, tab, and junk.
+The contract was run repeatedly before complete-path measurements. It also
+caught an intermediate empty-input panic immediately after a cold helper was
+tightened; that prototype never passed the test gate.
+
+Same-binary seven-run parser medians on one logical CPU were:
+
+| Signed integer input | Retained parser | Best handwritten parser | Parser-only result |
+| --- | ---: | ---: | ---: |
+| Empty | 1.578 ns; 0 B; 0 allocs | 1.574 ns; 0 B; 0 allocs | Neutral |
+| `"1"` | 12.77 ns; 0 B; 0 allocs | 1.971 ns; 0 B; 0 allocs | 6.48x faster |
+| `"-1"` | 12.88 ns; 0 B; 0 allocs | 5.129 ns; 0 B; 0 allocs | 2.51x faster |
+| Minimum `int64` | 35.32 ns; 0 B; 0 allocs | 21.64 ns; 0 B; 0 allocs | 1.63x faster |
+| One-byte invalid | 69.48 ns; 49 B; 2 allocs | 3.331 ns; 0 B; 0 allocs | 20.86x faster; allocations removed |
+| One-byte space | 3.768 ns; 0 B; 0 allocs | 3.188 ns; 0 B; 0 allocs | 1.18x faster |
+| Leading/trailing ASCII space | 4.677/4.105 ns | 4.261/3.117 ns | 1.10x/1.32x faster |
+| Leading/trailing Unicode space | 16.57/16.52 ns | 2.925/11.92 ns | 5.66x/1.39x faster |
+| Overflow | 89.47 ns; 72 B; 2 allocs | 19.31 ns; 0 B; 0 allocs | 4.63x faster; allocations removed |
+
+The parser microbenchmark was not sufficient for acceptance. Frozen binaries
+ran two million complete operations per sample on one pinned logical CPU and
+alternated parent/candidate process order. The direct 468-byte parser placement
+made complete `ADDFW` 286.3 versus 278.0 ns, or 1.03x slower. A compact
+one-byte wrapper recovered target gains, but moving its cold fallback through
+several source locations displaced unrelated hot symbols and produced
+1.1%-3.9% losses in unchanged controls. The final layout used a five-byte cold
+reject helper so `commandFastFloat64Field`, `executeFastGetCommand`, and the
+exact dispatcher retained their parent addresses and sizes. Even then, twelve
+alternating pairs measured:
+
+| Complete command, final layout | Parent median | Candidate median | Paired ratio | Decision |
+| --- | ---: | ---: | ---: | --- |
+| Fenwick add | 318.35 ns | 311.05 ns | 1.003x faster | Too small and inconsistent for added parser code |
+| Fenwick range | 98.345 ns | 95.925 ns | 1.020x faster | Unchanged control |
+| Quantile add | 544.25 ns | 567.10 ns | 1.039x slower | Disqualifying regression |
+| Quantile estimate | 279.30 ns | 282.40 ns | 1.012x slower | Disqualifying regression |
+| String get | 101.35 ns | 102.25 ns | 1.027x faster | Unchanged control |
+
+Two smaller alternatives were rejected earlier. Removing only the duplicate
+boundary scan made canonical integers about 1.10x faster, but did not remove
+error allocations. Applying that boundary form to floats made the canonical
+float median 60.04 versus 52.87 ns, or 1.136x slower, so the float production
+parser was never changed. All integer and float prototypes, temporary tests,
+benchmarks, imports, and helpers were removed. The retained production tree has
+the exact pre-experiment parser, code layout, behavior, heap, wire, storage,
+and configuration.
 
 #### Redis Command Benchmark CSV Parsing
 
