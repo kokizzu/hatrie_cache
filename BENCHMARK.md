@@ -497,6 +497,7 @@ tree.
 | Generic replication target sorting at every size | Removed three reflective allocations and 184 cumulative heap B for one large target slice | Complete paired 31/63-target construction was 1.03x/1.025x slower | Replaced by the measured 16-target cutoff; large sets retain the original sorter; see [adaptive replication target sorting](#adaptive-replication-target-sorting) |
 | Dedicated packed scalar key fields | General distinct-key batches improved 1.09x with 1.44x fewer allocations and 1.56% less wire | Two added slice fields enlarged every decoded legacy request; the 10k legacy control used 31,947 more heap B, or 1.35%, even when the fields were absent | Removed before commit; [shared scalar-batch keys](#shared-scalar-batch-keys) reuse the existing key column, improve the target workload more, and leave the generated request layout unchanged |
 | Reused streamed scalar responses | Could remove roughly three response/status allocations per envelope | gRPC's `SendMsg` contract forbids modifying a message after send because tracing and stats handlers may consume it lazily | Rejected before an unsafe prototype; every streamed response remains independently owned |
+| Reused structured-stream receive envelope | Removed exactly 63 allocations and 11,089 cumulative heap B from 63 envelopes | The optimized shared-key paired CPU ratio was 0.996x; separate medians regressed from 739.709 to 756.087 us (1.022x slower), and the repeated-key control also regressed 0.7% by separate medians | Removed; generated `Recv()` remains; see [structured receive-envelope rollback](#structured-stream-receive-envelope-rollback) |
 | gRPC shared transport buffers | Receive pooling and shared write buffers could reduce framing allocations | The APIs are experimental; receive pooling is disabled with stats/tracing and discouraged with compression, while shared write buffers use a global pool and add acquire/release work at every flush | Rejected as a no-tradeoff default before a product prototype; transport ownership and configuration remain unchanged |
 | Combined structured-column materializer | Expanded shared keys and subkeys from one backing allocation | The larger helper stopped inlining and added one allocation per shared-key-only envelope: 2,636,371 to 2,746,424 heap B and 53,186 to 53,812 allocations per 10k commands | Replaced before commit by separate inlinable key/subkey materializers; the shared-key-only control returned exactly to its shipped heap and allocation counts |
 | Structured shared-column descriptor copy | Consolidated six private shared key/subkey/value arguments and still removed the subkey-header allocation | The unchanged shared-value-only control slowed from 558.0 to 565.0 ns/command (1.013x) with identical heap and allocations | Replaced before commit by scalar parameters; the control returned to 562.8 versus 562.4 ns/command while retaining [cursor-borrowed shared subkeys](#cursor-borrowed-shared-structured-subkeys) |
@@ -3265,6 +3266,33 @@ while the retained loop has the same one empty request. Responses remain
 independently allocated because gRPC permits stats and tracing handlers to
 consume a sent message after `SendMsg` returns. There is no schema,
 configuration, persistence, or compatibility change.
+
+<a id="structured-stream-receive-envelope-rollback"></a>
+#### Structured Receive-Envelope Rollback
+
+The same request reuse was tested independently on `StructuredBatchStream`.
+Correctness passed ten ordinary and three race-detector repetitions, including
+the existing malformed-then-valid request sequence. Eleven alternating frozen
+binary pairs then ran 1,000 benchmark iterations each on one pinned CPU:
+
+```sh
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 1000x BenchmarkBigWins/StructuredBatchStreamSharedKey'
+```
+
+| 1,000-command stream, 63 messages | Generated `Recv()` | Reused request | Result |
+| --- | ---: | ---: | --- |
+| Shared-key separate CPU median | 739.709 us | 756.087 us | 1.022x slower; paired median ratio 0.996x |
+| Shared-key cumulative heap | 248,629 B | 237,540 B | 11,089 B lower |
+| Shared-key allocations | 5,287 | 5,224 | exactly 63 fewer |
+| Repeated-key separate CPU median | 836.348 us | 842.275 us | 1.007x slower |
+| Repeated-key cumulative heap | 337,164 B | 326,075 B | 11,089 B lower |
+| Repeated-key allocations | 6,480 | 6,417 | exactly 63 fewer |
+
+Wire bytes were unchanged at 18.84 shared-key and 36.64 repeated-key bytes per
+command. The allocation reduction did not justify slower complete-stream CPU,
+so the structured runtime change was removed. This also rules out mechanically
+applying request reuse to every generated stream without an independent
+end-to-end benchmark.
 
 ### Segmented WAL Compaction
 
