@@ -498,6 +498,7 @@ tree.
 | Comparable target keys in every replication map | Eliminated key concatenation and cut a 64-target/1,024-task grouping control from 1,990 to 966 allocations while improving CPU 1.03x | The 24-byte key raised grouping heap from 770,896 to 781,904 B, or 1.4% | Narrowed to persistent gRPC stream-session maps; generic grouping and digest ordering retain the 16-byte prefixed string; see [comparable stream identities](#comparable-grpc-stream-target-identities) |
 | Dedicated last-result timestamp field | Reused two timestamp objects and removed about 20,000 allocations per 10,000 replicated commands | Adding a field to `HTTPReplicator` changed its hot layout and reduced `GOGC=off` complete-stream CPU to 0.972x, or 2.8% slower | Removed; the accepted [retained timestamp storage](#retained-last-result-timestamp-storage) reuses the pointers already owned by the private stored result without changing the replicator layout |
 | Contiguous prepared replication operations | A 128-set batch was 1.027x faster by paired CPU and removed 127 allocations | Cumulative heap rose from 231,076 to 235,172 B, or 4,096 B/1.8%; contiguous storage also cost 256/512 B at 8/16 items | Reverted; per-child operations remain independently allocated, and allocator-size controls remain in [the rollback](#contiguous-prepared-replication-operations-rollback) |
+| Preallocated replication metadata map | A three-field literal measured 223.9 ns versus production's 224.2 ns | Preallocation measured 225.3 ns, while all variants retained 384 B and five allocations | Rejected as neutral; production construction remains unchanged; see [the metadata-map control](#replication-metadata-map-construction-rollback) |
 | Direct native packed scan | Focused preparation improved 1.10x with 1.15x lower heap | End-to-end CPU improved only 1.02x, below the 5% gate for a new C ABI | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Single-pass legacy repair | Unordered transfer was 1.07x faster with 1.11x fewer allocations | Wire grew 1.15x; restoring deterministic order made CPU 1.075x slower | Both variants reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -4959,6 +4960,29 @@ could fail, whereas the established path allocates only through the rejected
 child. The complete runtime candidate was removed. Validation order, failure
 allocation behavior, operation ownership, batch atomicity, CPU, heap, wire, and
 persistence therefore remain unchanged.
+
+<a id="replication-metadata-map-construction-rollback"></a>
+#### Replication Metadata Map Construction Rollback
+
+The common live-stream envelope carries source, sequence, and topology
+fingerprint in a three-entry `Map`. Preallocating capacity or constructing all
+three entries in one literal was compared directly with production:
+
+```sh
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationMetadataPairs -benchmem -benchtime=5000000x -count=7 -cpu=1'
+```
+
+| Seven-run median | Production inserts | Preallocated map | Three-entry literal |
+| --- | ---: | ---: | ---: |
+| CPU | 224.2 ns | 225.3 ns | 223.9 ns |
+| Cumulative heap | 384 B | 384 B | 384 B |
+| Allocations | 5 | 5 | 5 |
+
+The interface string values, formatted sequence, map header, and bucket still
+account for the same five allocations. Neither candidate provided a meaningful
+CPU or memory gain, so runtime construction, metadata contents, safety parsing,
+wire bytes, and behavior remain unchanged. The focused control remains to make
+the rejected alternatives reproducible.
 
 <a id="lazy-grpc-session-maps"></a>
 #### Lazy gRPC Session Maps

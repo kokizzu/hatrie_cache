@@ -3925,6 +3925,45 @@ func BenchmarkReplicationBatchMetadataWire(b *testing.B) {
 	}
 }
 
+var benchmarkReplicationMetadataPairsSink Map
+
+func BenchmarkReplicationMetadataPairs(b *testing.B) {
+	const source = "node-a"
+	const sequence = uint64(42)
+	const fingerprint = "fingerprint-a"
+	for _, tt := range []struct {
+		name  string
+		build func(string, uint64, string) Map
+	}{
+		{name: "Production", build: replicationMetadataPairs},
+		{name: "Preallocated", build: replicationMetadataPairsPreallocatedControl},
+		{name: "Literal", build: replicationMetadataPairsLiteralControl},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationMetadataPairsSink = tt.build(source, sequence, fingerprint)
+			}
+		})
+	}
+}
+
+func replicationMetadataPairsPreallocatedControl(source string, sequence uint64, fingerprint string) Map {
+	pairs := make(Map, 3)
+	pairs[replicationMetaSourceNode] = source
+	pairs[replicationMetaSequence] = strconv.FormatUint(sequence, 10)
+	pairs[replicationMetaTopologyFingerprint] = fingerprint
+	return pairs
+}
+
+func replicationMetadataPairsLiteralControl(source string, sequence uint64, fingerprint string) Map {
+	return Map{
+		replicationMetaSourceNode:          source,
+		replicationMetaSequence:            strconv.FormatUint(sequence, 10),
+		replicationMetaTopologyFingerprint: fingerprint,
+	}
+}
+
 func BenchmarkReplicationSyncTargetPlanning(b *testing.B) {
 	const payloadCount = 10000
 	replicator := &HTTPReplicator{self: "node-a"}
