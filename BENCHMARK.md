@@ -367,6 +367,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Comparable gRPC stream target identities](#comparable-grpc-stream-target-identities), 10k writes/313 batches | Prefixed string keys: 45.92 MB heap; 306,125 allocs | Comparable session keys: 45.60 MB heap; 286,119 allocs | 1.014x paired CPU without GC; 321 KB lower heap; about 20,006 fewer allocations | Scoped to persistent stream-session maps; generic grouping retains its smaller string key and exact memory profile |
 | Current pass | [Retained last-result timestamp storage](#retained-last-result-timestamp-storage), 10k writes/313 batches | Clone timestamps on store: 83.920 ms; 45.60 MB heap; 286,127 allocs | Reuse private timestamp storage: 81.270 ms; 45.12 MB heap; 266,118 allocs | 1.020x paired CPU; 481 KB lower heap; 20,009 fewer allocations | Public reads still deep-clone both timestamps; caller ownership, nil timing, wire, persistence, and `HTTPReplicator` layout are unchanged |
 | Current pass | [Grouped completed-result timestamps](#grouped-completed-result-timestamps), 10k writes/313 batches | Two 24-byte objects: 140.6 ns focused; 263,228 stream allocs | One 48-byte backing: 121.7 ns focused; 253,232 stream allocs | 1.161x focused, 1.014x normal-GC stream, and 1.008x no-GC stream; about 10k fewer allocations | Exported pointers remain independent and retain exactly 48 B; HTTP is 1.007x faster, while timing values, ownership, wire, and persistence are unchanged |
+| Current pass | [Retained last-result target backing](#retained-last-result-target-backing), 10k writes/313 batches | Clone private target: 103.4 ns; 35.82 MB heap; 253,222 allocs | Reuse exact-shape backing: 52.63 ns; 34.54 MB heap; 243,224 allocs | 1.96x focused; 1.014x normal-GC, 1.036x no-GC, and 1.017x HTTP; about 1.28 MB and 10k allocations removed | Public reads still deep-clone targets; target-count changes allocate exact capacity, avoiding retained fanout high-water memory |
 | Current pass | [Borrowed typed internal replication batches](#borrowed-typed-internal-replication-batches), 10k writes/313 batches | Clone decoded child requests: 45.12 MB heap; 266,109 allocs | Borrow immutable batch: 43.20 MB heap; 265,800 allocs | CPU neutral within 0.4%; 1.92 MB lower heap; 309 fewer allocations | The synchronous preparer still copies every child into private state; input immutability, validation, atomic preflight, wire, and persistence are unchanged |
 | Current pass | [Normalized topology-store routing](#normalized-topology-store-routing), one/four shards | Clone/sort all shards: 241.4/505.3 ns; 120/488 heap B; 4/9 allocs | Clone selected shard: 134.3/142.55 ns; 48/80 heap B; 2/2 allocs | 1.80x/3.54x faster; 2.50x/6.10x lower heap; 2x/4.50x fewer allocations | Store topology is already normalized; returned route ownership and generic routing for arbitrary topology values are unchanged |
 | Current pass | [Direct election-key routing](#direct-election-key-routing), healthy one/four shards | Topology snapshot plus active map: 643.95/1,337.5 ns; 680/1,688 heap B; 10/18 allocs | Selected route plus direct candidates: 226.15/263.35 ns; 80/128 heap B; 3/3 allocs | 2.85x/5.08x faster; 8.50x/13.19x lower heap; 3.33x/6x fewer allocations | Timeout, offline, maintenance, failover, topology-generation consistency, ownership, and lock order are unchanged |
@@ -498,6 +499,7 @@ tree.
 | Unconditional borrowed live target planning | Removed five route allocations per command in both batched and fixed-envelope live gRPC modes | The initial fixed one-command-envelope control was 0.990x by paired CPU median despite lower allocation | Narrowed to micro-batched mode; configured one-command mode runs the exact established planner in a separately compiled function; see [borrowed live target planning](#borrowed-live-replication-target-planning) |
 | Comparable target keys in every replication map | Eliminated key concatenation and cut a 64-target/1,024-task grouping control from 1,990 to 966 allocations while improving CPU 1.03x | The 24-byte key raised grouping heap from 770,896 to 781,904 B, or 1.4% | Narrowed to persistent gRPC stream-session maps; generic grouping and digest ordering retain the 16-byte prefixed string; see [comparable stream identities](#comparable-grpc-stream-target-identities) |
 | Dedicated last-result timestamp field | Reused two timestamp objects and removed about 20,000 allocations per 10,000 replicated commands | Adding a field to `HTTPReplicator` changed its hot layout and reduced `GOGC=off` complete-stream CPU to 0.972x, or 2.8% slower | Removed; the accepted [retained timestamp storage](#retained-last-result-timestamp-storage) reuses the pointers already owned by the private stored result without changing the replicator layout |
+| Unconditional last-result target capacity reuse | Removed the private target clone for stable fanout and cleared truncated elements | A temporary large fanout followed by a smaller result would retain the largest backing array despite clearing its references | Replaced before acceptance by [exact-shape target backing reuse](#retained-last-result-target-backing); any length or capacity change allocates the same exact-size backing as the baseline |
 | Contiguous prepared replication operations | A 128-set batch was 1.027x faster by paired CPU and removed 127 allocations | Cumulative heap rose from 231,076 to 235,172 B, or 4,096 B/1.8%; contiguous storage also cost 256/512 B at 8/16 items | Reverted; per-child operations remain independently allocated, and allocator-size controls remain in [the rollback](#contiguous-prepared-replication-operations-rollback) |
 | Preallocated replication metadata map | A three-field literal measured 223.9 ns versus production's 224.2 ns | Preallocation measured 225.3 ns, while all variants retained 384 B and five allocations | Rejected as neutral; production construction remains unchanged; see [the metadata-map control](#replication-metadata-map-construction-rollback) |
 | Direct typed gRPC receiver metadata | Bypassing the generic three-field metadata map made one/32-entry receiver batches 1.271x/1.032x faster and removed six allocations | The complete normal-GC 10,000-write stream was 0.934x as fast, or 6.6% slower, despite 121,593 B and 1,862 fewer allocations | Fully reverted; the generic metadata envelope remains, while atomicity/safety coverage and the focused benchmark remain in [the rollback](#direct-typed-grpc-receiver-metadata-rollback) |
@@ -4909,6 +4911,58 @@ confirmations plus the seven-pair HTTP control shown above.
 
 Timestamp precision and order, duration calculation, pointer mutability,
 result-to-result ownership, private last-result cloning, JSON fields, routing,
+transport, wire, storage, persistence, configuration, and public behavior are
+unchanged.
+
+<a id="retained-last-result-target-backing"></a>
+#### Retained Last-Result Target Backing
+
+`storeLastResult` deep-copies target results into private state so later caller
+mutation cannot alter monitoring output. It previously allocated a new target
+slice on every completed command. The method now reuses the prior private slice
+only when its length and capacity exactly match the new result, and overwrites
+each element under the existing mutex. A nested `CircuitOpenUntil` object is
+also reused by the same index when present. `LastResult` continues to return a
+fresh deep copy.
+
+The ownership test was added and passed against the cloning baseline before the
+change. It mutates the source slice and nested timestamp, mutates a public
+`LastResult` copy, verifies private state remains exact, grows and shrinks the
+target count, proves the smaller result has exact capacity, and verifies that a
+nil target result remains nil while a nonnil empty result remains nonnil.
+
+```sh
+make run CMD='go test . -run=TestReplicationLastResultTargetOwnershipIsIsolated -count=20'
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationLastResultTargetStore -benchmem -benchtime=1000000x -count=7 -cpu=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 7 10x BenchmarkReplicationLiveTransport10K/grpc-stream'
+make run CMD='env GOGC=off /tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 7 10x BenchmarkReplicationLiveTransport10K/grpc-stream'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 10 5 1x BenchmarkReplicationLiveTransport10K/http'
+```
+
+| Private target store, seven-run median | Clone each store | Reuse exact shape | Improvement |
+| --- | ---: | ---: | ---: |
+| Plain one-target result | 103.4 ns; 128 B; 1 alloc | 52.63 ns; 0 B; 0 allocs | 1.96x faster; timed allocation eliminated |
+| Circuit-open one-target result | 128.0 ns; 152 B; 2 allocs | 53.90 ns; 0 B; 0 allocs | 2.37x faster; both timed allocations eliminated |
+
+| Complete 10,000-write transport | Clone each store | Reuse exact shape | Improvement |
+| --- | ---: | ---: | ---: |
+| Normal-GC gRPC CPU | 76.652343 ms | 76.295088 ms | 1.014x paired ratio; 1.005x separate median |
+| Normal-GC gRPC heap/allocations | 35,817,183 B / 253,222 | 34,538,012 B / 243,224 | 1,279,171 B and 9,998 allocations removed |
+| `GOGC=off` gRPC CPU | 73.629188 ms | 71.412450 ms | 1.036x paired ratio; 1.031x separate median |
+| `GOGC=off` gRPC heap/allocations | 35,693,935 B / 253,193 | 34,408,418 B / 243,179 | 1,285,517 B and 10,014 allocations removed |
+| HTTP CPU | 1,021.554281 ms | 992.696109 ms | 1.017x paired ratio; 1.029x separate median |
+| HTTP heap/allocations | 197,619,088 B / 2,044,435 | 196,423,896 B / 2,034,412 | 1,195,192 B and 10,023 allocations removed |
+| gRPC batches / HTTP requests / wire | 313 / 10,000 / unchanged | 313 / 10,000 / unchanged | no protocol change |
+
+An initial candidate reused any sufficient capacity and cleared a truncated
+tail. Although this removed allocations for stable fanout, a temporary large
+fanout followed by a smaller nonnil result would retain the larger backing
+array. That version was rejected before acceptance. The final exact-shape gate
+allocates once whenever length or capacity changes, matching baseline retained
+capacity while preserving allocation-free storage for stable topology.
+
+Target values and order, nested timestamp ownership, nil versus empty slices,
+public deep-copy behavior, mutex scope, topology changes, result JSON, routing,
 transport, wire, storage, persistence, configuration, and public behavior are
 unchanged.
 

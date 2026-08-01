@@ -2428,6 +2428,8 @@ func (replicator *HTTPReplicator) storeLastResult(result ReplicationResult) {
 	defer replicator.mu.Unlock()
 	hasStarted := result.StartedAt != nil
 	hasFinished := result.FinishedAt != nil
+	targets := result.Targets
+	lastTargets := replicator.last.Targets
 	startedAt := replicator.last.StartedAt
 	if hasStarted {
 		if startedAt == nil {
@@ -2444,12 +2446,16 @@ func (replicator *HTTPReplicator) storeLastResult(result ReplicationResult) {
 	}
 	result.StartedAt = nil
 	result.FinishedAt = nil
+	result.Targets = nil
 	replicator.last = cloneReplicationResult(result)
 	if hasStarted {
 		replicator.last.StartedAt = startedAt
 	}
 	if hasFinished {
 		replicator.last.FinishedAt = finishedAt
+	}
+	if targets != nil {
+		replicator.last.Targets = cloneReplicationTargetsInto(lastTargets, targets)
 	}
 }
 
@@ -4013,13 +4019,29 @@ func cloneReplicationCircuitBreakers(breakers []ReplicationCircuitBreakerTarget)
 }
 
 func cloneReplicationTargets(targets []ReplicationTargetResult) []ReplicationTargetResult {
+	return cloneReplicationTargetsInto(nil, targets)
+}
+
+func cloneReplicationTargetsInto(out, targets []ReplicationTargetResult) []ReplicationTargetResult {
 	if targets == nil {
 		return nil
 	}
-	out := make([]ReplicationTargetResult, len(targets))
+	if len(targets) == 0 {
+		return make([]ReplicationTargetResult, 0)
+	}
+	if len(out) != len(targets) || cap(out) != len(targets) {
+		out = make([]ReplicationTargetResult, len(targets))
+	}
 	for idx, target := range targets {
+		circuitOpenUntil := out[idx].CircuitOpenUntil
 		out[idx] = target
-		out[idx].CircuitOpenUntil = cloneTimePtr(target.CircuitOpenUntil)
+		if target.CircuitOpenUntil != nil {
+			if circuitOpenUntil == nil {
+				circuitOpenUntil = new(time.Time)
+			}
+			*circuitOpenUntil = *target.CircuitOpenUntil
+			out[idx].CircuitOpenUntil = circuitOpenUntil
+		}
 	}
 	return out
 }

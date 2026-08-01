@@ -1279,6 +1279,51 @@ func TestReplicationLastResultTimingOwnershipIsIsolated(t *testing.T) {
 	}
 }
 
+func TestReplicationLastResultTargetOwnershipIsIsolated(t *testing.T) {
+	openUntil := time.Unix(1_700_000_000, 123).UTC()
+	wantOpenUntil := openUntil
+	targets := []ReplicationTargetResult{{
+		Node:             "node-b",
+		Address:          "http://node-b",
+		OK:               true,
+		Status:           200,
+		CircuitOpenUntil: &openUntil,
+	}}
+	replicator := &HTTPReplicator{}
+	replicator.storeLastResult(ReplicationResult{Targets: targets})
+
+	targets[0].Node = "mutated"
+	openUntil = time.Time{}
+	first := replicator.LastResult()
+	if len(first.Targets) != 1 || first.Targets[0].Node != "node-b" || first.Targets[0].CircuitOpenUntil == nil || !first.Targets[0].CircuitOpenUntil.Equal(wantOpenUntil) {
+		t.Fatalf("stored targets = %#v, want isolated node-b target", first.Targets)
+	}
+	first.Targets[0].Node = "returned-mutation"
+	*first.Targets[0].CircuitOpenUntil = time.Time{}
+	second := replicator.LastResult()
+	if len(second.Targets) != 1 || second.Targets[0].Node != "node-b" || second.Targets[0].CircuitOpenUntil == nil || !second.Targets[0].CircuitOpenUntil.Equal(wantOpenUntil) {
+		t.Fatalf("targets after returned mutation = %#v, want isolated node-b target", second.Targets)
+	}
+
+	replicator.storeLastResult(ReplicationResult{Targets: []ReplicationTargetResult{{Node: "node-c"}, {Node: "node-d"}}})
+	replicator.storeLastResult(ReplicationResult{Targets: []ReplicationTargetResult{{Node: "node-e"}}})
+	shrunk := replicator.LastResult()
+	if len(shrunk.Targets) != 1 || shrunk.Targets[0].Node != "node-e" {
+		t.Fatalf("shrunk targets = %#v, want only node-e", shrunk.Targets)
+	}
+	if cap(replicator.last.Targets) != len(replicator.last.Targets) {
+		t.Fatalf("shrunk target capacity = %d, want exact length %d", cap(replicator.last.Targets), len(replicator.last.Targets))
+	}
+	replicator.storeLastResult(ReplicationResult{Targets: []ReplicationTargetResult{}})
+	if empty := replicator.LastResult(); empty.Targets == nil || len(empty.Targets) != 0 {
+		t.Fatalf("empty targets = %#v, want nonnil empty slice", empty.Targets)
+	}
+	replicator.storeLastResult(ReplicationResult{})
+	if cleared := replicator.LastResult(); cleared.Targets != nil {
+		t.Fatalf("cleared targets = %#v, want nil", cleared.Targets)
+	}
+}
+
 func TestFinishReplicationResultTimingPointersAreIndependent(t *testing.T) {
 	startedAt := time.Unix(1_700_000_000, 123).UTC()
 	first := finishReplicationResult(ReplicationResult{}, startedAt)

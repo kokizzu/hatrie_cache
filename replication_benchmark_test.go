@@ -4222,6 +4222,25 @@ func storeLastResultClonedTimingControl(replicator *HTTPReplicator, result Repli
 	replicator.mu.Unlock()
 }
 
+func BenchmarkReplicationLastResultTargetStore(b *testing.B) {
+	openUntil := time.Unix(1_700_000_000, 123).UTC()
+	for _, benchmark := range []struct {
+		name   string
+		result ReplicationResult
+	}{
+		{name: "Plain", result: ReplicationResult{Targets: []ReplicationTargetResult{{Node: "node-b", OK: true, Status: 200}}}},
+		{name: "CircuitOpen", result: ReplicationResult{Targets: []ReplicationTargetResult{{Node: "node-b", CircuitOpen: true, CircuitOpenUntil: &openUntil}}}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			replicator := &HTTPReplicator{}
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				replicator.storeLastResult(benchmark.result)
+			}
+		})
+	}
+}
+
 func BenchmarkFinishReplicationResultTiming(b *testing.B) {
 	startedAt := time.Unix(1_700_000_000, 123).UTC()
 	b.ReportAllocs()
