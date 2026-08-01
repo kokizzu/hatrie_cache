@@ -2358,6 +2358,41 @@ func BenchmarkReplicationRoutingPlanning(b *testing.B) {
 	})
 }
 
+func BenchmarkReplicationTargetSelection(b *testing.B) {
+	for _, ownerCount := range []int{2, 16, 64} {
+		b.Run(strconv.Itoa(ownerCount)+"Owners", func(b *testing.B) {
+			routing, route, _ := replicationRouteTargetBenchmarkFixture(b, ownerCount)
+			topology, err := NewTopologyStore(routing.topology)
+			if err != nil {
+				b.Fatal(err)
+			}
+			replicator := &HTTPReplicator{
+				self:     routing.self,
+				topology: topology,
+				election: NewElectionStore(topology, ElectionOptions{}),
+			}
+			for _, benchmark := range []struct {
+				name string
+				run  func() []TopologyNode
+			}{
+				{name: "MaterializedStatus", run: func() []TopologyNode {
+					return replicationTargetsMaterializedStatusControl(replicator, route)
+				}},
+				{name: "GenerationInactive", run: func() []TopologyNode {
+					return replicator.replicationTargets(route)
+				}},
+			} {
+				b.Run(benchmark.name, func(b *testing.B) {
+					b.ReportAllocs()
+					for idx := 0; idx < b.N; idx++ {
+						benchmarkReplicationTargetsSink = benchmark.run()
+					}
+				})
+			}
+		})
+	}
+}
+
 var benchmarkReplicationRoutingSnapshotSink replicationRoutingSnapshot
 
 var benchmarkReplicationRoutingNodeMapSink map[string]TopologyNode

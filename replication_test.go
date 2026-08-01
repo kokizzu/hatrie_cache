@@ -5461,6 +5461,91 @@ func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 	}
 }
 
+func TestReplicationTargetsGenerationMatchesMaterializedStatus(t *testing.T) {
+	for _, ownerCount := range []int{2, 16, 64} {
+		t.Run(strconv.Itoa(ownerCount)+"Owners", func(t *testing.T) {
+			routing, route, _ := replicationRouteTargetBenchmarkFixture(t, ownerCount)
+			topology, err := NewTopologyStore(routing.topology)
+			if err != nil {
+				t.Fatalf("NewTopologyStore() error = %v", err)
+			}
+			now := time.Unix(1_700_000_000, 0)
+			election := NewElectionStore(topology, ElectionOptions{Timeout: time.Second, Now: func() time.Time { return now }})
+			replicator := &HTTPReplicator{self: routing.self, topology: topology, election: election}
+			assertMatches := func(stage string) {
+				t.Helper()
+				got := replicator.replicationTargets(route)
+				want := replicationTargetsMaterializedStatusControl(replicator, route)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s targets = %#v, materialized status control %#v", stage, got, want)
+				}
+			}
+
+			assertMatches("all active")
+			tracked := route.Route.Owners[len(route.Route.Owners)-1]
+			if err := election.Heartbeat(tracked); err != nil {
+				t.Fatalf("Heartbeat(%q) error = %v", tracked, err)
+			}
+			now = now.Add(2 * time.Second)
+			assertMatches("expired heartbeat")
+
+			current := topology.Get()
+			for idx := range current.Nodes {
+				if current.Nodes[idx].ID == route.Route.Owners[0] {
+					current.Nodes[idx].Maintenance = true
+					break
+				}
+			}
+			if err := topology.Set(current); err != nil {
+				t.Fatalf("Set(maintenance topology) error = %v", err)
+			}
+			assertMatches("maintenance")
+
+			replicator.election = nil
+			assertMatches("without election")
+		})
+	}
+}
+
+func replicationTargetsMaterializedStatusControl(replicator *HTTPReplicator, route ElectionKeyRoute) []TopologyNode {
+	topology := replicator.topology.Get()
+	nodes := topologyNodesByID(topology)
+	var online map[string]bool
+	if replicator.election != nil {
+		status := replicator.election.Status()
+		online = make(map[string]bool, len(status.Nodes))
+		for _, node := range status.Nodes {
+			online[node.ID] = node.Online
+		}
+	}
+	owners := route.Route.Owners
+	if len(owners) == 0 {
+		owners = routeOwners(route.Route.Shard)
+	}
+
+	targets := make([]TopologyNode, 0, len(owners))
+	seen := map[string]bool{}
+	for _, nodeID := range owners {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || nodeID == replicator.self || seen[nodeID] {
+			continue
+		}
+		if online != nil && !online[nodeID] {
+			continue
+		}
+		node, ok := nodes[nodeID]
+		if !ok {
+			continue
+		}
+		seen[nodeID] = true
+		targets = append(targets, node)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ID < targets[j].ID
+	})
+	return targets
+}
+
 func TestReplicationRouteTargetsNodeMatchesMaterializedControl(t *testing.T) {
 	for _, ownerCount := range []int{2, 3, 16, 64} {
 		routing, route, nodes := replicationRouteTargetBenchmarkFixture(t, ownerCount)

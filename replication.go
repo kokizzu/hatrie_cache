@@ -2752,9 +2752,8 @@ func (replicator *HTTPReplicator) replicationTargets(route ElectionKeyRoute) []T
 	if replicator.topology == nil {
 		return nil
 	}
-	topology := replicator.topology.Get()
-	nodes := topologyNodesByID(topology)
-	online := onlineElectionNodes(replicator.election)
+	topology, _ := replicator.topology.replicationRoutingGeneration()
+	inactive := replicator.election.inactiveNodesSnapshot(topology)
 	owners := route.Route.Owners
 	if len(owners) == 0 {
 		owners = routeOwners(route.Route.Shard)
@@ -2767,10 +2766,10 @@ func (replicator *HTTPReplicator) replicationTargets(route ElectionKeyRoute) []T
 		if nodeID == "" || nodeID == replicator.self || seen[nodeID] {
 			continue
 		}
-		if online != nil && !online[nodeID] {
+		if inactive[nodeID] {
 			continue
 		}
-		node, ok := nodes[nodeID]
+		node, ok := normalizedTopologyNode(topology.Nodes, nodeID)
 		if !ok {
 			continue
 		}
@@ -3646,18 +3645,6 @@ func topologyNodesByID(topology ClusterTopology) map[string]TopologyNode {
 	nodes := make(map[string]TopologyNode, len(topology.Nodes))
 	for _, node := range topology.Nodes {
 		nodes[node.ID] = node
-	}
-	return nodes
-}
-
-func onlineElectionNodes(election *ElectionStore) map[string]bool {
-	if election == nil {
-		return nil
-	}
-	status := election.Status()
-	nodes := make(map[string]bool, len(status.Nodes))
-	for _, node := range status.Nodes {
-		nodes[node.ID] = node.Online
 	}
 	return nodes
 }

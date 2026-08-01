@@ -363,6 +363,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct single-target gRPC sync dispatch](#direct-single-target-grpc-sync-dispatch), one task group | Generic grouping: 569.1 ns; 808 heap B; 8 allocs | Direct result slot: 426.8 ns; 384 heap B; 4 allocs | 1.33x faster, 2.10x lower heap, 2x fewer allocations | Applies only to exactly one group; repeated-target and multi-target controls retain identical heap/allocations and CPU within 1.1% |
 | Current pass | [Normalized topology-store routing](#normalized-topology-store-routing), one/four shards | Clone/sort all shards: 241.4/505.3 ns; 120/488 heap B; 4/9 allocs | Clone selected shard: 134.3/142.55 ns; 48/80 heap B; 2/2 allocs | 1.80x/3.54x faster; 2.50x/6.10x lower heap; 2x/4.50x fewer allocations | Store topology is already normalized; returned route ownership and generic routing for arbitrary topology values are unchanged |
 | Current pass | [Direct election-key routing](#direct-election-key-routing), healthy one/four shards | Topology snapshot plus active map: 643.95/1,337.5 ns; 680/1,688 heap B; 10/18 allocs | Selected route plus direct candidates: 226.15/263.35 ns; 80/128 heap B; 3/3 allocs | 2.85x/5.08x faster; 8.50x/13.19x lower heap; 3.33x/6x fewer allocations | Timeout, offline, maintenance, failover, topology-generation consistency, ownership, and lock order are unchanged |
+| Current pass | [Generation-based replication target selection](#generation-based-replication-target-selection), 10k routed writes | Full status/maps: 17.482 ms; 17.52 MB heap; 170,000 allocs | Immutable generation/inactive exceptions: 7.626 ms; 6.32 MB heap; 70,000 allocs | 2.29x faster, 2.77x lower heap, 2.43x fewer allocations; complete gRPC 1.098x faster | No cache or stale state; topology/election snapshots, target order, ownership, wire, and persistence are unchanged |
 | Current pass | [Allocation-free election node updates](#allocation-free-election-node-updates), one/four-shard heartbeat | Full topology clone: 279.65/535.5 ns; 272/896 heap B; 3/6 allocs | Normalized node lookup: 60.91/60.505 ns; 0 heap B; 0 allocs | 4.59x/8.85x faster; all timed heap and allocations eliminated | Membership follows every topology generation; heartbeat/offline record writes, validation, timestamps, locks, and behavior are unchanged |
 | Current pass | [Normalized election status generation](#normalized-election-status-generation), healthy one/four shards | Clone/sort topology: 808.05/1,851 ns; 944/2,432 heap B; 14/25 allocs | Borrow normalized generation: 387.1/800.0 ns; 464/976 heap B; 5/8 allocs | 2.09x/2.31x faster; 2.03x/2.49x lower heap; 2.80x/3.13x fewer allocations | Returned nodes, leaders, candidates, timestamps, ordering, generation consistency, locks, and behavior are unchanged |
 | Current pass | [Election-record status leader lookup](#election-record-status-leader-lookup), healthy one/four/64 shards | Temporary active map: 459.15/961.65/12,100 ns; 464/976/14,680 heap B; 5/8/70 allocs | Existing election records: 289.9/744.65/9,153 ns; 208/720/11,136 heap B; 3/6/66 allocs | 1.58x/1.29x/1.32x faster; 256/256/3,544 fewer heap bytes; 2/2/4 fewer allocations | Maintenance generations retain the former active map and are 1.07x faster with identical memory; cached mode bit adds no topology-store bytes on amd64 |
@@ -4740,6 +4741,53 @@ the internal node view remains immutable after its short read lock. Election
 records retain their own read lock, and no topology lock is held while waiting
 for it. Candidate order, timestamps, timeout boundaries, maintenance, response
 ownership, configuration, wire, persistence, and public behavior are unchanged.
+
+<a id="generation-based-replication-target-selection"></a>
+#### Generation-Based Replication Target Selection
+
+Per-command replication target selection previously cloned the complete
+topology, built a node-ID map, materialized the public election status for every
+node and shard, built an online-node map, and only then selected the current
+route's targets. The selector now borrows the immutable normalized topology
+generation, takes the existing sparse inactive-node snapshot, and binary
+searches registered nodes in the already-sorted node slice. The result still
+has its own backing, preserves defensive owner deduplication, and is sorted by
+node ID exactly as before.
+
+The test-first control retains the exact materialized-status implementation and
+compares it with production selection for 2, 16, and 64 owners while all nodes
+are active, after heartbeat timeout, with maintenance enabled, and with no
+election store. The broader replication suite covers live topology changes,
+offline failover, full-replica routing, and target ownership.
+
+```sh
+make run CMD='go test . -run=TestReplicationTargetsGenerationMatchesMaterializedStatus -count=20'
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationTargetSelection -benchtime=10000x -count=11 -cpu=1 -benchmem'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 10x BenchmarkReplicationRoutingPlanning/PerKeyDynamic'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 5x BenchmarkReplicationLiveTransport10K/^grpc-stream$'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 10 7 1x BenchmarkReplicationLiveTransport10K/^http$'
+```
+
+| Target selector, 11-run median | Materialized status/maps | Generation plus inactive exceptions | Improvement |
+| --- | ---: | ---: | ---: |
+| 2 owners | 1,021 ns; 712 B; 8 allocs | 325.0 ns; 232 B; 2 allocs | 3.14x faster; 3.07x lower heap; 4x fewer allocations |
+| 16 owners | 7,870 ns; 11,744 B; 21 allocs | 3,280 ns; 3,360 B; 9 allocs | 2.40x faster; 3.50x lower heap; 2.33x fewer allocations |
+| 64 owners | 23,684 ns; 45,872 B; 25 allocs | 10,871 ns; 13,664 B; 13 allocs | 2.18x faster; 3.36x lower heap; 1.92x fewer allocations |
+
+| Complete workload | Materialized status/maps | Generation plus inactive exceptions | Improvement |
+| --- | ---: | ---: | ---: |
+| Route and select 10,000 keys | 17.481647 ms; 17,520,021 B; 170,000 allocs | 7.626490 ms; 6,320,009 B; 70,000 allocs | 2.288x faster; 2.77x lower heap; exactly 100,000 fewer allocations |
+| Live gRPC, 10,000 writes/313 batches | 125.457451 ms; 73,183,352 B; 566,251 allocs | 114.308667 ms; 65,821,080 B; 486,236 allocs | 1.098x paired CPU; 7,362,272 B and about 80,015 allocations removed |
+| Live HTTP, 10,000 writes/10,000 requests | 1.019839 s; 205,405,464 B; 2,154,465 allocs | 1.000240 s; 198,021,760 B; 2,074,432 allocs | 1.028x paired CPU; 7,383,704 B and about 80,033 allocations removed |
+
+The default parallel-caller gRPC control also improved 1.077x with the same
+heap and allocation reduction. No liveness cache was added: each command still
+observes current topology and election records under their existing locks.
+`TopologyStore.Set` replaces complete validated generations, so borrowed node
+metadata remains immutable after the short topology read lock. Timeout,
+offline and maintenance filtering, unknown-node rejection, target order,
+result ownership, request count, logical wire, configuration, persistence, and
+public election status behavior are unchanged.
 
 <a id="allocation-free-election-node-updates"></a>
 #### Allocation-Free Election Node Updates
