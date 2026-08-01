@@ -364,6 +364,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct single-task live gRPC dispatch](#direct-single-task-live-grpc-dispatch), 10k writes/313 batches | Generic task grouping: 115.025 ms; 65.82 MB heap; 486,238 allocs | Direct compact payload: 101.061 ms; 55.83 MB heap; 426,213 allocs | 1.143x faster; 9.99 MB lower heap; about 60,025 fewer allocations | Applies only after successful native gRPC conversion; HTTP and conversion fallback retain the established path and are CPU/memory neutral |
 | Current pass | [Deferred single-target live gRPC metadata](#deferred-single-target-live-grpc-metadata), 10k writes/313 batches | Annotated task first: 100.339 ms; 55.84 MB heap; 426,221 allocs | Plan compact payload first: 89.148 ms; 49.04 MB heap; 356,108 allocs | 1.129x faster; 6.80 MB lower heap; about 70,113 fewer allocations | Scoped to synchronous one-target native gRPC; queue, batch, fanout, HTTP, conversion fallback, sequence safety, and wire are unchanged |
 | Current pass | [Borrowed live replication target planning](#borrowed-live-replication-target-planning), 10k writes/313 batches | Cloned route: 84.297 ms; 49.04 MB heap; 356,131 allocs | Borrowed generation: 82.968 ms; 45.92 MB heap; 306,109 allocs | 1.032x paired CPU; 3.13 MB lower heap; about 50,022 fewer allocations | Enabled only with live micro-batching; fixed one-command mode retains its exact planner, while HTTP, queue, storage, wire, and public routing are unchanged |
+| Current pass | [Comparable gRPC stream target identities](#comparable-grpc-stream-target-identities), 10k writes/313 batches | Prefixed string keys: 45.92 MB heap; 306,125 allocs | Comparable session keys: 45.60 MB heap; 286,119 allocs | 1.014x paired CPU without GC; 321 KB lower heap; about 20,006 fewer allocations | Scoped to persistent stream-session maps; generic grouping retains its smaller string key and exact memory profile |
 | Current pass | [Normalized topology-store routing](#normalized-topology-store-routing), one/four shards | Clone/sort all shards: 241.4/505.3 ns; 120/488 heap B; 4/9 allocs | Clone selected shard: 134.3/142.55 ns; 48/80 heap B; 2/2 allocs | 1.80x/3.54x faster; 2.50x/6.10x lower heap; 2x/4.50x fewer allocations | Store topology is already normalized; returned route ownership and generic routing for arbitrary topology values are unchanged |
 | Current pass | [Direct election-key routing](#direct-election-key-routing), healthy one/four shards | Topology snapshot plus active map: 643.95/1,337.5 ns; 680/1,688 heap B; 10/18 allocs | Selected route plus direct candidates: 226.15/263.35 ns; 80/128 heap B; 3/3 allocs | 2.85x/5.08x faster; 8.50x/13.19x lower heap; 3.33x/6x fewer allocations | Timeout, offline, maintenance, failover, topology-generation consistency, ownership, and lock order are unchanged |
 | Current pass | [Generation-based replication target selection](#generation-based-replication-target-selection), 10k routed writes | Full status/maps: 17.482 ms; 17.52 MB heap; 170,000 allocs | Immutable generation/inactive exceptions: 7.626 ms; 6.32 MB heap; 70,000 allocs | 2.29x faster, 2.77x lower heap, 2.43x fewer allocations; complete gRPC 1.098x faster | No cache or stale state; topology/election snapshots, target order, ownership, wire, and persistence are unchanged |
@@ -492,6 +493,7 @@ tree.
 | Transport-wide direct single-task dispatch | The HTTP 10,000-write path saved about 7.88 MB and 30,027 allocations by skipping its outer group slice | Paired HTTP CPU regressed to 0.985x, or 1.5% slower | Narrowed to successful native gRPC conversion; HTTP and conversion fallback retain exact grouping; see [direct single-task live gRPC dispatch](#direct-single-task-live-grpc-dispatch) |
 | Extracted shared replication-task constructor | Kept metadata fallback construction reusable while retaining the one-target native gRPC allocation savings | A loaded loopback HTTP control reported 0.979x paired CPU after the extraction even though allocations were unchanged | Removed before acceptance; the original HTTP planner body is restored, and the scoped [metadata deferral](#deferred-single-target-live-grpc-metadata) calls it only for fanout or fallback |
 | Unconditional borrowed live target planning | Removed five route allocations per command in both batched and fixed-envelope live gRPC modes | The initial fixed one-command-envelope control was 0.990x by paired CPU median despite lower allocation | Narrowed to micro-batched mode; configured one-command mode runs the exact established planner in a separately compiled function; see [borrowed live target planning](#borrowed-live-replication-target-planning) |
+| Comparable target keys in every replication map | Eliminated key concatenation and cut a 64-target/1,024-task grouping control from 1,990 to 966 allocations while improving CPU 1.03x | The 24-byte key raised grouping heap from 770,896 to 781,904 B, or 1.4% | Narrowed to persistent gRPC stream-session maps; generic grouping and digest ordering retain the 16-byte prefixed string; see [comparable stream identities](#comparable-grpc-stream-target-identities) |
 | Direct native packed scan | Focused preparation improved 1.10x with 1.15x lower heap | End-to-end CPU improved only 1.02x, below the 5% gate for a new C ABI | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Single-pass legacy repair | Unordered transfer was 1.07x faster with 1.11x fewer allocations | Wire grew 1.15x; restoring deterministic order made CPU 1.075x slower | Both variants reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -4747,6 +4749,59 @@ remains immutable; full-replica primary order, bucket routing, leader promotion,
 maintenance filtering, target sorting, fingerprinting, fanout, conversion
 fallback metadata, queue behavior, storage, persistence, configuration, and
 public routing results are unchanged.
+
+<a id="comparable-grpc-stream-target-identities"></a>
+#### Comparable gRPC Stream Target Identities
+
+The persistent gRPC stream session looked up the same target twice for every
+live command: once for sticky-fallback state and once for the active stream.
+Each lookup constructed a prefixed `"id:"+ID` or `"addr:"+Address` string, and
+the allocation profile attributed 19,976 objects per 10,000 writes to that
+identity helper. Stream-session maps now use a comparable `{value, isID}` key,
+which borrows the normalized node string and keeps ID and address namespaces
+distinct without concatenation.
+
+The identity test was added and passed against the established representation
+before the change. It verifies that equal IDs remain equal despite address
+changes, address-only targets use address identity, identical ID/address text
+does not collide across namespaces, and target grouping remains unchanged.
+Existing sticky-fallback, session-lifecycle, stream, fanout, and race tests cover
+the map lifecycle and concurrent transport behavior.
+
+```sh
+make run CMD='go test . -run="Test(ReplicationGRPCStreamTargetKey|GroupReplicationTasksByTarget|ReplicationGRPCStream|ReplicationGRPCSessionDefersOptionalMaps)" -count=10'
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationGRPCStreamTargetKey -benchmem -benchtime=5000000x -count=7 -cpu=1'
+make run CMD='go test . -run=NONE -bench=BenchmarkReplicationGRPCStreamTargetLookup -benchmem -benchtime=5000000x -count=7 -cpu=1'
+make run CMD='env GOGC=off /tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 10x BenchmarkReplicationLiveTransport10K/grpc-stream'
+make run CMD='go test . -run=NONE -bench=BenchmarkGroupReplicationTasksByTarget/SixtyFourTargetsOneKTasks/MapOnly -benchmem -benchtime=2000x -count=3 -cpu=1'
+```
+
+| Focused seven-run median | Prefixed string | Comparable fields | Improvement |
+| --- | ---: | ---: | ---: |
+| ID identity construction | 40.24 ns; 16 B; 1 alloc | 2.369 ns; 0 B; 0 alloc | 16.99x faster; allocation eliminated |
+| Address identity construction | 38.87 ns; 24 B; 1 alloc | 2.631 ns; 0 B; 0 alloc | 14.77x faster; allocation eliminated |
+| Construct and look up one stream target | 19.43 ns | 16.91 ns | 1.149x faster; both control keys remain stack-bound |
+
+| Complete 10,000-write stream | Prefixed string | Comparable fields | Improvement |
+| --- | ---: | ---: | ---: |
+| Normal-GC separate CPU median | 82.876121 ms | 82.777262 ms | tied; 1.001x |
+| `GOGC=off` separate CPU median | 78.459083 ms | 78.000030 ms | 1.006x faster |
+| `GOGC=off` paired CPU ratio median | baseline | optimized | 1.014x faster |
+| Normal-GC cumulative heap median | 45,920,508 B | 45,599,126 B | 321,382 B lower |
+| Normal-GC allocation median | 306,125 | 286,119 | 20,006 fewer; 1.070x fewer |
+| Batches and logical payload | about 313 / unchanged | about 313 / unchanged | no protocol change |
+
+The first implementation changed every replication map to the 24-byte
+comparable key. Although the 64-target/1,024-task grouping control improved from
+314,772 to 306,193 ns and removed 1,024 allocations, its heap increased 1.4%
+from 770,896 to 781,904 B because a generic map was deliberately preallocated
+for all 1,024 tasks. That broad version was rejected. The final change is scoped
+to persistent stream-session maps, where keys are reused across commands; the
+generic grouping control is restored exactly to 770,896 B and 1,990 allocations.
+
+Target identity, fallback stickiness, stream reuse and replacement, target
+ordering, HTTP grouping, digest ordering, topology ownership, wire, storage,
+persistence, configuration, and public behavior are unchanged.
 
 <a id="lazy-grpc-session-maps"></a>
 #### Lazy gRPC Session Maps

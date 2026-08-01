@@ -24,10 +24,22 @@ type replicationGRPCSyncSession struct {
 	replicator     *HTTPReplicator
 	ctx            context.Context
 	mu             sync.Mutex
-	targets        map[string]*replicationGRPCStreamTarget
-	fallback       map[string]bool
+	targets        map[replicationGRPCStreamTargetKey]*replicationGRPCStreamTarget
+	fallback       map[replicationGRPCStreamTargetKey]bool
 	stickyFallback bool
 	closed         bool
+}
+
+type replicationGRPCStreamTargetKey struct {
+	value string
+	isID  bool
+}
+
+func grpcStreamTargetKey(target TopologyNode) replicationGRPCStreamTargetKey {
+	if target.ID != "" {
+		return replicationGRPCStreamTargetKey{value: target.ID, isID: true}
+	}
+	return replicationGRPCStreamTargetKey{value: target.Address}
 }
 
 type replicationGRPCStreamTarget struct {
@@ -419,7 +431,7 @@ func (session *replicationGRPCSyncSession) executeReplicationTaskGroups(ctx cont
 }
 
 func (session *replicationGRPCSyncSession) executeReplicationTaskGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {
-	key := replicationTaskTargetKey(group.target)
+	key := grpcStreamTargetKey(group.target)
 	session.mu.Lock()
 	useFallback := session.fallback[key]
 	session.mu.Unlock()
@@ -440,11 +452,11 @@ func (session *replicationGRPCSyncSession) executeReplicationTaskGroup(ctx conte
 	return session.replicator.executeReplicationTaskGroupHTTP(ctx, group)
 }
 
-func (session *replicationGRPCSyncSession) markFallback(key string) {
+func (session *replicationGRPCSyncSession) markFallback(key replicationGRPCStreamTargetKey) {
 	session.mu.Lock()
 	if session.stickyFallback {
 		if session.fallback == nil {
-			session.fallback = make(map[string]bool)
+			session.fallback = make(map[replicationGRPCStreamTargetKey]bool)
 		}
 		session.fallback[key] = true
 	}
@@ -514,7 +526,7 @@ func (session *replicationGRPCSyncSession) sendGroup(ctx context.Context, group 
 }
 
 func (session *replicationGRPCSyncSession) streamTarget(node TopologyNode) (*replicationGRPCStreamTarget, error) {
-	key := replicationTaskTargetKey(node)
+	key := grpcStreamTargetKey(node)
 	session.mu.Lock()
 	if session.closed {
 		session.mu.Unlock()
@@ -579,7 +591,7 @@ func (session *replicationGRPCSyncSession) streamTarget(node TopologyNode) (*rep
 		return existing, nil
 	}
 	if session.targets == nil {
-		session.targets = make(map[string]*replicationGRPCStreamTarget)
+		session.targets = make(map[replicationGRPCStreamTargetKey]*replicationGRPCStreamTarget)
 	}
 	session.targets[key] = target
 	session.mu.Unlock()

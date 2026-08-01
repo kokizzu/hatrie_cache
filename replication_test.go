@@ -487,8 +487,9 @@ func TestReplicationGRPCSessionDefersOptionalMaps(t *testing.T) {
 	if syncSession.targets != nil || syncSession.fallback != nil {
 		t.Fatalf("new sync session maps = targets %v fallback %v, want nil/nil", syncSession.targets, syncSession.fallback)
 	}
-	syncSession.markFallback("node-b")
-	if syncSession.targets != nil || !syncSession.fallback["node-b"] {
+	targetKey := grpcStreamTargetKey(TopologyNode{ID: "node-b"})
+	syncSession.markFallback(targetKey)
+	if syncSession.targets != nil || !syncSession.fallback[targetKey] {
 		t.Fatalf("sync fallback maps = targets %v fallback %v, want nil/marked", syncSession.targets, syncSession.fallback)
 	}
 	syncSession.close()
@@ -497,7 +498,7 @@ func TestReplicationGRPCSessionDefersOptionalMaps(t *testing.T) {
 	}
 
 	liveSession := newReplicationGRPCLiveSession(context.Background(), replicator)
-	liveSession.markFallback("node-b")
+	liveSession.markFallback(targetKey)
 	if liveSession.targets != nil || liveSession.fallback != nil {
 		t.Fatalf("live fallback maps = targets %v fallback %v, want nil/nil", liveSession.targets, liveSession.fallback)
 	}
@@ -4202,6 +4203,32 @@ func TestGroupReplicationTasksByTargetAdaptiveMatchesMapGrouping(t *testing.T) {
 				t.Fatalf("adaptive groups = %#v, want map groups %#v", got, want)
 			}
 		})
+	}
+}
+
+func TestReplicationGRPCStreamTargetKeyPreservesIdentitySemantics(t *testing.T) {
+	idAddressA := TopologyNode{ID: "node-a", Address: "http://address-a"}
+	idAddressB := TopologyNode{ID: "node-a", Address: "http://address-b"}
+	addressOnlyA := TopologyNode{Address: "node-a"}
+	addressOnlyB := TopologyNode{Address: "node-a"}
+	if grpcStreamTargetKey(idAddressA) != grpcStreamTargetKey(idAddressB) {
+		t.Fatal("targets with the same ID must share an identity regardless of address")
+	}
+	if grpcStreamTargetKey(addressOnlyA) != grpcStreamTargetKey(addressOnlyB) {
+		t.Fatal("targets without an ID must use their address identity")
+	}
+	if grpcStreamTargetKey(idAddressA) == grpcStreamTargetKey(addressOnlyA) {
+		t.Fatal("ID and address identities with the same text must remain distinct")
+	}
+
+	tasks := []replicationTask{
+		{target: idAddressA, payload: CacheCommandRequest{Key: "id-a"}},
+		{target: idAddressB, payload: CacheCommandRequest{Key: "id-b"}},
+		{target: addressOnlyA, payload: CacheCommandRequest{Key: "address-a"}},
+	}
+	groups := groupReplicationTasksByTargetMap(tasks)
+	if len(groups) != 2 || len(groups[0].payloads) != 2 || len(groups[1].payloads) != 1 {
+		t.Fatalf("target identity groups = %#v, want two ID payloads and one address payload", groups)
 	}
 }
 

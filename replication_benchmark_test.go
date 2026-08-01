@@ -4016,6 +4016,49 @@ func BenchmarkGroupReplicationTasksByTarget(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationGRPCStreamTargetKey(b *testing.B) {
+	for _, benchmark := range []struct {
+		name   string
+		target TopologyNode
+	}{
+		{name: "ID", target: TopologyNode{ID: "node-b", Address: "http://node-b"}},
+		{name: "Address", target: TopologyNode{Address: "http://node-b"}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationGRPCStreamTargetKeySink = grpcStreamTargetKey(benchmark.target)
+			}
+		})
+	}
+}
+
+var benchmarkReplicationGRPCStreamTargetKeySink = grpcStreamTargetKey(TopologyNode{})
+
+func BenchmarkReplicationGRPCStreamTargetLookup(b *testing.B) {
+	target := TopologyNode{ID: "node-b", Address: "http://node-b"}
+	stringTargets := map[string]int{replicationTaskTargetKey(target): 1}
+	comparableTargets := map[replicationGRPCStreamTargetKey]int{grpcStreamTargetKey(target): 1}
+	for _, benchmark := range []struct {
+		name string
+		run  func() int
+	}{
+		{name: "ConcatenatedString", run: func() int {
+			return stringTargets[replicationTaskTargetKey(target)]
+		}},
+		{name: "ComparableFields", run: func() int {
+			return comparableTargets[grpcStreamTargetKey(target)]
+		}},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for idx := 0; idx < b.N; idx++ {
+				benchmarkReplicationTargetCountSink = benchmark.run()
+			}
+		})
+	}
+}
+
 func BenchmarkSplitReplicationTaskGroupByMaxBytes(b *testing.B) {
 	const payloadCount = 4096
 	const maxBytes = 16 << 10
