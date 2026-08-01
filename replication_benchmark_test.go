@@ -4222,6 +4222,14 @@ func storeLastResultClonedTimingControl(replicator *HTTPReplicator, result Repli
 	replicator.mu.Unlock()
 }
 
+func BenchmarkFinishReplicationResultTiming(b *testing.B) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	b.ReportAllocs()
+	for idx := 0; idx < b.N; idx++ {
+		benchmarkReplicationResultSink = finishReplicationResult(ReplicationResult{}, startedAt)
+	}
+}
+
 func BenchmarkSplitReplicationTaskGroupByMaxBytes(b *testing.B) {
 	const payloadCount = 4096
 	const maxBytes = 16 << 10

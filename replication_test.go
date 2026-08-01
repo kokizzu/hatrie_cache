@@ -1279,6 +1279,26 @@ func TestReplicationLastResultTimingOwnershipIsIsolated(t *testing.T) {
 	}
 }
 
+func TestFinishReplicationResultTimingPointersAreIndependent(t *testing.T) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	first := finishReplicationResult(ReplicationResult{}, startedAt)
+	second := finishReplicationResult(ReplicationResult{}, startedAt)
+	assertReplicationResultTiming(t, first)
+	assertReplicationResultTiming(t, second)
+	if first.StartedAt == first.FinishedAt {
+		t.Fatal("started and finished timestamps share one pointer")
+	}
+	wantFirstFinishedAt := *first.FinishedAt
+	wantSecondStartedAt := *second.StartedAt
+	*first.StartedAt = time.Time{}
+	if !first.FinishedAt.Equal(wantFirstFinishedAt) {
+		t.Fatalf("finished timestamp after started mutation = %s, want %s", first.FinishedAt, wantFirstFinishedAt)
+	}
+	if !second.StartedAt.Equal(wantSecondStartedAt) {
+		t.Fatalf("second result after first mutation = %s, want %s", second.StartedAt, wantSecondStartedAt)
+	}
+}
+
 func TestReplicationHealthScoresQueueState(t *testing.T) {
 	healthy := withReplicationHealth(ReplicationResult{
 		Queue: &ReplicationQueueStats{Enabled: true, Depth: 0, Capacity: 8},

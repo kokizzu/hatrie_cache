@@ -2458,8 +2458,9 @@ func finishReplicationResult(result ReplicationResult, startedAt time.Time) Repl
 		startedAt = time.Now().UTC()
 	}
 	finishedAt := time.Now().UTC()
-	result.StartedAt = cloneTimePtr(&startedAt)
-	result.FinishedAt = cloneTimePtr(&finishedAt)
+	timestamps := &[2]time.Time{startedAt, finishedAt}
+	result.StartedAt = &timestamps[0]
+	result.FinishedAt = &timestamps[1]
 	result.DurationMillis = finishedAt.Sub(startedAt).Milliseconds()
 	if result.DurationMillis < 0 {
 		result.DurationMillis = 0
