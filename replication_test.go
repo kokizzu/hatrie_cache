@@ -358,6 +358,129 @@ func TestReplicationGRPCStreamLiveMultiTargetFallbackPreservesMetadata(t *testin
 	}
 }
 
+func TestLiveReplicationTargetPlanningMatchesEstablishedPlanner(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	newReplicator := func(t *testing.T, topologyValue ClusterTopology, self string, withElection bool) (*HTTPReplicator, *TopologyStore, *ElectionStore) {
+		t.Helper()
+		topology, err := NewTopologyStore(topologyValue)
+		if err != nil {
+			t.Fatalf("NewTopologyStore() error = %v", err)
+		}
+		var election *ElectionStore
+		if withElection {
+			election = NewElectionStore(topology, ElectionOptions{Timeout: time.Second, Now: func() time.Time { return now }})
+		}
+		return &HTTPReplicator{self: self, topology: topology, election: election}, topology, election
+	}
+	assertMatches := func(t *testing.T, replicator *HTTPReplicator, ctx context.Context, request CacheCommandRequest, response CacheCommandResponse) {
+		t.Helper()
+		wantResult, wantKind, wantTargets, wantOK := replicator.planReplicationTargets(ctx, request, response)
+		gotResult, gotKind, gotTargets, gotOK := replicator.planLiveReplicationTargets(ctx, request, response)
+		gotTargetValues := liveReplicationTargetSelectionValues(gotTargets)
+		if gotOK != wantOK || gotKind != wantKind || !reflect.DeepEqual(gotResult, wantResult) || !reflect.DeepEqual(gotTargetValues, wantTargets) {
+			t.Fatalf("live target plan = %#v/%v/%#v/%v, want %#v/%v/%#v/%v", gotResult, gotKind, gotTargetValues, gotOK, wantResult, wantKind, wantTargets, wantOK)
+		}
+		if gotOK && gotTargets.fingerprint != replicator.topology.Fingerprint() {
+			t.Fatalf("live target fingerprint = %q, want %q", gotTargets.fingerprint, replicator.topology.Fingerprint())
+		}
+	}
+
+	request := CacheCommandRequest{Command: "SETSTR", Key: "live:route", Value: "value"}
+	response := CacheCommandResponse{OK: true}
+	sharded := ClusterTopology{
+		Version: 1,
+		Self:    "node-a",
+		Nodes: []TopologyNode{
+			{ID: "node-a", Address: "http://node-a"},
+			{ID: "node-b", Address: "http://node-b"},
+			{ID: "node-c", Address: "http://node-c"},
+		},
+		Shards: []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}}},
+	}
+
+	t.Run("healthy single target", func(t *testing.T) {
+		replicator, _, _ := newReplicator(t, sharded, "node-a", true)
+		assertMatches(t, replicator, context.Background(), request, response)
+	})
+	t.Run("fanout", func(t *testing.T) {
+		value := sharded
+		value.Shards = []TopologyShard{{ID: 0, Primary: "node-a", Replicas: []string{"node-c", "node-b"}}}
+		replicator, _, _ := newReplicator(t, value, "node-a", true)
+		assertMatches(t, replicator, context.Background(), request, response)
+	})
+	t.Run("offline target", func(t *testing.T) {
+		replicator, _, election := newReplicator(t, sharded, "node-a", true)
+		if err := election.MarkOffline("node-b"); err != nil {
+			t.Fatalf("MarkOffline(node-b) error = %v", err)
+		}
+		assertMatches(t, replicator, context.Background(), request, response)
+	})
+	t.Run("promoted remote leader", func(t *testing.T) {
+		replicator, _, election := newReplicator(t, sharded, "node-a", true)
+		if err := election.MarkOffline("node-a"); err != nil {
+			t.Fatalf("MarkOffline(node-a) error = %v", err)
+		}
+		assertMatches(t, replicator, context.Background(), request, response)
+	})
+	t.Run("maintenance target", func(t *testing.T) {
+		value := sharded
+		value.Nodes = append([]TopologyNode(nil), sharded.Nodes...)
+		value.Nodes[1].Maintenance = true
+		replicator, _, _ := newReplicator(t, value, "node-a", true)
+		assertMatches(t, replicator, context.Background(), request, response)
+	})
+	t.Run("without election", func(t *testing.T) {
+		value := sharded
+		value.Nodes = append([]TopologyNode(nil), sharded.Nodes...)
+		value.Nodes[1].Maintenance = true
+		replicator, _, _ := newReplicator(t, value, "node-a", false)
+		assertMatches(t, replicator, context.Background(), request, response)
+	})
+	t.Run("full replica", func(t *testing.T) {
+		replicator, _, _ := newReplicator(t, ClusterTopology{
+			Version: 1,
+			Mode:    TopologyModeFullReplica,
+			Self:    "node-a",
+			Nodes: []TopologyNode{
+				{ID: "node-b", Address: "http://node-b"},
+				{ID: "node-a", Address: "http://node-a"},
+			},
+		}, "node-a", true)
+		assertMatches(t, replicator, context.Background(), request, response)
+	})
+	t.Run("bucket range", func(t *testing.T) {
+		value := sharded
+		value.BucketCount = 16
+		value.Shards = []TopologyShard{
+			{ID: 0, Primary: "node-a", Replicas: []string{"node-b"}},
+			{ID: 1, Primary: "node-c", Replicas: []string{"node-a"}},
+		}
+		value.BucketRanges = []TopologyBucketRange{{Start: 0, End: 7, Shard: 0}, {Start: 8, End: 15, Shard: 1}}
+		replicator, topology, _ := newReplicator(t, value, "node-a", true)
+		bucketRequest := request
+		bucketRequest.Key = keyForShard(t, topology, 0)
+		assertMatches(t, replicator, context.Background(), bucketRequest, response)
+	})
+	t.Run("terminal requests", func(t *testing.T) {
+		replicator, _, _ := newReplicator(t, sharded, "node-a", true)
+		assertMatches(t, replicator, context.Background(), CacheCommandRequest{Command: "GET", Key: request.Key}, response)
+		assertMatches(t, replicator, context.Background(), request, CacheCommandResponse{OK: false})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		assertMatches(t, replicator, ctx, request, response)
+	})
+}
+
+func liveReplicationTargetSelectionValues(selection liveReplicationTargetSelection) []TopologyNode {
+	if len(selection.multiple) != 0 {
+		return selection.multiple
+	}
+	if selection.single.ID != "" {
+		return []TopologyNode{selection.single}
+	}
+	return nil
+}
+
 func TestReplicationGRPCSessionDefersOptionalMaps(t *testing.T) {
 	replicator := &HTTPReplicator{}
 	syncSession := newReplicationGRPCSyncSession(context.Background(), replicator)

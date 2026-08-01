@@ -2439,6 +2439,69 @@ func BenchmarkReplicationCommandTransportDispatch(b *testing.B) {
 	})
 }
 
+func BenchmarkLiveReplicationTargetPlanning(b *testing.B) {
+	for _, targetCount := range []int{1, 4, 16} {
+		b.Run(strconv.Itoa(targetCount)+"Targets", func(b *testing.B) {
+			nodes := make([]TopologyNode, targetCount+1)
+			replicas := make([]string, targetCount)
+			for idx := range nodes {
+				nodeID := fmt.Sprintf("node-%03d", idx)
+				nodes[idx] = TopologyNode{ID: nodeID, Address: "http://" + nodeID}
+				if idx > 0 {
+					replicas[idx-1] = nodeID
+				}
+			}
+			topology, err := NewTopologyStore(ClusterTopology{
+				Version: 1,
+				Self:    "node-000",
+				Nodes:   nodes,
+				Shards:  []TopologyShard{{ID: 0, Primary: "node-000", Replicas: replicas}},
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			replicator := &HTTPReplicator{
+				self:     "node-000",
+				topology: topology,
+				election: NewElectionStore(topology, ElectionOptions{}),
+			}
+			request := CacheCommandRequest{Command: "SETSTR", Key: "live:route", Value: "value"}
+			response := CacheCommandResponse{OK: true}
+			for _, benchmark := range []struct {
+				name string
+				run  func() int
+			}{
+				{name: "Established", run: func() int {
+					_, _, targets, ok := replicator.planReplicationTargets(context.Background(), request, response)
+					if !ok {
+						return 0
+					}
+					return len(targets)
+				}},
+				{name: "DirectGeneration", run: func() int {
+					_, _, targets, ok := replicator.planLiveReplicationTargets(context.Background(), request, response)
+					if !ok {
+						return 0
+					}
+					if len(targets.multiple) != 0 {
+						return len(targets.multiple)
+					}
+					return 1
+				}},
+			} {
+				b.Run(benchmark.name, func(b *testing.B) {
+					b.ReportAllocs()
+					for idx := 0; idx < b.N; idx++ {
+						benchmarkReplicationTargetCountSink = benchmark.run()
+					}
+				})
+			}
+		})
+	}
+}
+
+var benchmarkReplicationTargetCountSink int
+
 func replicateCommandEstablishedControl(replicator *HTTPReplicator, ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
 	result, tasks := replicator.planReplication(ctx, trie, request, response)
 	if len(tasks) == 0 {

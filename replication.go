@@ -246,6 +246,32 @@ type replicationTask struct {
 	payloadBytes int
 }
 
+type liveReplicationTargetSelection struct {
+	single      TopologyNode
+	multiple    []TopologyNode
+	fingerprint string
+}
+
+func (selection *liveReplicationTargetSelection) append(target TopologyNode, capacity int) {
+	if selection.single.ID == "" {
+		selection.single = target
+		return
+	}
+	if selection.multiple == nil {
+		selection.multiple = make([]TopologyNode, 0, capacity)
+		selection.multiple = append(selection.multiple, selection.single)
+	}
+	selection.multiple = append(selection.multiple, target)
+}
+
+func (selection *liveReplicationTargetSelection) sortMultiple() {
+	if len(selection.multiple) > 1 {
+		slices.SortFunc(selection.multiple, func(a, b TopologyNode) int {
+			return strings.Compare(a.ID, b.ID)
+		})
+	}
+}
+
 type plannedReplicationBatch struct {
 	last    ReplicationResult
 	tasks   []replicationTask
@@ -661,6 +687,9 @@ func (replicator *HTTPReplicator) replicateCommand(ctx context.Context, trie *Ha
 }
 
 func (replicator *HTTPReplicator) replicateLiveCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	if replicator.grpcLiveBatchMaxCommands != 1 {
+		return replicator.replicateBatchedLiveCommand(ctx, trie, request, response)
+	}
 	if trie == nil {
 		return ReplicationResult{
 			Command: normalizedCommand(request.Command),
@@ -685,6 +714,38 @@ func (replicator *HTTPReplicator) replicateLiveCommand(ctx context.Context, trie
 		}
 	}
 	_, tasks := replicator.tasksForReplicationPayload(result, targets, payload)
+	return replicator.executeReplicationTasks(ctx, result, tasks)
+}
+
+func (replicator *HTTPReplicator) replicateBatchedLiveCommand(ctx context.Context, trie *HatTrie, request CacheCommandRequest, response CacheCommandResponse) ReplicationResult {
+	if trie == nil {
+		return ReplicationResult{
+			Command: normalizedCommand(request.Command),
+			Key:     strings.TrimSpace(request.Key),
+			Skipped: true,
+			Reason:  "trie is not configured",
+		}
+	}
+	result, kind, targets, ok := replicator.planLiveReplicationTargets(ctx, request, response)
+	if !ok {
+		return result
+	}
+	payload, ok := replicationCommandPayload(trie, result.Key, kind)
+	if !ok {
+		result.Skipped = true
+		result.Reason = "no local value to replicate"
+		return result
+	}
+	if len(targets.multiple) == 0 {
+		if direct, handled := replicator.executeSingleLiveReplicationTaskWithFingerprint(ctx, result, replicationTask{target: targets.single, payload: payload}, targets.fingerprint); handled {
+			return direct
+		}
+		tasks := make([]replicationTask, 0, 1)
+		tasks = replicator.appendReplicationTasksForTargetsWithFingerprint(tasks, []TopologyNode{targets.single}, payload, targets.fingerprint)
+		return replicator.executeReplicationTasks(ctx, result, tasks)
+	}
+	tasks := make([]replicationTask, 0, len(targets.multiple))
+	tasks = replicator.appendReplicationTasksForTargetsWithFingerprint(tasks, targets.multiple, payload, targets.fingerprint)
 	return replicator.executeReplicationTasks(ctx, result, tasks)
 }
 
@@ -1220,6 +1281,47 @@ func (replicator *HTTPReplicator) planReplicationTargets(ctx context.Context, re
 	return result, kind, targets, true
 }
 
+func (replicator *HTTPReplicator) planLiveReplicationTargets(ctx context.Context, request CacheCommandRequest, response CacheCommandResponse) (ReplicationResult, replicationPayloadKind, liveReplicationTargetSelection, bool) {
+	ctx = replicationContext(ctx)
+	command := normalizedCommand(request.Command)
+	key := strings.TrimSpace(request.Key)
+	result := ReplicationResult{Command: command, Key: key}
+	if replicator == nil {
+		result.Skipped = true
+		result.Reason = "replication is not configured"
+		return result, replicationPayloadNone, liveReplicationTargetSelection{}, false
+	}
+	if err := ctx.Err(); err != nil {
+		result.Skipped = true
+		result.Reason = err.Error()
+		return result, replicationPayloadNone, liveReplicationTargetSelection{}, false
+	}
+	kind := replicationPayloadKindFor(request, response)
+	if kind == replicationPayloadNone {
+		result.Skipped = true
+		result.Reason = "command is not replicated"
+		return result, kind, liveReplicationTargetSelection{}, false
+	}
+
+	leader, targets, routed := replicator.liveReplicationTargetsForKey(key)
+	if !routed {
+		result.Skipped = true
+		result.Reason = "topology cannot route key"
+		return result, kind, liveReplicationTargetSelection{}, false
+	}
+	if replicator.self != "" && leader != "" && leader != replicator.self {
+		result.Skipped = true
+		result.Reason = "local node is not elected leader"
+		return result, kind, liveReplicationTargetSelection{}, false
+	}
+	if targets.single.ID == "" {
+		result.Skipped = true
+		result.Reason = "no remote replication targets"
+		return result, kind, liveReplicationTargetSelection{}, false
+	}
+	return result, kind, targets, true
+}
+
 func (replicator *HTTPReplicator) tasksForReplicationPayload(result ReplicationResult, targets []TopologyNode, payload CacheCommandRequest) (ReplicationResult, []replicationTask) {
 	tasks := make([]replicationTask, 0, len(targets))
 	return result, replicator.appendReplicationTasksForTargets(tasks, targets, payload)
@@ -1343,6 +1445,14 @@ func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, r
 }
 
 func (replicator *HTTPReplicator) executeSingleLiveReplicationTask(ctx context.Context, result ReplicationResult, task replicationTask) (ReplicationResult, bool) {
+	fingerprint := ""
+	if replicator.topology != nil {
+		fingerprint = replicator.topology.Fingerprint()
+	}
+	return replicator.executeSingleLiveReplicationTaskWithFingerprint(ctx, result, task, fingerprint)
+}
+
+func (replicator *HTTPReplicator) executeSingleLiveReplicationTaskWithFingerprint(ctx context.Context, result ReplicationResult, task replicationTask, fingerprint string) (ReplicationResult, bool) {
 	payload, err := liveReplicationGRPCPayload(task.payload)
 	if err != nil {
 		if !replicator.disableHTTPFallback {
@@ -1351,10 +1461,6 @@ func (replicator *HTTPReplicator) executeSingleLiveReplicationTask(ctx context.C
 		result.Queued = false
 		result.Targets = []ReplicationTargetResult{{Node: task.target.ID, Address: task.target.GRPCAddress, Error: err.Error()}}
 		return result, true
-	}
-	fingerprint := ""
-	if replicator.topology != nil {
-		fingerprint = replicator.topology.Fingerprint()
 	}
 	result.Queued = false
 	result.Targets = make([]ReplicationTargetResult, 1)
@@ -2816,6 +2922,79 @@ func appendPrecomputedNormalizedReplicationTargets(targets []TopologyNode, owner
 		})
 	}
 	return targets
+}
+
+func (replicator *HTTPReplicator) liveReplicationTargetsForKey(key string) (string, liveReplicationTargetSelection, bool) {
+	if replicator == nil || replicator.topology == nil {
+		return "", liveReplicationTargetSelection{}, false
+	}
+	topology, fingerprint := replicator.topology.replicationRoutingGeneration()
+	selection := liveReplicationTargetSelection{fingerprint: fingerprint}
+	if len(topology.Nodes) == 0 {
+		return "", selection, false
+	}
+	filterInactive := replicator.election != nil
+	var inactive map[string]bool
+	if filterInactive {
+		inactive = replicator.election.inactiveNodesSnapshot(topology)
+	}
+	leader := ""
+
+	if topology.Mode == TopologyModeFullReplica {
+		primary := topology.Self
+		if primary == "" {
+			primary = topology.Nodes[0].ID
+		}
+		leader = appendLiveReplicationCandidate(&selection, topology.Nodes, inactive, filterInactive, replicator.self, primary, len(topology.Nodes), leader)
+		for _, node := range topology.Nodes {
+			if node.ID != primary {
+				leader = appendLiveReplicationCandidate(&selection, topology.Nodes, inactive, filterInactive, replicator.self, node.ID, len(topology.Nodes), leader)
+			}
+		}
+		selection.sortMultiple()
+		return leader, selection, true
+	}
+
+	shards := topology.Shards
+	if len(shards) == 0 {
+		return "", selection, false
+	}
+	shardIndex := 0
+	if topology.BucketCount > 0 {
+		bucket := hashKeyToBucket(key, topology.BucketCount)
+		selected, ok := replicationRoutingShardIndexForBucket(topology, bucket, shards)
+		if !ok {
+			return "", selection, false
+		}
+		shardIndex = selected
+	} else {
+		shardIndex = hashKeyToShardIndex(key, len(shards))
+	}
+	shard := shards[shardIndex]
+	capacity := 1 + len(shard.Replicas)
+	leader = appendLiveReplicationCandidate(&selection, topology.Nodes, inactive, filterInactive, replicator.self, shard.Primary, capacity, leader)
+	for _, replica := range shard.Replicas {
+		leader = appendLiveReplicationCandidate(&selection, topology.Nodes, inactive, filterInactive, replicator.self, replica, capacity, leader)
+	}
+	selection.sortMultiple()
+	return leader, selection, true
+}
+
+func appendLiveReplicationCandidate(selection *liveReplicationTargetSelection, nodes []TopologyNode, inactive map[string]bool, filterInactive bool, self string, nodeID string, capacity int, leader string) string {
+	if filterInactive && inactive[nodeID] {
+		return leader
+	}
+	if leader == "" {
+		leader = nodeID
+	}
+	if nodeID == self {
+		return leader
+	}
+	node, ok := normalizedTopologyNode(nodes, nodeID)
+	if ok {
+		selection.append(node, capacity)
+	}
+	return leader
 }
 
 func (replicator *HTTPReplicator) replicationTargets(route ElectionKeyRoute) []TopologyNode {
