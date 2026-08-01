@@ -1251,6 +1251,34 @@ func assertReplicationResultTiming(t *testing.T, result ReplicationResult) {
 	}
 }
 
+func TestReplicationLastResultTimingOwnershipIsIsolated(t *testing.T) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	finishedAt := startedAt.Add(25 * time.Millisecond)
+	wantStartedAt := startedAt
+	wantFinishedAt := finishedAt
+	replicator := &HTTPReplicator{}
+	replicator.storeLastResult(ReplicationResult{StartedAt: &startedAt, FinishedAt: &finishedAt})
+
+	startedAt = time.Time{}
+	finishedAt = time.Time{}
+	first := replicator.LastResult()
+	if first.StartedAt == nil || first.FinishedAt == nil || !first.StartedAt.Equal(wantStartedAt) || !first.FinishedAt.Equal(wantFinishedAt) {
+		t.Fatalf("stored timing = %v/%v, want %s/%s", first.StartedAt, first.FinishedAt, wantStartedAt, wantFinishedAt)
+	}
+	*first.StartedAt = time.Time{}
+	*first.FinishedAt = time.Time{}
+	second := replicator.LastResult()
+	if second.StartedAt == nil || second.FinishedAt == nil || !second.StartedAt.Equal(wantStartedAt) || !second.FinishedAt.Equal(wantFinishedAt) {
+		t.Fatalf("timing after returned-pointer mutation = %v/%v, want %s/%s", second.StartedAt, second.FinishedAt, wantStartedAt, wantFinishedAt)
+	}
+
+	replicator.storeLastResult(ReplicationResult{})
+	cleared := replicator.LastResult()
+	if cleared.StartedAt != nil || cleared.FinishedAt != nil {
+		t.Fatalf("cleared timing = %v/%v, want nil/nil", cleared.StartedAt, cleared.FinishedAt)
+	}
+}
+
 func TestReplicationHealthScoresQueueState(t *testing.T) {
 	healthy := withReplicationHealth(ReplicationResult{
 		Queue: &ReplicationQueueStats{Enabled: true, Depth: 0, Capacity: 8},

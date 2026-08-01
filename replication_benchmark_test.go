@@ -4059,6 +4059,84 @@ func BenchmarkReplicationGRPCStreamTargetLookup(b *testing.B) {
 	}
 }
 
+func BenchmarkReplicationLastResultTimingOwnership(b *testing.B) {
+	startedAt := time.Unix(1_700_000_000, 123).UTC()
+	finishedAt := startedAt.Add(25 * time.Millisecond)
+	result := ReplicationResult{
+		StartedAt:  &startedAt,
+		FinishedAt: &finishedAt,
+		Targets:    []ReplicationTargetResult{{Node: "node-b", OK: true, Status: 200}},
+	}
+	b.Run("Store", func(b *testing.B) {
+		replicator := &HTTPReplicator{}
+		b.ReportAllocs()
+		for idx := 0; idx < b.N; idx++ {
+			replicator.storeLastResult(result)
+		}
+	})
+	b.Run("Read", func(b *testing.B) {
+		replicator := &HTTPReplicator{}
+		replicator.storeLastResult(result)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			benchmarkReplicationResultSink = replicator.LastResult()
+		}
+	})
+	b.Run("StoreAlternating", func(b *testing.B) {
+		baseline := &HTTPReplicator{}
+		candidate := &HTTPReplicator{}
+		var baselineDuration, candidateDuration time.Duration
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			candidateFirst := idx&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if candidateFirst == (pass == 0) {
+					candidate.storeLastResult(result)
+					candidateDuration += time.Since(started)
+				} else {
+					storeLastResultClonedTimingControl(baseline, result)
+					baselineDuration += time.Since(started)
+				}
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(baselineDuration.Nanoseconds())/float64(b.N), "cloned_ns/store")
+		b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "retained_ns/store")
+	})
+	b.Run("ReadAlternating", func(b *testing.B) {
+		baseline := &HTTPReplicator{}
+		candidate := &HTTPReplicator{}
+		storeLastResultClonedTimingControl(baseline, result)
+		candidate.storeLastResult(result)
+		var baselineDuration, candidateDuration time.Duration
+		b.ResetTimer()
+		for idx := 0; idx < b.N; idx++ {
+			candidateFirst := idx&1 != 0
+			for pass := 0; pass < 2; pass++ {
+				started := time.Now()
+				if candidateFirst == (pass == 0) {
+					benchmarkReplicationResultSink = candidate.LastResult()
+					candidateDuration += time.Since(started)
+				} else {
+					benchmarkReplicationResultSink = baseline.LastResult()
+					baselineDuration += time.Since(started)
+				}
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(baselineDuration.Nanoseconds())/float64(b.N), "cloned_ns/read")
+		b.ReportMetric(float64(candidateDuration.Nanoseconds())/float64(b.N), "retained_ns/read")
+	})
+}
+
+func storeLastResultClonedTimingControl(replicator *HTTPReplicator, result ReplicationResult) {
+	replicator.mu.Lock()
+	replicator.last = cloneReplicationResult(result)
+	replicator.mu.Unlock()
+}
+
 func BenchmarkSplitReplicationTaskGroupByMaxBytes(b *testing.B) {
 	const payloadCount = 4096
 	const maxBytes = 16 << 10

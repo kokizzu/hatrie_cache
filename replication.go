@@ -2426,7 +2426,31 @@ func (replicator *HTTPReplicator) storeLastResult(result ReplicationResult) {
 	}
 	replicator.mu.Lock()
 	defer replicator.mu.Unlock()
+	hasStarted := result.StartedAt != nil
+	hasFinished := result.FinishedAt != nil
+	startedAt := replicator.last.StartedAt
+	if hasStarted {
+		if startedAt == nil {
+			startedAt = new(time.Time)
+		}
+		*startedAt = *result.StartedAt
+	}
+	finishedAt := replicator.last.FinishedAt
+	if hasFinished {
+		if finishedAt == nil {
+			finishedAt = new(time.Time)
+		}
+		*finishedAt = *result.FinishedAt
+	}
+	result.StartedAt = nil
+	result.FinishedAt = nil
 	replicator.last = cloneReplicationResult(result)
+	if hasStarted {
+		replicator.last.StartedAt = startedAt
+	}
+	if hasFinished {
+		replicator.last.FinishedAt = finishedAt
+	}
 }
 
 func finishReplicationResult(result ReplicationResult, startedAt time.Time) ReplicationResult {
