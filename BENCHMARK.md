@@ -361,6 +361,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Allocate-after-grouping live gRPC](#pipelined-live-grpc-replication), 10k writes | 154.265 ms; 2,959 batches; 353.63 MB heap; 2,037,671 allocs | 126.893 ms; 2,305 batches; 303.23 MB heap; 940,900 allocs | 1.22x faster, 1.28x fewer batches, 1.17x lower heap, 2.17x fewer allocs | Topology updates compute their fingerprint once; requests retain payload references until ack |
 | Current pass | [Lazy gRPC session maps](#lazy-grpc-session-maps), unused create-and-close lifecycle | Eager live/sync: 170.3/175.7 ns; 208 heap B; 4 allocs | Lazy live/sync: 57.10/57.88 ns; 64 heap B; 1 alloc | 2.98x-3.04x faster, 3.25x lower heap, 4x fewer allocations | First successful stream and actual sticky fallback allocate their required maps; live sessions never allocate sticky fallback state |
 | Current pass | [Direct single-target gRPC sync dispatch](#direct-single-target-grpc-sync-dispatch), one task group | Generic grouping: 569.1 ns; 808 heap B; 8 allocs | Direct result slot: 426.8 ns; 384 heap B; 4 allocs | 1.33x faster, 2.10x lower heap, 2x fewer allocations | Applies only to exactly one group; repeated-target and multi-target controls retain identical heap/allocations and CPU within 1.1% |
+| Current pass | [Direct single-task live gRPC dispatch](#direct-single-task-live-grpc-dispatch), 10k writes/313 batches | Generic task grouping: 115.025 ms; 65.82 MB heap; 486,238 allocs | Direct compact payload: 101.061 ms; 55.83 MB heap; 426,213 allocs | 1.143x faster; 9.99 MB lower heap; about 60,025 fewer allocations | Applies only after successful native gRPC conversion; HTTP and conversion fallback retain the established path and are CPU/memory neutral |
 | Current pass | [Normalized topology-store routing](#normalized-topology-store-routing), one/four shards | Clone/sort all shards: 241.4/505.3 ns; 120/488 heap B; 4/9 allocs | Clone selected shard: 134.3/142.55 ns; 48/80 heap B; 2/2 allocs | 1.80x/3.54x faster; 2.50x/6.10x lower heap; 2x/4.50x fewer allocations | Store topology is already normalized; returned route ownership and generic routing for arbitrary topology values are unchanged |
 | Current pass | [Direct election-key routing](#direct-election-key-routing), healthy one/four shards | Topology snapshot plus active map: 643.95/1,337.5 ns; 680/1,688 heap B; 10/18 allocs | Selected route plus direct candidates: 226.15/263.35 ns; 80/128 heap B; 3/3 allocs | 2.85x/5.08x faster; 8.50x/13.19x lower heap; 3.33x/6x fewer allocations | Timeout, offline, maintenance, failover, topology-generation consistency, ownership, and lock order are unchanged |
 | Current pass | [Generation-based replication target selection](#generation-based-replication-target-selection), 10k routed writes | Full status/maps: 17.482 ms; 17.52 MB heap; 170,000 allocs | Immutable generation/inactive exceptions: 7.626 ms; 6.32 MB heap; 70,000 allocs | 2.29x faster, 2.77x lower heap, 2.43x fewer allocations; complete gRPC 1.098x faster | No cache or stale state; topology/election snapshots, target order, ownership, wire, and persistence are unchanged |
@@ -486,6 +487,7 @@ tree.
 | Ten-page replication aggregation | Reduced request count beyond the retained two-page cap | Could stage ten unusually large pages before splitting | Removed to preserve bounded memory; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Copying replication arena | Shared value storage but copied/reconstructed every key during protobuf sizing and writing | The paired 10k end-to-end median was about 1.09x slower | Replaced by direct immutable key references; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Shared-loop single-target digest branch | Removed the target map for one target without a separate scan loop | The added per-key branch made the immediate four-target control 1.8% slower | Replaced by caller-level selection; the [direct single-target digest inventory](#direct-single-target-digest-inventory) leaves the multi-target function unchanged |
+| Transport-wide direct single-task dispatch | The HTTP 10,000-write path saved about 7.88 MB and 30,027 allocations by skipping its outer group slice | Paired HTTP CPU regressed to 0.985x, or 1.5% slower | Narrowed to successful native gRPC conversion; HTTP and conversion fallback retain exact grouping; see [direct single-task live gRPC dispatch](#direct-single-task-live-grpc-dispatch) |
 | Direct native packed scan | Focused preparation improved 1.10x with 1.15x lower heap | End-to-end CPU improved only 1.02x, below the 5% gate for a new C ABI | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Single-pass legacy repair | Unordered transfer was 1.07x faster with 1.11x fewer allocations | Wire grew 1.15x; restoring deterministic order made CPU 1.075x slower | Both variants reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
 | Exact protobuf batch coalescing | Halved requests and sender allocations improved 1.44x | Receiver decode was 1.09x slower, largest body doubled, and combined CPU was 1.012x slower | Reverted; see [replication descriptor optimizations](#replication-descriptor-optimizations) |
@@ -4594,6 +4596,44 @@ payload bytes until the acknowledgement is delivered. This removes duplicate
 per-caller protobuf envelopes without copying values. Topology reloads pay the
 fingerprint cost once in `Set`; ordinary reads remain protected by the store's
 read lock.
+
+<a id="direct-single-task-live-grpc-dispatch"></a>
+#### Direct Single-Task Live gRPC Dispatch
+
+An ordinary one-target write previously became a one-element task slice, then
+allocated a group slice plus one-element payload, key, and byte-estimate slices.
+The live gRPC adapter immediately discarded those generic views and allocated
+the compact stream payload it actually needed. Successful one-task native gRPC
+conversion now validates the command and constructs that compact payload
+directly. Multi-target writes and batches still use generic grouping.
+
+The first candidate applied direct dispatch to HTTP as well. It saved about
+7.88 MB and 30,027 allocations per 10,000 requests, but paired CPU regressed to
+0.985x, or 1.5% slower. That variant was removed. HTTP now takes the exact
+established grouping branch, as does a gRPC payload that needs configurable
+HTTP conversion fallback. A focused policy test proves enabled fallback is
+left unhandled for normal grouping and disabled fallback returns the same
+target-addressed conversion error.
+
+```sh
+make run CMD='go test . -run="Test(ReplicationGRPCStream|SingleLiveReplicationTaskPreservesConversionFallbackPolicy)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 5x BenchmarkReplicationLiveTransport10K/^grpc-stream$'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 10 7 1x BenchmarkReplicationLiveTransport10K/^http$'
+```
+
+| 10,000 live writes, paired control | Generic one-task grouping | Scoped direct gRPC | Improvement |
+| --- | ---: | ---: | ---: |
+| Native gRPC CPU, 313 batches | 115.025140 ms | 101.060743 ms | 1.143x faster |
+| Native gRPC cumulative heap | 65,821,067 B | 55,833,195 B | 9,987,872 B lower; 1.18x lower |
+| Native gRPC allocations | 486,238 | 426,213 | about 60,025 fewer; 1.14x fewer |
+| HTTP CPU | 1.005211 s | 1.005422 s | 0.9996x; neutral within 0.04% |
+| HTTP cumulative heap/allocations | 197,943,640 B / 2,074,399 | 198,102,152 B / 2,074,430 | run noise; unchanged code path |
+| Batch count and logical wire | unchanged | unchanged | no protocol change |
+
+The compact payload retains the same immutable binary value until its stream
+acknowledgement. Sequence assignment, topology fingerprint, timeout, target
+result, HTTP fallback, batching limits, request ownership, wire, storage,
+configuration, and public behavior are unchanged.
 
 <a id="lazy-grpc-session-maps"></a>
 #### Lazy gRPC Session Maps

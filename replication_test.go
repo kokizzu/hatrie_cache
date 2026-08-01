@@ -5412,6 +5412,26 @@ func replicationRoutingNode(tb testing.TB, routing replicationRoutingSnapshot, n
 	return node
 }
 
+func TestSingleLiveReplicationTaskPreservesConversionFallbackPolicy(t *testing.T) {
+	task := replicationTask{
+		target:  TopologyNode{ID: "node-b", Address: "http://node-b", GRPCAddress: "grpc-node-b"},
+		payload: CacheCommandRequest{Command: replicationSetCompactCommand, Key: "empty-value"},
+	}
+	initial := ReplicationResult{Command: "SETSTR", Key: "empty-value"}
+
+	replicator := &HTTPReplicator{disableHTTPFallback: false}
+	result, handled := replicator.executeSingleLiveReplicationTask(context.Background(), initial, task)
+	if handled || !reflect.DeepEqual(result, initial) {
+		t.Fatalf("enabled fallback = %#v/%v, want unchanged result and grouped HTTP fallback", result, handled)
+	}
+
+	replicator.disableHTTPFallback = true
+	result, handled = replicator.executeSingleLiveReplicationTask(context.Background(), initial, task)
+	if !handled || len(result.Targets) != 1 || result.Targets[0].Node != "node-b" || result.Targets[0].Address != "grpc-node-b" || !strings.Contains(result.Targets[0].Error, "compact live replication value is empty") {
+		t.Fatalf("disabled fallback = %#v/%v, want direct conversion error", result, handled)
+	}
+}
+
 func TestReplicationRoutingSnapshotMatchesDynamicRouting(t *testing.T) {
 	topology, err := NewTopologyStore(ClusterTopology{
 		Version:     1,

@@ -1303,7 +1303,38 @@ func (replicator *HTTPReplicator) appendReplicationSyncArenaRecordToTargetGroups
 }
 
 func (replicator *HTTPReplicator) executeReplicationTasks(ctx context.Context, result ReplicationResult, tasks []replicationTask) ReplicationResult {
+	if len(tasks) == 1 && replicator.transport == ReplicationTransportGRPCStream && replicator.grpcLiveSession != nil {
+		if direct, ok := replicator.executeSingleLiveReplicationTask(ctx, result, tasks[0]); ok {
+			return direct
+		}
+	}
 	return replicator.executeReplicationTaskGroups(ctx, result, replicator.groupReplicationTasksByTarget(tasks))
+}
+
+func (replicator *HTTPReplicator) executeSingleLiveReplicationTask(ctx context.Context, result ReplicationResult, task replicationTask) (ReplicationResult, bool) {
+	payload, err := liveReplicationGRPCPayload(task.payload)
+	if err != nil {
+		if !replicator.disableHTTPFallback {
+			return result, false
+		}
+		result.Queued = false
+		result.Targets = []ReplicationTargetResult{{Node: task.target.ID, Address: task.target.GRPCAddress, Error: err.Error()}}
+		return result, true
+	}
+	fingerprint := ""
+	if replicator.topology != nil {
+		fingerprint = replicator.topology.Fingerprint()
+	}
+	result.Queued = false
+	result.Targets = make([]ReplicationTargetResult, 1)
+	result.Targets[0] = replicator.grpcLiveSession.executeReplicationTaskGroup(ctx, replicationTaskGroup{
+		target:           task.target,
+		syncPayloads:     []replicationSyncPayload{payload},
+		deferredMetadata: true,
+		metadataSource:   replicator.self,
+		metadataTopology: fingerprint,
+	})
+	return result, true
 }
 
 func (replicator *HTTPReplicator) executeReplicationTaskGroups(ctx context.Context, result ReplicationResult, groups []replicationTaskGroup) ReplicationResult {
@@ -1370,21 +1401,11 @@ func (replicator *HTTPReplicator) liveReplicationGRPCGroup(group replicationTask
 	}
 	streamPayloads := make([]replicationSyncPayload, 0, len(group.payloads))
 	for _, payload := range group.payloads {
-		key := strings.TrimSpace(payload.Key)
-		switch normalizedCommand(payload.Command) {
-		case replicationSetCompactCommand:
-			if key == "" || len(payload.BinaryValue) == 0 {
-				return replicationTaskGroup{}, errors.New("hatriecache: compact live replication value is empty")
-			}
-			streamPayloads = append(streamPayloads, replicationSyncPayload{key: key, binaryValue: payload.BinaryValue})
-		case "INTERNALDEL":
-			if key == "" {
-				return replicationTaskGroup{}, errors.New("hatriecache: live replication delete key is empty")
-			}
-			streamPayloads = append(streamPayloads, replicationSyncPayload{key: key})
-		default:
-			return replicationTaskGroup{}, fmt.Errorf("hatriecache: command %s is not supported by live gRPC replication", payload.Command)
+		streamPayload, err := liveReplicationGRPCPayload(payload)
+		if err != nil {
+			return replicationTaskGroup{}, err
 		}
+		streamPayloads = append(streamPayloads, streamPayload)
 	}
 	fingerprint := ""
 	if replicator.topology != nil {
@@ -1398,6 +1419,24 @@ func (replicator *HTTPReplicator) liveReplicationGRPCGroup(group replicationTask
 	group.metadataSource = replicator.self
 	group.metadataTopology = fingerprint
 	return group, nil
+}
+
+func liveReplicationGRPCPayload(payload CacheCommandRequest) (replicationSyncPayload, error) {
+	key := strings.TrimSpace(payload.Key)
+	switch normalizedCommand(payload.Command) {
+	case replicationSetCompactCommand:
+		if key == "" || len(payload.BinaryValue) == 0 {
+			return replicationSyncPayload{}, errors.New("hatriecache: compact live replication value is empty")
+		}
+		return replicationSyncPayload{key: key, binaryValue: payload.BinaryValue}, nil
+	case "INTERNALDEL":
+		if key == "" {
+			return replicationSyncPayload{}, errors.New("hatriecache: live replication delete key is empty")
+		}
+		return replicationSyncPayload{key: key}, nil
+	default:
+		return replicationSyncPayload{}, fmt.Errorf("hatriecache: command %s is not supported by live gRPC replication", payload.Command)
+	}
 }
 
 func (replicator *HTTPReplicator) executeReplicationTargetGroup(ctx context.Context, group replicationTaskGroup) ReplicationTargetResult {
