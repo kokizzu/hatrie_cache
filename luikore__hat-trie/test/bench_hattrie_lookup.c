@@ -23,6 +23,16 @@ static double monotonic_seconds(void)
     return (double) value.tv_sec + (double) value.tv_nsec / 1000000000.0;
 }
 
+static double process_cpu_seconds(void)
+{
+    struct timespec value;
+    if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &value) != 0) {
+        perror("clock_gettime");
+        exit(2);
+    }
+    return (double) value.tv_sec + (double) value.tv_nsec / 1000000000.0;
+}
+
 static size_t parse_size(const char* text, size_t fallback)
 {
     if (text == NULL || *text == '\0') return fallback;
@@ -69,26 +79,43 @@ int main(int argc, char** argv)
     const size_t keys = parse_size(argc > 1 ? argv[1] : NULL, 100000);
     const size_t lookup_operations = parse_size(argc > 2 ? argv[2] : NULL, 10000000);
     const char* mode = argc > 3 ? argv[3] : "shared";
+    const size_t insert_repetitions = parse_size(argc > 4 ? argv[4] : NULL, 1);
     int distributed = strcmp(mode, "distributed") == 0;
     if (!distributed && strcmp(mode, "shared") != 0) {
         fprintf(stderr, "invalid key mode: %s\n", mode);
         return 2;
     }
-    hattrie_t* trie = hattrie_create();
+    hattrie_t* trie = NULL;
     char key[96];
     size_t index;
 
     double start = monotonic_seconds();
-    for (index = 0; index < keys; ++index) {
-        size_t length = format_key(key, sizeof(key), index, distributed);
-        value_t* value = hattrie_get(trie, key, length);
-        if (value == NULL) {
-            fprintf(stderr, "insert failed at %zu\n", index);
-            return 1;
+    double cpu_start = process_cpu_seconds();
+    size_t repetition;
+    for (repetition = 0; repetition < insert_repetitions; ++repetition) {
+        trie = hattrie_create();
+        for (index = 0; index < keys; ++index) {
+            size_t length = format_key(key, sizeof(key), index, distributed);
+            value_t* value = hattrie_get(trie, key, length);
+            if (value == NULL) {
+                fprintf(stderr, "insert failed at %zu\n", index);
+                return 1;
+            }
+            *value = (value_t) index + 1;
         }
-        *value = (value_t) index + 1;
+        if (repetition + 1 < insert_repetitions) {
+            hattrie_free(trie);
+            trie = NULL;
+        }
     }
-    double insert_seconds = monotonic_seconds() - start;
+    double insert_cpu_seconds = (process_cpu_seconds() - cpu_start) /
+                                (double) insert_repetitions;
+    double insert_seconds = (monotonic_seconds() - start) /
+                            (double) insert_repetitions;
+    if (hattrie_size(trie) != keys) {
+        fprintf(stderr, "inserted size mismatch\n");
+        return 1;
+    }
 
     char lookup_keys[LOOKUP_KEY_COUNT][96];
     size_t lookup_lengths[LOOKUP_KEY_COUNT];
@@ -103,6 +130,7 @@ int main(int argc, char** argv)
     }
 
     start = monotonic_seconds();
+    cpu_start = process_cpu_seconds();
     for (index = 0; index < lookup_operations; ++index) {
         size_t lookup_index = index & (LOOKUP_KEY_COUNT - 1);
         value_t* value = hattrie_tryget(trie, lookup_keys[lookup_index], lookup_lengths[lookup_index]);
@@ -112,9 +140,11 @@ int main(int argc, char** argv)
         }
         lookup_sink ^= *value;
     }
+    double tryget_cpu_seconds = process_cpu_seconds() - cpu_start;
     double tryget_seconds = monotonic_seconds() - start;
 
     start = monotonic_seconds();
+    cpu_start = process_cpu_seconds();
     for (index = 0; index < lookup_operations; ++index) {
         size_t lookup_index = index & (LOOKUP_KEY_COUNT - 1);
         value_t* value = hattrie_get(trie, lookup_keys[lookup_index], lookup_lengths[lookup_index]);
@@ -124,6 +154,7 @@ int main(int argc, char** argv)
         }
         lookup_sink ^= *value;
     }
+    double get_cpu_seconds = process_cpu_seconds() - cpu_start;
     double get_seconds = monotonic_seconds() - start;
 
     struct rusage usage;
@@ -132,13 +163,17 @@ int main(int argc, char** argv)
         perror("getrusage");
         return 2;
     }
-    printf("mode=%s keys=%zu lookup_operations=%zu insert_seconds=%.9f tryget_seconds=%.9f get_seconds=%.9f size=%zu max_rss_kib=%ld\n",
+    printf("mode=%s keys=%zu insert_repetitions=%zu lookup_operations=%zu insert_seconds=%.9f insert_cpu_seconds=%.9f tryget_seconds=%.9f tryget_cpu_seconds=%.9f get_seconds=%.9f get_cpu_seconds=%.9f size=%zu max_rss_kib=%ld\n",
            mode,
            keys,
+           insert_repetitions,
            lookup_operations,
            insert_seconds,
+           insert_cpu_seconds,
            tryget_seconds,
+           tryget_cpu_seconds,
            get_seconds,
+           get_cpu_seconds,
            hattrie_size(trie),
            usage.ru_maxrss);
 

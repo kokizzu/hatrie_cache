@@ -303,6 +303,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Reverted | [Native slot-mask rollback](#native-slot-mask-rollback), 50m native lookups and complete command controls | Runtime flag: power-of-two 3.474 s; non-power-of-two 3.551 s; specialized GET 154.8 ns | Original modulo: power-of-two 3.521/3.536 s; non-power-of-two 3.504 s; GET 155.8 ns | Specialized native lookup was 1.037x faster, but complete commands improved at most 1.006x; the shared fallback was 1.013x slower | Both implementations removed; the branch penalized arbitrary slot counts, while three specialized C entry points did not clear the complete-path complexity gate |
 | Reverted | [Direct native tryget traversal rollback](#direct-native-tryget-traversal-rollback), 50m native hits and complete command controls | Generic finder: 2.2255 s native; paired complete controls | Read-only traversal: 2.1557 s native; 1.003x complete GET | Native lookup was 1.032x faster with unchanged 9,532 KiB RSS, but complete GET gained only 0.3% while SET/mixed-read controls moved 1.010x/1.009x slower | Runtime specialization removed; forced-split correctness coverage and the reusable native benchmark remain |
 | Reverted | [One-sided hybrid bucket reuse](#one-sided-hybrid-bucket-reuse-rollback), 100k native inserts | Rebuild both split tables: shared-prefix 64.303 ms; distributed 18.520 ms | Reuse all-key hybrid side: shared-prefix 51.177 ms; distributed 20.282 ms | Shared-prefix insertion was 1.239x faster, but distributed insertion was 1.149x slower | Runtime candidate removed; insertion timing and shared/distributed controls remain in the native benchmark |
+| Reverted | [Allocation-free native split scans](#allocation-free-native-split-scan-rollback), 100k inserts plus 5m lookup controls | Heap-backed iterators: four temporary heap objects per proper split | Best fused cursor: distributed insertion 1.085x faster; complete 100k Go insertion 1.123x faster | Standalone `tryget` was 1.044x slower; inline and aligned refinements remained 1.081x/1.052x slower | All runtime/API/test code removed; repeat-build and process-CPU benchmark controls remain |
 | Current pass | [Compact typed protobuf scalar batches](#compact-typed-protobuf-scalar-batches), 10k GET, batch 16 | Generic batch: 8.657 ms; 9.67 MB heap; 37.04 wire B/command | Scalar batch: 3.911 ms; 2.63 MB heap; 23.72 wire B/command | 2.21x faster, 3.67x lower heap, 2.66x fewer allocs, 1.56x smaller wire | Supports six scalar operations; other command families retain typed structured or generic batches |
 | Current pass | [Shared scalar-batch keys](#shared-scalar-batch-keys), 10k same-key GET, batch 16 | Repeated key column: 394.3 ns/command; 2,368,864 heap B; 34,823 allocs; 23.72 wire B/command | One shared key: 316.1 ns/command; 1,684,878 heap B; 23,020 allocs; 11.54 wire B/command | 1.25x faster, 1.41x lower heap, 1.51x fewer allocs, 2.06x smaller wire | Additive request form; mixed-version clients retry expanded keys after an older server's column-count error |
 | Current pass | [Compact typed protobuf structured batches](#compact-typed-protobuf-structured-batches), 10k mixed commands, batch 16 | Generic batch: 27.743 ms; 10.61 MB heap; 60.41 wire B/command | Structured batch: 19.909 ms; 3.59 MB heap; 33.22 wire B/command | 1.39x faster, 2.96x lower heap, 1.54x fewer allocs, 1.82x smaller wire | One value per mutating operation; multi-value and unsupported command families retain the generic batch path |
@@ -400,6 +401,7 @@ tree.
 | Power-of-two ahtable slot mask | A branch-free HAT-trie-only API made 50 million native lookups 1.037x faster with unchanged backing, capacity, and header size | Shared dispatch made arbitrary-size lookup 1.013x slower; three specialized entry points improved complete GET/SET/mixed profiles by only 0.0%-0.6% | Both candidates removed; the stronger lookup fixture and non-power-of-two/header tests remain; see [Native slot-mask rollback](#native-slot-mask-rollback) |
 | Direct native tryget traversal | Replaced the generic pointer-writeback finder with a read-only traversal and made 50 million native hits 1.032x faster at identical RSS | Complete GET improved only 1.003x; unrelated SET and mixed-read paired controls moved 1.010x/1.009x slower | Runtime candidate removed; the new native benchmark and forced shared-prefix split test remain; see [Direct native tryget traversal rollback](#direct-native-tryget-traversal-rollback) |
 | One-sided hybrid bucket reuse | Avoided allocating and repopulating one split table, making 100,000 shared-prefix inserts 1.239x faster | The same candidate made 100,000 binary-distributed inserts 1.149x slower and did not reduce RSS | Runtime candidate removed; the insertion-timed shared/distributed fixture remains; see [the rollback](#one-sided-hybrid-bucket-reuse-rollback) |
+| Allocation-free native split scans | Removed four temporary iterator heap objects per proper split and made complete 100,000-key Go insertion 1.123x faster | The best out-of-line cursor made standalone `tryget` 1.044x slower; direct, bulk-helper, inline, and aligned layouts also regressed an unchanged lookup control | Runtime/API/test candidates removed; repeat-build and process-CPU measurements remain in the native fixture; see [the rollback](#allocation-free-native-split-scan-rollback) |
 | Known-valid-key GET helper | Intended to skip redundant key validation | 121.7 ns versus 120.1 ns for the checked path | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Uppercase EXISTS fast path | Post-dispatch specialization made hits/misses 1.069x/1.038x faster with unchanged zero allocation | Large-switch placements made GET up to 1.045x slower; the isolated post-dispatch branch made lowercase generic `exists` about 1.046x slower, and the 100-command mixed profile was neutral | All three placements and temporary tests were removed; see [uppercase EXISTS fast path rollback](#uppercase-exists-fast-path-rollback) |
 | Idempotent string assignment | Intended to skip an unchanged string-header write and reusable-index check | The refined one-check prototype made duplicates 1.27x slower and true replacements 1.07x slower | Removed before production; direct assignment remains; see [idempotent string assignment](#idempotent-string-assignment-rollback) |
@@ -1978,6 +1980,64 @@ make bench-native-hattrie-lookup NATIVE_HATTRIE_KEY_MODE=distributed NATIVE_HATT
 
 This One-sided hybrid bucket reuse rollback leaves no production CPU, memory,
 layout, ABI, wire, storage, or configuration cost.
+
+<a id="allocation-free-native-split-scan-rollback"></a>
+#### Allocation-Free Native Split Scan Rollback
+
+Every proper HAT-trie bucket split scanned the old ahtable twice through the
+public unsorted iterator. Each scan allocated an iterator wrapper and an
+unsorted iterator, so one split created and freed four temporary heap objects.
+The candidate replaced only those split-time scans; table sizing, split-point
+selection, hashing, insertion order, key representation, and final values were
+unchanged.
+
+The existing split-boundary, long-prefix, deletion, iteration, allocation
+overflow, and LeakSanitizer tests passed before and after each candidate. A
+focused cursor test additionally covered empty, binary, short, long, repeated,
+and exact-once traversal while the cursor API existed. The runtime and that
+temporary API-specific test were removed after the performance gate failed.
+
+Several layouts were measured because changing a static split routine also
+moves later native functions in standalone builds. Ratios are medians of
+alternating frozen baseline/candidate process pairs pinned to one CPU; values
+above `1.00x` favor the candidate. Process CPU time excludes scheduler
+preemption from unrelated host work.
+
+| Candidate layout | Attractive result | Unchanged-path control | Decision |
+| --- | --- | --- | --- |
+| Direct local slot scans | Shared/distributed insertion 1.161x/1.075x faster | Distributed existing-key `get` 0.989x, or 1.012x slower | rejected |
+| Out-of-line count/distribute helpers | Shared/distributed insertion 1.230x/1.145x faster | Distributed `tryget` 0.995x and `get` 0.971x | rejected |
+| Out-of-line fused cursor | Shared/distributed insertion CPU 1.088x/1.085x faster | Distributed `tryget` CPU 0.958x, or 1.044x slower | rejected |
+| Header-inline fused cursor | Distributed insertion CPU 1.067x faster; binary 32 B smaller | Distributed `tryget` CPU 0.925x, or 1.081x slower | rejected |
+| Out-of-line cursor plus 64-byte function alignment | Distributed insertion CPU 1.035x faster | Distributed `tryget` CPU 0.951x, or 1.052x slower | rejected |
+
+The strongest production-like cgo result was real: a fresh-cache frozen Go
+binary improved the complete 100,000-key string insertion benchmark from a
+paired median of 75.600 ms to 66.899 ms, or `1.123x`, while retaining 18.87
+B/key and effectively the same 8.924 MB reported Go heap. Complete unchanged
+command controls were neutral within noise: repeated SET was `0.998x`, GET was
+`0.995x`, and the read-heavy mixed profile was `1.009x`. However, the vendored
+C library also supports normal separate translation-unit builds, where the
+repeatable 4.4% `tryget` regression is a user-visible cost. Inline and explicit
+alignment refinements made that control worse, not better.
+
+All cursor, helper, direct-scan, alignment, public API, and temporary correctness
+code was therefore removed. The native benchmark keeps two generally useful
+improvements: `NATIVE_HATTRIE_INSERT_REPETITIONS` averages complete
+create/insert/free cycles, and each insertion/lookup phase now reports process
+CPU time beside wall time. The final trie size and maximum RSS controls remain:
+
+```sh
+make bench-native-hattrie-lookup \
+  NATIVE_HATTRIE_KEY_MODE=distributed \
+  NATIVE_HATTRIE_KEYS=100000 \
+  NATIVE_HATTRIE_INSERT_REPETITIONS=20 \
+  NATIVE_HATTRIE_LOOKUPS=5000000 \
+  COUNT=11
+```
+
+This rollback leaves no production CPU, memory, layout, ABI, wire, storage, or
+configuration cost.
 
 <a id="grouped-storage-headers"></a>
 ### Grouped Storage Headers

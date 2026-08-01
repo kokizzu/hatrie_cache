@@ -6,6 +6,7 @@ artifact_dir=${BENCHMARK_ARTIFACT_DIR:-build/benchmarks}
 keys=${NATIVE_HATTRIE_KEYS:-100000}
 lookup_operations=${NATIVE_HATTRIE_LOOKUPS:-10000000}
 key_mode=${NATIVE_HATTRIE_KEY_MODE:-shared}
+insert_repetitions=${NATIVE_HATTRIE_INSERT_REPETITIONS:-1}
 count=${COUNT:-7}
 output="$artifact_dir/native-hattrie-lookup.txt"
 binary=$(mktemp "${TMPDIR:-/tmp}/hatrie-lookup-bench.XXXXXX")
@@ -34,6 +35,6 @@ gcc -O3 -std=c99 -Wall -Wextra \
 run=1
 while [ "$run" -le "$count" ]; do
 	printf 'run=%s ' "$run" | tee -a "$output"
-	"$binary" "$keys" "$lookup_operations" "$key_mode" | tee -a "$output"
+	"$binary" "$keys" "$lookup_operations" "$key_mode" "$insert_repetitions" | tee -a "$output"
 	run=$((run + 1))
 done

@@ -335,6 +335,12 @@ also tested retaining an old table when every split key stayed on one hybrid
 side. Shared-prefix insertion improved 1.239x, but binary-distributed insertion
 became 1.149x slower with no RSS gain, so only the benchmark's insertion timing
 and distributed-key control remain.
+The [Allocation-free native split scan rollback](BENCHMARK.md#allocation-free-native-split-scan-rollback)
+then removed four temporary iterator heap objects per proper split. Complete
+100,000-key Go insertion improved 1.123x, but the best standalone layout made
+unchanged `tryget` 1.044x slower; direct, helper, inline, and aligned refinements
+also failed a lookup control. Runtime and API changes were removed, while the
+native fixture keeps repeated-build and process-CPU measurements.
 The [Production native C optimization](BENCHMARK.md#production-native-c-optimization)
 now pins `-O3` for the cgo package instead of inheriting an environment whose
 C flags contained no optimization level. Twenty alternating complete-command

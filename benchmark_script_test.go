@@ -70,6 +70,54 @@ func TestNativeAhtableAllocatorBenchmarkIsReproducible(t *testing.T) {
 	}
 }
 
+func TestNativeHatTrieLookupBenchmarkMeasuresRepeatedBuildCPU(t *testing.T) {
+	data, err := os.ReadFile("scripts/benchmark-native-hattrie-lookup.sh")
+	if err != nil {
+		t.Fatalf("ReadFile(benchmark-native-hattrie-lookup.sh) error = %v", err)
+	}
+	for _, token := range []string{
+		"NATIVE_HATTRIE_INSERT_REPETITIONS",
+		"bench_hattrie_lookup.c",
+		`"$insert_repetitions"`,
+		"native-hattrie-lookup.txt",
+		"-O3",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("native HAT-trie benchmark script missing token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("luikore__hat-trie/test/bench_hattrie_lookup.c")
+	if err != nil {
+		t.Fatalf("ReadFile(bench_hattrie_lookup.c) error = %v", err)
+	}
+	for _, token := range []string{
+		"CLOCK_PROCESS_CPUTIME_ID",
+		"insert_repetitions",
+		"insert_cpu_seconds",
+		"tryget_cpu_seconds",
+		"get_cpu_seconds",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("native HAT-trie benchmark fixture missing token %q", token)
+		}
+	}
+
+	data, err = os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	for _, token := range []string{
+		"bench-native-hattrie-lookup:",
+		"NATIVE_HATTRIE_INSERT_REPETITIONS='$(NATIVE_HATTRIE_INSERT_REPETITIONS)'",
+		"./scripts/benchmark-native-hattrie-lookup.sh",
+	} {
+		if !strings.Contains(string(data), token) {
+			t.Fatalf("Makefile missing native HAT-trie benchmark token %q", token)
+		}
+	}
+}
+
 func TestStartupPersistenceBenchmarkIsReproducible(t *testing.T) {
 	data, err := os.ReadFile("scripts/benchmark-startup-persistence.sh")
 	if err != nil {
