@@ -409,6 +409,7 @@ tree.
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Unsupported exact-command early rejection | Skipping duplicate key validation made SETSTR/INC/EXPIRE 1.030x/1.061x/1.093x faster in the first alternating layout | Handling EXISTS in that layout made it 1.031x slower; removing EXISTS made unchanged GET/EXISTS 1.029x/1.094x slower and reduced the SETSTR gain to 1.003x | Both classifiers were removed; fallback correctness and exact/generic control benchmarks remain in [the rollback](#unsupported-exact-command-rejection-rollback) |
 | Exact delete dispatch and known-valid deletion | A generic-case helper made missing/reinsert `DEL` 1.083x/1.018x faster; an exact-switch placement made reinsert 1.035x faster | Exact-switch missing deletes became 1.10x slower and controls up to 1.06x slower; the generic helper slowed exact SET/lowercase GET 1.06x/1.04x; a lower-level validation refactor was neutral-to-slower for delete and slowed controls up to 1.14x | All runtime candidates removed; bounded missing/reinsert command controls remain in [the rollback](#delete-dispatch-validation-rollback) |
+| Fused native delete-and-return | One native traversal made existing-key delete up to 1.222x faster with unchanged final allocations under a by-value/scalar ABI | Out-pointer results added 8 B and one allocation; by-value/scalar misses were up to 1.14x slower; the best hybrid made hits 1.17x faster and misses neutral but shifted exact/generic SET 1.06x/1.05x slower | Native APIs, tests, wrappers, and Go runtime changes removed; see [the fused delete rollback](#fused-native-delete-rollback) |
 | Signed command integer parser | Made one-digit/full-width values 6.48x/1.63x faster, invalid/overflow inputs 20.86x/4.63x faster, and removed 49-72 B plus two allocations from parser errors | Direct placement made complete `ADDFW` 1.03x slower; wrapped placements improved it only 1.003x-1.043x while unchanged command controls moved up to 1.039x slower; the float counterpart was 1.136x slower | All parser, helper, layout, contract, and benchmark-fixture changes removed; see [signed command integer parser rollback](#signed-command-integer-parser-rollback) |
 | Post-O3 command normalization | Canonical SET improved up to 1.17x end to end and focused uppercase normalization improved up to 6.06x | Shared helpers slowed lowercase/spaced fallbacks up to 1.10x/1.06x; dispatcher-local recognition slowed TTL 1.034x; exact-switch recognition slowed lowercase/spaced SET and lowercase GET 1.07x/1.10x/1.08x | All runtime and temporary fixture code removed; see [Post-O3 Command Normalization Rollback](#post-o3-command-normalization-rollback) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
@@ -1663,6 +1664,42 @@ the complete delete workload and changed unrelated binary layout enough to
 fail the control gate. All production helpers, cases, and refactors were
 removed. Command normalization, validation, locking, telemetry, TTL cleanup,
 storage reuse, wire behavior, and public responses are unchanged.
+
+<a id="fused-native-delete-rollback"></a>
+#### Fused Native Delete Rollback
+
+The ordinary Go delete path first called `hattrie_tryget` to copy the typed
+storage handle, then called `hattrie_del`, causing two cgo crossings and two
+HAT-trie traversals for an existing key. A test-first native API deleted while
+returning the old `value_t`. Its C fixture covered bucket keys, values consumed
+on trie nodes, missing keys, and an optional output. Existing command, TTL,
+backing-storage reuse, and delete tests passed twenty times before each
+complete-command benchmark.
+
+Four ABIs/layouts were tried against the retained missing-key and
+delete-after-reinsert controls. Equal test binaries alternated on one pinned
+logical CPU; memory columns were recorded by the Go benchmark.
+
+| Native delete candidate | Missing `DEL` | Reinsert + `DEL` | Memory / control result |
+| --- | ---: | ---: | --- |
+| One-pass delete with Go out pointer | 67.97 to 89.44 ns, 1.32x slower | 349.5 to 314.8 ns, 1.110x faster | Added 8 B and one allocation to both delete rows because the cgo output escaped |
+| One-pass C struct return | 68.48 to 77.80 ns, 1.14x slower | 349.5 to 286.1 ns, 1.222x faster | Restored original allocation counts, but the two-register result kept the miss regression |
+| Nonzero scalar wrapper | 69.45 to 74.59 ns, 1.07x slower | 354.3 to 290.2 ns, 1.221x faster | Memory unchanged; exact INC moved 1.029x slower |
+| Hybrid fast lookup plus delete-on-hit, five-million-operation blocks | 71.86 to 71.48 ns, neutral within 0.5% | 363.0 to 310.3 ns, 1.170x faster | Memory unchanged, but exact and generic SET moved 1.064x/1.046x slower |
+| Hybrid body isolated from later Go functions | 69.54 to 73.27 ns, 1.054x slower | 351.0 to 327.8 ns, 1.071x faster | EXISTS and exact SET moved 1.085x/1.073x slower |
+
+The hybrid deliberately kept `ahtable_tryget` as the narrow miss path and ran
+`ahtable_del` only after a hit. It therefore removed one cgo crossing and one
+trie-prefix traversal without changing bucket miss work, but the complete
+binary still failed unrelated controls. One intermediate run was discarded
+because unrelated processes saturated most logical CPUs and unchanged rows
+swung by 10%-25%; it is not represented in the table.
+
+All native declarations, C tests, wrappers, and Go deletion changes were
+removed. Production retains the two-call path, which is faster for misses and
+does not perturb other commands. Storage ownership, deletion accounting, TTL
+cleanup, lock scope, native formats, wire behavior, and allocation counts are
+unchanged.
 
 <a id="post-o3-command-normalization-rollback"></a>
 #### Post-O3 Command Normalization Rollback
