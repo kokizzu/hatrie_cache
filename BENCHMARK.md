@@ -407,6 +407,7 @@ tree.
 | --- | --- | --- | --- |
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
+| Unsupported exact-command early rejection | Skipping duplicate key validation made SETSTR/INC/EXPIRE 1.030x/1.061x/1.093x faster in the first alternating layout | Handling EXISTS in that layout made it 1.031x slower; removing EXISTS made unchanged GET/EXISTS 1.029x/1.094x slower and reduced the SETSTR gain to 1.003x | Both classifiers were removed; fallback correctness and exact/generic control benchmarks remain in [the rollback](#unsupported-exact-command-rejection-rollback) |
 | Signed command integer parser | Made one-digit/full-width values 6.48x/1.63x faster, invalid/overflow inputs 20.86x/4.63x faster, and removed 49-72 B plus two allocations from parser errors | Direct placement made complete `ADDFW` 1.03x slower; wrapped placements improved it only 1.003x-1.043x while unchanged command controls moved up to 1.039x slower; the float counterpart was 1.136x slower | All parser, helper, layout, contract, and benchmark-fixture changes removed; see [signed command integer parser rollback](#signed-command-integer-parser-rollback) |
 | Post-O3 command normalization | Canonical SET improved up to 1.17x end to end and focused uppercase normalization improved up to 6.06x | Shared helpers slowed lowercase/spaced fallbacks up to 1.10x/1.06x; dispatcher-local recognition slowed TTL 1.034x; exact-switch recognition slowed lowercase/spaced SET and lowercase GET 1.07x/1.10x/1.08x | All runtime and temporary fixture code removed; see [Post-O3 Command Normalization Rollback](#post-o3-command-normalization-rollback) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
@@ -1574,6 +1575,59 @@ ahead of that switch still slowed the control from 166.2 to 175.5 ns. Cgo
 medians by 1.03x/1.10x/1.15x/1.03x, and a known-valid-key GET helper measured
 121.7 ns against the checked path's 120.1 ns. All production candidates and
 their temporary tests were removed, so this pass retains no runtime tradeoff.
+
+<a id="unsupported-exact-command-rejection-rollback"></a>
+#### Unsupported Exact-Command Rejection Rollback
+
+A fresh mixed-command CPU profile showed exact scalar mutations entering
+`executeExactFastCommandPointer`, validating their key, missing its supported
+command switch, and then repeating normalization and validation in the generic
+dispatcher. The profile attributed 30.50% cumulative CPU to the exact pointer
+dispatcher, 21.41% to checked reads, 28.45% to native cgo work, and smaller
+visible shares to `strings.TrimSpace` and key validation.
+
+```sh
+make run CMD='go test . -run NONE -bench "BenchmarkCommandFeature/(MixedReadHeavy100|MixedWriteHeavy100)" -benchtime=100000x -count=1 -cpu=1 -cpuprofile=/tmp/hatrie-command-mixed.cpu'
+make run CMD='go tool pprof -top -nodecount=40 /tmp/hatrie-command-mixed.cpu'
+make run CMD='go test . -run TestExactScalarMutationsRemainGenericFallbacks -count=20'
+make run CMD='/tmp/run-go-benchmark-pairs.sh BEFORE AFTER OUTPUT 20 11 1000000x BenchmarkExecuteCommandRequestPassingControl'
+```
+
+The test was added and passed before production edits. It proves exact
+`SETSTR`, `INC`, `EXPIRE`, and `EXISTS` remain generic fallbacks, including
+trimmed keys, and verifies their public effects. The benchmark adds those four
+commands to the existing exact/generic GET/SET request-passing controls plus a
+supported exact `PEEKMAP` control.
+
+The first candidate rejected all four commands before key validation:
+
+| Eleven-run median | Baseline | Four-command rejection | Result |
+| --- | ---: | ---: | ---: |
+| Exact SETSTR | 103.9 ns | 100.9 ns | 1.030x faster |
+| Exact INC | 158.8 ns | 149.7 ns | 1.061x faster |
+| Exact EXPIRE | 138.7 ns | 126.9 ns | 1.093x faster |
+| Exact EXISTS | 81.88 ns | 84.43 ns | 1.031x slower |
+| Exact GET control | 82.90 ns | 82.89 ns | neutral |
+| Exact PEEKMAP control | 50.13 ns | 49.51 ns | 1.013x faster |
+
+Because the intended `EXISTS` shortcut regressed, a second binary rejected
+only `SETSTR`, `INC`, and `EXPIRE`:
+
+| Eleven-run median | Baseline | Three-command rejection | Result |
+| --- | ---: | ---: | ---: |
+| Exact SETSTR | 103.0 ns | 102.7 ns | 1.003x faster |
+| Exact INC | 156.9 ns | 147.8 ns | 1.062x faster |
+| Exact EXPIRE | 138.1 ns | 134.9 ns | 1.024x faster |
+| Exact GET control | 82.10 ns | 84.49 ns | 1.029x slower |
+| Unchanged exact EXISTS | 81.74 ns | 89.39 ns | 1.094x slower |
+| Exact PEEKMAP control | 49.71 ns | 49.52 ns | neutral within 0.4% |
+
+All rows retained identical heap and allocation counts. Alternating order on
+one pinned logical CPU prevented the broad host-speed shift seen in the first
+separate run from being mistaken for an improvement. Both production
+classifiers were removed. Command normalization, key validation, error order,
+fallback behavior, heap, allocations, wire, storage, and public behavior are
+unchanged; only the test and broader benchmark remain.
 
 <a id="post-o3-command-normalization-rollback"></a>
 #### Post-O3 Command Normalization Rollback

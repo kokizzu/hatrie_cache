@@ -142,6 +142,38 @@ func TestExecuteCommandExpireExactPathDoesNotAllocate(t *testing.T) {
 	}
 }
 
+func TestExactScalarMutationsRemainGenericFallbacks(t *testing.T) {
+	ttlSeconds := int64(3600)
+	for _, request := range []CacheCommandRequest{
+		{Command: "SETSTR", Key: " key ", Value: "value"},
+		{Command: "INC", Key: " counter ", Value: "1"},
+		{Command: "EXPIRE", Key: " key ", TTLSeconds: &ttlSeconds},
+		{Command: "EXISTS", Key: " key "},
+	} {
+		ht := newTestTrie(t)
+		if _, handled := ht.executeExactFastCommand(request); handled {
+			t.Fatalf("executeExactFastCommand(%s) handled = true, want generic fallback", request.Command)
+		}
+	}
+
+	ht := newTestTrie(t)
+	if response := ht.ExecuteCommand(CacheCommandRequest{Command: "SETSTR", Key: " key ", Value: "value"}); !response.OK {
+		t.Fatalf("SETSTR fallback = %#v, want ok", response)
+	}
+	if response := ht.ExecuteCommand(CacheCommandRequest{Command: "SETINT", Key: " counter ", Value: "1"}); !response.OK {
+		t.Fatalf("SETINT setup = %#v, want ok", response)
+	}
+	if response := ht.ExecuteCommand(CacheCommandRequest{Command: "INC", Key: " counter ", Value: "1"}); !response.OK || response.Value != "2" {
+		t.Fatalf("INC fallback = %#v, want value 2", response)
+	}
+	if response := ht.ExecuteCommand(CacheCommandRequest{Command: "EXPIRE", Key: " key ", TTLSeconds: &ttlSeconds}); !response.OK {
+		t.Fatalf("EXPIRE fallback = %#v, want ok", response)
+	}
+	if response := ht.ExecuteCommand(CacheCommandRequest{Command: "EXISTS", Key: " key "}); !response.OK || response.Value != "1" {
+		t.Fatalf("EXISTS fallback = %#v, want value 1", response)
+	}
+}
+
 func TestExecuteCommandScalarBatchUsesSingleNativeCCallPerFamily(t *testing.T) {
 	tests := []struct {
 		name  string
