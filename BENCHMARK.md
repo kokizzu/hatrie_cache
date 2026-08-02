@@ -408,6 +408,7 @@ tree.
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Unsupported exact-command early rejection | Skipping duplicate key validation made SETSTR/INC/EXPIRE 1.030x/1.061x/1.093x faster in the first alternating layout | Handling EXISTS in that layout made it 1.031x slower; removing EXISTS made unchanged GET/EXISTS 1.029x/1.094x slower and reduced the SETSTR gain to 1.003x | Both classifiers were removed; fallback correctness and exact/generic control benchmarks remain in [the rollback](#unsupported-exact-command-rejection-rollback) |
+| Exact delete dispatch and known-valid deletion | A generic-case helper made missing/reinsert `DEL` 1.083x/1.018x faster; an exact-switch placement made reinsert 1.035x faster | Exact-switch missing deletes became 1.10x slower and controls up to 1.06x slower; the generic helper slowed exact SET/lowercase GET 1.06x/1.04x; a lower-level validation refactor was neutral-to-slower for delete and slowed controls up to 1.14x | All runtime candidates removed; bounded missing/reinsert command controls remain in [the rollback](#delete-dispatch-validation-rollback) |
 | Signed command integer parser | Made one-digit/full-width values 6.48x/1.63x faster, invalid/overflow inputs 20.86x/4.63x faster, and removed 49-72 B plus two allocations from parser errors | Direct placement made complete `ADDFW` 1.03x slower; wrapped placements improved it only 1.003x-1.043x while unchanged command controls moved up to 1.039x slower; the float counterpart was 1.136x slower | All parser, helper, layout, contract, and benchmark-fixture changes removed; see [signed command integer parser rollback](#signed-command-integer-parser-rollback) |
 | Post-O3 command normalization | Canonical SET improved up to 1.17x end to end and focused uppercase normalization improved up to 6.06x | Shared helpers slowed lowercase/spaced fallbacks up to 1.10x/1.06x; dispatcher-local recognition slowed TTL 1.034x; exact-switch recognition slowed lowercase/spaced SET and lowercase GET 1.07x/1.10x/1.08x | All runtime and temporary fixture code removed; see [Post-O3 Command Normalization Rollback](#post-o3-command-normalization-rollback) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
@@ -1628,6 +1629,40 @@ separate run from being mistaken for an improvement. Both production
 classifiers were removed. Command normalization, key validation, error order,
 fallback behavior, heap, allocations, wire, storage, and public behavior are
 unchanged; only the test and broader benchmark remain.
+
+<a id="delete-dispatch-validation-rollback"></a>
+#### Delete Dispatch and Validation Rollback
+
+A fresh exact-`DEL` profile measured canonical missing-key deletes at 69.64 ns
+and delete-after-reinsert cycles at 348.9 ns. Native cgo work dominated the
+existing-key cycle, while `strings.TrimSpace`, `strings.ToUpper`, public
+`DeleteChecked`, and repeated key-length validation remained visible. Existing
+delete, TTL, backing-storage reuse, and command tests passed twenty times
+before runtime edits.
+
+The request-passing benchmark now includes two bounded controls. A missing-key
+row isolates command dispatch and lookup. A reinsert row uses the same direct
+string upsert before every measured command in both binaries, avoiding an
+unbounded unique-key fixture and preserving the complete delete/accounting
+lifecycle. Candidate and baseline test binaries were alternated on one pinned
+logical CPU at one million operations per row. The first two layouts used
+eleven and fifteen complete pairs respectively.
+
+| Candidate placement | Missing `DEL` | Reinsert + `DEL` | Disqualifying controls |
+| --- | ---: | ---: | --- |
+| Exact fast-dispatch switch | 68.88 to 75.94 ns, 1.10x slower | 356.4 to 344.5 ns, 1.035x faster | Exact INC and generic SET became 1.056x/1.050x slower; GET, EXPIRE, and PEEKMAP also moved slower |
+| Existing generic `DEL` case, out-of-line checked-key helper | 69.69 to 64.33 ns, 1.083x faster | 350.9 to 344.6 ns, 1.018x faster | Exact SET and lowercase GET became 1.060x/1.037x slower |
+| Lower-level known-valid delete helpers | 69.07 to 70.52 ns, 1.021x slower | 352.8 to 351.4 ns, neutral within 0.4% | Exact SET and generic SET became 1.136x/1.063x slower |
+
+Heap and allocation counts were unchanged in every row: missing deletes remain
+allocation-free, while the complete reinsert cycle remains 16 B and two
+allocations. The lower-level prototype split `deleteLocked` and
+`deleteKnownLocked` into checked and known-valid variants and reused the latter
+after successful `validateKey`; even that source-level removal did not improve
+the complete delete workload and changed unrelated binary layout enough to
+fail the control gate. All production helpers, cases, and refactors were
+removed. Command normalization, validation, locking, telemetry, TTL cleanup,
+storage reuse, wire behavior, and public responses are unchanged.
 
 <a id="post-o3-command-normalization-rollback"></a>
 #### Post-O3 Command Normalization Rollback
