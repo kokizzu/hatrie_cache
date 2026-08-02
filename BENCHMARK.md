@@ -410,6 +410,7 @@ tree.
 | Unsupported exact-command early rejection | Skipping duplicate key validation made SETSTR/INC/EXPIRE 1.030x/1.061x/1.093x faster in the first alternating layout | Handling EXISTS in that layout made it 1.031x slower; removing EXISTS made unchanged GET/EXISTS 1.029x/1.094x slower and reduced the SETSTR gain to 1.003x | Both classifiers were removed; fallback correctness and exact/generic control benchmarks remain in [the rollback](#unsupported-exact-command-rejection-rollback) |
 | Exact delete dispatch and known-valid deletion | A generic-case helper made missing/reinsert `DEL` 1.083x/1.018x faster; an exact-switch placement made reinsert 1.035x faster | Exact-switch missing deletes became 1.10x slower and controls up to 1.06x slower; the generic helper slowed exact SET/lowercase GET 1.06x/1.04x; a lower-level validation refactor was neutral-to-slower for delete and slowed controls up to 1.14x | All runtime candidates removed; bounded missing/reinsert command controls remain in [the rollback](#delete-dispatch-validation-rollback) |
 | Fused native delete-and-return | One native traversal made existing-key delete up to 1.222x faster with unchanged final allocations under a by-value/scalar ABI | Out-pointer results added 8 B and one allocation; by-value/scalar misses were up to 1.14x slower; the best hybrid made hits 1.17x faster and misses neutral but shifted exact/generic SET 1.06x/1.05x slower | Native APIs, tests, wrappers, and Go runtime changes removed; see [the fused delete rollback](#fused-native-delete-rollback) |
+| Fused native scalar-batch delete | Reusing the batch's C result storage removed one cgo crossing and trie-prefix traversal on hits; 16/256-command hit pairs improved 1.024x/1.021x | Missing-delete batches became up to 1.096x slower and unchanged repeated-read batches up to 1.116x slower; heap, allocations, and scratch were unchanged | Native API and batch switch removed; focused hit/miss correctness and benchmark controls remain in [the rollback](#fused-native-batch-delete-rollback) |
 | Signed command integer parser | Made one-digit/full-width values 6.48x/1.63x faster, invalid/overflow inputs 20.86x/4.63x faster, and removed 49-72 B plus two allocations from parser errors | Direct placement made complete `ADDFW` 1.03x slower; wrapped placements improved it only 1.003x-1.043x while unchanged command controls moved up to 1.039x slower; the float counterpart was 1.136x slower | All parser, helper, layout, contract, and benchmark-fixture changes removed; see [signed command integer parser rollback](#signed-command-integer-parser-rollback) |
 | Post-O3 command normalization | Canonical SET improved up to 1.17x end to end and focused uppercase normalization improved up to 6.06x | Shared helpers slowed lowercase/spaced fallbacks up to 1.10x/1.06x; dispatcher-local recognition slowed TTL 1.034x; exact-switch recognition slowed lowercase/spaced SET and lowercase GET 1.07x/1.10x/1.08x | All runtime and temporary fixture code removed; see [Post-O3 Command Normalization Rollback](#post-o3-command-normalization-rollback) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
@@ -1700,6 +1701,40 @@ removed. Production retains the two-call path, which is faster for misses and
 does not perturb other commands. Storage ownership, deletion accounting, TTL
 cleanup, lock scope, native formats, wire behavior, and allocation counts are
 unchanged.
+
+<a id="fused-native-batch-delete-rollback"></a>
+#### Fused Native Scalar-Batch Delete Rollback
+
+The native scalar batch already owns C result storage, so it can return a
+deleted value without the Go out-pointer allocation that rejected the scalar
+fused-delete ABI. A test added before production code sends one successful
+delete followed by missing deletes, verifies ordered statuses, confirms one
+native call, and checks final absence. The benchmark adds alternating
+set/delete hit pairs and all-missing delete batches at 2, 4, 8, 16, 32, 64,
+and 256 commands, alongside every existing read and mixed control.
+
+The candidate added a native delete-and-return call that traversed the
+HAT-trie once, used the original `ahtable_tryget` miss path, and ran
+`ahtable_del` only after a bucket hit. Fifteen baseline/candidate pairs ran at
+10,000 complete batches per row on one pinned logical CPU.
+
+| Native scalar batch | Baseline | Fused delete | Result |
+| --- | ---: | ---: | --- |
+| Delete hit pairs, 16 commands | 1,896 ns | 1,851 ns | 1.024x faster |
+| Delete hit pairs, 256 commands | 25,141 ns | 24,629 ns | 1.021x faster |
+| Missing deletes, 16 commands | 875.3 ns | 959.7 ns | 1.096x slower |
+| Missing deletes, 32 commands | 1,558 ns | 1,651 ns | 1.060x slower |
+| Missing deletes, 256 commands | 11,653 ns | 12,333 ns | 1.058x slower |
+| Repeated reads, 8 commands | 277.2 ns | 309.5 ns | 1.116x slower |
+| Repeated reads, 32 commands | 567.5 ns | 604.8 ns | 1.066x slower |
+| Mixed commands, 32 commands | 2,960 ns | 2,922 ns | 1.013x faster |
+
+Every row retained identical B/op, allocations/op, and native scratch bytes.
+The small hit gain does not justify slower misses or unrelated read batches.
+The native declaration, C correctness fixture, and batch switch were removed;
+the Go hit/miss behavior test and reusable benchmark rows remain. Batch
+ordering, response values/statuses, storage release, telemetry, fallback
+selection, wire representation, and production native code are unchanged.
 
 <a id="post-o3-command-normalization-rollback"></a>
 #### Post-O3 Command Normalization Rollback

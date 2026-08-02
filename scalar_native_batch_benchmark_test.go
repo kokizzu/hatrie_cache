@@ -22,7 +22,48 @@ func BenchmarkScalarNativeBatch(b *testing.B) {
 		b.Run(fmt.Sprintf("Mixed%d", size), func(b *testing.B) {
 			benchmarkScalarNativeMixedBatch(b, size)
 		})
+		b.Run(fmt.Sprintf("DeleteHitPairs%d", size), func(b *testing.B) {
+			benchmarkScalarNativeDeleteHitPairs(b, size)
+		})
+		b.Run(fmt.Sprintf("DeleteMissing%d", size), func(b *testing.B) {
+			benchmarkScalarNativeDeleteMissingBatch(b, size)
+		})
 	}
+}
+
+func benchmarkScalarNativeDeleteHitPairs(b *testing.B, commands int) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    4,
+		Operations: make([]hatriecachev1.ScalarCommand, commands),
+		Keys:       make([]string, commands),
+	}
+	for index := range request.Operations {
+		request.Keys[index] = fmt.Sprintf("native:delete:hit:%04d", index/2)
+		if index%2 == 0 {
+			request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING
+			request.StringValues = append(request.StringValues, []byte("value"))
+		} else {
+			request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_DELETE
+		}
+	}
+	benchmarkScalarNativeRequest(b, trie, request)
+}
+
+func benchmarkScalarNativeDeleteMissingBatch(b *testing.B, commands int) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    5,
+		Operations: make([]hatriecachev1.ScalarCommand, commands),
+		Keys:       make([]string, commands),
+	}
+	for index := range request.Operations {
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_DELETE
+		request.Keys[index] = fmt.Sprintf("native:delete:missing:%04d", index)
+	}
+	benchmarkScalarNativeRequest(b, trie, request)
 }
 
 func benchmarkScalarNativeSameReadBatch(b *testing.B, commands int) {

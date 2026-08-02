@@ -63,6 +63,38 @@ func TestScalarBatchDirectUsesOneNativeCallAndPreservesMixedOrder(t *testing.T) 
 	}
 }
 
+func TestScalarBatchDirectDeleteHitThenMisses(t *testing.T) {
+	trie := newTestTrie(t)
+	trie.UpsertString("delete", "value")
+	operations := make([]hatriecachev1.ScalarCommand, minNativeCommandBatchSize)
+	keys := make([]string, minNativeCommandBatchSize)
+	for index := range operations {
+		operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_DELETE
+		keys[index] = "delete"
+	}
+	request := &hatriecachev1.ScalarBatchRequest{BatchId: 41, Operations: operations, Keys: keys}
+
+	beforeCalls := trie.nativeCommandBatchCalls
+	response := trie.executeScalarBatchDirect(context.Background(), request)
+	if !response.GetOk() || len(response.GetStatuses()) != len(operations) {
+		t.Fatalf("executeScalarBatchDirect(delete) = %#v, want %d results", response, len(operations))
+	}
+	if got := trie.nativeCommandBatchCalls - beforeCalls; got != 1 {
+		t.Fatalf("native scalar batch calls = %d, want 1", got)
+	}
+	if response.Statuses[0] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_OK {
+		t.Fatalf("status[0] = %s, want OK", response.Statuses[0])
+	}
+	for index := 1; index < len(response.Statuses); index++ {
+		if response.Statuses[index] != hatriecachev1.ScalarResultStatus_SCALAR_RESULT_STATUS_NOT_FOUND {
+			t.Fatalf("status[%d] = %s, want NOT_FOUND", index, response.Statuses[index])
+		}
+	}
+	if trie.Exists("delete") {
+		t.Fatal("delete key exists after native batch")
+	}
+}
+
 func TestScalarBatchDirectFallsBackForTTLState(t *testing.T) {
 	trie := newTestTrie(t)
 	now := time.Unix(1700000000, 0)
