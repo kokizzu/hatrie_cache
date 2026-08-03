@@ -177,6 +177,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-decode bitmap storage](#single-decode-bitmap-storage), Roaring and sparse bitsets with 8 KiB containers | Prepared descriptor/payload slices: 18,482 ns; 37,968 B; 6 allocs | Decode containers into final records: 15,414 ns; 18,944 B; 2 allocs | 1.199x faster; 50.1% lower heap; 66.7% fewer allocs | Storage-only; the two remaining allocations are final records, mixed containers/noncanonical input preserve compatibility, replication is neutral |
 | Current pass | [Trusted single-decode replication](#trusted-single-decode-replication), seven internally generated base64-backed families | Validated preparation into reused page: 19,946 ns; 22,704 B; 9 allocs | Trusted final-page decode: 14,069 ns; 0 B; 0 allocs | 1.418x faster; temporary heap and allocations eliminated | Private live-snapshot call only; external/restored values keep validation, CR/LF falls back, wire bytes unchanged |
 | Current pass | [Direct live fixed replication](#direct-live-fixed-replication), 32k-item Bloom DUMP into reused capacity | Snapshot base64 encode/decode: 119,288 ns; 229,448 B; 5 allocs | Live backing to final page: 6,133 ns; 0 B; 0 allocs | 19.45x faster; temporary heap and allocations eliminated | Private locked sender path for Bloom/CMS/HLL/Cuckoo/built XOR; exact 58,932 wire B, TTL, and staged-XOR fallback unchanged |
+| Current pass | [Direct live bitmap replication](#direct-live-bitmap-replication), 4,097-value dense Roaring DUMP into reused capacity | Snapshot container/base64 path: 18,865 ns; 24,696 B; 5 allocs | Live container to final page: 1,009 ns; 0 B; 0 allocs | 18.70x faster; temporary heap and allocations eliminated | Private locked Roaring/sparse path; exact 8,230 wire B, array/bitmap and sparse-inline encodings unchanged |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -2259,6 +2260,38 @@ per-element metadata is added.
 make run CMD='go test ./... -run "Test(FixedStructured|CanonicalFixedStructured|FixedCommandDumpDirect|CommandDump)" -count=10'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-fixed-before.test /tmp/hatrie-direct-live-fixed-after.test /tmp/hatrie-direct-live-fixed-pairs.txt 20 31 2000x BenchmarkFixedCommandDumpBloomFilterReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-fixed-before.test /tmp/hatrie-direct-live-fixed-after.test /tmp/hatrie-direct-live-fixed-command-control.txt 20 31 500000x BenchmarkCommandFeature/ReplicationDump'
+```
+
+<a id="direct-live-bitmap-replication"></a>
+### Direct Live Bitmap Replication
+
+The same locked sender now writes Roaring and sparse bitset containers directly
+from live backing. It sizes container metadata, preserves sorted order and
+array/bitmap tags, and writes array `uint16` values, bitmap `uint64` words, or
+sparse embedded two-value storage directly into the reusable replication page.
+No descriptor, payload, base64 string, or decoded slice is created.
+
+Integration tests compare dense Roaring, dense sparse, and sparse-inline output
+with the snapshot encoder and complete decode, in addition to the earlier fixed
+families, expiry, and staged-XOR fallback. Thirty-one alternating pairs use a
+4,097-value Roaring container, one value beyond the bitmap conversion threshold.
+
+| Paired median | Snapshot container path | Direct live container | Result |
+| --- | ---: | ---: | ---: |
+| Dense Roaring replication DUMP | 18,865 ns; 24,696 B; 5 allocs; 8,230 wire B | 1,009 ns; 0 B; 0 allocs; 8,230 wire B | 18.70x faster; temporary heap and allocations eliminated |
+| Already-direct Bloom control | 7,099 ns; 0 B; 0 allocs | 7,121 ns; 0 B; 0 allocs | neutral within 0.3% |
+| Scalar string DUMP control | 137.7 ns; 64 B; 1 alloc | 138.0 ns; 64 B; 1 alloc | neutral within 0.2% |
+
+Wire bytes, container representation and order, sparse inline ownership,
+receiver validation, routing, retry, batching, compression, storage, journal,
+snapshots, backup, and restore remain unchanged. The path adds no retained
+capacity or per-container metadata.
+
+```sh
+make run CMD='go test ./... -run "Test(FixedCommandDumpDirect|FixedStructured|CanonicalFixedStructured)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-bitmap-before.test /tmp/hatrie-direct-live-bitmap-after.test /tmp/hatrie-direct-live-bitmap-pairs.txt 20 31 5000x BenchmarkFixedCommandDumpRoaringBitmapReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-bitmap-before.test /tmp/hatrie-direct-live-bitmap-after.test /tmp/hatrie-direct-live-bitmap-bloom-control.txt 20 31 2000x BenchmarkFixedCommandDumpBloomFilterReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-bitmap-before.test /tmp/hatrie-direct-live-bitmap-after.test /tmp/hatrie-direct-live-bitmap-command-control.txt 20 31 500000x BenchmarkCommandFeature/ReplicationDump'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>

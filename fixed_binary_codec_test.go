@@ -153,8 +153,23 @@ func TestFixedCommandDumpDirectMatchesSnapshotEncoding(t *testing.T) {
 	if !ht.Expire("direct:bloom", time.Hour) {
 		t.Fatal("Expire(direct:bloom) = false")
 	}
+	roaringValues := make([]uint32, roaringBitmapArrayMaxSize+1)
+	sparseValues := make([]uint64, sparseBitsetArrayMaxSize+1)
+	for index := range roaringValues {
+		roaringValues[index] = uint32(index)
+		sparseValues[index] = uint64(index)
+	}
+	if added := ht.AddRoaringBitmap("direct:roaring", roaringValues[0], roaringValues[1:]...); added != len(roaringValues) {
+		t.Fatalf("AddRoaringBitmap() = %d, want %d", added, len(roaringValues))
+	}
+	if added := ht.AddSparseBitset("direct:sparse", sparseValues[0], sparseValues[1:]...); added != len(sparseValues) {
+		t.Fatalf("AddSparseBitset() = %d, want %d", added, len(sparseValues))
+	}
+	if added := ht.AddSparseBitset("direct:sparse-inline", 7); added != 1 {
+		t.Fatalf("AddSparseBitset(inline) = %d, want 1", added)
+	}
 
-	for _, key := range []string{"direct:bloom", "direct:cms", "direct:hll", "direct:cuckoo", "direct:xor", "direct:xor-staged"} {
+	for _, key := range []string{"direct:bloom", "direct:cms", "direct:hll", "direct:cuckoo", "direct:xor", "direct:xor-staged", "direct:roaring", "direct:sparse", "direct:sparse-inline"} {
 		got, ok, err := ht.commandDumpEntryBinaryWithoutStats(key)
 		if err != nil || !ok {
 			t.Fatalf("commandDumpEntryBinaryWithoutStats(%s) = %v/%v", key, ok, err)
@@ -535,6 +550,33 @@ func BenchmarkFixedCommandDumpBloomFilterReuse(b *testing.B) {
 	for iteration := 0; iteration < b.N; iteration++ {
 		buffer = buffer[:0]
 		buffer, ok, err = ht.appendCommandDumpEntryBinaryWithoutStats(buffer, "bloom:key")
+		if err != nil || !ok {
+			b.Fatalf("appendCommandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
+		}
+	}
+}
+
+func BenchmarkFixedCommandDumpRoaringBitmapReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	values := make([]uint32, roaringBitmapArrayMaxSize+1)
+	for index := range values {
+		values[index] = uint32(index)
+	}
+	if added := ht.AddRoaringBitmap("roaring:direct", values[0], values[1:]...); added != len(values) {
+		b.Fatalf("AddRoaringBitmap() = %d, want %d", added, len(values))
+	}
+	initial, ok, err := ht.commandDumpEntryBinaryWithoutStats("roaring:direct")
+	if err != nil || !ok {
+		b.Fatalf("commandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
+	}
+	buffer := make([]byte, 0, len(initial))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(initial)), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		buffer, ok, err = ht.appendCommandDumpEntryBinaryWithoutStats(buffer, "roaring:direct")
 		if err != nil || !ok {
 			b.Fatalf("appendCommandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
 		}
