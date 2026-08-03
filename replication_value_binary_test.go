@@ -1,6 +1,7 @@
 package hatriecache
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 	"time"
@@ -64,5 +65,88 @@ func TestAppendReplicationValueBinaryReusesDestination(t *testing.T) {
 	}
 	if !reflect.DeepEqual(decoded, entry) {
 		t.Fatalf("decoded = %#v, want %#v", decoded, entry)
+	}
+}
+
+func TestAppendReplicationStructuredValuesMatchBufferedEncoding(t *testing.T) {
+	prefix := []byte("replication-page-prefix")
+	expiresAt := time.Unix(1700000000, 123)
+	for _, entry := range benchmarkStructuredFallbackEntries() {
+		entry.ExpiresAt = &expiresAt
+		gotDestination := make([]byte, len(prefix), 1024)
+		wantDestination := make([]byte, len(prefix), 1024)
+		copy(gotDestination, prefix)
+		copy(wantDestination, prefix)
+		got, err := appendReplicationValueBinary(gotDestination, entry)
+		if err != nil {
+			t.Fatalf("appendReplicationValueBinary(%s) error = %v", entry.Type, err)
+		}
+		want, err := appendReplicationValueBinaryBufferedForTest(wantDestination, entry)
+		if err != nil {
+			t.Fatalf("appendReplicationValueBinaryBufferedForTest(%s) error = %v", entry.Type, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("binary %s replication value differs from buffered encoding:\n got % x\nwant % x", entry.Type, got, want)
+		}
+		if &got[0] != &gotDestination[0] {
+			t.Fatalf("appendReplicationValueBinary(%s) allocated despite sufficient destination capacity", entry.Type)
+		}
+	}
+}
+
+func appendReplicationValueBinaryBufferedForTest(destination []byte, entry snapshotEntry) ([]byte, error) {
+	value, err := prepareLevelDBBinaryEntryValue(entry)
+	if err != nil {
+		return destination, err
+	}
+	capacity, err := replicationValueBinaryCapacity(entry.Type, value.encodedSize, entry.ExpiresAt)
+	if err != nil {
+		return destination, err
+	}
+	destination = growBinaryAppendBuffer(destination, capacity)
+	writer := levelDBBinaryWriter{binaryFieldWriter: binaryFieldWriter{buf: destination}}
+	writer.buf = append(writer.buf, replicationValueBinaryMagic...)
+	writer.writeString(entry.Type)
+	writer.writePreparedSnapshotEntryValue(value)
+	writer.writeTimePtr(entry.ExpiresAt)
+	return writer.bytes(), nil
+}
+
+func BenchmarkReplicationStructuredFallbackEncode(b *testing.B) {
+	entries := benchmarkStructuredFallbackEntries()
+	recordBytes := 0
+	for _, entry := range entries {
+		data, err := marshalReplicationValueBinary(entry)
+		if err != nil {
+			b.Fatal(err)
+		}
+		recordBytes += len(data)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "record_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		for _, entry := range entries {
+			if _, err := marshalReplicationValueBinary(entry); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkReplicationStructuredFallbackAppendReuse(b *testing.B) {
+	entries := benchmarkStructuredFallbackEntries()
+	buffer := make([]byte, 0, 1024)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		for _, entry := range entries {
+			var err error
+			buffer, err = appendReplicationValueBinary(buffer, entry)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
 	}
 }

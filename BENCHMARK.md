@@ -182,6 +182,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Persistent storage backend bakeoff](#persistent-storage-backend-bakeoff), 10k x 256 B plus 1k churn | LevelDB: 91.602 ms cycle; 41.52 MB heap; 265.3 disk B/key | Pebble: 98.273 ms cycle; 20.52 MB heap; 285.7 disk B/key | 2.02x lower cumulative heap; disk is within 1.08x | LevelDB completes the mixed cycle 1.07x faster |
 | Earlier | [Replication request batching](#replication-batching-benchmark), 10k keys | Historical: 51,455,645,995 ns; 10,000 requests | First batched baseline: 162,195,812 ns; 1 request | About 317x faster, 10,000x fewer requests | Historical rows came from separate controlled runs |
 | Earlier | [Replication routing and encoding](#replication-batching-benchmark), 10k keys | 162,195,812 ns; 144,227 wire B; 57,035,706 heap B | 18,893,092 ns; 55,795 wire B; 948,495 heap B | 8.58x faster, 2.59x smaller wire, 60.13x lower heap | Compact paths retain legacy materialization fallbacks |
+| Current pass | [Direct structured replication assembly](#direct-structured-replication-assembly), seven fallback-heavy values in a reused page buffer | Buffered payload: 1,974 ns; 288 B; 7 allocs | Direct page append: 1,147 ns; 0 B; 0 allocs | 1.721x faster; temporary heap and allocations eliminated | No measured tradeoff; wire bytes are identical and scalar replication dump is neutral |
 | Current pass | [Direct fallback repair collection](#replication-descriptor-optimizations), 10k keys | Buffered entries: 4.939 ms; 1,854,982 heap B; 92 allocs | Direct changes: 4.544 ms; 421,376 heap B; 83 allocs | 1.09x faster, 4.40x lower heap, 1.11x fewer allocs | No measured regression; applies only after an older target rejects digest comparison |
 | Current pass | [Direct digest value arena](#replication-descriptor-optimizations), 1,024 sets | Per-value buffers: 1.089 ms; 108,878 heap B; 1,158 allocs | Direct records: 1.050 ms; 87,235 heap B; 136 allocs | 1.04x faster, 1.25x lower heap, 8.51x fewer allocs | No measured wire/CPU regression; JSON and mixed-delete compatibility paths are unchanged |
 | Current pass | [Legacy-target capability cache](#replication-descriptor-optimizations), 10k-key full sync | Probe every sync: 26.379 ms; 3 requests; 1,003,978 heap B; 608 allocs | Cached fallback: 13.148 ms; 2 steady requests; 979,718 heap B; 432 allocs | 2.01x faster, 1.02x lower heap, 1.41x fewer allocs | At most 1,024 small entries are retained for five minutes; address or topology changes invalidate them |
@@ -2014,6 +2015,46 @@ make run CMD='go test ./... -run TestLevelDBBinaryStructuredValuesMatchBufferedE
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-direct-before.test /tmp/hatrie-storage-direct-after.test /tmp/hatrie-storage-direct-pairs.txt 20 15 300000x BenchmarkStructuredStorageFallbackEncode'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-direct-before.test /tmp/hatrie-storage-direct-after.test /tmp/hatrie-storage-direct-scalar-pairs.txt 20 15 1000000x BenchmarkLevelDBEntryEncodeBinary'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-direct-before.test /tmp/hatrie-storage-direct-after.test /tmp/hatrie-storage-direct-save-pairs.txt 20 11 100x BenchmarkLevelDBSaveStructuredMaterialized'
+```
+
+<a id="direct-structured-replication-assembly"></a>
+### Direct Structured Replication Assembly
+
+Replication values used the same temporary tagged-value payload as persistent
+storage, even when a replication page had already reserved reusable capacity.
+Maps, slices, sets, priority queues, Top-K, radix trees, reservoir samples, and
+staged XOR filters now prepare and size first, then write their version-2 tag
+tree directly into the caller's page buffer. String replication also writes its
+known scalar layout directly so the dominant scalar path does not pay a second
+type dispatch.
+
+Tests added before the implementation compare every affected value family with
+an independent buffered reference, including normalized nested values and
+expiry metadata. They also prove that a destination with sufficient capacity
+retains its backing array. Frozen binaries ran fifteen alternating pairs pinned
+to logical CPU 20; final structured samples used 300,000 operations, the reused
+page used 300,000 operations, and the scalar control used 2,000,000.
+
+| Fifteen-pair median | Buffered payload | Direct page write | Result |
+| --- | ---: | ---: | ---: |
+| Seven standalone structured values | 2,186 ns; 680 B; 14 allocs; 364 wire B | 1,707 ns; 392 B; 7 allocs; 364 wire B | 1.281x faster, 42.4% lower heap, 50.0% fewer allocs |
+| Seven values appended to reused capacity | 1,974 ns; 288 B; 7 allocs | 1,147 ns; 0 B; 0 allocs | 1.721x faster; temporary heap and allocations eliminated |
+| Scalar replication dump control | 137.5 ns; 64 B; 1 alloc | 137.6 ns; 64 B; 1 alloc | neutral within 0.1% |
+
+The first structured prototype exposed a roughly 2% scalar regression because
+unaffected strings traversed both the new structured dispatch and the existing
+prepared-value dispatch. That layout was removed before acceptance. Direct
+string assembly restored the control to neutral without changing its bytes,
+heap, or allocation count.
+
+Wire bytes, decode behavior, JSON compatibility, validation, metadata, batch
+framing, compression, routing, retry behavior, storage, snapshots, journals,
+backup, and restore semantics are unchanged.
+
+```sh
+make run CMD='go test ./... -run "Test(ReplicationValueBinaryRoundTripOmitsKeyAndStats|AppendReplicationValueBinaryReusesDestination|AppendReplicationStructuredValuesMatchBufferedEncoding)" -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-replication-direct-before.test /tmp/hatrie-replication-direct-after.test /tmp/hatrie-replication-direct-final-pairs.txt 20 15 300000x BenchmarkReplicationStructuredFallback'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-replication-direct-before.test /tmp/hatrie-replication-direct-after.test /tmp/hatrie-replication-direct-scalar-pairs.txt 20 15 2000000x BenchmarkCommandFeature/ReplicationDump'
 ```
 
 <a id="adaptive-native-bucket-size-classes"></a>

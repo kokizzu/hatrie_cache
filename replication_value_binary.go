@@ -17,6 +17,40 @@ func marshalReplicationValueBinary(entry snapshotEntry) ([]byte, error) {
 }
 
 func appendReplicationValueBinary(destination []byte, entry snapshotEntry) ([]byte, error) {
+	switch entry.Type {
+	case "string":
+		return appendReplicationStringEntryBinary(destination, entry)
+	case "map":
+		return appendReplicationCollectionValueBinary(destination, entry, entry.Map)
+	case "slice":
+		return appendReplicationCollectionValueBinary(destination, entry, entry.Slice)
+	case "set":
+		return appendReplicationCollectionValueBinary(destination, entry, entry.Set)
+	case "priority_queue":
+		return appendReplicationPriorityQueueValueBinary(destination, entry)
+	case "top_k":
+		if entry.TopK == nil {
+			return destination, errors.New("hatriecache: top-k snapshot is required")
+		}
+		return appendReplicationTopKValueBinary(destination, entry, *entry.TopK)
+	case "radix_tree":
+		if entry.RadixTree == nil {
+			return destination, errors.New("hatriecache: radix tree snapshot is required")
+		}
+		return appendReplicationRadixTreeValueBinary(destination, entry, *entry.RadixTree)
+	case "reservoir_sample":
+		if entry.ReservoirSample == nil {
+			return destination, errors.New("hatriecache: reservoir sample snapshot is required")
+		}
+		return appendReplicationReservoirSampleValueBinary(destination, entry, *entry.ReservoirSample)
+	case "xor_filter":
+		if entry.XorFilter == nil {
+			return destination, errors.New("hatriecache: xor filter snapshot is required")
+		}
+		if !entry.XorFilter.Built {
+			return appendReplicationStagedXorFilterValueBinary(destination, entry, *entry.XorFilter)
+		}
+	}
 	value, err := prepareLevelDBBinaryEntryValue(entry)
 	if err != nil {
 		return destination, err
@@ -32,6 +66,183 @@ func appendReplicationValueBinary(destination []byte, entry snapshotEntry) ([]by
 	writer.writePreparedSnapshotEntryValue(value)
 	writer.writeTimePtr(entry.ExpiresAt)
 	return writer.bytes(), nil
+}
+
+func appendReplicationStringEntryBinary(destination []byte, entry snapshotEntry) ([]byte, error) {
+	valueSize, err := binaryLengthPrefixedSize(int64(len(entry.String)))
+	if err != nil {
+		return destination, err
+	}
+	capacity, err := replicationValueBinaryCapacity(entry.Type, valueSize, entry.ExpiresAt)
+	if err != nil {
+		return destination, err
+	}
+	destination = growBinaryAppendBuffer(destination, capacity)
+	writer := levelDBBinaryWriter{binaryFieldWriter: binaryFieldWriter{buf: destination}}
+	writer.buf = append(writer.buf, replicationValueBinaryMagic...)
+	writer.writeString(entry.Type)
+	writer.writeString(entry.String)
+	writer.writeTimePtr(entry.ExpiresAt)
+	return writer.bytes(), nil
+}
+
+func appendReplicationCollectionValueBinary(destination []byte, entry snapshotEntry, value interface{}) ([]byte, error) {
+	prepared, _, err := prepareSnapshotDynamicValueBinary(value)
+	if err != nil {
+		return destination, err
+	}
+	size, ok, err := snapshotValueBinarySize(prepared)
+	if err != nil {
+		return destination, err
+	}
+	if !ok {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	if !writeSnapshotValueBinary(&writer.binaryFieldWriter, prepared) {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationPriorityQueueValueBinary(destination []byte, entry snapshotEntry) ([]byte, error) {
+	prepared, err := prepareSnapshotPriorityQueueItemsBinary(entry.PriorityQueue)
+	if err != nil {
+		return destination, err
+	}
+	size, ok, err := snapshotValueBinaryPriorityQueueSize(prepared)
+	if err != nil {
+		return destination, err
+	}
+	if !ok {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	if !writeSnapshotValueBinaryPriorityQueue(&writer.binaryFieldWriter, prepared) {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationTopKValueBinary(destination []byte, entry snapshotEntry, snapshot topKSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotTopKBinary(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, ok, err := snapshotValueBinaryTopKSize(prepared)
+	if err != nil {
+		return destination, err
+	}
+	if !ok {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	if !writeSnapshotValueBinaryTopK(&writer.binaryFieldWriter, prepared) {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationRadixTreeValueBinary(destination []byte, entry snapshotEntry, snapshot radixTreeSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotRadixTreeBinary(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, ok, err := snapshotValueBinaryRadixTreeSize(prepared)
+	if err != nil {
+		return destination, err
+	}
+	if !ok {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	if !writeSnapshotValueBinaryRadixTree(&writer.binaryFieldWriter, prepared) {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationReservoirSampleValueBinary(destination []byte, entry snapshotEntry, snapshot reservoirSampleSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotReservoirSampleBinary(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, ok, err := snapshotValueBinaryReservoirSampleSize(prepared)
+	if err != nil {
+		return destination, err
+	}
+	if !ok {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	if !writeSnapshotValueBinaryReservoirSample(&writer.binaryFieldWriter, prepared) {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationStagedXorFilterValueBinary(destination []byte, entry snapshotEntry, snapshot xorFilterSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotStagedXorFilterBinary(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, ok, err := snapshotValueBinaryStagedXorFilterSize(prepared)
+	if err != nil {
+		return destination, err
+	}
+	if !ok {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	if !writeSnapshotValueBinaryStagedXorFilter(&writer.binaryFieldWriter, prepared) {
+		return destination, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func newReplicationDirectPayloadWriter(destination []byte, entry snapshotEntry, valueSize int) (levelDBBinaryWriter, error) {
+	payloadSize, err := snapshotValueBinaryAdd(len(snapshotValueBinaryMagic), valueSize)
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	encodedSize, err := binaryLengthPrefixedSize(int64(payloadSize))
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	capacity, err := replicationValueBinaryCapacity(entry.Type, encodedSize, entry.ExpiresAt)
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	destination = growBinaryAppendBuffer(destination, capacity)
+	writer := levelDBBinaryWriter{binaryFieldWriter: binaryFieldWriter{buf: destination}}
+	writer.buf = append(writer.buf, replicationValueBinaryMagic...)
+	writer.writeString(entry.Type)
+	writer.writeUvarint(uint64(payloadSize))
+	writer.buf = append(writer.buf, snapshotValueBinaryMagic...)
+	return writer, nil
+}
+
+func finishReplicationDirectPayload(writer levelDBBinaryWriter, entry snapshotEntry) []byte {
+	writer.writeTimePtr(entry.ExpiresAt)
+	return writer.bytes()
 }
 
 func growBinaryAppendBuffer(destination []byte, additional int) []byte {
