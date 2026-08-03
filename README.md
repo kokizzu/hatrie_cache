@@ -564,9 +564,11 @@ make run CMD='go build -o build/hatrie-cache ./cmd/hatrie-cache'
 make run CMD='go build -o build/hatrie-cli ./cmd/hatrie-cli'
 ```
 
-`make verify-ops` runs executable smoke tests for snapshot+journal restore and
-journal-pull catch-up. Keep it green when changing persistence, recovery,
-replication, or CLI behavior.
+`make verify-ops` creates and verifies an atomic backup bundle, restores it into
+a separate data directory, starts a server from only the restored files, and
+checks data written both before and after the source snapshot. It also exercises
+exact directory backup/restore, overwrite safeguards, and journal-pull catch-up.
+Keep it green when changing persistence, recovery, replication, or CLI behavior.
 
 Install the binaries wherever your service manager expects them. For a
 frontend-enabled deployment, build the static web assets and point
@@ -684,7 +686,12 @@ make backup DATA_DIR=data BACKUP_DIR=backup/run-001
 ```
 
 Use a fresh `BACKUP_DIR` by default. Set `BACKUP_OVERWRITE=true` only when you
-intentionally want to copy into an existing backup directory.
+intentionally want to replace an existing backup directory. Overwrite is an
+exact replacement: stale destination files are not retained. The copy is built
+in a sibling staging directory before publication, so the parent filesystem
+must have temporary space for the new copy while the old backup still exists.
+Symlink destinations and either direction of source/destination nesting are
+rejected.
 
 The safest operational pattern is to store cache data under one directory such
 as `/var/lib/hatrie-cache`, keep snapshots/journals/LevelDB on the same durable
@@ -751,7 +758,10 @@ make monitoring-server DB_PATH=data/cache.leveldb
 ```
 
 `make restore` refuses to copy into a non-empty `DATA_DIR` unless
-`RESTORE_OVERWRITE=true` is set.
+`RESTORE_OVERWRITE=true` is set. Overwrite publishes an exact staged copy and
+removes stale destination files; the previous directory remains available for
+rollback until publication succeeds. Symlink destinations and overlapping
+backup/data directories are rejected.
 
 Verify a backup directory or atomic bundle before restore:
 

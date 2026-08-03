@@ -123,10 +123,12 @@ expect_value() {
 }
 
 run_snapshot_journal_restore_smoke() {
-	data_dir="$tmp_dir/restore"
-	mkdir -p "$data_dir"
-	snapshot_path="$data_dir/snapshot.hc"
-	journal_path="$data_dir/commands.journal"
+	source_dir="$tmp_dir/restore-source"
+	restored_dir="$tmp_dir/restore-recovered"
+	mkdir -p "$source_dir"
+	snapshot_path="$source_dir/snapshot.hc"
+	journal_path="$source_dir/commands.journal"
+	bundle_path="$tmp_dir/restore-backup.tar.gz"
 
 	start_server restore-source "$restore_addr" \
 		-snapshot-path "$snapshot_path" \
@@ -135,18 +137,74 @@ run_snapshot_journal_restore_smoke() {
 	command "$restore_addr" SET ops:restore:before before
 	cli "$restore_addr" snapshot >/dev/null
 	command "$restore_addr" SET ops:restore:after after
-	bundle_path="$data_dir/backup.tar.gz"
 	cli "$restore_addr" backup -path "$bundle_path" >/dev/null
 	[ -s "$bundle_path" ] || fail "backup bundle was not written: $bundle_path"
 	stop_server "$pid"
+	"$cli_bin" doctor -path "$bundle_path" >/dev/null
+	"$cli_bin" restore-bundle -bundle "$bundle_path" -data-dir "$restored_dir" >/dev/null
+	mv "$source_dir" "$source_dir.offline"
 
 	start_server restore-replay "$restore_addr" \
-		-snapshot-path "$snapshot_path" \
-		-journal-path "$journal_path"
+		-snapshot-path "$restored_dir/snapshot.hc" \
+		-journal-path "$restored_dir/commands.journal"
 	pid=$started_pid
 	expect_value "$restore_addr" ops:restore:before before
 	expect_value "$restore_addr" ops:restore:after after
 	stop_server "$pid"
+}
+
+run_directory_backup_restore_smoke() {
+	source_dir="$tmp_dir/directory-source"
+	backup_dir="$tmp_dir/directory-backup"
+	restored_dir="$tmp_dir/directory-restored"
+	mkdir -p "$source_dir/nested" "$backup_dir" "$restored_dir"
+	printf 'snapshot-data\n' >"$source_dir/snapshot.hc"
+	printf 'journal-data\n' >"$source_dir/nested/commands.journal"
+	printf 'stale-backup\n' >"$backup_dir/stale"
+	printf 'stale-restore\n' >"$restored_dir/stale"
+
+	if DATA_DIR="$source_dir" BACKUP_DIR="$backup_dir" ./scripts/backup.sh >/dev/null 2>&1; then
+		fail "directory backup overwrote a non-empty destination without BACKUP_OVERWRITE"
+	fi
+	[ -f "$backup_dir/stale" ] || fail "refused directory backup modified its destination"
+
+	DATA_DIR="$source_dir" BACKUP_DIR="$backup_dir" BACKUP_OVERWRITE=true ./scripts/backup.sh >/dev/null
+	[ ! -e "$backup_dir/stale" ] || fail "directory backup retained a stale destination file"
+	cmp "$source_dir/snapshot.hc" "$backup_dir/snapshot.hc" >/dev/null || fail "directory backup changed snapshot.hc"
+	cmp "$source_dir/nested/commands.journal" "$backup_dir/nested/commands.journal" >/dev/null || fail "directory backup changed commands.journal"
+
+	if DATA_DIR="$restored_dir" BACKUP_DIR="$backup_dir" ./scripts/restore.sh >/dev/null 2>&1; then
+		fail "directory restore overwrote a non-empty destination without RESTORE_OVERWRITE"
+	fi
+	[ -f "$restored_dir/stale" ] || fail "refused directory restore modified its destination"
+
+	DATA_DIR="$restored_dir" BACKUP_DIR="$backup_dir" RESTORE_OVERWRITE=true ./scripts/restore.sh >/dev/null
+	[ ! -e "$restored_dir/stale" ] || fail "directory restore retained a stale destination file"
+	cmp "$source_dir/snapshot.hc" "$restored_dir/snapshot.hc" >/dev/null || fail "directory restore changed snapshot.hc"
+	cmp "$source_dir/nested/commands.journal" "$restored_dir/nested/commands.journal" >/dev/null || fail "directory restore changed commands.journal"
+
+	symlink_target="$tmp_dir/directory-symlink-target"
+	symlink_path="$tmp_dir/directory-symlink"
+	mkdir -p "$symlink_target"
+	printf 'protected\n' >"$symlink_target/protected"
+	ln -s "$symlink_target" "$symlink_path"
+	if DATA_DIR="$source_dir" BACKUP_DIR="$symlink_path" BACKUP_OVERWRITE=true ./scripts/backup.sh >/dev/null 2>&1; then
+		fail "directory backup accepted a symlink destination"
+	fi
+	[ -f "$symlink_target/protected" ] || fail "refused symlink backup modified its referent"
+
+	if DATA_DIR="$source_dir" BACKUP_DIR="$source_dir/nested-backup" ./scripts/backup.sh >/dev/null 2>&1; then
+		fail "directory backup accepted a destination inside its source"
+	fi
+	overlap_parent="$tmp_dir/directory-overlap"
+	mkdir -p "$overlap_parent/source"
+	printf 'overlap\n' >"$overlap_parent/source/value"
+	if DATA_DIR="$overlap_parent/source" BACKUP_DIR="$overlap_parent" BACKUP_OVERWRITE=true ./scripts/backup.sh >/dev/null 2>&1; then
+		fail "directory backup accepted a source inside its destination"
+	fi
+
+	leftovers=$(find "$tmp_dir" -maxdepth 1 \( -name '.*.copy.*' -o -name '.*.rollback.*' \) -print -quit)
+	[ -z "$leftovers" ] || fail "directory copy left staging state behind: $leftovers"
 }
 
 run_journal_pull_smoke() {
@@ -179,6 +237,7 @@ run_journal_pull_smoke() {
 }
 
 run_snapshot_journal_restore_smoke
+run_directory_backup_restore_smoke
 run_journal_pull_smoke
 
 echo "verify-ops: ok"

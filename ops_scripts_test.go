@@ -49,6 +49,87 @@ func TestBackupAndRestoreScriptsCopyDataDirectory(t *testing.T) {
 	}
 }
 
+func TestBackupAndRestoreScriptsOverwriteReplacesDirectoryExactly(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	backupDir := filepath.Join(tempDir, "backup")
+	restoreDir := filepath.Join(tempDir, "restore")
+	writeTestFile(t, filepath.Join(dataDir, "snapshot.hc"), "snapshot")
+	writeTestFile(t, filepath.Join(backupDir, "stale-backup"), "stale")
+	writeTestFile(t, filepath.Join(restoreDir, "stale-restore"), "stale")
+
+	runScript(t, "scripts/backup.sh",
+		"DATA_DIR="+dataDir,
+		"BACKUP_DIR="+backupDir,
+		"BACKUP_OVERWRITE=true",
+	)
+	if _, err := os.Stat(filepath.Join(backupDir, "stale-backup")); !os.IsNotExist(err) {
+		t.Fatalf("stale backup file stat error = %v, want not exist", err)
+	}
+
+	runScript(t, "scripts/restore.sh",
+		"DATA_DIR="+restoreDir,
+		"BACKUP_DIR="+backupDir,
+		"RESTORE_OVERWRITE=true",
+	)
+	if _, err := os.Stat(filepath.Join(restoreDir, "stale-restore")); !os.IsNotExist(err) {
+		t.Fatalf("stale restore file stat error = %v, want not exist", err)
+	}
+	data, err := os.ReadFile(filepath.Join(restoreDir, "snapshot.hc"))
+	if err != nil {
+		t.Fatalf("ReadFile(restored snapshot) error = %v", err)
+	}
+	if string(data) != "snapshot" {
+		t.Fatalf("restored snapshot = %q, want snapshot", data)
+	}
+}
+
+func TestBackupScriptRejectsSymlinkDestination(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	referentDir := filepath.Join(tempDir, "referent")
+	backupDir := filepath.Join(tempDir, "backup")
+	writeTestFile(t, filepath.Join(dataDir, "snapshot.hc"), "snapshot")
+	writeTestFile(t, filepath.Join(referentDir, "protected"), "keep")
+	if err := os.Symlink(referentDir, backupDir); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	output, err := runScriptOutput("scripts/backup.sh",
+		"DATA_DIR="+dataDir,
+		"BACKUP_DIR="+backupDir,
+		"BACKUP_OVERWRITE=true",
+	)
+	if err == nil {
+		t.Fatal("backup into symlink destination succeeded, want rejection")
+	}
+	if !strings.Contains(output, "BACKUP_DIR must not be a symlink") {
+		t.Fatalf("backup rejection output = %q, want symlink message", output)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(referentDir, "protected")); readErr != nil || string(data) != "keep" {
+		t.Fatalf("symlink referent = %q, %v; want protected file", data, readErr)
+	}
+}
+
+func TestBackupScriptRejectsDataInsideBackupDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	backupDir := filepath.Join(tempDir, "backup")
+	dataDir := filepath.Join(backupDir, "data")
+	writeTestFile(t, filepath.Join(dataDir, "snapshot.hc"), "snapshot")
+
+	output, err := runScriptOutput("scripts/backup.sh",
+		"DATA_DIR="+dataDir,
+		"BACKUP_DIR="+backupDir,
+		"BACKUP_OVERWRITE=true",
+	)
+	if err == nil {
+		t.Fatal("backup with DATA_DIR inside BACKUP_DIR succeeded, want rejection")
+	}
+	if !strings.Contains(output, "DATA_DIR must not be inside BACKUP_DIR") {
+		t.Fatalf("backup rejection output = %q, want overlap message", output)
+	}
+}
+
 func TestRestoreScriptRejectsNonEmptyDataDirectoryByDefault(t *testing.T) {
 	tempDir := t.TempDir()
 	backupDir := filepath.Join(tempDir, "backup")
