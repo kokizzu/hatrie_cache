@@ -179,6 +179,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct live fixed replication](#direct-live-fixed-replication), 32k-item Bloom DUMP into reused capacity | Snapshot base64 encode/decode: 119,288 ns; 229,448 B; 5 allocs | Live backing to final page: 6,133 ns; 0 B; 0 allocs | 19.45x faster; temporary heap and allocations eliminated | Private locked sender path for Bloom/CMS/HLL/Cuckoo/built XOR; exact 58,932 wire B, TTL, and staged-XOR fallback unchanged |
 | Current pass | [Direct live bitmap replication](#direct-live-bitmap-replication), 4,097-value dense Roaring DUMP into reused capacity | Snapshot container/base64 path: 18,865 ns; 24,696 B; 5 allocs | Live container to final page: 1,009 ns; 0 B; 0 allocs | 18.70x faster; temporary heap and allocations eliminated | Private locked Roaring/sparse path; exact 8,230 wire B, array/bitmap and sparse-inline encodings unchanged |
 | Current pass | [Direct live slice replication](#direct-live-slice-replication), Fenwick and quantile DUMP into reused capacity | Snapshot slice clones: 1,674/1,111 ns; 1,224/840 B; 3 allocs | Locked shallow views: 766/427 ns; 0 B; 0 allocs | Fenwick 2.187x, quantile 2.604x faster; temporary heap eliminated | Outlined fallback dispatch keeps existing Roaring neutral; exact bytes and Fenwick zero-tree omission unchanged |
+| Current pass | [Direct live map replication](#direct-live-map-replication), packed two-field and regular 64-field DUMP | Snapshot materialization: 639/13,412 ns; 360/6,128 B; 3/6 allocs | Locked representation writer: 108/7,152 ns; 0/1,152 B; 0/1 allocs | Packed 5.928x, regular 1.875x faster; snapshot heap eliminated | Exact 41/723 wire B, sorted keys, nested normalization, TTL, and fallback behavior unchanged; priority-queue control is neutral within 0.4% |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -2327,6 +2328,43 @@ make run CMD='go test ./... -run "Test(FixedCommandDumpDirect|FixedStructured|Ca
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-slices-before.test /tmp/hatrie-direct-live-slices-chained.test /tmp/hatrie-direct-live-fenwick-chained-pairs.txt 20 31 20000x BenchmarkFixedCommandDumpFenwickTreeReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-slices-before.test /tmp/hatrie-direct-live-slices-chained.test /tmp/hatrie-direct-live-quantile-chained-pairs.txt 20 31 50000x BenchmarkFixedCommandDumpQuantileSketchReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-slices-before.test /tmp/hatrie-direct-live-slices-chained.test /tmp/hatrie-direct-live-slices-roaring-chained-control.txt 20 31 5000x BenchmarkFixedCommandDumpRoaringBitmapReuse'
+```
+
+<a id="direct-live-map-replication"></a>
+### Direct Live Map Replication
+
+Map DUMP previously cloned every key and nested value into a snapshot before
+the binary writer immediately traversed that clone under the same trie lock.
+Packed one- and two-field maps also materialized a temporary Go map. The sender
+now reads the owned regular map directly and writes packed fields from a fixed
+two-element stack array. Unsupported concrete Go values are still normalized
+through the established JSON-compatible fallback before any destination bytes
+are written.
+
+The map helper is chained only after the established fixed and live-slice
+helpers decline an entry. The first candidate still allocated a 24-byte
+expiration timestamp on maps without TTL. Consulting the value's existing TTL
+bit before creating that timestamp removed the allocation and improved the
+packed result from 148.4 to 107.8 ns/op. Thirty-one alternating final pairs use
+caller-owned output capacity.
+
+| Paired median | Snapshot materialization | Direct locked representation | Result |
+| --- | ---: | ---: | ---: |
+| Packed two-field map DUMP | 639.0 ns; 360 B; 3 allocs; 41 wire B | 107.8 ns; 0 B; 0 allocs; 41 wire B | 5.928x faster; temporary heap eliminated |
+| Regular 64-field map DUMP | 13,412 ns; 6,128 B; 6 allocs; 723 wire B | 7,152 ns; 1,152 B; 1 alloc; 723 wire B | 1.875x faster; 81.2% lower heap; 83.3% fewer allocs |
+| Priority-queue fallback control | 12,963 ns; 10,136 B; 69 allocs | 13,012 ns; 10,136 B; 69 allocs | neutral within 0.4%; an independent 31-pair run was 0.1% faster |
+
+The remaining regular-map allocation is the existing sorted-key scratch needed
+for deterministic output above eight fields. Exact wire bytes, key ordering,
+nested values, JSON normalization, TTL, receiver validation, routing, retries,
+batching, storage, journal, snapshots, backup, and restore remain unchanged. No
+retained memory or per-field state is added.
+
+```sh
+make run CMD='go test ./... -run TestCommandDumpMapEncodingMatchesSnapshot -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-map-before.test /tmp/hatrie-direct-live-map-no-ttl-alloc.test /tmp/hatrie-direct-live-map-packed-final-pairs.txt 20 31 500000x BenchmarkCommandDumpPackedMapReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-map-before.test /tmp/hatrie-direct-live-map-no-ttl-alloc.test /tmp/hatrie-direct-live-map-large-final-pairs.txt 20 31 20000x BenchmarkCommandDumpLargeMapReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-map-before.test /tmp/hatrie-direct-live-map-no-ttl-alloc.test /tmp/hatrie-direct-live-map-priority-final-control.txt 20 31 20000x BenchmarkCommandDumpPriorityQueueControlReuse'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>

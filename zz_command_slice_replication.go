@@ -10,8 +10,9 @@ func (ht *HatTrie) appendCommandDumpSliceEntryBinaryLocked(destination []byte, e
 	case DATAVALUE_TYPE_QUANTILE_SKETCH:
 		data, err := appendCommandDumpQuantileSketchBinary(destination, snapshotExpiresAt(ht.expirationTimeLocked(entry.Key)), ht.quantileSketches.array[entry.Value.Index])
 		return data, true, err
+	default:
+		return ht.appendCommandDumpMapEntryBinaryLocked(destination, entry)
 	}
-	return destination, false, nil
 }
 
 func appendCommandDumpFenwickTreeBinary(destination []byte, expiresAt *time.Time, tree fenwickTreeData) ([]byte, error) {
