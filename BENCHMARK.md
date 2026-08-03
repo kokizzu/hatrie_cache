@@ -217,6 +217,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Radix prefix scan](#collection-allocation-follow-up) | 3,979 ns; 1,468 B; 20 allocs | 1,972 ns; 1,024 B; 1 alloc | 2.02x faster, 1.43x lower heap, 20x fewer allocs | Escaped/non-string values use generic JSON encoding |
 | Current pass | [Allocation-free duplicate radix updates](#idempotent-plain-string-radix-updates), exact plain-string `PUTRT` | 260.6 ns; 16 B; 1 alloc | 207.6 ns; 0 B; 0 allocs | 1.26x faster; allocation eliminated; focused duplicate 2.62x faster | Exact command only; public generic writes are unchanged, while replacements, dynamic builds, and reads are neutral or faster |
 | Current pass | [Order-independent radix bulk insertion](#order-independent-radix-bulk-insertion), 64/4,096-entry build and replacement | Sorted builds: 12,681/1,350,624 ns; replacements: 6,840/794,342 ns | Direct builds: 10,566/1,101,969 ns; replacements: 3,058/441,584 ns | Builds 1.20x/1.23x faster; replacements 2.24x/1.80x faster; one allocation and 1,152/65,536 B eliminated per call | No measured tradeoff; exact tree shape, item count, cloning, sorted traversal, snapshots, wire, and storage remain unchanged |
+| Current pass | [Direct radix child search](#direct-radix-child-search), fanout 1/16/256 plus lookup/replacement/build | `sort.Search`: 2.705/5.317/10.140 ns; lookup 42.340 ns; replacement 42.310 ns; build 18,474 ns | Direct binary loop: 1.770/4.581/8.394 ns; lookup 37.890 ns; replacement 38.300 ns; build 17,949 ns | Search 1.53x/1.16x/1.21x, lookup 1.12x, replacement 1.11x, build 1.03x faster | No measured tradeoff; every fanout improved, heap/allocations are unchanged, and complete prefix scan is neutral within 0.2% |
 | Current pass | [Borrowed command pair fields](#borrowed-command-pair-fields), pair-only `PUTMAP`/`PUTRT` replacement with 64/4,096 fields | Map: 26,107/2,311,800 ns; radix: 28,813/2,544,023 ns; 11,513/783,543 B | Map: 14,976/1,453,940 ns; radix: 16,328/1,742,736 ns; 2,144/131,181 B | Map 1.74x/1.59x faster; radix 1.76x/1.46x faster; 5.37x/5.97x lower heap; up to 25x fewer allocs | No measured tradeoff; storage still clones all retained values, and mixed subkey-plus-pairs requests retain an owned merge map |
 | Current pass | [Flat scalar structured validation](#flat-scalar-structured-validation), pair-only `PUTMAP`/`PUTRT` replacement with 64/4,096 fields | Map: 14,976/1,453,940 ns; radix: 16,328/1,742,736 ns; 2,144/131,181 B | Map: 3,251/247,728 ns; radix: 3,767/525,596 ns; 0 B; 0 allocs | Map 4.61x/5.87x faster; radix 4.33x/3.32x faster; command validation heap eliminated | No measured tradeoff; ordinary nested fallback is 1.02x-1.13x faster and custom marshalers, invalid values, cloning, wire, and storage are unchanged |
 | Current pass | [Flat scalar sequence validation](#flat-scalar-sequence-validation), checked slice/priority-queue replacement with 64/4,096 items | Slice: 3,926/198,293 ns; priority queue: 8,049/443,711 ns; 2,200-368,678 B; 3 allocs | Slice: 523.2/42,955 ns; priority queue: 2,791/182,809 ns; 1,152-196,608 B; 1 alloc | Slice 7.50x/4.62x faster; priority queue 2.88x/2.43x faster; 1.85x-2.00x lower heap; 3x fewer allocs | No measured tradeoff; worst-case nested fallback is 1.11x-1.26x faster with lower heap, while acceptance, cloning, wire, and storage are unchanged |
@@ -436,6 +437,7 @@ tree.
 | Priority-queue structured fallback scan | Kept the direct encoder string-only | A worst-case 100-item queue could scan every item before generic materialization and drift about 1% slower | Replaced by direct mixed-value encoding; see [compact priority-queue items](#compact-priority-queue-items) |
 | Priority-queue scalar dispatch placements | A typed scalar primitive was 1.45x faster and an early public dispatch made established strings 1.11x faster | The direct-generic helper made strings 1.04x slower; public dispatch made structured scalars and two-value batches 1.03x/1.02x slower; an out-of-line helper made structured scalars 1.03x slower; specializing first-item insertion inside the primitive made create/delete 0.9%-1.2% slower | All four placements were removed or replaced by [direct scalar priority-queue pushes](#direct-scalar-priority-queue-pushes), whose scalar, new-queue, and 2/16/128-value controls are all neutral or faster |
 | Radix-node tag compaction | 1.125x lower retained heap and 1.04x faster build | String, stored-`nil`, and missing reads were 1.10x-1.16x slower | Reverted; see [radix-node tag compaction](#radix-node-tag-compaction-rollback) |
+| Adaptive radix child search | Standalone linear controls were 1.2x-1.9x faster through fanout eight | In-method thresholds made fanout 8/16/32 up to 1.05x slower, while an outlined binary fallback made them 1.17x-1.21x slower | Replaced by the uniformly faster [direct binary loop](#direct-radix-child-search); no adaptive branch or extra call remains |
 | Fully linked XOR peel order | Halved normal-build allocations and cumulative heap | Cache-random reverse traversal made the 4,096/65,536-item builders 1.03x/1.05x slower | Replaced by linking only the queue while retaining contiguous peel order; see [linked XOR-filter build queue](#linked-xor-filter-build-queue) |
 | Direct staged-map XOR build | Removed the key-index allocation and made the separate 65,536-item build 1.35x faster with 1.43x lower heap | Same-binary 64-item and forced-retry builds were 1.06x and about 1.20x slower | Replaced by a compact seed-independent hash index; see [compact XOR-filter build hash index](#compact-xor-filter-build-hash-index) |
 | Marker-only plain XOR staging | Removed 64 allocations and 1,024 cumulative bytes while making 64-item staging 1.17x faster | Pending snapshot creation shifted those costs later: 2 to 66 allocations, 3,456 to 4,480 bytes, and 1.23x slower | Reverted; staged values remain pre-boxed so snapshots stay cheap; see [XOR staging marker](#xor-staging-marker-rollback) |
@@ -6928,6 +6930,58 @@ columns come from the dedicated allocation fixture. Final child order, prefix
 scan order, and serialized snapshots remain deterministic even though the
 temporary insertion order is not. No format, API, or retained-memory tradeoff
 was introduced.
+
+<a id="direct-radix-child-search"></a>
+### Direct Radix Child Search
+
+Every radix put, get, delete, contains, prefix traversal, and JSON prefix
+traversal locates a sorted child by its first byte. The shared `childIndex`
+method previously called `sort.Search` with a closure. It now performs the same
+lower-bound binary search directly, removing callback dispatch while retaining
+logarithmic behavior for all zero through 256-child nodes.
+
+The exhaustive reference test was added before production changed. For every
+fanout from zero through 256 and every possible first byte, it compares the
+returned insertion index and found flag with a linear reference. It passed ten
+times before and after the change and under the race detector. Frozen binaries
+then ran fifteen alternating pairs pinned to logical CPU 9. Search, command,
+update, and lookup samples used one million operations; the 128-entry build
+used 10,000 operations.
+
+| Fifteen-pair median | `sort.Search` baseline | Direct binary loop | Result |
+| --- | ---: | ---: | ---: |
+| Child search, fanout 1 | 2.705 ns; 0 B; 0 allocs | 1.770 ns; 0 B; 0 allocs | 1.528x faster |
+| Child search, fanout 2 | 3.242 ns; 0 B; 0 allocs | 2.254 ns; 0 B; 0 allocs | 1.438x faster |
+| Child search, fanout 4 | 3.722 ns; 0 B; 0 allocs | 2.791 ns; 0 B; 0 allocs | 1.334x faster |
+| Child search, fanout 8 | 4.509 ns; 0 B; 0 allocs | 3.725 ns; 0 B; 0 allocs | 1.210x faster |
+| Child search, fanout 16 | 5.317 ns; 0 B; 0 allocs | 4.581 ns; 0 B; 0 allocs | 1.161x faster |
+| Child search, fanout 32 | 5.371 ns; 0 B; 0 allocs | 4.740 ns; 0 B; 0 allocs | 1.133x faster |
+| Child search, fanout 64 | 7.617 ns; 0 B; 0 allocs | 6.208 ns; 0 B; 0 allocs | 1.227x faster |
+| Child search, fanout 128 | 9.234 ns; 0 B; 0 allocs | 7.339 ns; 0 B; 0 allocs | 1.258x faster |
+| Child search, fanout 256 | 10.140 ns; 0 B; 0 allocs | 8.394 ns; 0 B; 0 allocs | 1.208x faster |
+| Complete `RadixPut` command | 82.190 ns; 0 B; 0 allocs | 79.110 ns; 0 B; 0 allocs | 1.039x faster |
+| Existing-key replacement | 42.310 ns; 16 B; 1 alloc | 38.300 ns; 16 B; 1 alloc | 1.105x faster |
+| 128-key lookup | 42.340 ns; 0 B; 0 allocs | 37.890 ns; 0 B; 0 allocs | 1.117x faster |
+| 128-entry build | 18,474 ns; 31,168 B; 203 allocs | 17,949 ns; 31,168 B; 203 allocs | 1.029x faster |
+| Complete prefix scan control | 1,014 ns; 1,024 B; 1 alloc | 1,016 ns; 1,024 B; 1 alloc | neutral within 0.2% |
+
+Three adaptive linear-search placements were measured and rejected first. A
+threshold of eight improved common updates but made focused fanout 8/16/32
+searches 1.024x/1.027x/1.021x slower. Tightening the threshold to four still
+made those binary fallbacks about 1.05x slower. Outlining the binary fallback
+added a second call and made fanout 8/16/32 1.21x/1.19x/1.16x slower. None of
+those variants remain.
+
+The accepted loop changes no node layout, child order, comparison count class,
+retained memory, cloning, item counts, snapshots, journals, replication,
+persistent records, or wire format.
+
+```sh
+make run CMD='go test . -run="TestRadixTreeChildIndexMatchesLinearReference|TestRadixTree" -count=10'
+make run CMD='go test -race . -run="TestRadixTreeChildIndexMatchesLinearReference|TestRadixTree" -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-radix-child-baseline.test /tmp/hatrie-radix-child-candidate4.test /tmp/radix-child-pairs4.txt 9 15 1000000x "BenchmarkRadixTreeChildIndexFanout/Fanout(1|2|4|8|16|32|64|128|256)/Binary\\z"'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-radix-child-baseline.test /tmp/hatrie-radix-child-candidate4.test /tmp/radix-command-pairs4.txt 9 15 1000000x "BenchmarkCommandFeature/Radix(Put|Prefix)\\z"'
+```
 
 <a id="borrowed-command-pair-fields"></a>
 ### Borrowed Command Pair Fields

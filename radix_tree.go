@@ -3,7 +3,6 @@ package hatriecache
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	json "github.com/goccy/go-json"
@@ -475,10 +474,16 @@ func (node *radixTreeNode) collectStats(depth uint64, stats *radixTreeStats) {
 }
 
 func (node *radixTreeNode) childIndex(first byte) (int, bool) {
-	idx := sort.Search(len(node.children), func(idx int) bool {
-		return node.children[idx].prefix[0] >= first
-	})
-	return idx, idx < len(node.children) && node.children[idx].prefix[0] == first
+	low, high := 0, len(node.children)
+	for low < high {
+		middle := int(uint(low+high) >> 1)
+		if node.children[middle].prefix[0] < first {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	return low, low < len(node.children) && node.children[low].prefix[0] == first
 }
 
 func commonPrefixLen(left string, right string) int {
