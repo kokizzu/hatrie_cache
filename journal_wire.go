@@ -48,12 +48,16 @@ func marshalCommandJournalTailBinary(tail CommandJournalTail) ([]byte, error) {
 		if record.Sequence == 0 {
 			return nil, errors.New("hatriecache: invalid command journal tail sequence")
 		}
-		values, pairs, err := marshalCommandJournalRequestBinaryDynamicFields(record.Request)
+		values, err := prepareCommandJournalDirectBinaryDynamicField(record.Request.Values)
+		if err != nil {
+			return nil, err
+		}
+		pairs, err := prepareCommandJournalDirectBinaryDynamicField(record.Request.Pairs)
 		if err != nil {
 			return nil, err
 		}
 		writer.writeUvarint(record.Sequence)
-		if err := writeCommandJournalRequestBinaryFields(&writer, record.Request, values, pairs); err != nil {
+		if err := writeCommandJournalRequestDirectBinaryFields(&writer, record.Request, values, pairs); err != nil {
 			return nil, err
 		}
 	}

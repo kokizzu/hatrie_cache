@@ -84,6 +84,61 @@ func TestCommandJournalTailBinaryRoundTripAndRejectsTrailingData(t *testing.T) {
 	}
 }
 
+func TestCommandJournalTailStructuredBinaryMatchesBufferedEncoding(t *testing.T) {
+	structured := benchmarkCommandJournalStructuredEntry()
+	want := CommandJournalTail{
+		LastSequence:     3,
+		CompactedThrough: 1,
+		Limit:            2,
+		HasMore:          true,
+		Entries: []CommandJournalRecord{
+			{Sequence: 2, Request: CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}},
+			{Sequence: 3, Request: structured.Request},
+		},
+	}
+	got, err := marshalCommandJournalTailBinary(want)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalTailBinary() error = %v", err)
+	}
+	buffered, err := marshalCommandJournalTailBinaryBufferedForTest(want)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalTailBinaryBufferedForTest() error = %v", err)
+	}
+	if !bytes.Equal(got, buffered) {
+		t.Fatalf("structured binary tail differs from buffered encoding:\n got % x\nwant % x", got, buffered)
+	}
+}
+
+func marshalCommandJournalTailBinaryBufferedForTest(tail CommandJournalTail) ([]byte, error) {
+	if tail.Limit < 0 || tail.Limit > MaxCommandJournalTailLimit || len(tail.Entries) > tail.Limit {
+		return nil, errors.New("hatriecache: invalid command journal tail size")
+	}
+	initialCapacity := len(commandJournalTailBinaryMagic) + 64 + len(tail.Entries)*32
+	if initialCapacity > maxCommandJournalTailResponseBytes {
+		initialCapacity = maxCommandJournalTailResponseBytes
+	}
+	writer := newBinaryFieldWriter(commandJournalTailBinaryMagic, initialCapacity)
+	writer.writeUvarint(tail.LastSequence)
+	writer.writeUvarint(tail.CompactedThrough)
+	writer.writeUvarint(uint64(tail.Limit))
+	writer.writeBool(tail.HasMore)
+	writer.writeUvarint(uint64(len(tail.Entries)))
+	for _, record := range tail.Entries {
+		if record.Sequence == 0 {
+			return nil, errors.New("hatriecache: invalid command journal tail sequence")
+		}
+		values, pairs, err := marshalCommandJournalRequestBinaryDynamicFields(record.Request)
+		if err != nil {
+			return nil, err
+		}
+		writer.writeUvarint(record.Sequence)
+		if err := writeCommandJournalRequestBinaryFields(&writer, record.Request, values, pairs); err != nil {
+			return nil, err
+		}
+	}
+	return writer.bytes(), nil
+}
+
 func TestCommandJournalTailCompactScalarPullAppliesAndReplays(t *testing.T) {
 	want := CommandJournalTail{
 		LastSequence: 2,

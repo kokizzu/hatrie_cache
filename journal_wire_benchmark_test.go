@@ -48,6 +48,42 @@ func BenchmarkCommandJournalTailWire10k(b *testing.B) {
 	}
 }
 
+func BenchmarkCommandJournalTailStructuredBinaryEncode1k(b *testing.B) {
+	entry := benchmarkCommandJournalStructuredEntry()
+	tail := CommandJournalTail{LastSequence: 1000, Limit: 1000, Entries: make([]CommandJournalRecord, 1000)}
+	for index := range tail.Entries {
+		tail.Entries[index] = CommandJournalRecord{Sequence: uint64(index + 1), Request: entry.Request}
+	}
+	payload, err := marshalCommandJournalTailBinary(tail)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(payload)), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := marshalCommandJournalTailBinary(tail); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCommandJournalTailScalarBinaryEncode10k(b *testing.B) {
+	tail := benchmarkCommandJournalTail10k()
+	payload, err := marshalCommandJournalTailBinary(tail)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(payload)), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := marshalCommandJournalTailBinary(tail); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkCommandJournalTailOwnership10k(b *testing.B) {
 	payload, err := marshalCommandJournalTailBinary(benchmarkCommandJournalTail10k())
 	if err != nil {

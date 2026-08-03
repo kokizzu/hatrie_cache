@@ -164,6 +164,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Structured binary journal](README.md#serialization-tradeoffs) | JSON: 668 record B; 5,528 ns decode | Binary: 553 record B; 3,539 ns decode | 17.2% smaller, 1.56x faster decode | Encode is 1.56x slower because both representations are size-checked |
 | Current pass | [Canonical journal format dispatch](#canonical-journal-format-dispatch), scalar/structured JSON and binary encode | 5,067/1,259/3,109/2,053 ns | 4,920/1,222/3,048/1,971 ns | 1.03x/1.03x/1.02x/1.04x faster | No measured tradeoff; record bytes, heap, allocations, aliases, case folding, fallback formats, and decode are unchanged |
 | Current pass | [Direct journal dynamic fields](#direct-journal-dynamic-fields), structured record appended to reusable segment capacity | Buffered Values/Pairs: 1,625 ns; 616 B; 4 allocs | Direct fields: 1,168 ns; 72 B; 2 allocs | 1.391x faster, 8.56x lower heap, 2.00x fewer allocs | No measured tradeoff; durable bytes are identical and scalar journal encode is neutral |
+| Current pass | [Direct journal-tail dynamic fields](#direct-journal-tail-dynamic-fields), 1,000 structured records | Buffered Values/Pairs: 2.094 ms; 3.074 MB; 4,012 allocs | Direct fields: 1.645 ms; 2.530 MB; 2,012 allocs | 1.273x faster, 1.22x lower heap, 1.99x fewer allocs | No measured tradeoff; 540,886 wire B are identical and the scalar tail also improves 1.073x |
 | Earlier | [Structured gzip-best snapshot](README.md#serialization-tradeoffs) | Gzip JSON: 18,866,057 ns; 6,956 disk B | Gzip binary: 9,847,768 ns; 5,787 disk B | 1.92x faster, 16.8% smaller, 5.94x fewer allocs | Maximum compression remains CPU-intensive |
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
@@ -3946,6 +3947,39 @@ make run CMD='go test ./... -run "TestCommandJournalBinary(StructuredFieldsMatch
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-journal-direct-before.test /tmp/hatrie-journal-direct-after.test /tmp/hatrie-journal-direct-pairs.txt 20 15 300000x BenchmarkCommandJournalEncodeStructuredBinary'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-journal-direct-before.test /tmp/hatrie-journal-direct-after.test /tmp/hatrie-journal-direct-reuse-pairs.txt 20 15 500000x BenchmarkCommandJournalAppendStructuredBinaryReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-journal-direct-before.test /tmp/hatrie-journal-direct-after.test /tmp/hatrie-journal-direct-scalar-pairs.txt 20 15 1000000x BenchmarkCommandJournalEncodeBinary'
+```
+
+<a id="direct-journal-tail-dynamic-fields"></a>
+### Direct Journal-Tail Dynamic Fields
+
+The binary journal-tail transport retained the last production use of
+temporary tagged `Values` and `Pairs` buffers. Each tail record now uses the
+same prepared direct-field writer as durable journal records. The tail envelope
+still grows its shared response buffer incrementally, but no longer allocates
+and copies two complete dynamic payloads per structured record.
+
+A mixed scalar/structured byte-equivalence test was added before the transport
+change and compares the complete envelope with an independent buffered
+reference. Frozen binaries ran fifteen alternating pairs pinned to logical CPU
+20. The structured fixture encodes 1,000 records per operation; the scalar
+control encodes the established 10,000-record catch-up tail.
+
+| Fifteen-pair median | Buffered Values/Pairs | Direct fields | Result |
+| --- | ---: | ---: | ---: |
+| 1,000 structured records | 2,094,018 ns; 3,073,602 B; 4,012 allocs; 540,886 wire B | 1,644,889 ns; 2,529,602 B; 2,012 allocs; 540,886 wire B | 1.273x faster, 17.7% lower heap, 1.99x fewer allocs |
+| 10,000 scalar records | 927,371 ns; 327,680 B; 1 alloc; 289,886 wire B | 864,355 ns; 327,680 B; 1 alloc; 289,886 wire B | 1.073x faster; heap and allocations unchanged |
+
+Wire bytes, envelope limits, content negotiation, decode, borrowed-string
+ownership, command application, retry behavior, durable journals, snapshots,
+backup, and restore semantics are unchanged. The buffered dynamic-field helpers
+remain only as compatibility fixtures for legacy-byte tests; production
+storage, replication, durable journal, and journal-tail encoders now all write
+prepared tagged values directly to their final buffers.
+
+```sh
+make run CMD='go test ./... -run "TestCommandJournalTail(StructuredBinaryMatchesBufferedEncoding|BinaryRoundTripAndRejectsTrailingData)" -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-journal-tail-direct-before.test /tmp/hatrie-journal-tail-direct-after.test /tmp/hatrie-journal-tail-direct-structured-pairs.txt 20 15 1000x BenchmarkCommandJournalTailStructuredBinaryEncode1k'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-journal-tail-direct-before.test /tmp/hatrie-journal-tail-direct-after.test /tmp/hatrie-journal-tail-direct-scalar-pairs.txt 20 15 100x BenchmarkCommandJournalTailScalarBinaryEncode10k'
 ```
 
 <a id="binary-journal-catch-up-wire"></a>
