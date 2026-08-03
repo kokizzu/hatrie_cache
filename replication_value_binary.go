@@ -50,6 +50,47 @@ func appendReplicationValueBinary(destination []byte, entry snapshotEntry) ([]by
 		if !entry.XorFilter.Built {
 			return appendReplicationStagedXorFilterValueBinary(destination, entry, *entry.XorFilter)
 		}
+		return appendReplicationBuiltXorFilterValueBinary(destination, entry, *entry.XorFilter)
+	case "bloom_filter":
+		if entry.BloomFilter == nil {
+			return destination, errors.New("hatriecache: bloom filter snapshot is required")
+		}
+		return appendReplicationBloomFilterValueBinary(destination, entry, *entry.BloomFilter)
+	case "count_min_sketch":
+		if entry.CountMinSketch == nil {
+			return destination, errors.New("hatriecache: count-min sketch snapshot is required")
+		}
+		return appendReplicationCountMinSketchValueBinary(destination, entry, *entry.CountMinSketch)
+	case "hyperloglog":
+		if entry.HyperLogLog == nil {
+			return destination, errors.New("hatriecache: hyperloglog snapshot is required")
+		}
+		return appendReplicationHyperLogLogValueBinary(destination, entry, *entry.HyperLogLog)
+	case "cuckoo_filter":
+		if entry.CuckooFilter == nil {
+			return destination, errors.New("hatriecache: cuckoo filter snapshot is required")
+		}
+		return appendReplicationCuckooFilterValueBinary(destination, entry, *entry.CuckooFilter)
+	case "roaring_bitmap":
+		if entry.RoaringBitmap == nil {
+			return destination, errors.New("hatriecache: roaring bitmap snapshot is required")
+		}
+		return appendReplicationRoaringBitmapValueBinary(destination, entry, *entry.RoaringBitmap)
+	case "sparse_bitset":
+		if entry.SparseBitset == nil {
+			return destination, errors.New("hatriecache: sparse bitset snapshot is required")
+		}
+		return appendReplicationSparseBitsetValueBinary(destination, entry, *entry.SparseBitset)
+	case "fenwick_tree":
+		if entry.FenwickTree == nil {
+			return destination, errors.New("hatriecache: fenwick tree snapshot is required")
+		}
+		return appendReplicationFenwickTreeValueBinary(destination, entry, *entry.FenwickTree)
+	case "quantile_sketch":
+		if entry.QuantileSketch == nil {
+			return destination, errors.New("hatriecache: quantile sketch snapshot is required")
+		}
+		return appendReplicationQuantileSketchValueBinary(destination, entry, *entry.QuantileSketch)
 	}
 	value, err := prepareLevelDBBinaryEntryValue(entry)
 	if err != nil {
@@ -215,6 +256,151 @@ func appendReplicationStagedXorFilterValueBinary(destination []byte, entry snaps
 	if !writeSnapshotValueBinaryStagedXorFilter(&writer.binaryFieldWriter, prepared) {
 		return destination, errors.New("hatriecache: unsupported binary snapshot value")
 	}
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationBloomFilterValueBinary(destination []byte, entry snapshotEntry, snapshot bloomFilterSnapshot) ([]byte, error) {
+	bits, err := snapshotBloomFilterRawBits(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, err := snapshotValueBinaryBloomFilterSize(snapshot, len(bits))
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinaryBloomFilter(&writer.binaryFieldWriter, snapshot, bits)
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationCountMinSketchValueBinary(destination []byte, entry snapshotEntry, snapshot countMinSketchSnapshot) ([]byte, error) {
+	counters, err := snapshotCountMinSketchRawCounters(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, err := snapshotValueBinaryCountMinSketchSize(snapshot, len(counters))
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinaryCountMinSketch(&writer.binaryFieldWriter, snapshot, counters)
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationHyperLogLogValueBinary(destination []byte, entry snapshotEntry, snapshot hyperLogLogSnapshot) ([]byte, error) {
+	registers, err := snapshotHyperLogLogRawRegisters(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, err := snapshotValueBinaryHyperLogLogSize(snapshot, len(registers))
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinaryHyperLogLog(&writer.binaryFieldWriter, snapshot, registers)
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationCuckooFilterValueBinary(destination []byte, entry snapshotEntry, snapshot cuckooFilterSnapshot) ([]byte, error) {
+	fingerprints, err := snapshotCuckooFilterRawFingerprints(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, err := snapshotValueBinaryCuckooFilterSize(snapshot, len(fingerprints))
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinaryCuckooFilter(&writer.binaryFieldWriter, snapshot, fingerprints)
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationBuiltXorFilterValueBinary(destination []byte, entry snapshotEntry, snapshot xorFilterSnapshot) ([]byte, error) {
+	fingerprints, err := snapshotXorFilterRawFingerprints(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, err := snapshotValueBinaryXorFilterSize(snapshot, len(fingerprints))
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinaryXorFilter(&writer.binaryFieldWriter, snapshot, fingerprints)
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationRoaringBitmapValueBinary(destination []byte, entry snapshotEntry, snapshot roaringBitmapSnapshot) ([]byte, error) {
+	containers, err := prepareSnapshotRoaringBitmapBinaryContainers(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, err := snapshotValueBinaryRoaringBitmapSize(snapshot, containers)
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinaryRoaringBitmap(&writer.binaryFieldWriter, snapshot, containers)
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationSparseBitsetValueBinary(destination []byte, entry snapshotEntry, snapshot sparseBitsetSnapshot) ([]byte, error) {
+	containers, err := prepareSnapshotSparseBitsetBinaryContainers(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	size, err := snapshotValueBinarySparseBitsetSize(snapshot, containers)
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinarySparseBitset(&writer.binaryFieldWriter, snapshot, containers)
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationFenwickTreeValueBinary(destination []byte, entry snapshotEntry, snapshot fenwickTreeSnapshot) ([]byte, error) {
+	size, err := snapshotValueBinaryFenwickTreeSize(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinaryFenwickTree(&writer.binaryFieldWriter, snapshot)
+	return finishReplicationDirectPayload(writer, entry), nil
+}
+
+func appendReplicationQuantileSketchValueBinary(destination []byte, entry snapshotEntry, snapshot quantileSketchSnapshot) ([]byte, error) {
+	size, err := snapshotValueBinaryQuantileSketchSize(snapshot)
+	if err != nil {
+		return destination, err
+	}
+	writer, err := newReplicationDirectPayloadWriter(destination, entry, size)
+	if err != nil {
+		return destination, err
+	}
+	writeSnapshotValueBinaryQuantileSketch(&writer.binaryFieldWriter, snapshot)
 	return finishReplicationDirectPayload(writer, entry), nil
 }
 

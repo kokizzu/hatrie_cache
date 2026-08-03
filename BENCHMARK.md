@@ -171,7 +171,8 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
 | Current pass | [Complete tagged structured storage](#complete-tagged-structured-storage), fallback-heavy seven-record cycle | Inner JSON: 3,846/11,651 ns encode/decode; 674 record B | Tagged binary: 2,551/5,743 ns; 410 record B | Encode 1.51x, decode 2.03x faster; 1.64x smaller; 2.42x/1.92x lower heap | Uncommon concrete Go values normalize once to JSON-compatible types; version-1 binary and inner JSON remain readable |
 | Current pass | [Canonical storage format dispatch](#canonical-storage-format-dispatch), seven structured records and 512-key scalar/structured saves | 2,390 ns; 393,848/636,277 ns | 2,296 ns; 381,979/631,468 ns | Encoder 1.041x; saves 1.031x/1.008x faster | No measured tradeoff; large records are neutral, while bytes, heap, allocations, aliases, fallback formats, and decode are unchanged |
-| Current pass | [Direct structured storage assembly](#direct-structured-storage-assembly), seven fallback-heavy records | Buffered payload: 2,302 ns; 768 B; 14 allocs | Direct final record: 1,827 ns; 480 B; 7 allocs | 1.260x faster, 1.60x lower heap, 2.00x fewer allocs | No measured tradeoff; record bytes are identical, scalar encode is neutral, and replication retains its existing buffered path |
+| Current pass | [Direct structured storage assembly](#direct-structured-storage-assembly), seven fallback-heavy records | Buffered payload: 2,302 ns; 768 B; 14 allocs | Direct final record: 1,827 ns; 480 B; 7 allocs | 1.260x faster, 1.60x lower heap, 2.00x fewer allocs | No measured tradeoff; record bytes are identical, scalar encode is neutral, and replication was measured separately in the next pass |
+| Current pass | [Direct fixed structured assembly](#direct-fixed-structured-assembly), nine filter/sketch/bitmap/tree records | Storage: 33,386 ns; 71,536 B; 27 allocs; replication page: 28,992 ns; 47,088 B; 18 allocs | Storage: 29,215 ns; 47,152 B; 18 allocs; replication page: 24,537 ns; 22,704 B; 9 allocs | Storage 1.143x, replication 1.182x faster; 24,384 fewer B and 9 fewer allocs in both | No measured tradeoff; exact storage/wire bytes and round trips are unchanged, scalar controls are neutral or faster |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -2058,6 +2059,46 @@ backup, and restore semantics are unchanged.
 make run CMD='go test ./... -run "Test(ReplicationValueBinaryRoundTripOmitsKeyAndStats|AppendReplicationValueBinaryReusesDestination|AppendReplicationStructuredValuesMatchBufferedEncoding)" -count=1'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-replication-direct-before.test /tmp/hatrie-replication-direct-after.test /tmp/hatrie-replication-direct-final-pairs.txt 20 15 300000x BenchmarkReplicationStructuredFallback'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-replication-direct-before.test /tmp/hatrie-replication-direct-after.test /tmp/hatrie-replication-direct-scalar-pairs.txt 20 15 2000000x BenchmarkCommandFeature/ReplicationDump'
+```
+
+<a id="direct-fixed-structured-assembly"></a>
+### Direct Fixed Structured Assembly
+
+Bloom filters, Count-Min Sketches, HyperLogLog, Cuckoo filters, built XOR
+filters, Roaring bitmaps, sparse bitsets, Fenwick trees, and quantile sketches
+still allocated a complete tagged payload after preparing their raw bytes or
+containers. Storage then copied it into a second record allocation, while a
+replication page copied it into already reusable capacity. These nine families
+now size and write their prepared typed data directly into the final LevelDB or
+replication buffer. Base64 decoding and bitmap-container preparation remain
+unchanged because they validate and transform snapshot data rather than merely
+copying the final representation.
+
+Tests added before implementation construct valid representatives of all nine
+families. They compare storage and replication output with independent buffered
+references, decode both forms, verify exact snapshot equality, and prove that
+replication retains caller-owned capacity. Frozen binaries ran fifteen
+alternating focused/scalar pairs pinned to logical CPU 20. The complete
+272-entry structured save used eleven alternating 100-iteration pairs.
+
+| Paired median | Buffered tagged payload | Direct final buffer | Result |
+| --- | ---: | ---: | ---: |
+| Nine LevelDB records | 33,386 ns; 71,536 B; 27 allocs; 21,680 record B | 29,215 ns; 47,152 B; 18 allocs; 21,680 record B | 1.143x faster, 34.1% lower heap, 33.3% fewer allocs |
+| Nine values in reused replication page | 28,992 ns; 47,088 B; 18 allocs; 21,560 wire B | 24,537 ns; 22,704 B; 9 allocs; 21,560 wire B | 1.182x faster, 51.8% lower heap, 50.0% fewer allocs |
+| Complete 272-entry structured save | 855,941 ns; 1,723,342 B; 1,997 allocs | 836,424 ns; 1,668,174 B; 1,853 allocs | CPU neutral under matching JSON-control drift; 55,168 fewer B and 144 fewer allocs |
+| 3 KiB scalar storage control | 628.0 ns; 3,200 B; 1 alloc | 625.7 ns; 3,200 B; 1 alloc | neutral within 0.4% |
+| Scalar replication dump control | 141.4 ns; 64 B; 1 alloc | 138.0 ns; 64 B; 1 alloc | 1.025x faster |
+
+Record and wire bytes, tagged versions, decode, validation, expiry metadata,
+database batches, replication framing, snapshots, journals, backup, and restore
+semantics are unchanged.
+
+```sh
+make run CMD='go test ./... -run "Test(FixedStructuredBinaryRecordsMatchBufferedEncoding|FixedStructuredReplicationValuesMatchBufferedEncoding)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-pairs.txt 20 15 5000x BenchmarkFixedStructured'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-save-pairs.txt 20 11 100x BenchmarkLevelDBSaveStructuredMaterialized'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-scalar-pairs.txt 20 15 500000x BenchmarkLevelDBEntryEncodeBinary'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-replication-scalar-pairs.txt 20 15 1000000x BenchmarkCommandFeature/ReplicationDump'
 ```
 
 <a id="adaptive-native-bucket-size-classes"></a>

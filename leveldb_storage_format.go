@@ -145,6 +145,47 @@ func marshalLevelDBEntryBinary(entry snapshotEntry) ([]byte, error) {
 		if !entry.XorFilter.Built {
 			return marshalLevelDBStagedXorFilterEntryBinary(entry, *entry.XorFilter)
 		}
+		return marshalLevelDBBuiltXorFilterEntryBinary(entry, *entry.XorFilter)
+	case "bloom_filter":
+		if entry.BloomFilter == nil {
+			return nil, errors.New("hatriecache: bloom filter snapshot is required")
+		}
+		return marshalLevelDBBloomFilterEntryBinary(entry, *entry.BloomFilter)
+	case "count_min_sketch":
+		if entry.CountMinSketch == nil {
+			return nil, errors.New("hatriecache: count-min sketch snapshot is required")
+		}
+		return marshalLevelDBCountMinSketchEntryBinary(entry, *entry.CountMinSketch)
+	case "hyperloglog":
+		if entry.HyperLogLog == nil {
+			return nil, errors.New("hatriecache: hyperloglog snapshot is required")
+		}
+		return marshalLevelDBHyperLogLogEntryBinary(entry, *entry.HyperLogLog)
+	case "cuckoo_filter":
+		if entry.CuckooFilter == nil {
+			return nil, errors.New("hatriecache: cuckoo filter snapshot is required")
+		}
+		return marshalLevelDBCuckooFilterEntryBinary(entry, *entry.CuckooFilter)
+	case "roaring_bitmap":
+		if entry.RoaringBitmap == nil {
+			return nil, errors.New("hatriecache: roaring bitmap snapshot is required")
+		}
+		return marshalLevelDBRoaringBitmapEntryBinary(entry, *entry.RoaringBitmap)
+	case "sparse_bitset":
+		if entry.SparseBitset == nil {
+			return nil, errors.New("hatriecache: sparse bitset snapshot is required")
+		}
+		return marshalLevelDBSparseBitsetEntryBinary(entry, *entry.SparseBitset)
+	case "fenwick_tree":
+		if entry.FenwickTree == nil {
+			return nil, errors.New("hatriecache: fenwick tree snapshot is required")
+		}
+		return marshalLevelDBFenwickTreeEntryBinary(entry, *entry.FenwickTree)
+	case "quantile_sketch":
+		if entry.QuantileSketch == nil {
+			return nil, errors.New("hatriecache: quantile sketch snapshot is required")
+		}
+		return marshalLevelDBQuantileSketchEntryBinary(entry, *entry.QuantileSketch)
 	}
 	value, err := prepareLevelDBBinaryEntryValue(entry)
 	if err != nil {
@@ -292,6 +333,151 @@ func marshalLevelDBStagedXorFilterEntryBinary(entry snapshotEntry, snapshot xorF
 	if !writeSnapshotValueBinaryStagedXorFilter(&writer.binaryFieldWriter, prepared) {
 		return nil, errors.New("hatriecache: unsupported binary snapshot value")
 	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBBloomFilterEntryBinary(entry snapshotEntry, snapshot bloomFilterSnapshot) ([]byte, error) {
+	bits, err := snapshotBloomFilterRawBits(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryBloomFilterSize(snapshot, len(bits))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryBloomFilter(&writer.binaryFieldWriter, snapshot, bits)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBCountMinSketchEntryBinary(entry snapshotEntry, snapshot countMinSketchSnapshot) ([]byte, error) {
+	counters, err := snapshotCountMinSketchRawCounters(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryCountMinSketchSize(snapshot, len(counters))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryCountMinSketch(&writer.binaryFieldWriter, snapshot, counters)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBHyperLogLogEntryBinary(entry snapshotEntry, snapshot hyperLogLogSnapshot) ([]byte, error) {
+	registers, err := snapshotHyperLogLogRawRegisters(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryHyperLogLogSize(snapshot, len(registers))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryHyperLogLog(&writer.binaryFieldWriter, snapshot, registers)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBCuckooFilterEntryBinary(entry snapshotEntry, snapshot cuckooFilterSnapshot) ([]byte, error) {
+	fingerprints, err := snapshotCuckooFilterRawFingerprints(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryCuckooFilterSize(snapshot, len(fingerprints))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryCuckooFilter(&writer.binaryFieldWriter, snapshot, fingerprints)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBBuiltXorFilterEntryBinary(entry snapshotEntry, snapshot xorFilterSnapshot) ([]byte, error) {
+	fingerprints, err := snapshotXorFilterRawFingerprints(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryXorFilterSize(snapshot, len(fingerprints))
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryXorFilter(&writer.binaryFieldWriter, snapshot, fingerprints)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBRoaringBitmapEntryBinary(entry snapshotEntry, snapshot roaringBitmapSnapshot) ([]byte, error) {
+	containers, err := prepareSnapshotRoaringBitmapBinaryContainers(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinaryRoaringBitmapSize(snapshot, containers)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryRoaringBitmap(&writer.binaryFieldWriter, snapshot, containers)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBSparseBitsetEntryBinary(entry snapshotEntry, snapshot sparseBitsetSnapshot) ([]byte, error) {
+	containers, err := prepareSnapshotSparseBitsetBinaryContainers(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, err := snapshotValueBinarySparseBitsetSize(snapshot, containers)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinarySparseBitset(&writer.binaryFieldWriter, snapshot, containers)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBFenwickTreeEntryBinary(entry snapshotEntry, snapshot fenwickTreeSnapshot) ([]byte, error) {
+	size, err := snapshotValueBinaryFenwickTreeSize(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryFenwickTree(&writer.binaryFieldWriter, snapshot)
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBQuantileSketchEntryBinary(entry snapshotEntry, snapshot quantileSketchSnapshot) ([]byte, error) {
+	size, err := snapshotValueBinaryQuantileSketchSize(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	writeSnapshotValueBinaryQuantileSketch(&writer.binaryFieldWriter, snapshot)
 	return finishLevelDBDirectPayload(writer, entry), nil
 }
 
