@@ -38,6 +38,33 @@ func TestParseStorageFormat(t *testing.T) {
 	}
 }
 
+func TestMarshalLevelDBEntryNormalizesStorageFormatAliases(t *testing.T) {
+	entry := snapshotEntry{Key: "format:key", Type: "string", String: "value"}
+	for _, test := range []struct {
+		name      string
+		canonical StorageFormat
+		alias     StorageFormat
+	}{
+		{name: "binary alias", canonical: StorageFormatBinary, alias: " BIN "},
+		{name: "binary case", canonical: StorageFormatBinary, alias: "BINARY"},
+		{name: "json case and space", canonical: StorageFormatJSON, alias: " JSON "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			want, err := marshalLevelDBEntry(entry, test.canonical)
+			if err != nil {
+				t.Fatalf("marshalLevelDBEntry(%q) error = %v", test.canonical, err)
+			}
+			got, err := marshalLevelDBEntry(entry, test.alias)
+			if err != nil {
+				t.Fatalf("marshalLevelDBEntry(%q) error = %v", test.alias, err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("marshalLevelDBEntry(%q) differs from canonical %q", test.alias, test.canonical)
+			}
+		})
+	}
+}
+
 func TestLevelDBStoreDefaultFormatWritesBinaryAndLoadsLegacyJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.leveldb")
 	source := newTestTrie(t)

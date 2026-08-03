@@ -426,6 +426,34 @@ func BenchmarkLevelDBLoadStructuredMaterializedJSON(b *testing.B) {
 	benchmarkLevelDBLoadEntries(b, store, LevelDBLoadPolicy{}, entries, entries)
 }
 
+func BenchmarkLevelDBEntryEncodeJSON(b *testing.B) {
+	benchmarkLevelDBEntryEncodeFormat(b, StorageFormatJSON)
+}
+
+func BenchmarkLevelDBEntryEncodeBinary(b *testing.B) {
+	benchmarkLevelDBEntryEncodeFormat(b, StorageFormatBinary)
+}
+
+func benchmarkLevelDBEntryEncodeFormat(b *testing.B, format StorageFormat) {
+	entry := snapshotEntry{
+		Key:    "session:1",
+		Type:   "string",
+		String: strings.Repeat("active-user-", 256),
+	}
+	data, err := marshalLevelDBEntry(entry, format)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ReportMetric(float64(len(data)), "record_B/op")
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := marshalLevelDBEntry(entry, format); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkStructuredStorageFallbackEncode(b *testing.B) {
 	entries := benchmarkStructuredFallbackEntries()
 	recordBytes := 0

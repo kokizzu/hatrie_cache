@@ -36,6 +36,12 @@ func ParseStorageFormat(value string) (StorageFormat, error) {
 }
 
 func marshalLevelDBEntry(entry snapshotEntry, format StorageFormat) ([]byte, error) {
+	switch format {
+	case StorageFormatJSON:
+		return marshalSnapshotEntryJSON(entry)
+	case StorageFormatBinary:
+		return marshalLevelDBEntryBinary(entry)
+	}
 	format, err := ParseStorageFormat(string(format))
 	if err != nil {
 		return nil, err

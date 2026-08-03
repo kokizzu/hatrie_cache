@@ -167,6 +167,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
 | Current pass | [Complete tagged structured storage](#complete-tagged-structured-storage), fallback-heavy seven-record cycle | Inner JSON: 3,846/11,651 ns encode/decode; 674 record B | Tagged binary: 2,551/5,743 ns; 410 record B | Encode 1.51x, decode 2.03x faster; 1.64x smaller; 2.42x/1.92x lower heap | Uncommon concrete Go values normalize once to JSON-compatible types; version-1 binary and inner JSON remain readable |
+| Current pass | [Canonical storage format dispatch](#canonical-storage-format-dispatch), seven structured records and 512-key scalar/structured saves | 2,390 ns; 393,848/636,277 ns | 2,296 ns; 381,979/631,468 ns | Encoder 1.041x; saves 1.031x/1.008x faster | No measured tradeoff; large records are neutral, while bytes, heap, allocations, aliases, fallback formats, and decode are unchanged |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -1933,6 +1934,43 @@ Raw nanosecond samples were:
 
 The reproducible command writes the current raw output to
 `build/benchmarks/structured-storage-codec.txt`.
+
+<a id="canonical-storage-format-dispatch"></a>
+### Canonical Storage Format Dispatch
+
+Persistent stores retain a validated `StorageFormat`, but every LevelDB record
+marshal previously converted that enum to a string, trimmed it, folded case,
+and reparsed it before choosing JSON or binary. Canonical `json` and `binary`
+values now dispatch directly. Empty/default, `bin`, mixed-case, space-padded,
+invalid, and future noncanonical values still use the established normalization
+and validation path.
+
+A storage-format alias test was added before production changed. It proves
+that canonical and ` BIN `, `BINARY`, and ` JSON ` encodes produce byte-identical
+records. The test passed ten times before and after the change and under the
+race detector. Frozen binaries then ran fifteen alternating pairs pinned to
+logical CPU 9. Direct records and the seven-record cycle used 100,000 and
+10,000 operations per sample; the complete saves used 500 iterations.
+
+| Fifteen-pair median | Normalized dispatch | Canonical fast dispatch | Result |
+| --- | ---: | ---: | ---: |
+| Seven structured records | 2,390 ns; 768 B; 14 allocs; 410 record B | 2,296 ns; 768 B; 14 allocs; 410 record B | 1.041x faster |
+| 512-key scalar save | 393,848 ns; 1,607,749 B; 1,051 allocs; 276,992 record B | 381,979 ns; 1,607,749 B; 1,051 allocs; 276,992 record B | 1.031x faster |
+| 512-key structured save | 636,277 ns; 1,730,372 B; 2,125 allocs; 69,400 record B | 631,468 ns; 1,730,372 B; 2,125 allocs; 69,400 record B | 1.008x faster |
+| Single 3 KiB JSON record control | 2,263 ns; 3,728 B; 3 allocs | 2,250 ns; 3,728 B; 3 allocs | neutral within 0.6% |
+| Single 3 KiB binary record control | 1,105 ns; 3,200 B; 1 alloc | 1,104 ns; 3,200 B; 1 alloc | neutral within 0.1% |
+
+The change is limited to pre-encode dispatch. Entry validation, value codecs,
+record sizing, JSON and tagged-binary bytes, decode, checksums, metadata,
+database batches, snapshots, journals, replication, backup/restore, and wire
+formats are unchanged.
+
+```sh
+make run CMD='go test . -run="TestParseStorageFormat|TestMarshalLevelDBEntryNormalizesStorageFormatAliases|TestLevelDB" -count=10'
+make run CMD='go test -race . -run="TestParseStorageFormat|TestMarshalLevelDBEntryNormalizesStorageFormatAliases|TestLevelDB" -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-format-baseline.test /tmp/hatrie-storage-format-candidate.test /tmp/storage-fallback-format-pairs.txt 9 15 10000x "BenchmarkStructuredStorageFallbackEncode\\z"'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-format-baseline.test /tmp/hatrie-storage-format-candidate.test /tmp/storage-save-format-pairs-long.txt 9 15 500x "BenchmarkLevelDBSave(Materialized|StructuredMaterialized)\\z"'
+```
 
 <a id="adaptive-native-bucket-size-classes"></a>
 ### Adaptive Native Bucket Size Classes
