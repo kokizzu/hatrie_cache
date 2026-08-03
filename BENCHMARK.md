@@ -178,6 +178,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Trusted single-decode replication](#trusted-single-decode-replication), seven internally generated base64-backed families | Validated preparation into reused page: 19,946 ns; 22,704 B; 9 allocs | Trusted final-page decode: 14,069 ns; 0 B; 0 allocs | 1.418x faster; temporary heap and allocations eliminated | Private live-snapshot call only; external/restored values keep validation, CR/LF falls back, wire bytes unchanged |
 | Current pass | [Direct live fixed replication](#direct-live-fixed-replication), 32k-item Bloom DUMP into reused capacity | Snapshot base64 encode/decode: 119,288 ns; 229,448 B; 5 allocs | Live backing to final page: 6,133 ns; 0 B; 0 allocs | 19.45x faster; temporary heap and allocations eliminated | Private locked sender path for Bloom/CMS/HLL/Cuckoo/built XOR; exact 58,932 wire B, TTL, and staged-XOR fallback unchanged |
 | Current pass | [Direct live bitmap replication](#direct-live-bitmap-replication), 4,097-value dense Roaring DUMP into reused capacity | Snapshot container/base64 path: 18,865 ns; 24,696 B; 5 allocs | Live container to final page: 1,009 ns; 0 B; 0 allocs | 18.70x faster; temporary heap and allocations eliminated | Private locked Roaring/sparse path; exact 8,230 wire B, array/bitmap and sparse-inline encodings unchanged |
+| Current pass | [Direct live slice replication](#direct-live-slice-replication), Fenwick and quantile DUMP into reused capacity | Snapshot slice clones: 1,674/1,111 ns; 1,224/840 B; 3 allocs | Locked shallow views: 766/427 ns; 0 B; 0 allocs | Fenwick 2.187x, quantile 2.604x faster; temporary heap eliminated | Outlined fallback dispatch keeps existing Roaring neutral; exact bytes and Fenwick zero-tree omission unchanged |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -421,6 +422,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| Expanded live-slice replication switch | Fenwick/quantile removed all three allocations and improved more than 2x | Adding both cases to the existing fixed switch made already-direct dense Roaring 1.022x slower | Replaced by default-case chaining; Roaring is neutral within 0.1% and the gains remain; see [direct live slice replication](#direct-live-slice-replication) |
 | Direct canonical-base64 decode into fixed records | Reused replication fell from 3,680 B and 5 allocs to zero; storage fell from 7,456 B and 10 allocs to 3,776 B and 5 allocs | Canonical validation plus direct decode made storage 1.100x slower and replication 1.076x slower | Runtime candidate reverted; newline/error compatibility tests and focused controls remain; see [canonical base64 direct-decode rollback](#canonical-base64-direct-decode-rollback) |
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
@@ -2292,6 +2294,39 @@ make run CMD='go test ./... -run "Test(FixedCommandDumpDirect|FixedStructured|Ca
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-bitmap-before.test /tmp/hatrie-direct-live-bitmap-after.test /tmp/hatrie-direct-live-bitmap-pairs.txt 20 31 5000x BenchmarkFixedCommandDumpRoaringBitmapReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-bitmap-before.test /tmp/hatrie-direct-live-bitmap-after.test /tmp/hatrie-direct-live-bitmap-bloom-control.txt 20 31 2000x BenchmarkFixedCommandDumpBloomFilterReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-bitmap-before.test /tmp/hatrie-direct-live-bitmap-after.test /tmp/hatrie-direct-live-bitmap-command-control.txt 20 31 500000x BenchmarkCommandFeature/ReplicationDump'
+```
+
+<a id="direct-live-slice-replication"></a>
+### Direct Live Slice Replication
+
+Fenwick and quantile DUMP previously cloned their tree or summary slices into a
+snapshot immediately before the binary writer traversed those clones. The
+locked sender now gives the existing size and write routines shallow read-only
+views of the live slices. Fenwick still scans and omits an allocated all-zero
+tree exactly as `Snapshot()` does.
+
+These two types are outlined behind the established fixed-type helper's default
+case. That preserves the original caller and hot switch layout for already
+direct types; the dense Roaring control returned to neutral after an initial
+expanded-switch prototype made it 1.022x slower. Exact integration tests cover
+nonzero and empty Fenwick trees plus quantile summaries. Thirty-one alternating
+pairs use caller-owned output capacity.
+
+| Paired median | Snapshot slice clone | Direct locked view | Result |
+| --- | ---: | ---: | ---: |
+| Fenwick DUMP | 1,674 ns; 1,224 B; 3 allocs; 164 wire B | 765.6 ns; 0 B; 0 allocs; 164 wire B | 2.187x faster; temporary heap and allocations eliminated |
+| Quantile DUMP | 1,111 ns; 840 B; 3 allocs; 360 wire B | 426.7 ns; 0 B; 0 allocs; 360 wire B | 2.604x faster; temporary heap and allocations eliminated |
+| Already-direct Roaring control | 1,038 ns; 0 B; 0 allocs | 1,039 ns; 0 B; 0 allocs | neutral within 0.1% |
+
+Wire format and size, tree/summary order, all-zero omission, receiver
+validation, routing, retries, batching, storage, journal, snapshots, backup,
+and restore remain unchanged. No retained memory or per-element state is added.
+
+```sh
+make run CMD='go test ./... -run "Test(FixedCommandDumpDirect|FixedStructured|CanonicalFixedStructured)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-slices-before.test /tmp/hatrie-direct-live-slices-chained.test /tmp/hatrie-direct-live-fenwick-chained-pairs.txt 20 31 20000x BenchmarkFixedCommandDumpFenwickTreeReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-slices-before.test /tmp/hatrie-direct-live-slices-chained.test /tmp/hatrie-direct-live-quantile-chained-pairs.txt 20 31 50000x BenchmarkFixedCommandDumpQuantileSketchReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-slices-before.test /tmp/hatrie-direct-live-slices-chained.test /tmp/hatrie-direct-live-slices-roaring-chained-control.txt 20 31 5000x BenchmarkFixedCommandDumpRoaringBitmapReuse'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>

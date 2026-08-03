@@ -143,6 +143,12 @@ func TestFixedCommandDumpDirectMatchesSnapshotEncoding(t *testing.T) {
 		{Command: "BUILDXF", Key: "direct:xor"},
 		{Command: "CREATEXF", Key: "direct:xor-staged", Value: "64"},
 		{Command: "ADDXF", Key: "direct:xor-staged", Value: "value"},
+		{Command: "CREATEFW", Key: "direct:fenwick", Value: "128"},
+		{Command: "ADDFW", Key: "direct:fenwick", Value: "32", Subkey: "3"},
+		{Command: "CREATEFW", Key: "direct:fenwick-empty", Value: "128"},
+		{Command: "CREATEQ", Key: "direct:quantile", Value: "0.01"},
+		{Command: "ADDQ", Key: "direct:quantile", Value: "1.5"},
+		{Command: "ADDQ", Key: "direct:quantile", Value: "9.5"},
 	}
 	for _, request := range requests {
 		response := ht.ExecuteCommand(request)
@@ -169,7 +175,7 @@ func TestFixedCommandDumpDirectMatchesSnapshotEncoding(t *testing.T) {
 		t.Fatalf("AddSparseBitset(inline) = %d, want 1", added)
 	}
 
-	for _, key := range []string{"direct:bloom", "direct:cms", "direct:hll", "direct:cuckoo", "direct:xor", "direct:xor-staged", "direct:roaring", "direct:sparse", "direct:sparse-inline"} {
+	for _, key := range []string{"direct:bloom", "direct:cms", "direct:hll", "direct:cuckoo", "direct:xor", "direct:xor-staged", "direct:roaring", "direct:sparse", "direct:sparse-inline", "direct:fenwick", "direct:fenwick-empty", "direct:quantile"} {
 		got, ok, err := ht.commandDumpEntryBinaryWithoutStats(key)
 		if err != nil || !ok {
 			t.Fatalf("commandDumpEntryBinaryWithoutStats(%s) = %v/%v", key, ok, err)
@@ -577,6 +583,48 @@ func BenchmarkFixedCommandDumpRoaringBitmapReuse(b *testing.B) {
 	for iteration := 0; iteration < b.N; iteration++ {
 		buffer = buffer[:0]
 		buffer, ok, err = ht.appendCommandDumpEntryBinaryWithoutStats(buffer, "roaring:direct")
+		if err != nil || !ok {
+			b.Fatalf("appendCommandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
+		}
+	}
+}
+
+func BenchmarkFixedCommandDumpFenwickTreeReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	setupCommandFeatureFenwickTreeWithValues(b, ht)
+	initial, ok, err := ht.commandDumpEntryBinaryWithoutStats("fenwick:key")
+	if err != nil || !ok {
+		b.Fatalf("commandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
+	}
+	buffer := make([]byte, 0, len(initial))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(initial)), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		buffer, ok, err = ht.appendCommandDumpEntryBinaryWithoutStats(buffer, "fenwick:key")
+		if err != nil || !ok {
+			b.Fatalf("appendCommandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
+		}
+	}
+}
+
+func BenchmarkFixedCommandDumpQuantileSketchReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	setupCommandFeatureQuantileSketchWithValues(b, ht)
+	initial, ok, err := ht.commandDumpEntryBinaryWithoutStats("quantile:key")
+	if err != nil || !ok {
+		b.Fatalf("commandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
+	}
+	buffer := make([]byte, 0, len(initial))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(initial)), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		buffer, ok, err = ht.appendCommandDumpEntryBinaryWithoutStats(buffer, "quantile:key")
 		if err != nil || !ok {
 			b.Fatalf("appendCommandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
 		}

@@ -32,7 +32,7 @@ func (ht *HatTrie) appendCommandDumpFixedEntryBinaryLocked(destination []byte, e
 		data, err := appendCommandDumpSparseBitsetBinary(destination, snapshotExpiresAt(ht.expirationTimeLocked(entry.Key)), ht.sparseBitsets.array[entry.Value.Index])
 		return data, true, err
 	}
-	return destination, false, nil
+	return ht.appendCommandDumpSliceEntryBinaryLocked(destination, entry)
 }
 
 func appendCommandDumpBloomFilterBinary(destination []byte, expiresAt *time.Time, filter bloomFilterData) ([]byte, error) {
