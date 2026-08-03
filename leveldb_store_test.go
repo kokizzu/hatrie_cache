@@ -403,6 +403,75 @@ func TestLevelDBBinaryRecordsPreallocateStringAndComplexValues(t *testing.T) {
 	}
 }
 
+func TestLevelDBBinaryStructuredValuesMatchBufferedEncoding(t *testing.T) {
+	expiresAt := time.Unix(1234, 567)
+	stats := &KeyStats{Reads: 9, Hits: 7, Misses: 2, Writes: 3}
+	for _, entry := range benchmarkStructuredFallbackEntries() {
+		entry.ExpiresAt = &expiresAt
+		entry.Stats = stats
+		got, err := marshalLevelDBEntryBinary(entry)
+		if err != nil {
+			t.Fatalf("marshalLevelDBEntryBinary(%s) error = %v", entry.Type, err)
+		}
+		want, err := marshalLevelDBEntryBinaryBufferedForTest(entry)
+		if err != nil {
+			t.Fatalf("marshalLevelDBEntryBinaryBufferedForTest(%s) error = %v", entry.Type, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("binary %s record differs from buffered encoding:\n got % x\nwant % x", entry.Type, got, want)
+		}
+	}
+}
+
+func marshalLevelDBEntryBinaryBufferedForTest(entry snapshotEntry) ([]byte, error) {
+	var (
+		payload []byte
+		ok      = true
+		err     error
+	)
+	switch entry.Type {
+	case "map":
+		payload, ok, err = marshalSnapshotCollectionValueBinary(entry.Map)
+	case "slice":
+		payload, ok, err = marshalSnapshotCollectionValueBinary(entry.Slice)
+	case "set":
+		payload, ok, err = marshalSnapshotCollectionValueBinary(entry.Set)
+	case "priority_queue":
+		payload, ok, err = marshalSnapshotPriorityQueueValueBinary(entry.PriorityQueue)
+	case "top_k":
+		payload, ok, err = marshalSnapshotTopKValueBinary(*entry.TopK)
+	case "radix_tree":
+		payload, ok, err = marshalSnapshotRadixTreeValueBinary(*entry.RadixTree)
+	case "reservoir_sample":
+		payload, ok, err = marshalSnapshotReservoirSampleValueBinary(*entry.ReservoirSample)
+	case "xor_filter":
+		payload, ok, err = marshalSnapshotXorFilterValueBinary(*entry.XorFilter)
+	default:
+		return nil, fmt.Errorf("unsupported buffered test type %q", entry.Type)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("buffered test value is not binary encodable")
+	}
+	valueSize, err := binaryLengthPrefixedSize(int64(len(payload)))
+	if err != nil {
+		return nil, err
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, valueSize, entry.ExpiresAt, entry.Stats)
+	if err != nil {
+		return nil, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeBytes(payload)
+	writer.writeTimePtr(entry.ExpiresAt)
+	writer.writeKeyStatsPtr(entry.Stats)
+	return writer.bytes(), nil
+}
+
 func TestLevelDBBinaryMapSliceSetUseBinaryValuePayloads(t *testing.T) {
 	stringItems := make(Slice, 0, 12)
 	for idx := 0; idx < 12; idx++ {

@@ -168,6 +168,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
 | Current pass | [Complete tagged structured storage](#complete-tagged-structured-storage), fallback-heavy seven-record cycle | Inner JSON: 3,846/11,651 ns encode/decode; 674 record B | Tagged binary: 2,551/5,743 ns; 410 record B | Encode 1.51x, decode 2.03x faster; 1.64x smaller; 2.42x/1.92x lower heap | Uncommon concrete Go values normalize once to JSON-compatible types; version-1 binary and inner JSON remain readable |
 | Current pass | [Canonical storage format dispatch](#canonical-storage-format-dispatch), seven structured records and 512-key scalar/structured saves | 2,390 ns; 393,848/636,277 ns | 2,296 ns; 381,979/631,468 ns | Encoder 1.041x; saves 1.031x/1.008x faster | No measured tradeoff; large records are neutral, while bytes, heap, allocations, aliases, fallback formats, and decode are unchanged |
+| Current pass | [Direct structured storage assembly](#direct-structured-storage-assembly), seven fallback-heavy records | Buffered payload: 2,302 ns; 768 B; 14 allocs | Direct final record: 1,827 ns; 480 B; 7 allocs | 1.260x faster, 1.60x lower heap, 2.00x fewer allocs | No measured tradeoff; record bytes are identical, scalar encode is neutral, and replication retains its existing buffered path |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -1970,6 +1971,49 @@ make run CMD='go test . -run="TestParseStorageFormat|TestMarshalLevelDBEntryNorm
 make run CMD='go test -race . -run="TestParseStorageFormat|TestMarshalLevelDBEntryNormalizesStorageFormatAliases|TestLevelDB" -count=1'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-format-baseline.test /tmp/hatrie-storage-format-candidate.test /tmp/storage-fallback-format-pairs.txt 9 15 10000x "BenchmarkStructuredStorageFallbackEncode\\z"'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-format-baseline.test /tmp/hatrie-storage-format-candidate.test /tmp/storage-save-format-pairs-long.txt 9 15 500x "BenchmarkLevelDBSave(Materialized|StructuredMaterialized)\\z"'
+```
+
+<a id="direct-structured-storage-assembly"></a>
+### Direct Structured Storage Assembly
+
+LevelDB binary records for maps, slices, sets, priority queues, Top-K, radix
+trees, reservoir samples, and unbuilt XOR filters previously allocated a
+complete tagged-value payload, then copied that payload into a second exact-size
+record allocation. The storage encoder now prepares and sizes the value as
+before, reserves the exact final record, writes the payload length and version-2
+tag header, and serializes the prepared typed value directly into that record.
+The shared replication-value encoder deliberately retains its established
+buffered path, keeping this change limited to persistent storage.
+
+A byte-equivalence test was added before the production change. It compares the
+direct record against an independent buffered reference for every affected
+value family, including normalized nested values, expiry metadata, and key
+statistics. Frozen binaries ran fifteen alternating focused/scalar pairs and
+eleven complete-save pairs pinned to logical CPU 20. The focused cycle used
+300,000 iterations per sample, the 3 KiB scalar control used 1,000,000, and the
+complete structured save used 100.
+
+| Paired median | Buffered payload | Direct final record | Result |
+| --- | ---: | ---: | ---: |
+| Seven structured records | 2,302 ns; 768 B; 14 allocs; 410 record B | 1,827 ns; 480 B; 7 allocs; 410 record B | 1.260x faster, 37.5% lower heap, 50.0% fewer allocs |
+| Single 3 KiB binary scalar control | 615.5 ns; 3,200 B; 1 alloc | 616.2 ns; 3,200 B; 1 alloc | neutral within 0.1% |
+| Complete 272-entry structured save | 748,239 ns; 1,730,383 B; 2,125 allocs; 69,400 record B | 749,531 ns; 1,724,111 B; 2,013 allocs; 69,400 record B | CPU neutral within 0.2%; 6,272 fewer heap B and 112 fewer allocs |
+
+An initial generic helper retained byte equivalence and reduced heap from 768
+to 648 B, but its indirect writer made prepared values escape: allocation count
+stayed at 14 and median time was effectively unchanged at 2,299 versus 2,295
+ns. That variant was removed. Direct typed writer calls are both simpler for
+escape analysis and materially faster.
+
+Stored bytes, decode behavior, JSON fallback, version-1 tagged compatibility,
+validation, metadata, database batches, replication, snapshots, journal
+records, backup, and restore semantics are unchanged.
+
+```sh
+make run CMD='go test ./... -run TestLevelDBBinaryStructuredValuesMatchBufferedEncoding -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-direct-before.test /tmp/hatrie-storage-direct-after.test /tmp/hatrie-storage-direct-pairs.txt 20 15 300000x BenchmarkStructuredStorageFallbackEncode'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-direct-before.test /tmp/hatrie-storage-direct-after.test /tmp/hatrie-storage-direct-scalar-pairs.txt 20 15 1000000x BenchmarkLevelDBEntryEncodeBinary'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-storage-direct-before.test /tmp/hatrie-storage-direct-after.test /tmp/hatrie-storage-direct-save-pairs.txt 20 11 100x BenchmarkLevelDBSaveStructuredMaterialized'
 ```
 
 <a id="adaptive-native-bucket-size-classes"></a>

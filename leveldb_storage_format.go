@@ -114,6 +114,38 @@ func levelDBBinaryValueEndOffsetForKey(data []byte, key string) (int, bool, erro
 }
 
 func marshalLevelDBEntryBinary(entry snapshotEntry) ([]byte, error) {
+	switch entry.Type {
+	case "map":
+		return marshalLevelDBCollectionEntryBinary(entry, entry.Map)
+	case "slice":
+		return marshalLevelDBCollectionEntryBinary(entry, entry.Slice)
+	case "set":
+		return marshalLevelDBCollectionEntryBinary(entry, entry.Set)
+	case "priority_queue":
+		return marshalLevelDBPriorityQueueEntryBinary(entry)
+	case "top_k":
+		if entry.TopK == nil {
+			return nil, errors.New("hatriecache: top-k snapshot is required")
+		}
+		return marshalLevelDBTopKEntryBinary(entry, *entry.TopK)
+	case "radix_tree":
+		if entry.RadixTree == nil {
+			return nil, errors.New("hatriecache: radix tree snapshot is required")
+		}
+		return marshalLevelDBRadixTreeEntryBinary(entry, *entry.RadixTree)
+	case "reservoir_sample":
+		if entry.ReservoirSample == nil {
+			return nil, errors.New("hatriecache: reservoir sample snapshot is required")
+		}
+		return marshalLevelDBReservoirSampleEntryBinary(entry, *entry.ReservoirSample)
+	case "xor_filter":
+		if entry.XorFilter == nil {
+			return nil, errors.New("hatriecache: xor filter snapshot is required")
+		}
+		if !entry.XorFilter.Built {
+			return marshalLevelDBStagedXorFilterEntryBinary(entry, *entry.XorFilter)
+		}
+	}
 	value, err := prepareLevelDBBinaryEntryValue(entry)
 	if err != nil {
 		return nil, err
@@ -129,6 +161,165 @@ func marshalLevelDBEntryBinary(entry snapshotEntry) ([]byte, error) {
 	writer.writeTimePtr(entry.ExpiresAt)
 	writer.writeKeyStatsPtr(entry.Stats)
 	return writer.bytes(), nil
+}
+
+func marshalLevelDBCollectionEntryBinary(entry snapshotEntry, value interface{}) ([]byte, error) {
+	prepared, _, err := prepareSnapshotDynamicValueBinary(value)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinarySize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinary(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBPriorityQueueEntryBinary(entry snapshotEntry) ([]byte, error) {
+	prepared, err := prepareSnapshotPriorityQueueItemsBinary(entry.PriorityQueue)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryPriorityQueueSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryPriorityQueue(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBTopKEntryBinary(entry snapshotEntry, snapshot topKSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotTopKBinary(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryTopKSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryTopK(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBRadixTreeEntryBinary(entry snapshotEntry, snapshot radixTreeSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotRadixTreeBinary(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryRadixTreeSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryRadixTree(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBReservoirSampleEntryBinary(entry snapshotEntry, snapshot reservoirSampleSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotReservoirSampleBinary(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryReservoirSampleSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryReservoirSample(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func marshalLevelDBStagedXorFilterEntryBinary(entry snapshotEntry, snapshot xorFilterSnapshot) ([]byte, error) {
+	prepared, err := prepareSnapshotStagedXorFilterBinary(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	size, ok, err := snapshotValueBinaryStagedXorFilterSize(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, err
+	}
+	if !writeSnapshotValueBinaryStagedXorFilter(&writer.binaryFieldWriter, prepared) {
+		return nil, errors.New("hatriecache: unsupported binary snapshot value")
+	}
+	return finishLevelDBDirectPayload(writer, entry), nil
+}
+
+func newLevelDBDirectPayloadWriter(entry snapshotEntry, valueSize int) (levelDBBinaryWriter, error) {
+	payloadSize, err := snapshotValueBinaryAdd(len(snapshotValueBinaryMagic), valueSize)
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	encodedSize, err := binaryLengthPrefixedSize(int64(payloadSize))
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	capacity, err := levelDBBinaryRecordCapacityForValue(entry.Key, entry.Type, encodedSize, entry.ExpiresAt, entry.Stats)
+	if err != nil {
+		return levelDBBinaryWriter{}, err
+	}
+	writer := newLevelDBBinaryWriterWithCapacity(capacity)
+	writer.writeString(entry.Key)
+	writer.writeString(entry.Type)
+	writer.writeUvarint(uint64(payloadSize))
+	writer.buf = append(writer.buf, snapshotValueBinaryMagic...)
+	return writer, nil
+}
+
+func finishLevelDBDirectPayload(writer levelDBBinaryWriter, entry snapshotEntry) []byte {
+	writer.writeTimePtr(entry.ExpiresAt)
+	writer.writeKeyStatsPtr(entry.Stats)
+	return writer.bytes()
 }
 
 func marshalLevelDBStringEntryBinary(key string, value string) ([]byte, error) {
