@@ -324,6 +324,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Cached default trie clock](#cached-default-trie-clock), direct command operations | `time.Now`: set/get/inc/TTL 228.3/210.8/273.1/365.2 ns | `fastime.Now`: 177.6/162.9/226.5/240.8 ns | 1.29x/1.29x/1.21x/1.52x faster; heap and allocations unchanged | Default clock has a 5 ms refresh cadence without a hard scheduler-lag bound; injected test clocks and monotonic elapsed measurements are unchanged |
 | Reverted | [Exact scalar mutation dispatch](#exact-scalar-mutation-dispatch), nine alternating binaries | Generic set/get/inc/expire: 200.2/181.1/277.3/238.1 ns | Exact helper: 203.8/185.9/272.4/239.2 ns | INC 1.02x faster; SET 1.02x, GET 1.03x, and TTL 1.005x slower | Rolled back; unchanged heap, allocations, wire, and storage did not justify regressions in three of four complete command paths |
 | Reverted | [Signed command integer parser](#signed-command-integer-parser-rollback), exact Fenwick delta parsing | `TrimSpace` plus `strconv.ParseInt`; parser `"1"`/full-width/invalid/overflow 12.77/35.32/69.48/89.47 ns | Hand parser 1.971/21.64/3.331/19.31 ns; invalid/overflow allocation-free | Parser 6.48x/1.63x/20.86x/4.63x faster | Rolled back: final complete `ADDFW` improved only 1.003x by paired ratio while unchanged quantile controls were 1.039x/1.012x slower |
+| Reverted | [Callback-free quantile insertion search](#quantile-insertion-search-rollback), growing scalar summary and complete `ADDQ` | `sort.Search`: 177.5/484.6 ns | Inline upper bound: 177.6/483.6 ns | Direct insertion was 0.999x and the complete command only 1.002x | Rolled back; estimate-only and unrelated string controls moved 1.003x/1.024x, so no gain was attributable to the candidate; heap and allocations were identical |
 | Current pass | [Segmented WAL compaction](#segmented-wal-compaction), 100k records | 31.462 ms; 20,810,464 heap B; 500,033 allocs | 1.845 ms; 22,256 heap B; 56 allocs | 17.06x faster, 935x lower heap, 8,929x fewer allocs | Retains bounded sidecar files; rotation adds directory metadata syncs |
 | Current pass | [Binary journal catch-up wire](#binary-journal-catch-up-wire), 10k `SETINT` records | JSON: 6.182 ms; 11,178,528 heap B; 10,042 allocs; 808,943 wire B | Binary: 1.197 ms; 2,383,920 heap B; 4 allocs; 289,886 wire B | 5.16x faster, 4.69x lower heap, 2,510x fewer allocs, 2.79x smaller wire | JSON remains configurable and is negotiated as an old-source fallback |
 | Current pass | [Selective journal wire ownership](#selective-journal-wire-ownership), 10k binary `SETINT` records | Clone all fields: 0.956 ms; 2,216,240 heap B; 20,003 allocs | Borrow through apply: 0.696 ms; 2,056,240 heap B; 3 allocs | 1.37x faster, 1.08x lower heap, 6,667.67x fewer allocs | Stored strings and potentially retained keys are still cloned |
@@ -445,6 +446,7 @@ tree.
 | Compact Cuckoo-filter header | Reduced each empty header from 48 to 40 bytes, retained heap 1.20x, and header initialization 1.18x | The best 40-byte layout made paired delete+add 36.74 versus 35.87 ns, or 1.024x slower; membership was neutral | Reverted; the 48-byte operation-faster layout remains; see [compact Cuckoo-filter header rollback](#compact-cuckoo-filter-header-rollback) |
 | Compact Count-Min Sketch header | Reduced each lazy header from 48 to 40 bytes, retained heap 1.20x, and header initialization 1.23x | With identical direct loops, the compact width made increment 33.44 versus 29.54 ns, or 1.13x slower; estimate was also 0.9% slower | Reverted; the 48-byte header plus faster direct loops remains; see [compact Count-Min Sketch header rollback](#compact-count-min-sketch-header-rollback) |
 | Backward quantile-summary compaction | Replaced repeated per-merge slice copies with one backward compaction pass, making a dense 1,024-sample compression 4.56x faster | A valid no-merge summary became 1.65x slower and a complete 4,096-value build became 1.40x slower with identical heap and allocations | Reverted; the common-path copy-on-merge loop remains; see [backward quantile-summary compaction](#quantile-sketch-backward-compaction-rollback) |
+| Callback-free quantile insertion search | Removed the `sort.Search` callback from every accepted quantile insertion while preserving exact upper-bound placement | Fifteen pinned pairs measured the direct primitive at 177.6 versus 177.5 ns and complete `ADDQ` only 1.002x faster while unchanged controls moved farther | Reverted; the standard-library search remains and all temporary runtime/reference fixtures were removed; see [the rollback](#quantile-insertion-search-rollback) |
 | 40-byte Roaring field order | Lowered singleton retained and cumulative heap 1.21x/1.24x and made the 50,000-container build 1.11x faster | The best values-first layout made paired 4,097-value dense construction 1.018x and 1.044x slower in two nine-run confirmations; a pointer-first layout made lookup 1.039x slower | Reverted; the 48-byte operation-neutral layout remains; see [Roaring field-order compaction](#roaring-field-order-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
@@ -8471,6 +8473,42 @@ extra common-path work dominated the occasional reduction in tail copies and
 made the complete API substantially slower. All candidate production code,
 reference tests, and benchmark fixtures were removed; snapshots, estimates,
 wire bytes, storage, and runtime behavior remain unchanged.
+
+<a id="quantile-insertion-search-rollback"></a>
+#### Callback-Free Quantile Insertion Search Rollback
+
+Each accepted quantile value finds its insertion point with `sort.Search` and
+an upper-bound predicate, placing a new duplicate after existing equal values.
+A CPU review made the callback look removable with a small inline binary-search
+loop and no representation or algorithm change.
+
+A reference-equivalence test was added before production changed. It compared
+every intermediate summary and final estimates against the established
+`sort.Search` insertion across ordered boundaries, reverse values, duplicates,
+smallest nonzero floats, maximum finite floats, and 1,024 generated values. It
+passed ten times on the baseline, ten times on the candidate, and under the race
+detector. Frozen binaries then ran fifteen alternating pairs pinned to logical
+CPU 9 with one million operations per sample.
+
+| Fifteen-pair median | `sort.Search` baseline | Inline upper bound | Candidate result |
+| --- | ---: | ---: | ---: |
+| Direct growing-summary insertion | 177.5 ns; 0 B; 0 allocs | 177.6 ns; 0 B; 0 allocs | 0.999x, effectively neutral/slower |
+| Complete `ADDQ` command | 484.6 ns; 64 B; 1 alloc | 483.6 ns; 64 B; 1 alloc | 1.002x, below attribution threshold |
+| Estimate-only command control | 239.0 ns | 238.4 ns | control moved 1.003x |
+| Unrelated `StringSet` control | 123.5 ns | 120.6 ns | control moved 1.024x |
+
+The primitive itself did not improve, and the larger movement in code that
+never executes quantile insertion shows that the tiny command difference was
+process or layout variation. The inline search, reference test, and temporary
+fixtures were removed. The standard-library search, summary ordering,
+compression, estimates, heap, allocations, wire, storage, and persistence
+formats remain unchanged.
+
+```sh
+make run CMD='go test . -run=TestQuantileSketchInsertionMatchesSearchReference -count=10'
+make run CMD='go test -race . -run=QuantileSketch -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-quantile-search-baseline.test /tmp/hatrie-quantile-search-candidate.test /tmp/hatrie-quantile-search-scalar-pairs.txt 9 15 1000000x BenchmarkQuantileSketchAddValidation/Scalar'
+```
 
 <a id="prepared-result-fenwick-updates"></a>
 ### Prepared-Result Fenwick Updates
