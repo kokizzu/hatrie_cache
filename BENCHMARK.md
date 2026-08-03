@@ -447,6 +447,7 @@ tree.
 | Compact Count-Min Sketch header | Reduced each lazy header from 48 to 40 bytes, retained heap 1.20x, and header initialization 1.23x | With identical direct loops, the compact width made increment 33.44 versus 29.54 ns, or 1.13x slower; estimate was also 0.9% slower | Reverted; the 48-byte header plus faster direct loops remains; see [compact Count-Min Sketch header rollback](#compact-count-min-sketch-header-rollback) |
 | Backward quantile-summary compaction | Replaced repeated per-merge slice copies with one backward compaction pass, making a dense 1,024-sample compression 4.56x faster | A valid no-merge summary became 1.65x slower and a complete 4,096-value build became 1.40x slower with identical heap and allocations | Reverted; the common-path copy-on-merge loop remains; see [backward quantile-summary compaction](#quantile-sketch-backward-compaction-rollback) |
 | Callback-free quantile insertion search | Removed the `sort.Search` callback from every accepted quantile insertion while preserving exact upper-bound placement | Fifteen pinned pairs measured the direct primitive at 177.6 versus 177.5 ns and complete `ADDQ` only 1.002x faster while unchanged controls moved farther | Reverted; the standard-library search remains and all temporary runtime/reference fixtures were removed; see [the rollback](#quantile-insertion-search-rollback) |
+| Callback-free Roaring searches | Direct lower-bound loops made sparse contains and missing remove 1.07x and 1.23x faster without allocations | Replacing every search made existing sparse add 1.09x slower and 4,096-container lookup 1.02x slower; narrowing the change still made complete `RoaringAdd`/`RoaringHas` commands 1.3%/0.6% slower | Reverted; all four `sort.Search` sites remain and temporary fixtures were removed; see [the rollback](#roaring-search-rollback) |
 | 40-byte Roaring field order | Lowered singleton retained and cumulative heap 1.21x/1.24x and made the 50,000-container build 1.11x faster | The best values-first layout made paired 4,097-value dense construction 1.018x and 1.044x slower in two nine-run confirmations; a pointer-first layout made lookup 1.039x slower | Reverted; the 48-byte operation-neutral layout remains; see [Roaring field-order compaction](#roaring-field-order-compaction-rollback) |
 | HyperLogLog side allocation | Kept derived estimate fields outside the header | Go size-class rounding raised the 1,000-filter fixture heap by 12.47% | Replaced by an 8-byte header extension; see [incremental HyperLogLog estimates](#incremental-hyperloglog-estimates) |
 | String-keyed Merkle pending set | Used direct strings instead of compact key hashes | The 16,384-key maintenance cycle slowed from 29.294 to 33.070 ms without reducing heap | Removed; the hash-keyed bounded set remains; see [hierarchical Merkle anti-entropy](#hierarchical-merkle-anti-entropy) |
@@ -8508,6 +8509,54 @@ formats remain unchanged.
 make run CMD='go test . -run=TestQuantileSketchInsertionMatchesSearchReference -count=10'
 make run CMD='go test -race . -run=QuantileSketch -count=1'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-quantile-search-baseline.test /tmp/hatrie-quantile-search-candidate.test /tmp/hatrie-quantile-search-scalar-pairs.txt 9 15 1000000x BenchmarkQuantileSketchAddValidation/Scalar'
+```
+
+<a id="roaring-search-rollback"></a>
+#### Callback-Free Roaring Search Rollback
+
+Roaring container selection and sparse-array add, remove, and contains used
+four `sort.Search` lower bounds. A direct typed loop could remove each generic
+predicate without changing ordering, representation, container thresholds,
+wire bytes, storage, or allocations.
+
+Before production changed, an exhaustive reference test checked every uint16
+value against `sort.Search` and every present/missing key around 256 sorted
+containers. It passed ten times on the baseline, ten times on each candidate,
+and under the race detector. Frozen binaries then ran fifteen alternating
+pairs pinned to logical CPU 9 with one million operations per sample.
+
+The first candidate replaced all four searches:
+
+| Fifteen-pair median | `sort.Search` baseline | All-direct candidate | Result |
+| --- | ---: | ---: | ---: |
+| Sparse-array contains | 10.790 ns; 0 B; 0 allocs | 9.743 ns; 0 B; 0 allocs | 1.107x faster |
+| Sparse-array missing remove | 21.250 ns; 0 B; 0 allocs | 17.340 ns; 0 B; 0 allocs | 1.225x faster |
+| Existing sparse add | 12.440 ns; 0 B; 0 allocs | 13.600 ns; 0 B; 0 allocs | 1.093x slower |
+| 4,096-container contains | 61.420 ns; 0 B; 0 allocs | 62.540 ns; 0 B; 0 allocs | 1.018x slower |
+
+Compiler diagnostics confirmed that the typed helper inlined at every call,
+so the regressions were code-generation and branch effects rather than helper
+call overhead. A second candidate restored the established container and add
+searches, retaining direct loops only for sparse contains and remove:
+
+| Fifteen-pair median | Baseline | Narrow candidate | Result |
+| --- | ---: | ---: | ---: |
+| Sparse-array contains | 10.650 ns | 9.919 ns | 1.074x faster |
+| Sparse-array missing remove | 21.460 ns | 17.420 ns | 1.232x faster |
+| Complete `RoaringAdd` command control | 105.6 ns | 107.0 ns | 1.013x slower |
+| Complete `RoaringHas` command | 77.57 ns | 78.01 ns | 1.006x slower |
+| Existing sparse-add control | 12.460 ns | 12.550 ns | 0.7% slower |
+
+The complete command paths did not retain the isolated gains, and even the
+unchanged add control moved against the candidate. The runtime rewrite,
+reference test, and focused benchmark fixtures were removed. The original
+`sort.Search` implementation and all runtime behavior remain unchanged.
+
+```sh
+make run CMD='go test . -run="TestRoaringBitmapSearchMatchesReference|TestRoaringBitmap" -count=10'
+make run CMD='go test -race . -run="TestRoaringBitmapSearchMatchesReference|TestRoaringBitmap" -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-roaring-search-baseline.test /tmp/hatrie-roaring-search-candidate2.test /tmp/roaring-search-pairs2.txt 9 15 1000000x "BenchmarkRoaringBitmap(ArrayContainsSearch|MultiContainerContainsSearch|ArrayAddExistingSearch|ArrayRemoveMissingSearch|Add|Contains)\\z"'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-roaring-search-baseline.test /tmp/hatrie-roaring-search-candidate2.test /tmp/roaring-command-pairs2.txt 9 15 1000000x "BenchmarkCommandFeature/Roaring(Add|Has)\\z"'
 ```
 
 <a id="prepared-result-fenwick-updates"></a>
