@@ -65,6 +65,44 @@ func TestFixedStructuredReplicationValuesMatchBufferedEncoding(t *testing.T) {
 	}
 }
 
+func TestFixedStructuredBinaryRecordsAcceptBase64Newlines(t *testing.T) {
+	entry := benchmarkFixedBinaryEntries()[0]
+	encoded := entry.BloomFilter.Bits
+	entry.BloomFilter.Bits = encoded[:8] + "\r\n" + encoded[8:]
+
+	got, err := marshalLevelDBEntryBinary(entry)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntryBinary() error = %v", err)
+	}
+	entry.BloomFilter.Bits = encoded
+	want, err := marshalLevelDBEntryBinary(entry)
+	if err != nil {
+		t.Fatalf("marshalLevelDBEntryBinary(canonical) error = %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("base64 newlines changed the fixed binary record")
+	}
+}
+
+func TestFixedStructuredReplicationErrorPreservesDestination(t *testing.T) {
+	entry := benchmarkFixedBinaryEntries()[0]
+	entry.BloomFilter.Bits = "not-base64!!!"
+	destination := make([]byte, 16, 32768)
+	copy(destination, "fixed-prefix")
+	want := append([]byte(nil), destination...)
+
+	got, err := appendReplicationValueBinary(destination, entry)
+	if err == nil {
+		t.Fatal("appendReplicationValueBinary() error = nil, want malformed base64 error")
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("destination after error = %q, want %q", got, want)
+	}
+	if &got[0] != &destination[0] {
+		t.Fatal("appendReplicationValueBinary() replaced the destination on error")
+	}
+}
+
 func marshalFixedLevelDBEntryBinaryBufferedForTest(entry snapshotEntry) ([]byte, error) {
 	value, err := prepareLevelDBBinaryEntryValue(entry)
 	if err != nil {
@@ -100,6 +138,40 @@ func BenchmarkFixedStructuredStorageEncode(b *testing.B) {
 
 func BenchmarkFixedStructuredReplicationAppendReuse(b *testing.B) {
 	entries := benchmarkFixedBinaryEntries()
+	recordBytes := fixedBinaryReplicationRecordBytes(b, entries)
+	buffer := make([]byte, 0, recordBytes)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		for _, entry := range entries {
+			var err error
+			buffer, err = appendReplicationValueBinary(buffer, entry)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkCanonicalRawFixedStorageEncode(b *testing.B) {
+	entries := benchmarkFixedBinaryEntries()[:5]
+	recordBytes := fixedBinaryStorageRecordBytes(b, entries)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "record_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		for _, entry := range entries {
+			if _, err := marshalLevelDBEntryBinary(entry); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkCanonicalRawFixedReplicationAppendReuse(b *testing.B) {
+	entries := benchmarkFixedBinaryEntries()[:5]
 	recordBytes := fixedBinaryReplicationRecordBytes(b, entries)
 	buffer := make([]byte, 0, recordBytes)
 	b.ReportAllocs()

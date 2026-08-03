@@ -416,6 +416,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| Direct canonical-base64 decode into fixed records | Reused replication fell from 3,680 B and 5 allocs to zero; storage fell from 7,456 B and 10 allocs to 3,776 B and 5 allocs | Canonical validation plus direct decode made storage 1.100x slower and replication 1.076x slower | Runtime candidate reverted; newline/error compatibility tests and focused controls remain; see [canonical base64 direct-decode rollback](#canonical-base64-direct-decode-rollback) |
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Unsupported exact-command early rejection | Skipping duplicate key validation made SETSTR/INC/EXPIRE 1.030x/1.061x/1.093x faster in the first alternating layout | Handling EXISTS in that layout made it 1.031x slower; removing EXISTS made unchanged GET/EXISTS 1.029x/1.094x slower and reduced the SETSTR gain to 1.003x | Both classifiers were removed; fallback correctness and exact/generic control benchmarks remain in [the rollback](#unsupported-exact-command-rejection-rollback) |
@@ -2099,6 +2100,35 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.tes
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-save-pairs.txt 20 11 100x BenchmarkLevelDBSaveStructuredMaterialized'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-scalar-pairs.txt 20 15 500000x BenchmarkLevelDBEntryEncodeBinary'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-replication-scalar-pairs.txt 20 15 1000000x BenchmarkCommandFeature/ReplicationDump'
+```
+
+<a id="canonical-base64-direct-decode-rollback"></a>
+### Canonical Base64 Direct-Decode Rollback
+
+A follow-up prototype recognized canonical base64 without allocation, reserved
+the exact final record span, and decoded Bloom-filter, Count-Min Sketch,
+HyperLogLog, Cuckoo-filter, and built-XOR bytes directly into LevelDB and reused
+replication buffers. Input containing CR/LF or malformed base64 retained the
+existing decoder path, preserving compatibility and visible error behavior.
+
+Fifteen alternating pairs pinned to logical CPU 20 showed that removing the
+temporary decoded slices was not free. Scanning once to prove canonical input
+and decoding it a second time cost materially more CPU than the removed copy:
+
+| Five canonical raw families | Existing decode then copy | Validate and decode final | Result |
+| --- | ---: | ---: | ---: |
+| LevelDB records | 6,274 ns; 7,456 B; 10 allocs; 3,553 record B | 6,901 ns; 3,776 B; 5 allocs; 3,553 record B | 0.909x throughput, or 1.100x slower; 49.4% lower heap |
+| Reused replication page | 4,736 ns; 3,680 B; 5 allocs; 3,493 wire B | 5,095 ns; 0 B; 0 allocs; 3,493 wire B | 0.930x throughput, or 1.076x slower; temporary heap eliminated |
+
+The production candidate was reverted because the CPU loss is larger and more
+consistent than the allocation benefit. The focused benchmarks remain, along
+with regression tests proving that fixed records accept base64 CR/LF and that
+replication errors preserve the caller-visible destination.
+
+```sh
+make run CMD='go test ./... -run TestFixedStructured -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-base64-before.test /tmp/hatrie-canonical-base64-after.test /tmp/hatrie-canonical-base64-pairs.txt 20 15 5000x BenchmarkCanonicalRawFixed'
+make run CMD='go run /tmp/summarize-go-benchmark-pairs.go /tmp/hatrie-canonical-base64-pairs.txt'
 ```
 
 <a id="adaptive-native-bucket-size-classes"></a>
