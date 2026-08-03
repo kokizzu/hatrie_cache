@@ -337,6 +337,9 @@ func marshalLevelDBStagedXorFilterEntryBinary(entry snapshotEntry, snapshot xorF
 }
 
 func marshalLevelDBBloomFilterEntryBinary(entry snapshotEntry, snapshot bloomFilterSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBBloomFilterEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
 	bits, err := snapshotBloomFilterRawBits(snapshot)
 	if err != nil {
 		return nil, err
@@ -354,6 +357,9 @@ func marshalLevelDBBloomFilterEntryBinary(entry snapshotEntry, snapshot bloomFil
 }
 
 func marshalLevelDBCountMinSketchEntryBinary(entry snapshotEntry, snapshot countMinSketchSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBCountMinSketchEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
 	counters, err := snapshotCountMinSketchRawCounters(snapshot)
 	if err != nil {
 		return nil, err
@@ -371,6 +377,9 @@ func marshalLevelDBCountMinSketchEntryBinary(entry snapshotEntry, snapshot count
 }
 
 func marshalLevelDBHyperLogLogEntryBinary(entry snapshotEntry, snapshot hyperLogLogSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBHyperLogLogEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
 	registers, err := snapshotHyperLogLogRawRegisters(snapshot)
 	if err != nil {
 		return nil, err
@@ -388,6 +397,9 @@ func marshalLevelDBHyperLogLogEntryBinary(entry snapshotEntry, snapshot hyperLog
 }
 
 func marshalLevelDBCuckooFilterEntryBinary(entry snapshotEntry, snapshot cuckooFilterSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBCuckooFilterEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
 	fingerprints, err := snapshotCuckooFilterRawFingerprints(snapshot)
 	if err != nil {
 		return nil, err
@@ -405,6 +417,9 @@ func marshalLevelDBCuckooFilterEntryBinary(entry snapshotEntry, snapshot cuckooF
 }
 
 func marshalLevelDBBuiltXorFilterEntryBinary(entry snapshotEntry, snapshot xorFilterSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBBuiltXorFilterEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
 	fingerprints, err := snapshotXorFilterRawFingerprints(snapshot)
 	if err != nil {
 		return nil, err

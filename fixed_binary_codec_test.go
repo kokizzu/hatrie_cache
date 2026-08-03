@@ -68,7 +68,7 @@ func TestFixedStructuredReplicationValuesMatchBufferedEncoding(t *testing.T) {
 func TestFixedStructuredBinaryRecordsAcceptBase64Newlines(t *testing.T) {
 	entry := benchmarkFixedBinaryEntries()[0]
 	encoded := entry.BloomFilter.Bits
-	entry.BloomFilter.Bits = encoded[:8] + "\r\n" + encoded[8:]
+	entry.BloomFilter.Bits = encoded[:8] + "\r\n\r\n" + encoded[8:]
 
 	got, err := marshalLevelDBEntryBinary(entry)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestFixedStructuredBinaryRecordsAcceptBase64Newlines(t *testing.T) {
 
 func TestFixedStructuredReplicationErrorPreservesDestination(t *testing.T) {
 	entry := benchmarkFixedBinaryEntries()[0]
-	entry.BloomFilter.Bits = "not-base64!!!"
+	entry.BloomFilter.Bits = "!!!!"
 	destination := make([]byte, 16, 32768)
 	copy(destination, "fixed-prefix")
 	want := append([]byte(nil), destination...)
@@ -100,6 +100,17 @@ func TestFixedStructuredReplicationErrorPreservesDestination(t *testing.T) {
 	}
 	if &got[0] != &destination[0] {
 		t.Fatal("appendReplicationValueBinary() replaced the destination on error")
+	}
+}
+
+func TestFixedStructuredStorageRejectsMalformedBase64(t *testing.T) {
+	entry := benchmarkFixedBinaryEntries()[0]
+	entry.BloomFilter.Bits = "!!!!"
+	_, wantErr := base64.StdEncoding.DecodeString(entry.BloomFilter.Bits)
+	if _, err := marshalLevelDBEntryBinary(entry); err == nil {
+		t.Fatal("marshalLevelDBEntryBinary() error = nil, want malformed base64 error")
+	} else if err.Error() != wantErr.Error() {
+		t.Fatalf("marshalLevelDBEntryBinary() error = %q, want %q", err, wantErr)
 	}
 }
 

@@ -173,6 +173,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Canonical storage format dispatch](#canonical-storage-format-dispatch), seven structured records and 512-key scalar/structured saves | 2,390 ns; 393,848/636,277 ns | 2,296 ns; 381,979/631,468 ns | Encoder 1.041x; saves 1.031x/1.008x faster | No measured tradeoff; large records are neutral, while bytes, heap, allocations, aliases, fallback formats, and decode are unchanged |
 | Current pass | [Direct structured storage assembly](#direct-structured-storage-assembly), seven fallback-heavy records | Buffered payload: 2,302 ns; 768 B; 14 allocs | Direct final record: 1,827 ns; 480 B; 7 allocs | 1.260x faster, 1.60x lower heap, 2.00x fewer allocs | No measured tradeoff; record bytes are identical, scalar encode is neutral, and replication was measured separately in the next pass |
 | Current pass | [Direct fixed structured assembly](#direct-fixed-structured-assembly), nine filter/sketch/bitmap/tree records | Storage: 33,386 ns; 71,536 B; 27 allocs; replication page: 28,992 ns; 47,088 B; 18 allocs | Storage: 29,215 ns; 47,152 B; 18 allocs; replication page: 24,537 ns; 22,704 B; 9 allocs | Storage 1.143x, replication 1.182x faster; 24,384 fewer B and 9 fewer allocs in both | No measured tradeoff; exact storage/wire bytes and round trips are unchanged, scalar controls are neutral or faster |
+| Current pass | [Single-decode fixed storage](#single-decode-fixed-storage), five base64-backed filter/sketch families | Decode to temporary then copy: 5,633 ns; 7,456 B; 10 allocs | Decode once into final record: 4,553 ns; 3,776 B; 5 allocs | 1.237x faster; 49.4% lower heap; 50.0% fewer allocs | Storage-only fast path; noncanonical input falls back, malformed input returns the original decoder error, wire and record bytes unchanged |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -2100,6 +2101,49 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.tes
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-save-pairs.txt 20 11 100x BenchmarkLevelDBSaveStructuredMaterialized'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-scalar-pairs.txt 20 15 500000x BenchmarkLevelDBEntryEncodeBinary'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-before.test /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-fixed-direct-replication-scalar-pairs.txt 20 15 1000000x BenchmarkCommandFeature/ReplicationDump'
+```
+
+<a id="single-decode-fixed-storage"></a>
+### Single-Decode Fixed Storage
+
+The accepted follow-up removes the temporary decoded byte slice from LevelDB
+records for Bloom filters, Count-Min Sketches, HyperLogLog, Cuckoo filters, and
+built XOR filters. It derives a tentative decoded length from standard base64
+padding, allocates the final record once, and lets the standard decoder validate
+while writing directly into that disposable record. A decode error is returned
+unchanged. If ignored CR/LF makes the actual decoded length differ, the partial
+record is discarded and the existing compatible decoder path is used.
+
+This differs from the rejected two-pass candidate below: canonical input is
+decoded exactly once and is never scanned separately. Storage-only helpers are
+outlined in a late compilation unit so shared replication codec layout remains
+stable. Tests cover exact buffered bytes and round trips for all nine fixed
+families, length-aligned malformed base64, CR/LF whose total length remains
+divisible by four, and replication destination ownership.
+
+Frozen binaries ran fifteen alternating pairs pinned to logical CPU 20:
+
+| Paired median | Decode then copy | Single final decode | Result |
+| --- | ---: | ---: | ---: |
+| Five affected LevelDB records | 5,633 ns; 7,456 B; 10 allocs; 3,553 record B | 4,553 ns; 3,776 B; 5 allocs; 3,553 record B | 1.237x faster, 49.4% lower heap, 50.0% fewer allocs |
+| All nine fixed LevelDB records | 28,513 ns; 47,152 B; 18 allocs; 21,680 record B | 27,928 ns; 43,472 B; 13 allocs; 21,680 record B | 1.021x faster, 3,680 fewer B, 5 fewer allocs |
+| Complete 272-entry structured save | 745,020 ns; 1,668,174 B; 1,853 allocs; 69,400 record B | 735,766 ns; 1,616,206 B; 1,773 allocs; 69,400 record B | 1.013x faster despite the JSON control being 1.021x slower; 51,968 fewer B, 80 fewer allocs |
+| Five-family replication control | 4,365 ns; 3,680 B; 5 allocs | 4,347 ns; 3,680 B; 5 allocs | neutral/slightly faster at 1.004x |
+| All-nine replication control | 24,115 ns; 22,704 B; 9 allocs | 24,323 ns; 22,704 B; 9 allocs | neutral within 0.9% |
+| 3 KiB scalar storage control | 618.8 ns; 3,200 B; 1 alloc | 623.4 ns; 3,200 B; 1 alloc | neutral within 0.7% |
+
+Record format, validation results, expiry/stat metadata, snapshot compatibility,
+replication, journal, backup, and restore behavior are unchanged. Inputs that
+cannot provide a padding-based size hint use the old decoder directly; rare
+valid CR/LF layouts may allocate and discard one final-record attempt before
+falling back, outside the canonical internally generated storage path.
+
+```sh
+make run CMD='go test ./... -run TestFixedStructured -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-base64-before.test /tmp/hatrie-base64-final-storage-outlined.test /tmp/hatrie-base64-final-storage-outlined-pairs.txt 20 15 5000x BenchmarkCanonicalRawFixed'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-base64-final-storage-outlined.test /tmp/hatrie-base64-final-fixed-outlined-pairs.txt 20 15 5000x BenchmarkFixedStructured'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-base64-final-storage-outlined.test /tmp/hatrie-base64-final-save-outlined-pairs.txt 20 15 100x BenchmarkLevelDBSaveStructuredMaterialized'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-base64-final-storage-outlined.test /tmp/hatrie-base64-final-scalar-outlined-pairs.txt 20 15 500000x BenchmarkLevelDBEntryEncodeBinary'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>
