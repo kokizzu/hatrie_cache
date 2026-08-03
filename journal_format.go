@@ -77,16 +77,77 @@ func commandJournalRecordIsBinary(data []byte) bool {
 }
 
 func marshalCommandJournalEntryBinary(entry commandJournalEntry) ([]byte, error) {
-	fields, err := prepareCommandJournalBinaryEntryFields(entry)
+	fields, err := prepareCommandJournalDirectBinaryEntryFields(entry)
 	if err != nil {
 		return nil, err
 	}
-	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, len(fields.values), len(fields.pairs), len(fields.outbox))
+	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, fields.values.payloadBytes, fields.pairs.payloadBytes, len(fields.outbox))
 	if err != nil {
 		return nil, err
 	}
 	data := make([]byte, 0, commandJournalBinaryRecordCapacity(payloadBytes))
-	return appendPreparedCommandJournalEntryBinary(data, entry, fields, payloadBytes)
+	return appendPreparedCommandJournalEntryDirectBinary(data, entry, fields, payloadBytes)
+}
+
+type commandJournalDirectBinaryDynamicField struct {
+	value        interface{}
+	payloadBytes int
+}
+
+type commandJournalDirectBinaryEntryFields struct {
+	values commandJournalDirectBinaryDynamicField
+	pairs  commandJournalDirectBinaryDynamicField
+	outbox []byte
+}
+
+func prepareCommandJournalDirectBinaryEntryFields(entry commandJournalEntry) (commandJournalDirectBinaryEntryFields, error) {
+	values, err := prepareCommandJournalDirectBinaryDynamicField(entry.Request.Values)
+	if err != nil {
+		return commandJournalDirectBinaryEntryFields{}, err
+	}
+	pairs, err := prepareCommandJournalDirectBinaryDynamicField(entry.Request.Pairs)
+	if err != nil {
+		return commandJournalDirectBinaryEntryFields{}, err
+	}
+	var outbox []byte
+	if entry.Outbox != nil {
+		outbox, err = marshalReplicationOutboxJobBinary(*entry.Outbox)
+		if err != nil {
+			return commandJournalDirectBinaryEntryFields{}, err
+		}
+	}
+	return commandJournalDirectBinaryEntryFields{values: values, pairs: pairs, outbox: outbox}, nil
+}
+
+func prepareCommandJournalDirectBinaryDynamicField(value interface{}) (commandJournalDirectBinaryDynamicField, error) {
+	switch value := value.(type) {
+	case nil:
+		return commandJournalDirectBinaryDynamicField{}, nil
+	case Slice:
+		if len(value) == 0 {
+			return commandJournalDirectBinaryDynamicField{}, nil
+		}
+	case Map:
+		if len(value) == 0 {
+			return commandJournalDirectBinaryDynamicField{}, nil
+		}
+	}
+	prepared, _, err := prepareSnapshotDynamicValueBinary(value)
+	if err != nil {
+		return commandJournalDirectBinaryDynamicField{}, err
+	}
+	valueBytes, ok, err := snapshotValueBinarySize(prepared)
+	if err != nil {
+		return commandJournalDirectBinaryDynamicField{}, err
+	}
+	if !ok {
+		return commandJournalDirectBinaryDynamicField{}, errors.New("hatriecache: unsupported binary journal value")
+	}
+	payloadBytes, err := snapshotValueBinaryAdd(len(snapshotValueBinaryMagic), valueBytes)
+	if err != nil {
+		return commandJournalDirectBinaryDynamicField{}, err
+	}
+	return commandJournalDirectBinaryDynamicField{value: prepared, payloadBytes: payloadBytes}, nil
 }
 
 type commandJournalBinaryEntryFields struct {
@@ -111,31 +172,78 @@ func prepareCommandJournalBinaryEntryFields(entry commandJournalEntry) (commandJ
 }
 
 func marshalCommandJournalEntryBinaryPayload(entry commandJournalEntry) ([]byte, error) {
-	fields, err := prepareCommandJournalBinaryEntryFields(entry)
+	fields, err := prepareCommandJournalDirectBinaryEntryFields(entry)
 	if err != nil {
 		return nil, err
 	}
-	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, len(fields.values), len(fields.pairs), len(fields.outbox))
+	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, fields.values.payloadBytes, fields.pairs.payloadBytes, len(fields.outbox))
 	if err != nil {
 		return nil, err
 	}
 	writer := newBinaryFieldWriter(nil, payloadBytes)
-	if err := writePreparedCommandJournalEntryBinaryPayload(&writer, entry, fields); err != nil {
+	if err := writePreparedCommandJournalEntryDirectBinaryPayload(&writer, entry, fields); err != nil {
 		return nil, err
 	}
 	return writer.bytes(), nil
 }
 
 func appendCommandJournalEntryBinary(data []byte, entry commandJournalEntry) ([]byte, error) {
-	fields, err := prepareCommandJournalBinaryEntryFields(entry)
+	fields, err := prepareCommandJournalDirectBinaryEntryFields(entry)
 	if err != nil {
 		return nil, err
 	}
-	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, len(fields.values), len(fields.pairs), len(fields.outbox))
+	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, fields.values.payloadBytes, fields.pairs.payloadBytes, len(fields.outbox))
 	if err != nil {
 		return nil, err
 	}
-	return appendPreparedCommandJournalEntryBinary(data, entry, fields, payloadBytes)
+	return appendPreparedCommandJournalEntryDirectBinary(data, entry, fields, payloadBytes)
+}
+
+func appendPreparedCommandJournalEntryDirectBinary(data []byte, entry commandJournalEntry, fields commandJournalDirectBinaryEntryFields, payloadBytes int) ([]byte, error) {
+	writer := binaryFieldWriter{buf: data}
+	writer.buf = append(writer.buf, commandJournalBinaryMagic...)
+	writer.writeUvarint(uint64(payloadBytes))
+	if err := writePreparedCommandJournalEntryDirectBinaryPayload(&writer, entry, fields); err != nil {
+		return nil, err
+	}
+	return writer.bytes(), nil
+}
+
+func writePreparedCommandJournalEntryDirectBinaryPayload(writer *binaryFieldWriter, entry commandJournalEntry, fields commandJournalDirectBinaryEntryFields) error {
+	writer.writeUvarint(commandJournalBinaryPayloadVersion)
+	writer.writeUvarint(entry.Sequence)
+	writer.writeBool(entry.Checkpoint)
+	if err := writeCommandJournalRequestDirectBinaryFields(writer, entry.Request, fields.values, fields.pairs); err != nil {
+		return err
+	}
+	writer.writeBytes(fields.outbox)
+	return nil
+}
+
+func writeCommandJournalRequestDirectBinaryFields(writer *binaryFieldWriter, request CacheCommandRequest, values commandJournalDirectBinaryDynamicField, pairs commandJournalDirectBinaryDynamicField) error {
+	writer.writeString(request.Command)
+	writer.writeString(request.Key)
+	writer.writeString(request.Value)
+	writer.writeString(request.Subkey)
+	writeCommandJournalOptionalInt64Binary(writer, request.Priority)
+	writeCommandJournalOptionalInt64Binary(writer, request.TTLSeconds)
+	writeCommandJournalOptionalInt64Binary(writer, request.UnixSeconds)
+	if err := writeCommandJournalDirectBinaryDynamicField(writer, values); err != nil {
+		return err
+	}
+	return writeCommandJournalDirectBinaryDynamicField(writer, pairs)
+}
+
+func writeCommandJournalDirectBinaryDynamicField(writer *binaryFieldWriter, field commandJournalDirectBinaryDynamicField) error {
+	writer.writeUvarint(uint64(field.payloadBytes))
+	if field.payloadBytes == 0 {
+		return nil
+	}
+	writer.buf = append(writer.buf, snapshotValueBinaryMagic...)
+	if !writeSnapshotValueBinary(writer, field.value) {
+		return errors.New("hatriecache: unsupported binary journal value")
+	}
+	return nil
 }
 
 func appendPreparedCommandJournalEntryBinary(data []byte, entry commandJournalEntry, fields commandJournalBinaryEntryFields, payloadBytes int) ([]byte, error) {

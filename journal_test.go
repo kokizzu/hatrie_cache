@@ -1020,6 +1020,54 @@ func TestCommandJournalBinaryAppendMatchesStandaloneRecord(t *testing.T) {
 	}
 }
 
+func TestCommandJournalBinaryStructuredFieldsMatchBufferedEncoding(t *testing.T) {
+	entry := benchmarkCommandJournalStructuredEntry()
+	got, err := marshalCommandJournalEntryBinary(entry)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntryBinary() error = %v", err)
+	}
+	want, err := marshalCommandJournalEntryBinaryBufferedForTest(nil, entry)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntryBinaryBufferedForTest() error = %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("structured journal record differs from buffered encoding:\n got % x\nwant % x", got, want)
+	}
+
+	prefix := []byte("journal-segment-prefix")
+	destination := make([]byte, len(prefix), len(prefix)+len(want))
+	copy(destination, prefix)
+	got, err = appendCommandJournalEntryBinary(destination, entry)
+	if err != nil {
+		t.Fatalf("appendCommandJournalEntryBinary() error = %v", err)
+	}
+	if &got[0] != &destination[0] {
+		t.Fatal("appendCommandJournalEntryBinary() allocated despite exact destination capacity")
+	}
+	want, err = marshalCommandJournalEntryBinaryBufferedForTest(append([]byte(nil), prefix...), entry)
+	if err != nil {
+		t.Fatalf("marshalCommandJournalEntryBinaryBufferedForTest(prefix) error = %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("appended structured journal record differs from buffered encoding")
+	}
+}
+
+func marshalCommandJournalEntryBinaryBufferedForTest(data []byte, entry commandJournalEntry) ([]byte, error) {
+	fields, err := prepareCommandJournalBinaryEntryFields(entry)
+	if err != nil {
+		return nil, err
+	}
+	payloadBytes, err := commandJournalEntryBinaryPayloadCapacity(entry, len(fields.values), len(fields.pairs), len(fields.outbox))
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		data = make([]byte, 0, commandJournalBinaryRecordCapacity(payloadBytes))
+	}
+	return appendPreparedCommandJournalEntryBinary(data, entry, fields, payloadBytes)
+}
+
 func TestCommandJournalBinaryEntryReaderDecodesPayloadAndCountsBytes(t *testing.T) {
 	want := commandJournalEntry{
 		Version:  commandJournalVersion,

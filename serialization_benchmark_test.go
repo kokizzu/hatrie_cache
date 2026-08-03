@@ -108,6 +108,25 @@ func BenchmarkCommandJournalEncodeStructuredBinary(b *testing.B) {
 	benchmarkCommandJournalEncodeEntryFormat(b, benchmarkCommandJournalStructuredEntry(), CommandJournalFormatBinary)
 }
 
+func BenchmarkCommandJournalAppendStructuredBinaryReuse(b *testing.B) {
+	entry := benchmarkCommandJournalStructuredEntry()
+	record, err := marshalCommandJournalEntryBinary(entry)
+	if err != nil {
+		b.Fatal(err)
+	}
+	buffer := make([]byte, 0, len(record))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(record)), "journal_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		buffer, err = appendCommandJournalEntryBinary(buffer, entry)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkCommandJournalDecodeStructuredJSON(b *testing.B) {
 	benchmarkCommandJournalDecodeEntryFormat(b, benchmarkCommandJournalStructuredEntry(), CommandJournalFormatJSON)
 }
