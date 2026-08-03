@@ -165,6 +165,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Canonical journal format dispatch](#canonical-journal-format-dispatch), scalar/structured JSON and binary encode | 5,067/1,259/3,109/2,053 ns | 4,920/1,222/3,048/1,971 ns | 1.03x/1.03x/1.02x/1.04x faster | No measured tradeoff; record bytes, heap, allocations, aliases, case folding, fallback formats, and decode are unchanged |
 | Current pass | [Direct journal dynamic fields](#direct-journal-dynamic-fields), structured record appended to reusable segment capacity | Buffered Values/Pairs: 1,625 ns; 616 B; 4 allocs | Direct fields: 1,168 ns; 72 B; 2 allocs | 1.391x faster, 8.56x lower heap, 2.00x fewer allocs | No measured tradeoff; durable bytes are identical and scalar journal encode is neutral |
 | Current pass | [Direct journal-tail dynamic fields](#direct-journal-tail-dynamic-fields), 1,000 structured records | Buffered Values/Pairs: 2.094 ms; 3.074 MB; 4,012 allocs | Direct fields: 1.645 ms; 2.530 MB; 2,012 allocs | 1.273x faster, 1.22x lower heap, 1.99x fewer allocs | No measured tradeoff; 540,886 wire B are identical and the scalar tail also improves 1.073x |
+| Current pass | [Inline small-map sort scratch](#inline-small-map-sort-scratch), four/eight fields and 1,000-record tail | Heap key slice: 493/905 ns; tail 1.654 ms and 2,012 allocs | Outlined inline keys: 396/786 ns; tail 1.611 ms and 1,012 allocs | Maps 1.244x/1.151x faster; tail 1.027x and 1,000 fewer allocs | No measured tradeoff; 16/64-field controls are neutral or faster and bytes remain deterministic |
 | Earlier | [Structured gzip-best snapshot](README.md#serialization-tradeoffs) | Gzip JSON: 18,866,057 ns; 6,956 disk B | Gzip binary: 9,847,768 ns; 5,787 disk B | 1.92x faster, 16.8% smaller, 5.94x fewer allocs | Maximum compression remains CPU-intensive |
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
@@ -3980,6 +3981,48 @@ prepared tagged values directly to their final buffers.
 make run CMD='go test ./... -run "TestCommandJournalTail(StructuredBinaryMatchesBufferedEncoding|BinaryRoundTripAndRejectsTrailingData)" -count=1'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-journal-tail-direct-before.test /tmp/hatrie-journal-tail-direct-after.test /tmp/hatrie-journal-tail-direct-structured-pairs.txt 20 15 1000x BenchmarkCommandJournalTailStructuredBinaryEncode1k'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-journal-tail-direct-before.test /tmp/hatrie-journal-tail-direct-after.test /tmp/hatrie-journal-tail-direct-scalar-pairs.txt 20 15 100x BenchmarkCommandJournalTailScalarBinaryEncode10k'
+```
+
+<a id="inline-small-map-sort-scratch"></a>
+### Inline Small-Map Sort Scratch
+
+Tagged map values must sort keys to keep storage, replication, journal, and
+wire bytes deterministic. The shared writer previously allocated a key slice
+for maps that escaped compiler stack placement. Maps with at most eight fields
+now use a 128-byte stack array in an outlined helper; larger maps execute the
+original allocation and sort body.
+
+An insertion-order equivalence test was added before implementation and run ten
+times before and after the change. Frozen binaries ran fifteen alternating
+100,000-operation fanout pairs pinned to logical CPU 20. The complete
+structured journal append used fifteen 500,000-operation pairs. Because short
+tail samples crossed host-frequency states, the accepted tail result uses seven
+longer alternating pairs with 1,000 complete tail encodes per sample.
+
+| Paired median | Heap sort slice | Outlined inline keys | Result |
+| --- | ---: | ---: | ---: |
+| Four-field map | 493.0 ns; 144 B; 2 allocs | 396.2 ns; 80 B; 1 alloc | 1.244x faster, 64 fewer B, one fewer alloc |
+| Eight-field map | 904.7 ns; 272 B; 2 allocs | 785.9 ns; 144 B; 1 alloc | 1.151x faster, 128 fewer B, one fewer alloc |
+| 16-field control | 2,166 ns; 544 B; 2 allocs | 2,158 ns; 544 B; 2 allocs | neutral within 0.4% |
+| 64-field control | 9,563 ns; 2,304 B; 2 allocs | 9,503 ns; 2,304 B; 2 allocs | 1.006x faster |
+| Structured journal segment append | 1,180 ns; 72 B; 2 allocs | 1,072 ns; 24 B; 1 alloc | 1.101x faster, 48 fewer B, one fewer alloc |
+| 1,000-record structured tail | 1,654,457 ns; 2,529,602 B; 2,012 allocs | 1,610,872 ns; 2,481,601 B; 1,012 allocs | 1.027x faster, 48,001 fewer B, 1,000 fewer allocs |
+
+The first prototype declared the inline array in the general map writer. It
+improved small maps but zeroed 128 stack bytes even for the heap fallback,
+slowing 16-field maps 1.7% and 64-field maps 0.7%. That layout was removed.
+Outlining the small-map case restored both large controls while retaining the
+small-map gains.
+
+Map ordering, payload bytes, decode, recursion, large-map memory, storage,
+replication, journals, wire transfer, snapshots, backup, and restore semantics
+are unchanged.
+
+```sh
+make run CMD='go test ./... -run "TestSnapshotValueBinaryMapOrderIsDeterministic|TestCommandJournalBinaryStructuredFieldsMatchBufferedEncoding|TestAppendReplicationStructuredValuesMatchBufferedEncoding|TestLevelDBBinaryStructuredValuesMatchBufferedEncoding" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-map-sort-before.test /tmp/hatrie-map-sort-after-outlined.test /tmp/hatrie-map-sort-outlined-pairs.txt 20 15 100000x BenchmarkSnapshotValueBinaryMapEncode'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-map-sort-before.test /tmp/hatrie-map-sort-after-outlined.test /tmp/hatrie-map-sort-journal-pairs.txt 20 15 500000x BenchmarkCommandJournalAppendStructuredBinaryReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-map-sort-before.test /tmp/hatrie-map-sort-after-outlined.test /tmp/hatrie-map-sort-tail-long-pairs.txt 20 7 1000x BenchmarkCommandJournalTailStructuredBinaryEncode1k'
 ```
 
 <a id="binary-journal-catch-up-wire"></a>

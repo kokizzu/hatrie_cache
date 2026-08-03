@@ -906,8 +906,29 @@ func writeSnapshotValueBinaryPublicPriorityQueue(writer *binaryFieldWriter, item
 }
 
 func writeSnapshotValueBinaryMap(writer *binaryFieldWriter, values map[string]interface{}) bool {
+	if len(values) <= 8 {
+		return writeSnapshotValueBinarySmallMap(writer, values)
+	}
 	writer.buf = append(writer.buf, snapshotValueBinaryObject)
 	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	writer.writeUvarint(uint64(len(keys)))
+	for _, key := range keys {
+		writer.writeString(key)
+		if ok := writeSnapshotValueBinary(writer, values[key]); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func writeSnapshotValueBinarySmallMap(writer *binaryFieldWriter, values map[string]interface{}) bool {
+	writer.buf = append(writer.buf, snapshotValueBinaryObject)
+	var inlineKeys [8]string
+	keys := inlineKeys[:0]
 	for key := range values {
 		keys = append(keys, key)
 	}
