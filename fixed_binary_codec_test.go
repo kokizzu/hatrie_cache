@@ -114,6 +114,102 @@ func TestFixedStructuredStorageRejectsMalformedBase64(t *testing.T) {
 	}
 }
 
+func TestBitmapFixedStructuredBinaryRecordsAcceptBase64Newlines(t *testing.T) {
+	entries := benchmarkFixedBinaryEntries()
+	for _, index := range []int{5, 6} {
+		entry := entries[index]
+		var encoded string
+		switch entry.Type {
+		case "roaring_bitmap":
+			encoded = entry.RoaringBitmap.Containers[0].Bits
+			entry.RoaringBitmap.Containers[0].Bits = encoded[:8] + "\r\n\r\n" + encoded[8:]
+		case "sparse_bitset":
+			encoded = entry.SparseBitset.Containers[0].Bits
+			entry.SparseBitset.Containers[0].Bits = encoded[:8] + "\r\n\r\n" + encoded[8:]
+		default:
+			t.Fatalf("unexpected bitmap fixture type %q", entry.Type)
+		}
+
+		got, err := marshalLevelDBEntryBinary(entry)
+		if err != nil {
+			t.Fatalf("marshalLevelDBEntryBinary(%s) error = %v", entry.Type, err)
+		}
+		canonical := benchmarkFixedBinaryEntries()[index]
+		want, err := marshalLevelDBEntryBinary(canonical)
+		if err != nil {
+			t.Fatalf("marshalLevelDBEntryBinary(%s canonical) error = %v", entry.Type, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("base64 newlines changed the %s binary record", entry.Type)
+		}
+	}
+}
+
+func TestBitmapFixedStructuredStorageRejectsMalformedBase64(t *testing.T) {
+	entries := benchmarkFixedBinaryEntries()
+	for _, index := range []int{5, 6} {
+		entry := entries[index]
+		switch entry.Type {
+		case "roaring_bitmap":
+			entry.RoaringBitmap.Containers[0].Bits = "!!!!"
+		case "sparse_bitset":
+			entry.SparseBitset.Containers[0].Bits = "!!!!"
+		default:
+			t.Fatalf("unexpected bitmap fixture type %q", entry.Type)
+		}
+		_, wantErr := base64.StdEncoding.DecodeString("!!!!")
+		if _, err := marshalLevelDBEntryBinary(entry); err == nil {
+			t.Fatalf("marshalLevelDBEntryBinary(%s) error = nil, want malformed base64 error", entry.Type)
+		} else if err.Error() != wantErr.Error() {
+			t.Fatalf("marshalLevelDBEntryBinary(%s) error = %q, want %q", entry.Type, err, wantErr)
+		}
+	}
+}
+
+func TestBitmapFixedStructuredBinaryRecordsMatchBufferedEncodingForMixedContainers(t *testing.T) {
+	fixtures := benchmarkFixedBinaryEntries()
+	arrayPayload := base64.StdEncoding.EncodeToString([]byte{1, 0, 2, 0})
+	entries := []snapshotEntry{
+		{
+			Key:  "fixed:roaring:mixed",
+			Type: "roaring_bitmap",
+			RoaringBitmap: &roaringBitmapSnapshot{Cardinality: 3, Containers: []roaringBitmapContainerSnapshot{
+				{Key: 1, Kind: roaringBitmapContainerKindArray, Cardinality: 2, Values: arrayPayload},
+				{Key: 2, Kind: roaringBitmapContainerKindBits, Cardinality: 1, Bits: fixtures[5].RoaringBitmap.Containers[0].Bits},
+			}},
+		},
+		{
+			Key:  "fixed:sparse:mixed",
+			Type: "sparse_bitset",
+			SparseBitset: &sparseBitsetSnapshot{Cardinality: 3, Containers: []sparseBitsetContainerSnapshot{
+				{Key: 1, Kind: sparseBitsetContainerKindArray, Cardinality: 2, Values: arrayPayload},
+				{Key: 2, Kind: sparseBitsetContainerKindBits, Cardinality: 1, Bits: fixtures[6].SparseBitset.Containers[0].Bits},
+			}},
+		},
+	}
+
+	for _, entry := range entries {
+		got, err := marshalLevelDBEntryBinary(entry)
+		if err != nil {
+			t.Fatalf("marshalLevelDBEntryBinary(%s) error = %v", entry.Type, err)
+		}
+		want, err := marshalFixedLevelDBEntryBinaryBufferedForTest(entry)
+		if err != nil {
+			t.Fatalf("marshalFixedLevelDBEntryBinaryBufferedForTest(%s) error = %v", entry.Type, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("binary %s mixed-container record differs from buffered encoding", entry.Type)
+		}
+		decoded, err := decodeLevelDBEntry(got)
+		if err != nil {
+			t.Fatalf("decodeLevelDBEntry(%s) error = %v", entry.Type, err)
+		}
+		if !reflect.DeepEqual(decoded, entry) {
+			t.Fatalf("decoded %s entry = %#v, want %#v", entry.Type, decoded, entry)
+		}
+	}
+}
+
 func marshalFixedLevelDBEntryBinaryBufferedForTest(entry snapshotEntry) ([]byte, error) {
 	value, err := prepareLevelDBBinaryEntryValue(entry)
 	if err != nil {
@@ -183,6 +279,40 @@ func BenchmarkCanonicalRawFixedStorageEncode(b *testing.B) {
 
 func BenchmarkCanonicalRawFixedReplicationAppendReuse(b *testing.B) {
 	entries := benchmarkFixedBinaryEntries()[:5]
+	recordBytes := fixedBinaryReplicationRecordBytes(b, entries)
+	buffer := make([]byte, 0, recordBytes)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		for _, entry := range entries {
+			var err error
+			buffer, err = appendReplicationValueBinary(buffer, entry)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkBitmapFixedStorageEncode(b *testing.B) {
+	entries := benchmarkFixedBinaryEntries()[5:7]
+	recordBytes := fixedBinaryStorageRecordBytes(b, entries)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "record_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		for _, entry := range entries {
+			if _, err := marshalLevelDBEntryBinary(entry); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkBitmapFixedReplicationAppendReuse(b *testing.B) {
+	entries := benchmarkFixedBinaryEntries()[5:7]
 	recordBytes := fixedBinaryReplicationRecordBytes(b, entries)
 	buffer := make([]byte, 0, recordBytes)
 	b.ReportAllocs()

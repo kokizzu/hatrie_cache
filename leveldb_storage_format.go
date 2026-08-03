@@ -437,6 +437,9 @@ func marshalLevelDBBuiltXorFilterEntryBinary(entry snapshotEntry, snapshot xorFi
 }
 
 func marshalLevelDBRoaringBitmapEntryBinary(entry snapshotEntry, snapshot roaringBitmapSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBRoaringBitmapEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
 	containers, err := prepareSnapshotRoaringBitmapBinaryContainers(snapshot)
 	if err != nil {
 		return nil, err
@@ -454,6 +457,9 @@ func marshalLevelDBRoaringBitmapEntryBinary(entry snapshotEntry, snapshot roarin
 }
 
 func marshalLevelDBSparseBitsetEntryBinary(entry snapshotEntry, snapshot sparseBitsetSnapshot) ([]byte, error) {
+	if data, ok, err := marshalLevelDBSparseBitsetEntryBase64(entry, snapshot); ok || err != nil {
+		return data, err
+	}
 	containers, err := prepareSnapshotSparseBitsetBinaryContainers(snapshot)
 	if err != nil {
 		return nil, err

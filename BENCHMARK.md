@@ -174,6 +174,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct structured storage assembly](#direct-structured-storage-assembly), seven fallback-heavy records | Buffered payload: 2,302 ns; 768 B; 14 allocs | Direct final record: 1,827 ns; 480 B; 7 allocs | 1.260x faster, 1.60x lower heap, 2.00x fewer allocs | No measured tradeoff; record bytes are identical, scalar encode is neutral, and replication was measured separately in the next pass |
 | Current pass | [Direct fixed structured assembly](#direct-fixed-structured-assembly), nine filter/sketch/bitmap/tree records | Storage: 33,386 ns; 71,536 B; 27 allocs; replication page: 28,992 ns; 47,088 B; 18 allocs | Storage: 29,215 ns; 47,152 B; 18 allocs; replication page: 24,537 ns; 22,704 B; 9 allocs | Storage 1.143x, replication 1.182x faster; 24,384 fewer B and 9 fewer allocs in both | No measured tradeoff; exact storage/wire bytes and round trips are unchanged, scalar controls are neutral or faster |
 | Current pass | [Single-decode fixed storage](#single-decode-fixed-storage), five base64-backed filter/sketch families | Decode to temporary then copy: 5,633 ns; 7,456 B; 10 allocs | Decode once into final record: 4,553 ns; 3,776 B; 5 allocs | 1.237x faster; 49.4% lower heap; 50.0% fewer allocs | Storage-only fast path; noncanonical input falls back, malformed input returns the original decoder error, wire and record bytes unchanged |
+| Current pass | [Single-decode bitmap storage](#single-decode-bitmap-storage), Roaring and sparse bitsets with 8 KiB containers | Prepared descriptor/payload slices: 18,482 ns; 37,968 B; 6 allocs | Decode containers into final records: 15,414 ns; 18,944 B; 2 allocs | 1.199x faster; 50.1% lower heap; 66.7% fewer allocs | Storage-only; the two remaining allocations are final records, mixed containers/noncanonical input preserve compatibility, replication is neutral |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -2144,6 +2145,43 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-base64-before
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-base64-final-storage-outlined.test /tmp/hatrie-base64-final-fixed-outlined-pairs.txt 20 15 5000x BenchmarkFixedStructured'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-base64-final-storage-outlined.test /tmp/hatrie-base64-final-save-outlined-pairs.txt 20 15 100x BenchmarkLevelDBSaveStructuredMaterialized'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-fixed-direct-after.test /tmp/hatrie-base64-final-storage-outlined.test /tmp/hatrie-base64-final-scalar-outlined-pairs.txt 20 15 500000x BenchmarkLevelDBEntryEncodeBinary'
+```
+
+<a id="single-decode-bitmap-storage"></a>
+### Single-Decode Bitmap Storage
+
+Roaring and sparse bitset records previously built a descriptor slice and a
+decoded payload slice for every container before writing the final LevelDB
+record. The storage encoder now makes a metadata-only size pass and decodes each
+container once into its disposable final record. Unsupported kinds, size hints
+that cannot represent compatible input, and valid CR/LF size mismatches fall
+back to the existing preparation path. Decoder errors are returned unchanged.
+
+Tests cover exact buffered bytes, decode equality, both array and bitmap kinds
+in multi-container records, length-aligned CR/LF, malformed payload errors, and
+unchanged replication ownership. The focused/all-family measurements used 31
+alternating pairs; complete-save and scalar controls used fifteen.
+
+| Paired median | Prepared containers | Direct final containers | Result |
+| --- | ---: | ---: | ---: |
+| Two 8 KiB bitmap records | 18,482 ns; 37,968 B; 6 allocs; 16,484 record B | 15,414 ns; 18,944 B; 2 allocs; 16,484 record B | 1.199x faster, 50.1% lower heap, 66.7% fewer allocs |
+| All nine fixed records | 27,727 ns; 43,472 B; 13 allocs; 21,680 record B | 24,734 ns; 24,448 B; 9 allocs; 21,680 record B | 1.121x faster, 43.8% lower heap, 30.8% fewer allocs |
+| Complete 272-entry structured save | 733,521 ns; 1,616,206 B; 1,773 allocs | 737,544 ns; 1,612,820 B; 1,661 allocs | CPU neutral within 0.5%; 3,386 fewer B and 112 fewer allocs |
+| Two-family replication control | 15,108 ns; 19,024 B; 4 allocs | 15,190 ns; 19,024 B; 4 allocs | neutral within 0.5% |
+| All-nine replication control | 24,160 ns; 22,704 B; 9 allocs | 24,388 ns; 22,704 B; 9 allocs | neutral within 0.9% |
+| 3 KiB scalar storage control | 619.6 ns; 3,200 B; 1 alloc | 619.4 ns; 3,200 B; 1 alloc | neutral |
+
+The two focused allocations left after this change are the two final LevelDB
+records. Record and wire bytes, container order, validation/error behavior,
+metadata, replication, journal, snapshot, backup, and restore semantics are
+unchanged.
+
+```sh
+make run CMD='go test ./... -run "Test(FixedStructured|BitmapFixedStructured)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-bitmap-final-before.test /tmp/hatrie-bitmap-final-after.test /tmp/hatrie-bitmap-final-31-pairs.txt 20 31 5000x BenchmarkBitmapFixed'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-bitmap-final-before.test /tmp/hatrie-bitmap-final-after.test /tmp/hatrie-bitmap-final-fixed-31-pairs.txt 20 31 5000x BenchmarkFixedStructured'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-bitmap-final-before.test /tmp/hatrie-bitmap-final-after.test /tmp/hatrie-bitmap-final-save-pairs.txt 20 15 100x BenchmarkLevelDBSaveStructuredMaterialized'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-bitmap-final-before.test /tmp/hatrie-bitmap-final-after.test /tmp/hatrie-bitmap-final-scalar-pairs.txt 20 15 500000x BenchmarkLevelDBEntryEncodeBinary'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>

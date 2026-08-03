@@ -102,6 +102,166 @@ func marshalLevelDBBuiltXorFilterEntryBase64(entry snapshotEntry, snapshot xorFi
 	return finishLevelDBDirectPayload(writer, entry), true, nil
 }
 
+func marshalLevelDBRoaringBitmapEntryBase64(entry snapshotEntry, snapshot roaringBitmapSnapshot) ([]byte, bool, error) {
+	size, ok := snapshotValueBinaryRoaringBitmapBase64Size(snapshot)
+	if !ok {
+		return nil, false, nil
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, false, nil
+	}
+	written, err := writeSnapshotValueBinaryRoaringBitmapBase64(&writer.binaryFieldWriter, snapshot)
+	if err != nil || !written {
+		return nil, err != nil, err
+	}
+	return finishLevelDBDirectPayload(writer, entry), true, nil
+}
+
+func snapshotValueBinaryRoaringBitmapBase64Size(snapshot roaringBitmapSnapshot) (int, bool) {
+	total := 1 + binaryUvarintSize(snapshot.Cardinality) + binaryUvarintSize(uint64(len(snapshot.Containers)))
+	for _, container := range snapshot.Containers {
+		var encoded string
+		switch container.Kind {
+		case roaringBitmapContainerKindArray:
+			encoded = container.Values
+		case roaringBitmapContainerKindBits:
+			encoded = container.Bits
+		default:
+			return 0, false
+		}
+		decodedSize, ok := snapshotBase64DecodedSizeHint(encoded)
+		if !ok {
+			return 0, false
+		}
+		payloadSize, err := snapshotValueBinaryBytesSize(decodedSize)
+		if err != nil {
+			return 0, false
+		}
+		itemSize := binaryUvarintSize(uint64(container.Key)) +
+			1 +
+			binaryUvarintSize(uint64(container.Cardinality)) +
+			payloadSize
+		total, err = snapshotValueBinaryAdd(total, itemSize)
+		if err != nil {
+			return 0, false
+		}
+	}
+	return total, true
+}
+
+func writeSnapshotValueBinaryRoaringBitmapBase64(writer *binaryFieldWriter, snapshot roaringBitmapSnapshot) (bool, error) {
+	writer.buf = append(writer.buf, snapshotValueBinaryRoaringBitmap)
+	writer.writeUvarint(snapshot.Cardinality)
+	writer.writeUvarint(uint64(len(snapshot.Containers)))
+	for _, container := range snapshot.Containers {
+		var encoded string
+		var kind byte
+		switch container.Kind {
+		case roaringBitmapContainerKindArray:
+			encoded = container.Values
+			kind = snapshotRoaringBitmapBinaryArray
+		case roaringBitmapContainerKindBits:
+			encoded = container.Bits
+			kind = snapshotRoaringBitmapBinaryBits
+		default:
+			return false, nil
+		}
+		decodedSize, ok := snapshotBase64DecodedSizeHint(encoded)
+		if !ok {
+			return false, nil
+		}
+		writer.writeUvarint(uint64(container.Key))
+		writer.buf = append(writer.buf, kind)
+		writer.writeUvarint(uint64(container.Cardinality))
+		written, err := writeSnapshotValueBinaryBase64(writer, encoded, decodedSize)
+		if err != nil || !written {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func marshalLevelDBSparseBitsetEntryBase64(entry snapshotEntry, snapshot sparseBitsetSnapshot) ([]byte, bool, error) {
+	size, ok := snapshotValueBinarySparseBitsetBase64Size(snapshot)
+	if !ok {
+		return nil, false, nil
+	}
+	writer, err := newLevelDBDirectPayloadWriter(entry, size)
+	if err != nil {
+		return nil, false, nil
+	}
+	written, err := writeSnapshotValueBinarySparseBitsetBase64(&writer.binaryFieldWriter, snapshot)
+	if err != nil || !written {
+		return nil, err != nil, err
+	}
+	return finishLevelDBDirectPayload(writer, entry), true, nil
+}
+
+func snapshotValueBinarySparseBitsetBase64Size(snapshot sparseBitsetSnapshot) (int, bool) {
+	total := 1 + binaryUvarintSize(snapshot.Cardinality) + binaryUvarintSize(uint64(len(snapshot.Containers)))
+	for _, container := range snapshot.Containers {
+		var encoded string
+		switch container.Kind {
+		case sparseBitsetContainerKindArray:
+			encoded = container.Values
+		case sparseBitsetContainerKindBits:
+			encoded = container.Bits
+		default:
+			return 0, false
+		}
+		decodedSize, ok := snapshotBase64DecodedSizeHint(encoded)
+		if !ok {
+			return 0, false
+		}
+		payloadSize, err := snapshotValueBinaryBytesSize(decodedSize)
+		if err != nil {
+			return 0, false
+		}
+		itemSize := binaryUvarintSize(container.Key) +
+			1 +
+			binaryUvarintSize(uint64(container.Cardinality)) +
+			payloadSize
+		total, err = snapshotValueBinaryAdd(total, itemSize)
+		if err != nil {
+			return 0, false
+		}
+	}
+	return total, true
+}
+
+func writeSnapshotValueBinarySparseBitsetBase64(writer *binaryFieldWriter, snapshot sparseBitsetSnapshot) (bool, error) {
+	writer.buf = append(writer.buf, snapshotValueBinarySparseBitset)
+	writer.writeUvarint(snapshot.Cardinality)
+	writer.writeUvarint(uint64(len(snapshot.Containers)))
+	for _, container := range snapshot.Containers {
+		var encoded string
+		var kind byte
+		switch container.Kind {
+		case sparseBitsetContainerKindArray:
+			encoded = container.Values
+			kind = snapshotSparseBitsetBinaryArray
+		case sparseBitsetContainerKindBits:
+			encoded = container.Bits
+			kind = snapshotSparseBitsetBinaryBits
+		default:
+			return false, nil
+		}
+		decodedSize, ok := snapshotBase64DecodedSizeHint(encoded)
+		if !ok {
+			return false, nil
+		}
+		writer.writeUvarint(container.Key)
+		writer.buf = append(writer.buf, kind)
+		writer.writeUvarint(uint64(container.Cardinality))
+		written, err := writeSnapshotValueBinaryBase64(writer, encoded, decodedSize)
+		if err != nil || !written {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
 func writeSnapshotValueBinaryBloomFilterBase64(writer *binaryFieldWriter, snapshot bloomFilterSnapshot, decodedSize int) (bool, error) {
 	writer.buf = append(writer.buf, snapshotValueBinaryBloomFilter)
 	writer.writeUvarint(snapshot.BitCount)
