@@ -3613,6 +3613,9 @@ func (ht *HatTrie) appendCommandDumpScannedEntryBinaryWithoutStatsLocked(destina
 		}
 		return data, true, nil
 	}
+	if data, handled, err := ht.appendCommandDumpFixedEntryBinaryLocked(destination, entry); handled {
+		return data, err == nil, err
+	}
 	snapshot, err := ht.snapshotEntryWithoutStatsLocked(entry)
 	if err != nil {
 		return destination, false, err

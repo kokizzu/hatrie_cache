@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestFixedStructuredBinaryRecordsMatchBufferedEncoding(t *testing.T) {
@@ -120,6 +121,70 @@ func TestCanonicalFixedStructuredReplicationFallsBackForBase64Newlines(t *testin
 		}
 		if &got[0] != &gotDestination[0] {
 			t.Fatalf("canonical %s newline fallback replaced the destination", entry.Type)
+		}
+	}
+}
+
+func TestFixedCommandDumpDirectMatchesSnapshotEncoding(t *testing.T) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	requests := []CacheCommandRequest{
+		{Command: "CREATEBF", Key: "direct:bloom", Value: "2048", Subkey: "0.001"},
+		{Command: "ADDBF", Key: "direct:bloom", Value: "value"},
+		{Command: "CREATECMS", Key: "direct:cms", Value: "256", Subkey: "4"},
+		{Command: "INCRCMS", Key: "direct:cms", Value: "value", Subkey: "3"},
+		{Command: "CREATEHLL", Key: "direct:hll", Value: "10"},
+		{Command: "ADDHLL", Key: "direct:hll", Value: "value"},
+		{Command: "CREATECF", Key: "direct:cuckoo", Value: "2048", Subkey: "0.001"},
+		{Command: "ADDCF", Key: "direct:cuckoo", Value: "value"},
+		{Command: "CREATEXF", Key: "direct:xor", Value: "64"},
+		{Command: "ADDXF", Key: "direct:xor", Value: "value-a"},
+		{Command: "ADDXF", Key: "direct:xor", Value: "value-b"},
+		{Command: "BUILDXF", Key: "direct:xor"},
+		{Command: "CREATEXF", Key: "direct:xor-staged", Value: "64"},
+		{Command: "ADDXF", Key: "direct:xor-staged", Value: "value"},
+	}
+	for _, request := range requests {
+		response := ht.ExecuteCommand(request)
+		if !response.OK {
+			t.Fatalf("%s %s failed: %s", request.Command, request.Key, response.Message)
+		}
+	}
+	if !ht.Expire("direct:bloom", time.Hour) {
+		t.Fatal("Expire(direct:bloom) = false")
+	}
+
+	for _, key := range []string{"direct:bloom", "direct:cms", "direct:hll", "direct:cuckoo", "direct:xor", "direct:xor-staged"} {
+		got, ok, err := ht.commandDumpEntryBinaryWithoutStats(key)
+		if err != nil || !ok {
+			t.Fatalf("commandDumpEntryBinaryWithoutStats(%s) = %v/%v", key, ok, err)
+		}
+		ht.mu.Lock()
+		hval := ht.peekCachedLocked(key)
+		snapshot, snapshotErr := ht.snapshotEntryWithoutStatsLocked(Entry{Key: key, Value: hval})
+		ht.mu.Unlock()
+		if snapshotErr != nil {
+			t.Fatalf("snapshotEntryWithoutStatsLocked(%s) error = %v", key, snapshotErr)
+		}
+		want, err := appendCanonicalReplicationValueBinary(nil, snapshot)
+		if err != nil {
+			t.Fatalf("appendCanonicalReplicationValueBinary(%s) error = %v", key, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("direct command dump %s differs from snapshot encoding", key)
+		}
+		decoded, err := unmarshalReplicationValueBinary(key, got)
+		if err != nil {
+			t.Fatalf("unmarshalReplicationValueBinary(%s) error = %v", key, err)
+		}
+		if snapshot.ExpiresAt != nil {
+			if decoded.ExpiresAt == nil || !decoded.ExpiresAt.Equal(*snapshot.ExpiresAt) {
+				t.Fatalf("decoded direct command dump %s expiry = %v, want %v", key, decoded.ExpiresAt, snapshot.ExpiresAt)
+			}
+			decoded.ExpiresAt = snapshot.ExpiresAt
+		}
+		if !reflect.DeepEqual(decoded, snapshot) {
+			t.Fatalf("decoded direct command dump %s = %#v, want %#v", key, decoded, snapshot)
 		}
 	}
 }
@@ -452,6 +517,27 @@ func BenchmarkCanonicalFixedReplicationSnapshotPipeline(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkFixedCommandDumpBloomFilterReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	setupCommandFeatureBloomWithValue(b, ht)
+	initial, ok, err := ht.commandDumpEntryBinaryWithoutStats("bloom:key")
+	if err != nil || !ok {
+		b.Fatalf("commandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
+	}
+	buffer := make([]byte, 0, len(initial))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(len(initial)), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		buffer, ok, err = ht.appendCommandDumpEntryBinaryWithoutStats(buffer, "bloom:key")
+		if err != nil || !ok {
+			b.Fatalf("appendCommandDumpEntryBinaryWithoutStats() = %v/%v", ok, err)
+		}
 	}
 }
 

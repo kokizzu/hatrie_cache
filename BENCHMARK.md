@@ -176,6 +176,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-decode fixed storage](#single-decode-fixed-storage), five base64-backed filter/sketch families | Decode to temporary then copy: 5,633 ns; 7,456 B; 10 allocs | Decode once into final record: 4,553 ns; 3,776 B; 5 allocs | 1.237x faster; 49.4% lower heap; 50.0% fewer allocs | Storage-only fast path; noncanonical input falls back, malformed input returns the original decoder error, wire and record bytes unchanged |
 | Current pass | [Single-decode bitmap storage](#single-decode-bitmap-storage), Roaring and sparse bitsets with 8 KiB containers | Prepared descriptor/payload slices: 18,482 ns; 37,968 B; 6 allocs | Decode containers into final records: 15,414 ns; 18,944 B; 2 allocs | 1.199x faster; 50.1% lower heap; 66.7% fewer allocs | Storage-only; the two remaining allocations are final records, mixed containers/noncanonical input preserve compatibility, replication is neutral |
 | Current pass | [Trusted single-decode replication](#trusted-single-decode-replication), seven internally generated base64-backed families | Validated preparation into reused page: 19,946 ns; 22,704 B; 9 allocs | Trusted final-page decode: 14,069 ns; 0 B; 0 allocs | 1.418x faster; temporary heap and allocations eliminated | Private live-snapshot call only; external/restored values keep validation, CR/LF falls back, wire bytes unchanged |
+| Current pass | [Direct live fixed replication](#direct-live-fixed-replication), 32k-item Bloom DUMP into reused capacity | Snapshot base64 encode/decode: 119,288 ns; 229,448 B; 5 allocs | Live backing to final page: 6,133 ns; 0 B; 0 allocs | 19.45x faster; temporary heap and allocations eliminated | Private locked sender path for Bloom/CMS/HLL/Cuckoo/built XOR; exact 58,932 wire B, TTL, and staged-XOR fallback unchanged |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -2225,6 +2226,39 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-b
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-before.test /tmp/hatrie-canonical-replication-after.test /tmp/hatrie-canonical-replication-controls.txt 20 31 5000x BenchmarkFixedStructured'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-before.test /tmp/hatrie-canonical-replication-after.test /tmp/hatrie-canonical-replication-command-control.txt 20 31 500000x BenchmarkCommandFeature/ReplicationDump'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-pipeline.test /tmp/hatrie-canonical-replication-pipeline.test /tmp/hatrie-canonical-replication-pipeline-pairs.txt 20 15 2000x BenchmarkCanonicalFixedReplicationSnapshotPipeline'
+```
+
+<a id="direct-live-fixed-replication"></a>
+### Direct Live Fixed Replication
+
+The locked replication sender no longer constructs base64 snapshots for Bloom
+filters, Count-Min Sketches, HyperLogLog, Cuckoo filters, or built XOR filters.
+It sizes the existing live backing and writes tagged metadata plus little-endian
+`uint64`, `uint32`, `uint16`, or byte payloads directly into the final reusable
+replication page. This removes both the base64 encoding and the subsequent
+trusted decode introduced by the prior step.
+
+The path is private to backing arrays already protected by the cache lock.
+Staged XOR filters and every other type retain the established snapshot path.
+Exact integration tests create all five structures through commands, compare
+direct bytes with the snapshot encoder, decode equal entries, cover expiry
+metadata, and prove staged-XOR fallback. Thirty-one alternating pairs used a
+32,768-item Bloom filter with one value and caller-owned output capacity.
+
+| Paired median | Snapshot encode/decode | Direct live backing | Result |
+| --- | ---: | ---: | ---: |
+| Bloom replication DUMP | 119,288 ns; 229,448 B; 5 allocs; 58,932 wire B | 6,133 ns; 0 B; 0 allocs; 58,932 wire B | 19.45x faster; temporary heap and allocations eliminated |
+| Scalar string DUMP control | 142.9 ns; 64 B; 1 alloc | 140.1 ns; 64 B; 1 alloc | neutral/slightly faster at 1.020x |
+
+Wire bytes and tags, little-endian representation, expiry, receiver validation,
+staged values, routing, retry, batching, compression, storage, journal,
+snapshots, backup, and restore are unchanged. No extra retained backing or
+per-element metadata is added.
+
+```sh
+make run CMD='go test ./... -run "Test(FixedStructured|CanonicalFixedStructured|FixedCommandDumpDirect|CommandDump)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-fixed-before.test /tmp/hatrie-direct-live-fixed-after.test /tmp/hatrie-direct-live-fixed-pairs.txt 20 31 2000x BenchmarkFixedCommandDumpBloomFilterReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-fixed-before.test /tmp/hatrie-direct-live-fixed-after.test /tmp/hatrie-direct-live-fixed-command-control.txt 20 31 500000x BenchmarkCommandFeature/ReplicationDump'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>
