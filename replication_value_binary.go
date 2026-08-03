@@ -109,6 +109,10 @@ func appendReplicationValueBinary(destination []byte, entry snapshotEntry) ([]by
 	return writer.bytes(), nil
 }
 
+func appendCanonicalReplicationValueBinary(destination []byte, entry snapshotEntry) ([]byte, error) {
+	return appendCanonicalReplicationValueBinaryDirect(destination, entry)
+}
+
 func appendReplicationStringEntryBinary(destination []byte, entry snapshotEntry) ([]byte, error) {
 	valueSize, err := binaryLengthPrefixedSize(int64(len(entry.String)))
 	if err != nil {

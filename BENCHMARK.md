@@ -175,6 +175,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct fixed structured assembly](#direct-fixed-structured-assembly), nine filter/sketch/bitmap/tree records | Storage: 33,386 ns; 71,536 B; 27 allocs; replication page: 28,992 ns; 47,088 B; 18 allocs | Storage: 29,215 ns; 47,152 B; 18 allocs; replication page: 24,537 ns; 22,704 B; 9 allocs | Storage 1.143x, replication 1.182x faster; 24,384 fewer B and 9 fewer allocs in both | No measured tradeoff; exact storage/wire bytes and round trips are unchanged, scalar controls are neutral or faster |
 | Current pass | [Single-decode fixed storage](#single-decode-fixed-storage), five base64-backed filter/sketch families | Decode to temporary then copy: 5,633 ns; 7,456 B; 10 allocs | Decode once into final record: 4,553 ns; 3,776 B; 5 allocs | 1.237x faster; 49.4% lower heap; 50.0% fewer allocs | Storage-only fast path; noncanonical input falls back, malformed input returns the original decoder error, wire and record bytes unchanged |
 | Current pass | [Single-decode bitmap storage](#single-decode-bitmap-storage), Roaring and sparse bitsets with 8 KiB containers | Prepared descriptor/payload slices: 18,482 ns; 37,968 B; 6 allocs | Decode containers into final records: 15,414 ns; 18,944 B; 2 allocs | 1.199x faster; 50.1% lower heap; 66.7% fewer allocs | Storage-only; the two remaining allocations are final records, mixed containers/noncanonical input preserve compatibility, replication is neutral |
+| Current pass | [Trusted single-decode replication](#trusted-single-decode-replication), seven internally generated base64-backed families | Validated preparation into reused page: 19,946 ns; 22,704 B; 9 allocs | Trusted final-page decode: 14,069 ns; 0 B; 0 allocs | 1.418x faster; temporary heap and allocations eliminated | Private live-snapshot call only; external/restored values keep validation, CR/LF falls back, wire bytes unchanged |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -2182,6 +2183,48 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-bitmap-final-before.tes
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-bitmap-final-before.test /tmp/hatrie-bitmap-final-after.test /tmp/hatrie-bitmap-final-fixed-31-pairs.txt 20 31 5000x BenchmarkFixedStructured'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-bitmap-final-before.test /tmp/hatrie-bitmap-final-after.test /tmp/hatrie-bitmap-final-save-pairs.txt 20 15 100x BenchmarkLevelDBSaveStructuredMaterialized'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-bitmap-final-before.test /tmp/hatrie-bitmap-final-after.test /tmp/hatrie-bitmap-final-scalar-pairs.txt 20 15 500000x BenchmarkLevelDBEntryEncodeBinary'
+```
+
+<a id="trusted-single-decode-replication"></a>
+### Trusted Single-Decode Replication
+
+The command replication sender creates fixed-structure snapshots directly from
+live cache backing while holding the cache lock. Those base64 strings are
+therefore known outputs of the standard encoder. A new private call path uses
+that provenance to decode Bloom filters, Count-Min Sketches, HyperLogLog,
+Cuckoo filters, built XOR filters, Roaring bitmaps, and sparse bitsets directly
+into reusable replication-page capacity. It does not add a marker to every
+snapshot row or enlarge any snapshot structure.
+
+The ordinary replication encoder remains the validating entry point for
+external, decoded, restored, and test-supplied snapshots. Unexpected shapes and
+valid CR/LF size mismatches fall back to it. Tests compare exact output with the
+validated encoder for every family, decode complete round trips, prove caller
+capacity reuse, and exercise CR/LF fallback. Only the live-snapshot command
+call site selects the private trusted path.
+
+The focused fixture used 31 alternating frozen-binary pairs. A same-binary
+pipeline control includes fresh `Snapshot()` base64 generation for a Bloom
+filter and an 8 KiB Roaring container, while the scalar DUMP and unchanged
+validated codec controls guard unrelated behavior.
+
+| Paired median | Validated preparation | Trusted final-page decode | Result |
+| --- | ---: | ---: | ---: |
+| Seven values in reused page | 19,946 ns; 22,704 B; 9 allocs; 19,948 wire B | 14,069 ns; 0 B; 0 allocs; 19,948 wire B | 1.418x faster; temporary heap and allocations eliminated |
+| Snapshot plus Bloom/Roaring encode pipeline | about 21,201 ns; 34,144 B; 5 allocs | about 18,336 ns; 24,640 B; 3 allocs | 1.156x faster, 9,504 fewer B, 2 fewer allocs |
+| Existing validated all-nine replication control | 24,262 ns; 22,704 B; 9 allocs | 24,195 ns; 22,704 B; 9 allocs | neutral/slightly faster at 1.003x |
+| Existing all-nine storage control | 24,461 ns; 24,448 B; 9 allocs | 24,389 ns; 24,448 B; 9 allocs | neutral/slightly faster at 1.003x |
+| Scalar string DUMP control | 139.4 ns; 64 B; 1 alloc | 140.5 ns; 64 B; 1 alloc | neutral within 0.8% |
+
+Wire format and size, receiver validation, routing, retries, batching,
+compression, storage, journal, snapshots, backup, and restore are unchanged.
+
+```sh
+make run CMD='go test ./... -run "Test(FixedStructured|BitmapFixedStructured|CanonicalFixedStructured)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-before.test /tmp/hatrie-canonical-replication-after.test /tmp/hatrie-canonical-replication-pairs.txt 20 31 5000x BenchmarkCanonicalFixedReplicationAppendReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-before.test /tmp/hatrie-canonical-replication-after.test /tmp/hatrie-canonical-replication-controls.txt 20 31 5000x BenchmarkFixedStructured'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-before.test /tmp/hatrie-canonical-replication-after.test /tmp/hatrie-canonical-replication-command-control.txt 20 31 500000x BenchmarkCommandFeature/ReplicationDump'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-pipeline.test /tmp/hatrie-canonical-replication-pipeline.test /tmp/hatrie-canonical-replication-pipeline-pairs.txt 20 15 2000x BenchmarkCanonicalFixedReplicationSnapshotPipeline'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>

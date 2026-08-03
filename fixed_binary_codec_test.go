@@ -65,6 +65,65 @@ func TestFixedStructuredReplicationValuesMatchBufferedEncoding(t *testing.T) {
 	}
 }
 
+func TestCanonicalFixedStructuredReplicationValuesMatchValidatedEncoding(t *testing.T) {
+	prefix := []byte("canonical-fixed-prefix")
+	for _, entry := range benchmarkFixedBinaryEntries()[:7] {
+		t.Run(entry.Type, func(t *testing.T) {
+			gotDestination := make([]byte, len(prefix), 32768)
+			wantDestination := make([]byte, len(prefix), 32768)
+			copy(gotDestination, prefix)
+			copy(wantDestination, prefix)
+			got, err := appendCanonicalReplicationValueBinary(gotDestination, entry)
+			if err != nil {
+				t.Fatalf("appendCanonicalReplicationValueBinary() error = %v", err)
+			}
+			want, err := appendReplicationValueBinary(wantDestination, entry)
+			if err != nil {
+				t.Fatalf("appendReplicationValueBinary() error = %v", err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("canonical %s replication value differs from validated encoding", entry.Type)
+			}
+			if &got[0] != &gotDestination[0] {
+				t.Fatal("appendCanonicalReplicationValueBinary() allocated a new destination")
+			}
+			decoded, err := unmarshalReplicationValueBinary(entry.Key, got[len(prefix):])
+			if err != nil {
+				t.Fatalf("unmarshalReplicationValueBinary() error = %v", err)
+			}
+			if !reflect.DeepEqual(decoded, entry) {
+				t.Fatalf("decoded canonical %s entry = %#v, want %#v", entry.Type, decoded, entry)
+			}
+		})
+	}
+}
+
+func TestCanonicalFixedStructuredReplicationFallsBackForBase64Newlines(t *testing.T) {
+	entries := benchmarkFixedBinaryEntries()
+	entries[0].BloomFilter.Bits = entries[0].BloomFilter.Bits[:8] + "\r\n\r\n" + entries[0].BloomFilter.Bits[8:]
+	entries[5].RoaringBitmap.Containers[0].Bits = entries[5].RoaringBitmap.Containers[0].Bits[:8] + "\r\n\r\n" + entries[5].RoaringBitmap.Containers[0].Bits[8:]
+	for _, entry := range []snapshotEntry{entries[0], entries[5]} {
+		gotDestination := make([]byte, 8, 32768)
+		wantDestination := make([]byte, 8, 32768)
+		copy(gotDestination, "prefix::")
+		copy(wantDestination, "prefix::")
+		got, err := appendCanonicalReplicationValueBinary(gotDestination, entry)
+		if err != nil {
+			t.Fatalf("appendCanonicalReplicationValueBinary(%s) error = %v", entry.Type, err)
+		}
+		want, err := appendReplicationValueBinary(wantDestination, entry)
+		if err != nil {
+			t.Fatalf("appendReplicationValueBinary(%s) error = %v", entry.Type, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("canonical %s newline fallback differs from validated encoding", entry.Type)
+		}
+		if &got[0] != &gotDestination[0] {
+			t.Fatalf("canonical %s newline fallback replaced the destination", entry.Type)
+		}
+	}
+}
+
 func TestFixedStructuredBinaryRecordsAcceptBase64Newlines(t *testing.T) {
 	entry := benchmarkFixedBinaryEntries()[0]
 	encoded := entry.BloomFilter.Bits
@@ -327,6 +386,72 @@ func BenchmarkBitmapFixedReplicationAppendReuse(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+	}
+}
+
+func BenchmarkCanonicalFixedReplicationAppendReuse(b *testing.B) {
+	entries := benchmarkFixedBinaryEntries()[:7]
+	recordBytes := fixedBinaryReplicationRecordBytes(b, entries)
+	buffer := make([]byte, 0, recordBytes)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.ReportMetric(float64(recordBytes), "wire_B/op")
+	for iteration := 0; iteration < b.N; iteration++ {
+		buffer = buffer[:0]
+		for _, entry := range entries {
+			var err error
+			buffer, err = appendCanonicalReplicationValueBinary(buffer, entry)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkCanonicalFixedReplicationSnapshotPipeline(b *testing.B) {
+	fixtures := benchmarkFixedBinaryEntries()
+	bloom, err := newBloomFilterDataFromSnapshot(*fixtures[0].BloomFilter)
+	if err != nil {
+		b.Fatal(err)
+	}
+	roaring, err := newRoaringBitmapDataFromSnapshot(*fixtures[5].RoaringBitmap)
+	if err != nil {
+		b.Fatal(err)
+	}
+	modes := []struct {
+		name   string
+		append func([]byte, snapshotEntry) ([]byte, error)
+	}{
+		{name: "Validated", append: appendReplicationValueBinary},
+		{name: "Canonical", append: appendCanonicalReplicationValueBinary},
+	}
+	for _, mode := range modes {
+		b.Run(mode.name, func(b *testing.B) {
+			bloomSnapshot := bloom.Snapshot()
+			roaringSnapshot := roaring.Snapshot()
+			entries := []snapshotEntry{
+				{Type: "bloom_filter", BloomFilter: &bloomSnapshot},
+				{Type: "roaring_bitmap", RoaringBitmap: &roaringSnapshot},
+			}
+			wireBytes := fixedBinaryReplicationRecordBytes(b, entries)
+			buffer := make([]byte, 0, wireBytes)
+			b.ReportAllocs()
+			b.ReportMetric(float64(wireBytes), "wire_B/op")
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				bloomSnapshot = bloom.Snapshot()
+				roaringSnapshot = roaring.Snapshot()
+				entries[0].BloomFilter = &bloomSnapshot
+				entries[1].RoaringBitmap = &roaringSnapshot
+				buffer = buffer[:0]
+				for _, entry := range entries {
+					buffer, err = mode.append(buffer, entry)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
 	}
 }
 

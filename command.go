@@ -3617,7 +3617,7 @@ func (ht *HatTrie) appendCommandDumpScannedEntryBinaryWithoutStatsLocked(destina
 	if err != nil {
 		return destination, false, err
 	}
-	data, err := appendReplicationValueBinary(destination, snapshot)
+	data, err := appendCanonicalReplicationValueBinary(destination, snapshot)
 	if err != nil {
 		return destination, false, err
 	}
