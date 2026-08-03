@@ -237,8 +237,11 @@ func TestScalarBatchDirectNativeChunksPreserveOrder(t *testing.T) {
 		t.Fatalf("boundary GET values = %q/%v, want crossed", response.GetValues(), response.GetValueEnds())
 	}
 	scratch := &trie.nativeCommandBatchScratch
-	if cap(scratch.items) > nativeScalarDirectBatchChunkSize || cap(scratch.operations) > nativeScalarDirectBatchChunkSize || cap(scratch.results) > nativeScalarDirectBatchChunkSize {
-		t.Fatalf("native scratch capacities = items %d operations %d results %d, want <= %d", cap(scratch.items), cap(scratch.operations), cap(scratch.results), nativeScalarDirectBatchChunkSize)
+	if cap(scratch.items) != 0 {
+		t.Fatalf("native direct item scratch capacity = %d, want 0", cap(scratch.items))
+	}
+	if cap(scratch.operations) > nativeScalarDirectBatchChunkSize || cap(scratch.results) > nativeScalarDirectBatchChunkSize {
+		t.Fatalf("native scratch capacities = operations %d results %d, want <= %d", cap(scratch.operations), cap(scratch.results), nativeScalarDirectBatchChunkSize)
 	}
 }
 

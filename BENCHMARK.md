@@ -298,6 +298,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
+| Current pass | [Direct native scalar request packing](#direct-native-scalar-request-packing), 64 read/mixed/missing-delete commands | Staged items: 4,126/4,995/2,881 ns; 6,656/6,720/7,296 scratch B | Pack request columns: 3,417/4,410/2,150 ns; 4,096/4,160/4,736 scratch B | 1.21x/1.13x/1.34x faster; 2,560 fewer retained scratch bytes | Heap and allocations are identical; size-two/repeated-read and public pipeline/string/mixed controls are neutral, while three slower code placements were rejected |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
 | Current pass | [Native build-cache dependency tracking](#native-build-cache-dependency-tracking), included C/header edits | Go reused a stale cgo object after `hat-trie.c` changed | Embedded source manifest invalidates the package action; mutated behavior reaches the rebuilt binary | Correct native rebuild instead of a false cache hit; mixed read/write 1.005x/1.004x, scalar controls neutral | The changed-source build now pays the required native recompile; unchanged builds retain normal caching, and the production binary is 72 B smaller in the paired build |
@@ -411,6 +412,7 @@ tree.
 | Exact delete dispatch and known-valid deletion | A generic-case helper made missing/reinsert `DEL` 1.083x/1.018x faster; an exact-switch placement made reinsert 1.035x faster | Exact-switch missing deletes became 1.10x slower and controls up to 1.06x slower; the generic helper slowed exact SET/lowercase GET 1.06x/1.04x; a lower-level validation refactor was neutral-to-slower for delete and slowed controls up to 1.14x | All runtime candidates removed; bounded missing/reinsert command controls remain in [the rollback](#delete-dispatch-validation-rollback) |
 | Fused native delete-and-return | One native traversal made existing-key delete up to 1.222x faster with unchanged final allocations under a by-value/scalar ABI | Out-pointer results added 8 B and one allocation; by-value/scalar misses were up to 1.14x slower; the best hybrid made hits 1.17x faster and misses neutral but shifted exact/generic SET 1.06x/1.05x slower | Native APIs, tests, wrappers, and Go runtime changes removed; see [the fused delete rollback](#fused-native-delete-rollback) |
 | Fused native scalar-batch delete | Reusing the batch's C result storage removed one cgo crossing and trie-prefix traversal on hits; 16/256-command hit pairs improved 1.024x/1.021x | Missing-delete batches became up to 1.096x slower and unchanged repeated-read batches up to 1.116x slower; heap, allocations, and scratch were unchanged | Native API and batch switch removed; focused hit/miss correctness and benchmark controls remain in [the rollback](#fused-native-batch-delete-rollback) |
+| Native scalar direct-packer placements | Direct request packing made native rows up to 1.39x faster and removed 2,560 retained scratch bytes per full chunk | Adding the packer beside shared cgo batch code made public `PipelineBatch16` 1.15x slower; moving only the packer out was 1.066x slower; isolating a duplicate result reconciler was still 1.017x slower | All three placements removed; the smaller [direct request packer](#direct-native-scalar-request-packing) reuses the original reconciler and leaves the long public control neutral |
 | Signed command integer parser | Made one-digit/full-width values 6.48x/1.63x faster, invalid/overflow inputs 20.86x/4.63x faster, and removed 49-72 B plus two allocations from parser errors | Direct placement made complete `ADDFW` 1.03x slower; wrapped placements improved it only 1.003x-1.043x while unchanged command controls moved up to 1.039x slower; the float counterpart was 1.136x slower | All parser, helper, layout, contract, and benchmark-fixture changes removed; see [signed command integer parser rollback](#signed-command-integer-parser-rollback) |
 | Post-O3 command normalization | Canonical SET improved up to 1.17x end to end and focused uppercase normalization improved up to 6.06x | Shared helpers slowed lowercase/spaced fallbacks up to 1.10x/1.06x; dispatcher-local recognition slowed TTL 1.034x; exact-switch recognition slowed lowercase/spaced SET and lowercase GET 1.07x/1.10x/1.08x | All runtime and temporary fixture code removed; see [Post-O3 Command Normalization Rollback](#post-o3-command-normalization-rollback) |
 | Cgo call annotations | Intended to remove call overhead with `noescape`/`nocallback` | SET/GET/INC/TTL regressed 1.03x/1.10x/1.15x/1.03x | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
@@ -3401,15 +3403,84 @@ pass's 384.1 to 356.6 ns/command (1.08x), from 249,327 to 234,750 heap B
 same 23.64 wire B/command. Against the original pre-telemetry path, the two
 passes together improve 450.1 to 356.6 ns/command (1.26x).
 
-The repeated-key path retains no native scratch. A 16-command native batch
-retains 1,664-1,680 B and a 256-command mixed request retains 6,720 B because
-only one 64-command chunk is cached. The key arena is capped at 64 KiB for
-direct batches and is released after oversized-key requests; operation and
-result arrays are capped at 64 entries. TTL keys, lazy storage references,
-local partitions, batches smaller than four, and journal, dirty-tracker,
-replicator, or leader-enforcement interception retain the previous behavior.
-There is no wire, persistence, configuration, or background-worker change.
-Raw final output is in `build/benchmarks/scalar-native-batch.txt`.
+The repeated-key path retains no native scratch. At the end of this pass, a
+16-command native batch retained 1,664-1,680 B and a 256-command mixed request
+retained 6,720 B because only one 64-command chunk was cached. The direct
+request-packing follow-up below removes the item portion of that scratch. The
+key arena remains capped at 64 KiB for direct batches and is released after
+oversized-key requests; operation and result arrays remain capped at 64
+entries. TTL keys, lazy storage references, local partitions, batches smaller
+than four, and journal, dirty-tracker, replicator, or leader-enforcement
+interception retain the previous behavior. There is no wire, persistence,
+configuration, or background-worker change. Raw pass output is in
+`build/benchmarks/scalar-native-batch.txt`.
+
+<a id="direct-native-scalar-request-packing"></a>
+### Direct Native Scalar Request Packing
+
+The typed native path used to materialize one 40-byte
+`nativeCommandBatchItem` per command, then walk that slice once to size packed
+keys, again to create C operations, and again to reconcile results. The typed
+protobuf request already owns the validated command, key, and value columns.
+The retained path computes the maximum 64-command key chunk during validation,
+packs C operations directly from those columns, and uses a stack-local item
+only to call the existing result reconciler. Public `BATCH` retains its original
+implementation and compilation unit.
+
+The chunk-boundary test was tightened before implementation and initially
+failed with item scratch capacity 64. It now requires zero item scratch while
+also checking ordered mutation/read behavior across the 64-command boundary.
+Existing coverage checks every scalar operation, TTL and lazy-reference
+fallback, repeated hit/miss coalescing, cancellation boundaries, exact
+telemetry, oversized-key scratch release, and native-call counts.
+
+```sh
+make bench-scalar-native-batch BENCHTIME=20000x COUNT=15
+make run CMD='go test . -run=ScalarBatch -count=1'
+make run CMD='go test -race . -run=ScalarBatch -count=1'
+```
+
+Final values are medians from 15 alternating baseline/candidate binary pairs,
+pinned to one CPU with 20,000 batches per block. Heap and allocation columns
+were identical for every row.
+
+| Native scalar workload | Staged items | Direct packing | Improvement |
+| --- | ---: | ---: | ---: |
+| Read 4 | 550.0 ns; 416 scratch B | 504.0 ns; 256 scratch B | 1.09x faster; 160 fewer scratch B |
+| Read 16 | 1,298 ns; 1,664 scratch B | 1,127 ns; 1,024 scratch B | 1.15x faster; 640 fewer scratch B |
+| Read 64 | 4,126 ns; 6,656 scratch B | 3,417 ns; 4,096 scratch B | 1.21x faster; 2,560 fewer scratch B |
+| Read 256 | 16,216 ns; 6,656 scratch B | 13,339 ns; 4,096 scratch B | 1.22x faster; 2,560 fewer scratch B |
+| Mixed 4 | 609.1 ns; 420 scratch B | 557.4 ns; 260 scratch B | 1.09x faster; 160 fewer scratch B |
+| Mixed 16 | 1,624 ns; 1,680 scratch B | 1,447 ns; 1,040 scratch B | 1.12x faster; 640 fewer scratch B |
+| Mixed 64 | 4,995 ns; 6,720 scratch B | 4,410 ns; 4,160 scratch B | 1.13x faster; 2,560 fewer scratch B |
+| Mixed 256 | 19,399 ns; 6,720 scratch B | 16,515 ns; 4,160 scratch B | 1.17x faster; 2,560 fewer scratch B |
+| Delete hit pairs 64 | 6,183 ns; 7,040 scratch B | 5,648 ns; 4,480 scratch B | 1.09x faster; 2,560 fewer scratch B |
+| Missing delete 64 | 2,881 ns; 7,296 scratch B | 2,150 ns; 4,736 scratch B | 1.34x faster; 2,560 fewer scratch B |
+
+The non-native and public controls show no cost outside the selected path:
+
+| Control | Baseline | Direct packing | Result |
+| --- | ---: | ---: | ---: |
+| Repeated read 64 | 951.1 ns; 1,328 B; 5 allocs | 954.4 ns; 1,328 B; 5 allocs | Neutral within 0.3% |
+| Repeated read 256 | 3,582 ns; 4,592 B; 5 allocs | 3,561 ns; 4,592 B; 5 allocs | Neutral within 0.6% |
+| Public pipeline 16, 500k blocks | 2,091 ns; 1,152 B; 1 alloc | 2,104 ns; 1,152 B; 1 alloc | Neutral within 0.6% |
+| Public string set/get | 126.7/97.43 ns; 0 B; 0 allocs | 126.2/98.05 ns; 0 B; 0 allocs | Neutral within 0.6% |
+| Public mixed read/write profiles | 9,882/21,582 ns | 9,870/21,085 ns | Read neutral; write 1.02x faster |
+
+Four layouts were measured instead of accepting the focused win blindly. A
+packer inserted beside shared cgo batch code moved public `PipelineBatch16`
+from 2,106 to 2,421 ns (1.15x slower). Moving only the packer out while leaving
+modified reconciliation in the shared unit measured 2,105 versus 2,243 ns
+(1.066x slower). Restoring the shared unit and isolating a duplicate reconciler
+reduced that regression to 2,117 versus 2,153 ns (1.017x slower). All three
+were removed. The final isolated packer reuses the original reconciler and
+restored the long public control to neutral. One full matrix run was also
+discarded after an unrelated 32-worker Python job doubled absolute latency and
+moved unchanged controls by up to 10%; none of those samples appear above.
+
+The selected implementation changes no API, wire format, persistence format,
+configuration, background work, response ownership, storage ownership, chunk
+size, or fallback rule. It removes a private intermediate slice only.
 
 <a id="shared-scalar-batch-keys"></a>
 ### Shared Scalar-Batch Keys

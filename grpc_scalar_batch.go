@@ -312,6 +312,8 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 		return false
 	}
 	integerIndex := 0
+	chunkKeyBytes := 0
+	maxChunkKeyBytes := 0
 	for index, operation := range operations {
 		if index&63 == 0 && ctx.Err() != nil {
 			return false
@@ -323,6 +325,13 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 		if _, expiring := ht.expires[key]; expiring {
 			return false
 		}
+		chunkKeyBytes += len(key)
+		if index&63 == 63 {
+			if chunkKeyBytes > maxChunkKeyBytes {
+				maxChunkKeyBytes = chunkKeyBytes
+			}
+			chunkKeyBytes = 0
+		}
 		switch operation {
 		case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER,
 			hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT:
@@ -333,17 +342,10 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 			}
 		}
 	}
-
-	chunkCapacity := len(operations)
-	if chunkCapacity > nativeScalarDirectBatchChunkSize {
-		chunkCapacity = nativeScalarDirectBatchChunkSize
-	}
-	items := ht.nativeCommandBatchScratch.items[:0]
-	if cap(items) < chunkCapacity {
-		items = make([]nativeCommandBatchItem, 0, chunkCapacity)
+	if chunkKeyBytes > maxChunkKeyBytes {
+		maxChunkKeyBytes = chunkKeyBytes
 	}
 	defer func() {
-		ht.nativeCommandBatchScratch.items = items[:0]
 		if cap(ht.nativeCommandBatchScratch.keys) > maxNativeScalarDirectRetainedKeyBytes {
 			ht.nativeCommandBatchScratch.keys = nil
 		}
@@ -362,30 +364,16 @@ func (ht *HatTrie) executeScalarBatchNativeLocked(ctx context.Context, request *
 		if end > len(operations) {
 			end = len(operations)
 		}
-		items = items[:0]
-		for index := start; index < end; index++ {
-			operation := operations[index]
-			command := scalarNativePublicCommand(operation)
-			item := nativeCommandBatchItem{responseIndex: index, key: request.Keys[index], command: command}
-			switch operation {
-			case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING:
-				valueIndex := ht.strings.Add(string(request.StringValues[stringIndex]))
-				stringIndex++
-				item.input = HatValue{Index: valueIndex, Flags: DATAVALUE_TYPE_RAW_STRING}.toValue()
-			case hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER:
-				value := int32(request.IntegerValues[integerIndex])
-				integerIndex++
-				item.input = HatValue{Index: value, Flags: DATAVALUE_TYPE_COUNTER}.toValue()
-			case hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT:
-				value := int32(request.IntegerValues[integerIndex])
-				integerIndex++
-				item.input = nativeCommandBatchIncrementInput(value)
+		results, nextStringIndex, nextIntegerIndex := ht.runNativeScalarRequestChunkLocked(request, start, end, maxChunkKeyBytes, stringIndex, integerIndex)
+		stringIndex = nextStringIndex
+		integerIndex = nextIntegerIndex
+		for index, result := range results {
+			responseIndex := start + index
+			item := nativeCommandBatchItem{
+				key:     request.Keys[responseIndex],
+				command: scalarNativePublicCommand(operations[responseIndex]),
 			}
-			items = append(items, item)
-		}
-		results := ht.runNativeCommandBatchLocked(items)
-		for index, item := range items {
-			ht.applyNativeScalarBatchResultLocked(response, item.responseIndex, item, results[index], telemetry)
+			ht.applyNativeScalarBatchResultLocked(response, responseIndex, item, result, telemetry)
 		}
 	}
 	return true
