@@ -69,6 +69,41 @@ func TestParseCommandJournalFormat(t *testing.T) {
 	}
 }
 
+func TestMarshalCommandJournalEntryNormalizesFormatAliases(t *testing.T) {
+	entry := commandJournalEntry{
+		Version:  commandJournalVersion,
+		Sequence: 1,
+		Request: CacheCommandRequest{
+			Command: "SET",
+			Key:     "format:key",
+			Value:   "value",
+		},
+	}
+	for _, test := range []struct {
+		name      string
+		canonical CommandJournalFormat
+		alias     CommandJournalFormat
+	}{
+		{name: "binary alias", canonical: CommandJournalFormatBinary, alias: " BIN "},
+		{name: "binary case", canonical: CommandJournalFormatBinary, alias: "BINARY"},
+		{name: "json case and space", canonical: CommandJournalFormatJSON, alias: " JSON "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			want, err := marshalCommandJournalEntry(entry, test.canonical)
+			if err != nil {
+				t.Fatalf("marshalCommandJournalEntry(%q) error = %v", test.canonical, err)
+			}
+			got, err := marshalCommandJournalEntry(entry, test.alias)
+			if err != nil {
+				t.Fatalf("marshalCommandJournalEntry(%q) error = %v", test.alias, err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("marshalCommandJournalEntry(%q) differs from canonical %q", test.alias, test.canonical)
+			}
+		})
+	}
+}
+
 func TestOpenCommandJournalRejectsInvalidGroupCommitOptions(t *testing.T) {
 	for _, test := range []struct {
 		name    string

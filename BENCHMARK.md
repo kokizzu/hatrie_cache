@@ -162,6 +162,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Earlier | [Binary journal encode](README.md#serialization-tradeoffs) | JSON: 7,800 ns; 3,224 B; 8,496 heap B | Binary: 3,362 ns; 3,159 B; 6,400 heap B | 2.32x faster, 2.0% smaller, 1.33x lower heap | Binary records require project tooling to inspect |
 | Earlier | [Binary journal decode](README.md#serialization-tradeoffs) | JSON: 30,034 ns; 22,728 heap B; 29 allocs | Binary: 20,035 ns; 18,071 heap B; 25 allocs | 1.50x faster, 1.26x lower heap | Existing JSON remains a supported fallback |
 | Earlier | [Structured binary journal](README.md#serialization-tradeoffs) | JSON: 668 record B; 5,528 ns decode | Binary: 553 record B; 3,539 ns decode | 17.2% smaller, 1.56x faster decode | Encode is 1.56x slower because both representations are size-checked |
+| Current pass | [Canonical journal format dispatch](#canonical-journal-format-dispatch), scalar/structured JSON and binary encode | 5,067/1,259/3,109/2,053 ns | 4,920/1,222/3,048/1,971 ns | 1.03x/1.03x/1.02x/1.04x faster | No measured tradeoff; record bytes, heap, allocations, aliases, case folding, fallback formats, and decode are unchanged |
 | Earlier | [Structured gzip-best snapshot](README.md#serialization-tradeoffs) | Gzip JSON: 18,866,057 ns; 6,956 disk B | Gzip binary: 9,847,768 ns; 5,787 disk B | 1.92x faster, 16.8% smaller, 5.94x fewer allocs | Maximum compression remains CPU-intensive |
 | Earlier | [Binary LevelDB scalar records](README.md#serialization-tradeoffs) | JSON save/load: 3,341,825/4,250,143 ns; 394,194 B | Binary: 1,558,684/2,786,401 ns; 293,376 B | Save 2.14x, load 1.53x faster; 25.6% smaller | Binary is less manually inspectable than JSON |
 | Earlier | [Binary LevelDB structured records](README.md#serialization-tradeoffs) | JSON save/load: 2,179,589/4,685,072 ns; 175,315 B | Binary: 1,751,318/2,933,838 ns; 79,404 B | Save 1.24x, load 1.60x faster; 54.7% smaller | Some staged structures retain inner JSON fallback |
@@ -3753,6 +3754,40 @@ use to roughly 1 GiB plus the active file. A batch may cross the byte target,
 and rotation pays file rename, checkpoint `fsync`, and directory metadata
 `fsync`; those fixed costs explain the run-to-run latency variance. Setting
 `JOURNAL_SEGMENT_MAX_BYTES=0` restores the prior single-file rewrite path.
+
+<a id="canonical-journal-format-dispatch"></a>
+### Canonical Journal Format Dispatch
+
+Journal writers retain a validated `CommandJournalFormat`, but every record
+marshal previously converted that enum back to a string, trimmed it, folded
+case, and reparsed it before selecting JSON or binary. Canonical `json` and
+`binary` values now dispatch directly. Empty/default, `bin`, mixed-case,
+space-padded, invalid, and future noncanonical values still use the existing
+normalization and validation path.
+
+A format-alias test was added before production changed. It proves that
+canonical and ` BIN `, `BINARY`, and ` JSON ` encodes produce byte-identical
+records. The test passed ten times before and after the change and under the
+race detector. Frozen binaries then ran fifteen alternating pairs pinned to
+logical CPU 9 with 100,000 encodes per sample.
+
+| Fifteen-pair median | Normalized dispatch | Canonical fast dispatch | Result |
+| --- | ---: | ---: | ---: |
+| Scalar JSON encode | 5,067 ns; 8,528 B; 3 allocs; 3,224 record B | 4,920 ns; 8,528 B; 3 allocs; 3,224 record B | 1.030x faster |
+| Scalar binary encode | 1,259 ns; 3,200 B; 1 alloc; 3,160 record B | 1,222 ns; 3,200 B; 1 alloc; 3,160 record B | 1.030x faster |
+| Structured JSON encode | 3,109 ns; 2,496 B; 7 allocs; 668 record B | 3,048 ns; 2,496 B; 7 allocs; 668 record B | 1.020x faster |
+| Structured binary encode | 2,053 ns; 1,192 B; 5 allocs; 550 record B | 1,971 ns; 1,192 B; 5 allocs; 550 record B | 1.042x faster |
+
+The change is limited to pre-encode dispatch. Entry validation, payload sizing,
+JSON and tagged-binary codecs, decode, checksums, sequence handling, fsync,
+snapshots, backup/restore, replication, persistent bytes, and wire bytes are
+unchanged.
+
+```sh
+make run CMD='go test . -run="TestParseCommandJournalFormat|TestMarshalCommandJournalEntryNormalizesFormatAliases|TestCommandJournal" -count=10'
+make run CMD='go test -race . -run="TestParseCommandJournalFormat|TestMarshalCommandJournalEntryNormalizesFormatAliases|TestCommandJournal" -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-journal-format-baseline.test /tmp/hatrie-journal-format-candidate.test /tmp/journal-format-pairs.txt 9 15 100000x "BenchmarkCommandJournalEncode(JSON|Binary|StructuredJSON|StructuredBinary)\\z"'
+```
 
 <a id="binary-journal-catch-up-wire"></a>
 ### Binary Journal Catch-up Wire

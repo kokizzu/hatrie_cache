@@ -33,6 +33,12 @@ func ParseCommandJournalFormat(value string) (CommandJournalFormat, error) {
 }
 
 func marshalCommandJournalEntry(entry commandJournalEntry, format CommandJournalFormat) ([]byte, error) {
+	switch format {
+	case CommandJournalFormatJSON:
+		return marshalCommandJournalEntryJSON(entry)
+	case CommandJournalFormatBinary:
+		return marshalCommandJournalEntryBinary(entry)
+	}
 	format, err := ParseCommandJournalFormat(string(format))
 	if err != nil {
 		return nil, err
