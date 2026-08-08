@@ -245,6 +245,27 @@ func TestScalarBatchDirectNativeChunksPreserveOrder(t *testing.T) {
 	}
 }
 
+func TestScalarBatchDirectNativePreallocatesExistsOutputColumn(t *testing.T) {
+	trie := newTestTrie(t)
+	const commands = 255
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    7,
+		Operations: make([]hatriecachev1.ScalarCommand, commands),
+		Keys:       make([]string, commands),
+	}
+	for index := range request.Operations {
+		request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS
+		request.Keys[index] = fmt.Sprintf("exists:%d", index)
+	}
+	response := trie.executeScalarBatchDirect(context.Background(), request)
+	if !response.GetOk() || len(response.GetStatuses()) != commands || len(response.IntegerValues) != commands {
+		t.Fatalf("executeScalarBatchDirect(exists) = %#v", response)
+	}
+	if cap(response.IntegerValues) != len(response.IntegerValues) {
+		t.Fatalf("integer values capacity = %d, want exact %d", cap(response.IntegerValues), len(response.IntegerValues))
+	}
+}
+
 func TestScalarBatchDirectDoesNotRetainOversizedNativeKeys(t *testing.T) {
 	trie := newTestTrie(t)
 	operations := make([]hatriecachev1.ScalarCommand, minNativeScalarDirectBatchSize)

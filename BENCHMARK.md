@@ -4360,6 +4360,44 @@ The selected implementation changes no API, wire format, persistence format,
 configuration, background work, response ownership, storage ownership, chunk
 size, or fallback rule. It removes a private intermediate slice only.
 
+<a id="exact-native-exists-response-column"></a>
+### Exact Native EXISTS Response Column
+
+Native scalar batches already validate every operation before they enter C, but
+an all-`EXISTS` batch still grew its one boolean result column geometrically.
+Every `EXISTS` operation produces exactly one `IntegerValues` entry, including
+misses, so this is the one result shape where the exact final capacity is known
+without predicting a read hit or an increment overflow. The native path now
+preallocates that column only after confirming every operation is `EXISTS`.
+Mixed, read, write, and increment batches preserve their original path and do
+not reserve unused result capacity.
+
+The test was added first and initially failed with a 255-command result column
+of capacity 256. It now requires exact capacity as well as all result values.
+The frozen-binary acceptance run alternated 15 before/after pairs at one CPU
+with 10,000 256-command batches per block. The target median falls from
+10,453 to 9,450 ns, while the 256-read and 256-mixed controls keep their
+existing allocation and heap counts and showed no slowdown in paired runs.
+
+```sh
+make run CMD='go test . -run=TestScalarBatchDirectNativePreallocatesExistsOutputColumn -count=1'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-output-before.test /tmp/hatrie-scalar-output-candidate.test /tmp/hatrie-scalar-exists-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Exists256'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-output-before.test /tmp/hatrie-scalar-output-candidate.test /tmp/hatrie-scalar-read-serial-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Read256'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-output-before.test /tmp/hatrie-scalar-output-candidate.test /tmp/hatrie-scalar-mixed-serial-pairs.txt 20 15 10000x BenchmarkScalarNativeBatch/Mixed256'
+```
+
+| Native scalar workload | Geometric result growth | Exact EXISTS column | Improvement |
+| --- | ---: | ---: | --- |
+| 256 missing `EXISTS` operations | 10,453 ns; 6,376 B; 12 allocs | 9,450 ns; 4,336 B; 4 allocs | 1.106x faster; 1.47x lower heap; 3.00x fewer allocations |
+| 256 distinct `GET` control | 13,753 ns; 7,648 B; 20 allocs | 13,172 ns; 7,648 B; 20 allocs | No regression; memory unchanged |
+| 256 mixed command control | 16,655 ns; 6,048 B; 91 allocs | 16,541 ns; 6,048 B; 91 allocs | No regression; memory unchanged |
+
+The response remains request-owned and transient, with no pooling, retained
+backing, extra wire field, configuration, persistent state, or fallback-rule
+change. Preallocating `GET` or `INCREMENT` columns was deliberately not used:
+a miss or overflow would reserve output that does not exist, trading a target
+win for worse sparse or error-path memory.
+
 <a id="shared-scalar-batch-keys"></a>
 ### Shared Scalar-Batch Keys
 
