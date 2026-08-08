@@ -440,6 +440,7 @@ tree.
 | Generic priority-queue item sorter | Removed the 24-byte `sort.Interface` wrapper, reducing the accepted queue path from two allocations to one | Increased the 64-item candidate from about 2.8 us to 3.3 us, roughly 19% slower | Reverted to `sort.Sort`; the one-copy queue gain remains; see [direct live priority replication](#direct-live-priority-replication) |
 | Expanded live-slice replication switch | Fenwick/quantile removed all three allocations and improved more than 2x | Adding both cases to the existing fixed switch made already-direct dense Roaring 1.022x slower | Replaced by default-case chaining; Roaring is neutral within 0.1% and the gains remain; see [direct live slice replication](#direct-live-slice-replication) |
 | Direct canonical-base64 decode into fixed records | Reused replication fell from 3,680 B and 5 allocs to zero; storage fell from 7,456 B and 10 allocs to 3,776 B and 5 allocs | Canonical validation plus direct decode made storage 1.100x slower and replication 1.076x slower | Runtime candidate reverted; newline/error compatibility tests and focused controls remain; see [canonical base64 direct-decode rollback](#canonical-base64-direct-decode-rollback) |
+| Inline shared scalar-batch key accessor | A per-operation shared-key accessor improved the 256-operation compact batch from 19,724 to 17,797 ns and removed 4,864 B plus one allocation | The unchanged 256-operation distinct-key mixed control regressed from 17,913 to 18,186 ns, or 1.015x slower | Removed; the outlined stack-backed expansion preserves the shared-key win without the normal-path regression; see [stack-backed shared scalar batch keys](#stack-backed-shared-scalar-batch-keys) |
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
 | Exact scalar command dispatch | INC improved 1.02x in the strict control | SET/GET/TTL were 1.02x/1.03x/1.005x slower; large-switch and GET-hoist variants also slowed GET | Removed; see [exact scalar mutation dispatch](#exact-scalar-mutation-dispatch) |
 | Unsupported exact-command early rejection | Skipping duplicate key validation made SETSTR/INC/EXPIRE 1.030x/1.061x/1.093x faster in the first alternating layout | Handling EXISTS in that layout made it 1.031x slower; removing EXISTS made unchanged GET/EXISTS 1.029x/1.094x slower and reduced the SETSTR gain to 1.003x | Both classifiers were removed; fallback correctness and exact/generic control benchmarks remain in [the rollback](#unsupported-exact-command-rejection-rollback) |
@@ -4413,6 +4414,14 @@ uses an outlined stack array and immediately re-enters the unchanged expanded
 path. The native C packer still receives its required repeated key bytes, but
 no heap string-header column is created. Larger, partitioned, and durable
 compatibility batches retain their established expansion path.
+
+The first implementation used an inline accessor that selected either the
+single shared key or `Keys[index]` inside every direct/native loop. It improved
+the compact 256-operation target to 17,797 ns and removed 4,864 B plus one
+allocation, but made the ordinary 256-operation mixed control 17,913 to
+18,186 ns (1.015x slower) with identical memory. That candidate was removed;
+only the shared stack route enters the extra logic, keeping the normal path
+unchanged.
 
 | Paired median, 256 mixed operations | Heap-expanded key column | Stack-backed key column | Result |
 | --- | ---: | ---: | ---: |
