@@ -7,7 +7,7 @@ import (
 
 func (ht *HatTrie) appendCommandDumpMapEntryBinaryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	if entry.Value.Type() != DATAVALUE_TYPE_MAP {
-		return destination, false, nil
+		return ht.appendCommandDumpStoredSliceEntryBinaryLocked(destination, entry)
 	}
 	var expiresAt *time.Time
 	if entry.Value.HasTtl() {

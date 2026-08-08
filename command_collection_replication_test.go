@@ -76,6 +76,49 @@ func TestCommandDumpSmallMapErrorPreservesDestination(t *testing.T) {
 	}
 }
 
+func TestCommandDumpSliceEncodingMatchesSnapshot(t *testing.T) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	values := map[string]Slice{
+		"slice:nil":        nil,
+		"slice:empty":      {},
+		"slice:packed-one": {"one"},
+		"slice:packed-two": {"first", int64(2)},
+		"slice:regular": {
+			"alpha",
+			int64(-2),
+			Map{"nested": "map"},
+			Slice{"nested", uint64(4)},
+		},
+		"slice:normalized-fallback": {
+			commandDumpMapJSONValue{Label: "fallback"},
+		},
+		"slice:wrapped": {"shift-a", "shift-b", "keep-a", "keep-b"},
+	}
+	for key, value := range values {
+		if err := ht.UpsertSliceChecked(key, value); err != nil {
+			t.Fatalf("UpsertSliceChecked(%s) error = %v", key, err)
+		}
+	}
+	if _, ok, err := ht.ShiftSliceChecked("slice:wrapped"); err != nil || !ok {
+		t.Fatalf("ShiftSliceChecked(slice:wrapped) = %v/%v", ok, err)
+	}
+	if _, ok, err := ht.ShiftSliceChecked("slice:wrapped"); err != nil || !ok {
+		t.Fatalf("ShiftSliceChecked(slice:wrapped second) = %v/%v", ok, err)
+	}
+	if err := ht.PushSliceChecked("slice:wrapped", "wrap-a", "wrap-b"); err != nil {
+		t.Fatalf("PushSliceChecked(slice:wrapped) error = %v", err)
+	}
+	if !ht.Expire("slice:packed-two", time.Hour) {
+		t.Fatal("Expire(slice:packed-two) = false")
+	}
+
+	for key := range values {
+		assertCommandDumpMatchesSnapshot(t, ht, key)
+	}
+}
+
 func BenchmarkCommandDumpPackedMapReuse(b *testing.B) {
 	benchmarkCommandDumpMapReuse(b, "map:packed", Map{
 		"z-last":  "last",
@@ -89,6 +132,18 @@ func BenchmarkCommandDumpLargeMapReuse(b *testing.B) {
 		value[fmt.Sprintf("field-%02d", index)] = int64(index)
 	}
 	benchmarkCommandDumpMapReuse(b, "map:large", value)
+}
+
+func BenchmarkCommandDumpPackedSliceReuse(b *testing.B) {
+	benchmarkCommandDumpSliceReuse(b, "slice:packed", Slice{"first", int64(2)})
+}
+
+func BenchmarkCommandDumpLargeSliceReuse(b *testing.B) {
+	value := make(Slice, 64)
+	for index := range value {
+		value[index] = int64(index)
+	}
+	benchmarkCommandDumpSliceReuse(b, "slice:large", value)
 }
 
 func BenchmarkCommandDumpPriorityQueueControlReuse(b *testing.B) {
@@ -110,6 +165,16 @@ func benchmarkCommandDumpMapReuse(b *testing.B, key string, value Map) {
 	defer ht.Destroy()
 	if err := ht.UpsertMapChecked(key, value); err != nil {
 		b.Fatalf("UpsertMapChecked() error = %v", err)
+	}
+	benchmarkCommandDumpReuse(b, ht, key)
+}
+
+func benchmarkCommandDumpSliceReuse(b *testing.B, key string, value Slice) {
+	b.Helper()
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	if err := ht.UpsertSliceChecked(key, value); err != nil {
+		b.Fatalf("UpsertSliceChecked() error = %v", err)
 	}
 	benchmarkCommandDumpReuse(b, ht, key)
 }
