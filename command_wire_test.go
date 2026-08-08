@@ -328,6 +328,35 @@ func TestReleaseCommandResponseProtoClearsPooledChildren(t *testing.T) {
 	}
 }
 
+func TestReleaseCommandRequestProtoClearsPooledData(t *testing.T) {
+	message := &hatriecachev1.CommandRequest{
+		Command:     "INTERNALSET",
+		Key:         "secret-key",
+		Value:       "secret-value",
+		Subkey:      "secret-subkey",
+		BinaryValue: []byte("secret-binary-value"),
+		Values:      []string{"secret-list-value"},
+		Pairs:       map[string]string{"secret-pair-key": "secret-pair-value"},
+		Batch: []*hatriecachev1.CommandRequest{
+			{Command: "INTERNALSET", Key: "child-secret-key", Value: "child-secret-value"},
+		},
+	}
+	children := message.Batch
+	releaseCommandRequestProto(message)
+	if message.GetCommand() != "" || message.GetKey() != "" || message.GetValue() != "" || message.GetSubkey() != "" {
+		t.Fatalf("released parent retained scalar data: %#v", message)
+	}
+	if message.BinaryValue != nil || message.Values != nil || message.Pairs != nil {
+		t.Fatalf("released parent retained request payload: %#v", message)
+	}
+	if len(message.Batch) != 0 {
+		t.Fatalf("released parent batch length = %d, want 0", len(message.Batch))
+	}
+	if cap(children) != 0 && children[:cap(children)][0] != nil {
+		t.Fatalf("released parent retained child pointer: %#v", children[:cap(children)][0])
+	}
+}
+
 func TestReadLimitedCommandWireBoundaryLimits(t *testing.T) {
 	data, err := readLimitedCommandWire(strings.NewReader(""), 0)
 	if err != nil {
