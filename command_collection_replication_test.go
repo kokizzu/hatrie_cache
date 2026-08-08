@@ -119,6 +119,39 @@ func TestCommandDumpSliceEncodingMatchesSnapshot(t *testing.T) {
 	}
 }
 
+func TestCommandDumpSetEncodingMatchesSnapshot(t *testing.T) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	values := map[string]Set{
+		"set:empty":         {},
+		"set:packed-one":    {"one"},
+		"set:packed-two":    {"z-last", "a-first"},
+		"set:small-generic": {int64(2), int64(1)},
+		"set:regular": {
+			"alpha",
+			int64(-2),
+			Map{"nested": "map"},
+			Slice{"nested", uint64(4)},
+		},
+		"set:normalized-fallback": {
+			commandDumpMapJSONValue{Label: "fallback"},
+		},
+	}
+	for key, value := range values {
+		if err := ht.UpsertSetChecked(key, value); err != nil {
+			t.Fatalf("UpsertSetChecked(%s) error = %v", key, err)
+		}
+	}
+	if !ht.Expire("set:packed-two", time.Hour) {
+		t.Fatal("Expire(set:packed-two) = false")
+	}
+
+	for key := range values {
+		assertCommandDumpMatchesSnapshot(t, ht, key)
+	}
+}
+
 func BenchmarkCommandDumpPackedMapReuse(b *testing.B) {
 	benchmarkCommandDumpMapReuse(b, "map:packed", Map{
 		"z-last":  "last",
@@ -144,6 +177,22 @@ func BenchmarkCommandDumpLargeSliceReuse(b *testing.B) {
 		value[index] = int64(index)
 	}
 	benchmarkCommandDumpSliceReuse(b, "slice:large", value)
+}
+
+func BenchmarkCommandDumpPackedSetReuse(b *testing.B) {
+	benchmarkCommandDumpSetReuse(b, "set:packed", Set{"z-last", "a-first"})
+}
+
+func BenchmarkCommandDumpSmallGenericSetReuse(b *testing.B) {
+	benchmarkCommandDumpSetReuse(b, "set:small", Set{int64(2), int64(1)})
+}
+
+func BenchmarkCommandDumpLargeSetReuse(b *testing.B) {
+	value := make(Set, 64)
+	for index := range value {
+		value[index] = fmt.Sprintf("value-%02d", index)
+	}
+	benchmarkCommandDumpSetReuse(b, "set:large", value)
 }
 
 func BenchmarkCommandDumpPriorityQueueControlReuse(b *testing.B) {
@@ -175,6 +224,16 @@ func benchmarkCommandDumpSliceReuse(b *testing.B, key string, value Slice) {
 	defer ht.Destroy()
 	if err := ht.UpsertSliceChecked(key, value); err != nil {
 		b.Fatalf("UpsertSliceChecked() error = %v", err)
+	}
+	benchmarkCommandDumpReuse(b, ht, key)
+}
+
+func benchmarkCommandDumpSetReuse(b *testing.B, key string, value Set) {
+	b.Helper()
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	if err := ht.UpsertSetChecked(key, value); err != nil {
+		b.Fatalf("UpsertSetChecked() error = %v", err)
 	}
 	benchmarkCommandDumpReuse(b, ht, key)
 }

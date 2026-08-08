@@ -7,7 +7,7 @@ import (
 
 func (ht *HatTrie) appendCommandDumpStoredSliceEntryBinaryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	if entry.Value.Type() != DATAVALUE_TYPE_SLICE {
-		return destination, false, nil
+		return ht.appendCommandDumpSetEntryBinaryLocked(destination, entry)
 	}
 	var expiresAt *time.Time
 	if entry.Value.HasTtl() {
