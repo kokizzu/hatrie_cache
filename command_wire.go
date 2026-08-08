@@ -61,7 +61,10 @@ var commandWireBufferPool = sync.Pool{
 	},
 }
 
-const maxPooledCommandWireBufferCapacity = 1 << 20
+const (
+	maxPooledCommandWireBufferCapacity  = 1 << 20
+	maxPooledCommandRequestBatchEntries = 16
+)
 
 func ParseCommandWireFormat(value string) (CommandWireFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -445,15 +448,21 @@ func releaseCommandRequestProto(message *hatriecachev1.CommandRequest) {
 		return
 	}
 	children := message.Batch
-	message.Reset()
 	for _, child := range children {
 		releaseCommandRequestProto(child)
+	}
+	for index := range children {
+		children[index] = nil
+	}
+	message.Reset()
+	if cap(children) > 0 && cap(children) <= maxPooledCommandRequestBatchEntries {
+		message.Batch = children[:0]
 	}
 	commandRequestProtoPool.Put(message)
 }
 
 func fillCacheCommandRequestProto(out *hatriecachev1.CommandRequest, request CacheCommandRequest) error {
-	batch, err := cacheCommandBatchToPooledProto(request.Batch)
+	batch, err := cacheCommandBatchToPooledProto(out.Batch, request.Batch)
 	if err != nil {
 		return err
 	}
@@ -489,17 +498,24 @@ func fillCacheCommandRequestProto(out *hatriecachev1.CommandRequest, request Cac
 	return nil
 }
 
-func cacheCommandBatchToPooledProto(batch []CacheCommandRequest) ([]*hatriecachev1.CommandRequest, error) {
+func cacheCommandBatchToPooledProto(out []*hatriecachev1.CommandRequest, batch []CacheCommandRequest) ([]*hatriecachev1.CommandRequest, error) {
 	if len(batch) == 0 {
-		return nil, nil
+		return out[:0], nil
 	}
-	out := make([]*hatriecachev1.CommandRequest, len(batch))
+	if cap(out) < len(batch) {
+		out = make([]*hatriecachev1.CommandRequest, len(batch))
+	} else {
+		out = out[:len(batch)]
+	}
 	for idx, request := range batch {
 		message := acquireCommandRequestProto()
 		if err := fillCacheCommandRequestProto(message, request); err != nil {
 			releaseCommandRequestProto(message)
 			for _, previous := range out[:idx] {
 				releaseCommandRequestProto(previous)
+			}
+			for index := range out[:idx] {
+				out[index] = nil
 			}
 			return nil, fmt.Errorf("batch command %d: %w", idx, err)
 		}

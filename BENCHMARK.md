@@ -159,6 +159,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Pass | Implemented improvement | Baseline | Final | Improvement | Main tradeoff |
 | --- | --- | ---: | ---: | ---: | --- |
 | Earlier | [HTTP protobuf command wire](README.md#serialization-tradeoffs) | JSON: 15,012 ns; 3,185 wire B | Protobuf: 12,637 ns; 3,146 wire B | 1.19x faster, 1.2% smaller wire | Heap is 0.6% higher; complex values retain JSON fallback |
+| Current pass | [Bounded protobuf batch request reuse](#bounded-protobuf-batch-request-reuse), 16-command HTTP request | 4,924 ns; 152 B; 2 allocs; 1,109 wire B | 4,890 ns; 24 B; 1 alloc; 1,109 wire B | CPU neutral; 6.33x lower transient heap; 2x fewer allocations | At most one fixed 128-byte pointer slice is retained per pooled parent; batches above 16 release their backing |
 | Earlier | [Binary journal encode](README.md#serialization-tradeoffs) | JSON: 7,800 ns; 3,224 B; 8,496 heap B | Binary: 3,362 ns; 3,159 B; 6,400 heap B | 2.32x faster, 2.0% smaller, 1.33x lower heap | Binary records require project tooling to inspect |
 | Earlier | [Binary journal decode](README.md#serialization-tradeoffs) | JSON: 30,034 ns; 22,728 heap B; 29 allocs | Binary: 20,035 ns; 18,071 heap B; 25 allocs | 1.50x faster, 1.26x lower heap | Existing JSON remains a supported fallback |
 | Earlier | [Structured binary journal](README.md#serialization-tradeoffs) | JSON: 668 record B; 5,528 ns decode | Binary: 553 record B; 3,539 ns decode | 17.2% smaller, 1.56x faster decode | Encode is 1.56x slower because both representations are size-checked |
@@ -422,6 +423,40 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Bounded lazy outbox restore](#binary-grouped-replication-outbox), 100k jobs | 466.884 ms; 100,000 resident jobs; 415.1 MB heap | 5.019 ms; 1,024 resident jobs; 3.52 MB heap | 93.03x faster, 97.66x fewer resident jobs, 118.0x lower heap | LevelDB pages are lazy; legacy whole-file JSON still loads its file snapshot |
 | Current pass | [Outbox group commit](#binary-grouped-replication-outbox), 32 writers | JSON sync-each: 50.289 ms; 32 syncs | Binary grouped: 3.542 ms; 1 sync | 14.20x faster, 32x fewer syncs | Cumulative heap is 1.49x higher |
 | Current pass | [Journal-backed outbox](#journal-backed-replication-outbox), 10k durable 4 KiB mutations | Full LevelDB jobs: 136.854 s; 20,993 heap B/op; 2 syncs/op | Journal references: 7.845 s; 26,094 heap B/op; 1 sync/op | 17.44x faster, 2x fewer syncs | Total encoded/disk bytes are effectively unchanged; cumulative heap is 1.24x higher |
+
+<a id="bounded-protobuf-batch-request-reuse"></a>
+### Bounded Protobuf Batch Request Reuse
+
+The HTTP protobuf request encoder already pooled each generated request, but a
+parent `INTERNALBATCH` still allocated a new slice of child pointers for every
+request. On release it now clears each child reference and retains that backing
+only when it holds at most 16 pointers. The next compatible parent reuses it;
+larger columns preserve the old immediate-release behavior. The fixed retained
+amount is at most `16 * 8 = 128` bytes for one pooled parent. It is not charged
+per command, per batch, or per client request.
+
+Tests were added first and initially measured two allocations for a 16-command
+body. The retained implementation requires one allocation, covers a failed
+child conversion followed by a valid body, and retains the existing round-trip
+tests. The acceptance command alternated frozen before/after binaries for 15
+pairs with 10,000 request bodies per block on one CPU.
+
+```sh
+make run CMD='go test . -run=TestCommandRequestBodyProtobuf -count=20'
+make run CMD='go test -race . -run=TestCommandRequestBodyProtobuf -count=5'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-proto-batch-before.test /tmp/hatrie-proto-batch-candidate.test /tmp/hatrie-proto-batch-pairs.txt 20 15 10000x BenchmarkCommandWireProtobufBatch16'
+```
+
+| HTTP protobuf request, 16 child commands | Fresh parent pointer slice | Bounded reused slice | Improvement |
+| --- | ---: | ---: | --- |
+| Paired median | 4,924 ns; 152 B; 2 allocs; 1,109 wire B | 4,890 ns; 24 B; 1 alloc; 1,109 wire B | CPU neutral; 6.33x lower transient heap; 2.00x fewer allocations; wire unchanged |
+
+This remains an intentionally bounded tradeoff rather than an unbounded pool:
+only a successful batch at or below 16 children can leave its 128-byte pointer
+slice in a `sync.Pool`; all child pointers are nilled first, and 17+ child
+batches retain no parent-column backing. API shape, protobuf fields, JSON
+fallback, response ownership, persistent storage, and compression behavior are
+unchanged.
 
 ## Rejected Optimization Index
 

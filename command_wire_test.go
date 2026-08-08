@@ -493,6 +493,69 @@ func TestCommandRequestBodyProtobufScalarUsesLowAllocationPath(t *testing.T) {
 	}
 }
 
+func TestCommandRequestBodyProtobufBatchUsesLowAllocationPath(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts include race detector instrumentation")
+	}
+	request := benchmarkCommandWireBatchPayload(16)
+	allocs := testing.AllocsPerRun(1000, func() {
+		body, contentType, contentEncoding, err := commandRequestBody(request, CommandWireFormatProtobuf, 0, 0)
+		if err != nil {
+			t.Fatalf("commandRequestBody(protobuf batch) error = %v", err)
+		}
+		if contentType != commandWireContentTypeProtobuf || contentEncoding != "" {
+			t.Fatalf("commandRequestBody(protobuf batch) content type/encoding = %q/%q, want protobuf/empty", contentType, contentEncoding)
+		}
+		if _, err := io.Copy(io.Discard, body); err != nil {
+			t.Fatalf("ReadAll(protobuf batch body) error = %v", err)
+		}
+		if closer, ok := body.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				t.Fatalf("Close(protobuf batch body) error = %v", err)
+			}
+		}
+	})
+	if allocs > 1 {
+		t.Fatalf("protobuf 16-command batch body allocations = %.0f, want <= 1", allocs)
+	}
+}
+
+func TestCommandRequestBodyProtobufBatchFailureDoesNotPoisonPooledParent(t *testing.T) {
+	bad := CacheCommandRequest{
+		Command: "INTERNALBATCH",
+		Batch: []CacheCommandRequest{
+			{Command: "INTERNALSET", Key: "session:1", Value: `{"type":"string","string":"one"}`},
+			{Command: "PUSH", Key: "session:2", Values: Slice{Map{"unsupported": "value"}}},
+		},
+	}
+	if _, _, _, err := commandRequestBody(bad, CommandWireFormatProtobuf, 0, 0); !errors.Is(err, ErrUnsupportedCommandWireProtobufValue) {
+		t.Fatalf("commandRequestBody(bad protobuf batch) error = %v, want unsupported value", err)
+	}
+
+	valid := benchmarkCommandWireBatchPayload(16)
+	body, contentType, contentEncoding, err := commandRequestBody(valid, CommandWireFormatProtobuf, 0, 0)
+	if err != nil {
+		t.Fatalf("commandRequestBody(valid protobuf batch) error = %v", err)
+	}
+	if contentType != commandWireContentTypeProtobuf || contentEncoding != "" {
+		t.Fatalf("valid protobuf batch content type/encoding = %q/%q, want protobuf/empty", contentType, contentEncoding)
+	}
+	if closer, ok := body.(io.Closer); ok {
+		defer func() {
+			if err := closer.Close(); err != nil {
+				t.Fatalf("Close(valid protobuf batch body) error = %v", err)
+			}
+		}()
+	}
+	decoded, err := decodeCommandRequestProto(body, maxMonitoringJSONRequestBytes)
+	if err != nil {
+		t.Fatalf("decodeCommandRequestProto(valid batch) error = %v", err)
+	}
+	if decoded.Command != valid.Command || len(decoded.Batch) != len(valid.Batch) {
+		t.Fatalf("decoded valid batch = %#v, want %d entries", decoded, len(valid.Batch))
+	}
+}
+
 func TestCommandRequestBodyEncodesNativeBatchProtobuf(t *testing.T) {
 	request := CacheCommandRequest{
 		Command: "INTERNALBATCH",

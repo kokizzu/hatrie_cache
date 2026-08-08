@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,10 @@ func BenchmarkCommandWireJSON(b *testing.B) {
 
 func BenchmarkCommandWireProtobuf(b *testing.B) {
 	benchmarkCommandWireFormat(b, CommandWireFormatProtobuf)
+}
+
+func BenchmarkCommandWireProtobufBatch16(b *testing.B) {
+	benchmarkCommandWirePayloadFormat(b, benchmarkCommandWireBatchPayload(16), CommandWireFormatProtobuf)
 }
 
 func BenchmarkCommandResponseWireProtobuf(b *testing.B) {
@@ -136,7 +141,10 @@ func BenchmarkCommandJournalDecodeStructuredBinary(b *testing.B) {
 }
 
 func benchmarkCommandWireFormat(b *testing.B, format CommandWireFormat) {
-	payload := benchmarkCommandWirePayload()
+	benchmarkCommandWirePayloadFormat(b, benchmarkCommandWirePayload(), format)
+}
+
+func benchmarkCommandWirePayloadFormat(b *testing.B, payload CacheCommandRequest, format CommandWireFormat) {
 	wireBytes := benchmarkCommandWireBytes(b, payload, format)
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -231,6 +239,18 @@ func benchmarkCommandWirePayload() CacheCommandRequest {
 		Key:     "session:1",
 		Value:   entry,
 	}
+}
+
+func benchmarkCommandWireBatchPayload(count int) CacheCommandRequest {
+	batch := make([]CacheCommandRequest, count)
+	for index := range batch {
+		batch[index] = CacheCommandRequest{
+			Command: "INTERNALSET",
+			Key:     "batch:session:" + strconv.Itoa(index),
+			Value:   `{"type":"string","string":"value"}`,
+		}
+	}
+	return CacheCommandRequest{Command: "INTERNALBATCH", Batch: batch}
 }
 
 func benchmarkCommandWireResponse() CacheCommandResponse {
