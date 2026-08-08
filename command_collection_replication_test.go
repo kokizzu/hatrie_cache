@@ -152,6 +152,38 @@ func TestCommandDumpSetEncodingMatchesSnapshot(t *testing.T) {
 	}
 }
 
+func TestCommandDumpPriorityQueueEncodingMatchesSnapshot(t *testing.T) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	values := map[string]PriorityQueue{
+		"priority:empty": {},
+		"priority:ordered": {
+			{Priority: 5, Value: "last"},
+			{Priority: 1, Value: "first-tie"},
+			{Priority: 1, Value: "second-tie"},
+			{Priority: 2, Value: ""},
+			{Priority: 3, Value: Map{"nested": "map"}},
+			{Priority: 4, Value: Slice{"nested", int64(4)}},
+		},
+		"priority:normalized-fallback": {
+			{Priority: 1, Value: commandDumpMapJSONValue{Label: "fallback"}},
+		},
+	}
+	for key, value := range values {
+		if err := ht.UpsertPriorityQueueChecked(key, value); err != nil {
+			t.Fatalf("UpsertPriorityQueueChecked(%s) error = %v", key, err)
+		}
+	}
+	if !ht.Expire("priority:ordered", time.Hour) {
+		t.Fatal("Expire(priority:ordered) = false")
+	}
+
+	for key := range values {
+		assertCommandDumpMatchesSnapshot(t, ht, key)
+	}
+}
+
 func BenchmarkCommandDumpPackedMapReuse(b *testing.B) {
 	benchmarkCommandDumpMapReuse(b, "map:packed", Map{
 		"z-last":  "last",
@@ -206,6 +238,20 @@ func BenchmarkCommandDumpPriorityQueueControlReuse(b *testing.B) {
 		b.Fatalf("UpsertPriorityQueueChecked() error = %v", err)
 	}
 	benchmarkCommandDumpReuse(b, ht, "priority:control")
+}
+
+func BenchmarkCommandDumpTopKControlReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	if err := ht.UpsertTopK("topk:control", 64); err != nil {
+		b.Fatalf("UpsertTopK() error = %v", err)
+	}
+	for index := 0; index < 64; index++ {
+		if _, err := ht.AddTopKChecked("topk:control", fmt.Sprintf("value-%02d", index), uint64(index+1)); err != nil {
+			b.Fatalf("AddTopKChecked() error = %v", err)
+		}
+	}
+	benchmarkCommandDumpReuse(b, ht, "topk:control")
 }
 
 func benchmarkCommandDumpMapReuse(b *testing.B, key string, value Map) {

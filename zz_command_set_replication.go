@@ -8,7 +8,7 @@ import (
 
 func (ht *HatTrie) appendCommandDumpSetEntryBinaryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	if entry.Value.Type() != DATAVALUE_TYPE_SET {
-		return destination, false, nil
+		return ht.appendCommandDumpPriorityQueueEntryBinaryLocked(destination, entry)
 	}
 	var expiresAt *time.Time
 	if entry.Value.HasTtl() {

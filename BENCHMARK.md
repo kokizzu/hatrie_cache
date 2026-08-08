@@ -182,6 +182,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct live map replication](#direct-live-map-replication), packed two-field and regular 64-field DUMP | Snapshot materialization: 639/13,412 ns; 360/6,128 B; 3/6 allocs | Locked representation writer: 108/7,152 ns; 0/1,152 B; 0/1 allocs | Packed 5.928x, regular 1.875x faster; snapshot heap eliminated | Exact 41/723 wire B, sorted keys, nested normalization, TTL, and fallback behavior unchanged; priority-queue control is neutral within 0.4% |
 | Current pass | [Direct live sequence replication](#direct-live-sequence-replication), packed two-value and regular 64-item slice DUMP | Snapshot materialization: 249/1,920 ns; 80/1,200 B; 3 allocs | Locked packed/deque traversal: 83/657 ns; 0 B; 0 allocs | Packed 2.990x, regular 2.922x faster; temporary heap and allocations eliminated | Exact 29/149 wire B, nil/empty, ring order, nested values, TTL, and normalization fallback unchanged; priority-queue control neutral within 0.2% |
 | Current pass | [Direct live set replication](#direct-live-set-replication), packed strings, two generic values, and regular 64-value DUMP | Snapshot materialization: 254/266/7,588 ns; 80/80/2,352 B; 3/3/4 allocs | Locked ordered values: 87/99/6,802 ns; 0/0/1,152 B; 0/0/1 allocs | Compact sets 2.914x/2.685x, regular 1.116x faster; snapshot value heap eliminated | Exact 35/22/659 wire B, canonical order, nested values, TTL, and normalization fallback unchanged; priority-queue control 1.005x |
+| Current pass | [Direct live priority replication](#direct-live-priority-replication), 64 string items into reused DUMP capacity | Heap copy plus output snapshot: 12,365 ns; 10,136 B; 69 allocs | One sorted heap copy with direct strings: 3,339 ns; 3,224 B; 2 allocs | 3.703x faster; 3.14x lower heap; 34.5x fewer allocs | Exact 798 wire B, priority/sequence order, ties, nested values, TTL, and normalization fallback unchanged; Top-K control neutral within 0.3% |
 | Current pass | [Delta-only startup persistence](#delta-only-startup-persistence), unchanged Pebble checkpoint with 10k keys | Full generation rewrite: 16.285 ms; 4.64 MB heap; 21,085 allocs | Sequence check: 16.460 us; 12.9 KB heap; 7 allocs | 989x faster, 359x lower heap, 3,012x fewer allocs | Legacy stores and authoritative snapshot replacement perform one full migration save; journal writes pause behind the atomic persistence barrier |
 | Current pass | [Generation-based Pebble full save](#pebble-generation-full-save), 10k x 256 B | Legacy Pebble batch: 18.369 ms; 21.05 MB heap; 598.0 disk B/key | Generation SST: 24.651 ms; 9.61 MB heap; 299.6 disk B/key | 2.19x lower heap, 2.00x smaller disk, 10,680x less WAL | Full-save latency is 1.34x higher |
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
@@ -425,6 +426,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| Generic priority-queue item sorter | Removed the 24-byte `sort.Interface` wrapper, reducing the accepted queue path from two allocations to one | Increased the 64-item candidate from about 2.8 us to 3.3 us, roughly 19% slower | Reverted to `sort.Sort`; the one-copy queue gain remains; see [direct live priority replication](#direct-live-priority-replication) |
 | Expanded live-slice replication switch | Fenwick/quantile removed all three allocations and improved more than 2x | Adding both cases to the existing fixed switch made already-direct dense Roaring 1.022x slower | Replaced by default-case chaining; Roaring is neutral within 0.1% and the gains remain; see [direct live slice replication](#direct-live-slice-replication) |
 | Direct canonical-base64 decode into fixed records | Reused replication fell from 3,680 B and 5 allocs to zero; storage fell from 7,456 B and 10 allocs to 3,776 B and 5 allocs | Canonical validation plus direct decode made storage 1.100x slower and replication 1.076x slower | Runtime candidate reverted; newline/error compatibility tests and focused controls remain; see [canonical base64 direct-decode rollback](#canonical-base64-direct-decode-rollback) |
 | Direct Unix telemetry clock | Avoid constructing cached `time.Time` values | SET/GET/INC/TTL were 1.05x/1.07x/1.02x/1.05x slower with no memory gain | Reverted; the [cached default trie clock](#cached-default-trie-clock) remains |
@@ -2440,6 +2442,41 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-set-before.
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-set-before.test /tmp/hatrie-direct-live-set-after.test /tmp/hatrie-direct-live-set-small-pairs.txt 20 31 1000000x BenchmarkCommandDumpSmallGenericSetReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-set-before.test /tmp/hatrie-direct-live-set-after.test /tmp/hatrie-direct-live-set-large-pairs.txt 20 31 50000x BenchmarkCommandDumpLargeSetReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-set-before.test /tmp/hatrie-direct-live-set-after.test /tmp/hatrie-direct-live-set-priority-control.txt 20 31 20000x BenchmarkCommandDumpPriorityQueueControlReuse'
+```
+
+<a id="direct-live-priority-replication"></a>
+### Direct Live Priority Replication
+
+Priority-queue DUMP previously copied the live heap, repeatedly popped that
+copy into a second ordered slice, and converted each privately stored nonempty
+string into an escaping interface value. A 64-string queue therefore allocated
+69 objects. The sender now preflights value support, copies the heap once,
+sorts that private copy by the same `(priority, sequence)` order, and sizes and
+writes private string backing directly. Live queue state is never mutated.
+
+Unsupported concrete Go values decline to the established snapshot and JSON
+normalization path before allocation of the sorted copy or any output write.
+Tests compare exact bytes for empty queues, unordered priorities, equal-priority
+insertion order, empty and nonempty strings, nested maps/slices, TTL, and the
+normalization fallback. Thirty-one alternating pairs use caller-owned output
+capacity.
+
+| Paired median | Heap-pop snapshot | One-copy direct writer | Result |
+| --- | ---: | ---: | ---: |
+| 64 string items | 12,365 ns; 10,136 B; 69 allocs; 798 wire B | 3,339 ns; 3,224 B; 2 allocs; 798 wire B | 3.703x faster; 3.14x lower heap; 34.5x fewer allocs |
+| Top-K fallback control | 7,566 ns; 6,496 B; 5 allocs | 7,587 ns; 6,496 B; 5 allocs | neutral within 0.3% |
+
+The remaining allocations are the 3,200-byte sorted item copy and a 24-byte
+`sort.Interface` wrapper. A generic `slices.SortFunc` prototype removed the
+wrapper but increased local candidate time from about 2.8 us to 3.3 us,
+roughly 19%, so it was reverted. Wire format and size, queue order, tie
+stability, nested values, TTL, receiver validation, routing, retries, batching,
+storage, journal, snapshots, backup, and restore remain unchanged.
+
+```sh
+make run CMD='go test ./... -run TestCommandDumpPriorityQueueEncodingMatchesSnapshot -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-priority-before.test /tmp/hatrie-direct-live-priority-after.test /tmp/hatrie-direct-live-priority-pairs.txt 20 31 20000x BenchmarkCommandDumpPriorityQueueControlReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-priority-before.test /tmp/hatrie-direct-live-priority-after.test /tmp/hatrie-direct-live-priority-topk-control.txt 20 31 50000x BenchmarkCommandDumpTopKControlReuse'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>
