@@ -2687,10 +2687,13 @@ func (ht *HatTrie) executeFastGetReservoirSampleCommand(key string) (CacheComman
 		return commandError("command response is too large"), true
 	}
 	var singleton [1]reservoirSampleItem
+	var inline [commandFastReservoirSampleInlineSortedItems]reservoirSampleItem
 	var items []reservoirSampleItem
 	if len(sample.items) == 1 {
 		singleton[0] = sample.items[0]
 		items = singleton[:]
+	} else if len(sample.items) <= commandFastReservoirSampleInlineSortedItems {
+		items = commandFastSortedReservoirSampleItems(sample.items, &inline)
 	} else {
 		items = sample.sortedItems()
 	}
@@ -3057,6 +3060,25 @@ func commandFastReservoirSampleItemsJSON(items []reservoirSampleItem) (string, e
 	return commandFastReservoirSampleItemsJSONWithCapacity(items, capacity, verbatimStrings)
 }
 
+const commandFastReservoirSampleInlineSortedItems = 16
+
+// commandFastSortedReservoirSampleItems copies the heap-backed reservoir before
+// releasing the trie lock. Small snapshots use caller-owned stack storage.
+func commandFastSortedReservoirSampleItems(items []reservoirSampleItem, inline *[commandFastReservoirSampleInlineSortedItems]reservoirSampleItem) []reservoirSampleItem {
+	out := inline[:len(items)]
+	copy(out, items)
+	for idx := 1; idx < len(out); idx++ {
+		item := out[idx]
+		insert := idx
+		for insert > 0 && reservoirSampleOrderLess(item.Priority, item.Sequence, out[insert-1].Priority, out[insert-1].Sequence) {
+			out[insert] = out[insert-1]
+			insert--
+		}
+		out[insert] = item
+	}
+	return out
+}
+
 func commandFastReservoirSampleItemsJSONLayout(items []reservoirSampleItem) (int, bool, bool) {
 	const itemFixedBytes = len(`{"value":,"priority":,"sequence":}`)
 	max := int(^uint(0) >> 1)
@@ -3407,10 +3429,13 @@ func (ht *HatTrie) executeFastGetCommand(key string) (CacheCommandResponse, bool
 			return commandError("command response is too large"), true
 		}
 		var singleton [1]reservoirSampleItem
+		var inline [commandFastReservoirSampleInlineSortedItems]reservoirSampleItem
 		var items []reservoirSampleItem
 		if len(sample.items) == 1 {
 			singleton[0] = sample.items[0]
 			items = singleton[:]
+		} else if len(sample.items) <= commandFastReservoirSampleInlineSortedItems {
+			items = commandFastSortedReservoirSampleItems(sample.items, &inline)
 		} else {
 			items = sample.sortedItems()
 		}

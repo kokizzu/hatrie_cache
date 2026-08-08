@@ -280,6 +280,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Reservoir sample reads](#reservoir-sample-read-materialization), 16 string items | Generic materialization: 3,910 ns; 2,336 B; 8 allocs | Direct JSON: 2,323 ns; 1,688 B; 3 allocs | 1.68x faster, 1.38x lower heap, 2.67x fewer allocs | All-verbatim strings retain the specialized writer; encoded and structured values now use the same direct response buffer |
 | Current pass | [Direct generic reservoir GET](#reservoir-sample-read-materialization), 16/128 string and mixed items | Generic materialization: 2,709/18,349 ns strings; 2,941/18,861 ns mixed | Shared-lock direct JSON: 2,225/17,563 ns strings; 2,701/18,275 ns mixed | 1.03x-1.22x faster; up to 1.23x lower heap; 1.67x-2.00x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
 | Current pass | [Small reservoir reads](#reservoir-sample-read-materialization), empty/one/16-item exact `GETRS` | Sorted snapshot: 187.8/374.9/2,115.5 ns; 8/136/1,688 B; 1/3/3 allocs | Constant empty/stack singleton: 165.9/311.0/2,107 ns; 0/80/1,688 B; 0/1/3 allocs | Empty/one item 1.13x/1.21x faster; one-item heap 1.70x lower; avoidable allocations eliminated | No measured tradeoff; 16-item CPU is neutral within 0.4%, and ordering, output, ownership, lock scope, wire, and storage are unchanged |
+| Current pass | [Stack-backed small reservoir sort](#reservoir-sample-read-materialization), 16 exact plain-string `GETRS` items | Heap sorted copy: 2,076 ns; 1,688 B; 3 allocs | Stack sorted copy plus final response: 1,834 ns; 1,152 B; 1 alloc | 1.13x faster; 1.47x lower heap; 3x fewer allocations | At most 16 copied item headers use the stack; the 128-item generic control is neutral within 0.2%, with identical heap and allocations |
 | Current pass | [Multi-item Top-K reads](#multi-item-top-k-read-materialization), 16/default-100 string items | Generic materialization: 2,851/10,558 ns; 2,297/13,516 B; 8 allocs | Direct JSON: 1,851/6,898 ns; 1,624/9,752 B; 3 allocs | 1.54x/1.53x faster, 1.41x/1.39x lower heap, 2.67x fewer allocs | One-item and write implementations are unchanged; structured fallback improves 1.11x |
 | Current pass | [Direct generic Top-K GET](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Generic materialization: 2,376/13,936 ns strings; 3,019/13,966 ns mixed | Shared-lock direct JSON: 1,660/10,024 ns strings; 2,148/10,263 ns mixed | 1.36x-1.43x faster; 1.35x-1.53x lower heap; 2.00x-2.20x fewer allocs | Stored state, ordering, JSON bytes, public ownership, wire, and persistent formats are unchanged |
 | Current pass | [Generic Top-K encoding outside read lock](#multi-item-top-k-read-materialization), 16/100 string and mixed items | Lock-held direct JSON: 2,023/13,713 ns strings; 2,486/16,561 ns mixed; writer stalled behind caller JSON | Point-in-time copy: 1,988/13,598 ns strings; 2,469/16,036 ns mixed; writer progresses during JSON | 1.01x-1.03x faster serially with identical heap/allocations; unbounded caller-marshaler writer stall removed | Exact generic `GET` only; the dedicated `GETTOPK` candidate was rejected after a repeatable 1.05x CPU regression |
@@ -664,6 +665,7 @@ tree.
 | Dedicated `GETTOPK` lock-release snapshot | Let writers proceed while caller-controlled JSON marshaling was blocked | The five-second 100-item structured read was 14,457 ns versus 13,776 ns legacy, or 1.05x slower, with identical 9,872 B and 5 allocations | Reverted for `GETTOPK`; the serial-neutral generic `GET` snapshot remains; see [multi-item Top-K reads](#multi-item-top-k-read-materialization) |
 | Reservoir escaped-value exact sizing | Tried to pre-size the direct mixed JSON buffer exactly before writing escaped strings | The second full escape scan made exact encoded reads 3,489 ns versus 2,707 ns generic, or 1.29x slower | Removed; the retained writer uses the checked raw reservation and grows only when escaping requires it; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir sort outside cache lock | Shortened both dedicated and generic reservoir read lock holds without adding allocation | Default-capacity string/mixed generic reads were each 1.06x slower, and the dedicated 16-item read was 1.10x slower, with identical heap and allocation counts | Reverted; copy and sort retain their prior lock scope; see [reservoir sample reads](#reservoir-sample-read-materialization) |
+| Small reservoir sorter generic fallback wrapper | Stack-copied 16-item reads avoided the heap sort copy | Routing the 128-item path through the helper regressed its paired median from 17,955 to 18,078 ns, or 0.7%, with identical 14,360 B and three allocations | Removed; only the at-most-16-item branch uses the helper, while the 128-item path calls the original sorter and is neutral within 0.2%; see [reservoir sample reads](#reservoir-sample-read-materialization) |
 | Reservoir scalar/batch preparation layouts | Scalar branching improved short scalar adds about 1.05x; split-first backing made two-value batches 1.24x faster; indexed full backing made them 1.01x faster; the Scalar-only out-of-line wrapper improved scalar adds 1.09x-1.14x | Shared scalar branching made two-value batches 1.02x slower; split-first made 16-value batches 1.01x slower; indexed full backing made 128-value batches 1.02x slower; the isolated wrapper still made two-value batches 1.015x slower through layout drift | All four layouts were removed; the uniform append/preflight path remains; see [reservoir preparation layouts](#reservoir-preparation-layout-rollbacks) |
 | Bloom split-first preparation | Scalar safe/structured additions improved 1.39x/1.31x and a two-value batch improved 1.23x | The 128-value batch was 1.015x slower and the 16-value batch was 0.35% slower | Removed; only the [scalar public wrapper](#generic-bloom-filter-scalar-additions) was specialized, leaving variadic batches unchanged |
 | Large-only Bloom command dispatch | Removed 65 JSON allocations from a 64-string command batch | Leaving one through eight values on generic fallback added a second length branch and made the unchanged eight-value exact command 1.011x slower in the first alternating gate | Replaced by the [all-size direct command batch](#direct-bloom-filter-command-batches), which is 1.07x-1.65x faster from one through 64 strings and leaves all-structured memory unchanged |
@@ -10938,6 +10940,38 @@ but the added branch moved the 16-item control from 2,098 to 2,112 ns, a 0.7%
 regression with identical memory. It was removed. The retained implementation
 does not change sample layout, sorting, command bytes, public ownership,
 storage, persistence, replication, or wire formats.
+
+The remaining 16-item allocation was the heap-backed private sorted copy. A
+test-first allocation check initially failed at three allocations, then now
+requires the final response allocation alone. Both dedicated `GETRS` and exact
+generic `GET` copy up to 16 item headers into caller-owned stack storage,
+insertion-sort that private snapshot by the existing priority/sequence order,
+unlock, and use the unchanged JSON writer. The stack snapshot contains only
+the same item headers that the former heap copy contained; it neither retains
+values nor exposes internal backing. Larger samples continue to use the
+original heap copy and standard-library sort unchanged.
+
+Focused byte-parity, alias, state, ordering, structured/escaped-value, and
+telemetry tests ran before the change and under `-race` afterward. Fifteen
+alternating frozen-binary pairs on one CPU measured the small path at 100,000
+operations and the 128-item generic control at 10,000 operations:
+
+```sh
+make run CMD='go test . -run="Test(ExecuteExactFastCommandReservoirSampleGet|ExecuteExactFastCommandGenericGetReservoirSample|ReservoirSampleFastJSON)" -count=20'
+make run CMD='go test -race . -run="Test(ExecuteExactFastCommandReservoirSampleGet|ExecuteExactFastCommandGenericGetReservoirSample|ReservoirSampleFastJSON)" -count=5'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-reservoir-stack-before.test /tmp/hatrie-reservoir-stack-after.test /tmp/hatrie-reservoir-stack-small-final-pairs.txt 20 15 100000x "BenchmarkReservoirSampleSmallGetCommand/16$$"'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-reservoir-stack-before.test /tmp/hatrie-reservoir-stack-after.test /tmp/hatrie-reservoir-stack-large-final-pairs.txt 20 15 10000x "BenchmarkReservoirSampleGenericGetCommand/Strings128/Exact$$"'
+```
+
+| Frozen paired median | Former heap copy | Final stack copy | Improvement |
+| --- | ---: | ---: | --- |
+| 16-item exact plain-string `GETRS` | 2,076 ns; 1,688 B; 3 allocs | 1,834 ns; 1,152 B; 1 alloc | 1.13x faster; 1.47x lower heap; 3x fewer allocations |
+| 128-item generic `GET` control | 17,921 ns; 14,360 B; 3 allocs | 17,902 ns; 14,360 B; 3 allocs | CPU neutral within 0.2%; heap and allocations unchanged |
+
+The first helper also routed the large path through its fallback branch. Its
+paired 128-item median moved from 17,955 to 18,078 ns, or 0.7% slower, so that
+placement was removed and recorded in the rejected index. The accepted branch
+is limited to 16 items and leaves the existing large sorter in place.
 
 <a id="multi-item-top-k-read-materialization"></a>
 ### Multi-Item Top-K Read Materialization
