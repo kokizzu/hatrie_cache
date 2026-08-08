@@ -486,6 +486,35 @@ slice but nils every element and resets protobuf fields first, so prior response
 data cannot be exposed by a later request. The benchmark fixture and sanitizing
 test remain to guard this decision.
 
+<a id="radix-prefix-json-reservation-rollback"></a>
+### Rejected Radix Prefix JSON Reservation
+
+The plain-string `PREFIXRT` writer initially reserves 64 bytes for each of at
+most 64 entries. A 48-byte estimate was tested to reduce the one-allocation
+short-result footprint. It preserved exact JSON output and passed the focused
+race test, but an adversarial 16-byte value crosses the lower reservation by
+one byte and forces a second builder allocation.
+
+The frozen-binary acceptance run alternated 15 before/after pairs at one CPU
+with 100,000 prefix writes per block:
+
+```sh
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-radix-prefix-before.test /tmp/hatrie-radix-prefix-candidate.test /tmp/hatrie-radix-prefix-short-pairs.txt 20 15 100000x ^BenchmarkRadixTreePlainPrefixJSON/Value8$$'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-radix-prefix-boundary-before.test /tmp/hatrie-radix-prefix-boundary-candidate.test /tmp/hatrie-radix-prefix-boundary-pairs.txt 20 15 100000x ^BenchmarkRadixTreePlainPrefixJSON/Value16$$'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-radix-prefix-before.test /tmp/hatrie-radix-prefix-candidate.test /tmp/hatrie-radix-prefix-long-pairs.txt 20 15 100000x ^BenchmarkRadixTreePlainPrefixJSON/Value128$$'
+```
+
+| Plain radix prefix JSON, 16 entries | 64-byte reservation | 48-byte candidate | Result |
+| --- | ---: | ---: | --- |
+| Eight-byte values, paired median | 974.3 ns; 1,024 B; 1 alloc | 933.5 ns; 768 B; 1 alloc | 1.044x faster; 1.33x lower heap |
+| Sixteen-byte boundary values, paired median | 1,047 ns; 1,024 B; 1 alloc | 1,251 ns; 1,920 B; 2 allocs | 1.195x slower; 1.875x higher heap; one extra allocation |
+| 128-byte values, paired median | 3,306 ns; 7,936 B; 4 allocs | 3,120 ns; 6,400 B; 4 allocs | 1.060x faster; 1.24x lower heap |
+
+The smaller reservation was removed. The existing 64-byte estimate keeps the
+boundary case to one allocation; output bytes, fallback behavior, locking,
+storage, wire format, and retained state are unchanged. The direct JSON test
+and the short, boundary, and long fixtures remain.
+
 ## Rejected Optimization Index
 
 This is the central inventory of every failed or reverted performance
@@ -497,6 +526,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| 48-byte radix prefix JSON reservation | Eight-byte values became 1.044x faster with 1.33x lower heap; 128-byte values became 1.060x faster with 1.24x lower heap | Sixteen-byte values crossed the smaller buffer by one byte, becoming 1.195x slower with 1.875x higher heap and a second allocation | Removed; the 64-byte reservation preserves a single allocation at the boundary; see [the rollback](#radix-prefix-json-reservation-rollback) |
 | Bounded protobuf response-parent retention | A 64-entry cap would prevent large response pointer columns from staying in `sync.Pool` | A 256-child response regressed 1.128x, from 31,152 to 35,128 ns, and transient heap grew 42.27x, from 56 to 2,367 B/op | Removed; response pooling still clears all protobuf fields and child pointers before reuse; see [the rollback](#bounded-protobuf-response-retention-rollback) |
 | All-type cold binary value forwarding | Could avoid decode/materialization for every unhydrated binary-store DUMP | Exact tests showed dynamic structured storage preserves typed nested integers while replication intentionally normalizes them, producing different binary tags and wire bytes | Narrowed to byte-compatible scalar and fixed-layout types; dynamic structured and JSON records retain snapshot fallback; see [cold binary scalar forwarding](#cold-binary-scalar-forwarding) and [fixed forwarding](#cold-binary-fixed-forwarding) |
 | Cold built-XOR tag-gated forwarding | Made a 4,096-item built-XOR DUMP 2.007x faster, reducing 20,201 to 11,465 temporary B and 23 to 15 allocations | Inspecting the shared XOR payload made staged-XOR fallback 1.213x slower with a second store read; reusing the first record still left it 1.126x slower and added 1,384 B | Runtime candidate removed; exact built/staged encoding coverage and focused benchmarks remain; see [cold built-XOR forwarding rollback](#cold-built-xor-forwarding-rollback) |

@@ -250,6 +250,36 @@ func TestRadixTreePrefixScanUsesBoundedCapacity(t *testing.T) {
 	}
 }
 
+func TestRadixTreePlainPrefixJSONPreservesAllPlainEntries(t *testing.T) {
+	tree := newRadixTreeData()
+	for index := 0; index < 16; index++ {
+		key := fmt.Sprintf("session:%02d", index)
+		value := fmt.Sprintf("value-%02d", index)
+		if !tree.PutPlainString(key, value) {
+			t.Fatalf("PutPlainString(%q) = false, want new item", key)
+		}
+	}
+	data, ok := tree.plainItemsWithPrefixJSON("session:")
+	if !ok {
+		t.Fatal("plainItemsWithPrefixJSON() = false, want plain output")
+	}
+	var items []RadixTreeItem
+	if err := json.Unmarshal([]byte(data), &items); err != nil {
+		t.Fatalf("plainItemsWithPrefixJSON() JSON = %q, error = %v", data, err)
+	}
+	if len(items) != 16 {
+		t.Fatalf("plainItemsWithPrefixJSON() item count = %d, want 16", len(items))
+	}
+	for index, item := range items {
+		if want := fmt.Sprintf("session:%02d", index); item.Key != want {
+			t.Fatalf("item %d key = %q, want %q", index, item.Key, want)
+		}
+		if want := fmt.Sprintf("value-%02d", index); item.Value != want {
+			t.Fatalf("item %d value = %#v, want %q", index, item.Value, want)
+		}
+	}
+}
+
 func TestExecuteFastScanRadixTreeCommandUsesPlainStringPathAndFallsBack(t *testing.T) {
 	trie := newTestTrie(t)
 	if !trie.PutRadixTree("index", "session:1", "active") || !trie.PutRadixTree("index", "session:2", "idle") {

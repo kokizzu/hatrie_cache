@@ -3,9 +3,36 @@ package hatriecache
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
+
+var radixTreePrefixJSONSink string
+
+func BenchmarkRadixTreePlainPrefixJSON(b *testing.B) {
+	for _, valueSize := range []int{8, 16, 128} {
+		b.Run(fmt.Sprintf("Value%d", valueSize), func(b *testing.B) {
+			tree := newRadixTreeData()
+			value := strings.Repeat("v", valueSize)
+			for index := 0; index < 16; index++ {
+				key := fmt.Sprintf("session:%02d", index)
+				if !tree.PutPlainString(key, value) {
+					b.Fatalf("PutPlainString(%q) = false, want new item", key)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				data, ok := tree.plainItemsWithPrefixJSON("session:")
+				if !ok {
+					b.Fatal("plainItemsWithPrefixJSON() = false, want plain output")
+				}
+				radixTreePrefixJSONSink = data
+			}
+		})
+	}
+}
 
 func BenchmarkRadixTreePlainStringPutPaths(b *testing.B) {
 	b.Run("DuplicateGeneric", func(b *testing.B) {
