@@ -66,6 +66,8 @@ func TestCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t *testing.T) {
 		{Command: "ADDXF", Key: "xor", Value: "value-a"},
 		{Command: "ADDXF", Key: "xor", Value: "value-b"},
 		{Command: "BUILDXF", Key: "xor"},
+		{Command: "CREATEXF", Key: "xor-staged", Value: "64"},
+		{Command: "ADDXF", Key: "xor-staged", Value: "value"},
 		{Command: "CREATEFW", Key: "fenwick", Value: "128"},
 		{Command: "ADDFW", Key: "fenwick", Value: "32", Subkey: "3"},
 		{Command: "CREATEQ", Key: "quantile", Value: "0.01"},
@@ -96,7 +98,7 @@ func TestCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t *testing.T) {
 	loaded, store := loadColdCommandDumpTrie(t, source, StorageFormatBinary)
 	defer store.Close()
 	defer loaded.Destroy()
-	for _, key := range []string{"bloom", "cms", "hll", "cuckoo", "xor", "fenwick", "quantile", "roaring", "sparse"} {
+	for _, key := range []string{"bloom", "cms", "hll", "cuckoo", "xor", "xor-staged", "fenwick", "quantile", "roaring", "sparse"} {
 		assertColdLevelDBReference(t, loaded, key)
 		assertCommandDumpMatchesSnapshot(t, loaded, key)
 	}
@@ -125,6 +127,35 @@ func BenchmarkCommandDumpColdMap64Reuse(b *testing.B) {
 func BenchmarkCommandDumpColdBloomReuse(b *testing.B) {
 	benchmarkCommandDumpColdReuse(b, "bloom:key", func(source *HatTrie) {
 		setupCommandFeatureBloomWithValue(b, source)
+	})
+}
+
+func BenchmarkCommandDumpColdBuiltXorReuse(b *testing.B) {
+	benchmarkCommandDumpColdReuse(b, "xor", func(source *HatTrie) {
+		if err := source.UpsertXorFilter("xor", 4096); err != nil {
+			b.Fatalf("UpsertXorFilter() error = %v", err)
+		}
+		for index := 0; index < 4096; index++ {
+			if _, err := source.AddXorFilterChecked("xor", fmt.Sprintf("value-%04d", index)); err != nil {
+				b.Fatalf("AddXorFilterChecked() error = %v", err)
+			}
+		}
+		if _, ok, err := source.BuildXorFilter("xor"); err != nil || !ok {
+			b.Fatalf("BuildXorFilter() = %v/%v", ok, err)
+		}
+	})
+}
+
+func BenchmarkCommandDumpColdStagedXorControlReuse(b *testing.B) {
+	benchmarkCommandDumpColdReuse(b, "xor", func(source *HatTrie) {
+		if err := source.UpsertXorFilter("xor", 64); err != nil {
+			b.Fatalf("UpsertXorFilter() error = %v", err)
+		}
+		for index := 0; index < 64; index++ {
+			if _, err := source.AddXorFilterChecked("xor", fmt.Sprintf("value-%02d", index)); err != nil {
+				b.Fatalf("AddXorFilterChecked() error = %v", err)
+			}
+		}
 	})
 }
 

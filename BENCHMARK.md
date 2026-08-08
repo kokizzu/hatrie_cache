@@ -433,6 +433,7 @@ tree.
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
 | All-type cold binary value forwarding | Could avoid decode/materialization for every unhydrated binary-store DUMP | Exact tests showed dynamic structured storage preserves typed nested integers while replication intentionally normalizes them, producing different binary tags and wire bytes | Narrowed to byte-compatible scalar and fixed-layout types; dynamic structured and JSON records retain snapshot fallback; see [cold binary scalar forwarding](#cold-binary-scalar-forwarding) and [fixed forwarding](#cold-binary-fixed-forwarding) |
+| Cold built-XOR tag-gated forwarding | Made a 4,096-item built-XOR DUMP 2.007x faster, reducing 20,201 to 11,465 temporary B and 23 to 15 allocations | Inspecting the shared XOR payload made staged-XOR fallback 1.213x slower with a second store read; reusing the first record still left it 1.126x slower and added 1,384 B | Runtime candidate removed; exact built/staged encoding coverage and focused benchmarks remain; see [cold built-XOR forwarding rollback](#cold-built-xor-forwarding-rollback) |
 | Single-copy staged-XOR replication | Reduced a 64-item DUMP from 3,560 to 2,328 temporary B and from four to two allocations | Thirty-one paired medians regressed from 9,166 to 10,132 ns, or 1.105x slower | Runtime candidate removed; exact encoding and fallback benchmarks remain; see [staged-XOR single-copy rollback](#staged-xor-single-copy-rollback) |
 | Generic priority-queue item sorter | Removed the 24-byte `sort.Interface` wrapper, reducing the accepted queue path from two allocations to one | Increased the 64-item candidate from about 2.8 us to 3.3 us, roughly 19% slower | Reverted to `sort.Sort`; the one-copy queue gain remains; see [direct live priority replication](#direct-live-priority-replication) |
 | Expanded live-slice replication switch | Fenwick/quantile removed all three allocations and improved more than 2x | Adding both cases to the existing fixed switch made already-direct dense Roaring 1.022x slower | Replaced by default-case chaining; Roaring is neutral within 0.1% and the gains remain; see [direct live slice replication](#direct-live-slice-replication) |
@@ -2347,6 +2348,36 @@ backup, and restore remain unchanged. No retained memory is added.
 make run CMD='go test ./... -run TestCommandDumpColdFixedBinaryEncodingMatchesSnapshot -count=10'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-fixed-forward-before.test /tmp/hatrie-cold-fixed-forward-after.test /tmp/hatrie-cold-fixed-forward-bloom.txt 20 31 1000x BenchmarkCommandDumpColdBloomReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-fixed-forward-before.test /tmp/hatrie-cold-fixed-forward-after.test /tmp/hatrie-cold-fixed-forward-map-control.txt 20 31 5000x BenchmarkCommandDumpColdMap64Reuse'
+```
+
+<a id="cold-built-xor-forwarding-rollback"></a>
+### Cold Built-XOR Forwarding Rollback
+
+A follow-up candidate admitted cold binary XOR records after inspecting their
+payload tag. Built filters have a fixed byte representation and benefited from
+the same validated reframe as other fixed structures, but the shared
+`xor_filter` storage type also represents staged dynamic values. Those values
+must retain canonical snapshot normalization.
+
+| Paired median | Existing snapshot fallback | Tag-gated candidate | Result |
+| --- | ---: | ---: | ---: |
+| 4,096-item built-XOR DUMP | 14,613 ns; 20,201 B; 23 allocs; 5,115 wire B | 7,280 ns; 11,465 B; 15 allocs; 5,115 wire B | 2.007x faster; 1.76x lower heap; 1.53x fewer allocs |
+| 64-item staged-XOR, initial double-read fallback | 11,964 ns; 11,024 B; 217 allocs; 1,372 wire B | 14,510 ns; 14,552 B; 232 allocs; 1,372 wire B | 1.213x slower; 1.32x higher heap; 15 more allocs |
+| 64-item staged-XOR, reused-record fallback | 11,927 ns; 11,024 B; 217 allocs; 1,372 wire B | 13,428 ns; 12,408 B; 217 allocs; 1,372 wire B | 1.126x slower; 1,384 more heap B |
+
+The first candidate read the store again after discovering a staged payload.
+The refined candidate decoded the already-read record and restored the original
+allocation count, but tag inspection and the alternate fallback still imposed
+a material CPU and heap cost on staged filters. All XOR runtime changes were
+therefore removed. Fifteen baseline-versus-reverted pairs measured 12,474
+versus 12,512 ns (0.997x), with the original 11,024 B and 217 allocations on
+both sides, confirming full restoration. Exact tests and benchmark fixtures for
+both built and staged cold XOR values remain.
+
+```sh
+make run CMD='go test ./... -run "TestCommandDumpCold(FixedBinaryEncodingMatchesSnapshot|JSONFallsBackToSnapshot)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-built-xor-before.test /tmp/hatrie-cold-built-xor-after-reuse.test /tmp/hatrie-cold-staged-xor-reuse-control.txt 20 15 5000x BenchmarkCommandDumpColdStagedXorControlReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-built-xor-before.test /tmp/hatrie-cold-built-xor-reverted.test /tmp/hatrie-cold-built-xor-reverted-control.txt 20 15 5000x BenchmarkCommandDumpColdStagedXorControlReuse'
 ```
 
 <a id="direct-live-fixed-replication"></a>
