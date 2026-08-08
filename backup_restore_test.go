@@ -42,6 +42,55 @@ func TestRestoreBackupBundleVerifiesAndWritesSnapshotJournal(t *testing.T) {
 	}
 }
 
+// A restored bundle must be directly usable by normal startup: load the
+// snapshot first, then replay only journal records newer than its checkpoint.
+// Replaying from zero here would silently double-apply counter mutations.
+func TestRestoreBackupBundleStartupRecoveryDoesNotReplayCheckpointedCounter(t *testing.T) {
+	source := newTestTrie(t)
+	journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal() error = %v", err)
+	}
+	defer journal.Close()
+	if response := journal.ExecuteCommand(source, CacheCommandRequest{Command: "SETSTR", Key: "name", Value: "ivi"}); !response.OK {
+		t.Fatalf("SETSTR response = %#v, want ok", response)
+	}
+	if response := journal.ExecuteCommand(source, CacheCommandRequest{Command: "SETINT", Key: "requests", Value: "7"}); !response.OK {
+		t.Fatalf("SETINT response = %#v, want ok", response)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if _, err := CreateBackupBundle(bundlePath, source, journal, BackupBundleOptions{SnapshotFormat: SnapshotFormatBinary}); err != nil {
+		t.Fatalf("CreateBackupBundle() error = %v", err)
+	}
+
+	dataDir := filepath.Join(t.TempDir(), "data")
+	if _, err := RestoreBackupBundle(bundlePath, dataDir, BackupBundleRestoreOptions{}); err != nil {
+		t.Fatalf("RestoreBackupBundle() error = %v", err)
+	}
+	recovered := newTestTrie(t)
+	metadata, err := recovered.LoadSnapshotWithMetadata(filepath.Join(dataDir, "snapshot.hc"))
+	if err != nil {
+		t.Fatalf("LoadSnapshotWithMetadata() error = %v", err)
+	}
+	if metadata.JournalSequence != 2 {
+		t.Fatalf("restored snapshot journal sequence = %d, want 2", metadata.JournalSequence)
+	}
+	restoredJournal, err := OpenCommandJournal(filepath.Join(dataDir, "commands.journal"))
+	if err != nil {
+		t.Fatalf("OpenCommandJournal(restored) error = %v", err)
+	}
+	defer restoredJournal.Close()
+	if sequence, err := restoredJournal.Replay(recovered, metadata.JournalSequence); err != nil || sequence != metadata.JournalSequence {
+		t.Fatalf("Replay(after checkpoint) = %d/%v, want %d/nil", sequence, err, metadata.JournalSequence)
+	}
+	if got := recovered.GetString("name"); got != "ivi" {
+		t.Fatalf("recovered name = %q, want ivi", got)
+	}
+	if got := recovered.GetCounter("requests"); got != 7 {
+		t.Fatalf("recovered counter = %d, want 7 without checkpoint replay", got)
+	}
+}
+
 func TestRestoreBackupBundleRejectsNonEmptyDataDirByDefault(t *testing.T) {
 	ht := newTestTrie(t)
 	bundlePath := filepath.Join(t.TempDir(), "backup.tar.gz")
