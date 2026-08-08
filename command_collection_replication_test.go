@@ -285,6 +285,36 @@ func TestCommandDumpRadixTreeEncodingMatchesSnapshot(t *testing.T) {
 	}
 }
 
+func TestCommandDumpStagedXorEncodingMatchesSnapshot(t *testing.T) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	for _, key := range []string{"xor:empty", "xor:ordered", "xor:normalized-fallback"} {
+		if err := ht.UpsertXorFilter(key, 8); err != nil {
+			t.Fatalf("UpsertXorFilter(%s) error = %v", key, err)
+		}
+	}
+	values := []interface{}{
+		"z-last",
+		"a-first",
+		Map{"nested": "map"},
+		Slice{"nested", int64(4)},
+	}
+	if _, err := ht.AddXorFilterChecked("xor:ordered", values[0], values[1:]...); err != nil {
+		t.Fatalf("AddXorFilterChecked(xor:ordered) error = %v", err)
+	}
+	if _, err := ht.AddXorFilterChecked("xor:normalized-fallback", commandDumpMapJSONValue{Label: "fallback"}); err != nil {
+		t.Fatalf("AddXorFilterChecked(xor:normalized-fallback) error = %v", err)
+	}
+	if !ht.Expire("xor:ordered", time.Hour) {
+		t.Fatal("Expire(xor:ordered) = false")
+	}
+
+	for _, key := range []string{"xor:empty", "xor:ordered", "xor:normalized-fallback"} {
+		assertCommandDumpMatchesSnapshot(t, ht, key)
+	}
+}
+
 func BenchmarkCommandDumpPackedMapReuse(b *testing.B) {
 	benchmarkCommandDumpMapReuse(b, "map:packed", Map{
 		"z-last":  "last",
@@ -395,6 +425,23 @@ func BenchmarkCommandDumpStagedXorControlReuse(b *testing.B) {
 		}
 	}
 	benchmarkCommandDumpReuse(b, ht, "xor:control")
+}
+
+func BenchmarkCommandDumpStagedXorFallbackReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	if err := ht.UpsertXorFilter("xor:fallback", 64); err != nil {
+		b.Fatalf("UpsertXorFilter() error = %v", err)
+	}
+	for index := 0; index < 63; index++ {
+		if _, err := ht.AddXorFilterChecked("xor:fallback", fmt.Sprintf("value-%02d", index)); err != nil {
+			b.Fatalf("AddXorFilterChecked() error = %v", err)
+		}
+	}
+	if _, err := ht.AddXorFilterChecked("xor:fallback", commandDumpMapJSONValue{Label: "fallback"}); err != nil {
+		b.Fatalf("AddXorFilterChecked(fallback) error = %v", err)
+	}
+	benchmarkCommandDumpReuse(b, ht, "xor:fallback")
 }
 
 func benchmarkCommandDumpMapReuse(b *testing.B, key string, value Map) {

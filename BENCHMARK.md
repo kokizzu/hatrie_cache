@@ -429,6 +429,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| Single-copy staged-XOR replication | Reduced a 64-item DUMP from 3,560 to 2,328 temporary B and from four to two allocations | Thirty-one paired medians regressed from 9,166 to 10,132 ns, or 1.105x slower | Runtime candidate removed; exact encoding and fallback benchmarks remain; see [staged-XOR single-copy rollback](#staged-xor-single-copy-rollback) |
 | Generic priority-queue item sorter | Removed the 24-byte `sort.Interface` wrapper, reducing the accepted queue path from two allocations to one | Increased the 64-item candidate from about 2.8 us to 3.3 us, roughly 19% slower | Reverted to `sort.Sort`; the one-copy queue gain remains; see [direct live priority replication](#direct-live-priority-replication) |
 | Expanded live-slice replication switch | Fenwick/quantile removed all three allocations and improved more than 2x | Adding both cases to the existing fixed switch made already-direct dense Roaring 1.022x slower | Replaced by default-case chaining; Roaring is neutral within 0.1% and the gains remain; see [direct live slice replication](#direct-live-slice-replication) |
 | Direct canonical-base64 decode into fixed records | Reused replication fell from 3,680 B and 5 allocs to zero; storage fell from 7,456 B and 10 allocs to 3,776 B and 5 allocs | Canonical validation plus direct decode made storage 1.100x slower and replication 1.076x slower | Runtime candidate reverted; newline/error compatibility tests and focused controls remain; see [canonical base64 direct-decode rollback](#canonical-base64-direct-decode-rollback) |
@@ -2574,6 +2575,31 @@ fits the stack path and adds no retained memory.
 make run CMD='go test ./... -run TestCommandDumpRadixTreeEncodingMatchesSnapshot -count=10'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-radix-before.test /tmp/hatrie-direct-live-radix-after.test /tmp/hatrie-direct-live-radix-pairs.txt 20 31 50000x BenchmarkCommandDumpRadixTreeControlReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-radix-before.test /tmp/hatrie-direct-live-radix-after.test /tmp/hatrie-direct-live-radix-xor-control.txt 20 31 50000x BenchmarkCommandDumpStagedXorControlReuse'
+```
+
+<a id="staged-xor-single-copy-rollback"></a>
+### Staged-XOR Single-Copy Rollback
+
+A staged-XOR DUMP candidate preflighted live values, built one sorted item slice,
+and wrote those stored values directly. It removed the separate sorted-key
+slice and recursive value clones, reducing temporary memory and allocations,
+but the extra map scan and wider item sort increased CPU enough to reject it.
+
+| Paired median, 64 staged strings | Snapshot baseline | Single-copy candidate | Result |
+| --- | ---: | ---: | ---: |
+| DUMP into reused capacity | 9,166 ns; 3,560 B; 4 allocs; 1,372 wire B | 10,132 ns; 2,328 B; 2 allocs; 1,372 wire B | 1.105x slower despite 1.53x lower heap |
+
+The runtime candidate was removed. The exact-byte test remains for empty,
+ordered, nested, TTL, and normalization-fallback values, together with normal
+and fallback benchmark fixtures. Production retains the faster two-slice
+snapshot path and its unchanged wire behavior. Fifteen additional baseline
+versus reverted pairs measured 9,190 versus 9,185 ns (1.001x) with the original
+3,560 B and four allocations on both sides, confirming full performance
+restoration.
+
+```sh
+make run CMD='go test ./... -run TestCommandDumpStagedXorEncodingMatchesSnapshot -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-live-staged-xor-before.test /tmp/hatrie-direct-live-staged-xor-after.test /tmp/hatrie-direct-live-staged-xor-pairs.txt 20 31 50000x BenchmarkCommandDumpStagedXorControlReuse'
 ```
 
 <a id="canonical-base64-direct-decode-rollback"></a>
