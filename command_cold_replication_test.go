@@ -50,6 +50,58 @@ func TestCommandDumpColdJSONFallsBackToSnapshot(t *testing.T) {
 	assertCommandDumpMatchesSnapshot(t, loaded, "map")
 }
 
+func TestCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t *testing.T) {
+	source := CreateHatTrie()
+	defer source.Destroy()
+	requests := []CacheCommandRequest{
+		{Command: "CREATEBF", Key: "bloom", Value: "2048", Subkey: "0.001"},
+		{Command: "ADDBF", Key: "bloom", Value: "value"},
+		{Command: "CREATECMS", Key: "cms", Value: "256", Subkey: "4"},
+		{Command: "INCRCMS", Key: "cms", Value: "value", Subkey: "3"},
+		{Command: "CREATEHLL", Key: "hll", Value: "10"},
+		{Command: "ADDHLL", Key: "hll", Value: "value"},
+		{Command: "CREATECF", Key: "cuckoo", Value: "2048", Subkey: "0.001"},
+		{Command: "ADDCF", Key: "cuckoo", Value: "value"},
+		{Command: "CREATEXF", Key: "xor", Value: "64"},
+		{Command: "ADDXF", Key: "xor", Value: "value-a"},
+		{Command: "ADDXF", Key: "xor", Value: "value-b"},
+		{Command: "BUILDXF", Key: "xor"},
+		{Command: "CREATEFW", Key: "fenwick", Value: "128"},
+		{Command: "ADDFW", Key: "fenwick", Value: "32", Subkey: "3"},
+		{Command: "CREATEQ", Key: "quantile", Value: "0.01"},
+		{Command: "ADDQ", Key: "quantile", Value: "1.5"},
+		{Command: "ADDQ", Key: "quantile", Value: "9.5"},
+	}
+	for _, request := range requests {
+		if response := source.ExecuteCommand(request); !response.OK {
+			t.Fatalf("%s %s failed: %s", request.Command, request.Key, response.Message)
+		}
+	}
+	roaringValues := make([]uint32, roaringBitmapArrayMaxSize+1)
+	sparseValues := make([]uint64, sparseBitsetArrayMaxSize+1)
+	for index := range roaringValues {
+		roaringValues[index] = uint32(index)
+		sparseValues[index] = uint64(index)
+	}
+	if added := source.AddRoaringBitmap("roaring", roaringValues[0], roaringValues[1:]...); added != len(roaringValues) {
+		t.Fatalf("AddRoaringBitmap() = %d, want %d", added, len(roaringValues))
+	}
+	if added := source.AddSparseBitset("sparse", sparseValues[0], sparseValues[1:]...); added != len(sparseValues) {
+		t.Fatalf("AddSparseBitset() = %d, want %d", added, len(sparseValues))
+	}
+	if !source.Expire("bloom", time.Hour) {
+		t.Fatal("Expire(bloom) = false")
+	}
+
+	loaded, store := loadColdCommandDumpTrie(t, source, StorageFormatBinary)
+	defer store.Close()
+	defer loaded.Destroy()
+	for _, key := range []string{"bloom", "cms", "hll", "cuckoo", "xor", "fenwick", "quantile", "roaring", "sparse"} {
+		assertColdLevelDBReference(t, loaded, key)
+		assertCommandDumpMatchesSnapshot(t, loaded, key)
+	}
+}
+
 func BenchmarkCommandDumpColdBytes64KiBReuse(b *testing.B) {
 	benchmarkCommandDumpColdReuse(b, "bytes", func(source *HatTrie) {
 		if err := source.UpsertBytesChecked("bytes", bytes.Repeat([]byte{0, 255, 1, 128}, DiskBytesThreshold/4)); err != nil {
@@ -67,6 +119,12 @@ func BenchmarkCommandDumpColdMap64Reuse(b *testing.B) {
 		if err := source.UpsertMapChecked("map", value); err != nil {
 			b.Fatalf("UpsertMapChecked() error = %v", err)
 		}
+	})
+}
+
+func BenchmarkCommandDumpColdBloomReuse(b *testing.B) {
+	benchmarkCommandDumpColdReuse(b, "bloom:key", func(source *HatTrie) {
+		setupCommandFeatureBloomWithValue(b, source)
 	})
 }
 

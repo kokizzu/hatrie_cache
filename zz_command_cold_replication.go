@@ -14,7 +14,9 @@ func (ht *HatTrie) appendCommandDumpColdBinaryEntryLocked(destination []byte, en
 		return destination, false, nil
 	}
 	switch ref.Type {
-	case "counter", "string", "bytes":
+	case "counter", "string", "bytes",
+		"bloom_filter", "count_min_sketch", "hyperloglog", "cuckoo_filter",
+		"roaring_bitmap", "sparse_bitset", "fenwick_tree", "quantile_sketch":
 	default:
 		return destination, false, nil
 	}
