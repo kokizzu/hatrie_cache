@@ -9,6 +9,15 @@ import (
 )
 
 func TestCommandDumpColdBinaryEncodingMatchesSnapshot(t *testing.T) {
+	testCommandDumpColdBinaryEncodingMatchesSnapshot(t, StorageBackendLevelDB)
+}
+
+func TestCommandDumpColdBinaryEncodingMatchesSnapshotPebble(t *testing.T) {
+	testCommandDumpColdBinaryEncodingMatchesSnapshot(t, StorageBackendPebble)
+}
+
+func testCommandDumpColdBinaryEncodingMatchesSnapshot(t *testing.T, backend StorageBackend) {
+	t.Helper()
 	source := CreateHatTrie()
 	defer source.Destroy()
 	if err := source.UpsertCounterChecked("counter", -12345); err != nil {
@@ -27,7 +36,7 @@ func TestCommandDumpColdBinaryEncodingMatchesSnapshot(t *testing.T) {
 		t.Fatal("Expire(map) = false")
 	}
 
-	loaded, store := loadColdCommandDumpTrie(t, source, StorageFormatBinary)
+	loaded, store := loadColdCommandDumpPersistentTrie(t, source, backend, StorageFormatBinary)
 	defer store.Close()
 	defer loaded.Destroy()
 	for _, key := range []string{"counter", "string", "bytes", "map"} {
@@ -37,20 +46,43 @@ func TestCommandDumpColdBinaryEncodingMatchesSnapshot(t *testing.T) {
 }
 
 func TestCommandDumpColdJSONFallsBackToSnapshot(t *testing.T) {
+	testCommandDumpColdJSONFallsBackToSnapshot(t, StorageBackendLevelDB)
+}
+
+func TestCommandDumpColdJSONFallsBackToSnapshotPebble(t *testing.T) {
+	testCommandDumpColdJSONFallsBackToSnapshot(t, StorageBackendPebble)
+}
+
+func testCommandDumpColdJSONFallsBackToSnapshot(t *testing.T, backend StorageBackend) {
+	t.Helper()
 	source := CreateHatTrie()
 	defer source.Destroy()
 	if err := source.UpsertMapChecked("map", Map{"nested": Slice{"value", int64(4)}}); err != nil {
 		t.Fatalf("UpsertMapChecked() error = %v", err)
 	}
+	if err := source.UpsertBytesChecked("bytes", bytes.Repeat([]byte{0, 255, 1, 128}, DiskBytesThreshold/4)); err != nil {
+		t.Fatalf("UpsertBytesChecked() error = %v", err)
+	}
 
-	loaded, store := loadColdCommandDumpTrie(t, source, StorageFormatJSON)
+	loaded, store := loadColdCommandDumpPersistentTrie(t, source, backend, StorageFormatJSON)
 	defer store.Close()
 	defer loaded.Destroy()
-	assertColdLevelDBReference(t, loaded, "map")
-	assertCommandDumpMatchesSnapshot(t, loaded, "map")
+	for _, key := range []string{"map", "bytes"} {
+		assertColdLevelDBReference(t, loaded, key)
+		assertCommandDumpMatchesSnapshot(t, loaded, key)
+	}
 }
 
 func TestCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t *testing.T) {
+	testCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t, StorageBackendLevelDB)
+}
+
+func TestCommandDumpColdFixedBinaryEncodingMatchesSnapshotPebble(t *testing.T) {
+	testCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t, StorageBackendPebble)
+}
+
+func testCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t *testing.T, backend StorageBackend) {
+	t.Helper()
 	source := CreateHatTrie()
 	defer source.Destroy()
 	requests := []CacheCommandRequest{
@@ -95,7 +127,7 @@ func TestCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t *testing.T) {
 		t.Fatal("Expire(bloom) = false")
 	}
 
-	loaded, store := loadColdCommandDumpTrie(t, source, StorageFormatBinary)
+	loaded, store := loadColdCommandDumpPersistentTrie(t, source, backend, StorageFormatBinary)
 	defer store.Close()
 	defer loaded.Destroy()
 	for _, key := range []string{"bloom", "cms", "hll", "cuckoo", "xor", "xor-staged", "fenwick", "quantile", "roaring", "sparse"} {
@@ -105,7 +137,15 @@ func TestCommandDumpColdFixedBinaryEncodingMatchesSnapshot(t *testing.T) {
 }
 
 func BenchmarkCommandDumpColdBytes64KiBReuse(b *testing.B) {
-	benchmarkCommandDumpColdReuse(b, "bytes", func(source *HatTrie) {
+	benchmarkCommandDumpColdPersistentReuse(b, StorageBackendLevelDB, "bytes", func(source *HatTrie) {
+		if err := source.UpsertBytesChecked("bytes", bytes.Repeat([]byte{0, 255, 1, 128}, DiskBytesThreshold/4)); err != nil {
+			b.Fatalf("UpsertBytesChecked() error = %v", err)
+		}
+	})
+}
+
+func BenchmarkCommandDumpColdPebbleBytes64KiBReuse(b *testing.B) {
+	benchmarkCommandDumpColdPersistentReuse(b, StorageBackendPebble, "bytes", func(source *HatTrie) {
 		if err := source.UpsertBytesChecked("bytes", bytes.Repeat([]byte{0, 255, 1, 128}, DiskBytesThreshold/4)); err != nil {
 			b.Fatalf("UpsertBytesChecked() error = %v", err)
 		}
@@ -113,7 +153,7 @@ func BenchmarkCommandDumpColdBytes64KiBReuse(b *testing.B) {
 }
 
 func BenchmarkCommandDumpColdMap64Reuse(b *testing.B) {
-	benchmarkCommandDumpColdReuse(b, "map", func(source *HatTrie) {
+	benchmarkCommandDumpColdPersistentReuse(b, StorageBackendLevelDB, "map", func(source *HatTrie) {
 		value := make(Map, 64)
 		for index := 0; index < 64; index++ {
 			value[fmt.Sprintf("field-%02d", index)] = fmt.Sprintf("value-%02d", index)
@@ -125,13 +165,13 @@ func BenchmarkCommandDumpColdMap64Reuse(b *testing.B) {
 }
 
 func BenchmarkCommandDumpColdBloomReuse(b *testing.B) {
-	benchmarkCommandDumpColdReuse(b, "bloom:key", func(source *HatTrie) {
+	benchmarkCommandDumpColdPersistentReuse(b, StorageBackendLevelDB, "bloom:key", func(source *HatTrie) {
 		setupCommandFeatureBloomWithValue(b, source)
 	})
 }
 
 func BenchmarkCommandDumpColdBuiltXorReuse(b *testing.B) {
-	benchmarkCommandDumpColdReuse(b, "xor", func(source *HatTrie) {
+	benchmarkCommandDumpColdPersistentReuse(b, StorageBackendLevelDB, "xor", func(source *HatTrie) {
 		if err := source.UpsertXorFilter("xor", 4096); err != nil {
 			b.Fatalf("UpsertXorFilter() error = %v", err)
 		}
@@ -147,7 +187,7 @@ func BenchmarkCommandDumpColdBuiltXorReuse(b *testing.B) {
 }
 
 func BenchmarkCommandDumpColdStagedXorControlReuse(b *testing.B) {
-	benchmarkCommandDumpColdReuse(b, "xor", func(source *HatTrie) {
+	benchmarkCommandDumpColdPersistentReuse(b, StorageBackendLevelDB, "xor", func(source *HatTrie) {
 		if err := source.UpsertXorFilter("xor", 64); err != nil {
 			b.Fatalf("UpsertXorFilter() error = %v", err)
 		}
@@ -159,20 +199,22 @@ func BenchmarkCommandDumpColdStagedXorControlReuse(b *testing.B) {
 	})
 }
 
-func benchmarkCommandDumpColdReuse(b *testing.B, key string, setup func(*HatTrie)) {
+func benchmarkCommandDumpColdPersistentReuse(b *testing.B, backend StorageBackend, key string, setup func(*HatTrie)) {
 	b.Helper()
 	source := CreateHatTrie()
 	setup(source)
-	path := filepath.Join(b.TempDir(), "cache.leveldb")
-	if err := source.SaveLevelDB(path); err != nil {
+	path := filepath.Join(b.TempDir(), "cache")
+	store, err := OpenPersistentStoreWithFormat(path, backend, StorageFormatBinary)
+	if err != nil {
 		source.Destroy()
-		b.Fatalf("SaveLevelDB() error = %v", err)
+		b.Fatalf("OpenPersistentStoreWithFormat() error = %v", err)
+	}
+	if err := store.Save(source); err != nil {
+		store.Close()
+		source.Destroy()
+		b.Fatalf("Save() error = %v", err)
 	}
 	source.Destroy()
-	store, err := OpenLevelDBStore(path)
-	if err != nil {
-		b.Fatalf("OpenLevelDBStore() error = %v", err)
-	}
 	defer store.Close()
 	loaded := CreateHatTrie()
 	defer loaded.Destroy()
@@ -184,15 +226,16 @@ func benchmarkCommandDumpColdReuse(b *testing.B, key string, setup func(*HatTrie
 	benchmarkCommandDumpReuse(b, loaded, key)
 }
 
-func loadColdCommandDumpTrie(t *testing.T, source *HatTrie, format StorageFormat) (*HatTrie, *LevelDBStore) {
+func loadColdCommandDumpPersistentTrie(t *testing.T, source *HatTrie, backend StorageBackend, format StorageFormat) (*HatTrie, PersistentStore) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "cache.leveldb")
-	if err := source.SaveLevelDBWithFormat(path, format); err != nil {
-		t.Fatalf("SaveLevelDBWithFormat() error = %v", err)
-	}
-	store, err := OpenLevelDBStoreWithFormat(path, format)
+	path := filepath.Join(t.TempDir(), "cache")
+	store, err := OpenPersistentStoreWithFormat(path, backend, format)
 	if err != nil {
-		t.Fatalf("OpenLevelDBStoreWithFormat() error = %v", err)
+		t.Fatalf("OpenPersistentStoreWithFormat() error = %v", err)
+	}
+	if err := store.Save(source); err != nil {
+		store.Close()
+		t.Fatalf("Save() error = %v", err)
 	}
 	loaded := CreateHatTrie()
 	result, err := store.LoadWithPolicy(loaded, DefaultLevelDBHotLoadPolicy())

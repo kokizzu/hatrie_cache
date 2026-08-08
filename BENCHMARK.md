@@ -179,6 +179,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Direct live scalar replication](#direct-live-scalar-replication), counter, TTL string, and 64 KiB memory/disk byte DUMP | Snapshot/materialized: 126/178/132,894/143,901 ns; 24/24/319,512/328,073 B | Locked direct wire: 40/104/1,004/22,477 ns; 0/0/0/74,096 B | 3.143x/1.703x/132.365x/6.402x faster; memory-byte temporary heap eliminated | Exact 17/37/65,551/65,555 wire B and TTL unchanged; disk read allocation remains; Bloom neutral within 0.2%, radix 1.005x |
 | Current pass | [Cold binary scalar forwarding](#cold-binary-scalar-forwarding), 64 KiB byte DUMP from an unhydrated persistent reference | Read, decode, base64 snapshot, decode: 118,617 ns; 328,772 B; 22 allocs | Validated stored value reframe: 46,698 ns; 148,169 B; 15 allocs | 2.540x faster; 2.22x lower heap; 1.47x fewer allocs | Exact 65,551 wire B and current TTL unchanged; JSON and dynamic structures fall back; 64-field map control neutral within 0.7% |
 | Current pass | [Cold binary fixed forwarding](#cold-binary-fixed-forwarding), 32k-item Bloom DUMP from an unhydrated persistent reference | Read, decode, base64 snapshot, decode: 103,461 ns; 230,585 B; 23 allocs | Validated stored fixed payload reframe: 43,102 ns; 131,785 B; 15 allocs | 2.400x faster; 1.75x lower heap; 1.53x fewer allocs | Exact 58,932 wire B and TTL unchanged across eight fixed formats; built/staged XOR and dynamic structures fall back; map control 1.006x |
+| Current pass | [Borrowed cold persistent records](#borrowed-cold-persistent-records), 64 KiB binary byte DUMP | LevelDB: 48,502 ns; 147,585 B; 7 allocs. Pebble: 53,240 ns; 73,930 B; 5 allocs | LevelDB: 42,898 ns; 74,001 B; 7 allocs. Pebble: 34,740 ns; 331 B; 5 allocs | LevelDB 1.131x faster and 1.99x lower heap; Pebble 1.533x faster and 223.35x lower heap | Exact 65,551 wire B; only records at least 4 KiB use the private borrowed view, while JSON/dynamic and small-record fallback behavior is unchanged |
 | Current pass | [Direct live fixed replication](#direct-live-fixed-replication), 32k-item Bloom DUMP into reused capacity | Snapshot base64 encode/decode: 119,288 ns; 229,448 B; 5 allocs | Live backing to final page: 6,133 ns; 0 B; 0 allocs | 19.45x faster; temporary heap and allocations eliminated | Private locked sender path for Bloom/CMS/HLL/Cuckoo/built XOR; exact 58,932 wire B, TTL, and staged-XOR fallback unchanged |
 | Current pass | [Direct live bitmap replication](#direct-live-bitmap-replication), 4,097-value dense Roaring DUMP into reused capacity | Snapshot container/base64 path: 18,865 ns; 24,696 B; 5 allocs | Live container to final page: 1,009 ns; 0 B; 0 allocs | 18.70x faster; temporary heap and allocations eliminated | Private locked Roaring/sparse path; exact 8,230 wire B, array/bitmap and sparse-inline encodings unchanged |
 | Current pass | [Direct live slice replication](#direct-live-slice-replication), Fenwick and quantile DUMP into reused capacity | Snapshot slice clones: 1,674/1,111 ns; 1,224/840 B; 3 allocs | Locked shallow views: 766/427 ns; 0 B; 0 allocs | Fenwick 2.187x, quantile 2.604x faster; temporary heap eliminated | Outlined fallback dispatch keeps existing Roaring neutral; exact bytes and Fenwick zero-tree omission unchanged |
@@ -2348,6 +2349,38 @@ backup, and restore remain unchanged. No retained memory is added.
 make run CMD='go test ./... -run TestCommandDumpColdFixedBinaryEncodingMatchesSnapshot -count=10'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-fixed-forward-before.test /tmp/hatrie-cold-fixed-forward-after.test /tmp/hatrie-cold-fixed-forward-bloom.txt 20 31 1000x BenchmarkCommandDumpColdBloomReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-fixed-forward-before.test /tmp/hatrie-cold-fixed-forward-after.test /tmp/hatrie-cold-fixed-forward-map-control.txt 20 31 5000x BenchmarkCommandDumpColdMap64Reuse'
+```
+
+<a id="borrowed-cold-persistent-records"></a>
+### Borrowed Cold Persistent Records
+
+Cold binary DUMP had already avoided decoding and re-encoding compatible
+records, but it still copied every persistent record before locating the stored
+value field. For records at least 4 KiB, the two built-in stores now supply the
+record only to a private transformer that appends its value into the caller's
+output before the borrowed view expires. LevelDB documents `Get` values as
+owned copies; Pebble keeps its read closer and store lifetime live until the
+transformer returns. The public persistence API and the ordinary owned
+`entryData` path are unchanged.
+
+| Paired median | Existing copied record | Borrowed transformer | Result |
+| --- | ---: | ---: | ---: |
+| LevelDB 64 KiB cold bytes | 48,502 ns; 147,585 B; 7 allocs; 65,551 wire B | 42,898 ns; 74,001 B; 7 allocs; 65,551 wire B | 1.131x faster; 1.99x lower heap; allocations and wire identical |
+| Pebble 64 KiB cold bytes | 53,240 ns; 73,930 B; 5 allocs; 65,551 wire B | 34,740 ns; 331 B; 5 allocs; 65,551 wire B | 1.533x faster; 223.35x lower heap; allocations and wire identical |
+| LevelDB 64-field map fallback control | 17,000 ns; 9,936 B; 208 allocs; 1,235 wire B | 17,015 ns; 9,936 B; 208 allocs; 1,235 wire B | neutral within 0.1% |
+
+Exact tests cover scalar, fixed-layout, staged-XOR, dynamic structured, and
+large JSON records against the snapshot encoder on both LevelDB and Pebble.
+The latter two remain on the established canonical fallback. Record checksum,
+current TTL, receiver validation, routing, retries, batching, storage,
+journal, snapshots, backup, and restore behavior are unchanged. No retained
+memory or configuration is added.
+
+```sh
+make run CMD='go test ./... -run "TestCommandDumpCold(BinaryEncodingMatchesSnapshot|BinaryEncodingMatchesSnapshotPebble|FixedBinaryEncodingMatchesSnapshot|FixedBinaryEncodingMatchesSnapshotPebble|JSONFallsBackToSnapshot|JSONFallsBackToSnapshotPebble)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-borrow-before.test /tmp/hatrie-cold-borrow-after-transformer.test /tmp/hatrie-cold-borrow-transformer-leveldb.txt 20 15 1000x BenchmarkCommandDumpColdBytes64KiBReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-borrow-before.test /tmp/hatrie-cold-borrow-after-transformer.test /tmp/hatrie-cold-borrow-transformer-pebble.txt 20 15 1000x BenchmarkCommandDumpColdPebbleBytes64KiBReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-borrow-before.test /tmp/hatrie-cold-borrow-after-transformer.test /tmp/hatrie-cold-borrow-transformer-map-control.txt 20 15 5000x BenchmarkCommandDumpColdMap64Reuse'
 ```
 
 <a id="cold-built-xor-forwarding-rollback"></a>

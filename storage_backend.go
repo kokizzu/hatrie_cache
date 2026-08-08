@@ -26,6 +26,16 @@ type persistentReferenceStore interface {
 	entryData(string) ([]byte, bool, error)
 }
 
+// persistentReferenceStoreBorrower keeps a store-owned record valid only while
+// a transformer is running. Transformers must not retain the supplied bytes.
+type persistentReferenceStoreBorrower interface {
+	transformEntryData(string, persistentReferenceStoreEntryTransformer) ([]byte, bool, error)
+}
+
+type persistentReferenceStoreEntryTransformer interface {
+	transformPersistentReferenceEntry([]byte) ([]byte, bool, error)
+}
+
 // PersistentStore is the common durability and lazy-loading contract supported
 // by Pebble and LevelDB. LevelDB-named option/result types remain compatible.
 type PersistentStore interface {

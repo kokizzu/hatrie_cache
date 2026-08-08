@@ -5,6 +5,8 @@ import (
 	"errors"
 )
 
+const commandDumpColdBorrowMinimumRecordBytes = 4 << 10
+
 func (ht *HatTrie) appendCommandDumpColdBinaryEntryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	if entry.Value.Type() != DATAVALUE_TYPE_LEVELDB_REF {
 		return destination, false, nil
@@ -20,11 +22,35 @@ func (ht *HatTrie) appendCommandDumpColdBinaryEntryLocked(destination []byte, en
 	default:
 		return destination, false, nil
 	}
-	data, ok, err := ref.Store.entryData(ref.Key)
+	if ref.RecordBytes >= commandDumpColdBorrowMinimumRecordBytes {
+		if borrower, ok := ref.Store.(persistentReferenceStoreBorrower); ok {
+			result, handled, err := borrower.transformEntryData(ref.Key, commandDumpColdBinaryRecordTransformer{
+				trie:        ht,
+				destination: destination,
+				entry:       entry,
+				ref:         ref,
+			})
+			if err != nil {
+				return destination, true, err
+			}
+			if !handled {
+				return destination, false, nil
+			}
+			return result, handled, nil
+		}
+	}
+	data, found, err := ref.Store.entryData(ref.Key)
 	if err != nil {
 		return destination, true, err
 	}
-	if !ok || len(data) != ref.RecordBytes || levelDBRecordChecksum(data) != ref.RecordChecksum {
+	if !found {
+		return destination, false, nil
+	}
+	return ht.appendCommandDumpColdBinaryRecordLocked(destination, entry, ref, data)
+}
+
+func (ht *HatTrie) appendCommandDumpColdBinaryRecordLocked(destination []byte, entry Entry, ref LevelDBReference, data []byte) ([]byte, bool, error) {
+	if len(data) != ref.RecordBytes || levelDBRecordChecksum(data) != ref.RecordChecksum {
 		return destination, false, nil
 	}
 	valueStart, valueEnd, ok, err := levelDBBinaryReplicationValueRange(data, ref.Key, ref.Type)
@@ -46,6 +72,17 @@ func (ht *HatTrie) appendCommandDumpColdBinaryEntryLocked(destination []byte, en
 	writer.buf = append(writer.buf, data[valueStart:valueEnd]...)
 	writer.writeTimePtr(expiresAt)
 	return writer.bytes(), true, nil
+}
+
+type commandDumpColdBinaryRecordTransformer struct {
+	trie        *HatTrie
+	destination []byte
+	entry       Entry
+	ref         LevelDBReference
+}
+
+func (transformer commandDumpColdBinaryRecordTransformer) transformPersistentReferenceEntry(data []byte) ([]byte, bool, error) {
+	return transformer.trie.appendCommandDumpColdBinaryRecordLocked(transformer.destination, transformer.entry, transformer.ref, data)
 }
 
 func levelDBBinaryReplicationValueRange(data []byte, key string, entryType string) (int, int, bool, error) {

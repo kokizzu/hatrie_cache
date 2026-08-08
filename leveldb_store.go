@@ -1432,6 +1432,23 @@ func (store *LevelDBStore) entryData(key string) ([]byte, bool, error) {
 	return store.entryDataFromDB(db, key)
 }
 
+func (store *LevelDBStore) transformEntryData(key string, transformer persistentReferenceStoreEntryTransformer) ([]byte, bool, error) {
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return nil, false, err
+	}
+	defer unlock()
+
+	data, err := db.Get(levelDBKey(key), nil)
+	if errors.Is(err, leveldb.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return transformer.transformPersistentReferenceEntry(data)
+}
+
 func (store *LevelDBStore) entryDataFromDB(db *leveldb.DB, key string) ([]byte, bool, error) {
 	data, err := db.Get(levelDBKey(key), nil)
 	if errors.Is(err, leveldb.ErrNotFound) {

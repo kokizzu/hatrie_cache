@@ -693,6 +693,24 @@ func (store *PebbleStore) entryData(key string) ([]byte, bool, error) {
 	return pebbleEntryDataFromDB(db, store.activeGeneration, key)
 }
 
+func (store *PebbleStore) transformEntryData(key string, transformer persistentReferenceStoreEntryTransformer) ([]byte, bool, error) {
+	db, unlock, err := store.lockDB()
+	if err != nil {
+		return nil, false, err
+	}
+	defer unlock()
+
+	data, closer, err := db.Get(pebbleGenerationEntryKey(store.activeGeneration, key))
+	if errors.Is(err, pebble.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	defer closer.Close()
+	return transformer.transformPersistentReferenceEntry(data)
+}
+
 func (store *PebbleStore) lockDB() (*pebble.DB, func(), error) {
 	if store == nil {
 		return nil, func() {}, ErrLevelDBStoreClosed
