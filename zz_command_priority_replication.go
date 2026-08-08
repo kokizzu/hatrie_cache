@@ -8,7 +8,7 @@ import (
 
 func (ht *HatTrie) appendCommandDumpPriorityQueueEntryBinaryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	if entry.Value.Type() != DATAVALUE_TYPE_PRIORITY_QUEUE {
-		return destination, false, nil
+		return ht.appendCommandDumpTopKEntryBinaryLocked(destination, entry)
 	}
 	index := entry.Value.Index
 	if index < 0 || int(index) >= len(ht.priorityQueues.array) || ht.priorityQueues.reusables.Has(index) {
