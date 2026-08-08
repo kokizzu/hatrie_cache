@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/syndtr/goleveldb/leveldb"
 )
 
 func TestParseStorageFormat(t *testing.T) {
@@ -214,6 +216,32 @@ func TestParseLevelDBCompareBeforeWriteMode(t *testing.T) {
 	}
 	if _, err := ParseLevelDBCompareBeforeWriteMode("sometimes"); err == nil {
 		t.Fatal("ParseLevelDBCompareBeforeWriteMode(invalid) error = nil, want error")
+	}
+}
+
+func TestLevelDBBatchOwnsKeyInputs(t *testing.T) {
+	db, err := leveldb.OpenFile(filepath.Join(t.TempDir(), "batch-copy.leveldb"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	key := levelDBKey("first")
+	batch := new(leveldb.Batch)
+	batch.Put(key, []byte("value"))
+	copy(key, levelDBKey("other"))
+	if err := db.Write(batch, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := db.Get(levelDBKey("first"), nil)
+	if err != nil {
+		t.Fatalf("Get(first) error = %v", err)
+	}
+	if string(data) != "value" {
+		t.Fatalf("Get(first) = %q, want value", data)
+	}
+	if _, err := db.Get(levelDBKey("other"), nil); !errors.Is(err, leveldb.ErrNotFound) {
+		t.Fatalf("Get(other) error = %v, want not found", err)
 	}
 }
 
