@@ -10,6 +10,8 @@ import (
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
+const scalarBatchSharedKeyStackLimit = 256
+
 func (server *CacheGRPCServer) ScalarBatchStream(stream hatriecachev1.CacheService_ScalarBatchStreamServer) error {
 	ctx, err := server.requestContext(stream.Context())
 	if err != nil {
@@ -133,6 +135,12 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 		return scalarBatchResponseFromCommand(request, result)
 	}
 	operations := request.GetOperations()
+	if len(request.Keys) == 1 && len(operations) > 1 {
+		if len(operations) <= scalarBatchSharedKeyStackLimit {
+			return ht.executeScalarBatchDirectSharedKeyStack(ctx, request)
+		}
+		request = materializeScalarBatchSharedKey(request)
+	}
 	response := newScalarBatchResponse(request.GetBatchId(), len(operations))
 	stringIndex := 0
 	integerIndex := 0
@@ -152,7 +160,6 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 	if ht.executeScalarBatchRepeatedReadLocked(request, response, &telemetry) {
 		return response
 	}
-	request = materializeScalarBatchSharedKey(request)
 	if ht.executeScalarBatchNativeLocked(ctx, request, response, &telemetry) {
 		return response
 	}
@@ -245,6 +252,21 @@ func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatrie
 		}
 	}
 	return response
+}
+
+func (ht *HatTrie) executeScalarBatchDirectSharedKeyStack(ctx context.Context, request *hatriecachev1.ScalarBatchRequest) *hatriecachev1.ScalarBatchResponse {
+	var keys [scalarBatchSharedKeyStackLimit]string
+	for index := range request.Operations {
+		keys[index] = request.Keys[0]
+	}
+	prepared := &hatriecachev1.ScalarBatchRequest{
+		BatchId:       request.BatchId,
+		Operations:    request.Operations,
+		Keys:          keys[:len(request.Operations)],
+		StringValues:  request.StringValues,
+		IntegerValues: request.IntegerValues,
+	}
+	return ht.executeScalarBatchDirect(ctx, prepared)
 }
 
 func (ht *HatTrie) executeScalarBatchRepeatedReadLocked(request *hatriecachev1.ScalarBatchRequest, response *hatriecachev1.ScalarBatchResponse, telemetry *batchTelemetry) bool {

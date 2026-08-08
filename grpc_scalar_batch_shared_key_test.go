@@ -3,6 +3,7 @@ package hatriecache
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
@@ -121,4 +122,48 @@ func TestCacheGRPCServerScalarBatchSharedKeyPreservesJournalAndDirtyTracking(t *
 	if sequence != 2 || recovered.GetCounter("count") != 42 {
 		t.Fatalf("shared-key scalar journal replay = %d/count=%d, want 2/42", sequence, recovered.GetCounter("count"))
 	}
+}
+
+func TestExecuteScalarBatchDirectSharedKeyMatchesExpandedNativeBatch(t *testing.T) {
+	compactTrie := newTestTrie(t)
+	expandedTrie := newTestTrie(t)
+	compact := scalarBatchMixedSharedKeyRequest(64, true)
+	expanded := scalarBatchMixedSharedKeyRequest(64, false)
+	compactResponse := compactTrie.executeScalarBatchDirect(context.Background(), compact)
+	expandedResponse := expandedTrie.executeScalarBatchDirect(context.Background(), expanded)
+	if !reflect.DeepEqual(compactResponse, expandedResponse) {
+		t.Fatalf("compact response = %#v, want expanded %#v", compactResponse, expandedResponse)
+	}
+}
+
+func scalarBatchMixedSharedKeyRequest(commands int, compact bool) *hatriecachev1.ScalarBatchRequest {
+	request := &hatriecachev1.ScalarBatchRequest{
+		BatchId:    83,
+		Operations: make([]hatriecachev1.ScalarCommand, commands),
+		Keys:       make([]string, commands),
+	}
+	for index := range request.Operations {
+		request.Keys[index] = "shared:native"
+		switch index % 6 {
+		case 0:
+			request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_STRING
+			request.StringValues = append(request.StringValues, []byte("value"))
+		case 1:
+			request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_GET
+		case 2:
+			request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_SET_COUNTER
+			request.IntegerValues = append(request.IntegerValues, 7)
+		case 3:
+			request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_INCREMENT
+			request.IntegerValues = append(request.IntegerValues, 2)
+		case 4:
+			request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_EXISTS
+		case 5:
+			request.Operations[index] = hatriecachev1.ScalarCommand_SCALAR_COMMAND_DELETE
+		}
+	}
+	if compact && commands > 1 {
+		request.Keys = request.Keys[:1]
+	}
+	return request
 }

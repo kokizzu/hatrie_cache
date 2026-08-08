@@ -22,6 +22,9 @@ func BenchmarkScalarNativeBatch(b *testing.B) {
 		b.Run(fmt.Sprintf("Mixed%d", size), func(b *testing.B) {
 			benchmarkScalarNativeMixedBatch(b, size)
 		})
+		b.Run(fmt.Sprintf("MixedSharedKey%d", size), func(b *testing.B) {
+			benchmarkScalarNativeMixedSharedKeyBatch(b, size)
+		})
 		b.Run(fmt.Sprintf("DeleteHitPairs%d", size), func(b *testing.B) {
 			benchmarkScalarNativeDeleteHitPairs(b, size)
 		})
@@ -129,6 +132,12 @@ func benchmarkScalarNativeMixedBatch(b *testing.B, commands int) {
 		}
 	}
 	benchmarkScalarNativeRequest(b, trie, request)
+}
+
+func benchmarkScalarNativeMixedSharedKeyBatch(b *testing.B, commands int) {
+	trie := CreateHatTrie()
+	b.Cleanup(trie.Destroy)
+	benchmarkScalarNativeRequest(b, trie, scalarBatchMixedSharedKeyRequest(commands, true))
 }
 
 func benchmarkScalarNativeRequest(b *testing.B, trie *HatTrie, request *hatriecachev1.ScalarBatchRequest) {

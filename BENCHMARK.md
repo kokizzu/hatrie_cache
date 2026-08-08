@@ -325,6 +325,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Exact batch telemetry aggregation](#exact-batch-telemetry-aggregation), 4,096 native reads and 16/256 direct scalar reads | Per-item clocks: 1.012 ms; 3.903/55.274 us | One batch clock: 0.857 ms; 3.328/47.116 us | 1.18x/1.17x/1.17x faster; heap and allocations unchanged | Default global telemetry becomes visible at batch completion; explicit per-key telemetry retains per-item updates |
 | Current pass | [Adaptive typed scalar execution](#adaptive-typed-scalar-execution), 16 distinct reads/mixed commands/repeated reads | Go loop: 3,320/4,006/885.1 ns; 736/608/736 B; 12/20/12 allocs | Native/coalesced: 2,438/3,050/396.5 ns; 736/592/512 B; 12/17/5 allocs | 1.36x/1.31x/2.23x faster; mixed/repeated heap and allocations also lower | Native starts at four commands and retains bounded reusable scratch; size-two, TTL, cold-reference, and intercepted batches keep the prior path |
 | Current pass | [Direct native scalar request packing](#direct-native-scalar-request-packing), 64 read/mixed/missing-delete commands | Staged items: 4,126/4,995/2,881 ns; 6,656/6,720/7,296 scratch B | Pack request columns: 3,417/4,410/2,150 ns; 4,096/4,160/4,736 scratch B | 1.21x/1.13x/1.34x faster; 2,560 fewer retained scratch bytes | Heap and allocations are identical; size-two/repeated-read and public pipeline/string/mixed controls are neutral, while three slower code placements were rejected |
+| Current pass | [Stack-backed shared scalar batch keys](#stack-backed-shared-scalar-batch-keys), 256 mixed gRPC scalar operations on one key | Heap-expanded key column: 19,551 ns; 10,912 B; 92 allocs | Stack-expanded key column: 18,149 ns; 6,048 B; 91 allocs | 1.077x faster; 1.80x lower heap; one allocation removed | Applies only to compact shared-key batches through 256 operations; ordinary 256-command mixed batches are 1.019x faster with identical memory |
 | Current pass | [Adaptive native bucket size classes](#adaptive-native-bucket-size-classes), 100k insert plus 50% delete/reinsert | Exact resize: 24.458/21.053 ms insert/churn; 200,000 resizes | One-record reserve: 23.711/17.460 ms; 58,925 resizes | Insert 1.03x, churn 1.21x faster; 3.39x fewer resizes | Slot capacity is 7.0% higher; isolated RSS +4.5%, full-cache RSS +0.7% |
 | Current pass | [Production native C optimization](#production-native-c-optimization), complete command controls | Environment-only C flags; scalar and mixed-command baselines | Explicit package `-O3`; binary 5,856 B smaller | SET 1.44x, GET 1.87x, mixed read 1.74x, mixed write 1.34x faster | No measured runtime tradeoff; heap and allocations are identical, and longer mostly-Go/control families are neutral or faster |
 | Current pass | [Native build-cache dependency tracking](#native-build-cache-dependency-tracking), included C/header edits | Go reused a stale cgo object after `hat-trie.c` changed | Embedded source manifest invalidates the package action; mutated behavior reaches the rebuilt binary | Correct native rebuild instead of a false cache hit; mixed read/write 1.005x/1.004x, scalar controls neutral | The changed-source build now pays the required native recompile; unchanged builds retain normal caching, and the production binary is 72 B smaller in the paired build |
@@ -4402,6 +4403,32 @@ the two slice fields enlarged every decoded legacy request: the untouched-head
 was removed. Reusing response objects was also rejected before implementation:
 gRPC permits tracing and stats handlers to consume a sent message lazily, so a
 stream cannot safely mutate or pool the response immediately after `SendMsg`.
+
+#### Stack-Backed Shared Scalar Batch Keys
+
+The direct in-process scalar path still expanded a one-key request into a
+request-local `[]string` before it could use the existing native batch packer.
+For compact shared-key batches of at most 256 operations, that expansion now
+uses an outlined stack array and immediately re-enters the unchanged expanded
+path. The native C packer still receives its required repeated key bytes, but
+no heap string-header column is created. Larger, partitioned, and durable
+compatibility batches retain their established expansion path.
+
+| Paired median, 256 mixed operations | Heap-expanded key column | Stack-backed key column | Result |
+| --- | ---: | ---: | ---: |
+| Compact shared key | 19,551 ns; 10,912 B; 92 allocs; 3,904 retained scratch B | 18,149 ns; 6,048 B; 91 allocs; 3,904 retained scratch B | 1.077x faster; 1.80x lower heap; one allocation removed |
+| Ordinary distinct-key mixed control | 18,552 ns; 6,048 B; 91 allocs; 4,160 retained scratch B | 18,209 ns; 6,048 B; 91 allocs; 4,160 retained scratch B | 1.019x faster; memory and allocations identical |
+
+Exact compact-versus-expanded tests cover native mixed ordering, response
+columns, stream handling, journal replay, and dirty tracking. The temporary
+stack only exists while processing the request; no retained memory,
+configuration, wire, persistence, telemetry, or ownership behavior changes.
+
+```sh
+make run CMD='go test ./... -run "Test(ValidateScalarBatchColumnsAcceptsSharedKey|CacheGRPCServerScalarBatchStreamExecutesSharedKey|CacheGRPCServerScalarBatchSharedKeyPreservesJournalAndDirtyTracking|ExecuteScalarBatchDirectSharedKeyMatchesExpandedNativeBatch)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-shared-before.test /tmp/hatrie-scalar-shared-stack.test /tmp/hatrie-scalar-shared-stack-256.txt 20 15 1000x BenchmarkScalarNativeBatch/MixedSharedKey256'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-scalar-shared-before.test /tmp/hatrie-scalar-shared-stack.test /tmp/hatrie-scalar-normal-stack-256.txt 20 15 1000x BenchmarkScalarNativeBatch/Mixed256'
+```
 
 <a id="reused-scalar-stream-receive-envelope"></a>
 ### Reused Scalar-Stream Receive Envelope
