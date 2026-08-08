@@ -12,6 +12,35 @@ type commandDumpMapJSONValue struct {
 	Label string `json:"label"`
 }
 
+func TestCommandDumpScalarEncodingMatchesSnapshot(t *testing.T) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	if err := ht.UpsertCounterChecked("counter", -12345); err != nil {
+		t.Fatalf("UpsertCounterChecked() error = %v", err)
+	}
+	if err := ht.UpsertStringChecked("string", "escaped\x00\"value"); err != nil {
+		t.Fatalf("UpsertStringChecked() error = %v", err)
+	}
+	if !ht.Expire("string", time.Hour) {
+		t.Fatal("Expire(string) = false")
+	}
+	if err := ht.UpsertBytesChecked("bytes:memory", []byte{0, 1, 127, 128, 255}); err != nil {
+		t.Fatalf("UpsertBytesChecked(bytes:memory) error = %v", err)
+	}
+	diskValue := bytes.Repeat([]byte{0, 255, 1, 128}, DiskBytesThreshold/4+1)
+	if err := ht.UpsertBytesChecked("bytes:disk", diskValue); err != nil {
+		t.Fatalf("UpsertBytesChecked(bytes:disk) error = %v", err)
+	}
+	if !ht.Expire("bytes:memory", time.Hour) {
+		t.Fatal("Expire(bytes:memory) = false")
+	}
+
+	for _, key := range []string{"counter", "string", "bytes:memory", "bytes:disk"} {
+		assertCommandDumpMatchesSnapshot(t, ht, key)
+	}
+}
+
 func TestCommandDumpMapEncodingMatchesSnapshot(t *testing.T) {
 	ht := CreateHatTrie()
 	defer ht.Destroy()
@@ -320,6 +349,47 @@ func BenchmarkCommandDumpPackedMapReuse(b *testing.B) {
 		"z-last":  "last",
 		"a-first": int64(7),
 	})
+}
+
+func BenchmarkCommandDumpCounterReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	if err := ht.UpsertCounterChecked("counter", -12345); err != nil {
+		b.Fatalf("UpsertCounterChecked() error = %v", err)
+	}
+	benchmarkCommandDumpReuse(b, ht, "counter")
+}
+
+func BenchmarkCommandDumpTTLStringReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	if err := ht.UpsertStringChecked("string", "escaped\x00\"value"); err != nil {
+		b.Fatalf("UpsertStringChecked() error = %v", err)
+	}
+	if !ht.Expire("string", time.Hour) {
+		b.Fatal("Expire(string) = false")
+	}
+	benchmarkCommandDumpReuse(b, ht, "string")
+}
+
+func BenchmarkCommandDumpBytes64KiBReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	value := bytes.Repeat([]byte{0, 255, 1, 128}, DiskBytesThreshold/4)
+	if err := ht.UpsertBytesChecked("bytes:memory", value); err != nil {
+		b.Fatalf("UpsertBytesChecked() error = %v", err)
+	}
+	benchmarkCommandDumpReuse(b, ht, "bytes:memory")
+}
+
+func BenchmarkCommandDumpDiskBytes64KiBReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	value := bytes.Repeat([]byte{0, 255, 1, 128}, DiskBytesThreshold/4+1)
+	if err := ht.UpsertBytesChecked("bytes:disk", value); err != nil {
+		b.Fatalf("UpsertBytesChecked() error = %v", err)
+	}
+	benchmarkCommandDumpReuse(b, ht, "bytes:disk")
 }
 
 func BenchmarkCommandDumpLargeMapReuse(b *testing.B) {

@@ -176,6 +176,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-decode fixed storage](#single-decode-fixed-storage), five base64-backed filter/sketch families | Decode to temporary then copy: 5,633 ns; 7,456 B; 10 allocs | Decode once into final record: 4,553 ns; 3,776 B; 5 allocs | 1.237x faster; 49.4% lower heap; 50.0% fewer allocs | Storage-only fast path; noncanonical input falls back, malformed input returns the original decoder error, wire and record bytes unchanged |
 | Current pass | [Single-decode bitmap storage](#single-decode-bitmap-storage), Roaring and sparse bitsets with 8 KiB containers | Prepared descriptor/payload slices: 18,482 ns; 37,968 B; 6 allocs | Decode containers into final records: 15,414 ns; 18,944 B; 2 allocs | 1.199x faster; 50.1% lower heap; 66.7% fewer allocs | Storage-only; the two remaining allocations are final records, mixed containers/noncanonical input preserve compatibility, replication is neutral |
 | Current pass | [Trusted single-decode replication](#trusted-single-decode-replication), seven internally generated base64-backed families | Validated preparation into reused page: 19,946 ns; 22,704 B; 9 allocs | Trusted final-page decode: 14,069 ns; 0 B; 0 allocs | 1.418x faster; temporary heap and allocations eliminated | Private live-snapshot call only; external/restored values keep validation, CR/LF falls back, wire bytes unchanged |
+| Current pass | [Direct live scalar replication](#direct-live-scalar-replication), counter, TTL string, and 64 KiB memory/disk byte DUMP | Snapshot/materialized: 126/178/132,894/143,901 ns; 24/24/319,512/328,073 B | Locked direct wire: 40/104/1,004/22,477 ns; 0/0/0/74,096 B | 3.143x/1.703x/132.365x/6.402x faster; memory-byte temporary heap eliminated | Exact 17/37/65,551/65,555 wire B and TTL unchanged; disk read allocation remains; Bloom neutral within 0.2%, radix 1.005x |
 | Current pass | [Direct live fixed replication](#direct-live-fixed-replication), 32k-item Bloom DUMP into reused capacity | Snapshot base64 encode/decode: 119,288 ns; 229,448 B; 5 allocs | Live backing to final page: 6,133 ns; 0 B; 0 allocs | 19.45x faster; temporary heap and allocations eliminated | Private locked sender path for Bloom/CMS/HLL/Cuckoo/built XOR; exact 58,932 wire B, TTL, and staged-XOR fallback unchanged |
 | Current pass | [Direct live bitmap replication](#direct-live-bitmap-replication), 4,097-value dense Roaring DUMP into reused capacity | Snapshot container/base64 path: 18,865 ns; 24,696 B; 5 allocs | Live container to final page: 1,009 ns; 0 B; 0 allocs | 18.70x faster; temporary heap and allocations eliminated | Private locked Roaring/sparse path; exact 8,230 wire B, array/bitmap and sparse-inline encodings unchanged |
 | Current pass | [Direct live slice replication](#direct-live-slice-replication), Fenwick and quantile DUMP into reused capacity | Snapshot slice clones: 1,674/1,111 ns; 1,224/840 B; 3 allocs | Locked shallow views: 766/427 ns; 0 B; 0 allocs | Fenwick 2.187x, quantile 2.604x faster; temporary heap eliminated | Outlined fallback dispatch keeps existing Roaring neutral; exact bytes and Fenwick zero-tree omission unchanged |
@@ -2238,6 +2239,44 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-b
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-before.test /tmp/hatrie-canonical-replication-after.test /tmp/hatrie-canonical-replication-controls.txt 20 31 5000x BenchmarkFixedStructured'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-before.test /tmp/hatrie-canonical-replication-after.test /tmp/hatrie-canonical-replication-command-control.txt 20 31 500000x BenchmarkCommandFeature/ReplicationDump'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-canonical-replication-pipeline.test /tmp/hatrie-canonical-replication-pipeline.test /tmp/hatrie-canonical-replication-pipeline-pairs.txt 20 15 2000x BenchmarkCanonicalFixedReplicationSnapshotPipeline'
+```
+
+<a id="direct-live-scalar-replication"></a>
+### Direct Live Scalar Replication
+
+Counter and expiring-string DUMP previously built a generic snapshot entry.
+Byte DUMP additionally cloned the value, base64-encoded it into that snapshot,
+then decoded it back into bytes for the binary wire. The locked sender now
+writes counters, strings, and raw bytes directly into the existing binary
+framing. Disk-backed bytes still perform their required disk read, but skip the
+base64 round trip and its temporary buffers.
+
+Exact tests compare the direct bytes against the snapshot encoder for a signed
+counter, escaped TTL string, TTL memory bytes, and a value above the 64 KiB disk
+threshold. Thirty-one alternating pairs use caller-owned output capacity.
+
+| Paired median | Snapshot/materialized path | Direct scalar path | Result |
+| --- | ---: | ---: | ---: |
+| Signed counter | 126.4 ns; 24 B; 1 alloc; 17 wire B | 40.21 ns; 0 B; 0 allocs; 17 wire B | 3.143x faster; temporary heap eliminated |
+| Escaped TTL string | 177.8 ns; 24 B; 1 alloc; 37 wire B | 104.4 ns; 0 B; 0 allocs; 37 wire B | 1.703x faster; temporary heap eliminated |
+| 64 KiB memory bytes | 132,894 ns; 319,512 B; 5 allocs; 65,551 wire B | 1,004 ns; 0 B; 0 allocs; 65,551 wire B | 132.365x faster; temporary heap eliminated |
+| 64 KiB+ disk bytes | 143,901 ns; 328,073 B; 9 allocs; 65,555 wire B | 22,477 ns; 74,096 B; 5 allocs; 65,555 wire B | 6.402x faster; 4.43x lower heap; 1.80x fewer allocs |
+| Bloom switch control | 6,285 ns; 0 B; 0 allocs | 6,294 ns; 0 B; 0 allocs | neutral within 0.2% |
+| Radix fallback control | 1,687 ns; 0 B; 0 allocs | 1,678 ns; 0 B; 0 allocs | 1.005x |
+
+Wire format and size, signed counter representation, string/byte contents, TTL,
+disk ownership, receiver validation, routing, retries, batching, storage,
+journal, snapshots, backup, and restore remain unchanged. No retained backing
+or per-value metadata is added.
+
+```sh
+make run CMD='go test ./... -run TestCommandDumpScalarEncodingMatchesSnapshot -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-counter.txt 20 31 200000x BenchmarkCommandDumpCounterReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-ttl-string.txt 20 31 200000x BenchmarkCommandDumpTTLStringReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-bytes-memory.txt 20 31 5000x BenchmarkCommandDumpBytes64KiBReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-bytes-disk.txt 20 31 1000x BenchmarkCommandDumpDiskBytes64KiBReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-bloom-control.txt 20 31 5000x BenchmarkFixedCommandDumpBloomFilterReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-radix-control.txt 20 31 50000x BenchmarkCommandDumpRadixTreeControlReuse'
 ```
 
 <a id="direct-live-fixed-replication"></a>

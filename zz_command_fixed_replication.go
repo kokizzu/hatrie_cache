@@ -2,11 +2,29 @@ package hatriecache
 
 import (
 	"encoding/binary"
+	"errors"
 	"time"
 )
 
 func (ht *HatTrie) appendCommandDumpFixedEntryBinaryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	switch entry.Value.Type() {
+	case DATAVALUE_TYPE_COUNTER:
+		data, err := appendCommandDumpCounterBinary(destination, snapshotExpiresAt(ht.expirationTimeLocked(entry.Key)), entry.Value.Index)
+		return data, true, err
+	case DATAVALUE_TYPE_RAW_STRING:
+		index := entry.Value.Index
+		if index < 0 || int(index) >= len(ht.strings.array) || ht.strings.reusables.Has(index) {
+			return destination, true, errors.New("hatriecache: string backing index is missing")
+		}
+		data, err := appendReplicationStringEntryBinary(destination, snapshotEntry{
+			Type:      "string",
+			String:    ht.strings.array[index],
+			ExpiresAt: snapshotExpiresAt(ht.expirationTimeLocked(entry.Key)),
+		})
+		return data, true, err
+	case DATAVALUE_TYPE_RAW_BYTES:
+		data, err := ht.appendCommandDumpBytesBinaryLocked(destination, entry)
+		return data, true, err
 	case DATAVALUE_TYPE_BLOOM_FILTER:
 		data, err := appendCommandDumpBloomFilterBinary(destination, snapshotExpiresAt(ht.expirationTimeLocked(entry.Key)), ht.bloomFilters.array[entry.Value.Index])
 		return data, true, err
