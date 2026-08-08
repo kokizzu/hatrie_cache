@@ -413,8 +413,9 @@ func capturePebbleRecords(trie *HatTrie, format StorageFormat, visitRecord func(
 	afterKey := ""
 	hasAfterKey := false
 	pageNumber := 0
+	entries := make([]snapshotEntry, 0, snapshotCaptureScanPageEntries)
 	for {
-		entries := make([]snapshotEntry, 0, snapshotCaptureScanPageEntries)
+		entries = entries[:0]
 		page, err := replicationSyncEntriesPageWithCursor(trie, "", afterKey, hasAfterKey, snapshotCaptureScanPageEntries, cursor, func(entry Entry) error {
 			captured, err := trie.captureSnapshotEntryForStoreLocked(entry, nil, nil)
 			if err != nil {
@@ -438,6 +439,7 @@ func capturePebbleRecords(trie *HatTrie, format StorageFormat, visitRecord func(
 				return nil, err
 			}
 		}
+		clear(entries)
 		pageNumber++
 		if hook := trie.snapshotCapturePageHook; hook != nil {
 			hook(pageNumber)

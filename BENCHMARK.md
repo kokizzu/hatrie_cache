@@ -196,6 +196,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Native Pebble checkpoint bundles](#pebble-checkpoint-backup-bundles), restore 10k x 256 B | Snapshot: 61.219 ms; 21.35 MB heap; 101,064 allocs | Checkpoint: 83.666 ms; 13.35 MB heap; 62,406 allocs | 1.60x lower heap, 1.62x fewer allocs | Explicit mode: snapshot is 1.37x faster and 1.06x smaller |
 | Current pass | [Content-addressed incremental backups](#content-addressed-incremental-backups), 10k x 256 B, 1% changed | Full checkpoint bundle: 98.602 ms; 9.81 MB heap; 2,104,489 written B | Incremental repository: 14.659 ms; 0.94 MB heap; 35,020 written B | 6.73x faster, 10.49x lower heap, 60.09x fewer written bytes | Explicit mode; first backup is full and retained history consumes repository storage |
 | Current pass | [Direct incremental journal checkpoint](#direct-incremental-journal-checkpoint), one checkpoint record | Builder, string conversion, byte conversion | Direct marshaled record | JSON: 1.434x faster, 1.47x lower heap, 2x fewer allocations. Binary: 1.718x faster, 4.33x lower heap, 4x fewer allocations | Exact journal bytes, manifest checksum, backup object, restore sequence, and recovery behavior are unchanged |
+| Current pass | [Reusable Pebble capture page](#reusable-pebble-capture-page), full 10k x 256 B repository base | Fresh metadata page for every 256 entries: 77.835 ms; 7.99 MB heap; 22,621 allocs | One cleared reusable metadata page: 74.054 ms; 4.80 MB heap; 22,564 allocs | 1.051x faster; 1.66x lower heap; 57 fewer allocations | The page is cleared after each synchronous write; mutation reconciliation, records, hashes, disk bytes, and durability behavior are unchanged |
 | Current pass | [Single-pass staged restore](#single-pass-staged-restore), checkpoint 10k x 256 B | Verify then extract: 69.346 ms; 13.18 MB heap; 2 payload passes | Stage, verify, fsync, publish: 56.057 ms; 12.78 MB heap; 1 payload pass | 1.24x faster, 1.03x lower heap, half the payload passes | Repository restore is 1.09x slower because the durable path fsyncs staged files |
 | Current pass | [Checkpoint replica bootstrap](#checkpoint-replica-bootstrap), 10k x 256 B | Snapshot: 146.369 ms; 36.66 MB heap; 172,569 allocs; 2,051,371 wire B | Pebble checkpoint: 84.246 ms; 13.50 MB heap; 62,423 allocs; 2,103,717 wire B | 1.74x faster, 2.72x lower heap, 2.76x fewer allocs | Fresh Pebble databases only; wire size is 2.55% larger |
 | Current pass | [Incremental existing-replica recovery](#incremental-existing-replica-recovery), 10k x 256 B, 1% changed | Full snapshot: 169.906 ms; 38.68 MB heap; 2,047,776 wire B | Cached repository: 104.739 ms; 36.70 MB heap; 36,313 wire B | 1.62x faster, 1.05x lower heap, 2.26x fewer allocs, 56.39x smaller wire | Pebble and a cached base are required; exact restore still performs a full local DB save |
@@ -549,6 +550,44 @@ The journal record bytes, resulting repository object hash, manifest fields,
 disk footprint, journal sequence, restore contents, and recovery behavior are
 identical. There is no retained buffer, pooling, wire-format, configuration, or
 durability change.
+
+<a id="reusable-pebble-capture-page"></a>
+### Reusable Pebble Capture Page
+
+The non-partitioned Pebble generation writer scans the trie in fixed 256-entry
+pages. It previously allocated a new `[]snapshotEntry` metadata page for every
+scan page. The capture now allocates one page, reuses it for the full scan, and
+clears every entry after its synchronous record write. Clearing removes any
+references to captured values before the next scan page, so it does not retain
+snapshot data or alter the mutation reconciliation boundary.
+
+The existing concurrent mutation regression test was run before the change,
+then after it under the race detector. The full-base 10k repository benchmark
+used seven sequential samples on one CPU; this storage-backed measurement has
+normal filesystem timing variation, so raw samples are retained below.
+
+```sh
+make run CMD='go test . -run=TestPebbleStoreGenerationSaveReconcilesConcurrentMutations -count=20'
+make run CMD='go test -race . -run=TestPebbleStoreGenerationSaveReconcilesConcurrentMutations -count=5'
+make run CMD='go test . -run=^$$ -bench=BenchmarkIncrementalBackupRepository10k/FullBase$$ -benchtime=1x -benchmem -count=7 -cpu=1'
+```
+
+| Full 10k x 256 B repository base, median | Fresh page per scan | Reused and cleared page | Improvement |
+| --- | ---: | ---: | --- |
+| Time | 77.835 ms | 74.054 ms | 1.051x faster |
+| Timed heap | 7,985,448 B | 4,799,312 B | 1.66x lower |
+| Allocations | 22,621 | 22,564 | 57 fewer |
+| Logical bytes / written bytes | 3,068,373 / 3,069,927 | 3,068,373 / 3,069,927 | unchanged |
+
+| Version | Seven elapsed samples, ms |
+| --- | --- |
+| Fresh page per scan | `102.838, 77.835, 78.758, 109.837, 69.499, 71.966, 72.268` |
+| Reused and cleared page | `77.529, 127.656, 74.054, 72.820, 74.402, 71.966, 65.712` |
+
+The callback receives each encoded record synchronously before its metadata
+entry is cleared. The trie mutation tracker, page hook timing, storage format,
+generated SST contents, backup manifest and object hashes, and write/fsync
+behavior are unchanged. No buffer survives the capture call.
 
 ## Rejected Optimization Index
 
