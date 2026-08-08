@@ -7,7 +7,7 @@ import (
 
 func (ht *HatTrie) appendCommandDumpRadixTreeEntryBinaryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	if entry.Value.Type() != DATAVALUE_TYPE_RADIX_TREE {
-		return destination, false, nil
+		return ht.appendCommandDumpColdBinaryEntryLocked(destination, entry)
 	}
 	index := entry.Value.Index
 	if index < 0 || int(index) >= len(ht.radixTrees.array) || ht.radixTrees.reusables.Has(index) {

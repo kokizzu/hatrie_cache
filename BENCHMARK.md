@@ -177,6 +177,7 @@ their detailed sections; they are not assigned invented speedup ratios.
 | Current pass | [Single-decode bitmap storage](#single-decode-bitmap-storage), Roaring and sparse bitsets with 8 KiB containers | Prepared descriptor/payload slices: 18,482 ns; 37,968 B; 6 allocs | Decode containers into final records: 15,414 ns; 18,944 B; 2 allocs | 1.199x faster; 50.1% lower heap; 66.7% fewer allocs | Storage-only; the two remaining allocations are final records, mixed containers/noncanonical input preserve compatibility, replication is neutral |
 | Current pass | [Trusted single-decode replication](#trusted-single-decode-replication), seven internally generated base64-backed families | Validated preparation into reused page: 19,946 ns; 22,704 B; 9 allocs | Trusted final-page decode: 14,069 ns; 0 B; 0 allocs | 1.418x faster; temporary heap and allocations eliminated | Private live-snapshot call only; external/restored values keep validation, CR/LF falls back, wire bytes unchanged |
 | Current pass | [Direct live scalar replication](#direct-live-scalar-replication), counter, TTL string, and 64 KiB memory/disk byte DUMP | Snapshot/materialized: 126/178/132,894/143,901 ns; 24/24/319,512/328,073 B | Locked direct wire: 40/104/1,004/22,477 ns; 0/0/0/74,096 B | 3.143x/1.703x/132.365x/6.402x faster; memory-byte temporary heap eliminated | Exact 17/37/65,551/65,555 wire B and TTL unchanged; disk read allocation remains; Bloom neutral within 0.2%, radix 1.005x |
+| Current pass | [Cold binary scalar forwarding](#cold-binary-scalar-forwarding), 64 KiB byte DUMP from an unhydrated persistent reference | Read, decode, base64 snapshot, decode: 118,617 ns; 328,772 B; 22 allocs | Validated stored value reframe: 46,698 ns; 148,169 B; 15 allocs | 2.540x faster; 2.22x lower heap; 1.47x fewer allocs | Exact 65,551 wire B and current TTL unchanged; JSON and structured values fall back; 64-field map control neutral within 0.7% |
 | Current pass | [Direct live fixed replication](#direct-live-fixed-replication), 32k-item Bloom DUMP into reused capacity | Snapshot base64 encode/decode: 119,288 ns; 229,448 B; 5 allocs | Live backing to final page: 6,133 ns; 0 B; 0 allocs | 19.45x faster; temporary heap and allocations eliminated | Private locked sender path for Bloom/CMS/HLL/Cuckoo/built XOR; exact 58,932 wire B, TTL, and staged-XOR fallback unchanged |
 | Current pass | [Direct live bitmap replication](#direct-live-bitmap-replication), 4,097-value dense Roaring DUMP into reused capacity | Snapshot container/base64 path: 18,865 ns; 24,696 B; 5 allocs | Live container to final page: 1,009 ns; 0 B; 0 allocs | 18.70x faster; temporary heap and allocations eliminated | Private locked Roaring/sparse path; exact 8,230 wire B, array/bitmap and sparse-inline encodings unchanged |
 | Current pass | [Direct live slice replication](#direct-live-slice-replication), Fenwick and quantile DUMP into reused capacity | Snapshot slice clones: 1,674/1,111 ns; 1,224/840 B; 3 allocs | Locked shallow views: 766/427 ns; 0 B; 0 allocs | Fenwick 2.187x, quantile 2.604x faster; temporary heap eliminated | Outlined fallback dispatch keeps existing Roaring neutral; exact bytes and Fenwick zero-tree omission unchanged |
@@ -430,6 +431,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| All-type cold binary value forwarding | Could avoid decode/materialization for every unhydrated binary-store DUMP | Exact tests showed structured storage preserves typed nested integers while replication intentionally normalizes them, producing different binary tags and wire bytes | Narrowed to byte-compatible counter/string/bytes only; structured and JSON records retain snapshot fallback; see [cold binary scalar forwarding](#cold-binary-scalar-forwarding) |
 | Single-copy staged-XOR replication | Reduced a 64-item DUMP from 3,560 to 2,328 temporary B and from four to two allocations | Thirty-one paired medians regressed from 9,166 to 10,132 ns, or 1.105x slower | Runtime candidate removed; exact encoding and fallback benchmarks remain; see [staged-XOR single-copy rollback](#staged-xor-single-copy-rollback) |
 | Generic priority-queue item sorter | Removed the 24-byte `sort.Interface` wrapper, reducing the accepted queue path from two allocations to one | Increased the 64-item candidate from about 2.8 us to 3.3 us, roughly 19% slower | Reverted to `sort.Sort`; the one-copy queue gain remains; see [direct live priority replication](#direct-live-priority-replication) |
 | Expanded live-slice replication switch | Fenwick/quantile removed all three allocations and improved more than 2x | Adding both cases to the existing fixed switch made already-direct dense Roaring 1.022x slower | Replaced by default-case chaining; Roaring is neutral within 0.1% and the gains remain; see [direct live slice replication](#direct-live-slice-replication) |
@@ -2277,6 +2279,43 @@ make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.te
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-bytes-disk.txt 20 31 1000x BenchmarkCommandDumpDiskBytes64KiBReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-bloom-control.txt 20 31 5000x BenchmarkFixedCommandDumpBloomFilterReuse'
 make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-direct-scalar-before.test /tmp/hatrie-direct-scalar-after.test /tmp/hatrie-direct-scalar-radix-control.txt 20 31 50000x BenchmarkCommandDumpRadixTreeControlReuse'
+```
+
+<a id="cold-binary-scalar-forwarding"></a>
+### Cold Binary Scalar Forwarding
+
+An unhydrated persistent reference previously read and decoded its complete
+storage record, materialized a snapshot, base64-encoded byte values, then
+decoded them again for binary replication. For binary counter, string, and byte
+records, DUMP now validates the reference checksum and complete record framing,
+borrows the already encoded scalar value field, and reframes it with the trie's
+current TTL. The required store read remains.
+
+Binary key/type mismatches, checksum changes, legacy JSON records, and all
+structured types decline to the established snapshot path. Exact tests cover
+counter/string/bytes, current TTL, nested structured fallback, and JSON-store
+fallback without hydrating the references.
+
+| Paired median | Materialized cold snapshot | Validated scalar forwarding | Result |
+| --- | ---: | ---: | ---: |
+| 64 KiB cold bytes | 118,617 ns; 328,772 B; 22 allocs; 65,551 wire B | 46,698 ns; 148,169 B; 15 allocs; 65,551 wire B | 2.540x faster; 2.22x lower heap; 1.47x fewer allocs |
+| 64-field structured fallback control | 18,064 ns; 10,520 B; 216 allocs; 1,235 wire B | 18,181 ns; 10,520 B; 216 allocs; 1,235 wire B | neutral within 0.7% |
+
+An initial all-type candidate failed the exact-byte test: binary storage keeps
+typed nested integer representations that cold replication deliberately
+normalizes. Forwarding that structured payload would alter binary tags and wire
+bytes. That scope was rejected before benchmarking and remains on the original
+decode path.
+
+Wire format and size, current expiration metadata, scalar contents, structured
+normalization, legacy JSON compatibility, checksums, receiver validation,
+routing, retries, batching, storage, journal, snapshots, backup, and restore
+remain unchanged. No retained memory is added.
+
+```sh
+make run CMD='go test ./... -run "TestCommandDumpCold(BinaryEncodingMatchesSnapshot|JSONFallsBackToSnapshot)" -count=10'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-binary-forward-before.test /tmp/hatrie-cold-binary-forward-after.test /tmp/hatrie-cold-binary-forward-bytes.txt 20 31 1000x BenchmarkCommandDumpColdBytes64KiBReuse'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-cold-binary-forward-before.test /tmp/hatrie-cold-binary-forward-after.test /tmp/hatrie-cold-binary-forward-map-control.txt 20 31 5000x BenchmarkCommandDumpColdMap64Reuse'
 ```
 
 <a id="direct-live-fixed-replication"></a>
