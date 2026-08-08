@@ -7,7 +7,7 @@ import (
 
 func (ht *HatTrie) appendCommandDumpTopKEntryBinaryLocked(destination []byte, entry Entry) ([]byte, bool, error) {
 	if entry.Value.Type() != DATAVALUE_TYPE_TOP_K {
-		return destination, false, nil
+		return ht.appendCommandDumpReservoirSampleEntryBinaryLocked(destination, entry)
 	}
 	index := entry.Value.Index
 	if index < 0 || int(index) >= len(ht.topKs.array) || ht.topKs.reusables.Has(index) {

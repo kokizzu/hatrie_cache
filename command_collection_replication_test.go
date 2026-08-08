@@ -219,6 +219,36 @@ func TestCommandDumpTopKEncodingMatchesSnapshot(t *testing.T) {
 	}
 }
 
+func TestCommandDumpReservoirSampleEncodingMatchesSnapshot(t *testing.T) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+
+	for _, key := range []string{"reservoir:empty", "reservoir:ordered", "reservoir:normalized-fallback"} {
+		if err := ht.UpsertReservoirSample(key, 8); err != nil {
+			t.Fatalf("UpsertReservoirSample(%s) error = %v", key, err)
+		}
+	}
+	values := []interface{}{
+		"first",
+		Map{"nested": "map"},
+		Slice{"nested", int64(4)},
+		"last",
+	}
+	if _, err := ht.AddReservoirSampleChecked("reservoir:ordered", values[0], values[1:]...); err != nil {
+		t.Fatalf("AddReservoirSampleChecked(reservoir:ordered) error = %v", err)
+	}
+	if _, err := ht.AddReservoirSampleChecked("reservoir:normalized-fallback", commandDumpMapJSONValue{Label: "fallback"}); err != nil {
+		t.Fatalf("AddReservoirSampleChecked(reservoir:normalized-fallback) error = %v", err)
+	}
+	if !ht.Expire("reservoir:ordered", time.Hour) {
+		t.Fatal("Expire(reservoir:ordered) = false")
+	}
+
+	for _, key := range []string{"reservoir:empty", "reservoir:ordered", "reservoir:normalized-fallback"} {
+		assertCommandDumpMatchesSnapshot(t, ht, key)
+	}
+}
+
 func BenchmarkCommandDumpPackedMapReuse(b *testing.B) {
 	benchmarkCommandDumpMapReuse(b, "map:packed", Map{
 		"z-last":  "last",
@@ -301,6 +331,20 @@ func BenchmarkCommandDumpReservoirControlReuse(b *testing.B) {
 		}
 	}
 	benchmarkCommandDumpReuse(b, ht, "reservoir:control")
+}
+
+func BenchmarkCommandDumpRadixTreeControlReuse(b *testing.B) {
+	ht := CreateHatTrie()
+	defer ht.Destroy()
+	if err := ht.UpsertRadixTreeChecked("radix:control"); err != nil {
+		b.Fatalf("UpsertRadixTreeChecked() error = %v", err)
+	}
+	for index := 0; index < 64; index++ {
+		if _, err := ht.PutRadixTreeChecked("radix:control", fmt.Sprintf("field-%02d", index), fmt.Sprintf("value-%02d", index)); err != nil {
+			b.Fatalf("PutRadixTreeChecked() error = %v", err)
+		}
+	}
+	benchmarkCommandDumpReuse(b, ht, "radix:control")
 }
 
 func benchmarkCommandDumpMapReuse(b *testing.B, key string, value Map) {
