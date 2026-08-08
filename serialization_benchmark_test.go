@@ -23,7 +23,14 @@ func BenchmarkCommandWireProtobufBatch16(b *testing.B) {
 }
 
 func BenchmarkCommandResponseWireProtobuf(b *testing.B) {
-	response := benchmarkCommandWireResponse()
+	benchmarkCommandResponseWireProtobuf(b, benchmarkCommandWireResponse())
+}
+
+func BenchmarkCommandResponseWireProtobuf256(b *testing.B) {
+	benchmarkCommandResponseWireProtobuf(b, benchmarkCommandWireBatchResponse(256))
+}
+
+func benchmarkCommandResponseWireProtobuf(b *testing.B, response CacheCommandResponse) {
 	request, err := http.NewRequest(http.MethodPost, "/api/commands", nil)
 	if err != nil {
 		b.Fatal(err)
@@ -264,6 +271,14 @@ func benchmarkCommandWireResponse() CacheCommandResponse {
 			{OK: true, Message: "ok", Value: "42"},
 		},
 	}
+}
+
+func benchmarkCommandWireBatchResponse(count int) CacheCommandResponse {
+	responses := make([]CacheCommandResponse, count)
+	for index := range responses {
+		responses[index] = CacheCommandResponse{OK: true, Message: "ok", Value: "value"}
+	}
+	return CacheCommandResponse{OK: true, Message: "batch applied", Responses: responses}
 }
 
 func benchmarkCommandJournalEntry() commandJournalEntry {

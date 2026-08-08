@@ -458,6 +458,34 @@ batches retain no parent-column backing. API shape, protobuf fields, JSON
 fallback, response ownership, persistent storage, and compression behavior are
 unchanged.
 
+<a id="bounded-protobuf-response-retention-rollback"></a>
+### Rejected Bounded Protobuf Response Retention
+
+The response pool clears every scalar field and child pointer before reuse. A
+64-entry retention cap was evaluated to avoid retaining an unusually large
+parent response pointer slice. Tests were added first for scalar reset and
+child-pointer clearing; the candidate then passed those tests and the race
+detector. It was rejected because a 256-response batch must allocate that
+pointer slice again on every request.
+
+The acceptance command alternated frozen before/after binaries for 15 pairs
+with 10,000 response writes per block on one CPU:
+
+```sh
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-proto-response-before.test /tmp/hatrie-proto-response-candidate.test /tmp/hatrie-proto-response-small-pairs.txt 20 15 100000x ^BenchmarkCommandResponseWireProtobuf$$'
+make run CMD='/tmp/run-go-benchmark-pairs.sh /tmp/hatrie-proto-response-before.test /tmp/hatrie-proto-response-candidate.test /tmp/hatrie-proto-response-large-pairs.txt 20 15 10000x ^BenchmarkCommandResponseWireProtobuf256$$'
+```
+
+| HTTP protobuf response | Existing pooled backing | 64-entry candidate | Result |
+| --- | ---: | ---: | --- |
+| Four child responses, paired median | 1,170 ns; 56 B; 3 allocs | 1,182 ns; 56 B; 3 allocs | 1.0% slower, within measurement noise; no memory gain |
+| 256 child responses, paired median | 31,152 ns; 56 B; 3 allocs | 35,128 ns; 2,367 B; 4 allocs | 1.128x slower; 42.27x more transient heap; one extra allocation |
+
+The response cap was removed. Current release behavior retains the pointer
+slice but nils every element and resets protobuf fields first, so prior response
+data cannot be exposed by a later request. The benchmark fixture and sanitizing
+test remain to guard this decision.
+
 ## Rejected Optimization Index
 
 This is the central inventory of every failed or reverted performance
@@ -469,6 +497,7 @@ tree.
 
 | Rejected candidate | Measured attraction | Disqualifying result | Final state / detail |
 | --- | --- | --- | --- |
+| Bounded protobuf response-parent retention | A 64-entry cap would prevent large response pointer columns from staying in `sync.Pool` | A 256-child response regressed 1.128x, from 31,152 to 35,128 ns, and transient heap grew 42.27x, from 56 to 2,367 B/op | Removed; response pooling still clears all protobuf fields and child pointers before reuse; see [the rollback](#bounded-protobuf-response-retention-rollback) |
 | All-type cold binary value forwarding | Could avoid decode/materialization for every unhydrated binary-store DUMP | Exact tests showed dynamic structured storage preserves typed nested integers while replication intentionally normalizes them, producing different binary tags and wire bytes | Narrowed to byte-compatible scalar and fixed-layout types; dynamic structured and JSON records retain snapshot fallback; see [cold binary scalar forwarding](#cold-binary-scalar-forwarding) and [fixed forwarding](#cold-binary-fixed-forwarding) |
 | Cold built-XOR tag-gated forwarding | Made a 4,096-item built-XOR DUMP 2.007x faster, reducing 20,201 to 11,465 temporary B and 23 to 15 allocations | Inspecting the shared XOR payload made staged-XOR fallback 1.213x slower with a second store read; reusing the first record still left it 1.126x slower and added 1,384 B | Runtime candidate removed; exact built/staged encoding coverage and focused benchmarks remain; see [cold built-XOR forwarding rollback](#cold-built-xor-forwarding-rollback) |
 | Single-copy staged-XOR replication | Reduced a 64-item DUMP from 3,560 to 2,328 temporary B and from four to two allocations | Thirty-one paired medians regressed from 9,166 to 10,132 ns, or 1.105x slower | Runtime candidate removed; exact encoding and fallback benchmarks remain; see [staged-XOR single-copy rollback](#staged-xor-single-copy-rollback) |

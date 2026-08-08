@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"hatrie_cache/internal/gen/hatriecache/v1"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -301,6 +303,28 @@ func TestWriteCommandResponseWireProtobufBatchUsesLowAllocationPath(t *testing.T
 	})
 	if allocs > 3 {
 		t.Fatalf("protobuf batch response allocations = %.0f, want <= 3", allocs)
+	}
+}
+
+func TestReleaseCommandResponseProtoClearsPooledChildren(t *testing.T) {
+	message := &hatriecachev1.CommandResponse{
+		Ok:      true,
+		Message: "secret parent message",
+		Value:   "secret parent value",
+		Responses: []*hatriecachev1.CommandResponse{
+			{Ok: true, Message: "secret child message", Value: "secret child value"},
+		},
+	}
+	children := message.Responses
+	releaseCommandResponseProto(message)
+	if message.GetMessage() != "" || message.GetValue() != "" || message.GetOk() {
+		t.Fatalf("released parent retained scalar data: %#v", message)
+	}
+	if len(message.Responses) != 0 {
+		t.Fatalf("released parent response length = %d, want 0", len(message.Responses))
+	}
+	if cap(children) != 0 && children[:cap(children)][0] != nil {
+		t.Fatalf("released parent retained child pointer: %#v", children[:cap(children)][0])
 	}
 }
 
